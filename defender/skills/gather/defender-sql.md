@@ -57,5 +57,7 @@ SELECT v[2]->>'$' FROM (SELECT unnest(values) v FROM data)
 - **A count over one payload when the lead named several.** Cover every seq, not
   just `0`.
 
-When a system's own row shape has a recipe recorded, it is in
-`skills/{system}/execution.md` — read that rather than re-deriving it here.
+When a system's own row shape has a recipe recorded, it is in the execution
+surface your dispatch prompt names — read that rather than re-deriving it here.
+Only some systems have a sibling `execution.md`; for the rest that surface is
+`SKILL.md`'s `## Execution` section.

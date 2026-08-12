@@ -187,6 +187,27 @@ _INDEX_NONE_GRANTED = (
 )
 
 
+def _execution_surface(defender_dir: Path, system: str) -> str:
+    """Which file carries `system`'s execution surface — verbs, params, exit codes, the pitfalls
+    curator's `## Common pitfalls` — resolved off the tree at dispatch.
+
+    Only 3 of the 7 systems split it today into a sibling `execution.md`; the stubs keep it
+    inline as `SKILL.md`'s `## Execution` section (`docs/system-skill-shape.md`), and the
+    pitfalls curator creates the file for any system the first time it has a pitfall to record.
+    So which of the two it is, is a fact about the tree — not one a prompt can state once. Every
+    site that named the path unconditionally (this one, gather's ORIENT and coin branches,
+    `defender-sql`) bought the same wasted turn on those four: a Read that 404s. Named here, on
+    a line that varies only with the dispatched system and the tree, it costs no cache prefix.
+    """
+    execution = Path(defender_dir) / "skills" / system / "execution.md"
+    if execution.is_file():
+        return f"Its execution surface is the sibling `{execution}`."
+    return (
+        f"`{system}` has NO `execution.md` — its execution surface is that SKILL.md's "
+        "`## Execution` section; don't go looking for the sibling file."
+    )
+
+
 def _gather_prompt(
     deps: AgentDeps, request: GatherRequest, catalog: str | None,
     verb_grant: VerbGrant | None = None,
@@ -204,9 +225,9 @@ def _gather_prompt(
             f"progressive disclosure). Your target is `system: {request.system}`, named in the "
             "Dispatch at the end of this message; confirm it here. These descriptions are "
             "usually enough to pick a template or name a measurement — Read the target's full "
-            f"`{deps.defender_dir}/skills/{request.system}/SKILL.md` (and execution.md if "
-            "present) ONLY on demand, when you need field vocab or CLI specifics the "
-            "descriptor lacks; not on every dispatch.\n\n"
+            f"`{deps.defender_dir}/skills/{request.system}/SKILL.md` ONLY on demand, when you "
+            "need field vocab or CLI specifics the descriptor lacks; not on every dispatch. "
+            f"{_execution_surface(deps.defender_dir, request.system)}\n\n"
             f"{catalog}\n"
         )
     index = _template_index(deps.defender_dir, request.system, verb_grant)
