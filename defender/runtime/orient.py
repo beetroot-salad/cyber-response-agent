@@ -22,7 +22,15 @@ def _shim(argv: list[str], env: dict[str, str]) -> str | None:
             argv, capture_output=True, text=True, encoding="utf-8", errors="replace",
             env=env, cwd=str(_REPO_ROOT), timeout=_SHIM_TIMEOUT_S,
         )
-    except (OSError, subprocess.TimeoutExpired):
+    # `ValueError` belongs here with the rest (#851 F-23, second half). `subprocess.run` raises a
+    # bare `ValueError("embedded null byte")` — NOT an `OSError` — before it ever forks, for any
+    # argv element carrying a NUL. The one argv element this module builds from the alert is the
+    # signature, which is external data (`rule.id`), so an `alert.json` whose id carries a NUL
+    # unwound straight out of `orientation()` past `driver.py`'s unguarded call and killed the
+    # run before the first model request — the same invariant breach F-23's coercion fixed for
+    # `re.escape`, on the OTHER consumer of the same value. A shim that cannot be spawned is a
+    # shim with no output, which is what the other two arms already mean.
+    except (OSError, ValueError, subprocess.TimeoutExpired):
         return None
     out = (proc.stdout or "").strip()
     return out or None
@@ -38,10 +46,34 @@ def _catalog() -> str:
 
 
 def _alert_signature(alert_path: Path) -> str | None:
+    """The alert's `rule.id`, always as a `str` — the annotation, honoured (#851 F-23).
+
+    It used to return the parsed JSON value RAW, so a hand-authored or foreign-SIEM
+    `alert.json` carrying a numeric id (`"id": 5710`) detonated in `re.escape` on
+    `orientation()`'s unguarded path and killed the run before the first model request, with an
+    opaque `TypeError: decoding to str` instead of a legible complaint — a breach of this
+    module's own "orientation must never break the run" invariant. Both consumers take the value
+    as text (`re.escape` in `_build_lessons_section`, a `subprocess.run` argv in
+    `_build_corpus_vocab_section`), so coercing at the reader fixes both at once — the same
+    coercion `skills/invlang/corpus.py::_read_signature_id`, the other reader of this field,
+    applies to a numeric id.
+
+    Empty and `None` collapse to `None`: an empty signature would build a `.*` lessons pattern
+    that matches every row, which is not "the alert has no signature".
+
+    So does a NON-SCALAR id. `str()` is total, so a bare coercion turns `"id": []` into the
+    signature `"[]"` and `"id": {"a": 1}` into `"{'a': 1}"` — a string that is not an id,
+    handed to a lessons grep and to a shim argv as though it were one. A `rule.id` that is not
+    a string or a number is a malformed alert, and "no signature" is the honest reading of it.
+    `bool` is excluded explicitly: it is an `int` to `isinstance`, and `"id": false` would
+    otherwise become the signature `"False"`."""
     try:
-        return json.loads(read_text_utf8(Path(alert_path)))["rule"]["id"]
+        rid = json.loads(read_text_utf8(Path(alert_path)))["rule"]["id"]
     except (OSError, ValueError, KeyError, TypeError):
         return None
+    if isinstance(rid, bool) or not isinstance(rid, (str, int, float)):
+        return None
+    return str(rid) or None
 
 
 def _raw_alert(alert_path: Path, salt: str) -> str | None:

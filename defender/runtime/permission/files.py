@@ -470,11 +470,13 @@ def decide_write(
     guard's former dormant-when-omitted mode: the containment check now always runs, a pinned
     no-op for every real writer whose `write_allow` already sits inside its read roots.
 
-    Once both allowlist halves pass, a write to one of the run's two model-authored
-    artifacts faces its CONTENT SCHEMA (`defender._artifact_schema`): report.md's
-    frontmatter grammar and byte bounds, investigation.md's byte bound and structural
-    invlang validation. Any schema reason denies with that text, so the model can fix its
-    own output — the in-process equivalent of the hook's exit-2 feedback.
+    Once both allowlist halves pass, EVERY allowed write is checked for UTF-8-encodability
+    (#851 F-26) — through the artifact's own CONTENT SCHEMA (`defender._artifact_schema`, which
+    leads with that check) for the run's two model-authored artifacts, and through a direct call
+    on the non-artifact branch. The schema also carries report.md's frontmatter grammar and byte
+    bounds and investigation.md's byte bound and structural invlang validation. Any schema reason
+    denies with that text, so the model can fix its own output — the in-process equivalent of the
+    hook's exit-2 feedback.
     """
     path = Path(path)
     try:
@@ -518,15 +520,42 @@ def decide_write(
         (n for n in _artifact_schema.ARTIFACT_NAMES if _is_run_dir_file(rp, run_dir, n)), None
     )
     if artifact is None:
-        return Decision(True)
+        # #851 F-26 — the UTF-8-encodability check applies to EVERY allowed write, not only to
+        # the two artifacts whose schemas happen to measure bytes. It lives inside
+        # `validate_artifact` (which is also `close_tool`'s only gate, so it stays there), and
+        # so it ran for the artifacts and for nothing else: a lone surrogate — reachable from a
+        # model tool-call arg on a provider that hands args back as an already-parsed dict — was
+        # ALLOWED on every non-artifact path (the curator's and lead author's corpus files) and
+        # then raised `UnicodeEncodeError` out of `write_guarded`, past a write tool that maps no
+        # exception, quarantining the authoring spawn instead of returning the refusal the SAME
+        # content earns on report.md. No allowed write can be byte-measured or written
+        # unencodable, so the check belongs to all of them: it keeps the gate's "return a
+        # Decision, never propagate" contract (its RESOLVE_ERRORS rule) literally true on the
+        # non-artifact branch too. Spelled HERE rather than above the keying so the artifact
+        # branch keeps ONE refusal text for this condition — `validate_artifact`'s, named for the
+        # artifact and identical to the one the close lane produces — and so the 64 KiB
+        # investigation.md document is not `.encode()`d twice on every append.
+        reason = _artifact_schema.encodable_or_reason(proposed_text, str(path))
+        return Decision(True) if reason is None else Decision(False, reason)
     # The append-only baseline, read HERE so the schema module stays filesystem-free (#714).
     # Read only for the artifacts whose schema takes a baseline: an unconditional read would
     # put a `read_text` that can raise on the report.md path, where none ran before.
-    current = (
-        rp.read_text(encoding="utf-8")
-        if artifact in _artifact_schema.NEEDS_BASELINE and rp.is_file()
-        else None
-    )
+    #
+    # FAILS CLOSED on a read fault rather than propagating (the same RESOLVE_ERRORS rule the
+    # resolve above obeys): an undecodable or unreadable investigation.md would otherwise raise
+    # `UnicodeDecodeError`/`OSError` straight out of a blocking gate. Deny rather than fall back
+    # to `current=None`, which would drop the append-only baseline and let the faulting write
+    # REPLACE the document — a fail-open on the one invariant this branch exists to hold.
+    current: str | None = None
+    if artifact in _artifact_schema.NEEDS_BASELINE and rp.is_file():
+        try:
+            current = rp.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as e:
+            return Decision(
+                False,
+                f"Blocked: the current {artifact} could not be read to check this write "
+                f"against it (failing closed): {e}.",
+            )
     return _as_decision(_artifact_schema.validate_artifact(artifact, proposed_text, current))
 
 
