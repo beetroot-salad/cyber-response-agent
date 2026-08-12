@@ -152,9 +152,10 @@ Reserve `:H` (see §Discovery hypotheses) for cases where the
 how-to-answer is genuinely non-obvious — multiple competing upstreams
 where the lead choice itself depends on which story you're testing.
 
-**Disposition gate.** An unresolved `??` on any vertex blocks
-`disposition: benign`. Resolve via `:R attr_updates` before
-concluding, or escalate.
+**Disposition gate.** An unresolved slot on any vertex blocks
+`disposition: benign` — `??` or a `{a, b, c}` candidate set, in any
+slot of the class tuple or as an attribute value. Resolve via
+`:R attr_updates` before concluding, or escalate.
 
 ## Core blocks
 
@@ -257,6 +258,9 @@ keyed on the contract id. Columns:
   the lead that closed it; cite the rest here.
 - `edge` — the edge the contract attaches to (must match the declaring `ac<n>` row's `edge_ref`).
 - `fulfills` — the `ac<n>` contract id from `:H h-NNN.authz` being closed.
+  The row names no hypothesis, so `ac<n>` numbers across the DOCUMENT, not
+  per hypothesis the way `p<n>`/`r<n>` do — declaring `ac1` on two
+  hypotheses is denied on write, since one row would discharge both.
 - `verdict` — `authorized | unauthorized | indeterminate`.
 - `anchor_kind` — closed vocab (`enum anchor-kinds`); must match the declaring contract's `anchor_kind`.
 - `reasoning` — short citation of the supporting fact (quoted).

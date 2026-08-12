@@ -304,8 +304,17 @@ def _build_proposed_edge(rec: dict[str, str]) -> ProposedEdge:
 
 
 
+#: The DECLARING side of `HYPOTHESIS_ID_RE`, built from it rather than restating it. The
+#: restatement was narrower — single-segment only — so a hierarchical child that the four
+#: reference sites accept (#821/#828) could not declare `:H h-001-001.preds`: the block fell
+#: through to the generic "unknown block" warning and the write was denied, leaving a
+#: committed child unable to declare the prediction `_check_strong_move_provenance` then
+#: demands before it can be moved `++`/`--` (#853/F-27). One owner means the two cannot
+#: drift again, and a typoed child id now lands on `_project_hyp_subblock`'s "sub-block
+#: references unknown hypothesis" warning, which names the actual cause.
 _HYP_PREFIX_RE = re.compile(
-    r"^(?P<hyp>h-[A-Za-z0-9]+)\.(?P<sub>preds|attr_preds|refuts|authz|parent_attrs)$"
+    rf"^(?P<hyp>{HYPOTHESIS_ID_RE.pattern})"
+    rf"\.(?P<sub>preds|attr_preds|refuts|authz|parent_attrs)$"
 )
 
 _HYP_PRED_COLS = ["id", "subject", "claim"]

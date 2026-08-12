@@ -421,6 +421,42 @@ def _check_prediction_refs(companion: CompanionBody) -> list[str]:
     return errors
 
 
+def _check_authz_contract_ids(companion: CompanionBody) -> list[str]:
+    """An `ac*` id is declared by AT MOST ONE hypothesis in the document.
+
+    `:R authz` has no hypothesis column — the row names the contract it fulfills and nothing
+    else — so the id is what carries the binding, and every reader resolves it document-wide.
+    `_check_benign_authz` is the one that matters: it discharges a contract by bare id, so two
+    live hypotheses that each numbered their first contract `ac1` were BOTH discharged by one
+    row and a `disposition: benign` write gate failed open with no diagnostic (#853/F-16).
+
+    The rule is on the DECLARING side rather than a scoping rule on the resolving side,
+    because scoping cannot be recovered from a row that never carried the hypothesis: the
+    honest fix for an ambiguous id is to refuse it. Per-hypothesis numbering is the natural
+    mistake here — `p*` and `r*` DO restart per hypothesis in every shipped example — so the
+    error says which ids collide and that `ac*` numbers across the document.
+
+    Only the cross-hypothesis collision reaches here: `_extend_by_id` already keeps the first
+    row per id when one `:H <h>.authz` block repeats an id.
+    """
+    declared_by: dict[str, list[str]] = {}
+    for hid, hyp in _walkers.all_hypotheses(companion).items():
+        for c in hyp.get("authorization_contract") or []:
+            if not isinstance(c, dict):
+                continue
+            cid = c.get("id")
+            if isinstance(cid, str) and cid:
+                declared_by.setdefault(cid, []).append(hid)
+    return [
+        f"authz contract {cid!r} is declared by more than one hypothesis "
+        f"({', '.join(sorted(hids))}) — a `:R authz` row names only the contract it "
+        f"fulfills, so one row would discharge all of them; number `ac*` across the "
+        f"document, not per hypothesis"
+        for cid, hids in declared_by.items()
+        if len(set(hids)) > 1
+    ]
+
+
 def _vertex_core(v: VertexRecord) -> tuple:
     return (v.get("type"), v.get("classification"), v.get("identifier"))
 
@@ -746,13 +782,63 @@ def _check_closed_vocab(companion: CompanionBody, proposed_text: str) -> list[Di
 
 
 
+def _is_unresolved(value: Any) -> bool:
+    """Does this cell say "not settled yet" — the WHOLE of it, not a substring.
+
+    The two markers SKILL.md §Open questions defines, and the three-state progression it
+    documents (`??` → `{a, b, c}` → concrete) is the reason both count: a candidate set is
+    an upgrade from `??`, not a resolution of it. No comma is required — `{internal}` is a
+    one-member set that still has not picked, and demanding the comma made the narrowest
+    open state the one spelling the gate let through (#853/F-15).
+
+    Anchored to the whole value on purpose. A "contains braces" test would refuse a benign
+    close over a legitimate `attrs.cmdline` that happens to carry `{...}`, which is a
+    different and much larger change than closing the gap.
+    """
+    if not isinstance(value, str):
+        return False
+    v = value.strip()
+    return v == "??" or (v.startswith("{") and v.endswith("}"))
+
+
+def _class_slots(classification: str) -> list[str]:
+    """A class cell's slots — the slash-tuple, minus an optional leading `<type>:` prefix.
+
+    Brace-aware, because the primary candidate-set form enumerates whole triples
+    (`{monitoring-agent/internal/known-corp, ip-only/internet/novel}`) and a plain
+    `split("/")` would shred it into slots that are neither open nor concrete. Splitting at
+    depth 0 only reads that cell as the ONE unresolved slot it is, and still reads the
+    per-slot form (`role/{internal, dmz}/prov`) as three.
+
+    The type prefix is stripped rather than tolerated: SKILL.md says the class cell carries
+    the slash-tuple only, but `compute:{...}` is a spelling models reach for, and under the
+    old whole-cell test the prefix alone was enough to hide the set behind it.
+    """
+    c = classification.strip()
+    head, sep, rest = c.partition(":")
+    if sep and "{" not in head and "/" not in head:
+        c = rest.strip()
+    slots: list[str] = []
+    cur: list[str] = []
+    depth = 0
+    for ch in c:
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth = max(0, depth - 1)
+        elif ch == "/" and depth == 0:
+            slots.append("".join(cur))
+            cur = []
+            continue
+        cur.append(ch)
+    slots.append("".join(cur))
+    return [s.strip() for s in slots]
+
+
 def _has_open_slot(classification: Any) -> bool:
     if not isinstance(classification, str) or not classification:
         return False
-    c = classification.strip()
-    if c.startswith("{") and c.endswith("}") and "," in c:
-        return True
-    return any(slot.strip() == "??" for slot in c.split("/"))
+    return any(_is_unresolved(slot) for slot in _class_slots(classification))
 
 
 def _seed_vertex_state(
@@ -822,11 +908,11 @@ def _check_benign_open_slots(companion: CompanionBody) -> list[str]:
                 f":R attr_updates or escalate"
             )
         for name, val in st["attributes"].items():
-            if isinstance(val, str) and val.strip() == "??":
+            if _is_unresolved(val):
                 errors.append(
                     f"disposition benign blocked: vertex {vid} attribute "
-                    f"{name!r} is still `??` — resolve via :R attr_updates or "
-                    f"escalate"
+                    f"{name!r} is still unresolved ({val!r}) — resolve via "
+                    f":R attr_updates or escalate"
                 )
     return errors
 
@@ -1110,6 +1196,7 @@ def diagnose(
         companion, deferred=deferred_hypothesis_ids(warnings),
     )))
     found.extend(_plain(_check_prediction_refs(companion)))
+    found.extend(_plain(_check_authz_contract_ids(companion)))
     found.extend(_plain(_check_tested_commitment_refs(companion)))
     found.extend(_plain(_check_strong_move_provenance(companion)))
     found.extend(_check_closed_vocab(companion, proposed_text))

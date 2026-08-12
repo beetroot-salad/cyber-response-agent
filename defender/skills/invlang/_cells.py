@@ -14,14 +14,22 @@ def _split_quoted(
     while i < len(s):
         ch = s[i]
         if ch == "\\" and i + 1 < len(s):
-            if not unescape_delim:
-                cur.append(s[i : i + 2])
-                i += 2
-                continue
-            if s[i + 1] == sep:
+            # ONE branch decides what an escape pair means, and it is the delimiter or
+            # nothing: `\<sep>` unescapes when asked, every OTHER pair is consumed
+            # verbatim, 2 bytes at a time. The alternative — falling through on the pairs
+            # this branch does not claim — let the `"` of a `\"` reach the quote toggle
+            # below, so a row carrying an odd number of `\"` before its last cell flipped
+            # into "inside a quote", swallowed the remaining `|`s, and `_row_cells` padded
+            # the short record with empty strings: cells silently merged, no RowError, no
+            # warning (#853/F-14). `_has_unbalanced_quote` already skips the pair the same
+            # way; this is the tokenizer agreeing with it.
+            if unescape_delim and s[i + 1] == sep:
                 cur.append(sep)
                 i += 2
                 continue
+            cur.append(s[i : i + 2])
+            i += 2
+            continue
         if ch == '"':
             in_q = not in_q
             cur.append(ch)
