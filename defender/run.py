@@ -44,6 +44,7 @@ from defender._run_paths import RunPaths  # noqa: E402
 from defender.runtime import box as box_mod  # noqa: E402
 from defender.runtime import driver  # noqa: E402
 from defender.runtime import providers  # noqa: E402
+from defender.runtime.verbs import ModuleVerbRegistry  # noqa: E402
 from defender.scripts.case_history import ticket_writer as _default_ticket_writer  # noqa: E402
 
 DEFENDER_DIR = _DEFENDER_DIR
@@ -222,7 +223,18 @@ def _drive_investigation(
     so a test can hand in a plain function — no coroutine to build, no event loop to drive,
     and no model credentials, which is what kept the entrypoint's lifecycle unobservable
     before #741.
+
+    #808 — the ONLY real caller of `run_investigation`, so `verbs=` is built and passed
+    HERE, explicitly, rather than left for `run_investigation`'s own internal fallback
+    (`ModuleVerbRegistry(...)` when `verbs is None`) to supply. That fallback is deliberately
+    NOT what lead-0 reads (K12/d49): a test `drive()` site that injects no registry at all is
+    a scenario that asked for no backend, and lead-0 must stay off for it, which is why
+    `run_investigation` captures `lead_zero_verbs` before applying the fallback. A real
+    investigation is never that scenario — it always has a real, credentialed adapters tree —
+    so it must inject the registry itself rather than ride the same implicit default the
+    hermetic test suite depends on lead-0 NOT acquiring.
     """
+    verbs = ModuleVerbRegistry(defender_dir / "scripts" / "adapters", driver.GATHER_DEF.verb_grant)
     return asyncio.run(driver.run_investigation(
         alert_path=alert_path,
         run_dir=run_dir,
@@ -232,6 +244,7 @@ def _drive_investigation(
         model_name=model_name,
         model_override=model_override,
         box=box,
+        verbs=verbs,
     ))
 
 
