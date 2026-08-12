@@ -447,7 +447,11 @@ def materialize_alert(root: Path, doc: dict) -> Path:
 
 
 READ_ALERT = "read the alert"
-CORRELATION_SUMMARY = "3 same-signature alerts on-host, 11 fleet-wide, none benign-explained."
+#: The scripted gather return for item 3. Tracks the contract's two dimensions — an on-host
+#: count and a fleet-wide count, both across any rule. It no longer claims a benign-explained
+#: verdict: `kibana.alert.workflow_status` is `"open"` on every alert this environment emits,
+#: so that dimension was struck from `_correlation_contract` as unanswerable on this grant.
+CORRELATION_SUMMARY = "3 alerts on-host, 11 fleet-wide, across any rule."
 
 
 def run(  # noqa: PLR0913 — a scenario builder: one parameter per thing a scenario varies

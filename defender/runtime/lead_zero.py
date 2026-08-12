@@ -33,6 +33,7 @@ from defender.hooks.budget_enforcer import (
 )
 from defender.hooks.record_lead import claim_lead
 from defender.runtime import circuit_breaker
+from defender.runtime.verb_grant import GrantError, VerbGrant
 from defender.runtime.verbs import VerbContext
 
 # ─── the names this spec mints on the production side ───────────────────────────────────
@@ -40,6 +41,43 @@ L0 = "l-000"
 L3 = "l-00c"
 RESERVED_LEAD_IDS = (L0, L3)
 CORRELATION_REQUEST_LIMIT = 8
+
+#: Item 3's grant, hoisted to module scope so it is the SINGLE authored home for the vendor
+#: name on the correlation path (#808 follow-up). `dispatch_correlation` used to build this
+#: inline and then hardcode `"elastic"` a second and third time — in `GatherRequest` and in
+#: the `:L findings` row — which made the dispatched system a literal that could drift away
+#: from the grant that actually confines the lead. `CORRELATION_SYSTEM` derives from the
+#: grant instead, so the two cannot disagree: the grant is already the authority (it is what
+#: `decide` consults), and `system` is only ever a rendering/routing key.
+CORRELATION_GRANT = VerbGrant(
+    role="lead-zero-correlation",
+    entries=(("elastic", "alerts", "r"), ("elastic", "health-check", "r")),
+)
+
+#: The catalog template item 3's contract names outright. It exists because the grant admits
+#: exactly one query verb (`alerts`) and, before it was authored, the catalog held ZERO
+#: templates binding that verb — every elastic template is `esql` or `query`, so grant ∩
+#: catalog was empty by construction and the dispatch rendered `_INDEX_NONE_GRANTED`. A lead
+#: told only that nothing is runnable spends its whole budget discovering why.
+CORRELATION_TEMPLATE = "elastic.correlate-alerts-by-entity"
+
+
+def _sole_system(grant: VerbGrant) -> str:
+    """The one system a single-system grant reaches. Raises rather than picking, because a
+    two-system correlation grant is an authoring change whose dispatched-system choice must be
+    made deliberately (it selects the template index's on-target tier and the prompt-cache
+    lane), not silently resolved by `sorted(...)[0]` at run time."""
+    systems = sorted(grant.systems)
+    if len(systems) != 1:
+        raise GrantError(
+            f"the correlation grant for role {grant.role!r} reaches {len(systems)} systems "
+            f"({systems}) — `system` is derived from it and only a single-system grant "
+            "determines one. Name the dispatched system explicitly if this is intended."
+        )
+    return systems[0]
+
+
+CORRELATION_SYSTEM = _sole_system(CORRELATION_GRANT)
 
 PROVENANCE_KEY = "provenance"
 HARNESS_PROVENANCE = "harness"
@@ -646,12 +684,28 @@ def _correlation_contract(alert: dict, entities: Entities) -> tuple[str, list[st
         f"{entity_text} — over a bounded window around {_sanitize(ts)}. Search the alerts "
         "index ONLY (this is a correlation over prior alerts, not raw telemetry). Do not "
         "narrow to this alert's own rule; a different rule firing on the same host/user is "
-        "exactly the related behaviour this lead exists to surface."
+        "exactly the related behaviour this lead exists to surface. Bind "
+        f"`{CORRELATION_TEMPLATE}` — read it first: it is the one catalog template your grant "
+        "can run, and it already carries the entity-disjunct body and the window params this "
+        "contract needs. Each count is the result envelope's `total`, which the 20-doc `hits` "
+        "cap does not bound — a `truncated` result still carries a complete count."
     )
+    # Two dimensions, both answerable by ONE `alerts` call each. The third — "whether any
+    # correlated alert is already benign-explained" — was struck: `kibana.alert.workflow_status`
+    # is `"open"` on every alert this environment produces (nothing in `playground-v2/` ever
+    # writes it), and the systems that could carry a benign explanation (`ticket`,
+    # `change-mgmt`) are outside this lead's grant. It had exactly one possible answer, so it
+    # bought no information and cost the lead a dimension it had to spend calls failing to meet.
+    #
+    # "across any rule", not "same-signature": the goal above says do NOT narrow to this
+    # alert's own rule, and the dimensions used to say "same-signature" — read literally, a
+    # per-rule breakdown over the 8 installed rules is 8-16 `alerts` calls against a request
+    # limit of 8, and the one verb that could group-by in a single call (`esql`) is exactly
+    # what this lead's grant withholds for index confinement (g6/r19). The contract now asks
+    # for what the granted verb can actually return.
     what = [
-        "the count of same-signature alerts on-host in the window",
-        "the count of same-signature alerts fleet-wide in the window",
-        "whether any correlated alert is already benign-explained",
+        "the count of alerts on-host in the window, across any rule (the envelope's `total`)",
+        "the count of alerts fleet-wide in the window, across any rule (the envelope's `total`)",
     ]
     return goal, what
 
@@ -670,10 +724,8 @@ async def dispatch_correlation(  # noqa: C901, PLR0913 — item 3's own dispatch
     from .driver import GATHER_DEF, build_gather_agent
     from .tools import GatherDeps
     from .tools_gather import GatherRequest, _run_gather
-    from .verb_grant import VerbGrant
 
-    narrowed = VerbGrant(role="lead-zero-correlation",
-                          entries=(("elastic", "alerts", "r"), ("elastic", "health-check", "r")))
+    narrowed = CORRELATION_GRANT
 
     # A thin re-grant wrapper: same verb resolution, a narrower grant object — so `esql`
     # (never `confine_index`'d, g6/r19) is denied at the grant check rather than reaching a
@@ -713,8 +765,15 @@ async def dispatch_correlation(  # noqa: C901, PLR0913 — item 3's own dispatch
             extra_capabilities=extra, session_id=gather_session_id,
             # #835 — same per-system cache-key convention as the model-dispatched path
             # (`driver.py::_build_gather`): item 3 is bound to the alerts index only, so its
-            # own template-catalog prefix stays `elastic` regardless of what `request.system`
-            # says (the narrowed grant already confines it there).
+            # own template-catalog prefix stays the grant's system regardless of what
+            # `request.system` says (they are now the same value — `CORRELATION_SYSTEM` is
+            # derived from the grant — but the key does not depend on that).
+            #
+            # KNOWN MISMATCH, not fixed here: this key is shared with MAIN's own gather leads
+            # on the same system, and the prefix behind it is NOT the same text — the template
+            # index is grant-filtered, so this role renders one template where role `gather`
+            # renders fourteen. One lane, two prefixes. The fix is to key on role as well as
+            # system; it is a change to `driver.py`'s convention too, so it is not made here.
             cache_key=f"{GATHER_AGENT_ID_PREFIX}{system}",
         )
 
@@ -739,7 +798,7 @@ async def dispatch_correlation(  # noqa: C901, PLR0913 — item 3's own dispatch
         gbase, run_id=run_id, lead_id=L3, budget_started_monotonic=budget_started_monotonic,
     )
 
-    request = GatherRequest(L3, "elastic", goal, tuple(what_to_summarize))
+    request = GatherRequest(L3, CORRELATION_SYSTEM, goal, tuple(what_to_summarize))
     try:
         return await _run_gather(
             gdeps, gather_factory, CORRELATION_REQUEST_LIMIT, request, narrowed,
@@ -764,7 +823,7 @@ def _declare_l_finding(run_dir: Path, lead_id: str, name: str) -> None:
         f"## lead-0 ({lead_id}) — harness-authored, declared before the investigation begins\n\n"
         "```invlang\n"
         ":L findings [id|loop|name|target|tests|system|window]\n"
-        f"{lead_id}|0|{name}|||elastic|n/a\n"
+        f"{lead_id}|0|{name}|||{CORRELATION_SYSTEM}|n/a\n"
         "```\n\n"
     )
     try:
@@ -875,7 +934,10 @@ def resolve_lead_zero(
 
 
 __all__ = [
+    "CORRELATION_GRANT",
     "CORRELATION_REQUEST_LIMIT",
+    "CORRELATION_SYSTEM",
+    "CORRELATION_TEMPLATE",
     "ELIDED",
     "HARNESS_PROVENANCE",
     "L0",
