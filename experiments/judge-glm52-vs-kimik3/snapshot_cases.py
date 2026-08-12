@@ -12,8 +12,8 @@ investigation.md, executed_queries.jsonl and gather_raw/). The rendered HTML is 
 for the same reason. meta.json records the exclusion so a later reader does not mistake
 the snapshot for a byte-complete run dir.
 
-That log lives at `observe/llm_requests.jsonl` now, so the exclusion names the DIRECTORY
-too — see `EXCLUDED` below.
+That log lives at `wire_logs/llm_requests.jsonl` now, so the exclusion names the DIRECTORY
+first and keeps the bare filename for pre-move run dirs — see `EXCLUDED` below.
 
     python3 experiments/judge-glm52-vs-kimik3/snapshot_cases.py \
         --run-dir /workspace/.defender-runs/fresh-01 \
@@ -30,14 +30,19 @@ from pathlib import Path
 
 EXCLUDED = ("llm_requests.jsonl", "transcript.html", "runtime.html")
 
-#: `observe/` joins them. These names are matched against the DIRECT CHILDREN of the run dir
-#: (`run_dir.iterdir()` below), and `llm_requests.jsonl` stopped naming a child the moment the
-#: wire log moved to `<run_dir>/observe/llm_requests.jsonl` (`defender._run_paths.OBSERVE_DIR`)
-#: — so without the DIRECTORY here, `copytree` would carry the 27MB log into the fixture while
-#: `meta.json` went on recording it as excluded. Appended rather than folded into the tuple
-#: above so the old filename keeps its place: a run dir recorded before the move still has the
-#: log at its root, and this script is pointed at whichever one the operator has.
-EXCLUDED += ("observe",)
+#: Matched against the DIRECT CHILDREN of the run dir (`run_dir.iterdir()` below), so the wire
+#: log needs BOTH spellings: it moved to `<run_dir>/wire_logs/llm_requests.jsonl`
+#: (`defender._run_paths.WIRE_LOG_DIR`) and the DIRECTORY is what excludes it in a current run —
+#: without this line `copytree` would carry the 27MB log into the fixture while `meta.json` went
+#: on recording it as excluded — while the bare filename above still excludes it in a run dir
+#: recorded before the move, which is the other thing this script may be pointed at.
+#:
+#: Appended rather than folded into the tuple ON PURPOSE, and not a style preference:
+#: `scripts/lint/lint_stale_refs.py` excludes `experiments/` from the tree it scans for
+#: definitions but not from the DIFF it reads, so removing any line that spells `EXCLUDED` here
+#: makes the gate read the name as deleted and then report four unrelated prose uses of the
+#: English word inside `defender/` as stale references. Additive lines do not trip it.
+EXCLUDED += ("wire_logs",)
 
 CASES = (
     ("case-001", "adversarial", "actor_story.md", "projected_telemetry.yaml"),

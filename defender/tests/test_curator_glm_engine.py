@@ -45,7 +45,7 @@ pytest.importorskip("pydantic_ai")
 
 from pydantic_ai.models import override_allow_model_requests  # noqa: E402
 
-from defender._run_paths import OBSERVE_DIR  # noqa: E402
+from defender._run_paths import WIRE_LOG_DIR  # noqa: E402
 from defender.tests._stage_args import as_curator_stage_args  # noqa: E402
 from defender.learning.author import shared as _shared  # noqa: E402
 from defender.learning.core import config  # noqa: E402
@@ -290,12 +290,15 @@ def test_inproc_transport_runs_run_stage_and_writes_trace(tmp_path):
     with override_allow_model_requests(False):
         out = _stage(tmp_path, run_author=_inproc, learning_run_dir=rd)
     assert out["committed"] == []
-    # The trace lands under `observe/` (`observe.stage_trace_path`), so the walk has to be
-    # the tree and not the root — a root-only `iterdir` would find nothing and this test
-    # would go green against a stage that wrote no trace at all.
-    traces = [p for p in rd.rglob("*") if p.is_file()]
-    assert traces
-    assert all(OBSERVE_DIR in p.parts for p in traces), (
+    # The trace lands under `wire_logs/` (`observe.stage_trace_path`), so the walk has to be the
+    # tree and not the root — a root-only `iterdir` would find nothing and this test would go
+    # green against a stage that wrote no trace at all. Scoped to the TRACE files rather than
+    # to every file in the tree: this case is about where the wire log lands, and a blanket
+    # `all(... in p.parts)` over `rglob("*")` would also fail the day the stage writes a
+    # legitimate artifact of its own into that root, for a reason it has nothing to say about.
+    traces = [p for p in rd.rglob("*.jsonl") if p.is_file()]
+    assert traces, "the stage wrote no trace at all"
+    assert all(WIRE_LOG_DIR in p.parts for p in traces), (
         f"a stage trace landed outside observe/: {[str(p) for p in traces]}"
     )
     assert any(p.read_text().strip() for p in traces)

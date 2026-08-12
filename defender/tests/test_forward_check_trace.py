@@ -40,7 +40,7 @@ from defender.learning.author.verify_forward.checks import (  # noqa: E402
     ENV_CHECK,
     FINDINGS_CHECK,
 )
-from defender._run_paths import OBSERVE_DIR  # noqa: E402
+from defender._run_paths import WIRE_LOG_DIR  # noqa: E402
 from defender.learning.author.verify_forward.tool import (  # noqa: E402
     Pair,
     run_forward_check,
@@ -112,7 +112,7 @@ def test_d11_trace_names_distinct_per_check(tmp_path):
         out = asyncio.run(run_forward_check(deps, pairs))
     assert _counts(out) == (2, 0, 0)
 
-    traces = sorted(src.glob(f"{OBSERVE_DIR}/*.trace.jsonl"))
+    traces = sorted(src.glob(f"{WIRE_LOG_DIR}/*.trace.jsonl"))
     assert len(traces) == 2, f"same-stem checks did not write DISTINCT trace files: {traces}"
     contents = [t.read_text() for t in traces]
     assert all(c.strip() for c in contents)
@@ -159,9 +159,9 @@ def test_d12_curator_trace_in_a_separate_root(tmp_path):
             run_verify=_transport,
         )))
 
-    curator_traces = list(scene.curdir.glob(f"{OBSERVE_DIR}/*.trace.jsonl"))
+    curator_traces = list(scene.curdir.glob(f"{WIRE_LOG_DIR}/*.trace.jsonl"))
     assert curator_traces, "the curator spawn wrote no trace in its learning_run_dir"
-    nested_traces = list(src.glob(f"{OBSERVE_DIR}/*.trace.jsonl"))
+    nested_traces = list(src.glob(f"{WIRE_LOG_DIR}/*.trace.jsonl"))
     assert nested_traces, "the nested check wrote no trace in the source bundle"
     assert scene.curdir.resolve() != src.resolve()
     assert any(t.read_text().strip() for t in curator_traces)
@@ -207,7 +207,7 @@ def test_m2_env_checks_write_no_trace(tmp_path):
     deps = _deps(scene, run_verify=_transport, check=ENV_CHECK, corpus=env_corpus, queued={"obs-1"})
     asyncio.run(run_forward_check(deps, [Pair("defender/lessons-environment/x.md", "obs-1")]))
     assert calls == []
-    assert not list(src.glob(f"{OBSERVE_DIR}/*.trace.jsonl"))
+    assert not list(src.glob(f"{WIRE_LOG_DIR}/*.trace.jsonl"))
 
     (scene.corpus / "m.md").write_text("---\nname: m\n---\nbody\n")
     src2 = _bundle(scene, "run-M")
@@ -218,7 +218,7 @@ def test_m2_env_checks_write_no_trace(tmp_path):
     deps2 = _deps(scene, run_verify=_real, check=FINDINGS_CHECK, queued={"run-M"})
     with override_allow_model_requests(False):
         asyncio.run(run_forward_check(deps2, [Pair("defender/lessons/m.md", "run-M", "adversarial")]))
-    assert list(src2.glob(f"{OBSERVE_DIR}/*.trace.jsonl")), "a model-backed check wrote no trace (control failed)"
+    assert list(src2.glob(f"{WIRE_LOG_DIR}/*.trace.jsonl")), "a model-backed check wrote no trace (control failed)"
 
 
 
@@ -249,5 +249,5 @@ def test_m13_trace_handle_closed_when_a_check_raises(tmp_path):
 
     assert _counts(out) == (0, 0, 10)
     assert after - before <= 2, f"leaked file descriptors: {before} -> {after}"
-    written = sum(1 for r in rids if list((scene.runs / r).glob(f"{OBSERVE_DIR}/*.trace.jsonl")))
+    written = sum(1 for r in rids if list((scene.runs / r).glob(f"{WIRE_LOG_DIR}/*.trace.jsonl")))
     assert written == 10

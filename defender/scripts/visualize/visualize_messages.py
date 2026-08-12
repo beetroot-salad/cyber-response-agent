@@ -18,23 +18,25 @@ from defender.scripts.visualize.visualize_data import phase_verb
 from defender.scripts.visualize.visualize_primitives import parse_report
 
 
-#: Kept as the module's own name because `visualize_data` re-exports it under this spelling;
-#: its one live use is `load_messages`' pre-`observe/` fallback below. The LOCATION is
-#: `_run_paths`', not this module's — a consumer that wants the path asks `RunPaths.wire_log`
-#: and never joins this onto a run dir, which is exactly the drift the move exists to prevent.
-LLM_REQUESTS = WIRE_LOG
+#: The wire log's PRE-`wire_logs/` run-root location, and named for that rather than for the file:
+#: its one live use is `load_messages`' fallback below, and `visualize_data` re-exports it. Under
+#: the old spelling (`LLM_REQUESTS`) this constant read as "the wire log", so the one thing it
+#: invites — `run_dir / LLM_REQUESTS` — silently resolved to a path no current run writes, which
+#: is exactly the drift the move exists to prevent. A consumer that wants the wire log asks
+#: `RunPaths.wire_log`; a consumer that wants the legacy location asks for it by that name.
+LEGACY_WIRE_LOG = WIRE_LOG
 
 
 def load_messages(run_dir: Path) -> list[dict]:
     """The run's wire-log records, or `[]` when the run has none.
 
-    Falls back to the pre-`observe/` run-root path so a run dir written before the wire log
+    Falls back to the pre-`wire_logs/` run-root path so a run dir written before the wire log
     moved still renders a transcript. A READER fallback only: the move is a read-GATE fact
-    (`_run_paths.OBSERVE_DIR`) and this code is the host's, outside the gate entirely — the
+    (`_run_paths.WIRE_LOG_DIR`) and this code is the host's, outside the gate entirely — the
     empty state the runtime page prints already says "older run", and this is what keeps that
     true rather than silently blank."""
     current = RunPaths(run_dir).wire_log
-    return read_jsonl_rows(current if current.is_file() else run_dir / LLM_REQUESTS)
+    return read_jsonl_rows(current if current.is_file() else run_dir / LEGACY_WIRE_LOG)
 
 
 def _pretty_model(name: str) -> str:

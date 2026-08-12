@@ -9,7 +9,7 @@ if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender._corpus import iter_query_templates  # noqa: E402
-from defender._run_paths import OBSERVE_DIR  # noqa: E402
+from defender._run_paths import WIRE_LOG_DIR  # noqa: E402
 from defender.runtime.verbs import ADAPTER_SUFFIX  # noqa: E402
 
 DEFENDER_DIR = Path(__file__).resolve().parent.parent
@@ -18,11 +18,11 @@ REPO_ROOT = DEFENDER_DIR.parent
 #: Run-dir children the map does not name. This listing is inlined into MAIN's message 0 under
 #: "use this in place of `ls`/`find`/`grep`", and MAIN has no `ls` — so the map IS the model's
 #: directory view, and naming a path the gate then refuses only teaches it to ask for one
-#: (`test_gather_raw_suppressed`, #264). `observe/` joins `gather_raw/` on exactly that
+#: (`test_gather_raw_suppressed`, #264). `wire_logs/` joins `gather_raw/` on exactly that
 #: ground: it holds the run's wire log, one level down and so outside MAIN's `under(run, SEG)`
-#: read shape by construction — see `_run_paths.OBSERVE_DIR` for why it sits there.
+#: read shape by construction — see `_run_paths.WIRE_LOG_DIR` for why it sits there.
 #: `budget.json` predates both and is listed here to keep the suppression in one place.
-_UNLISTED = frozenset({"gather_raw", OBSERVE_DIR, "budget.json"})
+_UNLISTED = frozenset({"gather_raw", WIRE_LOG_DIR, "budget.json"})
 
 
 def _safe_name(name: str) -> str:

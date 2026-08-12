@@ -18,7 +18,7 @@ from .files import (
     decide_write,
     is_captured_payload,
     is_untrusted_read,
-    names_observe,
+    names_wire_log_dir,
 )
 from .grant import OPENS_NOTHING, PROGRAMS, Grant, Route, under
 from .policies.gather import GATHER_FALLTHROUGH_DENY_REASON
@@ -46,7 +46,7 @@ __all__ = [
     "decide_write",
     "is_captured_payload",
     "is_untrusted_read",
-    "names_observe",
+    "names_wire_log_dir",
     "require_anchor_root",
     "under",
 ]

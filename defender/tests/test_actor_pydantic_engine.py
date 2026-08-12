@@ -30,7 +30,7 @@ from defender.tests._engine_helpers import assert_stage_tools  # noqa: E402
 from defender.tests._engine_helpers import learning_run_dir  # noqa: E402
 from defender.tests._engine_helpers import fake_model as _fake_model  # noqa: E402
 from defender.tests._engine_helpers import replay_turns as _replay  # noqa: E402
-from defender._run_paths import OBSERVE_DIR  # noqa: E402
+from defender._run_paths import WIRE_LOG_DIR  # noqa: E402
 
 _ENV_RETRIEVE = config.LESSONS_ENV_RETRIEVE_SCRIPT
 _ACTOR_INDEX = config.LESSONS_ACTOR_INDEX_SCRIPT
@@ -86,8 +86,8 @@ def test_run_actor_pydantic_returns_story_and_writes_trace(tmp_path):
             make_model=_fake_model(fn),
         )
     assert out == _STORY
-    assert (lrd / OBSERVE_DIR / "actor_trace.jsonl").is_file()
-    assert (lrd / OBSERVE_DIR / "actor_trace.jsonl").read_text().strip()
+    assert (lrd / WIRE_LOG_DIR / "actor_trace.jsonl").is_file()
+    assert (lrd / WIRE_LOG_DIR / "actor_trace.jsonl").read_text().strip()
 
 
 def test_run_actor_pydantic_returns_skip_verbatim(tmp_path):

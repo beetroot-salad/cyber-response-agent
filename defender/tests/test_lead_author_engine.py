@@ -58,7 +58,7 @@ from defender.runtime.agent_role import AgentRole  # noqa: E402
 from defender.runtime.permission import AgentPolicy  # noqa: E402
 from defender.tests._engine_helpers import fake_model as _fake_model  # noqa: E402
 from defender.tests._engine_helpers import replay_once as _replay  # noqa: E402
-from defender._run_paths import OBSERVE_DIR  # noqa: E402
+from defender._run_paths import WIRE_LOG_DIR  # noqa: E402
 
 _SKILLS_REL = "defender/skills"
 
@@ -609,8 +609,8 @@ def test_two_distinct_traces_into_one_dir_both_survive(tmp_path):
                 ),
                 make_model=_fake_model(_replay("done")),
             )
-    a, b = (rd / OBSERVE_DIR / "run-A.7.trace.jsonl",
-            rd / OBSERVE_DIR / "run-B.7.trace.jsonl")
+    a, b = (rd / WIRE_LOG_DIR / "run-A.7.trace.jsonl",
+            rd / WIRE_LOG_DIR / "run-B.7.trace.jsonl")
     assert a.is_file()
     assert a.read_text().strip()
     assert b.is_file()

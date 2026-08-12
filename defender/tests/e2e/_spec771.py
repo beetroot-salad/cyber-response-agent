@@ -442,7 +442,7 @@ def run_tree(tmp_path: Path) -> Path:
     run = tmp_path / "run-771"
     (run / "gather_raw" / "l-001").mkdir(parents=True)
     (run / "gather_summaries").mkdir(parents=True)
-    (run / "observe").mkdir(parents=True)
+    (run / "wire_logs").mkdir(parents=True)
     (run / "alert.json").write_text('{"id": "a-771"}\n', encoding="utf-8")
     return run
 
@@ -808,7 +808,7 @@ def _invoke_observe_logger(run_dir: Path) -> None:
     # truncating open a planted link redirects (B1's shape at C1's row 3). The budget-refusal
     # record is appended after so the control observes real bytes and not just an empty file.
     # Driven through `wire_log_path` because that is the production entry point since the log
-    # moved under `<run>/observe/` — and it carries the row's `guarded_mkdir` of that
+    # moved under `<run>/wire_logs/` — and it carries the row's `guarded_mkdir` of that
     # component, which is what this row's component plant now judges.
     logger = observe.RequestLogger(observe.wire_log_path(run_dir))
     try:
@@ -965,7 +965,7 @@ CENSUS: tuple[Writer, ...] = (
            _invoke_write_trace, "runtime/observe.py", cite="C1,X10"),
     Writer("run_investigation", "tool_trace.jsonl", "write_text", "unmeasured",
            _invoke_fault_exit_trace, "runtime/driver.py", cite="C1,X10", lands_empty=True),
-    Writer("observe_logger", "observe/llm_requests.jsonl", "append-open", "unmeasured",
+    Writer("observe_logger", "wire_logs/llm_requests.jsonl", "append-open", "unmeasured",
            _invoke_observe_logger, "runtime/observe.py", cite="C1", mkdirs_component=True),
     Writer("denial_logger", "policy_denials.jsonl", "append-open", "unmeasured",
            _invoke_denial_logger, "runtime/observe.py", cite="C1,G12"),

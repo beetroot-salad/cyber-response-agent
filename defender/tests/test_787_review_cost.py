@@ -132,7 +132,7 @@ def _drive_every_lens(run: Path, logger: Any, seen: dict) -> None:
 
 def test_every_live_stage_is_built_on_the_run_s_own_logger(run_dir):
     """Not one of them mints its own. A private logger is a file no cost reader opens."""
-    logger = observe.RequestLogger(run_dir / "llm_requests.jsonl")
+    logger = observe.RequestLogger(observe.wire_log_path(run_dir))
     seen: dict = {}
     try:
         _drive_every_lens(run_dir, logger, seen)
@@ -153,14 +153,14 @@ def test_a_stage_does_not_close_the_logger_it_shares(run_dir):
     logger was its own. Carried onto the shared one it closes `llm_requests.jsonl` out from
     under the main agent mid-investigation — so the write below must land, and it is the
     whole point of this test that it is made AFTER a stage has run."""
-    logger = observe.RequestLogger(run_dir / "llm_requests.jsonl")
+    logger = observe.RequestLogger(observe.wire_log_path(run_dir))
     try:
         _drive_every_lens(run_dir, logger, {})
         logger.log(request_messages=[], response=_response("main turn"), agent_id="main")
     finally:
         logger.close()
 
-    rows = read_jsonl_rows(run_dir / "llm_requests.jsonl")
+    rows = read_jsonl_rows(observe.wire_log_path(run_dir))
     assert [r.get("agent_id") for r in rows if r.get("kind") == "response"] == [
         *(f"{REVIEW_AGENT_ID_PREFIX}{lens}" for lens in _LENSES), "main",
     ], "the main agent's turn did not reach the log after a review stage ran"
@@ -169,16 +169,21 @@ def test_a_stage_does_not_close_the_logger_it_shares(run_dir):
 def test_a_live_stage_leaves_no_private_trace_file(run_dir):
     """The per-lens `review_*_live_trace.jsonl` files are gone, not merely unread. Two homes
     for one record is how the second one stops being maintained."""
-    logger = observe.RequestLogger(run_dir / "llm_requests.jsonl")
+    logger = observe.RequestLogger(observe.wire_log_path(run_dir))
     try:
         _drive_every_lens(run_dir, logger, {})
     finally:
         logger.close()
 
-    assert not list(run_dir.glob("*_live_trace.jsonl"))
-    # `sorted`, because `iterdir()` yields in filesystem order — a list comparison against it
-    # is a flake waiting for the second artifact to land, not a stricter assertion.
-    assert sorted(p.name for p in run_dir.iterdir()) == ["llm_requests.jsonl"]
+    assert not list(run_dir.rglob("*_live_trace.jsonl"))
+    # `sorted`, because `rglob` yields in filesystem order — a list comparison against it is a
+    # flake waiting for the second artifact to land, not a stricter assertion. The walk is the
+    # TREE, not the root: the shared log lives at `wire_logs/llm_requests.jsonl`, so a
+    # root-only `iterdir` would see one directory and this case would go green against a
+    # bundle that had written a private trace beside it.
+    assert sorted(
+        str(p.relative_to(run_dir)) for p in run_dir.rglob("*") if p.is_file()
+    ) == [str(observe.wire_log_path(run_dir).relative_to(run_dir))]
 
 
 def test_the_two_support_calls_stay_apart_in_the_log(run_dir):
@@ -186,13 +191,13 @@ def test_the_two_support_calls_stay_apart_in_the_log(run_dir):
     sequence and record ids on `agent_id`. One id for both would collapse two readings into
     one, silently, which is the failure the per-lens split has always existed to prevent; it
     used to be carried by the filename and is now carried by the id."""
-    logger = observe.RequestLogger(run_dir / "llm_requests.jsonl")
+    logger = observe.RequestLogger(observe.wire_log_path(run_dir))
     try:
         _drive_every_lens(run_dir, logger, {})
     finally:
         logger.close()
 
-    rows = read_jsonl_rows(run_dir / "llm_requests.jsonl")
+    rows = read_jsonl_rows(observe.wire_log_path(run_dir))
     # Asked of the AGENT ID, not of the record id. `_emit` keys `seq` on `agent_id`, so a
     # bundle that gave all three lenses ONE id would still write three distinct record ids
     # (`review:support#0/#1/#2`) — a uniqueness assertion cannot fail for the reason this

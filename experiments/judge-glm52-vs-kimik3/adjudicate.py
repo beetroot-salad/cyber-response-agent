@@ -29,7 +29,7 @@ if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
     sys.path.insert(0, _root)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from analyze import read_trace  # noqa: E402
+from analyze import read_trace, trace_path  # noqa: E402
 
 ADJUDICATOR_MODEL = "claude-opus-5"
 _TRACE_NAMES = ("judge_trace.jsonl", "judge_benign_trace.jsonl")
@@ -70,8 +70,10 @@ VERDICT: A | B | TIE — <one clause naming the deciding difference>
 
 def _verdict_text(run_dir: Path) -> str:
     for name in _TRACE_NAMES:
-        trace = run_dir / name
-        if trace.is_file() and trace.stat().st_size:
+        # `analyze.trace_path`, not a join: a stage trace lands under `wire_logs/` now
+        # (`_run_paths.WIRE_LOG_DIR`), and a joined root path would read as "no verdict".
+        trace = trace_path(run_dir, name)
+        if trace is not None:
             return read_trace(trace)["verdict_text"]
     return ""
 

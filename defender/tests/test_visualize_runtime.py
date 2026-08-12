@@ -346,9 +346,9 @@ def test_the_review_gate_s_spend_is_inside_the_headline_and_named_there(tmp_path
 
 
 def test_load_messages_still_finds_a_pre_observe_run_s_wire_log(tmp_path):
-    """A run dir written before the wire log moved under `observe/` still renders.
+    """A run dir written before the wire log moved under `wire_logs/` still renders.
 
-    The move is a read-GATE fact — `<run>/observe/` is outside every reader agent's
+    The move is a read-GATE fact — `<run>/wire_logs/` is outside every reader agent's
     single-segment run-dir read shape — and the visualizer is host code that sits outside the
     gate entirely, so nothing is reopened by reading the old location when the new one is
     absent. Without the fallback the page silently shows its "older run" empty state for runs
@@ -357,12 +357,12 @@ def test_load_messages_still_finds_a_pre_observe_run_s_wire_log(tmp_path):
     The precedence is the other half: when both exist, the current location wins."""
     legacy = tmp_path / "legacy"
     legacy.mkdir()
-    (legacy / d.LLM_REQUESTS).write_text(json.dumps({"id": "old#0", "kind": "response"}) + "\n")
+    (legacy / d.LEGACY_WIRE_LOG).write_text(json.dumps({"id": "old#0", "kind": "response"}) + "\n")
     assert [r["id"] for r in d.load_messages(legacy)] == ["old#0"]
 
     both = tmp_path / "both"
     wire = RunPaths(both).wire_log
     wire.parent.mkdir(parents=True)
-    (both / d.LLM_REQUESTS).write_text(json.dumps({"id": "old#0", "kind": "response"}) + "\n")
+    (both / d.LEGACY_WIRE_LOG).write_text(json.dumps({"id": "old#0", "kind": "response"}) + "\n")
     wire.write_text(json.dumps({"id": "new#0", "kind": "response"}) + "\n")
     assert [r["id"] for r in d.load_messages(both)] == ["new#0"]

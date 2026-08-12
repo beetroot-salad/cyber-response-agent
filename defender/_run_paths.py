@@ -8,15 +8,17 @@ from pathlib import Path
 
 #: The run's ONE wire log, and the subdirectory that holds it — the layout fact, spelled here
 #: so the writers (`runtime.observe.wire_log_path` for the runtime, `stage_trace_path` for
-#: every learning stage), the read gate (`permission.files.names_observe`) and the readers
+#: every learning stage), the read gate (`permission.files.names_wire_log_dir`) and the readers
 #: (the visualizers) share one source. Named in this module rather than in `runtime.observe`
 #: because the visualizer needs the location and must not pay for pydantic-ai to learn it.
 #:
-#: `OBSERVE_DIR` is the whole class, not just this file: EVERY `RequestLogger` in the tree
-#: writes under it — `<run_dir>/observe/llm_requests.jsonl` for the investigation, and
-#: `<root>/observe/<stage>.trace.jsonl` for the actor, oracle, judge, curators and
+#: `WIRE_LOG_DIR` is the whole class, not just this file: every WIRE log in the tree writes
+#: under it — `<run_dir>/wire_logs/llm_requests.jsonl` for the investigation, and
+#: `<root>/wire_logs/<stage>.trace.jsonl` for the actor, oracle, judge, curators and
 #: forward-check verifier. One component means one rule can name them all, which is what
-#: `names_observe` is.
+#: `names_wire_log_dir` is. The class is "carries a wire body verbatim", NOT "is a
+#: `RequestLogger`": `runtime.observe.denial_logger` builds one of those too and stays at
+#: `<run_dir>/policy_denials.jsonl`, for the reason the root-level census below gives.
 #:
 #: THE SUBDIRECTORY IS THE GATE, not tidiness. MAIN's and GATHER's run-dir read shape is
 #: `under(run, SEG)` (`runtime/permission/policies/_common.read_shapes`, the builder those two
@@ -42,16 +44,25 @@ from pathlib import Path
 #: (`judge/compare.unredacted_exemplar`) and the gray-box actor could read it straight back,
 #: around the `gather_raw` deny that exists to keep exactly those bytes from it.
 #:
-#: Which is why the component ALSO carries an outright deny (`permission.files.names_observe`,
+#: Which is why the component ALSO carries an outright deny (`permission.files.names_wire_log_dir`,
 #: both read surfaces, every role) rather than resting on the shapes. The directory is what
 #: makes the deny addressable — one component test covers a trace name nobody has invented yet
 #: — and the deny is what makes it hold for the roles a shape cannot reach.
 #:
 #: The run's OTHER root-level streams stay at the root deliberately: `tool_trace.jsonl` is a
 #: projection carrying tool NAMES (`observe._user_event`), `policy_denials.jsonl` carries a
-#: parameter DIGEST rather than the blob, and `budget.json`/`circuit_breaker.json` are
-#: counters. None of them replays another agent's context, which is the property that made
-#: this one a leak; this dir is for streams that carry wire bodies verbatim.
+#: parameter DIGEST rather than the blob (`RequestLogger.log_policy_denial`), and
+#: `budget.json`/`circuit_breaker.json` are counters. None of them replays another agent's
+#: context, which is the property that made this one a leak; this dir is for streams that
+#: carry wire bodies verbatim.
+#:
+#: `review_{role}_trace.jsonl` IS in the class and MOVED WITH THEM. `_write_trace_row` appends
+#: each review stage's RAW wrapped reply, so at the run root it sat one segment deep inside
+#: MAIN's and GATHER's shape — while MAIN is handed only the composer's `target: ask` lines
+#: (`close_tool._render_challenged_message`) and never the two blind lenses' replies, which is
+#: the blindness the gate is built on. `challenge_gate.review_trace_path` still owns the
+#: filename and the visualizer's § Review gate still reads through it; only the component
+#: moved.
 #:
 #: `transcript.html`/`runtime.html` are the ONE exception and are named here so the exception
 #: is recorded rather than inferred: they DO inline MAIN's transcript verbatim (rendered from
@@ -60,8 +71,8 @@ from pathlib import Path
 #: `run.py` renders them after `run_investigation` has returned, so no agent of the run they
 #: describe is still alive to read them. That is a thinner guarantee than a directory, and
 #: anything that moves the render INTO the run (a mid-flight `--visualize`, a live page) has
-#: to move these two under `observe/` in the same change.
-OBSERVE_DIR = "observe"
+#: to move these two under `wire_logs/` in the same change.
+WIRE_LOG_DIR = "wire_logs"
 WIRE_LOG = "llm_requests.jsonl"
 
 
@@ -105,7 +116,7 @@ class RunPaths:
 
     @property
     def wire_log(self) -> Path:
-        return self.run_dir / OBSERVE_DIR / WIRE_LOG
+        return self.run_dir / WIRE_LOG_DIR / WIRE_LOG
 
 
 # A run bundle is ALWAYS `runs_dir / <run_id>` (`LoopPaths.runs_dir` is the only place the

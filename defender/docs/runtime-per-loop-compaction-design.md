@@ -271,6 +271,12 @@ Acceptance is **two** numbers per the migration doc: token savings **and**
 unchanged dispositions on the same fixtures. The available artifacts let us
 climb a cost-ordered ladder — cheapest, most diagnostic step first.
 
+> **Where the wire log lives now.** Every `llm_requests.jsonl` named in this section is at
+> the run ROOT, which is where the Phase-A recordings below have it. It moved to
+> `<run_dir>/wire_logs/llm_requests.jsonl` afterwards, as a read-gate decision
+> (`defender/_run_paths.WIRE_LOG_DIR`). `compaction_dryrun.py` resolves both, so the ladder
+> below still runs as written against a recording of either vintage.
+
 **Baseline material on hand:** 5 recorded Phase-A runs under
 `/tmp/defender-runs/` carry full `llm_requests.jsonl` + `tool_trace.jsonl`
 (best: `opt-verify-xtier-6f2d77e`, 344 request lines). They ran against the

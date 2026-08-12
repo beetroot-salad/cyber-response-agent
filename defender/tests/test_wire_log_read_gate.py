@@ -12,7 +12,7 @@ At the run ROOT it was readable by both of them. MAIN's and GATHER's run-dir rea
 bash `cat` lane alike, since they share the shape OBJECT. `is_untrusted_read` does not fire on
 the log either, so neither lane salt-framed the read: the bytes arrived as ordinary text.
 
-The fix is one directory, not one clamp: the log moved to `<run_dir>/observe/llm_requests.jsonl`,
+The fix is one directory, not one clamp: the log moved to `<run_dir>/wire_logs/llm_requests.jsonl`,
 one level down and therefore outside a single-segment shape, for MAIN and GATHER symmetrically
 and with no shape edited. `test_the_subdirectory_is_what_denies` is the falsification — it plants
 the same filename back at the run root and shows the gate admits it there, so these tests cannot
@@ -29,7 +29,7 @@ the previous pass's traces still in it, so the actor is alive while those files 
 A subdirectory alone does NOT close that one, which is why the deny is a component rule rather
 than a shape: the ACTOR declares no read shape at all (root containment only admits every
 depth) and the JUDGE's `cat` scope is `under(run, TREE)` (a subdirectory fullmatches). So
-`observe/` is denied OUTRIGHT by `files.names_observe`, on both read surfaces, for every role —
+`wire_logs/` is denied OUTRIGHT by `files.names_wire_log_dir`, on both read surfaces, for every role —
 and `test_the_component_is_what_denies_in_the_learning_lane` is that half's falsification.
 """
 from __future__ import annotations
@@ -41,7 +41,7 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-from defender._run_paths import OBSERVE_DIR, WIRE_LOG, RunPaths  # noqa: E402
+from defender._run_paths import WIRE_LOG_DIR, WIRE_LOG, RunPaths  # noqa: E402
 from defender.agents import ACTOR_DEF, GATHER_DEF, JUDGE_DEF, MAIN_DEF  # noqa: E402
 from defender.runtime import observe, permission  # noqa: E402
 from defender.runtime.agent_definition import (  # noqa: E402
@@ -92,7 +92,7 @@ def _bash(env, cmd, which):
 
 
 def test_the_wire_log_lives_one_level_below_the_run_root(tmp_path):
-    """The location is the mechanism, so it is pinned as such: `<run>/observe/` — a directory,
+    """The location is the mechanism, so it is pinned as such: `<run>/wire_logs/` — a directory,
     not a run-root name. `wire_log_path` creates the dir (the driver opens the logger on it
     before anything else writes into the run), and agrees with the layout `_run_paths` declares
     for every reader."""
@@ -100,7 +100,7 @@ def test_the_wire_log_lives_one_level_below_the_run_root(tmp_path):
     run.mkdir()
     path = observe.wire_log_path(run)
 
-    assert path == run / OBSERVE_DIR / WIRE_LOG
+    assert path == run / WIRE_LOG_DIR / WIRE_LOG
     assert path == RunPaths(run).wire_log
     assert path.parent.is_dir(), "the driver would fail to open a log in a dir nobody created"
     assert path.parent != run, (
@@ -153,7 +153,7 @@ def _run_dir_section(out: str) -> str:
     Asserted on rather than the whole document because the rest of the map is generated from
     the REAL `workspace_map.DEFENDER_DIR` — the skills dirs, the adapter filenames, the query
     systems — and a bare substring test over that would turn red the day someone adds a skill
-    whose name happens to contain `observe`, for a reason that has nothing to do with the
+    whose name happens to contain `wire_logs`, for a reason that has nothing to do with the
     suppression this test is about."""
     body = out.split("## Run dir", 1)[1]
     return body.split("\n## ", 1)[0]
@@ -165,7 +165,7 @@ def test_the_workspace_map_does_not_name_the_observe_dir(env):
     teaches the model to ask for it; `gather_raw/` is suppressed on the same ground (#264)."""
     listing = _run_dir_section(wsm.workspace_map(env.run).replace(str(env.run), "RUNDIR"))
 
-    assert OBSERVE_DIR not in listing
+    assert WIRE_LOG_DIR not in listing
     assert WIRE_LOG not in listing
     assert "investigation.md" in listing, "the run-dir listing stopped listing anything at all"
 
@@ -215,11 +215,11 @@ def lenv(tmp_path):
 
 
 def test_a_learning_stage_trace_lands_under_observe(lenv):
-    """One component for both lanes. `files.names_observe` is a single path-component test, so
+    """One component for both lanes. `files.names_wire_log_dir` is a single path-component test, so
     a stage trace written anywhere else is a stream the deny cannot see — which is the whole
     reason the offline writer goes through `stage_trace_path` rather than joining a name."""
     for name, path in lenv.traces.items():
-        assert path == lenv.run / OBSERVE_DIR / name
+        assert path == lenv.run / WIRE_LOG_DIR / name
         assert path.parent.is_dir()
 
 
@@ -241,18 +241,40 @@ def test_the_gray_box_actor_cannot_read_the_judge_s_trace(lenv):
 
 
 @pytest.mark.parametrize("which", LEARNING_READERS)
-def test_no_learning_role_reads_a_trace_on_either_lane(lenv, which):
-    """Denied OUTRIGHT, unlike `gather_raw` — no role may opt in by declaring a shape. The
-    judge is included precisely because a subdirectory could never have excluded it: its `cat`
-    scope is `under(run, TREE)`, which fullmatches at any depth, so on the bash lane the deny
-    is carried by `files.names_observe` alone."""
+def test_no_learning_role_reads_a_trace(lenv, which):
+    """Denied OUTRIGHT on the read tool, unlike `gather_raw` — no role may opt in by declaring
+    a shape. Both roles, and `test_the_component_is_what_denies_in_the_learning_lane` below is
+    the falsification for both."""
+    assert not _read(lenv, lenv.traces["judge_trace.jsonl"], which).allow
+
+
+def test_the_bash_lane_denies_a_trace_for_the_judge(lenv):
+    """The `cat` lane, asserted for the JUDGE and ONLY the judge — because it is the only
+    learning role where the assertion measures anything.
+
+    The judge is where a subdirectory could never have excluded the file: its `cat` scope is
+    `under(run, TREE)`, which fullmatches at any depth, so here the deny is carried by
+    `files.names_wire_log_dir` alone — and the run-root control beneath it is what shows the `cat`
+    itself is otherwise well-formed and claimable. The ACTOR is deliberately NOT parametrized
+    in: it holds ZERO bash grants, so every command it names is refused by the fallthrough
+    before an operand is ever resolved, and a `cat` deny for it would stay green with
+    `names_wire_log_dir` deleted. That vacuity is pinned rather than papered over — the last
+    assertion fails the day the actor grows a grant, which is the day the case belongs here
+    with a falsification of its own."""
     trace = lenv.traces["judge_trace.jsonl"]
-    assert not _read(lenv, trace, which).allow
-    assert not _bash(lenv, f"cat {trace}", which).allow
+    assert not _bash(lenv, f"cat {trace}", "judge").allow
+    assert _bash(lenv, f"cat {lenv.run / 'actor_story.md'}", "judge").allow, (
+        "positive control: a run-root artifact the judge may read must still `cat`, or the "
+        "deny above proves nothing about the component"
+    )
+    assert lenv.actor.bash_allow == (), (
+        "the actor grew a bash grant — its `cat` deny is no longer vacuous, so it belongs in "
+        "a parametrized case with a falsification of its own"
+    )
 
 
 def test_the_deny_is_scoped_to_observe_and_nothing_else(lenv):
-    """The positive control for the whole class. `observe/` must be the only thing that moved:
+    """The positive control for the whole class. `wire_logs/` must be the only thing that moved:
     the judge still reads the payloads it is supposed to judge, and the actor still reads its
     own inputs. A deny that swept these up would be a blanket, not a boundary."""
     assert _read(lenv, lenv.run / "gather_raw" / "l-001" / "0.json", "judge").allow
@@ -272,13 +294,13 @@ def test_the_component_is_what_denies_in_the_learning_lane(lenv, which):
     assert _read(lenv, planted, which).allow
 
 
-def test_names_observe_is_a_component_test_not_a_substring(tmp_path):
+def test_names_wire_log_dir_is_a_component_test_not_a_substring(tmp_path):
     """The discipline `_names_raw` states, held for the new marker too: the test is over path
     PARTS. A substring scan is decided by text the path's owner does not control — a checkout
     under `~/observe-notes/`, a pytest tmp dir named `test_observe_0` — and would deny reads
     across an unrelated tree while a file honestly named `observed.jsonl` slipped through."""
-    assert permission.names_observe(tmp_path / OBSERVE_DIR / "x.jsonl")
-    assert permission.names_observe(tmp_path / OBSERVE_DIR / "deep" / "x.jsonl")
-    assert not permission.names_observe(tmp_path / "observed" / "x.jsonl")
-    assert not permission.names_observe(tmp_path / "my-observe-notes" / "x.jsonl")
-    assert not permission.names_observe(tmp_path / "observe.jsonl")
+    assert permission.names_wire_log_dir(tmp_path / WIRE_LOG_DIR / "x.jsonl")
+    assert permission.names_wire_log_dir(tmp_path / WIRE_LOG_DIR / "deep" / "x.jsonl")
+    assert not permission.names_wire_log_dir(tmp_path / "observed" / "x.jsonl")
+    assert not permission.names_wire_log_dir(tmp_path / "my-observe-notes" / "x.jsonl")
+    assert not permission.names_wire_log_dir(tmp_path / "observe.jsonl")

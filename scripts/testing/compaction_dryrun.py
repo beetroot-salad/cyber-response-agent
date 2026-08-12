@@ -147,8 +147,8 @@ def _resolve_jsonl(arg: str) -> Path:
     """The wire log a `<run_dir|path>` argument names.
 
     A run dir resolves through `RunPaths`, never by joining the name: the log moved to
-    `<run_dir>/observe/` when the read gate stopped admitting it at the run root
-    (`_run_paths.OBSERVE_DIR`), so the joined spelling now names a file no run has. The
+    `<run_dir>/wire_logs/` when the read gate stopped admitting it at the run root
+    (`_run_paths.WIRE_LOG_DIR`), so the joined spelling now names a file no run has. The
     run-root fallback is the same READER-side courtesy `visualize_messages.load_messages`
     takes — this tool's whole purpose is replaying logs recorded before the move."""
     p = Path(arg)

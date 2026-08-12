@@ -440,7 +440,7 @@ def test_run_paths_accessor_set_is_exactly_its_artifacts_after_the_meta_accessor
     docstring's own count must agree with the accessors it enumerates.
 
     The count is asserted rather than typed twice: `wire_log` was added when the wire log moved
-    under `<run>/observe/` (out of every reader agent's single-segment read shape), and the
+    under `<run>/wire_logs/` (out of every reader agent's single-segment read shape), and the
     docstring is where a reader learns the set, so the two must not be able to drift apart."""
     accessors = {n for n, v in vars(RunPaths).items() if isinstance(v, property)}
     assert accessors == {

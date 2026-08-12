@@ -474,7 +474,7 @@ def test_run_dir_still_carries_every_investigation_artifact_after_the_removal(
     for name in ("alert.json", "investigation.md", "report.md", "tool_trace.jsonl"):
         assert (run_dir / name).is_file(), f"{name} is missing from the run dir"
     # Named through `RunPaths` and not joined onto the root: the wire log sits under
-    # `observe/`, which is what keeps it outside every reader's run-dir read shape.
+    # `wire_logs/`, which is what keeps it outside every reader's run-dir read shape.
     assert RunPaths(run_dir).wire_log.is_file(), "the wire log is missing from the run dir"
     assert (run_dir / "gather_raw").is_dir()
     assert (run_dir / "investigation.md").read_text(encoding="utf-8") == inv_text
@@ -552,7 +552,7 @@ def test_replayed_message_zero_listing_matches_the_production_run_dir_file_set(
     # `session_store_pointer.json` are both written by `run_investigation` itself, between
     # that snapshot and message 0 — present in a real run by the time the model sees the
     # listing, just not in this earlier snapshot. The wire log is written in that window too
-    # but is NOT allowed for here: it lands under `observe/`, which the map suppresses along
+    # but is NOT allowed for here: it lands under `wire_logs/`, which the map suppresses along
     # with `gather_raw/` because the read gate refuses both.
     assert set(listed) <= production_names | {
         "tool_trace.jsonl", "session_store_pointer.json",

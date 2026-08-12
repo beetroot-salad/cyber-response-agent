@@ -4,7 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from defender._run_paths import OBSERVE_DIR
+from defender._run_paths import WIRE_LOG_DIR
 from defender._vocab import normalized_disposition
 from defender.learning.core.directions import (
     ADVERSARIAL,
@@ -454,14 +454,18 @@ def render_judge_raw_bundle(run_id: str) -> str:
             panels.append(block("artifact", fname, pre_text(p.read_text(encoding="utf-8"))))
     for raw in sorted(learn_dir.glob("*.raw.txt")):
         panels.append(block("artifact raw", raw.name, pre_text(raw.read_text(encoding="utf-8"))))
-    # `observe/actor_trace.jsonl`, with the pre-move root path as a fallback so an older
+    # `wire_logs/actor_trace.jsonl`, with the pre-move root path as a fallback so an older
     # learning run dir still renders its bundle. Host code, outside the gate: the directory is
-    # where `permission.files.names_observe` refuses AGENTS, and this page is for an operator.
-    for trace in (learn_dir / OBSERVE_DIR / ACTOR_TRACE, learn_dir / ACTOR_TRACE):
+    # where `permission.files.names_wire_log_dir` refuses AGENTS, and this page is for an operator.
+    for trace in (learn_dir / WIRE_LOG_DIR / ACTOR_TRACE, learn_dir / ACTOR_TRACE):
         if trace.is_file():
-            panels.append(
-                block("artifact", ACTOR_TRACE, pre_text(trace.read_text(encoding="utf-8")))
-            )
+            # Labelled with the path RELATIVE TO THE LEARNING RUN DIR, not the bare name: the
+            # two candidates differ only in their directory, so a shared label would leave an
+            # operator unable to tell a current bundle from a pre-`wire_logs/` one.
+            panels.append(block(
+                "artifact", str(trace.relative_to(learn_dir)),
+                pre_text(trace.read_text(encoding="utf-8")),
+            ))
             break
     if not panels:
         return ""

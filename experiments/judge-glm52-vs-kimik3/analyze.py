@@ -30,6 +30,7 @@ from pathlib import Path
 if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
     sys.path.insert(0, _root)
 
+from defender._run_paths import WIRE_LOG_DIR  # noqa: E402
 from defender.scripts.pricing import PRICING, model_key  # noqa: E402
 
 # The 262k-context SKU. Not in pricing.PRICING on purpose: that table feeds real accounting
@@ -52,6 +53,22 @@ _USAGE_KEYS = (
     "cache_read_input_tokens",
 )
 _TRACE_NAMES = ("judge_trace.jsonl", "judge_benign_trace.jsonl")
+
+
+def trace_path(root: Path, name: str) -> Path | None:
+    """The non-empty judge trace `name` names under `root`, or `None`.
+
+    `<root>/wire_logs/<name>` FIRST: `_pydantic_stage.run_stage` writes every stage trace through
+    `observe.stage_trace_path` now, which puts it one level down (`_run_paths.WIRE_LOG_DIR` — the
+    read gate refuses the component to every agent). The pre-move root path stays as a fallback
+    because this tool is pointed at whatever arm dirs the operator already has on disk; without
+    the first candidate a current run reads as "no trace", which `collect` silently skips and
+    the report then prints as zero invocations. Shared with `adjudicate.py`, which imports it.
+    """
+    for candidate in (root / WIRE_LOG_DIR / name, root / name):
+        if candidate.is_file() and candidate.stat().st_size:
+            return candidate
+    return None
 
 
 def _cost(usage: dict, price: dict) -> float:
@@ -103,8 +120,8 @@ def collect(runs_dir: Path) -> dict:
     for label_dir in sorted(p for p in runs_dir.iterdir() if p.is_dir()):
         for case_dir in sorted(p for p in label_dir.iterdir() if p.is_dir()):
             for name in _TRACE_NAMES:
-                trace = case_dir / name
-                if not trace.is_file() or trace.stat().st_size == 0:
+                trace = trace_path(case_dir, name)
+                if trace is None:
                     continue
                 rec = read_trace(trace)
                 rec["case_id"] = case_dir.name

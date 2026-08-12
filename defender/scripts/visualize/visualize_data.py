@@ -386,7 +386,7 @@ def phase_wall_times(
 
 
 from defender.scripts.visualize.visualize_messages import (  # noqa: F401
-    LLM_REQUESTS,
+    LEGACY_WIRE_LOG,
     build_transcript,
     deduped_main_records,
     gather_calls_by_phase,

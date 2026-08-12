@@ -3,7 +3,7 @@
 
 The bound on spend is only a bound if the RECORD of spend is not forgeable, so the
 carve-out is scoped to the WHOLE run integrity surface — budget.json,
-circuit_breaker.json, observe/llm_requests.jsonl, tool_trace.jsonl, the queries table,
+circuit_breaker.json, wire_logs/llm_requests.jsonl, tool_trace.jsonl, the queries table,
 gather_summaries/ and alert.json — and the mechanism is a POSITIVE ALLOW-LIST of
 exactly {investigation.md}, deliberately tighter than the `.md` suffix
 filter the two sibling curators take. (#774/R1: report.md left this allow-list
@@ -65,11 +65,11 @@ BAD_INVLANG = "```yaml\nfoo: bar\n```\n"
 INTEGRITY_SURFACE = (
     "budget.json",
     "circuit_breaker.json",
-    # Under `observe/` since the wire log moved out of every reader's run-dir read shape.
+    # Under `wire_logs/` since the wire log moved out of every reader's run-dir read shape.
     # Named at its real path so the census keeps covering the artifact and not a stale name:
     # MAIN's write allow-list is one file, so both spellings deny, and only one of them is
     # the file whose forgery this suite exists to refuse.
-    "observe/llm_requests.jsonl",
+    "wire_logs/llm_requests.jsonl",
     "tool_trace.jsonl",
     "executed_queries.jsonl",
     "gather_raw/l-001.lead.json",
