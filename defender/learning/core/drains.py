@@ -26,10 +26,11 @@ from defender.learning.core.directions import BY_NAME
 from defender.learning.author.branch import AuthorBranch, BranchError
 from defender.learning.core.faults import run_or_dead_letter
 from defender.learning.core.markers import (
+    ClaimedMarker,
     claim_markers,
     marker_identity,
     quarantine_marker,
-    rewrite_marker,
+    requeue_marker,
 )
 from defender.learning.core.persist import merge_pitfalls, read_pitfalls
 from defender.learning.core.quarantine import preserve_tainted_tree
@@ -39,11 +40,30 @@ class _LeadAuthorRetry(Exception):
     pass
 
 
+class _LeadAuthorSkipped(Exception):
+    """The serve did not happen: another lead-author tick holds the per-author queue lock.
+
+    Distinct from `_LeadAuthorRetry` because the disposition is different (#852 F-03). A
+    retry is a FAILED attempt — it bumps `spec["attempts"]` and dead-letters the request
+    after `LEAD_AUTHOR_MAX_RETRIES`, which is right for work that keeps breaking and wrong
+    for work nothing has tried yet: one manual `lead_author.py` run held across three ticks
+    would quarantine three healthy batches. A skip costs the request nothing at all."""
+
+
 def _invoke_lead_author(paths: LoopPaths, run_dir: Path, *, box: Any = None) -> None:
     from defender.learning.leads.lead_extraction import LeadAuthorError
+    from defender.learning.leads.lead_author import QUEUE_LOCK_SKIP_RC
 
     _log("step=lead-author")
     rc = _run_curator_module("lead_author", lambda mod: mod.run(run_dir, paths=paths, box=box))
+    # BEFORE the rc-is-a-fault test below, and before the success path: a lock skip used to
+    # arrive as rc=0 and was indistinguishable from a completed serve, so the drain unlinked
+    # every marker it had claimed in the pass — the whole batch deleted, no work done, no
+    # dead letter, no retry (#852 F-03).
+    if rc == QUEUE_LOCK_SKIP_RC:
+        raise _LeadAuthorSkipped(
+            f"lead-author for {run_dir.name} skipped: another tick holds the queue lock"
+        )
     if rc not in (0, None):
         raise LeadAuthorError(f"lead-author for {run_dir.name} returned rc={rc}")
     if rc is None:
@@ -157,6 +177,29 @@ def _quarantine_lead_author_failure(
     quarantine_marker(spec, marker, queue_dir, f"lead-author-error: {e!r}")
 
 
+def _requeue_or_drop(claim: ClaimedMarker, *, note: str) -> None:
+    """Hand one claimed request back to the queue, then release the claim.
+
+    The re-queue lands at the TOP level — never at `claim.path`, the slot a reclaimed orphan
+    was read from and this pass is about to unlink — and it is CREATE-IF-ABSENT. A fresher
+    request for the same case that arrived while this one was claimed already occupies that
+    slot, and the queue's contract is that the later run wins (#791), so the older spec is
+    dropped rather than atomically written over it (#852 F-04).
+
+    The spec comes off the CLAIM rather than as its own argument: what goes back on the
+    queue and what is unlinked from `inflight/` are two halves of one hand-back, and a
+    caller able to pass a spec belonging to some other claim could split them."""
+    if requeue_marker(claim.queued_path, claim.spec):
+        _log(f"lead_author_drain: {note} — left queued for retry")
+    else:
+        _log(
+            f"lead_author_drain: {note} — a fresher request for the same case landed "
+            "while it was claimed and supersedes it; dropping this one"
+        )
+    with contextlib.suppress(OSError):
+        claim.path.unlink()
+
+
 def _drain_lead_author_markers(
     paths: LoopPaths,
     run_lead_author: Callable[..., None],
@@ -172,17 +215,26 @@ def _drain_lead_author_markers(
     )
     for claim in claims:
         claimed, spec, run_dir = claim.path, claim.spec, claim.run_dir
-        # Where a transient retry is re-queued, always the TOP level — never the claim slot a
-        # reclaimed orphan was read from, which this pass is about to unlink.
-        queued_path = claim.queued_path
+        # Where a request that is NOT served goes back — the top level, create-if-absent, and
+        # never the claim slot this pass is about to unlink — is `_requeue_or_drop`'s, in one
+        # place for both the skip and the retry.
         try:
             drained = run_or_dead_letter(
                 functools.partial(run_lead_author, paths, run_dir, box=box),
                 functools.partial(
                     _quarantine_lead_author_failure, spec, claimed, paths.author_queue_dir
                 ),
-                propagate=(_LeadAuthorRetry,),
+                propagate=(_LeadAuthorRetry, _LeadAuthorSkipped),
             )
+        except _LeadAuthorSkipped as e:
+            # NOTHING was tried for this request, so it costs nothing: the spec goes back
+            # untouched — no `attempts` bump, no dead letter — and the pass stops. Every
+            # marker still queued would meet the same held lock, and claiming them only to
+            # hand them straight back is churn against a queue another process is reading.
+            _requeue_or_drop(
+                claim, note=f"{marker_identity(spec, claimed)} not served: {e}",
+            )
+            break
         except _LeadAuthorRetry as e:
             attempts = int(spec.get("attempts", 0)) + 1
             if attempts >= max_retries:
@@ -192,12 +244,10 @@ def _drain_lead_author_markers(
                 )
             else:
                 spec["attempts"] = attempts
-                rewrite_marker(queued_path, spec)
-                with contextlib.suppress(OSError):
-                    claimed.unlink()
-                _log(
-                    f"lead_author_drain: transient on {marker_identity(spec, claimed)} "
-                    f"(attempt {attempts}/{max_retries}) — left queued for retry"
+                _requeue_or_drop(
+                    claim,
+                    note=f"transient on {marker_identity(spec, claimed)} "
+                         f"(attempt {attempts}/{max_retries})",
                 )
             continue
         finally:

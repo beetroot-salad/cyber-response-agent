@@ -48,6 +48,37 @@ def rewrite_marker(marker: Path, spec: dict) -> None:
     write_atomic(marker, json.dumps(spec) + "\n")
 
 
+def requeue_marker(marker: Path, spec: dict) -> bool:
+    """Put a claimed request BACK on the queue, and report whether the slot was still free.
+
+    The claim frees the top-level path on purpose, so a re-ask for the same case that lands
+    mid-serve has somewhere to go (#791 P2). A re-queue written with `rewrite_marker`'s
+    atomic REPLACE therefore destroys exactly that request and puts the older run's spec in
+    its place, and the case is re-served off the stale run dir — the newer investigation's
+    leads, drafts and pitfalls never curated (#852 F-04).
+
+    Create-if-absent instead: `False` means a fresher request for this case is already in the
+    slot, and under the queue's documented "the later run always wins" contract that request
+    SUPERSEDES this one — the caller drops its own re-queue rather than winning the race.
+
+    Written through a hard link from a staged temp file rather than `O_CREAT|O_EXCL` on the
+    target itself, so the slot goes from absent to fully-written in one step: a reader never
+    sees a marker mid-write, which is the property `write_atomic` gives every other writer of
+    these queues. An enqueue landing after the link still wins by rename, as it must."""
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    staged = marker.with_name(f".{marker.name}.requeue.{os.getpid()}")
+    try:
+        write_atomic(staged, json.dumps(spec) + "\n")
+        try:
+            os.link(staged, marker)
+        except FileExistsError:
+            return False
+        return True
+    finally:
+        with contextlib.suppress(OSError):
+            staged.unlink()
+
+
 def marker_identity(spec: dict, marker: Path) -> str:
     """The id an operator greps for when a queued request is dropped or deferred.
 
@@ -127,7 +158,26 @@ def claim_markers(
         if spec is None:
             quarantine_marker({identity_key: claimed.stem}, claimed, queue_dir, reason)
             continue
-        run_dir = Path(spec.get("run_dir", ""))
+        raw_run_dir = spec.get("run_dir")
+        if not isinstance(raw_run_dir, str) or not Path(raw_run_dir).is_absolute():
+            # #852 F-18. The unguarded `Path(spec.get("run_dir", ""))` had two failure
+            # shapes, and one check closes both. A non-string value (`null`, a number, a
+            # list) raised TypeError OUT of this generator — past every dead-letter path
+            # below, wedging the drain on a file only a human could remove. And the `""`
+            # default resolved to `Path(".")`, so a row with NO `run_dir` — exactly the
+            # shape `quarantine_marker`'s own dead letter writes — was SERVED, against the
+            # process CWD, and quarantined later under whatever the serve then failed on.
+            # ABSOLUTE, not merely non-empty: `""` is only the loudest of the paths that
+            # resolve against the CWD, and the drain's CWD is a worktree it is about to
+            # `reset --hard`. Both writers of these queues store `str(run_dir.resolve())`,
+            # so a relative value is by construction a row nothing this loop wrote.
+            # The type belongs here rather than in `_read_spec`, whose contract is the
+            # row's top-level shape, not the meaning of any one field.
+            quarantine_marker(
+                spec, claimed, queue_dir, "unreadable: run_dir is not an absolute path"
+            )
+            continue
+        run_dir = Path(raw_run_dir)
         if not run_dir.is_dir():
             quarantine_marker(spec, claimed, queue_dir, "artifact-missing")
             continue

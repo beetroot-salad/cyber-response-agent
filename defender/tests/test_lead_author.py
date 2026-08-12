@@ -297,13 +297,21 @@ def test_run_missing_run_dir(tmp_path: Path):
     assert lead_author.run(tmp_path / "nope") == 2
 
 
-def test_run_held_queue_lock_returns_zero(run_dir: Path):
+def test_run_held_queue_lock_reports_a_skip_not_a_serve(run_dir: Path):
+    """A held queue lock spawns nothing AND says so distinguishably (#852 F-03).
+
+    It used to return 0 — the value a completed curation returns — and the lead-author drain
+    reads that rc as "served, unlink the marker". The whole claimed batch was deleted with no
+    work done and no dead letter. The agent still must not be spawned; what changed is that
+    the caller can now tell the two apart."""
     deps = _deps(
         run_dir.parent,
         acquire_queue_lock=lambda: None,
         invoke_agent=_claude_should_not_be_called,
     )
-    assert lead_author.run(run_dir, deps=deps) == 0
+    rc = lead_author.run(run_dir, deps=deps)
+    assert rc == lead_author.QUEUE_LOCK_SKIP_RC
+    assert rc != 0
 
 
 def test_run_done_sentinel_short_circuits(run_dir: Path):

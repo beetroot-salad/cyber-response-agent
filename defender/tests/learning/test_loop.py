@@ -823,17 +823,33 @@ def test_lead_author_drain_marks_artifact_missing(tmp_path: Path):
 
 
 @pytest.mark.parametrize(
-    "body", ["{not valid json", "null", '["case-broken"]'], ids=["torn", "null", "list"],
+    "body",
+    [
+        "{not valid json",
+        "null",
+        '["case-broken"]',
+        '{"run_id": "case-broken", "run_dir": null}',
+        '{"run_id": "case-broken", "run_dir": 7}',
+        '{"run_id": "case-broken"}',
+    ],
+    ids=["torn", "null", "list", "run_dir-null", "run_dir-number", "run_dir-absent"],
 )
 def test_lead_author_drain_dead_letters_an_unservable_marker(tmp_path: Path, body: str):
     """A marker this pass cannot READ is dead-lettered, never left in the queue.
 
-    Both shapes are unservable: bytes that do not parse, and bytes that parse to something
+    Four shapes are unservable. Bytes that do not parse, and bytes that parse to something
     that is not a mapping (`null`, a list) — the second still answers `spec.get("run_dir")`
-    with an AttributeError that unwinds the whole drain. Either way, leaving the marker where
-    it was means the reclaim hands it straight back next tick, it fails again, and
-    `_has_lead_author_work` stays true on its presence forever, so the drain wakes every tick
-    to re-fail on the same file. The healthy sibling in the same pass must still be served."""
+    with an AttributeError that unwinds the whole drain. Then the two #852 F-18 halves, a
+    mapping whose `run_dir` is not a path: a non-string value raised a TypeError out of the
+    claim generator — past every dead-letter path below it, so the drain stayed wedged on the
+    file until a human removed it — and an ABSENT `run_dir` (the shape this module's own
+    `unreadable` dead letter writes) coerced to `Path("")`, i.e. the process CWD, and was
+    SERVED against whatever directory the drain happened to be started from.
+
+    Either way, leaving the marker where it was means the reclaim hands it straight back next
+    tick, it fails again, and `_has_lead_author_work` stays true on its presence forever, so
+    the drain wakes every tick to re-fail on the same file. The healthy sibling in the same
+    pass must still be served."""
     paths, _ = _isolate(tmp_path)
     run_dir = tmp_path / "tmprun" / "case-real"
     run_dir.mkdir(parents=True)
@@ -1085,7 +1101,16 @@ def test_learn_drain_marks_artifact_missing(tmp_path: Path):
 
 
 @pytest.mark.parametrize(
-    "body", ["{not valid json", "null", '["case-broken"]'], ids=["torn", "null", "list"],
+    "body",
+    [
+        "{not valid json",
+        "null",
+        '["case-broken"]',
+        '{"run_id": "case-broken", "run_dir": null}',
+        '{"run_id": "case-broken", "run_dir": 7}',
+        '{"run_id": "case-broken"}',
+    ],
+    ids=["torn", "null", "list", "run_dir-null", "run_dir-number", "run_dir-absent"],
 )
 def test_learn_drain_dead_letters_an_unservable_marker(tmp_path: Path, body: str):
     """The learn queue dead-letters an unreadable marker, exactly as its sibling does.

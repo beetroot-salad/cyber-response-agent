@@ -30,6 +30,7 @@ from defender.learning.core.config import (
     author_timeout as _author_timeout,
     make_logger,
     now_iso,
+    provenance_field,
 )
 
 
@@ -112,10 +113,13 @@ def disposition_for(cfg: AuthorConfig, run_id: str) -> str | None:
 
 def existing_finding_ids(cfg: AuthorConfig) -> set[str]:
     ids: set[str] = set()
+    # The same spelling the drain's attribution gate reads (#852 F-02): a file attributable
+    # there but invisible here is authored again on every following tick.
+    field = provenance_field(cfg.channel.id_key)
     for lesson in iter_lessons(
         cfg.corpus_dir, warn_label=lambda p: f"finding-id pre-flight: {p.name}"
     ):
-        sids = lesson.fm.get("source_finding_ids") or []
+        sids = lesson.fm.get(field) or []
         if isinstance(sids, list):
             ids.update(sid for sid in sids if isinstance(sid, str))
     return ids
@@ -222,9 +226,14 @@ def _write_held_report_after_rotate(outcome, cfg: AuthorConfig) -> None:
 
     It is the only seam that observes the tick's closing edge, which is what makes it
     shared config rather than lessons-local decoration — even though only this direction
-    populates it."""
-    if outcome.commit_sha is not None:
-        return
+    populates it.
+
+    UNCONDITIONAL AS OF #852 (F-02). It used to return early on a batch that committed,
+    which silenced the report on exactly the batch shape a forward-check hold is most
+    interesting in: a MIXED batch, where the held lesson's file sits in a corpus that is
+    being committed for its batch-mates. The rows a tick held or skipped are the same rows
+    whether or not other rows committed, and the operator's one written trace of a
+    `forward_bad` verdict should not depend on how the tick's other rows went."""
     write_held_report(
         cfg,
         batch_id=outcome.batch_id,

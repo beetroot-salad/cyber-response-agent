@@ -14,7 +14,12 @@ from defender.learning.author._config import BucketSpec, CorpusAuthorConfig
 from defender.learning.author.verify_forward.checks import ForwardCheck
 from defender._corpus import iter_lesson_paths, iter_lessons
 from defender._run_paths import resolve_run_bundle
-from defender.learning.core.config import StageContext, StageWiring, make_logger
+from defender.learning.core.config import (
+    StageContext,
+    StageWiring,
+    make_logger,
+    provenance_field,
+)
 
 
 
@@ -57,10 +62,14 @@ def existing_observation_ids(corpus_dir: Path) -> set[str]:
     if cached is not None:
         return set(cached)
     ids: set[str] = set()
+    # The same spelling the drain's attribution gate reads (#852 F-02). Spelled from the
+    # observation channels' `id_key` rather than as a literal, so the two cannot drift: a
+    # file attributable there but invisible here is authored again on every following tick.
+    field = provenance_field("observation_id")
     for lesson in iter_lessons(
         corpus_dir, warn_label=lambda p: f"observation-id pre-flight: {p.name}"
     ):
-        sids = lesson.fm.get("source_observation_ids") or []
+        sids = lesson.fm.get(field) or []
         if isinstance(sids, list):
             ids.update(sid for sid in sids if isinstance(sid, str))
     _EXISTING_IDS_CACHE.clear()
