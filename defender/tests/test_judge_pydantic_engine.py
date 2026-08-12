@@ -33,6 +33,7 @@ from defender.runtime.permission.command_shape import SQL_SHIM  # noqa: E402
 from defender.tests._engine_helpers import learning_run_dir  # noqa: E402
 from defender.tests._engine_helpers import fake_model as _fake_model  # noqa: E402
 from defender.tests._engine_helpers import replay_turns as _replay  # noqa: E402
+from defender._run_paths import WIRE_LOG_DIR  # noqa: E402
 
 _PY = "/venv/bin/python3"
 _CLI = Path("/repo/defender/scripts/adapters/ticket_adapter.py")
@@ -85,8 +86,8 @@ def test_run_judge_pydantic_returns_yaml_and_writes_trace(tmp_path):
             make_model=_fake_model(fn),
         )
     assert out == _YAML
-    assert (lrd / "judge_trace.jsonl").is_file()
-    assert (lrd / "judge_trace.jsonl").read_text().strip()
+    assert (lrd / WIRE_LOG_DIR / "judge_trace.jsonl").is_file()
+    assert (lrd / WIRE_LOG_DIR / "judge_trace.jsonl").read_text().strip()
 
 
 def test_run_judge_pydantic_reads_gather_raw_through_read_roots(tmp_path):

@@ -31,8 +31,10 @@ from defender.tests.e2e._replay_harness import (
     normalize,
 )
 from defender._io import read_jsonl_rows
+from defender._run_paths import RunPaths
 from defender.runtime import permission, tools as runtime_tools
 from defender.runtime.agent_definition import compile_policy_for
+from defender.runtime.challenge_gate import review_trace_path
 from defender.runtime.close_tool import CAUSE_EVIDENCE_CANNOT_DISCRIMINATE
 from defender.runtime.driver import GATHER_DEF, MAIN_DEF
 from defender.runtime.lead_zero import RESERVED_LEAD_IDS
@@ -78,7 +80,7 @@ def test_replay_golden_v2sshd(tmp_path):
     assert m.group(1) == "inconclusive"
 
     assert (run_dir / "tool_trace.jsonl").is_file()
-    assert (run_dir / "llm_requests.jsonl").is_file()
+    assert RunPaths(run_dir).wire_log.is_file()
 
 
 def test_replay_full_run_ab3(tmp_path, monkeypatch):
@@ -143,7 +145,7 @@ def test_replay_full_run_ab3(tmp_path, monkeypatch):
     # The reviewer really ran, rather than the close committing past a gate that never
     # dispatched: four stages, four traces, each carrying its round.
     for role in ("support", "ablation", "composer"):
-        rows = read_jsonl_rows(run_dir / f"review_{role}_trace.jsonl")
+        rows = read_jsonl_rows(review_trace_path(run_dir, role))
         assert rows, f"the {role} stage left no trace row"
         assert rows[0].get("ok") is True, f"the {role} stage did not answer"
     # WHICH bundle answered, asked POSITIVELY. A live stage no longer leaves a file of its
@@ -154,15 +156,20 @@ def test_replay_full_run_ab3(tmp_path, monkeypatch):
     # not the live path was taken. What only the injected bundle can produce is its own canned
     # reading, on disk, in the lens traces — a live stage there would carry a provider error.
     for lens in ("support", "ablation"):
-        trace = (run_dir / f"review_{lens}_trace.jsonl").read_text(encoding="utf-8")
+        trace = review_trace_path(run_dir, lens).read_text(encoding="utf-8")
         assert _review_bundle.LENS_READING in trace, (
             f"the {lens} reading is not the harness's — the run reached the provider-backed "
             "bundle, not the injected one"
         )
     # Kept as a belt on the hermetic override itself: if a review call ever DID reach a
     # provider, this is where the evidence would land.
+    wire_log = RunPaths(run_dir).wire_log
+    assert wire_log.is_file(), (
+        "the wire log is not where this belt is looking — a missing file reads as zero live "
+        "records, so the assertion below would pass without measuring anything"
+    )
     live = [
-        r for r in read_jsonl_rows(run_dir / "llm_requests.jsonl")
+        r for r in read_jsonl_rows(wire_log)
         if str(r.get("agent_id", "")).startswith(REVIEW_AGENT_ID_PREFIX)
     ]
     assert not live, (

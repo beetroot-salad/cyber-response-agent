@@ -32,6 +32,7 @@ from pydantic_ai.messages import (  # noqa: E402
 )
 
 from defender.runtime import observe
+from defender._run_paths import RunPaths
 from defender.tests._session_store_705 import (
     jsonl,
     sql,
@@ -202,7 +203,7 @@ def test_wire_sha_joins_a_store_row_to_its_wire_log_line(tmp_path):
                       "WHERE kind = 'request' AND wire_sha IS NOT NULL ORDER BY run_step")
     assert rows, "no request row carries a renderer digest"
 
-    lines = [r for r in jsonl(run_dir / "llm_requests.jsonl") if r.get("kind") == "response"]
+    lines = [r for r in jsonl(RunPaths(run_dir).wire_log) if r.get("kind") == "response"]
     by_key = {(r.get("session_id"), r.get("run_step")): r for r in lines}
     assert len(by_key) == len(lines), "the join key must be unique per wire line"
 

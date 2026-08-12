@@ -934,7 +934,10 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     limits = limits if limits is not None else DEFAULT_LIMITS  # lint-default: ok — DI seam owning its default (the cap table, threaded inward)
     budget_started_monotonic = time.monotonic()
     open_budget(run_dir, run_id)
-    logger = observe.RequestLogger(run_dir / "llm_requests.jsonl")
+    # `<run_dir>/wire_logs/llm_requests.jsonl`, one level down and NOT at the run root: the
+    # subdirectory is what keeps this log out of every reader agent's `under(run, SEG)` read
+    # shape, MAIN's and GATHER's alike. See `observe.wire_log_path`, which owns the location.
+    logger = observe.RequestLogger(observe.wire_log_path(run_dir))
 
     # THE one place a live review bundle can honestly be built, and it sits HERE — below the
     # logger, not above it. The entry point is the only frame holding all three things a live

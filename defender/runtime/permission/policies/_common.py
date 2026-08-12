@@ -24,6 +24,13 @@ def read_shapes(
     run, dfn = run_dir.resolve(), defender_dir.resolve()
     corpus = "|".join(_CORPUS_SUBDIRS)
     shapes = [
+        # `SEG` is ONE segment, so this admits every file at the run ROOT and nothing below
+        # it — which makes "where a run-dir stream is written" a gate decision, not a layout
+        # preference. A stream that replays another agent's context (the wire log: gather's
+        # tool returns and MAIN's transcript both go through one `RequestLogger`) must NOT
+        # sit at the root, or this shape hands it to MAIN and to GATHER alike. That one lives
+        # under `<run>/wire_logs/` for exactly this reason — see `_run_paths.WIRE_LOG_DIR`, and
+        # `tests/test_wire_log_read_gate.py`, which pins both agents denied.
         under(run, SEG),
         under(run, rf"gather_summaries/{SEG}"),
     ]

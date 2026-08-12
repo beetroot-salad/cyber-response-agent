@@ -88,7 +88,17 @@ def run_stage(
     this spawn is about — the two objects that replaced the ten parameters every engine
     used to re-declare and forward unchanged (#713)."""
     label = wiring.label
-    logger = observe.RequestLogger(ctx.learning_run_dir / wiring.trace_name)
+    # `<root>/wire_logs/<trace>`, never the root itself: this stream is the stage's whole
+    # context verbatim, and the roots here are SHARED — both legs of an `inconclusive`
+    # case run concurrently against one learning run dir, and a re-LEARN reopens it with
+    # the previous pass's traces still in place. The gray-box actor reads that root with
+    # no shape filter at all, so the judge's trace (which carries the UNREDACTED payload
+    # exemplars — `judge/compare.unredacted_exemplar`) handed it back exactly what
+    # `decide_read`'s gather_raw deny exists to keep from it. `files.names_wire_log_dir` is what
+    # refuses the read; this is what puts the file where that test can find it.
+    logger = observe.RequestLogger(
+        observe.stage_trace_path(ctx.learning_run_dir, wiring.trace_name)
+    )
     _log(f"step={label} engine=pydantic_ai model={wiring.model} effort={wiring.effort}")
     try:
         try:

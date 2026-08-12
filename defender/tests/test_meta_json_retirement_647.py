@@ -431,20 +431,26 @@ def test_update_json_locked_survives_the_sibling_removal(tmp_path):
     )
 
 
-def test_run_paths_accessor_set_is_five_after_the_meta_accessor_is_removed(tmp_path):
-    """`RunPaths` exposes five artifact accessors once the one pointing at the removed file is
-    gone — the alert, the report, the investigation log, the queries table and the raw-payload
-    dir. No accessor may survive naming a file no consumer reads, and the class docstring's own
-    count must agree with the accessors it enumerates."""
+def test_run_paths_accessor_set_is_exactly_its_artifacts_after_the_meta_accessor_is_removed(
+    tmp_path,
+):
+    """`RunPaths` names exactly the run artifacts a consumer reads, and no longer the removed
+    file — the alert, the report, the investigation log, the queries table, the raw-payload dir
+    and the wire log. No accessor may survive naming a file no consumer reads, and the class
+    docstring's own count must agree with the accessors it enumerates.
+
+    The count is asserted rather than typed twice: `wire_log` was added when the wire log moved
+    under `<run>/wire_logs/` (out of every reader agent's single-segment read shape), and the
+    docstring is where a reader learns the set, so the two must not be able to drift apart."""
     accessors = {n for n, v in vars(RunPaths).items() if isinstance(v, property)}
-    assert accessors == {"alert", "report", "investigation", "executed_queries", "gather_raw"}, (
-        f"the artifact accessor set drifted: {sorted(accessors)}"
-    )
+    assert accessors == {
+        "alert", "report", "investigation", "executed_queries", "gather_raw", "wire_log",
+    }, f"the artifact accessor set drifted: {sorted(accessors)}"
     assert not hasattr(RunPaths(tmp_path), "meta"), "RunPaths still resolves a meta.json path"
 
     doc = " ".join((RunPaths.__doc__ or "").split())
-    assert "five artifact accessors" in doc, (
-        "the class docstring still counts the accessors it no longer has"
+    assert "six artifact accessors" in doc, (
+        "the class docstring's count disagrees with the accessors it has"
     )
     assert "meta" not in doc, "the docstring still enumerates the removed accessor"
 

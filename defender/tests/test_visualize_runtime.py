@@ -21,6 +21,7 @@ import json
 from pathlib import Path
 
 from defender._io import read_jsonl_rows
+from defender._run_paths import RunPaths
 from defender.scripts.visualize import visualize_data as d
 from defender.scripts.visualize.visualize_run import render_runtime_page
 
@@ -44,7 +45,7 @@ _FULL_INVESTIGATION = (
 def _seed_session_store(run: Path, messages: list[dict]) -> None:
     """`render_runtime_page`/`render_judge_page` now open the run's own session store
     (R4/#705) — this fixture predates the store, so give it a real one seeded from the
-    same `messages` it already writes to `llm_requests.jsonl`, rather than fabricating a
+    same `messages` it already writes to the wire log, rather than fabricating a
     run dir the new render path cannot resolve."""
     from pydantic_ai.messages import ModelMessagesTypeAdapter
 
@@ -129,7 +130,9 @@ def _build_run(tmp: Path) -> Path:
                   "total_cost_usd": 0.5, "num_turns": 4, "usage": _USAGE})
 
     (run / "tool_trace.jsonl").write_text("".join(json.dumps(e) + "\n" for e in trace))
-    (run / "llm_requests.jsonl").write_text("".join(json.dumps(m) + "\n" for m in messages))
+    wire = RunPaths(run).wire_log
+    wire.parent.mkdir(parents=True, exist_ok=True)
+    wire.write_text("".join(json.dumps(m) + "\n" for m in messages))
     _seed_session_store(run, messages)
 
     queries = [
@@ -304,7 +307,7 @@ def _append_review_calls(run: Path, n_per_lens: int = 1) -> float:
                 "kind": "response", "model": "kimi-k3", "usage": _USAGE, "duration_ms": 900.0,
                 "message": {"kind": "response", "parts": [{"part_kind": "text", "content": "read"}]},
             })
-    with (run / "llm_requests.jsonl").open("a", encoding="utf-8") as fh:
+    with RunPaths(run).wire_log.open("a", encoding="utf-8") as fh:
         for row in rows:
             fh.write(json.dumps(row) + "\n")
     return len(rows) * usage_cost("kimi-k3", _USAGE)
@@ -340,3 +343,26 @@ def test_the_review_gate_s_spend_is_inside_the_headline_and_named_there(tmp_path
         "the by-model breakdown and the models byline must show the model the review "
         "actually billed, not fold its spend into the investigator's row"
     )
+
+
+def test_load_messages_still_finds_a_pre_observe_run_s_wire_log(tmp_path):
+    """A run dir written before the wire log moved under `wire_logs/` still renders.
+
+    The move is a read-GATE fact — `<run>/wire_logs/` is outside every reader agent's
+    single-segment run-dir read shape — and the visualizer is host code that sits outside the
+    gate entirely, so nothing is reopened by reading the old location when the new one is
+    absent. Without the fallback the page silently shows its "older run" empty state for runs
+    that DO have a transcript, which reads as a broken run rather than a moved file.
+
+    The precedence is the other half: when both exist, the current location wins."""
+    legacy = tmp_path / "legacy"
+    legacy.mkdir()
+    (legacy / d.LEGACY_WIRE_LOG).write_text(json.dumps({"id": "old#0", "kind": "response"}) + "\n")
+    assert [r["id"] for r in d.load_messages(legacy)] == ["old#0"]
+
+    both = tmp_path / "both"
+    wire = RunPaths(both).wire_log
+    wire.parent.mkdir(parents=True)
+    (both / d.LEGACY_WIRE_LOG).write_text(json.dumps({"id": "old#0", "kind": "response"}) + "\n")
+    wire.write_text(json.dumps({"id": "new#0", "kind": "response"}) + "\n")
+    assert [r["id"] for r in d.load_messages(both)] == ["new#0"]

@@ -83,7 +83,27 @@ hooks). The gates:
   in `driver.py`: an `after_tool_execute` budget accountant (warning-only
   per-run tool-call / spawn / wall-clock caps, `hooks/budget_enforcer.py`'s
   logic) and a `model_request` wrap that logs every API request to
-  `llm_requests.jsonl` (`runtime/observe.py`, which projects `tool_trace.jsonl`).
+  `wire_logs/llm_requests.jsonl` (`runtime/observe.py`, which projects
+  `tool_trace.jsonl`). The wire log sits one level below the run root **as a gate
+  decision, not a layout one**: MAIN's and GATHER's run-dir read shape is
+  `under(run, SEG)` and `SEG` is a single path segment, so a run-root file is
+  readable and a file in a subdirectory is not — on the read tool and the `cat`
+  lane alike, which share the shape object. Those two roles only: the judge's
+  `cat` scope is `under(run, TREE)` (multi-segment) and the actor holds no `cat`
+  grant, so its `read_allow` is empty and no shape filter applies to it at all —
+  so `wire_logs/` ALSO carries an outright deny (`permission.files.names_wire_log_dir`,
+  on both read surfaces, for every role), which is what covers the offline lane,
+  where every learning stage's trace is written under the same component by
+  `observe.stage_trace_path`. There the judge's trace holds the payload exemplars
+  its own prompt is given unredacted, and the gray-box actor shares that root —
+  the same crossing, reachable by a role no shape excludes. The directory makes
+  the deny addressable; the deny is what holds. That log is the one run artifact that
+  replays another agent's context verbatim (MAIN, every gather subagent and every
+  review stage write through one `RequestLogger`), so at the root it handed MAIN
+  the raw gather payload bytes `decide_read` refuses it with `RAW_DENY_REASON`,
+  untagged by `is_untrusted_read` — and handed GATHER MAIN's whole transcript by
+  the same shape. A new run-dir stream that carries wire bodies belongs beside it,
+  under `wire_logs/`, never at the root.
 - **lead claim + descriptor injection + tagging** — `runtime/tools.py`
   imports `record_lead.claim_lead` (writes the leads-table row and claims the
   `lead_id` with an atomic `O_CREAT|O_EXCL` create — a reused id raises

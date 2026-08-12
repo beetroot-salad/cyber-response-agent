@@ -35,6 +35,7 @@ from defender.tests._engine_helpers import assert_stage_tools  # noqa: E402
 from defender.tests._engine_helpers import learning_run_dir  # noqa: E402
 from defender.tests._engine_helpers import fake_model as _fake_model  # noqa: E402
 from defender.tests._engine_helpers import replay_turns as _replay  # noqa: E402
+from defender._run_paths import WIRE_LOG_DIR  # noqa: E402
 
 _DEFENDER_DIR = config.REPO_ROOT / "defender"
 
@@ -67,8 +68,8 @@ def test_run_oracle_pydantic_returns_yaml_and_writes_trace(tmp_path):
             make_model=_fake_model(fn),
         )
     assert out == _ORACLE_YAML
-    assert (lrd / "oracle_l-001.trace.jsonl").is_file()
-    assert (lrd / "oracle_l-001.trace.jsonl").read_text().strip()
+    assert (lrd / WIRE_LOG_DIR / "oracle_l-001.trace.jsonl").is_file()
+    assert (lrd / WIRE_LOG_DIR / "oracle_l-001.trace.jsonl").read_text().strip()
 
 
 

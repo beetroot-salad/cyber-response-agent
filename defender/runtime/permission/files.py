@@ -15,6 +15,7 @@ import re
 from pathlib import Path
 
 from defender import _artifact_schema
+from defender._run_paths import WIRE_LOG_DIR
 from defender.runtime import bash_policy
 
 from .decision import Decision
@@ -131,7 +132,11 @@ def read_allowed_path(
     an embedded NUL) OR a missing root context (`run_dir`/`defender_dir` `None`) returns `False`,
     never raises. The secret/ground-truth denylist IS applied (parity with `decide_read`, so a
     write can't land on a denied file the read tool refuses — the held-out `ground_truth.yaml`, a
-    captured `.env`). It applies NO path shapes: containment by shape is the caller's job (the
+    captured `.env`), and so is the `wire_logs/` component: the wire logs are HOST-side
+    observability, so no agent may AUTHOR one either. Resting that on "no writer's `write_allow`
+    happens to reach there" would leave the run's own spend record one widened write shape away
+    from forgeable, which is the property `tests/test_budget_write_scope_631.py` exists to hold.
+    It applies NO path shapes: containment by shape is the caller's job (the
     read tool checks `read_allow`; the bash lane checks the claiming grant's scope)."""
     if run_dir is None or defender_dir is None:
         return False  # no root context to gate against — fail closed
@@ -140,8 +145,8 @@ def read_allowed_path(
         roots = _resolved_read_roots(policy, run_dir, defender_dir)
     except RESOLVE_ERRORS:
         return False
-    if denylisted(rp):
-        return False  # a secret / ground-truth file is denied even inside a root
+    if denylisted(rp) or names_wire_log_dir(rp):
+        return False  # a secret / ground-truth file, or a wire log, even inside a root
     return any(_is_within(rp, root) for root in roots)
 
 
@@ -195,6 +200,16 @@ def decide_read(
     # deny-tail asserts it as a substring.
     if _names_raw(rp) and not admitted:
         return Decision(False, RAW_DENY_REASON)
+    # `wire_logs/` is denied OUTRIGHT — not "unless a shape admits it", the way `gather_raw` is
+    # one line up. That asymmetry is the difference between the two path classes: GATHER
+    # legitimately reads payloads, so raw has to stay opt-in-able, while a wire log is host
+    # observability that NO agent has business reading. Making it unconditional is also what
+    # makes it work at all here, because the two lanes that need it cannot be reached by a
+    # shape: the JUDGE's `cat` scope is `under(run, TREE)`, which fullmatches a subdirectory
+    # and would set `admitted`, and the ACTOR declares no shapes at all, so `admitted` is
+    # never True for it and no positive enumeration can ever exclude anything.
+    if names_wire_log_dir(rp):
+        return Decision(False, WIRE_LOG_DENY_REASON)
     if policy.read_allow and not admitted:
         return Decision(
             False,
@@ -225,6 +240,52 @@ RAW_DENY_REASON = (
     "Read/Grep/jq the raw payload from the main loop; that defeats the "
     "subagent isolation."
 )
+
+
+# The `wire_logs/` path component (`_run_paths.WIRE_LOG_DIR`, the layout's own name for it) and the
+# reason a read of one earns. Every WIRE log in the tree writes under this component — the
+# runtime's wire log at `<run_dir>/wire_logs/`, every learning stage's trace at
+# `<learning_run_dir>/wire_logs/` — so ONE component test covers the whole class. NOT every
+# `RequestLogger`: `observe.denial_logger` uses the same class for `<run_dir>/policy_denials.jsonl`
+# and stays at the root deliberately, because it projects a parameter DIGEST rather than the blob.
+# The class this component names is "carries a wire body verbatim", not "is a RequestLogger".
+#
+# WHY A DENY AND NOT JUST A SHAPE. A wire log holds another agent's context verbatim, which makes
+# it a boundary wherever two roles share a root. Moving it into a subdirectory is enough for MAIN
+# and GATHER, whose read shape is a single segment — but that is a property of THEIR shapes, not
+# of subdirectories, and the learning lane has neither: the JUDGE reads `under(run, TREE)` (a
+# subdirectory fullmatches) and the ACTOR declares no shape at all (root containment only, so
+# every depth is admitted). The concrete case is the gray-box actor: `_names_raw` above keeps it
+# out of `gather_raw/`, and `judge_trace.jsonl` at the learning run dir's root handed it the SAME
+# payloads back through the judge's prompt (`judge/compare.unredacted_exemplar` — real values,
+# not the oracle's scrubbed skeleton), with both legs of an `inconclusive` case running
+# CONCURRENTLY against one `LegDirs` and a re-LEARN reopening the dir with the previous pass's
+# traces still in it. The component is what holds; the subdirectory alone is not.
+# DISTINCTIVE ON PURPOSE, like `gather_raw` and `ticket_reads` beside it. This deny is
+# unconditional and applies inside EVERY read root, not just a run dir — and the judge's shapes
+# span the whole `defender/` tree — so an ordinary word here would be a trap: a system skill or
+# query-catalog dir that happened to be named for observing would go unreadable for every agent,
+# with a reason about wire logs that has nothing to do with the file.
+WIRE_LOG_MARKER = WIRE_LOG_DIR
+WIRE_LOG_DENY_REASON = (
+    "Blocked: wire_logs/ holds this run's wire logs — the verbatim request/response stream of "
+    "every agent that shares this root, including payload bytes and transcripts this agent is "
+    "deliberately not shown. It is host-side observability, readable by no agent. Work from "
+    "the artifacts your own role is given."
+)
+
+
+def names_wire_log_dir(p: Path) -> bool:
+    """Whether a resolved path is INSIDE an `wire_logs/` dir — a path COMPONENT test, for the
+    reason `_names_raw` gives below: a substring scan is decided by text the path's owner does
+    not control.
+
+    Public, and shared with the bash operand lane (`bash._in_scope`) exactly as `denylisted` is,
+    so the two read surfaces cannot disagree about a wire log that resolves within-root. That
+    sharing is not decoration here: the JUDGE holds a `cat` grant whose scope is
+    `under(run, TREE)`, so without this the bash lane would admit the very file `decide_read`
+    refuses it."""
+    return WIRE_LOG_MARKER in p.parts
 
 
 def _names_raw(p: Path) -> bool:

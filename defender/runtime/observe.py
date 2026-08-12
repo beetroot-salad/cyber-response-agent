@@ -21,7 +21,8 @@ from pydantic_ai.messages import (
 
 from defender._clock import now_iso
 from defender._env import env_int
-from defender._io import open_guarded, write_guarded
+from defender._io import guarded_mkdir, open_guarded, write_guarded
+from defender._run_paths import WIRE_LOG_DIR, WIRE_LOG, RunPaths
 from defender.runtime._wire import wire_digest
 
 from defender.scripts.pricing import usage_cost
@@ -259,6 +260,44 @@ def denial_logger(run_dir: Path) -> RequestLogger:
         logger = _denial_logger_or_null(path)
         _DENIAL_LOGGERS[key] = logger
     return logger
+
+
+def wire_log_path(run_dir: Path) -> Path:
+    """The run's wire log (`<run_dir>/wire_logs/llm_requests.jsonl`), creating the holding dir.
+
+    `denial_logger`'s sibling — the other "where does this run's stream live" resolver — and
+    the WRITER's half of a location `_run_paths` owns. The reason the wire log sits one level
+    down rather than at the run root is documented there, on `WIRE_LOG_DIR`: it is a read-gate
+    boundary, not a tidiness choice. Callers ask here instead of joining the name onto a run
+    dir, so the location cannot drift back up through an edit made somewhere that cannot see
+    that rationale. `guarded_mkdir` anchors on the run dir because that is the box's rw bind,
+    and so the first component the box could have planted a link at — which is `stage_trace_path`'s
+    anchor too, so this is that function under the run's own log name rather than a second
+    `guarded_mkdir` of the same component. The `RunPaths` assertion is what keeps the delegation
+    honest: the accessor every READER resolves through must name the file this WRITER opens."""
+    path = stage_trace_path(run_dir, WIRE_LOG)
+    assert path == RunPaths(Path(run_dir)).wire_log, (
+        "the wire log's writer and its RunPaths accessor have drifted apart"
+    )
+    return path
+
+
+def stage_trace_path(root: Path, trace_name: str) -> Path:
+    """A learning stage's trace (`<root>/wire_logs/<trace_name>`), creating the holding dir.
+
+    `wire_log_path`'s twin for the OFFLINE lane — the actor's, the oracle's, the judge's, the
+    curators' and the forward-check verifier's traces, all opened by `_pydantic_stage.run_stage`
+    off a root that is the learning run dir, the curator's pending dir or the source run dir
+    depending on the stage. Same component, and it has to be: `permission.files.names_wire_log_dir`
+    is ONE path-component test, so every wire log in the tree lands where that test finds it.
+
+    Here the component is NOT what denies — the actor declares no read shape and the judge's is
+    multi-segment, so neither is excluded by depth (see `files.WIRE_LOG_DENY_REASON`). The
+    component is what makes the deny addressable: a rule keyed on a directory covers a trace
+    name nobody has invented yet, which a rule keyed on `*.trace.jsonl` would not."""
+    root = Path(root)
+    guarded_mkdir(root / WIRE_LOG_DIR, base=root)
+    return root / WIRE_LOG_DIR / trace_name
 
 
 def _tool_args(value: Any) -> dict:

@@ -32,7 +32,9 @@ Outputs in ``<staging_dir>``:
   - actor_archetype.txt
   - actor_menu.txt
   - actor_story.md
-  - actor_trace.jsonl    (if a transcript was captured)
+  - wire_logs/actor_trace.jsonl   (if a transcript was captured — under `wire_logs/`, the
+                                 component the read gate refuses every agent, since a
+                                 stage trace is that stage's context verbatim)
 
 Exit codes:
   0  story written (any content — including SKIP)

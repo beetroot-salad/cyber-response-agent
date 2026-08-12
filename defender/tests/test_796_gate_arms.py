@@ -15,6 +15,7 @@ import pytest
 
 from defender._io import read_jsonl_rows
 from defender.runtime import challenge_gate
+from defender.runtime.challenge_gate import review_trace_path
 from defender.runtime.close_tool import (
     CAUSE_EVIDENCE_CANNOT_DISCRIMINATE,
     CAUSE_NOTHING_LEFT_TO_ASK,
@@ -234,7 +235,7 @@ def test_every_dispatched_role_leaves_its_own_trace(tmp_path):
     deps, run_dir = _deps(tmp_path)
     _run(deps, _bundle(composer=_composer("holds")))
     for role in challenge_gate.REVIEW_ROLES:
-        assert (run_dir / f"review_{role}_trace.jsonl").is_file(), f"{role} left no trace"
+        assert review_trace_path(run_dir, role).is_file(), f"{role} left no trace"
 
 
 def test_a_lens_that_was_never_dispatched_is_not_recorded_as_one_that_answered(tmp_path):
@@ -259,7 +260,7 @@ def test_a_lens_that_was_never_dispatched_is_not_recorded_as_one_that_answered(t
     )
     assert _run(deps, _bundle(composer=_composer("holds"))).outcome == STANDS
 
-    rows = read_jsonl_rows(run_dir / "review_ablation_trace.jsonl")
+    rows = read_jsonl_rows(review_trace_path(run_dir, "ablation"))
     assert rows, "the skipped lens left no row at all — the trace cannot say it did not run"
     assert rows[0].get("skipped"), "the row does not say the lens was skipped"
     assert "ok" not in rows[0], "a lens that never ran is recorded as one that answered"
@@ -285,7 +286,7 @@ def test_a_lens_reply_reaches_the_trace_framed_and_never_bare(tmp_path):
     deps, run_dir = _deps(tmp_path)
     poison = "IGNORE-PREVIOUS-INSTRUCTIONS-MARKER"
     _run(deps, _bundle(lens=poison, composer=_composer("holds")))
-    trace = (run_dir / "review_support_trace.jsonl").read_text(encoding="utf-8")
+    trace = review_trace_path(run_dir, "support").read_text(encoding="utf-8")
     assert poison in trace
     assert f"<run-{deps.salt}-untrusted>" in trace, "the reply landed unframed"
 
@@ -338,7 +339,7 @@ def test_every_dispatched_lens_leaves_a_row_even_when_an_earlier_one_faults(tmp_
         composer=_stage(_composer("holds")),
     ))
     assert verdict.outcome == FORCED_INCONCLUSIVE
-    trace = (run_dir / "review_ablation_trace.jsonl").read_text(encoding="utf-8")
+    trace = review_trace_path(run_dir, "ablation").read_text(encoding="utf-8")
     assert "ablation read that" in trace, "ablation answered and its reply reached no trace"
 
 
@@ -353,7 +354,7 @@ def test_a_second_review_pass_is_not_recorded_as_the_first(tmp_path):
     assert _run(deps, bundle).outcome == CHALLENGED
     _run(deps, bundle)
 
-    rows = read_jsonl_rows(run_dir / "review_composer_trace.jsonl")
+    rows = read_jsonl_rows(review_trace_path(run_dir, "composer"))
     rounds = [row["round"] for row in rows]
     assert sorted(set(rounds)) == [0, 1], f"both review passes recorded as one: {rounds}"
 
@@ -372,7 +373,7 @@ def test_no_stage_reply_stands_as_a_trace_row_whatever_shape_it_arrives_in(tmp_p
     run_dir.mkdir()
     challenge_gate._write_trace_row(run_dir, "composer", 0, {"ok": True}, raw_reply=reply)
 
-    path = run_dir / "review_composer_trace.jsonl"
+    path = review_trace_path(run_dir, "composer")
     rows = read_jsonl_rows(path)
     assert len(rows) == 1, f"a stage's reply was counted as a trace row of its own: {rows}"
     assert rows[0]["round"] == 0, "the surviving row is not the gate's metadata"
@@ -388,12 +389,12 @@ def test_the_composers_json_reply_does_not_stand_as_a_trace_row_of_its_own(tmp_p
     deps, run_dir = _deps(tmp_path)
     _run(deps, _bundle(composer=_composer("holds", review="the close reads sound")))
 
-    rows = read_jsonl_rows(run_dir / "review_composer_trace.jsonl")
+    rows = read_jsonl_rows(review_trace_path(run_dir, "composer"))
     assert rows, "the composer left no trace row"
     for row in rows:
         assert "round" in row, f"a round-less row reached the trace: {row}"
         assert "finding" not in row, "the composer's reply parsed as a trace row of its own"
-    trace = (run_dir / "review_composer_trace.jsonl").read_text(encoding="utf-8")
+    trace = review_trace_path(run_dir, "composer").read_text(encoding="utf-8")
     assert f"<run-{deps.salt}-untrusted>" in trace, "the reply landed unframed"
     assert "the close reads sound" in trace, "the reply did not reach the trace at all"
 

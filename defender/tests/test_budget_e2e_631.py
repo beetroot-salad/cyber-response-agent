@@ -37,6 +37,7 @@ from pathlib import Path
 import pytest
 
 from defender._io import read_jsonl_rows
+from defender._run_paths import RunPaths
 from defender.hooks.budget_enforcer import (
     BUDGET_REFUSAL_MESSAGE,
     DEFAULT_LIMITS,
@@ -151,7 +152,7 @@ def test_budget_trip_returns_summary_and_writes_trace(tmp_path, enforced):
     assert budget(run_dir)["tool_calls"] == 1, "the refused call spent the pool"
     assert summary["requests"] >= 2
     assert (run_dir / "tool_trace.jsonl").is_file()
-    assert (run_dir / "llm_requests.jsonl").is_file()
+    assert RunPaths(run_dir).wire_log.is_file()
     assert (run_dir / "budget.json").is_file()
 
 
@@ -274,7 +275,7 @@ def test_only_one_shutdown_path_writes_the_run_dir_artifacts(tmp_path, enforced)
     events = list(read_jsonl_rows(run_dir / "tool_trace.jsonl"))
     assert sum(1 for e in events if e.get("type") == "result") == 1
 
-    rows = list(read_jsonl_rows(run_dir / "llm_requests.jsonl"))
+    rows = list(read_jsonl_rows(RunPaths(run_dir).wire_log))
     ids = [r.get("id") for r in rows if r.get("id")]
     assert ids, "no request ids were logged — the uniqueness check would pass vacuously"
     assert len(ids) == len(set(ids)), "the request log was written by two paths"
@@ -532,7 +533,7 @@ def test_a_refused_call_writes_an_explicit_refusal_record(tmp_path, enforced):
           ]),
           limits=caps(max_tool_calls=1))
 
-    rows = list(read_jsonl_rows(run_dir / "llm_requests.jsonl"))
+    rows = list(read_jsonl_rows(RunPaths(run_dir).wire_log))
     refusals = [r for r in rows if r.get("kind") == "budget_refusal"]
     assert refusals, "a refused call left no explicit record in the run's durable log"
     assert refusals[0].get("tool_name") == "bash"
@@ -902,7 +903,7 @@ def test_stopped_query_writes_no_row(tmp_path, enforced):
     assert len(rows) == 1, (
         f"the stopped query wrote a phantom row — {len(rows)} rows for 1 executed query"
     )
-    refusals = [r for r in read_jsonl_rows(run_dir / "llm_requests.jsonl")
+    refusals = [r for r in read_jsonl_rows(RunPaths(run_dir).wire_log)
                 if r.get("kind") == "budget_refusal" and r.get("tool_name") == "query"]
     assert refusals, "the stopped query reached the seam but left no record at all"
 

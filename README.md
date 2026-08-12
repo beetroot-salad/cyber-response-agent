@@ -123,7 +123,7 @@ Notes:
 - pass `--no-learn` to skip enqueuing the learning step while iterating on the runtime loop only
 - the learning loop runs off-process — a worker drains the queue with `python3 defender/learning/loop.py --learn-drain`; run one dir directly with `python3 defender/learning/loop.py <run_dir>`
 
-Each run dir contains at least `alert.json`, `investigation.md`, `report.md`, `executed_queries.jsonl`, `llm_requests.jsonl`, `tool_trace.jsonl`, `transcript.html`, and a `gather_raw/` directory of lead sidecars + per-query payloads.
+Each run dir contains at least `alert.json`, `investigation.md`, `report.md`, `executed_queries.jsonl`, `tool_trace.jsonl`, `transcript.html`, an `wire_logs/` directory holding the run's wire log (`llm_requests.jsonl`), and a `gather_raw/` directory of lead sidecars + per-query payloads.
 
 ## Learning-Loop Frontend
 

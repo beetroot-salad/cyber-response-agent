@@ -6,6 +6,7 @@ from pathlib import Path
 
 from defender._io import read_jsonl_rows
 from defender._report import ReportRead
+from defender._run_paths import WIRE_LOG, RunPaths
 # `agent_role` and NOT `review_roles`, though the latter re-exports the same constant:
 # `review_roles` pulls `runtime.tools` and with it the whole in-process runtime (pydantic-ai
 # included), and `learning/frontend/build.py` imports this package at module scope for the
@@ -17,11 +18,25 @@ from defender.scripts.visualize.visualize_data import phase_verb
 from defender.scripts.visualize.visualize_primitives import parse_report
 
 
-LLM_REQUESTS = "llm_requests.jsonl"
+#: The wire log's PRE-`wire_logs/` run-root location, and named for that rather than for the file:
+#: its one live use is `load_messages`' fallback below, and `visualize_data` re-exports it. Under
+#: the old spelling (`LLM_REQUESTS`) this constant read as "the wire log", so the one thing it
+#: invites — `run_dir / LLM_REQUESTS` — silently resolved to a path no current run writes, which
+#: is exactly the drift the move exists to prevent. A consumer that wants the wire log asks
+#: `RunPaths.wire_log`; a consumer that wants the legacy location asks for it by that name.
+LEGACY_WIRE_LOG = WIRE_LOG
 
 
 def load_messages(run_dir: Path) -> list[dict]:
-    return read_jsonl_rows(run_dir / LLM_REQUESTS)
+    """The run's wire-log records, or `[]` when the run has none.
+
+    Falls back to the pre-`wire_logs/` run-root path so a run dir written before the wire log
+    moved still renders a transcript. A READER fallback only: the move is a read-GATE fact
+    (`_run_paths.WIRE_LOG_DIR`) and this code is the host's, outside the gate entirely — the
+    empty state the runtime page prints already says "older run", and this is what keeps that
+    true rather than silently blank."""
+    current = RunPaths(run_dir).wire_log
+    return read_jsonl_rows(current if current.is_file() else run_dir / LEGACY_WIRE_LOG)
 
 
 def _pretty_model(name: str) -> str:

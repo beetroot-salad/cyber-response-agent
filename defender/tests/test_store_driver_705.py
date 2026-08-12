@@ -41,6 +41,7 @@ from pydantic_ai.messages import (  # noqa: E402
 )
 
 from defender.hooks.budget_enforcer import DEFAULT_LIMITS  # noqa: E402
+from defender._run_paths import RunPaths  # noqa: E402
 from defender.runtime import circuit_breaker, driver  # noqa: E402
 from defender.tests._session_store_705 import (
     FaultStore,
@@ -488,7 +489,7 @@ def test_a_swallowed_store_error_never_sends_an_unrecorded_list(tmp_path):
     assert "compaction skipped" not in source, (
         "the catch-all that returns the input unchanged is what M5 deletes")
 
-    log = run_dir / "llm_requests.jsonl"
+    log = RunPaths(run_dir).wire_log
     requests_logged = sum(1 for line in log.read_text().splitlines()
                           if line.strip() and json.loads(line).get("kind") == "response")
     assert requests_logged <= 3, (
@@ -722,7 +723,7 @@ def test_the_wire_log_is_still_written_and_still_human_readable(tmp_path):
     drive(rd, run_id="log-alive", salt=SALT, main=replay,
           store_factory=store_factory(tmp_path))
 
-    log = rd / "llm_requests.jsonl"
+    log = RunPaths(rd).wire_log
     assert log.is_file()
     lines = [line for line in log.read_text().splitlines() if line.strip()]
     assert lines, "the wire log is empty"

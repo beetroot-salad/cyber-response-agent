@@ -226,12 +226,27 @@ def _fresh_stage_request(render: Callable[[str], str], bounds: Bounds) -> StageR
 
 
 def review_trace_path(run_dir, role: str):
-    """One review role's trace file. PUBLIC for the same reason `review_record_path` is: the
-    run dir's readers (the runtime visualizer's § Review gate) need the shape, and a second
-    site spelling `review_{role}_trace.jsonl` is a filename with two owners."""
+    """One review role's trace file, under the run's wire-log component. PUBLIC for the same
+    reason `review_record_path` is: the run dir's readers (the runtime visualizer's § Review
+    gate) need the shape, and a second site spelling `review_{role}_trace.jsonl` is a filename
+    with two owners.
+
+    UNDER `WIRE_LOG_DIR` because this file holds each stage's RAW wrapped reply, which makes it
+    the same stream class as the wire log and the learning-stage traces — and at the run root
+    it was inside MAIN's `under(run, SEG)` shape on both lanes. MAIN is handed only the
+    composer's `target: ask` lines (`close_tool._render_challenged_message`); the two blind
+    lenses' replies are exactly what it must not see, and reading them is how a close is
+    tailored to a gate it is supposed to pass blind. `permission.files.names_wire_log_dir` refuses
+    the component for every role, so the roster of who can read this is now empty.
+
+    PURE — it joins and returns, and the mkdir belongs to the one WRITER (`_write_trace_row`).
+    A reader that materialised the directory just by asking where the file is would leave an
+    empty `wire_logs/` in any run dir the visualizer merely rendered."""
     from pathlib import Path
 
-    return Path(run_dir) / f"review_{role}_trace.jsonl"
+    from defender._run_paths import WIRE_LOG_DIR
+
+    return Path(run_dir) / WIRE_LOG_DIR / f"review_{role}_trace.jsonl"
 
 
 def _is_row_shaped(raw_reply: str) -> bool:
@@ -268,7 +283,9 @@ def _write_trace_row(
     line is what makes "wrapped, never bare" a checkable property of the bytes on disk — but
     only for a reply no reader can parse. A reply that IS a JSON object goes inside the value
     instead; on its own line it would corrupt the trace's row structure."""
-    from defender._io import write_guarded
+    from pathlib import Path
+
+    from defender._io import guarded_mkdir, write_guarded
 
     payload = {"round": round_no, **row}
     inline = raw_reply is not None and _is_row_shaped(raw_reply)
@@ -280,7 +297,12 @@ def _write_trace_row(
     # ONE guarded append per row, not one per physical line: the two lines are a single trace
     # record, and splitting them across two `write_guarded` calls both doubled the syscalls and
     # left a window in which the metadata row was on disk without the reply it describes.
-    write_guarded(review_trace_path(run_dir, role), line, mode="append")
+    # The component is created HERE, at the sole writer, rather than in `review_trace_path`
+    # — see that function on why the path resolver stays pure. Anchored on the run dir, the
+    # box's rw bind and so the first component it could have planted a link at.
+    path = review_trace_path(run_dir, role)
+    guarded_mkdir(path.parent, base=Path(run_dir))
+    write_guarded(path, line, mode="append")
 
 
 def _mark_traces_incomplete(deps: Any, round_no: int, reason: str) -> None:

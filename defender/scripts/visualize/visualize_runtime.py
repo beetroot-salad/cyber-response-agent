@@ -10,6 +10,7 @@ from typing import NamedTuple
 
 from defender import _git
 from defender._report import ReportRead
+from defender._run_paths import WIRE_LOG_DIR, WIRE_LOG
 from defender.learning import lead_repository
 from defender.scripts.visualize.visualize_data import (
     normalize_phase_names,
@@ -26,6 +27,13 @@ from defender.scripts.visualize.visualize_primitives import (
     pre_text_untrusted,
     section,
 )
+
+
+#: The wire log AS AN OPERATOR READS IT — run-dir-relative, so the two strings below name a
+#: path someone can actually go and look at. Derived, not typed: the log moved under
+#: `wire_logs/` (`_run_paths.WIRE_LOG_DIR`) and a hand-spelled `llm_requests.jsonl` here would
+#: have sent a reader to a run-root file that no current run writes.
+_WIRE_LOG_REL = f"{WIRE_LOG_DIR}/{WIRE_LOG}"
 
 
 def _short_phase(name: str | None) -> str:
@@ -110,7 +118,7 @@ def render_runtime_transcript(
 
     if not entries:
         rows_html = (
-            '<div class="empty">llm_requests.jsonl not found — transcript unavailable '
+            f'<div class="empty">{esc(_WIRE_LOG_REL)} not found — transcript unavailable '
             '(older run, or the run is still in flight)</div>'
         )
     else:
@@ -133,7 +141,7 @@ def render_runtime_transcript(
     return (
         section(
             "sec-transcript", "defender", "Transcript",
-            "— main-agent turns, tool calls + results (llm_requests.jsonl)", body,
+            f"— main-agent turns, tool calls + results ({_WIRE_LOG_REL})", body,
         ),
         len(entries),
         anchored,
