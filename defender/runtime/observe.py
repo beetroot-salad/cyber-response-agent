@@ -21,7 +21,8 @@ from pydantic_ai.messages import (
 
 from defender._clock import now_iso
 from defender._env import env_int
-from defender._io import open_guarded, write_guarded
+from defender._io import guarded_mkdir, open_guarded, write_guarded
+from defender._run_paths import RunPaths
 from defender.runtime._wire import wire_digest
 
 from defender.scripts.pricing import usage_cost
@@ -259,6 +260,21 @@ def denial_logger(run_dir: Path) -> RequestLogger:
         logger = _denial_logger_or_null(path)
         _DENIAL_LOGGERS[key] = logger
     return logger
+
+
+def wire_log_path(run_dir: Path) -> Path:
+    """The run's wire log (`<run_dir>/observe/llm_requests.jsonl`), creating the holding dir.
+
+    `denial_logger`'s sibling — the other "where does this run's stream live" resolver — and
+    the WRITER's half of a location `_run_paths` owns. The reason the wire log sits one level
+    down rather than at the run root is documented there, on `OBSERVE_DIR`: it is a read-gate
+    boundary, not a tidiness choice. Callers ask here instead of joining the name onto a run
+    dir, so the location cannot drift back up through an edit made somewhere that cannot see
+    that rationale. `guarded_mkdir` anchors on the run dir because that is the box's rw bind,
+    and so the first component the box could have planted a link at."""
+    paths = RunPaths(Path(run_dir))
+    guarded_mkdir(paths.wire_log.parent, base=paths.run_dir)
+    return paths.wire_log
 
 
 def _tool_args(value: Any) -> dict:

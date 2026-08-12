@@ -6,6 +6,7 @@ from pathlib import Path
 
 from defender._io import read_jsonl_rows
 from defender._report import ReportRead
+from defender._run_paths import WIRE_LOG, RunPaths
 # `agent_role` and NOT `review_roles`, though the latter re-exports the same constant:
 # `review_roles` pulls `runtime.tools` and with it the whole in-process runtime (pydantic-ai
 # included), and `learning/frontend/build.py` imports this package at module scope for the
@@ -17,11 +18,21 @@ from defender.scripts.visualize.visualize_data import phase_verb
 from defender.scripts.visualize.visualize_primitives import parse_report
 
 
-LLM_REQUESTS = "llm_requests.jsonl"
+#: Kept as the module's own name because `visualize_data` re-exports it and the runtime page
+#: prints it in its empty state; the LOCATION is `_run_paths`', not this module's.
+LLM_REQUESTS = WIRE_LOG
 
 
 def load_messages(run_dir: Path) -> list[dict]:
-    return read_jsonl_rows(run_dir / LLM_REQUESTS)
+    """The run's wire-log records, or `[]` when the run has none.
+
+    Falls back to the pre-`observe/` run-root path so a run dir written before the wire log
+    moved still renders a transcript. A READER fallback only: the move is a read-GATE fact
+    (`_run_paths.OBSERVE_DIR`) and this code is the host's, outside the gate entirely — the
+    empty state the runtime page prints already says "older run", and this is what keeps that
+    true rather than silently blank."""
+    current = RunPaths(run_dir).wire_log
+    return read_jsonl_rows(current if current.is_file() else run_dir / LLM_REQUESTS)
 
 
 def _pretty_model(name: str) -> str:

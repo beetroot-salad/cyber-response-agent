@@ -31,6 +31,7 @@ from defender.tests.e2e._replay_harness import (
     normalize,
 )
 from defender._io import read_jsonl_rows
+from defender._run_paths import RunPaths
 from defender.runtime import permission, tools as runtime_tools
 from defender.runtime.agent_definition import compile_policy_for
 from defender.runtime.close_tool import CAUSE_EVIDENCE_CANNOT_DISCRIMINATE
@@ -78,7 +79,7 @@ def test_replay_golden_v2sshd(tmp_path):
     assert m.group(1) == "inconclusive"
 
     assert (run_dir / "tool_trace.jsonl").is_file()
-    assert (run_dir / "llm_requests.jsonl").is_file()
+    assert RunPaths(run_dir).wire_log.is_file()
 
 
 def test_replay_full_run_ab3(tmp_path, monkeypatch):
@@ -161,8 +162,13 @@ def test_replay_full_run_ab3(tmp_path, monkeypatch):
         )
     # Kept as a belt on the hermetic override itself: if a review call ever DID reach a
     # provider, this is where the evidence would land.
+    wire_log = RunPaths(run_dir).wire_log
+    assert wire_log.is_file(), (
+        "the wire log is not where this belt is looking — a missing file reads as zero live "
+        "records, so the assertion below would pass without measuring anything"
+    )
     live = [
-        r for r in read_jsonl_rows(run_dir / "llm_requests.jsonl")
+        r for r in read_jsonl_rows(wire_log)
         if str(r.get("agent_id", "")).startswith(REVIEW_AGENT_ID_PREFIX)
     ]
     assert not live, (

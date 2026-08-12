@@ -29,6 +29,7 @@ from defender.tests.e2e._replay_harness import (
     drive,
     materialize,
 )
+from defender._run_paths import RunPaths
 from defender.agents import MAIN_DEF
 from defender.runtime import circuit_breaker, tools as runtime_tools
 from defender.runtime.agent_definition import bind
@@ -76,7 +77,7 @@ def test_request_limit_writes_partial_trace(tmp_path):
     assert result["output"] is None
     assert result["requests"] == raised_limit
     assert (run_dir / "tool_trace.jsonl").is_file()
-    assert (run_dir / "llm_requests.jsonl").is_file()
+    assert RunPaths(run_dir).wire_log.is_file()
 
 
 def test_circuit_breaker_kill_switch_aborts_run(tmp_path):

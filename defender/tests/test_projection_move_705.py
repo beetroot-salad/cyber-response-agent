@@ -35,6 +35,7 @@ from defender.tests._by_path import WORKTREE, load_module
 import pytest
 
 from defender.scripts.pricing import usage_cost
+from defender._run_paths import RunPaths
 from defender.tests._session_store_705 import (
     crafted_html_payload,
     jsonl,
@@ -93,7 +94,7 @@ def _log_derived_reference(run_dir: Path) -> dict:
     The wire log's response records carry `_usage_dict`'s already-transformed usage, so this
     is the log-derived column the store-derived projection must match — computed here rather
     than read from a golden, which would bake X2's two known divergences in."""
-    records = [r for r in jsonl(run_dir / "llm_requests.jsonl")
+    records = [r for r in jsonl(RunPaths(run_dir).wire_log)
                if r.get("kind") == "response" and r.get("agent_id", "main") == "main"]
     keys = ("input_tokens", "output_tokens", "cache_read_input_tokens",
             "cache_creation_input_tokens")
@@ -122,7 +123,7 @@ def test_projections_are_built_from_the_store_not_from_logger_messages(tmp_path)
     with_log = (run_dir / "tool_trace.jsonl").read_text()
     assert with_log.strip(), "the projection produced nothing to compare"
 
-    (run_dir / "llm_requests.jsonl").unlink()
+    RunPaths(run_dir).wire_log.unlink()
     observe_mod = __import__("defender.runtime.observe", fromlist=["write_trace"])
     observe_mod.write_trace(run_dir, store=store, session_id=session_id, wall_ms=0.0)
     without_log = (run_dir / "tool_trace.jsonl").read_text()

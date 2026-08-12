@@ -6,14 +6,40 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+#: The run's ONE wire log, and the subdirectory that holds it — the layout fact, spelled here
+#: so the writer (`runtime.observe.wire_log_path`) and the readers (the visualizer) share one
+#: source. Named in this module rather than in `runtime.observe` because the visualizer needs
+#: the location and must not pay for pydantic-ai to learn it.
+#:
+#: THE SUBDIRECTORY IS THE GATE, not tidiness. Every reader agent's run-dir read shape is
+#: `under(run, SEG)` (`runtime/permission/policies/_common.read_shapes`) and `SEG` spells ONE
+#: path segment — so a run-root file is admitted by that shape and a file one level down is
+#: not, on the read tool and the bash `cat` lane alike (they share the shape OBJECT). At the
+#: run root this log was readable by MAIN, which is a boundary crossing: every gather subagent
+#: logs through the SAME `RequestLogger` (`driver.build_gather_agent`), so gather's tool
+#: returns — the raw payload bytes `decide_read` refuses MAIN one call earlier with
+#: `RAW_DENY_REASON` — sat verbatim in a file MAIN could `read_file`/`cat`, and
+#: `is_untrusted_read` did not fire on it, so neither lane salt-framed the read. GATHER's
+#: shape is the same, so the mirror held too: an injected subagent could read MAIN's whole
+#: transcript. One subdirectory takes both away without touching a shape.
+#:
+#: The run's OTHER root-level streams stay at the root deliberately: `tool_trace.jsonl` is a
+#: projection carrying tool NAMES (`observe._user_event`), `policy_denials.jsonl` carries a
+#: parameter DIGEST rather than the blob, and `budget.json`/`circuit_breaker.json` are
+#: counters. None of them replays another agent's context, which is the property that made
+#: this one a leak; this dir is for streams that carry wire bodies verbatim.
+OBSERVE_DIR = "observe"
+WIRE_LOG = "llm_requests.jsonl"
+
+
 @dataclass(frozen=True)
 class RunPaths:
     """One run's directories and named artifacts.
 
-    ``run_dir`` is the source root (the finished investigation, read); the five
+    ``run_dir`` is the source root (the finished investigation, read); the six
     artifact accessors (``alert``/``report``/``investigation``/``executed_queries``/
-    ``gather_raw``) resolve relative to it. Construct ``RunPaths(some_dir)`` on
-    whichever root you hold — the accessors are root-relative by design.
+    ``gather_raw``/``wire_log``) resolve relative to it. Construct ``RunPaths(some_dir)``
+    on whichever root you hold — the accessors are root-relative by design.
 
     ONE root, deliberately. This used to carry an optional second (the per-case leg-output
     dir) so that "the two roots travel together", but exactly one consumer ever read the
@@ -43,6 +69,10 @@ class RunPaths:
     @property
     def gather_raw(self) -> Path:
         return self.run_dir / "gather_raw"
+
+    @property
+    def wire_log(self) -> Path:
+        return self.run_dir / OBSERVE_DIR / WIRE_LOG
 
 
 # A run bundle is ALWAYS `runs_dir / <run_id>` (`LoopPaths.runs_dir` is the only place the

@@ -166,8 +166,14 @@ demands:
      binds: ["hooks_run_dir", "interacts(budget_enforcer->hooks_run_dir)",
              "interacts(circuit_breaker->hooks_run_dir)"]}
 
+  # The discharging test was renamed off its literal count when `RunPaths` gained `wire_log`
+  # (the run's wire log moved under `<run>/observe/`, out of every reader agent's
+  # single-segment run-dir read shape). The DEMAND is unchanged and still discharged: the
+  # accessor set is pinned exactly, `.meta` is still absent, and the docstring's own count
+  # still has to agree with it — which is what this demand asked for. Only the count in the
+  # test's name moved, and a name carrying a number is what dangles the pointer next time.
   - {id: d22_run_paths_exposes_five_accessors, kind: shape, form: test,
-     discharged_by: test_run_paths_accessor_set_is_five_after_the_meta_accessor_is_removed,
+     discharged_by: test_run_paths_accessor_set_is_exactly_its_artifacts_after_the_meta_accessor_is_removed,
      binds: ["RunPaths", "interacts(run_investigation->RunPaths)"]}
 
   # NEGATIVE — paired positive control: d22_run_paths_exposes_five_accessors.
