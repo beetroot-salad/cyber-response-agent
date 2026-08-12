@@ -238,6 +238,48 @@ def test_the_ceiling_names_the_operand_that_set_it(tmp_path):
     assert str(summary) not in out.split("[bash]", 1)[1]
 
 
+def test_an_already_reduced_overflow_is_not_told_to_re_run_its_own_pipe(tmp_path):
+    """A payload sets the 8 KB ceiling for the WHOLE pipeline, including the larger aggregate the
+    reducer computed from it — so the reduce lane can overflow, and the generic hint's answer
+    ("reduce it in a pipe: `cat <payload> | defender-sql …`") is the command that just
+    overflowed. A hint that names the failing command back is an instruction loop."""
+    deps, run = _scene(tmp_path, GATHER_DEF, stdout=b"agg\n" * (CAPTURE_CAP // 2))
+    payload = _payload(run, "q" * 10)
+
+    out = _tool_bash(deps, f"cat {payload} | defender-sql 'SELECT user FROM data GROUP BY 1'")
+
+    assert f"showing the first {CAPTURE_CAP}" in out
+    assert tools._BASH_REDUCED_HINT in out
+    assert "Reduce it in a pipe" not in out
+
+
+def test_the_overflow_hint_never_names_a_bash_signature_that_does_not_exist(tmp_path):
+    """An agent with a `cat` grant and no reducer (the curator) falls to
+    `_overflow_filter_hint`'s substring-search branch. That branch names the tool whose
+    `pattern=` kwarg exists — `read_file` — and `read_tool="bash"` made it spell
+    `bash('<path>', pattern=…)`, a call no agent can make."""
+    hint = tools._overflow_filter_hint(str(tmp_path / "x.md"), permission.AgentPolicy())
+
+    assert "read_file(" in hint
+    assert "bash(" not in hint
+
+
+def test_stderr_is_held_to_the_same_ceiling_as_stdout(tmp_path):
+    """The ceiling is on what the COMMAND returns, and `_format_bash_result` returns both
+    streams. `defender-sql` writes payload-derived text to stderr — duckdb's parse error quotes
+    the offending JSON, `_shape_hint` names the payload's own columns — so a bound that covered
+    stdout alone was a bound the data could step over."""
+    deps, run = _scene(tmp_path, GATHER_DEF, stdout=b"")
+    payload = _payload(run, "p" * 10)
+    deps.box.result = BoxResult(1, b"", b"E" * (CAPTURE_CAP + 5000))
+
+    out = _tool_bash(deps, f"cat {payload} | defender-sql 'bad'")
+
+    assert f"showing the first {CAPTURE_CAP}" in out
+    assert "E" * (CAPTURE_CAP + 5000) not in out
+    assert len(out) < CAPTURE_CAP + 2000
+
+
 def test_the_cap_lands_inside_the_frame(tmp_path):
     """The ordering `test_oversized_untrusted_read_caps_before_wrapping` pins for the read lane,
     now pinned for this one: cap FIRST, then wrap, so the head and its notice sit inside the

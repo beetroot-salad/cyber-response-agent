@@ -343,13 +343,18 @@ def is_untrusted_read(path: Path) -> bool:
     to those bytes already framed them (the tool's own return, `cat` on the bash lane, and above
     all `is_captured_payload`, which named the family for the read CAP while this predicate did
     not), so the unframed `read_file` was the single lane delivering a span the view withheld,
-    bare. Additive only: `decide_read` never consults this, so nothing new is denied."""
+    bare. Additive only: `decide_read` never consults this, so nothing new is denied.
+
+    It joins by DELEGATION rather than by a second spelling of the marker: the `is_captured_payload
+    ⊆ is_untrusted_read` relation below is load-bearing, and F-08 was exactly the drift of two
+    parallel disjunction lists — the cap's grew a family the frame's did not. Calling the narrower
+    predicate makes the containment structural, so the next payload family is one edit, not two
+    that must agree."""
     p = Path(path)
     return (
         p.name == "alert.json"
-        or _names_raw(p)
+        or is_captured_payload(p)
         or _names_query_draft(p)
-        or TICKET_READS_MARKER in p.parts
     )
 
 
@@ -366,7 +371,8 @@ def is_captured_payload(path: Path) -> bool:
     The subset relation is the load-bearing half: a capture is by construction a copy of bytes
     that arrived from outside, so a path this predicate admits and the other one refuses would be
     a payload delivered unlabeled. It held for `gather_raw/` from the start and was false for
-    `ticket_reads/` until #849 — which is what that finding was."""
+    `ticket_reads/` until #849 — which is what that finding was, and why `is_untrusted_read`
+    now CALLS this rather than restating its members."""
     p = Path(path)
     return _names_raw(p) or TICKET_READS_MARKER in p.parts
 

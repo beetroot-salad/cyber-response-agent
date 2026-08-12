@@ -94,7 +94,10 @@ def _cap_for(p: Path) -> int:
 
 
 def _bounded_read(
-    text: str, path: str, *, cap: int, filter_hint: str, read_tool: str = "read_file",
+    # `path` is not read by this body — it is kept for the call sites that pass it
+    # positionally, and defaulted so a lane with no file to name (the bash return) does not
+    # have to invent one.
+    text: str, path: str = "", *, cap: int, filter_hint: str, read_tool: str = "read_file",
     subject: str = "This file",
 ) -> str:
     if len(text) <= cap:
@@ -291,7 +294,11 @@ def _tool_bash(deps: AgentDeps, command: str) -> str:
     )
     if not decision.allow:
         raise ModelRetry(decision.reason)
-    _deny_authored_bash_read(deps, decision)
+    # Walked ONCE and threaded: the operand set decides the authored-read denial, the ceiling
+    # and its hint, and the frame, and re-deriving it per question re-ran the argv extractor
+    # and the path resolution three extra times per command.
+    operands = tuple(_opened_operands(deps, decision))
+    _deny_authored_bash_read(deps, operands)
     try:
         result = deps.box.run_parsed(
             list(decision.pipelines or ()),
@@ -304,19 +311,25 @@ def _tool_bash(deps: AgentDeps, command: str) -> str:
     except box_mod.BoxFault as e:
         raise ModelRetry(f"the sandbox could not run this command: {e}") from e
     _record_shim_failure(deps, decision, command, result)
-    cap, filter_hint = _bash_output_bound(deps, decision)
+    capping = min(operands, key=_cap_for, default=None)
     formatted = _format_bash_result(
         result.rc,
         # Bounded BEFORE the frame below, matching the ordering
         # `test_oversized_untrusted_read_caps_before_wrapping` pins for the read lane: the head
         # and its notice land inside the delimiters, never a dump whose closing tag was cut off.
-        _bounded_read(
-            result.out.decode("utf-8", "replace"), command,
-            cap=cap, filter_hint=filter_hint, read_tool="bash", subject="This output",
+        _bounded_bash_stream(
+            deps, decision, capping,
+            result.out.decode("utf-8", "replace"), subject="This output",
         ),
-        result.err.decode("utf-8", "replace"),
+        # BOTH streams, not just stdout: `defender-sql` writes payload-derived text to stderr
+        # (duckdb's parse error quotes the offending JSON; `_shape_hint` names the payload's own
+        # columns), so a ceiling that covered only stdout was a ceiling the data could step over.
+        _bounded_bash_stream(
+            deps, decision, capping,
+            result.err.decode("utf-8", "replace"), subject="This error output",
+        ),
     )
-    if _is_learning_role(deps) or _opens_untrusted_read(deps, decision):
+    if _is_learning_role(deps) or _opens_untrusted_read(operands):
         return _wrap(formatted, "untrusted", deps.salt)
     return formatted
 
@@ -399,7 +412,7 @@ def _opened_operands(deps: AgentDeps, decision: permission.BashDecision) -> Iter
             yield _resolve_operand(deps, operand)
 
 
-def _opens_untrusted_read(deps: AgentDeps, decision: permission.BashDecision) -> bool:
+def _opens_untrusted_read(operands: Iterable[Path]) -> bool:
     """Does this command open a file the read tool would have salt-tag wrapped?
 
     The trust boundary is a property of the DATA, not of who is reading it — but until
@@ -416,22 +429,57 @@ def _opens_untrusted_read(deps: AgentDeps, decision: permission.BashDecision) ->
     Keying on `is_untrusted_read` — the one predicate that already decides this for every
     other read surface — makes the frame a property of the channel rather than of the
     caller, so the three routes to the same file now agree."""
-    return any(permission.is_untrusted_read(p) for p in _opened_operands(deps, decision))
+    return any(permission.is_untrusted_read(p) for p in operands)
 
 
 #: What the bash lane's overflow notice says when no file operand set the ceiling.
 #: `_overflow_filter_hint` reduces a NAMED file (`cat <path> | <reducer>`), and a command that
-#: opened none — `ls`, a shim that takes no path — has no name to give it.
+#: opened none — `ls`, a shim that takes no path — has no name to give it. It does NOT say
+#: "there is nothing to re-read a smaller slice of": `defender-invlang` and `defender-lessons`
+#: open nothing on the argv and still read files, so the true statement is about the OPERAND.
 _BASH_NO_OPERAND_HINT = (
-    "Narrow the command itself and run it again — this return is not a file, so there is "
-    "nothing to re-read a smaller slice of."
+    "Narrow the command itself — a tighter filter or selector — and run it again. This return "
+    "is a command's output and names no file operand, so there is no path to re-read a "
+    "smaller slice of."
+)
+
+#: …and when the command ALREADY reduced. `_overflow_filter_hint` answers "how do I shrink a
+#: file I just read whole", and its answer is the reduce pipe — which is the command that just
+#: overflowed. Handing that back is an instruction loop, and the loop is reachable: a payload
+#: sets the 8 KB capture ceiling for the WHOLE pipeline, including a legitimately larger
+#: aggregate the reducer computed from it.
+_BASH_REDUCED_HINT = (
+    "This return is already a reduction, so re-running the same pipe returns the same "
+    "oversized result. Narrow the reduction itself — aggregate further, select fewer columns, "
+    "or add a LIMIT — and run it again."
 )
 
 
-def _bash_output_bound(
-    deps: AgentDeps, decision: permission.BashDecision
-) -> tuple[int, str]:
-    """The ceiling on what this command may return, and the reduction its caller can run.
+def _bash_overflow_hint(
+    deps: AgentDeps, decision: permission.BashDecision, capping: Path | None
+) -> str:
+    """The reduction the caller can run when the bash return overflowed its ceiling.
+
+    Three cases, because one answer does not serve them. No operand: nothing to re-read.
+    A TERMINAL reducer (`command_shape.terminal_reducer` — the same predicate
+    `_record_shim_failure` attributes an rc with): the reduce pipe IS the command, so the
+    generic hint would name it back. Otherwise the file the ceiling came from, through the read
+    lane's own hint — which keeps `read_tool` at its default on purpose: that argument names the
+    tool whose SUBSTRING SEARCH the no-reducer branch falls back to (`read_file(p, pattern=…)`),
+    not the tool that overflowed, and `read_tool="bash"` there spelled a `bash(p, pattern=…)`
+    call no agent has."""
+    if capping is None:
+        return _BASH_NO_OPERAND_HINT
+    if permission.command_shape.terminal_reducer(list(decision.pipelines or ())):
+        return _BASH_REDUCED_HINT
+    return _overflow_filter_hint(str(capping), deps.policy)
+
+
+def _bounded_bash_stream(
+    deps: AgentDeps, decision: permission.BashDecision, capping: Path | None,
+    text: str, *, subject: str,
+) -> str:
+    """One bash output stream, held to the ceiling its DATA chose.
 
     Keyed on the DATA, the way #776 keyed the untrusted wrap. `read_file` bounds a captured
     payload at the capture ceiling precisely so a later read cannot recover what the capture view
@@ -440,23 +488,25 @@ def _bash_output_bound(
     uncapped lane the one gather's own prompt tells it to use. `_opened_operands` + `_cap_for`
     already answer the per-path question; this only has to ask it of the right path.
 
-    The operand with the SMALLEST cap sets it, and names the hint: a pipeline may open several
-    files, and a ceiling any one operand can raise is not a ceiling. A command that opens no
-    file still gets the authored cap — a bound on the return, just not one a file chose."""
-    capping = min(_opened_operands(deps, decision), key=_cap_for, default=None)
-    if capping is None:
-        return _read_char_cap(), _BASH_NO_OPERAND_HINT
-    return _cap_for(capping), _overflow_filter_hint(
-        str(capping), deps.policy, read_tool="bash"
+    `capping` is the operand with the SMALLEST cap: a pipeline may open several files, and a
+    ceiling any one operand can raise is not a ceiling. A command that opens no file still gets
+    the authored cap — a bound on the return, just not one a file chose. The hint is built only
+    when the stream actually overflows, because building it probes the policy
+    (`_overflow_filter_hint` → `_lane_admits` → a full `decide_bash`) and the overwhelming
+    majority of returns fit."""
+    cap = _read_char_cap() if capping is None else _cap_for(capping)
+    if len(text) <= cap:
+        return text
+    return _bounded_read(
+        text, cap=cap, filter_hint=_bash_overflow_hint(deps, decision, capping),
+        read_tool="bash", subject=subject,
     )
 
 
-def _deny_authored_bash_read(
-    deps: AgentDeps, decision: permission.BashDecision
-) -> None:
+def _deny_authored_bash_read(deps: AgentDeps, operands: Iterable[Path]) -> None:
     if not _is_learning_role(deps):
         return
-    for operand in _opened_operands(deps, decision):
+    for operand in operands:
         _deny_authored_read(deps, operand)
 
 

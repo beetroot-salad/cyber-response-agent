@@ -118,13 +118,16 @@ hooks). The gates:
   for it. The salt frame is `permission.is_untrusted_read`: the alert, anything
   under `gather_raw/`, a `_draft/` query template, and the judge's closed-ticket
   capture under `ticket_reads/`. The ceiling is `is_captured_payload`, a strict
-  SUBSET of that set — a capture is a copy of bytes that arrived from outside —
-  which reads at the capture view's 8 KB rather than the authored 64 KB, so a
-  later read cannot recover what the capture withheld. `read_file` and the `cat`
-  lane consult both (`tools._bound_and_wrap`, `tools._bash_output_bound`, which
-  takes the SMALLEST cap among the operands a pipeline opens), so the three
-  routes to one file — the tool's own return, `read_file`, `cat` — agree on
-  whether it is labeled and on how much of it arrives. One asymmetry is
+  SUBSET of that set — structurally, since `is_untrusted_read` calls it: a
+  capture is a copy of bytes that arrived from outside — which reads at the
+  capture view's 8 KB rather than the authored 64 KB, so a later read cannot
+  recover what the capture withheld. `read_file` and the `cat` lane consult both
+  (`tools._bound_and_wrap`, `tools._bounded_bash_stream`, which takes the
+  SMALLEST cap among the operands a pipeline opens and holds BOTH bash streams to
+  it), so the three routes to one file — the tool's own return, `read_file`,
+  `cat` — agree on whether it is labeled and on how much of it arrives. A
+  pipeline that already reduced is told to narrow the reduction rather than to
+  re-run the pipe it just ran. One asymmetry is
   deliberate: for a LEARNING stage the run dir is the SHARED cross-stage
   directory, so its artifacts frame as cross-agent text
   (`tools._is_cross_agent_read`); for MAIN and GATHER it is private workspace,
