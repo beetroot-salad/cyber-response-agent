@@ -90,10 +90,14 @@ hooks). The gates:
   readable and a file in a subdirectory is not — on the read tool and the `cat`
   lane alike, which share the shape object. Those two roles only: the judge's
   `cat` scope is `under(run, TREE)` (multi-segment) and the actor holds no `cat`
-  grant, so its `read_allow` is empty and no shape filter applies to it at all.
-  Both read the *learning* run dir, which the wire log never reaches, so the
-  containment argument here is about MAIN and GATHER and does not carry to a
-  stream placed under a subdirectory elsewhere. That log is the one run artifact that
+  grant, so its `read_allow` is empty and no shape filter applies to it at all —
+  so `observe/` ALSO carries an outright deny (`permission.files.names_observe`,
+  on both read surfaces, for every role), which is what covers the offline lane,
+  where every learning stage's trace is written under the same component by
+  `observe.stage_trace_path`. There the judge's trace holds the payload exemplars
+  its own prompt is given unredacted, and the gray-box actor shares that root —
+  the same crossing, reachable by a role no shape excludes. The directory makes
+  the deny addressable; the deny is what holds. That log is the one run artifact that
   replays another agent's context verbatim (MAIN, every gather subagent and every
   review stage write through one `RequestLogger`), so at the root it handed MAIN
   the raw gather payload bytes `decide_read` refuses it with `RAW_DENY_REASON`,

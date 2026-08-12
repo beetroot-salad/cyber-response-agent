@@ -22,7 +22,7 @@ from pydantic_ai.messages import (
 from defender._clock import now_iso
 from defender._env import env_int
 from defender._io import guarded_mkdir, open_guarded, write_guarded
-from defender._run_paths import RunPaths
+from defender._run_paths import OBSERVE_DIR, RunPaths
 from defender.runtime._wire import wire_digest
 
 from defender.scripts.pricing import usage_cost
@@ -275,6 +275,24 @@ def wire_log_path(run_dir: Path) -> Path:
     paths = RunPaths(Path(run_dir))
     guarded_mkdir(paths.wire_log.parent, base=paths.run_dir)
     return paths.wire_log
+
+
+def stage_trace_path(root: Path, trace_name: str) -> Path:
+    """A learning stage's trace (`<root>/observe/<trace_name>`), creating the holding dir.
+
+    `wire_log_path`'s twin for the OFFLINE lane — the actor's, the oracle's, the judge's, the
+    curators' and the forward-check verifier's traces, all opened by `_pydantic_stage.run_stage`
+    off a root that is the learning run dir, the curator's pending dir or the source run dir
+    depending on the stage. Same component, and it has to be: `permission.files.names_observe`
+    is ONE path-component test, so every wire log in the tree lands where that test finds it.
+
+    Here the component is NOT what denies — the actor declares no read shape and the judge's is
+    multi-segment, so neither is excluded by depth (see `files.OBSERVE_DENY_REASON`). The
+    component is what makes the deny addressable: a rule keyed on a directory covers a trace
+    name nobody has invented yet, which a rule keyed on `*.trace.jsonl` would not."""
+    root = Path(root)
+    guarded_mkdir(root / OBSERVE_DIR, base=root)
+    return root / OBSERVE_DIR / trace_name
 
 
 def _tool_args(value: Any) -> dict:

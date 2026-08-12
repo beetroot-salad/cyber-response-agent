@@ -7,9 +7,16 @@ from pathlib import Path
 
 
 #: The run's ONE wire log, and the subdirectory that holds it — the layout fact, spelled here
-#: so the writer (`runtime.observe.wire_log_path`) and the readers (the visualizer) share one
-#: source. Named in this module rather than in `runtime.observe` because the visualizer needs
-#: the location and must not pay for pydantic-ai to learn it.
+#: so the writers (`runtime.observe.wire_log_path` for the runtime, `stage_trace_path` for
+#: every learning stage), the read gate (`permission.files.names_observe`) and the readers
+#: (the visualizers) share one source. Named in this module rather than in `runtime.observe`
+#: because the visualizer needs the location and must not pay for pydantic-ai to learn it.
+#:
+#: `OBSERVE_DIR` is the whole class, not just this file: EVERY `RequestLogger` in the tree
+#: writes under it — `<run_dir>/observe/llm_requests.jsonl` for the investigation, and
+#: `<root>/observe/<stage>.trace.jsonl` for the actor, oracle, judge, curators and
+#: forward-check verifier. One component means one rule can name them all, which is what
+#: `names_observe` is.
 #:
 #: THE SUBDIRECTORY IS THE GATE, not tidiness. MAIN's and GATHER's run-dir read shape is
 #: `under(run, SEG)` (`runtime/permission/policies/_common.read_shapes`, the builder those two
@@ -24,16 +31,21 @@ from pathlib import Path
 #: shape is the same, so the mirror held too: an injected subagent could read MAIN's whole
 #: transcript. One subdirectory takes both away without touching a shape.
 #:
-#: THE RULE DOES NOT GENERALIZE PAST THOSE TWO ROLES, which is why they are named above rather
-#: than written as "every reader". The JUDGE's `cat` scope is built from `under(run, TREE)`
-#: (`judge/engine_pydantic._judge_bash_shapes`) — multi-segment, so a subdirectory hides
-#: nothing from it — and the ACTOR carries no `cat` grant at all, so `read_allow_of` yields an
-#: EMPTY shape tuple and `decide_read` applies no shape filter to it whatsoever, leaving that
-#: role gated by root containment alone. Both read the LEARNING run dir, which this log never
-#: reaches (`lead_repository.stage_tables` copies `executed_queries.jsonl` and `gather_raw/`
-#: and nothing else), so neither is in scope here. But a future stream put under a
-#: subdirectory "because that is how the wire log is protected" would be protected from MAIN
-#: and GATHER and from nobody else.
+#: THE SUBDIRECTORY ARGUMENT DOES NOT GENERALIZE PAST THOSE TWO ROLES, which is why they are
+#: named above rather than written as "every reader". The JUDGE's `cat` scope is built from
+#: `under(run, TREE)` (`judge/engine_pydantic._judge_bash_shapes`) — multi-segment, so a
+#: subdirectory hides nothing from it — and the ACTOR carries no `cat` grant at all, so
+#: `read_allow_of` yields an EMPTY shape tuple and `decide_read` applies no shape filter to it
+#: whatsoever, leaving that role gated by root containment alone. Those two share the LEARNING
+#: run dir, where the same `RequestLogger` writes every stage's trace, so the identical defect
+#: lived there: the judge's trace carries the payload exemplars its prompt is given UNREDACTED
+#: (`judge/compare.unredacted_exemplar`) and the gray-box actor could read it straight back,
+#: around the `gather_raw` deny that exists to keep exactly those bytes from it.
+#:
+#: Which is why the component ALSO carries an outright deny (`permission.files.names_observe`,
+#: both read surfaces, every role) rather than resting on the shapes. The directory is what
+#: makes the deny addressable — one component test covers a trace name nobody has invented yet
+#: — and the deny is what makes it hold for the roles a shape cannot reach.
 #:
 #: The run's OTHER root-level streams stay at the root deliberately: `tool_trace.jsonl` is a
 #: projection carrying tool NAMES (`observe._user_event`), `policy_denials.jsonl` carries a

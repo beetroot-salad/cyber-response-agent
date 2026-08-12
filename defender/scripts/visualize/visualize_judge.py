@@ -4,6 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from defender._run_paths import OBSERVE_DIR
 from defender._vocab import normalized_disposition
 from defender.learning.core.directions import (
     ADVERSARIAL,
@@ -21,6 +22,10 @@ from defender.scripts.visualize.visualize_primitives import (
     render_report_card,
     section,
 )
+
+
+#: The actor stage's trace, named once for the two locations this page looks in.
+ACTOR_TRACE = "actor_trace.jsonl"
 
 # The leg's own terminal status (#791 R2/R15) — the one place a run dir written before the
 # field existed reads as its stated default rather than as a leg that never ran.
@@ -449,9 +454,15 @@ def render_judge_raw_bundle(run_id: str) -> str:
             panels.append(block("artifact", fname, pre_text(p.read_text(encoding="utf-8"))))
     for raw in sorted(learn_dir.glob("*.raw.txt")):
         panels.append(block("artifact raw", raw.name, pre_text(raw.read_text(encoding="utf-8"))))
-    trace = learn_dir / "actor_trace.jsonl"
-    if trace.is_file():
-        panels.append(block("artifact", "actor_trace.jsonl", pre_text(trace.read_text(encoding="utf-8"))))
+    # `observe/actor_trace.jsonl`, with the pre-move root path as a fallback so an older
+    # learning run dir still renders its bundle. Host code, outside the gate: the directory is
+    # where `permission.files.names_observe` refuses AGENTS, and this page is for an operator.
+    for trace in (learn_dir / OBSERVE_DIR / ACTOR_TRACE, learn_dir / ACTOR_TRACE):
+        if trace.is_file():
+            panels.append(
+                block("artifact", ACTOR_TRACE, pre_text(trace.read_text(encoding="utf-8")))
+            )
+            break
     if not panels:
         return ""
     return section("sec-raw-bundle", "raw", "Raw bundle", "— learning-loop inputs &amp; fallbacks", "".join(panels))

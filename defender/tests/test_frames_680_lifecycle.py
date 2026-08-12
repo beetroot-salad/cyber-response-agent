@@ -19,6 +19,7 @@ import pytest
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
 from pydantic_ai.models import override_allow_model_requests
 
+from defender._run_paths import OBSERVE_DIR  # noqa: E402
 from defender.learning.author.curator_engine import ForwardCheckConfig  # noqa: E402
 from defender.learning.core.config import StageContext, StageWiring  # noqa: E402
 from defender.learning.author import shared as author_shared
@@ -104,7 +105,7 @@ def test_parallel_oracle_leads_overlap_while_one_invocation_is_retried(tmp_path)
         failed_seen["observation"],
         *(result[2] for result in results),
     ]
-    failed_trace = tmp_path / "run" / "parallel-failed.trace.jsonl"
+    failed_trace = tmp_path / "run" / OBSERVE_DIR / "parallel-failed.trace.jsonl"
     message = "overlap plus retry must create three distinct salted attempts"
     assert len({deps.salt for deps in all_deps}) == 3, message
     assert failed_trace.is_file(), message
@@ -125,9 +126,9 @@ def test_failed_stage_attempt_leaves_a_salted_trace_before_the_same_work_is_retr
     first_seen = {}
     with pytest.raises(RunUnprocessable, match="failed"):
         _stage_attempt(tmp_path, "first.trace.jsonl", failure, observed=first_seen)
-    first_trace = tmp_path / "run" / "first.trace.jsonl"
+    first_trace = tmp_path / "run" / OBSERVE_DIR / "first.trace.jsonl"
     retry = _stage_attempt(tmp_path, "retry.trace.jsonl", replay_once("done"))
-    retry_trace = tmp_path / "run" / "retry.trace.jsonl"
+    retry_trace = tmp_path / "run" / OBSERVE_DIR / "retry.trace.jsonl"
     assert first_trace.is_file()
     assert retry_trace.is_file()
     assert first_trace != retry_trace
@@ -184,7 +185,10 @@ def _stage_attempt(
     observation = _judge_fixture(prompt_scene, hostile="lifecycle body", salt=deps.salt)
     instructions = scene / ("instructions-" + trace_name + ".md")
     if observed is not None:
-        observed.update(deps=deps, observation=observation, trace=run / trace_name)
+        observed.update(
+            deps=deps, observation=observation,
+            trace=run / OBSERVE_DIR / trace_name,
+        )
     instructions.write_text("Return the scripted answer.")
     with override_allow_model_requests(False):
         out = run_stage(
@@ -205,7 +209,7 @@ def _stage_attempt(
             deps=deps,
             make_model=fake_model(model_fn),
         )
-    return out, deps, observation, run / trace_name
+    return out, deps, observation, run / OBSERVE_DIR / trace_name
 
 
 def test_stage_retries_after_a_model_request_failure_before_any_output(tmp_path):

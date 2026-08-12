@@ -33,6 +33,7 @@ from defender.runtime.agent_role import AgentRole  # noqa: E402
 from defender.tests._engine_helpers import assert_stage_tools  # noqa: E402
 from defender.tests._engine_helpers import fake_model as _fake_model  # noqa: E402
 from defender.tests._engine_helpers import replay_once as _replay  # noqa: E402
+from defender._run_paths import OBSERVE_DIR  # noqa: E402
 
 _DEFENDER_DIR = config.REPO_ROOT / "defender"
 _VERDICT = "I reason about the counterfactual here.\n\nMore reasoning.\n\nVERDICT: GOOD"
@@ -69,8 +70,8 @@ def test_run_verify_pydantic_returns_text_verbatim_and_writes_trace(tmp_path):
             make_model=_fake_model(_replay(_VERDICT)),
         )
     assert out == _VERDICT
-    assert (src / "vf.run-X.trace.jsonl").is_file()
-    assert (src / "vf.run-X.trace.jsonl").read_text().strip()
+    assert (src / OBSERVE_DIR / "vf.run-X.trace.jsonl").is_file()
+    assert (src / OBSERVE_DIR / "vf.run-X.trace.jsonl").read_text().strip()
 
 
 def test_run_verify_pydantic_empty_output_is_unprocessable(tmp_path):

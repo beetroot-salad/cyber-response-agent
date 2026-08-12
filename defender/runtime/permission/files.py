@@ -15,6 +15,7 @@ import re
 from pathlib import Path
 
 from defender import _artifact_schema
+from defender._run_paths import OBSERVE_DIR
 from defender.runtime import bash_policy
 
 from .decision import Decision
@@ -195,6 +196,16 @@ def decide_read(
     # deny-tail asserts it as a substring.
     if _names_raw(rp) and not admitted:
         return Decision(False, RAW_DENY_REASON)
+    # `observe/` is denied OUTRIGHT — not "unless a shape admits it", the way `gather_raw` is
+    # one line up. That asymmetry is the difference between the two path classes: GATHER
+    # legitimately reads payloads, so raw has to stay opt-in-able, while a wire log is host
+    # observability that NO agent has business reading. Making it unconditional is also what
+    # makes it work at all here, because the two lanes that need it cannot be reached by a
+    # shape: the JUDGE's `cat` scope is `under(run, TREE)`, which fullmatches a subdirectory
+    # and would set `admitted`, and the ACTOR declares no shapes at all, so `admitted` is
+    # never True for it and no positive enumeration can ever exclude anything.
+    if names_observe(rp):
+        return Decision(False, OBSERVE_DENY_REASON)
     if policy.read_allow and not admitted:
         return Decision(
             False,
@@ -225,6 +236,44 @@ RAW_DENY_REASON = (
     "Read/Grep/jq the raw payload from the main loop; that defeats the "
     "subagent isolation."
 )
+
+
+# The `observe/` path component (`_run_paths.OBSERVE_DIR`, the layout's own name for it) and the
+# reason a read of one earns. Every `RequestLogger` in the tree writes under this component — the
+# runtime's wire log at `<run_dir>/observe/`, every learning stage's trace at
+# `<learning_run_dir>/observe/` — so ONE component test covers the whole class.
+#
+# WHY A DENY AND NOT JUST A SHAPE. A wire log holds another agent's context verbatim, which makes
+# it a boundary wherever two roles share a root. Moving it into a subdirectory is enough for MAIN
+# and GATHER, whose read shape is a single segment — but that is a property of THEIR shapes, not
+# of subdirectories, and the learning lane has neither: the JUDGE reads `under(run, TREE)` (a
+# subdirectory fullmatches) and the ACTOR declares no shape at all (root containment only, so
+# every depth is admitted). The concrete case is the gray-box actor: `_names_raw` above keeps it
+# out of `gather_raw/`, and `judge_trace.jsonl` at the learning run dir's root handed it the SAME
+# payloads back through the judge's prompt (`judge/compare.unredacted_exemplar` — real values,
+# not the oracle's scrubbed skeleton), with both legs of an `inconclusive` case running
+# CONCURRENTLY against one `LegDirs` and a re-LEARN reopening the dir with the previous pass's
+# traces still in it. The component is what holds; the subdirectory alone is not.
+OBSERVE_MARKER = OBSERVE_DIR
+OBSERVE_DENY_REASON = (
+    "Blocked: observe/ holds the run's wire logs — the verbatim request/response stream of "
+    "every agent that shares this root, including payload bytes and transcripts this agent is "
+    "deliberately not shown. It is host-side observability, readable by no agent. Work from "
+    "the artifacts your own role is given."
+)
+
+
+def names_observe(p: Path) -> bool:
+    """Whether a resolved path is INSIDE an `observe/` dir — a path COMPONENT test, for the
+    reason `_names_raw` gives below: a substring scan is decided by text the path's owner does
+    not control.
+
+    Public, and shared with the bash operand lane (`bash._in_scope`) exactly as `denylisted` is,
+    so the two read surfaces cannot disagree about a wire log that resolves within-root. That
+    sharing is not decoration here: the JUDGE holds a `cat` grant whose scope is
+    `under(run, TREE)`, so without this the bash lane would admit the very file `decide_read`
+    refuses it."""
+    return OBSERVE_MARKER in p.parts
 
 
 def _names_raw(p: Path) -> bool:
