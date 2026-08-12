@@ -31,7 +31,7 @@ from defender.learning.core.markers import (
     quarantine_marker,
     rewrite_marker,
 )
-from defender.learning.core.persist import read_pitfalls
+from defender.learning.core.persist import merge_pitfalls, read_pitfalls
 from defender.learning.core.quarantine import preserve_tainted_tree
 
 
@@ -122,7 +122,9 @@ def _has_lead_author_work(paths: LoopPaths) -> bool:
     inflight = qdir / "inflight"
     if inflight.is_dir() and any(inflight.glob("*.json")):
         return True
-    return len(read_pitfalls(paths)) >= threshold
+    # Distinct mistakes, the same count `run_pitfalls` gates on (#840) — a wake gate that
+    # counted rows would spin the drain up for a curation that then declines to run.
+    return len(merge_pitfalls(read_pitfalls(paths))) >= threshold
 
 
 def _drain_curators(

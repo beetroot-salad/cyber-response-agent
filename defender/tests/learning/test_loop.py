@@ -794,8 +794,12 @@ def test_has_lead_author_work_fires_on_pitfalls_threshold(tmp_path: Path, monkey
     paths, _ = _isolate(tmp_path)
     assert drains._has_lead_author_work(paths) is False
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
+    # Distinct `stderr_digest`s, because the gate counts distinct MISTAKES post-#840 and two
+    # copies of one would (correctly) leave it shut.
     persist.append_pitfalls(
-        [{"pitfall_id": f"r:{i}", "system": "elastic"} for i in range(2)], paths=paths
+        [{"pitfall_id": f"r:{i}", "system": "elastic", "stderr_digest": f"exit=1; e{i}"}
+         for i in range(2)],
+        paths=paths,
     )
     assert drains._has_lead_author_work(paths) is True
 

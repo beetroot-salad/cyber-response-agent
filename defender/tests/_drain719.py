@@ -215,7 +215,10 @@ def row_for(name: str, rid: str, **extra) -> dict:
             "query_id": "elastic.esql",
             "goal": "g",
             "executed_query": "bad pipe",
-            "stderr_digest": "exit=1; mismatched input",
+            # Per-row, because #840 collapses rows sharing a digest into ONE record and the
+            # curation threshold counts records. A row here stands for one queued unit of
+            # work, so each has to be a distinct mistake.
+            "stderr_digest": f"exit=1; mismatched input ({rid})",
             "error_class": "agent-fixable",
             **extra,
         }

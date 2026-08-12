@@ -20,13 +20,16 @@ You are NOT the lead-author (it curates the query catalog and system `SKILL.md`)
         "query_id": "host-state.processes",
         "goal": "list the processes running on the target host",
         "executed_query": "<the EXACT verb + params that failed>",
-        "stderr_digest": "exit=64; unknown param(s) ['pid'] — this verb declares ['host'] ..."
+        "stderr_digest": "exit=64; unknown param(s) ['pid'] — this verb declares ['host'] ...",
+        "occurrences": 8
       }
     ]
   }
   ```
 
   The handoff carries records + the path only — **Read `execution_md_path` yourself** to see its current sections and what is already documented.
+
+  **One entry is one distinct mistake.** Repeats of the same failure are already collapsed before you see them: `occurrences` is how many times it was recorded, and the failures of a system arrive most-repeated first. A high count is evidence the mistake is *systemic* — the strongest case for spending a line on it — never evidence of a second lesson. Never write one bullet per occurrence, and never mention the count in the bullet: the entry teaches the fix, not the history.
 
 ## Procedure
 

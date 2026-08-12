@@ -32,13 +32,24 @@ LEAD_PITFALLS_PROMPT = LEARNING_DIR / "leads" / "lead_pitfalls.md"
 
 
 def _build_pitfalls_handoffs(rows: list[dict]) -> list[dict]:
+    """One entry per system, one failure per distinct MISTAKE (#840).
+
+    Merges the rows itself rather than trusting its caller to have merged them — the merge
+    is idempotent, and this is the last seam before the prompt, so no reader of the queue
+    can hand the curator N copies of one bullet. `occurrences` rides along and orders the
+    list, so the mistake a lead made eight times is the first failure the curator weighs,
+    not the eighth copy it has to notice is a copy.
+    """
     by_system: dict[str, list[dict]] = {}
-    for r in rows:
+    for r in _loop_persist.merge_pitfalls(rows):
         system = str(r.get("system") or "").strip()
         if system:
             by_system.setdefault(system, []).append(r)
     out: list[dict] = []
     for system in sorted(by_system):
+        # `occurrences` is stamped on every record `merge_pitfalls` returns, so it is read
+        # here as a key, not coalesced a second time.
+        failures = sorted(by_system[system], key=lambda f: f["occurrences"], reverse=True)
         out.append(
             {
                 "system": system,
@@ -49,8 +60,9 @@ def _build_pitfalls_handoffs(rows: list[dict]) -> list[dict]:
                         "goal": f.get("goal", ""),
                         "executed_query": f.get("executed_query", ""),
                         "stderr_digest": f.get("stderr_digest", ""),
+                        "occurrences": f["occurrences"],
                     }
-                    for f in by_system[system]
+                    for f in failures
                 ],
             }
         )
@@ -115,23 +127,34 @@ def run_pitfalls(
     box=None,
 ) -> int:
     rows = _loop_persist.read_pitfalls(paths)
+    # The gate counts DISTINCT MISTAKES, not rows (#840). The queue keeps one row per
+    # failure, so a looping lead used to clear a threshold of 3 on a single lesson — and the
+    # threshold is #823 O3's evidence that the channel learned N things, which a count of
+    # failures is not.
+    records = _loop_persist.merge_pitfalls(rows)
     threshold = _loop_config.pitfalls_threshold()
-    if len(rows) < threshold:
-        if rows:
+    if len(records) < threshold:
+        if records:
             _log(
-                f"pitfalls queue below threshold (n={len(rows)}, "
-                f"threshold={threshold}) — skipping curation"
+                f"pitfalls queue below threshold (n={len(records)} distinct mistake(s) "
+                f"in {len(rows)} row(s), threshold={threshold}) — skipping curation"
             )
         return 0
+    # From the RAW rows: rotation is what empties the queue, so it has to name every row
+    # that fed a record, not just the exemplar the merge kept.
     batch_ids = [str(r["pitfall_id"]) for r in rows if r.get("pitfall_id")]
-    handoffs = _build_pitfalls_handoffs(rows)
+    handoffs = _build_pitfalls_handoffs(records)
     if not handoffs:
-        _log(f"{len(rows)} queued pitfall(s) but none carried a system — dropping")
+        _log(f"{len(records)} queued pitfall(s) but none carried a system — dropping")
         _loop_persist.rotate_pitfalls(batch_ids, None, paths=paths)
         return 0
     repo_root = paths.repo_root
     baseline_stray = _author_shared.changes_outside(repo_root, SKILLS_REL)
-    _log(f"pitfalls curation: {len(rows)} failure(s) across {len(handoffs)} system(s)")
+    _log(
+        f"pitfalls curation: {len(records)} distinct mistake(s) "
+        f"({sum(r['occurrences'] for r in records)} failure(s)) "
+        f"across {len(handoffs)} system(s)"
+    )
 
     rc = (invoke or _invoke_pitfalls_agent)(handoffs, repo_root=repo_root, box=box)
     if rc != 0:
