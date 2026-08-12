@@ -159,6 +159,15 @@ slot of the class tuple or as an attribute value. Resolve via
 
 ## Core blocks
 
+A header's `?` marks the columns a row may leave off the end
+(`[id|type|class|ident|attrs?]` — four cells is a complete row). Every
+other column has to be written, empty if it has no value: a row that
+stops short of the last required column is denied, because the alternative
+is padding it with empty strings and reading back a record the author
+never wrote. Within a cell, a `"` may only wrap a whole value — the whole
+cell, a whole `;`-subcell, or the whole right side of a `k=v`. A quote
+that opens mid-token swallows the next `|`; write a literal one as `\"`.
+
 `:V` vertices:
 
 ```invlang
@@ -259,8 +268,9 @@ keyed on the contract id. Columns:
 - `edge` — the edge the contract attaches to (must match the declaring `ac<n>` row's `edge_ref`).
 - `fulfills` — the `ac<n>` contract id from `:H h-NNN.authz` being closed.
   The row names no hypothesis, so `ac<n>` numbers across the DOCUMENT, not
-  per hypothesis the way `p<n>`/`r<n>` do — declaring `ac1` on two
-  hypotheses is denied on write, since one row would discharge both.
+  per hypothesis the way `p<n>`/`r<n>` do — declaring `ac1` on two hypotheses
+  that are both still live is denied on write, since one row would discharge
+  both.
 - `verdict` — `authorized | unauthorized | indeterminate`.
 - `anchor_kind` — closed vocab (`enum anchor-kinds`); must match the declaring contract's `anchor_kind`.
 - `reasoning` — short citation of the supporting fact (quoted).
@@ -456,9 +466,10 @@ ac1|proposed|iam-policy|"service account allowed to read object at event time"|e
 
 `ac<n>` numbers across the DOCUMENT, not per hypothesis the way
 `p<n>`/`r<n>` do: the resolving `:R authz` row names only the contract
-it fulfills, so a second hypothesis numbering its first contract `ac1`
-is denied on write. Two rows in one block may not share an id either —
-only the first is kept.
+it fulfills, so a second LIVE hypothesis numbering its first contract
+`ac1` is denied on write. (Refuting one of the two also ends the
+ambiguity — a contract on a refuted hypothesis discharges nothing.) Two
+rows in one block may not share an id either — only the first is kept.
 
 Authz checks ask whether an interaction edge is permitted; impact
 checks whether the edge's effect crosses a threshold. Integrity is

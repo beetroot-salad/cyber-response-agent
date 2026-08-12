@@ -101,6 +101,82 @@ def test_a_laced_ident_cell_no_longer_hides_an_open_attribute_from_the_benign_ga
     assert _blocked(validate_companion(laced))
 
 
+def test_a_quote_opening_mid_token_is_refused_rather_than_merging_cells():
+    """F-14's residual half, and the one the `\\"` fix did NOT close: an EVEN number of plain
+    `"` merges cells with row parity intact, so `_has_unbalanced_quote` stays silent. Nor can
+    a cell count see it — the merge eats one delimiter and the optional trailing `attrs?`
+    absorbs the shift, so `signing=??` lands in `ident`, which by #836/N9 gates nothing. What
+    is actually malformed is the quote's POSITION, and that is what the row is refused for."""
+    merged = _benign_doc(
+        'v-001|compute|bastion"/internal/known-corp|bastion"-01.corp|signing=??'
+    )
+    _companion, warnings = parse_dense_companion(merged)
+    assert len(warnings) == 1
+    assert warnings[0].reason.startswith(
+        'cell \'bastion"/internal/known-corp|bastion"-01.corp\' opens a `"` inside a token'
+    )
+    assert validate_companion(merged)
+
+
+def test_a_row_short_of_a_required_column_is_refused_not_padded():
+    """The pad was the silent half of F-14: a record short of what its own header requires
+    became a record with empty strings in it, and no diagnostic. The `?` flags say which
+    columns may be omitted; anything before the last required one is a refusal."""
+    truncated = _benign_doc("v-001|compute|bastion/internal/known-corp")
+    _companion, warnings = parse_dense_companion(truncated)
+    assert [w.reason for w in warnings] == [
+        "row has 3 cells but the header requires 4 for [id|type|class|ident|attrs] — "
+        "only a `?` column may be omitted (an unbalanced `\"` inside a cell merges the "
+        'cells after it: quote the whole cell, or escape the quote as `\\"`)'
+    ]
+    assert validate_companion(truncated)
+
+
+def test_a_quoted_cell_and_a_quoted_subcell_value_are_still_legal():
+    """The controls the placement rule is bounded by — every quoting shape the corpus uses:
+    a wholly-quoted cell carrying a `|`, and a quoted value inside a `k=v` subcell."""
+    doc = _doc(
+        ":V prologue.vertices [id|type|class|ident|attrs?]\n"
+        'v-001|process|process:bash|bash[pid=42]|flags="EXE_WRITABLE|EXE_LOWER";user=root',
+        ":L findings [id|loop|name|target|tests|system|window]\n"
+        "l-001|1|cmdb-lookup|v-001||cmdb|n/a",
+        ":R authz [resolved_by|edge|fulfills|verdict|anchor_kind|reasoning]\n"
+        'l-001|e-001|ac1|authorized|change-mgmt|"CHG-4471 covers the window"',
+    )
+    companion, warnings = parse_dense_companion(doc)
+    assert warnings == []
+    assert companion["prologue"]["vertices"][0]["attributes"] == {
+        "flags": "EXE_WRITABLE|EXE_LOWER",
+        "user": "root",
+    }
+
+
+def test_an_empty_table_still_writes_itself_as_one_none_row():
+    """`none` under a two-column header is a COMPLETE row saying the table is empty, not a
+    truncated one — the shape `:T conclude.surviving` uses when every hypothesis was
+    refuted. The required-cell check has to know the marker or it refuses that document."""
+    doc = _doc(
+        ":V prologue.vertices [id|type|class|ident|attrs?]\n"
+        "v-001|compute|bastion/internal/known-corp|bastion-01.corp|",
+        ":L findings [id|loop|name|target|tests|system|window]\n"
+        "l-001|1|cmdb-lookup|v-001||cmdb|n/a",
+        ":T conclude.surviving [hyp_id|final_weight]\nnone",
+    )
+    _companion, warnings = parse_dense_companion(doc)
+    assert warnings == []
+    assert validate_companion(doc) == []
+
+
+def test_an_omitted_trailing_optional_column_is_still_padded():
+    """The control the `?` flags exist for: `attrs?` is optional, so a row that stops after
+    `ident` — with no trailing `|` — is a complete row and still parses."""
+    doc = _benign_doc("v-001|compute|bastion/internal/known-corp|bastion-01.corp")
+    companion, warnings = parse_dense_companion(doc)
+    assert warnings == []
+    assert companion["prologue"]["vertices"][0]["identifier"] == "bastion-01.corp"
+    assert validate_companion(doc) == []
+
+
 # --------------------------------------------------------------------------- #
 # F-15 — every documented spelling of an unresolved slot blocks benign
 # --------------------------------------------------------------------------- #
@@ -189,7 +265,15 @@ _TWO_LIVE_HYPS = (
 )
 
 
-def _authz_doc(first_id: str, second_id: str, *resolution_rows: str) -> str:
+def _authz_doc(
+    first_id: str, second_id: str, *resolution_rows: str, refute: str = ""
+) -> str:
+    moved = (
+        ":T resolutions\n"
+        f"{refute}  null → --    [l-001 p1 severe ⟂ e-001 :: no change window covers it]"
+        if refute
+        else ""
+    )
     return _doc(
         ":V prologue.vertices [id|type|class|ident|attrs?]\n"
         "v-001|compute|bastion/internal/known-corp|bastion-01.corp|",
@@ -204,6 +288,7 @@ def _authz_doc(first_id: str, second_id: str, *resolution_rows: str) -> str:
         "l-001|1|change-lookup|v-001|h-001,h-002|change-mgmt|n/a",
         ":R authz [resolved_by|edge|fulfills|verdict|anchor_kind|reasoning]\n"
         + "\n".join(resolution_rows),
+        moved,
         _CONCLUDE_BENIGN,
     )
 
@@ -216,9 +301,26 @@ def test_two_hypotheses_declaring_the_same_contract_id_are_denied():
     )
     errors = validate_companion(doc)
     assert any(
-        "authz contract 'ac1' is declared by more than one hypothesis" in e for e in errors
+        "authz contract 'ac1' is declared by more than one live hypothesis" in e
+        for e in errors
     ), errors
     assert any("h-001" in e and "h-002" in e for e in errors)
+
+
+def test_a_collision_with_one_side_refuted_is_not_denied():
+    """LIVE, not declared — and the scope is what keeps the rule repairable. `investigation.md`
+    is append-only and `:H` rows are immutable, so a collision already on disk can never be
+    edited away; under a declared-set reading every later write to that document would be
+    denied for a row the author is not allowed to touch. Refuting one side is the in-grammar
+    move that ends the ambiguity, and it costs nothing: `_check_benign_authz` reads the same
+    live set, so a contract on a refuted hypothesis discharges nothing either way."""
+    doc = _authz_doc(
+        "ac1",
+        "ac1",
+        'l-001|e-001|ac1|authorized|change-mgmt|"CHG-4471 covers the window"',
+        refute="h-002",
+    )
+    assert not [e for e in validate_companion(doc) if "authz contract" in e]
 
 
 def test_one_authz_row_no_longer_discharges_a_siblings_contract():

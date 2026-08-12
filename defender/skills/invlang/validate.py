@@ -422,7 +422,7 @@ def _check_prediction_refs(companion: CompanionBody) -> list[str]:
 
 
 def _check_authz_contract_ids(companion: CompanionBody) -> list[str]:
-    """An `ac*` id is declared by AT MOST ONE hypothesis in the document.
+    """An `ac*` id is declared by AT MOST ONE LIVE hypothesis.
 
     `:R authz` has no hypothesis column — the row names the contract it fulfills and nothing
     else — so the id is what carries the binding, and every reader resolves it document-wide.
@@ -436,14 +436,27 @@ def _check_authz_contract_ids(companion: CompanionBody) -> list[str]:
     mistake here — `p*` and `r*` DO restart per hypothesis in every shipped example — so the
     error says which ids collide and that `ac*` numbers across the document.
 
+    LIVE, not declared, and the scope is what makes the rule repairable. `investigation.md`
+    is append-only and `:H` rows are immutable, so a collision already on disk cannot be
+    edited away — under a declared-set reading, every later write to that document would be
+    denied for a row the author is no longer allowed to touch, and `learning/core/persist.py`
+    dead-letters the run. Refuting one of the two is an in-grammar, append-only move that
+    ends the ambiguity honestly, and it is the same set `_check_benign_authz` reads: a
+    contract on a refuted hypothesis discharges nothing, so a collision there costs nothing.
+    Two hypotheses that are both still live is the case with no honest reading, and it stays
+    refused.
+
     Only the cross-hypothesis collision reaches here: `_extend_by_id` keeps the first row per
     id when ONE `:H <h>.authz` block repeats an id, so the folded record this walks carries
     one contract either way. That repeat is not silent — the projector warns on it, because
     keeping the first row DISCARDS the second contract's predicate and the benign gate would
     then never have to satisfy it.
     """
+    live = set(_walkers.live_hypothesis_ids(companion))
     declared_by: dict[str, set[str]] = {}
     for hid, hyp in _walkers.all_hypotheses(companion).items():
+        if hid not in live:
+            continue
         for c in hyp.get("authorization_contract") or []:
             if not isinstance(c, dict):
                 continue
@@ -451,10 +464,10 @@ def _check_authz_contract_ids(companion: CompanionBody) -> list[str]:
             if isinstance(cid, str) and cid:
                 declared_by.setdefault(cid, set()).add(hid)
     return [
-        f"authz contract {cid!r} is declared by more than one hypothesis "
+        f"authz contract {cid!r} is declared by more than one live hypothesis "
         f"({', '.join(sorted(hids))}) — a `:R authz` row names only the contract it "
         f"fulfills, so one row would discharge all of them; number `ac*` across the "
-        f"document, not per hypothesis"
+        f"document, not per hypothesis (or refute one of them, if the evidence says so)"
         for cid, hids in declared_by.items()
         if len(hids) > 1
     ]

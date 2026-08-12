@@ -82,7 +82,7 @@ the legitimacy question. The resolving lead writes a `:R authz` row (verdict
 ∈ `authorized | unauthorized | indeterminate`) whose `fulfills` column names
 the `ac<n>` it closes — and names no hypothesis, so `ac<n>` numbers across
 the DOCUMENT, not per hypothesis the way `p<n>`/`r<n>` do. Declaring `ac1`
-on two hypotheses is denied on write. `disposition: benign` requires every
+on two hypotheses that are both still live is denied on write. `disposition: benign` requires every
 authz contract on a surviving hypothesis to resolve `authorized`; `unauthorized` /
 `indeterminate` forces escalation. Authz outcomes go in `:R authz`, never in
 `:R attr_updates` keyed on a contract id.

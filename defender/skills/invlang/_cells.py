@@ -64,15 +64,32 @@ def _unquote(s: str) -> str:
     return s
 
 
-def _has_unbalanced_quote(s: str) -> bool:
-    """True when a row opens a `"` it never closes — the multi-line author's signature.
+#: What the format writes where a row has nothing to say (`docs/dense-investigation-
+#: format.md`: these "carry `none` / `n/a`" unless the run terminated on a ceiling). A list row
+#: holding it projects as absence, so a reader tests `conclude.get("ceiling_test")` rather than
+#: filtering a sentinel back out.
+#:
+#: Lives at this layer rather than beside the conclude projection because `_row_cells` is now
+#: a SECOND reader: `none` is also how an empty TABLE is written (`:T conclude.surviving`
+#: carrying one `none` row), and a one-cell row under a two-column header is exactly the shape
+#: the required-cell check refuses. One owner, so the two readings cannot drift apart.
+_CONCLUDE_EMPTY_MARKERS: frozenset[str] = frozenset({"none", "n/a"})
 
-    invlang is line-oriented: `_tokenize_fence` makes ONE row per line for every block, so a
-    value written across two lines keeps line one (quote dangling) and reparses the rest as
-    fresh rows. Parity is the test, not a leading `"`: `summary  "sensu" login is sanctioned`
-    is a valid one-line row that starts with a quote, and denying it would block a conclusion
-    the author cannot rewrite into anything the check likes better.
+
+def is_conclude_empty_marker(value: object) -> bool:
+    """Does this conclude row value spell "nothing to say"? THE membership test for the
+    vocabulary above, beside the vocabulary.
+
+    A SCALAR row keeps the marker — only the list branch drops it — so a gate that asks
+    "did the run state a defect" has to ask this rather than `value.strip()`: `detection_notes
+    none` is the row that explicitly says there is no defect, and it is not blank.
     """
+    return isinstance(value, str) and value.strip().lower() in _CONCLUDE_EMPTY_MARKERS
+
+
+def _count_unescaped_quotes(s: str) -> int:
+    """How many `"` the tokenizer will TOGGLE on — escape pairs skipped, exactly as
+    `_split_quoted` consumes them."""
     quotes = 0
     i = 0
     while i < len(s):
@@ -82,16 +99,92 @@ def _has_unbalanced_quote(s: str) -> bool:
         if s[i] == '"':
             quotes += 1
         i += 1
-    return quotes % 2 == 1
+    return quotes
+
+
+def _has_unbalanced_quote(s: str) -> bool:
+    """True when a row opens a `"` it never closes — the multi-line author's signature.
+
+    invlang is line-oriented: `_tokenize_fence` makes ONE row per line for every block, so a
+    value written across two lines keeps line one (quote dangling) and reparses the rest as
+    fresh rows. Parity is the test, not a leading `"`: `summary  "sensu" login is sanctioned`
+    is a valid one-line row that starts with a quote, and denying it would block a conclusion
+    the author cannot rewrite into anything the check likes better.
+    """
+    return _count_unescaped_quotes(s) % 2 == 1
+
+
+def _strip_quote_wrapper(s: str) -> str:
+    s = s.strip()
+    if len(s) >= 2 and s[0] == '"' and s[-1] == '"':
+        return s[1:-1]
+    return s
+
+
+def _quotes_wrap_whole_values(cell: str) -> bool:
+    """Does every `"` in this cell WRAP a value, rather than open mid-token?
+
+    Row parity is not enough, and the gap is not academic: `bastion"/internal|bastion"-01`
+    carries an EVEN number of quotes, so `_has_unbalanced_quote` stays silent, and yet the
+    first one opens a quoted span that swallows the `|` between them. Every cell after it
+    shifts left and the optional trailing column absorbs the shift, so the count check cannot
+    see it either — an `attrs` value slides into `ident`, where nothing gates it (#853/F-14).
+
+    A quote is legal wrapping the whole cell (`"free text with a | in it"`), a whole
+    `;`-subcell, or the whole right-hand side of a `k=v` (`flags="EXE_WRITABLE|EXE_LOWER"`).
+    That is every shape the shipped corpus uses. Anything else is a quote opening inside a
+    token, which is the malformation; an inner quote that is meant literally spells itself
+    `\\"` and never reaches the toggle.
+
+    Rows in blocks that declare no `[a|b|c]` header never arrive here — `:T conclude` and
+    `:T resolutions` carry free text with bare quotes and are projected by their own readers,
+    not by cell splitting.
+    """
+    if _count_unescaped_quotes(cell) == 0:
+        return True
+    if _count_unescaped_quotes(_strip_quote_wrapper(cell)) == 0:
+        return True
+    for sub in _split_subcells(cell):
+        if _count_unescaped_quotes(sub) == 0:
+            continue
+        if _count_unescaped_quotes(_strip_quote_wrapper(sub)) == 0:
+            continue
+        _key, sep, value = sub.partition("=")
+        if sep and _count_unescaped_quotes(_strip_quote_wrapper(value)) == 0:
+            continue
+        return False
+    return True
 
 
 def _row_cells(block: Block, row: str, expected: int) -> list[str]:
     cells = _split_cells(row)
+    # Before either count check, because a bad count is usually this defect's SYMPTOM and
+    # the author needs the cause named: a quote that opens mid-token merged the cells.
+    for cell in cells:
+        if not _quotes_wrap_whole_values(cell):
+            raise RowError(
+                f"cell {cell!r} opens a `\"` inside a token — a quote may only wrap a "
+                f"whole cell, a whole `;`-subcell or the whole value of a `k=v`, and "
+                f"anything else silently merges this row's remaining cells; write a "
+                f"literal quote as `\\\"`"
+            )
     if len(cells) > expected:
         header = f" for [{'|'.join(block.columns)}]" if block.columns else ""
         raise RowError(
             f"row has {len(cells)} cells but {expected} expected{header} "
             f"(check for unescaped `|` inside an attrs/value cell)"
+        )
+    # "Empty arrays render as a single `none` row" (`docs/dense-investigation-format.md`), so
+    # a lone marker is a COMPLETE row saying the table is empty — not a truncated one.
+    if len(cells) == 1 and is_conclude_empty_marker(cells[0]):
+        return cells + [""] * (expected - 1)
+    if len(cells) < block.required_cells:
+        header = f" for [{'|'.join(block.columns)}]" if block.columns else ""
+        raise RowError(
+            f"row has {len(cells)} cells but the header requires "
+            f"{block.required_cells}{header} — only a `?` column may be omitted "
+            f"(an unbalanced `\"` inside a cell merges the cells after it: quote the "
+            f"whole cell, or escape the quote as `\\\"`)"
         )
     if len(cells) < expected:
         cells = cells + [""] * (expected - len(cells))

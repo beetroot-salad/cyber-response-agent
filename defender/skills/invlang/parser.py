@@ -19,6 +19,7 @@ from ._cells import (
     _split_quoted,  # noqa: F401 — re-export: invlang tests import it from `parser`
     _split_subcells,  # noqa: F401 — re-export: invlang tests import it from `parser`
     _unquote,
+    is_conclude_empty_marker,  # noqa: F401 — re-export: parser is this name's public home
 )
 from ._types import Block, RowError
 from .vocab import UNOBSERVED_EDGE_REF
@@ -100,15 +101,27 @@ def _tokenize_fence(body: str) -> list[Block]:
         if m:
             in_story = False
             cols_raw = m.group("cols")
-            cols = (
-                [c.strip().rstrip("?") for c in cols_raw.split("|")]
+            declared = (
+                [c.strip() for c in cols_raw.split("|")]
                 if cols_raw is not None
                 else None
+            )
+            cols = (
+                [c.rstrip("?") for c in declared] if declared is not None else None
+            )
+            required = (
+                max(
+                    (i + 1 for i, c in enumerate(declared) if not c.endswith("?")),
+                    default=0,
+                )
+                if declared is not None
+                else 0
             )
             cur = Block(
                 tag=m.group("tag"),
                 name=m.group("name"),
                 columns=cols,
+                required_cells=required,
             )
             blocks.append(cur)
             continue
@@ -565,24 +578,6 @@ _CONCLUDE_KEYS_HINT = ", ".join(
     sorted(_CONCLUDE_SCALARS | _CONCLUDE_LISTS)
     + ["termination.category", "termination.rationale"]
 )
-
-#: What the format writes where a conclude row has nothing to say (`docs/dense-investigation-
-#: format.md`: these "carry `none` / `n/a`" unless the run terminated on a ceiling). A list row
-#: holding it projects as absence, so a reader tests `conclude.get("ceiling_test")` rather than
-#: filtering a sentinel back out.
-_CONCLUDE_EMPTY_MARKERS: frozenset[str] = frozenset({"none", "n/a"})
-
-
-def is_conclude_empty_marker(value: object) -> bool:
-    """Does this conclude row value spell "nothing to say"? THE membership test for the
-    vocabulary above, beside the vocabulary.
-
-    A SCALAR row keeps the marker — only the list branch below drops it — so a gate that asks
-    "did the run state a defect" has to ask this rather than `value.strip()`: `detection_notes
-    none` is the row that explicitly says there is no defect, and it is not blank.
-    """
-    return isinstance(value, str) and value.strip().lower() in _CONCLUDE_EMPTY_MARKERS
-
 
 def _close_loop(rows: list[str]) -> int | None:
     for row in rows:
