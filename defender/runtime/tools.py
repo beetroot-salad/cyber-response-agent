@@ -26,6 +26,7 @@ from . import box as box_mod
 from . import permission
 from .agent_definition import ResolvedRoots, ToolSet
 from .agent_role import AgentRole
+from .permission.files import RESOLVE_ERRORS
 
 from defender._untrusted import wrap as _wrap
 # The SAME byte ruler the #629 bounds are measured with — a write tool that reports "bytes"
@@ -310,6 +311,15 @@ def _tool_bash(deps: AgentDeps, command: str) -> str:
         raise ModelRetry(f"command timed out after {_BASH_TIMEOUT_S}s: {command}") from e
     except box_mod.BoxFault as e:
         raise ModelRetry(f"the sandbox could not run this command: {e}") from e
+    # #851 F-07/F-10, belt-and-braces behind the gate's NUL deny. `encode_request` sits ABOVE
+    # `run_parsed`'s own try (box.py) and raises a bare `ValueError` for a frame it cannot
+    # encode; nothing between here and `run.py::main` catches that type — not this handler
+    # stack, not `_drive_agent`'s five named arms, not the gather lane's — so an unencodable
+    # argv took the whole investigation down with a traceback and no disposition. It becomes a
+    # refusal the model can act on instead. The encoder's exception TYPE is left alone
+    # deliberately: `test_540_exec_seam.py` pins `pytest.raises(ValueError)` on `run_parsed`.
+    except ValueError as e:
+        raise ModelRetry(f"the command cannot cross the box wire: {e}") from e
     _record_shim_failure(deps, decision, command, result)
     capping = min(operands, key=_cap_for, default=None)
     formatted = _format_bash_result(
@@ -611,8 +621,19 @@ def _closed_for_investigation_write(deps: AgentDeps, p: Path) -> bool:
     """RS15. `investigation.md` becomes review-state-aware AFTER a close commits — no
     post-close write can silently move the recorded disposition. The working document
     itself stays otherwise model-writable throughout the investigation (untouched by
-    this change up to the close); this is the ONE new gate on it."""
-    if p.resolve() != (deps.run_dir / "investigation.md").resolve():
+    this change up to the close); this is the ONE new gate on it.
+
+    #851 F-25: the `resolve()` here runs one line AHEAD of `decide_write`/`decide_read`, so an
+    operand it cannot resolve (an embedded NUL — `ValueError`; a symlink cycle — `RuntimeError`)
+    escaped the write/edit tool as an unhandled exception and quarantined the whole authoring
+    spawn, routing around the fail-closed `Decision(False)` the gate's `RESOLVE_ERRORS` rule
+    exists to produce. An unresolvable operand is certainly not `<run_dir>/investigation.md`, so
+    answering False is honest — and it hands the operand straight to the gate, which denies it
+    with the correctable "could not be resolved (failing closed)" reason."""
+    try:
+        if p.resolve() != (deps.run_dir / "investigation.md").resolve():
+            return False
+    except RESOLVE_ERRORS:
         return False
     from .challenge_gate import ReviewState
 

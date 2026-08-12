@@ -38,10 +38,24 @@ def _catalog() -> str:
 
 
 def _alert_signature(alert_path: Path) -> str | None:
+    """The alert's `rule.id`, always as a `str` — the annotation, honoured (#851 F-23).
+
+    It used to return the parsed JSON value RAW, so a hand-authored or foreign-SIEM
+    `alert.json` carrying a numeric id (`"id": 5710`) detonated in `re.escape` on
+    `orientation()`'s unguarded path and killed the run before the first model request, with an
+    opaque `TypeError: decoding to str` instead of a legible complaint — a breach of this
+    module's own "orientation must never break the run" invariant. Both consumers take the value
+    as text (`re.escape` in `_build_lessons_section`, a `subprocess.run` argv in
+    `_build_corpus_vocab_section`), so coercing at the reader fixes both at once. Matches
+    `skills/invlang/corpus.py::_read_signature_id`, the other reader of this field.
+
+    Empty and `None` collapse to `None`: an empty signature would build a `.*` lessons pattern
+    that matches every row, which is not "the alert has no signature"."""
     try:
-        return json.loads(read_text_utf8(Path(alert_path)))["rule"]["id"]
+        rid = json.loads(read_text_utf8(Path(alert_path)))["rule"]["id"]
     except (OSError, ValueError, KeyError, TypeError):
         return None
+    return str(rid) if rid not in (None, "") else None
 
 
 def _raw_alert(alert_path: Path, salt: str) -> str | None:

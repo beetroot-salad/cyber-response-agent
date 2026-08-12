@@ -409,11 +409,12 @@ def decide_write(
     guard's former dormant-when-omitted mode: the containment check now always runs, a pinned
     no-op for every real writer whose `write_allow` already sits inside its read roots.
 
-    Once both allowlist halves pass, a write to one of the run's two model-authored
-    artifacts faces its CONTENT SCHEMA (`defender._artifact_schema`): report.md's
-    frontmatter grammar and byte bounds, investigation.md's byte bound and structural
-    invlang validation. Any schema reason denies with that text, so the model can fix its
-    own output — the in-process equivalent of the hook's exit-2 feedback.
+    Once both allowlist halves pass, EVERY allowed write is checked for UTF-8-encodability, and
+    a write to one of the run's two model-authored artifacts additionally faces its CONTENT
+    SCHEMA (`defender._artifact_schema`): report.md's frontmatter grammar and byte bounds,
+    investigation.md's byte bound and structural invlang validation. Any schema reason denies
+    with that text, so the model can fix its own output — the in-process equivalent of the
+    hook's exit-2 feedback.
     """
     path = Path(path)
     try:
@@ -438,6 +439,20 @@ def decide_write(
             f"Blocked: {path} is outside this agent's read roots — a write must land within the "
             "agent's read containment (write ⊆ read roots).",
         )
+
+    # #851 F-26 — the UTF-8-encodability check applies to EVERY allowed write, not only to the
+    # two artifacts whose schemas happen to measure bytes. It used to sit inside
+    # `validate_artifact`, below the keying, so a lone surrogate (reachable from a model
+    # tool-call arg on a provider that hands args back as an already-parsed dict) was ALLOWED on
+    # every non-artifact path — the curator's and lead author's corpus files — and then raised
+    # `UnicodeEncodeError` out of `write_guarded`, past a write tool that maps no exception,
+    # quarantining the authoring spawn instead of returning the refusal the SAME content earns
+    # on report.md. No allowed write can be byte-measured or written unencodable, so the check
+    # belongs to all of them: it keeps the gate's "return a Decision, never propagate" contract
+    # (its RESOLVE_ERRORS rule) literally true on the non-artifact branch too.
+    reason = _artifact_schema.encodable_or_reason(proposed_text, str(path))
+    if reason is not None:
+        return Decision(False, reason)
 
     # #629 — the run's two model-authored output artifacts get a structural + volume gate,
     # keyed on the operand RESOLVING to the run-dir ROOT (not `path.name` alone). Resolving

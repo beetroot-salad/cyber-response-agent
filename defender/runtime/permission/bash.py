@@ -46,6 +46,23 @@ def _stage_unsafe(argv: list[str]) -> bool:
     return False
 
 
+EMBEDDED_NUL_REASON = (
+    "Blocked: the command contains a NUL byte (U+0000), which no command can carry — it "
+    "cannot cross the box wire, and it makes an operand unresolvable. Re-send the command "
+    "without it."
+)
+"""#851 F-07/F-10. Denied on the WHOLE command string, ahead of the parse, because the two
+places that would otherwise catch a NUL each miss half the surface. `_in_scope`'s
+`RESOLVE_ERRORS` arm only runs for a program whose extractor OPENS something — every
+`OPENS_NOTHING` grant (grep/echo/wc/python3/rm/the `defender-*` shims) was ALLOWED with a NUL
+in its argv, and `encode_request` then raised a bare `ValueError` out of `BoxExecutor.run_parsed`
+that no handler between there and `run.py::main` catches, killing the whole investigation instead
+of refusing one command. And `_claim` cannot tell a NUL a token really carries from the
+`_TOKEN_SPACE` sentinel it substitutes for an intra-token space — the two collapse in the very
+string every grant pattern is `fullmatch`ed against. Refusing the whole command outright closes
+both, and is free: no legitimate command carries one."""
+
+
 UNTOKENIZABLE_REASON = (
     "Blocked: the command could not be tokenized — an unbalanced quote or a trailing "
     "`\\`. Each PHYSICAL LINE is lexed on its own (there is no shell to join them), so "
@@ -154,6 +171,9 @@ def decide_bash(
     cmd = command.strip()
     if not cmd:
         return BashDecision(True)
+
+    if "\x00" in cmd:
+        return BashDecision(False, EMBEDDED_NUL_REASON)
 
     try:
         pipelines = _parse(cmd)
