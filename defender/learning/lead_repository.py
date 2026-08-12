@@ -6,7 +6,7 @@ import json
 import re
 import shutil
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -15,6 +15,7 @@ import yaml
 from defender._io import TEXT_READ_ERRORS, read_jsonl_rows, read_text_utf8
 from defender._run_paths import RunPaths, artifact_dir, artifact_file, contained_payload
 from defender.runtime.circuit_breaker import error_class_for_exit
+from defender.scripts.gather_tools.record_query import is_reserved_query_id
 
 if TYPE_CHECKING:
     from defender.skills.invlang.schema import CompanionBody
@@ -47,6 +48,20 @@ class QueryRow:
     payload_digest: str
     raw_ref: Path | None
 
+    @property
+    def is_sentinel(self) -> bool:
+        """Is this row a WRITER-ONLY record rather than a query the defender ran?
+
+        The `∅.`-prefixed sentinels (`record_query.RESERVED_QUERY_ID_PREFIX`) all share one
+        property: nothing they describe reached a system of record. A repeat the guard refused,
+        a call the argument schema turned back, a reducer shim that failed — each is an
+        RECORD about the lead's conduct, written into the queries table because that is
+        the only append-only surface the run has, not because a query was issued.
+
+        The predicate is the writer's own (`is_reserved_query_id`, #823) rather than a second
+        list of literals here: a fourth sentinel must partition on the day it is defined."""
+        return is_reserved_query_id(self.query_id)
+
 
 @dataclass(frozen=True)
 class JoinedLead:
@@ -54,11 +69,28 @@ class JoinedLead:
     lead_id: str
     goal: str | None
     what_to_summarize: list
+    #: The queries the defender ACTUALLY RAN, seq-ordered — every consumer that means
+    #: "what did this lead ask" reads this, and gets no sentinel row by construction (#841).
     queries: list
     orphan: bool = False
     #: K11 — absent (`None`) reads as model-authored; every row on disk before this field
     #: existed predates the schema addition and must join the same way.
     provenance: str | None = None
+    #: The lead's `∅.`-prefixed rows, seq-ordered. Split OUT of `queries` rather than filtered
+    #: at each consumer (#841): a filter is a thing a future reader forgets, whereas a field
+    #: named `queries` that holds only queries makes the safe reading the default one. The rows
+    #: are still HERE, not dropped, because `collect_general_failures` reaches them through
+    #: `extract_from_joined` — the pitfalls residue is the whole point of #823.
+    sentinels: list = field(default_factory=list)
+
+    @property
+    def rows(self) -> list:
+        """Every row this lead has in the queries table, in seq order — `queries` and
+        `sentinels` remerged. For the readers that mean "the table", not "the queries":
+        the offline extraction (whose `pitfall_id` keys on position, so the order must be the
+        table's own) and the run-inspection HTML (where hiding a refusal row from a human
+        debugging the run is the opposite of the help)."""
+        return sorted([*self.queries, *self.sentinels], key=lambda r: r.seq)
 
 
 
@@ -158,27 +190,45 @@ def joined(run_dir: Path) -> list[JoinedLead]:
         if lid in orphans:
             continue
         lead = leads.get(lid, {})
+        issued, observed = _partition(buckets.get(lid, []))
         out.append(
             JoinedLead(
                 lead_id=lid,
                 goal=lead.get("goal") if lid in leads else None,
                 what_to_summarize=lead.get("what_to_summarize", []),
-                queries=sorted(buckets.get(lid, []), key=lambda r: r.seq),
+                queries=issued,
                 orphan=lid not in leads,
                 provenance=lead.get("provenance") if lid in leads else None,
+                sentinels=observed,
             )
         )
     for lid in orphans:
+        issued, observed = _partition(buckets.get(lid, []))
         out.append(
             JoinedLead(
                 lead_id=lid,
                 goal=None,
                 what_to_summarize=[],
-                queries=sorted(buckets.get(lid, []), key=lambda r: r.seq),
+                queries=issued,
                 orphan=True,
+                sentinels=observed,
             )
         )
     return out
+
+
+def _partition(rows: list[QueryRow]) -> tuple[list[QueryRow], list[QueryRow]]:
+    """`(queries, sentinels)`, each seq-ordered.
+
+    A lead is bucketed on ALL its rows before this split, and the split is what decides which
+    of the two lists each row lands in — never whether the LEAD appears at all. A lead whose
+    only rows are sentinels still joins (with an empty `queries`), because it is a lead the
+    run really did open and the pitfalls residue really does read."""
+    ordered = sorted(rows, key=lambda r: r.seq)
+    return (
+        [r for r in ordered if not r.is_sentinel],
+        [r for r in ordered if r.is_sentinel],
+    )
 
 
 def first_rendered_payload(
@@ -217,12 +267,23 @@ def first_rendered_payload(
 
 
 def actor_view(run_dir: Path) -> dict:
+    """The actor's gray-box view: the queries the defender ran, and nothing else about it.
+
+    Sentinel rows are dropped and the lead is KEPT (#841). The two halves are one decision: a
+    lead that only ever tripped the repeat guard is still a lead the defender opened, and the
+    actor's whole job is to write a story around what the defender did and did not look at —
+    but `∅.repeat-trip` is a refusal record, and `∅.bash-shim` carries up to
+    `SHIM_COMMAND_MAX_CHARS` of model-authored shell text. Shown as queries, they tell the
+    actor the defender ran something it never ran, in words a prior turn chose."""
     run_dir = Path(run_dir)
     grouped: dict[str, list[dict]] = {}
     for q in load_queries(run_dir):
-        grouped.setdefault(q.lead_id, []).append(
-            {"query_id": q.query_id, "params": q.params}
-        )
+        # The lead is registered BEFORE the skip, so a lead whose only rows are sentinels
+        # still reaches the actor with an empty query list rather than vanishing.
+        entries = grouped.setdefault(q.lead_id, [])
+        if q.is_sentinel:
+            continue
+        entries.append({"query_id": q.query_id, "params": q.params})
     return {
         "case_id": run_dir.name,
         "alert_ref": "alert.json",
@@ -319,8 +380,11 @@ def narration_crosscheck(run_dir: Path, l_ids: set[str]) -> dict:
     table_ids = lead_ids | query_lead_ids
 
     jl = joined(run_dir)
+    # `.rows`, not `.queries`: this is a bookkeeping crosscheck between the narration and the
+    # two tables, so the question is whether the lead reached the TABLE at all. A lead that
+    # only tripped the repeat guard has a row and is not a lead the narration failed to write.
     leads_without_queries = sorted(
-        {j.lead_id for j in jl if not j.queries} | (l_ids - table_ids)
+        {j.lead_id for j in jl if not j.rows} | (l_ids - table_ids)
     )
 
     missing_from_narration = sorted(table_ids - l_ids)

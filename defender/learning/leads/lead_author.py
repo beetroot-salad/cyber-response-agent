@@ -105,6 +105,14 @@ def build_handoff(
     grouped: dict[Path, list[ExecutedLead]] = {}
     seen_order: list[Path] = []
     for lead in executed:
+        if lead.is_sentinel:
+            # Not a contract violation and not this collector's row: a `∅.`-prefixed sentinel
+            # records something the defender did NOT run, and it is routed to the pitfalls
+            # residue by construction (#823). Before #841 it fell to the WARN below, which
+            # said "runtime contract violation" about the one row shape the runtime is
+            # supposed to write — one line of noise per refusal, in the log an operator reads
+            # to find real catalog drift.
+            continue
         tpl = by_id.get(lead.query_id)
         if tpl is None:
             _log(
@@ -491,8 +499,9 @@ def _prepare_handoffs(
 
     if not handoffs and not pending_drafts:
         _log(
-            f"all {len(executed)} extracted lead(s) had unresolved "
-            "query_ids and no pending drafts — nothing to do"
+            f"none of the {len(executed)} extracted lead(s) resolved to a catalog "
+            "template (unresolved query_id, or a `∅.` sentinel routed to the pitfalls "
+            "residue) and there are no pending drafts — nothing to do"
         )
         _write_state(
             _done_sentinel(run_dir),

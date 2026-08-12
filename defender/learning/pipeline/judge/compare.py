@@ -203,7 +203,16 @@ def _md_safe(text: str) -> str:
 
 def _payload_paths(c: LeadComparison, gather_raw: Path) -> list[str]:
     paths = [str(q.raw_ref) for q in c.queries if q.raw_ref is not None]
-    return paths or [str(gather_raw / c.lead_id / "0.json")]
+    if paths:
+        return paths
+    if not c.queries:
+        # #841 — a lead whose only rows are sentinels ran NO query, so it holds no payload.
+        # The `0.json` fallback below is for a lead that ran queries whose rows carry no
+        # payload path; firing it here would name the sentinel's OWN sidecar (written empty
+        # by `runtime/tools.py` for `∅.bash-shim`) and put the refusal record back in front
+        # of the judge by another door — under an absence instruction it cannot satisfy.
+        return []
+    return [str(gather_raw / c.lead_id / "0.json")]
 
 
 def _render_lead_file(c: LeadComparison, gather_raw: Path) -> str:
@@ -226,8 +235,25 @@ def _render_lead_file(c: LeadComparison, gather_raw: Path) -> str:
     authz = _yaml_or(c.authz, "(no authorization resolutions for this lead)")
 
     payloads = _payload_paths(c, gather_raw)
-    payload_lines = "".join(f">   {p}\n" for p in payloads)
-    example = payloads[0]
+    if payloads:
+        payload_lines = "".join(f">   {p}\n" for p in payloads)
+        example = payloads[0]
+        absence = (
+            "> The sample is ONE event, for shape orientation. To assert that an entity is\n"
+            "> ABSENT (the refute primitive), query the FULL payload — never infer absence\n"
+            "> from the sample. `DESCRIBE data` first; defender-sql names the columns and the\n"
+            "> right idiom for this payload's shape.\n"
+            f"> This lead's payloads ({len(payloads)}); an absence claim must cover ALL of them:\n"
+            f"{payload_lines}"
+            f">   cat {example} | defender-sql \"DESCRIBE data\"\n"
+            f">   cat {example} | defender-sql \"SELECT count(*) FROM (SELECT unnest(hits) h FROM data) WHERE h.<field> = '<value>'\"\n"
+        )
+    else:
+        absence = (
+            "> This lead executed no query, so it holds NO payload. There is nothing here to\n"
+            "> search: no absence claim can be grounded in this lead, and its coverage gap is\n"
+            "> the finding.\n"
+        )
 
     return (
         f"{head}\n\n"
@@ -235,14 +261,7 @@ def _render_lead_file(c: LeadComparison, gather_raw: Path) -> str:
         f"{q_lines}\n\n"
         "## Evidence — sample event (orientation only)\n"
         f"{c.real_sample}\n\n"
-        "> The sample is ONE event, for shape orientation. To assert that an entity is\n"
-        "> ABSENT (the refute primitive), query the FULL payload — never infer absence\n"
-        "> from the sample. `DESCRIBE data` first; defender-sql names the columns and the\n"
-        "> right idiom for this payload's shape.\n"
-        f"> This lead's payloads ({len(payloads)}); an absence claim must cover ALL of them:\n"
-        f"{payload_lines}"
-        f">   cat {example} | defender-sql \"DESCRIBE data\"\n"
-        f">   cat {example} | defender-sql \"SELECT count(*) FROM (SELECT unnest(hits) h FROM data) WHERE h.<field> = '<value>'\"\n\n"
+        f"{absence}\n"
         "## Defender reasoning (invlang — the \"why\")\n"
         "### Belief movement (:T resolutions)\n"
         f"{res}\n\n"

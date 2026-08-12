@@ -135,6 +135,7 @@ from defender.tests.e2e.test_query_tool_611 import (  # noqa: E402
 from defender.scripts.gather_tools.record_query import (  # noqa: E402
     REPEAT_ESCAPE,
     REPEAT_THRESHOLD,
+    REPEAT_TRIP_QUERY_ID,
     GatherDeadEnd,
     RepeatTrip,
     lead_rows,
@@ -1217,7 +1218,14 @@ def test_lead_repository_reads_the_trip_row_unchanged(tmp_path):
     trip, `joined` returns the lead with all three rows in seq order, the trip row's
     `raw_ref` resolves to a real on-disk payload, `stage_tables` copies it into the learning
     corpus unfiltered, and `repeat_trip` over the STAGED copy reaches the identical verdict —
-    no path, inode or mtime enters the key or the count."""
+    no path, inode or mtime enters the key or the count.
+
+    #841 moved WHICH LIST the trip row joins into, and nothing else: it is a refusal record,
+    not a query the defender ran, so `JoinedLead.queries` no longer holds it and
+    `JoinedLead.sentinels` does. Every fact this test was written to protect is asserted
+    below through `.rows`, which is the seq-ordered remerge — the row is not dropped, its
+    payload is still reachable to the join surface, staging is still byte-unfiltered, and the
+    replay verdict is still identical."""
     rec = VerbRecorder()
     r = _run(tmp_path / "src", verbs=elastic_ok(rec), run_id="d807-repo", turns=[
         q("elastic", "query", {"native_query": "FROM logs"}),
@@ -1230,9 +1238,15 @@ def test_lead_repository_reads_the_trip_row_unchanged(tmp_path):
         if lead.lead_id not in RESERVED_LEAD_IDS
     ]
     assert [lead.lead_id for lead in leads] == [LEAD]
-    queries = leads[0].queries
-    assert [qr.seq for qr in queries] == [0, 1, 2]
-    trip = queries[2]
+    rows = leads[0].rows
+    assert [qr.seq for qr in rows] == [0, 1, 2]
+    # #841's split, on the one lead that has both populations: the two calls that reached
+    # elastic are the queries, the refusal is the observation.
+    assert [qr.seq for qr in leads[0].queries] == [0, 1]
+    assert [qr.seq for qr in leads[0].sentinels] == [2]
+    trip = rows[2]
+    assert trip.query_id == REPEAT_TRIP_QUERY_ID
+    assert trip.is_sentinel
     assert trip.exit_code == 64
     assert trip.error_class == "agent-fixable"
     assert trip.raw_ref is not None, "the trip row's payload is unreachable to the join surface"

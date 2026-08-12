@@ -282,7 +282,7 @@ def _count_retries(messages: list[dict]) -> int:
 
 
 def _is_dead_end(jl) -> bool:
-    return jl.orphan or not jl.queries
+    return jl.orphan or not jl.rows  # "reached the table at all" (#841)
 
 
 def _safe_joined(run_dir: Path) -> list:
