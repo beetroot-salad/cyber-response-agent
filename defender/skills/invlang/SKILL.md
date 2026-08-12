@@ -454,6 +454,12 @@ Authz contracts live in `:H h-NNN.authz`:
 ac1|proposed|iam-policy|"service account allowed to read object at event time"|escalate|escalate
 ```
 
+`ac<n>` numbers across the DOCUMENT, not per hypothesis the way
+`p<n>`/`r<n>` do: the resolving `:R authz` row names only the contract
+it fulfills, so a second hypothesis numbering its first contract `ac1`
+is denied on write. Two rows in one block may not share an id either —
+only the first is kept.
+
 Authz checks ask whether an interaction edge is permitted; impact
 checks whether the edge's effect crosses a threshold. Integrity is
 source-side graph work — follow session/identity/process/compute

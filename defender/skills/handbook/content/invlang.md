@@ -68,7 +68,10 @@ A recurring decision the handbook gets asked about:
   the open slot inline with `??` (or `{a, b, c}` candidates) and let a lead
   close it via `:R attr_updates`. Refinement is not a hypothesis row.
 
-An unresolved `??` blocks `disposition: benign` — resolve it or escalate.
+An unresolved slot blocks `disposition: benign` — resolve it or escalate.
+A `{a, b, c}` candidate set is an unresolved slot too, in any slot of the
+class tuple or as an attribute value: it is an upgrade from `??`, not a
+resolution of it.
 
 ## Legitimacy is edge-coupled, not a hypothesis fork
 
@@ -77,8 +80,10 @@ authorized?", **don't fork them** — that's not a topological difference.
 Collapse to one hypothesis and attach an `:H h-N.authz` contract carrying
 the legitimacy question. The resolving lead writes a `:R authz` row (verdict
 ∈ `authorized | unauthorized | indeterminate`) whose `fulfills` column names
-the `ac<n>` it closes. `disposition: benign` requires every authz contract
-on a surviving hypothesis to resolve `authorized`; `unauthorized` /
+the `ac<n>` it closes — and names no hypothesis, so `ac<n>` numbers across
+the DOCUMENT, not per hypothesis the way `p<n>`/`r<n>` do. Declaring `ac1`
+on two hypotheses is denied on write. `disposition: benign` requires every
+authz contract on a surviving hypothesis to resolve `authorized`; `unauthorized` /
 `indeterminate` forces escalation. Authz outcomes go in `:R authz`, never in
 `:R attr_updates` keyed on a contract id.
 

@@ -976,20 +976,52 @@ class _Projector:
         """
         if sub == "preds":
             if preds := self._project_rows(block, _hyp_sub_pred_row):
+                self._warn_repeated_ids(block, preds)
                 _extend_by_id(hyp.setdefault("predictions", []), preds)
             return
         if sub == "attr_preds":
             if attr_preds := self._project_rows(block, _hyp_sub_attr_pred_row):
+                self._warn_repeated_ids(block, attr_preds)
                 _extend_by_id(hyp.setdefault("attribute_predictions", []), attr_preds)
             return
         if sub == "refuts":
             if refuts := self._project_rows(block, _hyp_sub_refut_row):
+                self._warn_repeated_ids(block, refuts)
                 _extend_by_id(hyp.setdefault("refutation_shape", []), refuts)
             return
         if sub == "authz":
             if authz := self._project_rows(block, _hyp_sub_authz_row):
+                self._warn_repeated_ids(block, authz)
                 _extend_by_id(hyp.setdefault("authorization_contract", []), authz)
             return
+
+    def _warn_repeated_ids(self, block: Block, rows: list[Any]) -> None:
+        """An id written twice in ONE sub-block DELETES the second row, so say so.
+
+        `_extend_by_id` keeps the first record per id — correct against the re-emission it
+        exists for, which is a whole block sent again as a SECOND block — but WITHIN one
+        block a repeated id is never a re-emission, and the row it drops carries content
+        nothing else does. A second `ac1` with a different predicate simply vanished, and
+        `_check_benign_authz` then discharged the surviving contract and closed benign over
+        a legitimacy question no lead ever asked. Same shape for a second `p1`/`r1`: the
+        prediction is gone while `:T resolutions` goes on citing the id.
+
+        Only the rows of the block in hand are compared, which is what keeps the legal
+        cross-block repeat silent.
+        """
+        seen: set[str] = set()
+        for r in rows:
+            rid = r.get("id") if isinstance(r, dict) else None
+            if not isinstance(rid, str) or not rid:
+                continue
+            if rid in seen:
+                self._warn(
+                    block, -1, "",
+                    f"{rid!r} is declared twice in this block; only the FIRST row is kept "
+                    f"and the later one is discarded with everything it declares. Give each "
+                    f"row its own id, or send the added rows as a second block.",
+                )
+            seen.add(rid)
 
     def _project_lead_subblock(
         self, tag: str, sub: str, block: Block, lead: dict[str, Any]

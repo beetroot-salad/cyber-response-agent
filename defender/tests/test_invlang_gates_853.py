@@ -139,6 +139,20 @@ def test_attribute_candidate_set_blocks_benign_and_names_the_value():
     assert "'signing'" in errors[0]
 
 
+def test_an_unterminated_candidate_set_blocks_benign():
+    """A dropped `}` must not read as concrete. The brace-aware split folds every slot after
+    the unclosed `{` into one cell that is neither `??` nor a closed `{...}`, so without this
+    a one-character typo closed benign over the class it was still enumerating."""
+    truncated = _benign_doc(
+        "v-001|compute|{monitoring-agent/internal/known-corp, ip-only/internet/novel|10.42.7.183|"
+    )
+    mid_tuple = _benign_doc(
+        "v-001|compute|monitoring-agent/{internal, dmz/known-corp|10.42.7.183|"
+    )
+    assert _blocked(validate_companion(truncated))
+    assert _blocked(validate_companion(mid_tuple))
+
+
 def test_a_resolved_document_and_an_attribute_that_merely_contains_braces_still_close():
     """The whole-value anchor, as a control: a legitimate `attrs.cmdline` carrying `{...}`
     inside a longer string is a fact, not an open question, and must not block."""
@@ -218,6 +232,36 @@ def test_one_authz_row_no_longer_discharges_a_siblings_contract():
     assert len(blocked) == 1
     assert "ac2" in blocked[0]
     assert "h-002" in blocked[0]
+
+
+def test_one_hypothesis_repeating_a_contract_id_in_one_block_is_denied():
+    """The collision's other half, one level down: `_extend_by_id` keeps the FIRST row per id,
+    so a second `ac1` carrying a different predicate was discarded in silence and the benign
+    gate never had to satisfy it. The projector names the dropped row now."""
+    doc = _doc(
+        ":V prologue.vertices [id|type|class|ident|attrs?]\n"
+        "v-001|compute|bastion/internal/known-corp|bastion-01.corp|",
+        ":E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]\n"
+        "e-001|modified|v-001|v-001|2026-05-07T14:25:22.570Z|siem-event:wazuh|",
+        ":H hypothesize.hypotheses "
+        "[id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]\n"
+        "h-001|?gpo-edit|v-001|modified|identity|service-account/known-corp||null|active",
+        ":H h-001.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]\n"
+        'ac1|e-001|change-mgmt|"approved change ticket exists"|escalate|escalate\n'
+        'ac1|e-001|iam-policy|"the account may modify the GPO"|escalate|escalate',
+        ":L findings [id|loop|name|target|tests|system|window]\n"
+        "l-001|1|change-lookup|v-001|h-001|change-mgmt|n/a",
+        ":R authz [resolved_by|edge|fulfills|verdict|anchor_kind|reasoning]\n"
+        'l-001|e-001|ac1|authorized|change-mgmt|"CHG-4471 covers the window"',
+        _CONCLUDE_BENIGN,
+    )
+    _companion, warnings = parse_dense_companion(doc)
+    assert [w.reason for w in warnings] == [
+        "'ac1' is declared twice in this block; only the FIRST row is kept and the later "
+        "one is discarded with everything it declares. Give each row its own id, or send "
+        "the added rows as a second block."
+    ]
+    assert validate_companion(doc)
 
 
 def test_distinct_contract_ids_each_discharged_still_close_benign():

@@ -436,24 +436,27 @@ def _check_authz_contract_ids(companion: CompanionBody) -> list[str]:
     mistake here — `p*` and `r*` DO restart per hypothesis in every shipped example — so the
     error says which ids collide and that `ac*` numbers across the document.
 
-    Only the cross-hypothesis collision reaches here: `_extend_by_id` already keeps the first
-    row per id when one `:H <h>.authz` block repeats an id.
+    Only the cross-hypothesis collision reaches here: `_extend_by_id` keeps the first row per
+    id when ONE `:H <h>.authz` block repeats an id, so the folded record this walks carries
+    one contract either way. That repeat is not silent — the projector warns on it, because
+    keeping the first row DISCARDS the second contract's predicate and the benign gate would
+    then never have to satisfy it.
     """
-    declared_by: dict[str, list[str]] = {}
+    declared_by: dict[str, set[str]] = {}
     for hid, hyp in _walkers.all_hypotheses(companion).items():
         for c in hyp.get("authorization_contract") or []:
             if not isinstance(c, dict):
                 continue
             cid = c.get("id")
             if isinstance(cid, str) and cid:
-                declared_by.setdefault(cid, []).append(hid)
+                declared_by.setdefault(cid, set()).add(hid)
     return [
         f"authz contract {cid!r} is declared by more than one hypothesis "
         f"({', '.join(sorted(hids))}) — a `:R authz` row names only the contract it "
         f"fulfills, so one row would discharge all of them; number `ac*` across the "
         f"document, not per hypothesis"
         for cid, hids in declared_by.items()
-        if len(set(hids)) > 1
+        if len(hids) > 1
     ]
 
 
@@ -836,9 +839,17 @@ def _class_slots(classification: str) -> list[str]:
 
 
 def _has_open_slot(classification: Any) -> bool:
-    if not isinstance(classification, str) or not classification:
+    if not isinstance(classification, str):
         return False
-    return any(_is_unresolved(slot) for slot in _class_slots(classification))
+    slots = _class_slots(classification)
+    # A `{` the author never closed is an UNTERMINATED candidate set, and it has to count as
+    # open: the depth-aware split above folds every slot after it into one cell that is
+    # neither `??` nor a closed `{...}`, so a single dropped `}` read as CONCRETE and closed
+    # benign over the open class it was still enumerating. A stray `}` with no `{` is left
+    # alone — it splits like any other character and hides nothing.
+    if any(s.count("{") > s.count("}") for s in slots):
+        return True
+    return any(_is_unresolved(slot) for slot in slots)
 
 
 def _seed_vertex_state(
