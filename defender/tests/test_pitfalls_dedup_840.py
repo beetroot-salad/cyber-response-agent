@@ -169,9 +169,56 @@ def test_a_merged_record_keeps_the_exemplars_queue_bookkeeping(paths):
 def test_merging_a_record_set_twice_changes_nothing(paths):
     """Two seams merge — the threshold gate and the handoff builder — and one feeds the
     other. The collapse is therefore idempotent by contract, not by luck of call order."""
-    persist.append_pitfalls([_row(f"r:l-003:{i}") for i in range(5)], paths=paths)
+    persist.append_pitfalls(
+        [*[_row(f"r:l-003:{i}") for i in range(5)],
+         _row("r:l-004:0", digest=QUOTING),
+         _row("r:l-005:0", system="host-state"),
+         _row("r:l-006:0", digest="")],
+        paths=paths,
+    )
     once = _records(paths)
+    assert len(once) == 4
     assert persist.merge_pitfalls(once) == once
+
+
+def test_a_row_whose_digest_carries_no_diagnosis_keys_to_itself(paths):
+    """The absence of a verdict is not a verdict two rows hold in common. An adapter that
+    fails with an empty stderr writes the SAME `exit=N;` envelope on every call, so keying on
+    it would fold unrelated mistakes behind one exemplar — the curator would see one query,
+    and `rotate_pitfalls` would then retire the rest as though they had been curated.
+
+    The discriminating shape is N rows carrying the SAME empty digest — rows carrying
+    DIFFERENT empty-ish strings would stay N records under any key, including the one this
+    carve-out replaces."""
+    same = [_row(f"r:l-00{i}:0", digest="exit=1; ", executed_query=f"SELECT {i}")
+            for i in range(3)]
+    persist.append_pitfalls(same, paths=paths)
+    records = _records(paths)
+    assert len(records) == 3, "three unrelated failures collapsed onto one empty diagnosis"
+    assert [r["executed_query"] for r in records] == ["SELECT 0", "SELECT 1", "SELECT 2"], (
+        "the curator would have received one exemplar and the other two would rotate away"
+    )
+
+    # The whole no-diagnosis family, each spelling of it repeated: a bare envelope with no
+    # trailing space, nothing at all, and whitespace-only.
+    for digest in ("exit=2;", "", "   "):
+        p = LoopPaths(repo_root=paths.repo_root, state_dir=paths.state_dir / f"v{len(digest)}")
+        persist.append_pitfalls(
+            [_row(f"v:l-00{i}:0", digest=digest) for i in range(2)], paths=p)
+        assert len(persist.merge_pitfalls(persist.read_pitfalls(p))) == 2, (
+            f"two failures merged on the empty diagnosis {digest!r}"
+        )
+
+
+def test_the_merge_key_normalises_system_the_way_the_handoff_groups_it():
+    """`_build_pitfalls_handoffs` groups on the STRIPPED system, so a key coarser than that
+    grouping hands the curator N entries it reads as N bullets — the one thing the collapse
+    exists to prevent."""
+    rows = [_row("r:l-001:0"), _row("r:l-002:0", system="elastic "),
+            _row("r:l-003:0", system=" elastic")]
+    failures = pitfalls_curator._build_pitfalls_handoffs(rows)[0]["failures"]
+    assert len(failures) == 1, "one mistake reached the curator as three bullets"
+    assert failures[0]["occurrences"] == 3
 
 
 def test_an_empty_append_leaves_the_queue_untouched(paths):
@@ -244,7 +291,7 @@ def test_the_wake_gate_counts_what_the_curation_gate_counts(paths, monkeypatch):
 # =============================================================================================
 
 
-def test_the_handoff_carries_the_count_and_leads_with_it(paths):
+def test_the_handoff_carries_the_count_and_leads_with_it():
     """`occurrences` reaches the prompt, and the mistake made eight times is the first
     failure in its system's list — the curator's context budget is spent severity-first."""
     handoffs = pitfalls_curator._build_pitfalls_handoffs([
@@ -256,7 +303,7 @@ def test_the_handoff_carries_the_count_and_leads_with_it(paths):
     assert failures[0]["stderr_digest"] == UNNEST
 
 
-def test_the_handoff_builder_collapses_raw_queue_rows_itself(paths):
+def test_the_handoff_builder_collapses_raw_queue_rows_itself():
     """The builder is handed queue ROWS, which carry no count of their own, and it is the
     last seam before the prompt. It merges rather than trusting its caller to have done it,
     so no future reader of the queue can hand the curator four copies of one bullet."""

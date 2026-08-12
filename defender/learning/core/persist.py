@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import re
 import shutil
 import threading
 from dataclasses import dataclass
@@ -310,6 +311,15 @@ def append_findings(
 
 
 
+#: The envelope `record_query.payload_digest` wraps EVERY failing call in (`exit={code}; `).
+#: It is shared by every failure of a system, so it is not itself a diagnosis.
+_EXIT_ENVELOPE = re.compile(r"^\s*exit=-?\d+\s*;\s*")
+
+
+def _digest_diagnosis(digest: str) -> str:
+    return _EXIT_ENVELOPE.sub("", digest, count=1)
+
+
 def pitfall_key(row: dict) -> tuple[str, str]:
     """The identity of a MISTAKE, which is not the identity of a failing row (#840).
 
@@ -320,8 +330,24 @@ def pitfall_key(row: dict) -> tuple[str, str]:
     varying the SQL against one unchanging `Binder Error`. `query_id` is deliberately OUT of
     the key: two coined queries that earn the identical rejection teach one bullet, and
     every bash-shim row carries the same sentinel id anyway.
+
+    `system` is STRIPPED, because `_build_pitfalls_handoffs` groups on the stripped value:
+    keys coarser than the grouping would hand the curator two entries it then reads as two
+    bullets, which is the one thing the collapse exists to prevent.
+
+    A row whose digest carries NO diagnosis — absent, blank, or nothing but the adapter's
+    `exit=N;` envelope, which an adapter that fails with an empty stderr writes on every
+    call — keys to ITSELF. Merging on the absence of a verdict is not merging on a shared
+    verdict: it would fold unrelated mistakes behind one exemplar, hand the curator only
+    that exemplar's query, and then rotate the rest into `consumed` as though they had been
+    curated. `is_content_less`, not `.strip()`, so a digest of zero-width filler cannot
+    read as a diagnosis either (#722's rule, same reason).
     """
-    return (str(row.get("system") or ""), str(row.get("stderr_digest") or ""))
+    system = str(row.get("system") or "").strip()
+    digest = str(row.get("stderr_digest") or "")
+    if is_content_less(_digest_diagnosis(digest)):
+        return (system, "\x00" + str(row.get("pitfall_id") or ""))
+    return (system, digest)
 
 
 def _occurrences(row: dict) -> int:

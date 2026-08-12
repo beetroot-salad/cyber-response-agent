@@ -145,15 +145,19 @@ def run_pitfalls(
     batch_ids = [str(r["pitfall_id"]) for r in rows if r.get("pitfall_id")]
     handoffs = _build_pitfalls_handoffs(records)
     if not handoffs:
-        _log(f"{len(records)} queued pitfall(s) but none carried a system — dropping")
+        _log(
+            f"{len(records)} queued pitfall(s) in {len(batch_ids)} row(s) but none carried "
+            "a system — dropping"
+        )
         _loop_persist.rotate_pitfalls(batch_ids, None, paths=paths)
         return 0
     repo_root = paths.repo_root
     baseline_stray = _author_shared.changes_outside(repo_root, SKILLS_REL)
+    # `len(rows)`, not `sum(occurrences)`: a queue row IS one occurrence, so the two are the
+    # same number and only one of them costs a pass over the records.
     _log(
         f"pitfalls curation: {len(records)} distinct mistake(s) "
-        f"({sum(r['occurrences'] for r in records)} failure(s)) "
-        f"across {len(handoffs)} system(s)"
+        f"({len(rows)} failure(s)) across {len(handoffs)} system(s)"
     )
 
     rc = (invoke or _invoke_pitfalls_agent)(handoffs, repo_root=repo_root, box=box)

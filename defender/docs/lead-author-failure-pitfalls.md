@@ -157,7 +157,12 @@ the mapping into `error_class`.
   it is the evidence, and #823 N3 pins the row-level duplication — but
   both seams that *read* it collapse rows sharing a
   `(system, stderr_digest)` into one record carrying `occurrences: N`
-  (`persist.merge_pitfalls`). So the threshold counts distinct mistakes,
+  (`persist.merge_pitfalls`). A row whose digest carries no diagnosis —
+  blank, or nothing but the `exit=N;` envelope an empty stderr leaves
+  behind — keys to itself instead: the absence of a verdict is not a
+  verdict two rows share, and folding on it would hand the curator one
+  exemplar and rotate the rest away as if curated.
+  So the threshold counts distinct mistakes,
   which is what makes clearing it evidence that the channel learned that
   many things (#823 O3), and the curator is handed one entry per mistake
   with the count as its severity signal rather than N copies to notice

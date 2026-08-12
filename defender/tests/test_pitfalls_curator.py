@@ -199,9 +199,7 @@ def test_run_pitfalls_all_systemless_drops_batch_without_spawn(tmp_git_repo: Pat
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
     paths = LoopPaths(repo_root=tmp_git_repo, state_dir=tmp_path / "state")
     persist.append_pitfalls(
-        [{"pitfall_id": f"r:{i}", "system": "", "stderr_digest": f"exit=1; e{i}"}
-         for i in range(2)],
-        paths=paths,
+        [{"pitfall_id": f"r:{i}", "system": ""} for i in range(2)], paths=paths
     )
     called: list[int] = []
     rc = pitfalls_curator.run_pitfalls(paths=paths, invoke=lambda *a, **k: called.append(1) or 0)
