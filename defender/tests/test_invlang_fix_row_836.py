@@ -213,27 +213,78 @@ def test_fix_row_applies_to_every_flagged_occurrence(tmp_path):
     assert WARN_ROW not in _inv(run)
 
 
+def test_fix_row_when_one_flagged_row_is_a_prefix_of_another(tmp_path):
+    """Two flagged rows where one's text is a PREFIX of the other: each is repairable on its
+    own, and repairing the shorter leaves the longer untouched and still flagged.
+
+    The multiplicity has to be counted on WHOLE LINES for this to hold. A substring count
+    sees the shorter row inside the longer one, concludes a match lies outside the flagged
+    set, and refuses both — a false refusal (both matches are flagged) that left the window
+    unclearable and, under the M5 gate, the run unclosable. Cheap, and the exact shape a
+    value cell like `svc` / `svc2` produces."""
+    short_row = "l-001|v-001|owner|svc"
+    long_row = "l-001|v-001|owner|svc2"
+
+    deps, run = main_deps(tmp_path)
+    seed_investigation(run, PROLOGUE + attr_block(short_row, long_row))
+    assert flagged_rows(_inv(run)) == (short_row, long_row)
+
+    _fix(deps, short_row, "l-001|v-001|class|svc")
+
+    assert flagged_rows(_inv(run)) == (long_row,), "the prefix repair took the longer row too"
+    assert long_row in _inv(run)
+
+    # ...and the longer one is then repairable in its turn, so the window still closes.
+    _fix(deps, long_row, "")
+    assert flagged_rows(_inv(run)) == ()
+
+
 def test_fix_row_refuses_a_match_outside_the_flagged_set(tmp_path):
-    """H4's rider, and the half that keeps the multiplicity safe: if ANY match lies outside
-    the currently-flagged set, the repair refuses outright.
+    """H4's rider, and the half that keeps the multiplicity safe: if the row also stands as a
+    WHOLE LINE the window did not flag, the repair refuses outright.
 
-    The reachable case is the model having quoted the row in its own prose. Applying to every
-    match without this guard would rewrite that prose too — a general edit capability
-    arriving through the back door of a convenience.
+    The reachable case is the model pasting the row on a line of its own in narrative prose,
+    outside any fence. That line is unflagged and byte-identical, so applying to every match
+    without this guard would rewrite it too — a general edit capability arriving through the
+    back door of a convenience.
 
-    Paired control: with the prose copy removed, the same call succeeds."""
+    WHOLE-LINE is the correct multiplicity, and this test previously asserted SUBSTRING —
+    a row merely EMBEDDED in a prose sentence. That was never a hazard: the repair only ever
+    rewrites lines where `line.strip() == old_row`, so an embedded copy is already out of
+    reach. Refusing on it cost O5 instead, in a way the model reaches by ordinary means — a
+    `:T conclude` summary quoting its own flagged row made both the repair and the deletion
+    escape refuse, and with the M5 gate the run could not close. It also fired when one
+    flagged row's text was a PREFIX of another (`…|owner|svc` inside `…|owner|svc2`), where
+    the refusal's own claim was false: both matches were flagged.
+
+    So the embedded copy is asserted here too, as the complementary condition — it does NOT
+    refuse, and the flagged row alone is repaired.
+
+    Paired control: with the whole-line copy removed, the same call succeeds."""
     from pydantic_ai.exceptions import ModelRetry
 
     deps, run = main_deps(tmp_path)
-    quoted = PROLOGUE + f"\nI wrote {WARN_ROW} and it was refused.\n" + attr_block(WARN_ROW)
-    seed_investigation(run, quoted)
-    assert flagged_rows(_inv(run)) == (WARN_ROW,), "the prose copy became flagged too"
+    pasted = PROLOGUE + f"\nI wrote this row and it was refused:\n{WARN_ROW}\n" + attr_block(
+        WARN_ROW
+    )
+    seed_investigation(run, pasted)
+    assert flagged_rows(_inv(run)) == (WARN_ROW,), "the pasted copy became flagged too"
 
     with pytest.raises(ModelRetry) as exc:
         _fix(deps, WARN_ROW, REPAIRED_ROW)
 
-    assert _inv(run) == quoted, "a refused repair left residue"
+    assert _inv(run) == pasted, "a refused repair left residue"
     assert "flagged" in str(exc.value).lower()
+
+    # ...and the EMBEDDED copy is not a match at all: the repair lands, the prose is untouched.
+    deps_embedded, run_embedded = main_deps(tmp_path / "embedded")
+    embedded = PROLOGUE + f"\nI wrote {WARN_ROW} and it was refused.\n" + attr_block(WARN_ROW)
+    seed_investigation(run_embedded, embedded)
+    _fix(deps_embedded, WARN_ROW, REPAIRED_ROW)
+    assert flagged_rows(_inv(run_embedded)) == ()
+    assert f"I wrote {WARN_ROW} and it was refused." in _inv(run_embedded), (
+        "the repair rewrote a line it only appeared inside"
+    )
 
     deps2, run2 = main_deps(tmp_path / "control")
     seed_investigation(run2, PROLOGUE + attr_block(WARN_ROW))

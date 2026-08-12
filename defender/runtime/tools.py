@@ -739,16 +739,16 @@ def _tool_fix_row(deps: AgentDeps, old_row: str, new_row: str) -> str:
         # emptied: a repeated identical repair is idempotent-safe by construction, and a
         # "you already did this" branch would need the stored state M3 exists to avoid.
         raise ModelRetry(
-            f"{UNCHANGED_LEAD} — nothing is currently flagged in investigation.md, so there "
-            f"is no row to repair. {UNCHANGED_NOTICE}"
+            f"{UNCHANGED_NOTICE} Nothing is currently flagged in investigation.md, so there "
+            f"is no row to repair."
         )
     if old_row not in flagged:
         # Scope, not merely match: `old_row` is confined to the flagged set, and the flagged
         # set is `:R attr_updates`-only. A verb that refused only when the text was ABSENT
         # would happily rewrite a committed vertex row that is present.
         raise ModelRetry(
-            f"{UNCHANGED_LEAD} — `old_row` must be one of the rows currently flagged in "
-            f"investigation.md, quoted exactly as the warning printed it. {UNCHANGED_NOTICE}"
+            f"{UNCHANGED_NOTICE} `old_row` must be one of the rows currently flagged in "
+            f"investigation.md, quoted exactly as the warning printed it."
             "\n\nCurrently flagged:\n"
             + "\n".join(f"  {row}" for row in flagged)
         )
@@ -758,22 +758,27 @@ def _tool_fix_row(deps: AgentDeps, old_row: str, new_row: str) -> str:
     whole = [i for i, line in enumerate(lines) if line.strip() == old_row]
     if not whole:
         raise ModelRetry(
-            f"{UNCHANGED_LEAD} — `old_row` matches no line in investigation.md. "
-            f"{UNCHANGED_NOTICE}"
+            f"{UNCHANGED_NOTICE} `old_row` matches no line in investigation.md."
         )
     # H4: the repair applies to EVERY flagged occurrence — a flagged row whose text is not
     # unique would otherwise be neither repairable nor deletable, and with the M5 gate the run
-    # would be unclosable. The rider is what keeps that safe: if the text also appears
-    # anywhere the window did NOT flag (the model quoting the row in its own prose is the
-    # reachable case), the repair refuses rather than rewriting that too.
+    # would be unclosable. The rider is what keeps that safe: if the text also stands as a
+    # WHOLE LINE the window did not flag, the repair refuses rather than rewriting that too.
+    #
+    # WHOLE-LINE, not substring. The rebuild below only ever touches lines where
+    # `line.strip() == old_row`, so a line that merely CONTAINS the row is already out of
+    # reach and a substring count guards nothing — while refusing on one wedged the window
+    # shut: a `:T conclude` summary quoting its own flagged row made both `fix_row(row, new)`
+    # and `fix_row(row, "")` refuse, and with the M5 gate the run could not close. It also
+    # fired when one flagged row's text was a PREFIX of another (`…|owner|svc` inside
+    # `…|owner|svc2`), where the refusal's own claim — that a match lay somewhere unflagged —
+    # was simply false.
     occurrences = flagged.count(old_row)
-    containing = sum(1 for line in lines if old_row in line)
-    if len(whole) != occurrences or containing != occurrences:
+    if len(whole) != occurrences:
         raise ModelRetry(
-            f"{UNCHANGED_LEAD} — that row's text also appears in investigation.md somewhere "
-            f"the repair window did not flag ({containing} occurrence(s), {occurrences} "
-            f"flagged), and `fix_row` will not rewrite a line it never flagged. "
-            f"{UNCHANGED_NOTICE}"
+            f"{UNCHANGED_NOTICE} That row's text also stands as a whole line the repair "
+            f"window did not flag ({len(whole)} line(s) match, {occurrences} flagged), and "
+            f"`fix_row` will not rewrite a line it never flagged."
         )
 
     if new_row:
@@ -781,9 +786,9 @@ def _tool_fix_row(deps: AgentDeps, old_row: str, new_row: str) -> str:
         reason = _new_row_shape_reason(new_row, cells) if cells is not None else None
         if reason is not None:
             raise ModelRetry(
-                f"{UNCHANGED_LEAD} — `new_row` must be a single row of the same "
+                f"{UNCHANGED_NOTICE} `new_row` must be a single row of the same "
                 f":R attr_updates block: {reason}. Send one row with the same columns, or "
-                f'an empty `new_row` to delete the line instead. {UNCHANGED_NOTICE}'
+                'an empty `new_row` to delete the line instead.'
             )
 
     # The whole on-disk LINE is what gets rewritten — leading/trailing whitespace included —
