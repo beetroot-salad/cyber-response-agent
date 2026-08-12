@@ -6,11 +6,17 @@ makes all three priceable. That sharing is also what makes the file a boundary: 
 full and verbatim, the raw gather payload bytes `decide_read` refuses MAIN one call earlier with
 `RAW_DENY_REASON`, and MAIN's transcript that GATHER has never been shown.
 
-At the run ROOT it was readable by both of them. Every reader agent's run-dir read shape is
-`under(run, SEG)` (`permission/policies/_common.read_shapes`) and `SEG` spells ONE path segment,
-so the shape admits every run-root file — the read tool and the bash `cat` lane alike, since they
-share the shape OBJECT. `is_untrusted_read` does not fire on the log either, so neither lane
-salt-framed the read: the bytes arrived as ordinary text.
+At the run ROOT it was readable by both of them. MAIN's and GATHER's run-dir read shape is
+`under(run, SEG)` (`permission/policies/_common.read_shapes`, the builder those two share) and
+`SEG` spells ONE path segment, so the shape admits every run-root file — the read tool and the
+bash `cat` lane alike, since they share the shape OBJECT. `is_untrusted_read` does not fire on
+the log either, so neither lane salt-framed the read: the bytes arrived as ordinary text.
+
+MAIN and GATHER are the whole roster here, and deliberately: they are the two roles that read
+THIS run dir. The judge and the actor read the learning run dir, which the wire log never
+reaches, and neither would be covered by a subdirectory anyway — the judge's scope is
+`under(run, TREE)` and the actor declares no shape at all. `_run_paths.OBSERVE_DIR` records
+that limit so the containment argument is not borrowed for a stream it does not cover.
 
 The fix is one directory, not one clamp: the log moved to `<run_dir>/observe/llm_requests.jsonl`,
 one level down and therefore outside a single-segment shape, for MAIN and GATHER symmetrically
@@ -129,12 +135,24 @@ def test_the_subdirectory_is_what_denies(env, which):
     assert _bash(env, f"cat {planted}", which).allow
 
 
+def _run_dir_section(out: str) -> str:
+    """Just the map's `## Run dir` listing.
+
+    Asserted on rather than the whole document because the rest of the map is generated from
+    the REAL `workspace_map.DEFENDER_DIR` — the skills dirs, the adapter filenames, the query
+    systems — and a bare substring test over that would turn red the day someone adds a skill
+    whose name happens to contain `observe`, for a reason that has nothing to do with the
+    suppression this test is about."""
+    body = out.split("## Run dir", 1)[1]
+    return body.split("\n## ", 1)[0]
+
+
 def test_the_workspace_map_does_not_name_the_observe_dir(env):
     """The map is inlined into MAIN's message 0 as "the canonical surfaces", and MAIN has no
     `ls` — so the map is its whole directory view. Naming a dir the gate then refuses only
     teaches the model to ask for it; `gather_raw/` is suppressed on the same ground (#264)."""
-    out = wsm.workspace_map(env.run).replace(str(env.run), "RUNDIR")
+    listing = _run_dir_section(wsm.workspace_map(env.run).replace(str(env.run), "RUNDIR"))
 
-    assert OBSERVE_DIR not in out
-    assert WIRE_LOG not in out
-    assert "investigation.md" in out, "the run-dir listing stopped listing anything at all"
+    assert OBSERVE_DIR not in listing
+    assert WIRE_LOG not in listing
+    assert "investigation.md" in listing, "the run-dir listing stopped listing anything at all"

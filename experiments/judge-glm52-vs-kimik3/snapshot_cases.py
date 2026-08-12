@@ -6,11 +6,11 @@ one run supplies both cases: the adversarial leg becomes case-001 (FN axis) and 
 leg case-002 (FP axis). Each case gets its own copy of the run dir because the harness
 takes a `run_dir` per case and nothing here should depend on two cases sharing a path.
 
-`llm_requests.jsonl` is EXCLUDED — it is 27MB of the defender's own request log and no
-judge input reads it (`build_judge_invocation` takes alert.json, report.md,
-investigation.md, executed_queries.jsonl and gather_raw/). The rendered HTML is excluded
-for the same reason. meta.json records the exclusion so a later reader does not mistake
-the snapshot for a byte-complete run dir.
+The wire log (`observe/llm_requests.jsonl`) is EXCLUDED — it is 27MB of the defender's own
+request log and no judge input reads it (`build_judge_invocation` takes alert.json,
+report.md, investigation.md, executed_queries.jsonl and gather_raw/). The rendered HTML is
+excluded for the same reason. meta.json records the exclusion so a later reader does not
+mistake the snapshot for a byte-complete run dir.
 
     python3 experiments/judge-glm52-vs-kimik3/snapshot_cases.py \
         --run-dir /workspace/.defender-runs/fresh-01 \
@@ -25,7 +25,12 @@ import shutil
 import sys
 from pathlib import Path
 
-EXCLUDED = ("llm_requests.jsonl", "transcript.html", "runtime.html")
+#: Matched against the DIRECT CHILDREN of the run dir (`run_dir.iterdir()` below), so the
+#: wire log is excluded by naming the directory that now holds it: it moved to
+#: `<run_dir>/observe/llm_requests.jsonl` (`defender._run_paths.OBSERVE_DIR`), and the bare
+#: filename stopped matching any child the moment it did — which would have copied the 27MB
+#: log into the fixture through `copytree` while `meta.json` went on recording it as excluded.
+EXCLUDED = ("llm_requests.jsonl", "observe", "transcript.html", "runtime.html")
 
 CASES = (
     ("case-001", "adversarial", "actor_story.md", "projected_telemetry.yaml"),

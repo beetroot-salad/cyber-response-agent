@@ -18,8 +18,10 @@ from defender.scripts.visualize.visualize_data import phase_verb
 from defender.scripts.visualize.visualize_primitives import parse_report
 
 
-#: Kept as the module's own name because `visualize_data` re-exports it and the runtime page
-#: prints it in its empty state; the LOCATION is `_run_paths`', not this module's.
+#: Kept as the module's own name because `visualize_data` re-exports it under this spelling;
+#: its one live use is `load_messages`' pre-`observe/` fallback below. The LOCATION is
+#: `_run_paths`', not this module's — a consumer that wants the path asks `RunPaths.wire_log`
+#: and never joins this onto a run dir, which is exactly the drift the move exists to prevent.
 LLM_REQUESTS = WIRE_LOG
 
 

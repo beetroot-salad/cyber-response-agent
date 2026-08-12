@@ -31,6 +31,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # repo root → defender.*
 
+from defender._run_paths import WIRE_LOG, RunPaths
 from defender.runtime import compaction as C
 
 
@@ -143,9 +144,17 @@ def dry_run(records: list[dict]) -> list[StepMetric]:
 
 
 def _resolve_jsonl(arg: str) -> Path:
+    """The wire log a `<run_dir|path>` argument names.
+
+    A run dir resolves through `RunPaths`, never by joining the name: the log moved to
+    `<run_dir>/observe/` when the read gate stopped admitting it at the run root
+    (`_run_paths.OBSERVE_DIR`), so the joined spelling now names a file no run has. The
+    run-root fallback is the same READER-side courtesy `visualize_messages.load_messages`
+    takes — this tool's whole purpose is replaying logs recorded before the move."""
     p = Path(arg)
     if p.is_dir():
-        return p / "llm_requests.jsonl"
+        current = RunPaths(p).wire_log
+        return current if current.is_file() else p / WIRE_LOG
     return p
 
 

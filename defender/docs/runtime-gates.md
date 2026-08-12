@@ -85,10 +85,15 @@ hooks). The gates:
   logic) and a `model_request` wrap that logs every API request to
   `observe/llm_requests.jsonl` (`runtime/observe.py`, which projects
   `tool_trace.jsonl`). The wire log sits one level below the run root **as a gate
-  decision, not a layout one**: every reader agent's run-dir read shape is
+  decision, not a layout one**: MAIN's and GATHER's run-dir read shape is
   `under(run, SEG)` and `SEG` is a single path segment, so a run-root file is
   readable and a file in a subdirectory is not — on the read tool and the `cat`
-  lane alike, which share the shape object. That log is the one run artifact that
+  lane alike, which share the shape object. Those two roles only: the judge's
+  `cat` scope is `under(run, TREE)` (multi-segment) and the actor holds no `cat`
+  grant, so its `read_allow` is empty and no shape filter applies to it at all.
+  Both read the *learning* run dir, which the wire log never reaches, so the
+  containment argument here is about MAIN and GATHER and does not carry to a
+  stream placed under a subdirectory elsewhere. That log is the one run artifact that
   replays another agent's context verbatim (MAIN, every gather subagent and every
   review stage write through one `RequestLogger`), so at the root it handed MAIN
   the raw gather payload bytes `decide_read` refuses it with `RAW_DENY_REASON`,

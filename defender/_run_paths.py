@@ -11,23 +11,44 @@ from pathlib import Path
 #: source. Named in this module rather than in `runtime.observe` because the visualizer needs
 #: the location and must not pay for pydantic-ai to learn it.
 #:
-#: THE SUBDIRECTORY IS THE GATE, not tidiness. Every reader agent's run-dir read shape is
-#: `under(run, SEG)` (`runtime/permission/policies/_common.read_shapes`) and `SEG` spells ONE
-#: path segment — so a run-root file is admitted by that shape and a file one level down is
-#: not, on the read tool and the bash `cat` lane alike (they share the shape OBJECT). At the
-#: run root this log was readable by MAIN, which is a boundary crossing: every gather subagent
-#: logs through the SAME `RequestLogger` (`driver.build_gather_agent`), so gather's tool
+#: THE SUBDIRECTORY IS THE GATE, not tidiness. MAIN's and GATHER's run-dir read shape is
+#: `under(run, SEG)` (`runtime/permission/policies/_common.read_shapes`, the builder those two
+#: and only those two share) and `SEG` spells ONE path segment — so a run-root file is
+#: admitted by that shape and a file one level down is not, on the read tool and the bash
+#: `cat` lane alike (they share the shape OBJECT). At the run root this log was readable by
+#: MAIN, which is a boundary crossing: every gather subagent logs through the SAME
+#: `RequestLogger` (`driver.build_gather_agent`), so gather's tool
 #: returns — the raw payload bytes `decide_read` refuses MAIN one call earlier with
 #: `RAW_DENY_REASON` — sat verbatim in a file MAIN could `read_file`/`cat`, and
 #: `is_untrusted_read` did not fire on it, so neither lane salt-framed the read. GATHER's
 #: shape is the same, so the mirror held too: an injected subagent could read MAIN's whole
 #: transcript. One subdirectory takes both away without touching a shape.
 #:
+#: THE RULE DOES NOT GENERALIZE PAST THOSE TWO ROLES, which is why they are named above rather
+#: than written as "every reader". The JUDGE's `cat` scope is built from `under(run, TREE)`
+#: (`judge/engine_pydantic._judge_bash_shapes`) — multi-segment, so a subdirectory hides
+#: nothing from it — and the ACTOR carries no `cat` grant at all, so `read_allow_of` yields an
+#: EMPTY shape tuple and `decide_read` applies no shape filter to it whatsoever, leaving that
+#: role gated by root containment alone. Both read the LEARNING run dir, which this log never
+#: reaches (`lead_repository.stage_tables` copies `executed_queries.jsonl` and `gather_raw/`
+#: and nothing else), so neither is in scope here. But a future stream put under a
+#: subdirectory "because that is how the wire log is protected" would be protected from MAIN
+#: and GATHER and from nobody else.
+#:
 #: The run's OTHER root-level streams stay at the root deliberately: `tool_trace.jsonl` is a
 #: projection carrying tool NAMES (`observe._user_event`), `policy_denials.jsonl` carries a
 #: parameter DIGEST rather than the blob, and `budget.json`/`circuit_breaker.json` are
 #: counters. None of them replays another agent's context, which is the property that made
 #: this one a leak; this dir is for streams that carry wire bodies verbatim.
+#:
+#: `transcript.html`/`runtime.html` are the ONE exception and are named here so the exception
+#: is recorded rather than inferred: they DO inline MAIN's transcript verbatim (rendered from
+#: this very log — `visualize_messages`, which keeps only `agent_id == "main"`), and they sit
+#: at the run root inside GATHER's shape. They are out of reach on TIMING, not on content —
+#: `run.py` renders them after `run_investigation` has returned, so no agent of the run they
+#: describe is still alive to read them. That is a thinner guarantee than a directory, and
+#: anything that moves the render INTO the run (a mid-flight `--visualize`, a live page) has
+#: to move these two under `observe/` in the same change.
 OBSERVE_DIR = "observe"
 WIRE_LOG = "llm_requests.jsonl"
 
