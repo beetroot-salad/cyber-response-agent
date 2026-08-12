@@ -310,9 +310,17 @@ def _names_query_draft(p: Path) -> bool:
     return QUERIES_MARKER in p.parts and DRAFT_MARKER in p.parts
 
 
+# The judge's ticket-read capture writes `ticket_reads/{seq}.json` instead of `gather_raw/`
+# (`learning/pipeline/judge/closed_ticket_tool.py`). `_run_paths._PAYLOAD_SHAPES` already names
+# BOTH as "the two by-ref payload families a run writes"; a cap that knew only the first left the
+# judge — which holds `read=True` — able to re-read at the authored ceiling exactly what the
+# capture view withheld, which is the one property the #832 O7 split exists to keep.
+TICKET_READS_MARKER = "ticket_reads"
+
+
 def is_untrusted_read(path: Path) -> bool:
     """True for reads of attacker-influenced data the caller must SALT-TAG WRAP: the alert
-    payload, the raw gather payloads, and a DRAFT query template.
+    payload, the raw gather payloads, a captured closed TICKET, and a DRAFT query template.
 
     Keyed on the gather_raw SHAPE, and deliberately kept when the raw *clamp* was deleted
     (#575): the clamp was containment (now positive enumeration), while this is the TRUST
@@ -326,28 +334,39 @@ def is_untrusted_read(path: Path) -> bool:
     definition, on the same channel as the payload that produced it. `template_search` now returns
     hits from those files, so without this the text would reach the model bare. An ESTABLISHED
     template stays trusted (False): it is the curated corpus gather exists to reuse, and wrapping
-    it would teach gather to distrust its own catalog."""
+    it would teach gather to distrust its own catalog.
+
+    `ticket_reads/` joins it (#849). The closed-ticket store's free text is attacker-influenced by
+    this package's own reckoning — `_predates_case` exists because a comment on a three-year-old
+    record can name the live incident — and the judge's capture persists it verbatim, then prints
+    the absolute path to the model so it can re-open what the 8 KB view elided. Every OTHER route
+    to those bytes already framed them (the tool's own return, `cat` on the bash lane, and above
+    all `is_captured_payload`, which named the family for the read CAP while this predicate did
+    not), so the unframed `read_file` was the single lane delivering a span the view withheld,
+    bare. Additive only: `decide_read` never consults this, so nothing new is denied."""
     p = Path(path)
-    return p.name == "alert.json" or _names_raw(p) or _names_query_draft(p)
-
-
-# The judge's ticket-read capture writes `ticket_reads/{seq}.json` instead of `gather_raw/`
-# (`learning/pipeline/judge/closed_ticket_tool.py`). `_run_paths._PAYLOAD_SHAPES` already names
-# BOTH as "the two by-ref payload families a run writes"; a cap that knew only the first left the
-# judge — which holds `read=True` — able to re-read at the authored ceiling exactly what the
-# capture view withheld, which is the one property the #832 O7 split exists to keep.
-TICKET_READS_MARKER = "ticket_reads"
+    return (
+        p.name == "alert.json"
+        or _names_raw(p)
+        or _names_query_draft(p)
+        or TICKET_READS_MARKER in p.parts
+    )
 
 
 def is_captured_payload(path: Path) -> bool:
     """Whether a resolved path is a payload a capture wrote — `gather_raw/` (the `query` tool)
     or `ticket_reads/` (the judge's closed-ticket capture).
 
-    Narrower than `is_untrusted_read` on purpose, and answering a different question. That one
-    asks "must this be salt-tagged?" and takes in the alert and draft templates too; this one
-    asks "was this text already bounded once, on its way into context?" — which is true only of
-    a captured payload, and decides which read cap applies (#832 O7). `alert.json` is the run's
-    own input and is read whole; a payload is not."""
+    A strict SUBSET of `is_untrusted_read`, and answering a different question. That one asks
+    "must this be salt-tagged?" and takes in the alert and draft templates too; this one asks
+    "was this text already bounded once, on its way into context?" — which is true only of a
+    captured payload, and decides which read cap applies (#832 O7). `alert.json` is the run's
+    own input and is read whole; a payload is not.
+
+    The subset relation is the load-bearing half: a capture is by construction a copy of bytes
+    that arrived from outside, so a path this predicate admits and the other one refuses would be
+    a payload delivered unlabeled. It held for `gather_raw/` from the start and was false for
+    `ticket_reads/` until #849 — which is what that finding was."""
     p = Path(path)
     return _names_raw(p) or TICKET_READS_MARKER in p.parts
 

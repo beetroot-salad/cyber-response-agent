@@ -113,6 +113,22 @@ hooks). The gates:
   untrusted-data tagging of adapter/alert reads + the gather return), and
   `record_lesson_load.lesson_name` (lesson→outcome traceability into
   `lessons_loaded.jsonl`). These anchor on the run dir from `AgentDeps`.
+- **the frame and the ceiling follow the DATA, not the lane** (#776, #849) — two
+  properties of a read, both keyed on the path rather than on which tool asked
+  for it. The salt frame is `permission.is_untrusted_read`: the alert, anything
+  under `gather_raw/`, a `_draft/` query template, and the judge's closed-ticket
+  capture under `ticket_reads/`. The ceiling is `is_captured_payload`, a strict
+  SUBSET of that set — a capture is a copy of bytes that arrived from outside —
+  which reads at the capture view's 8 KB rather than the authored 64 KB, so a
+  later read cannot recover what the capture withheld. `read_file` and the `cat`
+  lane consult both (`tools._bound_and_wrap`, `tools._bash_output_bound`, which
+  takes the SMALLEST cap among the operands a pipeline opens), so the three
+  routes to one file — the tool's own return, `read_file`, `cat` — agree on
+  whether it is labeled and on how much of it arrives. One asymmetry is
+  deliberate: for a LEARNING stage the run dir is the SHARED cross-stage
+  directory, so its artifacts frame as cross-agent text
+  (`tools._is_cross_agent_read`); for MAIN and GATHER it is private workspace,
+  and framing their own log would teach them to distrust themselves.
 
 Still out of scope (port later if a case demands it): report-consistency
 judges, the phase state machine, class-slot grammar vocab, and sibling-fork

@@ -94,14 +94,15 @@ def _cap_for(p: Path) -> int:
 
 
 def _bounded_read(
-    text: str, path: str, *, cap: int, filter_hint: str, read_tool: str = "read_file"
+    text: str, path: str, *, cap: int, filter_hint: str, read_tool: str = "read_file",
+    subject: str = "This file",
 ) -> str:
     if len(text) <= cap:
         return text
     total_lines = text.count("\n") + 1
     note = (
         f"\n\n[{read_tool}] {len(text)} chars / {total_lines} line(s); showing the "
-        f"first {cap}. This file is too large to read whole — do not "
+        f"first {cap}. {subject} is too large to read whole — do not "
         f"treat this head as complete. {filter_hint}"
     )
     return text[:cap] + note
@@ -303,8 +304,17 @@ def _tool_bash(deps: AgentDeps, command: str) -> str:
     except box_mod.BoxFault as e:
         raise ModelRetry(f"the sandbox could not run this command: {e}") from e
     _record_shim_failure(deps, decision, command, result)
+    cap, filter_hint = _bash_output_bound(deps, decision)
     formatted = _format_bash_result(
-        result.rc, result.out.decode("utf-8", "replace"), result.err.decode("utf-8", "replace"),
+        result.rc,
+        # Bounded BEFORE the frame below, matching the ordering
+        # `test_oversized_untrusted_read_caps_before_wrapping` pins for the read lane: the head
+        # and its notice land inside the delimiters, never a dump whose closing tag was cut off.
+        _bounded_read(
+            result.out.decode("utf-8", "replace"), command,
+            cap=cap, filter_hint=filter_hint, read_tool="bash", subject="This output",
+        ),
+        result.err.decode("utf-8", "replace"),
     )
     if _is_learning_role(deps) or _opens_untrusted_read(deps, decision):
         return _wrap(formatted, "untrusted", deps.salt)
@@ -409,6 +419,38 @@ def _opens_untrusted_read(deps: AgentDeps, decision: permission.BashDecision) ->
     return any(permission.is_untrusted_read(p) for p in _opened_operands(deps, decision))
 
 
+#: What the bash lane's overflow notice says when no file operand set the ceiling.
+#: `_overflow_filter_hint` reduces a NAMED file (`cat <path> | <reducer>`), and a command that
+#: opened none — `ls`, a shim that takes no path — has no name to give it.
+_BASH_NO_OPERAND_HINT = (
+    "Narrow the command itself and run it again — this return is not a file, so there is "
+    "nothing to re-read a smaller slice of."
+)
+
+
+def _bash_output_bound(
+    deps: AgentDeps, decision: permission.BashDecision
+) -> tuple[int, str]:
+    """The ceiling on what this command may return, and the reduction its caller can run.
+
+    Keyed on the DATA, the way #776 keyed the untrusted wrap. `read_file` bounds a captured
+    payload at the capture ceiling precisely so a later read cannot recover what the capture view
+    withheld (#832 O7) — but until #849 the same file read through `cat` had no ceiling at all,
+    which made the bound a `read_file`-LANE property rather than a per-file one, and left the
+    uncapped lane the one gather's own prompt tells it to use. `_opened_operands` + `_cap_for`
+    already answer the per-path question; this only has to ask it of the right path.
+
+    The operand with the SMALLEST cap sets it, and names the hint: a pipeline may open several
+    files, and a ceiling any one operand can raise is not a ceiling. A command that opens no
+    file still gets the authored cap — a bound on the return, just not one a file chose."""
+    capping = min(_opened_operands(deps, decision), key=_cap_for, default=None)
+    if capping is None:
+        return _read_char_cap(), _BASH_NO_OPERAND_HINT
+    return _cap_for(capping), _overflow_filter_hint(
+        str(capping), deps.policy, read_tool="bash"
+    )
+
+
 def _deny_authored_bash_read(
     deps: AgentDeps, decision: permission.BashDecision
 ) -> None:
@@ -427,8 +469,18 @@ def _under(path: Path, root: Path) -> bool:
 
 
 def _is_cross_agent_read(deps: AgentDeps, path: Path) -> bool:
+    """Whether a learning stage is reading text some OTHER agent produced — the predicate that
+    decides the salt frame for reads that `is_untrusted_read` does not already claim.
+
+    The agent's own run dir is in the root set (#849). For a runtime agent the run dir is its
+    own workspace, but for a learning stage it is the SHARED cross-stage directory: the host
+    writes `past_tickets.txt` into it, the sibling leg leaves its `actor_*_story.md` there, and
+    the judge's own closed-ticket capture lands at `ticket_reads/{seq}.json` — all of it produced
+    by someone else, and all of it bare here while `_tool_bash` framed the same file. MAIN and
+    GATHER are unaffected: `_bound_and_wrap` consults this only under `_is_learning_role`, so
+    their same-agent run-dir reads stay unframed."""
     resolved = _resolved(path)
-    roots = (*deps.policy.read_roots, *deps.policy.read_confine)
+    roots = (deps.run_dir, *deps.policy.read_roots, *deps.policy.read_confine)
     corpus_dir = getattr(deps, "corpus_dir", None)
     if corpus_dir is not None:
         roots = (*roots, Path(corpus_dir))

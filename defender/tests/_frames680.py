@@ -619,9 +619,20 @@ def _judge_deps(tmp_path: Path, *, box=None):
     return (deps, comparison)
 
 
-def _drive_learning_read(tmp_path: Path, body: str, *, name: str = "lead.md") -> str:
+def _drive_learning_read(
+    tmp_path: Path, body: str, *, name: str = "lead.md", in_run_dir: bool = False
+) -> str:
+    """One learning-stage `read_file`, through the real tool.
+
+    `in_run_dir` puts the artifact where PRODUCTION puts it. For a learning stage the run dir is
+    not private workspace — it is the SHARED cross-stage directory: `benign_actor/run.py:47` and
+    `run_cycle.py:97` write `past_tickets.txt` and the actor story into it, and the judge's own
+    closed-ticket capture lands at `ticket_reads/{seq}.json`. This harness staged those under
+    `comparison/` instead, which is a real add-dir but the wrong one, and that spelling is what
+    kept #849's F-11 (run-dir reads arriving unframed) out of view here."""
     deps, comparison = _judge_deps(tmp_path)
-    artifact = comparison / name
+    artifact = (deps.run_dir if in_run_dir else comparison) / name
+    artifact.parent.mkdir(parents=True, exist_ok=True)
     artifact.write_text(body, encoding="utf-8")
     return _tool_read_file(deps, str(artifact))
 
