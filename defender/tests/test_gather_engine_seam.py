@@ -8,6 +8,7 @@ decision/prompt helpers:
 """
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -73,6 +74,36 @@ def test_gather_prompt_header_is_progressive_disclosure():
     assert "ONLY on" in prompt
     assert "not on every dispatch" in prompt
     assert "skills/elastic/SKILL.md" in prompt
+
+
+def test_the_dispatch_prompt_settles_whether_this_system_has_an_execution_md(tmp_path):
+    """4 of the 7 systems have no `execution.md`: the stubs carry their Execution section inline
+    in `SKILL.md` (`docs/system-skill-shape.md`), and the pitfalls curator creates the file for a
+    system only once it has a pitfall to fold there. Every prompt that named the path
+    unconditionally — this header, gather's ORIENT and coin branches, `defender-sql`'s recipe
+    pointer — bought a Read that 404s, one wasted turn per dispatch against those four.
+
+    Pinned on tmp trees rather than the live corpus deliberately: which systems split is exactly
+    what the curator is free to change mid-corpus, so the demand is that the prompt STATES the
+    tree's answer, not which answer it is."""
+    for system, has_file in (("split", True), ("inline", False)):
+        d = tmp_path / "skills" / system
+        d.mkdir(parents=True)
+        (d / "SKILL.md").write_text("## Execution\n", encoding="utf-8")
+        if has_file:
+            (d / "execution.md").write_text("## Verbs\n", encoding="utf-8")
+
+    deps = replace(_deps(), defender_dir=tmp_path)
+    cat = "- `split`: desc"
+    split = tools._gather_prompt(deps, tools.GatherRequest("l-001", "split", "g", ("d",)), cat)
+    inline = tools._gather_prompt(deps, tools.GatherRequest("l-002", "inline", "g", ("d",)), cat)
+
+    assert f"{tmp_path}/skills/split/execution.md" in split
+    assert "NO `execution.md`" not in split
+    assert "NO `execution.md`" in inline
+    assert f"{tmp_path}/skills/inline/execution.md" not in inline, (
+        "the prompt still hands gather a path that does not exist"
+    )
 
 
 def test_835_the_per_lead_dispatch_comes_last_behind_the_two_fixed_indexes():

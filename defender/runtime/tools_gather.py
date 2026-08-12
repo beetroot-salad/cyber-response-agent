@@ -187,6 +187,27 @@ _INDEX_NONE_GRANTED = (
 )
 
 
+def _execution_surface(defender_dir: Path, system: str) -> str:
+    """Which file carries `system`'s execution surface — verbs, params, exit codes, the pitfalls
+    curator's `## Common pitfalls` — resolved off the tree at dispatch.
+
+    All seven systems split it today, so this resolves to the path on every live dispatch. The
+    absent arm is not dead: `connect` scaffolds a new system's `SKILL.md` before its
+    `execution.md` exists (`validate_scaffold.py` warns rather than fails), and until this was
+    named at dispatch, gather spent a turn per lead finding that out — a Read that 404s, 20 of
+    them across the 30 recorded runs, on the four systems that had no file. The check is what
+    keeps the promise honest for the next system, rather than resting on a convention that has
+    already been broken once.
+    """
+    execution = Path(defender_dir) / "skills" / system / "execution.md"
+    if execution.is_file():
+        return f"Its execution surface is the sibling `{execution}`."
+    return (
+        f"`{system}` has NO `execution.md` — its execution surface is that SKILL.md's "
+        "`## Execution` section; don't go looking for the sibling file."
+    )
+
+
 def _gather_prompt(
     deps: AgentDeps, request: GatherRequest, catalog: str | None,
     verb_grant: VerbGrant | None = None,
@@ -204,9 +225,9 @@ def _gather_prompt(
             f"progressive disclosure). Your target is `system: {request.system}`, named in the "
             "Dispatch at the end of this message; confirm it here. These descriptions are "
             "usually enough to pick a template or name a measurement — Read the target's full "
-            f"`{deps.defender_dir}/skills/{request.system}/SKILL.md` (and execution.md if "
-            "present) ONLY on demand, when you need field vocab or CLI specifics the "
-            "descriptor lacks; not on every dispatch.\n\n"
+            f"`{deps.defender_dir}/skills/{request.system}/SKILL.md` ONLY on demand, when you "
+            "need field vocab or CLI specifics the descriptor lacks; not on every dispatch. "
+            f"{_execution_surface(deps.defender_dir, request.system)}\n\n"
             f"{catalog}\n"
         )
     index = _template_index(deps.defender_dir, request.system, verb_grant)

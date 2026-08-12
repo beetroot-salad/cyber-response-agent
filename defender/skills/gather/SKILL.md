@@ -37,9 +37,9 @@ Read `{run_dir}/alert.json` and the lead. Confirm the lead actually wants
 through the `esql` verb (an ES|QL pipe against the `logs-*` data streams) and
 filters through `query`/`alerts`; other systems have their own verbs (e.g.
 cmdb `get-host`, identity `can-access`), each binding named params — so
-ES|QL is the SIEM's language, not the universal query shape. Read
-`{defender_dir}/skills/{system}/execution.md` only if you need the index list
-or the system's verb/param details.
+ES|QL is the SIEM's language, not the universal query shape. Read the
+`execution.md` your dispatch prompt names only if you need the index list or
+the system's verb/param details.
 
 **You own the retrieval — the time window included.** The lead names the
 question and its anchors (a timestamp, an identity, a host); it does not name
@@ -72,7 +72,7 @@ lead-author builds the catalog from.
 
 No template fits → **don't author one**; coin a descriptive id
 (`sshd-auth-failures-by-srcip`, not `query1`) and write the query yourself. Before
-coining, if `{defender_dir}/skills/{system}/execution.md` exists, Read its
+coining, when your dispatch prompt named an `execution.md`, Read its
 `## Common pitfalls` section — prior coined-query mistakes on this system (bad index
 syntax, malformed pipes, wrong params) are recorded there; don't repeat them. The
 offline lead-author curates

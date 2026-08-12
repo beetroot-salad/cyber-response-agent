@@ -299,6 +299,45 @@ def test_pitfalls_keeps_exit_64_and_reshapes_examples():
     assert re.search(r"param", prompt), "lead_pitfalls.md exemplars do not name a param mistake"
 
 
+def _systems() -> tuple[str, ...]:
+    """The system skills, discovered off the tree by the marker only a system carries — its
+    `## Visibility surface`. A hand-listed tuple is what let the execution-surface split go
+    uneven for four systems without a test noticing."""
+    found = tuple(sorted(
+        p.parent.name for p in (_DEFENDER / "skills").glob("*/SKILL.md")
+        if "## Visibility surface" in p.read_text(encoding="utf-8")
+    ))
+    assert len(found) >= 7, f"the system discriminator stopped matching: {found}"
+    return found
+
+
+def test_every_system_keeps_its_execution_surface_in_execution_md():
+    """The Execution surface is a sibling `execution.md` for EVERY system, never a section
+    inline in `SKILL.md` (`docs/system-skill-shape.md`).
+
+    Two things ride on the uniformity. #261: `SKILL.md` is what the orchestrating defender reads
+    to route, so an inline Execution section puts the adapter's transport and env vars in the
+    context of the one role that must never dispatch — which is how the four stubs sat until the
+    extraction, each spelling out its `docker --context soc-playground exec <bastion> curl`
+    transport. And gather can only be handed the path unconditionally if the path is always
+    there; while four were missing it spent a turn per lead on a Read that 404s.
+
+    The leak markers are asserted against the `## Execution` section body, not the whole file:
+    a Visibility surface may legitimately name a `config.env` when describing a declared gap."""
+    for system in _systems():
+        skill = _read(_DEFENDER / "skills" / system / "SKILL.md")
+        assert (_DEFENDER / "skills" / system / "execution.md").is_file(), \
+            f"{system} has no execution.md — gather is told a path that 404s"
+        section = _corpus.section_bodies(skill).get("Execution", "")
+        assert "execution.md" in section, \
+            f"{system}/SKILL.md ## Execution no longer points at the sibling file"
+        for marker in ("docker --context", "curl http", "config.env", "query(system="):
+            assert marker not in section, (
+                f"{system}/SKILL.md ## Execution carries {marker!r} inline — that is the #261 "
+                "leak, in the file the orchestrator reads to route"
+            )
+
+
 def test_execution_md_documents_exit_64_and_index_off_flags():
     """demand: execution_md_documents_exit_64_and_index_off_flags.
 
@@ -306,7 +345,7 @@ def test_execution_md_documents_exit_64_and_index_off_flags():
     now produces). ``elastic/execution.md`` ``## Index-pattern selection`` is off the ``--index``
     CLI-flag surface, consistent with its own 'no command, no --help' ## Verbs opening.
     """
-    for system in ("elastic", "cmdb", "identity"):
+    for system in _systems():
         text = _read(_DEFENDER / "skills" / system / "execution.md")
         sections = _corpus.section_bodies(text)
         exit_codes = sections.get("Exit codes", "")
