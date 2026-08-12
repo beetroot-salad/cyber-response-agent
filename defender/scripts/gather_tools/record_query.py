@@ -15,10 +15,8 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender._io import guarded_mkdir, read_jsonl_rows, write_guarded
-from defender._run_paths import RunPaths
+from defender._run_paths import LEAD_ID_RE, RunPaths  # noqa: F401 — re-export: `tools_gather` imports the pre-dispatch gate from here
 from defender.runtime.circuit_breaker import AGENT_FIXABLE_ERROR_CLASS, error_class_for_exit
-
-LEAD_ID_RE = re.compile(r"^l-[A-Za-z0-9]+$")
 
 _ADAPTER_RE = re.compile(r"(?:^|/)(\w+)_adapter\.py$")
 _NON_ADAPTER = frozenset({"invlang"})

@@ -15,7 +15,7 @@ import re
 from pathlib import Path
 
 from defender import _artifact_schema
-from defender._run_paths import WIRE_LOG_DIR
+from defender._run_paths import CASE_ANSWER_KEY_NAMES, WIRE_LOG_DIR
 from defender.runtime import bash_policy
 
 from .decision import Decision
@@ -168,14 +168,21 @@ def decide_read(
        clamp — the gather_raw shape is simply not in main's list. Empty `read_allow` (every
        non-reader agent) applies no shape filter, leaving the gate root-only.
 
-    On top of both, the declarative secret/ground-truth denylist (`bash_policy.json`) denies a
-    sensitive file that lands INSIDE an allowed shape — a captured `.env` in the run dir, the
+    Three path classes are then judged on top of the two gates, because a ROOT the agent holds is
+    not the same claim as a FILE it may see: `gather_raw/` and the case's answer-key artifacts at
+    the agent's own run-dir root (`names_case_answer_key`, confined agents only) are denied unless
+    a declared shape names them, and `wire_logs/` is denied outright. Each is commented at its
+    line with why it is opt-in-able or not.
+
+    On top of all of it, the declarative secret/ground-truth denylist (`bash_policy.json`) denies
+    a sensitive file that lands INSIDE an allowed shape — a captured `.env` in the run dir, the
     eval `cases.json`/`ground_truth.yaml` — cheap belt-and-suspenders applied to every agent.
     A `resolve()` error (a symlink cycle, an embedded NUL) FAILS CLOSED rather than propagating
     out of a blocking gate."""
     p = Path(path)
     try:
         rp = p.resolve()
+        rd = Path(run_dir).resolve()
         roots = _resolved_read_roots(policy, run_dir, defender_dir)
     except RESOLVE_ERRORS:
         return Decision(False, f"Blocked: {p!r} could not be resolved (failing closed).")
@@ -210,6 +217,36 @@ def decide_read(
     # never True for it and no positive enumeration can ever exclude anything.
     if names_wire_log_dir(rp):
         return Decision(False, WIRE_LOG_DENY_REASON)
+    # The same argument as `gather_raw` one step up, applied to the OTHER thing the learning loop
+    # stages into the gray-box agent's own root (#850 F-19). `persist._copy_shared_inputs` and
+    # `lead_repository.stage_tables` write the source run's investigation.md, report.md,
+    # source_refs.yaml and executed_queries.jsonl into `<learning_run_dir>/` — which IS the actor's
+    # `run_dir`, an unconditional read root it declares no shapes over — so the case's reasoning
+    # and its disposition sat one `read_file` away from the agent whose whole confine exists to
+    # withhold them. Not reachable on a clean first pass (persist runs after that leg's actor), but
+    # the dir is `mkdir(exist_ok=True)` with no cleanup and no once-only guard, so ANY second pass
+    # over the same run id — a hand re-drive, `ops/replay_actor.py`, the sibling leg's persist
+    # landing first on an `inconclusive` case — starts the actor in a dir already holding them.
+    #
+    # CONDITIONAL ON `read_confine`, unlike the wire log's outright deny: the judge reads exactly
+    # these files as the case it is grading (its comparison roots are declared read_roots), and it
+    # is unconfined. A confine is this system's one declaration of "this agent is being TESTED on
+    # this case", so it is the right key — and `not admitted` keeps the opt-in door the raw deny
+    # has, for a future confined role that declares a shape naming one of them.
+    #
+    # THE RUN-DIR ROOT, not the basename anywhere: a confined agent's other root is a lesson
+    # corpus, and a flat name test would make a lesson that happened to be called `report.md`
+    # unreadable with a reason about answer keys. Every staged copy is `<run_dir>/<name>`
+    # (`RunPaths` composes all four that way), so the parent is part of the fact.
+    #
+    # decide_read ONLY, like `_names_raw` and unlike the wire log. The bash lane cannot reach here:
+    # the actor holds no file-opening grant at all (only `python3 <pinned script>`), and the
+    # curator's `cat` scope is `under(corpus, TREE)` — neither grant's scope spans its run dir, so
+    # there is no second surface to disagree with. `read_allowed_path` is deliberately untouched
+    # for the other reason too: it also backs `decide_write`'s containment half, and a confined
+    # agent authoring into its own run dir is not the leak.
+    if policy.read_confine and not admitted and names_case_answer_key(rp, rd):
+        return Decision(False, ANSWER_KEY_DENY_REASON)
     if policy.read_allow and not admitted:
         return Decision(
             False,
@@ -286,6 +323,30 @@ def names_wire_log_dir(p: Path) -> bool:
     `under(run, TREE)`, so without this the bash lane would admit the very file `decide_read`
     refuses it."""
     return WIRE_LOG_MARKER in p.parts
+
+
+# The reason a confined agent earns for reading a staged case artifact. Names the FILE and the
+# posture, never the roots — the actor is not told where its run dir is (no disclosure in its
+# instructions, its user message, or the out-of-roots denial reason), and a reason that spelled
+# the layout back would hand it the address it has to guess today.
+ANSWER_KEY_DENY_REASON = (
+    "Blocked: that file is the finished case — the defender's own reasoning, its disposition, "
+    "and the queries behind them. Your run dir holds a staged copy for archival, not for you: "
+    "you are written against this case WITHOUT its answer, and reading it would make your output "
+    "a restatement of the verdict rather than an independent one. Work from what your role is "
+    "handed — the alert, your inputs, and your corpus."
+)
+
+
+def names_case_answer_key(p: Path, run_dir: Path) -> bool:
+    """Whether RESOLVED path `p` is one of the case's answer-key artifacts staged at the ROOT of
+    RESOLVED `run_dir` (`_run_paths.CASE_ANSWER_KEY_NAMES`).
+
+    Both operands are already-resolved paths — the caller (`decide_read`) resolves them together
+    inside its one fail-closed `try`, so a symlink at `investigation.md`'s name is collapsed onto
+    the staged file before this compares parents, and a `..` cannot spell the root some other way.
+    """
+    return p.name in CASE_ANSWER_KEY_NAMES and p.parent == run_dir
 
 
 def _names_raw(p: Path) -> bool:

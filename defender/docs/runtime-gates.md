@@ -61,6 +61,30 @@ hooks). The gates:
     read-only viewers run from the main loop; data-source adapters and
     `gather_raw/` reads are denied there (the gather subagent is the
     data-access layer).
+  - **A confined agent's own run dir is not a hole in its confine** (#850 F-19) —
+    the gray-box actor's `run_dir` IS the learning run dir, and the loop STAGES the
+    finished case into it: `persist._copy_shared_inputs` writes investigation.md,
+    report.md and source_refs.yaml there, `lead_repository.stage_tables` writes
+    executed_queries.jsonl and the whole `gather_raw/` tree. A run dir is an
+    unconditional read root and the actor declares no shapes over it, so the
+    `gather_raw` carve-out closed the payloads while the case's own reasoning and
+    disposition stayed one `read_file` away. `names_case_answer_key` denies those
+    four names AT THE RUN-DIR ROOT for any policy declaring a `read_confine` — a
+    confine being this system's one declaration of *this agent is being TESTED on
+    this case*, which is why the deny keys on it rather than on the layout: the
+    JUDGE binds on the same dir and must keep reading exactly those files. Not the
+    basename anywhere (a confined agent's other root is a lesson corpus), and
+    `alert.json` is deliberately not in the set — it is the case INPUT, handed to
+    the actor in its own user message. The layout is unchanged on purpose: the
+    staged copies are what `verify_forward` and `disposition_for` read when a
+    finding later becomes a lesson, so they are not archival and cannot simply move.
+  - **One alphabet for a lead id** (#850 F-09) — the gather payload shape
+    (`_run_paths.GATHER_RAW_SHAPE`) and the four lead-id validators compose off one
+    constant (`_run_paths.LEAD_ID_BODY`). They are not independent facts: the
+    payload path gather is told to `cat` is minted from a claimed id, so a gate
+    narrower than the claim gate denies gather its own payload. It did — the shape
+    said `l-\d+` while every validator said `l-[A-Za-z0-9]+` — latently, because
+    every id ever recorded happened to be numeric.
   - **Query capture is a capability of the typed `query` tool** — since #611 the
     gather subagent calls the in-process `query` tool (`runtime/query_tool.py`)
     with `system`/`verb`/`params`; there is no standalone adapter call on any bash

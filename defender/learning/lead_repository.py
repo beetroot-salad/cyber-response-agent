@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import re
 import shutil
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -13,7 +12,13 @@ from typing import TYPE_CHECKING
 import yaml
 
 from defender._io import TEXT_READ_ERRORS, read_jsonl_rows, read_text_utf8
-from defender._run_paths import RunPaths, artifact_dir, artifact_file, contained_payload
+from defender._run_paths import (
+    LEAD_ID_RE as _LEAD_ID_RE,
+    RunPaths,
+    artifact_dir,
+    artifact_file,
+    contained_payload,
+)
 from defender.runtime.circuit_breaker import error_class_for_exit
 from defender.scripts.gather_tools.record_query import is_reserved_query_id
 
@@ -22,7 +27,6 @@ if TYPE_CHECKING:
 
 
 _LEAD_SUFFIX = ".lead.json"
-_LEAD_ID_RE = re.compile(r"^l-[A-Za-z0-9]+$")
 
 
 def _as_int(value, default: int = 0) -> int:
