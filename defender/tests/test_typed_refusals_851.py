@@ -105,18 +105,33 @@ def test_f10_a_nul_in_an_opens_nothing_argv_is_denied_by_the_gate(command, tmp_p
         run_dir=deps.run_dir, defender_dir=deps.defender_dir, cwd_anchor=deps.cwd_anchor,
     )
     assert d.allow is False
-    assert "NUL" in d.reason
+    assert d.reason == permission.EMBEDDED_NUL_REASON
 
 
 def test_f10_the_cat_lane_still_denies_a_nul_operand(tmp_path):
     """Regression guard on the one lane that already refused (`test_grant_gate_575.py`'s a9):
-    the new whole-string check must not have moved that deny somewhere it can be lost."""
+    the new whole-string check must not have moved that deny somewhere it can be lost.
+
+    Driven at BOTH altitudes on purpose. The whole-string check sits ahead of the parse, so
+    through `decide_bash` it is now the only arm a NUL can ever reach — an assertion there
+    would pass with `_in_scope`'s `RESOLVE_ERRORS` arm deleted, and would not be a guard on
+    the cat lane at all. `_decide_readers` is therefore driven directly, below the new check,
+    where that arm is still the thing answering."""
+    from defender.runtime.permission import bash as bash_gate
+
     deps, run, _box = _box_scene(tmp_path, MAIN_DEF)
+    command = f"cat {run}/inv\x00.md"
     d = permission.decide_bash(
-        f"cat {run}/inv\x00.md", policy=deps.policy,
+        command, policy=deps.policy,
         run_dir=deps.run_dir, defender_dir=deps.defender_dir, cwd_anchor=deps.cwd_anchor,
     )
     assert d.allow is False
+
+    pipelines = bash_gate._parse(command)
+    assert pipelines is not None, "the NUL command still tokenizes — the deny is the gate's"
+    below = bash_gate._decide_readers(pipelines, deps.policy, run_dir=deps.cwd_anchor)
+    assert below is not None
+    assert below.allow is False
 
 
 @pytest.mark.parametrize("command", _NUL_COMMANDS)
@@ -242,6 +257,25 @@ def test_f26_encodable_content_on_the_same_path_still_commits(tmp_path):
     assert (corpus / "x.md").read_text(encoding="utf-8") == "körper — ok ✅\n"
 
 
+def test_f26_an_undecodable_baseline_denies_rather_than_raising(tmp_path):
+    """The OTHER exception `decide_write` could still hand its caller. investigation.md's
+    schema takes the on-disk text as its append-only baseline, and the gate reads it — so
+    an investigation.md that is not UTF-8 made `read_text` raise `UnicodeDecodeError` out of
+    the gate, the same "propagate instead of decide" shape F-26 is about, one branch over.
+
+    It DENIES rather than falling back to `current=None`: no baseline means no append-only
+    check, which would let the faulting write replace the committed document."""
+    deps, _run, _box = _box_scene(tmp_path, MAIN_DEF)
+    inv = deps.run_dir / "investigation.md"
+    inv.write_bytes(b"\xff\xfe not utf-8\n")
+    d = permission.decide_write(
+        inv, "```\n:V x | host\n```\n",
+        run_dir=deps.run_dir, defender_dir=deps.defender_dir, policy=deps.policy,
+    )
+    assert d.allow is False
+    assert "failing closed" in d.reason
+
+
 # =========================================================================== #
 # F-23 — `_alert_signature` is annotated `-> str | None` and returned the parsed JSON value
 # RAW, so a numeric `rule.id` detonated in `re.escape` on `orientation()`'s unguarded path and
@@ -276,3 +310,24 @@ def test_f23_an_empty_signature_is_no_signature(rule_id, tmp_path):
     """`str(None)` would be the literal `"None"` and `""` would build a `source_signature ~ .*`
     pattern matching every lesson row — both are "no signature", not a signature."""
     assert orient._alert_signature(_alert(tmp_path, rule_id)) is None
+
+
+@pytest.mark.parametrize("rule_id", [[], {}, ["a"], {"a": 1}, True, False])
+def test_f23_a_non_scalar_signature_is_no_signature(rule_id, tmp_path):
+    """`str()` is total, so the coercion alone turns every malformed id into a signature-shaped
+    string that is not one — `[]` becomes `"[]"`, `false` becomes `"False"` — and hands it to
+    the lessons grep and the shim argv as though the alert had declared it."""
+    assert orient._alert_signature(_alert(tmp_path, rule_id)) is None
+
+
+def test_f23_a_signature_carrying_a_nul_orients_instead_of_raising(tmp_path):
+    """F-23's other consumer. Coercing to `str` fixes `re.escape`, but the SAME value is an
+    argv element — and `subprocess.run` raises a bare `ValueError("embedded null byte")`, not
+    an `OSError`, for a NUL in one. `_shim` folded only `OSError`/`TimeoutExpired`, so the
+    signature took `orientation()` down before the first model request through the argv rather
+    than through the regex: the identical invariant breach, one line over."""
+    alert = _alert(tmp_path, "rule\x00id")
+    assert orient._alert_signature(alert) == "rule\x00id"
+    out = orient.orientation(tmp_path, DEFENDER, alert, salt="s")
+    assert isinstance(out, str)
+    assert "## invlang grammar" in out

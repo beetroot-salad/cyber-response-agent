@@ -32,7 +32,7 @@ from defender._untrusted import wrap as _wrap
 # The SAME byte ruler the #629 bounds are measured with — a write tool that reports "bytes"
 # has to report the number the gate will judge, not a codepoint count that under-reads it.
 from defender._artifact_schema import _utf8_len
-from defender._env import env_int
+from defender._env import FatalConfigError, env_int
 from defender.scripts.adapters.faults import USAGE_EXIT_CODE
 from defender.scripts.gather_tools import sql as defender_sql
 from defender.scripts.gather_tools import record_query
@@ -318,6 +318,14 @@ def _tool_bash(deps: AgentDeps, command: str) -> str:
     # argv took the whole investigation down with a traceback and no disposition. It becomes a
     # refusal the model can act on instead. The encoder's exception TYPE is left alone
     # deliberately: `test_540_exec_seam.py` pins `pytest.raises(ValueError)` on `run_parsed`.
+    #
+    # `FatalConfigError` is re-raised AHEAD of it: it subclasses `ValueError` while meaning the
+    # opposite of a correctable command fault — a misconfigured run that must stop, not retry —
+    # and every other broad `except ValueError` in the tree already lets it through
+    # (`author/verify_forward/tool.py`). A blanket arm that swallowed it would hand the model
+    # "the command cannot cross the box wire" for an operator's bad env var, forever.
+    except FatalConfigError:
+        raise
     except ValueError as e:
         raise ModelRetry(f"the command cannot cross the box wire: {e}") from e
     _record_shim_failure(deps, decision, command, result)
