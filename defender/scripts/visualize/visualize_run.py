@@ -313,7 +313,7 @@ def _lead_summary(leads: list) -> str:
         return '<span class="empty">no leads</span>'
     rows: list[str] = []
     for jl in leads:
-        dead = jl.orphan or not jl.queries
+        dead = jl.orphan or not jl.rows  # "reached the table at all" (#841)
         goal = (jl.goal or ("orphan" if jl.orphan else "")).strip()
         mark = ' <span class="lead-dead">∅</span>' if dead else ""
         goal_html = f'<span class="lead-mini-goal">{esc(goal)}</span>' if goal else ""

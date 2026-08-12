@@ -222,6 +222,19 @@ authored during a run are written back to the per-system catalog
 with usage; early near-duplicates are accepted and normalized downstream when
 patterns stabilize.
 
+**Not every row in the queries table is a query.** The `∅.`-prefixed **sentinel**
+ids (`record_query.RESERVED_QUERY_ID_PREFIX` — the repeat guard's trip row, the
+rows written above its placement, a failed reducer shim) are writer-only records
+of things that never reached a system, kept in the table because it is the run's
+only append-only surface. `joined` therefore projects each lead in two parts
+(#841): `JoinedLead.queries` — the queries the defender actually ran, and what
+the actor, the oracle and the judge are each shown — and
+`JoinedLead.observations`, which the pitfalls residue
+(`collect_general_failures`) reaches through `JoinedLead.rows`, the seq-ordered
+remerge. The filter is deliberately NOT in `load_queries`: dropping the rows at
+the reader would delete the lead-author's one view of a failed reduce, which is
+the whole of #823.
+
 For gray-box adversarial runs, the actor sees `alert.json` plus an
 **answer-and-intent-redacted** projection of the lead sequence:
 

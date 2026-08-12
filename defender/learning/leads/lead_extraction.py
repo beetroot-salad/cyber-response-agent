@@ -55,8 +55,14 @@ def extract_from_joined(joined_leads: list) -> list[ExecutedLead]:
     for entry_idx, jl in enumerate(joined_leads):
         goal = jl.goal or ""
         wtc = tuple(str(x) for x in jl.what_to_summarize if isinstance(x, (str, int)))
-        is_multi = len(jl.queries) > 1
-        for q_idx, q in enumerate(jl.queries):
+        # `.rows` — the WHOLE table for this lead, sentinels included, in the table's own seq
+        # order. This is the one reader that must not take #841's split: `query_index` keys
+        # `pitfall_id`, and `collect_general_failures` below is exactly the collector the
+        # `∅.bash-shim` row was minted for (#823). The agent-facing projections are the ones
+        # that read `.queries`.
+        rows = jl.rows
+        is_multi = len(rows) > 1
+        for q_idx, q in enumerate(rows):
             if q.raw_ref is None or not q.raw_ref.is_file():
                 continue
             if q.payload_status not in _VALID_PAYLOAD_STATUSES:

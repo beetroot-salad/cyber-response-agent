@@ -21,6 +21,7 @@ from defender.learning.pipeline._prompt import stage_user_message, structured_js
 from defender.learning.leads import lead_neighbors
 from defender.learning.leads import lead_render
 from defender.runtime.verbs import engine_for
+from defender.scripts.gather_tools.record_query import is_reserved_query_id
 
 from defender.learning.leads.path_validation import (  # noqa: F401  (re-exported)
     CATALOG_DIR,
@@ -105,6 +106,14 @@ def build_handoff(
     grouped: dict[Path, list[ExecutedLead]] = {}
     seen_order: list[Path] = []
     for lead in executed:
+        if is_reserved_query_id(lead.query_id):
+            # Not a contract violation and not this collector's row: a `∅.`-prefixed sentinel
+            # records something the defender did NOT run, and it is routed to the pitfalls
+            # residue by construction (#823). Before #841 it fell to the WARN below, which
+            # said "runtime contract violation" about the one row shape the runtime is
+            # supposed to write — one line of noise per refusal, in the log an operator reads
+            # to find real catalog drift.
+            continue
         tpl = by_id.get(lead.query_id)
         if tpl is None:
             _log(

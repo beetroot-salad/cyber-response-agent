@@ -576,7 +576,10 @@ def render_runtime_leads_queries(run_dir: Path, leads: list | None = None) -> tu
     rows: list[str] = []
     for jl in leads:
         goal = jl.goal or ("(orphan — query with no lead sidecar)" if jl.orphan else "")
-        qs = jl.queries
+        # `.rows` — this table IS the run-inspection view (#841): a human debugging the
+        # run needs the refusal and shim rows most of all, so the split the agent-facing
+        # projections take is exactly wrong here.
+        qs = jl.rows
         lead_cell = (
             f'<td class="lq-lead" id="lead-{esc(jl.lead_id)}" rowspan="{max(1, len(qs))}">'
             f'<div class="lq-leadid">{esc(jl.lead_id)}</div>'

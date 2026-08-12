@@ -160,7 +160,7 @@ def render_lead_sequence_compact(run_dir: Path) -> str:
     for jl in leads:
         goal = jl.goal or ""
         q_rows: list[str] = []
-        for q in jl.queries:
+        for q in jl.rows:  # run inspection — the whole table, sentinels included (#841)
             params_str = json.dumps(q.params, ensure_ascii=False) if q.params else ""
             q_rows.append(
                 f'<div class="lead-query"><span class="qid">{esc(q.query_id or "?")}</span> '
