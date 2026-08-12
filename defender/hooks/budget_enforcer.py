@@ -34,10 +34,15 @@ BUDGET_EXEMPT_TOOLS = frozenset({"close_investigation"})
 BUDGET_REFUSAL_MESSAGE = (
     "Budget stop: the {tool} tool is now PERMANENTLY withdrawn for the rest of this "
     "run (the {limb} cap is reached and will not reset). Appending to investigation.md — "
-    "append_block — and closing the investigation are still available. "
+    "append_block — repairing a flagged row — fix_row — and closing the investigation are "
+    "still available. "
     "Do not retry this tool; close the investigation now and record your report from "
     "the evidence you already have."
 )
+# `fix_row` is named because the survivor set would otherwise be WRONG whenever a repair
+# window is open (#836): both `append_block` and the close are refused while a row is
+# flagged, so a message offering only those two sends the model to a close it will be
+# refused — a dead end manufactured by the message itself.
 
 
 class BudgetKill(Exception):
@@ -222,7 +227,11 @@ def tail_exhausted(state: dict, limits: dict) -> bool:
 #: `append_block` joined when it became main's only writer (#810) — omitting it would have
 #: left the transcript budget-refusable mid-investigation. `write_file`/`edit_file` stay listed
 #: because the tier is keyed on a name, not on a grant, and a stale name here is inert.
-_MAIN_TAIL_TOOLS = ("read_file", "append_block", "write_file", "edit_file")
+#: `fix_row` joined for the same reason `append_block` did (#836): while a row is flagged BOTH
+#: the append and the close are refused, so a repair verb left at `core` tier would be
+#: permanently withdrawn at the cap and leave the run with nothing that can reopen either.
+#: METERED, not exempt — a model looping on repairs is still stoppable at `tail_exhausted`.
+_MAIN_TAIL_TOOLS = ("read_file", "append_block", "fix_row", "write_file", "edit_file")
 
 
 def tier(tool_name: str, role: AgentRole) -> str:

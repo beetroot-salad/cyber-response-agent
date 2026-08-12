@@ -454,7 +454,14 @@ class _ToolRecorder:
         self.names: list[str] = []
         self.fns: dict = {}
 
-    def tool(self, fn):
+    def tool(self, fn=None, **kwargs):
+        """Mirrors `Agent.tool`, which is usable bare OR with keyword options — #836
+        registers the write verbs with `sequential=`/`prepare=`, so a recorder that only
+        accepted the bare form would break on registration rather than on the property
+        this suite is about."""
+        if fn is None:
+            return self.tool
+
         self.names.append(fn.__name__)
         self.fns[fn.__name__] = fn
         return fn

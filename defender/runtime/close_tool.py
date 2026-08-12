@@ -39,6 +39,7 @@ from defender.hooks.budget_enforcer import BUDGET_EXEMPT_TOOLS  # noqa: F401 —
 from defender.skills.invlang.validate import false_positive_entry_price
 
 from . import challenge_gate
+from . import tools as tools_mod
 from .agent_role import AgentRole
 from .tools import AgentDeps
 
@@ -367,7 +368,12 @@ def _commit(  # noqa: PLR0913 — the commit's full inputs; the scalars are alre
 async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams, all injected
     deps: AgentDeps, disposition: str, *, stages: Any, bounds: challenge_gate.Bounds,
     evidence: str | None = None, validator: ArtifactValidator = validate_artifact,
+    forced: bool = False,
 ) -> CloseResult:
+    """`forced` distinguishes the FRAMEWORK's close from the model's (#836/H1). Only the
+    driver's retry-exhaustion limb sets it, and it buys exactly one thing: exemption from the
+    flagged-row gate below. Defaulted False so every other caller — the tool adapter, the sync
+    host entry point, a direct test call — is gated."""
     if deps.role is not AgentRole.MAIN:
         raise ModelRetry(
             "close_investigation is reachable only from the investigator (main) role — "
@@ -408,6 +414,21 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
             "the close is terminal. Re-closing would re-run the whole review and overwrite "
             "both the recorded disposition and the first close's own review record."
         )
+    # #836/M5+H5. TOP of the close — after the two cheap well-formedness refusals above, and
+    # before ANY disposition branch. Placing it inside one branch would leave `inconclusive`
+    # (which commits early, ahead of the gate) able to dodge the obligation entirely, and
+    # would spend the reviewer's model calls on a close that is going to be refused anyway.
+    #
+    # The framework's FORCED close is the one written-down exception: retry exhaustion has no
+    # model left to repair with, so gating it would dead-letter the run at persist for a
+    # MISSING report.md — before investigation.md is validated at all, and for the wrong
+    # reason. Every close the MODEL invokes is gated.
+    if not forced:
+        flagged = tools_mod.flagged_diagnostics(deps)
+        if flagged:
+            raise ModelRetry(tools_mod.flagged_write_refusal(
+                "close_investigation", flagged, offered_text=False,
+            ))
     # #806: the one disposition with an entry price, collected here as well as at the
     # `investigation.md` write gate. `report.md` is written FROM this argument, and nothing else
     # on this path reads the companion — so without this the price is bypassable by concluding

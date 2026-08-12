@@ -888,12 +888,12 @@ def test_d6_writers_pass_roots(tmp_path):
         _tool_write_file(deps, str(escape / "x.md"), "content")
     # EVERY call site must pass the tree — a source check covers edit_file and append_block
     # (whose read gates already deny the escape, so the wiring is not behaviourally separable
-    # there). Three sites since #810 added append_block; the count is the census half of the
-    # assertion, so a new writer that skips the roots shows up here as a mismatch rather than
-    # as a dormant guard.
+    # there). FOUR sites since #836 added fix_row, the second writer bound to investigation.md;
+    # the count is the census half of the assertion, so a new writer that skips the roots shows
+    # up here as a mismatch rather than as a dormant guard.
     tools_src = (PATHS.repo_root / "defender" / "runtime" / "tools.py").read_text()
     calls = re.findall(r"decide_write\(.*?policy=deps\.policy", tools_src, re.DOTALL)
-    assert len(calls) == 3, "a decide_write call site appeared or vanished — check the roots"
+    assert len(calls) == 4, "a decide_write call site appeared or vanished — check the roots"
     assert all("defender_dir=deps.defender_dir" in c for c in calls)
 
 

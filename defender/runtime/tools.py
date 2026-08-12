@@ -2,13 +2,18 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
+import sys
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, ClassVar, Self
+from typing import TYPE_CHECKING, Any, ClassVar, Self
+
+if TYPE_CHECKING:  # pragma: no cover — typing only; the runtime import stays lazy
+    from defender.skills.invlang.validate import Diagnostic
 
 from defender._clock import now_iso
 from defender._paths import PATHS
@@ -573,6 +578,108 @@ def _tool_edit_file(deps: AgentDeps, path: str, old_string: str, new_string: str
     return f"edited {path} ({len(new_text)} bytes)"
 
 
+# --------------------------------------------------------------------------------------
+# #836 — the repair window. A warn-family `:R attr_updates` row LANDS instead of costing a
+# whole re-emitted block, and then gates the next write until it is repaired.
+#
+# The window is DERIVED, never stored: `warn_diagnostics` over whatever `investigation.md`
+# holds right now IS the state. Nothing here caches it, and no `AgentDeps` field carries it,
+# so it cannot go stale and cannot disagree with the file.
+# --------------------------------------------------------------------------------------
+
+def _investigation_path(deps: AgentDeps) -> Path:
+    return deps.run_dir / "investigation.md"
+
+
+def flagged_diagnostics(deps: AgentDeps) -> tuple[Diagnostic, ...]:
+    """The run's currently-open repair window, re-derived from disk on every call.
+
+    FAILS OPEN, deliberately and on all three paths that read it (`prepare=`, the write gate,
+    the close gate). An unreadable or undecodable `investigation.md` is an unrelated fault;
+    converting it into "every write and the close are refused" would manufacture exactly the
+    unclosable run this mechanism exists to avoid. `append_block` still refuses an undecodable
+    document for its own pre-existing reason — that refusal is not this gate.
+
+    A warn diagnostic carrying NO `locus` is not in the window. The window is the set of rows
+    `fix_row` can address, and a locus-less finding names none — counting it would refuse the
+    append AND the close with no row the repair verb could ever clear, which is precisely the
+    unclosable run above. No family emits one today; this keeps that from being load-bearing."""
+    from defender.skills.invlang.validate import warn_diagnostics
+
+    p = _investigation_path(deps)
+    # ABSENCE is the ordinary "no window open" case, not a fault: `prepare=` runs on EVERY
+    # model request, including turn 1 before any write verb has created the file. Logging it
+    # would put a line on stderr for every request of every run.
+    if not p.is_file():
+        return ()
+    try:
+        return _addressable(warn_diagnostics(read_text_utf8(p)))
+    except Exception as e:  # noqa: BLE001 — fail open; a wedged run is the worse failure
+        print(
+            f"[tools] repair-window derivation failed, treating it as empty: {e!r}",
+            file=sys.stderr,
+        )
+        return ()
+
+
+def _addressable(diags: Iterable[Diagnostic]) -> tuple[Diagnostic, ...]:
+    return tuple(d for d in diags if d.locus is not None)
+
+
+def _flagged_rows(diags: tuple[Diagnostic, ...]) -> tuple[str, ...]:
+    return tuple(d.locus.row_text for d in diags if d.locus is not None)
+
+
+def flagged_write_refusal(
+    verb: str, diags: tuple[Diagnostic, ...], *, offered_text: bool = True
+) -> str:
+    """The gate's refusal, naming EVERY currently-flagged row and its `use:` alternatives.
+
+    Re-derived rather than remembered: after a frontier fold the model is handed a truncated
+    PREFIX of the document (`driver._fold_decision`), so a flagged row below the cut is simply
+    absent from its view. The refusal is the recovery channel, which is why it carries the
+    whole set rather than the most recent row.
+
+    `offered_text=False` for the CLOSE, which proposed no `investigation.md` bytes of its own:
+    the full notice's "does not contain your text" would be a claim about nothing. Both
+    spellings LEAD with the same fragment, so the model still tells a refusal from an accept
+    by the first sentence."""
+    from defender._artifact_schema import UNCHANGED_LEAD, UNCHANGED_NOTICE, render_diagnostic
+
+    # The close's opening states what the CLOSE did not do — no disposition recorded — never
+    # "nothing was committed for this run", which flatly contradicts the next sentence ("the
+    # row LANDED and is committed") and reads as "your whole investigation was discarded".
+    opening = (
+        UNCHANGED_NOTICE if offered_text
+        else f"{UNCHANGED_LEAD} — no disposition was recorded for this run."
+    )
+    return (
+        f"{opening} `{verb}` is blocked while investigation.md carries a flagged "
+        f"row. The row LANDED and is committed, so re-sending the block cannot help; repair "
+        f"it in place with `fix_row(old_row, new_row)`, or delete it with "
+        f'`fix_row(old_row, "")`.\n\n'
+        + "\n".join(render_diagnostic(d) for d in diags)
+        + "\n\nRepair every row above, then retry."
+    )
+
+
+def _warning_return(lead: str, diags: tuple[Diagnostic, ...]) -> str:
+    """An ACCEPT that carries a warning. It LEADS with the bytes and says the block landed —
+    a model that reads "warning" as "refusal" re-emits the whole block, which is the cost
+    #836 exists to remove — and it never carries the unchanged-notice wording."""
+    from defender._artifact_schema import render_diagnostic
+
+    if not diags:
+        return lead
+    return (
+        lead
+        + "\n\nBut one or more rows are FLAGGED and now block the next write:\n\n"
+        + "\n".join(render_diagnostic(d) for d in diags)
+        + "\n\nRepair each flagged row with `fix_row(old_row, new_row)` — or delete it with "
+        '`fix_row(old_row, "")` — before the next append_block or close_investigation.'
+    )
+
+
 def _tool_append_block(deps: AgentDeps, text: str) -> str:
     """Append to `investigation.md` — main's only write (#810).
 
@@ -585,13 +692,20 @@ def _tool_append_block(deps: AgentDeps, text: str) -> str:
 
     Faces the identical gate the other two verbs do — same `decide_write`, same content
     schema, same RS15 post-close refusal — on the resulting full document."""
-    p = deps.run_dir / "investigation.md"
+    p = _investigation_path(deps)
     if _closed_for_investigation_write(deps, p):
         raise ModelRetry(
             "investigation.md is no longer writable: the close already committed a "
             "recorded disposition for this run, and a further append could silently "
             "move it. The case is closed."
         )
+    # #836/M5. The gate is FORCED, not chosen: `_check_closed_vocab` walks the FULL proposed
+    # document, so a landed warn row re-fires on every subsequent append anyway. Without the
+    # gate the choices are grandfathering — which dead-letters the run at persist — or a
+    # wedged document.
+    flagged = flagged_diagnostics(deps)
+    if flagged:
+        raise ModelRetry(flagged_write_refusal("append_block", flagged))
     read_decision = permission.decide_read(
         p, run_dir=deps.run_dir, defender_dir=deps.defender_dir, policy=deps.policy
     )
@@ -621,10 +735,218 @@ def _tool_append_block(deps: AgentDeps, text: str) -> str:
     # UTF-8 BYTES, not characters: the SKILL tells the model this return IS a byte count and
     # the 65536-byte cap it has to stay under is measured the same way. invlang rows carry
     # `⟂ → ⟺` freely, so `len(str)` under-reports against the bound the gate applies.
-    return (
+    lead = (
         f"appended {_utf8_len(text)} bytes to investigation.md "
         f"({_utf8_len(new_text)} total)"
     )
+    # The gate ACCEPTED a warn-only document, which means it returned no text to reuse — so
+    # the warning can only come from a SECOND derivation here, over the bytes just written.
+    # Two `diagnose` passes per accepted append is the expected cost of the accept channel,
+    # and deriving in memory keeps it deterministic without a re-read.
+    warn = _warn_over(new_text)
+    if warn:
+        return _warning_return(f"{lead} — the block LANDED.", warn)
+    return lead
+
+
+def _warn_over(text: str) -> tuple[Diagnostic, ...]:
+    """The window over text held in memory. FAILS OPEN for the same reason
+    `flagged_diagnostics` does, and for one more: both call sites derive AFTER the bytes have
+    already landed, so a validator error raised here would surface as a failed tool call on a
+    write that succeeded — the one wrong answer #810 measured the cost of."""
+    from defender.skills.invlang.validate import warn_diagnostics
+
+    try:
+        return _addressable(warn_diagnostics(text))
+    except Exception as e:  # noqa: BLE001 — fail open; the write already landed
+        print(
+            f"[tools] repair-window derivation failed, treating it as empty: {e!r}",
+            file=sys.stderr,
+        )
+        return ()
+
+
+#: EVERY separator `str.splitlines()` honours, which is what `_tokenize_fence` splits a fence
+#: body on — so it is what decides where a ROW ends, and therefore what `Locus.row_text` holds.
+#: `split("\n")` alone left a row sitting after a `\v` `\f` `\x1c` `\x1d` `\x1e` `\x85`
+#: `\u2028` or `\u2029` FLAGGED but UNADDRESSABLE: `old_row` matched no whole line, so the
+#: repair refused while `append_block` and the close both refused for that same flagged row —
+#: a permanently wedged run, reachable from one `append_block` carrying one of those bytes.
+#: `\r\n` / `\r` never reach here: `read_text_utf8` translates them on read.
+#: Spelled as ESCAPES, never as the literal codepoints: two of them are invisible line breaks
+#: and would split THIS file for anything that reads it the way the tokenizer reads a fence.
+#: Captured, not consumed, so every untouched line keeps the separator the model wrote.
+_LINE_SEP_RE = re.compile("([\n\v\f\x1c\x1d\x1e\x85\u2028\u2029])")
+
+
+def _split_lines(text: str) -> tuple[list[str], list[str]]:
+    """`text` as the tokenizer sees it: its lines, and the separator that FOLLOWED each one
+    (`""` for the last). `lines[i] + seps[i]` reassembles the document byte for byte."""
+    parts = _LINE_SEP_RE.split(text)
+    return parts[0::2], parts[1::2] + [""]
+
+
+def _attr_block_columns(text: str, row: str) -> int | None:
+    """How many cells the block carrying `row` declares. `None` when no `:R attr_updates`
+    block holds it — which cannot happen for a flagged row, since that is the only block the
+    warn family walks."""
+    from defender.skills.invlang.parser import iter_blocks
+
+    for block in iter_blocks(text):
+        if block.name == "attr_updates" and block.columns and row in block.rows:
+            return len(block.columns)
+    return None
+
+
+def _new_row_shape_reason(new_row: str, cells: int | None) -> str | None:
+    """H3's guard: `new_row` is ONE row of the SAME block, or it is refused.
+
+    `fix_row` is the first verb that rewrites a line INSIDE an already-open fence, and every
+    other guard M4 states is on `old_row` — so without this, `new_row` is the whole write
+    surface. It is not a belt-and-braces check: `_check_append_only` never inspects `:R` rows,
+    so a `:V` declaration substituted for a flagged row draws ZERO diagnostics; an embedded
+    newline forges a well-formed second row; a fence delimiter makes the injected row vanish
+    by closing the block early; and one cell too FEW is silently padded. Only "too many cells"
+    is caught by anything today, and by the parser rather than by a guard. This is what makes
+    "no verb mutates or removes a committed :V/:E record" true by construction."""
+    from defender.skills.invlang._cells import _split_cells
+    from defender.skills.invlang.parser import HEADER_RE
+
+    # EVERY line break `str.splitlines()` honours, not just `\n`. `_tokenize_fence` splits the
+    # fence body with `splitlines()`, which breaks on \v \f \x1c \x1d \x1e \x85
+    # as well — so a `new_row` carrying one of those is a SECOND row (or a whole second block)
+    # to the parser while looking like one line to a `"\n" in ...` check, and its pipe count is
+    # unchanged so the cell-count arm never fires either.
+    lines = new_row.splitlines()
+    if len(lines) != 1 or lines[0] != new_row:
+        return "it spans more than one line"
+    if "```" in new_row:
+        return "it carries a fence delimiter (```), which would close the block early"
+    if HEADER_RE.match(new_row.strip()):
+        return "it is a block header, not a row"
+    # `cells is None` means the declaring block could not be located. Only the CELL-COUNT arm
+    # needs it — the three arms above are unconditional, so an unlocatable block narrows the
+    # guard by one check instead of switching the whole write surface off.
+    if cells is None:
+        return None
+    got = len(_split_cells(new_row))
+    if got != cells:
+        return f"it has {got} cells but the block declares {cells}"
+    return None
+
+
+def _tool_fix_row(deps: AgentDeps, old_row: str, new_row: str) -> str:
+    """#836/M4 — repair ONE flagged row of `investigation.md` in place.
+
+    No path and no free-form anchor: `old_row` must be one of the rows the repair window is
+    currently open on, which is what puts every committed `:V`/`:E` record out of reach (the
+    warn family walks `:R attr_updates` blocks and nothing else). `new_row` empty DELETES the
+    line — the always-available escape that keeps the window closable, and the only move that
+    is still available when the document is at its size bound.
+
+    The window is re-derived here at call time. Being OFFERED the verb is never evidence the
+    window is still open: `prepare=` filters per-request offers and is ergonomics, so the body
+    is the guard. And the resulting full document faces the same `decide_write` chain every
+    other write on this artifact faces — the verb sits behind the validator, not beside it."""
+    from defender._artifact_schema import UNCHANGED_LEAD, UNCHANGED_NOTICE
+
+    p = _investigation_path(deps)
+    if _closed_for_investigation_write(deps, p):
+        raise ModelRetry(
+            f"{UNCHANGED_LEAD} — investigation.md is no longer writable: the close already "
+            "committed a recorded disposition for this run, and a further repair could "
+            "silently move it. The case is closed."
+        )
+    diags = flagged_diagnostics(deps)
+    flagged = _flagged_rows(diags)
+    if not flagged:
+        # Deliberately the SAME refusal a never-flagged `old_row` earns once the window has
+        # emptied: a repeated identical repair is idempotent-safe by construction, and a
+        # "you already did this" branch would need the stored state M3 exists to avoid.
+        raise ModelRetry(
+            f"{UNCHANGED_NOTICE} Nothing is currently flagged in investigation.md, so there "
+            f"is no row to repair."
+        )
+    if old_row not in flagged:
+        # Scope, not merely match: `old_row` is confined to the flagged set, and the flagged
+        # set is `:R attr_updates`-only. A verb that refused only when the text was ABSENT
+        # would happily rewrite a committed vertex row that is present.
+        raise ModelRetry(
+            f"{UNCHANGED_NOTICE} `old_row` must be one of the rows currently flagged in "
+            f"investigation.md, quoted exactly as the warning printed it."
+            "\n\nCurrently flagged:\n"
+            + "\n".join(f"  {row}" for row in flagged)
+        )
+
+    current = read_text_utf8(p)
+    lines, seps = _split_lines(current)
+    whole = [i for i, line in enumerate(lines) if line.strip() == old_row]
+    if not whole:
+        raise ModelRetry(
+            f"{UNCHANGED_NOTICE} `old_row` matches no line in investigation.md."
+        )
+    # H4: the repair applies to EVERY flagged occurrence — a flagged row whose text is not
+    # unique would otherwise be neither repairable nor deletable, and with the M5 gate the run
+    # would be unclosable. The rider is what keeps that safe: if the text also stands as a
+    # WHOLE LINE the window did not flag, the repair refuses rather than rewriting that too.
+    #
+    # WHOLE-LINE, not substring. The rebuild below only ever touches lines where
+    # `line.strip() == old_row`, so a line that merely CONTAINS the row is already out of
+    # reach and a substring count guards nothing — while refusing on one wedged the window
+    # shut: a `:T conclude` summary quoting its own flagged row made both `fix_row(row, new)`
+    # and `fix_row(row, "")` refuse, and with the M5 gate the run could not close. It also
+    # fired when one flagged row's text was a PREFIX of another (`…|owner|svc` inside
+    # `…|owner|svc2`), where the refusal's own claim — that a match lay somewhere unflagged —
+    # was simply false.
+    occurrences = flagged.count(old_row)
+    if len(whole) != occurrences:
+        raise ModelRetry(
+            f"{UNCHANGED_NOTICE} That row's text also stands as a whole line the repair "
+            f"window did not flag ({len(whole)} line(s) match, {occurrences} flagged), and "
+            f"`fix_row` will not rewrite a line it never flagged."
+        )
+
+    if new_row:
+        cells = _attr_block_columns(current, old_row)
+        reason = _new_row_shape_reason(new_row, cells) if cells is not None else None
+        if reason is not None:
+            raise ModelRetry(
+                f"{UNCHANGED_NOTICE} `new_row` must be a single row of the same "
+                f":R attr_updates block: {reason}. Send one row with the same columns, or "
+                'an empty `new_row` to delete the line instead.'
+            )
+
+    # The whole on-disk LINE is what gets rewritten — leading/trailing whitespace included —
+    # because `old_row` is matched against the STRIPPED row text the warning printed, and a
+    # padded line would otherwise survive its own repair.
+    hit = set(whole)
+    if new_row:
+        rebuilt = [
+            (new_row if i in hit else line) + sep
+            for i, (line, sep) in enumerate(zip(lines, seps, strict=True))
+        ]
+    else:
+        rebuilt = [
+            line + sep
+            for i, (line, sep) in enumerate(zip(lines, seps, strict=True))
+            if i not in hit
+        ]
+    new_text = "".join(rebuilt)
+
+    decision = permission.decide_write(
+        p, new_text, run_dir=deps.run_dir, defender_dir=deps.defender_dir, policy=deps.policy,
+    )
+    if not decision.allow:
+        raise ModelRetry(decision.reason)
+    _guarded_parents(deps, p)
+    write_guarded(p, new_text)
+    deps.authored_paths.add(_resolved(p))
+    verb = "deleted" if not new_row else "repaired"
+    lead = (
+        f"{verb} {len(whole)} flagged row(s) in investigation.md "
+        f"({_utf8_len(new_text)} bytes total) — the change LANDED."
+    )
+    return _warning_return(lead, _warn_over(new_text))
 
 
 def register_tools(agent, tools: ToolSet, verbs: Any = None) -> None:
@@ -671,16 +993,52 @@ def register_tools(agent, tools: ToolSet, verbs: Any = None) -> None:
             return _tool_edit_file(ctx.deps, path, old_string, new_string)
 
     if tools.append:
-        @agent.tool
-        async def append_block(ctx: RunContext[AgentDeps], text: str) -> str:
-            """Append to investigation.md, the invlang work log — no path and no anchor,
-            because the run has one transcript and it only ever grows. Send ONE invlang
-            block per call. The resulting full document is validated (invlang); if it is
-            refused, nothing is written and the file still does not contain your text.
-            To record a disposition use close_investigation, the report's only writer."""
-            return _tool_append_block(ctx.deps, text)
+        _register_investigation_verbs(agent)
 
     _register_deferred_tools(agent, tools, verbs)
+
+
+def _register_investigation_verbs(agent) -> None:
+    """The two verbs bound to `investigation.md` — the append and, since #836, the repair.
+
+    One grant, one registration site: `fix_row` rides `append=True` rather than minting a
+    capability bit, so an agent that may grow the transcript may also repair a row it landed
+    in it. Split out of `register_tools` to keep that function under the complexity gate."""
+    # `sequential=True` (#836/H6): two `ToolCallPart`s in ONE model response otherwise run
+    # concurrently, and against the real write primitive that is a genuine LOST UPDATE —
+    # both calls read the same pre-image, exactly one change reaches disk, and both report
+    # success. A `fix_row` paired with an `append_block` could discard the repair while
+    # telling the model it landed, leaving a window that looks shut and is not.
+    @agent.tool(sequential=True)
+    async def append_block(ctx: RunContext[AgentDeps], text: str) -> str:
+        """Append to investigation.md, the invlang work log — no path and no anchor,
+        because the run has one transcript and it only ever grows. Send ONE invlang
+        block per call. The resulting full document is validated (invlang); if it is
+        refused, nothing is written and the file still does not contain your text. A
+        WARNING is different: the block DID land, and the flagged row blocks the next
+        write until you repair it with fix_row. To record a disposition use
+        close_investigation, the report's only writer."""
+        return _tool_append_block(ctx.deps, text)
+
+    @agent.tool(prepare=_prepare_fix_row, sequential=True)
+    async def fix_row(ctx: RunContext[AgentDeps], old_row: str, new_row: str) -> str:
+        """Repair ONE flagged row of investigation.md in place — offered only while a
+        row is flagged. `old_row` must be a currently-flagged row, copied exactly as the
+        warning printed it; it is matched as a whole line, never as a substring, and
+        never outside the flagged set. `new_row` replaces it and must be a single row of
+        the same block with the same columns; an EMPTY `new_row` deletes the line. This
+        is not a general editor: nothing else in the document is reachable through it."""
+        return _tool_fix_row(ctx.deps, old_row, new_row)
+
+
+async def _prepare_fix_row(ctx: RunContext[AgentDeps], tool_def: Any) -> Any:
+    """Offer `fix_row` only while the repair window is open.
+
+    ERGONOMICS, not a control — the model is not shown a verb it has nothing to use it on,
+    and is shown it the moment it does. The offer is computed once per model REQUEST, so a
+    model that saw the definition on an earlier turn can still emit the call after the window
+    closed; `_tool_fix_row` re-derives and refuses. SEC3 rests on that body, never on this."""
+    return tool_def if flagged_diagnostics(ctx.deps) else None
 
 
 def _register_deferred_tools(agent, tools: ToolSet, verbs: Any = None) -> None:

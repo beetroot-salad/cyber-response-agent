@@ -42,17 +42,47 @@ from defender.runtime.tools import _tail_chars  # noqa: E402
 from defender.skills.invlang.validate import diagnose, validate_companion  # noqa: E402
 
 # A minimal document carrying one bad `:R attr_updates` key. The lead is declared with the
-# real `:L findings` column list, so the ONLY complaint is the refinement key — asserted by
+# real `:L findings` column list AND the target vertex with the real `:V prologue.vertices`
+# one, so the ONLY complaint is the refinement key — asserted by
 # test_the_bad_key_is_the_documents_only_fault below, because a fixture that quietly carried
 # a parse error alongside would let a weaker implementation pass these.
+#
+# The bad key is `owner`, not the `ident` this suite was written with: #836 made `ident` a
+# LEGAL third refinement key, and a fixture keyed on it stops being a bad key at all. `owner`
+# is outside `class` / `ident` / `attrs.*` and keeps exercising exactly what these tests
+# assert — the family names its row and offers both corrections in the header's own column
+# order. The `:V` block is the same migration from the other side: #836 refuses a refinement
+# naming a vertex no `:V` declares, and an undeclared target would be a SECOND fault in a
+# fixture whose whole job is to carry one.
 _BAD_ATTR_KEY = """```invlang
+:V prologue.vertices [id|type|class|ident|attrs?]
+v-003|compute|workstation/internal/known-corp|office-ws-1|
+
 :L findings [id|loop|name|target|tests|system|window]
 l-003|1|cmdb-lookup-office-ws-1|v-001||cmdb|n/a
 ```
 
 ```invlang
 :R attr_updates [resolved_by|target|key|value]
-l-003|v-003|ident|svc.config-mgmt
+l-003|v-003|owner|svc.config-mgmt
+```
+"""
+
+
+#: The same shape as `_BAD_ATTR_KEY` but ERROR severity — the refinement row cites a lead the
+#: document never declares. Minted for #836: the branches below that need "a document the
+#: invlang validator REFUSES" can no longer use a bad refinement key, which now warns and lands.
+_ERROR_INVLANG = """```invlang
+:V prologue.vertices [id|type|class|ident|attrs?]
+v-003|compute|workstation/internal/known-corp|office-ws-1|
+
+:L findings [id|loop|name|target|tests|system|window]
+l-003|1|cmdb-lookup-office-ws-1|v-001||cmdb|n/a
+```
+
+```invlang
+:R attr_updates [resolved_by|target|key|value]
+l-404|v-003|class|svc.config-mgmt
 ```
 """
 
@@ -90,10 +120,10 @@ def test_attr_update_key_diagnostic_quotes_its_row_and_both_legal_forms():
 
     assert d.locus is not None
     assert d.locus.block == ":R attr_updates"
-    assert d.locus.row_text == "l-003|v-003|ident|svc.config-mgmt"
+    assert d.locus.row_text == "l-003|v-003|owner|svc.config-mgmt"
     assert d.fix == (
         "l-003|v-003|class|svc.config-mgmt",
-        "l-003|v-003|attrs.ident|svc.config-mgmt",
+        "l-003|v-003|attrs.owner|svc.config-mgmt",
     )
 
 
@@ -125,11 +155,22 @@ def test_parse_warnings_keep_the_structure_format_used_to_destroy():
 def test_validate_companion_still_returns_the_same_strings():
     """The `list[str]` surface is unchanged in both type and content. Two production callers
     and thirteen assertion sites across five suites do substring work on these elements; the
-    typing went in underneath them, not through them."""
-    strings = validate_companion(_BAD_ATTR_KEY, None)
+    typing went in underneath them, not through them.
+
+    #836 narrowed the CONTENT to error severity — the list reads as "reasons to refuse", and
+    persist dead-letters a run on any element, which a warn-family row must not do. So the
+    parity asserted is against the error-severity diagnostics, and the warn half is asserted
+    genuinely dropped rather than accidentally absent."""
+    strings = validate_companion(_ERROR_INVLANG, None)
+    diags = diagnose(_ERROR_INVLANG, None)
 
     assert all(isinstance(s, str) for s in strings)
-    assert strings == [d.message for d in diagnose(_BAD_ATTR_KEY, None)]
+    assert strings == [d.message for d in diags if d.severity != "warning"]
+    assert strings, "the fixture stopped producing an error at all"
+
+    # ...and the warn-only document comes back empty through this surface.
+    assert validate_companion(_BAD_ATTR_KEY, None) == []
+    assert [d.severity for d in diagnose(_BAD_ATTR_KEY, None)] == ["warning"]
 
 
 # --------------------------------------------------------------------------- #
@@ -137,7 +178,10 @@ def test_validate_companion_still_returns_the_same_strings():
 # --------------------------------------------------------------------------- #
 
 @pytest.mark.parametrize(("kind", "text", "current"), [
-    ("invlang", _BAD_ATTR_KEY, None),
+    # `_ERROR_INVLANG`, not `_BAD_ATTR_KEY`: since #836 a bad refinement key WARNS and the
+    # document lands, so it no longer reaches a refusing branch at all. The branch under test
+    # is unchanged; only the fixture that reaches it had to move.
+    ("invlang", _ERROR_INVLANG, None),
     ("byte-bound", "x" * (INVESTIGATION_FILE_MAX + 1), None),
 ])
 def test_every_refusing_branch_states_the_file_is_unchanged(kind, text, current):
@@ -153,13 +197,28 @@ def test_every_refusing_branch_states_the_file_is_unchanged(kind, text, current)
 
 def test_the_refusal_carries_the_row_and_the_correction_to_the_model():
     """The rendered refusal, which is the `ModelRetry` body verbatim. The row and both legal
-    forms have to reach the MODEL, not merely exist on a dataclass the gate never prints."""
-    reason = validate_investigation(_BAD_ATTR_KEY, None)
+    forms have to reach the MODEL, not merely exist on a dataclass the gate never prints.
 
-    assert "invlang validation" in reason, "the substring six suites assert on"
-    assert "row: l-003|v-003|ident|svc.config-mgmt" in reason
+    #836 moved WHICH refusal carries them, not whether one does. A bad refinement key now
+    WARNS and lands, so it no longer refuses through `validate_investigation`; the refusal that
+    names the row is the repair-window gate, which blocks the NEXT write until the landed row
+    is repaired. Same renderer, same three lines, same obligation — read off the gate that now
+    owns it rather than off the branch that stopped producing it.
+
+    The error-severity branch keeps its own half, asserted in the last block."""
+    from defender.runtime.tools import flagged_write_refusal
+    from defender.skills.invlang.validate import warn_diagnostics
+
+    reason = flagged_write_refusal("append_block", warn_diagnostics(_BAD_ATTR_KEY))
+
+    assert "row: l-003|v-003|owner|svc.config-mgmt" in reason
     assert "use: l-003|v-003|class|svc.config-mgmt" in reason
-    assert "l-003|v-003|attrs.ident|svc.config-mgmt" in reason
+    assert "l-003|v-003|attrs.owner|svc.config-mgmt" in reason
+    assert UNCHANGED_NOTICE in reason
+
+    # ...and an error-severity document still refuses through the validator, carrying the
+    # substring six suites assert on.
+    assert "invlang validation" in validate_investigation(_ERROR_INVLANG, None)
 
 
 def test_a_located_row_is_not_printed_twice():
@@ -177,8 +236,12 @@ def test_a_row_with_escapes_is_still_not_printed_twice():
     `'C:\\temp'` in the message and a raw-substring test does not find it. Both spellings
     have to be checked or the escape-carrying rows — the ones most likely to be malformed
     in the first place — get their row printed twice."""
+    # One cell too MANY, so the row fails to parse and the PARSE-warning family — the one that
+    # embeds its row as a `repr()` — is what renders it. #836 turned the bad-refinement-key
+    # family into a warning the write gate no longer returns, so the escape-carrying row is
+    # routed through the error-severity family that still reaches this renderer.
     malformed = ("```invlang\n:R attr_updates [resolved_by|target|key|value]\n"
-                 "l-001|v-001|note|C:\\temp\n```\n")
+                 "l-001|v-001|note|C:\\temp|extra\n```\n")
     reason = validate_investigation(malformed, None)
 
     assert "C:" in reason, "the fixture stopped reaching the renderer"
@@ -436,13 +499,16 @@ def test_the_registered_roster_is_what_the_toolset_grants():
 # --------------------------------------------------------------------------- #
 
 _TRANSPOSED = """```invlang
+:V prologue.vertices [id|type|class|ident|attrs?]
+v-003|compute|workstation/internal/known-corp|office-ws-1|
+
 :L findings [id|loop|name|target|tests|system|window]
 l-003|1|cmdb-lookup|v-001||cmdb|n/a
 ```
 
 ```invlang
 :R attr_updates [resolved_by|target|value|key]
-l-003|v-003|svc.config-mgmt|ident
+l-003|v-003|svc.config-mgmt|owner
 ```
 """
 
@@ -459,10 +525,10 @@ def test_a_transposed_header_gets_a_correction_in_its_own_column_order():
     d = _only(diagnose(_TRANSPOSED, None), lambda d: "refinement key" in d.message)
 
     assert d.locus is not None
-    assert d.locus.row_text == "l-003|v-003|svc.config-mgmt|ident"
+    assert d.locus.row_text == "l-003|v-003|svc.config-mgmt|owner"
     assert d.fix == (
         "l-003|v-003|svc.config-mgmt|class",
-        "l-003|v-003|svc.config-mgmt|attrs.ident",
+        "l-003|v-003|svc.config-mgmt|attrs.owner",
     )
     # the value cell is untouched and stays where the author put it
     assert all(f.split("|")[2] == "svc.config-mgmt" for f in d.fix)
@@ -473,10 +539,10 @@ def test_the_canonical_header_is_unchanged_by_that_fix():
     exactly what rebuilding it used to, for the order every real document declares."""
     d = _only(diagnose(_BAD_ATTR_KEY, None), lambda d: "refinement key" in d.message)
 
-    assert d.locus.row_text == "l-003|v-003|ident|svc.config-mgmt"
+    assert d.locus.row_text == "l-003|v-003|owner|svc.config-mgmt"
     assert d.fix == (
         "l-003|v-003|class|svc.config-mgmt",
-        "l-003|v-003|attrs.ident|svc.config-mgmt",
+        "l-003|v-003|attrs.owner|svc.config-mgmt",
     )
 
 
@@ -486,13 +552,16 @@ def test_a_header_without_a_key_column_degrades_instead_of_guessing():
     seven checks that never had a row — rather than inventing a correction. A wrong fix is
     worse than no fix, which is the whole finding behind #825."""
     headerless = """```invlang
+:V prologue.vertices [id|type|class|ident|attrs?]
+v-003|compute|workstation/internal/known-corp|office-ws-1|
+
 :L findings [id|loop|name|target|tests|system|window]
 l-003|1|cmdb-lookup|v-001||cmdb|n/a
 ```
 
 ```invlang
 :R attr_updates [resolved_by|target|key|value]
-l-003|v-003|ident|svc.config-mgmt
+l-003|v-003|owner|svc.config-mgmt
 ```
 """.replace("[resolved_by|target|key|value]", "[resolved_by|target|attribute|value]")
     diags = [d for d in diagnose(headerless, None) if "refinement key" in d.message]

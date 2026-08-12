@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from defender._vocab import normalized_disposition
 from . import _walkers, vocab
@@ -33,6 +33,9 @@ STRONG_WEIGHTS = vocab.STRONG_WEIGHTS
 _STRONG_AUTH_KINDS_STR = " / ".join(sorted(STRONG_AUTH_KINDS))
 
 _YAML_FENCE_RE = re.compile(r"```ya?ml\b")
+
+#: `Diagnostic.severity`'s closed set (#836). Declared once, beside the type that carries it.
+Severity = Literal["error", "warning"]
 
 
 @dataclass(frozen=True)
@@ -65,6 +68,16 @@ class Diagnostic:
     message: str
     locus: Locus | None = None
     fix: tuple[str, ...] = field(default_factory=tuple)
+    #: `"error"` (the write is refused and nothing is written) or `"warning"` (#836: the write
+    #: LANDS and the row gates the NEXT one until it is repaired). Additive and defaulted, so
+    #: every family that does not opt in keeps exactly today's refusing behaviour — the
+    #: partition is assigned per check family at diagnose time and is never document content,
+    #: which is why no migration mechanism exists for bytes written before the field did.
+    #: A closed `Literal`, not a bare `str`: the partition is read THREE ways across three
+    #: modules (`== "warning"` here, `!= "warning"` in `validate_companion` and in
+    #: `_artifact_schema.validate_investigation`), so a mistyped value would not fail — it
+    #: would file silently as error severity at every one of them.
+    severity: Severity = "error"
 
 
 def _plain(messages: list[str]) -> list[Diagnostic]:
@@ -625,6 +638,19 @@ def _swap_cell(cells: list[str], at: int, replacement: str) -> str:
     return "|".join(swapped)
 
 
+#: The refinement keys `:R attr_updates` accepts. `class` sharpens the classification,
+#: `attrs.<name>` an attribute, and `ident` (#836) the vertex's effective IDENTIFIER — the
+#: operation every measured bad-key refusal was reaching for, and which had no legal spelling
+#: before. `ident` lands in a distinct top-level `identifier` slot, never in `attributes`:
+#: `_check_benign_open_slots` refuses a benign close on any `??`-valued ATTRIBUTE, so routing
+#: it there would make `ident=??` newly block a benign disposition.
+IDENT_REFINEMENT_KEY = "ident"
+
+
+def _is_legal_refinement_key(key: str) -> bool:
+    return key == "class" or key == IDENT_REFINEMENT_KEY or key.startswith("attrs.")
+
+
 def _check_attr_update_keys(proposed_text: str) -> list[Diagnostic]:
     """`:R attr_updates` keys, checked over the ROWS rather than the folded records.
 
@@ -650,22 +676,61 @@ def _check_attr_update_keys(proposed_text: str) -> list[Diagnostic]:
             except RowError:
                 continue  # already a parse warning; not this check's business
             key = rec.get("key")
-            if not key or key == "class" or key.startswith("attrs."):
+            if not key or _is_legal_refinement_key(key):
                 continue
             cells = [rec.get(c, "") for c in cols]
             out.append(Diagnostic(
                 message=(
                     f":R attr_updates on {rec.get('target', '?')}: key {key!r} is not a "
-                    f"valid refinement key — use `class` (class refinement) or "
-                    f"`attrs.<name>` (attribute); a bare key is dropped silently"
+                    f"valid refinement key — use `class` (class refinement), `ident` "
+                    f"(identifier refinement) or `attrs.<name>` (attribute); a bare key "
+                    f"is dropped silently"
                 ),
                 locus=Locus(block=":R attr_updates", row_text=row),
                 fix=(
                     _swap_cell(cells, at, "class"),
                     _swap_cell(cells, at, f"attrs.{key}"),
                 ),
+                # #836: THE one warn-severity family. The row is INERT — it changes no
+                # effective vertex state — so the block it rides in is worth keeping, and
+                # the model repairs the row with `fix_row` instead of re-emitting the whole
+                # block. Every other family stays a refusal: nothing is written and the
+                # model re-sends.
+                severity="warning",
             ))
     return out
+
+
+def _check_attr_update_targets(companion: CompanionBody) -> list[str]:
+    """#836/H8 — a `:R attr_updates` row must name a graph object the document DECLARES.
+
+    Before this check an undeclared target landed with zero diagnostics and
+    `_effective_vertex_state` fabricated the object out of the refinement alone. That was
+    tolerable while nothing read the effective identifier; `ident` becoming writable is
+    exactly what invalidates that argument, because the fabricated vertex's identifier now
+    carries a value that flows from alert content.
+
+    EDGES count as declared targets, not only vertices. `:R attr_updates` is the surface for
+    recording facts learned about ANY existing graph object, and refining an edge is ordinary
+    practice — `l-001|e-001|attrs.auth_method|password` appears in the checked-in goldens. A
+    vertex-only reading would refuse a real recorded investigation, which is a different (and
+    much larger) change than closing the fabrication gap."""
+    declared = {
+        r.get("id")
+        for records in (_walkers.all_vertices(companion), _walkers.all_edges(companion))
+        for r in records
+        if isinstance(r.get("id"), str)
+    }
+    errors: list[str] = []
+    for upd in _walkers.iter_attr_updates(companion):
+        tgt = upd.get("target")
+        if not isinstance(tgt, str) or not tgt or tgt in declared:
+            continue
+        errors.append(
+            f":R attr_updates refines {tgt!r}, which no `:V` or `:E` block declares — declare "
+            f"it before refining it (declared: {sorted(d for d in declared if d)})"
+        )
+    return errors
 
 
 def _check_closed_vocab(companion: CompanionBody, proposed_text: str) -> list[Diagnostic]:
@@ -700,7 +765,14 @@ def _seed_vertex_state(
         cls = v.get("classification", "")
         cur = state.setdefault(
             vid,
-            {"classification": cls, "attributes": dict(v.get("attributes") or {})},
+            {
+                "classification": cls,
+                # #836: seeded from the DECLARED `:V` identifier. Both construction sites
+                # carry the slot — a slot present at only one of them is a KeyError for the
+                # consumer on every document that does not happen to exercise the other.
+                "identifier": v.get("identifier", ""),
+                "attributes": dict(v.get("attributes") or {}),
+            },
         )
         if cls and _has_open_slot(cur["classification"]) and not _has_open_slot(cls):
             cur["classification"] = cls
@@ -716,10 +788,17 @@ def _apply_attr_updates(
         updates = upd.get("updates") or {}
         if not isinstance(tgt, str) or not isinstance(updates, dict):
             continue
-        st = state.setdefault(tgt, {"classification": "", "attributes": {}})
+        st = state.setdefault(
+            tgt, {"classification": "", "identifier": "", "attributes": {}}
+        )
         for key, val in updates.items():
             if key == "class":
                 st["classification"] = val
+            elif key == IDENT_REFINEMENT_KEY:
+                # A DISTINCT top-level slot, never `attributes["ident"]` — see
+                # IDENT_REFINEMENT_KEY. Last row in document order wins; the fold retains
+                # no history, so a superseded value survives only as the rows on disk.
+                st["identifier"] = val
             elif isinstance(key, str) and key.startswith("attrs."):
                 st["attributes"][key[len("attrs."):]] = val
 
@@ -1026,6 +1105,7 @@ def diagnose(
         return found
 
     found.extend(_plain(_check_lead_refs(companion)))
+    found.extend(_plain(_check_attr_update_targets(companion)))
     found.extend(_plain(_check_hypothesis_refs(
         companion, deferred=deferred_hypothesis_ids(warnings),
     )))
@@ -1038,11 +1118,36 @@ def diagnose(
     return found
 
 
+def warn_diagnostics(text: str) -> tuple[Diagnostic, ...]:
+    """#836/M3 — the REPAIR WINDOW, derived from a document's current bytes and stored nowhere.
+
+    The window is not state anything records: it is `diagnose`'s warn-severity findings over
+    whatever is on disk right now. That is why it cannot go stale, cannot disagree with the
+    file, needs no `AgentDeps` field, and survives a freshly constructed deps object. Each
+    finding's `locus.row_text` is how `fix_row` addresses the row — the row as PARSED (the
+    tokenizer strips it), which is also the text the warning prints, so the model's copy-paste
+    round trip closes.
+
+    No baseline: append-only is judged against history, but a warning is a property of the
+    document as it stands, and the callers derive over one text.
+
+    Lives here rather than beside its callers because this module already owns `Diagnostic`
+    and `diagnose`, and giving the type a second importer would buy nothing."""
+    return tuple(d for d in diagnose(text) if d.severity == "warning")
+
+
 def validate_companion(
     proposed_text: str, current_text: str | None = None
 ) -> list[str]:
     """The string surface over `diagnose`, kept because it is what the validator's callers
     are written against: `learning/core/persist.py`, and thirteen assertion sites across
     five suites that do substring work on the elements. `_artifact_schema` is the one
-    caller that wants the structure and calls `diagnose` directly."""
-    return [d.message for d in diagnose(proposed_text, current_text)]
+    caller that wants the structure and calls `diagnose` directly.
+
+    ERROR severity only (#836). Its one production caller reads this list as "reasons to
+    refuse the document" — persist dead-letters a run on any element — and a warn-family row
+    is explicitly not that: the run reaches the learning loop with it. Returning warnings here
+    would make a warn-only document unprocessable, which is the exact failure O2 removes."""
+    return [
+        d.message for d in diagnose(proposed_text, current_text) if d.severity != "warning"
+    ]
