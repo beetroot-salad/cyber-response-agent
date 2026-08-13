@@ -231,6 +231,17 @@ class StoreFault:
     on: str = "append"          # "append" | "read" | "open"
     after: int = 1              # let this many successful calls through first
     mode: str = "absent"        # "absent" | "corrupt" | "locked" | "disk-full"
+    #: How long the store's REAL connection is allowed to block on the `locked` fault's real
+    #: `BEGIN EXCLUSIVE` before the real `sqlite3` gives up. Ignored by every other mode.
+    #:
+    #: Short by default, and that is not a weakening: `auth:P7` (what a contention outlasting
+    #: `busy_timeout` does) is UNPROBED, so no demand here asserts an exception class OR a
+    #: wait — only that the run stops. The wait is still real, still served by the real engine,
+    #: and still outlasted; only its length is pinned. At the shipped
+    #: `session_store.STORE_BUSY_TIMEOUT_MS` (30s) the two blocked appends in
+    #: `test_store_append_is_fail_closed[locked]` cost 60s — 13% of CI's whole unit-test step,
+    #: and the single largest test in the suite — to observe the same stop.
+    busy_timeout_ms: int = 250
 
 
 class FaultStore:
@@ -280,6 +291,11 @@ class FaultStore:
             self._real.close()
             path.write_bytes(b"this is not a database, it is attacker text\n" * 64)
         elif f.mode == "locked":
+            # Re-issued on the REAL connection the store is about to append through, so the
+            # wait below is the engine's own busy handler on a real lock — the same code path
+            # at a pinned length. Set BEFORE the lock is taken: after `BEGIN EXCLUSIVE` lands,
+            # the pragma would itself have to wait out the deadline it is trying to shorten.
+            self._real.connection.execute(f"PRAGMA busy_timeout = {int(f.busy_timeout_ms)}")
             self._lock_conn = sqlite3.connect(str(path), timeout=0.0)
             self._lock_conn.execute("BEGIN EXCLUSIVE")
         elif f.mode == "disk-full":

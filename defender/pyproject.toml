@@ -38,6 +38,12 @@ runtime = [
 ]
 dev = [
     "pytest>=8.0",
+    # CI runs the suite under `-n auto --dist loadfile`. `loadfile`, not the default
+    # `load`: the suite has module-scoped fixtures and per-file tmp git repos, and
+    # keeping a file's tests on one worker is what makes the split a scheduling change
+    # rather than an isolation change. Verified over the whole collected suite before
+    # it was turned on — zero tests changed outcome versus a serial run.
+    "pytest-xdist>=3.5",
     "pytest-cov",
     "coverage",
     "ruff",
@@ -55,6 +61,12 @@ markers = [
     "live: requires live external infrastructure (skip in CI with -m 'not live')",
     "e2e: hermetic FunctionModel replay of the runtime driver (no API key; needs the runtime extra)",
     "box: drives a REAL container to pin the #540 execution boundary (needs a native docker daemon + the gVisor runtime; self-skips under docker-outside-of-Docker)",
+    # NOT a way to skip a check — a `gate`-marked test asserts EXACTLY what a blocking
+    # step in CI's `code-smells` job already asserts (`lint_<name>.main([]) == 0` over the
+    # real tree, the same entry point the step runs). The marker exists so the `test` job
+    # can stop paying for the second copy; the check itself stays hard-gated, in the job
+    # that owns it. A test carrying this marker MUST name the step that covers it.
+    "gate: re-runs a repo-wide lint gate that CI's code-smells job already runs as a blocking step",
 ]
 
 [tool.uv]

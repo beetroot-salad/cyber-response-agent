@@ -157,10 +157,14 @@ def test_fingerprint_dedups_within_a_function(tmp_path):
     assert len(_kinds(tree)) == 1, "same file+function+kind is one fingerprint"
 
 
+@pytest.mark.gate  # covered by code-smells' "Unpinned text-io gate"
 def test_real_tree_clean():
     """The regression check: the shipped baseline is EMPTY, so the real trees must
     scan clean. `main([])` scans BOTH scopes (defender/ + spec-flow/scripts/), so any
-    new unpinned site in either tree turns this — and CI — red."""
+    new unpinned site in either tree turns this — and CI — red.
+
+    `gate`-marked: "and CI" is the code-smells step, which runs this same `main([])` over
+    both the same scopes and blocks on it. That step is the one keeping this red."""
     assert _GATE.main([]) == 0
 
 

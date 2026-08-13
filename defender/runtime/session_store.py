@@ -275,16 +275,25 @@ def _extract_lead_id(payload_text: str) -> str | None:
         return None
 
 
+#: How long an append blocks on a lock another connection holds before the real `sqlite3`
+#: gives up. ONE anchor for both halves of that wait: `sqlite3.connect(timeout=)` sets the
+#: busy handler in SECONDS and the pragma resets it in MILLISECONDS, so the two were the
+#: same number spelled twice, in two units, three lines apart — and the survivor of any
+#: disagreement is whichever runs last, silently.
+STORE_BUSY_TIMEOUT_MS = 30_000
+
+
 def _bare_connect(path: Path) -> sqlite3.Connection:
     """A connection with no pragma and no function registered yet — so a stale-version
     refusal can fire before the WAL pragma rewrites the file's header (FK-G)."""
-    return sqlite3.connect(str(path), timeout=30.0, isolation_level=None)
+    return sqlite3.connect(str(path), timeout=STORE_BUSY_TIMEOUT_MS / 1000,
+                           isolation_level=None)
 
 
 def _finish_connect(conn: sqlite3.Connection) -> None:
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
-    conn.execute("PRAGMA busy_timeout = 30000")
+    conn.execute(f"PRAGMA busy_timeout = {STORE_BUSY_TIMEOUT_MS}")
     conn.create_function("extract_lead_id", 1, _extract_lead_id)
 
 

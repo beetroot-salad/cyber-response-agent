@@ -928,6 +928,13 @@ def test_ci_registers_the_box_runtime_with_oci_seccomp(tmp_path):
     both, and under F4's not-opt-out-able fault every one of them faults on arrival until the
     registration changes. There is no degraded path to hide behind.
 
+    RE-SCOPED, as the guard below instructs: a THIRD registering job (`box-native`) now exists.
+    The #540 boundary suite was split out of the `test` job for wall clock — it was 61s of a
+    452s step — and its new home registers the runtime exactly as the other two do. The demand
+    is unchanged and its reach grew: EVERY registering step is still required to carry the
+    flag, and there are now three of them. The count is a vacuity guard, not the claim; what
+    would be a weakening is dropping it, or letting a new job register runsc unexamined.
+
     The step is located by what it RUNS rather than by its name, and a guard fires if the
     install step moves — a fixture assertion that silently matches nothing is the vacuous
     shape this idiom exists to avoid."""
@@ -937,9 +944,10 @@ def test_ci_registers_the_box_runtime_with_oci_seccomp(tmp_path):
     steps = [s for job in workflow["jobs"].values() for s in job.get("steps", [])]
     installs = [s for s in steps if "runsc install" in str(s.get("run", ""))]
 
-    assert len(installs) == 2, (
-        f"expected the two gVisor install steps X15 found, got {len(installs)} — the step "
-        f"moved, so re-scope this demand rather than trusting a vacuous pass"
+    assert len(installs) == 3, (
+        f"expected the three gVisor install steps (`test`, `box-native`, `box-dood`), got "
+        f"{len(installs)} — the step moved, so re-scope this demand rather than trusting a "
+        f"vacuous pass"
     )
     for step in installs:
         run_text = str(step["run"])
