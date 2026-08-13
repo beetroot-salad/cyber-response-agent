@@ -178,9 +178,11 @@ def test_a_forged_wrap_delimiter_in_ancestor_content_cannot_close_the_frame(tmp_
     )
     assert second.gather is not None
     prompt = second.gather.seen[0]
-    assert prompt.count(f"<run-{SALT}-untrusted>") == prompt.count(FORGED_CLOSE), (
-        "item 3's subagent prompt carries unbalanced untrusted tags — the document content "
-        "carried into its goal closed a frame the harness opened"
+    # `== 1`, not merely balanced: two opens and two closes is exactly what a forged delimiter
+    # that survived sanitization looks like from here, and a bare equality is green for it.
+    assert prompt.count(f"<run-{SALT}-untrusted>") == prompt.count(FORGED_CLOSE) == 1, (
+        "item 3's subagent prompt carries unbalanced (or duplicated) untrusted tags — the "
+        "document content carried into its goal closed a frame the harness opened"
     )
 
 

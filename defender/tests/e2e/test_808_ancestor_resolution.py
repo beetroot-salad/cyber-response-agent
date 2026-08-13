@@ -723,7 +723,17 @@ def test_an_oversized_ancestor_message_is_elided_with_a_pointer_to_its_payload(t
 
     Asserted as a property rather than a magic number: the rendered block is materially
     smaller than the payload it points at, the elision is announced, and the pointer names a
-    file that is really there."""
+    file that is really there.
+
+    THE PATH IS RESOLVED, NOT PREFIX-MATCHED (#867 review fix). `f"gather_raw/{L0}/" in section`
+    is green for every seq the implementation could print, and the implementation printed the
+    DOCUMENT'S POSITION in the block rather than the seq of the call that returned it — which
+    coincides at position 0 and at nothing else, so a single-document scenario could not see it.
+    The second arm below drives four documents off one batched fetch: three of the four pointers
+    named a file no writer ever produced, and the first named the SHELL fetch's payload — a
+    different document. Every pointer the block prints is now opened."""
+    import re
+
     huge = "A" * 200_000
     res = run(tmp_path, run_id="lz808-huge",
               answer=answer_hits([hit(ts="2026-05-25T15:22:00.000Z", message=huge)]))
@@ -735,6 +745,24 @@ def test_an_oversized_ancestor_message_is_elided_with_a_pointer_to_its_payload(t
     assert f"gather_raw/{L0}/" in section, \
         "the elision points nowhere — the full payload is on disk and unreferenced"
     assert res.payloads(L0), "the pointer's target was never persisted"
+
+    # FOUR documents off ONE batched fetch, so a pointer built from the document's own position
+    # in the block and a pointer built from the call's queries-table seq are different numbers.
+    many = run(tmp_path / "many", run_id="lz808-huge-many",
+               alert=alert_doc(ancestors=[ancestor(f"a{i}") for i in range(4)]),
+               answer=answer_hits([
+                   hit(ts=f"2026-05-25T15:22:{10 + 10 * i}.000Z", message=huge, user=f"u{i}")
+                   for i in range(4)
+               ]))
+    pointers = re.findall(rf"gather_raw/{L0}/(\d+)\.json", many.section())
+    assert len(pointers) == 4, \
+        f"four elided documents rendered {len(pointers)} payload pointers: {pointers}"
+    for seq in pointers:
+        assert (many.run_dir / "gather_raw" / L0 / f"{seq}.json").is_file(), (
+            f"the elision points at gather_raw/{L0}/{seq}.json, which no call wrote — the "
+            "pointer is built from the document's position in the block rather than from the "
+            "seq of the fetch that returned it"
+        )
 
 
 def test_the_rendered_block_survives_a_failed_queries_table_write(tmp_path):

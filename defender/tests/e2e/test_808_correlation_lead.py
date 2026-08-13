@@ -118,7 +118,11 @@ def test_correlation_lead_goal_and_dimensions_are_fixed_by_the_harness(tmp_path)
     assert isinstance(goal, str), f"item 3's goal is not a string: {goal!r}"
     assert goal.strip(), "item 3's goal is falsy — claim_lead's swallow arm writes nothing"
     dims = " ".join(sidecar["what_to_summarize"]).lower()
-    assert "scoped" in dims, \
+    # `"scoped" in dims` is a SUBSTRING of `"unscoped"` — spelled as a bare `in`, deleting the
+    # scoped dimension entirely leaves both assertions green off the surviving unscoped one,
+    # which is the vacuous shape phase F checks for. The negative lookbehind is what makes the
+    # first assertion about the first dimension.
+    assert re.search(r"(?<!un)scoped", dims), \
         f"no scoped count is named as an output field: {sidecar['what_to_summarize']}"
     assert "unscoped" in dims, \
         f"no unscoped count is named as an output field: {sidecar['what_to_summarize']}"

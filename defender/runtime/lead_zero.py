@@ -215,6 +215,20 @@ def _rows_for(run_dir: Path, lead_id: str) -> list[dict]:
             if r.get("lead_id") == lead_id]
 
 
+def _last_row_seq(run_dir: Path, lead_id: str) -> int:
+    """The queries-table `seq` the LAST call under `lead_id` wrote — the payload sidecar a
+    document resolved by that call is elided against (#867 review fix).
+
+    Item 1 issues several calls and one batched call returns many documents, so a document's
+    position in the rendered block is not its payload's seq. The block used to print the
+    position: with four documents off one fetch, the first pointed at the SHELL fetch's payload
+    and the last two at `gather_raw/l-000/{2,3}.json`, files no writer ever produced. `-1` when
+    no row exists (a screened call, or a table write that could not land)."""
+    rows = _rows_for(run_dir, lead_id)
+    seq = rows[-1].get("seq") if rows else None
+    return seq if isinstance(seq, int) else -1
+
+
 async def _capture_issue(
     capture: Any, deps: _CaptureDeps, verb: str, params: dict, env: dict,
 ) -> tuple[dict | None, str]:
@@ -431,14 +445,21 @@ def _budget_account(run_dir: Path, run_id: str, tool_name: str, limits: dict) ->
 
 # ─── item 1 rendering ─────────────────────────────────────────────────────────────────
 
-def _elide(message: str, lead_id: str, seq: int) -> str:
-    if not isinstance(message, str) or len(message) <= MESSAGE_CHAR_BUDGET:
-        return message if isinstance(message, str) else str(message)
-    head = message[:MESSAGE_CHAR_BUDGET]
-    return (
-        f"{head}\n{ELIDED} {len(message)} chars, full text at "
-        f"gather_raw/{lead_id}/{seq}.json)"
+def _elide(value: Any, lead_id: str, seq: int) -> str:
+    """Bound ONE rendered leaf, with a pointer to the payload that holds it whole.
+
+    `seq` is the QUERIES-TABLE seq of the call that returned the document (`_last_row_seq`),
+    never the document's position in the block — those are different numbers and the block
+    used to print the second (#867 review fix). A negative `seq` means the call wrote no row
+    at all (screened, or the table write failed), and the note then says so rather than naming
+    a payload that was never persisted."""
+    if not isinstance(value, str) or len(value) <= MESSAGE_CHAR_BUDGET:
+        return value if isinstance(value, str) else str(value)
+    where = (
+        f", full text at gather_raw/{lead_id}/{seq}.json"
+        if seq >= 0 else ", and the call that returned it persisted no payload"
     )
+    return f"{value[:MESSAGE_CHAR_BUDGET]}\n{ELIDED} {len(value)} chars{where})"
 
 
 def _flatten_doc(doc: dict) -> dict[str, Any]:
@@ -463,6 +484,16 @@ def _flatten_doc(doc: dict) -> dict[str, Any]:
             for k, v in node.items():
                 key = f"{prefix}.{k}" if prefix else str(k)
                 walk(v, key)
+        elif isinstance(node, list) and any(isinstance(x, dict) for x in node):
+            # An ARRAY OF OBJECTS is the same defect one level down, and it is not exotic:
+            # every Kibana alert document carries `kibana.alert.ancestors`, and on the group-id
+            # path the documents this block renders ARE alert documents. Rendering the array
+            # whole prints `[{'id': …, 'index': …}]` — a Python repr, not a field name anything
+            # can be queried on. Indexed (`…ancestors.0.id`) so two elements' same-named leaves
+            # stay distinguishable; an array of SCALARS stays whole, since `['a', 'b']` already
+            # reads as the multi-valued field it is.
+            for i, item in enumerate(node):
+                walk(item, f"{prefix}.{i}" if prefix else str(i))
         elif prefix:
             out[prefix] = node
 
@@ -490,20 +521,32 @@ def _render_doc(doc: dict, lead_id: str, seq: int) -> str:
         # attacker-influenced document whose key itself carries a `<run-…-…>`-shaped
         # delimiter would otherwise end the untrusted frame early, exactly the class of
         # forgery this module's value-side `_sanitize` calls already exist to close.
-        lines.append(f"  {_sanitize(key)}: {_sanitize(flat[key])}")
+        #
+        # EVERY leaf is elided, not just `message` (#867 review fix). The rendering budget was
+        # written when a nested object rendered as ONE line, so `message` was the only leaf that
+        # could be large; flattening makes every leaf of every namespace its own line, and a
+        # captured command line or a rule's stored query is exactly as unbounded as a message.
+        lines.append(f"  {_sanitize(key)}: {_sanitize(_elide(flat[key], lead_id, seq))}")
     if flat.get("message") is not None:
         lines.append(f"  message: {_sanitize(_elide(flat['message'], lead_id, seq))}")
     return "\n".join(lines)
 
 
-def _sort_chrono(docs: list[dict]) -> list[dict]:
-    def key(d):
-        return str(d.get("@timestamp") or "")
+def _sort_chrono(docs: list[tuple[dict, int]]) -> list[tuple[dict, int]]:
+    """Chronological by each document's own `@timestamp`. Each entry is `(doc, seq)` — the
+    queries-table seq of the call that returned it, which the elision pointer names."""
+    def key(entry: tuple[dict, int]) -> str:
+        return str(entry[0].get("@timestamp") or "")
     return sorted(docs, key=key)
 
 
 def _unavailable(reason: str) -> str:
-    return f"{UNAVAILABLE} {reason})"
+    """#867 review fix — the reason is SANITIZED. `_unavailable(f"{e!r}")` interpolates the repr
+    of an exception whose message can carry attacker-influenced text (this suite's own `d13`
+    docstring says exactly that), and the note lands INSIDE `wrap()`'s frame with everything
+    else — the one text path into item 1's frame the module's threat model covers and its code
+    did not."""
+    return f"{UNAVAILABLE} {_sanitize(reason)})"
 
 
 # ─── item 1: ancestor resolution ─────────────────────────────────────────────────────
@@ -524,10 +567,12 @@ def _map_backing_index(index: str) -> str:
     return f"{m.group('name')}-*"
 
 
-async def _fetch_batched(ancestors: list[dict], issue) -> tuple[list[dict], int, bool]:
+async def _fetch_batched(ancestors: list[dict], issue) -> tuple[list[tuple[dict, int]], int, bool]:
     """Batch ancestor ids by MAPPED backing index — one call per distinct index, never one
-    per ancestor (d5). Returns `(docs, requested_count, truncated_any)`; `issue` is the
-    caller's own budget-gated, success-tracking call wrapper."""
+    per ancestor (d5). Returns `(docs, requested_count, truncated_any)` where each doc is
+    paired with the queries-table `seq` of the call that returned it (#867 review fix — the
+    elision pointer's target); `issue` is the caller's own budget-gated, success-tracking call
+    wrapper, which returns `(envelope, seq)`."""
     by_index: dict[str, list[str]] = {}
     for a in ancestors:
         aid = a.get("id")
@@ -542,16 +587,16 @@ async def _fetch_batched(ancestors: list[dict], issue) -> tuple[list[dict], int,
     if not by_index:
         return [], 0, False
 
-    docs: list[dict] = []
+    docs: list[tuple[dict, int]] = []
     truncated_any = False
     for mapped_index, ids in sorted(by_index.items()):
         predicate = " OR ".join(f'"{i}"' for i in ids)
         params = {"native_query": f"_id: ({predicate})", "limit": 20,
                   "index": mapped_index, "sort": "desc"}
-        envelope = await issue("query", params)
+        envelope, seq = await issue("query", params)
         if envelope is None:
             continue
-        docs.extend(envelope.get("hits") or [])
+        docs.extend((h, seq) for h in (envelope.get("hits") or []))
         truncated_any = truncated_any or bool(envelope.get("truncated"))
     return docs, sum(len(v) for v in by_index.values()), truncated_any
 
@@ -602,7 +647,7 @@ async def _resolve_item1(  # noqa: C901, PLR0912, PLR0915 — item 1's own branc
     issued_any = False
     saw_success = False
 
-    async def _issue(verb: str, params: dict):
+    async def _issue(verb: str, params: dict) -> tuple[dict | None, int]:
         nonlocal issued_any, saw_success
         issued_any = True
         _budget_gate(run_dir, limits)
@@ -610,31 +655,34 @@ async def _resolve_item1(  # noqa: C901, PLR0912, PLR0915 — item 1's own branc
         _budget_account(run_dir, run_id, "query", limits)
         if envelope is not None:
             saw_success = True
-        return envelope
+        # The seq is read AFTER the call, off the row that call just wrote: a document's
+        # elision pointer has to name the payload of the fetch that returned it, not its own
+        # position in the block (#867 review fix).
+        return envelope, _last_row_seq(run_dir, L0)
 
     shell: dict | None = None
     if isinstance(alert_id, str) and alert_id.strip():
-        shell = await _issue("alerts", {
+        shell_envelope, _ = await _issue("alerts", {
             "native_query": f'{ALERT_ID_FIELD}:"{alert_id}"', "limit": 1,
             "index": signal_index, "sort": "desc",
         })
-        if isinstance(shell, dict):
-            hits = shell.get("hits") or []
+        if isinstance(shell_envelope, dict):
+            hits = shell_envelope.get("hits") or []
             shell = hits[0] if hits else None
 
     group_id = shell.get(GROUP_ID_FIELD) if isinstance(shell, dict) else None
-    docs: list[dict] = []
+    docs: list[tuple[dict, int]] = []
     requested = len(ancestor_events)
     truncated = False
 
     if isinstance(group_id, str) and group_id.strip():
-        envelope = await _issue("alerts", {
+        envelope, group_seq = await _issue("alerts", {
             "native_query": f'{GROUP_ID_FIELD}:"{group_id}"', "limit": 20,
             "index": signal_index, "sort": "desc",
         })
         hits = [h for h in ((envelope or {}).get("hits") or []) if h.get(BUILDING_BLOCK_FIELD)]
         if hits:
-            docs = hits
+            docs = [(h, group_seq) for h in hits]
             requested = max(requested, len(hits))
             truncated = bool((envelope or {}).get("truncated"))
         else:
@@ -653,8 +701,8 @@ async def _resolve_item1(  # noqa: C901, PLR0912, PLR0915 — item 1's own branc
 
     body_lines = []
     if docs:
-        for i, d in enumerate(docs):
-            body_lines.append(_render_doc(d, L0, i))
+        for doc, seq in docs:
+            body_lines.append(_render_doc(doc, L0, seq))
     elif saw_success:
         body_lines.append(_unavailable("the resolution reached the backend and found nothing"))
     else:

@@ -209,6 +209,47 @@ def _execution_surface(defender_dir: Path, system: str) -> str:
     )
 
 
+def _yaml_scalar(value: str, indent: str, parent_indent: int = 0) -> str:
+    """One Dispatch field, as a YAML LITERAL BLOCK SCALAR whenever it spans more than one line
+    and as a plain inline scalar when it does not (#867 review fix).
+
+    The model-dispatched path's goals are one sentence, but `goal` and every
+    `what_to_summarize` entry are model-authored free text, and lead-0's item 3 now carries
+    item 1's rendered ancestor block inside its goal. Emitted after a bare `goal:`, every line
+    but the first reads as a sibling key of the Dispatch mapping — the `what_to_summarize` list
+    the lead is supposed to satisfy lands in the middle of document text, or a forged one lands
+    beside it.
+
+    Keyed on `splitlines()`, NOT on `"\\n" in value`: a lone `\\r`, `\\x85` or `\\u2028` renders
+    as a line break in the fenced block the model reads while carrying no `\\n` at all, so a
+    newline test leaves open exactly the injection the block scalar exists to close. Applied to
+    BOTH fields at the one place that renders them, rather than to the one lead that motivated
+    it.
+
+    The header carries an EXPLICIT indentation indicator (`|2-`, not `|-`). YAML infers a bare
+    block scalar's indentation from its first non-empty line, so a value whose first line opens
+    with a space infers one level deeper than the lines under it and the block ends at line
+    two — the remainder reparsing as mapping content, which is the same injection by a
+    different door. Both fields are model-authored free text, so a leading space is reachable
+    input, and with the indicator the space is content rather than structure.
+
+    The indicator is RELATIVE TO THE PARENT NODE, which is why `parent_indent` exists rather
+    than the indicator being read off `indent` alone: `goal` is a top-level mapping value
+    (parent 0, content at 2 → `|2-`), while a `what_to_summarize` entry hangs off a `-` at
+    column 2 (parent 2, content at 6 → `|4-`). Passing the absolute width for the sequence case
+    makes the block unparseable, so the two are not interchangeable."""
+    lines = value.splitlines() or [""]
+    if len(lines) == 1:
+        return lines[0]
+    indicator = len(indent) - parent_indent
+    if not 1 <= indicator <= 9:
+        raise ValueError(
+            f"block-scalar indentation indicator must be 1-9, got {indicator} "
+            f"(indent={len(indent)}, parent_indent={parent_indent})"
+        )
+    return f"|{indicator}-\n" + "\n".join(f"{indent}{ln}" for ln in lines)
+
+
 def _gather_prompt(
     deps: AgentDeps, request: GatherRequest, catalog: str | None,
     verb_grant: VerbGrant | None = None,
@@ -237,23 +278,16 @@ def _gather_prompt(
     else:
         block += _INDEX_NONE_GRANTED if index.established_seen else _INDEX_UNAVAILABLE
 
-    wts = "\n".join(f"  - {d}" for d in request.what_to_summarize) or "  - (unspecified)"
-    # A MULTI-LINE goal is a YAML BLOCK SCALAR, never an inline one (#867 review fix). The
-    # model-dispatched path's goals are one sentence, but lead-0's item 3 now carries item 1's
-    # rendered ancestor block inside its goal — emitted after a bare `goal:` every line but the
-    # first reads as a sibling key of the Dispatch mapping, and the `what_to_summarize` list
-    # the lead is supposed to satisfy lands in the middle of document text. The block scalar is
-    # the shared fix at the one place that renders the field, not a special case for one lead.
-    goal_yaml = request.goal
-    if "\n" in goal_yaml:
-        goal_yaml = "|-\n" + "\n".join(f"  {ln}" for ln in goal_yaml.splitlines())
+    wts = "\n".join(
+        f"  - {_yaml_scalar(d, '      ', parent_indent=2)}" for d in request.what_to_summarize
+    ) or "  - (unspecified)"
     block += (
         "\n## Dispatch\n```yaml\n"
         f"defender_dir: {deps.defender_dir}\n"
         f"run_dir: {deps.run_dir}\n"
         f"lead_id: {request.lead_id}\n"
         f"system: {request.system}\n"
-        f"goal: {goal_yaml}\n"
+        f"goal: {_yaml_scalar(request.goal, '  ')}\n"
         f"what_to_summarize:\n{wts}\n"
         "```\n"
     )
