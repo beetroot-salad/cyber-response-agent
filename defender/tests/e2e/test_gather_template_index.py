@@ -146,7 +146,7 @@ def test_835_the_composition_root_keys_each_gather_lane_on_its_dispatched_system
     """The other half of #835, at the seam that actually decides it: `driver._build_gather`'s
     `cache_key=f"gather:{system}"`.
 
-    The unit tests around it pin the CONTRACT (`gather_factory(agent_id, system)`) and the
+    The unit tests around it pin the CONTRACT (`gather_factory(agent_id, system, request_limit)`) and the
     PASSTHROUGH (`build_gather_agent(cache_key=…)` reaches `model_settings`) — but neither
     reaches the closure that supplies the key, so reverting that one line to `agent_id` left the
     whole suite green and silently restored a per-lead cache lane. `AgentInfo.model_settings`

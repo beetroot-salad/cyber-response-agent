@@ -674,17 +674,18 @@ def build_agent(  # noqa: PLR0913 — composition root: config + DI seams + the 
     # reused `lead_id`, so it is unique within a run.
     gather_sessions: dict[str, str] = {}
 
-    def _build_gather(agent_id: str, system: str) -> Agent[GatherDeps, str]:
+    def _build_gather(agent_id: str, system: str, request_limit: int) -> Agent[GatherDeps, str]:
         gather_extra: Sequence[Any] = ()
         gather_session_id: str | None = None
         if store is not None:
             gather_session_id = store.new_session(agent_id=agent_id)
             gather_sessions[agent_id] = gather_session_id
-            # The SAME ceiling `register_gather_tool` below hands `_run_gather` for a lead
-            # dispatched through this factory — the recorder's withholding check and the
-            # limit that actually stops the loop must read one value (#880 F-19).
+            # `request_limit` is THE DISPATCH'S OWN, handed down by `_run_gather` — not
+            # `GATHER_REQUEST_LIMIT` read again here (#880 F-19 residue). The recorder's
+            # withholding check and the `UsageLimits` that actually stops the loop are now the
+            # same number by construction rather than by two literals matching.
             gather_extra = _gather_extra_capabilities(
-                store, gather_session_id, agent_id, request_limit=GATHER_REQUEST_LIMIT,
+                store, gather_session_id, agent_id, request_limit=request_limit,
             )
         return build_gather_agent(
             defender_dir, logger, agent_id, make_model, verbs, limits,

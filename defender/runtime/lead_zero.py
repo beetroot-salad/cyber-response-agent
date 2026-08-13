@@ -656,8 +656,11 @@ async def _resolve_item1(  # noqa: C901, PLR0912, PLR0915 — item 1's own branc
     ledger = _CallLedger(run_dir)
     issued_any = False
     answered_any = False
-    ancestor_attempted = False
-    ancestor_answered = False
+    # COUNTS, not booleans (#880 F-14 residue). One batched call per distinct backing index
+    # means "an ancestor call answered" and "the ancestor calls answered" are different facts,
+    # and the block used to render only the first — see `_ancestor_shortfall` below.
+    ancestor_issued = 0
+    ancestor_answered = 0
 
     async def _issue(verb: str, params: dict, *, ancestor: bool) -> tuple[dict | None, int]:
         """`ancestor=False` marks a call that CANNOT produce an ancestor document — item 1's
@@ -679,16 +682,17 @@ async def _resolve_item1(  # noqa: C901, PLR0912, PLR0915 — item 1's own branc
         itself a resolved absence: when the shell fetch is the ONLY call and it failed, the
         group-id branch was never even reachable, so nothing was established — least of all
         that this alert has no ancestors."""
-        nonlocal issued_any, answered_any, ancestor_attempted, ancestor_answered
+        nonlocal issued_any, answered_any, ancestor_issued, ancestor_answered
         issued_any = True
-        ancestor_attempted = ancestor_attempted or ancestor
+        if ancestor:
+            ancestor_issued += 1
         _budget_gate(run_dir, limits)
         envelope, _text = await ledger.call(capture, deps, verb, params, env)
         _budget_account(run_dir, run_id, "query", limits)
         if envelope is not None:
             answered_any = True
             if ancestor:
-                ancestor_answered = True
+                ancestor_answered += 1
         # The seq is read AFTER the call, off the row that call just wrote: a document's
         # elision pointer has to name the payload of the fetch that returned it, not its own
         # position in the block (#867 review fix).
@@ -733,11 +737,20 @@ async def _resolve_item1(  # noqa: C901, PLR0912, PLR0915 — item 1's own branc
 
     docs = _sort_chrono(docs)
 
+    # #880 F-14 residue. One call per DISTINCT MAPPED BACKING INDEX (d5) means a resolution
+    # can have both an ancestor call that answered and one that faulted, and "at least one
+    # answered" is what the absence sentence below used to be gated on. An alert whose
+    # ancestors span two backing indices, where the first matches nothing and the second
+    # faults, then rendered "the resolution reached the backend and found nothing": a resolved
+    # absence claimed over an index that never answered. Same over-claim as F-14 itself, one
+    # level down.
+    ancestor_failed = ancestor_issued - ancestor_answered
+
     body_lines = []
     if docs:
         for doc, seq in docs:
             body_lines.append(_render_doc(doc, L0, seq))
-    elif ancestor_attempted and not ancestor_answered:
+    elif ancestor_issued and not ancestor_answered:
         # Reworded with the flag it now reads (#880 F-14). "every backend call this
         # resolution attempted failed" is itself false in the newly reachable case: the shell
         # fetch answered, and only the calls that could have produced an ancestor did not.
@@ -751,11 +764,28 @@ async def _resolve_item1(  # noqa: C901, PLR0912, PLR0915 — item 1's own branc
         # without this arm turns exactly this run into `_(unavailable: … found nothing)`, the
         # false claim over a silent backend F-14 exists to remove.
         body_lines.append(_unavailable("every backend call this resolution attempted failed"))
+    elif ancestor_failed:
+        # SOME answered and some did not, and nothing came back from the ones that did. The
+        # absence holds only over the indices that were actually reached, and the sentence now
+        # says exactly that instead of generalizing it to the alert.
+        body_lines.append(_unavailable(
+            f"{ancestor_failed} of {ancestor_issued} ancestor fetches failed; the rest "
+            "reached the backend and found nothing"))
     else:
-        # Either an ancestor call answered and matched nothing, or — the alert declaring no
-        # usable ancestor and its shell answering with no group id — there was no ancestor
-        # call to make. Both are a resolved absence, which is what this sentence says.
+        # Every ancestor call this resolution issued answered, and none matched — or the alert
+        # declared no usable ancestor and its shell answered with no group id, so there was no
+        # ancestor call to make. Both are a resolved absence, which is what this sentence says.
         body_lines.append(_unavailable("the resolution reached the backend and found nothing"))
+
+    if docs and ancestor_failed:
+        # The docs-present half of the same residue. The count note below says how many
+        # documents came back against how many were asked for, which reads as "the backend
+        # did not have them"; this one says the other thing that can be true at the same time,
+        # and the two compose.
+        body_lines.append(
+            f"{SHORTFALL} {ancestor_failed} of {ancestor_issued} ancestor fetches failed — "
+            "the documents above are what the rest returned)"
+        )
 
     if requested and (len(docs) < requested or truncated):
         body_lines.append(
@@ -765,13 +795,20 @@ async def _resolve_item1(  # noqa: C901, PLR0912, PLR0915 — item 1's own branc
 
     text = "\n\n".join(body_lines)
 
-    # FAILED when no call that could have contributed answered. `ancestor_attempted` guards
-    # the ancestor half so an alert with nothing to ask for stays EMPTY (#880 F-14): a
-    # resolution that issued no ancestor call has no failed call to report. The `answered_any`
-    # half is what keeps a resolution whose SHELL FETCH was its only call, and failed, out of
-    # EMPTY — it asked nothing further because the answer that would have told it what to ask
-    # never came, which is a failure and not an absence.
-    if not ancestor_answered and (ancestor_attempted or not answered_any):
+    # FAILED when no call that could have contributed answered. `ancestor_issued` guards the
+    # ancestor half so an alert with nothing to ask for stays EMPTY (#880 F-14): a resolution
+    # that issued no ancestor call has no failed call to report. The `answered_any` half is
+    # what keeps a resolution whose SHELL FETCH was its only call, and failed, out of EMPTY —
+    # it asked nothing further because the answer that would have told it what to ask never
+    # came, which is a failure and not an absence.
+    #
+    # A PARTIAL ancestor failure stays EMPTY/TRUNCATED rather than earning a fifth status. The
+    # over-claim it produces is in what MAIN is TOLD — which is what #880 is about throughout,
+    # and the arms above now say it — while the status has exactly two consumers: the dispatch
+    # gate, which refuses FAILED and EMPTY alike, and `_user_prompt`, which forwards it. A new
+    # status would be a distinction nothing acts on, and moving a partial failure to FAILED
+    # would discard the documents the calls that DID answer returned.
+    if not ancestor_answered and (ancestor_issued or not answered_any):
         status = STATUS_FAILED
     elif not docs:
         status = STATUS_EMPTY
@@ -919,18 +956,17 @@ async def dispatch_correlation(  # noqa: C901, PLR0913 — item 3's own dispatch
     if store is not None:
         gather_session_id = store.new_session(agent_id=agent_id)
 
-    def gather_factory(_agent_id: str, system: str):
+    def gather_factory(_agent_id: str, system: str, request_limit: int):
         from .driver import _gather_extra_capabilities
 
         extra: list = []
         if store is not None and gather_session_id is not None:
-            # THIS dispatch's ceiling, not the module constant the model-dispatched path
-            # uses — the same value handed to `_run_gather` below (#880 F-19). The recorder
-            # withholds the doomed round by comparing against it; handed 40 while this lead
-            # stops at 8, it withheld nothing and stored an unanswered final request.
+            # `request_limit` arrives from `_run_gather` — the value it is about to enforce —
+            # rather than being read again from `CORRELATION_REQUEST_LIMIT` here (#880 F-19
+            # residue). The recorder withholds the doomed round by comparing against it, and
+            # measuring a ceiling this dispatch did not receive is the whole of that finding.
             extra = _gather_extra_capabilities(
-                store, gather_session_id, _agent_id,
-                request_limit=CORRELATION_REQUEST_LIMIT,
+                store, gather_session_id, _agent_id, request_limit=request_limit,
             )
         return build_gather_agent(
             defender_dir, logger, _agent_id, make_model, registry, limits,

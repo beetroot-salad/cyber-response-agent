@@ -160,7 +160,7 @@ def test_a_malformed_system_is_retried_at_the_seam_not_silently_degraded(tmp_pat
     (run_dir / "gather_raw").mkdir(parents=True)
     deps = bind(MAIN_DEF, run_dir, salt="0011223344556677", defender_dir=_DEFENDER)
 
-    def _never(agent_id, system):  # pragma: no cover — reaching it IS the failure
+    def _never(agent_id, system, request_limit):  # pragma: no cover — reaching it IS the failure
         raise AssertionError(f"a malformed system reached the factory: {system!r}")
 
     for bad in ("Elastic", "elastic\nx", "el astic", "e" * 200):
@@ -179,7 +179,7 @@ def test_a_malformed_system_is_retried_at_the_seam_not_silently_degraded(tmp_pat
         async def run(self, *a, **kw):
             raise UsageLimitExceeded("far enough — the dispatch was admitted")
 
-    def _record(agent_id, system):
+    def _record(agent_id, system, request_limit):
         seen.append(system)
         return _Stop()
 
@@ -223,7 +223,7 @@ def test_an_empty_goal_is_retried_at_the_seam_and_leaves_the_id_takeable(tmp_pat
 
     run_dir, deps = _seam_deps(tmp_path)
 
-    def _never(agent_id, system):  # pragma: no cover — reaching it IS the failure
+    def _never(agent_id, system, request_limit):  # pragma: no cover — reaching it IS the failure
         raise AssertionError("an unclaimed dispatch reached the gather factory")
 
     for empty in ("", "   ", "\n"):
@@ -238,7 +238,7 @@ def test_an_empty_goal_is_retried_at_the_seam_and_leaves_the_id_takeable(tmp_pat
 
     seen: list[str] = []
 
-    def _record(agent_id, system):
+    def _record(agent_id, system, request_limit):
         seen.append(system)
         return _StopAfterDispatch()
 
@@ -266,7 +266,7 @@ def test_the_second_dispatch_of_one_lead_id_is_always_refused(tmp_path):
     run_dir, deps = _seam_deps(tmp_path)
     runs: list[str] = []
 
-    def _factory(agent_id, system):
+    def _factory(agent_id, system, request_limit):
         runs.append(agent_id)
         return _StopAfterDispatch()
 
@@ -287,6 +287,47 @@ def test_the_second_dispatch_of_one_lead_id_is_always_refused(tmp_path):
         f"{len(runs)} gather sessions ran under one lead_id; exactly one may"
 
 
+def test_the_gather_factory_is_handed_the_ceiling_this_dispatch_will_enforce(tmp_path):
+    """#880 F-19's residue, closed at the seam rather than by two literals agreeing.
+
+    The factory builds this lead's history recorder, and that recorder withholds the doomed
+    round — the continuation pydantic_ai appends BEFORE it checks the limit — by comparing the
+    request count against a ceiling. Which ceiling it compares against used to be the factory's
+    own business: each one read a module constant, `driver._build_gather` reading
+    `GATHER_REQUEST_LIMIT` (40) and `lead_zero.gather_factory` reading
+    `CORRELATION_REQUEST_LIMIT` (8). F-19 was one of those two reading the other's, and the fix
+    that shipped only made the two literals match — a third dispatch, or a per-run raised
+    ceiling of the kind `challenge_gate.raised_request_limit` already computes for MAIN,
+    reproduces it with nothing to catch it.
+
+    `_run_gather` now hands the factory the value it is ABOUT TO ENFORCE through
+    `UsageLimits(request_limit=...)`, so the two cannot be different numbers. Asserted as
+    identity against the argument this call passes, and driven at two different ceilings so a
+    factory that ignored its parameter and returned a constant could not pass both."""
+    from defender.runtime import tools_gather
+
+    run_dir, deps = _seam_deps(tmp_path)
+    handed: list[int] = []
+
+    def _factory(agent_id, system, request_limit):
+        handed.append(request_limit)
+        return _StopAfterDispatch()
+
+    for i, ceiling in enumerate((40, 8)):
+        asyncio.run(tools_gather._run_gather(
+            deps, _factory, ceiling,
+            tools_gather.GatherRequest(f"l-8{i}0", "elastic", "confirm the lead", ("what",)),
+            GATHER_DEF.verb_grant,
+        ))
+
+    assert handed == [40, 8], (
+        f"the factory was handed {handed} for dispatches ceilinged at [40, 8] — it is reading "
+        "a ceiling of its own rather than this run's, which is the shape of #880 F-19: the "
+        "recorder it builds then withholds the doomed round against a number no dispatch here "
+        "will enforce"
+    )
+
+
 def test_a_claim_that_could_not_be_written_is_a_retry_not_a_dispatch(tmp_path):
     """The other unclaimed outcome (#855 F-12), and the one no argument can reach from the
     model side: the claim's write FAILED — a full disk, a squatted `gather_raw` component, an
@@ -301,7 +342,7 @@ def test_a_claim_that_could_not_be_written_is_a_retry_not_a_dispatch(tmp_path):
 
     run_dir, deps = _seam_deps(tmp_path)
 
-    def _never(agent_id, system):  # pragma: no cover — reaching it IS the failure
+    def _never(agent_id, system, request_limit):  # pragma: no cover — reaching it IS the failure
         raise AssertionError("an unwritten claim dispatched gather anyway")
 
     with pytest.MonkeyPatch.context() as mp:
@@ -328,7 +369,7 @@ def test_an_overlong_lead_id_never_reaches_the_claim(tmp_path):
 
     run_dir, deps = _seam_deps(tmp_path)
 
-    def _never(agent_id, system):  # pragma: no cover — reaching it IS the failure
+    def _never(agent_id, system, request_limit):  # pragma: no cover — reaching it IS the failure
         raise AssertionError("an unbounded lead_id dispatched gather")
 
     with pytest.raises(ModelRetry, match="invalid lead_id"):

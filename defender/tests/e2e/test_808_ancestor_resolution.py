@@ -105,6 +105,10 @@ ANCESTOR_CALLS_FAILED = "every backend call that could have resolved an ancestor
 #: Nothing answered at all, and no ancestor call was ever issuable because the shell fetch
 #: that decides whether one exists is what failed.
 SHELL_ONLY_FAILED = "every backend call this resolution attempted failed"
+#: The PARTIAL case: some ancestor fetches answered and some did not. Matched as a fragment
+#: rather than whole because the same words appear in two notes — the empty-body sentence and
+#: the docs-present shortfall — and what this asserts is that one of them is there.
+ANCESTOR_FETCHES_FAILED = "ancestor fetches failed"
 
 
 def _order(section: str, *needles: str) -> list[int]:
@@ -364,6 +368,98 @@ def test_a_shell_fetch_that_answers_does_not_stand_in_for_the_ancestor_calls(tmp
     )
     assert SHELL_ONLY_FAILED in shell_only.text, \
         f"the failed resolution carries no failed-call note: {shell_only.text!r}"
+
+
+def test_one_ancestor_fetch_answering_does_not_establish_an_absence_for_the_others(tmp_path):
+    """#880 F-14's residue — "an ancestor call answered" and "the ancestor calls answered" are
+    different facts, and the block used to render only the first.
+
+    `d5` puts ONE call on each distinct mapped backing index, so a resolution can hold both an
+    answering ancestor call and a faulting one at the same time. The empty-body sentence was
+    gated on "at least one ancestor call answered", so an alert whose ancestors span
+    `logs-system.auth-*` and `logs-falco.alerts-*` — two of this environment's own backing
+    indices, and the pair `test_one_backend_call_per_distinct_backing_index_never_one_per
+    _ancestor` already drives — where the first matches nothing and the second faults, rendered
+    `_(unavailable: the resolution reached the backend and found nothing)`. That is a resolved
+    absence claimed over an index that never answered: the same over-claim as F-14 itself, one
+    level down, and the reason the fix counts calls instead of setting a flag.
+
+    BOTH HALVES, because the residue has two. With nothing resolved the SENTENCE is what
+    over-claims, and it now names how many fetches failed instead of generalizing to the alert.
+    With something resolved the sentence is gone and the count note — "resolved 1 of 2
+    requested ancestor document(s)" — reads as "the backend did not have the other one", which
+    is the same false absence wearing a number; a second note now says the other thing that was
+    true at the same time.
+
+    The complementary condition is the arm where every ancestor call ANSWERS and finds nothing:
+    that absence is real, is the common case, and must keep its plain sentence with no
+    failed-fetch note beside it — or the note says nothing by always firing."""
+    from defender.runtime import lead_zero
+
+    def _resolve(name, table):
+        run_dir = materialize_alert(tmp_path / name, alert_doc(ancestors=[
+            ancestor("anc-auth", index=AUTH_BACKING),
+            ancestor("anc-falco", index=FALCO_BACKING),
+        ]))
+        rec = VerbRecorder()
+        result = lead_zero.resolve_lead_zero(
+            run_dir=run_dir, defender_dir=defender_dir(),
+            alert_path=run_dir / "alert.json", salt=SALT,
+            verbs=elastic_backend(rec, answer=answer_by_index(table)),
+        )
+        return result, rec
+
+    empty_envelope = envelope([], index="logs-system.auth-*")
+    fault = TransportFault("docker exec failed")
+
+    # Half 1 — nothing resolved. One index answers and matches nothing; the other faults.
+    partial, rec = _resolve("partial_empty", {
+        "logs-system.auth-*": empty_envelope,
+        "logs-falco.alerts-*": fault,
+    })
+    assert len(rec.calls) == 3, (
+        f"the scenario did not issue the shell fetch plus one call per backing index: "
+        f"{[(c.verb, c.params.get('index')) for c in rec.calls]}"
+    )
+    assert RESOLVED_ABSENCE not in partial.text, (
+        "MAIN is told this alert's ancestors were reached and there were none, while one of "
+        "the two backing indices never answered — the absence holds only over the index that "
+        "did, and the sentence generalizes it to the alert"
+    )
+    assert ANCESTOR_FETCHES_FAILED in partial.text, (
+        "nothing in the block says a fetch failed at all: the run reads as a clean empty "
+        f"resolution. Block was {partial.text!r}"
+    )
+
+    # Half 2 — something resolved, and one fetch still failed. The count note alone reads as
+    # "the backend did not have the other document".
+    resolved, rec2 = _resolve("partial_docs", {
+        "logs-system.auth-*": envelope([hit(ts="2026-05-25T15:22:00.000Z")],
+                                       index="logs-system.auth-*"),
+        "logs-falco.alerts-*": fault,
+    })
+    assert len(rec2.calls) == 3
+    assert "2026-05-25T15:22:00" in resolved.text, \
+        "the document the answering index returned was dropped along with the failed fetch"
+    assert ANCESTOR_FETCHES_FAILED in resolved.text, (
+        "the block carries the shortfall COUNT but nothing saying a fetch failed — a reader "
+        "cannot tell 'the backend did not have it' from 'we never asked successfully'"
+    )
+
+    # Complementary condition — every ancestor fetch answers, nothing matches. A real absence,
+    # and the note must not fire on it.
+    clean, rec3 = _resolve("both_empty", {
+        "logs-system.auth-*": empty_envelope,
+        "logs-falco.alerts-*": envelope([], index="logs-falco.alerts-*"),
+    })
+    assert len(rec3.calls) == 3
+    assert clean.status == lead_zero.STATUS_EMPTY
+    assert RESOLVED_ABSENCE in clean.text, \
+        "a resolution whose every fetch answered and matched nothing lost its plain sentence"
+    assert ANCESTOR_FETCHES_FAILED not in clean.text, (
+        "the failed-fetch note fires when no fetch failed — a note that always fires says "
+        "nothing, which is how the residue survived the first fix"
+    )
 
 
 def test_item_one_stops_at_one_recorded_per_system_failure(tmp_path):

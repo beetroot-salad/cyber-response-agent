@@ -258,7 +258,7 @@ def test_835_gather_is_cache_keyed_on_the_system_while_its_agent_id_stays_the_le
     Two halves, and NEITHER reaches `driver._build_gather` — it is a closure inside
     `build_agent`, unreachable without the `monkeypatch.setattr` this module's header forbids.
     So: `_run_gather` driven with a recording fake pins the CONTRACT that carries the system
-    down (`gather_factory(agent_id, system)`), and `build_gather_agent` pins that a `cache_key`
+    down (`gather_factory(agent_id, system, request_limit)`), and `build_gather_agent` pins that a `cache_key`
     argument lands on the model settings. The composition root's own
     `cache_key=f"gather:{system}"` is still unpinned — an integration seam worth a test that can
     observe the built gather agent's settings end-to-end."""
@@ -274,7 +274,7 @@ def test_835_gather_is_cache_keyed_on_the_system_while_its_agent_id_stays_the_le
         async def run(self, *a, **kw):
             raise UsageLimitExceeded("stop here — the factory call is what this pins")
 
-    def _factory(agent_id: str, system: str):
+    def _factory(agent_id: str, system: str, request_limit: int):
         seen.append((agent_id, system))
         return _Agent()
 
