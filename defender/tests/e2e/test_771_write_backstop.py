@@ -1106,11 +1106,15 @@ def test_a_duplicate_lead_id_still_fails_exclusive_create(tmp_path):
     run = run_tree(tmp_path)
     dispatch = {"run_dir": str(run), "lead_id": "l-001", "goal": "first", "what_to_summarize": []}
 
-    assert record_lead.claim_lead(dispatch) != 2
+    # `== CLAIMED`, not `!= 2` (#855 F-12): "not the reuse code" is satisfied by the silent
+    # refusal too, which is exactly the read that let an unclaimed dispatch run. The first
+    # claim of this pair is the premise the rest of the demand rests on, so it asserts that
+    # the row was WRITTEN.
+    assert record_lead.claim_lead(dispatch) == record_lead.CLAIMED
     sidecar = run / "gather_raw" / "l-001.lead.json"
     first = sidecar.read_text(encoding="utf-8")
 
-    assert record_lead.claim_lead({**dispatch, "goal": "second"}) == 2, (
+    assert record_lead.claim_lead({**dispatch, "goal": "second"}) == record_lead.ALREADY_CLAIMED, (
         "the duplicate claim did not report reuse"
     )
     assert sidecar.read_text(encoding="utf-8") == first, "the duplicate claim overwrote the first"
@@ -1139,8 +1143,10 @@ def test_the_claim_time_and_gather_seam_lead_id_gates_accept_the_same_set(tmp_pa
              "../etc", "l-1/../..")
 
     def claim_rejects(lead_id: str) -> bool:
-        # The return code cannot answer this: `claim_lead` returns 0 both when it rejects the
-        # id and when it succeeds. The observable is whether a sidecar appeared.
+        # The observable is whether a SIDECAR appeared, not the return code — and it stays the
+        # observable now that #855 F-12 has split the codes (a refusal answers `NOT_CLAIMED`,
+        # success `CLAIMED`), because the two gates being compared are the shape checks, and
+        # only one of them has a code to report at all.
         d = tmp_path / f"claim-{abs(hash(lead_id))}"
         d.mkdir()
         run = run_tree(d)

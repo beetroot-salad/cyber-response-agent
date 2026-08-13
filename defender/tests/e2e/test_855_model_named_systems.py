@@ -34,7 +34,8 @@ from defender.learning.leads.pitfalls_curator import _build_pitfalls_handoffs  #
 from defender.scripts.gather_tools.record_query import ABOVE_GUARD_QUERY_ID  # noqa: E402
 from defender.tests.e2e._replay_harness import Turn  # noqa: E402
 from defender.tests.e2e.test_pitfalls_input_823 import _Res, _dispatch, _run  # noqa: E402
-from defender.tests.e2e.test_query_tool_611 import DONE, q  # noqa: E402
+from defender.tests.e2e._replay_harness import VerbRecorder  # noqa: E402
+from defender.tests.e2e.test_query_tool_611 import DONE, elastic_ok, q  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
@@ -133,14 +134,24 @@ def test_no_row_names_a_system_the_dispatch_never_named(tmp_path):
     about the run, and every above-guard writer is inside it."""
     dispatch = _dispatch()
     dispatched = {dispatch[1]["system"]}
-    turns = [_bad_args(PHANTOM), q("ghost", "query", PARAMS), _bad_args("a b"), DONE]
+    # Distinct `params` per turn ON PURPOSE: identical ones would key as one repeat group
+    # (`three_different_undeclared_systems_are_one_repeat_group`) and the third call would end
+    # the lead, leaving this universal quantified over two rows and a dead end instead of
+    # over every writer it means to cover.
+    turns = [
+        _bad_args(PHANTOM, {"native_query": "FROM one"}),
+        q("ghost", "query", {"native_query": "FROM two"}),
+        _bad_args("a b", {"native_query": "FROM three"}),
+        DONE,
+    ]
     r = _run(tmp_path, run_id="d855-universal", turns=turns, main_turns=[
         Turn(tool_calls=[dispatch]), Turn(text="Investigation complete."),
     ])
 
     assert dispatch[0] == "gather", "the shared helper stopped building a gather dispatch"
     assert dispatched == {"elastic"}
-    assert _above_guard(r), "no above-guard row was written, so the universal is vacuous"
+    assert len(_above_guard(r)) == 3, \
+        "the three above-guard writers did not all leave a row — the universal is vacuous"
     for row in r.rows:
         assert row["system"] in dispatched | {""}, \
             f"a row names a system no dispatch did: {row['system']!r}"
@@ -162,6 +173,58 @@ def test_the_companion_repeat_guard_still_bounds_a_phantom_rejection_loop(tmp_pa
     assert "Treat this lead as incomplete" in summary
     assert PHANTOM not in summary, \
         "the model's own string crossed back into main's context on a refusal path"
+
+
+def test_three_different_undeclared_systems_are_one_repeat_group(tmp_path):
+    """THE IDENTITY CONSEQUENCE of the coarsening, pinned as behaviour rather than left as a
+    side effect nobody wrote down. Three rejections naming THREE DIFFERENT phantom systems
+    under one verb and params key the same, so the third ends the lead — where on the base
+    they were three distinct requests and the lead ran on.
+
+    This is the reading the fix commits to: below the grant the identity is "a call to no
+    system this run declares", and a model issuing three of those has repeated one mistake.
+    It is also the only reading available — the guard recovers its identity from the twelve
+    frozen row keys, so a `system` the row deliberately does not carry cannot separate them.
+
+    What the coarsening may NOT do is make the dead-end LIE. The message must not claim those
+    calls named one system, and must not echo the model's own strings back into main's
+    context on a refusal path. It says `an undeclared system`, which is true of every member
+    of the group and is the host's own words."""
+    r = _run(tmp_path, run_id="d855-distinct", turns=[
+        _bad_args("ghostone"), q("ghosttwo", "query", PARAMS), _bad_args("ghostthree"), DONE,
+    ])
+
+    rows = _above_guard(r)
+    assert len(rows) == 3, "the three rejections did not all leave their rows"
+    assert {row["system"] for row in rows} == {""}, "a phantom name reached the table"
+
+    summary = (r.run_dir / "gather_summaries" / "l-001.md").read_text(encoding="utf-8")
+    assert "Treat this lead as incomplete" in summary, \
+        "the third rejection did not end the lead — the group stopped being one group"
+    assert "an undeclared system" in summary, \
+        "the dead end named a system, or said the arguments were unreadable — neither is true"
+    for phantom in ("ghostone", "ghosttwo", "ghostthree"):
+        assert phantom not in summary, \
+            "a model-authored system name crossed into main's context on a refusal path"
+
+
+def test_a_declared_system_is_never_folded_into_that_group(tmp_path):
+    """The control for the test above, and the property that keeps the coarsening honest: two
+    rejections against UNDECLARED systems do not top up the count for a REAL one. `elastic`
+    keys as itself, so its first rejection is its first — the lead runs on and the corrected
+    call executes."""
+    rec = VerbRecorder()
+    r = _run(tmp_path, run_id="d855-notfolded", verbs=elastic_ok(rec), turns=[
+        _bad_args("ghostone"), _bad_args("ghosttwo"),
+        _bad_args("elastic"), q("elastic", "query", PARAMS), DONE,
+    ])
+
+    rows = r.own_rows
+    assert [row["exit_code"] for row in rows] == [64, 64, 64, 0], \
+        "the real system's call was refused by a count only the phantoms earned"
+    assert len(rec.calls) == 1, "the corrected call never reached the backend"
+    summary = (r.run_dir / "gather_summaries" / "l-001.md").read_text(encoding="utf-8")
+    assert "Treat this lead as incomplete" not in summary
 
 
 def test_the_dispatch_argument_is_the_only_system_the_run_can_name(tmp_path):

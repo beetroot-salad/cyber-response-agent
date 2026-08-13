@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import shlex
+import sys
 from typing import Any
 
 from pydantic import ValidationError
@@ -215,19 +216,49 @@ class QueryCapture(AbstractCapability[Any]):
         the same reason, that a bad `system` "would send the curator at a `skills/sql/
         execution.md` that must never exist".
 
-        Spent on the rejection guard's identity and the dead-end reason as well as on the row,
-        never on one and not the others: the guard recovers its count from the rows it wrote,
-        so a live identity keyed on the raw string over a table holding `""` would match
-        nothing and the repeat class this guard exists to bound would stop being bounded."""
+        Spent on the rejection guard's identity as well as on the row, never on one and not the
+        other: the guard recovers its count from the rows it wrote, so a live identity keyed on
+        the raw string over a table holding `""` would match nothing and the repeat class this
+        guard exists to bound would stop being bounded.
+
+        THE IDENTITY CONSEQUENCE, stated because it is a real behaviour change and not an
+        oversight: every undeclared system now keys the SAME, so three rejections naming
+        `ghostone`, `ghosttwo` and `ghostthree` under one verb and params are one repeat group
+        and the third ends the lead. That is the reading this coarsening commits to — the
+        request identity below the grant is "a call to no system this run declares", and a
+        model that issues three of those in a row has repeated one mistake, not made three. It
+        is also the only reading available: the guard's identity is recovered from the twelve
+        frozen row keys, so a `system` the row does not carry cannot separate them. What must
+        NOT follow is a dead-end that tells main those calls named one system —
+        `_undeclared_target` is why the message says an undeclared system instead."""
         try:
             declared = self._registry.systems()
         except CONTROL_FLOW_EXCEPTIONS:
             raise
         except (BudgetKill, KeyboardInterrupt, GeneratorExit, asyncio.CancelledError):
             raise
-        except BaseException:  # noqa: BLE001 — a registry that cannot list declares nothing
+        except BaseException as e:  # noqa: BLE001 — a registry that cannot list declares nothing
+            # Fail closed, but never SILENTLY: a registry that cannot answer coarsens every
+            # above-guard row in the run, real systems included, and `collect_general_failures`
+            # then drops the lot. `_decide_guarded` turns its own load failure into a visible
+            # row; this path has no row of its own to carry one, so it says so on stderr.
+            print(f"[query_tool] system registry could not list its systems "
+                  f"({type(e).__name__}: {e}); above-guard rows will carry no system",
+                  file=sys.stderr)
             return ""
         return system if system in declared else ""
+
+    @staticmethod
+    def _undeclared_target(recorded: str, raw: str) -> str:
+        """What the dead-end message calls the request's target.
+
+        The coarsened value is what the row and the guard agree on, but rendering `""` there
+        makes `rejection_dead_end_reason` say "system/verb unreadable in the call's own
+        arguments" — which is false for a call that named a system perfectly readably, just not
+        one that exists. And the raw string cannot be echoed: it is unbounded model text on a
+        path that crosses into MAIN's context. So neither, and a third thing that is true of
+        every member of this repeat group."""
+        return recorded or ("an undeclared system" if raw.strip() else "")
 
     def _traversal_reject(self, model_query_id: Any) -> str | None:
         if model_query_id and any(t in str(model_query_id) for t in _QID_TRAVERSAL):
@@ -270,7 +301,8 @@ class QueryCapture(AbstractCapability[Any]):
             # `system` coarsens the same way when the registry does not declare it, and for a
             # stronger reason: this row's `system` steers an offline corpus write
             # (`_system_of_record`).
-            system = self._system_of_record(_as_str(raw.get("system")))
+            raw_system = _as_str(raw.get("system"))
+            system = self._system_of_record(raw_system)
             verb = _as_str(raw.get("verb"))
             params = _as_dict(raw.get("params"))
             trip = self._rejection_guard(ctx.deps, system, verb, params)
@@ -285,7 +317,8 @@ class QueryCapture(AbstractCapability[Any]):
             )
             if trip is not None:
                 raise GatherDeadEnd(
-                    reason=rejection_dead_end_reason(system, verb, trip),
+                    reason=rejection_dead_end_reason(
+                        self._undeclared_target(system, raw_system), verb, trip),
                     escape=REPEAT_ESCAPE,
                 ) from e
             raise
@@ -339,7 +372,8 @@ class QueryCapture(AbstractCapability[Any]):
             )
             if trip is not None:
                 raise GatherDeadEnd(
-                    reason=rejection_dead_end_reason(recorded_system, verb, trip),
+                    reason=rejection_dead_end_reason(
+                        self._undeclared_target(recorded_system, system), verb, trip),
                     escape=REPEAT_ESCAPE,
                 )
             raise ModelRetry(decision.refusal or f"unresolvable: {system}.{verb}")

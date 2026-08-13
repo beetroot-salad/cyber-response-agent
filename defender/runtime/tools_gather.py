@@ -374,10 +374,17 @@ _LEAD_REUSE_RETRY = (
 #: run under an unclaimed id is invisible to the reuse gate (which IS the sidecar's exclusive
 #: create), so the id admits an unbounded number of further sessions, each overwriting the
 #: last one's `gather_summaries/{lead_id}.md` — the file main re-reads as its own memory.
+#: The id is NOT burnt, and the correction says so. Every shape a model can get wrong — a
+#: malformed id, an empty goal — is refused at the seam ABOVE the claim, so the only outcome
+#: that still reaches here is a run-dir write that failed, and the claim unlinks whatever it
+#: had started. Telling the model to spend a fresh `:L` row would burn one id per attempt
+#: against a fault that is not about the id, so this is the retry-THIS-lead wording its two
+#: siblings above already use.
 _LEAD_UNCLAIMED_RETRY = (
-    "lead_id {lead_id!r} could not be claimed, so no leads-table row exists and this "
-    "dispatch was not run. Re-dispatch as a NEW lead: append a fresh :L findings row with a "
-    "non-empty goal and echo its new id."
+    "lead_id {lead_id!r} could not be claimed: the leads-table row could not be WRITTEN, so "
+    "this dispatch was not run and the id is still free. Re-dispatch this same lead_id. If it "
+    "fails the same way again the run dir is not writable — say so and reason from what the "
+    "other leads captured rather than spending a new :L row per attempt."
 )
 
 

@@ -48,6 +48,16 @@ def _is_real_system(system: str, skills_dir: Path) -> bool:
     a sibling file today, and creating that file for a system that lacks one is exactly what
     the curator is FOR (`docs/system-skill-shape.md`). What it may never do is invent the
     directory around it."""
+    # A NAME, not a path. `system` is spent as ONE directory component both here and in the
+    # `execution_md_path` this predicate is gating, so a value carrying a separator, a NUL or
+    # a leading dot is not a system whose dir might exist — it is a traversal, and probing for
+    # it answers about somewhere else entirely. `".."` is the one that matters: `skills_dir /
+    # ".." / "SKILL.md"` IS `defender/SKILL.md`, which exists, so the bare probe returned True
+    # for it and the handoff minted `defender/skills/../execution.md`. Same alphabet the
+    # dispatch seam already holds a system name to (`runtime/verbs._SYSTEM_RE`), asked as the
+    # question this site has: is it a single, ordinary component.
+    if not system or system.startswith(".") or any(c in system for c in "/\\\x00"):
+        return False
     return (skills_dir / system / "SKILL.md").is_file()
 
 
@@ -73,8 +83,8 @@ def _build_pitfalls_handoffs(rows: list[dict], *, skills_dir: Path = SKILLS_DIR)
     if dropped:
         # Named, never dropped quietly: a batch that silently loses a system reads exactly
         # like one that had nothing to teach it.
-        _log(f"pitfalls: dropped {len(dropped)} queued system(s) with no {SKILLS_REL} "
-             f"directory: {sorted(dropped)}")
+        _log(f"pitfalls: dropped {len(dropped)} queued system(s) with no "
+             f"{SKILLS_REL}<system>/SKILL.md: {sorted(dropped)}")
     out: list[dict] = []
     for system in sorted(by_system):
         # `occurrences` is stamped on every record `merge_pitfalls` returns, so it is read
@@ -191,7 +201,7 @@ def run_pitfalls(
     if not handoffs:
         _log(
             f"{len(records)} queued pitfall(s) in {len(batch_ids)} row(s) but none named a "
-            "system with a directory under defender/skills/ — dropping"
+            "system with a checked-in defender/skills/<system>/SKILL.md — dropping"
         )
         _loop_persist.rotate_pitfalls(batch_ids, None, paths=paths)
         return 0
