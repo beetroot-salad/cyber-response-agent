@@ -442,10 +442,16 @@ def _check_authz_contract_ids(companion: CompanionBody) -> list[str]:
     edited away — under a declared-set reading, every later write to that document would be
     denied for a row the author is no longer allowed to touch, and `learning/core/persist.py`
     dead-letters the run. Refuting one of the two is an in-grammar, append-only move that
-    ends the ambiguity honestly, and it is the same set `_check_benign_authz` reads: a
-    contract on a refuted hypothesis discharges nothing, so a collision there costs nothing.
-    Two hypotheses that are both still live is the case with no honest reading, and it stays
-    refused.
+    ends the ambiguity honestly. Two hypotheses that are both still live is the case with no
+    honest reading, and it stays refused.
+
+    What refuting does NOT do is make the id unambiguous, and this docstring used to claim it
+    did — "a contract on a refuted hypothesis discharges nothing, so a collision there costs
+    nothing" was true of the CONTRACT and false of the ROW that fulfills it (#876/F-3). The
+    `:R authz` row carries no hypothesis column, so the refuted declarer's row discharged the
+    live declarer's same-numbered contract too. `_check_benign_authz` is what closes that, by
+    scoping a shared id to the ANCHOR KIND both sides carry; the exemption here is what leaves
+    the author a repair, and it is not on its own sufficient.
 
     Only the cross-hypothesis collision reaches here: `_extend_by_id` keeps the first row per
     id when ONE `:H <h>.authz` block repeats an id, so the folded record this walks carries
@@ -838,17 +844,25 @@ def _is_unresolved(value: Any) -> bool:
     close over a legitimate `attrs.cmdline` that happens to carry `{...}`, which is a
     different and much larger change than closing the gap.
 
-    An OPENING brace with no close counts as open, and that is not a brace COUNT (#876/F-26).
-    `_has_open_slot` has carried an unterminated-brace guard since a single dropped `}` read
-    as CONCRETE and closed benign over the class it was still enumerating; the ATTRIBUTE arm
-    calls this predicate directly, where `role={internal, dmz` satisfied neither test and read
-    as a settled fact. The whole-value anchor is what keeps the fix narrow — a shell command
-    carrying an unclosed `{` does not START with one, so it stays clean.
+    An OPENING brace with no close counts as open (#876/F-26). `_has_open_slot` has carried an
+    unterminated-brace guard since a single dropped `}` read as CONCRETE and closed benign over
+    the class it was still enumerating; the ATTRIBUTE arm calls this predicate directly, where
+    `role={internal, dmz` satisfied neither test and read as a settled fact.
+
+    "With no close" is the SAME `count("{") > count("}")` test `_has_open_slot` states one
+    function down, and it is load-bearing on top of the whole-value anchor rather than replaced
+    by it. The anchor alone reads any value that merely BEGINS with a brace as open, closed or
+    not — `attrs.cmdline={ cd /x && ls; } >out` and a JSON-shaped attribute both start with `{`
+    and both carry their close — so it newly refused a benign close over concrete facts. The
+    anchor still does the narrowing the fix needs: a shell command carrying an unclosed `{`
+    does not START with one, so it stays clean.
     """
     if not isinstance(value, str):
         return False
     v = value.strip()
-    return v == "??" or v.startswith("{")
+    if v == "??":
+        return True
+    return v.startswith("{") and (v.endswith("}") or v.count("{") > v.count("}"))
 
 
 def _class_slots(classification: str) -> list[str]:
@@ -1028,6 +1042,10 @@ def _authz_contract_error(
     candidates = verdicts.get(cid) or []
 
     if competing:
+        # Not "if the kinds are both blank": a contract cannot have one. `_hyp_sub_authz_row`
+        # `_require`s `anchor_kind`, so a `:H <h>.authz` row without it is a parse error and
+        # the contract never reaches the companion — which is what makes the kind a usable
+        # discriminator here rather than one more cell that might say nothing.
         twins = sorted(h for h, a in competing if a == anchor)
         if twins:
             return (
@@ -1055,11 +1073,14 @@ def _authz_contract_error(
             f"row', not 'authorized' — benign requires every contract "
             f"authorized"
         )
-    bad = next((v for v in rows if v != "authorized"), None)
-    if bad is not None:
+    # The LIST, not `next(..., None)`: `None` is a verdict a row can carry, so the sentinel
+    # and the value would be the same object and a `None` verdict would discharge the contract
+    # it is the strongest evidence against. Emptiness is the only test that cannot collide.
+    bad = [v for v in rows if v != "authorized"]
+    if bad:
         return (
             f"disposition benign blocked: authz contract {cid} on "
-            f"live hypothesis {hid} resolved {bad!r}, not 'authorized' "
+            f"live hypothesis {hid} resolved {bad[0]!r}, not 'authorized' "
             f"— benign requires every contract authorized"
         )
     return None

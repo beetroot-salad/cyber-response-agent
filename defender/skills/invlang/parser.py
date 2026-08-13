@@ -47,6 +47,17 @@ HEADER_RE = re.compile(
     r"(?:\s*\[(?P<cols>[^\]]*)\])?\s*$"
 )
 _STORY_HEADER_RE = re.compile(r"^###\s+story\s+(h-[\w\-]+)\s*$")
+#: A line the author MEANT as a block header — the `:<TAG>` opening of `HEADER_RE`, whether or
+#: not the rest of the line is one `HEADER_RE` accepts. Not a second grammar: it is the FIRST
+#: TOKEN of the same one, which is what makes "the author was opening a block here" decidable
+#: on a line the header rule rejects.
+#:
+#: Two arms of `_tokenize_fence` read it, both about bounding a silent drop. Prose inside a
+#: `### story h-NNN` section is discarded without a warning — correct for narrative, and it
+#: reopened F-2 in full for a rejected header sitting under one. And a run of orphan lines is
+#: otherwise bounded only by the next ACCEPTED header, so a fence with two rejected headers
+#: folded both into one warning that named only the first.
+_HEADER_ATTEMPT_RE = re.compile(r"^:[A-Z]")
 _LEAD_PREFIX_RE = re.compile(r"^l-(?P<id>[A-Za-z0-9]+)\.(?P<sub>.+)$")
 
 
@@ -101,14 +112,23 @@ def _orphan_warning(lines: list[str]) -> ParseWarning:
     EMPTY companion with `warnings == []`, so `_check_disposition_gating` dispatched on
     nothing and the benign write gate never ran at all.
 
-    Needs the rejected header to be the FIRST in its fence, which is the ordinary authoring
-    path: `append_block` carries one block per fence. With a block still open the same line
-    lands as a ROW of that block and draws a cell-count error — loud, and already refused.
+    Reached whenever no block is OPEN — which is the first header of a fence (`append_block`
+    carries one block per fence, so that is the ordinary authoring path), a header under a
+    `### story h-NNN` section, and every rejected header after the first. With a block still
+    open the same line lands as a ROW of that block and draws a cell-count error — loud, and
+    already refused.
 
     ONE warning per RUN of orphan lines, not one per line. The first line is the rejected
-    header and repairing it repairs all of them, so a seven-row `:T conclude` would otherwise
-    cost eight errors for one trailing comment; the count of what followed it is carried in
-    the message instead, so nothing vanishes unnamed.
+    header and repairing it repairs the ROWS under it, so a seven-row `:T conclude` would
+    otherwise cost eight errors for one trailing comment; the count of what followed it is
+    carried in the message instead, so nothing vanishes unnamed.
+
+    A run ends at the next header ATTEMPT, not only at the next ACCEPTED header, which is what
+    keeps "repairing the first line repairs the run" true. A fence carrying two rejected
+    headers otherwise folded both into one warning naming only the first — and repairing that
+    one does not repair the second: it opens a block, and the second rejected header then
+    lands in it as a bad ROW, for a second round trip over a defect the document had already
+    stated.
     """
     head, rest = lines[0], lines[1:]
     tail = (
@@ -129,19 +149,52 @@ def _orphan_warning(lines: list[str]) -> ParseWarning:
     )
 
 
+def _header_block(m: re.Match[str]) -> Block:
+    """The empty `Block` a matched header opens — its declared columns, and how many of them a
+    row has to carry.
+
+    Split out of `_tokenize_fence` so that function reads as the state machine it is: this is
+    the only arm of it that is pure column arithmetic, and it is where a `?` stops being a
+    character and becomes `required_cells`."""
+    cols_raw = m.group("cols")
+    declared = (
+        [c.strip() for c in cols_raw.split("|")] if cols_raw is not None else None
+    )
+    return Block(
+        tag=m.group("tag"),
+        name=m.group("name"),
+        columns=[c.rstrip("?") for c in declared] if declared is not None else None,
+        required_cells=(
+            max(
+                (i + 1 for i, c in enumerate(declared) if not c.endswith("?")),
+                default=0,
+            )
+            if declared is not None
+            else 0
+        ),
+    )
+
+
+def _flush_orphans(orphans: list[str], warnings: list[ParseWarning]) -> None:
+    """Discharge the run of orphan lines in hand as ONE warning, and reset the run.
+
+    Module-level rather than a closure over `_tokenize_fence`'s locals: the two lists are the
+    only state it touches, and taking them as arguments is what lets the four call sites be
+    read for WHERE a run ends — a story heading, an accepted header, the next rejected one,
+    end of fence — instead of for what a captured name is currently holding."""
+    if orphans:
+        warnings.append(_orphan_warning(orphans))
+        orphans.clear()
+
+
 def _tokenize_fence(body: str) -> tuple[list[Block], list[ParseWarning]]:
     blocks: list[Block] = []
     warnings: list[ParseWarning] = []
     cur: Block | None = None
     in_story = False
     # Lines reached with no block open. They LAND here rather than being dropped, and
-    # `flush` turns each run of them into one warning (#876/F-2).
+    # `_flush_orphans` turns each run of them into one warning (#876/F-2).
     orphans: list[str] = []
-
-    def flush() -> None:
-        if orphans:
-            warnings.append(_orphan_warning(orphans))
-            orphans.clear()
 
     for raw in body.splitlines():
         stripped = raw.strip()
@@ -149,50 +202,43 @@ def _tokenize_fence(body: str) -> tuple[list[Block], list[ParseWarning]]:
             continue
 
         if _STORY_HEADER_RE.match(stripped):
-            flush()
+            _flush_orphans(orphans, warnings)
             in_story = True
             cur = None
-            continue
+            # A state transition, not a row: the line consumed IS the heading, so there is
+            # nothing here to land and nothing a warning could name. (The flush above
+            # discharges the run that ENDED here; it says nothing about this line, so the
+            # suppression is stated rather than inferred from the call.)
+            continue  # lint-row-drop: ok — the story heading itself, not a row
 
         m = HEADER_RE.match(stripped)
         if m:
-            flush()
+            _flush_orphans(orphans, warnings)
             in_story = False
-            cols_raw = m.group("cols")
-            declared = (
-                [c.strip() for c in cols_raw.split("|")]
-                if cols_raw is not None
-                else None
-            )
-            cols = (
-                [c.rstrip("?") for c in declared] if declared is not None else None
-            )
-            required = (
-                max(
-                    (i + 1 for i, c in enumerate(declared) if not c.endswith("?")),
-                    default=0,
-                )
-                if declared is not None
-                else 0
-            )
-            cur = Block(
-                tag=m.group("tag"),
-                name=m.group("name"),
-                columns=cols,
-                required_cells=required,
-            )
+            cur = _header_block(m)
             blocks.append(cur)
             continue
 
-        if in_story:
+        if in_story and not _HEADER_ATTEMPT_RE.match(stripped):
             # A `### story h-NNN` section is narrative by construction, so there is no row
             # here to land and nothing a warning could name.
             continue  # lint-row-drop: ok — prose inside a story section, not a row
-        if cur is None:
+
+        if in_story or cur is None:
+            if _HEADER_ATTEMPT_RE.match(stripped):
+                # A header the header RULE rejected, and the two things it has to do. It ENDS
+                # any story section above it: a story only ever ended at an ACCEPTED header,
+                # so `### story h-001` over a `:T conclude  # loop 2` swallowed the header and
+                # every row beneath it in silence — F-2's failure mode whole, an empty
+                # companion with `warnings == []` and the benign gate never dispatched. And it
+                # opens its OWN orphan run, because repairing the PREVIOUS run's header does
+                # not repair this one; see `_orphan_warning`.
+                _flush_orphans(orphans, warnings)
+                in_story = False
             orphans.append(stripped)
             continue
         cur.rows.append(stripped)
-    flush()
+    _flush_orphans(orphans, warnings)
     return blocks, warnings
 
 
@@ -955,6 +1001,7 @@ class _Projector:
         if self._stale_hyp_header(block):
             return
         hyps = self._project_rows(block, _hypothesis_record)
+        self._warn_repeated_ids(block, hyps)
         # Extend, never assign. Append-only forbids rewriting the loop-1 block, so
         # a loop that forks a hypothesis writes a SECOND `:H
         # hypothesize.hypotheses` — which used to REPLACE the list, deleting every
@@ -1082,7 +1129,16 @@ class _Projector:
         unrecoverable — the committed row cannot be rewritten, and a second block with the
         corrected id declares a DIFFERENT vertex — so the drop has to be loud at write time.
 
-        Only the rows of the block in hand are compared, which is what keeps the legal
+        The two `:H` DECLARATION sites are here on the same argument, and leaving them out
+        left the sharpest case of it uncovered: a repeated `h-001` in one
+        `:H hypothesize.hypotheses` block deletes a whole hypothesis — its story, its anchor,
+        its status — and every `:H h-001.authz` contract in the document then attaches to the
+        SURVIVING row, so the benign gate discharges a contract the deleted hypothesis never
+        got to state. `_register_hypotheses` cannot see it: it is written against the
+        cross-BLOCK re-emission, where the first declaration standing silently is the
+        sanctioned append-only shape.
+
+        Only the rows of the block in hand are compared, which is what keeps that legal
         cross-block repeat silent.
         """
         seen: set[str] = set()
@@ -1132,6 +1188,7 @@ class _Projector:
             if self._stale_hyp_header(block):
                 return
             hyps = self._project_rows(block, _hypothesis_record)
+            self._warn_repeated_ids(block, hyps)
             _extend_by_id(lead.setdefault("new_hypotheses", []), hyps)
             # A hypothesis born inside a lead declares its predictions the way a
             # prologue one does — in a `:H h-NNN.preds` sub-block. Unregistered,

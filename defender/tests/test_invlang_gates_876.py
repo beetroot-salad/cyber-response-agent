@@ -174,6 +174,39 @@ def test_a_clean_header_and_a_story_section_are_unchanged():
     assert validate_companion(storied) == []
 
 
+def test_a_story_section_does_not_swallow_the_rejected_header_under_it():
+    """The gap the story arm left open, which is F-2 whole: `in_story` ended only at an
+    ACCEPTED header, so a `### story h-NNN` section standing above a rejected one swallowed
+    the header AND every row beneath it — an EMPTY companion, `warnings == []`, and the benign
+    gate never dispatched. A header ATTEMPT ends the story now."""
+    doc = _doc(
+        "### story h-001\nThe operator logged in from the bastion, as they do every morning.",
+        _REJECTED_HEADERS[0] + "\n"
+        + _CONCLUDE_BENIGN.strip("\n").split("\n", 1)[1],
+    )
+    companion, warnings = parse_dense_companion(doc)
+    assert companion == {}
+    assert len(warnings) == 1
+    assert warnings[0].row == _REJECTED_HEADERS[0]
+    assert _parse_errors(validate_companion(doc))
+
+
+def test_each_rejected_header_earns_its_own_warning():
+    """One warning covers the ROWS a rejected header takes down, not the next header the
+    author also has to fix: repairing the first opens a block, and a second rejected header
+    would then land in it as a bad row, for a second round trip over a defect the document had
+    already stated."""
+    doc = _doc(
+        _REJECTED_HEADERS[0] + "\ndisposition|benign",
+        ":V prologue.vertices [id|type|class|ident|attrs?]   # loop 3\n" + _CLEAN_VERTEX,
+    )
+    warnings = parse_dense_companion(doc)[1]
+    assert [w.row for w in warnings] == [
+        _REJECTED_HEADERS[0],
+        ":V prologue.vertices [id|type|class|ident|attrs?]   # loop 3",
+    ]
+
+
 # --------------------------------------------------------------------------- #
 # F-3 — a refuted hypothesis's row discharges nothing of a live one's
 # --------------------------------------------------------------------------- #
@@ -235,6 +268,21 @@ def test_the_shared_id_is_repairable_by_the_append_the_error_names():
         'l-001|e-001|ac1|authorized|change-mgmt|"CHG-4471 covers the window"\n',
     )
     assert validate_companion(doc) == []
+
+
+def test_a_contract_with_no_anchor_kind_never_reaches_the_scoping_at_all():
+    """What makes `anchor_kind` a usable discriminator rather than one more cell that might say
+    nothing: `_hyp_sub_authz_row` requires it, so a contract without one is a parse error and
+    never reaches the companion. There is no "both sides blank" case for the scoping to answer.
+    """
+    doc = _shared_id_doc("ac1").replace(
+        'ac1|e-001|change-mgmt|"approved change ticket exists"',
+        'ac1|e-001||"approved change ticket exists"',
+    )
+    companion, warnings = parse_dense_companion(doc)
+    assert [w.reason for w in warnings] == ["authz row missing id/anchor_kind"]
+    assert companion["hypothesize"]["hypotheses"][0].get("authorization_contract") is None
+    assert _parse_errors(validate_companion(doc))
 
 
 def test_a_shared_id_AND_a_shared_anchor_kind_discharges_nothing():
@@ -333,6 +381,35 @@ def test_the_other_three_graph_row_sites_warn_on_the_same_shape():
         reasons = [w.reason for w in parse_dense_companion(doc)[1]]
         assert reasons == [_REPEAT_REASON.replace("'v-001'", f"{rid!r}")], rid
         assert validate_companion(doc), rid
+
+
+def test_the_two_hypothesis_declaration_sites_warn_on_the_same_shape():
+    """The other two `_extend_by_id` sites, and the sharpest case of the same drop: a repeated
+    `h-001` deletes a whole hypothesis — story, anchor, status — and every `:H h-001.authz`
+    contract in the document then attaches to the SURVIVING row, so the benign gate discharges
+    a contract the deleted hypothesis never got to state. `_register_hypotheses` cannot catch
+    it: it is written against the cross-BLOCK re-emission, where the first declaration standing
+    silently is the sanctioned append-only shape."""
+    rows = (
+        "h-001|?gpo-edit|v-001|modified|identity|service-account/known-corp||null|active\n"
+        "h-001|?scheduled-task|v-001|created|identity|service-account/known-corp||null|active"
+    )
+    hypothesize = _benign_doc(
+        _vertices(_CLEAN_VERTEX),
+        ":H hypothesize.hypotheses "
+        "[id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]\n"
+        + rows,
+    )
+    lead_born = _benign_doc(
+        _vertices(_CLEAN_VERTEX),
+        ":H l-001.new_hypotheses "
+        "[id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]\n"
+        + rows,
+    )
+    for doc in (hypothesize, lead_born):
+        reasons = [w.reason for w in parse_dense_companion(doc)[1]]
+        assert reasons == [_REPEAT_REASON.replace("'v-001'", "'h-001'")], doc
+        assert validate_companion(doc), doc
 
 
 def test_the_same_id_across_two_blocks_is_still_the_silent_legal_re_emission():
