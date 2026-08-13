@@ -197,11 +197,49 @@ def _paid(**over: str) -> str:
 def test_the_entry_price_is_readable_from_a_companion_document():
     """The write gate reads a parsed companion; the close reads a FILE. One function answers
     both, so the two boundaries cannot drift into disagreeing about what is owed."""
-    from defender.skills.invlang.validate import false_positive_entry_price
+    from defender.skills.invlang.validate import disposition_entry_price
 
-    assert false_positive_entry_price(_paid()) == []
-    assert false_positive_entry_price("") != []          # nothing written owes everything
-    assert false_positive_entry_price(_doc(_PROLOGUE, _LEADS)) != []
+    assert disposition_entry_price("false-positive", _paid()) == []
+    assert disposition_entry_price("false-positive", "") != []   # nothing written owes everything
+    assert disposition_entry_price("false-positive", _doc(_PROLOGUE, _LEADS)) != []
+
+
+#: An `investigation.md` that pays NEITHER price: `v-001` carries an unresolved class and an
+#: unresolved attribute (what `benign` owes), and the conclude block states no defect and names
+#: no entity check (what `false-positive` owes). Concluded `inconclusive`, which is legitimately
+#: unpriced — so the write gate passes it, and every denial below is the CLOSE's alone.
+_UNPAID = _doc(
+    "```invlang\n"
+    ":V prologue.vertices [id|type|class|ident|attrs?]\n"
+    "v-001|compute|??/??/??|db-1|os=??\n"
+    "```\n",
+    _conclude(disposition="inconclusive"),
+)
+
+
+def test_the_reader_is_the_gate_table_and_not_one_keyword():
+    """#879: the close's reader dispatches on the same `_DISPOSITION_GATES` the write gate
+    does, so EVERY priced keyword is collected here and the unpriced ones cost nothing.
+
+    Asserted by iterating the table rather than a list spelled out here — a third priced
+    keyword landing as a row must not need this test edited to be collected, which is exactly
+    the property `benign` lacked while the close read one row by literal."""
+    from defender.skills.invlang.validate import (
+        _DISPOSITION_GATES,
+        disposition_entry_price,
+    )
+
+    assert set(_DISPOSITION_GATES) <= DISPOSITION_ENUM, "a price on a keyword nothing can close"
+    for priced in _DISPOSITION_GATES:
+        assert disposition_entry_price(priced, _UNPAID) != [], priced
+    for unpriced in DISPOSITION_ENUM - set(_DISPOSITION_GATES):
+        assert disposition_entry_price(unpriced, _UNPAID) == [], unpriced
+
+    # #722 reaches this dispatch the same way it reaches the write gate's: a keyword is judged
+    # on what it RENDERS as, so lacing it must not buy the unpriced branch. The close's own
+    # argument is enum-checked upstream, but this reader is public and the two rules stay
+    # independent on purpose — either alone would leave a hole.
+    assert disposition_entry_price("benign\u200b", _UNPAID) != []
 
 
 def _close(tmp_path, companion: str, disposition: str):
@@ -253,6 +291,55 @@ def test_a_companion_that_paid_the_price_closes(tmp_path):
     message: a price that denied everything would satisfy the test above just as well, and the
     exit this disposition exists for has to actually be reachable."""
     result = _close(tmp_path, _paid(), "false-positive")
+    assert result.outcome == "stands"
+    assert (tmp_path / "run" / "report.md").exists()
+
+
+def test_benigns_price_is_collected_at_the_close_too(tmp_path):
+    """#879, the mirror of the bypass above. `benign` was priced at the `investigation.md`
+    write and collected NOWHERE at the close, so the same one-move exit was open in the other
+    direction: conclude `inconclusive` — legitimately unpriced, so the write gate passes it —
+    over a log whose slots are still `??`, then pass `benign` to `close_investigation`.
+
+    Worse than the FP bypass in one respect: the `??` slots stay on disk, so only `report.md`
+    disagrees with them, and `report.md` is what the learning loop reads — `directions_for`
+    picks the FN-hunt leg alone for `benign` where the honest `inconclusive` picks both, and
+    the case enters the corpus resolved.
+
+    The surviving review gate is not a second collection point: it is a model judgment over
+    projections, so it can uphold a close this table would refuse."""
+    from pydantic_ai.exceptions import ModelRetry
+
+    with pytest.raises(ModelRetry) as e:
+        _close(tmp_path, _UNPAID, "benign")
+    assert "close blocked" in str(e.value)
+    assert "v-001" in str(e.value), "the refusal names the vertex still holding an open slot"
+    assert not (tmp_path / "run" / "report.md").exists()
+
+
+def test_an_absent_conclude_block_does_not_buy_a_benign_close(tmp_path):
+    """The other half of the same move: an absent `:T conclude` is legal invlang, so `benign`'s
+    price used to be dodged by simply not writing the block the write gate dispatches on. The
+    close dispatches on its own ARGUMENT, so there is nothing to omit."""
+    from pydantic_ai.exceptions import ModelRetry
+
+    no_conclude = _doc(
+        "```invlang\n"
+        ":V prologue.vertices [id|type|class|ident|attrs?]\n"
+        "v-001|compute|??/??/??|db-1|os=??\n"
+        "```\n"
+    )
+    with pytest.raises(ModelRetry) as e:
+        _close(tmp_path, no_conclude, "benign")
+    assert "close blocked" in str(e.value)
+
+
+def test_a_companion_that_paid_benigns_price_closes(tmp_path):
+    """Benign's positive control. `benign` refuses CONTRADICTIONS — open slots, unfulfilled
+    authorization contracts — so a log carrying neither owes nothing, and the disposition the
+    runtime reaches for most has to still be reachable. Asserted on the commit, because a
+    price that denied everything would pass the two tests above just as well."""
+    result = _close(tmp_path, _doc(_PROLOGUE, _conclude(disposition="benign")), "benign")
     assert result.outcome == "stands"
     assert (tmp_path / "run" / "report.md").exists()
 

@@ -36,7 +36,7 @@ from defender._untrusted import wrap as _wrap
 # argument schema below.
 from defender._vocab import DISPOSITION_ENUM, DISPOSITION_VALUES
 from defender.hooks.budget_enforcer import BUDGET_EXEMPT_TOOLS  # noqa: F401 — re-export, RS16
-from defender.skills.invlang.validate import false_positive_entry_price
+from defender.skills.invlang.validate import disposition_entry_price
 
 from . import challenge_gate
 from . import tools as tools_mod
@@ -365,6 +365,26 @@ def _commit(  # noqa: PLR0913 — the commit's full inputs; the scalars are alre
     )
 
 
+#: Why a priced disposition is priced, keyed by the disposition — read only when a close is
+#: already being refused, and never to decide WHETHER to refuse: `_DISPOSITION_GATES` owns that
+#: and this table is prose. A keyword missing a row here is still refused, on the gate's own
+#: `owed` strings, which name the blocking vertex, contract or row; what a row adds is why the
+#: price exists at all, which is what the model needs to choose between paying it and
+#: concluding in another vocabulary.
+_ENTRY_PRICE_RATIONALE: dict[str, str] = {
+    "benign": (
+        "`benign` says the alerted activity was accounted for, which an unresolved slot or an "
+        "unfulfilled authorization contract on a live hypothesis directly contradicts — so it "
+        "is reachable only from an `investigation.md` that settled them."
+    ),
+    "false-positive": (
+        "`false-positive` says the RULE misfired, which is no evidence about the alerted "
+        "entity — so it is reachable only from an `investigation.md` that states the defect "
+        "and names the lead that checked the entity anyway."
+    ),
+}
+
+
 async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams, all injected
     deps: AgentDeps, disposition: str, *, stages: Any, bounds: challenge_gate.Bounds,
     evidence: str | None = None, validator: ArtifactValidator = validate_artifact,
@@ -429,23 +449,26 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
             raise ModelRetry(tools_mod.flagged_write_refusal(
                 "close_investigation", flagged, offered_text=False,
             ))
-    # #806: the one disposition with an entry price, collected here as well as at the
-    # `investigation.md` write gate. `report.md` is written FROM this argument, and nothing else
-    # on this path reads the companion — so without this the price is bypassable by concluding
-    # under a cheaper keyword and passing `false-positive` to the close. Placed AFTER the
-    # terminal-close refusal so R4's ordering holds, and before the gate so a close that owes
-    # the price never spends a review on it.
-    if disposition == "false-positive":
-        owed = false_positive_entry_price(
-            _read_companion_text(Path(deps.run_dir) / "investigation.md")
-        )
-        if owed:
-            raise ModelRetry(
-                "close blocked: `false-positive` says the RULE misfired, which is no evidence "
-                "about the alerted entity — so it is reachable only from an `investigation.md` "
-                "that states the defect and names the lead that checked the entity anyway. "
-                + " ".join(owed)
-            )
+    # #806/#879: the dispositions carrying a structural entry price, collected here as well as
+    # at the `investigation.md` write gate. `report.md` is written FROM this argument, and
+    # nothing else on this path reads the companion — so without this a price is bypassable by
+    # concluding under a cheaper keyword (or none) and passing the priced one to the close.
+    # Placed AFTER the terminal-close refusal so R4's ordering holds, and before the gate so a
+    # close that owes the price never spends a review on it.
+    #
+    # Dispatched through the OWNER's table, not against a keyword this module spells. #806
+    # collected `false-positive` here with `if disposition == "false-positive"`, which read one
+    # row of a two-row table and left `benign`'s price owed by the document alone (#879) — so a
+    # fourth priced keyword is a row in `_DISPOSITION_GATES`, and this seam already collects it.
+    owed = disposition_entry_price(
+        disposition, _read_companion_text(Path(deps.run_dir) / "investigation.md")
+    )
+    if owed:
+        raise ModelRetry(" ".join(
+            part for part in
+            ("close blocked:", _ENTRY_PRICE_RATIONALE.get(disposition, ""), *owed)
+            if part
+        ))
     if disposition == "inconclusive":
         # The gate reviews CONFIDENT closes only, so nothing was reviewed and there is no
         # stage output to diagnose — the empty detail here is the honest value, not a gap.
@@ -519,9 +542,19 @@ def _read_companion_text(path: Path) -> str:
     defect and names no entity check, so it owes the whole price and the caller denies with the
     same actionable text a blank `:T conclude` earns. Raising instead would hand the model an
     exception where it needs an instruction.
+
+    Undecodable BYTES are read leniently rather than caught, which is the one place this
+    differs from absence. Since #879 every close reads this file, so a stray byte anywhere in
+    an otherwise ordinary work log now reaches a gate it never used to — and the two ways to
+    survive that are not equivalent: returning `""` would waive the whole entry price over one
+    bad byte, while replacing the byte leaves every readable `??` slot and unfulfilled contract
+    still owed. A gate reads what is readable and judges THAT; it does not treat mojibake as an
+    empty document. `investigation.md` is written through `append_block`, which refuses an
+    undecodable document for its own reason, so this path is reached by a file that arrived
+    some other way — an imported run dir, a replayed fixture, a hand edit.
     """
     try:
-        return path.read_text(encoding="utf-8")
+        return path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return ""
 

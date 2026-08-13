@@ -1278,28 +1278,48 @@ def _check_benign_gating(companion: CompanionBody) -> list[str]:
 #: rest carry none. Declared as a table rather than as a guard clause inside each gate so a
 #: third priced keyword is a row here, not a third copy of the "is this my disposition"
 #: preamble — which is the line that has to get #722 right every time it is written.
+#:
+#: Two readers dispatch on it and both must, because a price owed by the document alone is
+#: not owed at all: `_check_disposition_gating` on what `:T conclude` says, and
+#: `disposition_entry_price` on what the close is about to commit. Adding a row arms both.
 _DISPOSITION_GATES: dict[str, Callable[[CompanionBody], list[str]]] = {
     "benign": _check_benign_gating,
     "false-positive": _check_false_positive_gating,
 }
 
 
-def false_positive_entry_price(companion_text: str) -> list[str]:
-    """What `disposition false-positive` still owes, read off an `investigation.md` — empty when
-    it owes nothing.
+def disposition_entry_price(disposition: object, companion_text: str) -> list[str]:
+    """What `disposition` still owes, read off an `investigation.md` — empty when it owes
+    nothing, and empty for the keywords `_DISPOSITION_GATES` prices at nothing.
 
-    Public because the price has to be collected at BOTH boundaries. This module gates the
+    Public because a price has to be collected at BOTH boundaries. This module gates the
     `investigation.md` write; `report.md` is written by `close_investigation`, which takes its
-    disposition as a tool argument and never reads the companion. Without a second reader the
+    disposition as a tool argument and never reads the companion. Without a second reader an
     entry price is bypassable by writing `:T conclude` with a cheaper keyword — or none — and
-    passing `false-positive` to the close, which is the artifact the learning loop, the evals
+    passing the priced one to the close, which is the artifact the learning loop, the evals
     and the ticket lane all actually read.
 
-    A missing or unparseable companion yields the same denials an empty one does: you cannot
-    close on a defect you never wrote down.
+    The mirror of `_check_disposition_gating`, and deliberately the same table read: that one
+    dispatches on the disposition the DOCUMENT wrote, this one on the disposition the CALLER
+    is about to commit, and a row added to `_DISPOSITION_GATES` is collected at both the day
+    it lands. #806 shipped this half as a `false-positive`-only reader, which left `benign`
+    priced at the write gate and collected nowhere at the close (#879) — the half-read table
+    the two-sided phrasing here exists to prevent.
+
+    `disposition` is normalized through `normalized_disposition` for the same #722 reason the
+    write-side dispatch is: a keyword is judged on what it RENDERS as, so a zero-width
+    character cannot turn a gate off. What each price then means about an absent companion is
+    the gate's own business, and the two priced ones honestly differ — `false-positive`
+    demands stated content, so nothing written owes everything; `benign` refuses
+    CONTRADICTIONS in the log, so a document with no open slot and no unfulfilled contract
+    owes nothing whether it is empty or complete.
     """
+    priced = normalized_disposition(disposition)
+    gate = _DISPOSITION_GATES.get(priced) if priced else None
+    if gate is None:
+        return []
     companion, _ = parse_dense_companion(companion_text)
-    return _check_false_positive_gating(companion)
+    return gate(companion)
 
 
 def _check_disposition_gating(companion: CompanionBody) -> list[str]:
