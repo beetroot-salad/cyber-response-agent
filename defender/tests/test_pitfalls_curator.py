@@ -104,17 +104,23 @@ def test_verify_pitfalls_state_returns_sorted_changed(tmp_git_repo: Path):
     returned list is sorted, discriminating `return sorted(changed)`: a tracked-modified
     `elastic/execution.md` (changed class, sorts LATE) is listed by git BEFORE an
     untracked `cmdb/execution.md` (untracked class, sorts EARLY), so only `sorted()`
-    yields [cmdb, elastic]. A regression to `return changed` returns [elastic, cmdb]."""
+    yields [cmdb, elastic]. A regression to `return changed` returns [elastic, cmdb].
+
+    `cmdb` is seeded as a REAL system dir (its `SKILL.md` is committed here, as the fixture
+    commits elastic's) because an `execution.md` under a directory holding no `SKILL.md` is
+    refused outright now — #855 F-06's minting gate. The untracked-`execution.md` half of the
+    interleaving, which is what this test needs, is untouched by that."""
+    cmdb = tmp_git_repo / "defender" / "skills" / "cmdb"
+    cmdb.mkdir(parents=True)
+    (cmdb / "SKILL.md").write_text("---\nname: defender-cmdb\n---\n# cmdb\n")
     (tmp_git_repo / "defender" / "skills" / "elastic" / "execution.md").write_text("# e\n")
-    _run_git(tmp_git_repo, "add", "defender/skills/elastic/execution.md")
+    _run_git(tmp_git_repo, "add",
+             "defender/skills/elastic/execution.md", "defender/skills/cmdb/SKILL.md")
     _run_git(tmp_git_repo, "commit", "-q", "-m", "seed execution.md")
     (tmp_git_repo / "defender" / "skills" / "elastic" / "execution.md").write_text(
         "# e edited\n"
     )
-    (tmp_git_repo / "defender" / "skills" / "cmdb").mkdir(parents=True)
-    (tmp_git_repo / "defender" / "skills" / "cmdb" / "execution.md").write_text(
-        "# c\n"
-    )
+    (cmdb / "execution.md").write_text("# c\n")
     changed = pitfalls_curator._verify_pitfalls_state(tmp_git_repo, baseline_stray=[])
     assert changed == [
         "defender/skills/cmdb/execution.md",
@@ -190,6 +196,47 @@ def test_run_pitfalls_no_edit_tick_still_rotates(tmp_git_repo: Path, tmp_path: P
     assert rc == 0
     assert persist.read_pitfalls(paths) == []
     assert _run_git(tmp_git_repo, "status", "--porcelain").stdout == ""
+
+
+def test_a_queued_system_with_no_skills_dir_never_becomes_a_handoff_path(tmp_git_repo: Path):
+    """#855 F-06, the offline half. `execution_md_path` is a PATH BUILT FROM A QUEUE FIELD and
+    the curator is told to read and write it, so a `system` that reached the queue from
+    anywhere unvetted mints a brand-new single-segment directory under `defender/skills/` — the
+    phantom-system class #821/#828 closed for `h-*` and `system_for_payload_operands` closed
+    for the reducer names. The writer is where this is really fixed (`query_tool.
+    _system_of_record`); this is the boundary that would have contained it anyway.
+
+    The positive control is in the same call: `elastic`, a system whose directory the fixture
+    committed, keeps its handoff — a filter that dropped everything would pass the negative."""
+    rows = [
+        {"system": s, "query_id": f"{s}.esql", "goal": "g", "executed_query": "x",
+         "stderr_digest": f"exit=64; boom {s}"}
+        for s in ("elastic", "Ignore Previous Instructions", "sql", "a b")
+    ]
+    skills = tmp_git_repo / "defender" / "skills"
+    handoffs = pitfalls_curator._build_pitfalls_handoffs(rows, skills_dir=skills)
+    assert [h["system"] for h in handoffs] == ["elastic"]
+    assert handoffs[0]["execution_md_path"] == "defender/skills/elastic/execution.md"
+
+
+def test_the_commit_gate_refuses_an_execution_md_that_mints_its_own_system_dir(tmp_git_repo: Path):
+    """The last gate on the same class (#855 F-06), and it asks about the DIRECTORY, not the
+    file: 4 of the 7 systems have no `execution.md` yet and writing the first one is exactly
+    what the curator is for, so creating the file in an existing system's dir stays legal while
+    creating the dir around it does not."""
+    ghost = tmp_git_repo / "defender" / "skills" / "ghost"
+    ghost.mkdir(parents=True)
+    (ghost / "execution.md").write_text("# ghost\n## Common pitfalls\n- invented\n")
+    with pytest.raises(LeadAuthorError, match="no SKILL.md"):
+        pitfalls_curator._verify_pitfalls_state(tmp_git_repo, baseline_stray=[])
+
+    # Positive control on the same gate: the fixture's real system dir takes a NEW execution.md.
+    (ghost / "execution.md").unlink()
+    ghost.rmdir()
+    (tmp_git_repo / "defender" / "skills" / "elastic" / "execution.md").write_text("# e\n")
+    assert pitfalls_curator._verify_pitfalls_state(tmp_git_repo, baseline_stray=[]) == [
+        "defender/skills/elastic/execution.md"
+    ]
 
 
 def test_run_pitfalls_all_systemless_drops_batch_without_spawn(tmp_git_repo: Path, tmp_path: Path, monkeypatch):

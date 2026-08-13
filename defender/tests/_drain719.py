@@ -143,7 +143,14 @@ def make_repo(tmp_path: Path) -> Path:
         d = repo / "defender" / corpus
         d.mkdir(parents=True)
         (d / ".gitkeep").write_text("")
-    (repo / "defender" / "skills" / "elastic").mkdir(parents=True)
+    elastic = repo / "defender" / "skills" / "elastic"
+    elastic.mkdir(parents=True)
+    # A system dir is a system dir because it carries a `SKILL.md` — the pitfalls curator
+    # folds into `<system>/execution.md` only for systems that already exist, and a bare
+    # directory is not one (#855 F-06). Committed, so the corpus this harness claims to carry
+    # is actually in HEAD: git tracks no empty directory, so before this the skills corpus was
+    # the one of the four that `git add -A` silently dropped.
+    (elastic / "SKILL.md").write_text("---\nname: defender-elastic\n---\n# elastic\n")
     (repo / "defender" / "skills" / "gather" / "queries").mkdir(parents=True)
     (repo / ".gitignore").write_text(GIT_IGNORE)
     git(repo, "init", "-q", "-b", "main")

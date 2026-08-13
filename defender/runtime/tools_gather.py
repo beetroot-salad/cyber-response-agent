@@ -26,6 +26,7 @@ from .tools import (
 )
 
 from defender._corpus import QueryTemplate, iter_query_templates
+from defender.hooks.record_lead import ALREADY_CLAIMED, CLAIMED
 from defender.hooks.record_lead import claim_lead as _claim_lead
 from defender.hooks.inject_system_skill_description import descriptor_catalog as _descriptor_catalog
 from defender._untrusted import wrap as _wrap
@@ -367,6 +368,25 @@ _LEAD_REUSE_RETRY = (
     "reuse an id)."
 )
 
+#: The OTHER unclaimed outcome (#855 F-12). `ALREADY_CLAIMED` says the id is taken; this says
+#: no row was written at all — the claim's shape checks refused the dispatch, or the write
+#: failed. Both are "this dispatch owns nothing", and neither may proceed: a gather session
+#: run under an unclaimed id is invisible to the reuse gate (which IS the sidecar's exclusive
+#: create), so the id admits an unbounded number of further sessions, each overwriting the
+#: last one's `gather_summaries/{lead_id}.md` — the file main re-reads as its own memory.
+#: The id is NOT burnt, and the correction says so. Every shape a model can get wrong — a
+#: malformed id, an empty goal — is refused at the seam ABOVE the claim, so the only outcome
+#: that still reaches here is a run-dir write that failed, and the claim unlinks whatever it
+#: had started. Telling the model to spend a fresh `:L` row would burn one id per attempt
+#: against a fault that is not about the id, so this is the retry-THIS-lead wording its two
+#: siblings above already use.
+_LEAD_UNCLAIMED_RETRY = (
+    "lead_id {lead_id!r} could not be claimed: the leads-table row could not be WRITTEN, so "
+    "this dispatch was not run and the id is still free. Re-dispatch this same lead_id. If it "
+    "fails the same way again the run dir is not writable — say so and reason from what the "
+    "other leads captured rather than spending a new :L row per attempt."
+)
+
 
 def _persist_gather_summary(run_dir: Path, lead_id: str, wrapped: str) -> None:
     try:
@@ -417,16 +437,34 @@ async def _run_gather(  # noqa: C901 — the branch count IS the terminator cens
             "hyphens (`host-state`, `change-mgmt`) — the `:L` row's system, spelled as the "
             "descriptor index spells it. Re-dispatch this same lead_id with the corrected name."
         )
+    # Same placement and same reason as `system` (#855 F-12): `goal` is a bare `str` on the
+    # tool signature, so the schema admits `""` and nothing below here has an opinion about it
+    # — the claim refuses an empty goal (a leads row with no question is not a lead) and used
+    # to refuse it with the code it also returned on success. Named at the seam, the model gets
+    # the correction that fits: the goal is missing, not the id.
+    if not request.goal.strip():
+        raise ModelRetry(
+            f"empty goal for lead_id {lead_id!r}: name the question this lead answers — it is "
+            "the leads-table row's own text and the whole of what gather is dispatched to "
+            "measure. Re-dispatch this same lead_id with the goal spelled out."
+        )
     # K15/F3 (#808): a lead the HARNESS already claimed (the reserved ids, claimed at run
     # start before MAIN's first turn) must not be re-claimed here — `claim_lead`'s reuse arm
-    # returns 2 harmlessly on its own, but `_run_gather`'s ordinary path turns that into a
-    # `ModelRetry` with no model in the loop to retry it, which would end the run inside
-    # `_user_prompt` for every harness dispatch rather than only a pathological one.
-    if not pre_claimed and _claim_lead({
-        "run_dir": str(deps.run_dir), "lead_id": lead_id,
-        "goal": request.goal, "what_to_summarize": list(request.what_to_summarize),
-    }) == 2:
-        raise ModelRetry(_LEAD_REUSE_RETRY.format(lead_id=lead_id))
+    # returns `ALREADY_CLAIMED` harmlessly on its own, but `_run_gather`'s ordinary path turns
+    # that into a `ModelRetry` with no model in the loop to retry it, which would end the run
+    # inside `_user_prompt` for every harness dispatch rather than only a pathological one.
+    if not pre_claimed:
+        # `== CLAIMED`, never "not the reuse code" (#855 F-12). The claim has three answers and
+        # only one of them means a leads row is on disk; reading the other two as success is
+        # what let an unclaimed dispatch run.
+        claimed = _claim_lead({
+            "run_dir": str(deps.run_dir), "lead_id": lead_id,
+            "goal": request.goal, "what_to_summarize": list(request.what_to_summarize),
+        })
+        if claimed == ALREADY_CLAIMED:
+            raise ModelRetry(_LEAD_REUSE_RETRY.format(lead_id=lead_id))
+        if claimed != CLAIMED:
+            raise ModelRetry(_LEAD_UNCLAIMED_RETRY.format(lead_id=lead_id))
 
     if circuit_breaker.is_tripped(deps.run_dir, system):
         return circuit_breaker.down_message(deps.run_dir, system)

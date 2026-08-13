@@ -58,7 +58,7 @@ pytest.importorskip("pydantic_ai")
 
 from defender import run_common  # noqa: E402
 from defender.agents import GATHER_DEF, MAIN_DEF  # noqa: E402
-from defender.hooks.record_lead import claim_lead  # noqa: E402
+from defender.hooks.record_lead import ALREADY_CLAIMED, CLAIMED, claim_lead  # noqa: E402
 from defender.runtime import permission  # noqa: E402
 from defender.runtime import tools as runtime_tools  # noqa: E402
 from defender.runtime.agent_definition import bind, compile_policy_for  # noqa: E402
@@ -1466,13 +1466,14 @@ def test_a_box_write_cannot_overwrite_a_claimed_lead_sidecar(tmp_path):
     forged = '{"goal": "written by the box"}\n'
     (raw / "l-002.lead.json").write_text(forged, encoding="utf-8")
 
-    assert claim_lead(dispatch) == 2, "the claim overwrote a name it did not create"
+    assert claim_lead(dispatch) == ALREADY_CLAIMED, \
+        "the claim overwrote a name it did not create"
     assert (raw / "l-002.lead.json").read_text(encoding="utf-8") == forged
 
     dispatch2 = dict(dispatch, lead_id="l-003")
-    assert claim_lead(dispatch2) == 0
+    assert claim_lead(dispatch2) == CLAIMED
     first = (raw / "l-003.lead.json").read_text(encoding="utf-8")
-    assert claim_lead(dict(dispatch2, goal="a different goal")) == 2
+    assert claim_lead(dict(dispatch2, goal="a different goal")) == ALREADY_CLAIMED
     assert (raw / "l-003.lead.json").read_text(encoding="utf-8") == first
 
 

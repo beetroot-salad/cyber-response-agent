@@ -44,7 +44,7 @@ pytest.importorskip("pydantic_ai")
 
 from defender import _run_paths  # noqa: E402
 from defender.agents import ACTOR_DEF, GATHER_DEF, JUDGE_DEF, MAIN_DEF  # noqa: E402
-from defender.hooks.record_lead import LEAD_ID_RE, claim_lead  # noqa: E402
+from defender.hooks.record_lead import CLAIMED, LEAD_ID_RE, claim_lead  # noqa: E402
 from defender.learning.core import persist  # noqa: E402
 from defender.learning.core.config import (  # noqa: E402
     LESSONS_ACTOR_DIR,
@@ -131,7 +131,7 @@ def test_f09_a_lettered_lead_id_survives_claim_persist_and_the_read_gate(env):
     assert claim_lead({
         "run_dir": str(env.run), "lead_id": LETTERED,
         "goal": "who logged in", "what_to_summarize": ["actor"],
-    }) == 0, "the claim gate accepts a lettered id — that is the premise, not the defect"
+    }) == CLAIMED, "the claim gate accepts a lettered id — that is the premise, not the defect"
 
     rel = persist_payload(env.run, LETTERED, 0, '{"hits": []}')
     assert rel == f"gather_raw/{LETTERED}/0.json", (
@@ -156,7 +156,7 @@ def test_f09_the_gate_and_the_validators_share_one_alphabet(env):
     for lead in (NUMERIC, LETTERED, "l-auth1", "l-A", "l-0", "l-999", "l-Ab9z"):
         assert LEAD_ID_RE.match(lead), f"{lead} is outside the lead-id namespace"
         assert claim_lead({"run_dir": str(env.run), "lead_id": lead, "goal": "g",
-                           "what_to_summarize": ["x"]}) == 0
+                           "what_to_summarize": ["x"]}) == CLAIMED
         rel = persist_payload(env.run, lead, 3, "{}")
         assert _read(env, env.run / rel, gather).allow, f"gather cannot read its own {rel}"
 

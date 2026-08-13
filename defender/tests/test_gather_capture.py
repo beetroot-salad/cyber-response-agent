@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 
 from defender._io import append_jsonl
-from defender.hooks.record_lead import claim_lead
+from defender.hooks.record_lead import ALREADY_CLAIMED, CLAIMED, claim_lead
 from defender.scripts.gather_tools.payload_view import render
 from defender.scripts.gather_tools.record_query import _next_seq
 
@@ -47,8 +47,8 @@ def test_claim_lead_claims_then_rejects_reuse(tmp_path):
         "run_dir": str(tmp_path), "lead_id": "l-001",
         "goal": "did the IP resolve?", "what_to_summarize": ["a", "b"],
     }
-    assert claim_lead(dispatch) == 0
+    assert claim_lead(dispatch) == CLAIMED
     sidecar = tmp_path / "gather_raw" / "l-001.lead.json"
     assert json.loads(sidecar.read_text()) == {
         "goal": "did the IP resolve?", "what_to_summarize": ["a", "b"]}
-    assert claim_lead(dispatch) == 2
+    assert claim_lead(dispatch) == ALREADY_CLAIMED
