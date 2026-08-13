@@ -195,10 +195,26 @@ def _md_safe(text: str) -> str:
     no embedded heading marker, no embedded newline can reopen the frame with a heading of
     the injector's choosing.
 
-    Applies to EVERY interpolated span, not just the lead id — the lead's `goal` is the
-    more attacker-reachable of the two (the investigation writes it from the alert's own
-    surface), so leaving it raw would have left the frame open through the same door."""
-    return text.replace("\n", " ").replace("#", "")
+    Call `_md_line` rather than this, and the claim below stays true by construction. #875 F-8:
+    the docstring here USED to say "applies to EVERY interpolated span" while three of the
+    seven spans were raw — `query_id` above all, which is the gather model's own string
+    (`query_tool.resolve_query_id` returns it verbatim). A per-span opt-in is a claim about
+    every future edit, and this one was already false when it was written."""
+    return text.replace("\n", " ").replace("\r", " ").replace("#", "")
+
+
+def _md_line(template: str, **spans: object) -> str:
+    """One rendered markdown line whose EVERY interpolated span is neutralized.
+
+    The unit of the guarantee is the LINE, not the value: a caller cannot interpolate through
+    this and forget one, because there is no way to pass a span that skips `_md_safe`. That is
+    the whole reason it exists — the opt-in it replaces drifted the moment a span was added
+    (#875 F-8), and the next span added here inherits the neutralization without anyone
+    remembering to ask for it.
+
+    `template` is HOST text, never run-chosen — it carries the markdown structure, and the
+    spans carry only values."""
+    return template.format(**{k: _md_safe(str(v)) for k, v in spans.items()})
 
 
 def _payload_paths(c: LeadComparison, gather_raw: Path) -> list[str]:
@@ -212,22 +228,31 @@ def _payload_paths(c: LeadComparison, gather_raw: Path) -> list[str]:
         # by `runtime/tools.py` for `∅.bash-shim`) and put the refusal record back in front
         # of the judge by another door — under an absence instruction it cannot satisfy.
         return []
-    return [str(gather_raw / c.lead_id / "0.json")]
+    # `_md_safe` on the lead id here too (#875 F-8): this string is interpolated into the
+    # absence block's `> ` quote lines exactly like every other span, and the ONLY reason it
+    # is not model-reachable today is that the dispatch seam holds `lead_id` to `_LEAD_ID_RE`.
+    # That is a constraint one door over, not a property of this render.
+    return [str(gather_raw / _md_safe(c.lead_id) / "0.json")]
 
 
 def _render_lead_file(c: LeadComparison, gather_raw: Path) -> str:
-    safe_id = _md_safe(c.lead_id)
     if c.note:
-        head = f"# Lead {safe_id}  [{c.note}]"
+        head = _md_line("# Lead {id}  [{note}]", id=c.lead_id, note=c.note)
     elif c.orphan:
-        head = f"# Lead {safe_id}  [orphan — query with no lead sidecar]"
+        head = _md_line("# Lead {id}  [orphan — query with no lead sidecar]", id=c.lead_id)
     elif c.goal:
-        head = f"# Lead {safe_id} — {_md_safe(c.goal)}"
+        head = _md_line("# Lead {id} — {goal}", id=c.lead_id, goal=c.goal)
     else:
-        head = f"# Lead {safe_id}"
+        head = _md_line("# Lead {id}", id=c.lead_id)
 
+    # `params` rides `json.dumps` (which escapes its own newlines) and STILL goes through the
+    # line builder: the point of #875 F-8 is that no span here is exempt by argument.
     q_lines = "\n".join(
-        f"- {q.query_id}  verb={q.verb}  params={json.dumps(q.params or {})}  status={q.payload_status}"
+        _md_line(
+            "- {qid}  verb={verb}  params={params}  status={status}",
+            qid=q.query_id, verb=q.verb, params=json.dumps(q.params or {}),
+            status=q.payload_status,
+        )
         for q in c.queries
     ) or "(no queries executed for this lead)"
 

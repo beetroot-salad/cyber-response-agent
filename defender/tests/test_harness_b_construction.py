@@ -280,7 +280,7 @@ def test_835_gather_is_cache_keyed_on_the_system_while_its_agent_id_stays_the_le
 
     run_dir = tmp_path / "run"
     (run_dir / "gather_raw").mkdir(parents=True)
-    deps = bind(MAIN_DEF, run_dir, salt="0011223344556677", defender_dir=_DEFENDER)
+    deps = bind(MAIN_DEF, run_dir, defender_dir=_DEFENDER)
     asyncio.run(tools_gather._run_gather(
         deps, _factory, 40,
         tools_gather.GatherRequest("l-005", "identity", "goal", ("what",)),

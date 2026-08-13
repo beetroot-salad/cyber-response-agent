@@ -27,7 +27,7 @@ from pydantic_ai import RunContext
 from pydantic_ai.exceptions import ModelRetry
 
 from defender._artifact_schema import validate_artifact
-from defender._untrusted import wrap as _wrap
+from defender._untrusted import wrap_fresh
 # The vocabulary from its OWNER, not second-hand through the report schema — `_artifact_schema`
 # has its own gate to run on it and names it for that, but it was never this module's supplier
 # (#785's rule: a module that USES the vocabulary imports it from the owner, so a consumer's
@@ -260,7 +260,7 @@ def _render_challenged_message(material: tuple[RecommendedLead, ...], deps: Agen
     # it returns inside the SAME run-salted untrusted frame the gather subagent's return
     # already uses (`defender._untrusted.wrap`, keyed on the INVESTIGATION's own salt, never
     # the review role's own — the review role minted a fresh one and never held this one).
-    framed = _wrap("\n".join(lines), "untrusted", deps.salt)
+    framed = wrap_fresh("\n".join(lines), "untrusted")
     # "measurement", not "lead": #796's ask names the entity, edge, lead or hypothesis to
     # measure and the DIMENSION to measure it on — the investigation chooses the lead. Calling
     # a vertex a lead here told the model a `v-` id was something it could go run.
@@ -285,7 +285,7 @@ def _record_dict(verdict: challenge_gate.GateVerdict, disposition: str, deps: Ag
     return {
         "verdict": verdict.outcome,
         "reviewed_disposition": disposition,
-        "detail": _wrap(verdict.detail, "untrusted", deps.salt) if verdict.detail else "",
+        "detail": wrap_fresh(verdict.detail, "untrusted") if verdict.detail else "",
         "failure_kind": verdict.failure_kind,
     }
 

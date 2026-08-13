@@ -43,7 +43,7 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
     drive,
     materialize,
 )
-from defender.tests.e2e.test_query_tool_611 import DONE, LEAD, SALT, q  # noqa: E402
+from defender.tests.e2e.test_query_tool_611 import DONE, LEAD, q  # noqa: E402
 
 
 
@@ -233,7 +233,7 @@ def test_seq_stays_monotonic_when_a_payload_write_fails(tmp_path):
         q("elastic", "query", {"native_query": "b"}),
         DONE,
     ])
-    drive(run_dir, run_id="rq-seq", salt=SALT, main=main, gather=gather, verbs=verbs)
+    drive(run_dir, run_id="rq-seq", main=main, gather=gather, verbs=verbs)
 
     # lead-0 (#808) resolves against GOLDEN_AB3 ahead of MAIN's own turn and writes its
     # own (l-000) row(s) into this same table — scope to `LEAD`'s own rows, which is

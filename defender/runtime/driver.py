@@ -90,7 +90,7 @@ def _main_instructions(defender_dir: Path) -> str:
 
 
 def _user_prompt(  # noqa: PLR0913 — the harness's own pre-turn seams (#808)
-    run_dir: Path, alert_path: Path, defender_dir: Path, salt: str,
+    run_dir: Path, alert_path: Path, defender_dir: Path,
     *, verbs: Any = None, limits: dict = DEFAULT_LIMITS, run_id: str | None = None,
 ) -> tuple[str, str, str]:
     """#808 — lead-0's own call site. It takes its OWN exception handler (K8/N3): a
@@ -110,7 +110,7 @@ def _user_prompt(  # noqa: PLR0913 — the harness's own pre-turn seams (#808)
     status = lead_zero_mod.STATUS_FAILED
     try:
         result = lead_zero_mod.resolve_lead_zero(
-            run_dir=run_dir, defender_dir=defender_dir, alert_path=alert_path, salt=salt,
+            run_dir=run_dir, defender_dir=defender_dir, alert_path=alert_path,
             verbs=verbs, limits=limits, run_id=run_id,
         )
         lead_zero_text = lead_zero_mod.render_orient_section(result)
@@ -121,14 +121,13 @@ def _user_prompt(  # noqa: PLR0913 — the harness's own pre-turn seams (#808)
         degraded = lead_zero_mod.LeadZeroResult(
             text=lead_zero_mod._render_section(
                 lead_zero_mod._unavailable(f"a run-level fault interrupted resolution: {e!r}"),
-                salt,
             ),
             status=lead_zero_mod.STATUS_FAILED,
         )
         lead_zero_text = lead_zero_mod.render_orient_section(degraded)
 
     orientation = orient.orientation(
-        run_dir, defender_dir, alert_path, salt, lead_zero_section=lead_zero_text,
+        run_dir, defender_dir, alert_path, lead_zero_section=lead_zero_text,
     )
     prompt = (
         "Begin the investigation.\n\n"
@@ -931,7 +930,6 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     run_dir: Path,
     run_id: str,
     defender_dir: Path,
-    salt: str,
     model_name: str | None = None,
     make_model: MakeModel | None = None,
     verbs: Any = None,
@@ -1028,7 +1026,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
         )
 
     prompt, lead_zero_block, lead_zero_status = _user_prompt(
-        run_dir, alert_path, defender_dir, salt,
+        run_dir, alert_path, defender_dir,
         verbs=lead_zero_verbs, limits=limits, run_id=run_id,
     )
 
@@ -1055,7 +1053,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
             # which a harness dispatch never emits.
             lead_zero_mod._budget_account(run_dir, run_id, "gather", limits)
             correlation_task = asyncio.ensure_future(lead_zero_mod.dispatch_correlation(
-                run_dir=run_dir, defender_dir=defender_dir, salt=salt, run_id=run_id,
+                run_dir=run_dir, defender_dir=defender_dir, run_id=run_id,
                 goal=goal, what_to_summarize=what_to_summarize, verbs=lead_zero_verbs,
                 limits=limits, make_model=make_model, logger=logger, box=box, store=store,
                 # #808 review fix — share the RUN's own budget-clock origin (see
@@ -1071,7 +1069,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
         correlation_task=correlation_task,
     )
     deps = replace(
-        bind(MAIN_DEF, run_dir, salt=salt, defender_dir=defender_dir, box=box),
+        bind(MAIN_DEF, run_dir, defender_dir=defender_dir, box=box),
         run_id=run_id,
         budget_started_monotonic=budget_started_monotonic,
     )

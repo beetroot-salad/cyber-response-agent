@@ -80,7 +80,7 @@ def test_a_gather_leg_session_carries_its_own_head_like_any_other_session(tmp_pa
     ])
     gather = ReplayFn([Turn(text="lead summarised")])
 
-    drive(run_dir, run_id="leg-head", salt=SALT, main=main, gather=gather,
+    drive(run_dir, run_id="leg-head", main=main, gather=gather,
           verbs=FakeVerbs({"elastic": {}}),
           store_factory=store_factory(tmp_path, sink=opened))
 
@@ -134,7 +134,7 @@ def test_a_store_error_during_setup_ends_the_run_through_the_handled_exit(tmp_pa
     legacy_v1_store_file(ss.store_path_for("stale-case", runs_base=runs_base(tmp_path)))
     replay = ReplayFn([Turn(text="never reached")])
 
-    result = drive(run_dir, run_id="stale-setup", salt=SALT, main=replay,
+    result = drive(run_dir, run_id="stale-setup", main=replay,
                    store_factory=store_factory(tmp_path, case_id="stale-case"))
 
     assert isinstance(result, dict), result
@@ -146,7 +146,7 @@ def test_a_store_error_during_setup_ends_the_run_through_the_handled_exit(tmp_pa
 
     control_dir = materialize(tmp_path / "control", GOLDEN)
     control_replay = ReplayFn([Turn(text="Investigation complete.")])
-    control = drive(control_dir, run_id="fresh-setup", salt=SALT, main=control_replay,
+    control = drive(control_dir, run_id="fresh-setup", main=control_replay,
                     store_factory=store_factory(tmp_path, case_id="fresh-case"))
     assert control["truncated_by"] is None, (
         f"control: the same run against a current-version store completes; got {control}")
@@ -168,7 +168,7 @@ def test_the_pointer_path_is_trusted_verbatim_across_a_relocated_run_dir(tmp_pat
     # the relocation case explicit.
     ss = store_mod()
     run_dir = materialize(tmp_path, GOLDEN)
-    result = drive(run_dir, run_id="relocated", salt=SALT,
+    result = drive(run_dir, run_id="relocated",
                    main=ReplayFn([Turn(text="Investigation complete.")]),
                    store_factory=store_factory(tmp_path))
 

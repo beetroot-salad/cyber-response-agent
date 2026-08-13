@@ -200,7 +200,7 @@ class CuratorDeps(AgentDeps):
             ),
         )
         deps = bind(
-            CORPUS_AUTHOR_DEF, run_dir, scope=scope, defender_dir=defender_dir, salt=salt,
+            CORPUS_AUTHOR_DEF, run_dir, scope=scope, defender_dir=defender_dir,
             box=box,
         )
         assert isinstance(deps, CuratorDeps)

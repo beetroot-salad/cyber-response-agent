@@ -186,7 +186,7 @@ def run_gather(
         Turn(text="Investigation complete."),
     ])
     gather = ReplayFn(turns)
-    drive(run_dir, run_id=run_id, salt=SALT, main=main, gather=gather, verbs=verbs)
+    drive(run_dir, run_id=run_id, main=main, gather=gather, verbs=verbs)
     return _Run(run_dir, main, gather)
 
 
@@ -241,23 +241,33 @@ def test_query_returns_wrapped_truncated_view_and_payload_note(tmp_path):
     assert rec.only().params == {"native_query": "FROM logs | LIMIT 2", "limit": 10}
 
     assert "exit=0" in seen
-    assert f"<run-{SALT}-untrusted>" in seen
-    assert f"</run-{SALT}-untrusted>" in seen
+    assert re.search(r"<run-[0-9a-f]+-untrusted>", seen), "the return was not framed"
+    assert re.search(r"</run-[0-9a-f]+-untrusted>", seen), "the frame never closed"
     assert f"[record_query] raw payload: {payload_abs}" in seen
     assert "dev.dana" in seen, "the truncated view of the payload must reach the model"
 
 
-def test_query_return_wrap_uses_the_run_salt(tmp_path):
-    """query_return_wrap_uses_the_run_salt — the wrap uses deps.salt (the per-run token), never
-    a freshly minted one: with a fresh salt the model can forge the closing tag and the
-    injection defense fails open."""
+def test_query_return_wrap_mints_its_own_salt(tmp_path):
+    """query_return_wrap_mints_its_own_salt — the wrap mints a FRESH token per return, never a
+    per-run one shared with the party being framed.
+
+    AMENDED PREMISE (#875 F-1). This demand read "the wrap uses deps.salt (the per-run token),
+    never a freshly minted one: with a fresh salt the model can forge the closing tag and the
+    injection defense fails open." It is exactly inverted. Gather reads the per-run token in
+    plaintext on every payload view it is handed — THIS return — so sharing it is what lets
+    gather forge a closer. A salt minted after the content is in hand, and re-minted while it
+    collides with that content, cannot occur in the body at all."""
     rec = VerbRecorder()
     r = run_gather(tmp_path, verbs=elastic_ok(rec), turns=[
         q("elastic", "query", {"native_query": "FROM logs"}), DONE,
     ])
     tags = re.findall(r"<run-([0-9a-zA-Z]+)-untrusted>", r.gather_saw)
     assert tags, "the query return carried no untrusted wrap at all"
-    assert set(tags) == {SALT}, f"a wrap used a salt other than the run's: {set(tags)}"
+    for tag in set(tags):
+        body = r.gather_saw.split(f"<run-{tag}-untrusted>", 1)[1].split(
+            f"</run-{tag}-untrusted>", 1)[0]
+        assert tag not in body, \
+            f"the frame salt {tag!r} occurs inside its own body — gather can close its frame"
 
 
 def test_query_payload_is_not_double_wrapped_on_read_back(tmp_path):
@@ -270,11 +280,11 @@ def test_query_payload_is_not_double_wrapped_on_read_back(tmp_path):
     ])
     payload_abs = r.run_dir / "gather_raw" / LEAD / "0.json"
 
-    gdeps = bind(GATHER_DEF, r.run_dir, salt=SALT, defender_dir=DEFENDER)
+    gdeps = bind(GATHER_DEF, r.run_dir, defender_dir=DEFENDER)
     out = runtime_tools._tool_read_file(gdeps, str(payload_abs))
 
-    assert out.count(f"<run-{SALT}-untrusted>") == 1
-    assert out.count(f"</run-{SALT}-untrusted>") == 1
+    assert len(re.findall(r"<run-[0-9a-f]+-untrusted>", out)) == 1
+    assert len(re.findall(r"</run-[0-9a-f]+-untrusted>", out)) == 1
     assert "dev.dana" in out
 
 
@@ -305,7 +315,7 @@ def test_query_return_wrap_positive_control(tmp_path):
         Turn(text="done"),
     ])
     gather = ReplayFn(turns)
-    drive(run_dir, run_id="q611-ctl", salt=SALT, main=main, gather=gather, verbs=elastic_ok(rec))
+    drive(run_dir, run_id="q611-ctl", main=main, gather=gather, verbs=elastic_ok(rec))
 
     on_disk = payload_abs.read_text(encoding="utf-8")
     assert "<run-" not in on_disk, "the persisted payload must be the raw bytes, never wrapped"
@@ -729,7 +739,7 @@ def test_capture_fires_only_for_the_query_tool(tmp_path):
         Turn(tool_calls=[("template_search", {"pattern": "sshd"})]),
         DONE,
     ])
-    drive(run_dir, run_id="q611-other", salt=SALT, main=main, gather=gather,
+    drive(run_dir, run_id="q611-other", main=main, gather=gather,
           verbs=elastic_ok(rec))
 
     assert gather.calls == 4, "one of the three non-query tools was intercepted and derailed"

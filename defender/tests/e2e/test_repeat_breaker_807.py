@@ -226,7 +226,7 @@ def _run(
         circuit_breaker.record_outcome(run_dir, brk_system, brk_exit)
     main = ReplayFn([Turn(tool_calls=[_dispatch(lead, system)]), Turn(text="Investigation complete.")])
     gather = ReplayFn(turns)
-    drive(run_dir, run_id=run_id, salt=SALT, main=main, gather=gather, verbs=verbs)
+    drive(run_dir, run_id=run_id, main=main, gather=gather, verbs=verbs)
     return _Res(run_dir, main, gather)
 
 
@@ -244,7 +244,7 @@ def _run_two_leads(
         Turn(text="Investigation complete."),
     ])
     gather = ReplayFn(turns)
-    drive(run_dir, run_id=run_id, salt=SALT, main=main, gather=gather, verbs=verbs)
+    drive(run_dir, run_id=run_id, main=main, gather=gather, verbs=verbs)
     return _Res(run_dir, main, gather)
 
 
@@ -883,8 +883,9 @@ def test_dead_end_return_contract(tmp_path):
 
     assert f"gather for {LEAD}" in summary
     assert INCOMPLETE_IDIOM in summary
-    assert summary.startswith(f"<run-{SALT}-untrusted>")
-    assert summary.endswith(f"</run-{SALT}-untrusted>")
+    assert re.match(r"<run-[0-9a-f]+-untrusted>", summary), "the summary was not framed"
+    salt = re.match(r"<run-([0-9a-f]+)-untrusted>", summary).group(1)
+    assert summary.endswith(f"</run-{salt}-untrusted>"), "the frame never closed on its own salt"
     assert "sshd-auth-window" in summary, "the message does not name the repeated request"
     assert REPEAT_ESCAPE in summary, "the escape never reached the string main receives"
     assert summary in r.main_saw, \

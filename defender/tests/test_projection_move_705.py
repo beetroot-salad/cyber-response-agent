@@ -77,7 +77,7 @@ def _driven_run(tmp_path: Path, *, run_id: str, turns=None, text: str = "done"):
     ]
     replay = ReplayFn(scripted)
     opened: list = []
-    drive(run_dir, run_id=run_id, salt=SALT, main=replay,
+    drive(run_dir, run_id=run_id, main=replay,
           store_factory=store_factory(tmp_path, sink=opened))
     return run_dir, opened[0], replay
 
@@ -427,7 +427,7 @@ def test_transcript_html_escapes_message_payload_content_reaching_the_store_back
         Turn(text=payload),
     ])
     opened: list = []
-    drive(run_dir, run_id="escaping", salt=SALT, main=replay,
+    drive(run_dir, run_id="escaping", main=replay,
           store_factory=store_factory(tmp_path, sink=opened))
 
     bodies = "".join(row[0] for row in

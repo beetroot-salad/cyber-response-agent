@@ -52,7 +52,7 @@ pytestmark = pytest.mark.e2e
 
 
 def test_replay_golden_v2sshd(tmp_path):
-    run_id, salt = "replay-v2sshd", "deadbeefcafe0000"
+    run_id = "replay-v2sshd"
     run_dir = materialize(tmp_path, GOLDEN)
 
     inv_text = (GOLDEN / "investigation.md").read_text()
@@ -66,13 +66,13 @@ def test_replay_golden_v2sshd(tmp_path):
         Turn(tool_calls=[("close_investigation", {"disposition": "inconclusive"})]),
         Turn(text="Investigation complete."),
     ])
-    drive(run_dir, run_id=run_id, salt=salt, main=replay)
+    drive(run_dir, run_id=run_id, main=replay)
 
     assert replay.calls == 3, f"expected 3 model turns, got {replay.calls}"
 
     produced_inv = (run_dir / "investigation.md").read_text()
-    assert normalize(produced_inv, run_dir=run_dir, salt=salt, run_id=run_id) == \
-           normalize(inv_text, run_dir=run_dir, salt=salt, run_id=run_id)
+    assert normalize(produced_inv, run_dir=run_dir, run_id=run_id) == \
+           normalize(inv_text, run_dir=run_dir, run_id=run_id)
     assert validate_companion(produced_inv, None) == []
 
     m = re.search(r"^disposition:\s*(\w+)", (run_dir / "report.md").read_text(), re.M)
@@ -96,7 +96,7 @@ def test_replay_full_run_ab3(tmp_path, monkeypatch):
     re-validates clean through the live gate. The two-table / gather_raw capture
     belongs to the nested-gather replay (test_nested_gather_capture).
     """
-    run_id, salt = "replay-ab3", "0011223344556677"
+    run_id = "replay-ab3"
     run_dir = materialize(tmp_path, GOLDEN_AB3)
 
     turns = load_turns_from_trace(
@@ -120,15 +120,15 @@ def test_replay_full_run_ab3(tmp_path, monkeypatch):
     # #774/R1: the golden trace's report.md write is re-recorded as a close_investigation
     # call. It reaches a confident (malicious) disposition, which the gate reviews — three
     # lenses and a composer, all four bound to the harness's hermetic bundle.
-    drive(run_dir, run_id=run_id, salt=salt, main=replay)
+    drive(run_dir, run_id=run_id, main=replay)
 
     assert replay.calls == len(turns), \
         f"replayed {replay.calls}/{len(turns)} turns (early stop = an unexpected gate deny)"
 
     produced = (run_dir / "investigation.md").read_text()
     golden = (GOLDEN_AB3 / "investigation.md").read_text()
-    assert normalize(produced, run_dir=run_dir, salt=salt, run_id=run_id) == \
-           normalize(golden, run_dir=run_dir, salt=salt, run_id=run_id)
+    assert normalize(produced, run_dir=run_dir, run_id=run_id) == \
+           normalize(golden, run_dir=run_dir, run_id=run_id)
 
     assert validate_companion(produced, None) == []
 
@@ -188,7 +188,7 @@ def test_a_gap_the_review_cannot_measure_overrides_the_confident_close(tmp_path)
     confident draft, one bundle apart. A suite in which every review answers `holds` cannot
     tell a reviewer that ran from a close that reached no reviewer at all, which is exactly
     what the replays were unable to distinguish while the seam defaulted to a live bundle."""
-    run_id, salt = "replay-gap", "ccddeeff00112233"
+    run_id = "replay-gap"
     run_dir = materialize(tmp_path, GOLDEN_AB3)
     inv_text = (GOLDEN_AB3 / "investigation.md").read_text()
 
@@ -197,7 +197,7 @@ def test_a_gap_the_review_cannot_measure_overrides_the_confident_close(tmp_path)
         Turn(tool_calls=[("close_investigation", {"disposition": "malicious"})]),
         Turn(text="Investigation complete."),
     ])
-    drive(run_dir, run_id=run_id, salt=salt, main=replay,
+    drive(run_dir, run_id=run_id, main=replay,
           review_stages=_review_bundle.bundle(composer=_review_bundle.composer_reply(
               "gap", review="the pivot rests on one inference no lead measured", ask=None,
           )))
@@ -236,11 +236,11 @@ def test_a_gap_the_review_cannot_measure_overrides_the_confident_close(tmp_path)
      "only the defender-* shims"),
 ])
 def test_main_loop_deny_bounces(tmp_path, label, tool_name, args_fn, reason_substr):
-    run_id, salt = f"deny-{label}", "8899aabbccddeeff"
+    run_id = f"deny-{label}"
     run_dir = materialize(tmp_path, GOLDEN_AB3)
 
     probe = DenyProbe(tool_name, args_fn(run_dir))
-    drive(run_dir, run_id=run_id, salt=salt, main=probe)
+    drive(run_dir, run_id=run_id, main=probe)
 
     assert probe.calls >= 2, "deny did not bounce the agent back into the loop"
 
@@ -256,7 +256,7 @@ def test_main_cannot_name_a_write_path_at_all(tmp_path):
     has nothing to say it with. Unreachable beats denied — but only if it is actually
     unreachable, so this asserts both halves: no path-taking writer is registered, and the
     one writer that is lands on the transcript and creates nothing else."""
-    run_id, salt = "no-write-path", "99aabbccddeeff00"
+    run_id = "no-write-path"
     run_dir = materialize(tmp_path, GOLDEN_AB3)
 
     assert MAIN_DEF.tools.append is True
@@ -270,7 +270,7 @@ def test_main_cannot_name_a_write_path_at_all(tmp_path):
         Turn(tool_calls=[("close_investigation", {"disposition": "inconclusive"})]),
         Turn(text="done"),
     ])
-    drive(run_dir, run_id=run_id, salt=salt, main=replay)
+    drive(run_dir, run_id=run_id, main=replay)
 
     assert (run_dir / "investigation.md").read_text() == "+ probe\n"
     assert {p.name for p in run_dir.parent.iterdir()} == before, (
@@ -311,7 +311,7 @@ def _elastic_verbs() -> FakeVerbs:
 
 
 def test_nested_gather_capture(tmp_path):
-    run_id, salt = "nested-gather", "1122334455667788"
+    run_id = "nested-gather"
     run_dir = materialize(tmp_path, GOLDEN_AB3)
 
     main_replay = ReplayFn([
@@ -330,7 +330,7 @@ def test_nested_gather_capture(tmp_path):
         Turn(text="Summary: 1 sshd auth event for dev.dana."),
     ])
 
-    drive(run_dir, run_id=run_id, salt=salt, main=main_replay, gather=gather_replay,
+    drive(run_dir, run_id=run_id, main=main_replay, gather=gather_replay,
           verbs=_elastic_verbs())
 
     assert main_replay.calls == 3

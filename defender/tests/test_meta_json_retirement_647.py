@@ -158,12 +158,15 @@ def module_level_names_at_base(repo_path: str) -> set[str]:
 
 
 
-def test_run_py_unpacks_the_pair_and_threads_both_elements_onward(tmp_path):
-    """`run.py`'s call to `materialize_run_dir` binds BOTH elements of the returned pair in
-    order — the run dir first, the salt second — and hands each onward to `run_investigation`
-    (`run_dir=` and `salt=`). No disk re-read of the salt survives between the two: the value
-    the builder returned is the value threaded, not a round-trip through a file the same
-    function just wrote.
+def test_run_py_binds_the_run_dir_and_threads_it_onward(tmp_path):
+    """`run.py`'s call to `materialize_run_dir` binds the run dir it returns and hands it
+    onward to `run_investigation` (`run_dir=`).
+
+    AMENDED BY #875. This demand was "binds BOTH elements of the returned pair in order — the
+    run dir first, the salt second", the shape #647 introduced so that the run's ONE trust
+    token had a single origin and no disk round-trip. The token itself is gone: `wrap_fresh`
+    mints each frame's delimiter after its content is in hand, so there is no run-scoped salt
+    to originate, thread, or re-read. What survives is the run-dir half, unchanged.
 
     #741 moved the `run_investigation` call out of `main` and behind an `investigate=` seam on
     `_run_investigation_lifecycle`, so the threading leg is now EXECUTED rather than read off
@@ -183,14 +186,14 @@ def test_run_py_unpacks_the_pair_and_threads_both_elements_onward(tmp_path):
     ]
     assert len(unpacks) == 1, f"expected exactly one materialize_run_dir call site, got {len(unpacks)}"
     target = unpacks[0].targets[0]
-    assert isinstance(target, ast.Tuple), (
-        "run.py still binds materialize_run_dir's result to a single name — the builder now "
-        "returns (run_dir, salt) and the caller must unpack both elements"
+    # AMENDED BY #875: the builder returns ONLY the run dir. This demand pinned the
+    # `(run_dir, salt)` unpack #647 introduced; the run salt is gone — `wrap_fresh` mints each
+    # frame's delimiter after its content is in hand — so a single-name bind is the contract.
+    assert isinstance(target, ast.Name), (
+        "run.py still unpacks materialize_run_dir's result as a tuple — the builder returns "
+        "only the run dir now (#875 removed the run salt)"
     )
-    bound = [e.id for e in target.elts if isinstance(e, ast.Name)]
-    assert bound == ["run_dir", "salt"], (
-        f"unpack order must match the return order (run_dir, salt); got {bound}"
-    )
+    assert target.id == "run_dir", f"the bound name must be run_dir; got {target.id}"
 
     from defender.run import _run_investigation_lifecycle
 
@@ -203,15 +206,16 @@ def test_run_py_unpacks_the_pair_and_threads_both_elements_onward(tmp_path):
     run_dir = tmp_path / "r-647"
     run_dir.mkdir()
     _run_investigation_lifecycle(
-        run_dir=run_dir, salt="THE-MINTED-SALT", model="m-647", model_override=None, defender_dir=DEFENDER,
+        run_dir=run_dir, model="m-647", model_override=None, defender_dir=DEFENDER,
         investigate=recording_investigate,
         start_box=lambda *_a, **_kw: object(),
         stop_box=lambda *_a, **_kw: None,
         scrub=lambda *_a, **_kw: None,
     )
-    assert arrived.get("run_dir") == run_dir, "run.py must thread the unpacked run dir onward"
-    assert arrived.get("salt") == "THE-MINTED-SALT", (
-        "run.py must thread the UNPACKED salt onward — not a value re-read from disk"
+    assert arrived.get("run_dir") == run_dir, "run.py must thread the run dir onward"
+    assert "salt" not in arrived, (
+        "run.py still threads a salt into the investigation — #875 removed the run salt; a "
+        "value threaded here is a value some framed party can be handed"
     )
 
     src = (DEFENDER / "run.py").read_text(encoding="utf-8")
@@ -263,12 +267,14 @@ def test_learning_curator_leg_mints_a_fresh_uuid4_salt_distinct_from_the_run_tok
         box=None,
     )
 
-    assert re.fullmatch(r"[0-9a-f]{32}", deps.salt), (
-        f"the curator leg must mint a fresh uuid4 token, got {deps.salt!r}"
-    )
-    assert deps.salt != other.salt, (
-        "two curator spawns must not share a token — each stage mints its own"
-    )
+    # Two independently built legs, so this is not vacuous on a single construction: NEITHER
+    # carries a salt. #875 removed the field — the per-invocation stage salt is minted by the
+    # PRODUCER and reaches the prompt, never the deps, so no caller can hand a framed party the
+    # delimiter of the frame its own output returns inside.
+    for leg, name in ((deps, "first"), (other, "second")):
+        assert not hasattr(leg, "salt"), (
+            f"the {name} curator leg's deps still carry a salt"
+        )
 
 
 
@@ -321,12 +327,15 @@ def test_every_importer_of_the_relocated_wrap_resolves_after_the_move():
     a real result rather than a broken query."""
     pytest.importorskip("pydantic_ai")
     from defender.runtime import orient, query_tool, tools, tools_gather
-    from defender.runtime.untrusted import wrap
+    from defender._untrusted import wrap_fresh
     from defender.learning.author import lesson_read
 
-    assert orient.wrap is wrap
+    # #875 split the seam: these four frame TOOL RETURNS, so they hold `wrap_fresh` (which
+    # mints its own salt) rather than the salt-taking `wrap` the learning stages still use.
+    # Same property this demand always asserted — one function object, one owner.
+    assert orient.wrap_fresh is wrap_fresh
     for mod in (tools, query_tool, tools_gather):
-        assert mod._wrap is wrap, f"{mod.__name__} holds a different wrap object"
+        assert mod.wrap_fresh is wrap_fresh, f"{mod.__name__} holds a different wrap object"
     assert lesson_read is not None
 
     importers = live_hits(repo_grep(r"from defender\.runtime\.untrusted import|runtime\.untrusted"))
@@ -681,17 +690,18 @@ def test_the_subprocess_environment_carries_no_path_to_the_run_salt(tmp_path):
     alert.write_text("{}", encoding="utf-8")
     os.environ["DEFENDER_RUNS_BASE"] = str(tmp_path / "runs")
     try:
-        run_dir, salt = run_common.materialize_run_dir(alert, "env-boundary-647")
+        run_dir = run_common.materialize_run_dir(alert, "env-boundary-647")
     finally:
         os.environ.pop("DEFENDER_RUNS_BASE", None)
 
     env = run_common.run_env(DEFENDER, run_dir)
     assert env["DEFENDER_RUN_DIR"] == str(run_dir), "the positive-control channel is empty"
     assert not [k for k in env if "SALT" in k.upper()], "an env var names the salt"
-    assert salt not in "\n".join(env.values()), "the salt's value leaked into the subprocess env"
-    assert not list(run_dir.glob("*.json")) or not any(
-        salt in p.read_text(encoding="utf-8", errors="ignore") for p in run_dir.rglob("*")
-        if p.is_file()
-    ), "the salt is recoverable from a file inside the exported run dir"
+    # #875 makes the rest of this demand unstatable in the strongest possible way: there IS no
+    # run salt to leak into the environment or to recover from the run dir. The value-level
+    # assertions this demand carried are replaced by the absence that subsumes them.
+    from defender import run_common as _rc
+    assert "secrets" not in _rc.materialize_run_dir.__code__.co_names, \
+        "the builder mints a run-scoped token again — there is a value to leak once more"
 
 

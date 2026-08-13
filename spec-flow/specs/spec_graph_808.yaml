@@ -470,7 +470,7 @@ demands:
   # ---- the ORIENT block's trust framing ---------------------------------------------------
   - {id: d38_one_outer_untrusted_frame, kind: behavior, form: test,
      binds: ["interacts(lead_zero->orient_block).payload", "orient_block"],
-     discharged_by: test_the_lead_zero_section_sits_in_one_untrusted_frame_keyed_to_the_run_salt,
+     discharged_by: test_the_lead_zero_section_sits_in_one_untrusted_frame_with_its_own_salt,
      rejected: [{nl: "per-document wraps: they nest identical salt-derived tags and wrap()
        escapes nothing of its own delimiter shape (a2), so an inner close ends the outer span"},
        {nl: "no wrap at all: it ships the one ORIENT section with no trust framing"}]}

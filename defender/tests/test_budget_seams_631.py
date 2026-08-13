@@ -111,7 +111,7 @@ def drive_agent(defn, run_dir: Path, turns, *, limits, enforce: bool | None = No
     # disagree (the judge — see agent_definition.effective_tools_for) would raise; this probe
     # is about the budget/accounting hooks, not the verb grant.
     bindable = _replace(defn, tools=effective_tools_for(defn))
-    deps = bind(bindable, run_dir, salt="0011223344556677", defender_dir=DEFENDER, box=box)
+    deps = bind(bindable, run_dir, defender_dir=DEFENDER, box=box)
     import asyncio
 
     async def _go():
@@ -194,7 +194,7 @@ def test_budget_kill_is_not_control_flow(tmp_path):
         return _KillingAgent()
 
     import asyncio
-    deps = bind(MAIN_DEF, run_dir, salt="0011223344556677", defender_dir=DEFENDER)
+    deps = bind(MAIN_DEF, run_dir, defender_dir=DEFENDER)
     with pytest.raises(BudgetKill):
         asyncio.run(runtime_tools._run_gather(
             deps, killing_factory, 40,
@@ -220,7 +220,7 @@ def _drive_gather_query(run_dir: Path, registry):
         make_model=lambda name, effort: BuiltModel(FunctionModel(model), None),
         verbs=registry, limits=DEFAULT_LIMITS,
     )
-    deps = replace(bind(GATHER_DEF, run_dir, salt="0011223344556677",
+    deps = replace(bind(GATHER_DEF, run_dir,
                         defender_dir=DEFENDER), lead_id="l-001")
 
     async def _go():
@@ -249,7 +249,7 @@ def test_enforcement_keys_on_declared_bit(tmp_path):
     assert MAIN_DEF.budget_enforced is True
     assert AGENTS[AgentRole.JUDGE].budget_enforced is False
 
-    deps = bind(MAIN_DEF, _run_dir(tmp_path, "p"), salt="0" * 16, defender_dir=DEFENDER)
+    deps = bind(MAIN_DEF, _run_dir(tmp_path, "p"), defender_dir=DEFENDER)
     assert deps.policy.budget_enforced is True
 
     limits = {**DEFAULT_LIMITS, "max_tool_calls": 1}

@@ -19,7 +19,7 @@ from pydantic_ai.exceptions import (
 )
 
 from defender.hooks.budget_enforcer import BudgetKill
-from defender._untrusted import wrap as _wrap
+from defender._untrusted import wrap_fresh
 from defender.scripts.adapters.faults import USAGE_EXIT_CODE, AdapterFault
 from defender.scripts.gather_tools.payload_view import render as _render_payload
 from defender.scripts.gather_tools.record_query import (
@@ -69,7 +69,14 @@ CONTROL_FLOW_EXCEPTIONS: tuple[type[BaseException], ...] = (
 
 DEFAULT_FAULT_EXIT = 2
 
-_QID_TRAVERSAL = ("/", "\\", "..", "\x00")
+#: Characters a `query_id` may not carry. The first four are PATH shapes — a traversal that
+#: would walk the id out of the directory it names a file in. The last two are RENDER shapes
+#: (#875 F-8): a catalog id is interpolated into markdown three offline collectors read, and a
+#: newline or a heading marker in it forges document structure inside the judge's per-lead
+#: comparison — which lead a section describes, which sample event is the run's real one. Both
+#: families are here for one reason, so they screen as one rule: a `query_id` is a catalog
+#: IDENTIFIER the collectors partition on, not free text, and neither shape belongs in one.
+_QID_FORBIDDEN = ("/", "\\", "..", "\x00", "\n", "\r", "#")
 
 
 def resolve_query_id(system: str, verb: str, model_query_id: str | None) -> str:
@@ -85,7 +92,7 @@ def resolve_query_id(system: str, verb: str, model_query_id: str | None) -> str:
     if (
         model_query_id
         and not is_reserved_query_id(model_query_id)
-        and not any(t in model_query_id for t in _QID_TRAVERSAL)
+        and not any(t in model_query_id for t in _QID_FORBIDDEN)
     ):
         return model_query_id
     return f"{system}.{verb}" if verb else f"{system}.ad-hoc"
@@ -261,7 +268,7 @@ class QueryCapture(AbstractCapability[Any]):
         return recorded or ("an undeclared system" if raw.strip() else "")
 
     def _traversal_reject(self, model_query_id: Any) -> str | None:
-        if model_query_id and any(t in str(model_query_id) for t in _QID_TRAVERSAL):
+        if model_query_id and any(t in str(model_query_id) for t in _QID_FORBIDDEN):
             return (
                 f"invalid query_id {model_query_id!r}: no '/', '\\', '..' or NUL — it becomes a "
                 "catalog path segment. Coin a `{system}.{kebab-name}` id."
@@ -363,7 +370,7 @@ class QueryCapture(AbstractCapability[Any]):
                 call_id=f"{system}.{verb}", params=params,
             )
             return None, _format_bash_result(
-                DEFAULT_FAULT_EXIT, "", _wrap(decision.refusal or "", "untrusted", deps.salt), "",
+                DEFAULT_FAULT_EXIT, "", wrap_fresh(decision.refusal or "", "untrusted"), "",
             )
 
         if decision.outcome != GRANTED:
@@ -549,7 +556,7 @@ class QueryCapture(AbstractCapability[Any]):
             # line out of it would put a second, differently-trusted region in a result the
             # main loop reads as one span.
             body = detail if repeat is None else f"{repeat}\n{detail}"
-            return _format_bash_result(exit_code, "", _wrap(body, "untrusted", deps.salt), note)
+            return _format_bash_result(exit_code, "", wrap_fresh(body, "untrusted"), note)
         # ONE call, no condition: `render` returns the payload verbatim when it fits and a
         # bounded view when it does not (#832). The condition used to live here AND at the
         # judge's mirror of this method, so "what counts as too big" was stated twice and could
@@ -557,7 +564,7 @@ class QueryCapture(AbstractCapability[Any]):
         view = _render_payload(text, row["payload_path"], deps.run_dir)
         if repeat is not None:
             view = f"{repeat}\n{view}"
-        return _format_bash_result(0, _wrap(view, "untrusted", deps.salt), "", note)
+        return _format_bash_result(0, wrap_fresh(view, "untrusted"), "", note)
 
 
 

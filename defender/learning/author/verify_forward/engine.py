@@ -59,17 +59,16 @@ def _run_verify_pydantic(
     """The forward-check's request limit is stage-fixed (one turn); its timeout is not — the
     caller passes its own env-backed knob, so no default is evaluated at import (#717).
 
-    The context is built FIRST and `bind` reads the salt off it, so `ctx.salt` is what the
-    agent was actually bound with rather than a second copy nothing reads."""
+    `ctx.salt` is NOT bound (#875): it scopes this stage's PROMPT frames — the set
+    `stage_user_message` announces as one message — while a tool return is framed by
+    `wrap_fresh`, which mints its own salt after the content is in hand."""
     ctx = StageContext(
         learning_run_dir=source_run_dir, user=user,
         request_limit=VERIFY_REQUEST_LIMIT,
         wall_clock_timeout=wall_clock_timeout,
         salt=salt,
     )
-    deps = bind(
-        VERIFY_DEF, ctx.learning_run_dir, defender_dir=defender_dir, salt=ctx.salt,
-    )
+    deps = bind(VERIFY_DEF, ctx.learning_run_dir, defender_dir=defender_dir)
     return run_stage(
         stage="verify_forward", wiring=wiring, ctx=ctx, deps=deps, make_model=make_model,
     )

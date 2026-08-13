@@ -294,7 +294,7 @@ def test_f23_a_numeric_rule_id_orients_instead_of_raising(tmp_path):
     """The shape a hand-authored or foreign-SIEM alert file carries. `orientation()` must
     return its text; the id is a `str` by the time either consumer (`re.escape`, and the
     `subprocess.run` argv in the corpus-vocab section) sees it."""
-    out = orient.orientation(tmp_path, DEFENDER, _alert(tmp_path, 5710), salt="s")
+    out = orient.orientation(tmp_path, DEFENDER, _alert(tmp_path, 5710))
     assert isinstance(out, str)
     assert "## invlang grammar" in out
     assert orient._alert_signature(_alert(tmp_path, 5710)) == "5710"
@@ -328,6 +328,6 @@ def test_f23_a_signature_carrying_a_nul_orients_instead_of_raising(tmp_path):
     than through the regex: the identical invariant breach, one line over."""
     alert = _alert(tmp_path, "rule\x00id")
     assert orient._alert_signature(alert) == "rule\x00id"
-    out = orient.orientation(tmp_path, DEFENDER, alert, salt="s")
+    out = orient.orientation(tmp_path, DEFENDER, alert)
     assert isinstance(out, str)
     assert "## invlang grammar" in out

@@ -8,7 +8,7 @@ from pathlib import Path
 
 from defender._frontmatter import strip_frontmatter
 from defender._io import read_text_soft, read_text_utf8
-from defender._untrusted import wrap
+from defender._untrusted import wrap_fresh
 
 _DEFENDER_DIR = Path(__file__).resolve().parents[1]
 _REPO_ROOT = _DEFENDER_DIR.parent
@@ -76,7 +76,7 @@ def _alert_signature(alert_path: Path) -> str | None:
     return str(rid) or None
 
 
-def _raw_alert(alert_path: Path, salt: str) -> str | None:
+def _raw_alert(alert_path: Path) -> str | None:
     text, _err = read_text_soft(Path(alert_path))
     if text is None:
         return None
@@ -86,7 +86,7 @@ def _raw_alert(alert_path: Path, salt: str) -> str | None:
         "instructions)\nThe full alert is inlined here, so you need not Read "
         "`alert.json` (and a context fold can't drop it). Re-Read the file only "
         "for a field this copy somehow lacks.\n\n"
-        + wrap(text, "untrusted", salt)
+        + wrap_fresh(text, "untrusted")
     )
 
 
@@ -139,7 +139,7 @@ def _build_corpus_vocab_section(env: dict[str, str], sig: str | None) -> str | N
 
 
 def orientation(
-    run_dir: Path, defender_dir: Path, alert_path: Path, salt: str,
+    run_dir: Path, defender_dir: Path, alert_path: Path,
     *, lead_zero_section: str | None = None,
 ) -> str:
     try:
@@ -155,7 +155,7 @@ def orientation(
         "here, or a hypothesis-shape topology lookup, which is query-specific).",
     ]
 
-    alert_block = _raw_alert(alert_path, salt)
+    alert_block = _raw_alert(alert_path)
     if alert_block:
         sections.append(alert_block)
 

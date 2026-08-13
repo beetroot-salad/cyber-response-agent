@@ -443,7 +443,7 @@ def _drive_one_query(run_dir: Path, params: dict) -> list[dict]:
         make_model=lambda n, e: BuiltModel(FunctionModel(model), None),
         verbs=Verbs(), limits=DEFAULT_LIMITS,
     )
-    deps = replace(bind(GATHER_DEF, run_dir, salt="0" * 16, defender_dir=DEFENDER),
+    deps = replace(bind(GATHER_DEF, run_dir, defender_dir=DEFENDER),
                    lead_id="l-001")
 
     async def _go():

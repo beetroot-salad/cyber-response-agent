@@ -56,13 +56,13 @@ from defender.runtime.tools import _tool_bash, _tool_read_file
 #: shape — matching the real per-leg build.
 JUDGE_BENIGN_DEF = replace(JUDGE_DEF, tools=effective_tools_for(JUDGE_DEF))
 
-SALT_RE = re.compile(r"<run-([0-9a-f]{32})-([^>]+)>\n(.*?)\n</run-\1-\2>", re.DOTALL)
+SALT_RE = re.compile(r"<run-([0-9a-f]+)-([^>]+)>\n(.*?)\n</run-\1-\2>", re.DOTALL)
 ROOT = Path(__file__).resolve().parents[2]
 DEFENDER = ROOT / "defender"
 STAGE_SALT = "5a" * 16
 RUN_SALT = "c3" * 16
 FRAME_RE = re.compile(
-    r"<run-(?P<salt>[0-9a-f]{32})-(?P<tag>[^>\n]+)>\n"
+    r"<run-(?P<salt>[0-9a-f]+)-(?P<tag>[^>\n]+)>\n"
     r"(?P<body>.*?)\n</run-(?P=salt)-(?P=tag)>",
     re.DOTALL,
 )
@@ -573,6 +573,31 @@ def _expected_frame(body: str, tag: str, salt: str = STAGE_SALT) -> str:
     return f"<run-{salt}-{tag}>\n{body}\n</run-{salt}-{tag}>"
 
 
+def frame_salt_of(text: str, tag: str = "untrusted") -> str:
+    """The salt of the first `tag` frame in `text` — recovered by READING it, never predicted.
+
+    `wrap_fresh` (#875) mints a tool-return frame's salt AFTER the content is in hand, so a
+    caller cannot know it in advance. That is the property, not an inconvenience: a test that
+    could predict the delimiter would be asserting the very thing the design removed. The
+    message-assembly frames (a stage's prompt sections) still share one caller-owned salt, and
+    `_expected_frame` above stays correct for those."""
+    m = re.search(rf"<run-([0-9a-f]+)-{re.escape(tag)}>", text)
+    assert m is not None, f"no <run-…-{tag}> frame in: {text[:400]!r}"
+    return m.group(1)
+
+
+def assert_one_frame(text: str, body: str, tag: str = "untrusted") -> str:
+    """`text` is EXACTLY one `tag` frame around `body`, verbatim, with nothing outside it.
+
+    The post-#875 spelling of `assert out == _expected_frame(body, tag)` for a TOOL RETURN.
+    Returns the salt, for callers that go on to assert about it."""
+    salt = frame_salt_of(text, tag)
+    assert text == f"<run-{salt}-{tag}>\n{body}\n</run-{salt}-{tag}>", (
+        f"not exactly one verbatim {tag} frame:\n{text[:600]!r}"
+    )
+    return salt
+
+
 def _drive_frame(body: str, tag: str = "payload", salt: str = STAGE_SALT) -> str:
     """Drive the primitive without asserting policy on behalf of a test owner."""
     return _shared_wrap()(body, tag, salt)
@@ -611,7 +636,6 @@ def _judge_deps(tmp_path: Path, *, box=None):
     deps = bind(
         JUDGE_BENIGN_DEF,
         run_dir,
-        salt=STAGE_SALT,
         defender_dir=defender_dir,
         scope=RunScope(add_dirs=(comparison,)),
         box=box,

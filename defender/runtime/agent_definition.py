@@ -268,7 +268,7 @@ def compile_policy_for(
 
 def bind(
     defn: AgentDefinition, run_dir: Path, *,
-    scope: RunScope = _DEFAULT_SCOPE, salt: str | None = None, defender_dir: Path | None = None,
+    scope: RunScope = _DEFAULT_SCOPE, defender_dir: Path | None = None,
     box: Any = None,
 ) -> AgentDeps:
     roots = _build_roots(defn, run_dir, scope, defender_dir)
@@ -280,7 +280,7 @@ def bind(
             "importing the learning stages to look it up)."
         )
     return defn.deps_cls._for_run(
-        run_dir, policy, defender_dir=roots.defender_dir, salt=salt, box=box,
+        run_dir, policy, defender_dir=roots.defender_dir, box=box,
         cwd_anchor=(roots.defender_dir.parent if defn.anchors_on_tree else run_dir),
         roots=roots,
     )

@@ -17,7 +17,7 @@ scenario is a few lines of `Turn(...)` against this harness, not a fresh copy of
 the plumbing.
 
 This is NOT a test module (the leading underscore keeps pytest from collecting
-it). Drive a run with `drive(run_dir, run_id=…, salt=…, main=<callable>)`, where
+it). Drive a run with `drive(run_dir, run_id=…, main=<callable>)`, where
 the callable is a `ReplayFn` / `DenyProbe` / `NeverEndsModel` — `drive` wraps it
 in `FunctionModel`, so scripts never touch the pydantic plumbing.
 
@@ -371,16 +371,23 @@ def materialize(tmp_path: Path, golden: Path) -> Path:
     return run_dir
 
 
-def normalize(text: str, *, run_dir: Path, salt: str, run_id: str) -> str:
+#: Every frame delimiter, whatever salt it carries. Since #875 a run has no single salt to
+#: substitute: `wrap_fresh` mints one per frame, after the content is in hand, so normalizing
+#: has to match the SHAPE rather than a known value. Strictly better for a golden diff — it
+#: also normalizes frames the old single-substitution missed (a stage salt, a nested frame).
+_FRAME_TAG_RE = re.compile(r"<(/?)run-[0-9a-f]+-([a-z_-]+)>")
+
+
+def normalize(text: str, *, run_dir: Path, run_id: str) -> str:
     """Strip nondeterministic substrings so a replayed artifact diffs cleanly
-    against a golden (the VCR/snapshot discipline: timestamps, salt, run id)."""
-    return (text.replace(str(run_dir), "<RUN_DIR>")
-                .replace(salt, "<SALT>")
+    against a golden (the VCR/snapshot discipline: timestamps, frame salts, run id)."""
+    return (_FRAME_TAG_RE.sub(r"<\1run-<SALT>-\2>", text)
+                .replace(str(run_dir), "<RUN_DIR>")
                 .replace(run_id, "<RUN_ID>"))
 
 
 def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJECTION SEAM
-        run_dir: Path, *, run_id: str, salt: str, main, gather=None, verbs=None,
+        run_dir: Path, *, run_id: str, main, gather=None, verbs=None,
         limits=None, box=None, store_factory=None, review_stages=None, bounds=None):
     """Run the real driver with injected fake models — no monkeypatching of the
     model symbol. `main`/`gather` are plain replay callables (ReplayFn / DenyProbe
@@ -473,5 +480,5 @@ def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJEC
     with override_allow_model_requests(False):
         return asyncio.run(driver.run_investigation(
             alert_path=run_dir / "alert.json", run_dir=run_dir, run_id=run_id,
-            defender_dir=DEFENDER, salt=salt, make_model=make_model, **seams,
+            defender_dir=DEFENDER, make_model=make_model, **seams,
         ))
