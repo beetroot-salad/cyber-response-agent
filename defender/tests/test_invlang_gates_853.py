@@ -312,15 +312,26 @@ def test_a_collision_with_one_side_refuted_is_not_denied():
     is append-only and `:H` rows are immutable, so a collision already on disk can never be
     edited away; under a declared-set reading every later write to that document would be
     denied for a row the author is not allowed to touch. Refuting one side is the in-grammar
-    move that ends the ambiguity, and it costs nothing: `_check_benign_authz` reads the same
-    live set, so a contract on a refuted hypothesis discharges nothing either way."""
+    move that ends the ambiguity.
+
+    The DECLARING-side exemption is what this pins, and it stands. Its original second half —
+    "and it costs nothing: `_check_benign_authz` reads the same live set, so a contract on a
+    refuted hypothesis discharges nothing either way" — was true of the CONTRACT and false of
+    the ROW that fulfills it, which is #876/F-3: the `:R authz` row carries no hypothesis
+    column, so the refuted declarer's row discharged the live one's same-numbered contract.
+    The assertion is therefore narrowed to the collision error this test is about. Both
+    contracts here also share an ANCHOR KIND, so the benign close is now blocked instead —
+    `test_invlang_gates_876` carries that case and the differing-anchor one it repairs by.
+    """
     doc = _authz_doc(
         "ac1",
         "ac1",
         'l-001|e-001|ac1|authorized|change-mgmt|"CHG-4471 covers the window"',
         refute="h-002",
     )
-    assert not [e for e in validate_companion(doc) if "authz contract" in e]
+    errors = validate_companion(doc)
+    assert not [e for e in errors if "declared by more than one live hypothesis" in e]
+    assert [e for e in errors if "shares BOTH its id and its anchor kind" in e], errors
 
 
 def test_one_authz_row_no_longer_discharges_a_siblings_contract():

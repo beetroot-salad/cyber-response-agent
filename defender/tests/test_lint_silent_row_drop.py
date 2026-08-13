@@ -334,18 +334,36 @@ def test_clean_tree_still_scans(tmp_path):
 
 
 def test_gate_fires_on_its_motivating_findings():
-    """#876, the three drops this gate exists for — the tokenizer half and the two
-    projector halves. They are baselined (landing the gate fixes nothing), so this is the
-    assertion that the gate still SEES them: a gate that stops reporting its own motivating
-    finding is not a gate, and the baseline would hide that silently."""
+    """The drops this gate exists for, still reported. They are baselined, so a gate that
+    quietly stopped SEEING one would look exactly like a clean run: the baseline hides the
+    finding, and nothing else would fail.
+
+    The tokenizer half — `_tokenize_fence:continue:in_story or cur is None`, this gate's
+    original motivating finding — is deliberately absent from the list now: #876/F-2 FIXED
+    it, and it is asserted gone below. Its two projector siblings were not among #876's six
+    findings and remain baselined debt."""
     reported = {f.fingerprint for f in _GATE._scan(_GATE.INVLANG)}
     for fingerprint in (
-        "defender/skills/invlang/parser.py:_tokenize_fence:continue:in_story or cur is None",
         "defender/skills/invlang/parser.py:_Projector._project_shelved_block:continue:not hyp",
         "defender/skills/invlang/parser.py:_Projector._project_surviving_block:"
         "continue:not hid or is_conclude_empty_marker(hid)",
     ):
         assert fingerprint in reported, f"the gate went blind on {fingerprint}"
+
+
+def test_the_tokenizer_half_stays_fixed():
+    """#876/F-2's regression assertion, at the gate's own layer. A line reached with no block
+    open now LANDS in the tokenizer's orphan list and earns one `ParseWarning`, so the site is
+    no longer a finding at all — and this is what would fail if a later edit reverted the
+    landing and the baseline were regenerated to accept it."""
+    reported = {f.fingerprint for f in _GATE._scan(_GATE.INVLANG)}
+    baselined = json.loads(_GATE.BASELINE_PATH.read_text(encoding="utf-8"))["entries"]
+    for fingerprint in (
+        "defender/skills/invlang/parser.py:_tokenize_fence:continue:in_story or cur is None",
+        "defender/skills/invlang/parser.py:_tokenize_fence:continue:in_story",
+    ):
+        assert fingerprint not in reported
+        assert fingerprint not in baselined
 
 
 def test_every_baseline_entry_carries_a_reason():
