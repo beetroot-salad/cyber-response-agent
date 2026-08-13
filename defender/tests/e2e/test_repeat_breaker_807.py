@@ -1158,14 +1158,22 @@ def test_repeat_guard_never_fires_above_its_own_placement(tmp_path):
     """repeat_guard_never_fires_above_its_own_placement — three identical calls to a system
     whose ADAPTER FAILS TO LOAD produce NO `GatherDeadEnd` and no trip row: the load-error
     branch records its row from `_grant_check`, ABOVE M2, so no such call ever reaches the
-    repeat check, and two exit-2 rows mark the system DOWN so the third is answered by the
-    infra breaker's down-message in any case. The `circuit_breaker` owns this shape end to
-    end. Because no such call can reach the guard, its rows are outside the counted domain
+    repeat check, and two exit-2 rows mark the system DOWN so the third IS answered by the
+    infra breaker's down-message. The `circuit_breaker` owns this shape end to end. Because no
+    such call can reach the guard, its rows are outside the counted domain
     (`counted_domain_excludes_validate_path_rows`) and a REPLAY over this run's own table must
     reach the same verdict the live run did — at any threshold, including the N = 2 the two
     recorded rows would otherwise satisfy. Positive control:
     `repeat_trips_on_third_identical_request`, the same three identical calls against a
-    loadable adapter, which DOES trip."""
+    loadable adapter, which DOES trip.
+
+    AMENDED at #878 F-07. The count assertion was `>= 2`, which passed at 3 — the shape where
+    the third call is recorded and answered by the load error again, never by the breaker. That
+    is what the code did, and it contradicted this docstring, the demand in
+    `spec_graph_807.yaml:450-461` and `rejection_trip`'s own justification for excluding these
+    rows. It is now `== 2`, and the down-message is asserted positively rather than inferred
+    from `is_tripped`. `load_error_repeat_is_answered_by_the_breaker_not_the_run_kill` drives
+    the same shape past the fifth call, where the old behaviour cost the run."""
     r = _run(
         tmp_path / "run", verbs=unloadable_adapter(tmp_path / "tree"), run_id="d807-loaderr",
         turns=[
@@ -1175,15 +1183,50 @@ def test_repeat_guard_never_fires_above_its_own_placement(tmp_path):
             DONE,
         ])
     rows = r.own_rows
-    assert len(rows) >= 2, "the load-error branch stopped recording its rows"
+    assert len(rows) == 2, \
+        "the third load-error call was recorded — the breaker that owns this repeat never answered it"
     assert {row["exit_code"] for row in rows} == {2}, \
         "a load-error call was recorded as anything other than the infra fault it is"
     assert all(row["exit_code"] != 64 for row in rows), "the guard wrote a trip row above its placement"
     assert circuit_breaker.is_tripped(r.run_dir, "elastic") is True
+    assert "is DOWN" in r.gather_saw, "the third call was not answered by the down-message"
     assert r.gather.calls == 4, "a GatherDeadEnd ended the lead where the infra breaker owns it"
     assert INCOMPLETE_IDIOM not in r.summary()
     assert _replay(rows, threshold=2) == [], \
         "replay tripped on rows `_grant_check` wrote above M2 — live and replay disagree"
+
+
+def test_load_error_repeat_is_answered_by_the_breaker_not_the_run_kill(tmp_path):
+    """#878 F-07 — FIVE identical calls to a system whose adapter fails to load leave exactly
+    TWO rows and three down-messages, and the run survives.
+
+    `verbs._load_adapter_module` caches only on success, so every call in this class re-runs
+    the failing import and `_record`'s tail hands every one of them to
+    `circuit_breaker.record_outcome`. With the breaker consulted only BELOW `_grant_check`'s
+    return, all five were recorded: the second marked the system down with nothing reading it,
+    and the fifth crossed `RUN_FAIL_KILL_LIMIT = 5` and raised `RunAborted` — which
+    `_run_gather` does not catch and `_drive_agent`'s `RunAborted` arm does not force a close
+    for, so the run ended with no gather summary, no resumed MAIN and no `report.md`.
+
+    The three assertions that separate the fix from the defect: `total_failures` stays at
+    `PER_SYSTEM_FAIL_LIMIT` rather than reaching the kill limit (a tripped breaker means the
+    call did not happen, so it counts no failure), the lead still produces its summary, and
+    MAIN still reaches its own final turn."""
+    r = _run(
+        tmp_path / "run", verbs=unloadable_adapter(tmp_path / "tree"), run_id="d878-loaderr",
+        turns=[q("elastic", "probe", {"native_query": "FROM logs"})] * 5 + [DONE])
+    rows = r.own_rows
+    assert len(rows) == 2, "a call answered by the down-message still recorded an evidence row"
+    assert {row["exit_code"] for row in rows} == {2}
+    assert r.gather_saw.count("is DOWN") == 3, \
+        "the three calls past the trip were not each answered by the breaker's down-message"
+    assert r.breaker["total_failures"] == circuit_breaker.PER_SYSTEM_FAIL_LIMIT, \
+        "a down-answered call counted a failure — five of them spend RUN_FAIL_KILL_LIMIT"
+    assert r.breaker["total_failures"] < circuit_breaker.RUN_FAIL_KILL_LIMIT
+    assert r.gather.calls == 6, "the lead ended early — RunAborted or a dead end cut it short"
+    assert INCOMPLETE_IDIOM not in r.summary(), "the lead reported itself incomplete"
+    assert r.main.calls == 2, \
+        "MAIN never resumed after the gather lead — the run died inside it"
 
 
 def test_repeat_trip_empty_params_is_its_own_domain_member(tmp_path):

@@ -558,6 +558,28 @@ def _is_cross_agent_read(deps: AgentDeps, path: Path) -> bool:
     return bool(role_name) and resolved.name == f"{role_name}.md"
 
 
+def _probe_is_file(p: Path, path: str) -> bool:
+    """`p.is_file()` over a MODEL-AUTHORED path, as a refusal rather than a traceback (#878
+    F-15).
+
+    `pathlib` swallows only `_IGNORED_ERRNOS` — ENOENT/ENOTDIR/EBADF/ELOOP — and every other
+    `os.stat` error comes back out. The reachable one is ENAMETOOLONG (errno 36): the read gate
+    ALLOWS a basename over `NAME_MAX`, because MAIN's and GATHER's run-root read shape is
+    `under(run, SEG)` with `SEG = [\\w.@=+-]+`, which places no length bound, and
+    `Path.resolve()` does not stat. So an allowed path reached the probe and raised — outside
+    every `try`, past `on_tool_execute_error`, past all five of `_drive_agent`'s handlers and
+    out of `asyncio.run` — ending the run with no disposition and no `report.md`.
+
+    Bounding `SEG` is deliberately NOT the fix: the probe has to survive an allowed path
+    whatever its shape. This is the read-side twin of the bound `_run_paths.LEAD_ID_BODY` that
+    #855 F-12 gave the write side for the same reason — a model-minted string spent as a
+    filename component."""
+    try:
+        return p.is_file()
+    except OSError as e:
+        raise ModelRetry(f"could not read {path}: {e}") from None
+
+
 def _gated_read(
     deps: AgentDeps, path: str, *, lesson_corpora: frozenset[str] = _RUNTIME_LESSON_CORPORA
 ) -> tuple[Path, str]:
@@ -568,7 +590,7 @@ def _gated_read(
     )
     if not decision.allow:
         raise ModelRetry(decision.reason)
-    if not p.is_file():
+    if not _probe_is_file(p, path):
         raise ModelRetry(f"file not found: {path}")
     _deny_authored_read(deps, p)
     try:
@@ -680,11 +702,17 @@ def _tool_edit_file(deps: AgentDeps, path: str, old_string: str, new_string: str
     )
     if not read_decision.allow:
         raise ModelRetry(read_decision.reason)
+    # ONE probe, not the two this read (#878 F-15: each was its own unguarded `os.stat`) and
+    # the empty-`old_string` check below used to make: they are asking the same question about
+    # the same path, and a second stat could answer it differently.
+    exists = _probe_is_file(p, path)
     try:
-        current = read_text_utf8(p) if p.is_file() else ""
+        current = read_text_utf8(p) if exists else ""
     except UnicodeDecodeError:
         raise ModelRetry(f"{path} is not valid UTF-8 text (binary or corrupt)") from None
-    if not old_string and p.is_file():
+    except OSError as e:
+        raise ModelRetry(f"could not read {path}: {e}") from None
+    if not old_string and exists:
         raise ModelRetry(
             f"{path} already exists; an empty old_string would overwrite it. "
             "Pass a unique old_string to edit, or use write_file to replace it."

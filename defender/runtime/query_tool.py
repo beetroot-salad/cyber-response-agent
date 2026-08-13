@@ -332,6 +332,24 @@ class QueryCapture(AbstractCapability[Any]):
         caller must return without ever reaching execution."""
         decision, load_error = self._decide_guarded(system, verb)
         if load_error is not None:
+            # THE BREAKER CHECK, consulted HERE rather than only at `wrap_tool_execute:429`
+            # (#878 F-07). Two modules promise this class's repeat is owned end to end by
+            # `circuit_breaker` — `rejection_trip`'s docstring excludes these `infra` rows from
+            # the companion guard on exactly that promise, and the comment at the unresolvable
+            # branch below repeats it. The promise was false for as long as the check sat
+            # BELOW this return: `verbs._load_adapter_module` caches only on success, so the
+            # same import re-failed on every call, `_record`'s tail fed each one to
+            # `record_outcome`, and no call of this class was ever answered by the
+            # down-message. The second failure marked the system down and nothing read it; the
+            # fifth crossed `RUN_FAIL_KILL_LIMIT` and `RunAborted` ended the run with no
+            # disposition. Ahead of `_record`, so the down-answer neither writes a third row
+            # nor counts a third failure — the point of a tripped breaker is that the call did
+            # not happen. NOT hoisted above `_grant_check` entirely: the DENIED branch below
+            # owes its denial record whatever else is wrong with the call (§7 R3/R23), and a
+            # breaker answer ahead of the grant would swallow it.
+            tripped = _tripped_message(deps, system)
+            if tripped is not None:
+                return None, tripped
             row, text = await self._record(
                 deps, system=system, verb=verb,
                 query_id=ABOVE_GUARD_QUERY_ID, params=params, payload=None,
@@ -351,9 +369,10 @@ class QueryCapture(AbstractCapability[Any]):
         if decision.outcome != GRANTED:
             # The unresolvable-verb repeat class — the same shape as the schema class at a
             # different placement (#826 item 4), and the reason the companion guard is reached
-            # from both. The load-error branch above is deliberately NOT guarded: its rows are
-            # `infra`, outside `rejection_trip`'s domain, and `circuit_breaker` already owns
-            # that repeat end to end.
+            # from both. The load-error branch above is deliberately NOT guarded by THIS
+            # guard: its rows are `infra`, outside `rejection_trip`'s domain, and
+            # `circuit_breaker` owns that repeat end to end — which since #878 F-07 it
+            # actually does, by consulting the breaker in the branch itself.
             # The same coarsening the schema placement applies, for the same reason (#855
             # F-06) and with the same domain: an unresolvable call is unresolvable precisely
             # because the grant reached no system by that name, so the string it names is the

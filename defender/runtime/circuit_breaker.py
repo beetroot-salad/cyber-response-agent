@@ -83,7 +83,39 @@ def _load(run_dir: Path) -> dict:
     # dir can produce for free.
     if not isinstance(doc, dict):
         return {**_blank(), "_unreadable": True}
+    # ...and NEITHER is a dict whose `systems` is `5`, whose per-system record is `7`, or whose
+    # `failures`/`total_failures` is `"x"` (#878 F-25). Below the top level every reader
+    # dereferenced bare: `is_tripped` raised `AttributeError` on the first two and `TypeError`
+    # on the third, from a call site outside every `try` — `query_tool`'s breaker check and the
+    # judge's — and killed the process. The check belongs HERE, with the top level's, because
+    # the rider is one rule: a state this module cannot read must not read as a healthy,
+    # freshly initialised breaker.
+    #
+    # UNREADABLE, not coerced. Coercing `{"systems": 5}` to `{}` would answer "no system is
+    # down", which is the fail-OPEN the rider spends this whole function refusing, and the
+    # writer that produced the shape is the one an out-of-band write into the rw-bound run root
+    # comes from. `lead_zero._breaker_failures` coerces instead because its reader answers a
+    # COUNT for a resolution step, where zero is the safe answer; here the answer is a gate.
+    if not _shape_ok(doc):
+        return {**_blank(), "_unreadable": True}
     return doc or _blank()
+
+
+def _is_count(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _shape_ok(doc: dict) -> bool:
+    """Every level below the top, in the shape `is_tripped`/`down_message` dereference it."""
+    if "total_failures" in doc and not _is_count(doc["total_failures"]):
+        return False
+    systems = doc.get("systems", {})
+    if not isinstance(systems, dict):
+        return False
+    return all(
+        isinstance(rec, dict) and ("failures" not in rec or _is_count(rec["failures"]))
+        for rec in systems.values()
+    )
 
 
 def record_outcome(run_dir: Path, system: str, exit_code: int) -> dict:
@@ -91,20 +123,37 @@ def record_outcome(run_dir: Path, system: str, exit_code: int) -> dict:
         return {}
 
     def _mutate(state: dict) -> None:
-        state.setdefault("systems", {})
-        sysrec = state["systems"].setdefault(system, {"failures": 0})
+        # The writer coerces where `_load` refuses (#878 F-25). It cannot fail closed — it has
+        # to leave a countable document behind — so a level it cannot read as a counter it
+        # starts that counter over from, which is what `default=_blank` already does for the
+        # document as a whole. `state["systems"].setdefault(...)`, `sysrec["failures"] += 1`
+        # and `state.get("total_failures", 0) + 1` each raised on a shape the run dir's other
+        # writer can produce for free.
+        if not isinstance(state.get("systems"), dict):
+            state["systems"] = {}
+        sysrec = state["systems"].get(system)
+        if not isinstance(sysrec, dict) or not _is_count(sysrec.get("failures")):
+            sysrec = {"failures": 0}
+            state["systems"][system] = sysrec
         sysrec["failures"] += 1
-        state["total_failures"] = state.get("total_failures", 0) + 1
+        prior = state.get("total_failures", 0)
+        state["total_failures"] = (prior if _is_count(prior) else 0) + 1
         if sysrec["failures"] >= PER_SYSTEM_FAIL_LIMIT and "tripped_at" not in sysrec:
             sysrec["tripped_at"] = now_iso()
 
     try:
         state = update_json_locked(_path(run_dir), _mutate, default=_blank)
-    except OSError:
+    except (OSError, TypeError, AttributeError, ValueError):
         # A robustness fix regardless of §7 D3's exemption (rider #1): today this propagates
         # uncaught PAST `_drive_agent`'s four-type catch and crashes the process harder than
         # `BudgetKill` would. A refused write here is contained at the writer, same as every
         # other alias refusal — it does not get to also be the reason the run crashes.
+        #
+        # Shape faults join `OSError` for exactly that reason (#878 F-25): the coercions in
+        # `_mutate` above are what SHOULD keep them from arising, and this arm is what honours
+        # the rule when a level neither it nor `_shape_ok` anticipated turns up. Failing the
+        # write closed is safe on both sides — `_load` reads a document it cannot parse as
+        # `_unreadable`, which is DOWN.
         return {}
 
     if state.get("total_failures", 0) >= RUN_FAIL_KILL_LIMIT:

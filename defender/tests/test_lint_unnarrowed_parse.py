@@ -365,17 +365,30 @@ def test_the_shipped_baseline_carries_a_reason_for_every_entry():
 
 
 def test_the_motivating_findings_are_in_the_shipped_baseline():
-    """A gate that does not fire on the defect it exists for is not landed. These four are
-    #878's: the `_run_dir` seam that CAUSED the two audit findings, and the two bare
-    `fromisoformat` sites."""
+    """A gate that does not fire on the defect it exists for is not landed. One of #878's four
+    motivating sites is still open and still reported — the positive control that this gate
+    fires on REAL code and not only on the synthetic seams above.
+
+    THE OTHER THREE ARE FIXED, and are asserted GONE rather than deleted from this test (#878).
+    They were the whole reason the gate was landed, so "the gate no longer reports them" is the
+    statement worth keeping: `read_json_locked` and `update_json_locked` now narrow their parse
+    to a dict at the seam, and `_wall_origin` now goes through `_clock.parse_iso_utc`. Each is
+    also out of the shipped baseline, so a re-widening comes back as a NEW finding and fails the
+    ratchet — which is the regression this direction of the assertion protects.
+
+    `lead_zero._correlation_contract` stays open deliberately: it is the same hand-rolled half
+    of `parse_iso_utc`, but it PARSES ONLY TO VALIDATE and discards the value, so no naive-vs-
+    aware comparison is reachable from it. It is a debt this gate names, not one of #878's five
+    reachable faults, and #878 did not widen its scope to collect it."""
     fingerprints = {f.fingerprint for f in _GATE._scan(_GATE.DEFENDER)}
-    for fp in (
+    assert "defender/runtime/lead_zero.py:_correlation_contract:unowned-iso-parse" in fingerprints
+
+    for fixed in (
         "defender/hooks/_run_dir.py:read_json_locked:unnarrowed-parse",
         "defender/hooks/_run_dir.py:update_json_locked:unnarrowed-parse",
         "defender/hooks/budget_enforcer.py:_wall_origin:unowned-iso-parse",
-        "defender/runtime/lead_zero.py:_correlation_contract:unowned-iso-parse",
     ):
-        assert fp in fingerprints, fp
+        assert fixed not in fingerprints, f"{fixed} was re-widened after #878 narrowed it"
 
 
 def test_the_readers_of_a_laundered_value_are_not_reported():
