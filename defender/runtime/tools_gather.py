@@ -45,11 +45,19 @@ class GatherRequest:
     what_to_summarize: tuple[str, ...]
 
 
-#: `(agent_id, system) -> the built gather agent`. Named and ANNOTATED because #835 widened it
-#: from one argument to two: the seam is untyped at both call sites otherwise, so a stale
-#: one-argument factory surfaces as a `TypeError` raised where no terminator arm catches it —
+#: `(agent_id, system, request_limit) -> the built gather agent`. Named and ANNOTATED because
+#: #835 widened it from one argument to two: the seam is untyped at both call sites otherwise,
+#: so a stale factory surfaces as a `TypeError` raised where no terminator arm catches it —
 #: outside the try in `_run_gather` — and unwinds through main's tool call mid-lead.
-GatherFactory = Callable[[str, str], Any]
+#:
+#: `request_limit` is the third argument for #880 F-19's residue. The factory builds this
+#: lead's history recorder, and that recorder must withhold the doomed round against the SAME
+#: ceiling `_run_gather` is about to enforce with `UsageLimits`. It used to be told nothing, so
+#: each factory named a ceiling of its own from a module constant — and the correlation
+#: dispatch, whose ceiling is 8 rather than 40, named the wrong one and committed a round that
+#: was never sent. Passing the run's own value leaves the two unable to disagree; naming it
+#: twice in two modules only left them agreeing by inspection.
+GatherFactory = Callable[[str, str, int], Any]
 
 
 def _tripped_message(deps: GatherDeps, system: str | None) -> str | None:
@@ -525,7 +533,11 @@ async def _run_gather(  # noqa: C901 — the branch count IS the terminator cens
     # this lead's session and its wire-log lines; `system` is what the composition root keys the
     # prompt-cache lane on, because the prefix this dispatch shares with its siblings is the
     # system's, not the lead's. The factory owns that policy — this frame only knows both facts.
-    gagent = gather_factory(agent_id, system)
+    #
+    # `request_limit` is handed over for the same reason and is THIS frame's own (#880 F-19
+    # residue): it is the value the `UsageLimits` below enforces, so a recorder the factory
+    # builds to mirror that ceiling cannot be measuring a different one.
+    gagent = gather_factory(agent_id, system, request_limit)
     gbase = bind(
         GATHER_DEF, deps.run_dir, salt=deps.salt, defender_dir=deps.defender_dir, box=deps.box,
     )

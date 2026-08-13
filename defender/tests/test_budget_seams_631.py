@@ -190,7 +190,7 @@ def test_budget_kill_is_not_control_flow(tmp_path):
             seen_gather_deps.append(kwargs["deps"])
             raise BudgetKill("tail exhausted")
 
-    def killing_factory(agent_id, system):
+    def killing_factory(agent_id, system, request_limit):
         return _KillingAgent()
 
     import asyncio
@@ -523,7 +523,7 @@ def _registered_names(defn) -> set[str]:
     if defn is MAIN_DEF:
         from defender.runtime.tools import register_gather_tool
         register_gather_tool(
-            agent, lambda agent_id, system: agent, driver.GATHER_REQUEST_LIMIT,
+            agent, lambda agent_id, system, request_limit: agent, driver.GATHER_REQUEST_LIMIT,
             driver.GATHER_DEF.verb_grant,
         )
     return set(agent._function_toolset.tools)
