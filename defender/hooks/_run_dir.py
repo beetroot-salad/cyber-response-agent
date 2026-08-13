@@ -7,7 +7,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from defender._io import locked_for_rewrite
+from defender._io import TEXT_READ_ERRORS, locked_for_rewrite
 
 
 def update_json_locked(
@@ -30,7 +30,15 @@ def update_json_locked(
     read as state is a document it starts over from."""
     path = Path(path)
     with locked_for_rewrite(path) as f:
-        raw = f.read()
+        # UNDECODABLE is the same case as unparseable, and it is reached one step EARLIER: the
+        # handle is text-mode utf-8, so a `budget.json` holding non-UTF-8 bytes raised
+        # `UnicodeDecodeError` out of the read, above every guard below it — out of
+        # `open_budget` before MAIN's first prompt, which is the F-17 harm reached through the
+        # read rather than the parse. `""` here, so the fallback is `default()` below.
+        try:
+            raw = f.read()
+        except UnicodeDecodeError:
+            raw = ""
         try:
             state = json.loads(raw) if raw else default()
         except json.JSONDecodeError:
@@ -61,11 +69,22 @@ def read_json_locked(path: Path) -> dict:
     path = Path(path)
     if not path.is_file():
         return {}
+    # A SYMLINK at the state's name is not this run's state, the same judgement
+    # `locked_for_rewrite` makes on the write side (#771 M3) and `circuit_breaker._load` makes
+    # on its own read side. `is_file()` above DEREFERENCES, so without this the reader followed
+    # a planted alias and read whatever the planter aimed it at as `budget.json` — the one
+    # shape the write side spends the whole of M3 refusing, left open on the read.
+    if path.is_symlink():
+        return {}
+    # `TEXT_READ_ERRORS`, not a bare `OSError`: `f.read()` on a text handle also raises
+    # `UnicodeDecodeError` (a `ValueError`), and non-UTF-8 bytes in the rw-bound run root came
+    # back out of `read_budget` un-caught — the F-17(a) harm reached through the read instead of
+    # the parse, on the very seam this function narrows.
     try:
         with open(path, encoding="utf-8") as f:
             fcntl.flock(f, fcntl.LOCK_SH)
             raw = f.read()
-    except OSError:
+    except TEXT_READ_ERRORS:
         return {}
     try:
         doc = json.loads(raw) if raw else {}

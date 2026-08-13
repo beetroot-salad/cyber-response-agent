@@ -154,27 +154,51 @@ def test_non_list_what_to_summarize_silently_skips(tmp_path):
     assert not (run_dir / "gather_raw" / "l-001.lead.json").exists()
 
 
+def _fd_is_closed(fd: int) -> bool:
+    """Whether `fd` names no open descriptor — `EBADF` on the errno, never on `strerror`, which
+    is libc's and locale-dependent."""
+    try:
+        os.fstat(fd)
+    except OSError as e:
+        return e.errno == errno.EBADF
+    return False
+
+
 def test_fdopen_failure_removes_empty_sidecar_and_allows_retry(tmp_path, monkeypatch):
     """A write failure after the O_EXCL create must not leave a 0-byte sidecar:
     it would degrade the lead to an orphan AND falsely reject a same-id retry.
 
-    NAMED for the branch it actually drives (#878 F-36). The stub closes the fd itself and
-    raises FROM `os.fdopen`, so this is the one case where ownership never transferred and the
-    hook still owes the fd a close — not the flush failure its "disk full" message names.
-    `failed_flush_does_not_close_a_descriptor_it_no_longer_owns` below drives that one."""
+    NAMED for the branch it actually drives (#878 F-36). The stub raises FROM `os.fdopen`, so
+    this is the one case where ownership never transferred and the hook still owes the fd a
+    close — not the flush failure its "disk full" message names.
+    `failed_flush_does_not_close_a_descriptor_it_no_longer_owns` below drives that one.
+
+    The stub LEAVES THE FD OPEN, which is what the real failure does: `io.open` over a passed-in
+    descriptor sets `fd_is_own = 0`, so a `FileIO` init fault — the OSError arm this branch
+    exists for — returns with the descriptor untouched. A stub that closed it first would make
+    the hook's own `os.close(fd)` the second close F-36 is about, silently absorbed by
+    `contextlib.suppress` and invisible to every assertion here. The fd is captured instead, and
+    `os.fstat` on it afterwards is what proves the hook closed the one it still owned."""
     run_dir = tmp_path / "run"
     (run_dir / "gather_raw").mkdir(parents=True)
     dispatch = _dispatch(run_dir, "l-001", "g", ["d"])
 
     real_fdopen = os.fdopen
+    handed_out: list[int] = []
 
     def boom(fd, *a, **k):
-        os.close(fd)
+        handed_out.append(fd)
         raise OSError("fdopen refused the descriptor")
 
     monkeypatch.setattr(os, "fdopen", boom)
-    assert claim_lead(dispatch) == NOT_CLAIMED
-    monkeypatch.setattr(os, "fdopen", real_fdopen)
+    try:
+        assert claim_lead(dispatch) == NOT_CLAIMED
+    finally:
+        monkeypatch.setattr(os, "fdopen", real_fdopen)
+
+    assert len(handed_out) == 1, "the claim never reached fdopen"
+    assert _fd_is_closed(handed_out[0]), \
+        "the never-took-ownership branch leaked the descriptor it still owned"
 
     sidecar = run_dir / "gather_raw" / "l-001.lead.json"
     assert not sidecar.exists()

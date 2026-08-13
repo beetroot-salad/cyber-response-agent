@@ -580,6 +580,20 @@ def _probe_is_file(p: Path, path: str) -> bool:
         raise ModelRetry(f"could not read {path}: {e}") from None
 
 
+def _probe_read_text(p: Path, path: str) -> str:
+    """`read_text_utf8(p)` over a MODEL-AUTHORED path, as a refusal rather than a traceback.
+
+    The other half of `_probe_is_file`, and ONE copy of it: `_gated_read` and `_tool_edit_file`
+    both read the same operand under the same two fault classes (undecodable, unreadable) and
+    owe the model the same two refusals, which they had been spelling separately."""
+    try:
+        return read_text_utf8(p)
+    except UnicodeDecodeError:
+        raise ModelRetry(f"{path} is not valid UTF-8 text (binary or corrupt)") from None
+    except OSError as e:
+        raise ModelRetry(f"could not read {path}: {e}") from None
+
+
 def _gated_read(
     deps: AgentDeps, path: str, *, lesson_corpora: frozenset[str] = _RUNTIME_LESSON_CORPORA
 ) -> tuple[Path, str]:
@@ -593,12 +607,7 @@ def _gated_read(
     if not _probe_is_file(p, path):
         raise ModelRetry(f"file not found: {path}")
     _deny_authored_read(deps, p)
-    try:
-        text = read_text_utf8(p)
-    except UnicodeDecodeError:
-        raise ModelRetry(f"{path} is not valid UTF-8 text (binary or corrupt)") from None
-    except OSError as e:
-        raise ModelRetry(f"could not read {path}: {e}") from None
+    text = _probe_read_text(p, path)
     _record_lesson_load(deps, p, lesson_corpora)
     return p, text
 
@@ -706,12 +715,7 @@ def _tool_edit_file(deps: AgentDeps, path: str, old_string: str, new_string: str
     # the empty-`old_string` check below used to make: they are asking the same question about
     # the same path, and a second stat could answer it differently.
     exists = _probe_is_file(p, path)
-    try:
-        current = read_text_utf8(p) if exists else ""
-    except UnicodeDecodeError:
-        raise ModelRetry(f"{path} is not valid UTF-8 text (binary or corrupt)") from None
-    except OSError as e:
-        raise ModelRetry(f"could not read {path}: {e}") from None
+    current = _probe_read_text(p, path) if exists else ""
     if not old_string and exists:
         raise ModelRetry(
             f"{path} already exists; an empty old_string would overwrite it. "

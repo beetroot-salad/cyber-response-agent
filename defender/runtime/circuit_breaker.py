@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 
 from defender._clock import now_iso
+from defender._io import TEXT_READ_ERRORS
 from defender.hooks._run_dir import update_json_locked
 
 PER_SYSTEM_FAIL_LIMIT = 2
@@ -68,9 +70,14 @@ def _load(run_dir: Path) -> dict:
         return _blank()
     if p.is_symlink():
         return {**_blank(), "_unreadable": True}
+    # `TEXT_READ_ERRORS`, not a bare `OSError`: reading a text file can also fail UNDECODABLE
+    # (`UnicodeDecodeError`, a `ValueError`), and a run root the box bind-mounts rw is a place
+    # non-UTF-8 bytes land for free. With only `OSError` named here that decode error came back
+    # out of `is_tripped`/`down_message` — outside every `try` at both call sites — which is
+    # exactly the F-25 harm one line below this, reached through the read instead of the parse.
     try:
         text = p.read_text(encoding="utf-8")
-    except OSError:
+    except TEXT_READ_ERRORS:
         return {**_blank(), "_unreadable": True}
     try:
         doc = json.loads(text or "{}")
@@ -106,14 +113,17 @@ def _is_count(value: object) -> bool:
 
 
 def _shape_ok(doc: dict) -> bool:
-    """Every level below the top, in the shape `is_tripped`/`down_message` dereference it."""
-    if "total_failures" in doc and not _is_count(doc["total_failures"]):
+    """Every level below the top, in the shape `is_tripped`/`down_message` dereference it.
+
+    An ABSENT counter is spelled as the `0` those readers already default it to, so the
+    membership test and the type test are one expression rather than two that could disagree."""
+    if not _is_count(doc.get("total_failures", 0)):
         return False
     systems = doc.get("systems", {})
     if not isinstance(systems, dict):
         return False
     return all(
-        isinstance(rec, dict) and ("failures" not in rec or _is_count(rec["failures"]))
+        isinstance(rec, dict) and _is_count(rec.get("failures", 0))
         for rec in systems.values()
     )
 
@@ -143,7 +153,7 @@ def record_outcome(run_dir: Path, system: str, exit_code: int) -> dict:
 
     try:
         state = update_json_locked(_path(run_dir), _mutate, default=_blank)
-    except (OSError, TypeError, AttributeError, ValueError):
+    except (OSError, TypeError, AttributeError, ValueError) as e:
         # A robustness fix regardless of §7 D3's exemption (rider #1): today this propagates
         # uncaught PAST `_drive_agent`'s four-type catch and crashes the process harder than
         # `BudgetKill` would. A refused write here is contained at the writer, same as every
@@ -154,6 +164,14 @@ def record_outcome(run_dir: Path, system: str, exit_code: int) -> dict:
         # the rule when a level neither it nor `_shape_ok` anticipated turns up. Failing the
         # write closed is safe on both sides — `_load` reads a document it cannot parse as
         # `_unreadable`, which is DOWN.
+        #
+        # NEVER SILENTLY, though: a refused write here means infra failures stop being counted
+        # for the rest of the run — no trip, no `RUN_FAIL_KILL_LIMIT` — and the whole point of
+        # containing the fault at the writer is that it is observable somewhere. Same channel
+        # `_decide_guarded` and `flagged_diagnostics` use for their own fail-safe arms.
+        print(f"[circuit-breaker] outcome for {system!r} not recorded "
+              f"({type(e).__name__}: {e}); this run's failure count no longer advances",
+              file=sys.stderr)
         return {}
 
     if state.get("total_failures", 0) >= RUN_FAIL_KILL_LIMIT:

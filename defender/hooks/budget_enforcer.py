@@ -163,10 +163,23 @@ def _accounting_failure_path(run_dir: Path) -> Path:
 
 
 def accounting_failure_state(run_dir: Path) -> dict:
+    """The two accounting-failure counters, NORMALISED — a corrupt sidecar reads as "no
+    failures yet", never as a value the callers then arithmetic on.
+
+    `read_json_locked` narrows the DOCUMENT to a dict; it says nothing about the values inside
+    it, and both readers of this state do arithmetic: `int(state.get(...))` raised `ValueError`
+    on a string count, and `_record_accounting_failure`'s `time.monotonic() - first_failure_at`
+    raised `TypeError` on a non-number stamp — from inside `account_call`'s `except OSError`
+    arm, which has no handler for either. The seam narrowing #878 landed does not reach here,
+    which is the half `lint_unnarrowed_parse`'s own docstring says it deliberately does not
+    mechanize."""
     state = read_json_locked(_accounting_failure_path(run_dir))
+    stamp = state.get("first_failure_at")
     return {
-        "consecutive_failures": int(state.get("consecutive_failures", 0) or 0),
-        "first_failure_at": state.get("first_failure_at"),
+        "consecutive_failures": _valid_count(state.get("consecutive_failures")) or 0,
+        "first_failure_at": (
+            stamp if isinstance(stamp, (int, float)) and not isinstance(stamp, bool) else None
+        ),
     }
 
 

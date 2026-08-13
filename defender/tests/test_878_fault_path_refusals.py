@@ -16,6 +16,7 @@ the_run_kill`. F-36's amendment lives with `claim_lead`'s other rollback tests, 
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -96,7 +97,7 @@ def test_read_file_refuses_an_overlong_basename_instead_of_raising(tmp_path):
     run_dir, deps = _main_deps(tmp_path)
     with pytest.raises(ModelRetry) as excinfo:
         tools._gated_read(deps, str(run_dir / _LONG_NAME))
-    assert "File name too long" in str(excinfo.value) or "too long" in str(excinfo.value)
+    assert "too long" in str(excinfo.value)
 
 
 def test_edit_file_refuses_an_overlong_basename_instead_of_raising(tmp_path):
@@ -178,14 +179,21 @@ def test_a_naive_created_at_does_not_raise_out_of_the_elapsed_check(tmp_path):
 
     `open_budget`'s `setdefault` PRESERVES such a stamp rather than replacing it, which is what
     makes the shape survive into enforcement; the second arm asserts exactly that, so the fix
-    cannot be mistaken for "the open rewrites it"."""
-    naive = {"run_id": "r", "tool_calls": 0, "created_at": "2026-08-13T00:00:00"}
+    cannot be mistaken for "the open rewrites it".
+
+    The stamp is derived from NOW rather than written as a literal date: a literal makes the
+    "past the cap" arm a fact about the calendar, so the test is a no-op before that date and a
+    failure on any machine whose clock has not reached it — a suite that passes because time
+    passed is not asserting the narrowing."""
+    stamp = (datetime.now(UTC) - timedelta(days=1)).replace(tzinfo=None).isoformat()
+    assert datetime.fromisoformat(stamp).tzinfo is None, "the seed stamp is not naive"
+    naive = {"run_id": "r", "tool_calls": 0, "created_at": stamp}
     (tmp_path / "budget.json").write_text(json.dumps(naive), encoding="utf-8")
 
-    assert open_budget(tmp_path, "r")["created_at"] == "2026-08-13T00:00:00", \
+    assert open_budget(tmp_path, "r")["created_at"] == stamp, \
         "the open replaced the naive stamp — this shape no longer reaches enforcement"
     assert tail_exhausted(read_budget(tmp_path), DEFAULT_LIMITS) is True, \
-        "a 2026-08-13 origin is far past the wall-clock cap; a False here means it was not read"
+        "a day-old origin is far past the wall-clock cap; a False here means it was not read"
 
 
 def test_a_naive_origin_is_read_as_utc_not_dropped(tmp_path):
@@ -283,6 +291,76 @@ def test_a_healthy_state_still_reads_and_trips(tmp_path):
     assert "UNREADABLE" not in msg
     assert "2 connectivity/auth failures" in msg
     assert cb.is_tripped(tmp_path, "identity") is False, "one system's failures tripped another"
+
+
+# ---------------------------------------------------------------------------------------
+# The read half of the same seam: UNDECODABLE bytes, and an alias at the state's name
+# ---------------------------------------------------------------------------------------
+
+#: A byte the utf-8 decoder cannot start a sequence with. The run root is bind-mounted rw into
+#: the box, so "not utf-8" needs no more privilege than "not a dict" does.
+_UNDECODABLE = b'\xff\xfe{"systems": {}}'
+
+
+def test_is_tripped_returns_a_verdict_over_undecodable_bytes(tmp_path):
+    """`_load` guarded its `read_text` with `OSError` alone. Reading a text file has a SECOND
+    fault class — `UnicodeDecodeError`, a `ValueError` — so non-UTF-8 bytes at the breaker's
+    name raised out of `is_tripped`, from the same call sites and past the same handlers as the
+    nested shapes above. Same verdict as every other unreadable state: DOWN."""
+    (tmp_path / "circuit_breaker.json").write_bytes(_UNDECODABLE)
+    assert cb.is_tripped(tmp_path, "elastic") is True
+    assert "UNREADABLE" in cb.down_message(tmp_path, "elastic")
+    assert isinstance(cb.record_outcome(tmp_path, "elastic", 2), dict)
+
+
+def test_the_budget_readers_survive_undecodable_bytes(tmp_path):
+    """The same fault class on the same seam, both directions. `read_json_locked`'s
+    `except OSError` and `update_json_locked`'s bare `f.read()` each let a
+    `UnicodeDecodeError` out of a text-mode handle — out of `read_budget` into
+    `_budget_state_for_enforcement`, and out of `open_budget` before MAIN's first prompt. It is
+    F-17's harm reached one step earlier than the parse the fix narrowed."""
+    (tmp_path / "budget.json").write_bytes(_UNDECODABLE)
+    assert read_budget(tmp_path) == {}
+    assert tail_exhausted({**read_budget(tmp_path), "started_monotonic": None},
+                          DEFAULT_LIMITS) is False
+    assert open_budget(tmp_path, "run-878")["run_id"] == "run-878"
+    assert json.loads((tmp_path / "budget.json").read_text(encoding="utf-8"))["tool_calls"] == 0
+
+
+def test_read_json_locked_refuses_an_alias_at_the_state_name(tmp_path):
+    """A SYMLINK at `budget.json` reads as no state, not as whatever it points at.
+
+    `update_json_locked` goes through `locked_for_rewrite`, which refuses a non-plain target
+    before it locks anything (#771 M3), and `circuit_breaker._load` refuses one on its own read
+    side. `read_json_locked` — the read half of the same pair — followed it, so the box could
+    aim the enforcement path's state read at any file it liked."""
+    outside = tmp_path / "outside.json"
+    outside.write_text(json.dumps({"run_id": "not-this-run", "tool_calls": 10 ** 6}),
+                       encoding="utf-8")
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    (run_dir / "budget.json").symlink_to(outside)
+    assert read_budget(run_dir) == {}
+
+
+def test_accounting_failure_state_normalises_corrupt_counters(tmp_path):
+    """The counters INSIDE the sidecar, which the seam narrowing does not reach: a string count
+    raised `ValueError` out of `int(...)`, and a non-number `first_failure_at` raised `TypeError`
+    out of `time.monotonic() - stamp` — both from inside `account_call`'s `except OSError` arm,
+    which handles neither."""
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    sidecar = run_dir.parent / f"{run_dir.name}.accounting_failures.json"
+    sidecar.write_text(json.dumps({"consecutive_failures": "x", "first_failure_at": "nope"}),
+                       encoding="utf-8")
+
+    assert budget_enforcer.accounting_failure_state(run_dir) == {
+        "consecutive_failures": 0, "first_failure_at": None,
+    }
+    budget_enforcer._record_accounting_failure(run_dir, DEFAULT_LIMITS)
+    state = budget_enforcer.accounting_failure_state(run_dir)
+    assert state["consecutive_failures"] == 1
+    assert isinstance(state["first_failure_at"], float)
 
 
 def test_the_run_kill_still_fires_on_a_healthy_state(tmp_path):
