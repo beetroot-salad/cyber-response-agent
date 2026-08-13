@@ -199,9 +199,9 @@ def test_the_entry_price_is_readable_from_a_companion_document():
     both, so the two boundaries cannot drift into disagreeing about what is owed."""
     from defender.skills.invlang.validate import disposition_entry_price
 
-    assert disposition_entry_price("false-positive", _paid()) == []
-    assert disposition_entry_price("false-positive", "") != []   # nothing written owes everything
-    assert disposition_entry_price("false-positive", _doc(_PROLOGUE, _LEADS)) != []
+    assert disposition_entry_price("false-positive", _paid()).owed == ()
+    assert disposition_entry_price("false-positive", "").owed    # nothing written owes everything
+    assert disposition_entry_price("false-positive", _doc(_PROLOGUE, _LEADS)).owed
 
 
 #: An `investigation.md` that pays NEITHER price: `v-001` carries an unresolved class and an
@@ -219,10 +219,11 @@ _UNPAID = _doc(
 
 def test_the_reader_is_the_gate_table_and_not_one_keyword():
     """#879: the close's reader dispatches on the same `_DISPOSITION_GATES` the write gate
-    does, so EVERY priced keyword is collected here and the unpriced ones cost nothing.
+    does, so EVERY priced keyword is COLLECTED here and the unpriced ones cost nothing.
 
-    Asserted by iterating the table rather than a list spelled out here — a third priced
-    keyword landing as a row must not need this test edited to be collected, which is exactly
+    The iteration buys generic collection, not a generic fixture — `_UNPAID` is hand-built to
+    owe both prices we have, and a third gate pricing something it happens to satisfy would
+    need a row added to it. What must NOT be needed is a third branch at the close, which is
     the property `benign` lacked while the close read one row by literal."""
     from defender.skills.invlang.validate import (
         _DISPOSITION_GATES,
@@ -231,15 +232,24 @@ def test_the_reader_is_the_gate_table_and_not_one_keyword():
 
     assert set(_DISPOSITION_GATES) <= DISPOSITION_ENUM, "a price on a keyword nothing can close"
     for priced in _DISPOSITION_GATES:
-        assert disposition_entry_price(priced, _UNPAID) != [], priced
+        price = disposition_entry_price(priced, _UNPAID)
+        assert price.owed, priced
+        # Every priced keyword arrives EXPLAINED as well as collected. A row carrying a check
+        # and no rationale would refuse the model without telling it why the price exists,
+        # which is what it needs to choose between paying and re-concluding.
+        assert priced in price.rationale, priced
     for unpriced in DISPOSITION_ENUM - set(_DISPOSITION_GATES):
-        assert disposition_entry_price(unpriced, _UNPAID) == [], unpriced
+        assert not disposition_entry_price(unpriced, _UNPAID).owed, unpriced
 
     # #722 reaches this dispatch the same way it reaches the write gate's: a keyword is judged
     # on what it RENDERS as, so lacing it must not buy the unpriced branch. The close's own
     # argument is enum-checked upstream, but this reader is public and the two rules stay
-    # independent on purpose — either alone would leave a hole.
-    assert disposition_entry_price("benign\u200b", _UNPAID) != []
+    # independent on purpose — either alone would leave a hole. The rationale comes back off
+    # the SAME dispatch, so a laced keyword that owes is still explained — it cannot be looked
+    # up on a differently-normalized value than the check was.
+    laced = disposition_entry_price("benign\u200b", _UNPAID)
+    assert laced.owed
+    assert laced.rationale
 
 
 def _close(tmp_path, companion: str, disposition: str):
@@ -334,14 +344,145 @@ def test_an_absent_conclude_block_does_not_buy_a_benign_close(tmp_path):
     assert "close blocked" in str(e.value)
 
 
+#: A log that PAYS benign's price rather than merely never owing it: `v-001`'s class tuple and
+#: attribute are both resolved, and `h-010` is live (`status active`, unrefuted) carrying an
+#: authorization contract that an `:R authz` row discharges as `authorized`. Both halves of
+#: `_check_benign_gating` therefore have something to evaluate and clear — a positive control
+#: over a document with no hypothesis at all would leave `_check_benign_authz` returning `[]`
+#: without reading a single contract, and a regression that refused every contract would still
+#: pass it.
+_PAID_BENIGN = (
+    "```invlang\n"
+    ":V prologue.vertices [id|type|class|ident|attrs?]\n"
+    "v-001|compute|database-server/internal/known-corp|db-1|os=linux\n"
+    ":E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]\n"
+    "e-001|executed|v-001|v-001|2026-05-05T03:42:11Z|siem-event:siem|\n"
+    ":L findings [id|loop|name|target|tests|system|window]\n"
+    "l-001|1|change-window-lookup|v-001|h-010|change-mgmt|30d\n"
+    ":H hypothesize.hypotheses "
+    "[id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]\n"
+    "h-010|?scheduled-maintenance|v-001|executed|process|unclassified-process||null|active\n"
+    ":H h-010.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]\n"
+    'ac1|e-001|change-mgmt|"a change record covers this window"|escalate|escalate\n'
+    ":R authz [resolved_by|edge|fulfills|verdict|anchor_kind|reasoning]\n"
+    'l-001|e-001|ac1|authorized|change-mgmt|"CHG-4471 covers the window"\n'
+    "```\n"
+) + _conclude(disposition="benign")
+
+
 def test_a_companion_that_paid_benigns_price_closes(tmp_path):
     """Benign's positive control. `benign` refuses CONTRADICTIONS — open slots, unfulfilled
-    authorization contracts — so a log carrying neither owes nothing, and the disposition the
+    authorization contracts — so a log that settled both owes nothing, and the disposition the
     runtime reaches for most has to still be reachable. Asserted on the commit, because a
-    price that denied everything would pass the two tests above just as well."""
-    result = _close(tmp_path, _doc(_PROLOGUE, _conclude(disposition="benign")), "benign")
+    price that denied everything would pass the two tests above just as well.
+
+    Both halves of the gate are exercised, not just the slot half: see `_PAID_BENIGN`."""
+    from defender.skills.invlang.validate import (
+        _check_benign_authz,
+        disposition_entry_price,
+    )
+    from defender.skills.invlang.parser import parse_dense_companion
+
+    # The control on the control: assert the authz half actually had a live contract to clear,
+    # so this cannot quietly decay into the no-hypothesis document it replaced.
+    companion, _ = parse_dense_companion(_PAID_BENIGN)
+    assert companion["hypothesize"]["hypotheses"][0]["authorization_contract"]
+    assert _check_benign_authz(companion) == []
+    assert disposition_entry_price("benign", _PAID_BENIGN).owed == ()
+
+    result = _close(tmp_path, _PAID_BENIGN, "benign")
     assert result.outcome == "stands"
     assert (tmp_path / "run" / "report.md").exists()
+
+
+def test_a_companion_that_cannot_be_read_refuses_the_close(tmp_path):
+    """A gate that cannot look must not report clean (#618/#621/#652).
+
+    Once every close reads this file, an I/O fault reaches a gate none of them used to — and
+    swallowing it to `""` would not mean "nothing was written", it would mean "this gate did
+    not run". That waives `benign`'s whole price, because that price refuses CONTRADICTIONS
+    and an empty read carries none; `false-positive`'s would still be refused, so the two
+    priced keywords would disagree about what a fault means. Induced through the real
+    primitive — `investigation.md` as a DIRECTORY, so `read_text` raises a real `OSError`
+    regardless of the uid running the suite (a chmod would not: CI is non-root, this container
+    is not).
+
+    Both priced keywords are driven, and the refusal is asserted to be the FAULT's rather than
+    either price's — a test that only checked "something was refused" would pass against the
+    fail-open code for `false-positive`."""
+    import asyncio
+
+    from pydantic_ai.exceptions import ModelRetry
+
+    from defender.agents import MAIN_DEF
+    from defender.runtime import challenge_gate
+    from defender.runtime.agent_definition import bind
+    from defender.runtime.close_tool import _close_investigation_async
+    from defender.tests._review_bundle import bundle as _bundle
+    from defender.tests._review_bundle import composer_reply as _composer
+
+    for disposition in ("benign", "false-positive"):
+        run_dir = tmp_path / disposition / "run"
+        (run_dir / "gather_raw").mkdir(parents=True)
+        (run_dir / "investigation.md").mkdir()          # the fault: a directory, not a file
+        dfn = tmp_path / disposition / "defender"
+        dfn.mkdir(exist_ok=True)
+        deps = bind(MAIN_DEF, run_dir, defender_dir=dfn)
+        with pytest.raises(ModelRetry) as e:
+            asyncio.run(_close_investigation_async(
+                deps, disposition, stages=_bundle(composer=_composer(finding="holds")),
+                bounds=challenge_gate.default_bounds(),
+            ))
+        assert "could not be read" in str(e.value), disposition
+        assert not (run_dir / "report.md").exists(), disposition
+
+
+def test_an_absent_companion_is_not_a_fault(tmp_path):
+    """The control that bounds the test above: NEVER WRITTEN and COULD NOT LOOK are different
+    answers, and only the second is a fault. An unwritten log still owes `false-positive`'s
+    whole price — it states no defect — and is refused on THAT, with the price's own words
+    rather than the fault's."""
+    from pydantic_ai.exceptions import ModelRetry
+
+    run_dir = tmp_path / "run"
+    (run_dir / "gather_raw").mkdir(parents=True)
+    dfn = tmp_path / "defender"
+    dfn.mkdir(exist_ok=True)
+
+    import asyncio
+
+    from defender.agents import MAIN_DEF
+    from defender.runtime import challenge_gate
+    from defender.runtime.agent_definition import bind
+    from defender.runtime.close_tool import _close_investigation_async
+    from defender.tests._review_bundle import bundle as _bundle
+    from defender.tests._review_bundle import composer_reply as _composer
+
+    deps = bind(MAIN_DEF, run_dir, defender_dir=dfn)
+    with pytest.raises(ModelRetry) as e:
+        asyncio.run(_close_investigation_async(
+            deps, "false-positive", stages=_bundle(composer=_composer(finding="holds")),
+            bounds=challenge_gate.default_bounds(),
+        ))
+    assert "could not be read" not in str(e.value)
+    assert "detection_notes" in str(e.value)
+
+
+def test_an_unfulfilled_authz_contract_blocks_the_benign_close(tmp_path):
+    """The authz half's negative, mirroring the slot half's above — and the discriminator for
+    the positive control: drop the `:R authz` row that discharges `ac1` and the same document
+    is refused, so the control proves the contract was CLEARED rather than never read."""
+    from pydantic_ai.exceptions import ModelRetry
+
+    unfulfilled = _PAID_BENIGN.replace(
+        ":R authz [resolved_by|edge|fulfills|verdict|anchor_kind|reasoning]\n"
+        'l-001|e-001|ac1|authorized|change-mgmt|"CHG-4471 covers the window"\n',
+        "",
+    )
+    assert unfulfilled != _PAID_BENIGN, "the fixture's authz row moved — this test is blind"
+    with pytest.raises(ModelRetry) as e:
+        _close(tmp_path, unfulfilled, "benign")
+    assert "authz contract ac1" in str(e.value)
 
 
 def test_a_vertex_from_an_earlier_prologue_block_is_still_the_alerted_entity():

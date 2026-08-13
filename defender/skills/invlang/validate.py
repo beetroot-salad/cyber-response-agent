@@ -1274,6 +1274,22 @@ def _check_benign_gating(companion: CompanionBody) -> list[str]:
     return errors
 
 
+@dataclass(frozen=True)
+class _Price:
+    """What a keyword costs, and why it costs it.
+
+    Two columns because the price has two audiences. `check` answers whether THIS document
+    has paid, and its strings name the blocking vertex, contract or row. `rationale` answers
+    why the price exists at all, which is what a model that has just been refused needs in
+    order to choose between paying it and concluding in another vocabulary — and it is a
+    property of the KEYWORD, equally true at either boundary, so it belongs beside the check
+    rather than in a second keyword-keyed table at whichever boundary happens to print it.
+    """
+
+    check: Callable[[CompanionBody], list[str]]
+    rationale: str
+
+
 #: The structural price of a keyword, keyed by the keyword. Two dispositions carry one; the
 #: rest carry none. Declared as a table rather than as a guard clause inside each gate so a
 #: third priced keyword is a row here, not a third copy of the "is this my disposition"
@@ -1282,15 +1298,63 @@ def _check_benign_gating(companion: CompanionBody) -> list[str]:
 #: Two readers dispatch on it and both must, because a price owed by the document alone is
 #: not owed at all: `_check_disposition_gating` on what `:T conclude` says, and
 #: `disposition_entry_price` on what the close is about to commit. Adding a row arms both.
-_DISPOSITION_GATES: dict[str, Callable[[CompanionBody], list[str]]] = {
-    "benign": _check_benign_gating,
-    "false-positive": _check_false_positive_gating,
+#:
+#: The rationale rides in the row for the same reason (#879). The close briefly kept its own
+#: `{keyword: prose}` table, which is the owner/consumer split this issue was about wearing a
+#: different hat: a third row here would have been collected but not explained, and
+#: `lint_half_read_table` cannot see that shape — a consumer enumerating EVERY key is its
+#: documented blind spot, so the ratchet that just cleaned this site would not notice it
+#: regrowing. One row, both readers, nothing to keep in sync.
+#: Each row is BOUND TO A NAME rather than built inline in the table, and that is load-bearing
+#: rather than style: `lint_half_read_table` recognizes a keyed gate table only when every
+#: value is a `Name`/`Attribute`/`Lambda` — "each key has its own ANSWER" — so writing these as
+#: `_Price(...)` calls in the literal makes the table invisible to the one gate that watches
+#: it, disarming it for every consumer at once and silently dropping its other findings too.
+_BENIGN_PRICE = _Price(
+    check=_check_benign_gating,
+    rationale=(
+        "`benign` says the alerted activity was accounted for, which an unresolved slot or "
+        "an unfulfilled authorization contract on a live hypothesis directly contradicts — "
+        "so it is reachable only from an `investigation.md` that settled them."
+    ),
+)
+_FALSE_POSITIVE_PRICE = _Price(
+    check=_check_false_positive_gating,
+    rationale=(
+        "`false-positive` says the RULE misfired, which is no evidence about the alerted "
+        "entity — so it is reachable only from an `investigation.md` that states the defect "
+        "and names the lead that checked the entity anyway."
+    ),
+)
+
+_DISPOSITION_GATES: dict[str, _Price] = {
+    "benign": _BENIGN_PRICE,
+    "false-positive": _FALSE_POSITIVE_PRICE,
 }
 
 
-def disposition_entry_price(disposition: object, companion_text: str) -> list[str]:
-    """What `disposition` still owes, read off an `investigation.md` — empty when it owes
-    nothing, and empty for the keywords `_DISPOSITION_GATES` prices at nothing.
+@dataclass(frozen=True)
+class EntryPrice:
+    """What a close still owes for its keyword, and why that keyword owes anything.
+
+    Both halves come back from ONE dispatch so a caller cannot look the second up on a
+    differently-normalized value than the first — which is how the refusal would lose its
+    explanation on exactly the zero-width-laced keyword #722 exists for.
+    """
+
+    owed: tuple[str, ...]
+    rationale: str
+
+    def __bool__(self) -> bool:
+        """Truthy when something is owed, so `if price:` reads as "is anything outstanding".
+        An unpriced keyword and a paid document are both falsy — the caller does not care
+        which, and neither blocks a close."""
+        return bool(self.owed)
+
+
+def disposition_entry_price(disposition: str, companion_text: str) -> EntryPrice:
+    """What `disposition` still owes, read off an `investigation.md` — nothing owed when it
+    owes nothing, and nothing owed for the keywords `_DISPOSITION_GATES` prices at nothing.
 
     Public because a price has to be collected at BOTH boundaries. This module gates the
     `investigation.md` write; `report.md` is written by `close_investigation`, which takes its
@@ -1308,18 +1372,23 @@ def disposition_entry_price(disposition: object, companion_text: str) -> list[st
 
     `disposition` is normalized through `normalized_disposition` for the same #722 reason the
     write-side dispatch is: a keyword is judged on what it RENDERS as, so a zero-width
-    character cannot turn a gate off. What each price then means about an absent companion is
-    the gate's own business, and the two priced ones honestly differ — `false-positive`
-    demands stated content, so nothing written owes everything; `benign` refuses
-    CONTRADICTIONS in the log, so a document with no open slot and no unfulfilled contract
-    owes nothing whether it is empty or complete.
+    character cannot turn a gate off. Typed `str` rather than `object` even though the
+    normalizer accepts anything: an unrecognized value takes the unpriced branch, so this
+    dispatch fails OPEN on a wrong one, and `object` would let the type checker pass a caller
+    that swapped these two arguments — both are `str` — and silently waive the price. The
+    write-side dispatch reads a value off a parsed DOCUMENT and keeps the wider type honestly;
+    a caller of this one always holds a keyword. What each price then means about an absent
+    companion is the gate's own business, and the two priced ones honestly differ —
+    `false-positive` demands stated content, so nothing written owes everything; `benign`
+    refuses CONTRADICTIONS in the log, so a document with no open slot and no unfulfilled
+    contract owes nothing whether it is empty or complete.
     """
     priced = normalized_disposition(disposition)
-    gate = _DISPOSITION_GATES.get(priced) if priced else None
-    if gate is None:
-        return []
+    price = _DISPOSITION_GATES.get(priced) if priced else None
+    if price is None:
+        return EntryPrice(owed=(), rationale="")
     companion, _ = parse_dense_companion(companion_text)
-    return gate(companion)
+    return EntryPrice(owed=tuple(price.check(companion)), rationale=price.rationale)
 
 
 def _check_disposition_gating(companion: CompanionBody) -> list[str]:
@@ -1334,8 +1403,8 @@ def _check_disposition_gating(companion: CompanionBody) -> list[str]:
     disposition = normalized_disposition(
         (companion.get("conclude") or {}).get("disposition")
     )
-    gate = _DISPOSITION_GATES.get(disposition) if disposition else None
-    return gate(companion) if gate is not None else []
+    price = _DISPOSITION_GATES.get(disposition) if disposition else None
+    return price.check(companion) if price is not None else []
 
 
 

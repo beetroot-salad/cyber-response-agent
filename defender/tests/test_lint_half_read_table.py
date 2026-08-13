@@ -368,11 +368,28 @@ def test_untriaged_baseline_entry_fails_the_gate(tmp_path):
     assert _GATE.main([], scope=tree, baseline_path=bp) == 1
 
 
+def _shipped_baseline_entries() -> dict[str, str]:
+    return json.loads(Path(_GATE.BASELINE_PATH).read_text(encoding="utf-8"))["entries"]
+
+
 def test_shipped_baseline_has_a_reason_for_every_entry():
-    for fingerprint, reason in json.loads(
-        (Path(_GATE.BASELINE_PATH)).read_text(encoding="utf-8")
-    )["entries"].items():
+    entries = _shipped_baseline_entries()
+    assert entries, "an empty baseline makes this test vacuous — assert something or delete it"
+    for fingerprint, reason in entries.items():
         assert reason.strip(), f"{fingerprint} carries no reason"
+
+
+def test_the_scan_still_produces_exactly_what_the_shipped_baseline_buries():
+    """The real-tree POSITIVE control, and the only test that has one since #879 stopped
+    being a live finding.
+
+    `test_real_tree_clean` and `test_its_motivating_finding_is_fixed_and_not_baselined` both
+    assert an ABSENCE, so a scanner that regressed into finding nothing on the real tree
+    passes both — and the synthetic fixtures cannot catch that, because they exercise a tree
+    this gate's import-edge and key-identity rules never have to resolve for real. Equality
+    (rather than "something was found") also catches the other direction: a baseline entry
+    that no longer fires is a burial the ratchet is still carrying."""
+    assert {f.fingerprint for f in _GATE._scan()} == set(_shipped_baseline_entries())
 
 
 def test_its_motivating_finding_is_fixed_and_not_baselined():
@@ -396,9 +413,7 @@ def test_its_motivating_finding_is_fixed_and_not_baselined():
     assert at_the_close == [], [f.display for f in at_the_close]
     assert not any(
         fp.startswith("defender/runtime/close_tool.py:")
-        for fp in json.loads(
-            Path(_GATE.BASELINE_PATH).read_text(encoding="utf-8")
-        )["entries"]
+        for fp in _shipped_baseline_entries()
     ), "#879 was fixed — a close_tool entry here means the branch came back and was buried"
 
 

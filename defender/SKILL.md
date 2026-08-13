@@ -479,9 +479,9 @@ Two of them carry an ENTRY PRICE, and this close reads it back out of
 resolved and every authz contract on a live hypothesis `authorized`;
 `false-positive` needs `detection_notes` (the defect) and `entity_check`
 (that lead's id) in `:T conclude`. Write them FIRST — the close returns
-without committing if they are not there. The keyword you CONCLUDE under
-does not change what the keyword you CLOSE under owes, so concluding
-`inconclusive` and closing `benign` is refused, not a way around the price.
+without committing if they are not there. The price is charged against the
+keyword you CLOSE under, never the one you concluded under, so concluding
+`inconclusive` buys nothing: the log still has to have paid.
 
 Every confident disposition — anything but `inconclusive` — passes a live
 challenge gate before it commits. When the gate is not satisfied yet, the call

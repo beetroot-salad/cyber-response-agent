@@ -331,8 +331,9 @@ summary                "Login matched established bastion usage"
   fired on a different kind of behavior than it claims — needs
   `detection_notes` and `entity_check` below. Both prices are charged twice:
   on the write, against the keyword you conclude under, and again by
-  `close_investigation`, against the keyword you close under. Concluding
-  under a cheaper keyword and closing under a priced one is refused.
+  `close_investigation`, against the keyword you close under. So concluding
+  under a cheaper keyword buys nothing — the log itself still has to have
+  paid for the keyword the close commits.
 - `ceiling_test` — the checks you could NOT make. One row per gap, repeated,
   naming the host and the data source:
   `ceiling_test  "authorized_keys FIM on web-1 (auditd write events) not retrieved"`
