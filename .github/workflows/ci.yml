@@ -488,6 +488,54 @@ jobs:
       - name: Shippable-surface gate (env-agnostic discipline — baseline-ratcheted)
         run: defender/.venv/bin/python scripts/lint/lint_shippable_surface.py
 
+      # A function that DECLARES a shape but lets raw deserializer output reach its `return`
+      # un-narrowed (#878). `json.loads` is typed `Any`, and `Any` satisfies every annotation,
+      # so `def read_json_locked(path) -> dict: return json.loads(raw)` type-checks CLEAN —
+      # the tree sits at zero mypy errors with that lie in it. This gate is not duplicating
+      # mypy; it closes the one hole mypy has agreed to stop asking about. It fires at the
+      # SEAM and deliberately NOT at the readers of a laundered value: narrowing _run_dir
+      # fixes circuit_breaker and budget_enforcer and every future reader, where chasing
+      # readers institutionalizes the per-reader hardening that caused the defect. The second
+      # check is the same rule for time: a bare `datetime.fromisoformat` outside the module
+      # owning `defender._clock.parse_iso_utc`, whose docstring names the naive-vs-aware
+      # TypeError it produces. 21 entries baselined with `require_reasons=True` — 4 are #878's
+      # own, 9 are oracle_golden readers weak because their input is the checked-in golden
+      # corpus, 8 are older first-party debt; each says what has to fold before it can go. A
+      # clean run means no new SEAM — NOT that no deref is unguarded (see the module docstring).
+      - name: Un-narrowed-parse gate (the parse and the shape check are one construction, #878 — baseline-ratcheted)
+        run: defender/.venv/bin/python scripts/lint/lint_unnarrowed_parse.py
+
+      # A boundary that branches on ONE key of another module's keyed gate table, spelled as a
+      # string literal, so that table's other keys have no reader there. #879: close_tool
+      # charges the `false-positive` entry price by literal, while `benign` — the other key of
+      # `skills.invlang.validate._DISPOSITION_GATES` — passes that same write boundary ungated.
+      # A table is watched only once something in the corpus reads it generically (`T.get(x)` /
+      # `T[expr]` / `x in T` / iteration, including through a resolved import), so the gate arms
+      # itself as keyed tables land, with no edit to the lint. Green here is NARROW on purpose:
+      # the detector fires on the GAP, so a consumer that enumerates EVERY key by literal is
+      # invisible to it, and cross-module key identity is value-based, so short generic keys
+      # collide — the two baselined entries say which is which (#879, and the learning-lane
+      # `direction == "benign"` collision in persist.py). Suppress a deliberate site with
+      # `# lint-half-table: ok — <reason>`.
+      - name: Half-read-table gate (one reader per key, #879 — baseline-ratcheted)
+        run: defender/.venv/bin/python scripts/lint/lint_half_read_table.py
+
+      # A row leaving a loop in the invlang row-carrying surface by continue/break/bare
+      # return with neither a ParseWarning nor a landing unconditionally on that path
+      # (#876). The two roles are derived STRUCTURALLY, never from a name list: a PROJECTOR
+      # is a class that both holds `list[ParseWarning]` state AND raises one — so
+      # `corpus.Companion`, which merely carries warnings somebody else raised, owns no drop
+      # channel and is exempt — and a TOKENIZER is a function whose return annotation
+      # mentions `Block`, resolved by origin so an aliased import is the same case (#602).
+      # The warn-emitter set is a fixpoint, so the next `_warn_*` helper clears its call
+      # sites with no edit to the gate. Only the EXPLICIT escape is mechanized: the implicit
+      # drop — a dispatch arm returning "handled" without projecting, an if/elif chain with
+      # no else, a suppressed conversion — is not detectable here, and a green run is NOT
+      # proof the parser drops nothing. Eight sites are baselined, four of them the live
+      # #876 drops and four annotated false positives; `require_reasons` refuses "".
+      - name: Silent invlang row drop gate (warn or land before you drop, #876 — baseline-ratcheted)
+        run: defender/.venv/bin/python scripts/lint/lint_silent_row_drop.py
+
       # For symbols this PR removed, the post-PR tree must hold no surviving reference.
       # Needs the merge-base with origin/main — hence `fetch-depth: 0` on the checkout
       # above. Fails CLOSED: exit 2 if the base ref or the merge-base is unavailable, so
