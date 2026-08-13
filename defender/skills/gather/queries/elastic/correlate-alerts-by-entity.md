@@ -15,8 +15,10 @@ sample of it. Keyword recall: correlate alerts, same host, prior alert,
 campaign, scoped count, unscoped count, kibana.alert, entity, radar, already
 firing.
 
-**Wide/superset** — narrow by writing a tighter `${entity_filter}`; widen by
-dropping the disjuncts you have no value for.
+**Wide/superset** — the whole body is `${entity_filter}`, so the narrowing and
+the widening are both yours to write: narrow by ANDing more of this alert's
+axes into it, widen by dropping disjuncts down to the one field that carries
+the entity, and drop the filter entirely for the unscoped count.
 
 ## Query
 

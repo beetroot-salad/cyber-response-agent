@@ -28,6 +28,8 @@ THE TWO THINGS §7 REVERSED, AND WHY NEITHER CAN BE ASSUMED HERE
 """
 from __future__ import annotations
 
+import re
+
 import pytest
 
 pytest.importorskip("pydantic_ai")
@@ -177,7 +179,14 @@ def test_correlation_contract_bounds_a_window_around_alert_timestamp(tmp_path):
     ENTITIES resolving, not the timestamp. Both arms are asserted here."""
     res = run(tmp_path, run_id="lz808-window", answer=answer_hits(TWO_ACTORS))
     contract = str(res.sidecar(L3))
-    assert "2026-05-25" in contract, \
+    # The FULL alert timestamp, not its date prefix (#867 review fix). Since the contract
+    # carries item 1's rendered block, every ancestor document's own `@timestamp` is in it —
+    # and `TWO_ACTORS` sits on the alert's own DAY, so `"2026-05-25" in contract` was satisfied
+    # by the embedded evidence whether or not the goal still anchored a window at all.
+    # `ALERT_TS` appears only where `_correlation_contract` interpolates it: no resolved
+    # document carries the alert's own timestamp (the shell document that does is filtered out
+    # of the block).
+    assert ALERT_TS in contract, \
         "item 3's contract names no window anchored on the alert's own timestamp"
 
     for label, bad in (("unparseable", "not-a-timestamp"), ("empty", "")):
@@ -230,19 +239,59 @@ def test_correlation_lead_is_not_narrowed_to_the_alerts_own_rule_id(tmp_path):
     DIFFERENT rule on the same host or user is exactly the related behaviour already on the
     radar, which is the whole detection value the breadth exists for.
 
-    Bound at `rule_id.domain.distinguished[any]` and asserted on the harness-authored contract
+    Bound at `rule_id.domain.distinguished[any]` and asserted on the HARNESS-AUTHORED contract
     rather than on the subagent's composed query, because that contract is the only part of
     item 3 the hermetic suite can read. The residue's Red flag 1 is why this is not credited
     as already-answered: no claim establishes that the lead's own query construction does not
     reinstate the narrowing, and the adversarial angle
-    (`test_correlation_lead_any_signature_scope_widened_by_injection`) was never framed."""
-    res = run(tmp_path, run_id="lz808-anysig", alert=alert_doc(rule_id=RULE_ID),
-              answer=answer_hits(TWO_ACTORS))
+    (`test_correlation_lead_any_signature_scope_widened_by_injection`) was never framed.
 
-    contract = str(res.sidecar(L3))
-    assert RULE_ID not in contract, (
-        "item 3's contract names this alert's own rule id — the correlation is narrowed to "
-        "the signature that already fired, which is the opposite of what it is for"
+    "HARNESS-AUTHORED" IS NOW LOAD-BEARING RATHER THAN DESCRIPTIVE (#867). The contract carries
+    item 1's resolved documents inside an untrusted frame, and on the group-id path those
+    documents ARE alert documents — a sequence alert's building blocks carry
+    `kibana.alert.rule.*`, so this alert's own rule id legitimately appears in the EVIDENCE.
+    A flat "the id appears nowhere in the contract" was an exact proxy while the contract was
+    harness text alone; it now conflates the harness naming the rule as an AXIS with a document
+    naming it as a FACT, and would fail on production shapes while passing here only because
+    the fixture documents happen to carry no rule fields.
+
+    So the assertion is scoped to the text the harness wrote — the demand's own words — and the
+    scenario is strengthened to actually put the rule id inside the frame, which no arm did
+    before: without that, stripping the frame would be untested bookkeeping. The instruction
+    that carries the obligation is asserted positively alongside it, because a contract that
+    merely omits the id while saying nothing about breadth discharges nothing."""
+    res = run(tmp_path, run_id="lz808-anysig", alert=alert_doc(rule_id=RULE_ID),
+              answer=answer_hits([
+                  hit(ts="2026-05-25T15:26:10.000Z", user="dev.dana",
+                      **{"kibana.alert.rule.rule_id": RULE_ID,
+                         "kibana.alert.rule.name": "v2 sshd success after failures"}),
+              ]))
+
+    sidecar = res.sidecar(L3)
+    contract = str(sidecar)
+    assert RULE_ID in contract, (
+        "the scenario no longer puts this alert's rule id inside the evidence frame, so the "
+        "scoped assertion below cannot tell stripping from absence"
+    )
+
+    # The frame is item 1's resolved evidence; everything outside it is what the harness wrote.
+    framed = re.compile(r"<run-[0-9a-zA-Z]*-untrusted>.*?</run-[0-9a-zA-Z]*-untrusted>",
+                        re.DOTALL)
+    authored = framed.sub("", contract)
+    assert RULE_ID not in authored, (
+        "item 3's HARNESS-AUTHORED contract names this alert's own rule id — the correlation "
+        "is narrowed to the signature that already fired, which is the opposite of what it "
+        "is for. (A document naming the rule inside the untrusted frame is evidence, not a "
+        "narrowing; this assertion excludes the frame precisely so it can tell the two apart.)"
+    )
+    # Asserted on `authored`, not on the raw goal, so it doubles as the guard against a
+    # runaway strip: a regex that swallowed the harness's own text would leave this empty and
+    # turn the assertion above into a vacuous pass.
+    assert "not narrow to this alert's own rule" in authored, (
+        "the contract dropped the instruction that carries d20 (or the frame strip above ate "
+        "the harness's own text, making the rule-id assertion vacuous) — omitting the rule id "
+        "while saying nothing about breadth leaves the lead free to reinstate the narrowing "
+        "itself, which the residue's Red flag 1 names as the unclosed half of this demand"
     )
 
 
@@ -370,7 +419,7 @@ def test_correlation_summary_reaches_main_before_its_second_request(tmp_path):
     boundary and not "before PLAN", because r17 (executed) establishes ORIENT and PLAN are
     headings in MAIN's prompted procedure with no runtime referent — a test pinned to PLAN
     pins a proxy."""
-    marker = "11 fleet-wide"
+    marker = "11 unscoped"
     # The marker is a FRAGMENT of the scripted summary, chosen to be distinctive enough that
     # finding it in a request proves the summary reached it. Pinned to its source: the summary
     # is edited whenever item 3's dimensions change (#859 rewrote both), and a marker that

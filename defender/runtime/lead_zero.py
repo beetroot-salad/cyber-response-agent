@@ -127,6 +127,13 @@ ITEM1_WHAT_TO_SUMMARIZE = [
 ]
 
 _ANY_RUN_TAG = re.compile(r"</?run-[0-9a-zA-Z]*-[a-z-]+>")
+#: A markdown code-fence run. Neutralized for the same reason as the wrap delimiter, and
+#: since #867 for a second one: item 1's rendered block is interpolated into item 3's goal,
+#: which `tools_gather._gather_prompt` emits INSIDE a fenced block. A fence run in an
+#: attacker-authored `message` (a captured command line, a shell transcript) closes that fence
+#: early, so the harness's own `what_to_summarize` block renders as free prose the lead reads
+#: as document content.
+_FENCE_RUN = re.compile(r"`{3,}")
 
 
 # ─── the return contract (F1) ────────────────────────────────────────────────────────────
@@ -174,13 +181,20 @@ def _run_sync(coro: Any) -> Any:
 # ─── sanitizing wrap-delimiter shapes (K1 round 2 + F4) ─────────────────────────────────
 
 def _sanitize(text: Any) -> str:
-    """Neutralize any `<run-…-…>`-shaped delimiter in externally-sourced content BEFORE it
-    is wrapped or interpolated. `wrap()` performs no escaping of its own delimiter shape, so
-    an attacker-authored `message`/`user.name`/`source.ip` carrying a byte-exact close tag
-    would otherwise end the untrusted frame (or item 3's contract) early."""
+    """Neutralize any `<run-…-…>`-shaped delimiter, and any markdown code-fence run, in
+    externally-sourced content BEFORE it is wrapped or interpolated. `wrap()` performs no
+    escaping of its own delimiter shape, so an attacker-authored `message`/`user.name`/
+    `source.ip` carrying a byte-exact close tag would otherwise end the untrusted frame (or
+    item 3's contract) early; a ``` run would likewise end the fenced block whichever
+    consumer put the text inside one.
+
+    DEFANGED, NEVER DELETED — the same rule both surfaces' tests assert: the evidence has to
+    survive in a form the reader can still see, or the sanitizer passes by destroying what it
+    was protecting."""
     if not isinstance(text, str):
         text = str(text)
-    return _ANY_RUN_TAG.sub(lambda m: m.group(0).replace("<", "‹").replace(">", "›"), text)
+    text = _ANY_RUN_TAG.sub(lambda m: m.group(0).replace("<", "‹").replace(">", "›"), text)
+    return _FENCE_RUN.sub(lambda m: "ˋ" * len(m.group(0)), text)
 
 
 # ─── deps for routing through the real QueryCapture (K7/d10) ────────────────────────────
@@ -427,21 +441,58 @@ def _elide(message: str, lead_id: str, seq: int) -> str:
     )
 
 
+def _flatten_doc(doc: dict) -> dict[str, Any]:
+    """A document's leaves, keyed by their DOTTED ECS path.
+
+    #867 review fix. The adapter hands `_source` back UNMODIFIED, and real ECS `_source` is
+    NESTED (`{"host": {"name": …}}`, and a per-source namespace nests its own actor two or
+    three levels deeper) while the alerting namespace and this suite's test doubles arrive as
+    flat dotted keys. Rendering the top level alone printed a nested document as one line per
+    top-level object holding a PYTHON DICT REPR — `host: {'name': 'ws-1'}` — which is not a
+    field name anything can be queried on.
+
+    That was survivable while the harness extracted the entities itself (the retired
+    `_ecs_field` read both shapes). It stopped being survivable when #867 made this block
+    the correlation lead's whole entity evidence and asked it to name "the field each came
+    from": on production-shaped documents the lead had to reverse-engineer a dotted path out
+    of a repr, and the very source class the change exists for is the one that nests."""
+    out: dict[str, Any] = {}
+
+    def walk(node: Any, prefix: str) -> None:
+        if isinstance(node, dict) and node:
+            for k, v in node.items():
+                key = f"{prefix}.{k}" if prefix else str(k)
+                walk(v, key)
+        elif prefix:
+            out[prefix] = node
+
+    walk(doc, "")
+    return out
+
+
 def _render_doc(doc: dict, lead_id: str, seq: int) -> str:
+    flat = _flatten_doc(doc)
     lines = []
-    ts = doc.get("@timestamp")
+    ts = flat.get("@timestamp")
     if ts:
         lines.append(f"- @timestamp: {_sanitize(ts)}")
-    for key in sorted(doc):
+    for key in sorted(flat):
         if key in ("@timestamp", "message"):
+            continue
+        # A null leaf is DROPPED, not rendered (#867 review fix). `_sanitize(None)` is the
+        # literal string `"None"`, and this block is now what the correlation lead picks its
+        # correlation axes off — `host.name: None` reads as a bindable value and invites
+        # `host.name:"None"`, a predicate that matches nothing and reports as a real zero.
+        # An absent field and a null one are the same thing to the index anyway.
+        if flat[key] is None:
             continue
         # #808 review fix — the field NAME, not just its value, must be neutralized: an
         # attacker-influenced document whose key itself carries a `<run-…-…>`-shaped
         # delimiter would otherwise end the untrusted frame early, exactly the class of
         # forgery this module's value-side `_sanitize` calls already exist to close.
-        lines.append(f"  {_sanitize(key)}: {_sanitize(doc[key])}")
-    if "message" in doc:
-        lines.append(f"  message: {_sanitize(_elide(doc['message'], lead_id, seq))}")
+        lines.append(f"  {_sanitize(key)}: {_sanitize(flat[key])}")
+    if flat.get("message") is not None:
+        lines.append(f"  message: {_sanitize(_elide(flat['message'], lead_id, seq))}")
     return "\n".join(lines)
 
 
@@ -664,15 +715,20 @@ def _correlation_contract(alert: dict, ancestor_block: str) -> tuple[str, list[s
         "alert reports from selects the whole environment and measures nothing.\n\n"
         f"{ancestor_block}\n\n"
         "Search the alerts index ONLY (this is a correlation over prior alerts, not raw "
-        "telemetry). Do not narrow to this alert's own rule; a different rule firing on the "
-        "same entity is exactly the related behaviour this lead exists to surface. Bind "
+        "telemetry). Do not narrow to this alert's own rule. The documents above may NAME that "
+        "rule — on a sequence alert they are themselves alert documents, carrying "
+        "`kibana.alert.rule.*` — and it is still not an axis to bind: a different rule firing "
+        "on the same entity is exactly the related behaviour this lead exists to surface, and "
+        "narrowing to the signature that already fired is the one result guaranteed to teach "
+        "nothing. Bind "
         f"`{CORRELATION_TEMPLATE}` — read it first: it is named by your grant-filtered template "
         "index, and it carries the window params and the substitutable entity filter this "
         "contract needs. Each count is the result envelope's `total`, which the `hits` cap does "
         "not bound — a `truncated` result still carries a complete count."
     )
-    # Two dimensions, both answerable by ONE `alerts` call each. The third — "whether any
-    # correlated alert is already benign-explained" — was struck: `kibana.alert.workflow_status`
+    # Two COUNT dimensions, both answerable by ONE `alerts` call each (#867 adds a third line
+    # that is not a count — see below). A different third — "whether any correlated alert is
+    # already benign-explained" — was struck: `kibana.alert.workflow_status`
     # is `"open"` on every alert this environment produces (nothing in the environment's own
     # provisioning ever writes it), and the systems that could carry a benign explanation
     # (`ticket`, `change-mgmt`) are outside this lead's grant. It had exactly one possible
@@ -977,8 +1033,8 @@ __all__ = [
     "SHORTFALL",
     "STATUS_EMPTY",
     "STATUS_FAILED",
-    "STATUS_TRUNCATED",
     "STATUS_RESOLVED",
+    "STATUS_TRUNCATED",
     "UNAVAILABLE",
     "LeadZeroResult",
     "dispatch_correlation",

@@ -447,11 +447,16 @@ def materialize_alert(root: Path, doc: dict) -> Path:
 
 
 READ_ALERT = "read the alert"
-#: The scripted gather return for item 3. Tracks the contract's two dimensions — an on-host
-#: count and a fleet-wide count, both across any rule. It no longer claims a benign-explained
-#: verdict: `kibana.alert.workflow_status` is `"open"` on every alert this environment emits,
-#: so that dimension was struck from `_correlation_contract` as unanswerable on this grant.
-CORRELATION_SUMMARY = "3 alerts on-host, 11 fleet-wide, across any rule."
+#: The scripted gather return for item 3. Tracks the contract's own dimensions — a SCOPED
+#: count, an UNSCOPED count, and the entities the lead judged discriminating — all across any
+#: rule. It no longer claims a benign-explained verdict: `kibana.alert.workflow_status` is
+#: `"open"` on every alert this environment emits, so that dimension was struck from
+#: `_correlation_contract` as unanswerable on this grant. It no longer says "on-host"/
+#: "fleet-wide" either: #867 retired that pair, and a double whose wording outlives the
+#: contract's is what makes a delivery marker read as covered while pinning a dead spelling.
+CORRELATION_SUMMARY = (
+    "3 alerts scoped to user.name dev.dana, 11 unscoped, across any rule."
+)
 
 
 def run(  # noqa: PLR0913 — a scenario builder: one parameter per thing a scenario varies

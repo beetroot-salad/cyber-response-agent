@@ -238,13 +238,22 @@ def _gather_prompt(
         block += _INDEX_NONE_GRANTED if index.established_seen else _INDEX_UNAVAILABLE
 
     wts = "\n".join(f"  - {d}" for d in request.what_to_summarize) or "  - (unspecified)"
+    # A MULTI-LINE goal is a YAML BLOCK SCALAR, never an inline one (#867 review fix). The
+    # model-dispatched path's goals are one sentence, but lead-0's item 3 now carries item 1's
+    # rendered ancestor block inside its goal — emitted after a bare `goal:` every line but the
+    # first reads as a sibling key of the Dispatch mapping, and the `what_to_summarize` list
+    # the lead is supposed to satisfy lands in the middle of document text. The block scalar is
+    # the shared fix at the one place that renders the field, not a special case for one lead.
+    goal_yaml = request.goal
+    if "\n" in goal_yaml:
+        goal_yaml = "|-\n" + "\n".join(f"  {ln}" for ln in goal_yaml.splitlines())
     block += (
         "\n## Dispatch\n```yaml\n"
         f"defender_dir: {deps.defender_dir}\n"
         f"run_dir: {deps.run_dir}\n"
         f"lead_id: {request.lead_id}\n"
         f"system: {request.system}\n"
-        f"goal: {request.goal}\n"
+        f"goal: {goal_yaml}\n"
         f"what_to_summarize:\n{wts}\n"
         "```\n"
     )

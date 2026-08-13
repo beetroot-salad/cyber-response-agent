@@ -24,7 +24,9 @@ message, after the indexes — carries:
   never pass it to the `query` tool — just run your query.
 - `system` — system of record (a `skills/` subdir). The catalog of templates is
   at `{defender_dir}/skills/gather/queries/{system}/`.
-- `goal` — one-sentence measurement contract.
+- `goal` — the measurement contract, usually one sentence. It may also carry
+  evidence the harness already resolved, delimited as §Untrusted data describes;
+  pick your query's filter axes off it.
 - `what_to_summarize` — the obligations your summary must establish. A report
   schema, not a retrieval spec: see §5 RETURN.
 
