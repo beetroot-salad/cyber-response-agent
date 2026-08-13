@@ -134,6 +134,9 @@ def test_conclude_without_detection_notes_is_clean_and_invents_no_key():
     reader cannot tell an empty note from a defect nobody looked for."""
     text = """\
 ```invlang
+:V prologue.vertices [id|type|class|ident|attrs?]
+v-001|compute|bastion/internal/known-corp|bastion-01.corp|kind=physical
+
 :T conclude
 disposition            benign
 confidence             high
@@ -143,6 +146,9 @@ summary                "Login matched established bastion usage"
     body, warnings = parse_dense_companion(text)
     assert warnings == []
     assert "detection_notes" not in body["conclude"]
+    # The prologue is here to carry `benign`'s grounding clause, not for the projection under
+    # test: a `:T conclude` block alone is a document that recorded no alerted entity, which
+    # `_check_benign_grounding` refuses independently of anything about `detection_notes`.
     assert validate_companion(text) == []
 
 
@@ -157,6 +163,9 @@ def test_conclude_records_every_ceiling_test_row_in_order():
     """
     text = """\
 ```invlang
+:V prologue.vertices [id|type|class|ident|attrs?]
+v-001|compute|bastion/internal/known-corp|bastion-01.corp|kind=physical
+
 :T conclude
 disposition            benign
 ceiling_test           "l-009 Zeek HTTP detail for curl events not retrieved (request limit)"

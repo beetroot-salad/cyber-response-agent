@@ -27,7 +27,11 @@ from defender._vocab import (
     normalized_disposition,
 )
 from defender.skills.invlang import vocab
-from defender.skills.invlang.validate import validate_companion
+from defender.skills.invlang.validate import _DISPOSITION_GATES, validate_companion
+
+#: The keywords that carry a structural price, read off the OWNER's table so this file
+#: cannot drift into asserting a priced keyword is clean (#879).
+_PRICED = frozenset(_DISPOSITION_GATES)
 
 ZWSP = "​"
 
@@ -110,20 +114,30 @@ def test_every_keyword_clears_the_vocabulary_check(disposition):
     assert not any("is not a known disposition" in e for e in errors)
 
 
-@pytest.mark.parametrize("disposition", sorted(DISPOSITION_ENUM - {"false-positive"}))
+@pytest.mark.parametrize("disposition", sorted(DISPOSITION_ENUM - set(_PRICED)))
 def test_an_ungated_keyword_draws_no_error_at_all(disposition):
     """The `== []` half the test above used to carry, kept for every keyword that is NOT
     priced. Narrowing the assertion to "no vocabulary error" for ALL FOUR would have let a gate
-    that spuriously fires on `malicious` — or on `benign` with nothing to check — ship green.
-    `benign` passes here vacuously (no vertices, no live hypotheses), which is exactly the
-    shape #806 exists to stop `false-positive` from inheriting."""
+    that spuriously fires on `malicious` ship green.
+
+    `benign` left this set with #879. It used to pass here VACUOUSLY — a bare `conclude` has no
+    vertices and no live hypotheses, so both of its checks had nothing to refuse — which is the
+    same shape #806 exists to stop `false-positive` from inheriting, sitting unremarked on the
+    keyword next to it. `_check_benign_grounding` is what ended that, so a bare conclude is now
+    denied under either priced keyword and this list is the two that are not."""
     assert validate_companion(_companion(disposition), None) == []
 
 
-def test_a_bare_false_positive_conclude_is_denied():
-    """The counterpart, and the one keyword a bare `conclude` cannot reach."""
-    errors = validate_companion(_companion("false-positive"), None)
-    assert any("false-positive blocked" in e for e in errors)
+@pytest.mark.parametrize("disposition", sorted(_PRICED))
+def test_a_bare_conclude_cannot_reach_a_priced_keyword(disposition):
+    """The counterpart: neither priced keyword is reachable from a `:T conclude` alone.
+
+    Parametrized off `_DISPOSITION_GATES` rather than a list spelled here, so a third priced
+    keyword joins this test and leaves the one above without either being edited — the two
+    sets are complements of the same table, which is what stops them drifting into a keyword
+    that is priced and asserted clean at the same time."""
+    errors = validate_companion(_companion(disposition), None)
+    assert any(f"{disposition} blocked" in e for e in errors), errors
 
 
 def test_an_out_of_enum_disposition_is_an_error_not_a_skipped_gate():

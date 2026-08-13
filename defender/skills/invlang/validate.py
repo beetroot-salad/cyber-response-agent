@@ -1267,8 +1267,42 @@ def _check_false_positive_gating(companion: CompanionBody) -> list[str]:
     return errors
 
 
+def _check_benign_grounding(companion: CompanionBody) -> list[str]:
+    """`benign` needs a log that recorded WHAT THE ALERT WAS ABOUT.
+
+    The other two benign checks refuse CONTRADICTIONS — an unresolved slot, an unfulfilled
+    contract — which is exactly the right shape for a log that did the work, and vacuous for
+    one that did not: a document with no vertices has no slot to be open and no hypothesis to
+    carry a contract, so it clears a price it never paid. Absent, empty, whitespace-only and
+    fence-less `investigation.md` files all reach the close that way, and `benign` is the
+    disposition that asserts the alerted activity was accounted for. Nothing accounts for
+    anything in a log that never says what was alerted on.
+
+    So the prologue has to carry a vertex, and the point is less the clause itself than what
+    it does to the two beside it: once a vertex is guaranteed, `_check_benign_open_slots` has
+    something to check on every benign close, and "the classification is resolved" stops being
+    a claim a document can satisfy by staying silent. ORIENT writes this block before PLAN
+    runs, so every real run has cleared it long before it can conclude anything — what it
+    refuses is a close over a work log that was never written.
+
+    Deliberately NOT a demand for leads, committed or declared. How much measurement a
+    disposition needs is a judgment about the case, which the review gate makes; this is the
+    structural floor beneath it, and a trivially-benign alert closed off the payload alone is
+    a run this must not refuse.
+    """
+    if not (companion.get("prologue") or {}).get("vertices"):
+        return [
+            "disposition benign blocked: no `:V prologue.vertices` row — benign says the "
+            "alerted activity was accounted for, so the log has to name the entity the "
+            "alert was about. An `investigation.md` that records no vertex records no "
+            "investigation; conclude `inconclusive` instead."
+        ]
+    return []
+
+
 def _check_benign_gating(companion: CompanionBody) -> list[str]:
     errors: list[str] = []
+    errors += _check_benign_grounding(companion)
     errors += _check_benign_open_slots(companion)
     errors += _check_benign_authz(companion)
     return errors
@@ -1314,8 +1348,10 @@ _BENIGN_PRICE = _Price(
     check=_check_benign_gating,
     rationale=(
         "`benign` says the alerted activity was accounted for, which an unresolved slot or "
-        "an unfulfilled authorization contract on a live hypothesis directly contradicts — "
-        "so it is reachable only from an `investigation.md` that settled them."
+        "an unfulfilled authorization contract on a live hypothesis directly contradicts, "
+        "and which a log that never named the alerted entity does not support at all — so "
+        "it is reachable only from an `investigation.md` that recorded the entity and "
+        "settled what it left open."
     ),
 )
 _FALSE_POSITIVE_PRICE = _Price(
@@ -1377,11 +1413,12 @@ def disposition_entry_price(disposition: str, companion_text: str) -> EntryPrice
     dispatch fails OPEN on a wrong one, and `object` would let the type checker pass a caller
     that swapped these two arguments — both are `str` — and silently waive the price. The
     write-side dispatch reads a value off a parsed DOCUMENT and keeps the wider type honestly;
-    a caller of this one always holds a keyword. What each price then means about an absent
-    companion is the gate's own business, and the two priced ones honestly differ —
-    `false-positive` demands stated content, so nothing written owes everything; `benign`
-    refuses CONTRADICTIONS in the log, so a document with no open slot and no unfulfilled
-    contract owes nothing whether it is empty or complete.
+    a caller of this one always holds a keyword. What each price means about an ABSENT
+    companion is the gate's own business, and both priced ones answer it the same way for
+    different reasons: `false-positive` demands stated content, so nothing written owes
+    everything, and `benign` demands a prologue vertex beneath its contradiction checks
+    (`_check_benign_grounding`), because those checks are vacuous over a document with no
+    vertices and a close on an empty log is the case they exist to refuse.
     """
     priced = normalized_disposition(disposition)
     price = _DISPOSITION_GATES.get(priced) if priced else None

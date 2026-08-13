@@ -395,6 +395,79 @@ def test_a_companion_that_paid_benigns_price_closes(tmp_path):
     assert (tmp_path / "run" / "report.md").exists()
 
 
+@pytest.mark.parametrize(("companion", "shape"), [
+    (None, "absent"),
+    ("", "empty"),
+    ("\n\n   \n", "whitespace only"),
+    ("# Investigation\n\nThe host looked fine to me.\n", "prose, no invlang fence"),
+    ("The class is ??/??/?? but no `:V` block was ever written.\n", "unresolved slots in PROSE"),
+])
+def test_a_log_that_recorded_nothing_cannot_close_benign(tmp_path, companion, shape):
+    """#879's second half. `benign`'s other two checks refuse CONTRADICTIONS — an open slot, an
+    unfulfilled contract — which is vacuous over a document that has neither because it has
+    NOTHING: no vertex to hold a slot, no hypothesis to carry a contract. So collecting the
+    price at the close still left the one-move exit open in a weaker form, and the weaker form
+    is the cheaper one to reach — a run that writes no work log at all.
+
+    The last fixture is the one that shows the clause is structural rather than textual: `??`
+    appears in the document, and it is still not an open SLOT, because nothing parsed it into a
+    vertex. A gate that grepped for the marker would pass this and refuse nothing real.
+
+    Driven through the real close, and asserted on `report.md` staying absent — this is the
+    artifact the learning loop reads, and the review gate downstream is a model judgment, not a
+    second structural collection point."""
+    from pydantic_ai.exceptions import ModelRetry
+
+    import asyncio
+
+    from defender.agents import MAIN_DEF
+    from defender.runtime import challenge_gate
+    from defender.runtime.agent_definition import bind
+    from defender.runtime.close_tool import _close_investigation_async
+    from defender.tests._review_bundle import bundle as _bundle
+    from defender.tests._review_bundle import composer_reply as _composer
+
+    run_dir = tmp_path / "run"
+    (run_dir / "gather_raw").mkdir(parents=True)
+    if companion is not None:
+        (run_dir / "investigation.md").write_text(companion, encoding="utf-8")
+    dfn = tmp_path / "defender"
+    dfn.mkdir(exist_ok=True)
+    deps = bind(MAIN_DEF, run_dir, defender_dir=dfn)
+
+    with pytest.raises(ModelRetry) as e:
+        asyncio.run(_close_investigation_async(
+            deps, "benign", stages=_bundle(composer=_composer(finding="holds")),
+            bounds=challenge_gate.default_bounds(),
+        ))
+    assert "prologue.vertices" in str(e.value), shape
+    assert not (run_dir / "report.md").exists(), shape
+
+
+def test_the_grounding_clause_is_what_makes_the_open_slot_check_bite(tmp_path):
+    """Why the clause is worth having beyond the empty document: it is what guarantees
+    `_check_benign_open_slots` has something to check.
+
+    A prologue is the block ORIENT writes before PLAN runs, so requiring one costs a real run
+    nothing — but it means "every vertex's classification is resolved" can no longer be
+    satisfied by a document that declared no vertices. The pair is asserted here rather than
+    separately: the same document is refused with no prologue, refused again with a prologue
+    whose slots are open, and accepted only once both hold."""
+    from defender.skills.invlang.validate import disposition_entry_price
+
+    conclude = _conclude(disposition="benign")
+    open_slot = (
+        "```invlang\n"
+        ":V prologue.vertices [id|type|class|ident|attrs?]\n"
+        "v-001|compute|??/??/??|db-1|os=??\n"
+        "```\n"
+    ) + conclude
+
+    assert "prologue.vertices" in disposition_entry_price("benign", conclude).owed[0]
+    assert any("unresolved" in o for o in disposition_entry_price("benign", open_slot).owed)
+    assert disposition_entry_price("benign", _PROLOGUE + conclude).owed == ()
+
+
 def test_a_companion_that_cannot_be_read_refuses_the_close(tmp_path):
     """A gate that cannot look must not report clean (#618/#621/#652).
 

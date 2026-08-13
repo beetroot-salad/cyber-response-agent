@@ -540,12 +540,10 @@ def _refuse_if_entry_price_is_owed(deps: AgentDeps, disposition: str) -> None:
 def _read_companion_text(path: Path) -> str:
     """The investigation log as text, or empty when it was never written.
 
-    NEVER WRITTEN is not an error to raise here: an unwritten companion states no defect and
-    names no entity check, so it owes `false-positive`'s whole price and the caller denies with
-    the same actionable text a blank `:T conclude` earns. Raising instead would hand the model
-    an exception where it needs an instruction. (It owes `benign` nothing, because that price
-    refuses CONTRADICTIONS in the log and an absent log carries none — the two priced keywords
-    honestly differ about the empty document, and `disposition_entry_price` says why.)
+    NEVER WRITTEN is not an error to raise here: an unwritten companion states no defect, names
+    no entity check and records no alerted entity, so it owes BOTH priced keywords their whole
+    price and the caller denies with the same actionable text a blank `:T conclude` earns.
+    Raising instead would hand the model an exception where it needs an instruction.
 
     COULD NOT LOOK is a different answer, and since #879 it has to be: every close reads this
     file now, so an EACCES, an EIO or a run dir that is not a directory reaches a gate none of
