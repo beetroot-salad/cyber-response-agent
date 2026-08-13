@@ -93,6 +93,14 @@ in front of you.
   known-populated field. A zero that survives a positive control is evidence; a
   zero that does not is a mapping fact about the index and must be reported as
   "not established", never as "no correlated activity".
+  **The fallback, when the control says unqueryable**: this verb takes an `index`
+  param, and it is `confine_index`'d against the events pattern as well as the
+  alerts one — so the SOURCE DATA STREAM of the alert's own documents (their
+  `data_stream.*` fields name it, e.g. `logs-falco.alerts-*`) is reachable on the
+  same call. The entity is queryable there, because that is where it was ingested.
+  Counting events is NOT counting alerts on the radar — it answers "how often does
+  this container do this", not "is this entity already known" — so bind it as a
+  clearly-labelled substitute and name the index beside the number.
 - **Bind the window through the verb's own `start` / `end` params**, not a
   `@timestamp` clause in the Lucene body — they are declared params of `alerts`,
   and mixing the two makes the effective window unreadable from the queries table.

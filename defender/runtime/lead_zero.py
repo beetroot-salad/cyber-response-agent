@@ -771,8 +771,18 @@ def _correlation_contract(alert: dict, ancestor_block: str) -> tuple[str, list[s
         "the environment carries: a host name that names the shared VPS every containerized "
         "alert reports from selects the whole environment and measures nothing.\n\n"
         f"{ancestor_block}\n\n"
-        "Search the alerts index ONLY (this is a correlation over prior alerts, not raw "
-        "telemetry). Do not narrow to this alert's own rule. The documents above may NAME that "
+        "Take both counts from the ALERTS index — this is a correlation over what is already "
+        "on the SOC's radar, and an alert is the unit of that. If an entity you judged central "
+        "is not QUERYABLE there, say so and fall back rather than reporting the empty result: "
+        "an alert's `_source` can carry a field the alerts index does not map, and a term on "
+        "an unmapped field returns `total: 0` with no error, which reads exactly like an "
+        "absence of activity. Positive-control a zero before you believe it (re-run the window "
+        "with the entity clause replaced by `<field>:*`); if the control is also empty the "
+        "field is unqueryable, and you may take that one count from the source event stream "
+        "instead by naming its index on the same verb — the SOURCE DATA STREAM of the "
+        "documents above, which their `data_stream.*` fields name. Counting events is a "
+        "different measurement from counting alerts, so if you do it, say which surface each "
+        "number came from. Do not narrow to this alert's own rule. The documents above may NAME that "
         "rule — on a sequence alert they are themselves alert documents, carrying "
         "`kibana.alert.rule.*` — and it is still not an axis to bind: a different rule firing "
         "on the same entity is exactly the related behaviour this lead exists to surface, and "
@@ -821,8 +831,10 @@ def _correlation_contract(alert: dict, ancestor_block: str) -> tuple[str, list[s
         "call, across any rule (the envelope's `total`)",
         "the count for those same entities UNSCOPED — the same window with the narrowing "
         "predicate dropped, across any rule (the envelope's `total`)",
-        "which entities you correlated on, the field each came from, and why you judged them "
-        "the discriminating ones for this alert",
+        "which entities you correlated on, the field each came from, WHICH INDEX each count "
+        "was taken against, and why you judged those entities the discriminating ones for "
+        "this alert — plus, for any count that came back zero, whether a positive control "
+        "confirmed the field is queryable at all",
     ]
     return goal, what
 
@@ -883,7 +895,7 @@ async def dispatch_correlation(  # noqa: C901, PLR0913 — item 3's own dispatch
             defender_dir, logger, _agent_id, make_model, registry, limits,
             extra_capabilities=extra, session_id=gather_session_id,
             # #835 — same per-system cache-key convention as the model-dispatched path
-            # (`driver.py::_build_gather`): item 3 is bound to the alerts index only, so its
+            # (`driver.py::_build_gather`): item 3 holds one confined search verb, so its
             # own template-catalog prefix stays the grant's system regardless of what
             # `request.system` says (they are now the same value — `CORRELATION_SYSTEM` is
             # derived from the grant — but the key does not depend on that).
