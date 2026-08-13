@@ -1,0 +1,67 @@
+{
+  "src": "/tmp/defender-runs/golden-case-007-lotl-web1/gather_raw/l-001/22.json",
+  "rows": 7,
+  "cols": 2,
+  "bytes": 870,
+  "payload": {
+    "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-26T19:17:22Z\" AND @timestamp < \"2026-07-26T19:47:22Z\"\n        AND host.name == \"web-1\"\n| STATS events = COUNT(*)\n        BY message\n| SORT events DESC\n| LIMIT 20",
+    "columns": [
+      {
+        "name": "events",
+        "type": "long"
+      },
+      {
+        "name": "message",
+        "type": "text"
+      }
+    ],
+    "row_count": 7,
+    "values": [
+      [
+        10,
+        "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)"
+      ],
+      [
+        10,
+        "pam_unix(runuser:session): session closed for user svc.monitoring"
+      ],
+      [
+        2,
+        "pam_unix(runuser:session): session opened for user svc.reports(uid=1004) by (uid=0)"
+      ],
+      [
+        2,
+        "error: kex_exchange_identification: Connection closed by remote host"
+      ],
+      [
+        2,
+        "pam_unix(runuser:session): session closed for user svc.reports"
+      ],
+      [
+        1,
+        "Connection closed by 172.18.0.13 port 37910"
+      ],
+      [
+        1,
+        "Connection closed by 172.18.0.13 port 59982"
+      ]
+    ]
+  },
+  "questions": [
+    {
+      "kind": "cell_lookup",
+      "q": "In the row where message is 'pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)', what is the value of events?",
+      "a": 10
+    },
+    {
+      "kind": "arity",
+      "q": "How many rows does this payload contain?",
+      "a": 7
+    },
+    {
+      "kind": "extremum",
+      "q": "Which message has the largest events?",
+      "a": "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1003) by (uid=0)"
+    }
+  ]
+}

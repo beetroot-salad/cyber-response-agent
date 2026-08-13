@@ -1,0 +1,71 @@
+{
+  "src": "/tmp/defender-runs/golden-case-006-bruteforce-web1/gather_raw/l-005/2.json",
+  "rows": 2,
+  "cols": 6,
+  "bytes": 1116,
+  "payload": {
+    "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-26T00:00:00Z\" AND @timestamp < \"2026-07-26T08:38:04Z\"\n        AND user.name == \"dev.dana\"\n        AND host.name == \"db-1\"\n        AND event.outcome IS NOT NULL\n| STATS failed = COUNT(*) WHERE event.outcome == \"failure\",\n        accepted = COUNT(*) WHERE event.outcome == \"success\",\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY auth_method = CASE(message LIKE \"*publickey*\", \"publickey\",\n                              message LIKE \"*password*\",  \"password\", \"other\"),\n           source.ip\n| SORT failed DESC, accepted DESC",
+    "columns": [
+      {
+        "name": "failed",
+        "type": "long"
+      },
+      {
+        "name": "accepted",
+        "type": "long"
+      },
+      {
+        "name": "first_seen",
+        "type": "date"
+      },
+      {
+        "name": "last_seen",
+        "type": "date"
+      },
+      {
+        "name": "auth_method",
+        "type": "keyword"
+      },
+      {
+        "name": "source.ip",
+        "type": "ip"
+      }
+    ],
+    "row_count": 2,
+    "values": [
+      [
+        24,
+        0,
+        "2026-07-03T12:05:20.000Z",
+        "2026-07-03T12:05:55.000Z",
+        "other",
+        "172.18.0.13"
+      ],
+      [
+        10,
+        0,
+        "2026-07-26T08:25:10.000Z",
+        "2026-07-26T08:37:55.000Z",
+        "other",
+        "172.18.0.11"
+      ]
+    ]
+  },
+  "questions": [
+    {
+      "kind": "cell_lookup",
+      "q": "In the row where last_seen is '2026-07-03T12:05:55.000Z', what is the value of accepted?",
+      "a": 0
+    },
+    {
+      "kind": "arity",
+      "q": "How many rows does this payload contain?",
+      "a": 2
+    },
+    {
+      "kind": "extremum",
+      "q": "Which first_seen has the largest failed?",
+      "a": "2026-07-03T12:05:20.000Z"
+    }
+  ]
+}

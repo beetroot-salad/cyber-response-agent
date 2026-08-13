@@ -1,0 +1,89 @@
+{
+  "src": "/tmp/defender-runs/golden-case-002b/gather_raw/l-001/1.json",
+  "rows": 2,
+  "cols": 9,
+  "bytes": 1123,
+  "payload": {
+    "query": "FROM logs-zeek.connection-*\n| WHERE @timestamp >= \"2026-07-25T09:22:37Z\" AND @timestamp < \"2026-07-25T09:42:37Z\"\n        AND source.ip == \"172.18.0.1\"\n| STATS conns      = COUNT(*),\n        bytes_out  = SUM(source.bytes),\n        bytes_in   = SUM(destination.bytes),\n        dest_ips   = COUNT_DISTINCT(destination.ip),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY destination.ip, destination.port, proto = network.protocol\n| SORT conns DESC",
+    "columns": [
+      {
+        "name": "conns",
+        "type": "long"
+      },
+      {
+        "name": "bytes_out",
+        "type": "long"
+      },
+      {
+        "name": "bytes_in",
+        "type": "long"
+      },
+      {
+        "name": "dest_ips",
+        "type": "long"
+      },
+      {
+        "name": "first_seen",
+        "type": "date"
+      },
+      {
+        "name": "last_seen",
+        "type": "date"
+      },
+      {
+        "name": "destination.ip",
+        "type": "ip"
+      },
+      {
+        "name": "destination.port",
+        "type": "long"
+      },
+      {
+        "name": "proto",
+        "type": "keyword"
+      }
+    ],
+    "row_count": 2,
+    "values": [
+      [
+        277,
+        7666694,
+        2787010,
+        1,
+        "2026-07-25T09:25:34.282Z",
+        "2026-07-25T09:42:32.932Z",
+        "172.18.0.17",
+        9200,
+        "ssl"
+      ],
+      [
+        32,
+        1920,
+        1280,
+        1,
+        "2026-07-25T09:25:11.102Z",
+        "2026-07-25T09:35:21.670Z",
+        "172.18.0.17",
+        9200,
+        null
+      ]
+    ]
+  },
+  "questions": [
+    {
+      "kind": "cell_lookup",
+      "q": "In the row where bytes_out is 1920, what is the value of destination.ip?",
+      "a": "172.18.0.17"
+    },
+    {
+      "kind": "arity",
+      "q": "How many rows does this payload contain?",
+      "a": 2
+    },
+    {
+      "kind": "extremum",
+      "q": "Which first_seen has the largest conns?",
+      "a": "2026-07-25T09:25:34.282Z"
+    }
+  ]
+}

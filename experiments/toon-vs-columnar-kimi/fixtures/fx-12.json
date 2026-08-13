@@ -1,0 +1,133 @@
+{
+  "src": "/tmp/defender-runs/golden-case-007-lotl-web1/gather_raw/l-001/28.json",
+  "rows": 19,
+  "cols": 3,
+  "bytes": 1224,
+  "payload": {
+    "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-25T07:00:00Z\" AND @timestamp < \"2026-07-25T11:00:00Z\"\n        AND host.name == \"soc-playground\"\n        AND (falco.output_fields.proc.name == \"nginx\" OR falco.output_fields.proc.name == \"tini\" OR falco.output_fields.proc.name == \"sshd\")\n| STATS events = COUNT(*)\n        BY falco.output_fields.container.id, falco.output_fields.proc.name\n| SORT events DESC\n| LIMIT 20",
+    "columns": [
+      {
+        "name": "events",
+        "type": "long"
+      },
+      {
+        "name": "falco.output_fields.container.id",
+        "type": "keyword"
+      },
+      {
+        "name": "falco.output_fields.proc.name",
+        "type": "keyword"
+      }
+    ],
+    "row_count": 19,
+    "values": [
+      [
+        783,
+        "host",
+        "sshd"
+      ],
+      [
+        629,
+        "a36492b5172b",
+        "sshd"
+      ],
+      [
+        549,
+        "ed96a85a7480",
+        "sshd"
+      ],
+      [
+        422,
+        "ffbff1299702",
+        "sshd"
+      ],
+      [
+        413,
+        "1df4bcd65ee4",
+        "sshd"
+      ],
+      [
+        345,
+        "e1dc89faaa8b",
+        "tini"
+      ],
+      [
+        334,
+        "d1daf6f3b7c6",
+        "sshd"
+      ],
+      [
+        283,
+        "d8fb0192a17f",
+        "sshd"
+      ],
+      [
+        234,
+        "922f03f16a11",
+        "sshd"
+      ],
+      [
+        217,
+        "2c1e2ec93d17",
+        "sshd"
+      ],
+      [
+        27,
+        "ed96a85a7480",
+        "tini"
+      ],
+      [
+        9,
+        "d1daf6f3b7c6",
+        "tini"
+      ],
+      [
+        7,
+        "c58bf05facac",
+        "tini"
+      ],
+      [
+        7,
+        "1df4bcd65ee4",
+        "tini"
+      ],
+      [
+        5,
+        "a36492b5172b",
+        "tini"
+      ],
+      [
+        4,
+        "d8fb0192a17f",
+        "tini"
+      ],
+      [
+        4,
+        "4b35545773e1",
+        "tini"
+      ],
+      [
+        2,
+        "922f03f16a11",
+        "tini"
+      ],
+      [
+        2,
+        "c58bf05facac",
+        "sshd"
+      ]
+    ]
+  },
+  "questions": [
+    {
+      "kind": "cell_lookup",
+      "q": "In the row where events is 629, what is the value of falco.output_fields.container.id?",
+      "a": "a36492b5172b"
+    },
+    {
+      "kind": "arity",
+      "q": "How many rows does this payload contain?",
+      "a": 19
+    }
+  ]
+}

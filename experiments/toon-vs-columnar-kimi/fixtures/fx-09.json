@@ -1,0 +1,140 @@
+{
+  "src": "/tmp/defender-runs/golden-case-005-cross-tier-probe-db1-2/gather_raw/l-010/0.json",
+  "rows": 9,
+  "cols": 7,
+  "bytes": 1893,
+  "payload": {
+    "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-26T11:08:28Z\" AND @timestamp < \"2026-07-26T11:08:28Z\"\n        AND user.name == \"dev.dana\"\n        AND event.outcome IS NOT NULL\n| STATS accepted   = COUNT(*) WHERE event.outcome == \"success\",\n        failed     = COUNT(*) WHERE event.outcome == \"failure\",\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY auth_method = CASE(message LIKE \"*publickey*\", \"publickey\",\n                              message LIKE \"*password*\",  \"password\", \"other\"),\n           source.ip, host.name\n| SORT accepted DESC, failed DESC",
+    "columns": [
+      {
+        "name": "accepted",
+        "type": "long"
+      },
+      {
+        "name": "failed",
+        "type": "long"
+      },
+      {
+        "name": "first_seen",
+        "type": "date"
+      },
+      {
+        "name": "last_seen",
+        "type": "date"
+      },
+      {
+        "name": "auth_method",
+        "type": "keyword"
+      },
+      {
+        "name": "source.ip",
+        "type": "ip"
+      },
+      {
+        "name": "host.name",
+        "type": "keyword"
+      }
+    ],
+    "row_count": 9,
+    "values": [
+      [
+        1092,
+        1386,
+        "2026-07-02T11:57:54.968Z",
+        "2026-07-13T10:27:51.587Z",
+        "password",
+        "172.18.0.23",
+        "jump-box-1"
+      ],
+      [
+        595,
+        738,
+        "2026-06-26T11:58:41.942Z",
+        "2026-07-02T02:10:12.923Z",
+        "password",
+        "172.18.0.15",
+        "jump-box-1"
+      ],
+      [
+        10,
+        30,
+        "2026-07-17T14:25:19.284Z",
+        "2026-07-17T15:22:40.206Z",
+        "password",
+        "172.18.0.20",
+        "jump-box-1"
+      ],
+      [
+        0,
+        1386,
+        "2026-07-02T11:57:52.741Z",
+        "2026-07-12T20:06:35.597Z",
+        "other",
+        "172.18.0.23",
+        "jump-box-1"
+      ],
+      [
+        0,
+        738,
+        "2026-06-26T13:54:42.507Z",
+        "2026-07-02T01:28:36.722Z",
+        "other",
+        "172.18.0.15",
+        "jump-box-1"
+      ],
+      [
+        0,
+        30,
+        "2026-07-17T14:25:16.702Z",
+        "2026-07-17T15:22:37.878Z",
+        "other",
+        "172.18.0.20",
+        "jump-box-1"
+      ],
+      [
+        0,
+        24,
+        "2026-07-03T12:05:20.000Z",
+        "2026-07-03T12:05:55.000Z",
+        "other",
+        "172.18.0.13",
+        "db-1"
+      ],
+      [
+        0,
+        16,
+        "2026-07-26T08:25:10.000Z",
+        "2026-07-26T11:04:41.000Z",
+        "other",
+        "172.18.0.11",
+        "db-1"
+      ],
+      [
+        0,
+        4,
+        "2026-07-26T09:43:38.000Z",
+        "2026-07-26T09:44:10.000Z",
+        "other",
+        "172.18.0.11",
+        "web-2"
+      ]
+    ]
+  },
+  "questions": [
+    {
+      "kind": "cell_lookup",
+      "q": "In the row where first_seen is '2026-07-02T11:57:52.741Z', what is the value of failed?",
+      "a": 1386
+    },
+    {
+      "kind": "arity",
+      "q": "How many rows does this payload contain?",
+      "a": 9
+    },
+    {
+      "kind": "extremum",
+      "q": "Which first_seen has the largest accepted?",
+      "a": "2026-07-02T11:57:54.968Z"
+    }
+  ]
+}

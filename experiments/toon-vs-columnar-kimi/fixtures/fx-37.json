@@ -1,0 +1,146 @@
+{
+  "src": "/tmp/defender-runs/golden-case-005-cross-tier-probe-db1-2/gather_raw/l-005/19.json",
+  "rows": 28,
+  "cols": 2,
+  "bytes": 931,
+  "payload": {
+    "query": "FROM logs-nginx.access-*\n| STATS BY host.name, host.ip\n| SORT host.name, host.ip",
+    "columns": [
+      {
+        "name": "host.name",
+        "type": "keyword"
+      },
+      {
+        "name": "host.ip",
+        "type": "ip"
+      }
+    ],
+    "row_count": 28,
+    "values": [
+      [
+        "web-1",
+        "172.18.0.2"
+      ],
+      [
+        "web-1",
+        "172.18.0.3"
+      ],
+      [
+        "web-1",
+        "172.18.0.4"
+      ],
+      [
+        "web-1",
+        "172.18.0.6"
+      ],
+      [
+        "web-1",
+        "172.18.0.7"
+      ],
+      [
+        "web-1",
+        "172.18.0.8"
+      ],
+      [
+        "web-1",
+        "172.18.0.10"
+      ],
+      [
+        "web-1",
+        "172.18.0.11"
+      ],
+      [
+        "web-1",
+        "172.18.0.13"
+      ],
+      [
+        "web-1",
+        "172.18.0.14"
+      ],
+      [
+        "web-1",
+        "172.18.0.17"
+      ],
+      [
+        "web-1",
+        "172.18.0.18"
+      ],
+      [
+        "web-1",
+        "172.18.0.22"
+      ],
+      [
+        "web-1",
+        "172.18.0.25"
+      ],
+      [
+        "web-2",
+        "172.18.0.2"
+      ],
+      [
+        "web-2",
+        "172.18.0.4"
+      ],
+      [
+        "web-2",
+        "172.18.0.5"
+      ],
+      [
+        "web-2",
+        "172.18.0.6"
+      ],
+      [
+        "web-2",
+        "172.18.0.8"
+      ],
+      [
+        "web-2",
+        "172.18.0.10"
+      ],
+      [
+        "web-2",
+        "172.18.0.12"
+      ],
+      [
+        "web-2",
+        "172.18.0.13"
+      ],
+      [
+        "web-2",
+        "172.18.0.14"
+      ],
+      [
+        "web-2",
+        "172.18.0.16"
+      ],
+      [
+        "web-2",
+        "172.18.0.18"
+      ],
+      [
+        "web-2",
+        "172.18.0.19"
+      ],
+      [
+        "web-2",
+        "172.18.0.22"
+      ],
+      [
+        "web-2",
+        "172.18.0.23"
+      ]
+    ]
+  },
+  "questions": [
+    {
+      "kind": "cell_lookup",
+      "q": "In the row where host.ip is '172.18.0.17', what is the value of host.name?",
+      "a": "web-1"
+    },
+    {
+      "kind": "arity",
+      "q": "How many rows does this payload contain?",
+      "a": 28
+    }
+  ]
+}

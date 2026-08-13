@@ -1,0 +1,55 @@
+{
+  "src": "/tmp/defender-runs/golden-case-005-cross-tier-probe-db1-2/gather_raw/l-002/2.json",
+  "rows": 4,
+  "cols": 2,
+  "bytes": 624,
+  "payload": {
+    "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-26T00:00:00Z\" AND @timestamp < \"2026-07-26T11:08:28Z\"\n        AND host.name == \"db-1\"\n        AND event.outcome == \"failure\"\n        AND message LIKE \"*Failed password*\"\n| STATS failed_count = COUNT(*)\n        BY hour_of_day = DATE_TRUNC(1 hour, @timestamp)\n| SORT hour_of_day ASC",
+    "columns": [
+      {
+        "name": "failed_count",
+        "type": "long"
+      },
+      {
+        "name": "hour_of_day",
+        "type": "date"
+      }
+    ],
+    "row_count": 4,
+    "values": [
+      [
+        24,
+        "2026-07-03T12:00:00.000Z"
+      ],
+      [
+        12,
+        "2026-07-26T08:00:00.000Z"
+      ],
+      [
+        48,
+        "2026-07-26T09:00:00.000Z"
+      ],
+      [
+        4,
+        "2026-07-26T11:00:00.000Z"
+      ]
+    ]
+  },
+  "questions": [
+    {
+      "kind": "cell_lookup",
+      "q": "In the row where hour_of_day is '2026-07-26T09:00:00.000Z', what is the value of failed_count?",
+      "a": 48
+    },
+    {
+      "kind": "arity",
+      "q": "How many rows does this payload contain?",
+      "a": 4
+    },
+    {
+      "kind": "extremum",
+      "q": "Which hour_of_day has the largest failed_count?",
+      "a": "2026-07-26T09:00:00.000Z"
+    }
+  ]
+}

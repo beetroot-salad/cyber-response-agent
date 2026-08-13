@@ -1,0 +1,74 @@
+{
+  "src": "/tmp/defender-runs/golden-case-006-bruteforce-web1/gather_raw/l-003/7.json",
+  "rows": 10,
+  "cols": 2,
+  "bytes": 520,
+  "payload": {
+    "query": "FROM logs-system.auth-* | WHERE host.ip == \"172.18.0.11\" | STATS BY host.name, host.ip | LIMIT 10",
+    "columns": [
+      {
+        "name": "host.name",
+        "type": "keyword"
+      },
+      {
+        "name": "host.ip",
+        "type": "ip"
+      }
+    ],
+    "row_count": 10,
+    "values": [
+      [
+        "web-1",
+        "172.18.0.11"
+      ],
+      [
+        "office-ws-1",
+        "172.18.0.11"
+      ],
+      [
+        "office-ws-2",
+        "172.18.0.11"
+      ],
+      [
+        "web-2",
+        "172.18.0.11"
+      ],
+      [
+        "canary-1",
+        "172.18.0.11"
+      ],
+      [
+        "db-1",
+        "172.18.0.11"
+      ],
+      [
+        "jump-box-1",
+        "172.18.0.11"
+      ],
+      [
+        "ci-1",
+        "172.18.0.11"
+      ],
+      [
+        "config-mgmt-1",
+        "172.18.0.11"
+      ],
+      [
+        "dev-ws-1",
+        "172.18.0.11"
+      ]
+    ]
+  },
+  "questions": [
+    {
+      "kind": "cell_lookup",
+      "q": "In the row where host.name is 'web-1', what is the value of host.ip?",
+      "a": "172.18.0.11"
+    },
+    {
+      "kind": "arity",
+      "q": "How many rows does this payload contain?",
+      "a": 10
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+trials: 200
+
+arm       kind            n     acc         wilson95    tokens
+--------------------------------------------------------------
+current   cell_lookup    40 100.0%   [91.2%,100.0%]      1018
+current   arity          40 100.0%   [91.2%,100.0%]      1000
+current   extremum       20 100.0%   [83.9%,100.0%]       666
+current   ALL           100 100.0%   [96.3%,100.0%]       941
+
+toon      cell_lookup    40 100.0%   [91.2%,100.0%]       950
+toon      arity          40 100.0%   [91.2%,100.0%]       932
+toon      extremum       20 100.0%   [83.9%,100.0%]       623
+toon      ALL           100 100.0%   [96.3%,100.0%]       878
+
+paired fixtures/questions: 100
+  input tokens  current=94,065  toon=87,755   delta=-6.7%
+  view bytes    current=207,403  toon=187,738   delta=-9.5%
+  cell_lookup  current=40/40 (100.0%)  toon=40/40 (100.0%)  worst-case delta=-8.8pp
+  ALL          current=100/100 (100.0%)  toon=100/100 (100.0%)  worst-case delta=-3.7pp
