@@ -1035,7 +1035,14 @@ class _Projector:
         for h in hyps:
             hid = h.get("id")
             if not isinstance(hid, str):
-                continue
+                # NOT a dropped row, which is why this one warns nothing: `_hypothesis_record`
+                # `_require`s `id` and `name`, so a `:H` row with an empty id cell raises
+                # `RowError` and is warned by `_project_rows` ("hypothesis missing id/name")
+                # before any record exists. Nothing that reaches here can fail this test; it
+                # narrows the type for the reader and for mypy, and a warning would be a
+                # second diagnostic for a defect already named — the exact double-reporting
+                # `deferred_hypothesis_ids` exists to prevent.
+                continue  # lint-row-drop: ok — no row here; a bad id was refused upstream
             if prologue:
                 if hid in self.prologue_hypothesis_ids:
                     continue
@@ -1308,13 +1315,25 @@ class _Projector:
         """
         conclude: dict[str, Any] = self.out.setdefault("conclude", {})
         rows: list[dict[str, str]] = conclude.setdefault("surviving_hypotheses", [])
-        for _idx, _row, rec in self._for_each_row(block, _SURVIVING_COLS):
+        for idx, row, rec in self._for_each_row(block, _SURVIVING_COLS):
             hid = rec.get("hyp_id")
             # `none` / `n/a` is how an EMPTY array is written here, not a hypothesis id
             # (`docs/dense-investigation-format.md`: "Empty arrays render as a single `none`
             # row", `surviving_hypotheses` named among them). Projecting the marker made the
             # undeclared-`h-*` rule refuse a run whose hypotheses were all refuted.
-            if not hid or is_conclude_empty_marker(hid):
+            if is_conclude_empty_marker(hid):
+                continue  # lint-row-drop: ok — the empty-TABLE marker, not a row
+            # One guard used to carry both cases, and the other one is a DROP: a row whose
+            # `hyp_id` cell is simply empty vanished from `conclude.surviving_hypotheses`
+            # with nothing raised, and the close then reasoned over a shortened survivor set
+            # that no reader could tell from an honestly shorter one.
+            if not hid:
+                self._warn(
+                    block, idx, row,
+                    "surviving row has no hypothesis id — the row records WHICH hypothesis "
+                    "is still standing, so an empty `hyp_id` cell records nothing. Name the "
+                    "`h-*`, or write the whole table as one `none` row if none survived.",
+                )
                 continue
             # Keyed `hypothesis`, the name `:T resolutions` records already use for the
             # same reference — a reader that knows one shape reads the other.
@@ -1324,9 +1343,31 @@ class _Projector:
             rows.append(entry)
 
     def _project_shelved_block(self, block: Block) -> None:
+        """`:T shelved [hyp_id|by_lead|rationale]` — which hypotheses a lead set aside.
+
+        Both empty-cell cases warn, and they did not use to. The missing `by_lead` half
+        always has; the missing `hyp_id` half was the silent one, three lines above a
+        warning for the very same shape — a shelved hypothesis simply never reached any
+        lead's `shelved` list, and #34's prediction-closure rule reads that list to decide
+        which hypotheses still owe their predictions.
+
+        The empty-TABLE marker is honoured here the way `:T conclude.surviving` honours it.
+        `_row_cells` already pads a lone `none` row to the block's width, so the marker
+        arrived as `hyp_id="none"` with an empty `by_lead` and earned the lead-attribution
+        warning — a run that shelved nothing was told it had written a bad row.
+        """
         for idx, row, rec in self._for_each_row(block):
             hyp = rec.get("hyp_id")
+            if is_conclude_empty_marker(hyp):
+                continue  # lint-row-drop: ok — the empty-TABLE marker, not a row
             if not hyp:
+                self._warn(
+                    block, idx, row,
+                    "shelved row has no hypothesis id — the row records WHICH hypothesis "
+                    "was set aside, so an empty `hyp_id` cell records nothing. Name the "
+                    "`h-*`, or write the whole table as one `none` row if nothing was "
+                    "shelved.",
+                )
                 continue
             lid = rec.get("by_lead")
             if not lid:

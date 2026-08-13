@@ -30,6 +30,11 @@ being "deny everything".
         `new_hypothesis` typo they are not, and `deferred_hypothesis_ids` then stood the
         undeclared-hypothesis rule down for the whole document — costing a round trip, not a
         write.
+
+The last section is not one of the six. `lint_silent_row_drop` (#886) shipped with three
+parser drops baselined as true positives it was forbidden to fix, annotated "filed as #876"
+— which #876's six findings never carried. They are fixed here, so the gate's baseline holds
+nothing but false positives; one of the three turned out not to be a drop at all.
 """
 
 from __future__ import annotations
@@ -582,3 +587,79 @@ def test_the_singular_new_hypothesis_typo_still_defers_for_its_own_ids():
     _companion, warnings = parse_dense_companion(_stray_doc(typo))
     assert deferred_hypothesis_ids(warnings) == frozenset({"h-999"})
     assert not [e for e in validate_companion(_stray_doc(typo)) if "h-999" in e]
+
+
+# --------------------------------------------------------------------------- #
+# the silent-drop gate's own findings — baselined by #886, fixed here
+# --------------------------------------------------------------------------- #
+
+def _conclude_table(block: str) -> str:
+    return _benign_doc(_vertices(_CLEAN_VERTEX), block)
+
+
+def test_a_surviving_row_with_no_hypothesis_id_is_named_not_dropped():
+    """One guard carried two cases — the documented `none` empty-TABLE marker, and a row
+    whose `hyp_id` cell is simply empty. The second is a drop: the row vanished from
+    `conclude.surviving_hypotheses` with nothing raised, and the close then reasoned over a
+    shortened survivor set no reader could tell from an honestly shorter one."""
+    doc = _conclude_table(":T conclude.surviving [hyp_id|final_weight]\n|++")
+    companion, warnings = parse_dense_companion(doc)
+    assert len(warnings) == 1
+    assert warnings[0].reason.startswith("surviving row has no hypothesis id")
+    assert companion["conclude"]["surviving_hypotheses"] == []
+    assert _parse_errors(validate_companion(doc))
+
+
+def test_a_shelved_row_with_no_hypothesis_id_is_named_not_dropped():
+    """The same drop three lines above a warning for the very same shape: `:T shelved`
+    already refused a row with no lead attribution, while one with no hypothesis id went
+    silently — and #34's prediction-closure rule reads that list to decide which hypotheses
+    still owe their predictions."""
+    doc = _conclude_table(':T shelved [hyp_id|by_lead|rationale]\n|l-001|"outranked by h-001"')
+    _companion, warnings = parse_dense_companion(doc)
+    assert len(warnings) == 1
+    assert warnings[0].reason.startswith("shelved row has no hypothesis id")
+    assert _parse_errors(validate_companion(doc))
+
+
+def test_an_empty_table_written_as_the_none_marker_stays_silent_in_both():
+    """The control that makes those two warnings honest, and a bug of its own on the shelved
+    side: `_row_cells` pads a lone `none` row to the block's width, so the marker reached
+    `_project_shelved_block` as `hyp_id="none"` with an empty `by_lead` and earned the
+    lead-attribution warning. A run that shelved nothing was told it had written a bad row."""
+    for block in (
+        ":T conclude.surviving [hyp_id|final_weight]\nnone",
+        ":T shelved [hyp_id|by_lead|rationale]\nnone",
+        ":T shelved [hyp_id|by_lead|rationale]\nn/a",
+    ):
+        doc = _conclude_table(block)
+        assert parse_dense_companion(doc)[1] == [], block
+        assert validate_companion(doc) == [], block
+
+
+def test_a_shelved_row_that_names_both_still_lands():
+    """The positive control for the pair of guards above."""
+    doc = _conclude_table(
+        ':T shelved [hyp_id|by_lead|rationale]\nh-001|l-001|"outranked by h-002"'
+    )
+    companion, warnings = parse_dense_companion(doc)
+    assert warnings == []
+    lead = companion["findings"][0]
+    assert lead["shelved"] == ["h-001"]
+    assert lead["shelved_rationales"] == {"h-001": "outranked by h-002"}
+
+
+def test_a_hypothesis_row_with_an_empty_id_is_refused_once_not_twice():
+    """The third baselined finding, and the one that is NOT a drop. `_hypothesis_record`
+    `_require`s `id` and `name`, so the row raises `RowError` and is warned before any record
+    exists — nothing that reaches `_register_hypotheses`' `isinstance` guard can fail it. A
+    warning there would be a second diagnostic for a defect already named."""
+    doc = _benign_doc(
+        _vertices(_CLEAN_VERTEX),
+        ":H hypothesize.hypotheses "
+        "[id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]\n"
+        "|?gpo-edit|v-001|modified|identity|service-account/known-corp||null|active",
+    )
+    companion, warnings = parse_dense_companion(doc)
+    assert [w.reason for w in warnings] == ["hypothesis missing id/name"]
+    assert companion.get("hypothesize", {}).get("hypotheses", []) == []
