@@ -6,6 +6,20 @@ on:
   pull_request:
     branches: [main]
 
+# One in-flight run per ref. Pushing again to a PR branch used to leave the previous run's
+# four jobs running to completion against a commit nobody would merge; with ~4 pushes per
+# branch that is most of this repo's runner capacity spent on superseded commits. The
+# symptom was queueing, not slowness: run 31624714749's `box-dood` job waited 4544s (75
+# minutes) for a free runner and turned an 8-minute run into a 78-minute one.
+#
+# cancel-in-progress ONLY for pull_request. A push to `main` is a distinct commit whose
+# result is a fact about that commit — cancelling it because a later merge landed would
+# leave the earlier one permanently untested, and `main` has no branch protection to catch
+# it later. Those queue behind each other instead.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -69,9 +83,31 @@ jobs:
         # budget posture (#631, M9/D11): flipping the flag in CI is what exercises the
         # deny branch on real runs (C6 refuted — real runs land at 191/200), so the
         # enforcement path is executed routinely rather than merely enabled.
+        #
+        # `-n auto --dist loadfile`: this step WAS the entire wall clock of CI — 452s of a
+        # 508s job, with every other job finishing inside 102s — and it ran on one core of
+        # a four-core runner. `loadfile` keeps each file's tests on one worker, so
+        # module-scoped fixtures and the per-file tmp git repos behave as they did serially.
+        #
+        # Two deselections, neither of which drops a check from CI:
+        #   -m "not gate"  — five tests that re-run a repo-wide lint gate over the real tree
+        #                    via the same `main([])` entry point the code-smells job already
+        #                    runs as a BLOCKING step. See the `gate` marker in
+        #                    defender/pyproject.toml; each marked test names its step.
+        #   --ignore …540… — the boundary suite drives real containers (61s, the largest
+        #                    file here). It now runs in `box-native` below, natively, and in
+        #                    `box-dood` under the split-namespace topology — twice, as
+        #                    before, just not on this job's critical path. gVisor is still
+        #                    installed above because OTHER suites in this job start real
+        #                    boxes: test_store_boundary_705.py's `box`-marked tests and
+        #                    test_771_alias_ban.py's mechanism confirmations, which
+        #                    _spec771.py deliberately routes through THIS job.
         env:
           DEFENDER_BUDGET_ENFORCE: "1"
-        run: uv run pytest tests/ -v -m "not live"
+        run: >-
+          uv run pytest tests/ -v -m "not live and not gate"
+          -n auto --dist loadfile
+          --ignore tests/e2e/test_540_box_boundary.py
 
       # The spec_graph gate checks (check_actors / check_binds) ship with the
       # spec-flow plugin and were dark to CI — only defender/ was collected, so a
@@ -82,6 +118,66 @@ jobs:
       # defender/.venv (the same idiom as the code-smells lint gates below).
       - name: Run spec-flow tool tests
         run: defender/.venv/bin/python -m pytest spec-flow/scripts -q
+
+  # The #540 boundary suite on a NATIVE daemon — the same collection the `test` job used to
+  # carry inline. It moved out here for wall clock alone: 27 tests that each start a real
+  # gVisor box cost 61s, the largest single file in the suite, and pytest-xdist cannot shrink
+  # them (the cost is container startup, not CPU). Split out, they run alongside `test`
+  # instead of inside it.
+  #
+  # NOT a duplicate of `box-dood`. That job exists for the split-path-namespace topology
+  # (C46) where bind-source translation is observable; this one is the native case where the
+  # driver and the daemon share a path namespace. Both were already running this file before
+  # this split — `test` natively and `box-dood` under DooD — so the pairing is unchanged.
+  box-native:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Sync defender venv
+        working-directory: defender
+        run: uv sync --extra dev --extra runtime
+
+      # Byte-identical to the `test` job's install, and deliberately so: the boxes here are
+      # the same boxes, and #771's alias ban faults every box on arrival unless the daemon
+      # records `--oci-seccomp` as a runtimeArg. test_771_alias_ban.py asserts that over
+      # EVERY `runsc install` step in this file, so this copy is covered by that census
+      # rather than trusted.
+      - name: Install gVisor (runsc) for the box suite
+        run: |
+          set -eux
+          curl -fsSL https://gvisor.dev/archive.key \
+            | sudo gpg --dearmor -o /usr/share/keyrings/gvisor-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/gvisor-archive-keyring.gpg] https://storage.googleapis.com/gvisor/releases release main" \
+            | sudo tee /etc/apt/sources.list.d/gvisor.list > /dev/null
+          sudo apt-get update && sudo apt-get install -y runsc
+          sudo runsc install -- --oci-seccomp
+          sudo systemctl restart docker
+          docker info --format '{{.Runtimes}}'
+          # Hard-fail rather than print — same reason as the `test` job: the suite self-skips
+          # a runtime the daemon does not register, so a degraded install would leave this
+          # job green having started no gVisor box at all.
+          docker info --format '{{range $k, $v := .Runtimes}}{{$k}} {{end}}' \
+            | tr ' ' '\n' | grep -qx runsc
+
+      - name: Pre-pull the box rootfs
+        run: docker pull python:3.11-slim
+
+      - name: "Run the #540 boundary suite natively"
+        working-directory: defender
+        # Same enforcing posture as every other pytest step over tests/ (#631 D11) — and
+        # test_budget_seams_631's workflow gate reads this block to prove it.
+        env:
+          DEFENDER_BUDGET_ENFORCE: "1"
+        # No -n: 27 container starts contend on one docker daemon, and xdist would buy
+        # nothing but flakier teardown.
+        run: uv run pytest tests/e2e/test_540_box_boundary.py -v -rs
 
   # The #540 boundary suite under docker-outside-of-Docker — the topology C46 exists for, and
   # the one the `test` job structurally cannot reach. There the driver and the daemon share a
