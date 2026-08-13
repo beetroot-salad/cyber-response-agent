@@ -104,7 +104,11 @@ def resolve_review_model(explicit: str | None = None) -> str:
 def bind_review_role(
     defn: AgentDefinition, run_dir: Path, *, defender_dir: Path | None = None,
 ) -> AgentDeps:
-    """Bind a review role's deps with its OWN fresh salt — PR7/PR8: never the session's."""
+    """Bind a review role's deps — with NO salt, because since #875 there is none to bind.
+
+    PR7/PR8's obligation (a review role must never hold the delimiter of the frame its own
+    output returns inside) is discharged by `wrap_fresh` minting at wrap time rather than by
+    this call minting a fresh one per bind."""
     return bind(defn, run_dir, scope=RunScope(), defender_dir=defender_dir)
 
 

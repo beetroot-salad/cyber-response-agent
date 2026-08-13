@@ -191,16 +191,55 @@ class _LeadFilenamer:
 
 
 def _md_safe(text: str) -> str:
-    """A run-chosen value, neutralized before it is interpolated into a raw markdown frame:
-    no embedded heading marker, no embedded newline can reopen the frame with a heading of
-    the injector's choosing.
+    """A run-chosen value, neutralized before it is interpolated into a raw markdown frame.
 
-    Call `_md_line` rather than this, and the claim below stays true by construction. #875 F-8:
-    the docstring here USED to say "applies to EVERY interpolated span" while three of the
-    seven spans were raw — `query_id` above all, which is the gather model's own string
+    Both markers go: the newline, which is what lets a span reach column 0 at all, and the
+    heading marker, which is what makes what lands there a section. Lossy by design — a value
+    that legitimately contains `#` loses it — which is why the one span that legitimately does,
+    `params`, does not come through here at all (see `_Encoded`).
+
+    Call `_md_line` rather than this, and no span can be forgotten. #875 F-8:
+    the docstring here USED to claim it "applies to EVERY interpolated span" while three of the
+    seven were raw — `query_id` above all, which is the gather model's own string
     (`query_tool.resolve_query_id` returns it verbatim). A per-span opt-in is a claim about
     every future edit, and this one was already false when it was written."""
     return text.replace("\n", " ").replace("\r", " ").replace("#", "")
+
+
+#: Every `{placeholder}` on a line that a `#` could turn into — or add to — a heading: a span
+#: that OPENS a line (its `#` would land at column 0), and a span anywhere on a line the
+#: template already begins with `#` (its `#` extends a heading's own text, which is how a
+#: hostile lead id reads as a second section even though the document still has one).
+#:
+#: Derived from the TEMPLATE, which is host text — so this is a structural fact about the
+#: renderer, not a per-span opinion. That distinction is the point: the per-span opt-in is what
+#: drifted and made `_md_safe`'s "EVERY interpolated span" docstring false (#875 F-8).
+class _Encoded(str):
+    """A span its OWN encoder already made structurally safe, passed through unneutralized.
+
+    Exactly one thing qualifies today: `json.dumps` output. JSON escapes newlines inside string
+    literals, so an encoded value cannot carry the line break that is the whole of the
+    structural threat — and a `#` inside a JSON string cannot begin a line when no line break
+    can precede it.
+
+    This is NOT the per-span opt-in that #875 F-8 was caused by. That opt-in was a human
+    judgement per call site ("this one looks fine"), invisible at the seam and silently false
+    once a span was added. This is a claim about an ENCODER, made once, and `_md_line` VERIFIES
+    it on every render — a value that turns out to hold a newline raises rather than passing.
+
+    It exists because neutralizing `params` was itself a corruption: `{"host": "web#2"}` reached
+    the judge as `{"host": "web2"}` — a value the run never bound, in the document the judge
+    grades the run on, with nothing marking that a character was dropped. That is F-8's own harm
+    (the judge shown a document that misdescribes the run) arriving from the other direction."""
+
+
+def _verified_encoded(name: str, value: _Encoded) -> str:
+    if "\n" in value or "\r" in value:
+        raise ValueError(
+            f"span {name!r} was passed as _Encoded but carries a raw line break — its encoder "
+            "does not give the guarantee _Encoded claims; neutralize it instead"
+        )
+    return str(value)
 
 
 def _md_line(template: str, **spans: object) -> str:
@@ -214,7 +253,10 @@ def _md_line(template: str, **spans: object) -> str:
 
     `template` is HOST text, never run-chosen — it carries the markdown structure, and the
     spans carry only values."""
-    return template.format(**{k: _md_safe(str(v)) for k, v in spans.items()})
+    return template.format(**{
+        k: (_verified_encoded(k, v) if isinstance(v, _Encoded) else _md_safe(str(v)))
+        for k, v in spans.items()
+    })
 
 
 def _payload_paths(c: LeadComparison, gather_raw: Path) -> list[str]:
@@ -228,11 +270,12 @@ def _payload_paths(c: LeadComparison, gather_raw: Path) -> list[str]:
         # by `runtime/tools.py` for `∅.bash-shim`) and put the refusal record back in front
         # of the judge by another door — under an absence instruction it cannot satisfy.
         return []
-    # `_md_safe` on the lead id here too (#875 F-8): this string is interpolated into the
-    # absence block's `> ` quote lines exactly like every other span, and the ONLY reason it
-    # is not model-reachable today is that the dispatch seam holds `lead_id` to `_LEAD_ID_RE`.
-    # That is a constraint one door over, not a property of this render.
-    return [str(gather_raw / _md_safe(c.lead_id) / "0.json")]
+    # NOT `_md_safe`d here: this function answers "which files does this lead hold", and a
+    # neutralized path is a path that no longer names the file (`len(paths)` and the `cat`
+    # the judge is told to run both mean the real one). The neutralization belongs at the
+    # RENDER, where the value becomes a markdown span — and there it covers this fallback and
+    # the `raw_ref` branch above alike, which the per-span opt-in did not (#875 F-8).
+    return [str(gather_raw / c.lead_id / "0.json")]
 
 
 def _render_lead_file(c: LeadComparison, gather_raw: Path) -> str:
@@ -250,7 +293,7 @@ def _render_lead_file(c: LeadComparison, gather_raw: Path) -> str:
     q_lines = "\n".join(
         _md_line(
             "- {qid}  verb={verb}  params={params}  status={status}",
-            qid=q.query_id, verb=q.verb, params=json.dumps(q.params or {}),
+            qid=q.query_id, verb=q.verb, params=_Encoded(json.dumps(q.params or {})),
             status=q.payload_status,
         )
         for q in c.queries
@@ -261,8 +304,12 @@ def _render_lead_file(c: LeadComparison, gather_raw: Path) -> str:
 
     payloads = _payload_paths(c, gather_raw)
     if payloads:
-        payload_lines = "".join(f">   {p}\n" for p in payloads)
-        example = payloads[0]
+        # Every payload path is a span like any other — `raw_ref`'s shape gate makes today's
+        # values tame, but that is a constraint one door over rather than a property of this
+        # render, and #875 F-8's whole point is that no span here is exempt by argument.
+        safe_payloads = [_md_safe(p) for p in payloads]
+        payload_lines = "".join(f">   {p}\n" for p in safe_payloads)
+        example = safe_payloads[0]
         absence = (
             "> The sample is ONE event, for shape orientation. To assert that an entity is\n"
             "> ABSENT (the refute primitive), query the FULL payload — never infer absence\n"
@@ -325,7 +372,11 @@ def render_manifest(comparisons: list[LeadComparison]) -> str:
     for c in comparisons:
         name = namer.name(c.lead_id)
         flags = "anomaly" if (c.orphan or c.note) else "ok"
-        label = (c.goal or "").strip().splitlines()[0] if c.goal else (c.note or ("orphan" if c.orphan else ""))
+        # `next(iter(...), "")`, never `[0]`: a `goal` is model-chosen at the gather dispatch
+        # and a whitespace-only one (`goal="\n"`) strips to the empty string, whose
+        # `splitlines()` is EMPTY — an `IndexError` here took the whole judge stage down.
+        first_line = next(iter((c.goal or "").strip().splitlines()), "")
+        label = first_line if c.goal else (c.note or ("orphan" if c.orphan else ""))
         lines.append(f"- {name}  [{flags}]  {_md_safe(label)}")
     return "\n".join(lines)
 

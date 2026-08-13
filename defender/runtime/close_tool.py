@@ -257,9 +257,9 @@ def _render_challenged_message(material: tuple[RecommendedLead, ...], deps: Agen
     assert material, "the challenged arm never returns without discriminating material"
     lines = [f"- {item.target}: {item.ask}" for item in material]
     # O6/O7: the discriminating material is derived from a payload-influenced role's output —
-    # it returns inside the SAME run-salted untrusted frame the gather subagent's return
-    # already uses (`defender._untrusted.wrap`, keyed on the INVESTIGATION's own salt, never
-    # the review role's own — the review role minted a fresh one and never held this one).
+    # it returns inside the same KIND of untrusted frame the gather subagent's return uses
+    # (`defender._untrusted.wrap_fresh`) — since #875 NOT the same salt: the delimiter is minted
+    # after this content is in hand, so no party has seen it, the review role included.
     framed = wrap_fresh("\n".join(lines), "untrusted")
     # "measurement", not "lead": #796's ask names the entity, edge, lead or hypothesis to
     # measure and the DIMENSION to measure it on — the investigation chooses the lead. Calling

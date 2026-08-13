@@ -181,7 +181,7 @@ class CuratorDeps(AgentDeps):
     @classmethod
     def for_run(
         cls, run_dir: Path, repo_root: Path, corpus_dir: Path,
-        *, cfg: ForwardCheckConfig, box: Any, salt: str | None = None,
+        *, cfg: ForwardCheckConfig, box: Any,
     ) -> CuratorDeps:
         """A thin wrapper over `bind` (M9): resolves the corpus NAME off `corpus_dir`'s own
         basename and binds through the one seam, then attaches the forward-check config into
@@ -248,7 +248,9 @@ def _run_curator_pydantic(
         )
     deps = CuratorDeps.for_run(
         ctx.learning_run_dir, repo_root, corpus_dir,
-        cfg=cfg, salt=ctx.salt, box=ctx.box,
+        # No `salt=`: #875 took it off `bind`, so passing one here bound nothing and silently
+        # read as if it had. The stage salt's one live reader is `run_curator_stage` below.
+        cfg=cfg, box=ctx.box,
     )
     return run_stage(
         stage="curator",

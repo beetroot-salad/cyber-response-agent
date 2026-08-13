@@ -267,11 +267,15 @@ class QueryCapture(AbstractCapability[Any]):
         every member of this repeat group."""
         return recorded or ("an undeclared system" if raw.strip() else "")
 
-    def _traversal_reject(self, model_query_id: Any) -> str | None:
+    def _forbidden_reject(self, model_query_id: Any) -> str | None:
+        # The message names the WHOLE screen, not the path half of it: a refusal that lists
+        # four characters the caller did not use is one the caller cannot act on, and #875 F-8
+        # widened `_QID_FORBIDDEN` past the traversal set.
         if model_query_id and any(t in str(model_query_id) for t in _QID_FORBIDDEN):
             return (
-                f"invalid query_id {model_query_id!r}: no '/', '\\', '..' or NUL — it becomes a "
-                "catalog path segment. Coin a `{system}.{kebab-name}` id."
+                f"invalid query_id {model_query_id!r}: no '/', '\\', '..', NUL, newline or '#' "
+                "— it becomes a catalog path segment and a markdown span the offline collectors "
+                "render. Coin a `{system}.{kebab-name}` id."
             )
         return None
 
@@ -413,7 +417,7 @@ class QueryCapture(AbstractCapability[Any]):
         """The per-call screens BELOW the grant and the breaker: the traversal screen, param
         validation, and the self-ticket screen. Raises `ModelRetry` (after its usage row) when
         one of them refuses."""
-        reason = self._traversal_reject(model_query_id)
+        reason = self._forbidden_reject(model_query_id)
         if reason is None:
             reason = validate_params(decision.fn, params)
         if reason is None:

@@ -182,11 +182,20 @@ def _run_sync(coro: Any) -> Any:
 
 def _sanitize(text: Any) -> str:
     """Neutralize any `<run-…-…>`-shaped delimiter, and any markdown code-fence run, in
-    externally-sourced content BEFORE it is wrapped or interpolated. `wrap()` performs no
-    escaping of its own delimiter shape, so an attacker-authored `message`/`user.name`/
-    `source.ip` carrying a byte-exact close tag would otherwise end the untrusted frame (or
-    item 3's contract) early; a ``` run would likewise end the fenced block whichever
-    consumer put the text inside one.
+    externally-sourced content before it is INTERPOLATED into text that crosses an agent
+    boundary unframed.
+
+    The fence half is unconditional: a ``` run ends the fenced block whichever consumer put
+    the text inside one, and nothing about how a frame is delimited changes that.
+
+    The DELIMITER half was NARROWED BY #875. Its original reason was the untrusted frame —
+    `wrap()` escapes nothing of its own delimiter shape, so a byte-exact close tag in an
+    attacker-authored `message`/`user.name`/`source.ip` would end the frame early. That reason
+    is gone: `wrap_fresh` mints this section's delimiter AFTER the body is assembled and
+    re-mints while it collides, so no content can close the frame that wraps it, sanitized or
+    not. What survives is item 3's contract (`_correlation_goal`): the correlation lead's GOAL
+    is free prose built from those same attacker-derived values and handed to the gather
+    subagent as a dispatch argument, inside no frame at all, so no re-mint covers it.
 
     DEFANGED, NEVER DELETED — the same rule both surfaces' tests assert: the evidence has to
     survive in a form the reader can still see, or the sanitizer passes by destroying what it

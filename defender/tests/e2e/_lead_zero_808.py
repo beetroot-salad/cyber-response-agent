@@ -88,6 +88,9 @@ HARNESS_PROVENANCE = "harness"     # K11's provenance field VALUE
 PROVENANCE_KEY = "provenance"      # K11's provenance field NAME
 LEAD_ZERO_HEADING = "## Alert ancestors"   # the ORIENT section `orientation()` appends
 
+#: A salt-SHAPED literal, no longer the run's own: since #875 `wrap_fresh` mints each frame's
+#: delimiter after its content is in hand, so nothing here can predict a real one. What is left
+#: is `test_808_orient_framing`'s FORGERY subject — the token an injected alert guesses with.
 SALT = "aabbccddeeff0011"
 # The three rendered notes, spelled in `orient.py`'s own shipped `_(unavailable: …)_` idiom
 # so the block reads like every other degraded ORIENT section rather than inventing a second
@@ -480,7 +483,6 @@ def run(  # noqa: PLR0913 — a scenario builder: one parameter per thing a scen
     main_turns: list[Turn] | None = None,
     gather_turns: list[Turn] | None = None,
     run_id: str = "lz808",
-    salt: str = SALT,
     limits: dict | None = None,
     store_factory: Any = None,
     stores: list | None = None,

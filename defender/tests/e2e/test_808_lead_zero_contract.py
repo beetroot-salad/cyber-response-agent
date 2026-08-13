@@ -119,7 +119,7 @@ class _Watcher(ReplayFn):
 
 def test_lead_zero_returns_section_text_entities_and_status(tmp_path):
     """d0 — `resolve_lead_zero` returns ONE value carrying (a) `text`, item 1's rendered
-    section entirely inside a single `wrap(text, "untrusted", salt=deps.salt)` frame, and
+    section entirely inside a single `wrap_fresh(text, "untrusted")` frame, and
     (b) a `status` distinguishing failed / succeeded-empty / succeeded-truncated /
     succeeded-resolved.
 

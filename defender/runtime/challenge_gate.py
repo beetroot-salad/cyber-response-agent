@@ -311,7 +311,7 @@ def _mark_traces_incomplete(deps: Any, round_no: int, reason: str) -> None:
     restated here — with no roles bound this writes nothing, which is the honest record of a
     gate that dispatched nothing.
 
-    The reason rides FRAMED, on the investigation's salt, exactly as the stage replies on the
+    The reason rides FRAMED, on a wrap-time salt (#875) exactly as the stage replies on the
     same files do. Half of what can land here is stage-derived — a reply the reader refused
     quotes the model's own `finding`/`target`, and a stage error carries the provider's
     message — so an unframed reason puts payload-influenced text into the one artifact whose

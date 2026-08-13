@@ -252,9 +252,16 @@ _PROBE = "ALPHA\n##BRAVO#CHARLIE"
 
 #: Attributes of a `LeadComparison` (`c`) or a `QueryRow` (`q`) that may be interpolated raw,
 #: each with the reason it is not a run-chosen text span:
-#:   `real_sample` — already-rendered markdown from the payload walk. It carries the sample
-#:       block's own `### Raw Sample Events` heading and a JSON fence BY DESIGN; neutralizing it
-#:       would destroy the evidence column rather than protect it.
+#:   `real_sample` — already-rendered markdown from the payload walk, carrying the sample
+#:       block's own `### Raw Sample Events` heading and a JSON fence, so `_md_safe` would
+#:       destroy the evidence column rather than protect it. NOT a claim that the span is safe:
+#:       `unredacted_exemplar` echoes the MATCHED header line, and `_RAW_SAMPLE_HEADER_RE`'s
+#:       trailing `.*` is payload-derived — a payload containing a line `### Raw Sample Events
+#:       INJECTED` with no JSON fence after it renders that heading verbatim into the document.
+#:       A KNOWN GAP, pre-existing and tracked as #893: the fix cannot simply
+#:       canonicalize the header, because the oracle legitimately emits suffixes of its own
+#:       (`### Raw Sample Events (first 3)`), and the producer has a twin in
+#:       `oracle/sample.py` — so it is an evidence-renderer decision, not a neutralizer one.
 #:   `note` — one of `compare.py`'s own literals, set by `build_comparison`, not by the run.
 #:   `orphan` — a bool.
 _EXEMPT_ATTRS = {"real_sample", "note", "orphan"}
@@ -355,15 +362,32 @@ def test_875_every_run_chosen_span_in_the_comparison_render_is_neutralized():
     )
 
 
-def test_875_md_safe_strips_both_frame_reopeners():
-    """The unit under the claim: the neutralizer removes the newline AND the heading marker, and
-    keeps everything else.
+def test_875_md_safe_strips_both_reopeners_and_params_keeps_its_own_hashes():
+    """The unit under the claim, in two halves.
 
-    Both, not either. The newline is what lets a span reach column 0; the `#` is what makes what
-    lands there a heading. Stripping one alone leaves a document a hostile span can still
-    restructure — a bare newline splits the queries list, and a `#` that survives to a line the
-    renderer itself begins is a heading the run chose."""
+    `_md_safe` strips BOTH reopeners. The newline is what lets a span reach column 0; the `#`
+    is what makes what lands there a heading. It is lossy on purpose, and every IDENTIFIER span
+    goes through it — `query_id`, `lead_id`, `goal`, `verb`, `status` have no legitimate `#`,
+    and `resolve_query_id` refuses one at the source besides.
+
+    `params` does NOT, and the reason is a property of its ENCODER rather than an opinion about
+    the span: `json.dumps` escapes newlines inside string literals, so an encoded value cannot
+    carry the line break the whole threat rests on. Neutralizing it anyway corrupted evidence —
+    a host named `web#2` reached the judge as `web2`, a value the run never bound, in the very
+    document the judge grades the run on. `_md_line` VERIFIES the encoder's guarantee on every
+    render, so this cannot rot into the per-span opt-in that caused F-8."""
     out = compare_mod._md_safe(_PROBE)
     assert "\n" not in out, f"{out!r} can still reach column 0"
     assert "#" not in out, f"{out!r} can still open a heading"
     assert out == "ALPHA BRAVOCHARLIE", f"the span's own text was not preserved: {out!r}"
+
+    rendered = compare_mod._md_line(
+        "- {qid}  params={params}", qid="elastic.auth",
+        params=compare_mod._Encoded(json.dumps({"host": "web#2"})),
+    )
+    assert '"web#2"' in rendered, f"a JSON evidence value was corrupted: {rendered!r}"
+    assert len(rendered.splitlines()) == 1, "the span introduced a line break"
+
+    # The verification, not merely the claim: an _Encoded that lies raises rather than passing.
+    with pytest.raises(ValueError, match="raw line break"):
+        compare_mod._md_line("- {p}", p=compare_mod._Encoded("a\nb"))
