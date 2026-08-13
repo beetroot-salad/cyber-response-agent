@@ -47,6 +47,8 @@ are properties you verify the *shape* of, not constraints on you.
 Read the doc you need; don't duplicate it into what you scaffold.
 
 - `adapter.md` / `mcp.md` — the two build paths.
+- `lead-zero.md` — what the pre-turn lead-0 needs from an alert source (only
+  for the system that raises alerts).
 - `decisions.md` — why the skill is shaped this way (for grounding a call).
 - `defender/docs/system-skill-shape.md` — the per-system `SKILL.md` /
   `execution.md` split and its fields.
@@ -138,6 +140,11 @@ Both paths produce the same per-system skill. Read
 `defender/docs/system-skill-shape.md` for the exact shape; if a sibling
 system already exists, mirror the closest one. The bar is **lean** —
 everything here grows post-merge.
+
+If this system **raises the alerts investigations start from**, read
+`${CLAUDE_SKILL_DIR}/lead-zero.md` before writing the gaps and the seed
+templates — it decides one gap line and one template, and it carries the
+thing a maintainer will otherwise learn on a live run.
 
 `defender/skills/{system}/`:
 

@@ -31,6 +31,10 @@ This file covers the rest — the calls a script can't make.
 - [ ] **`gaps` are honest.** `SKILL.md` declares what the system *cannot*
       answer here, including silent-failure shapes — enough that a reader
       who'd never touched this system wouldn't fall in blind.
+- [ ] **If this is the alert source, lead-0 was settled** (`lead-zero.md`).
+      The maintainer knows lead-0's system is bound in code and that
+      connecting this one does not repoint it, and a source that cannot
+      name an alert's constituent events says so as a gap.
 - [ ] **The adapter conforms to the client.** The Haiku alignment loop was
       run (`adapter.md`): cosmetic divergences became verb/param
       changes, and only irreducible vendor constraints were documented. You
