@@ -392,6 +392,27 @@ def test_an_esql_payload_at_the_row_cap_is_never_called_complete(tmp_path):
     assert "counts are exact" not in view
 
 
+def test_an_unknown_envelope_is_not_offered_as_a_full_payload_to_count(tmp_path):
+    """THE SAME CLAIM, ONE LINE FURTHER DOWN. `_prose` and `_footer` read the SAME
+    `Completeness` and both speak to the lead, so narrowing only the prose left `unknown`
+    falling through `_footer`'s `!= "capped"` arm onto `full payload: <path>` plus
+    `defender-sql 'SELECT count(*) FROM data'` — the file named as the whole result and a count
+    over it advertised as the answer, on exactly the ES|QL payload the test above just stopped
+    calling complete."""
+    from defender.scripts.adapters.elastic_adapter import esql_payload
+
+    payload = esql_payload("FROM logs-* | STATS c = COUNT(*) BY host", {
+        "columns": [{"name": "host", "type": "keyword"}, {"name": "c", "type": "long"}],
+        "values": _esql_rows(1000),
+    })
+    assert pv.completeness(payload).state == "unknown", "the fixture stopped exercising it"
+    view = _view(json.dumps(payload), ceiling=8192, run_dir=tmp_path)
+
+    assert "full payload" not in view, "an envelope declaring nothing was called complete"
+    assert "count(*)" not in view, "a count over an unknown slice was offered as the answer"
+    assert "payload on disk" in view, "the file the lead must read was not named at all"
+
+
 def test_a_row_count_above_the_rows_present_is_still_a_cap(tmp_path):
     """The reading that survives, and the reason the branch was narrowed rather than deleted: a
     `row_count` ABOVE the rows carried is a real declaration — whoever wrote it knew of rows

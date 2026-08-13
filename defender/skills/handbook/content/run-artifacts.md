@@ -103,9 +103,10 @@ field-by-field spec.** At a glance:
   per executed query — `{lead_id, seq, system, verb, query_id, params,
   raw_command, payload_path, exit_code, error_class, payload_status,
   payload_digest, payload_sha256}`. `payload_digest` is display prose (a
-  serialized byte length, or `exit=N; …` on a failure); `payload_sha256` is the
-  payload's content identity, and the only field any byte-identity claim about
-  two results may be made from.
+  serialized byte length, or `exit=N; …` on a failure) and carries no content
+  identity of its own — two different payloads of equal length share one digest.
+  `payload_sha256` is the payload's content identity; any byte-identity claim
+  about two successful results rests on it, never on the digest alone.
   `query_id` is `{system}.{kebab-name}` (`ad-hoc` = one-off probe, no catalog
   candidacy); `params` are bound values; `seq` disambiguates N-queries-per-lead
   (no "composite" mode, no `{position}{a..z}` suffix).

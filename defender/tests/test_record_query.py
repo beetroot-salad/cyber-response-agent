@@ -242,3 +242,16 @@ def test_seq_stays_monotonic_when_a_payload_write_fails(tmp_path):
     assert [r["seq"] for r in rows] == [0, 1]
     assert rows[0]["payload_path"] is None
     assert rows[1]["payload_path"] == f"gather_raw/{LEAD}/1.json"
+
+
+def test_the_content_hash_never_folds_two_payloads_together(tmp_path):
+    """`payload_sha256` is the one field whose contract is that different bytes hash
+    differently, so its error handler may not be `replace`: U+FFFD is one character and every
+    unencodable codepoint would map onto it, colliding two distinct payloads under the very
+    claim the column exists to license ("byte-identical"). Moot for today's writers — both hand
+    it `json.dumps(..., ensure_ascii=True)` output, which is pure ASCII — and pinned anyway,
+    because #834's compact encoding is a live proposal to turn `ensure_ascii` off."""
+    a, b = "\ud800", "\ud801"
+    assert ge.payload_sha256(a) != ge.payload_sha256(b), \
+        "two different payloads share one content hash"
+    assert ge.payload_sha256("héllo") == ge.payload_sha256("héllo")

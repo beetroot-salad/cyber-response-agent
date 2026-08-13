@@ -71,7 +71,12 @@ def test_a_curl_level_failure_is_a_transport_fault_not_an_empty_payload(
     _curl(monkeypatch, rc, "\n000", stderr)
     with pytest.raises(TransportFault) as exc:
         ticket_adapter.health_check(ctx)
-    assert "000" in str(exc.value) or str(rc) in str(exc.value)
+    # `rc={rc}`, not a bare `str(rc)`: a one- or two-digit exit code occurs by accident in
+    # almost any message, so the loose disjunction passed on ANY `TransportFault` however
+    # raised — including one from a config error that never reached curl. The fault must name
+    # THIS curl exit, and carry curl's own stderr, which is the half a lead can act on.
+    assert f"rc={rc}" in str(exc.value), str(exc.value)
+    assert stderr.split(":")[0] in str(exc.value), str(exc.value)
 
     with pytest.raises(TransportFault):
         ticket_adapter.list_tickets(ctx, status="closed")

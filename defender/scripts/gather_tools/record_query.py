@@ -51,8 +51,11 @@ def payload_digest(stdout: str, stderr: str, exit_code: int) -> str:
     On a success it is a serialized LENGTH and says so: both writers hand it
     `json.dumps(payload, default=str)`, which escapes control characters, so the text holds no
     raw newline and `lines` is always 1. Two different payloads of equal length produce the
-    same digest — which is why nothing compares payloads through it any more (#877 F-9);
-    `payload_sha256` is the identity."""
+    same digest, which is why it no longer STANDS ALONE for a payload comparison (#877 F-9):
+    `_result_identity` reads it beside `payload_sha256`, and the hash is what carries a
+    success's content. On a FAILURE it is still the discriminating half — every failed row
+    hashes the same empty payload, so the error text is the only thing that separates two of
+    them."""
     if exit_code != 0:
         return f"exit={exit_code}; {stderr.strip()[:160]}"
     lines = stdout.count("\n") + 1 if stdout.strip() else 0
@@ -67,10 +70,16 @@ def payload_sha256(payload_text: str) -> str:
     reads and truncates (`lead_extraction` cuts it at 200 chars), the hash is what
     `repeat_note` asserts byte identity from.
 
-    Encoded lossily for the same reason the transports decode lossily — the far side is vendor
-    data, and a stray unencodable codepoint in one indexed log line must cost one character,
-    not raise out of the recorder and lose the whole row."""
-    return hashlib.sha256(payload_text.encode("utf-8", errors="replace")).hexdigest()
+    `surrogatepass`, and NOT the `replace` the transports decode vendor bytes with: this is the
+    one field whose whole contract is that different bytes hash differently, and `replace` maps
+    every unencodable codepoint to the SAME U+FFFD — two distinct payloads would collide and
+    `repeat_note` would tell the lead they are byte-identical. Today the question is moot, and
+    the docstring says so rather than inventing a hazard: both writers hand this
+    `json.dumps(payload, default=str)` with `ensure_ascii` on, so the text is pure ASCII and
+    nothing can fail to encode. `surrogatepass` is what keeps that true the day it stops being
+    (#834's compact encoding would turn `ensure_ascii` off) — it round-trips a lone surrogate
+    instead of raising out of the recorder or folding it into a shared character."""
+    return hashlib.sha256(payload_text.encode("utf-8", errors="surrogatepass")).hexdigest()
 
 
 def _request_key(system: Any, verb: Any, params: Any) -> str:

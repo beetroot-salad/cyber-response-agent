@@ -292,7 +292,7 @@ def http_get_obj(
 
 
 def _raise_on_transport_failure(
-    ctx: VerbContext, bastion: str, rc: int, stdout: str, stderr: str
+    ctx: VerbContext, bastion: str, rc: int, stderr: str
 ) -> None:
     """curl never completed a request → transport-level failure. `TransportFault` (exit 2) so
     the queries row and the circuit breaker both see a down system, not a query error. No-op
@@ -309,7 +309,11 @@ def _raise_on_transport_failure(
     no down-message was ever shown and the silent zero repeated for the rest of the run.
 
     The bastion case the guard was originally written for is unchanged: a missing or stopped
-    container makes `docker exec` itself fail before curl runs, and its rc is non-zero too."""
+    container makes `docker exec` itself fail before curl runs, and its rc is non-zero too.
+
+    `stdout` is deliberately NOT a parameter: it was one only to serve the `and not stdout`
+    conjunct above, and a guard that still accepted it would read as though the body could
+    still change the verdict."""
     if rc == 0:
         return
     hint = stderr.strip() or "no stderr"
@@ -334,7 +338,9 @@ def _parse_status_code(stdout: str, stderr: str, url: str, rc: int) -> tuple[str
     `000` while exiting 0 would otherwise still be filed as a system that answered."""
     body_text, status = split_status(stdout)
     if not status:
-        # curl exited non-zero but emitted partial output — show what we got.
+        # Reached only with rc == 0 now (`_raise_on_transport_failure` owns every non-zero
+        # exit): curl claims it succeeded while emitting no `-w` status line at all. Show the
+        # bytes it did emit — the shape of that stdout is the whole diagnosis.
         raise TransportFault(
             f"malformed curl response from {url}: "
             f"stdout={stdout!r} stderr={stderr.strip()!r}"
@@ -385,7 +391,7 @@ def _request(
         ctx, bastion, url, method=method, body=body, timeout_sec=timeout
     )
 
-    _raise_on_transport_failure(ctx, bastion, rc, stdout, stderr)
+    _raise_on_transport_failure(ctx, bastion, rc, stderr)
     body_text, code = _parse_status_code(stdout, stderr, url, rc)
     _raise_on_http_error(code, body_text, url)
 

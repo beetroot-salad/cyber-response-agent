@@ -644,6 +644,25 @@ def _footer(payload_rel: str | None, run_dir: Path, comp: Completeness) -> list[
             "in, don't pass it as an operand, e.g.:\n"
             f"  cat {abs_payload} | head -40",
         ]
+    if comp.state == "unknown":
+        # THE SAME CLAIM THE PROSE JUST STOPPED MAKING (#877 F-10). `unknown` means the
+        # envelope declared no completeness fact this module can read — which since F-10 is
+        # EVERY ES|QL payload, because `row_count` is `len(values)` and says nothing. Falling
+        # through to the `complete` arm below named that file "full payload" and advertised
+        # `SELECT count(*) FROM data` over it, so the false "nothing was capped upstream" the
+        # prose no longer states was still reaching the lead one line further down — on
+        # exactly the payloads (above the passthrough ceiling) large enough to have been
+        # clipped by ES's own 1000-row cap or the query's `LIMIT`. Name the file, offer the
+        # reducers, and let a count be a count OF THIS FILE rather than an answer.
+        return [
+            f"[record_query] payload on disk: {abs_payload}",
+            "→ nothing in this payload declares a total, so whether the system capped it is "
+            "UNKNOWN: a count over this file counts the rows the FILE holds, not the rows that "
+            "matched. Read field shape and values off it; to claim a total, re-query with an "
+            "aggregating query that reports one. The reducers read STDIN — pipe the file in, "
+            "don't pass it as an operand, e.g.:\n"
+            f"  cat {abs_payload} | defender-sql 'DESCRIBE data'",
+        ]
     return [
         f"[record_query] full payload: {abs_payload}",
         "→ compute every value over the full payload on disk; the reducers read STDIN — pipe "
