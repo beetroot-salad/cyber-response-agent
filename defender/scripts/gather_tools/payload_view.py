@@ -151,7 +151,7 @@ def _rows_for(obj: dict, declared: int) -> list | None:
 
 def completeness(obj: Any) -> Completeness:
     """Read, in declaration order of strength: the `total`/`returned` pair the search envelope
-    states outright; `row_count` against the rows actually present (ES|QL); a lone `total`
+    states outright; a `row_count` that EXCEEDS the rows actually present; a lone `total`
     against the payload's ONE list; and finally a bare `truncated` flag.
 
     Structural throughout — a list is identified by being the only list, never by its name."""
@@ -161,9 +161,23 @@ def completeness(obj: Any) -> Completeness:
     if total is not None and returned is not None:
         return Completeness("capped" if total > returned else "complete", total, returned)
     row_count = _int(obj, "row_count")
-    if row_count is not None and (rows := _rows_for(obj, row_count)) is not None:
-        n = len(rows)
-        return Completeness("capped" if row_count > n else "complete", row_count, n)
+    # ONE DIRECTION ONLY (#877 F-10). A `row_count` above the rows present is a real
+    # declaration of a cap — whoever wrote it knew of rows this payload does not carry. A
+    # `row_count` EQUAL to them declares nothing, and reading it as `complete` was a fact the
+    # envelope derived from itself: `elastic_adapter.esql_payload` computes
+    # `"row_count": len(values)` from the very array `_rows_for` then measures, so `row_count >
+    # n` was unsatisfiable and EVERY ES|QL payload read `complete` — including one whose row
+    # count IS ES's 1000-row cap or the query's own `LIMIT`. The prose only renders above the
+    # passthrough ceiling, so that false "nothing was capped upstream" reached exactly the
+    # payloads large enough to have been truncated. Equal counts now fall through to `unknown`:
+    # no prose rather than false prose. A genuine server total for ES|QL needs response headers
+    # (`Warning`), which `docker_exec_curl` does not capture today.
+    if (
+        row_count is not None
+        and (rows := _rows_for(obj, row_count)) is not None
+        and row_count > len(rows)
+    ):
+        return Completeness("capped", row_count, len(rows))
     if total is not None and len(lists := _lists(obj)) == 1:
         n = len(lists[0])
         return Completeness("capped" if total > n else "complete", total, n)

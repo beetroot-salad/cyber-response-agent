@@ -227,7 +227,7 @@ class QueryCapture(AbstractCapability[Any]):
         and the third ends the lead. That is the reading this coarsening commits to — the
         request identity below the grant is "a call to no system this run declares", and a
         model that issues three of those in a row has repeated one mistake, not made three. It
-        is also the only reading available: the guard's identity is recovered from the twelve
+        is also the only reading available: the guard's identity is recovered from the frozen
         frozen row keys, so a `system` the row does not carry cannot separate them. What must
         NOT follow is a dead-end that tells main those calls named one system —
         `_undeclared_target` is why the message says an undeclared system instead."""
@@ -487,7 +487,7 @@ class QueryCapture(AbstractCapability[Any]):
         run_dir = deps.run_dir
 
         async with self._seq_lock:
-            # The twelve keys are assembled by `append_query_row` (#823 F1), which the gather
+            # The thirteen keys are assembled by `append_query_row` (#823 F1), which the gather
             # bash lane's shim recorder also calls. The lock stays: it is this path's, and it
             # is cheaper to keep than to argue that nothing will ever add an `await` here.
             row = append_query_row(
@@ -521,7 +521,8 @@ class QueryCapture(AbstractCapability[Any]):
         repeat = repeat_note(
             deps.run_dir, deps.lead_id, seq=row["seq"], system=row["system"],
             verb=row["verb"], params=row["params"],
-            payload_digest=row["payload_digest"], exit_code=exit_code,
+            payload_digest=row["payload_digest"], payload_sha256=row["payload_sha256"],
+            exit_code=exit_code,
         )
         if exit_code != 0:
             # Prepended to `detail` INSIDE the wrap, mirroring the success arm: the wrap is

@@ -310,7 +310,7 @@ _UNMAPPED_FAULT_EXIT = 2
 def _record_manual_row(
     deps: _CaptureDeps, verb: str, params: dict, payload: Any, *, exit_code: int,
 ) -> None:
-    """Write a queries-table row with the SAME twelve-key shape `QueryCapture._record`
+    """Write a queries-table row with the SAME thirteen-key shape `QueryCapture._record`
     writes — including `error_class`/`payload_status` derived the SAME way
     (`circuit_breaker.error_class_for_exit`, `query_tool._payload_status`'s own rule), not
     hardcoded (#808 review fix: a hardcoded `error_class="infra"` mis-filed a genuinely
@@ -323,7 +323,12 @@ def _record_manual_row(
 
     from defender._io import guarded_mkdir, write_guarded
     from defender.runtime.circuit_breaker import error_class_for_exit
-    from defender.scripts.gather_tools.record_query import _json_safe_params, _next_seq, payload_digest
+    from defender.scripts.gather_tools.record_query import (
+        _json_safe_params,
+        _next_seq,
+        payload_digest,
+        payload_sha256,
+    )
 
     seq = _next_seq(deps.run_dir, deps.lead_id)
     lead_dir = RunPaths(deps.run_dir).gather_raw / deps.lead_id
@@ -353,6 +358,10 @@ def _record_manual_row(
         "payload_digest": (
             payload_digest(text, "", 0) if exit_code == 0 else f"exit={exit_code}; capped"
         ),
+        # Over the SAME text the sidecar above holds — the content identity `repeat_note`
+        # keys byte-identity on (#877 F-9), derived here rather than defaulted so this second
+        # writer's rows can never read as "no payload evidence" beside `_record`'s.
+        "payload_sha256": payload_sha256(text),
     }
     write_guarded(RunPaths(deps.run_dir).executed_queries, json.dumps(row) + "\n", mode="append")
 

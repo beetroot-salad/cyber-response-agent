@@ -6,7 +6,7 @@
 subprocess wrapper that ran an adapter, persisted its stdout and appended the queries row. #611
 deleted that function: a data-source call is the typed `query` tool now, and the row + by-ref
 payload are written in-process by its capture capability. Every capture assertion this file made
-(the twelve-key row, per-lead `seq` monotonicity, the error/empty statuses, the traversal-
+(the thirteen-key row, per-lead `seq` monotonicity, the error/empty statuses, the traversal-
 `query_id` rejection, the `adapter | defender-sql` aggregation) is re-made END-TO-END against the
 real tool in `tests/e2e/test_query_tool_611.py`, one layer up and through the real gate — so they
 are not lost, they moved to where the behaviour now is. What remains here is the part that was

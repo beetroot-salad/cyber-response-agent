@@ -294,10 +294,23 @@ def http_get_obj(
 def _raise_on_transport_failure(
     ctx: VerbContext, bastion: str, rc: int, stdout: str, stderr: str
 ) -> None:
-    """curl never produced output → transport-level failure. `TransportFault` (exit 2) so
-    the queries row and the circuit breaker both see a down system, not a query error.
-    No-op when there was usable output."""
-    if not (rc != 0 and not stdout):
+    """curl never completed a request → transport-level failure. `TransportFault` (exit 2) so
+    the queries row and the circuit breaker both see a down system, not a query error. No-op
+    when curl exited clean.
+
+    THE RETURN CODE ALONE DECIDES. The `and not stdout` conjunct this used to carry was
+    structurally unsatisfiable for a curl-level fault (#877 F-5): `docker_exec_curl` appends
+    `-w "\\n%{http_code}"`, so curl writes a status line to stdout on EVERY exit — stdout is
+    `"\\n000"`, never empty, when no request completed. A DNS failure, a refused connection and
+    a `--max-time` timeout all walked past this guard, parsed as HTTP 0, matched neither the 5xx
+    nor the 4xx arm of `_raise_on_http_error`, and returned `{}` from `_request` as a SUCCESS:
+    an outage of any of the five stub systems reached the lead as "the system answered, and it
+    holds nothing", with the breaker counting nothing (exit 0 is not in `INFRA_EXIT_CODES`), so
+    no down-message was ever shown and the silent zero repeated for the rest of the run.
+
+    The bastion case the guard was originally written for is unchanged: a missing or stopped
+    container makes `docker exec` itself fail before curl runs, and its rc is non-zero too."""
+    if rc == 0:
         return
     hint = stderr.strip() or "no stderr"
     if "No such container" in hint or "is not running" in hint:
@@ -308,10 +321,17 @@ def _raise_on_transport_failure(
     raise TransportFault(f"docker exec failed (rc={rc}): {hint}")
 
 
-def _parse_status_code(stdout: str, stderr: str, url: str) -> tuple[str, int]:
-    """Split curl's body/status and parse the HTTP status to an int. A malformed (no status)
-    or non-numeric response is a `TransportFault`: curl never completed a request, so there
-    is no upstream verdict to file as a query error. Returns (body_text, code)."""
+def _parse_status_code(stdout: str, stderr: str, url: str, rc: int) -> tuple[str, int]:
+    """Split curl's body/status and parse the HTTP status to an int. A malformed (no status),
+    non-numeric, or `000` response is a `TransportFault`: curl never completed a request, so
+    there is no upstream verdict to file as a query error. Returns (body_text, code).
+
+    `000` is curl's own "no response" status, and the second half of #877 F-5's fix — the
+    sibling transport has raised on it all along (`elastic_adapter._http_json`), while this one
+    parsed it to `0`, walked past both arms of `_raise_on_http_error` (`0` is neither `>= 500`
+    nor `>= 400`) and returned an empty SUCCESS. Kept as its own guard rather than folded into
+    the rc check: the two are independent readings of the same fault, and a curl that reported
+    `000` while exiting 0 would otherwise still be filed as a system that answered."""
     body_text, status = split_status(stdout)
     if not status:
         # curl exited non-zero but emitted partial output — show what we got.
@@ -323,6 +343,11 @@ def _parse_status_code(stdout: str, stderr: str, url: str) -> tuple[str, int]:
         code = int(status)
     except ValueError as e:
         raise TransportFault(f"non-numeric http status from curl: {status!r}") from e
+    if code == 0:
+        detail = stderr.strip() or "no stderr"
+        raise TransportFault(
+            f"curl reported HTTP 000 from {url} (no response; rc={rc}): {detail}"
+        )
     return body_text, code
 
 
@@ -361,7 +386,7 @@ def _request(
     )
 
     _raise_on_transport_failure(ctx, bastion, rc, stdout, stderr)
-    body_text, code = _parse_status_code(stdout, stderr, url)
+    body_text, code = _parse_status_code(stdout, stderr, url, rc)
     _raise_on_http_error(code, body_text, url)
 
     if not body_text:

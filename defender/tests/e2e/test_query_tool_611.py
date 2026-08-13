@@ -1097,11 +1097,16 @@ def test_verb_resolves_config_from_deps_tree(tmp_path):
 ROW_KEYS = {
     "lead_id", "seq", "system", "verb", "query_id", "params", "raw_command",
     "payload_path", "exit_code", "error_class", "payload_status", "payload_digest",
+    # #877 F-9: the payload's CONTENT identity, beside the display digest rather than inside
+    # it — `repeat_note` asserts byte identity from this, the digest stays prose a curator
+    # reads. Derived by the writer from the text it persists, so no caller can disagree with
+    # the sidecar it just wrote.
+    "payload_sha256",
 }
 
 
 def test_row_contract_frozen(tmp_path):
-    """row_contract_frozen — the twelve-key queries row: params keyed by the REGISTRY's real param
+    """row_contract_frozen — the thirteen-key queries row: params keyed by the REGISTRY's real param
     names (not arg0/arg1), verb holding the tool's REAL verb (the column has zero production
     readers today and finally becomes honest), raw_command a derived audit string."""
     rec = VerbRecorder()

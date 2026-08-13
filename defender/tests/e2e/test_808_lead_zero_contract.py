@@ -288,7 +288,7 @@ def test_lead_zero_issues_its_backend_calls_through_the_query_capture_seam(tmp_p
     anyway and a TRIPPED breaker was ignored, because six of the eight screens live inside
     `QueryCapture` and are not inherited.
 
-    Observed at the writer, which only `QueryCapture._record` reaches: a twelve-key row under
+    Observed at the writer, which only `QueryCapture._record` reaches: a thirteen-key row under
     `l-000`, a persisted payload sidecar at `gather_raw/l-000/{seq}.json` allocated by the
     shared `record_query._next_seq`, and a breaker outcome recorded on the same tail.
 
@@ -306,6 +306,7 @@ def test_lead_zero_issues_its_backend_calls_through_the_query_capture_seam(tmp_p
     assert set(rows[0]) == {
         "lead_id", "seq", "system", "verb", "query_id", "params", "raw_command",
         "payload_path", "exit_code", "error_class", "payload_status", "payload_digest",
+        "payload_sha256",
     }, "lead-0's row is not the row QueryCapture._record builds — a second writer " \
        "re-implemented the schema, which is exactly what the tree's other queries-table " \
        "writer already did (g4)"
