@@ -132,7 +132,13 @@ hooks). The gates:
   imports `record_lead.claim_lead` (writes the leads-table row and claims the
   `lead_id` with an atomic `O_CREAT|O_EXCL` create — a reused id raises
   in-process, bouncing the defender back to PLAN, so it stays a real integrity
-  gate), `inject_system_skill_description.descriptor_catalog` (the
+  gate). Its answer is one of THREE codes and only `CLAIMED` dispatches: the
+  claim used to spend one code on success and on every silent refusal alike, so
+  `_run_gather` could only test for the reuse code and an empty `goal` — which
+  the tool schema admits — ran a gather session under an id with no leads row,
+  where the reuse gate (that row's own exclusive create) could never see it
+  again (#855 F-12). It also imports
+  `inject_system_skill_description.descriptor_catalog` (the
   progressive-disclosure descriptor catalog), `runtime/untrusted.wrap` (salted
   untrusted-data tagging of adapter/alert reads + the gather return), and
   `record_lesson_load.lesson_name` (lesson→outcome traceability into

@@ -8,6 +8,7 @@ decision/prompt helpers:
 """
 from __future__ import annotations
 
+import asyncio
 from dataclasses import replace
 from pathlib import Path
 
@@ -20,7 +21,7 @@ pytest.importorskip("pydantic_ai")
 from pydantic_ai.exceptions import UsageLimitExceeded  # noqa: E402
 
 from defender.runtime import permission, tools  # noqa: E402
-from defender.runtime.agent_definition import ToolSet, compile_policy_for  # noqa: E402
+from defender.runtime.agent_definition import ToolSet, bind, compile_policy_for  # noqa: E402
 from defender.runtime.driver import GATHER_DEF, MAIN_DEF  # noqa: E402
 
 
@@ -188,3 +189,152 @@ def test_a_malformed_system_is_retried_at_the_seam_not_silently_degraded(tmp_pat
         GATHER_DEF.verb_grant,
     ))
     assert seen == ["ghost"], "a well-formed system outside the ROLE grant must still dispatch"
+
+
+class _StopAfterDispatch:
+    """A gather agent that proves the dispatch was ADMITTED and gets no further: reaching
+    `.run` is the observation, and `UsageLimitExceeded` is the arm `_run_gather` degrades into
+    a summary rather than one that would need a whole replay model behind it."""
+
+    async def run(self, *a, **kw):
+        raise UsageLimitExceeded("far enough — the dispatch was admitted")
+
+
+def _seam_deps(tmp_path: Path):
+    run_dir = tmp_path / "run"
+    (run_dir / "gather_raw").mkdir(parents=True)
+    return run_dir, bind(MAIN_DEF, run_dir, salt="0011223344556677", defender_dir=_DEFENDER)
+
+
+def test_an_empty_goal_is_retried_at_the_seam_and_leaves_the_id_takeable(tmp_path):
+    """#855 F-12, the reachable half. `goal` is a bare `str` on the `gather` signature — the
+    tool's JSON schema carries no `minLength`, so `""` validates and reaches this frame — and
+    the only thing with an opinion about it was `claim_lead`, which refused it with the SAME
+    code it returned on success. So "re-run l-003 to confirm; leave the goal blank" bought a
+    second gather session under a claimed id: no leads row, nothing for the reuse gate (the
+    sidecar's own exclusive create) to refuse next time, and a summary written over the honest
+    `gather_summaries/l-003.md` that the compaction driver has main re-read as its own memory.
+
+    Rejected at the seam, ahead of the claim like `system`, so the correction is a retry of
+    THIS lead: the second half asserts the same id is still takeable afterwards."""
+    from pydantic_ai.exceptions import ModelRetry
+
+    from defender.runtime import tools_gather
+
+    run_dir, deps = _seam_deps(tmp_path)
+
+    def _never(agent_id, system):  # pragma: no cover — reaching it IS the failure
+        raise AssertionError("an unclaimed dispatch reached the gather factory")
+
+    for empty in ("", "   ", "\n"):
+        with pytest.raises(ModelRetry, match="empty goal"):
+            asyncio.run(tools_gather._run_gather(
+                deps, _never, 40,
+                tools_gather.GatherRequest("l-001", "elastic", empty, ("what",)),
+                GATHER_DEF.verb_grant,
+            ))
+    assert not list((run_dir / "gather_raw").glob("*.lead.json")), \
+        "a dispatch that never ran claimed the lead id anyway"
+
+    seen: list[str] = []
+
+    def _record(agent_id, system):
+        seen.append(system)
+        return _StopAfterDispatch()
+
+    asyncio.run(tools_gather._run_gather(
+        deps, _record, 40,
+        tools_gather.GatherRequest("l-001", "elastic", "the corrected question", ("what",)),
+        GATHER_DEF.verb_grant,
+    ))
+    assert seen == ["elastic"], "the corrected re-dispatch of the same id was refused"
+    assert (run_dir / "gather_raw" / "l-001.lead.json").is_file(), \
+        "the corrected dispatch ran without claiming its lead id"
+
+
+def test_the_second_dispatch_of_one_lead_id_is_always_refused(tmp_path):
+    """The gate #855 F-12 defeated, stated as the property it protects: ONE gather session per
+    `lead_id`, whatever happened to the first attempt. Two empty-goal dispatches then a good
+    one then a repeat of the good one — the empty pair claims nothing (so the third is a fresh
+    claim, not a reuse), and the fourth is refused as a reuse. Under the old fail-open the
+    first two RAN, and the fourth ran too, because nothing on disk recorded that the id was
+    ever taken."""
+    from pydantic_ai.exceptions import ModelRetry
+
+    from defender.runtime import tools_gather
+
+    run_dir, deps = _seam_deps(tmp_path)
+    runs: list[str] = []
+
+    def _factory(agent_id, system):
+        runs.append(agent_id)
+        return _StopAfterDispatch()
+
+    def _dispatch(goal: str):
+        return asyncio.run(tools_gather._run_gather(
+            deps, _factory, 40,
+            tools_gather.GatherRequest("l-003", "elastic", goal, ("what",)),
+            GATHER_DEF.verb_grant,
+        ))
+
+    for _ in range(2):
+        with pytest.raises(ModelRetry, match="empty goal"):
+            _dispatch("")
+    _dispatch("confirm the lead")
+    with pytest.raises(ModelRetry, match="already dispatched"):
+        _dispatch("confirm the lead")
+    assert runs == ["gather:l-003"], \
+        f"{len(runs)} gather sessions ran under one lead_id; exactly one may"
+
+
+def test_a_claim_that_could_not_be_written_is_a_retry_not_a_dispatch(tmp_path):
+    """The other unclaimed outcome (#855 F-12), and the one no argument can reach from the
+    model side: the claim's write FAILED — a full disk, a squatted `gather_raw` component, an
+    id the filesystem will not take. `_run_gather` used to test the claim for the reuse code
+    alone, so every one of those proceeded exactly as if the row had been written. Driven at
+    the claim seam because a caller must not need to know which fault it was: the contract is
+    that only `CLAIMED` dispatches."""
+    from pydantic_ai.exceptions import ModelRetry
+
+    from defender.hooks.record_lead import NOT_CLAIMED
+    from defender.runtime import tools_gather
+
+    run_dir, deps = _seam_deps(tmp_path)
+
+    def _never(agent_id, system):  # pragma: no cover — reaching it IS the failure
+        raise AssertionError("an unwritten claim dispatched gather anyway")
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(tools_gather, "_claim_lead", lambda dispatch: NOT_CLAIMED)
+        with pytest.raises(ModelRetry, match="could not be claimed"):
+            asyncio.run(tools_gather._run_gather(
+                deps, _never, 40,
+                tools_gather.GatherRequest("l-004", "elastic", "a real goal", ("what",)),
+                GATHER_DEF.verb_grant,
+            ))
+    assert not (run_dir / "gather_summaries").exists(), \
+        "a dispatch that never ran wrote a gather summary"
+
+
+def test_an_overlong_lead_id_never_reaches_the_claim(tmp_path):
+    """A `lead_id` is spent as a FILENAME COMPONENT — `gather_raw/{id}.lead.json` — and the
+    validator that admits it said nothing about length, so a well-shaped 300-character id
+    reached `os.open` and failed ENAMETOOLONG. That was one more route into the fail-open this
+    issue closes; bounding the shared `LEAD_ID_BODY` turns it back here instead, with the
+    correction that names the id."""
+    from pydantic_ai.exceptions import ModelRetry
+
+    from defender.runtime import tools_gather
+
+    run_dir, deps = _seam_deps(tmp_path)
+
+    def _never(agent_id, system):  # pragma: no cover — reaching it IS the failure
+        raise AssertionError("an unbounded lead_id dispatched gather")
+
+    with pytest.raises(ModelRetry, match="invalid lead_id"):
+        asyncio.run(tools_gather._run_gather(
+            deps, _never, 40,
+            tools_gather.GatherRequest("l-" + "a" * 300, "elastic", "a real goal", ("what",)),
+            GATHER_DEF.verb_grant,
+        ))
+    assert not list((run_dir / "gather_raw").glob("*.lead.json"))

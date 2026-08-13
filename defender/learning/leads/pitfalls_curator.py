@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 
 from uuid import uuid4
@@ -24,6 +25,7 @@ from defender.learning.leads.lead_extraction import LeadAuthorError
 from defender.learning.pipeline._prompt import stage_user_message, structured_json_body
 from defender.learning.leads.path_validation import (
     LEARNING_DIR,
+    SKILLS_DIR,
     SKILLS_REL,
     _is_system_execution_md,
 )
@@ -31,7 +33,25 @@ from defender.learning.leads.path_validation import (
 LEAD_PITFALLS_PROMPT = LEARNING_DIR / "leads" / "lead_pitfalls.md"
 
 
-def _build_pitfalls_handoffs(rows: list[dict]) -> list[dict]:
+def _is_real_system(system: str, skills_dir: Path) -> bool:
+    """Does `defender/skills/<system>/` already exist, as a checked-in system directory?
+
+    A check against MINTING, not a membership check — membership belongs to the writer that
+    set the row's `system` (`query_tool._system_of_record`), which is where #855 F-06 is
+    actually closed. This is the offline half: `execution_md_path` below is a PATH built from
+    a queue field, and the curator is told to write it, so a `system` that reached the queue
+    from anywhere unvetted mints a brand-new single-segment directory under `defender/skills/`
+    — the phantom-system class #821/#828 closed for `h-*` and `system_for_payload_operands`
+    closed for the bash shim's reducer names.
+
+    `SKILL.md`, not `execution.md`: only 3 of the 7 systems split their execution surface into
+    a sibling file today, and creating that file for a system that lacks one is exactly what
+    the curator is FOR (`docs/system-skill-shape.md`). What it may never do is invent the
+    directory around it."""
+    return (skills_dir / system / "SKILL.md").is_file()
+
+
+def _build_pitfalls_handoffs(rows: list[dict], *, skills_dir: Path = SKILLS_DIR) -> list[dict]:
     """One entry per system, one failure per distinct MISTAKE (#840).
 
     Merges the rows itself rather than trusting its caller to have merged them — the merge
@@ -41,10 +61,20 @@ def _build_pitfalls_handoffs(rows: list[dict]) -> list[dict]:
     not the eighth copy it has to notice is a copy.
     """
     by_system: dict[str, list[dict]] = {}
+    dropped: set[str] = set()
     for r in _loop_persist.merge_pitfalls(rows):
         system = str(r.get("system") or "").strip()
-        if system:
-            by_system.setdefault(system, []).append(r)
+        if not system:
+            continue
+        if not _is_real_system(system, skills_dir):
+            dropped.add(system)
+            continue
+        by_system.setdefault(system, []).append(r)
+    if dropped:
+        # Named, never dropped quietly: a batch that silently loses a system reads exactly
+        # like one that had nothing to teach it.
+        _log(f"pitfalls: dropped {len(dropped)} queued system(s) with no {SKILLS_REL} "
+             f"directory: {sorted(dropped)}")
     out: list[dict] = []
     for system in sorted(by_system):
         # `occurrences` is stamped on every record `merge_pitfalls` returns, so it is read
@@ -92,11 +122,21 @@ def _invoke_pitfalls_agent(
     )
 
 
-def _pitfalls_path_rule(xy: str, path: str) -> None:
+def _pitfalls_path_rule(xy: str, path: str, *, repo_root: Path) -> None:
     if not _is_system_execution_md(path):
         raise LeadAuthorError(
             f"pitfalls curator edited a non-execution.md skills path ({path}); "
             "refusing to commit (its scope is execution.md only)"
+        )
+    # The LAST gate on the same phantom-system class the handoff filters (#855 F-06): an
+    # `execution.md` under a directory that holds no `SKILL.md` is not a system's execution
+    # surface, it is a new system directory being minted one file at a time. Creating the
+    # FILE stays legal — 4 of the 7 systems have no `execution.md` yet and the curator's job
+    # is to write the first one — so this asks about the directory, not the file.
+    if not _is_real_system(Path(path).parent.name, repo_root / SKILLS_REL):
+        raise LeadAuthorError(
+            f"pitfalls curator wrote {path} under a directory with no SKILL.md; refusing to "
+            "commit (execution.md lands in an existing system's dir, never mints a new one)"
         )
     if "D" in xy:
         raise LeadAuthorError(
@@ -107,7 +147,8 @@ def _pitfalls_path_rule(xy: str, path: str) -> None:
 
 def _verify_pitfalls_state(repo_root: Path, baseline_stray: list[str]) -> list[str]:
     return _verify_corpus_scope(
-        repo_root, baseline_stray, actor="pitfalls curator", rule=_pitfalls_path_rule,
+        repo_root, baseline_stray, actor="pitfalls curator",
+        rule=partial(_pitfalls_path_rule, repo_root=repo_root),
     )
 
 
@@ -143,15 +184,17 @@ def run_pitfalls(
     # From the RAW rows: rotation is what empties the queue, so it has to name every row
     # that fed a record, not just the exemplar the merge kept.
     batch_ids = [str(r["pitfall_id"]) for r in rows if r.get("pitfall_id")]
-    handoffs = _build_pitfalls_handoffs(records)
+    repo_root = paths.repo_root
+    # The WORKTREE's skills tree, not the process's own: this run commits into `repo_root`, so
+    # the directories that exist there are the ones a handoff path may name.
+    handoffs = _build_pitfalls_handoffs(records, skills_dir=repo_root / SKILLS_REL)
     if not handoffs:
         _log(
-            f"{len(records)} queued pitfall(s) in {len(batch_ids)} row(s) but none carried "
-            "a system — dropping"
+            f"{len(records)} queued pitfall(s) in {len(batch_ids)} row(s) but none named a "
+            "system with a directory under defender/skills/ — dropping"
         )
         _loop_persist.rotate_pitfalls(batch_ids, None, paths=paths)
         return 0
-    repo_root = paths.repo_root
     baseline_stray = _author_shared.changes_outside(repo_root, SKILLS_REL)
     # `len(rows)`, not `sum(occurrences)`: a queue row IS one occurrence, so the two are the
     # same number and only one of them costs a pass over the records.

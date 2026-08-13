@@ -13,11 +13,15 @@ THE TABLES, AND WHY LEAD-0 IS A HARD WRITER TO ADD
 
 Three executed facts shape every demand in this file.
 
-  * `claim_lead` returns `0` for BOTH "written" and "silently refused" (r1/r14, executed): a
-    falsy `goal`, a non-list `what_to_summarize` or an id outside `LEAD_ID_RE` all return the
-    SUCCESS code and write nothing at all. A lead-0 dispatch built from an empty goal
-    therefore reports success, writes no sidecar, and the rows it goes on to write make
-    `joined()` mark `l-000` `orphan=True` — contradicting `d11`.
+  * `claim_lead` returned `0` for BOTH "written" and "silently refused" (r1/r14, executed): a
+    falsy `goal`, a non-list `what_to_summarize` or an id outside `LEAD_ID_RE` all returned the
+    SUCCESS code and wrote nothing at all. A lead-0 dispatch built from an empty goal
+    therefore reported success, wrote no sidecar, and the rows it went on to write made
+    `joined()` mark `l-000` `orphan=True` — contradicting `d11`. **#855 F-12 split that code**:
+    the claim now answers `CLAIMED` / `NOT_CLAIMED` / `ALREADY_CLAIMED` and every caller
+    dispatches on `CLAIMED` alone. The demands below are UNCHANGED — lead-0 must still never
+    construct the refused shape, and this file's probes re-execute the arm rather than assume
+    it — but "the claim reported success" is no longer a thing a refused claim can do.
   * A reuse returns `2`, prints to stderr and leaves the first sidecar byte-identical — but
     the same collision routed through `gather_dispatch` raises `ModelRetry` (E7a, executed),
     and a harness dispatch has no model to retry, so that exception escapes into
@@ -40,7 +44,7 @@ pytest.importorskip("pydantic_ai")
 
 from defender._io import append_jsonl, read_jsonl_rows  # noqa: E402
 from defender._run_paths import RunPaths, _PAYLOAD_SHAPES  # noqa: E402
-from defender.hooks.record_lead import LEAD_ID_RE, claim_lead  # noqa: E402
+from defender.hooks.record_lead import LEAD_ID_RE, NOT_CLAIMED, claim_lead  # noqa: E402
 from defender.tests.e2e._lead_zero_808 import (  # noqa: E402
     HARNESS_PROVENANCE,
     L0,
@@ -79,14 +83,16 @@ def test_lead_zero_claims_l000_lead_row(tmp_path):
     list `what_to_summarize`, and its id is one `lead_repository`'s own reader half accepts.
 
     Goal construction is VALIDATED, not assumed, and the docstring says so because the
-    mechanism does not: `claim_lead`'s falsy-goal arm returns the SUCCESS code and writes
-    nothing (r14, executed), so "the claim succeeded" is not evidence that the row exists."""
+    mechanism did not: `claim_lead`'s falsy-goal arm returned the SUCCESS code and wrote
+    nothing (r14, executed), so "the claim succeeded" was not evidence that the row exists.
+    #855 F-12 gave that arm its own code, but the demand is on the SIDECAR either way — the
+    assertions below read the file, which is what `d8` is actually about."""
     res = run(tmp_path, run_id="lz808-claim", answer=answer_hits(DOCS))
 
     sidecar = res.sidecar(L0)
     assert isinstance(sidecar.get("goal"), str), f"l-000's goal is not a string: {sidecar!r}"
     assert sidecar["goal"].strip(), \
-        "l-000's goal is falsy — claim_lead's swallow arm returns 0 and writes nothing"
+        "l-000's goal is falsy — claim_lead's swallow arm claims nothing and writes nothing"
     assert isinstance(sidecar.get("what_to_summarize"), list), \
         "l-000's what_to_summarize is not a list — the same swallow arm"
     assert sidecar["what_to_summarize"], "l-000's what_to_summarize is empty"
@@ -99,14 +105,16 @@ def test_lead_zero_goal_construction_never_hits_claim_leads_silent_zero(tmp_path
     row is missing, on the happy path or on a degraded one.
 
     The swallow arm is re-executed here against the REAL primitive rather than assumed, so
-    the taxonomy assumption is re-probed on every run: `claim_lead` with an empty goal
-    returns 0 — the SUCCESS code — and writes no file. That is the state `joined()` reports as
-    `orphan=True`, which is exactly what `d11` says must not happen."""
+    the taxonomy assumption is re-probed on every run: `claim_lead` with an empty goal writes
+    no file. That is the state `joined()` reports as `orphan=True`, which is exactly what
+    `d11` says must not happen. It now says so in its RETURN as well (#855 F-12: `NOT_CLAIMED`,
+    no longer the success code), and the probe reads the named code rather than the literal —
+    a claim that started reporting success here would be the regression this demand names."""
     probe_dir = materialize_alert(tmp_path / "probe", alert_doc())
     assert claim_lead({"run_dir": str(probe_dir), "lead_id": "l-777",
-                       "goal": "", "what_to_summarize": ["x"]}) == 0, \
-        "claim_lead's falsy-goal arm no longer reports success — re-read r14 before relying " \
-        "on the guard this demand asks for"
+                       "goal": "", "what_to_summarize": ["x"]}) == NOT_CLAIMED, \
+        "claim_lead's falsy-goal arm reports something other than NOT_CLAIMED — re-read r14 " \
+        "before relying on the guard this demand asks for"
     assert not (probe_dir / "gather_raw" / "l-777.lead.json").exists(), \
         "the falsy-goal arm now writes a sidecar; the swallow this demand guards is gone"
 
@@ -126,7 +134,7 @@ def test_lead_zero_goal_construction_never_hits_claim_leads_silent_zero(tmp_path
         for lead in (L0, L3):
             assert not (res.rows_for(lead) and not res.has_sidecar(lead)), (
                 f"[{label}] rows exist under {lead} with no leads row — joined() marks it "
-                "orphan=True, and the claim reported success"
+                "orphan=True"
             )
 
 

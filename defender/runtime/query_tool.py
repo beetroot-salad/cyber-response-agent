@@ -196,6 +196,39 @@ class QueryCapture(AbstractCapability[Any]):
         except BaseException as e:  # noqa: BLE001 — the registry could not LOAD this system's module
             return None, f"{system} adapter failed to load: {type(e).__name__}: {e}"
 
+    def _system_of_record(self, system: str) -> str:
+        """The `system` an ABOVE-GUARD row is allowed to carry: the model's own string when the
+        registry declares that system, `""` when it does not (#855 F-06).
+
+        The two writers up here — the argument schema's rejection and the grant check's
+        unresolvable branch — record what the MODEL named, and nothing between there and the
+        offline collectors re-checks it: the call never reached the grant, so no other party on
+        the path ever formed an opinion about the string. It is not inert. An exit-64
+        `agent-fixable` row IS the pitfalls channel's input, and `_build_pitfalls_handoffs`
+        spends its `system` verbatim as `defender/skills/<system>/execution.md` and points the
+        curator at that path — so a schema the model can fail on purpose (any extra or mistyped
+        argument does it, no grant required) was a route to naming a corpus write.
+
+        `""` rather than a drop, and it needs no new branch downstream: `collect_general_
+        failures` already skips a systemless row, exactly as `record_query.system_for_payload_
+        operands` returning `""` does for the bash shim's writer — the sibling this closes for
+        the same reason, that a bad `system` "would send the curator at a `skills/sql/
+        execution.md` that must never exist".
+
+        Spent on the rejection guard's identity and the dead-end reason as well as on the row,
+        never on one and not the others: the guard recovers its count from the rows it wrote,
+        so a live identity keyed on the raw string over a table holding `""` would match
+        nothing and the repeat class this guard exists to bound would stop being bounded."""
+        try:
+            declared = self._registry.systems()
+        except CONTROL_FLOW_EXCEPTIONS:
+            raise
+        except (BudgetKill, KeyboardInterrupt, GeneratorExit, asyncio.CancelledError):
+            raise
+        except BaseException:  # noqa: BLE001 — a registry that cannot list declares nothing
+            return ""
+        return system if system in declared else ""
+
     def _traversal_reject(self, model_query_id: Any) -> str | None:
         if model_query_id and any(t in str(model_query_id) for t in _QID_TRAVERSAL):
             return (
@@ -229,12 +262,16 @@ class QueryCapture(AbstractCapability[Any]):
             return await handler(args)
         except (ValidationError, ModelRetry) as e:
             raw = _raw_args(args)
-            system, verb = _as_str(raw.get("system")), _as_str(raw.get("verb"))
             # THE SECOND IDENTITY EXTRACTION (P-a). These are the RAW arguments: this frame
             # runs precisely because the schema refused to produce validated ones, so there is
             # nothing else to key on. A `params` that is not a dict at all coarsens to `{}`
             # here — that is what the row already stores, so the live count and a replay over
             # the recorded table read the same identity, which is the property that matters.
+            # `system` coarsens the same way when the registry does not declare it, and for a
+            # stronger reason: this row's `system` steers an offline corpus write
+            # (`_system_of_record`).
+            system = self._system_of_record(_as_str(raw.get("system")))
+            verb = _as_str(raw.get("verb"))
             params = _as_dict(raw.get("params"))
             trip = self._rejection_guard(ctx.deps, system, verb, params)
             await self._record(
@@ -284,10 +321,16 @@ class QueryCapture(AbstractCapability[Any]):
             # from both. The load-error branch above is deliberately NOT guarded: its rows are
             # `infra`, outside `rejection_trip`'s domain, and `circuit_breaker` already owns
             # that repeat end to end.
-            trip = self._rejection_guard(deps, system, verb, params)
+            # The same coarsening the schema placement applies, for the same reason (#855
+            # F-06) and with the same domain: an unresolvable call is unresolvable precisely
+            # because the grant reached no system by that name, so the string it names is the
+            # one least entitled to become a `skills/<system>/` path. A REAL system with an
+            # unknown verb — the ordinary shape here — is untouched and still records itself.
+            recorded_system = self._system_of_record(system)
+            trip = self._rejection_guard(deps, recorded_system, verb, params)
             refusal = decision.refusal or "unresolvable"
             await self._record(
-                deps, system=system, verb=verb,
+                deps, system=recorded_system, verb=verb,
                 query_id=ABOVE_GUARD_QUERY_ID, params=params, payload=None,
                 exit_code=USAGE_EXIT_CODE,
                 detail=(
@@ -296,7 +339,7 @@ class QueryCapture(AbstractCapability[Any]):
             )
             if trip is not None:
                 raise GatherDeadEnd(
-                    reason=rejection_dead_end_reason(system, verb, trip),
+                    reason=rejection_dead_end_reason(recorded_system, verb, trip),
                     escape=REPEAT_ESCAPE,
                 )
             raise ModelRetry(decision.refusal or f"unresolvable: {system}.{verb}")

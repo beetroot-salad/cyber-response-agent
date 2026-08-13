@@ -138,7 +138,13 @@ _NAMELESS = {"", ".", ".."}
 #: The three id validators (`hooks.record_lead.LEAD_ID_RE`, `scripts.gather_tools.record_query.
 #: LEAD_ID_RE`, `learning.lead_repository._LEAD_ID_RE`) and the two path shapes
 #: (`_PAYLOAD_SHAPES` below, `permission.policies._common.read_shapes`) all compose off this.
-LEAD_ID_BODY = r"[A-Za-z0-9]+"
+#: BOUNDED, and generously (#855 F-12): every id is spent as a FILENAME COMPONENT —
+#: `gather_raw/{lead_id}.lead.json`, `gather_summaries/{lead_id}.md` — so an unbounded body
+#: let a model-coined id fail the claim's `os.open` with ENAMETOOLONG rather than at a seam,
+#: and the claim's "could not write" is the answer a caller has the least to say about. 64 is
+#: far above anything the `:L` set spells (`l-001`, `l-00c`, `l-auth1`) and far below the 255
+#: a filename component gets, so no real id is near it and no path this composes can reach it.
+LEAD_ID_BODY = r"[A-Za-z0-9]{1,64}"
 
 #: `\Z`, not `$`: `$` also matches BEFORE a trailing newline, so `l-abc\n` passes `.match()` and
 #: composes a lead dir whose name ends in a newline — the one known hole adv:PO7 recorded against

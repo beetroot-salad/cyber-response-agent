@@ -31,7 +31,7 @@ from defender.hooks.budget_enforcer import (
     tail_exhausted,
     update_budget_locked,
 )
-from defender.hooks.record_lead import claim_lead
+from defender.hooks.record_lead import ALREADY_CLAIMED, CLAIMED, claim_lead
 from defender.runtime import circuit_breaker
 from defender.runtime.verb_grant import GrantError, VerbGrant
 from defender.runtime.verbs import VerbContext
@@ -555,15 +555,21 @@ async def _resolve_item1(  # noqa: C901, PLR0912, PLR0915 — item 1's own branc
         "run_dir": str(run_dir), "lead_id": L0, "goal": ITEM1_GOAL,
         "what_to_summarize": ITEM1_WHAT_TO_SUMMARIZE, "provenance": HARNESS_PROVENANCE,
     })
-    if claimed == 2:
+    if claimed != CLAIMED:
         # #808 review fix — someone else already owns L0 (a planted collision, the exact
         # shape `test_a_harness_side_reclaim_takes_claim_leads_return_two_arm` exercises
         # for L3): degrade rather than issue backend calls or append a second, inconsistent
         # `:L findings` row under an id this call does not own. Mirrors
         # `prepare_correlation_lead`'s own L3 collision arm — previously item 1 discarded
         # `claim_lead`'s return value entirely and proceeded regardless.
-        return (_unavailable(f"{L0} is already claimed by something else on this run dir"),
-                Entities(), STATUS_FAILED)
+        #
+        # `!= CLAIMED` and not `== ALREADY_CLAIMED` (#855 F-12): a claim that could not be
+        # WRITTEN leaves this frame owning exactly as little as a collision does, and the
+        # harness has no more right than the model to run a lead with no leads row.
+        return (_unavailable(
+            f"{L0} is already claimed by something else on this run dir"
+            if claimed == ALREADY_CLAIMED else f"{L0}'s leads row could not be claimed"
+        ), Entities(), STATUS_FAILED)
     _declare_l_finding(run_dir, L0, "ancestor resolution", ITEM1_SYSTEM)
 
     alert_id = alert.get("alert_id")
@@ -880,8 +886,10 @@ def prepare_correlation_lead(run_dir: Path, alert: dict, entities: Entities, sta
         "run_dir": str(run_dir), "lead_id": L3, "goal": goal,
         "what_to_summarize": what, "provenance": HARNESS_PROVENANCE,
     })
-    if claimed == 2:
-        # Someone else already owns this id (a planted collision) — do not touch it further.
+    if claimed != CLAIMED:
+        # Someone else already owns this id (a planted collision), or the row could not be
+        # written at all (#855 F-12) — either way this frame owns nothing, so it dispatches
+        # nothing and touches the id no further.
         return None
     _declare_l_finding(run_dir, L3, "correlation lead", CORRELATION_SYSTEM)
     return goal, what

@@ -133,7 +133,7 @@ as Claude Code PreToolUse hooks):
 
 | Gate | Where | Purpose |
 |---|---|---|
-| `record_lead.claim_lead` | called in `runtime/tools.py` on gather dispatch | Writes the leads-table row `gather_raw/{lead_id}.lead.json` (goal + dimensions), claiming the `lead_id` with an atomic `O_CREAT|O_EXCL` create — a reused id raises (an integrity gate, not just a shim) |
+| `record_lead.claim_lead` | called in `runtime/tools.py` on gather dispatch | Writes the leads-table row `gather_raw/{lead_id}.lead.json` (goal + dimensions), claiming the `lead_id` with an atomic `O_CREAT|O_EXCL` create — a reused id raises (an integrity gate, not just a shim). Returns `CLAIMED` / `ALREADY_CLAIMED` / `NOT_CLAIMED`, and only `CLAIMED` dispatches: an unclaimed lead has no row for the reuse gate to refuse next time |
 | `inject_system_skill_description.descriptor_catalog` | `runtime/tools.py` | Supplies the per-system SKILL `description:` catalog (progressive disclosure) so gather confirms relevance then reads the full SKILL |
 | `runtime/permission.py` | called before each tool | Blocks the main loop from running system CLIs directly or reading `gather_raw` to re-derive fields (positive grant enumeration — main carries no `gather_raw` shape); raises `ModelRetry` on a deny |
 | `challenge_gate.challenge_gate` | called inside `runtime/close_tool.py` on every **confident** close | The write-time review (§The close is gated). Fails closed: a stage that raises, times out or replies unreadably overrides the disposition to `inconclusive` rather than letting it commit silently |
