@@ -151,7 +151,7 @@ def _rows_for(obj: dict, declared: int) -> list | None:
 
 def completeness(obj: Any) -> Completeness:
     """Read, in declaration order of strength: the `total`/`returned` pair the search envelope
-    states outright; `row_count` against the rows actually present (ES|QL); a lone `total`
+    states outright; a `row_count` that EXCEEDS the rows actually present; a lone `total`
     against the payload's ONE list; and finally a bare `truncated` flag.
 
     Structural throughout — a list is identified by being the only list, never by its name."""
@@ -161,9 +161,23 @@ def completeness(obj: Any) -> Completeness:
     if total is not None and returned is not None:
         return Completeness("capped" if total > returned else "complete", total, returned)
     row_count = _int(obj, "row_count")
-    if row_count is not None and (rows := _rows_for(obj, row_count)) is not None:
-        n = len(rows)
-        return Completeness("capped" if row_count > n else "complete", row_count, n)
+    # ONE DIRECTION ONLY (#877 F-10). A `row_count` above the rows present is a real
+    # declaration of a cap — whoever wrote it knew of rows this payload does not carry. A
+    # `row_count` EQUAL to them declares nothing, and reading it as `complete` was a fact the
+    # envelope derived from itself: `elastic_adapter.esql_payload` computes
+    # `"row_count": len(values)` from the very array `_rows_for` then measures, so `row_count >
+    # n` was unsatisfiable and EVERY ES|QL payload read `complete` — including one whose row
+    # count IS ES's 1000-row cap or the query's own `LIMIT`. The prose only renders above the
+    # passthrough ceiling, so that false "nothing was capped upstream" reached exactly the
+    # payloads large enough to have been truncated. Equal counts now fall through to `unknown`:
+    # no prose rather than false prose. A genuine server total for ES|QL needs response headers
+    # (`Warning`), which `docker_exec_curl` does not capture today.
+    if (
+        row_count is not None
+        and (rows := _rows_for(obj, row_count)) is not None
+        and row_count > len(rows)
+    ):
+        return Completeness("capped", row_count, len(rows))
     if total is not None and len(lists := _lists(obj)) == 1:
         n = len(lists[0])
         return Completeness("capped" if total > n else "complete", total, n)
@@ -629,6 +643,25 @@ def _footer(payload_rel: str | None, run_dir: Path, comp: Completeness) -> list[
             "with the narrowing filter and read that. The reducers read STDIN — pipe the file "
             "in, don't pass it as an operand, e.g.:\n"
             f"  cat {abs_payload} | head -40",
+        ]
+    if comp.state == "unknown":
+        # THE SAME CLAIM THE PROSE JUST STOPPED MAKING (#877 F-10). `unknown` means the
+        # envelope declared no completeness fact this module can read — which since F-10 is
+        # EVERY ES|QL payload, because `row_count` is `len(values)` and says nothing. Falling
+        # through to the `complete` arm below named that file "full payload" and advertised
+        # `SELECT count(*) FROM data` over it, so the false "nothing was capped upstream" the
+        # prose no longer states was still reaching the lead one line further down — on
+        # exactly the payloads (above the passthrough ceiling) large enough to have been
+        # clipped by ES's own 1000-row cap or the query's `LIMIT`. Name the file, offer the
+        # reducers, and let a count be a count OF THIS FILE rather than an answer.
+        return [
+            f"[record_query] payload on disk: {abs_payload}",
+            "→ nothing in this payload declares a total, so whether the system capped it is "
+            "UNKNOWN: a count over this file counts the rows the FILE holds, not the rows that "
+            "matched. Read field shape and values off it; to claim a total, re-query with an "
+            "aggregating query that reports one. The reducers read STDIN — pipe the file in, "
+            "don't pass it as an operand, e.g.:\n"
+            f"  cat {abs_payload} | defender-sql 'DESCRIBE data'",
         ]
     return [
         f"[record_query] full payload: {abs_payload}",

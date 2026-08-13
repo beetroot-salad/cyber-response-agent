@@ -82,10 +82,25 @@ def test_derive_system_skips_non_adapter_and_unknown():
 # already in context, telling the lead not to count what it could see in full.
 
 
-def _row(seq, *, params, digest, lead="l-001"):
+def _row(seq, *, params, payload, lead="l-001"):
+    """One prior queries row, its digest AND its content hash derived from the PAYLOAD TEXT.
+
+    Both are derived rather than passed (#877 F-9): a fixture free to state a digest and a hash
+    that disagree could pin `repeat_note` against a table the writers cannot produce, which is
+    how the defect survived — the old helper took a digest string alone, so "same digest" and
+    "same payload" were indistinguishable in the tests exactly as they were in the code."""
     return {
         "lead_id": lead, "seq": seq, "system": "elastic", "verb": "query",
-        "query_id": "elastic.probe", "params": params, "payload_digest": digest,
+        "query_id": "elastic.probe", "params": params, "exit_code": 0,
+        **_result_of(payload),
+    }
+
+
+def _result_of(payload: str) -> dict:
+    """The two result-identity fields a caller hands `repeat_note`, over one payload text."""
+    return {
+        "payload_digest": ge.payload_digest(payload, "", 0),
+        "payload_sha256": ge.payload_sha256(payload),
     }
 
 
@@ -98,24 +113,28 @@ def _write_rows(tmp_path, rows):
     return tmp_path
 
 
+#: One recorded payload text, and a second of the SAME serialized length holding other bytes.
+_PAYLOAD = '{"total": 2, "hits": ["web-1", "web-2"]}'
+_SAME_LENGTH = '{"total": 2, "hits": ["db-01", "db-02"]}'
+
+
 def test_repeat_note_is_silent_on_the_first_call(tmp_path):
-    _write_rows(tmp_path, [_row(0, params={"q": "a"}, digest="25904 bytes, 1 line(s)")])
+    _write_rows(tmp_path, [_row(0, params={"q": "a"}, payload=_PAYLOAD)])
     assert ge.repeat_note(
         tmp_path, "l-001", seq=0, system="elastic", verb="query",
-        params={"q": "a"}, payload_digest="25904 bytes, 1 line(s)",
+        params={"q": "a"}, **_result_of(_PAYLOAD),
     ) is None
 
 
 def test_repeat_note_names_the_identical_earlier_request(tmp_path):
-    d = "25904 bytes, 1 line(s)"
     _write_rows(tmp_path, [
-        _row(0, params={"q": "a"}, digest=d),
-        _row(1, params={"q": "b"}, digest=d),
-        _row(2, params={"q": "b"}, digest=d),
+        _row(0, params={"q": "a"}, payload=_PAYLOAD),
+        _row(1, params={"q": "b"}, payload=_PAYLOAD),
+        _row(2, params={"q": "b"}, payload=_PAYLOAD),
     ])
     note = ge.repeat_note(
         tmp_path, "l-001", seq=2, system="elastic", verb="query",
-        params={"q": "b"}, payload_digest=d,
+        params={"q": "b"}, **_result_of(_PAYLOAD),
     )
     assert note is not None
     assert "REPEAT" in note
@@ -129,37 +148,67 @@ def test_repeat_note_flags_a_changed_request_that_moved_nothing(tmp_path):
     payload came back byte-identical. Nothing in the loop compared the two, and the lead
     spent its remaining 35 turns varying a filter that was never applied.
     """
-    d = "25904 bytes, 1 line(s)"
     _write_rows(tmp_path, [
-        _row(0, params={"q": "host:db-1"}, digest=d),
-        _row(1, params={"q": 'host:db-1 AND message: *"Accepted"*'}, digest=d),
+        _row(0, params={"q": "host:db-1"}, payload=_PAYLOAD),
+        _row(1, params={"q": 'host:db-1 AND message: *"Accepted"*'}, payload=_PAYLOAD),
     ])
     note = ge.repeat_note(
         tmp_path, "l-001", seq=1, system="elastic", verb="query",
-        params={"q": 'host:db-1 AND message: *"Accepted"*'}, payload_digest=d,
+        params={"q": 'host:db-1 AND message: *"Accepted"*'}, **_result_of(_PAYLOAD),
     )
     assert note is not None
     assert "NO-OP" in note
     assert "seq 0" in note
 
 
-def test_repeat_note_ignores_other_leads_and_later_rows(tmp_path):
-    d = "25904 bytes, 1 line(s)"
+def test_a_different_payload_of_the_same_length_is_not_a_no_op(tmp_path):
+    """#877 F-9 — THE regression. The NO-OP arm tells the lead "the payload is byte-identical",
+    and it used to establish that from `payload_digest`: `f"{len(text)} bytes, 1 line(s)"`, a
+    serialized LENGTH (`json.dumps` escapes every newline, so the line count is always 1).
+
+    Fixed-schema enumeration produces same-length payloads by construction, so this fired
+    constantly on genuinely different results — 55 false NO-OPs against 41 true ones across the
+    recorded runs, the sharpest being a `fim-checksum` of `/etc/passwd` and one of `/etc/shadow`
+    at 160 bytes each: the lead was told the checksum of shadow was the checksum of passwd."""
+    assert len(_PAYLOAD) == len(_SAME_LENGTH), "the fixture stopped exercising the defect"
     _write_rows(tmp_path, [
-        _row(0, params={"q": "a"}, digest=d, lead="l-002"),
-        _row(0, params={"q": "a"}, digest="404 bytes, 1 line(s)"),
-        _row(1, params={"q": "a"}, digest=d),
+        _row(0, params={"host": "web-1"}, payload=_PAYLOAD),
+        _row(1, params={"host": "db-01"}, payload=_SAME_LENGTH),
+    ])
+    assert ge.repeat_note(
+        tmp_path, "l-001", seq=1, system="elastic", verb="query",
+        params={"host": "db-01"}, **_result_of(_SAME_LENGTH),
+    ) is None
+
+
+def test_a_row_with_no_recorded_hash_evidences_no_byte_identity(tmp_path):
+    """A table written before the hash column existed states no content fact, and the note is a
+    statement OF that fact. Silence, not a digest-shaped guess."""
+    row = _row(0, params={"q": "a"}, payload=_PAYLOAD)
+    del row["payload_sha256"]
+    _write_rows(tmp_path, [row, _row(1, params={"q": "b"}, payload=_PAYLOAD)])
+    assert ge.repeat_note(
+        tmp_path, "l-001", seq=1, system="elastic", verb="query",
+        params={"q": "b"}, **_result_of(_PAYLOAD),
+    ) is None
+
+
+def test_repeat_note_ignores_other_leads_and_later_rows(tmp_path):
+    _write_rows(tmp_path, [
+        _row(0, params={"q": "a"}, payload=_PAYLOAD, lead="l-002"),
+        _row(0, params={"q": "a"}, payload=_SAME_LENGTH),
+        _row(1, params={"q": "a"}, payload=_PAYLOAD),
     ])
     assert ge.repeat_note(
         tmp_path, "l-001", seq=0, system="elastic", verb="query",
-        params={"q": "a"}, payload_digest="404 bytes, 1 line(s)",
+        params={"q": "a"}, **_result_of(_SAME_LENGTH),
     ) is None
 
 
 def test_repeat_note_survives_a_missing_table(tmp_path):
     assert ge.repeat_note(
         tmp_path, "l-001", seq=3, system="elastic", verb="query",
-        params={"q": "a"}, payload_digest="1 bytes, 1 line(s)",
+        params={"q": "a"}, **_result_of(_PAYLOAD),
     ) is None
 
 
@@ -193,3 +242,16 @@ def test_seq_stays_monotonic_when_a_payload_write_fails(tmp_path):
     assert [r["seq"] for r in rows] == [0, 1]
     assert rows[0]["payload_path"] is None
     assert rows[1]["payload_path"] == f"gather_raw/{LEAD}/1.json"
+
+
+def test_the_content_hash_never_folds_two_payloads_together(tmp_path):
+    """`payload_sha256` is the one field whose contract is that different bytes hash
+    differently, so its error handler may not be `replace`: U+FFFD is one character and every
+    unencodable codepoint would map onto it, colliding two distinct payloads under the very
+    claim the column exists to license ("byte-identical"). Moot for today's writers — both hand
+    it `json.dumps(..., ensure_ascii=True)` output, which is pure ASCII — and pinned anyway,
+    because #834's compact encoding is a live proposal to turn `ensure_ascii` off."""
+    a, b = "\ud800", "\ud801"
+    assert ge.payload_sha256(a) != ge.payload_sha256(b), \
+        "two different payloads share one content hash"
+    assert ge.payload_sha256("héllo") == ge.payload_sha256("héllo")

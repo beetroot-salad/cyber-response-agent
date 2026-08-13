@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import re
@@ -44,10 +45,41 @@ def derive_system(inner: list[str]) -> str | None:
 
 
 def payload_digest(stdout: str, stderr: str, exit_code: int) -> str:
+    """The row's HUMAN-READABLE display string — prose for the offline readers
+    (`lead_extraction`, `lead_repository`, the lead-author's prompt), never an identity.
+
+    On a success it is a serialized LENGTH and says so: both writers hand it
+    `json.dumps(payload, default=str)`, which escapes control characters, so the text holds no
+    raw newline and `lines` is always 1. Two different payloads of equal length produce the
+    same digest, which is why it no longer STANDS ALONE for a payload comparison (#877 F-9):
+    `_result_identity` reads it beside `payload_sha256`, and the hash is what carries a
+    success's content. On a FAILURE it is still the discriminating half — every failed row
+    hashes the same empty payload, so the error text is the only thing that separates two of
+    them."""
     if exit_code != 0:
         return f"exit={exit_code}; {stderr.strip()[:160]}"
     lines = stdout.count("\n") + 1 if stdout.strip() else 0
     return f"{len(stdout)} bytes, {lines} line(s)"
+
+
+def payload_sha256(payload_text: str) -> str:
+    """The row's CONTENT identity: `sha256` of the exact text persisted to the sidecar.
+
+    Its own column beside `payload_digest` rather than a longer digest string, because the two
+    answer different questions and only one of them may drift: the digest is prose a curator
+    reads and truncates (`lead_extraction` cuts it at 200 chars), the hash is what
+    `repeat_note` asserts byte identity from.
+
+    `surrogatepass`, and NOT the `replace` the transports decode vendor bytes with: this is the
+    one field whose whole contract is that different bytes hash differently, and `replace` maps
+    every unencodable codepoint to the SAME U+FFFD — two distinct payloads would collide and
+    `repeat_note` would tell the lead they are byte-identical. Today the question is moot, and
+    the docstring says so rather than inventing a hazard: both writers hand this
+    `json.dumps(payload, default=str)` with `ensure_ascii` on, so the text is pure ASCII and
+    nothing can fail to encode. `surrogatepass` is what keeps that true the day it stops being
+    (#834's compact encoding would turn `ensure_ascii` off) — it round-trips a lone surrogate
+    instead of raising out of the recorder or folding it into a shared character."""
+    return hashlib.sha256(payload_text.encode("utf-8", errors="surrogatepass")).hexdigest()
 
 
 def _request_key(system: Any, verb: Any, params: Any) -> str:
@@ -110,7 +142,7 @@ def append_query_row(  # noqa: PLR0913 — one parameter per ROW COLUMN the call
     payload_digest: str,
 ) -> dict:
     """THE append to the queries table: allocate this lead's next seq, persist the payload
-    sidecar, assemble the twelve frozen keys, append one line.
+    sidecar, assemble the thirteen frozen keys, append one line.
 
     Extracted from `QueryCapture._record` (#823 fork F1) because the gather bash lane became a
     second writer and a second copy of this would be a third place for the row shape to drift
@@ -147,6 +179,10 @@ def append_query_row(  # noqa: PLR0913 — one parameter per ROW COLUMN the call
         "error_class": error_class_for_exit(exit_code),
         "payload_status": payload_status,
         "payload_digest": payload_digest,
+        # DERIVED here, like `error_class`, and for the same reason: a writer that could hand
+        # in a hash disagreeing with the bytes it just persisted is exactly the divergence the
+        # column exists to close. It is the hash of the text written to the sidecar above.
+        "payload_sha256": payload_sha256(payload_text),
     }
     write_guarded(RunPaths(run_dir).executed_queries, json.dumps(row) + "\n", mode="append")
     return row
@@ -218,9 +254,37 @@ def system_for_payload_operands(run_dir: Path, operands: Iterable[Path]) -> str:
     return ""
 
 
-def repeat_note(
+def _result_identity(digest: Any, sha256: Any) -> tuple[str, str] | None:
+    """What two calls must SHARE for their RESULTS to be the same fact — or `None` when a row
+    evidences no such fact and can therefore match nothing.
+
+    BOTH halves, and each is the discriminating one for a different kind of row:
+
+      - for a FAILURE the digest carries the error (`exit={code}; {detail}`) and the hash is
+        the same empty-payload hash every failed row has, both writers persisting `""`. The
+        error text is what repeats, and it is what separates two failures.
+      - for a SUCCESS the hash carries the payload's content and the digest is `f"{len(text)}
+        bytes, 1 line(s)"` — a serialized LENGTH (`json.dumps` escapes every newline, so the
+        line count is always 1). Keying on the digest alone is #877 F-9: measured over the
+        recorded runs it read 55 false byte-identical verdicts against 41 true ones, because
+        fixed-schema enumeration produces same-length payloads by construction — a
+        `fim-checksum` of `/etc/passwd` and one of `/etc/shadow` are both 160 bytes, and the
+        lead was told the checksum of shadow was the checksum of passwd.
+
+    Neither half is read as a KIND, and this function is deliberately blind to `exit_code`:
+    #826 item 3 pins that the exit code selects the note's wording and never whether a note
+    fires, so a caller passing the wrong one must get the wrong prose, not silence.
+
+    A row carrying no `payload_sha256` — a table written before the column existed — yields
+    `None` and matches nothing. The note asserts byte identity; a row that cannot evidence it
+    must produce no note rather than a plausible one.
+    """
+    return (str(digest), str(sha256)) if sha256 else None
+
+
+def repeat_note(  # noqa: PLR0913 — one parameter per ROW FIELD the comparison reads: the request identity (system/verb/params), the result identity (digest + hash), and this call's own seq/exit
     run_dir: Path, lead: str, *, seq: int, system: str, verb: str,
-    params: dict, payload_digest: str, exit_code: int = 0,
+    params: dict, payload_digest: str, payload_sha256: str, exit_code: int = 0,
 ) -> str | None:
     """Name the earlier call in this lead that this one repeats, if any.
 
@@ -233,13 +297,16 @@ def repeat_note(
     producing reasoning, and only a changed observation reaches one.
 
     `exit_code` is THIS call's, and selects the wording only — never whether a note fires
-    (#826 item 3). The comparison itself is unchanged and needs no exit code of its own: for a
-    failed call `payload_digest` is already `_record`'s `exit={code}; {detail}` form, so two
-    failures match each other and can never match a success's `N bytes, M line(s)`. What the
-    failing caller must not be told is that its request "returned the same payload" — it
-    returned no payload at all, and the fact that matched is the identical ERROR.
+    (#826 item 3). The comparison itself needs no exit code of its own: a failed call's digest
+    is `_record`'s `exit={code}; {detail}` form, so two failures match each other and can never
+    match a success's `N bytes, M line(s)` — and since #877 F-9 the digest is checked together
+    with the payload's content hash (`_result_identity`), which is what makes "byte-identical"
+    a claim the row can actually stand behind. What the failing caller must not be told is that
+    its request "returned the same payload" — it returned no payload at all, and the fact that
+    matched is the identical ERROR.
     """
     key = _request_key(system, verb, params)
+    identity = _result_identity(payload_digest, payload_sha256)
     repeat_seq: int | None = None
     same_payload: int | None = None
     for rec in lead_rows(run_dir, lead):
@@ -253,7 +320,9 @@ def repeat_note(
         prior = rec.get("seq")
         if not isinstance(prior, int) or prior >= seq:
             continue
-        payload_matches = rec.get("payload_digest") == payload_digest
+        payload_matches = identity is not None and identity == _result_identity(
+            rec.get("payload_digest"), rec.get("payload_sha256"),
+        )
         # REPEAT requires BOTH conditions on the SAME row: `same_request`/`same_payload`
         # used to be tracked as two independent "earliest match" scans, which could name two
         # DIFFERENT prior rows and then assert a compound fact about only one of them.
@@ -352,10 +421,10 @@ ABOVE_GUARD_QUERY_ID = "∅.above-repeat-guard"
 `_grant_check`'s row-writing branches (the adapter-load-error row and the non-`GRANTED`/
 unresolvable row). No call that reaches the guard could ever HAVE such a row itself refused, so
 counting one toward a later trip would let the replay oracle report a trip no live run can
-produce. P-a found no discriminator among the twelve frozen row keys between such a row and a
+produce. P-a found no discriminator among the frozen row keys between such a row and a
 validated one, so this value is deliberately reserved — `resolve_query_id` refuses to return it
 (or an unscreened traversal string) even when a model supplies one verbatim as `query_id` — and
-lives inside the existing twelve keys rather than adding a thirteenth."""
+lives inside the existing key set rather than adding one of its own."""
 
 BASH_SHIM_QUERY_ID = "∅.bash-shim"
 """The sentinel `query_id` for a FAILED reducer-shim row from the gather bash lane (#823 M1).
@@ -484,7 +553,7 @@ def rejection_trip(
     repeat is ALREADY owned end to end by `circuit_breaker` — two failures mark the system down
     and the third call is answered by the down-message. Counting those here would give one
     shape two owners and convert an infra outage into a lead-level dead end, so this guard
-    never sees them. Both fields are among the twelve frozen row keys; no thirteenth is
+    never sees them. Both fields are among the frozen row keys; no key of the guard's own is
     needed, and the same filter is what a replay over a recorded table applies."""
     return _trip(
         rows, lead, system=system, verb=verb, params=params, threshold=threshold,

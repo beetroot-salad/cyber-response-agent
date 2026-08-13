@@ -248,13 +248,22 @@ def _run_two_leads(
     return _Res(run_dir, main, gather)
 
 
+#: The payload text a seeded SUCCESS row stands for — one text, so two seeded successes are
+#: byte-identical the way two rows of one repeated request are, and the fixture's digest and
+#: content hash are both derived from it (#877 F-9).
+_SEEDED_PAYLOAD = "abcdefghijkl"
+
+
 def _row(
     lead: str, seq: int, system: str, verb: str, params: dict, *,
     exit_code: int = 0, query_id: str | None = None, digest: str | None = None,
 ) -> dict:
-    """One queries-table row in the frozen twelve-key shape, with `error_class` computed by
-    the PRODUCTION classifier rather than restated — a seeded fixture that disagrees with
-    `error_class_for_exit` would be a fixture asserting its own arithmetic."""
+    """One queries-table row in the frozen key shape, with `error_class`, `payload_digest` and
+    `payload_sha256` computed by the PRODUCTION helpers rather than restated — a seeded fixture
+    that disagrees with `error_class_for_exit`, or one whose recorded hash does not belong to
+    the payload it claims (#877 F-9), would be a fixture asserting its own arithmetic. A failed
+    row's payload text is `""`, as both writers persist it."""
+    payload_text = "" if exit_code != 0 else _SEEDED_PAYLOAD
     return {
         "lead_id": lead,
         "seq": seq,
@@ -268,8 +277,10 @@ def _row(
         "error_class": circuit_breaker.error_class_for_exit(exit_code),
         "payload_status": "error" if exit_code != 0 else "ok",
         "payload_digest": digest if digest is not None else (
-            f"exit={exit_code}; seeded" if exit_code != 0 else "12 bytes, 1 line(s)"
+            f"exit={exit_code}; seeded" if exit_code != 0
+            else record_query.payload_digest(payload_text, "", 0)
         ),
+        "payload_sha256": record_query.payload_sha256(payload_text),
     }
 
 
@@ -796,13 +807,14 @@ def test_repeat_trip_leaves_the_infra_breaker_untouched(tmp_path):
 
 def test_trip_row_conforms_to_the_frozen_row_contract(tmp_path):
     """trip_row_conforms_to_the_frozen_row_contract — the trip row's payload carries the SAME
-    twelve frozen keys as any other queries row: no thirteenth key, no amendment to
-    `test_row_contract_frozen`. Every downstream reader written against twelve keys still
+    frozen keys as any other queries row: no key of its own, no amendment to
+    `test_row_contract_frozen`. Every downstream reader written against the frozen set still
     reads it, and the key set is imported from the existing contract rather than restated, so
-    the two cannot drift."""
-    # rejected: a thirteenth key (e.g. `refusal_kind`) — typed and unambiguous, but it breaks
-    #   `test_row_contract_frozen` and every reader written against twelve keys; that is a
-    #   deliberate contract amendment this issue did not propose. F-I option 2 puts the
+    the two cannot drift. (The set is thirteen keys since #877 F-9 added `payload_sha256` for
+    every writer alike; the argument below is about a key only ONE writer would fill.)"""
+    # rejected: a key of the trip row's own (e.g. `refusal_kind`) — typed and unambiguous, but
+    #   it breaks `test_row_contract_frozen` and every reader written against the frozen set;
+    #   that is a deliberate contract amendment this issue did not propose. F-I option 2 puts the
     #   repetition in the existing detail field instead (see trip_row_detail_names_the_repetition).
     rec = VerbRecorder()
     r = _run(tmp_path, verbs=elastic_ok(rec), run_id="d807-frozen", turns=[
@@ -1277,10 +1289,10 @@ def test_counted_domain_excludes_validate_path_rows(tmp_path):
     justification forbids, and the only argument the artifact gives for why the trip row itself
     counts. Every arm therefore asserts the LIVE verdict and the REPLAY verdict over the same
     table. P-a, an executed break-attempt over all five rejection shapes, found NO discriminator
-    among the twelve frozen keys, so an above-M2 row must carry a sentinel identity the guard
+    among the frozen row keys, so an above-M2 row must carry a sentinel identity the guard
     skips: that sentinel is production work this test only observes, and it must live INSIDE
-    the twelve (`set(row) == ROW_KEYS` is asserted on every such row here, so a thirteenth key
-    is not an available implementation).
+    the frozen set (`set(row) == ROW_KEYS` is asserted on every such row here, so a key of the
+    sentinel's own is not an available implementation).
 
     WHAT THIS TEST NO LONGER SAYS (#826 item 4). Its second arm used to pin that three
     identical UNRESOLVABLE-verb calls end the lead nowhere — `gather.calls == 4`, no incomplete
@@ -1643,7 +1655,7 @@ def test_trip_row_detail_names_the_repetition(tmp_path):
     """trip_row_detail_names_the_repetition — the trip row announces itself as a repeat in the
     row's EXISTING detail field, `payload_digest`, which `_record` already fills for a non-zero
     exit as `f"exit={code}; {detail[:160]}"`. Without it the trip row is byte-shaped like a
-    bad-parameter refusal — same exit, same error_class, same empty payload, same twelve keys
+    bad-parameter refusal — same exit, same error_class, same empty payload, same row keys
     — and O4's named audience, the learning loop, reads "fix this parameter" off it. Contrast
     asserted in the same run: an ordinary `_screen` parameter refusal's detail names the
     parameter and never the repetition."""
