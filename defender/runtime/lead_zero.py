@@ -96,7 +96,13 @@ LEAD_ZERO_HEADING = "## Alert ancestors"
 STATUS_FAILED = "failed"
 STATUS_EMPTY = "succeeded-empty"
 STATUS_TRUNCATED = "succeeded-truncated"
-STATUS_WITH_ENTITIES = "succeeded-with-entities"
+#: Every requested ancestor document resolved. Named `STATUS_WITH_ENTITIES` until #867, which
+#: is the name lying about its own arm: the status block below derives this value from
+#: `saw_success` / `docs` / `requested` and has never consulted an extracted entity at all. The
+#: gate in `prepare_correlation_lead` reads it as "item 1 resolved documents" and always did —
+#: #867 deletes the extraction without touching that gate, because the predicate was already
+#: the right one.
+STATUS_RESOLVED = "succeeded-resolved"
 
 UNAVAILABLE = "_(unavailable:"
 SHORTFALL = "_(incomplete:"
@@ -121,21 +127,35 @@ ITEM1_WHAT_TO_SUMMARIZE = [
 ]
 
 _ANY_RUN_TAG = re.compile(r"</?run-[0-9a-zA-Z]*-[a-z-]+>")
+#: A markdown code-fence run. Neutralized for the same reason as the wrap delimiter, and
+#: since #867 for a second one: item 1's rendered block is interpolated into item 3's goal,
+#: which `tools_gather._gather_prompt` emits INSIDE a fenced block. A fence run in an
+#: attacker-authored `message` (a captured command line, a shell transcript) closes that fence
+#: early, so the harness's own `what_to_summarize` block renders as free prose the lead reads
+#: as document content.
+_FENCE_RUN = re.compile(r"`{3,}")
 
 
 # ─── the return contract (F1) ────────────────────────────────────────────────────────────
 
 @dataclass(frozen=True)
-class Entities:
-    hosts: tuple[str, ...] = ()
-    users: tuple[str, ...] = ()
-    source_ips: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True)
 class LeadZeroResult:
+    """#867 retired the third field. It was `entities: Entities` — a `host.name`/`user.name`/
+    `source.ip` triple extracted from the resolved documents by the harness and interpolated
+    into item 3's contract. A fixed field list is the right shape for exactly one class of
+    alert source (host-level auth logs, where those three fields are the activity) and produces
+    noise on any source that carries its entities elsewhere: a container-runtime source names
+    every alert with the shared host the runtime itself runs on, nests the real actor under a
+    vendor-specific field namespace the extractor never reads, and has no source address at
+    all. Which entities matter is a property of the alert, not of a schema.
+
+    Nothing typed replaced it. `text` — item 1's rendered block, already sanitized, elided and
+    wrapped — IS what item 3's contract now carries, so the correlation lead reads the same
+    bytes MAIN reads at ORIENT and picks its own correlation axes off them. Choosing what to
+    filter on is what every other gather lead already does; `l-00c` was the only lead in this
+    tree handed a predicate it could not inspect."""
+
     text: str
-    entities: Entities
     status: str
 
 
@@ -161,65 +181,20 @@ def _run_sync(coro: Any) -> Any:
 # ─── sanitizing wrap-delimiter shapes (K1 round 2 + F4) ─────────────────────────────────
 
 def _sanitize(text: Any) -> str:
-    """Neutralize any `<run-…-…>`-shaped delimiter in externally-sourced content BEFORE it
-    is wrapped or interpolated. `wrap()` performs no escaping of its own delimiter shape, so
-    an attacker-authored `message`/`user.name`/`source.ip` carrying a byte-exact close tag
-    would otherwise end the untrusted frame (or item 3's contract) early."""
+    """Neutralize any `<run-…-…>`-shaped delimiter, and any markdown code-fence run, in
+    externally-sourced content BEFORE it is wrapped or interpolated. `wrap()` performs no
+    escaping of its own delimiter shape, so an attacker-authored `message`/`user.name`/
+    `source.ip` carrying a byte-exact close tag would otherwise end the untrusted frame (or
+    item 3's contract) early; a ``` run would likewise end the fenced block whichever
+    consumer put the text inside one.
+
+    DEFANGED, NEVER DELETED — the same rule both surfaces' tests assert: the evidence has to
+    survive in a form the reader can still see, or the sanitizer passes by destroying what it
+    was protecting."""
     if not isinstance(text, str):
         text = str(text)
-    return _ANY_RUN_TAG.sub(lambda m: m.group(0).replace("<", "‹").replace(">", "›"), text)
-
-
-# ─── entities ─────────────────────────────────────────────────────────────────────────
-
-def _ip_sort_key(ip: str) -> tuple:
-    parts = ip.split(".")
-    try:
-        octets = tuple(int(p) for p in parts)
-    except ValueError:
-        return (1, ip)
-    if len(octets) != 4:
-        return (1, ip)
-    return (0, octets)
-
-
-def _ecs_field(doc: dict, flat_key: str, *nested_path: str) -> Any:
-    """#808 review fix — read an ECS-shaped field that may arrive either as a literal flat
-    dotted key (matching the fixture-driven test doubles in this suite, and Kibana's own
-    `kibana.alert.*` namespace) or as standard nested ECS JSON (`{"host": {"name": ...}}`) —
-    the shape `elastic_adapter._search` actually hands back for `_source` (docs pass through
-    UNMODIFIED, per this module's own probe evidence), and the shape this project's own
-    `fixtures/*/alert.json` uses for the same conceptual fields. Prefers the flat key; falls
-    back to walking the nested path so a real, ECS-nested document still yields entities."""
-    if flat_key in doc:
-        return doc[flat_key]
-    cur: Any = doc
-    for part in nested_path:
-        if not isinstance(cur, dict):
-            return None
-        cur = cur.get(part)
-    return cur
-
-
-def _entities_from_docs(docs: list[dict]) -> Entities:
-    hosts: set[str] = set()
-    users: set[str] = set()
-    ips: set[str] = set()
-    for doc in docs:
-        h = _ecs_field(doc, "host.name", "host", "name")
-        if isinstance(h, str) and h.strip():
-            hosts.add(h)
-        u = _ecs_field(doc, "user.name", "user", "name")
-        if isinstance(u, str) and u.strip():
-            users.add(u)
-        ip = _ecs_field(doc, "source.ip", "source", "ip")
-        if isinstance(ip, str) and ip.strip():
-            ips.add(ip)
-    return Entities(
-        hosts=tuple(sorted(hosts)),
-        users=tuple(sorted(users)),
-        source_ips=tuple(sorted(ips, key=_ip_sort_key)),
-    )
+    text = _ANY_RUN_TAG.sub(lambda m: m.group(0).replace("<", "‹").replace(">", "›"), text)
+    return _FENCE_RUN.sub(lambda m: "ˋ" * len(m.group(0)), text)
 
 
 # ─── deps for routing through the real QueryCapture (K7/d10) ────────────────────────────
@@ -238,6 +213,20 @@ class _CaptureDeps:
 def _rows_for(run_dir: Path, lead_id: str) -> list[dict]:
     return [r for r in read_jsonl_rows(RunPaths(run_dir).executed_queries)
             if r.get("lead_id") == lead_id]
+
+
+def _last_row_seq(run_dir: Path, lead_id: str) -> int:
+    """The queries-table `seq` the LAST call under `lead_id` wrote — the payload sidecar a
+    document resolved by that call is elided against (#867 review fix).
+
+    Item 1 issues several calls and one batched call returns many documents, so a document's
+    position in the rendered block is not its payload's seq. The block used to print the
+    position: with four documents off one fetch, the first pointed at the SHELL fetch's payload
+    and the last two at `gather_raw/l-000/{2,3}.json`, files no writer ever produced. `-1` when
+    no row exists (a screened call, or a table write that could not land)."""
+    rows = _rows_for(run_dir, lead_id)
+    seq = rows[-1].get("seq") if rows else None
+    return seq if isinstance(seq, int) else -1
 
 
 async def _capture_issue(
@@ -465,42 +454,108 @@ def _budget_account(run_dir: Path, run_id: str, tool_name: str, limits: dict) ->
 
 # ─── item 1 rendering ─────────────────────────────────────────────────────────────────
 
-def _elide(message: str, lead_id: str, seq: int) -> str:
-    if not isinstance(message, str) or len(message) <= MESSAGE_CHAR_BUDGET:
-        return message if isinstance(message, str) else str(message)
-    head = message[:MESSAGE_CHAR_BUDGET]
-    return (
-        f"{head}\n{ELIDED} {len(message)} chars, full text at "
-        f"gather_raw/{lead_id}/{seq}.json)"
+def _elide(value: Any, lead_id: str, seq: int) -> str:
+    """Bound ONE rendered leaf, with a pointer to the payload that holds it whole.
+
+    `seq` is the QUERIES-TABLE seq of the call that returned the document (`_last_row_seq`),
+    never the document's position in the block — those are different numbers and the block
+    used to print the second (#867 review fix). A negative `seq` means the call wrote no row
+    at all (screened, or the table write failed), and the note then says so rather than naming
+    a payload that was never persisted."""
+    if not isinstance(value, str) or len(value) <= MESSAGE_CHAR_BUDGET:
+        return value if isinstance(value, str) else str(value)
+    where = (
+        f", full text at gather_raw/{lead_id}/{seq}.json"
+        if seq >= 0 else ", and the call that returned it persisted no payload"
     )
+    return f"{value[:MESSAGE_CHAR_BUDGET]}\n{ELIDED} {len(value)} chars{where})"
+
+
+def _flatten_doc(doc: dict) -> dict[str, Any]:
+    """A document's leaves, keyed by their DOTTED ECS path.
+
+    #867 review fix. The adapter hands `_source` back UNMODIFIED, and real ECS `_source` is
+    NESTED (`{"host": {"name": …}}`, and a per-source namespace nests its own actor two or
+    three levels deeper) while the alerting namespace and this suite's test doubles arrive as
+    flat dotted keys. Rendering the top level alone printed a nested document as one line per
+    top-level object holding a PYTHON DICT REPR — `host: {'name': 'ws-1'}` — which is not a
+    field name anything can be queried on.
+
+    That was survivable while the harness extracted the entities itself (the retired
+    `_ecs_field` read both shapes). It stopped being survivable when #867 made this block
+    the correlation lead's whole entity evidence and asked it to name "the field each came
+    from": on production-shaped documents the lead had to reverse-engineer a dotted path out
+    of a repr, and the very source class the change exists for is the one that nests."""
+    out: dict[str, Any] = {}
+
+    def walk(node: Any, prefix: str) -> None:
+        if isinstance(node, dict) and node:
+            for k, v in node.items():
+                key = f"{prefix}.{k}" if prefix else str(k)
+                walk(v, key)
+        elif isinstance(node, list) and any(isinstance(x, dict) for x in node):
+            # An ARRAY OF OBJECTS is the same defect one level down, and it is not exotic:
+            # every Kibana alert document carries `kibana.alert.ancestors`, and on the group-id
+            # path the documents this block renders ARE alert documents. Rendering the array
+            # whole prints `[{'id': …, 'index': …}]` — a Python repr, not a field name anything
+            # can be queried on. Indexed (`…ancestors.0.id`) so two elements' same-named leaves
+            # stay distinguishable; an array of SCALARS stays whole, since `['a', 'b']` already
+            # reads as the multi-valued field it is.
+            for i, item in enumerate(node):
+                walk(item, f"{prefix}.{i}" if prefix else str(i))
+        elif prefix:
+            out[prefix] = node
+
+    walk(doc, "")
+    return out
 
 
 def _render_doc(doc: dict, lead_id: str, seq: int) -> str:
+    flat = _flatten_doc(doc)
     lines = []
-    ts = doc.get("@timestamp")
+    ts = flat.get("@timestamp")
     if ts:
         lines.append(f"- @timestamp: {_sanitize(ts)}")
-    for key in sorted(doc):
+    for key in sorted(flat):
         if key in ("@timestamp", "message"):
+            continue
+        # A null leaf is DROPPED, not rendered (#867 review fix). `_sanitize(None)` is the
+        # literal string `"None"`, and this block is now what the correlation lead picks its
+        # correlation axes off — `host.name: None` reads as a bindable value and invites
+        # `host.name:"None"`, a predicate that matches nothing and reports as a real zero.
+        # An absent field and a null one are the same thing to the index anyway.
+        if flat[key] is None:
             continue
         # #808 review fix — the field NAME, not just its value, must be neutralized: an
         # attacker-influenced document whose key itself carries a `<run-…-…>`-shaped
         # delimiter would otherwise end the untrusted frame early, exactly the class of
         # forgery this module's value-side `_sanitize` calls already exist to close.
-        lines.append(f"  {_sanitize(key)}: {_sanitize(doc[key])}")
-    if "message" in doc:
-        lines.append(f"  message: {_sanitize(_elide(doc['message'], lead_id, seq))}")
+        #
+        # EVERY leaf is elided, not just `message` (#867 review fix). The rendering budget was
+        # written when a nested object rendered as ONE line, so `message` was the only leaf that
+        # could be large; flattening makes every leaf of every namespace its own line, and a
+        # captured command line or a rule's stored query is exactly as unbounded as a message.
+        lines.append(f"  {_sanitize(key)}: {_sanitize(_elide(flat[key], lead_id, seq))}")
+    if flat.get("message") is not None:
+        lines.append(f"  message: {_sanitize(_elide(flat['message'], lead_id, seq))}")
     return "\n".join(lines)
 
 
-def _sort_chrono(docs: list[dict]) -> list[dict]:
-    def key(d):
-        return str(d.get("@timestamp") or "")
+def _sort_chrono(docs: list[tuple[dict, int]]) -> list[tuple[dict, int]]:
+    """Chronological by each document's own `@timestamp`. Each entry is `(doc, seq)` — the
+    queries-table seq of the call that returned it, which the elision pointer names."""
+    def key(entry: tuple[dict, int]) -> str:
+        return str(entry[0].get("@timestamp") or "")
     return sorted(docs, key=key)
 
 
 def _unavailable(reason: str) -> str:
-    return f"{UNAVAILABLE} {reason})"
+    """#867 review fix — the reason is SANITIZED. `_unavailable(f"{e!r}")` interpolates the repr
+    of an exception whose message can carry attacker-influenced text (this suite's own `d13`
+    docstring says exactly that), and the note lands INSIDE `wrap()`'s frame with everything
+    else — the one text path into item 1's frame the module's threat model covers and its code
+    did not."""
+    return f"{UNAVAILABLE} {_sanitize(reason)})"
 
 
 # ─── item 1: ancestor resolution ─────────────────────────────────────────────────────
@@ -521,10 +576,12 @@ def _map_backing_index(index: str) -> str:
     return f"{m.group('name')}-*"
 
 
-async def _fetch_batched(ancestors: list[dict], issue) -> tuple[list[dict], int, bool]:
+async def _fetch_batched(ancestors: list[dict], issue) -> tuple[list[tuple[dict, int]], int, bool]:
     """Batch ancestor ids by MAPPED backing index — one call per distinct index, never one
-    per ancestor (d5). Returns `(docs, requested_count, truncated_any)`; `issue` is the
-    caller's own budget-gated, success-tracking call wrapper."""
+    per ancestor (d5). Returns `(docs, requested_count, truncated_any)` where each doc is
+    paired with the queries-table `seq` of the call that returned it (#867 review fix — the
+    elision pointer's target); `issue` is the caller's own budget-gated, success-tracking call
+    wrapper, which returns `(envelope, seq)`."""
     by_index: dict[str, list[str]] = {}
     for a in ancestors:
         aid = a.get("id")
@@ -539,16 +596,16 @@ async def _fetch_batched(ancestors: list[dict], issue) -> tuple[list[dict], int,
     if not by_index:
         return [], 0, False
 
-    docs: list[dict] = []
+    docs: list[tuple[dict, int]] = []
     truncated_any = False
     for mapped_index, ids in sorted(by_index.items()):
         predicate = " OR ".join(f'"{i}"' for i in ids)
         params = {"native_query": f"_id: ({predicate})", "limit": 20,
                   "index": mapped_index, "sort": "desc"}
-        envelope = await issue("query", params)
+        envelope, seq = await issue("query", params)
         if envelope is None:
             continue
-        docs.extend(envelope.get("hits") or [])
+        docs.extend((h, seq) for h in (envelope.get("hits") or []))
         truncated_any = truncated_any or bool(envelope.get("truncated"))
     return docs, sum(len(v) for v in by_index.values()), truncated_any
 
@@ -556,7 +613,7 @@ async def _fetch_batched(ancestors: list[dict], issue) -> tuple[list[dict], int,
 async def _resolve_item1(  # noqa: C901, PLR0912, PLR0915 — item 1's own branch/call census: the shell fetch, the group/fallback branch, the empty/no-group fallback, per-call budget gating — see the module docstring
     *, run_dir: Path, defender_dir: Path, salt: str, run_id: str, alert: dict,
     capture: Any, env: dict, limits: dict,
-) -> tuple[str, Entities, str]:
+) -> tuple[str, str]:
     from defender.scripts.adapters.elastic_adapter import load_config
 
     deps = _build_deps(run_dir, defender_dir, salt, run_id, L0)
@@ -578,7 +635,7 @@ async def _resolve_item1(  # noqa: C901, PLR0912, PLR0915 — item 1's own branc
         return (_unavailable(
             f"{L0} is already claimed by something else on this run dir"
             if claimed == ALREADY_CLAIMED else f"{L0}'s leads row could not be claimed"
-        ), Entities(), STATUS_FAILED)
+        ), STATUS_FAILED)
     _declare_l_finding(run_dir, L0, "ancestor resolution", ITEM1_SYSTEM)
 
     alert_id = alert.get("alert_id")
@@ -589,7 +646,7 @@ async def _resolve_item1(  # noqa: C901, PLR0912, PLR0915 — item 1's own branc
             signal_index = cfg["ELASTIC_ALERTS_INDEX"]
         except Exception:  # noqa: BLE001 — degrade the whole item, never the run
             return (_unavailable("could not resolve this alert's signal_index"),
-                    Entities(), STATUS_FAILED)
+                    STATUS_FAILED)
 
     ancestor_events = alert.get("ancestor_events") or []
     if not isinstance(ancestor_events, list):
@@ -599,7 +656,7 @@ async def _resolve_item1(  # noqa: C901, PLR0912, PLR0915 — item 1's own branc
     issued_any = False
     saw_success = False
 
-    async def _issue(verb: str, params: dict):
+    async def _issue(verb: str, params: dict) -> tuple[dict | None, int]:
         nonlocal issued_any, saw_success
         issued_any = True
         _budget_gate(run_dir, limits)
@@ -607,31 +664,34 @@ async def _resolve_item1(  # noqa: C901, PLR0912, PLR0915 — item 1's own branc
         _budget_account(run_dir, run_id, "query", limits)
         if envelope is not None:
             saw_success = True
-        return envelope
+        # The seq is read AFTER the call, off the row that call just wrote: a document's
+        # elision pointer has to name the payload of the fetch that returned it, not its own
+        # position in the block (#867 review fix).
+        return envelope, _last_row_seq(run_dir, L0)
 
     shell: dict | None = None
     if isinstance(alert_id, str) and alert_id.strip():
-        shell = await _issue("alerts", {
+        shell_envelope, _ = await _issue("alerts", {
             "native_query": f'{ALERT_ID_FIELD}:"{alert_id}"', "limit": 1,
             "index": signal_index, "sort": "desc",
         })
-        if isinstance(shell, dict):
-            hits = shell.get("hits") or []
+        if isinstance(shell_envelope, dict):
+            hits = shell_envelope.get("hits") or []
             shell = hits[0] if hits else None
 
     group_id = shell.get(GROUP_ID_FIELD) if isinstance(shell, dict) else None
-    docs: list[dict] = []
+    docs: list[tuple[dict, int]] = []
     requested = len(ancestor_events)
     truncated = False
 
     if isinstance(group_id, str) and group_id.strip():
-        envelope = await _issue("alerts", {
+        envelope, group_seq = await _issue("alerts", {
             "native_query": f'{GROUP_ID_FIELD}:"{group_id}"', "limit": 20,
             "index": signal_index, "sort": "desc",
         })
         hits = [h for h in ((envelope or {}).get("hits") or []) if h.get(BUILDING_BLOCK_FIELD)]
         if hits:
-            docs = hits
+            docs = [(h, group_seq) for h in hits]
             requested = max(requested, len(hits))
             truncated = bool((envelope or {}).get("truncated"))
         else:
@@ -644,15 +704,14 @@ async def _resolve_item1(  # noqa: C901, PLR0912, PLR0915 — item 1's own branc
 
     if not issued_any:
         return (_unavailable("no usable ancestor identifier or alert id survived — no "
-                              "fetch was issued"), Entities(), STATUS_EMPTY)
+                              "fetch was issued"), STATUS_EMPTY)
 
     docs = _sort_chrono(docs)
-    entities = _entities_from_docs(docs)
 
     body_lines = []
     if docs:
-        for i, d in enumerate(docs):
-            body_lines.append(_render_doc(d, L0, i))
+        for doc, seq in docs:
+            body_lines.append(_render_doc(doc, L0, seq))
     elif saw_success:
         body_lines.append(_unavailable("the resolution reached the backend and found nothing"))
     else:
@@ -673,14 +732,24 @@ async def _resolve_item1(  # noqa: C901, PLR0912, PLR0915 — item 1's own branc
     elif requested and (len(docs) < requested or truncated):
         status = STATUS_TRUNCATED
     else:
-        status = STATUS_WITH_ENTITIES
+        status = STATUS_RESOLVED
 
-    return text, entities, status
+    return text, status
 
 
 # ─── item 3: the correlation lead's harness-authored contract ───────────────────────────
 
-def _correlation_contract(alert: dict, entities: Entities) -> tuple[str, list[str]] | None:
+def _correlation_contract(alert: dict, ancestor_block: str) -> tuple[str, list[str]] | None:
+    """#867 — the contract carries item 1's RESOLVED DOCUMENTS and the lead chooses the
+    correlation axes off them.
+
+    It used to carry a `host.name`/`user.name`/`source.ip` triple the harness extracted, and
+    the entity-emptiness arm that used to live here (return `None` when the triple came back
+    empty) went with the extraction: what gates the dispatch is item 1 resolving documents,
+    which `prepare_correlation_lead`'s status check already decides. `GatherRequest` carries
+    `goal` and `what_to_summarize` and nothing else, so before this change the lead was asked
+    to correlate on entities it had never seen — the only lead in this tree whose predicate was
+    handed to it rather than written by it."""
     ts = alert.get("alert_timestamp")
     if not isinstance(ts, str) or not ts.strip():
         return None
@@ -690,34 +759,33 @@ def _correlation_contract(alert: dict, entities: Entities) -> tuple[str, list[st
     except ValueError:
         return None
 
-    entity_bits = []
-    for label, values in (("host", entities.hosts), ("user", entities.users),
-                          ("source IP", entities.source_ips)):
-        for v in values:
-            entity_bits.append(f"{label} {_sanitize(v)}")
-    if not entity_bits:
-        # #808 review fix — a resolution that reached the backend and found documents but
-        # extracted no host/user/source-ip (a null `host.name` on a correlation/sequence
-        # alert, or an unparsed pam_unix/session/cron ancestor line — both real, documented
-        # shapes per skills/elastic/SKILL.md) must not dispatch a correlation lead with
-        # nothing to correlate on. Matches this suite's own documented gate: "item 3
-        # dispatches only when item 1 resolved at least one non-empty entity set."
-        return None
-    entity_text = "; ".join(entity_bits)
-
     goal = (
-        "Correlate ANY signature of alert already on the SOC's radar for these entities — "
-        f"{entity_text} — over a bounded window around {_sanitize(ts)}. Search the alerts "
-        "index ONLY (this is a correlation over prior alerts, not raw telemetry). Do not "
-        "narrow to this alert's own rule; a different rule firing on the same host/user is "
-        "exactly the related behaviour this lead exists to surface. Bind "
+        "Correlate ANY signature of alert already on the SOC's radar for THIS alert's key "
+        f"entities over a bounded window around {_sanitize(ts)}.\n\n"
+        "The alert's resolved ancestor documents follow. Read them first and judge which "
+        "entities actually discriminate this alert — the ones that would pick it out of the "
+        "environment's traffic rather than match everything in it. A container id, a process "
+        "name, a destination host named inside a command line, a file path, a user, a source "
+        "IP are all candidates; which of them matter is a property of THIS alert, not a fixed "
+        "list. Prefer an entity that is specific to the activity over one every document in "
+        "the environment carries: a host name that names the shared VPS every containerized "
+        "alert reports from selects the whole environment and measures nothing.\n\n"
+        f"{ancestor_block}\n\n"
+        "Search the alerts index ONLY (this is a correlation over prior alerts, not raw "
+        "telemetry). Do not narrow to this alert's own rule. The documents above may NAME that "
+        "rule — on a sequence alert they are themselves alert documents, carrying "
+        "`kibana.alert.rule.*` — and it is still not an axis to bind: a different rule firing "
+        "on the same entity is exactly the related behaviour this lead exists to surface, and "
+        "narrowing to the signature that already fired is the one result guaranteed to teach "
+        "nothing. Bind "
         f"`{CORRELATION_TEMPLATE}` — read it first: it is named by your grant-filtered template "
-        "index, and it already carries the entity-disjunct body and the window params this "
+        "index, and it carries the window params and the substitutable entity filter this "
         "contract needs. Each count is the result envelope's `total`, which the `hits` cap does "
         "not bound — a `truncated` result still carries a complete count."
     )
-    # Two dimensions, both answerable by ONE `alerts` call each. The third — "whether any
-    # correlated alert is already benign-explained" — was struck: `kibana.alert.workflow_status`
+    # Two COUNT dimensions, both answerable by ONE `alerts` call each (#867 adds a third line
+    # that is not a count — see below). A different third — "whether any correlated alert is
+    # already benign-explained" — was struck: `kibana.alert.workflow_status`
     # is `"open"` on every alert this environment produces (nothing in the environment's own
     # provisioning ever writes it), and the systems that could carry a benign explanation
     # (`ticket`, `change-mgmt`) are outside this lead's grant. It had exactly one possible
@@ -733,18 +801,28 @@ def _correlation_contract(alert: dict, entities: Entities) -> tuple[str, list[st
     #
     # Each dimension names its ENTITY SCOPE. "on-host"/"fleet-wide" alone do not: read
     # literally, "the count of alerts fleet-wide" is every alert the environment emitted in
-    # the window — a number about the SOC, not about this alert — while the template's own
-    # fleet-wide narrowing (drop `host.name`, keep `user.name`/`source.ip`) counts THESE
-    # entities anywhere. Two different numbers, and the lead's prose summary is the only thing
-    # MAIN sees, so the contract has to say which one it wants. The on-host dimension names
-    # the host SET for the same reason: item 1 routinely resolves more than one host (#808's
-    # own worked example resolves two), and one `alerts` call over an OR of them is a merged
-    # count that answers neither host on its own unless the contract asked for the merge.
+    # the window — a number about the SOC, not about this alert — while the narrowing it meant
+    # counts THESE entities anywhere. Two different numbers, and the lead's prose summary is
+    # the only thing MAIN sees, so the contract has to say which one it wants.
+    #
+    # #867 re-spelled the pair from "on-host"/"fleet-wide" to SCOPED/UNSCOPED. The old spelling
+    # was host-centric — it presumed the resolved host was the thing worth scoping to, which
+    # holds for host-level auth sources and collapses on any source whose alerts all report the
+    # same shared host: there the on-host count degenerates to "every alert this source
+    # emitted" and the fleet-wide one, defined as "drop the host predicate and keep the rest",
+    # has nothing left to bind at all. Scoped/unscoped asks for the same two measurements
+    # without naming which field carries them.
+    #
+    # The third line is not a count. It exists because the lead now CHOOSES what the first two
+    # are counted over: a number whose predicate MAIN cannot see is not a measurement MAIN can
+    # weigh, and the prose summary is the only thing that reaches it.
     what = [
-        "the count of alerts on-host in the window — every host item 1 resolved, OR'd into "
-        "one call — across any rule (the envelope's `total`)",
-        "the count of alerts fleet-wide for these same entities (no host predicate) in the "
-        "window, across any rule (the envelope's `total`)",
+        "the count of alerts in the window scoped to the entities you judged central — one "
+        "call, across any rule (the envelope's `total`)",
+        "the count for those same entities UNSCOPED — the same window with the narrowing "
+        "predicate dropped, across any rule (the envelope's `total`)",
+        "which entities you correlated on, the field each came from, and why you judged them "
+        "the discriminating ones for this alert",
     ]
     return goal, what
 
@@ -880,14 +958,28 @@ def _declare_l_finding(run_dir: Path, lead_id: str, name: str, system: str) -> N
         print(f"[lead_zero] could not declare {lead_id} in investigation.md: {e!r}")
 
 
-def prepare_correlation_lead(run_dir: Path, alert: dict, entities: Entities, status: str) -> tuple[str, list[str]] | None:
+def prepare_correlation_lead(
+    run_dir: Path, alert: dict, ancestor_block: str, status: str,
+) -> tuple[str, list[str]] | None:
     """The SYNCHRONOUS half of item 3: gate on the resolution status (d22 — dispatches on
-    WITH_ENTITIES and TRUNCATED, not on FAILED/EMPTY), build the harness-authored contract,
-    and claim `l-00c`'s leads row BEFORE MAIN's first turn (F5). Returns `(goal,
-    what_to_summarize)` when item 3 should actually dispatch, else `None`."""
-    if status not in (STATUS_WITH_ENTITIES, STATUS_TRUNCATED):
+    RESOLVED and TRUNCATED, not on FAILED/EMPTY), build the harness-authored contract, and
+    claim `l-00c`'s leads row BEFORE MAIN's first turn (F5). Returns `(goal,
+    what_to_summarize)` when item 3 should actually dispatch, else `None`.
+
+    #867 CHANGED THE OBLIGATION THIS GATE DISCHARGES, and deliberately. `d22` used to read
+    "dispatches only when item 1 resolved at least one non-empty ENTITY SET"; it now reads "at
+    least one ancestor DOCUMENT". The line below is untouched by that change — it always
+    tested the status, and the status was always about documents — but a resolution whose
+    documents yielded no host/user/source-ip used to be turned away downstream, inside
+    `_correlation_contract`, and no longer is. That arm was not a degenerate case: it was every
+    alert source that carries its entities outside those three fields — real documents, nothing
+    the triple could see. `STATUS_EMPTY` and `STATUS_FAILED` still dispatch nothing.
+
+    `ancestor_block` is item 1's rendered block as `LeadZeroResult.text` carries it — already
+    sanitized, elided and wrapped — so the lead reads the same bytes MAIN reads at ORIENT."""
+    if status not in (STATUS_RESOLVED, STATUS_TRUNCATED):
         return None
-    contract = _correlation_contract(alert, entities)
+    contract = _correlation_contract(alert, ancestor_block)
     if contract is None:
         return None
     goal, what = contract
@@ -938,20 +1030,20 @@ def resolve_lead_zero(
     if verbs is None:
         unavailable_text = _render_section(
             _unavailable("no verb registry was injected into this run"), salt)
-        return LeadZeroResult(text=unavailable_text, entities=Entities(), status=STATUS_FAILED)
+        return LeadZeroResult(text=unavailable_text, status=STATUS_FAILED)
 
     alert_text, err = read_text_soft(Path(alert_path))
     if alert_text is None:
         body = _unavailable(f"could not read the alert: {err}")
-        return LeadZeroResult(text=_render_section(body, salt), entities=Entities(), status=STATUS_FAILED)
+        return LeadZeroResult(text=_render_section(body, salt), status=STATUS_FAILED)
     try:
         alert = json.loads(alert_text)
     except (ValueError, TypeError) as e:
         body = _unavailable(f"the alert is not valid JSON: {e!r}")
-        return LeadZeroResult(text=_render_section(body, salt), entities=Entities(), status=STATUS_FAILED)
+        return LeadZeroResult(text=_render_section(body, salt), status=STATUS_FAILED)
     if not isinstance(alert, dict):
         body = _unavailable("the alert is not a JSON object")
-        return LeadZeroResult(text=_render_section(body, salt), entities=Entities(), status=STATUS_FAILED)
+        return LeadZeroResult(text=_render_section(body, salt), status=STATUS_FAILED)
 
     from defender import run_common
     from .query_tool import QueryCapture
@@ -976,10 +1068,10 @@ def resolve_lead_zero(
             # breaks task cancellation semantics for whatever is running this coroutine.
             raise
         except BaseException as e:  # noqa: BLE001 — item 1's own faults degrade, never raise
-            return _unavailable(f"{e!r}"), Entities(), STATUS_FAILED
+            return _unavailable(f"{e!r}"), STATUS_FAILED
 
-    body, entities, status = _run_sync(_go())
-    return LeadZeroResult(text=_render_section(body, salt), entities=entities, status=status)
+    body, status = _run_sync(_go())
+    return LeadZeroResult(text=_render_section(body, salt), status=status)
 
 
 __all__ = [
@@ -998,10 +1090,9 @@ __all__ = [
     "SHORTFALL",
     "STATUS_EMPTY",
     "STATUS_FAILED",
+    "STATUS_RESOLVED",
     "STATUS_TRUNCATED",
-    "STATUS_WITH_ENTITIES",
     "UNAVAILABLE",
-    "Entities",
     "LeadZeroResult",
     "dispatch_correlation",
     "prepare_correlation_lead",
