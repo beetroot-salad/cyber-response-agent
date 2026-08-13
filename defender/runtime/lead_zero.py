@@ -581,7 +581,8 @@ async def _fetch_batched(ancestors: list[dict], issue) -> tuple[list[tuple[dict,
     per ancestor (d5). Returns `(docs, requested_count, truncated_any)` where each doc is
     paired with the queries-table `seq` of the call that returned it (#867 review fix — the
     elision pointer's target); `issue` is the caller's own budget-gated, success-tracking call
-    wrapper, which returns `(envelope, seq)`."""
+    wrapper, which returns `(envelope, seq)` and is told whether this call could produce an
+    ancestor at all (#880 F-14)."""
     by_index: dict[str, list[str]] = {}
     for a in ancestors:
         aid = a.get("id")
@@ -602,7 +603,7 @@ async def _fetch_batched(ancestors: list[dict], issue) -> tuple[list[tuple[dict,
         predicate = " OR ".join(f'"{i}"' for i in ids)
         params = {"native_query": f"_id: ({predicate})", "limit": 20,
                   "index": mapped_index, "sort": "desc"}
-        envelope, seq = await issue("query", params)
+        envelope, seq = await issue("query", params, ancestor=True)
         if envelope is None:
             continue
         docs.extend((h, seq) for h in (envelope.get("hits") or []))
@@ -654,16 +655,40 @@ async def _resolve_item1(  # noqa: C901, PLR0912, PLR0915 — item 1's own branc
 
     ledger = _CallLedger(run_dir)
     issued_any = False
-    saw_success = False
+    answered_any = False
+    ancestor_attempted = False
+    ancestor_answered = False
 
-    async def _issue(verb: str, params: dict) -> tuple[dict | None, int]:
-        nonlocal issued_any, saw_success
+    async def _issue(verb: str, params: dict, *, ancestor: bool) -> tuple[dict | None, int]:
+        """`ancestor=False` marks a call that CANNOT produce an ancestor document — item 1's
+        opening by-`alert_id` fetch of the alert's own shell, which resolves the alert and no
+        ancestor.
+
+        #880 F-14: one `saw_success` flag used to be set from every call, and both its readers
+        spend it as "a call that could have resolved an ancestor reached the backend". The
+        shell fetch answers on every alert with a resolvable `alert_id`, so it alone kept the
+        flag true — `STATUS_FAILED` was unreachable however the ancestor calls ended, and an
+        outage on them rendered as `_(unavailable: … found nothing)`: an absence of ancestors,
+        which is triage evidence, asserted over a backend that never answered.
+
+        `ancestor` has no default deliberately: the omitted discriminator is exactly what was
+        wrong, and a call site added later that forgets it must not silently read as an
+        ancestor call.
+
+        `answered_any` is tracked beside it because "no ancestor call was made" is NOT by
+        itself a resolved absence: when the shell fetch is the ONLY call and it failed, the
+        group-id branch was never even reachable, so nothing was established — least of all
+        that this alert has no ancestors."""
+        nonlocal issued_any, answered_any, ancestor_attempted, ancestor_answered
         issued_any = True
+        ancestor_attempted = ancestor_attempted or ancestor
         _budget_gate(run_dir, limits)
         envelope, _text = await ledger.call(capture, deps, verb, params, env)
         _budget_account(run_dir, run_id, "query", limits)
         if envelope is not None:
-            saw_success = True
+            answered_any = True
+            if ancestor:
+                ancestor_answered = True
         # The seq is read AFTER the call, off the row that call just wrote: a document's
         # elision pointer has to name the payload of the fetch that returned it, not its own
         # position in the block (#867 review fix).
@@ -674,7 +699,7 @@ async def _resolve_item1(  # noqa: C901, PLR0912, PLR0915 — item 1's own branc
         shell_envelope, _ = await _issue("alerts", {
             "native_query": f'{ALERT_ID_FIELD}:"{alert_id}"', "limit": 1,
             "index": signal_index, "sort": "desc",
-        })
+        }, ancestor=False)
         if isinstance(shell_envelope, dict):
             hits = shell_envelope.get("hits") or []
             shell = hits[0] if hits else None
@@ -688,7 +713,7 @@ async def _resolve_item1(  # noqa: C901, PLR0912, PLR0915 — item 1's own branc
         envelope, group_seq = await _issue("alerts", {
             "native_query": f'{GROUP_ID_FIELD}:"{group_id}"', "limit": 20,
             "index": signal_index, "sort": "desc",
-        })
+        }, ancestor=True)
         hits = [h for h in ((envelope or {}).get("hits") or []) if h.get(BUILDING_BLOCK_FIELD)]
         if hits:
             docs = [(h, group_seq) for h in hits]
@@ -712,10 +737,25 @@ async def _resolve_item1(  # noqa: C901, PLR0912, PLR0915 — item 1's own branc
     if docs:
         for doc, seq in docs:
             body_lines.append(_render_doc(doc, L0, seq))
-    elif saw_success:
-        body_lines.append(_unavailable("the resolution reached the backend and found nothing"))
-    else:
+    elif ancestor_attempted and not ancestor_answered:
+        # Reworded with the flag it now reads (#880 F-14). "every backend call this
+        # resolution attempted failed" is itself false in the newly reachable case: the shell
+        # fetch answered, and only the calls that could have produced an ancestor did not.
+        body_lines.append(_unavailable(
+            "every backend call that could have resolved an ancestor failed"))
+    elif not answered_any:
+        # No ancestor call was ISSUED and the only call this resolution made — the shell
+        # fetch whose group id decides whether an ancestor branch exists at all — failed. The
+        # original sentence, and it is the true one here: nothing answered, so the group
+        # branch was never reachable and no absence was established. Splitting the flag
+        # without this arm turns exactly this run into `_(unavailable: … found nothing)`, the
+        # false claim over a silent backend F-14 exists to remove.
         body_lines.append(_unavailable("every backend call this resolution attempted failed"))
+    else:
+        # Either an ancestor call answered and matched nothing, or — the alert declaring no
+        # usable ancestor and its shell answering with no group id — there was no ancestor
+        # call to make. Both are a resolved absence, which is what this sentence says.
+        body_lines.append(_unavailable("the resolution reached the backend and found nothing"))
 
     if requested and (len(docs) < requested or truncated):
         body_lines.append(
@@ -725,7 +765,13 @@ async def _resolve_item1(  # noqa: C901, PLR0912, PLR0915 — item 1's own branc
 
     text = "\n\n".join(body_lines)
 
-    if not saw_success:
+    # FAILED when no call that could have contributed answered. `ancestor_attempted` guards
+    # the ancestor half so an alert with nothing to ask for stays EMPTY (#880 F-14): a
+    # resolution that issued no ancestor call has no failed call to report. The `answered_any`
+    # half is what keeps a resolution whose SHELL FETCH was its only call, and failed, out of
+    # EMPTY — it asked nothing further because the answer that would have told it what to ask
+    # never came, which is a failure and not an absence.
+    if not ancestor_answered and (ancestor_attempted or not answered_any):
         status = STATUS_FAILED
     elif not docs:
         status = STATUS_EMPTY
@@ -878,7 +924,14 @@ async def dispatch_correlation(  # noqa: C901, PLR0913 — item 3's own dispatch
 
         extra: list = []
         if store is not None and gather_session_id is not None:
-            extra = _gather_extra_capabilities(store, gather_session_id, _agent_id)
+            # THIS dispatch's ceiling, not the module constant the model-dispatched path
+            # uses — the same value handed to `_run_gather` below (#880 F-19). The recorder
+            # withholds the doomed round by comparing against it; handed 40 while this lead
+            # stops at 8, it withheld nothing and stored an unanswered final request.
+            extra = _gather_extra_capabilities(
+                store, gather_session_id, _agent_id,
+                request_limit=CORRELATION_REQUEST_LIMIT,
+            )
         return build_gather_agent(
             defender_dir, logger, _agent_id, make_model, registry, limits,
             extra_capabilities=extra, session_id=gather_session_id,
