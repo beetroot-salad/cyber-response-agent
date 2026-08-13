@@ -61,7 +61,6 @@ from defender.tests.e2e._lead_zero_808 import (  # noqa: E402
     FALCO_BACKING,
     L0,
     L3,
-    SALT,
     SHORTFALL,
     UNAVAILABLE,
     alert_doc,
@@ -289,7 +288,7 @@ def test_a_shell_fetch_that_answers_does_not_stand_in_for_the_ancestor_calls(tmp
         rec = VerbRecorder()
         result = lead_zero.resolve_lead_zero(
             run_dir=run_dir, defender_dir=defender_dir(),
-            alert_path=run_dir / "alert.json", salt=SALT,
+            alert_path=run_dir / "alert.json",
             verbs=elastic_backend(rec, **kw),
         )
         return result, rec, run_dir
