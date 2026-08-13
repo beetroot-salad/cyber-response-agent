@@ -94,9 +94,21 @@ def test_correlation_lead_goal_and_dimensions_are_fixed_by_the_harness(tmp_path)
     contradicted `d20` in the same contract — the goal says do NOT narrow to this alert's own
     rule — and, read literally, a per-rule breakdown is 8-16 `alerts` calls against `d21`'s
     request limit of 8, on a grant that withholds the one verb (`esql`) that could group by rule
-    in a single call. The dimensions now say "across any rule". What this test asserts is
-    unchanged and is what K18 actually moved to the seam: two NAMED count dimensions, one
-    on-host and one fleet-wide."""
+    in a single call. The dimensions now say "across any rule".
+
+    THE ON-HOST / FLEET-WIDE HALF NO LONGER HOLDS EITHER, and also deliberately (#867). That
+    pair was host-centric: it presumed the resolved host was the thing worth scoping to, which
+    is true for the four detection rules firing on `logs-system.auth-*` and false for the four
+    firing on `logs-falco.alerts-*`, where the only host is the VPS every containerized alert
+    reports from. The scoped count there was "every container alert in the environment" and the
+    fleet-wide count — defined as "drop the host predicate, keep user and source IP" — had
+    nothing left to bind at all. The pair is now SCOPED / UNSCOPED, which asks for the same two
+    measurements without fixing which field carries them, and a third dimension asks the lead to
+    NAME what it correlated on: the lead now chooses the predicate, so a count whose entities
+    MAIN cannot see is not a measurement MAIN can weigh.
+
+    What this test asserts is what K18 actually moved to the seam and is unchanged in kind: the
+    harness fixes the dimensions, the sidecar records them, and the suite reads them there."""
     res = run(tmp_path, run_id="lz808-contract", answer=answer_hits(TWO_ACTORS))
 
     sidecar = res.sidecar(L3)
@@ -104,32 +116,43 @@ def test_correlation_lead_goal_and_dimensions_are_fixed_by_the_harness(tmp_path)
     assert isinstance(goal, str), f"item 3's goal is not a string: {goal!r}"
     assert goal.strip(), "item 3's goal is falsy — claim_lead's swallow arm writes nothing"
     dims = " ".join(sidecar["what_to_summarize"]).lower()
-    assert "on-host" in dims or "on host" in dims, \
-        f"no on-host count is named as an output field: {sidecar['what_to_summarize']}"
-    assert "fleet" in dims, \
-        f"no fleet-wide count is named as an output field: {sidecar['what_to_summarize']}"
+    assert "scoped" in dims, \
+        f"no scoped count is named as an output field: {sidecar['what_to_summarize']}"
+    assert "unscoped" in dims, \
+        f"no unscoped count is named as an output field: {sidecar['what_to_summarize']}"
     assert "count" in dims, \
         "the obligation's COUNT survives only as prose the hermetic suite cannot assert"
+    assert "which entities" in dims, (
+        "no dimension asks the lead which entities it correlated on — the lead picks the "
+        "predicate now, so an unnamed one leaves MAIN a number it cannot interpret"
+    )
 
 
 def test_correlation_contract_binds_the_entity_sets_resolved_by_item_one(tmp_path):
-    """d17/K9 — item 3's contract binds the entity SETS item 1 resolved off the ancestor
-    documents: every distinct host, user and source IP, not a single chosen value.
+    """d17/K9 — item 3's contract binds what item 1 resolved off the ancestor documents, and
+    every value it resolved reaches the correlation lead. The values come from the RESOLVED
+    DOCUMENTS, never from the alert's own top-level fields, which is the situation item 3
+    exists to work under (g16: the design's own cited template documents that `host.name` is
+    normally null on a correlation alert). This scenario nulls the alert's own `host.name` and
+    `user.name` so a bind that read them instead would surface here.
 
-    §7 resolved SETS over singletons because the singular reading drops half the discriminator
-    on #808's own worked example — a two-leg sequence naming two users (`dev.dana`,
-    `svc.config-mgmt`) from two sources (`172.18.0.15`, `172.18.0.4`) — and selects nothing at
-    all on the 2-of-5 checked-in fixtures whose top-level `host.name` is null. The values are
-    read off the RESOLVED DOCUMENTS, never off the alert's own top-level fields, which is the
-    situation item 3 exists to work under (g16: the design's own cited template documents that
-    `host.name` is normally null on a correlation alert).
+    WHAT IS BOUND CHANGED, and deliberately (#867). It was the extracted entity SETS — every
+    distinct host, user and source IP, deduplicated. It is now item 1's rendered BLOCK itself,
+    carried into the contract verbatim. §7 was right that a singular bind drops half the
+    discriminator; the error was a level above it, in fixing the three ECS fields the
+    extraction could see at all. Half the environment's detection rules fire on
+    `logs-falco.alerts-*`, where that triple yields the shared VPS host and nothing else — no
+    amount of set-shaping rescues a field list that cannot see `falco.output_fields.*`. So the
+    lead is handed the documents and picks its own axes.
 
-    SETS, so DEDUPLICATED — driven, not described. The four documents name `dev.dana` three
-    times and `svc.config-mgmt` once; a per-document bind carries the first three times over
-    and hands the subagent a contract that reads as though one actor mattered three times as
-    much. Asserted as a RATIO rather than a literal count so it survives any rendering the
-    implementation picks: a value resolved three times must appear in the dimensions exactly as
-    often as one resolved once, whether that is once each or once per named dimension."""
+    THE DEDUPLICATION RATIO IS RETIRED WITH IT. It asserted that a value resolved by three
+    documents appears exactly as often as one resolved by a single document, because an
+    extracted entity repeated three times reads as an actor mattering three times as much.
+    That is a property of an ENTITY LIST, and there is no longer an entity list: a block of
+    resolved documents names `dev.dana` three times because three documents name it, which is
+    evidence the lead is meant to see and weigh. Asserting the old ratio here would now demand
+    the harness de-duplicate the documents themselves — the opposite of what item 1 owes MAIN,
+    and it would drop the very repetition that tells the lead an actor recurs."""
     res = run(tmp_path, run_id="lz808-entities",
               alert=alert_doc(**{"host": {"name": None}, "user": {"name": None}}),
               answer=answer_hits(REPEATED_ACTORS))
@@ -139,22 +162,9 @@ def test_correlation_contract_binds_the_entity_sets_resolved_by_item_one(tmp_pat
     for value in ("dev.dana", "svc.config-mgmt", "172.18.0.15", "172.18.0.4",
                   "office-ws-1", "db-1"):
         assert value in contract, (
-            f"{value!r} was resolved by item 1 and is missing from item 3's contract — a "
-            "singular bind drops half the discriminator the change exists to surface"
+            f"{value!r} was resolved by item 1 and is missing from item 3's contract — the "
+            "correlation lead cannot correlate on an entity it was never shown"
         )
-
-    # Ratio checked over `contract` (the WHOLE sidecar), not `sidecar["what_to_summarize"]`
-    # alone: d16 only requires "on-host"/"fleet"/"count" WORDING there, never the raw entity
-    # values, so an implementation that (correctly, per d17's own binds) interpolates the
-    # resolved values into `goal` instead would leave `what_to_summarize`'s own count at 0 for
-    # both actors — `0 == 0` passes regardless of deduplication, which is the vacuous-ratio
-    # shape phase F checks for. `contract` already has a non-zero-count guarantee for both
-    # actors from the presence loop just above, so the ratio below cannot pass by emptiness.
-    assert contract.count("dev.dana") == contract.count("svc.config-mgmt"), (
-        f"`dev.dana` (resolved by three documents) appears {contract.count('dev.dana')} times "
-        f"in item 3's contract against {contract.count('svc.config-mgmt')} for "
-        "`svc.config-mgmt` (resolved by one) — the bind is per-document, not a set"
-    )
 
 
 def test_correlation_contract_bounds_a_window_around_alert_timestamp(tmp_path):
@@ -266,8 +276,8 @@ def test_mains_own_leads_still_run_under_the_full_forty(tmp_path):
     lowered to pay for a new gate's forced turns while another reader kept its own copy is
     the canonical shape of this bug.
 
-    Driven with an alert that resolves NO entities, so item 3 does not dispatch and the one
-    lead in the run is MAIN's own."""
+    Driven with an alert that resolves NO ancestor documents, so item 3 does not dispatch and
+    the one lead in the run is MAIN's own."""
     res = run(tmp_path, run_id="lz808-budget40", alert=alert_doc(ancestors=[]),
               answer=answer_hits([]),
               main_turns=[
@@ -287,15 +297,29 @@ def test_mains_own_leads_still_run_under_the_full_forty(tmp_path):
 
 
 def test_correlation_lead_is_dispatched_only_after_ancestors_resolve(tmp_path):
-    """d22 — item 3 dispatches only when item 1 resolved at least one non-empty entity set:
-    a FAILED resolution and a SUCCEEDED-EMPTY one both leave the correlation lead
-    undispatched, and a SUCCEEDED-TRUNCATED one — nonempty but short — still dispatches.
+    """d22 — item 3 dispatches only when item 1 resolved at least one ancestor DOCUMENT: a
+    FAILED resolution and a SUCCEEDED-EMPTY one both leave the correlation lead undispatched,
+    and a SUCCEEDED-TRUNCATED one — nonempty but short — still dispatches.
 
-    The gate is written against the resolution STATUS, not against an absence of entities:
-    three states hide under the word "resolved" and `d0`'s old two-component return could not
-    tell "resolution failed" from "resolution found nothing". K13 makes the distinction
-    load-bearing, and P1b makes it unreadable from the wire (an unparseable body reaches the
-    caller byte-identical to a genuine empty match)."""
+    The gate is written against the resolution STATUS: three states hide under the word
+    "resolved" and `d0`'s old two-component return could not tell "resolution failed" from
+    "resolution found nothing". K13 makes the distinction load-bearing, and P1b makes it
+    unreadable from the wire (an unparseable body reaches the caller byte-identical to a
+    genuine empty match).
+
+    THE OBLIGATION ITSELF CHANGED HERE, and deliberately (#867). It used to read "at least one
+    non-empty ENTITY SET". The status check below is untouched by that — it always tested the
+    status, and the status was always computed from resolved document counts — but a second,
+    downstream gate used to turn away a resolution whose documents yielded no
+    `host.name`/`user.name`/`source.ip`, and that gate is gone with the extraction it served.
+    That arm was not a rare degenerate case: it was every alert off `logs-falco.alerts-*`,
+    where the entity values live under `falco.output_fields.*` and the triple saw only the
+    shared VPS host. Those resolutions now dispatch, which is the point of the change.
+    SUCCEEDED-EMPTY and FAILED still dispatch nothing — a lead with no documents to read has
+    no entities to judge, and that is the distinction the status was always drawing.
+
+    The arm below covers the surviving gate. The retired one has no test because it has no
+    behaviour: there is no longer any resolution that produces documents and is refused."""
     from defender.scripts.adapters.faults import TransportFault
     from defender.tests.e2e._lead_zero_808 import answer_raising
 
@@ -310,8 +334,29 @@ def test_correlation_lead_is_dispatched_only_after_ancestors_resolve(tmp_path):
                     alert=alert_doc(ancestors=[ancestor(f"a{i}") for i in range(4)]),
                     answer=answer_hits(TWO_ACTORS, total=25, truncated=True))
     assert truncated.has_sidecar(L3), \
-        "a truncated but NONEMPTY resolution blocked the dispatch — the entities it did " \
+        "a truncated but NONEMPTY resolution blocked the dispatch — the documents it did " \
         "resolve are exactly what item 3 exists to correlate"
+
+    # The arm #867 opened: documents resolve, and NONE of them carries a value the retired
+    # host/user/source-ip extraction could have seen. This is the falco shape — the entity
+    # evidence lives in fields the old triple did not read — and it must now dispatch.
+    opaque_doc = hit(
+        ts="2026-05-25T15:26:10.000Z", host=None, user=None, ip=None,
+        message="15:02:55.140537128: Notice Network tool launched in container",
+        **{"falco.rule": "Launch Suspicious Network Tool in Container",
+           "falco.output_fields.proc.name": "nc",
+           "falco.output_fields.proc.cmdline": "nc -zv db-1 22",
+           "falco.output_fields.user.name": "root",
+           "falco.output_fields.container.id": "8bcf106a5a8e"},
+    )
+    opaque = run(tmp_path / "opaque", run_id="lz808-gate-opaque",
+                 alert=alert_doc(**{"host": {"name": None}, "user": {"name": None}}),
+                 answer=answer_hits([opaque_doc]))
+    assert opaque.has_sidecar(L3), (
+        "a resolution that returned real documents was refused because the retired "
+        "host/user/source-ip triple could not read them — that refusal was #867's whole defect "
+        "and it covers every alert this environment raises off logs-falco.alerts-*"
+    )
 
 
 def test_correlation_summary_reaches_main_before_its_second_request(tmp_path):

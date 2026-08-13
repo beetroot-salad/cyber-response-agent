@@ -119,6 +119,11 @@ GROUPS: dict[str, GroupSpec] = {
         "desc_key": "relevance_criteria",
         "fields": [
             {"label": "Alert rules", "key": "alert_rule_ids", "kind": "chips"},
+            # lint-stale-ref: ok — this is the display label for an environment lesson's own
+            # `entities` frontmatter key (learning/core/validate.py's
+            # `environment_observations[].entities` selectors), not a reference to the
+            # `Entities` dataclass #867 retired from runtime/lead_zero.py. Same word, unrelated
+            # domain: renaming it would change a user-visible chip label and a corpus schema key.
             {"label": "Entities", "key": "entities", "kind": "chips"},
             {"label": "Recorded", "key": "recorded_at", "kind": "text"},
         ],

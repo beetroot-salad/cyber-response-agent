@@ -3,20 +3,20 @@ id: elastic.correlate-alerts-by-entity
 status: established
 verb: alerts
 params: [end, start]
-body_substitutions: [host, ip, user]
+body_substitutions: [entity_filter]
 ---
 
 ## Goal
 
-Detection-engine alerts naming a given host, user or source IP over a window —
-the "is this entity already on the SOC's radar" question, counted across EVERY
-rule rather than one. The envelope's `total` IS the count; the returned `hits`
-are a capped sample of it. Keyword recall: correlate alerts, same host, prior
-alert, campaign, on-host count, fleet-wide count, kibana.alert, entity, radar,
-already firing.
+Detection-engine alerts naming a given entity over a window — the "is this
+entity already on the SOC's radar" question, counted across EVERY rule rather
+than one. The envelope's `total` IS the count; the returned `hits` are a capped
+sample of it. Keyword recall: correlate alerts, same host, prior alert,
+campaign, scoped count, unscoped count, kibana.alert, entity, radar, already
+firing.
 
-**Wide/superset** — narrow by dropping the entity disjuncts the lead has no
-value for; drop the `host.name` disjunct entirely for the fleet-wide count.
+**Wide/superset** — narrow by writing a tighter `${entity_filter}`; widen by
+dropping the disjuncts you have no value for.
 
 ## Query
 
@@ -25,15 +25,28 @@ Lucene/KQL against the alerts index. The verb defaults its `index` to
 name to spell — the body is the entity filter alone.
 
 ```
-host.name:"${host}" OR user.name:"${user}" OR source.ip:"${ip}"
+${entity_filter}
 ```
 
-- *On-host count*: keep the `host.name` disjunct alone — `total` is the count of
-  alerts naming that host in the window.
-- *Fleet-wide count*: drop `host.name`, keep `user.name` / `source.ip` — same
-  window, no host predicate, so `total` is the fleet-wide count for that actor.
+**You choose the fields.** This template used to hardcode a fixed disjunction
+over `host.name`, `user.name` and `source.ip`, which fits alerts off
+`logs-system.auth-*` and measures nothing on alerts off `logs-falco.alerts-*`:
+there the only `host.name` is the shared VPS every containerized alert reports
+from, `user.name` lives at `falco.output_fields.user.name`, and there is no
+`source.ip` at all (#867). Bind whatever fields actually discriminate the alert
+in front of you.
+
+- *Scoped count*: the filter over the entities you judged central — `total` is
+  the count of alerts naming them in the window.
+- *Unscoped count*: the same window with the narrowing predicate dropped, so
+  `total` covers the wider population the scoped number should be read against.
+  Say which predicate produced which number.
 - *A resolved entity SET*: OR the values inside one field —
   `user.name:("dev.dana" OR "svc.config-mgmt")` — rather than one query per value.
+- Container and process axes live under `falco.output_fields.*` on falco-sourced
+  alerts (`container.id`, `proc.name`, `proc.cmdline`); a target named only
+  inside a command line is reachable with a wildcard on `proc.cmdline` and is
+  worth more than the host it ran on.
 
 ## Pitfalls
 
@@ -44,13 +57,15 @@ host.name:"${host}" OR user.name:"${user}" OR source.ip:"${ip}"
   bounds the sample, never the count. Do not reach for `esql` to re-derive a
   number `total` already gave you, and do not report a count as unavailable
   because `truncated` is set.
-- **`host.name` is often null on correlation and sequence alerts** — a cross-tier
-  or EQL-sequence rule fires on a correlation, not a single host, so an on-host
-  predicate silently excludes exactly the multi-host alerts a correlation lead
-  most wants. Run the user / source-IP disjuncts too, and say which count came
+- **`host.name` is a bad axis in both directions here.** It is often null on
+  correlation and sequence alerts — a cross-tier or EQL-sequence rule fires on a
+  correlation, not a single host — so a host predicate silently excludes exactly
+  the multi-host alerts a correlation lead most wants. And on every alert off
+  `logs-falco.alerts-*` it is populated with the shared VPS name, so it selects
+  the whole environment instead. Run other axes too, and say which count came
   from which predicate.
-- **`user.name` can arrive with a LEADING SPACE, and this template binds it as an
-  exact term.** `Failed password for invalid user <u>` lands `user.name` as
+- **A bound value is matched as an EXACT TERM, and `user.name` can arrive with a
+  LEADING SPACE.** `Failed password for invalid user <u>` lands `user.name` as
   `" dev.dana"` while the sibling `Invalid user <u>` line lands it clean
   (`skills/elastic/SKILL.md` §Gaps, `sshd-auth-history.md` §Pitfalls) — and an
   alert copies its source document's value verbatim, so an entity resolved off an

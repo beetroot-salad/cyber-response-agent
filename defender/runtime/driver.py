@@ -92,18 +92,21 @@ def _main_instructions(defender_dir: Path) -> str:
 def _user_prompt(  # noqa: PLR0913 — the harness's own pre-turn seams (#808)
     run_dir: Path, alert_path: Path, defender_dir: Path, salt: str,
     *, verbs: Any = None, limits: dict = DEFAULT_LIMITS, run_id: str | None = None,
-) -> tuple[str, Any, str]:
+) -> tuple[str, str, str]:
     """#808 — lead-0's own call site. It takes its OWN exception handler (K8/N3): a
     `BudgetKill` or `circuit_breaker.RunAborted` raised inside `resolve_lead_zero` (its
     QueryCapture path inherits both) is caught HERE, so it never escapes `_user_prompt` and
     ends the run before MAIN's first prompt — the run degrades the section instead.
 
-    Returns `(prompt, entities, status)`: the entities/status feed item 3's dispatch gate
-    (`d22`), computed once here rather than re-resolved by a second lead_zero call."""
+    Returns `(prompt, ancestor_block, status)`: the block/status feed item 3's dispatch gate
+    (`d22`), computed once here rather than re-resolved by a second lead_zero call. The middle
+    element was `entities` until #867 — a harness-extracted host/user/source-ip triple. Item 3
+    now hands the lead item 1's rendered block itself and lets it choose its own correlation
+    axes, so what threads through here is that block, verbatim."""
     from . import lead_zero as lead_zero_mod
     from .circuit_breaker import RunAborted
 
-    entities: Any = lead_zero_mod.Entities()
+    ancestor_block = ""
     status = lead_zero_mod.STATUS_FAILED
     try:
         result = lead_zero_mod.resolve_lead_zero(
@@ -111,7 +114,7 @@ def _user_prompt(  # noqa: PLR0913 — the harness's own pre-turn seams (#808)
             verbs=verbs, limits=limits, run_id=run_id,
         )
         lead_zero_text = lead_zero_mod.render_orient_section(result)
-        entities = result.entities
+        ancestor_block = result.text
         status = result.status
     except (BudgetKill, RunAborted) as e:
         print(f"[run.py] lead-0 degraded ({e!r}); continuing without it", file=sys.stderr)
@@ -120,7 +123,7 @@ def _user_prompt(  # noqa: PLR0913 — the harness's own pre-turn seams (#808)
                 lead_zero_mod._unavailable(f"a run-level fault interrupted resolution: {e!r}"),
                 salt,
             ),
-            entities=lead_zero_mod.Entities(), status=lead_zero_mod.STATUS_FAILED,
+            status=lead_zero_mod.STATUS_FAILED,
         )
         lead_zero_text = lead_zero_mod.render_orient_section(degraded)
 
@@ -133,7 +136,7 @@ def _user_prompt(  # noqa: PLR0913 — the harness's own pre-turn seams (#808)
         f"alert: {alert_path}\n\n"
         f"{orientation}"
     )
-    return prompt, entities, status
+    return prompt, ancestor_block, status
 
 
 def _budget_state_for_enforcement(state: dict, deps: AgentDeps) -> dict:
@@ -1004,7 +1007,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
             case_id=case_id, store_path=None,
         )
 
-    prompt, lead_zero_entities, lead_zero_status = _user_prompt(
+    prompt, lead_zero_block, lead_zero_status = _user_prompt(
         run_dir, alert_path, defender_dir, salt,
         verbs=lead_zero_verbs, limits=limits, run_id=run_id,
     )
@@ -1022,7 +1025,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
         except (OSError, ValueError):
             alert_doc = {}
         contract = lead_zero_mod.prepare_correlation_lead(
-            run_dir, alert_doc, lead_zero_entities, lead_zero_status,
+            run_dir, alert_doc, lead_zero_block, lead_zero_status,
         )
         if contract is not None:
             goal, what_to_summarize = contract
