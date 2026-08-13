@@ -77,6 +77,22 @@ in front of you.
   correlated alerts" rather than as a parser quirk. OR both spellings
   (`user.name:("dev.dana" OR " dev.dana")`) whenever a bound value is
   space-prefixed, and say which spelling produced the count.
+- **THE ENTITY YOU CAN SEE IS NOT ALWAYS AN ENTITY YOU CAN QUERY, AND THE
+  DIFFERENCE LOOKS LIKE ZERO.** An alert's `_source` may carry a field that the
+  alerts index does not MAP, and a Lucene term on an unmapped field matches
+  nothing — `"total": 0`, no error, indistinguishable from "this entity has no
+  other alerts". Measured here (2026-08-13): `falco.*` resolves to **zero** mapped
+  fields in the alerts index via `_field_caps`, while `container.id`,
+  `process.name`, `user.name` and `source.ip` are populated on **zero** alerts of
+  all four falco-sourced rules. Only `host.name` is populated, and it is the shared
+  VPS every containerized alert reports from. So on a container-runtime alert the
+  discriminating axes — container id, process name, command line — exist in the
+  EVENT documents and are unreachable from this index.
+  **Before reporting a zero as a finding, positive-control the field**: re-run the
+  same window with the entity clause replaced by `<field>:*`, or drop to a
+  known-populated field. A zero that survives a positive control is evidence; a
+  zero that does not is a mapping fact about the index and must be reported as
+  "not established", never as "no correlated activity".
 - **Bind the window through the verb's own `start` / `end` params**, not a
   `@timestamp` clause in the Lucene body — they are declared params of `alerts`,
   and mixing the two makes the effective window unreadable from the queries table.
