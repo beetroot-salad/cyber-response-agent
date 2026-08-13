@@ -403,7 +403,7 @@ def test_one_ancestor_fetch_answering_does_not_establish_an_absence_for_the_othe
         rec = VerbRecorder()
         result = lead_zero.resolve_lead_zero(
             run_dir=run_dir, defender_dir=defender_dir(),
-            alert_path=run_dir / "alert.json", salt=SALT,
+            alert_path=run_dir / "alert.json",
             verbs=elastic_backend(rec, answer=answer_by_index(table)),
         )
         return result, rec

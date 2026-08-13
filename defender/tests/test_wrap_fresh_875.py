@@ -126,7 +126,7 @@ def _drive(tmp_path: Path, lead_id: str = "l-001"):
     run_dir, deps = _main_deps(tmp_path)
     agent = _InjectedGather()
     out = asyncio.run(tools_gather._run_gather(
-        deps, lambda agent_id, system: agent, 40,
+        deps, lambda agent_id, system, request_limit: agent, 40,
         tools_gather.GatherRequest(lead_id, "elastic", "who logged in", ("accepted vs failed",)),
         GATHER_DEF.verb_grant,
     ))
@@ -187,7 +187,14 @@ def test_875_wrap_fresh_remints_until_the_delimiter_is_absent_from_the_body(monk
         minted.append(colliding if len(minted) == 0 else clean)
         return minted[-1]
 
-    monkeypatch.setattr("defender._untrusted.secrets.token_hex", _fake_token_hex)
+    monkeypatch.setattr(
+        # lint-monkeypatch: ok — `wrap_fresh` deliberately has NO injection seam for its RNG.
+        # An `rng=` parameter would be a way to hand PRODUCTION a weak generator, and the whole
+        # guarantee here is that the salt is drawn from `secrets`. Driving the collision branch
+        # therefore has to substitute the module attribute: there is no collaborator to inject,
+        # and adding one to make this test prettier would widen the thing it is testing.
+        "defender._untrusted.secrets.token_hex", _fake_token_hex,
+    )
 
     framed = _untrusted.wrap_fresh(body, "untrusted")
 
