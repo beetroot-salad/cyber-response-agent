@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Build playground-v2/ingest/falco-ecs-entities.json from a readable Painless source."""
+"""Regenerate falco-ecs-entities.json in this directory from a readable Painless source.
+
+The pipeline JSON is the artifact the installer ships; this is its source, kept beside it so
+the Painless stays reviewable as code rather than as one escaped line inside JSON. Run after
+editing SCRIPT, then re-run scripts/install_ingest_pipelines.py."""
 import json
 import pathlib
 
@@ -101,6 +105,6 @@ spec = {
     ],
 }
 
-out = pathlib.Path(__file__).resolve().parents[1] / "playground-v2/ingest/falco-ecs-entities.json"
+out = pathlib.Path(__file__).resolve().parent / "falco-ecs-entities.json"
 out.write_text(json.dumps(spec, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 print("wrote", out)
