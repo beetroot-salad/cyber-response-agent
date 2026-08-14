@@ -849,7 +849,17 @@ def test_the_box_start_fault_removes_the_container_it_created(tmp_path):
     with pytest.raises(ban_not_in_force_error()):
         box_mod.start_box(run_tree(tmp_path), DEFENDER, docker=rec)
 
-    assert any(a[:3] == ["docker", "rm", "-f"] for a in rec.calls), (
+    # AFTER the create, and naming what create made. `start_box` opens with an UNCONDITIONAL
+    # pre-create `docker rm -f <name>` (the stale-same-name sweep), so a bare `any(rm -f)` over
+    # the whole call list is true whether or not the fault arm reaps at all — it is the
+    # assertion #884 F-29 slipped past on the sibling create arm (see
+    # `test_665_box_geography._reaped_after_create`). Only the position discriminates.
+    create = next(
+        (i for i, a in enumerate(rec.calls) if len(a) > 1 and a[1] == "run"), None
+    )
+    assert create is not None, "no `docker run` was issued — the fault fired before create"
+    name = rec.calls[create][rec.calls[create].index("--name") + 1]
+    assert ["docker", "rm", "-f", name] in rec.calls[create + 1:], (
         "the faulted start left its container running"
     )
 

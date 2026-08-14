@@ -84,6 +84,26 @@ _CONNECTORS_ONLY = tuple(t for t in _ALPHABET if not t.startswith("2>"))
 _FULL_ALPHABET_MAX_LEN = 3
 _CONNECTOR_MAX_LEN = 4
 
+#: Spellings PAST both tiers, seeded by hand because a defect family actually lived there.
+#:
+#: Exhaustive length 5 over the connector alphabet is 7776 more candidates — ~13s of bash forks
+#: idle and several times that on a loaded machine, against a sweep the tiers hold to ~2.8s. So
+#: depth is bought where it has been earned instead of everywhere: `A && ;\n B` is 5 tokens and
+#: was accepted with the `&&` reaching ACROSS the line boundary to run B conditionally on A —
+#: found in review of #897's own fix, which had put the pending-connector check after the whole
+#: parse instead of per line. Neither tier can render it, so neither assertion below could see
+#: it; without these seeds this file still could not catch the last bug it was used to find.
+#:
+#: A new family found at length >= 5 belongs here, next to the one that earned the list.
+_SEEDED_FAMILIES: tuple[tuple[str, ...], ...] = (
+    (_WORD, "&&", ";", "\n", _WORD),      # the connector crosses the line — #897 review
+    (_WORD, "||", ";", "\n", _WORD),
+    (_WORD, "&&", ";", ";", "\n", _WORD),  # ...and survives more than one bare `;`
+    (_WORD, "|", ";", "\n", _WORD),       # the #884 F-28 shape, spelled across a boundary
+    (_WORD, "|", "&&", "\n", _WORD),
+    (_WORD, ";", ";", "\n", _WORD),       # control: the carve-out, which must stay accepted
+)
+
 #: A `;` preceded by one of these — or by nothing — sits where a command could START, so it
 #: drops nothing and the carve-out lets it through. `|` is POINTEDLY absent: see the module
 #: docstring. Changing this set widens the exemption, which is the one edit here that can
@@ -104,6 +124,8 @@ def _candidates() -> list[tuple[str, ...]]:
         for n in range(1, max_len + 1):
             for combo in itertools.product(alphabet, repeat=n):
                 seen[combo] = None
+    for combo in _SEEDED_FAMILIES:
+        seen[combo] = None
     return list(seen)
 
 
@@ -187,6 +209,22 @@ def test_every_command_bash_rejects_is_refused_by_the_executor(corpus):
         "these commands are bash syntax errors that `bash_exec.parse` accepts, and the "
         "leading-`;` carve-out does not explain them:\n  "
         + "\n  ".join(repr(c) for c in sorted(unexplained)[:40])
+    )
+
+    # The exemption's own honesty, checked against OUR parser rather than bash's. Stripping a
+    # benign `;` must not change what `parse` says: if it does, that `;` was load-bearing —
+    # accepted with it, refused without — and the exemption is excusing a divergence instead
+    # of explaining one. bash cannot see this, because the STRIPPED form is legal bash by
+    # construction (that is what "explained" means above). It is how `A && ;\nB` hid: accepted,
+    # while the `A &&\nB` it strips to is refused as a connector crossing a line boundary.
+    load_bearing = [
+        _render(combo) for combo in diverging
+        if not _parse_accepts(_render(_without_benign_semicolons(combo)) or "true")
+    ]
+    assert not load_bearing, (
+        "the benign-`;` exemption FLIPS this module's own verdict on these commands — `parse` "
+        "accepts them but refuses what they strip to, so the `;` is dropping something:\n  "
+        + "\n  ".join(repr(c) for c in sorted(load_bearing)[:40])
     )
 
 

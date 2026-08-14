@@ -65,11 +65,14 @@ both, and is free: no legitimate command carries one."""
 
 UNTOKENIZABLE_REASON = (
     "Blocked: the command could not be tokenized — an unbalanced quote, a trailing "
-    "`\\`, or a `|`/`&&`/`||` sitting at a line boundary. Each PHYSICAL LINE is lexed on "
-    "its own (there is no shell to join them), so a `\\` line-continuation, a newline "
-    "inside a quoted argument, and a connector that opens or closes a line (`A |` then "
-    "`B`, or `A` then `| B`) all fail here, even when the command is otherwise allowed. "
-    "Rewrite it as a SINGLE line."
+    "`\\`, or a `|`/`&&`/`||` without a complete command on BOTH sides. Each PHYSICAL LINE "
+    "is lexed on its own (there is no shell to join them), so a `\\` line-continuation, a "
+    "newline inside a quoted argument, and a connector that opens or closes a line (`A |` "
+    "then `B`, or `A` then `| B`) all fail here, even when the command is otherwise "
+    "allowed — rewrite those as a SINGLE line. A connector whose other side is empty "
+    "WITHIN one line fails for the same reason and rewriting it as one line will not help: "
+    "`A | ; B`, `A | | B`, `A && ;`, `A | 2>/dev/null` each drop the connector and leave a "
+    "stage running on nothing. Give every `|`/`&&`/`||` one complete command on each side."
 )
 
 

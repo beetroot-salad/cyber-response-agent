@@ -82,19 +82,23 @@ def _populate_mount_sources(mounts, tmp_path: Path) -> None:
 
 
 def _reaped_after_create(calls) -> bool:
-    """Whether a reap was issued AFTER create — the only form of this assertion that says
-    anything.
+    """Whether the container CREATE ASKED FOR was reaped AFTER create — the only form of this
+    assertion that says anything.
 
-    Both start paths open with an UNCONDITIONAL pre-create `docker rm -f <name>` (box.py:634,
-    :721, the stale-same-name sweep), so `any(c[:3] == [docker, rm, -f] for c in calls)` is
-    true on every path through both functions whether or not the fault arm reaps at all. It
-    passed against the create-fault arm that provably did NOT reap (#884 F-29), which is how
-    that leak survived a test suite that believed it pinned the reap."""
+    Both start paths open with an UNCONDITIONAL pre-create `docker rm -f <name>` (the
+    stale-same-name sweep in each of `_start_boxed`/`_start_boxed_request`), so on every path
+    through both functions — whether or not the fault arm reaps at all — BOTH of the obvious
+    spellings are already true: `any(c[:3] == [docker, rm, -f] for c in calls)`, and equally
+    `[docker, rm, -f, <the created name>] in calls`, since the pre-create reap names that same
+    container. The first passed against the create-fault arm that provably did NOT reap
+    (#884 F-29), which is how that leak survived a test suite that believed it pinned the reap;
+    naming the container does not rescue it. Only the POSITION discriminates, so position and
+    name are asserted together, here, once."""
     create = next(
         (i for i, c in enumerate(calls) if len(c) > 1 and c[1] == "run"), None
     )
     assert create is not None, "no `docker run` was issued — the fault fired before create"
-    return any(c[:3] == ["docker", "rm", "-f"] for c in calls[create + 1:])
+    return ["docker", "rm", "-f", _created_name(calls)] in calls[create + 1:]
 
 
 def _created_name(calls) -> str:
@@ -389,8 +393,6 @@ def test_create_fault_that_leaves_a_created_container_is_reaped_investigation_la
         box_mod.start_box(run_dir, DEFENDER, docker=rec)
     assert _reaped_after_create(rec.calls), \
         "a container that may exist in `created` was left behind by the create-fault arm"
-    assert ["docker", "rm", "-f", _created_name(rec.calls)] in rec.calls, \
-        "the reap named something other than the container create was asked to make"
 
 
 def test_create_fault_that_leaves_a_created_container_is_reaped_request_lane(tmp_path):
@@ -405,8 +407,6 @@ def test_create_fault_that_leaves_a_created_container_is_reaped_request_lane(tmp
         start_box_request(_request(run_dir), docker=rec)
     assert _reaped_after_create(rec.calls), \
         "a container that may exist in `created` was left behind by the create-fault arm"
-    assert ["docker", "rm", "-f", _created_name(rec.calls)] in rec.calls, \
-        "the reap named something other than the container create was asked to make"
 
 
 def test_container_exits_between_create_and_sentinel(tmp_path):

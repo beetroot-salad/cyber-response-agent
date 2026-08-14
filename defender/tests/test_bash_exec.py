@@ -228,6 +228,12 @@ def test_non_utf8_output_does_not_crash():
     "echo a &&\necho b",
     "echo a\n|| echo b",
     "echo a ||\necho b",
+    # The connector does not close the line — a bare `;` does — so the token check at the line
+    # end never sees it, and `pending_connector` is builder state that outlives a line. Checked
+    # only once after the whole parse, the `&&` REACHES ACROSS the boundary and runs `echo b`
+    # conditionally on `echo a`, which is the guess this module refuses to make one line up.
+    "echo a && ;\necho b",
+    "echo a || ;\necho b",
 ])
 def test_line_boundary_connector_fails_closed(cmd):
     """A `|`/`&&`/`||` at a line boundary used to be DROPPED — each physical line is lexed

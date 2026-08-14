@@ -646,11 +646,24 @@ def _start_boxed(
         # a principal. Unconditional, like the pre-create reap above and for the same reason:
         # C43a records `docker rm -f <missing>` as rc=0 with `Error response from daemon` on
         # stderr, so a caller that read either would misfire on the success path (#884).
-        _call(docker, ["docker", "rm", "-f", name])
+        #
+        # The MARKER goes first: §7 D2's verdict is best-effort by construction, but a `_call`
+        # that raises (a daemon that died between create and reap) would otherwise leave the
+        # tree with no verdict at all AND swap this arm's create stderr for "could not invoke
+        # docker" — the marker's own failure replacing the signal, which is the one thing
+        # `_write_verdict` says must not happen.
+        #
+        # Guarded by `_is_running` for the reason the pre-create arm above refuses outright: a
+        # create that failed on a NAME CONFLICT says the container under this name is someone
+        # else's, still writing its artifacts, and no lane may reap that. The `created`
+        # container this arm exists for never started, so the guard never withholds the reap
+        # from the leak it is here to close.
         write_did_not_run(
             run_dir, f"box create faulted before the box was startable: "
                      f"{(created.stderr or '').strip()}"
         )
+        if not _is_running(docker, name):
+            _call(docker, ["docker", "rm", "-f", name])
         raise BoxFault(
             f"could not create the box {name}: {(created.stderr or '').strip()}"
         )
@@ -735,12 +748,16 @@ def _start_boxed_request(
         # non-zero rc can still leave a `created` container, and this lane's names are no more
         # revisited than that one's — `defender-drain-{uuid4}` per invocation. The run-cycle
         # lane happens to self-heal at its own pre-create reap, being keyed on a reused run id;
-        # that is a property of one caller, not of this arm (#884).
-        _call(docker, ["docker", "rm", "-f", request.name])
+        # that is a property of one caller, not of this arm (#884). Marker-then-guarded-reap
+        # for that lane's reasons too, and the name-conflict guard matters MORE here: this is
+        # the lane whose names are reused, so a create that lost the race to a concurrent
+        # batch of the same run id is exactly the create that must not reap.
         _did_not_run_for_request(
             request, f"box create faulted before the box was startable: "
                      f"{(created.stderr or '').strip()}"
         )
+        if not _is_running(docker, request.name):
+            _call(docker, ["docker", "rm", "-f", request.name])
         raise BoxFault(
             f"could not create the box {request.name}: {(created.stderr or '').strip()}"
         )
