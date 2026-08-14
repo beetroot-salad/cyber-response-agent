@@ -21,8 +21,8 @@ STATE_DIR=/var/lib/elastic-agent       # persisted via per-host named volume
 SENTINEL=${STATE_DIR}/.enrolled
 
 # Wait for the enrollment token — fleet-host-policies may still be running.
-# 60 × 5s = 5 min ceiling matches v1 target-endpoint, enough even for a cold
-# Kibana on lever-up.
+# 60 × 5s = 5 min ceiling carried over from the retired v1 lab, enough even for
+# a cold Kibana on lever-up.
 for _ in $(seq 1 60); do
   [[ -s "$TOKEN_FILE" ]] && break
   sleep 5
@@ -52,8 +52,8 @@ else
   [[ -f "$SENTINEL" ]] || echo "[agent-enroll] first run for role=$HOST_ROLE — enrolling"
   # `|| true` on enroll: post-enrollment the deb tries a service-manager
   # reload that fails in a systemd-less container, but the server-side
-  # registration has already completed at that point. Matches v1's pattern
-  # (playground/target-endpoint/entrypoint.sh).
+  # registration has already completed at that point. Carried over from the
+  # retired v1 lab's entrypoint, which hit the same failure.
   elastic-agent enroll --force \
     --url=https://fleet-server:8220 \
     --enrollment-token="$(cat "$TOKEN_FILE")" \
