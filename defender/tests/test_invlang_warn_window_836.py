@@ -480,9 +480,9 @@ def test_close_gate_precedes_every_disposition_branch(tmp_path):
 
     All three exits are driven: `inconclusive` (which commits early, before the challenge
     gate runs at all), `false-positive` (which owes the entry price), and a confident
-    disposition (which spends a review). The doc's literal "beside the
-    `false_positive_entry_price` read" placement would leave two of the three ungated, and
-    the `inconclusive` escape would dodge O4 entirely.
+    disposition (which spends a review). The doc's literal "beside the entry-price read"
+    placement would leave two of the three ungated, and the `inconclusive` escape would dodge
+    O4 entirely.
 
     The last block is H5's accepted trade-off made explicit: the two cheap well-formedness
     refusals still come FIRST, so a garbled call hears that its disposition string was

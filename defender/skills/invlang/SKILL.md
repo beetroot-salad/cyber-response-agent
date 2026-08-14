@@ -155,7 +155,10 @@ where the lead choice itself depends on which story you're testing.
 **Disposition gate.** An unresolved slot on any vertex blocks
 `disposition: benign` — `??` or a `{a, b, c}` candidate set, in any
 slot of the class tuple or as an attribute value. Resolve via
-`:R attr_updates` before concluding, or escalate.
+`:R attr_updates` before concluding, or escalate. A companion carrying
+NO vertices is blocked too, for the same reason rather than a different
+one: with nothing declared there is no slot to resolve, and "every slot
+is resolved" would otherwise be satisfied by never declaring one.
 
 ## Core blocks
 
@@ -324,10 +327,18 @@ summary                "Login matched established bastion usage"
   `report.md`'s frontmatter carries. A value outside it is denied on
   write; there is no `escalate` keyword — an escalation is
   `termination.category exhaustion-escalation` with `disposition
-  inconclusive`. One keyword describes the RULE rather than the alerted
-  entity — `false-positive`, for a rule that fired on a different kind of
-  behavior than it claims — and it is the one with an entry price: it
-  requires `detection_notes` and `entity_check` below.
+  inconclusive`. Two keywords carry an ENTRY PRICE. `benign` needs at least
+  one `:V prologue.vertices` row — a log that never recorded the alerted
+  entity accounts for nothing — plus every `??` slot resolved (§Open
+  questions) and every authz contract on a live hypothesis `authorized`
+  (§`:R authz`); `false-positive` — the one keyword
+  that describes the RULE rather than the alerted entity, for a rule that
+  fired on a different kind of behavior than it claims — needs
+  `detection_notes` and `entity_check` below. Both prices are charged twice:
+  on the write, against the keyword you conclude under, and again by
+  `close_investigation`, against the keyword you close under. So concluding
+  under a cheaper keyword buys nothing — the log itself still has to have
+  paid for the keyword the close commits.
 - `ceiling_test` — the checks you could NOT make. One row per gap, repeated,
   naming the host and the data source:
   `ceiling_test  "authorized_keys FIM on web-1 (auditd write events) not retrieved"`
