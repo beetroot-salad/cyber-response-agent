@@ -161,6 +161,19 @@ def test_a_one_line_query_gets_its_bound_before_every_other_command():
     assert len(CONTROLS.esql_bounds(got)) == 2
 
 
+def test_a_pipe_inside_a_string_literal_is_not_a_command_separator():
+    """`|` is a separator only outside a string. `WHERE message RLIKE "sshd|sudo"` carries
+    one as DATA, and splitting on it cuts the predicate in half — the clause would land
+    mid-literal and the control would not parse, while a reader counting commands off the
+    same naive split names the wrong command as the one that ran first."""
+    assert CONTROLS.split_commands('FROM logs-* | WHERE m RLIKE "a|b" | LIMIT 1') == [
+        "FROM logs-* ", ' WHERE m RLIKE "a|b" ', " LIMIT 1"]
+    got = CONTROLS.add_esql_window('FROM "logs|weird"', datetime(2026, 7, 25, tzinfo=UTC),
+                                   datetime(2026, 7, 25, 1, tzinfo=UTC))
+    assert got.splitlines()[0] == 'FROM "logs|weird"', (
+        f"the source command was cut at a quoted pipe: {got!r}")
+
+
 def test_a_source_only_query_still_gets_its_bound():
     """A query with no `|` at all has no command to precede — the clause is appended,
     and appending is correct here precisely because there is nothing after it."""

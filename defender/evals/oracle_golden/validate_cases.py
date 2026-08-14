@@ -23,6 +23,9 @@ cause-code sidecar and score reproduction all went with `label.py` and the old
   split, unit        every case carries both, and a derived case inherits its base's
   held-out ledger    every held-out score is in the append-only ledger with a matching
                      hash, so a rewrite, a deletion, or a second run under one tag fail
+  seq keying         every observed payload is named for a seq some query in
+                     `leads.jsonl` is keyed by, so a control cannot baseline a different
+                     query's envelope (#882)
   controls           every stored control measures the window its record declares, so a
                      baseline that silently measured something else cannot be graded
                      against (#882)
@@ -112,7 +115,49 @@ def check_case(case_dir: Path, by_id: dict[str, dict]) -> list[str]:
 
     problems += check_split_and_unit(name, manifest, by_id)
     problems += check_expectation(name, manifest)
+    problems += check_seq_keying(case_dir)
     problems += check_controls(case_dir)
+    return problems
+
+
+def check_seq_keying(case_dir: Path) -> list[str]:
+    """A lead's queries must be keyed by the seq its observed payloads are named for.
+
+    `check_controls` below pairs a control record to a LEAD QUERY, which is only half the
+    join. The other half is the one `judge.load_lead_inputs` makes: observed payloads come
+    from `hidden/observed/<lead>/{seq}.json` and baselines from
+    `hidden/controls/<lead>/{seq}.json`, and both are keyed by whatever
+    `controls.lead_queries` answered. That reader falls back to the LIST POSITION for a
+    case whose `leads.jsonl` predates the `seq` field — exact only while position IS seq,
+    which stopped being guaranteed when #841 split the `∅.`-prefixed sentinels out of
+    `JoinedLead.queries` and left `record_query._next_seq` counting them.
+
+    When the fallback is wrong it is invisible to `check_controls`: the control record and
+    `lead_queries` both used the position, so they agree with each other and disagree with
+    the payloads on disk. The payload FILENAMES are the only surviving witness — they carry
+    the table's own seq — so this compares against them rather than trusting the fallback.
+    """
+    observed_root = case_dir / "hidden" / "observed"
+    if not observed_root.is_dir() or not (case_dir / "oracle_visible" / "leads.jsonl").is_file():
+        return []
+    keyed: dict[str, set[int]] = {}
+    for lead_id, seq, _ in CONTROLS.lead_queries(case_dir):
+        keyed.setdefault(lead_id, set()).add(seq)
+
+    problems = []
+    for lead_dir in sorted(p for p in observed_root.iterdir() if p.is_dir()):
+        # Fewer payloads than queries is normal — a query with no by-ref payload writes no
+        # file. A payload named for a seq NO query is keyed by is the failure: that lead's
+        # controls are keyed off a different numbering than its envelopes.
+        named = {int(p.stem) for p in lead_dir.glob("*.json") if p.stem.isdigit()}
+        stray = sorted(named - keyed.get(lead_dir.name, set()))
+        if stray:
+            problems.append(
+                f"{case_dir.name}: {lead_dir.name} carries observed payload(s) "
+                f"{stray} that no query in leads.jsonl is keyed by "
+                f"{sorted(keyed.get(lead_dir.name, set()))} — the controls keyed off those "
+                f"numbers baseline a different query's envelope, and `judge._control` drops "
+                f"the query string, so nothing downstream can see the mispairing")
     return problems
 
 
@@ -149,14 +194,39 @@ def check_controls(case_dir: Path) -> list[str]:
     if not controls_dir.is_dir() or not (case_dir / "oracle_visible" / "leads.jsonl").is_file():
         return []
     name = case_dir.name
-    originals = {(lead_id, seq): params.get("query") or ""
-                 for lead_id, seq, params in CONTROLS.lead_queries(case_dir)}
+    # `object` in the key, because the seq this is looked up BY comes off an untrusted
+    # record: a control carrying `"seq": "1"` must miss and be reported as pairing with no
+    # query, not be narrowed away before it can be.
+    originals: dict[tuple[str, object], str] = {
+        (lead_id, seq): params.get("query") or ""
+        for lead_id, seq, params in CONTROLS.lead_queries(case_dir)}
 
     problems = []
     for path in sorted(controls_dir.rglob("*.json")):
-        record = json.loads(path.read_text(encoding="utf-8"))
-        lead_id = record.get("lead_id", path.parent.name)
+        # A linter over artifacts must not die on the artifact it exists to catch: a
+        # record it cannot read is a problem line, not a traceback out of the sweep that
+        # would take every LATER case's findings with it.
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            problems.append(f"{name}: {path.parent.name}/{path.name} is not readable "
+                            f"JSON ({exc})")
+            continue
+        if not isinstance(record, dict):
+            problems.append(f"{name}: {path.parent.name}/{path.name} is a "
+                            f"{type(record).__name__}, not a control record")
+            continue
+        # The DIRECTORY, because that is the join `judge.load_lead_inputs` makes
+        # (`hidden/controls/<lead_id>/`). A record whose own `lead_id` says otherwise is
+        # attached to this lead's payloads no matter what it claims.
+        lead_id = path.parent.name
         rel = f"{lead_id}/{path.name}"
+        declared = record.get("lead_id")
+        if declared is not None and declared != lead_id:
+            problems.append(
+                f"{name}: {rel} records lead_id {declared!r} but sits under {lead_id}/ — "
+                f"`judge.load_lead_inputs` joins a control to its observed payloads by the "
+                f"DIRECTORY, so this baselines a lead it does not name")
         original = originals.get((lead_id, record.get("seq")))
         if original is None:
             # The pairing itself is broken: this control keys onto no query in the lead
@@ -177,8 +247,10 @@ def check_controls(case_dir: Path) -> list[str]:
     return problems
 
 
-def _control_problems(where: str, entry: dict, *, was_added: bool) -> list[str]:
+def _control_problems(where: str, entry: object, *, was_added: bool) -> list[str]:
     """One control's own integrity, against the window it declares."""
+    if not isinstance(entry, dict):
+        return [f"{where}: control entry is a {type(entry).__name__}, not a record"]
     label = entry.get("name", "?")
     query = entry.get("query") or ""
     window = entry.get("window") or []
@@ -195,12 +267,22 @@ def _control_problems(where: str, entry: dict, *, was_added: bool) -> list[str]:
     # a positional read cannot tell `>= start AND < end` from `< start AND >= end`, and
     # the second is unsatisfiable. Compared as instants rather than strings so a literal
     # written with different precision is not reported as a crossed bound.
-    want = {">": CONTROLS.parse_iso(window[0]), "<": CONTROLS.parse_iso(window[1])}
+    try:
+        want = {">": CONTROLS.parse_iso(window[0]), "<": CONTROLS.parse_iso(window[1])}
+    except ValueError as exc:
+        return [f"{where} [{label}]: the declared window {window!r} is not a pair of "
+                f"timestamps ({exc})"]
     # `strict`: both lists are one entry per `_BOUND` match, so a length mismatch is not a
     # short query but a broken invariant in the two readers, and it should raise here.
     for operator, literal in zip(CONTROLS.esql_operators(query),
                                  CONTROLS.esql_bounds(query), strict=True):
-        if CONTROLS.parse_iso(literal) != want[operator[0]]:
+        try:
+            measured = CONTROLS.parse_iso(literal)
+        except ValueError as exc:
+            problems.append(f"{where} [{label}]: the `{operator}` bound {literal!r} is not "
+                            f"a timestamp this module can read ({exc})")
+            continue
+        if measured != want[operator[0]]:
             problems.append(
                 f"{where} [{label}]: the `{operator}` bound is {literal}, but the record "
                 f"declares the window {window[0]} .. {window[1]} — a bound substituted "
@@ -213,16 +295,21 @@ def _control_problems(where: str, entry: dict, *, was_added: bool) -> list[str]:
         # and CANNOT widen it, which is the only property that makes an added window a
         # control at all. Anywhere later and it filters whatever the commands before it
         # already reduced the rows to.
-        commands = [c.strip() for c in query.split("|")]
-        if len(commands) < 2 or not commands[1].startswith("WHERE @timestamp"):
-            landed = next((i for i, c in enumerate(commands)
-                           if c.startswith("WHERE @timestamp")), None)
+        #
+        # "Where it landed" is the command that CARRIES THE BOUNDS, not the first one
+        # whose text starts `WHERE @timestamp`: a lead is free to open with a
+        # `WHERE @timestamp IS NOT NULL`, which is no bound at all, and a prefix test
+        # reads that as the added clause and passes a record whose window really did land
+        # at the end of the pipeline.
+        commands = [c.strip() for c in CONTROLS.split_commands(query)]
+        landed = next((i for i, c in enumerate(commands) if CONTROLS.esql_bounds(c)), None)
+        if landed != 1:
             problems.append(
                 f"{where} [{label}]: the lead's query carries no @timestamp bound, so this "
                 f"window was ADDED — but it landed at command {landed} rather than "
-                f"immediately after the source command, behind "
-                f"{commands[1:landed] if landed else commands[1:]}. Those run FIRST, so "
-                f"this measured a window over rows they had already reduced")
+                f"immediately after the source command, behind {commands[1:landed]}. "
+                f"Those run FIRST, so this measured a window over rows they had "
+                f"already reduced")
     return problems
 
 

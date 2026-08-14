@@ -397,3 +397,86 @@ def test_a_case_with_no_controls_is_not_a_problem(tmp_path):
     """A lookup lead has no `@timestamp` bound to move, so it has no baseline by
     construction — the coverage report's job, not a defect."""
     assert validate_cases.check_controls(_case(tmp_path, "case-x")) == []
+
+
+def test_a_window_that_landed_last_is_caught_behind_a_non_bound_timestamp_predicate(tmp_path):
+    """The placement check must key on which command CARRIES THE BOUNDS, not on which one
+    reads `WHERE @timestamp`. A lead is free to open with `WHERE @timestamp IS NOT NULL`,
+    which bounds nothing; a prefix test sees that at command 1, calls the placement good,
+    and passes a record whose window really did land after the `LIMIT` — the exact
+    artifact this check exists to refuse."""
+    d = _controlled_case(
+        tmp_path, "case-x",
+        lead_query="FROM logs-* | WHERE @timestamp IS NOT NULL | LIMIT 1",
+        control_query=f'FROM logs-* | WHERE @timestamp IS NOT NULL | LIMIT 1\n'
+                      f'| WHERE @timestamp >= "{_WINDOW[0]}" AND @timestamp < "{_WINDOW[1]}"')
+    assert any("landed at command 3" in p for p in validate_cases.check_controls(d))
+
+
+def test_a_control_record_under_another_leads_directory_is_a_problem(tmp_path):
+    """`judge.load_lead_inputs` reads `hidden/controls/<lead_id>/` — it joins by the
+    DIRECTORY and never looks at the record's own `lead_id`. A record whose field says
+    otherwise baselines the lead it is filed under, whatever it claims."""
+    d = _controlled_case(tmp_path, "case-x", lead_query=_UNBOUNDED,
+                         control_query=f'FROM logs-zeek.ssh-*\n| WHERE @timestamp >= '
+                                       f'"{_WINDOW[0]}" AND @timestamp < "{_WINDOW[1]}"\n'
+                                       f'| LIMIT 1')
+    (d / "hidden" / "controls" / "l-001").rename(d / "hidden" / "controls" / "l-777")
+    assert any("sits under l-777/" in p for p in validate_cases.check_controls(d))
+
+
+def test_a_control_record_that_is_not_readable_is_reported_not_raised(tmp_path):
+    """A linter over artifacts must survive the artifact it exists to catch: a traceback
+    here takes every LATER case's findings out of the sweep with it."""
+    d = _controlled_case(tmp_path, "case-x", lead_query=_UNBOUNDED,
+                         control_query=f'FROM logs-zeek.ssh-*\n| WHERE @timestamp >= '
+                                       f'"{_WINDOW[0]}" AND @timestamp < "{_WINDOW[1]}"\n'
+                                       f'| LIMIT 1')
+    (d / "hidden" / "controls" / "l-001" / "0.json").write_text("{ not json", encoding="utf-8")
+    assert any("not readable JSON" in p for p in validate_cases.check_controls(d))
+
+
+def test_a_window_literal_the_record_cannot_state_is_reported_not_raised(tmp_path):
+    d = _controlled_case(tmp_path, "case-x", lead_query=_UNBOUNDED,
+                         window=["never", _WINDOW[1]],
+                         control_query=f'FROM logs-zeek.ssh-*\n| WHERE @timestamp >= '
+                                       f'"{_WINDOW[0]}" AND @timestamp < "{_WINDOW[1]}"\n'
+                                       f'| LIMIT 1')
+    assert any("not a pair of timestamps" in p for p in validate_cases.check_controls(d))
+
+
+# --------------------------------------------------------------- seq keying
+
+def test_an_observed_payload_no_query_is_keyed_by_is_a_problem(tmp_path):
+    """The half of the join `check_controls` cannot see. `controls.lead_queries` falls
+    back to the LIST POSITION for a `leads.jsonl` with no `seq`, and the control record
+    was written from that same fallback — so the two agree with each other and disagree
+    with the payloads on disk. Only the payload filenames carry the table's own seq, and
+    since #841 split the `∅.` sentinels out of `JoinedLead.queries` one refusal ahead of
+    a real query is enough to make position trail seq for the rest of the lead."""
+    d = _case(tmp_path, "case-x")
+    (d / "oracle_visible" / "leads.jsonl").write_text(
+        json.dumps({"lead_id": "l-001", "queries": [
+            {"query_id": "elastic.a", "params": {"query": "FROM a"}},
+            {"query_id": "elastic.b", "params": {"query": "FROM b"}}]}) + "\n",
+        encoding="utf-8")
+    obs = d / "hidden" / "observed" / "l-001"
+    # The sentinel took seq 0, so the two real queries' payloads are named 1 and 2 while
+    # the position fallback keys them 0 and 1.
+    (obs / "0.json").unlink()
+    for seq in (1, 2):
+        (obs / f"{seq}.json").write_text("{}", encoding="utf-8")
+    problems = validate_cases.check_seq_keying(d)
+    assert any("carries observed payload(s) [2]" in p for p in problems), problems
+
+
+def test_a_lead_whose_payloads_match_its_own_seqs_is_not_a_problem(tmp_path):
+    """Pinned beside the failure: the check must not fire on a lead that simply recorded
+    fewer payloads than it has queries — a query with no by-ref payload writes no file."""
+    d = _case(tmp_path, "case-x")
+    (d / "oracle_visible" / "leads.jsonl").write_text(
+        json.dumps({"lead_id": "l-001", "queries": [
+            {"query_id": "elastic.a", "params": {"query": "FROM a"}, "seq": 0},
+            {"query_id": "elastic.b", "params": {"query": "FROM b"}, "seq": 4}]}) + "\n",
+        encoding="utf-8")
+    assert validate_cases.check_seq_keying(d) == []

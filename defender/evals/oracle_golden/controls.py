@@ -146,10 +146,12 @@ def esql_window(query: str) -> tuple[datetime, datetime] | None:
     it names no window, and `measure_controls` must refuse it the way it refuses an
     odd bound count rather than shift something that bounds nothing.
     """
-    bounds = esql_bounds(query)
-    if len(bounds) != 2 or not bounds_name_a_window(query):
+    # One test, not two: exactly one lower and one upper bound ALREADY means exactly two
+    # bounds, because every bound this module can read points one way or the other. A
+    # second `len(...) != 2` here would read as a case this can reach and cannot.
+    if not bounds_name_a_window(query):
         return None
-    start, end = (parse_iso(b) for b in bounds)
+    start, end = (parse_iso(b) for b in esql_bounds(query))
     return (start, end) if start < end else (end, start)
 
 
@@ -187,6 +189,40 @@ def shift_esql_window(query: str, start: datetime, end: datetime) -> str:
         query)
 
 
+def _separator_offsets(query: str) -> list[int]:
+    """Offsets of the `|` characters that actually separate commands.
+
+    A `|` inside a string literal is DATA, not a separator — `WHERE message RLIKE
+    "sshd|sudo"` carries one — so a naive `split("|")` cuts a predicate in half. Splicing
+    there produces a control that will not even parse, and reading command positions off
+    it names the wrong command as the one that ran first.
+    """
+    out: list[int] = []
+    in_string = escaped = False
+    for i, ch in enumerate(query):
+        if escaped:
+            escaped = False
+        elif ch == "\\" and in_string:
+            escaped = True
+        elif ch == '"':
+            in_string = not in_string
+        elif ch == _COMMAND_SEP and not in_string:
+            out.append(i)
+    return out
+
+
+def split_commands(query: str) -> list[str]:
+    """This query's commands, split on the separators ES|QL actually uses.
+
+    THE splitter for anything that reasons about command order — `add_esql_window` when it
+    places its clause, and `validate_cases` when it reads back where that clause landed.
+    Two copies of "split on `|`" is how one of them learns about quoting and the other
+    does not.
+    """
+    edges = [-1, *_separator_offsets(query), len(query)]
+    return [query[a + 1:b] for a, b in zip(edges, edges[1:], strict=False)]
+
+
 def add_esql_window(query: str, start: datetime, end: datetime) -> str:
     """Add a `@timestamp` restriction to a query that carries none.
 
@@ -215,11 +251,14 @@ def add_esql_window(query: str, start: datetime, end: datetime) -> str:
               f'AND @timestamp < "{format_iso(end)}"')
     # Everything after the first separator is put back VERBATIM, separator included:
     # the clause is the only thing this may add, and re-joining parsed commands would
-    # let it reformat a predicate it has no business touching.
-    source, sep, rest = query.partition(_COMMAND_SEP)
-    if not sep:
+    # let it reformat a predicate it has no business touching. The offset comes from
+    # `_separator_offsets` rather than `partition`, so a `|` inside a string literal in
+    # the source command is not mistaken for the end of it.
+    offsets = _separator_offsets(query)
+    if not offsets:
         return f"{query.rstrip()}\n{clause}"
-    return f"{source.rstrip()}\n{clause}\n{_COMMAND_SEP}{rest}"
+    cut = offsets[0]
+    return f"{query[:cut].rstrip()}\n{clause}\n{query[cut:]}"
 
 
 def shape_matched_windows(start: datetime, end: datetime,
@@ -464,8 +503,14 @@ def main(argv: list[str] | None = None) -> int:
             continue
         if not controls:
             skipped += 1
-            print(f"  {lead_id}/{seq}: no time bounds and no operation window — "
-                  f"not controllable")
+            # Two different refusals reach here and they are not the same fact: a query
+            # that carries bounds naming no window HAS time bounds, and printing "no time
+            # bounds" of it sends the reader looking for a missing operation window that
+            # would not have helped.
+            why = ("@timestamp bounds that name no window"
+                   if esql_bounds(query) else
+                   "no time bounds and no operation window")
+            print(f"  {lead_id}/{seq}: {why} — not controllable")
             continue
         record = {"lead_id": lead_id, "seq": seq, "controls": controls}
         if contribution is not None:

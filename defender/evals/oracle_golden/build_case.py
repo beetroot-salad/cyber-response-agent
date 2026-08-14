@@ -97,8 +97,16 @@ def main(argv: list[str] | None = None) -> int:
             # table's seq still counts them, so one refusal ahead of a real query
             # makes the position trail the seq for the rest of the lead — and a
             # control keyed by position is then a different query's baseline.
-            # Oracle-visible but prompt-neutral: `build_lead_user_prompt` renders
-            # only `id` and `params` (oracle/sample.py::_query_lines).
+            # Reaches NO model prompt, and that is enforced at each reader rather than
+            # asserted here. The oracle renders only `id` and `params`
+            # (oracle/sample.py::_query_lines) and `replay.py` rebuilds its `_Query`
+            # from the same two. The judge would have carried it — `label_user_prompt`
+            # yaml-dumps this whole row into its `<lead>` block — so `judge` projects
+            # through `lead_for_model` (an allowlist) before either pass sees it. That
+            # matters because a prompt that gains a line is a different measurement
+            # taken under an unchanged `prompts_sha8` and an unchanged
+            # `labels/<judge-suffix>.json` cache key: a rebuilt case would be labelled
+            # from a different shape than its siblings and nothing would say so.
             "queries": [{"query_id": q.query_id, "params": q.params or {}, "seq": q.seq}
                         for q in jl.queries],
         })
