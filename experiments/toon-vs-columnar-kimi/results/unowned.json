@@ -1,0 +1,17 @@
+{
+  "dictrow": {
+    "tokens": 52446,
+    "bytes": 137492,
+    "n": 40
+  },
+  "columnar": {
+    "tokens": 38335,
+    "bytes": 88077,
+    "n": 40
+  },
+  "toon": {
+    "tokens": 35578,
+    "bytes": 79456,
+    "n": 40
+  }
+}

@@ -1,0 +1,123 @@
+{
+  "src": "/tmp/defender-runs/golden-case-006-authorized-keys-db1/gather_raw/l-001/7.json",
+  "rows": 17,
+  "cols": 3,
+  "bytes": 1721,
+  "payload": {
+    "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-26T18:50:57Z\" AND @timestamp < \"2026-07-26T19:20:57Z\"\n        AND host.name == \"db-1\"\n| STATS events = COUNT(*)\n        BY process.name, message\n| SORT events DESC\n| LIMIT 20",
+    "columns": [
+      {
+        "name": "events",
+        "type": "long"
+      },
+      {
+        "name": "process.name",
+        "type": "keyword"
+      },
+      {
+        "name": "message",
+        "type": "text"
+      }
+    ],
+    "row_count": 17,
+    "values": [
+      [
+        5,
+        "sshd",
+        "error: kex_exchange_identification: Connection closed by remote host"
+      ],
+      [
+        3,
+        "runuser",
+        "pam_unix(runuser:session): session closed for user svc.monitoring"
+      ],
+      [
+        3,
+        "sudo",
+        "pam_unix(sudo:session): session opened for user postgres(uid=103) by (uid=0)"
+      ],
+      [
+        3,
+        "runuser",
+        "pam_unix(runuser:session): session opened for user svc.monitoring(uid=1004) by (uid=0)"
+      ],
+      [
+        3,
+        "sudo",
+        "pam_limits(sudo:session): Could not set limit for 'core' to soft=-1, hard=-1: Operation not permitted; uid=0,euid=0"
+      ],
+      [
+        3,
+        "sudo",
+        "pam_unix(sudo:session): session closed for user postgres"
+      ],
+      [
+        1,
+        "sudo",
+        "    root : PWD=/ ; USER=postgres ; COMMAND=/usr/bin/psql -d app -v ON_ERROR_STOP=1"
+      ],
+      [
+        1,
+        "sudo",
+        "    root : PWD=/ ; USER=postgres ; COMMAND=/usr/bin/psql -tAc 'SELECT 1 FROM pg_database WHERE datname=\\'app\\''"
+      ],
+      [
+        1,
+        null,
+        null
+      ],
+      [
+        1,
+        "sudo",
+        "    root : PWD=/ ; USER=postgres ; COMMAND=/usr/bin/psql -v ON_ERROR_STOP=1"
+      ],
+      [
+        1,
+        "sshd",
+        "Server listening on :: port 22."
+      ],
+      [
+        1,
+        "sshd",
+        "Connection closed by 127.0.0.1 port 34600"
+      ],
+      [
+        1,
+        "sshd",
+        "Server listening on 0.0.0.0 port 22."
+      ],
+      [
+        1,
+        "sshd",
+        "Connection closed by 127.0.0.1 port 52402"
+      ],
+      [
+        1,
+        "sshd",
+        "Connection closed by 172.18.0.17 port 36266"
+      ],
+      [
+        1,
+        "sshd",
+        "Connection closed by 172.18.0.12 port 44634"
+      ],
+      [
+        1,
+        "sshd",
+        "Connection closed by 127.0.0.1 port 44332"
+      ]
+    ]
+  },
+  "questions": [
+    {
+      "kind": "cell_lookup",
+      "q": "In the row where message is 'Connection closed by 127.0.0.1 port 34600', what is the value of process.name?",
+      "a": "sshd"
+    },
+    {
+      "kind": "arity",
+      "q": "How many rows does this payload contain?",
+      "a": 17
+    }
+  ]
+}

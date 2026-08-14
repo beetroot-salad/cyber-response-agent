@@ -1,0 +1,4 @@
+# 200 per-trial JSONs — regenerable by re-running run.py over fixtures/, and
+# results/final.md already carries every number derived from them.
+runs/
+__pycache__/

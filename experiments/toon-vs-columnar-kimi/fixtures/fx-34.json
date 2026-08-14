@@ -1,0 +1,83 @@
+{
+  "src": "/tmp/defender-runs/golden-case-006-bruteforce-web1/gather_raw/l-001/9.json",
+  "rows": 2,
+  "cols": 8,
+  "bytes": 1625,
+  "payload": {
+    "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-26T08:23:04Z\" AND @timestamp < \"2026-07-26T08:53:04Z\"\n        AND host.name == \"db-1\"\n        AND process.name == \"sshd\"\n        AND event.outcome IS NOT NULL\n| EVAL event_type = CASE(\n    message LIKE \"*Failed password*\", \"failed_password\",\n    message LIKE \"*Invalid user*\", \"invalid_user\",\n    message LIKE \"*Accepted*\", \"accepted\",\n    message LIKE \"*pam_unix*\", \"pam_unix\",\n    \"other\"\n  )\n| STATS failed_password_count = COUNT(*) WHERE event_type == \"failed_password\",\n        invalid_user_count = COUNT(*) WHERE event_type == \"invalid_user\",\n        pam_unix_success_count = COUNT(*) WHERE event_type == \"pam_unix\" AND event.outcome == \"success\",\n        pam_unix_failure_count = COUNT(*) WHERE event_type == \"pam_unix\" AND event.outcome == \"failure\",\n        accepted_count = COUNT(*) WHERE event_type == \"accepted\",\n        first_event = MIN(@timestamp),\n        last_event = MAX(@timestamp)\n        BY source.ip",
+    "columns": [
+      {
+        "name": "failed_password_count",
+        "type": "long"
+      },
+      {
+        "name": "invalid_user_count",
+        "type": "long"
+      },
+      {
+        "name": "pam_unix_success_count",
+        "type": "long"
+      },
+      {
+        "name": "pam_unix_failure_count",
+        "type": "long"
+      },
+      {
+        "name": "accepted_count",
+        "type": "long"
+      },
+      {
+        "name": "first_event",
+        "type": "date"
+      },
+      {
+        "name": "last_event",
+        "type": "date"
+      },
+      {
+        "name": "source.ip",
+        "type": "ip"
+      }
+    ],
+    "row_count": 2,
+    "values": [
+      [
+        0,
+        0,
+        12,
+        0,
+        0,
+        "2026-07-26T08:25:10.000Z",
+        "2026-07-26T08:38:17.000Z",
+        null
+      ],
+      [
+        12,
+        12,
+        0,
+        12,
+        0,
+        "2026-07-26T08:25:10.000Z",
+        "2026-07-26T08:38:19.000Z",
+        "172.18.0.11"
+      ]
+    ]
+  },
+  "questions": [
+    {
+      "kind": "cell_lookup",
+      "q": "In the row where pam_unix_success_count is 0, what is the value of pam_unix_failure_count?",
+      "a": 12
+    },
+    {
+      "kind": "arity",
+      "q": "How many rows does this payload contain?",
+      "a": 2
+    },
+    {
+      "kind": "extremum",
+      "q": "Which last_event has the largest failed_password_count?",
+      "a": "2026-07-26T08:38:19.000Z"
+    }
+  ]
+}

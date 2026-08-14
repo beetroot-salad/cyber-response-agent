@@ -1,0 +1,234 @@
+{
+  "src": "/tmp/defender-runs/golden-case-019-squid-egress-officews1/gather_raw/l-006/7.json",
+  "rows": 20,
+  "cols": 7,
+  "bytes": 3464,
+  "payload": {
+    "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-28T06:36:53Z\" AND @timestamp < \"2026-07-28T07:36:53Z\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule      = falco.rule,\n           proc      = falco.output_fields.proc.name,\n           parent    = falco.output_fields.proc.pname,\n           container = falco.output_fields.container.id\n| SORT events DESC\n| LIMIT 20",
+    "columns": [
+      {
+        "name": "events",
+        "type": "long"
+      },
+      {
+        "name": "first_seen",
+        "type": "date"
+      },
+      {
+        "name": "last_seen",
+        "type": "date"
+      },
+      {
+        "name": "rule",
+        "type": "keyword"
+      },
+      {
+        "name": "proc",
+        "type": "keyword"
+      },
+      {
+        "name": "parent",
+        "type": "keyword"
+      },
+      {
+        "name": "container",
+        "type": "keyword"
+      }
+    ],
+    "row_count": 20,
+    "values": [
+      [
+        448,
+        "2026-07-28T06:38:18.488Z",
+        "2026-07-28T07:14:44.344Z",
+        "Unexpected UDP Traffic",
+        "sshd",
+        "sshd",
+        "host"
+      ],
+      [
+        185,
+        "2026-07-28T06:37:57.480Z",
+        "2026-07-28T07:14:08.331Z",
+        "BPF Program Not Profiled",
+        "runc",
+        "containerd-shim",
+        "host"
+      ],
+      [
+        162,
+        "2026-07-28T06:38:18.488Z",
+        "2026-07-28T07:14:44.343Z",
+        "Read sensitive file untrusted",
+        "9",
+        "<NA>",
+        "host"
+      ],
+      [
+        85,
+        "2026-07-28T06:43:58.644Z",
+        "2026-07-28T07:09:28.243Z",
+        "Launch Ingress Remote File Copy Tools in Container",
+        "curl",
+        "bash",
+        "2c1e2ec93d17"
+      ],
+      [
+        52,
+        "2026-07-28T06:39:43.505Z",
+        "2026-07-28T07:12:44.304Z",
+        "Redirect STDOUT/STDIN to Network Connection in Container",
+        "sshd",
+        "sshd",
+        "ed96a85a7480"
+      ],
+      [
+        44,
+        "2026-07-28T06:37:42.476Z",
+        "2026-07-28T07:10:13.261Z",
+        "Redirect STDOUT/STDIN to Network Connection in Container",
+        "sshd",
+        "<NA>",
+        "ffbff1299702"
+      ],
+      [
+        38,
+        "2026-07-28T06:37:17.472Z",
+        "2026-07-28T07:14:19.339Z",
+        "Drop and execute new binary in container",
+        "curl",
+        "sh",
+        "58ffe39dd54f"
+      ],
+      [
+        38,
+        "2026-07-28T06:38:51.496Z",
+        "2026-07-28T07:13:16.317Z",
+        "Redirect STDOUT/STDIN to Network Connection in Container",
+        "sshd",
+        "sshd",
+        "a36492b5172b"
+      ],
+      [
+        38,
+        "2026-07-28T06:37:17.472Z",
+        "2026-07-28T07:14:19.339Z",
+        "Drop and execute new binary in container",
+        "openssl",
+        "sh",
+        "58ffe39dd54f"
+      ],
+      [
+        37,
+        "2026-07-28T06:37:57.480Z",
+        "2026-07-28T07:14:08.331Z",
+        "Unexpected UDP Traffic",
+        "iptables",
+        null,
+        "host"
+      ],
+      [
+        37,
+        "2026-07-28T06:37:57.480Z",
+        "2026-07-28T07:14:08.332Z",
+        "Launch Sensitive Mount Container",
+        "tini",
+        "containerd-shim",
+        "e1dc89faaa8b"
+      ],
+      [
+        37,
+        "2026-07-28T06:37:57.479Z",
+        "2026-07-28T07:14:08.330Z",
+        "BPF Program Not Profiled",
+        "<NA>",
+        null,
+        "host"
+      ],
+      [
+        28,
+        "2026-07-28T06:39:43.505Z",
+        "2026-07-28T07:12:44.304Z",
+        "Unexpected UDP Traffic",
+        "sshd",
+        "sshd",
+        "ed96a85a7480"
+      ],
+      [
+        22,
+        "2026-07-28T06:37:42.476Z",
+        "2026-07-28T07:10:13.261Z",
+        "Unexpected UDP Traffic",
+        "sshd",
+        "<NA>",
+        "ffbff1299702"
+      ],
+      [
+        21,
+        "2026-07-28T06:38:51.496Z",
+        "2026-07-28T07:13:16.317Z",
+        "Unexpected UDP Traffic",
+        "sshd",
+        "sshd",
+        "a36492b5172b"
+      ],
+      [
+        18,
+        "2026-07-28T06:41:51.546Z",
+        "2026-07-28T07:12:47.305Z",
+        "Redirect STDOUT/STDIN to Network Connection in Container",
+        "sshd",
+        "<NA>",
+        "d1daf6f3b7c6"
+      ],
+      [
+        18,
+        "2026-07-28T06:38:18.489Z",
+        "2026-07-28T07:14:44.343Z",
+        "User mgmt binaries",
+        "systemd",
+        "<NA>",
+        "host"
+      ],
+      [
+        18,
+        "2026-07-28T06:40:27.516Z",
+        "2026-07-28T07:11:30.289Z",
+        "Redirect STDOUT/STDIN to Network Connection in Container",
+        "sshd",
+        "<NA>",
+        "d8fb0192a17f"
+      ],
+      [
+        16,
+        "2026-07-28T06:46:48.714Z",
+        "2026-07-28T07:12:54.309Z",
+        "Redirect STDOUT/STDIN to Network Connection in Container",
+        "sshd",
+        "sshd",
+        "1df4bcd65ee4"
+      ],
+      [
+        14,
+        "2026-07-28T06:38:12.485Z",
+        "2026-07-28T07:08:10.205Z",
+        "Launch Suspicious Network Tool in Container",
+        "nc",
+        "bash",
+        "c58bf05facac"
+      ]
+    ]
+  },
+  "questions": [
+    {
+      "kind": "cell_lookup",
+      "q": "In the row where proc is 'runc', what is the value of container?",
+      "a": "host"
+    },
+    {
+      "kind": "arity",
+      "q": "How many rows does this payload contain?",
+      "a": 20
+    }
+  ]
+}

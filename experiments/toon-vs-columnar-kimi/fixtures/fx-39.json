@@ -1,0 +1,99 @@
+{
+  "src": "/tmp/defender-runs/golden-case-016-nginx-scan-web1/gather_raw/l-002/3.json",
+  "rows": 15,
+  "cols": 2,
+  "bytes": 669,
+  "payload": {
+    "query": "FROM logs-nginx.access-*\n| WHERE @timestamp >= \"2026-07-21T06:17:32Z\" AND @timestamp < \"2026-07-28T06:17:32Z\"\n        AND host.name == \"web-1\"\n| STATS requests = COUNT(*)\n        BY url.path\n| SORT requests DESC",
+    "columns": [
+      {
+        "name": "requests",
+        "type": "long"
+      },
+      {
+        "name": "url.path",
+        "type": "keyword"
+      }
+    ],
+    "row_count": 15,
+    "values": [
+      [
+        2791,
+        "/nginx_status"
+      ],
+      [
+        171,
+        "/"
+      ],
+      [
+        3,
+        "/admin"
+      ],
+      [
+        3,
+        "/.env"
+      ],
+      [
+        2,
+        "/.aws/credentials"
+      ],
+      [
+        2,
+        "/api/v1/users"
+      ],
+      [
+        2,
+        "/wp-login.php"
+      ],
+      [
+        2,
+        "/config.php"
+      ],
+      [
+        2,
+        "/server-status"
+      ],
+      [
+        2,
+        "/backup.sql"
+      ],
+      [
+        2,
+        "/phpmyadmin"
+      ],
+      [
+        2,
+        "/actuator/health"
+      ],
+      [
+        2,
+        "/.ssh/id_rsa"
+      ],
+      [
+        2,
+        "/.git/config"
+      ],
+      [
+        1,
+        "/smoke-test-marker"
+      ]
+    ]
+  },
+  "questions": [
+    {
+      "kind": "cell_lookup",
+      "q": "In the row where url.path is '/wp-login.php', what is the value of requests?",
+      "a": 2
+    },
+    {
+      "kind": "arity",
+      "q": "How many rows does this payload contain?",
+      "a": 15
+    },
+    {
+      "kind": "extremum",
+      "q": "Which url.path has the largest requests?",
+      "a": "/nginx_status"
+    }
+  ]
+}

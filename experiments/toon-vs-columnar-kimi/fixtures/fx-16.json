@@ -1,0 +1,46 @@
+{
+  "src": "/tmp/defender-runs/golden-case-005-cross-tier-probe-db1-2/gather_raw/l-005/8.json",
+  "rows": 3,
+  "cols": 2,
+  "bytes": 447,
+  "payload": {
+    "query": "FROM logs-system.auth-*\n| WHERE host.name == \"db-1\" AND @timestamp >= \"2026-07-26T11:00:00.000Z\" AND @timestamp <= \"2026-07-26T11:10:00.000Z\" AND event.outcome == \"failure\"\n| STATS BY source.ip, user.name\n| SORT source.ip",
+    "columns": [
+      {
+        "name": "source.ip",
+        "type": "ip"
+      },
+      {
+        "name": "user.name",
+        "type": "keyword"
+      }
+    ],
+    "row_count": 3,
+    "values": [
+      [
+        "172.18.0.11",
+        "dev.dana"
+      ],
+      [
+        "172.18.0.11",
+        null
+      ],
+      [
+        "172.18.0.11",
+        " dev.dana"
+      ]
+    ]
+  },
+  "questions": [
+    {
+      "kind": "cell_lookup",
+      "q": "In the row where user.name is 'dev.dana', what is the value of source.ip?",
+      "a": "172.18.0.11"
+    },
+    {
+      "kind": "arity",
+      "q": "How many rows does this payload contain?",
+      "a": 3
+    }
+  ]
+}

@@ -1,0 +1,63 @@
+{
+  "src": "/tmp/defender-runs/golden-case-006-authorized-keys-db1/gather_raw/l-001/6.json",
+  "rows": 6,
+  "cols": 2,
+  "bytes": 516,
+  "payload": {
+    "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-26T18:50:57Z\" AND @timestamp < \"2026-07-26T19:20:57Z\"\n        AND host.name == \"db-1\"\n| STATS events = COUNT(*)\n        BY data_stream.dataset\n| SORT events DESC",
+    "columns": [
+      {
+        "name": "events",
+        "type": "long"
+      },
+      {
+        "name": "data_stream.dataset",
+        "type": "keyword"
+      }
+    ],
+    "row_count": 6,
+    "values": [
+      [
+        569,
+        "postgresql.log"
+      ],
+      [
+        457,
+        "elastic_agent.metricbeat"
+      ],
+      [
+        427,
+        "elastic_agent"
+      ],
+      [
+        70,
+        "elastic_agent.filebeat"
+      ],
+      [
+        31,
+        "system.auth"
+      ],
+      [
+        8,
+        "system.syslog"
+      ]
+    ]
+  },
+  "questions": [
+    {
+      "kind": "cell_lookup",
+      "q": "In the row where events is 427, what is the value of data_stream.dataset?",
+      "a": "elastic_agent"
+    },
+    {
+      "kind": "arity",
+      "q": "How many rows does this payload contain?",
+      "a": 6
+    },
+    {
+      "kind": "extremum",
+      "q": "Which data_stream.dataset has the largest events?",
+      "a": "postgresql.log"
+    }
+  ]
+}

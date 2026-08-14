@@ -1,0 +1,59 @@
+{
+  "src": "/tmp/defender-runs/golden-case-005-cross-tier-probe-db1-2/gather_raw/l-005/24.json",
+  "rows": 5,
+  "cols": 2,
+  "bytes": 370,
+  "payload": {
+    "query": "FROM logs-system.auth-*\n| WHERE host.name == \"db-1\"\n| STATS count = COUNT(*) BY host.ip\n| SORT count DESC\n| LIMIT 5",
+    "columns": [
+      {
+        "name": "count",
+        "type": "long"
+      },
+      {
+        "name": "host.ip",
+        "type": "ip"
+      }
+    ],
+    "row_count": 5,
+    "values": [
+      [
+        247958,
+        "172.18.0.12"
+      ],
+      [
+        203283,
+        "172.18.0.16"
+      ],
+      [
+        189694,
+        "172.18.0.24"
+      ],
+      [
+        151647,
+        "172.18.0.18"
+      ],
+      [
+        139989,
+        "172.18.0.23"
+      ]
+    ]
+  },
+  "questions": [
+    {
+      "kind": "cell_lookup",
+      "q": "In the row where host.ip is '172.18.0.16', what is the value of count?",
+      "a": 203283
+    },
+    {
+      "kind": "arity",
+      "q": "How many rows does this payload contain?",
+      "a": 5
+    },
+    {
+      "kind": "extremum",
+      "q": "Which host.ip has the largest count?",
+      "a": "172.18.0.12"
+    }
+  ]
+}

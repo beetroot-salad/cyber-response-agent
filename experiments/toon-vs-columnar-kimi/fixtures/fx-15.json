@@ -1,0 +1,276 @@
+{
+  "src": "/tmp/defender-runs/golden-case-005-cross-tier-probe-db1-2/gather_raw/l-011/6.json",
+  "rows": 19,
+  "cols": 9,
+  "bytes": 3681,
+  "payload": {
+    "query": "FROM logs-zeek.ssh-*\n| WHERE source.ip == \"172.18.0.11\"\n| STATS events = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY destination.ip, destination.port, zeek.ssh.client, zeek.ssh.auth.success, zeek.ssh.algorithm.cipher, zeek.ssh.algorithm.mac\n| SORT events DESC, last_seen DESC\n| LIMIT 20",
+    "columns": [
+      {
+        "name": "events",
+        "type": "long"
+      },
+      {
+        "name": "first_seen",
+        "type": "date"
+      },
+      {
+        "name": "last_seen",
+        "type": "date"
+      },
+      {
+        "name": "destination.ip",
+        "type": "ip"
+      },
+      {
+        "name": "destination.port",
+        "type": "long"
+      },
+      {
+        "name": "zeek.ssh.client",
+        "type": "keyword"
+      },
+      {
+        "name": "zeek.ssh.auth.success",
+        "type": "boolean"
+      },
+      {
+        "name": "zeek.ssh.algorithm.cipher",
+        "type": "keyword"
+      },
+      {
+        "name": "zeek.ssh.algorithm.mac",
+        "type": "keyword"
+      }
+    ],
+    "row_count": 19,
+    "values": [
+      [
+        4152,
+        "2026-06-13T09:25:30.229Z",
+        "2026-07-02T03:23:04.326Z",
+        "172.18.0.18",
+        22,
+        null,
+        null,
+        null,
+        null
+      ],
+      [
+        1228,
+        "2026-05-26T07:27:47.176Z",
+        "2026-06-14T09:22:53.027Z",
+        "172.18.0.14",
+        22,
+        null,
+        null,
+        null,
+        null
+      ],
+      [
+        1095,
+        "2026-05-26T07:52:20.592Z",
+        "2026-06-10T04:42:38.160Z",
+        "172.18.0.12",
+        22,
+        null,
+        null,
+        null,
+        null
+      ],
+      [
+        1083,
+        "2026-05-26T07:32:45.488Z",
+        "2026-06-10T04:50:24.921Z",
+        "172.18.0.2",
+        22,
+        null,
+        null,
+        null,
+        null
+      ],
+      [
+        1024,
+        "2026-05-26T08:11:04.999Z",
+        "2026-06-10T04:38:53.001Z",
+        "172.18.0.4",
+        22,
+        null,
+        null,
+        null,
+        null
+      ],
+      [
+        486,
+        "2026-06-20T04:27:08.719Z",
+        "2026-07-02T01:43:07.121Z",
+        "172.18.0.10",
+        22,
+        "SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.15",
+        false,
+        "chacha20-poly1305@openssh.com",
+        "umac-64-etm@openssh.com"
+      ],
+      [
+        364,
+        "2026-05-26T07:36:24.076Z",
+        "2026-06-10T02:52:39.611Z",
+        "172.18.0.2",
+        22,
+        "SSH-2.0-OpenSSH_9.6p1 Ubuntu-3ubuntu13.16",
+        true,
+        "chacha20-poly1305@openssh.com",
+        "umac-64-etm@openssh.com"
+      ],
+      [
+        351,
+        "2026-05-26T08:22:50.323Z",
+        "2026-06-10T03:14:24.437Z",
+        "172.18.0.14",
+        22,
+        "SSH-2.0-OpenSSH_9.6p1 Ubuntu-3ubuntu13.16",
+        true,
+        "chacha20-poly1305@openssh.com",
+        "umac-64-etm@openssh.com"
+      ],
+      [
+        344,
+        "2026-05-26T09:55:20.728Z",
+        "2026-06-10T03:45:01.545Z",
+        "172.18.0.12",
+        22,
+        "SSH-2.0-OpenSSH_9.6p1 Ubuntu-3ubuntu13.16",
+        true,
+        "chacha20-poly1305@openssh.com",
+        "umac-64-etm@openssh.com"
+      ],
+      [
+        342,
+        "2026-05-26T09:05:32.957Z",
+        "2026-06-10T03:37:30.549Z",
+        "172.18.0.4",
+        22,
+        "SSH-2.0-OpenSSH_9.6p1 Ubuntu-3ubuntu13.16",
+        true,
+        "chacha20-poly1305@openssh.com",
+        "umac-64-etm@openssh.com"
+      ],
+      [
+        25,
+        "2026-06-12T15:04:15.338Z",
+        "2026-07-25T10:35:43.717Z",
+        "172.18.0.6",
+        22,
+        null,
+        null,
+        null,
+        null
+      ],
+      [
+        9,
+        "2026-06-12T15:23:22.186Z",
+        "2026-06-12T16:00:13.332Z",
+        "172.18.0.6",
+        22,
+        "SSH-2.0-OpenSSH_9.6p1 Ubuntu-3ubuntu13.16",
+        true,
+        "chacha20-poly1305@openssh.com",
+        "umac-64-etm@openssh.com"
+      ],
+      [
+        3,
+        "2026-06-12T15:41:03.017Z",
+        "2026-06-12T15:41:11.114Z",
+        "172.18.0.6",
+        22,
+        "SSH-2.0-OpenSSH_9.6p1 Ubuntu-3ubuntu13.16",
+        null,
+        "chacha20-poly1305@openssh.com",
+        "umac-64-etm@openssh.com"
+      ],
+      [
+        2,
+        "2026-07-25T07:35:20.848Z",
+        "2026-07-25T08:03:02.414Z",
+        "172.18.0.25",
+        22,
+        null,
+        null,
+        null,
+        null
+      ],
+      [
+        2,
+        "2026-07-25T07:49:30.407Z",
+        "2026-07-25T08:02:33.532Z",
+        "172.18.0.24",
+        22,
+        "SSH-2.0-OpenSSH_9.6p1 Ubuntu-3ubuntu13.16",
+        true,
+        "chacha20-poly1305@openssh.com",
+        "umac-64-etm@openssh.com"
+      ],
+      [
+        2,
+        "2026-07-25T07:40:19.152Z",
+        "2026-07-25T07:54:30.751Z",
+        "172.18.0.24",
+        22,
+        null,
+        null,
+        null,
+        null
+      ],
+      [
+        2,
+        "2026-06-13T14:48:27.316Z",
+        "2026-06-14T07:50:10.350Z",
+        "172.18.0.18",
+        22,
+        "SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.15",
+        true,
+        "chacha20-poly1305@openssh.com",
+        "umac-64-etm@openssh.com"
+      ],
+      [
+        2,
+        "2026-06-13T14:48:26.990Z",
+        "2026-06-14T07:50:10.010Z",
+        "172.18.0.14",
+        22,
+        "SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.15",
+        true,
+        "chacha20-poly1305@openssh.com",
+        "umac-64-etm@openssh.com"
+      ],
+      [
+        1,
+        "2026-07-25T07:59:54.258Z",
+        "2026-07-25T07:59:54.258Z",
+        "172.18.0.5",
+        22,
+        null,
+        null,
+        null,
+        null
+      ]
+    ]
+  },
+  "questions": [
+    {
+      "kind": "cell_lookup",
+      "q": "In the row where first_seen is '2026-07-25T07:49:30.407Z', what is the value of zeek.ssh.client?",
+      "a": "SSH-2.0-OpenSSH_9.6p1 Ubuntu-3ubuntu13.16"
+    },
+    {
+      "kind": "arity",
+      "q": "How many rows does this payload contain?",
+      "a": 19
+    },
+    {
+      "kind": "extremum",
+      "q": "Which first_seen has the largest events?",
+      "a": "2026-06-13T09:25:30.229Z"
+    }
+  ]
+}

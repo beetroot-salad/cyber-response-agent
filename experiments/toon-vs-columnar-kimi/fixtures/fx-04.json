@@ -1,0 +1,118 @@
+{
+  "src": "/tmp/defender-runs/golden-case-010-crosstier-web2-2/gather_raw/l-002/0.json",
+  "rows": 6,
+  "cols": 8,
+  "bytes": 1642,
+  "payload": {
+    "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-26T19:51:42Z\" AND @timestamp < \"2026-07-26T20:21:42Z\"\n        AND host.name == \"web-2\"\n        AND event.outcome IS NOT NULL\n| STATS accepted   = COUNT(*) WHERE event.outcome == \"success\",\n        failed     = COUNT(*) WHERE event.outcome == \"failure\",\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY auth_method = CASE(message LIKE \"*publickey*\", \"publickey\",\n                              message LIKE \"*password*\",  \"password\", \"other\"),\n           source.ip, host.name, user.name\n| SORT accepted DESC, failed DESC",
+    "columns": [
+      {
+        "name": "accepted",
+        "type": "long"
+      },
+      {
+        "name": "failed",
+        "type": "long"
+      },
+      {
+        "name": "first_seen",
+        "type": "date"
+      },
+      {
+        "name": "last_seen",
+        "type": "date"
+      },
+      {
+        "name": "auth_method",
+        "type": "keyword"
+      },
+      {
+        "name": "source.ip",
+        "type": "ip"
+      },
+      {
+        "name": "host.name",
+        "type": "keyword"
+      },
+      {
+        "name": "user.name",
+        "type": "keyword"
+      }
+    ],
+    "row_count": 6,
+    "values": [
+      [
+        4,
+        0,
+        "2026-07-26T20:06:04.000Z",
+        "2026-07-26T20:06:40.000Z",
+        "other",
+        null,
+        "web-2",
+        null
+      ],
+      [
+        0,
+        48,
+        "2026-07-26T19:52:23.000Z",
+        "2026-07-26T19:55:21.000Z",
+        "other",
+        "172.18.0.6",
+        "web-2",
+        "root"
+      ],
+      [
+        0,
+        48,
+        "2026-07-26T19:52:25.000Z",
+        "2026-07-26T19:55:23.000Z",
+        "password",
+        "172.18.0.6",
+        "web-2",
+        "root"
+      ],
+      [
+        0,
+        4,
+        "2026-07-26T20:06:04.000Z",
+        "2026-07-26T20:06:40.000Z",
+        "other",
+        "172.18.0.6",
+        "web-2",
+        null
+      ],
+      [
+        0,
+        4,
+        "2026-07-26T20:06:04.000Z",
+        "2026-07-26T20:06:40.000Z",
+        "other",
+        "172.18.0.6",
+        "web-2",
+        "dev.dana"
+      ],
+      [
+        0,
+        4,
+        "2026-07-26T20:06:07.000Z",
+        "2026-07-26T20:06:42.000Z",
+        "password",
+        "172.18.0.6",
+        "web-2",
+        " dev.dana"
+      ]
+    ]
+  },
+  "questions": [
+    {
+      "kind": "cell_lookup",
+      "q": "In the row where failed is 0, what is the value of host.name?",
+      "a": "web-2"
+    },
+    {
+      "kind": "arity",
+      "q": "How many rows does this payload contain?",
+      "a": 6
+    }
+  ]
+}

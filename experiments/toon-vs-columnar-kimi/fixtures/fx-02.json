@@ -1,0 +1,186 @@
+{
+  "src": "/tmp/defender-runs/golden-case-018-squid-egress-officews1/gather_raw/l-008/1.json",
+  "rows": 17,
+  "cols": 6,
+  "bytes": 5367,
+  "payload": {
+    "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-27T06:25:11.465Z\" AND @timestamp < \"2026-07-28T06:25:11.465Z\"\n        AND falco.output_fields.container.id == \"ffbff1299702\"\n| STATS events     = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY rule      = falco.rule,\n           proc      = falco.output_fields.proc.name,\n           cmdline   = falco.output_fields.proc.cmdline\n| SORT events DESC",
+    "columns": [
+      {
+        "name": "events",
+        "type": "long"
+      },
+      {
+        "name": "first_seen",
+        "type": "date"
+      },
+      {
+        "name": "last_seen",
+        "type": "date"
+      },
+      {
+        "name": "rule",
+        "type": "keyword"
+      },
+      {
+        "name": "proc",
+        "type": "keyword"
+      },
+      {
+        "name": "cmdline",
+        "type": "keyword"
+      }
+    ],
+    "row_count": 17,
+    "values": [
+      [
+        378,
+        "2026-07-27T16:34:56.152Z",
+        "2026-07-28T06:22:28.157Z",
+        "Redirect STDOUT/STDIN to Network Connection in Container",
+        "sshd",
+        "sshd"
+      ],
+      [
+        197,
+        "2026-07-27T16:34:56.152Z",
+        "2026-07-28T06:22:28.157Z",
+        "Unexpected UDP Traffic",
+        "sshd",
+        "sshd -D -R"
+      ],
+      [
+        120,
+        "2026-07-27T16:34:54.280Z",
+        "2026-07-28T06:09:58.143Z",
+        "Contact cloud metadata service from container",
+        "elastic-otel-co",
+        "elastic-otel-co --supervised --supervised.monitoring.url=unix:///var/lib/elastic-agent/data/tmp/ZaV_0OLb1vdHHFhzn0256b16Lra5CAQJ.sock --feature-gates=telemetry.newPipelineTelemetry --supervised.logging.level=info"
+      ],
+      [
+        106,
+        "2026-07-27T16:34:56.158Z",
+        "2026-07-28T06:24:44.233Z",
+        "Launch Suspicious Network Tool in Container",
+        "nc",
+        "nc -z -w1 jump-box-1 22"
+      ],
+      [
+        100,
+        "2026-07-27T16:34:56.167Z",
+        "2026-07-28T06:22:28.156Z",
+        "Launch Ingress Remote File Copy Tools in Container",
+        "curl",
+        "curl -sf -o /dev/null http://127.0.0.1/"
+      ],
+      [
+        100,
+        "2026-07-27T16:34:56.167Z",
+        "2026-07-28T06:22:28.157Z",
+        "Launch Suspicious Network Tool in Container",
+        "nc",
+        "nc -z 127.0.0.1 22"
+      ],
+      [
+        24,
+        "2026-07-27T16:34:54.279Z",
+        "2026-07-28T06:09:58.118Z",
+        "Contact cloud metadata service from container",
+        "elastic-otel-co",
+        "elastic-otel-co filebeat -E setup.ilm.enabled=false -E setup.template.enabled=false -E management.enabled=true -E management.restart_on_output_change=true -E logging.level=info -E logging.to_stderr=true -E gc_percent=${FILEBEAT_GOGC:100} -E filebeat.config.modules.enabled=false -E logging.event_data.to_stderr=true -E logging.event_data.to_files=false -E http.enabled=true -E http.host=unix:///var/lib/elastic-agent/data/tmp/PGwsYWcynGUYZEjD872Gs-npqbv-30jS.sock -E path.data=/var/lib/elastic-agent/data/elastic-agent-9.3.3-d70142/run/log-default"
+      ],
+      [
+        23,
+        "2026-07-27T16:35:05.044Z",
+        "2026-07-27T16:35:05.052Z",
+        "Contact EC2 Instance Metadata Service From Container",
+        "elastic-otel-co",
+        "elastic-otel-co --supervised --supervised.monitoring.url=unix:///var/lib/elastic-agent/data/tmp/ZaV_0OLb1vdHHFhzn0256b16Lra5CAQJ.sock --feature-gates=telemetry.newPipelineTelemetry --supervised.logging.level=info"
+      ],
+      [
+        11,
+        "2026-07-27T16:35:05.054Z",
+        "2026-07-27T18:04:08.092Z",
+        "Read environment variable from /proc files",
+        "elastic-otel-co",
+        "elastic-otel-co --supervised --supervised.monitoring.url=unix:///var/lib/elastic-agent/data/tmp/ZaV_0OLb1vdHHFhzn0256b16Lra5CAQJ.sock --feature-gates=telemetry.newPipelineTelemetry --supervised.logging.level=info"
+      ],
+      [
+        3,
+        "2026-07-27T16:35:05.037Z",
+        "2026-07-27T16:35:05.037Z",
+        "Contact EC2 Instance Metadata Service From Container",
+        "elastic-otel-co",
+        "elastic-otel-co filebeat -E setup.ilm.enabled=false -E setup.template.enabled=false -E management.enabled=true -E management.restart_on_output_change=true -E logging.level=info -E logging.to_stderr=true -E gc_percent=${FILEBEAT_GOGC:100} -E filebeat.config.modules.enabled=false -E logging.event_data.to_stderr=true -E logging.event_data.to_files=false -E http.enabled=true -E http.host=unix:///var/lib/elastic-agent/data/tmp/PGwsYWcynGUYZEjD872Gs-npqbv-30jS.sock -E path.data=/var/lib/elastic-agent/data/elastic-agent-9.3.3-d70142/run/log-default"
+      ],
+      [
+        2,
+        "2026-07-27T16:34:54.335Z",
+        "2026-07-28T06:09:58.858Z",
+        "Read environment variable from /proc files",
+        "elastic-agent",
+        "elastic-agent --path.home /var/lib/elastic-agent --path.config /etc/elastic-agent --path.logs /var/log/elastic-agent run"
+      ],
+      [
+        1,
+        "2026-07-27T16:33:57.415Z",
+        "2026-07-27T16:33:57.415Z",
+        "Write below etc",
+        "elastic-agent",
+        "elastic-agent --path.home /var/lib/elastic-agent --path.config /etc/elastic-agent --path.logs /var/log/elastic-agent run"
+      ],
+      [
+        1,
+        "2026-07-27T16:35:02.721Z",
+        "2026-07-27T16:35:02.721Z",
+        "Adding ssh keys to authorized_keys",
+        "bash",
+        "bash -c mkdir -p ~/.ssh && chmod 700 ~/.ssh && \\\n   echo \"ssh-rsa AAAAB3rotated$(date +%s) svc.config-mgmt@rotation\" >> ~/.ssh/authorized_keys && \\\n   chmod 600 ~/.ssh/authorized_keys"
+      ],
+      [
+        1,
+        "2026-07-27T16:33:57.329Z",
+        "2026-07-27T16:33:57.329Z",
+        "Unexpected UDP Traffic",
+        "sshd",
+        "sshd -D"
+      ],
+      [
+        1,
+        "2026-07-27T16:33:57.329Z",
+        "2026-07-27T16:33:57.329Z",
+        "Clear Log Activities",
+        "agent-enroll.sh",
+        "agent-enroll.sh /usr/local/bin/agent-enroll.sh"
+      ],
+      [
+        1,
+        "2026-07-27T16:58:27.009Z",
+        "2026-07-27T16:58:27.009Z",
+        "Unexpected UDP Traffic",
+        "elastic-otel-co",
+        "elastic-otel-co --supervised --supervised.monitoring.url=unix:///var/lib/elastic-agent/data/tmp/ZaV_0OLb1vdHHFhzn0256b16Lra5CAQJ.sock --feature-gates=telemetry.newPipelineTelemetry --supervised.logging.level=info"
+      ],
+      [
+        1,
+        "2026-07-28T06:25:04.244Z",
+        "2026-07-28T06:25:04.244Z",
+        "Launch Package Management Process in Container",
+        "dpkg",
+        "dpkg --print-foreign-architectures"
+      ]
+    ]
+  },
+  "questions": [
+    {
+      "kind": "cell_lookup",
+      "q": "In the row where first_seen is '2026-07-27T16:33:57.415Z', what is the value of last_seen?",
+      "a": "2026-07-27T16:33:57.415Z"
+    },
+    {
+      "kind": "arity",
+      "q": "How many rows does this payload contain?",
+      "a": 17
+    }
+  ]
+}
