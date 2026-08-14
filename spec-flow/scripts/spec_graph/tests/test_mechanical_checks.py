@@ -13,40 +13,37 @@ import sys
 import textwrap
 from pathlib import Path
 
-from conftest import run_script  # re-exported: the fixes suites import it from here
+from conftest import SPEC_GRAPH_DIR, run_script  # run_script re-exported for the fixes suites
+
+# The rule roster and version set are READ from the schema, never restated: a fixture that
+# restates them goes stale the moment one grows, and then silently exercises the
+# missing-entry arm instead of the mechanics it names (#883).
+sys.path.insert(0, str(SPEC_GRAPH_DIR))
+import _schema  # noqa: E402 — resolvable only after the sys.path line above
 
 
 # ---------------------------------------------------------------------------
 # check_gate
 # ---------------------------------------------------------------------------
 
-# All seven rules evaluated `fired: true` — the common case.
-_EVALUATED_ALL = """\
-gate:
-  evaluated:
-    - {rule: R0, fired: true}
-    - {rule: R1, fired: true}
-    - {rule: R2, fired: true}
-    - {rule: R3, fired: true}
-    - {rule: R4, fired: true}
-    - {rule: R5, fired: true}
-    - {rule: R6, fired: true}
-    - {rule: R7, fired: true}
-"""
+def _evaluated(version: int = 1, **fired: bool) -> str:
+    """A `gate.evaluated` block recording every rule a graph at `version` OWES an entry for
+    (`_schema.SINCE`), `fired: true` unless named otherwise.
+
+    Derived rather than written out: a restated roster goes stale the moment a rule is
+    added, and a stale one does not fail loudly — it makes every test using it exercise the
+    missing-entry arm instead of the mechanics it names."""
+    rules = [r for r in _schema.RULES if _schema.SINCE.get(r, 1) <= version]
+    return "gate:\n  evaluated:\n" + "".join(
+        f"    - {{rule: {r}, fired: {str(fired.get(r, True)).lower()}}}\n" for r in rules
+    )
+
+
+# Every rule this graph owes, `fired: true` — the common case.
+_EVALUATED_ALL = _evaluated()
 
 # Same, but R4 recorded `fired: false` — the slot-vs-evaluated conflict case.
-_EVALUATED_R4_FALSE = """\
-gate:
-  evaluated:
-    - {rule: R0, fired: true}
-    - {rule: R1, fired: true}
-    - {rule: R2, fired: true}
-    - {rule: R3, fired: true}
-    - {rule: R4, fired: false}
-    - {rule: R5, fired: true}
-    - {rule: R6, fired: true}
-    - {rule: R7, fired: true}
-"""
+_EVALUATED_R4_FALSE = _evaluated(R4=False)
 
 # One R4 trigger: a design-provenance domain boundary with a read edge and one
 # distinguished member. `demands:` decides whether the trigger is answered.
@@ -107,6 +104,53 @@ def test_gate_missing_evaluated_entry_reads_as_skipped(make_repo):
     p = run_script("check_gate.py", "g.yaml", cwd=r.root)
     assert p.returncode == 1
     assert "EVALUATED" in p.stdout and "R6" in p.stdout
+
+
+# The `_schema.SINCE` gating: a rule is owed a `gate.evaluated` entry only from the artifact
+# version it was introduced at. Without this, adding a rule makes every graph in the corpus
+# dirty at once, and the only ways out are re-baselining unrelated history (masking a first
+# real finding in every graph that was clean) or leaving the corpus red (#883).
+
+#: Exactly what a version-1 run could record. Applied to a version-2 graph below, it is the
+#: omission the gating must still catch.
+_EVALUATED_V1 = _evaluated(1)
+
+
+def test_a_rule_newer_than_the_graphs_schema_version_is_not_owed_an_entry(make_repo):
+    """R8 arrived at schema_version 2. A version-1 graph recording R0–R7 is COMPLETE: the
+    run that would have evaluated R8 predates the rule, so demanding the entry would be
+    demanding a record of something that could not have happened."""
+    r = make_repo()
+    r.config(code_roots=[])
+    r.write("g.yaml", _R4_GRAPH.format(demands=_D_CELL, gate=_EVALUATED_V1))
+    p = run_script("check_gate.py", "g.yaml", cwd=r.root)
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert "R8" not in p.stdout
+
+
+def test_a_rule_at_or_below_the_graphs_schema_version_is_owed_its_entry(make_repo):
+    """The other direction, and the half that makes the gating worth having: at the version
+    the rule was introduced, the same omission is a finding. A version gate that only ever
+    excused things would be indistinguishable from deleting the check."""
+    r = make_repo()
+    r.config(code_roots=[])
+    v2 = _R4_GRAPH.replace("schema_version: 1", "schema_version: 2")
+    r.write("g.yaml", v2.format(demands=_D_CELL, gate=_EVALUATED_V1))
+    p = run_script("check_gate.py", "g.yaml", cwd=r.root)
+    assert p.returncode == 1
+    assert "EVALUATED" in p.stdout and "R8" in p.stdout
+
+
+def test_a_graph_declaring_no_schema_version_owes_only_the_oldest_contract(make_repo):
+    """An absent declaration reads as version 1 — the contract owing the fewest entries.
+    Naming the omission is check_lint's job (it validates the closed version set); check_gate
+    piling a second finding on top would report one defect as two."""
+    r = make_repo()
+    r.config(code_roots=[])
+    unversioned = _R4_GRAPH.replace("schema_version: 1\n", "")
+    r.write("g.yaml", unversioned.format(demands=_D_CELL, gate=_EVALUATED_V1))
+    p = run_script("check_gate.py", "g.yaml", cwd=r.root)
+    assert p.returncode == 0, p.stdout + p.stderr
 
 
 def test_gate_dangling_binds_address_is_an_r0_finding(make_repo):
@@ -238,6 +282,37 @@ def test_frontiers_resume_reports_design_refuted_as_a_halt(tmp_path):
 # ---------------------------------------------------------------------------
 # check_lint
 # ---------------------------------------------------------------------------
+
+_MINIMAL = """\
+schema_version: {v}
+design: "#t"
+base: abc
+demands: []
+structure:
+  boundaries: []
+"""
+
+
+def test_lint_accepts_every_declared_schema_version_and_no_others(make_repo):
+    """`schema_version` is a closed SET, not a pin. It has to admit every contract the
+    corpus actually holds — `_schema.SINCE` reads the declaration to decide which rules a
+    graph owes an entry for, so a pin would force each new rule to be paid for by
+    re-baselining history — and it has to keep refusing values outside the set, or the
+    field stops being a contract at all."""
+    for version in _schema.SCHEMA_VERSIONS:
+        r = make_repo()
+        r.config(code_roots=[])
+        r.write("g.yaml", _MINIMAL.format(v=version))
+        p = run_script("check_lint.py", "g.yaml", cwd=r.root)
+        assert "schema_version" not in p.stdout, f"v{version} rejected: {p.stdout}"
+
+    r = make_repo()
+    r.config(code_roots=[])
+    r.write("g.yaml", _MINIMAL.format(v=max(_schema.SCHEMA_VERSIONS) + 1))
+    p = run_script("check_lint.py", "g.yaml", cwd=r.root)
+    assert p.returncode == 1
+    assert "schema_version" in p.stdout
+
 
 def test_lint_flags_vocabulary_and_form_conditional_defects(make_repo):
     r = make_repo()

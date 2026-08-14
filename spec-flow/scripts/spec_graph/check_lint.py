@@ -11,7 +11,7 @@ vocabulary is either a typo (fix it) or a vocabulary the schema must deliberatel
 Checked: top-level and structure keys; demand kind/form vocabularies and the
 form-conditional fields (a `form: test` demand is a pointer — `discharged_by`, no
 `outcome`; clause/waiver carry `outcome.nl`); actor/edge/facet vocabularies; unique
-demand and claim ids; gate entries referencing rules R0–R6 and demands that exist.
+demand and claim ids; gate entries referencing rules R0–R8 and demands that exist.
 NOT checked here: address resolution and rule triggers (check_gate), prose⊄binds
 (check_binds), claim instruments (check_claims), test existence (check_binds).
 
@@ -100,9 +100,15 @@ class _Lint:
 def _rule_top_level(lint: _Lint) -> None:
     for k in set(lint.graph) - _TOP:
         lint.add(f"{lint.n}: unknown top-level key `{k}` (schema.md, 'The artifact').")
-    if lint.graph.get("schema_version") != 1:
+    # A closed SET, not a pin: the corpus holds graphs authored against more than one
+    # contract, and `_schema.SINCE` reads the declaration to decide which rules each one
+    # owes a `gate.evaluated` entry for. Pinning a single version would force every new
+    # rule to be paid for by re-baselining history (#883).
+    if lint.graph.get("schema_version") not in _schema.SCHEMA_VERSIONS:
         lint.add(
-            f"{lint.n}: schema_version `{lint.graph.get('schema_version')}` (expected 1)."
+            f"{lint.n}: schema_version `{lint.graph.get('schema_version')}` "
+            f"(expected one of {list(_schema.SCHEMA_VERSIONS)}; "
+            f"new graphs declare {_schema.CURRENT_SCHEMA_VERSION})."
         )
     for field in ("design", "base"):
         if not lint.graph.get(field):
@@ -340,7 +346,7 @@ def _rule_handoff(lint: _Lint) -> None:
 #: The check, in order. Order is contract, not taste: findings print in the order they
 #: were appended, and `_rule_demands` must precede the two gate rules that resolve a
 #: pointer against the demand ids it collects. Named `_LINT_RULES`, not `_RULES` —
-#: `_RULES` above is the R0–R6 gate vocabulary `vocab()` validates against.
+#: `_RULES` above is the R0–R8 gate vocabulary `vocab()` validates against.
 _LINT_RULES = (
     _rule_top_level,
     _rule_demands,
