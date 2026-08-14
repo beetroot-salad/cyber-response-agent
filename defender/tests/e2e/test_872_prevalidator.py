@@ -1,5 +1,5 @@
 """#872 — M7, the pre-validator, and O9's three-part oracle
-(`d48`, `d49`, `d50`, `d51`, `d52`, `d53`, `d54`, `d57`, `d64`).
+(`d48`, `d49`, `d50`, `d51`, `d52`, `d53`, `d54`, `d57`, `d64`, `d81`).
 
 O9 replaces r2's fail-safe sentence, which was REFUTED END TO END: a real capability ->
 WrapperToolset -> Agent with a foreign tool returning `{1: 'alpha'}` exited 1 with a
@@ -335,6 +335,76 @@ print(json.dumps({{
     assert result["dumps_calls"] == 0, "the expansion bomb reached the encoder"
     assert result["raised"] is False
     assert result["content_is_wire"] is True
+
+
+def _shared_leaf_dag(*, width: int, share: int) -> dict:
+    """One leaf dict of `width` SCALAR entries, shared pairwise `share` levels deep.
+
+    CONTAINERS: `2**(share+1) - 1`, and it does not move with `width`.
+    VALUES:     the containers plus `2**share * width` scalars, and it moves with nothing else.
+
+    That separation is the whole fixture: two payloads built from it can carry an identical
+    container count and differ by orders of magnitude in what the encoder emits.
+    """
+    value: dict = {f"k{i}": i for i in range(width)}
+    for _ in range(share):
+        value = {"a": value, "b": value}
+    return value
+
+
+def test_a_payload_under_the_budget_in_containers_and_over_it_in_values_is_refused() -> None:
+    """The budget charges EVERY VALUE the walk visits, scalars included — not only the
+    dict/list containers it recurses into. NO NODE CONSTANT IS ASSERTED.
+
+    THE TWO PAYLOADS IN EACH PASS CARRY THE SAME 63 CONTAINERS and differ only in a count a
+    container-only budget never charges, so an implementation that counts containers admits
+    the first and this test is the only thing in the suite that sees it. `d52`'s bomb does
+    not: at its configured budget of 1000 both readings refuse it, because that fixture's
+    containers are the thing that expands.
+
+    WHY IT MATTERS, MEASURED. `toons` emits one line per value with the full indent on it —
+    at depth 64 that is 136 bytes for a scalar entry against ~9 in JSON — so the output is
+    proportional to VALUES, not containers. A payload of 64 objects (a 300-entry leaf shared
+    15 levels deep, sunk to depth 64) is admitted by a container-counting walk at 65 583
+    containers and then aborts the process inside the Rust encoder: `memory allocation of
+    2147483648 bytes failed`, SIGABRT, rc 134. It is an ABORT, not a Python exception, so
+    `d55`'s `BaseException` arm never runs. The un-gated arm of the same payload returns
+    CLEANLY under the identical 2 GB ceiling (121 MB dispatched, 1520 MB peak), so a
+    container-only budget breaks `O9(a)`'s parity outright.
+
+    That process death is a CLAIM (`cE2`) and not a case here, for the reason the expansion
+    bomb is not in `d57`'s battery: reaching it needs >130 MB of wire text on the refusal
+    path, which is a risk to the test host rather than a test result. What is driven here is
+    the predicate that keeps the encoder from ever seeing it.
+
+    `r3_validator.prevalidate` — the instrument behind `S8`, `S9` and §7 r6's 100 000 —
+    already counts this way: its `budget -= 1` sits ABOVE the container check, which is why
+    `S9` reports 517 nodes on a corpus whose deepest fixture holds 108 containers.
+    """
+    for budget, over_width, under_width in ((1000, 400, 20), (5000, 1000, 100)):
+        env = {MAX_NODES_ENV: str(budget), MAX_DEPTH_ENV: "64"}
+
+        over = _shared_leaf_dag(width=over_width, share=5)
+        spy = _sealed()
+        out = agent_run(toolset=foreign_toolset(over), encoder=spy, env=env)
+        assert spy.dumps_calls == 0, (
+            f"a payload holding 63 containers and {32 * over_width} scalar values reached the "
+            f"encoder at a budget of {budget} — the budget is counting containers, not values"
+        )
+        assert framed_content(out.dispatched.text(), salt=SALT) == wire_text(over), (
+            "the over-budget payload was refused, but the model did not get the tool's own "
+            "wire bytes"
+        )
+
+        # The anti-vacuity control, and it is the half that makes the assertion above mean
+        # what it says: the SAME 63 containers with the values under the budget is ADMITTED,
+        # so the refusal is charged to the value count and not to the shape.
+        under = _shared_leaf_dag(width=under_width, share=5)
+        admitted = agent_run(toolset=foreign_toolset(under), env=env)
+        assert admitted.encoder.dumps_calls == 1, (
+            f"a payload of 63 containers and {32 * under_width} scalar values was refused at a "
+            f"budget of {budget} — the budget is not the configured value"
+        )
 
 
 def test_one_leaf_object_referenced_three_times_encodes_round_trips_and_substitutes() -> None:

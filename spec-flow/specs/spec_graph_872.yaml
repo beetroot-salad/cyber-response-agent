@@ -1171,6 +1171,12 @@ demands:
       cannot even terminate on it — it would visit 2**28 nodes itself — so this demand also pins
       that the walk's own cost is bounded, which is the second reason M7 precedes the encoder rather
       than wrapping it.
+      WHAT THIS DEMAND'S TEST DISCRIMINATES AND WHAT IT DOES NOT, both verified by construction
+      against hand-written stubs (`cE1`): it DOES separate a visit count from a UNIQUE-OBJECT one —
+      a memoising walk reports 29 nodes here, admits, and fails the `dumps_calls == 0` assertion,
+      while an unpruned unique-counter fails the wall clock. It does NOT separate a value count from
+      a CONTAINER-ONLY one, because at a budget of 1000 both refuse this fixture: its containers are
+      what multiply. That second reading is `d81`, and it is the one that reproduces the incident.
 
   - id: d53_benign_shared_structure_is_not_refused
     kind: behavior
@@ -1908,6 +1914,45 @@ demands:
       the last authoring step, under a decision that was about idempotence and not about a new
       public name.
 
+  - id: d81_the_budget_charges_every_value_the_walk_visits
+    kind: domain-outcome
+    form: test
+    fork: f9
+    resolved_by: auto             # not a new decision: the instrument every f9 number came from already counts this way
+    binds: ["toon_gate_max_nodes.domain", "interacts(toon_gate->toon_encoder).response",
+            "interacts(toon_gate->model_view).payload"]
+    discharged_by: test_a_payload_under_the_budget_in_containers_and_over_it_in_values_is_refused
+    positive_control: d54_the_guard_refuses_nothing_in_the_committed_corpus
+    cites: [cE1, cE2, cE3, cE4]
+    source: >-
+      `.spec-flow/frontiers/100-encoder-audit.md` §2 — the encoder audit run against the host
+      memory-exhaustion investigation of 2026-08-14, which traced 10 OOM kills to `toons.dumps`
+      on this suite's own DAG fixture.
+    note: >-
+      THE UNIT OF THE BUDGET, AND UNTIL THIS DEMAND NOTHING DROVE IT. `d52` pins that the budget
+      is not the depth cap and that a seen-set of UNIQUE OBJECTS is not a visit count — verified
+      by construction (`cE1`): a memoising walk reports 29 nodes on `S7`'s bomb, admits it, and
+      fails `d52`'s `dumps_calls == 0`, while an unpruned unique-counter never terminates and
+      fails its wall clock. What no test saw is a SECOND reading of the same knob: charge only the
+      dict/list containers the walk RECURSES INTO, and leave every scalar entry free. `d52`'s bomb
+      does not discriminate it — at a budget of 1000 both readings refuse it, because that
+      fixture's containers are the thing that multiplies.
+      THE COST OF THE FREE READING IS THE INCIDENT ITSELF (`cE2`). `toons` emits one line per
+      value carrying the full indent — 136 bytes for a scalar entry at depth 64 against ~9 in
+      JSON — so the output is proportional to VALUES. 64 objects (a 300-entry leaf shared 15
+      levels deep, sunk to the cap) pass a container-only budget at 65 583 containers and abort
+      the process inside the Rust encoder (`memory allocation of 2147483648 bytes failed`,
+      SIGABRT, rc 134, uncatchable, so `d55`'s arm never runs) while the UN-GATED arm of the same
+      payload returns cleanly under the identical ceiling. That is `O9(a)`'s parity broken by an
+      admitted input, which is the one thing M7 exists to prevent.
+      IT IS A CORRECTION, NOT A DECISION, which is why it resolves `auto` and does not re-open f9:
+      `r3_validator.prevalidate` — the instrument behind `S8`, `S9` and §7 r6's own 100 000 —
+      decrements the budget ABOVE its container check, so it has always charged every value. That
+      is why `S9` reports 517 nodes on a corpus whose deepest fixture holds 108 containers, and it
+      is why 100 000 is unchanged and `d54` still passes: both readings admit all 80 corpus arms
+      (`cE3`). Like `d51` and `d52` this demand asserts NO CONSTANT — it is stated at two
+      configured budgets over two payloads with an identical container count.
+
 # ---------------------------------------------------------------------------
 # STRUCTURE — the address space. `provenance: design` is this change's delta (rules.md, Procedure);
 # `provenance: code` is the grounded neighborhood the brief carries and no demand asked for.
@@ -2108,7 +2153,7 @@ structure:
       facets:
         domain:
           type: int
-          refinement: {nl: "the maximum number of dict/list nodes M7 visits before refusing — the walk's own worst case as well as the encoder's. A shallow, acyclic payload over the budget is refused."}
+          refinement: {nl: "the maximum number of VALUES M7 visits before refusing — every entry the walk reaches, scalars included, not only the dict/list containers it recurses into. This is what `r3_validator.prevalidate` counts (its decrement sits above the container check), which is why S9 reports 517 on a corpus whose deepest fixture holds 108 containers. The walk's own worst case as well as the encoder's, and the encoder's is the reason for the unit: `toons` emits one line per VALUE with the full indent on it, so a container-only budget bounds nothing about the output (d81, cE2). A shallow, acyclic payload over the budget is refused."}
           default: 100000             # DECIDED AT §7 r6 (fork f9), with the depth cap — "decided with the depth cap or neither is decided". Was `unknown`, the other half of hole H4. 100 000 is roughly 200x the real corpus's peak of 517 nodes (S9) and far below the 2**24 nodes of expansion at which 29 objects sharing children pairwise take the process (S7); at k=20 the same shape already reaches 132 MB of TOON.
           distinguished: []           # as with the depth cap: d52 is parameterized on the configured budget and asserts no constant
           falsy_valid: false          # a budget of 0 refuses every container
@@ -2117,8 +2162,15 @@ structure:
         NOT THE DEPTH CAP, and that is why it is a second boundary rather than a second member: the
         expansion bomb is 29 objects at depth 28, so a depth cap admits it and the process dies
         (S7). It is also what bounds the VALIDATOR's own cost — without it the walk would visit
-        2**28 nodes on that input. Bound by d52 and d54. §7 r6 supplied the value; d52 still asserts
-        no node constant.
+        2**28 nodes on that input. Bound by d52, d54 and d81. §7 r6 supplied the value; d52 still
+        asserts no node constant.
+        THE UNIT WAS WRONG IN THIS SLOT UNTIL THE ENCODER AUDIT AND THE VALUE IS NOT: the
+        refinement said "dict/list nodes" where the instrument every f9 number came from charges
+        every VALUE, and the two readings disagree on exactly one thing — a payload of 64 objects
+        that a container-only budget admits at 65 583 containers and that then aborts the process
+        in the encoder (cE2). 100 000 is unchanged, S9's 517 is unchanged (it was always the value
+        count), and all 80 corpus arms are admitted under both readings (cE3). d81 is the demand
+        that drives the unit; f9 is not re-opened.
 
     - id: toolset_seam
       provenance: design
@@ -3440,6 +3492,33 @@ claims:
      observed: "`root_capability` is a public property ('The root capability of the agent, containing all registered capabilities') and `apply` visits every registered capability. A plain build yields `pydantic_ai.capabilities._tool_search.ToolSearch`, `pydantic_ai.capabilities._pending_messages.PendingMessageDrainCapability` and `pydantic_ai.capabilities.hooks.Hooks` — three, all library-defined; anything passed through `extra_capabilities` appears alongside them. The stripped definition registers no `query` tool, so `QueryCapture` is absent.",
      note: "HOW `d80`'s FIXTURE NAMES THE GATE WITHOUT MINTING A SYMBOL. `_toon872.installed_gate_capability` filters on `type(c).__module__` starting with `defender`, so the implementer is free to name the class and place it where they like; what the test would refuse is a gate the composition root does not statically install (a capability FUNCTION resolved per-run would not be enumerable here), and the helper's assertion says so rather than failing obscurely."}
 
+  # ======================= the encoder audit (100-encoder-audit.md), run against the =======================
+  # ======================= host memory-exhaustion investigation of 2026-08-14      =======================
+
+  - {id: cE1, kind: behavior, probe_kind: executed, verdict: holds,
+     claim: "`d52`'s test discriminates a VISIT budget from a UNIQUE-OBJECT one: a memoising walk that counts distinct containers admits `S7`'s bomb and calls the encoder, and an unpruned unique-counter never terminates on it.",
+     probe: "probe_A_budget_semantics.py — three hand-written pre-validators (A visits, path-scoped; B unique objects, memoised, with the cycle check kept ahead of the memo so B still passes d49; C unique objects, unpruned) driven through one rig that reproduces d52's observable, the spy encoder's call count, at MAX_NODES=1000 / MAX_DEPTH=64. RLIMIT_AS 2 GB per child.",
+     observed: "On the k=28 bomb — A: REFUSED 'node budget exhausted', dumps_calls 0, 0.3 ms. B: ADMITTED at 29 unique objects, dumps_calls 1 (d52's assertion fails, and 29 is the incident's own object count). C: 2**29-1 steps at 2.75M steps/s, killed at 95 s against d52's 90 s clock, so `not outcome.timed_out` fails. B passes d49 (cycle refused), d51 (depth refused), d53 (shared leaf admitted) and the corpus shape unchanged — d52's test is the ONLY thing in the suite that sees it.",
+     note: "THE ANSWER TO THE AUDIT'S LOAD-BEARING QUESTION, AND IT IS THE GOOD ONE: the unique-vs-visit distinction is not prose-only. It is driven, and driven twice over — the seen-set arm dies on the call count and the unpruned arm dies on the wall clock. The zero this claim reports (`dumps_calls == 0` for A) is settled by a NON-ZERO CONTROL in the identical rig, arm B's 1, and not by construction. What it does NOT cover is the unit of the count, which is cE2 and d81."}
+
+  - {id: cE2, kind: primitive, probe_kind: executed, verdict: holds,
+     claim: "A payload the CONTAINER reading of the budget admits aborts the process inside `toons.dumps` while the un-gated arm of the same payload returns cleanly — so a container-only budget breaks O9(a)'s parity on an admitted input.",
+     probe: "probe_B2_crossing.py + probe_B3_ungated_drive.py — a 300-entry scalar leaf shared pairwise 15 levels deep and sunk to depth 64 by a chain (64 objects total). Checked admissible by the container reading first, then encoded (the gate's own order: PRE-VALIDATE, dumps, wire), and separately driven end to end through `agent_run(capabilities=False)` — d57's own un-gated arm. One process each, RLIMIT_AS 2 GB, RLIMIT_CORE 0.",
+     observed: "Container reading: ADMIT, 65 583 containers, depth 64. GATED encode: 'memory allocation of 2147483648 bytes failed' -> SIGABRT, rc 134 — a Rust abort, not a Python exception, so no `except BaseException` sees it. UN-GATED full turn: returned, error None, 121 045 314 B dispatched, peak RSS 1520 MB. At width 1000 the un-gated arm degrades to a CATCHABLE MemoryError (419 MB dispatched) where the gated encode still aborts, so the parity break holds across the ladder in `how it dies` as well as in `whether`.",
+     note: "THE INCIDENT CLASS, REPRODUCED THROUGH THE GUARD. The amplification is not structural: a chain-plus-DAG carrying no large scalars is bounded at 12 585 121 B of TOON from ~3 KB of input (65 583 containers at depth 64, JSON 688 405 B, ratio 18.3x) — a few MB, and no threat. It is the SCALAR ENTRIES a container-only budget leaves free: cE4's line law makes each one cost 2*depth bytes of indent, 136 B at the cap against ~9 in JSON. NOT DRIVEN AS A TEST, for the reason the expansion bomb is absent from d57's battery (`handoff.deviations`): the refusal path alone builds >130 MB of wire text, which risks the test host rather than producing a test result. d81 drives the predicate instead."}
+
+  - {id: cE3, kind: behavior, probe_kind: executed, verdict: holds,
+     claim: "Charging every value rather than every container costs the committed corpus nothing, because `S9`'s own 517 was already the value count.",
+     probe: "probe_D_instrument_vs_artifact.py — `r3_validator.prevalidate` (the instrument behind S8, S9 and §7 r6) against the artifact's refinement read literally, over all 40 committed fixtures x 2 arms plus four distinguished payloads; and a direct count of containers vs values over the same corpus.",
+     observed: "Corpus: both readings ADMIT all 80 arms; max containers 108 (fx-00 columnar), max values 517 (fx-14 columnar, = S9's figure exactly), max depth 3. The two readings AGREE on S7's bomb (both refuse), on d53's shared leaf (both admit) and on the structural worst case (both admit), and DISAGREE on exactly one payload — cE2's fat-leaf DAG, which the instrument refuses ('node budget 100000 exhausted') and the refinement admits. `prevalidate`'s `budget[0] -= 1` sits ABOVE its `isinstance(node, CONTAINERS)` early return.",
+     note: "WHY d81 RESOLVES `auto` AND f9 DOES NOT RE-OPEN. The correction restores the artifact to its own instrument rather than deciding anything new: 100 000 is untouched, its '200x the corpus's 517' justification becomes true rather than approximate, and d54 passes under both readings. The drift was in the refinement's WORDING, and the one payload it changed is the one that reproduces the incident."}
+
+  - {id: cE4, kind: primitive, probe_kind: executed, verdict: holds,
+     claim: "`toons` output is quadratic in depth because every emitted line carries the full indent — exactly `n**2 + 4n + 7` for the investigation's chain — and the C stack goes between 10 000 and 15 000 deep in this runtime.",
+     probe: "probe_C_depth_law.py — `{'a': ...}` nested n deep over a `{'leaf': 1}` leaf and over a scalar leaf, n in 1/2/4/8/16/32/64/128/256/1000; then a crash ladder at 5 000/10 000/15 000/20 000, one process each, RLIMIT_AS 2 GB, `os._exit` to skip a recursive teardown.",
+     observed: "Dict leaf: len == n**2 + 4n + 7 at every n measured (12, 19, 39, 103, 327, 4359, 16903, 66567, 1004007) — the investigation's formula, reproduced exactly. Scalar leaf: (n+1)**2. Crash ladder: 5 000 -> 25 010 001 B and 10 000 -> 100 020 001 B survive; 15 000 and 20 000 SIGSEGV (rc 139, core suppressed).",
+     note: "THE COEFFICIENT IN THE GUARD'S OUTPUT BOUND, WHICH IS WHY IT IS A CLAIM RATHER THAN A CURIOSITY: 2 bytes of indent per level per LINE is what makes an uncounted scalar entry cost 136 B at the cap (cE2) and what fixes the pure-depth cost at the cap at 4 359 B — the whole of what depth 64 alone can buy an attacker. THE DEPTH HALF CHANGES NO OBLIGATION and is recorded as corroboration only: S3 already has 10 000 surviving and 20 000 signalling, S4 already establishes the threshold is a property of the thread's stack rather than a constant, and d51 asserts no depth. This run's 15 000 (against S3's 20 000) is the same fact at finer resolution and is one more reason no constant belongs in the suite."}
+
 # ---------------------------------------------------------------------------
 # GATE. `spec-graph gate` computes 45 triggers over this structure — R1 x6, R2 x2, R3 x4, R4 x26,
 # R7 x7 — plus R0's formal half. THIRTY are answered by an executable demand that binds the
@@ -3881,4 +3960,5 @@ handoff:
     - "ASSEMBLY DECISION, NOW SPENT — `interacts(toon_gate->gather_raw)` and `interacts(toon_gate->toon_sidecar)` were BOTH modelled for one undecided write, because each carried a different question: whether the sidecar inherits gather_raw's MAIN-denied read gate, and whether the sink has a key at all. The entry's own last clause is what §7 r1 executed: 'under f5-B neither edge exists'. Both are removed, and a reader who finds the modelling in an older revision should not read two edges as two writes."
     - "ASSEMBLY DECISION — the five `drives(build_agent_core->*)` edges carry `provenance: design` although the edges themselves pre-exist in code. The delta is not the edge but the QUESTION of which build path carries the gate (fork P2), and marking them `code` would have put the whole blast radius outside the gate's delta scope, which is the opposite of what P2 found."
     - "MECHANICAL BLIND SPOT, NOW MOOT RATHER THAN FIXED — and the distinction matters to whoever inherits this checker. §7 r1 removed the gate's write into `gather_raw`, so R2 no longer fires on that boundary at all and the suppressed half has nothing to suppress. THE CHECKER BEHAVIOUR IS UNCHANGED AND WILL DO THE SAME THING ON THE NEXT GRAPH THAT HITS IT. AS WRITTEN: R2 on `gather_raw.identity` computes as ANSWERED, because d27's negative binds the boundary and `check_gate` accepts any demand at the boundary's altitude as an answer. The consequence is that the KEY-COVERAGE half is suppressed and never printed: `interacts(toon_gate->gather_raw)` interpolates NOTHING and therefore covers none of [run_id, lead_id, seq], and `interacts(judge_closed_ticket_tool->gather_raw)` covers no `lead_id` because its template is `ticket_reads/{seq}.json`. Both are real and neither is computed. The addresses were left faithful rather than bent to make the tool speak; this entry is the substitute. Same shape, one altitude up: a fork-conditional write with no key axis is exactly what f5 reading A is."
+    - "A KNOWN LIMIT OF `d81`'s TEST, NAMED BY THE LEAF THAT MADE IT: the demand is driven at the PREDICATE and not at the process outcome. `cE2`'s payload — the one a container-only budget admits and the Rust encoder then aborts on — is not a case in the suite, for the reason the expansion bomb is absent from `d57`'s battery: the refusal arm alone stringifies >130 MB of wire text (measured 121 MB dispatched, 1520 MB peak RSS), so driving it would put the test host's memory at risk rather than produce a test result. What the suite pins is that the budget charges values, at two configured budgets over two payloads with an identical container count; what it does not pin is the abort that follows if it does not. A reader who wants the process-level case has `cE2`'s record and this entry."
     - "PROCESS — the frontier files this artifact derives from are in an EXCLUDED directory (`/workspace/.git/info/exclude:18` lists `.spec-flow/`), so the brief, the demand extraction, the dispositions and the corrected design doc are in no commit. This graph is the only committed record of what they established, which is why its notes carry so much of their prose."
