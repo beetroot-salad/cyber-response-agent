@@ -1,0 +1,119 @@
+{
+  "src": "/tmp/defender-runs/golden-case-019-squid-egress-officews1/gather_raw/l-006/4.json",
+  "rows": 8,
+  "cols": 6,
+  "bytes": 1567,
+  "payload": {
+    "query": "FROM logs-zeek.http-*\n| WHERE @timestamp >= \"2026-07-28T06:36:53Z\" AND @timestamp < \"2026-07-28T07:36:53Z\"\n        AND source.ip == \"172.18.0.6\"\n| STATS requests   = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY url.original, http.request.method, user_agent.original\n| SORT requests DESC\n| LIMIT 20",
+    "columns": [
+      {
+        "name": "requests",
+        "type": "long"
+      },
+      {
+        "name": "first_seen",
+        "type": "date"
+      },
+      {
+        "name": "last_seen",
+        "type": "date"
+      },
+      {
+        "name": "url.original",
+        "type": "keyword"
+      },
+      {
+        "name": "http.request.method",
+        "type": "keyword"
+      },
+      {
+        "name": "user_agent.original",
+        "type": "keyword"
+      }
+    ],
+    "row_count": 8,
+    "values": [
+      [
+        30,
+        "2026-07-28T06:46:45.045Z",
+        "2026-07-28T06:47:19.196Z",
+        "/realms/soc-playground/protocol/openid-connect/token",
+        "POST",
+        "curl/7.81.0"
+      ],
+      [
+        8,
+        "2026-07-28T07:06:02.467Z",
+        "2026-07-28T07:06:53.322Z",
+        "pastebin.com:443",
+        "CONNECT",
+        "curl/7.81.0"
+      ],
+      [
+        8,
+        "2026-07-28T07:06:02.361Z",
+        "2026-07-28T07:06:53.219Z",
+        "raw.githubusercontent.com:443",
+        "CONNECT",
+        "curl/7.81.0"
+      ],
+      [
+        8,
+        "2026-07-28T07:06:02.323Z",
+        "2026-07-28T07:06:53.198Z",
+        "transfer.sh:443",
+        "CONNECT",
+        "curl/7.81.0"
+      ],
+      [
+        8,
+        "2026-07-28T07:06:02.151Z",
+        "2026-07-28T07:06:53.006Z",
+        "ifconfig.me:443",
+        "CONNECT",
+        "curl/7.81.0"
+      ],
+      [
+        8,
+        "2026-07-28T07:06:02.093Z",
+        "2026-07-28T07:06:52.931Z",
+        "example.com:443",
+        "CONNECT",
+        "curl/7.81.0"
+      ],
+      [
+        8,
+        "2026-07-28T07:06:02.689Z",
+        "2026-07-28T07:06:53.572Z",
+        "api.telegram.org:443",
+        "CONNECT",
+        "curl/7.81.0"
+      ],
+      [
+        4,
+        "2026-07-28T07:03:14.492Z",
+        "2026-07-28T07:09:24.661Z",
+        "/",
+        "GET",
+        "curl/7.81.0"
+      ]
+    ]
+  },
+  "questions": [
+    {
+      "kind": "cell_lookup",
+      "q": "In the row where last_seen is '2026-07-28T07:06:53.006Z', what is the value of requests?",
+      "a": 8
+    },
+    {
+      "kind": "arity",
+      "q": "How many rows does this payload contain?",
+      "a": 8
+    },
+    {
+      "kind": "extremum",
+      "q": "Which first_seen has the largest requests?",
+      "a": "2026-07-28T06:46:45.045Z"
+    }
+  ]
+}

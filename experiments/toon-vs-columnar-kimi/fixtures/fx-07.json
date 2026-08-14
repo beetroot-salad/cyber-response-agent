@@ -1,0 +1,74 @@
+{
+  "src": "/tmp/defender-runs/golden-case-006-authorized-keys-db1/gather_raw/l-002/1.json",
+  "rows": 3,
+  "cols": 6,
+  "bytes": 1004,
+  "payload": {
+    "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-26T18:35:57Z\" AND @timestamp < \"2026-07-26T19:35:57Z\"\n        AND host.name == \"db-1\"\n        AND message LIKE \"*sudo:*\"\n| STATS attempts   = COUNT(*),\n        sessions   = COUNT(*) WHERE message LIKE \"*session opened*\",\n        auth_fail  = COUNT(*) WHERE message LIKE \"*authentication failure*\",\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY user.name\n| SORT attempts DESC",
+    "columns": [
+      {
+        "name": "attempts",
+        "type": "long"
+      },
+      {
+        "name": "sessions",
+        "type": "long"
+      },
+      {
+        "name": "auth_fail",
+        "type": "long"
+      },
+      {
+        "name": "first_seen",
+        "type": "date"
+      },
+      {
+        "name": "last_seen",
+        "type": "date"
+      },
+      {
+        "name": "user.name",
+        "type": "keyword"
+      }
+    ],
+    "row_count": 3,
+    "values": [
+      [
+        3,
+        0,
+        0,
+        "2026-07-26T18:57:35.000Z",
+        "2026-07-26T18:57:36.000Z",
+        "postgres"
+      ],
+      [
+        3,
+        3,
+        0,
+        "2026-07-26T18:57:35.000Z",
+        "2026-07-26T18:57:35.000Z",
+        ""
+      ],
+      [
+        3,
+        0,
+        0,
+        "2026-07-26T18:57:35.000Z",
+        "2026-07-26T18:57:35.000Z",
+        null
+      ]
+    ]
+  },
+  "questions": [
+    {
+      "kind": "cell_lookup",
+      "q": "In the row where user.name is '', what is the value of last_seen?",
+      "a": "2026-07-26T18:57:35.000Z"
+    },
+    {
+      "kind": "arity",
+      "q": "How many rows does this payload contain?",
+      "a": 3
+    }
+  ]
+}

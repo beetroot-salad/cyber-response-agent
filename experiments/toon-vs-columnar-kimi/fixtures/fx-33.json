@@ -1,0 +1,128 @@
+{
+  "src": "/tmp/defender-runs/golden-case-007-lotl-web1/gather_raw/l-001/10.json",
+  "rows": 18,
+  "cols": 3,
+  "bytes": 1011,
+  "payload": {
+    "query": "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-07-25T00:00:00Z\" AND @timestamp < \"2026-07-26T00:00:00Z\"\n| STATS events = COUNT(*)\n        BY falco.output_fields.container.id, falco.output_fields.container.name\n| SORT events DESC\n| LIMIT 20",
+    "columns": [
+      {
+        "name": "events",
+        "type": "long"
+      },
+      {
+        "name": "falco.output_fields.container.id",
+        "type": "keyword"
+      },
+      {
+        "name": "falco.output_fields.container.name",
+        "type": "keyword"
+      }
+    ],
+    "row_count": 18,
+    "values": [
+      [
+        4082,
+        "host",
+        "host"
+      ],
+      [
+        994,
+        "a36492b5172b",
+        "<NA>"
+      ],
+      [
+        961,
+        "ed96a85a7480",
+        "<NA>"
+      ],
+      [
+        942,
+        "ffbff1299702",
+        "<NA>"
+      ],
+      [
+        715,
+        "d1daf6f3b7c6",
+        "<NA>"
+      ],
+      [
+        706,
+        "1df4bcd65ee4",
+        "<NA>"
+      ],
+      [
+        646,
+        "d8fb0192a17f",
+        "<NA>"
+      ],
+      [
+        599,
+        "922f03f16a11",
+        "<NA>"
+      ],
+      [
+        556,
+        "2c1e2ec93d17",
+        "<NA>"
+      ],
+      [
+        552,
+        "58ffe39dd54f",
+        "<NA>"
+      ],
+      [
+        345,
+        "e1dc89faaa8b",
+        "<NA>"
+      ],
+      [
+        269,
+        "c58bf05facac",
+        "<NA>"
+      ],
+      [
+        240,
+        "45388dd0bf3a",
+        "<NA>"
+      ],
+      [
+        151,
+        "7e76d1cea7c4",
+        "<NA>"
+      ],
+      [
+        26,
+        "766d44ae82cf",
+        "<NA>"
+      ],
+      [
+        20,
+        "4b35545773e1",
+        "<NA>"
+      ],
+      [
+        12,
+        "698231edcfaf",
+        "<NA>"
+      ],
+      [
+        2,
+        null,
+        null
+      ]
+    ]
+  },
+  "questions": [
+    {
+      "kind": "cell_lookup",
+      "q": "In the row where falco.output_fields.container.id is '2c1e2ec93d17', what is the value of events?",
+      "a": 556
+    },
+    {
+      "kind": "arity",
+      "q": "How many rows does this payload contain?",
+      "a": 18
+    }
+  ]
+}

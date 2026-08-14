@@ -1,0 +1,100 @@
+{
+  "src": "/tmp/defender-runs/golden-case-016-nginx-scan-web1/gather_raw/l-002/1.json",
+  "rows": 7,
+  "cols": 5,
+  "bytes": 1152,
+  "payload": {
+    "query": "FROM logs-nginx.access-*\n| WHERE @timestamp >= \"2026-07-21T06:17:32Z\" AND @timestamp < \"2026-07-28T06:17:32Z\"\n        AND host.name == \"web-1\"\n| STATS requests = COUNT(*),\n        distinct_paths = COUNT_DISTINCT(url.path),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY source.ip\n| SORT requests DESC",
+    "columns": [
+      {
+        "name": "requests",
+        "type": "long"
+      },
+      {
+        "name": "distinct_paths",
+        "type": "long"
+      },
+      {
+        "name": "first_seen",
+        "type": "date"
+      },
+      {
+        "name": "last_seen",
+        "type": "date"
+      },
+      {
+        "name": "source.ip",
+        "type": "ip"
+      }
+    ],
+    "row_count": 7,
+    "values": [
+      [
+        2901,
+        2,
+        "2026-07-27T16:34:07.000Z",
+        "2026-07-28T06:17:23.000Z",
+        "127.0.0.1"
+      ],
+      [
+        30,
+        13,
+        "2026-07-27T20:07:33.000Z",
+        "2026-07-27T20:57:28.000Z",
+        "172.18.0.21"
+      ],
+      [
+        21,
+        1,
+        "2026-07-27T16:41:20.000Z",
+        "2026-07-27T17:06:16.000Z",
+        "172.18.0.11"
+      ],
+      [
+        21,
+        1,
+        "2026-07-27T16:44:34.000Z",
+        "2026-07-27T17:59:00.000Z",
+        "172.18.0.16"
+      ],
+      [
+        8,
+        1,
+        "2026-07-27T20:12:04.000Z",
+        "2026-07-27T20:49:23.000Z",
+        "172.18.0.20"
+      ],
+      [
+        5,
+        1,
+        "2026-07-27T16:34:07.000Z",
+        "2026-07-28T06:09:13.000Z",
+        null
+      ],
+      [
+        3,
+        3,
+        "2026-07-28T06:13:22.000Z",
+        "2026-07-28T06:17:31.000Z",
+        "172.18.0.6"
+      ]
+    ]
+  },
+  "questions": [
+    {
+      "kind": "cell_lookup",
+      "q": "In the row where requests is 3, what is the value of source.ip?",
+      "a": "172.18.0.6"
+    },
+    {
+      "kind": "arity",
+      "q": "How many rows does this payload contain?",
+      "a": 7
+    },
+    {
+      "kind": "extremum",
+      "q": "Which last_seen has the largest requests?",
+      "a": "2026-07-28T06:17:23.000Z"
+    }
+  ]
+}

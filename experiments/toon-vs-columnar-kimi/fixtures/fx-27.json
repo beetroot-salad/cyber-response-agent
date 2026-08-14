@@ -1,0 +1,348 @@
+{
+  "src": "/tmp/defender-runs/golden-case-013-crosstier-web1/gather_raw/l-005/1.json",
+  "rows": 29,
+  "cols": 8,
+  "bytes": 4553,
+  "payload": {
+    "query": "FROM logs-*\n| WHERE @timestamp >= \"2026-07-27T00:00:00Z\" AND @timestamp < \"2026-07-27T23:59:59Z\"\n        AND (source.ip == \"172.18.0.16\" OR client.ip == \"172.18.0.16\" OR host.ip == \"172.18.0.16\"\n             OR source.ip == \"172.18.0.9\" OR client.ip == \"172.18.0.9\" OR host.ip == \"172.18.0.9\"\n             OR source.ip == \"172.18.0.24\" OR client.ip == \"172.18.0.24\" OR host.ip == \"172.18.0.24\")\n| STATS events = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY host.name, source.ip, client.ip, host.ip, data_stream.dataset\n| SORT events DESC",
+    "columns": [
+      {
+        "name": "events",
+        "type": "long"
+      },
+      {
+        "name": "first_seen",
+        "type": "date"
+      },
+      {
+        "name": "last_seen",
+        "type": "date"
+      },
+      {
+        "name": "host.name",
+        "type": "keyword"
+      },
+      {
+        "name": "source.ip",
+        "type": "ip"
+      },
+      {
+        "name": "client.ip",
+        "type": "ip"
+      },
+      {
+        "name": "host.ip",
+        "type": "ip"
+      },
+      {
+        "name": "data_stream.dataset",
+        "type": "keyword"
+      }
+    ],
+    "row_count": 29,
+    "values": [
+      [
+        526,
+        "2026-07-27T09:27:09.783Z",
+        "2026-07-27T10:50:15.120Z",
+        "ci-1",
+        null,
+        null,
+        "172.18.0.9",
+        "elastic_agent.metricbeat"
+      ],
+      [
+        525,
+        "2026-07-27T09:27:12.804Z",
+        "2026-07-27T10:50:08.926Z",
+        "office-ws-1",
+        null,
+        null,
+        "172.18.0.16",
+        "elastic_agent.metricbeat"
+      ],
+      [
+        525,
+        "2026-07-27T09:27:10.650Z",
+        "2026-07-27T10:50:06.019Z",
+        "config-mgmt-1",
+        null,
+        null,
+        "172.18.0.24",
+        "elastic_agent.metricbeat"
+      ],
+      [
+        382,
+        "2026-07-27T09:27:10.168Z",
+        "2026-07-27T10:46:23.654Z",
+        "office-ws-1",
+        null,
+        null,
+        "172.18.0.16",
+        "elastic_agent"
+      ],
+      [
+        364,
+        "2026-07-27T09:27:07.043Z",
+        "2026-07-27T10:40:53.394Z",
+        "config-mgmt-1",
+        null,
+        null,
+        "172.18.0.24",
+        "elastic_agent"
+      ],
+      [
+        360,
+        "2026-07-27T09:27:06.174Z",
+        "2026-07-27T10:39:49.319Z",
+        "ci-1",
+        null,
+        null,
+        "172.18.0.9",
+        "elastic_agent"
+      ],
+      [
+        130,
+        "2026-07-27T09:27:09.000Z",
+        "2026-07-27T10:50:07.000Z",
+        "office-ws-1",
+        null,
+        null,
+        "172.18.0.16",
+        "system.auth"
+      ],
+      [
+        96,
+        "2026-07-27T09:56:07.000Z",
+        "2026-07-27T09:59:12.000Z",
+        "db-1",
+        "172.18.0.16",
+        null,
+        "172.18.0.25",
+        "system.auth"
+      ],
+      [
+        63,
+        "2026-07-27T09:27:09.479Z",
+        "2026-07-27T10:48:22.499Z",
+        "ci-1",
+        null,
+        null,
+        "172.18.0.9",
+        "elastic_agent.filebeat"
+      ],
+      [
+        61,
+        "2026-07-27T09:27:06.550Z",
+        "2026-07-27T10:47:53.668Z",
+        "config-mgmt-1",
+        null,
+        null,
+        "172.18.0.24",
+        "system.auth"
+      ],
+      [
+        57,
+        "2026-07-27T09:27:10.110Z",
+        "2026-07-27T10:38:51.863Z",
+        "config-mgmt-1",
+        null,
+        null,
+        "172.18.0.24",
+        "elastic_agent.filebeat"
+      ],
+      [
+        55,
+        "2026-07-27T09:27:12.521Z",
+        "2026-07-27T10:40:14.811Z",
+        "office-ws-1",
+        null,
+        null,
+        "172.18.0.16",
+        "elastic_agent.filebeat"
+      ],
+      [
+        41,
+        "2026-07-27T09:27:05.000Z",
+        "2026-07-27T10:49:55.000Z",
+        "ci-1",
+        null,
+        null,
+        "172.18.0.9",
+        "system.auth"
+      ],
+      [
+        36,
+        "2026-07-27T10:16:45.000Z",
+        "2026-07-27T10:40:30.000Z",
+        "web-1",
+        "172.18.0.16",
+        null,
+        "172.18.0.10",
+        "system.auth"
+      ],
+      [
+        14,
+        "2026-07-27T09:37:51.000Z",
+        "2026-07-27T10:50:07.000Z",
+        "web-2",
+        "172.18.0.16",
+        null,
+        "172.18.0.12",
+        "nginx.access"
+      ],
+      [
+        14,
+        "2026-07-27T09:37:51.000Z",
+        "2026-07-27T10:50:07.000Z",
+        "web-1",
+        "172.18.0.16",
+        null,
+        "172.18.0.10",
+        "nginx.access"
+      ],
+      [
+        9,
+        "2026-07-27T09:27:09.000Z",
+        "2026-07-27T10:17:01.000Z",
+        "office-ws-1",
+        null,
+        null,
+        "172.18.0.16",
+        "system.syslog"
+      ],
+      [
+        9,
+        "2026-07-27T09:27:06.421Z",
+        "2026-07-27T10:17:01.060Z",
+        "config-mgmt-1",
+        null,
+        null,
+        "172.18.0.24",
+        "system.syslog"
+      ],
+      [
+        9,
+        "2026-07-27T09:27:05.000Z",
+        "2026-07-27T10:17:01.000Z",
+        "ci-1",
+        null,
+        null,
+        "172.18.0.9",
+        "system.syslog"
+      ],
+      [
+        8,
+        "2026-07-27T09:33:34.000Z",
+        "2026-07-27T10:44:09.000Z",
+        "db-1",
+        "172.18.0.24",
+        null,
+        "172.18.0.25",
+        "system.auth"
+      ],
+      [
+        8,
+        "2026-07-27T09:33:33.000Z",
+        "2026-07-27T10:44:09.000Z",
+        "web-1",
+        "172.18.0.24",
+        null,
+        "172.18.0.10",
+        "system.auth"
+      ],
+      [
+        8,
+        "2026-07-27T09:33:35.791Z",
+        "2026-07-27T10:44:11.286Z",
+        "office-ws-2",
+        "172.18.0.24",
+        null,
+        "172.18.0.19",
+        "system.auth"
+      ],
+      [
+        8,
+        "2026-07-27T09:33:36.000Z",
+        "2026-07-27T10:44:11.000Z",
+        "canary-1",
+        "172.18.0.24",
+        null,
+        "172.18.0.13",
+        "system.auth"
+      ],
+      [
+        8,
+        "2026-07-27T09:33:35.000Z",
+        "2026-07-27T10:44:10.000Z",
+        "office-ws-1",
+        "172.18.0.24",
+        null,
+        "172.18.0.16",
+        "system.auth"
+      ],
+      [
+        8,
+        "2026-07-27T09:33:34.000Z",
+        "2026-07-27T10:44:09.000Z",
+        "web-2",
+        "172.18.0.24",
+        null,
+        "172.18.0.12",
+        "system.auth"
+      ],
+      [
+        8,
+        "2026-07-27T09:33:34.775Z",
+        "2026-07-27T10:44:10.280Z",
+        "jump-box-1",
+        "172.18.0.24",
+        null,
+        "172.18.0.21",
+        "system.auth"
+      ],
+      [
+        8,
+        "2026-07-27T09:33:35.117Z",
+        "2026-07-27T10:44:10.601Z",
+        "dev-ws-1",
+        "172.18.0.24",
+        null,
+        "172.18.0.22",
+        "system.auth"
+      ],
+      [
+        4,
+        "2026-07-27T09:44:52.000Z",
+        "2026-07-27T10:49:55.000Z",
+        "web-2",
+        "172.18.0.9",
+        null,
+        "172.18.0.12",
+        "system.auth"
+      ],
+      [
+        4,
+        "2026-07-27T09:44:52.000Z",
+        "2026-07-27T10:49:55.000Z",
+        "web-1",
+        "172.18.0.9",
+        null,
+        "172.18.0.10",
+        "system.auth"
+      ]
+    ]
+  },
+  "questions": [
+    {
+      "kind": "cell_lookup",
+      "q": "In the row where last_seen is '2026-07-27T10:50:15.120Z', what is the value of events?",
+      "a": 526
+    },
+    {
+      "kind": "arity",
+      "q": "How many rows does this payload contain?",
+      "a": 29
+    }
+  ]
+}

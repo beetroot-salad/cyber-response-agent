@@ -1,0 +1,82 @@
+{
+  "src": "/tmp/defender-runs/golden-case-005-cross-tier-probe-db1-2/gather_raw/l-005/18.json",
+  "rows": 12,
+  "cols": 2,
+  "bytes": 513,
+  "payload": {
+    "query": "FROM logs-postgresql.log-*\n| STATS BY host.name, host.ip\n| SORT host.name, host.ip",
+    "columns": [
+      {
+        "name": "host.name",
+        "type": "keyword"
+      },
+      {
+        "name": "host.ip",
+        "type": "ip"
+      }
+    ],
+    "row_count": 12,
+    "values": [
+      [
+        "db-1",
+        "172.18.0.2"
+      ],
+      [
+        "db-1",
+        "172.18.0.4"
+      ],
+      [
+        "db-1",
+        "172.18.0.9"
+      ],
+      [
+        "db-1",
+        "172.18.0.10"
+      ],
+      [
+        "db-1",
+        "172.18.0.12"
+      ],
+      [
+        "db-1",
+        "172.18.0.13"
+      ],
+      [
+        "db-1",
+        "172.18.0.15"
+      ],
+      [
+        "db-1",
+        "172.18.0.16"
+      ],
+      [
+        "db-1",
+        "172.18.0.18"
+      ],
+      [
+        "db-1",
+        "172.18.0.21"
+      ],
+      [
+        "db-1",
+        "172.18.0.23"
+      ],
+      [
+        "db-1",
+        "172.18.0.24"
+      ]
+    ]
+  },
+  "questions": [
+    {
+      "kind": "cell_lookup",
+      "q": "In the row where host.ip is '172.18.0.23', what is the value of host.name?",
+      "a": "db-1"
+    },
+    {
+      "kind": "arity",
+      "q": "How many rows does this payload contain?",
+      "a": 12
+    }
+  ]
+}

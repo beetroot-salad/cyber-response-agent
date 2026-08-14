@@ -1,0 +1,71 @@
+{
+  "src": "/tmp/defender-runs/golden-case-005-cross-tier-probe-db1-2/gather_raw/l-007/2.json",
+  "rows": 4,
+  "cols": 4,
+  "bytes": 1089,
+  "payload": {
+    "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-26T08:00:00Z\" AND @timestamp < \"2026-07-26T12:00:00Z\"\n        AND host.name == \"db-1\"\n        AND event.outcome == \"success\"\n        AND process.name == \"sshd\"\n| STATS count = COUNT(*),\n        first_seen = MIN(@timestamp),\n        last_seen = MAX(@timestamp)\n        BY message\n| SORT count DESC\n| LIMIT 20",
+    "columns": [
+      {
+        "name": "count",
+        "type": "long"
+      },
+      {
+        "name": "first_seen",
+        "type": "date"
+      },
+      {
+        "name": "last_seen",
+        "type": "date"
+      },
+      {
+        "name": "message",
+        "type": "text"
+      }
+    ],
+    "row_count": 4,
+    "values": [
+      [
+        16,
+        "2026-07-26T08:25:10.000Z",
+        "2026-07-26T11:04:41.000Z",
+        "pam_unix(sshd:auth): check pass; user unknown"
+      ],
+      [
+        1,
+        "2026-07-26T08:15:17.000Z",
+        "2026-07-26T08:15:17.000Z",
+        "Accepted password for sre.alice from 172.18.0.13 port 55692 ssh2"
+      ],
+      [
+        1,
+        "2026-07-26T08:02:13.000Z",
+        "2026-07-26T08:02:13.000Z",
+        "Accepted password for sre.ben from 172.18.0.13 port 42252 ssh2"
+      ],
+      [
+        1,
+        "2026-07-26T09:47:07.000Z",
+        "2026-07-26T09:47:07.000Z",
+        "Accepted password for svc.config-mgmt from 172.18.0.19 port 44522 ssh2"
+      ]
+    ]
+  },
+  "questions": [
+    {
+      "kind": "cell_lookup",
+      "q": "In the row where message is 'pam_unix(sshd:auth): check pass; user unknown', what is the value of first_seen?",
+      "a": "2026-07-26T08:25:10.000Z"
+    },
+    {
+      "kind": "arity",
+      "q": "How many rows does this payload contain?",
+      "a": 4
+    },
+    {
+      "kind": "extremum",
+      "q": "Which first_seen has the largest count?",
+      "a": "2026-07-26T08:25:10.000Z"
+    }
+  ]
+}

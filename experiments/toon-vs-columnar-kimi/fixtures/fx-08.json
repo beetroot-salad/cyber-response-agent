@@ -1,0 +1,261 @@
+{
+  "src": "/tmp/defender-runs/golden-case-009-bruteforce-baseline-id/gather_raw/l-001/6.json",
+  "rows": 30,
+  "cols": 5,
+  "bytes": 4233,
+  "payload": {
+    "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-07-26T09:20:52Z\" AND @timestamp < \"2026-07-26T09:24:52Z\"\n  AND host.name == \"db-1\"\n  AND process.name == \"sshd\"\n  AND event.outcome == \"failure\"\n  AND message LIKE \"*Failed password*\"\n| KEEP @timestamp, source.ip, source.port, user.name, message\n| SORT @timestamp ASC\n| LIMIT 100",
+    "columns": [
+      {
+        "name": "@timestamp",
+        "type": "date"
+      },
+      {
+        "name": "source.ip",
+        "type": "ip"
+      },
+      {
+        "name": "source.port",
+        "type": "long"
+      },
+      {
+        "name": "user.name",
+        "type": "keyword"
+      },
+      {
+        "name": "message",
+        "type": "text"
+      }
+    ],
+    "row_count": 30,
+    "values": [
+      [
+        "2026-07-26T09:22:54.000Z",
+        "172.18.0.11",
+        35222,
+        "root",
+        "Failed password for root from 172.18.0.11 port 35222 ssh2"
+      ],
+      [
+        "2026-07-26T09:22:56.000Z",
+        "172.18.0.11",
+        35230,
+        "root",
+        "Failed password for root from 172.18.0.11 port 35230 ssh2"
+      ],
+      [
+        "2026-07-26T09:23:00.000Z",
+        "172.18.0.11",
+        38470,
+        "root",
+        "Failed password for root from 172.18.0.11 port 38470 ssh2"
+      ],
+      [
+        "2026-07-26T09:23:02.000Z",
+        "172.18.0.11",
+        38480,
+        "root",
+        "Failed password for root from 172.18.0.11 port 38480 ssh2"
+      ],
+      [
+        "2026-07-26T09:23:05.000Z",
+        "172.18.0.11",
+        38494,
+        "root",
+        "Failed password for root from 172.18.0.11 port 38494 ssh2"
+      ],
+      [
+        "2026-07-26T09:23:08.000Z",
+        "172.18.0.11",
+        48486,
+        "root",
+        "Failed password for root from 172.18.0.11 port 48486 ssh2"
+      ],
+      [
+        "2026-07-26T09:23:17.000Z",
+        "172.18.0.11",
+        39804,
+        "root",
+        "Failed password for root from 172.18.0.11 port 39804 ssh2"
+      ],
+      [
+        "2026-07-26T09:23:21.000Z",
+        "172.18.0.11",
+        39816,
+        "root",
+        "Failed password for root from 172.18.0.11 port 39816 ssh2"
+      ],
+      [
+        "2026-07-26T09:23:23.000Z",
+        "172.18.0.11",
+        39828,
+        "root",
+        "Failed password for root from 172.18.0.11 port 39828 ssh2"
+      ],
+      [
+        "2026-07-26T09:23:25.000Z",
+        "172.18.0.11",
+        39842,
+        "root",
+        "Failed password for root from 172.18.0.11 port 39842 ssh2"
+      ],
+      [
+        "2026-07-26T09:23:29.000Z",
+        "172.18.0.11",
+        58382,
+        "root",
+        "Failed password for root from 172.18.0.11 port 58382 ssh2"
+      ],
+      [
+        "2026-07-26T09:23:34.000Z",
+        "172.18.0.11",
+        58398,
+        "root",
+        "Failed password for root from 172.18.0.11 port 58398 ssh2"
+      ],
+      [
+        "2026-07-26T09:23:44.000Z",
+        "172.18.0.11",
+        37062,
+        "root",
+        "Failed password for root from 172.18.0.11 port 37062 ssh2"
+      ],
+      [
+        "2026-07-26T09:23:47.000Z",
+        "172.18.0.11",
+        59062,
+        "root",
+        "Failed password for root from 172.18.0.11 port 59062 ssh2"
+      ],
+      [
+        "2026-07-26T09:23:49.000Z",
+        "172.18.0.11",
+        59074,
+        "root",
+        "Failed password for root from 172.18.0.11 port 59074 ssh2"
+      ],
+      [
+        "2026-07-26T09:23:52.000Z",
+        "172.18.0.11",
+        59082,
+        "root",
+        "Failed password for root from 172.18.0.11 port 59082 ssh2"
+      ],
+      [
+        "2026-07-26T09:23:56.000Z",
+        "172.18.0.11",
+        59098,
+        "root",
+        "Failed password for root from 172.18.0.11 port 59098 ssh2"
+      ],
+      [
+        "2026-07-26T09:23:58.000Z",
+        "172.18.0.11",
+        43716,
+        "root",
+        "Failed password for root from 172.18.0.11 port 43716 ssh2"
+      ],
+      [
+        "2026-07-26T09:24:08.000Z",
+        "172.18.0.11",
+        33624,
+        "root",
+        "Failed password for root from 172.18.0.11 port 33624 ssh2"
+      ],
+      [
+        "2026-07-26T09:24:10.000Z",
+        "172.18.0.11",
+        33640,
+        "root",
+        "Failed password for root from 172.18.0.11 port 33640 ssh2"
+      ],
+      [
+        "2026-07-26T09:24:13.000Z",
+        "172.18.0.11",
+        33646,
+        "root",
+        "Failed password for root from 172.18.0.11 port 33646 ssh2"
+      ],
+      [
+        "2026-07-26T09:24:16.000Z",
+        "172.18.0.11",
+        33660,
+        "root",
+        "Failed password for root from 172.18.0.11 port 33660 ssh2"
+      ],
+      [
+        "2026-07-26T09:24:19.000Z",
+        "172.18.0.11",
+        51642,
+        "root",
+        "Failed password for root from 172.18.0.11 port 51642 ssh2"
+      ],
+      [
+        "2026-07-26T09:24:22.000Z",
+        "172.18.0.11",
+        51644,
+        "root",
+        "Failed password for root from 172.18.0.11 port 51644 ssh2"
+      ],
+      [
+        "2026-07-26T09:24:31.000Z",
+        "172.18.0.11",
+        57924,
+        "root",
+        "Failed password for root from 172.18.0.11 port 57924 ssh2"
+      ],
+      [
+        "2026-07-26T09:24:34.000Z",
+        "172.18.0.11",
+        57938,
+        "root",
+        "Failed password for root from 172.18.0.11 port 57938 ssh2"
+      ],
+      [
+        "2026-07-26T09:24:36.000Z",
+        "172.18.0.11",
+        44154,
+        "root",
+        "Failed password for root from 172.18.0.11 port 44154 ssh2"
+      ],
+      [
+        "2026-07-26T09:24:40.000Z",
+        "172.18.0.11",
+        44170,
+        "root",
+        "Failed password for root from 172.18.0.11 port 44170 ssh2"
+      ],
+      [
+        "2026-07-26T09:24:42.000Z",
+        "172.18.0.11",
+        44174,
+        "root",
+        "Failed password for root from 172.18.0.11 port 44174 ssh2"
+      ],
+      [
+        "2026-07-26T09:24:45.000Z",
+        "172.18.0.11",
+        44182,
+        "root",
+        "Failed password for root from 172.18.0.11 port 44182 ssh2"
+      ]
+    ]
+  },
+  "questions": [
+    {
+      "kind": "cell_lookup",
+      "q": "In the row where source.port is 59074, what is the value of source.ip?",
+      "a": "172.18.0.11"
+    },
+    {
+      "kind": "arity",
+      "q": "How many rows does this payload contain?",
+      "a": 30
+    },
+    {
+      "kind": "extremum",
+      "q": "Which @timestamp has the largest source.port?",
+      "a": "2026-07-26T09:23:56.000Z"
+    }
+  ]
+}

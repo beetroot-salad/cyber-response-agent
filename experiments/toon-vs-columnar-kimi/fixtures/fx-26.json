@@ -1,0 +1,137 @@
+{
+  "src": "/tmp/defender-runs/golden-case-010-crosstier-web2-2/gather_raw/l-004/14.json",
+  "rows": 13,
+  "cols": 5,
+  "bytes": 1758,
+  "payload": {
+    "query": "FROM logs-system.auth-*\n| WHERE @timestamp >= \"2026-06-26T20:06:42Z\" AND @timestamp < \"2026-07-26T20:06:42Z\"\n        AND host.name == \"web-2\"\n        AND event.outcome IS NOT NULL\n| STATS accepted = COUNT(*) WHERE event.outcome == \"success\",\n        failed   = COUNT(*) WHERE event.outcome == \"failure\",\n        first_seen = MIN(@timestamp),\n        last_seen  = MAX(@timestamp)\n        BY source.ip\n| SORT accepted DESC, failed DESC\n| LIMIT 20",
+    "columns": [
+      {
+        "name": "accepted",
+        "type": "long"
+      },
+      {
+        "name": "failed",
+        "type": "long"
+      },
+      {
+        "name": "first_seen",
+        "type": "date"
+      },
+      {
+        "name": "last_seen",
+        "type": "date"
+      },
+      {
+        "name": "source.ip",
+        "type": "ip"
+      }
+    ],
+    "row_count": 13,
+    "values": [
+      [
+        13992,
+        0,
+        "2026-06-27T00:16:33.000Z",
+        "2026-07-26T20:06:40.000Z",
+        null
+      ],
+      [
+        3227,
+        0,
+        "2026-07-02T08:05:42.000Z",
+        "2026-07-13T07:56:08.000Z",
+        "172.18.0.14"
+      ],
+      [
+        2637,
+        0,
+        "2026-06-26T22:53:38.000Z",
+        "2026-07-13T08:39:03.000Z",
+        "172.18.0.20"
+      ],
+      [
+        1428,
+        0,
+        "2026-07-02T09:54:17.000Z",
+        "2026-07-13T11:00:30.000Z",
+        "172.18.0.17"
+      ],
+      [
+        1000,
+        0,
+        "2026-06-27T00:16:33.000Z",
+        "2026-07-01T22:28:29.000Z",
+        "172.18.0.21"
+      ],
+      [
+        960,
+        0,
+        "2026-06-27T01:29:21.000Z",
+        "2026-07-02T02:41:03.000Z",
+        "172.18.0.9"
+      ],
+      [
+        150,
+        2688,
+        "2026-06-26T20:17:53.000Z",
+        "2026-07-17T15:50:06.000Z",
+        "172.18.0.10"
+      ],
+      [
+        108,
+        0,
+        "2026-07-17T12:54:53.000Z",
+        "2026-07-17T15:51:27.000Z",
+        "172.18.0.16"
+      ],
+      [
+        54,
+        0,
+        "2026-07-17T13:25:12.000Z",
+        "2026-07-17T15:49:14.000Z",
+        "172.18.0.3"
+      ],
+      [
+        4,
+        0,
+        "2026-07-26T09:47:07.000Z",
+        "2026-07-26T11:16:39.000Z",
+        "172.18.0.19"
+      ],
+      [
+        0,
+        5567,
+        "2026-07-03T21:16:32.000Z",
+        "2026-07-26T20:06:40.000Z",
+        "172.18.0.6"
+      ],
+      [
+        0,
+        4620,
+        "2026-07-02T15:06:07.000Z",
+        "2026-07-13T08:37:39.000Z",
+        "172.18.0.8"
+      ],
+      [
+        0,
+        3120,
+        "2026-06-27T00:44:05.000Z",
+        "2026-07-26T11:29:27.000Z",
+        "172.18.0.11"
+      ]
+    ]
+  },
+  "questions": [
+    {
+      "kind": "cell_lookup",
+      "q": "In the row where source.ip is '172.18.0.8', what is the value of accepted?",
+      "a": 0
+    },
+    {
+      "kind": "arity",
+      "q": "How many rows does this payload contain?",
+      "a": 13
+    }
+  ]
+}
