@@ -23,6 +23,7 @@
       "defender/runtime",
       "defender/learning",
       "defender/evals",
+      "defender/scripts",
       "defender/run.py"
     ],
     "entrypointStems": [

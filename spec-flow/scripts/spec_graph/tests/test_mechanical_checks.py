@@ -20,7 +20,7 @@ from conftest import run_script  # re-exported: the fixes suites import it from 
 # check_gate
 # ---------------------------------------------------------------------------
 
-# All seven rules evaluated `fired: true` — the common case.
+# Every rule evaluated `fired: true` — the common case.
 _EVALUATED_ALL = """\
 gate:
   evaluated:
@@ -32,6 +32,7 @@ gate:
     - {rule: R5, fired: true}
     - {rule: R6, fired: true}
     - {rule: R7, fired: true}
+    - {rule: R8, fired: true}
 """
 
 # Same, but R4 recorded `fired: false` — the slot-vs-evaluated conflict case.
@@ -46,6 +47,7 @@ gate:
     - {rule: R5, fired: true}
     - {rule: R6, fired: true}
     - {rule: R7, fired: true}
+    - {rule: R8, fired: true}
 """
 
 # One R4 trigger: a design-provenance domain boundary with a read edge and one

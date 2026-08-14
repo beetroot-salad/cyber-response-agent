@@ -11,7 +11,7 @@ vocabulary is either a typo (fix it) or a vocabulary the schema must deliberatel
 Checked: top-level and structure keys; demand kind/form vocabularies and the
 form-conditional fields (a `form: test` demand is a pointer — `discharged_by`, no
 `outcome`; clause/waiver carry `outcome.nl`); actor/edge/facet vocabularies; unique
-demand and claim ids; gate entries referencing rules R0–R6 and demands that exist.
+demand and claim ids; gate entries referencing rules R0–R8 and demands that exist.
 NOT checked here: address resolution and rule triggers (check_gate), prose⊄binds
 (check_binds), claim instruments (check_claims), test existence (check_binds).
 
@@ -340,7 +340,7 @@ def _rule_handoff(lint: _Lint) -> None:
 #: The check, in order. Order is contract, not taste: findings print in the order they
 #: were appended, and `_rule_demands` must precede the two gate rules that resolve a
 #: pointer against the demand ids it collects. Named `_LINT_RULES`, not `_RULES` —
-#: `_RULES` above is the R0–R6 gate vocabulary `vocab()` validates against.
+#: `_RULES` above is the R0–R8 gate vocabulary `vocab()` validates against.
 _LINT_RULES = (
     _rule_top_level,
     _rule_demands,
