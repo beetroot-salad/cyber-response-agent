@@ -31,7 +31,9 @@ cases/<case-id>/
   manifest.yaml            # provenance, split, unit, lead_source, recorded projections
   oracle_visible/          # ← the ONLY thing a projection may read
     story.md               #   ground-truth story (the oracle's story input)
-    leads.jsonl            #   per lead: {lead_id, goal, what_to_summarize, queries[{query_id, params}]}
+    leads.jsonl            #   per lead: {lead_id, goal, what_to_summarize, queries[{query_id, params, seq}]}
+                           #   `seq` is the queries table's own seq — the number the
+                           #   hidden/ payload and its control are both named for
     samples/<lead>.txt     #   the redacted sample skeleton the production oracle sees
   hidden/                  # ← the scoring target; never an oracle input. OBSERVED CASES ONLY
     observed/<lead>/<seq>.json   #   full observed query payloads (ground truth)

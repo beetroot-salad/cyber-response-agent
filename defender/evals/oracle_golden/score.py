@@ -35,8 +35,9 @@ invalidates the cache by construction.
 **Derived cases (`mutation`, `negative-control`) never reach the judge.** They reuse
 their base's envelopes and change only the story, so no telemetry was ever captured for
 the story they tell — there is no `y`. They are scored by the mechanical checks alone
-and contribute no judged rows; `report.py` reports their mechanical results separately
-rather than folding a definitional truth into a measured rate.
+and contribute no judged rows — chiefly `mechanical.expectation_failures`, the
+manifest's `expectation:` clauses, which is the whole of what grades them. `report.py`
+reports those separately rather than folding a definitional truth into a measured rate.
 
 Because the judge runs here, THIS IS NOT DETERMINISTIC, and the judge is part of the
 tag: `<oracle-tag>__judge-<model>-<effort>_<prompts-sha8>`.

@@ -290,3 +290,193 @@ def test_a_story_that_leaks_the_evaluation_frame_is_caught_case_insensitively(tm
     _case(tmp_path, "case-clean", story="An operator ran a routine backup.")
     assert not any("leaks the evaluation frame" in p
                    for p in validate_cases.check_case(tmp_path / "case-clean", {}))
+
+
+# ------------------------------------------------------------------- controls
+
+#: A lead query with no `@timestamp` bound of its own, written on ONE line — ES|QL
+#: separates commands with `|`, not with newlines, and the defender model writes both
+#: shapes. This is the shape `add_esql_window` used to splice wrongly (#882 F-20).
+_UNBOUNDED = "FROM logs-zeek.ssh-* | LIMIT 1"
+_WINDOW = ["2026-07-12T19:36:22.000Z", "2026-07-12T20:36:22.000Z"]
+
+
+def _controlled_case(root, name, *, lead_query, control_query, window=None,
+                     seq=0, record_seq=None):
+    """A case whose one lead carries `lead_query`, controlled by `control_query`."""
+    d = _case(root, name)
+    (d / "oracle_visible" / "leads.jsonl").write_text(
+        json.dumps({"lead_id": "l-001", "queries": [
+            {"query_id": "elastic.ad-hoc", "params": {"query": lead_query}, "seq": seq}]})
+        + "\n", encoding="utf-8")
+    cd = d / "hidden" / "controls" / "l-001"
+    cd.mkdir(parents=True)
+    (cd / f"{seq}.json").write_text(json.dumps({
+        "lead_id": "l-001",
+        "seq": seq if record_seq is None else record_seq,
+        "controls": [{"name": "C-14d", "window": window or _WINDOW,
+                      "query": control_query, "live": True,
+                      "payload": {"row_count": 0, "columns": [], "values": []}}],
+    }), encoding="utf-8")
+    return d
+
+
+def test_an_added_window_behind_another_command_is_a_problem(tmp_path):
+    """#882 F-20, against the artifact. The clause belongs immediately after the source
+    command, where it narrows the row set and CANNOT widen it — that property is the
+    only thing that makes an added window a control. Behind a `LIMIT`, one arbitrary row
+    is taken first and then filtered by time, so the control reads zero rows.
+
+    Zero rows is exactly what nothing downstream can interpret: `judge._control` drops
+    the query string, so the label pass sees a live window that observed nothing and
+    grades every observed row `present` against it.
+    """
+    d = _controlled_case(
+        tmp_path, "case-x", lead_query=_UNBOUNDED,
+        control_query=f'FROM logs-zeek.ssh-* | LIMIT 1 | WHERE @timestamp >= "{_WINDOW[0]}" '
+                      f'AND @timestamp < "{_WINDOW[1]}"')
+    problems = validate_cases.check_controls(d)
+    assert any("landed at command 2" in p for p in problems), problems
+    assert any("LIMIT 1" in p for p in problems), "the commands that ran first must be named"
+
+
+def test_a_correctly_placed_added_window_is_not_a_problem(tmp_path):
+    """The same lead, spliced the way `add_esql_window` splices it now. Pinned beside the
+    failure so the check is known to discriminate rather than to flag every added
+    window."""
+    d = _controlled_case(
+        tmp_path, "case-x", lead_query=_UNBOUNDED,
+        control_query=f'FROM logs-zeek.ssh-*\n| WHERE @timestamp >= "{_WINDOW[0]}" '
+                      f'AND @timestamp < "{_WINDOW[1]}"\n| LIMIT 1')
+    assert validate_cases.check_controls(d) == []
+
+
+def test_a_bound_on_the_wrong_end_of_the_window_is_a_problem(tmp_path):
+    """#882 F-32, against the artifact. A shifted pair bound by POSITION rather than by
+    each match's operator crosses an upper-bound-first query into `< start AND >= end` —
+    unsatisfiable. ES|QL runs it happily and returns nothing, and `window_is_live` probes
+    the window separately, so the record stores `live: true` with zero rows: the same
+    empty baseline the misplaced splice produces."""
+    d = _controlled_case(
+        tmp_path, "case-x",
+        lead_query=('FROM logs-system.auth-* | WHERE @timestamp < "2026-07-26T20:30:00.000Z" '
+                    'AND @timestamp >= "2026-07-26T20:00:00.000Z"'),
+        control_query=(f'FROM logs-system.auth-* | WHERE @timestamp < "{_WINDOW[0]}" '
+                       f'AND @timestamp >= "{_WINDOW[1]}"'))
+    problems = validate_cases.check_controls(d)
+    assert any("the `<` bound is" in p for p in problems), problems
+    assert any("the `>=` bound is" in p for p in problems), problems
+
+
+def test_a_correctly_shifted_upper_first_query_is_not_a_problem(tmp_path):
+    """The same upper-first lead, shifted the way `shift_esql_window` shifts it now:
+    `>=`/`>` takes the window's start and `<=`/`<` its end, wherever they were written.
+    Source order is preserved — only the literals move."""
+    d = _controlled_case(
+        tmp_path, "case-x",
+        lead_query=('FROM logs-system.auth-* | WHERE @timestamp < "2026-07-26T20:30:00.000Z" '
+                    'AND @timestamp >= "2026-07-26T20:00:00.000Z"'),
+        control_query=(f'FROM logs-system.auth-* | WHERE @timestamp < "{_WINDOW[1]}" '
+                       f'AND @timestamp >= "{_WINDOW[0]}"'))
+    assert validate_cases.check_controls(d) == []
+
+
+def test_a_control_that_pairs_with_no_query_is_a_problem(tmp_path):
+    """#882 F-21's failure mode, against the artifact. Control records and observed
+    payloads are joined on `seq`; a control keyed to a seq the lead set does not have is
+    a baseline for nothing, and `judge._control` drops the query string, so no reader
+    downstream can notice the mispairing."""
+    d = _controlled_case(tmp_path, "case-x", lead_query=_UNBOUNDED, seq=0, record_seq=3,
+                         control_query=f'FROM logs-zeek.ssh-*\n| WHERE @timestamp >= '
+                                       f'"{_WINDOW[0]}" AND @timestamp < "{_WINDOW[1]}"\n'
+                                       f'| LIMIT 1')
+    assert any("not a query in leads.jsonl" in p for p in validate_cases.check_controls(d))
+
+
+def test_a_case_with_no_controls_is_not_a_problem(tmp_path):
+    """A lookup lead has no `@timestamp` bound to move, so it has no baseline by
+    construction — the coverage report's job, not a defect."""
+    assert validate_cases.check_controls(_case(tmp_path, "case-x")) == []
+
+
+def test_a_window_that_landed_last_is_caught_behind_a_non_bound_timestamp_predicate(tmp_path):
+    """The placement check must key on which command CARRIES THE BOUNDS, not on which one
+    reads `WHERE @timestamp`. A lead is free to open with `WHERE @timestamp IS NOT NULL`,
+    which bounds nothing; a prefix test sees that at command 1, calls the placement good,
+    and passes a record whose window really did land after the `LIMIT` — the exact
+    artifact this check exists to refuse."""
+    d = _controlled_case(
+        tmp_path, "case-x",
+        lead_query="FROM logs-* | WHERE @timestamp IS NOT NULL | LIMIT 1",
+        control_query=f'FROM logs-* | WHERE @timestamp IS NOT NULL | LIMIT 1\n'
+                      f'| WHERE @timestamp >= "{_WINDOW[0]}" AND @timestamp < "{_WINDOW[1]}"')
+    assert any("landed at command 3" in p for p in validate_cases.check_controls(d))
+
+
+def test_a_control_record_under_another_leads_directory_is_a_problem(tmp_path):
+    """`judge.load_lead_inputs` reads `hidden/controls/<lead_id>/` — it joins by the
+    DIRECTORY and never looks at the record's own `lead_id`. A record whose field says
+    otherwise baselines the lead it is filed under, whatever it claims."""
+    d = _controlled_case(tmp_path, "case-x", lead_query=_UNBOUNDED,
+                         control_query=f'FROM logs-zeek.ssh-*\n| WHERE @timestamp >= '
+                                       f'"{_WINDOW[0]}" AND @timestamp < "{_WINDOW[1]}"\n'
+                                       f'| LIMIT 1')
+    (d / "hidden" / "controls" / "l-001").rename(d / "hidden" / "controls" / "l-777")
+    assert any("sits under l-777/" in p for p in validate_cases.check_controls(d))
+
+
+def test_a_control_record_that_is_not_readable_is_reported_not_raised(tmp_path):
+    """A linter over artifacts must survive the artifact it exists to catch: a traceback
+    here takes every LATER case's findings out of the sweep with it."""
+    d = _controlled_case(tmp_path, "case-x", lead_query=_UNBOUNDED,
+                         control_query=f'FROM logs-zeek.ssh-*\n| WHERE @timestamp >= '
+                                       f'"{_WINDOW[0]}" AND @timestamp < "{_WINDOW[1]}"\n'
+                                       f'| LIMIT 1')
+    (d / "hidden" / "controls" / "l-001" / "0.json").write_text("{ not json", encoding="utf-8")
+    assert any("not readable JSON" in p for p in validate_cases.check_controls(d))
+
+
+def test_a_window_literal_the_record_cannot_state_is_reported_not_raised(tmp_path):
+    d = _controlled_case(tmp_path, "case-x", lead_query=_UNBOUNDED,
+                         window=["never", _WINDOW[1]],
+                         control_query=f'FROM logs-zeek.ssh-*\n| WHERE @timestamp >= '
+                                       f'"{_WINDOW[0]}" AND @timestamp < "{_WINDOW[1]}"\n'
+                                       f'| LIMIT 1')
+    assert any("not a pair of timestamps" in p for p in validate_cases.check_controls(d))
+
+
+# --------------------------------------------------------------- seq keying
+
+def test_an_observed_payload_no_query_is_keyed_by_is_a_problem(tmp_path):
+    """The half of the join `check_controls` cannot see. `controls.lead_queries` falls
+    back to the LIST POSITION for a `leads.jsonl` with no `seq`, and the control record
+    was written from that same fallback — so the two agree with each other and disagree
+    with the payloads on disk. Only the payload filenames carry the table's own seq, and
+    since #841 split the `∅.` sentinels out of `JoinedLead.queries` one refusal ahead of
+    a real query is enough to make position trail seq for the rest of the lead."""
+    d = _case(tmp_path, "case-x")
+    (d / "oracle_visible" / "leads.jsonl").write_text(
+        json.dumps({"lead_id": "l-001", "queries": [
+            {"query_id": "elastic.a", "params": {"query": "FROM a"}},
+            {"query_id": "elastic.b", "params": {"query": "FROM b"}}]}) + "\n",
+        encoding="utf-8")
+    obs = d / "hidden" / "observed" / "l-001"
+    # The sentinel took seq 0, so the two real queries' payloads are named 1 and 2 while
+    # the position fallback keys them 0 and 1.
+    (obs / "0.json").unlink()
+    for seq in (1, 2):
+        (obs / f"{seq}.json").write_text("{}", encoding="utf-8")
+    problems = validate_cases.check_seq_keying(d)
+    assert any("carries observed payload(s) [2]" in p for p in problems), problems
+
+
+def test_a_lead_whose_payloads_match_its_own_seqs_is_not_a_problem(tmp_path):
+    """Pinned beside the failure: the check must not fire on a lead that simply recorded
+    fewer payloads than it has queries — a query with no by-ref payload writes no file."""
+    d = _case(tmp_path, "case-x")
+    (d / "oracle_visible" / "leads.jsonl").write_text(
+        json.dumps({"lead_id": "l-001", "queries": [
+            {"query_id": "elastic.a", "params": {"query": "FROM a"}, "seq": 0},
+            {"query_id": "elastic.b", "params": {"query": "FROM b"}, "seq": 4}]}) + "\n",
+        encoding="utf-8")
+    assert validate_cases.check_seq_keying(d) == []

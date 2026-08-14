@@ -232,16 +232,57 @@ def test_a_derived_case_contributes_no_rows_but_is_still_named(tmp_path):
 
 
 def test_the_mechanical_results_survive_into_the_rollup(tmp_path):
-    """`score.py` decides malformed grammar and pre-mutation leaks in code and never
-    calls the judge for them. If the roll-up did not carry them, a mutation case's whole
-    result would vanish with its rows."""
+    """`score.py` decides malformed grammar, pre-mutation leaks and the manifest's
+    `expectation:` clauses in code and never calls the judge for them. If the roll-up did
+    not carry them, a mutation case's whole result would vanish with its rows.
+
+    `expectation_failures` is the load-bearing one and was the one missing: a derived
+    case contributes no judged rows BY CONSTRUCTION, so those clauses are not part of its
+    result, they ARE its result. It carries four of the manifest's five clauses
+    (`empty_leads`, `no_suppression`, `no_noise_marker`, `must_emit`); the fifth,
+    `must_not_emit`, is the one already carried here as `leaked_values`. This fixture set
+    only the two that were folded in, so it stayed green while the roll-up printed a
+    derived case's name and dropped its verdict.
+    """
     _write_case(tmp_path, "mut-a", split="dev", family="f", host_pair="a->b", env="e",
                 rows=[], judged=False,
                 mechanical={"malformed_leads": {"l-2": "prose, not a marker"},
-                            "forbidden_emitted": ["172.18.0.15"]})
+                            "forbidden_emitted": ["172.18.0.15"],
+                            "expectation_failures": [
+                                "l-3: must be empty — the story's activity never touches "
+                                "this envelope, but it emitted 2 fabricated event(s)"]})
     data = REPORT.build_report(REPORT.load_golden_cases(tmp_path), TAG, 0.90)["splits"]["dev"]
     assert data["mechanical"]["malformed_leads"] == 1
     assert data["mechanical"]["leaked_values"] == ["mut-a: 172.18.0.15"]
+    assert data["mechanical"]["expectation_failures"] == [
+        "mut-a: l-3: must be empty — the story's activity never touches this envelope, "
+        "but it emitted 2 fabricated event(s)"], "the case id must survive, as leaks do"
+
+
+def test_a_derived_cases_expectation_failures_are_printed_not_just_counted(tmp_path, capsys):
+    """The roll-up is the artifact a reader treats as the suite's answer. `score.py` still
+    exits 1 per case and still prints `!! expectation — …`, so a caller scoring
+    case-by-case sees the violation; only the aggregate hid it — under sixteen
+    "contributes NO judged rows" lines that named each derived case while stating nothing
+    about whether it passed."""
+    _write_case(tmp_path, "case-a", split="dev", family="f", host_pair="a->b", env="e",
+                rows=[_row("l-1", "elastic", "present", faithful=True)])
+    _write_case(tmp_path, "corrupt-a", split="dev", family="f", host_pair="a->b", env="e",
+                rows=[], judged=False, base_case="case-a",
+                mechanical={"expectation_failures": ["l-3: must not claim suppression"]})
+    REPORT.print_rollup(REPORT.build_report(REPORT.load_golden_cases(tmp_path), TAG, 0.90))
+    out = capsys.readouterr().out
+    assert "corrupt-a: l-3: must not claim suppression" in out, (
+        "the derived case's whole result must appear in the roll-up")
+
+
+def test_the_rollup_reports_clean_expectations_rather_than_staying_silent(tmp_path, capsys):
+    """Same reason `pre-mutation leaks: CLEAN` is printed: a check reported only on
+    failure is indistinguishable from a check that never ran."""
+    _write_case(tmp_path, "case-a", split="dev", family="f", host_pair="a->b", env="e",
+                rows=[_row("l-1", "elastic", "present", faithful=True)])
+    REPORT.print_rollup(REPORT.build_report(REPORT.load_golden_cases(tmp_path), TAG, 0.90))
+    assert "expectation clauses: CLEAN" in capsys.readouterr().out
 
 
 def test_a_pre_judge_score_document_is_refused_rather_than_skipped(tmp_path):

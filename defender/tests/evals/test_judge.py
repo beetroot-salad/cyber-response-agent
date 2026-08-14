@@ -692,3 +692,46 @@ def test_the_verdict_pass_has_a_measured_noise_floor_for_the_current_prompts():
             # The verdicts themselves, not just the tally: a noise floor you cannot
             # attribute to a lead cannot be argued with.
             assert len(row["faithful"]) == audit["repeats"], row["lead"]
+
+
+# --------------------------------------------------------------- the lead projection
+
+def test_a_plumbing_field_in_a_lead_row_never_reaches_a_judge_prompt():
+    """`seq` is the queries-table key that pairs a control with its observed payload
+    (#882). The judge has no use for it, and `label_user_prompt` yaml-dumps the whole
+    `leads.jsonl` row into its `<lead>` block — so without a projection, a case rebuilt
+    with that field shows the label pass a `seq:` line its siblings do not.
+
+    That failure is silent by construction: the prompt text is not in `prompts_sha8`
+    (which hashes the prompt FILES), and `labels/<judge-suffix>.json` is keyed by case
+    and judge suffix, so nothing invalidates a cached measurement taken from the other
+    shape. An allowlist is the point — the next plumbing field must not have to be
+    remembered here.
+    """
+    row = {"lead_id": "l-001", "goal": "g", "what_to_summarize": ["x"],
+           "queries": [{"query_id": "elastic.a", "params": {"query": "FROM a"}, "seq": 3}],
+           "provenance": "harness"}
+    projected = judge.lead_for_model(row)
+
+    assert projected == {"lead_id": "l-001", "goal": "g", "what_to_summarize": ["x"],
+                         "queries": [{"query_id": "elastic.a", "params": {"query": "FROM a"}}]}
+    rendered = judge.label_user_prompt(judge.LeadInputs(
+        case_id="c", lead_id="l-001", lead=projected, sample="", observed=[],
+        baseline=[], environment_notes={}, story=""))
+    assert "seq" not in rendered
+    assert "provenance" not in rendered
+
+
+def test_the_projection_is_a_no_op_on_every_committed_case():
+    """Which is what makes it safe to add: no recorded label is invalidated by it. If a
+    future case carries a field the judge SHOULD see, this fails and the allowlist is
+    where the decision gets made."""
+    for case_dir in sorted(p for p in CASES.iterdir() if p.is_dir()):
+        leads_file = case_dir / "oracle_visible" / "leads.jsonl"
+        if not leads_file.is_file():
+            continue
+        for row in judge.load_case_leads(case_dir):
+            assert judge.lead_for_model(row) == row, (
+                f"{case_dir.name}/{row['lead_id']}: the projection would change this "
+                f"lead's prompt, so every label recorded for it was taken from the "
+                f"other shape")

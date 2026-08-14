@@ -104,6 +104,9 @@ class LeadInputs:
 
     case_id: str
     lead_id: str
+    #: The lead as a MODEL sees it — `lead_for_model`, not the raw `leads.jsonl` row.
+    #: Both prompt builders are its only readers, which is what makes that projection
+    #: safe to take once here rather than at each `_block("lead", ...)`.
     lead: dict
     sample: str
     observed: list[dict]
@@ -198,6 +201,29 @@ def load_case_leads(case_dir: Path) -> list[dict]:
     return [json.loads(line) for line in text.splitlines() if line.strip()]
 
 
+#: The lead fields a judge pass may reason about. An ALLOWLIST, so a field added to
+#: `leads.jsonl` for plumbing cannot reach a model prompt by default — the failure this
+#: exists to prevent is silent, because a prompt that gains a line is a different
+#: measurement taken under an unchanged `prompts_sha8` and an unchanged
+#: `labels/<judge-suffix>.json` cache key, so a rebuilt case would be labelled from a
+#: different input shape than its siblings under one tag and nothing would say so.
+#: `seq` (#882) is exactly such a field: it is the queries-table key that pairs a control
+#: with its observed payload, and the judge has no use for it. Adding this projection is a
+#: no-op on every committed case — all 267 lead rows carry exactly these keys and all 1436
+#: queries exactly these two — so no recorded label is invalidated by it.
+MODEL_LEAD_FIELDS = ("lead_id", "goal", "what_to_summarize", "queries")
+MODEL_QUERY_FIELDS = ("query_id", "params")
+
+
+def lead_for_model(lead: dict) -> dict:
+    """The `leads.jsonl` row projected down to what a judge prompt should carry."""
+    out = {k: lead[k] for k in MODEL_LEAD_FIELDS if k in lead}
+    if "queries" in out:
+        out["queries"] = [{k: q[k] for k in MODEL_QUERY_FIELDS if k in q}
+                          for q in out["queries"]]
+    return out
+
+
 def load_lead_inputs(case_dir: Path, lead_id: str) -> LeadInputs:
     leads = {row["lead_id"]: row for row in load_case_leads(case_dir)}
     if lead_id not in leads:
@@ -224,7 +250,7 @@ def load_lead_inputs(case_dir: Path, lead_id: str) -> LeadInputs:
     return LeadInputs(
         case_id=case_dir.name,
         lead_id=lead_id,
-        lead=leads[lead_id],
+        lead=lead_for_model(leads[lead_id]),
         sample=sample_path.read_text(encoding="utf-8") if sample_path.exists() else "",
         observed=observed,
         baseline=baseline,
