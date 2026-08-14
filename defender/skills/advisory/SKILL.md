@@ -40,6 +40,10 @@ goal: <one-sentence: what the caller wants past cases to tell them>
    defender-invlang advisory --signature <signature_id> --class lead_discrimination --frontier '?hypothesis-one' --frontier '?hypothesis-two' --top-k 5
    ```
 
+   Send it as ONE physical line, however long it gets. Nothing joins
+   lines here, so a `\` continuation continues nothing and the command
+   is refused rather than wrapped.
+
    `--frontier` is repeatable — one flag per hypothesis name, not
    comma-joined. When the dispatch frontier is empty, omit the
    `--frontier` flag entirely (the CLI will fall back to top-K

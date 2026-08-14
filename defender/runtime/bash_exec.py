@@ -91,8 +91,9 @@ class _PipelineBuilder:
             #
             # Same set as the trailing check, and for the same reason: a leading `;` drops
             # NOTHING (`A` then `; B` already means the two commands it runs), so refusing it
-            # would deny a harmless command under a reason — this module's docstring, the
-            # gate's UNTOKENIZABLE_REASON, SKILL.md — that names `|`/`&&`/`||` and not `;`.
+            # would deny a harmless command under the only reason the agent is ever shown for
+            # it — `permission/bash.UNTOKENIZABLE_REASON` — which names `|`/`&&`/`||` and
+            # not `;`.
             raise UntokenizableCommand(
                 f"pipeline/connector token {t!r} has no command to its left"
             )

@@ -206,6 +206,29 @@ class RecordingDocker:
         return self.flag_value("--tmpfs")
 
 
+def reaped_after_create(calls) -> bool:
+    """Whether the container CREATE ASKED FOR was reaped AFTER create — the only form of this
+    assertion that says anything.
+
+    Both start paths open with an UNCONDITIONAL pre-create `docker rm -f <name>` (the
+    stale-same-name sweep in each of `_start_boxed`/`_start_boxed_request`), so on every path
+    through both functions — whether or not the fault arm reaps at all — BOTH of the obvious
+    spellings are already true: `any(c[:3] == [docker, rm, -f] for c in calls)`, and equally
+    `[docker, rm, -f, <the created name>] in calls`, since the pre-create reap names that same
+    container. The first passed against the create-fault arm that provably did NOT reap
+    (#884 F-29), which is how that leak survived a test suite that believed it pinned the reap;
+    naming the container does not rescue it. Only the POSITION discriminates, so position and
+    name are asserted together, here, once — and here rather than in either test module,
+    because BOTH #665's create-fault arms and #771's startup-fault arm need exactly it."""
+    create = next(
+        (i for i, c in enumerate(calls) if len(c) > 1 and c[1] == "run"), None
+    )
+    assert create is not None, "no `docker run` was issued — the fault fired before create"
+    argv = calls[create]
+    name = argv[argv.index("--name") + 1]
+    return ["docker", "rm", "-f", name] in calls[create + 1:]
+
+
 # --------------------------------------------------------------------------- #
 # The future box.py geography seam (O8/M2: callers own the geography, box.py
 # renders + validates the boundary). Referenced lazily so HEAD still collects.

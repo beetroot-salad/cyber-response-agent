@@ -141,11 +141,14 @@ def _without_benign_semicolons(combo: tuple[str, ...]) -> tuple[str, ...]:
 
 
 def _bash_accepts(commands: list[str]) -> list[bool]:
-    """`bash -n <cmd>` for each command, in ONE bash process.
+    """`bash -n <cmd>` for each command, driven from ONE Python subprocess.
 
-    A subprocess per candidate would be several thousand interpreter launches; the loop keeps
-    it to one, and `-n` means bash parses without running anything. `read -d ''` is why the
-    commands are NUL-separated: every other delimiter is a byte a candidate might contain."""
+    The `bash -n -c` in the loop body still forks a bash per candidate — that is the oracle,
+    and it cannot be avoided without moving the parse check away from bash itself. What the
+    loop DOES remove is a `subprocess.run` per candidate: one pipe, one fork/exec from Python,
+    and one wait, several thousand times over. `-n` means bash parses without running anything.
+    `read -d ''` is why the commands are NUL-separated: every other delimiter is a byte a
+    candidate might contain."""
     script = (
         "while IFS= read -r -d '' cmd; do\n"
         "  if bash -n -c \"$cmd\" 2>/dev/null; then printf 'y\\n'; else printf 'n\\n'; fi\n"

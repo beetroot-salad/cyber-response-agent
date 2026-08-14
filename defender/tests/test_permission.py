@@ -362,6 +362,13 @@ _LEXING_FAILURES = [
     # with nothing single to hand on. (Nested quotes like `bash -c 'cat /a | grep 'x''` are
     # NOT this case — shlex concatenates them into one token and the command unwraps fine.)
     ("malformed `bash -c`",         "bash -c 'cat /run/report.md' extra",      "bash -c"),
+    # The other two shapes `unwrap` answers None to. Both used to reach the model as a
+    # CAPABILITY refusal and both now answer the lexing reason, so cause (5) has to name them
+    # rather than the `bash -c` spelling alone — a wrapper with no `-c` at all, and a `timeout`
+    # prefix whose own words are quoted (shlex normalizes them away, so the prefix no longer
+    # matches the raw text and cannot be stripped back off it).
+    ("shell wrapper with no -c",    "bash /run/report.md",                     "bash -c"),
+    ("quoted `timeout` prefix",     "timeout '5' cat /run/report.md",          "timeout"),
 ]
 
 

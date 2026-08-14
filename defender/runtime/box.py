@@ -1,6 +1,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 import subprocess
@@ -401,6 +402,31 @@ def _is_running(docker: DockerFn, name: str) -> bool:
     return proc.returncode == 0 and "running" in (proc.stdout or "")
 
 
+def _reap_on_fault(docker: DockerFn, name: str, *, unless_running: bool = False) -> None:
+    """Reap a box on a path that is ALREADY unwinding a startup fault — best-effort on BOTH
+    halves, which is the whole point of routing every such reap through here.
+
+    `_call` raises `BoxFault` whenever docker cannot be invoked at all (a daemon that died or
+    hung between create and reap is the CORRELATED case — the same sick daemon is often why
+    create failed in the first place), and `_is_running` goes through `_call` too. Unsuppressed,
+    either half replaces the fault its caller is already holding — the create's own stderr, the
+    only account of why this box never started — with a generic "could not invoke docker", and
+    on the arms that reap BEFORE marking it also costs the tree its §7 D2 verdict. That is
+    exactly the rule `scrub._write_verdict` states for the marker written on these same arms
+    ("the marker's own write failure must never REPLACE the signal its caller is holding"), and
+    it holds no less for the cleanup standing beside it.
+
+    `unless_running=True` is for the CREATE-fault arms only: there the container under this
+    name may not be ours at all (a create that failed on a name conflict names another lane's
+    box, still writing its artifacts, and no lane may reap that). The startup-fault arms
+    created their box themselves, so they must reap it whatever state it is in and pass
+    nothing."""
+    with contextlib.suppress(BoxFault):
+        if unless_running and _is_running(docker, name):
+            return
+        _call(docker, ["docker", "rm", "-f", name])
+
+
 def _own_container_ids(
     hostname_path: Path = _HOSTNAME_PATH, mountinfo_path: Path = _MOUNTINFO_PATH,
 ) -> tuple[str, ...]:
@@ -647,23 +673,22 @@ def _start_boxed(
         # C43a records `docker rm -f <missing>` as rc=0 with `Error response from daemon` on
         # stderr, so a caller that read either would misfire on the success path (#884).
         #
-        # The MARKER goes first: §7 D2's verdict is best-effort by construction, but a `_call`
-        # that raises (a daemon that died between create and reap) would otherwise leave the
-        # tree with no verdict at all AND swap this arm's create stderr for "could not invoke
-        # docker" — the marker's own failure replacing the signal, which is the one thing
-        # `_write_verdict` says must not happen.
+        # Both the marker and the reap are BEST-EFFORT, and neither may replace the signal this
+        # arm is about to raise: the create's stderr is the only account of why the box failed.
+        # `write_did_not_run` swallows its own OSError (`scrub._write_verdict`); `_reap_on_fault`
+        # carries the same rule for the docker side, where a daemon that died between create and
+        # reap is the correlated case rather than the exotic one.
         #
-        # Guarded by `_is_running` for the reason the pre-create arm above refuses outright: a
-        # create that failed on a NAME CONFLICT says the container under this name is someone
-        # else's, still writing its artifacts, and no lane may reap that. The `created`
-        # container this arm exists for never started, so the guard never withholds the reap
-        # from the leak it is here to close.
+        # `unless_running` for the reason the pre-create arm above refuses outright: a create
+        # that failed on a NAME CONFLICT says the container under this name is someone else's,
+        # still writing its artifacts, and no lane may reap that. The `created` container this
+        # arm exists for never started, so the guard never withholds the reap from the leak it
+        # is here to close.
         write_did_not_run(
             run_dir, f"box create faulted before the box was startable: "
                      f"{(created.stderr or '').strip()}"
         )
-        if not _is_running(docker, name):
-            _call(docker, ["docker", "rm", "-f", name])
+        _reap_on_fault(docker, name, unless_running=True)
         raise BoxFault(
             f"could not create the box {name}: {(created.stderr or '').strip()}"
         )
@@ -671,7 +696,10 @@ def _start_boxed(
         _plant_sentinel(run_dir, docker, name)
         _probe_alias_ban(docker, name, run_dir, spec.runtime)
     except BaseException as e:
-        _call(docker, ["docker", "rm", "-f", name])
+        # Unconditional (this box IS ours — create succeeded) but best-effort: a reap that
+        # raised here used to take the §7 D2 marker below down with it and replace the startup
+        # fault `e` with "could not invoke docker".
+        _reap_on_fault(docker, name)
         write_did_not_run(
             run_dir, f"box startup faulted before the reap scan could run: {e}"
         )
@@ -748,16 +776,16 @@ def _start_boxed_request(
         # non-zero rc can still leave a `created` container, and this lane's names are no more
         # revisited than that one's — `defender-drain-{uuid4}` per invocation. The run-cycle
         # lane happens to self-heal at its own pre-create reap, being keyed on a reused run id;
-        # that is a property of one caller, not of this arm (#884). Marker-then-guarded-reap
-        # for that lane's reasons too, and the name-conflict guard matters MORE here: this is
-        # the lane whose names are reused, so a create that lost the race to a concurrent
-        # batch of the same run id is exactly the create that must not reap.
+        # that is a property of one caller, not of this arm (#884). Best-effort marker and
+        # best-effort guarded reap for that lane's reasons too, and the name-conflict guard
+        # matters MORE on this function: the run-cycle caller REUSES its name, so a create that
+        # lost the race to a concurrent batch of the same run id is exactly the create that
+        # must not reap.
         _did_not_run_for_request(
             request, f"box create faulted before the box was startable: "
                      f"{(created.stderr or '').strip()}"
         )
-        if not _is_running(docker, request.name):
-            _call(docker, ["docker", "rm", "-f", request.name])
+        _reap_on_fault(docker, request.name, unless_running=True)
         raise BoxFault(
             f"could not create the box {request.name}: {(created.stderr or '').strip()}"
         )
@@ -766,7 +794,10 @@ def _start_boxed_request(
             _check_mount_sentinel(m, docker, request.name)
         _probe_alias_ban(docker, request.name, _probe_cwd_for_request(request), request.spec.runtime)
     except BaseException as e:
-        _call(docker, ["docker", "rm", "-f", request.name])
+        # Unconditional (this box IS ours — create succeeded) but best-effort: a reap that
+        # raised here used to take the markers below down with it and replace the startup
+        # fault `e` with "could not invoke docker".
+        _reap_on_fault(docker, request.name)
         # Both fault arms mark, exactly as the investigation lane's `_start_boxed` does. The
         # host has already planted sentinels into these trees by the time a mount probe or the
         # alias probe fails; without the marker the tree is left with no verdict at all, which

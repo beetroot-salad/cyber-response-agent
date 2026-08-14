@@ -33,6 +33,7 @@ from _box665 import (  # noqa: E402
     ScriptedTransport,
     framed,
     make_run_dir,
+    reaped_after_create,
     start_box_request,
 )
 
@@ -79,31 +80,6 @@ def _populate_mount_sources(mounts, tmp_path: Path) -> None:
             continue
         source.mkdir(parents=True, exist_ok=True)
         (source / "entry.txt").write_text("x", encoding="utf-8")
-
-
-def _reaped_after_create(calls) -> bool:
-    """Whether the container CREATE ASKED FOR was reaped AFTER create — the only form of this
-    assertion that says anything.
-
-    Both start paths open with an UNCONDITIONAL pre-create `docker rm -f <name>` (the
-    stale-same-name sweep in each of `_start_boxed`/`_start_boxed_request`), so on every path
-    through both functions — whether or not the fault arm reaps at all — BOTH of the obvious
-    spellings are already true: `any(c[:3] == [docker, rm, -f] for c in calls)`, and equally
-    `[docker, rm, -f, <the created name>] in calls`, since the pre-create reap names that same
-    container. The first passed against the create-fault arm that provably did NOT reap
-    (#884 F-29), which is how that leak survived a test suite that believed it pinned the reap;
-    naming the container does not rescue it. Only the POSITION discriminates, so position and
-    name are asserted together, here, once."""
-    create = next(
-        (i for i, c in enumerate(calls) if len(c) > 1 and c[1] == "run"), None
-    )
-    assert create is not None, "no `docker run` was issued — the fault fired before create"
-    return ["docker", "rm", "-f", _created_name(calls)] in calls[create + 1:]
-
-
-def _created_name(calls) -> str:
-    argv = next(c for c in calls if len(c) > 1 and c[1] == "run")
-    return argv[argv.index("--name") + 1]
 
 
 def _request(run_dir: Path, *, name="defender-runcycle-abc", env=None, mounts=None, workdir=None):
@@ -353,7 +329,7 @@ def test_partial_multi_mount_sentinel_validation_leaves_box_in_ambiguous_state(t
     rec = RecordingDocker(sentinel=DockerFault(rc=1, stderr="mount 2 read-back failed", cite="po48"))
     with pytest.raises(box_mod.BoxFault):
         start_box_request(_request(run_dir), docker=rec)
-    assert _reaped_after_create(rec.calls), \
+    assert reaped_after_create(rec.calls), \
         "a partially-validated box was not reaped after a sentinel fault"
 
 
@@ -391,7 +367,7 @@ def test_create_fault_that_leaves_a_created_container_is_reaped_investigation_la
     rec = RecordingDocker(create=DockerFault(**_SHIM_FAULT))
     with pytest.raises(box_mod.BoxFault):
         box_mod.start_box(run_dir, DEFENDER, docker=rec)
-    assert _reaped_after_create(rec.calls), \
+    assert reaped_after_create(rec.calls), \
         "a container that may exist in `created` was left behind by the create-fault arm"
 
 
@@ -405,8 +381,46 @@ def test_create_fault_that_leaves_a_created_container_is_reaped_request_lane(tmp
     rec = RecordingDocker(create=DockerFault(**_SHIM_FAULT))
     with pytest.raises(box_mod.BoxFault):
         start_box_request(_request(run_dir), docker=rec)
-    assert _reaped_after_create(rec.calls), \
+    assert reaped_after_create(rec.calls), \
         "a container that may exist in `created` was left behind by the create-fault arm"
+
+
+def _dies_after_create(rec, *subcommands):
+    """A daemon that answers until the create, then cannot be invoked at all — `_call`'s
+    OSError arm, which it translates to `BoxFault`. The correlated case, not an exotic one:
+    the daemon that just failed a create is the one most likely to be gone by the reap."""
+    def docker(argv, **kw):
+        if rec.create_argv is not None and len(argv) > 1 and argv[1] in subcommands:
+            raise OSError("daemon socket gone")
+        return rec(argv, **kw)
+    return docker
+
+
+def test_a_reap_that_cannot_reach_the_daemon_does_not_replace_the_create_fault(tmp_path):
+    """The create-fault arm's reap is best-effort on BOTH halves, `docker inspect` included.
+
+    Unsuppressed, either would raise `BoxFault("could not invoke docker …")` out of an arm that
+    was one line from raising the create's own stderr — the ONLY account of why this box never
+    started — so the cleanup would replace the signal it exists to clean up after. That is the
+    rule `scrub._write_verdict` already states for the marker written on this same arm."""
+    run_dir = make_run_dir(tmp_path)
+    rec = RecordingDocker(create=DockerFault(**_SHIM_FAULT))
+    with pytest.raises(box_mod.BoxFault) as excinfo:
+        box_mod.start_box(run_dir, DEFENDER, docker=_dies_after_create(rec, "inspect", "rm"))
+    assert _SHIM_FAULT["stderr"] in str(excinfo.value), \
+        f"the reap replaced the create fault with {str(excinfo.value)[:90]!r}"
+
+
+def test_a_reap_that_cannot_reach_the_daemon_still_leaves_the_did_not_run_marker(tmp_path):
+    """The same rule on the STARTUP-fault arm, where the reap runs BEFORE the §7 D2 marker: a
+    reap that raised took the verdict down with it, leaving the tree indistinguishable from one
+    nobody has judged yet — which is exactly what `write_did_not_run` exists to prevent."""
+    run_dir = make_run_dir(tmp_path)
+    rec = RecordingDocker(sentinel=DockerFault(rc=1, stderr="read-back failed", cite="po48"))
+    with pytest.raises(box_mod.BoxFault):
+        box_mod.start_box(run_dir, DEFENDER, docker=_dies_after_create(rec, "rm"))
+    assert box_mod.verdict_path(run_dir).is_file(), \
+        "a reap that could not reach the daemon took the §7 D2 verdict down with it"
 
 
 def test_container_exits_between_create_and_sentinel(tmp_path):

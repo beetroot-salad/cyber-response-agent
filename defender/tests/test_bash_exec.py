@@ -273,6 +273,13 @@ def test_dangling_pipe_within_a_line_fails_closed(cmd):
     ("echo a | grep a | wc -l", "1\n"),   # cur_argv is non-empty at the second `|`
     ("echo a ; ; echo b", "a\nb\n"),      # the leading-`;` carve-out drops NOTHING
     ("echo a 2>&1 | wc -l", "1\n"),       # a stderr redirect is not an empty right side
+    # The carve-out's reach after a CONNECTOR, which is where the refusal above stops: a
+    # command CAN start after `&&`, so the `;` in `A && ; B` drops nothing and this runs as
+    # `A && B`. `A && ;` — the same shape with nothing following — is refused one block up,
+    # and the two together are what UNTOKENIZABLE_REASON's cause (4) has to say precisely: a
+    # connector left with no command AT ALL to its right on its own line, not any connector
+    # whose neighbour happens to be a `;`.
+    ("echo a && ; echo b", "a\nb\n"),
 ])
 def test_the_dangling_pipe_guard_leaves_real_pipelines_alone(cmd, out):
     """The positive control for the guard above. Stated separately because the guard is an
