@@ -797,8 +797,11 @@ def test_d1_positive_control_every_template_resolves_a_goal():
 
 
 def test_d24_every_template_id_matches_its_system_dir_and_filename():
-    """Asserted NOWHERE in CI today (validate_scaffold checks `id: {system}.` for one system on
-    the connect path only, established-only, non-recursive). The index keys on `id` and gather
+    """NOT asserted, despite what `checklist.md` claimed until #885, by `validate_scaffold`:
+    `check_templates` reads each template's verb and placeholders and never looks at `id` at
+    all. The one other enforcement is `test_verb_roster_632.py`'s committed-surface census,
+    which walks the catalog by path and additionally fails a template that declares no `id:`
+    — the case `iter_query_templates` drops here with a stderr warning. The index keys on `id` and gather
     tags --query-id {id} against the DISPATCHED system's adapter, so a template whose id says
     elastic.x while it sits in cmdb/ puts an elastic id in cmdb's index, writes a cross-system
     queries-table row, and makes draft_synthesis mint elastic/_draft/x.md from a cmdb query."""

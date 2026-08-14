@@ -333,27 +333,72 @@ def test_query_return_wrap_positive_control(tmp_path):
 
 def test_verbs_registry_declares_surface():
     """verbs_registry_declares_surface — every adapter module exports a VERBS mapping of
-    verb → callable whose ANNOTATED signature declares that verb's params, and
-    `declared_params` (the one reader the tool's validator uses) reads exactly that."""
+    verb → callable dispatchable as `fn(ctx, **params)`, whose model-supplied params are
+    ANNOTATED and keyword-only.
+
+    Read the SIGNATURE, never `declared_params`. Until #885 this test asserted
+    `set(declared_params(fn)) == {p.name for p in sig.parameters.values() if p.kind is
+    KEYWORD_ONLY}` — but `declared_params` IS that comprehension (`verbs.py:83-88`), so
+    both sides were the same filter over the same signature and the assert held for every
+    callable alive, including one with no keyword-only params at all (`set() == set()`).
+    The annotation assert below it then iterated that same empty dict and checked nothing.
+    Adding a positional param to a shipped adapter turned the whole test green. An oracle
+    that stands in for the property while being incapable of failing is worse than none:
+    it reports coverage. The asserts here compare the signature against the CALL SHAPE the
+    tool actually makes (`fn(vctx, **params)`, in `query_tool.register_query_tool`), which
+    is a fact about the tool, not a restatement of the reader. Spelled out inline rather
+    than delegated to `validate_scaffold.check_signatures`: that script is the OTHER gate on
+    the same property, and a test that calls its checker is back to grading the grader."""
     reg = ModuleVerbRegistry(ADAPTERS_DIR, DENY_ALL)
     on_disk = sorted(
         p.name[: -len("_adapter.py")].replace("_", "-") for p in ADAPTERS_DIR.glob("*_adapter.py")
     )
     assert sorted(reg.systems()) == on_disk, "the registry roster is not the adapter roster"
+    positional = (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
 
     for system in reg.systems():
         verbs = reg.verbs(system)
         assert verbs, f"{system} declares no verbs"
         for name, fn in verbs.items():
             assert callable(fn), f"{system}.{name} is not callable"
-            sig = inspect.signature(fn)
-            params = declared_params(fn)
-            kwonly = {
-                p.name for p in sig.parameters.values()
-                if p.kind is inspect.Parameter.KEYWORD_ONLY
-            }
-            assert set(params) == kwonly, f"{system}.{name}: declared params != kw-only params"
-            for p in params.values():
+            sig_params = list(inspect.signature(fn).parameters.values())
+
+            assert sig_params, f"{system}.{name}: takes no parameters at all, not even a ctx"
+            assert sig_params[0].kind in positional, \
+                f"{system}.{name}: takes no leading VerbContext — the tool passes it positionally"
+
+            # The KIND alone does not say it is the ctx: `def get_host(host: str)` also leads
+            # with a positional param, and the tool would bind the VerbContext OBJECT into
+            # `host` — a silently wrong request, not a caught error. Adapters carry
+            # `from __future__ import annotations`, so the annotation arrives as a string.
+            ctx_ann = sig_params[0].annotation
+            assert (ctx_ann is VerbContext
+                    or (isinstance(ctx_ann, str) and ctx_ann.rpartition(".")[2] == "VerbContext")), (
+                f"{system}.{name}: leading param `{sig_params[0].name}` is not annotated "
+                f"VerbContext — nothing distinguishes the carriage from a model param the "
+                f"ctx would overwrite"
+            )
+
+            # The load-bearing one. `declared_params` collects KEYWORD_ONLY parameters ONLY,
+            # so a param declared positionally is invisible to `validate_params`: the model
+            # can never bind it, every call naming it is refused as unknown, and the one shape
+            # that survives (`params={}`) raises TypeError on the missing positional inside
+            # `fn(vctx, **params)`. The verb is unusable in every form.
+            leaked = [p.name for p in sig_params[1:] if p.kind in positional]
+            assert not leaked, (
+                f"{system}.{name}: param(s) {leaked} bind positionally, so the model can never "
+                f"supply them — spell them `*, {leaked[0]}: <type>`"
+            )
+
+            # Same reason `**kwargs` is out: it widens what the FUNCTION accepts without
+            # widening what `declared_params` reports, so the roster the validator names is
+            # not the roster the body reads.
+            var_kw = [p.name for p in sig_params if p.kind is inspect.Parameter.VAR_KEYWORD]
+            assert not var_kw, \
+                f"{system}.{name}: **{var_kw[0]} is not a declared param surface the validator can read"
+
+            model_params = [p for p in sig_params if p.kind is inspect.Parameter.KEYWORD_ONLY]
+            for p in model_params:
                 assert p.annotation is not inspect.Parameter.empty, \
                     f"{system}.{name}.{p.name} carries no annotation — the validator has no type"
 

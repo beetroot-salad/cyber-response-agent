@@ -950,6 +950,62 @@ def _scaffold_cmdb_tree(root: Path, template_body: str) -> Path:
     return root
 
 
+_GET_HOST_SIG = "def get_host(ctx: VerbContext, *, host: str)"
+# Each mutation breaks ONE clause of `fn(ctx, **params)` — the call shape query_tool makes —
+# and names the substring the corresponding FAIL row must carry.
+_UNDISPATCHABLE_VERBS = [
+    ("positional", "def get_host(ctx: VerbContext, host: str)", "positional"),
+    ("no-ctx", "def get_host(host: str)", "VerbContext"),
+    ("var-kw", "def get_host(ctx: VerbContext, *, host: str, **rest)", "**rest"),
+]
+
+
+@pytest.mark.parametrize(("label", "signature", "expected"), _UNDISPATCHABLE_VERBS)
+def test_validate_scaffold_fails_a_verb_that_is_not_dispatchable(tmp_path, label, signature,
+                                                                 expected):
+    """validate_scaffold FAILS an adapter whose verb cannot be dispatched as `fn(ctx, **params)`
+    — the check `checklist.md` advertised from the day `check_registry` was written, which was
+    never actually implemented (#885). A positional model param is unbindable, not merely
+    unidiomatic: `declared_params` reads KEYWORD_ONLY only, so `validate_params` refuses every
+    call naming it and the one shape that survives (`params={}`) raises TypeError inside the
+    tool. Dropping the ctx entirely is worse than a crash — the tool binds the VerbContext
+    OBJECT into `host` and issues a garbage request — and `**kwargs` widens the body's surface
+    past the roster the validator reports.
+
+    Discriminating control: the SAME tree with the signature intact passes, so a FAIL cannot be
+    an incidental scaffold defect, and each case asserts the FAIL row names ITS clause. The
+    template is REPLACED (not removed) with a placeholder-free `list-roles` one in every bad
+    tree, because the placeholder invariant would ALSO fail the `${host}` template once `host`
+    stops being a declared param — a real second symptom, but it would mask which check
+    fired."""
+    def tree(name: str, mutated_signature: str | None) -> Path:
+        root = _scaffold_cmdb_tree(tmp_path / name, "get-host host=${host}")
+        if mutated_signature is not None:
+            adapter = root / "scripts" / "adapters" / "cmdb_adapter.py"
+            src = adapter.read_text(encoding="utf-8")
+            mutated = src.replace(_GET_HOST_SIG, mutated_signature)
+            assert mutated != src, "the get_host signature moved — this mutation no longer applies"
+            adapter.write_text(mutated, encoding="utf-8")
+            _catalog_template(root / "skills" / "gather" / "queries", "cmdb", "cmdb.tmpl",
+                              "query", "list-roles")
+        return root
+
+    good = _run_validate_scaffold("cmdb", defender_dir=tree(f"ok-{label}", None))
+    assert good.returncode == 0, (
+        "the control tree (get_host dispatchable) did not pass — the FAIL below cannot be "
+        f"attributed to the signature check\nstdout:\n{good.stdout}"
+    )
+    bad = _run_validate_scaffold("cmdb", defender_dir=tree(label, signature))
+    assert bad.returncode != 0, (
+        f"validate_scaffold passed an adapter whose get-host is `{signature}` — the tool "
+        f"cannot dispatch it as fn(ctx, **params)\nstdout:\n{bad.stdout}"
+    )
+    assert expected in bad.stdout, (
+        f"validate_scaffold FAILED for some other reason than the {label} signature "
+        f"(expected a row naming {expected!r})\nstdout:\n{bad.stdout}"
+    )
+
+
 def test_validate_scaffold_enforces_placeholder_invariant(tmp_path):
     """validate_scaffold_enforces_placeholder_invariant — validate_scaffold FAILS a template whose
     ${placeholder} is neither a declared param of the template's verb nor a marked body

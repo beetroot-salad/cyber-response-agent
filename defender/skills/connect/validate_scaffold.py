@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import os
 import re
 import sys
@@ -17,12 +18,31 @@ from defender.runtime.verb_grant import DENY_ALL  # noqa: E402
 from defender.runtime.verbs import (  # noqa: E402
     ADAPTER_SUFFIX,
     ModuleVerbRegistry,
+    VerbContext,
     declared_params,
     engine_of,
 )
 
 PASS, WARN, FAIL = "PASS", "WARN", "FAIL"
 _GLYPH = {PASS: "✓", WARN: "!", FAIL: "✗"}
+
+# The parameter kinds that bind POSITIONALLY. Legal for the leading ctx (`query_tool`
+# passes it positionally), disqualifying for every param after it.
+_POSITIONAL_KINDS = (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+
+
+def _is_ctx(param: inspect.Parameter) -> bool:
+    """The leading param is the harness carriage, not a model-supplied value. Checking the
+    KIND alone is not enough: `def get_host(host: str)` also has a leading positional param,
+    so a verb that dropped its ctx entirely reads as well-formed and the tool then binds a
+    `VerbContext` OBJECT into `host` — a silently wrong request instead of a caught error.
+    Adapters carry `from __future__ import annotations`, so the annotation arrives as the
+    STRING `"VerbContext"`; one without it hands over the class. Accept both, and any
+    qualified spelling (`verbs.VerbContext`)."""
+    ann = param.annotation
+    if ann is VerbContext:
+        return True
+    return isinstance(ann, str) and ann.rpartition(".")[2] == "VerbContext"
 
 _SECRET_KEYS = re.compile(r"(PASSWORD|PASSWD|SECRET|TOKEN|CREDENTIAL|API[_-]?KEY)$", re.I)
 _ENV_NAME = re.compile(r"^[A-Z][A-Z0-9_]*$")
@@ -73,7 +93,74 @@ def check_registry(report: Report, defender: Path, system: str):
         report.add(PASS, "VERBS declares a health-check verb")
     else:
         report.add(FAIL, f"VERBS declares no health-check verb (has {sorted(verbs)})")
+    check_signatures(report, verbs)
     return verbs
+
+
+def check_signatures(report: Report, verbs) -> None:
+    """Every verb must be dispatchable as ``fn(ctx, **params)`` — the ONE call shape
+    `query_tool` makes (`fn(vctx, **params)`), with the model's params bound by keyword.
+
+    A verb that takes its params positionally is not merely non-idiomatic, it is
+    unusable: `declared_params` collects KEYWORD_ONLY parameters only, so a
+    positional-or-keyword param is invisible to `validate_params` and the model can
+    never bind it. Every call is then refused at the boundary as an unknown param, and
+    the one shape that survives (`params={}`) raises TypeError on the missing positional
+    inside the tool. The checklist advertised this check from the day `check_registry`
+    was written and it was never here (#885).
+
+    The four sub-checks are the four ways that call shape breaks, and they are the SAME
+    four `test_verbs_registry_declares_surface` pins over the shipped adapters — a gate a
+    scaffold author is told to clear before going further must not be weaker than the CI
+    test that greets them afterwards."""
+    broken: list[str] = []
+    for name in sorted(verbs):
+        fn = verbs[name]
+        try:
+            params = list(inspect.signature(fn).parameters.values())
+        except (TypeError, ValueError):
+            broken.append(f"{name}: signature is unreadable, so the tool cannot bind it")
+            continue
+        if not params or params[0].kind not in _POSITIONAL_KINDS:
+            broken.append(f"{name}: takes no leading VerbContext parameter")
+            continue
+        if not _is_ctx(params[0]):
+            broken.append(
+                f"{name}: leading param `{params[0].name}` is not annotated `VerbContext` — "
+                f"the tool passes the ctx positionally, so an unannotated leading param is "
+                f"either the carriage undeclared or a model param the ctx will overwrite"
+            )
+            continue
+        positional = [p.name for p in params[1:] if p.kind in _POSITIONAL_KINDS]
+        if positional:
+            broken.append(
+                f"{name}: param(s) {positional} are positional — the model can only bind "
+                f"keyword-only params, so spell them `*, {positional[0]}: <type>`"
+            )
+            continue
+        var_kw = [p.name for p in params if p.kind is inspect.Parameter.VAR_KEYWORD]
+        if var_kw:
+            broken.append(
+                f"{name}: **{var_kw[0]} widens what the function accepts without widening "
+                f"what `declared_params` reports, so the validator's roster is not the "
+                f"body's — spell every model param out"
+            )
+            continue
+        unannotated = [
+            p.name for p in params[1:]
+            if p.kind is inspect.Parameter.KEYWORD_ONLY
+            and p.annotation is inspect.Parameter.empty
+        ]
+        if unannotated:
+            broken.append(
+                f"{name}: param(s) {unannotated} carry no annotation — `validate_params` "
+                f"has no type to enforce, so a quoted \"20\" reaches the body as a str"
+            )
+    if broken:
+        for b in broken:
+            report.add(FAIL, f"verb signature: {b}")
+    else:
+        report.add(PASS, f"{len(verbs)} verb(s) are dispatchable as fn(ctx, **params)")
 
 
 def check_config(report: Report, defender: Path, system: str) -> None:
@@ -158,6 +245,7 @@ def check_templates(report: Report, defender: Path, system: str, verbs) -> None:
         return
     verbs = verbs or {}
     failures: list[str] = []
+    checked = 0
     for t in templates:
         fm = parse_frontmatter_or_none(t.path.read_text(encoding="utf-8")) or {}
         verb_name = _template_verb(fm, t.query)
@@ -169,7 +257,12 @@ def check_templates(report: Report, defender: Path, system: str, verbs) -> None:
             continue
         placeholders = set(_PLACEHOLDER_RE.findall(t.query))
         if engine_of(verbs[verb_name]) != "none":
+            # An engine verb's body IS the query language, so its `${…}` are body text, not
+            # params — the rule is per-VERB (`adapter.md`). Counting these as "satisfied"
+            # below reported coverage this check does not have: a system whose whole catalog
+            # is engine verbs had every template skipped and every template claimed (#885).
             continue
+        checked += 1
         allowed = set(declared_params(verbs[verb_name])) | _body_substitutions(fm)
         undeclared = sorted(placeholders - allowed)
         if undeclared:
@@ -181,7 +274,10 @@ def check_templates(report: Report, defender: Path, system: str, verbs) -> None:
         for f in failures:
             report.add(FAIL, f"template placeholder invariant: {f}")
     else:
-        report.add(PASS, f"{len(templates)} template(s) satisfy the placeholder<->param invariant")
+        skipped = len(templates) - checked
+        report.add(PASS, f"{len(templates)} template(s) name a declared verb; {checked} "
+                         f"param-only template(s) satisfy the placeholder<->param invariant"
+                         + (f" ({skipped} engine-verb template(s) exempt)" if skipped else ""))
 
 
 def main() -> None:
