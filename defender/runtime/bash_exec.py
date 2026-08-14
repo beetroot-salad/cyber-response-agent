@@ -57,6 +57,20 @@ class _PipelineBuilder:
         self.cur_stderr = "capture"
 
     def end_pipeline(self, next_connector: str) -> None:
+        if self.cur_stages and not self.cur_argv:
+            # A `|` banked a stage and nothing COMPLETE follows it, so this pipeline would
+            # close holding only its left side and the `|` would vanish — `A | ; B` runs B on
+            # /dev/null exactly as #854 F-22's line-boundary spellings did. The check lives
+            # here, where a pipeline closes, rather than in `feed_token` where the two
+            # existing halves live, because the token that exposes it is not always a
+            # connector: `;` is not in `_DANGLING_CONNECTORS` (the leading-`;` carve-out
+            # below), and `A | 2>/dev/null` empties its right side with no separator at all.
+            # Stating the invariant once — no pipeline banks a stage list whose last `|` had
+            # an empty right side — covers every spelling instead of naming the tokens that
+            # can follow a pipe, which is the enumeration that let this survive #854 (#884).
+            raise UntokenizableCommand(
+                "pipeline token '|' has nothing to its right"
+            )
         self.end_stage()
         if self.cur_stages:
             self.pipelines.append(Pipeline(self.pending_connector, self.cur_stages))
@@ -65,18 +79,22 @@ class _PipelineBuilder:
 
     def feed_token(self, toks: list[str], i: int) -> int:
         t, n = toks[i], len(toks)
-        if t in _DANGLING_CONNECTORS and not self.cur_argv and not self.cur_stages:
-            # A connector with nothing to its left. Within a line that is a bash syntax error;
-            # ACROSS lines (`A\n| B`) it is the half of #854 F-22 where the token was dropped
-            # and `A | B` silently became `A ; B` — a second stage on /dev/null, reported as
-            # the last pipeline's rc.
+        if t in _DANGLING_CONNECTORS and not self.cur_argv:
+            # A connector with no COMPLETE command to its left. Within a line that is a bash
+            # syntax error; ACROSS lines (`A\n| B`) it is the half of #854 F-22 where the
+            # token was dropped and `A | B` silently became `A ; B` — a second stage on
+            # /dev/null, reported as the last pipeline's rc.
+            #
+            # `cur_stages` is deliberately NOT consulted: `A | | B` reaches here with a stage
+            # already banked, and the second `|` is just as dropped as a leading one (it used
+            # to collapse into the single pipe `A | B`, which bash rejects outright) (#884).
             #
             # Same set as the trailing check, and for the same reason: a leading `;` drops
             # NOTHING (`A` then `; B` already means the two commands it runs), so refusing it
             # would deny a harmless command under a reason — this module's docstring, the
             # gate's UNTOKENIZABLE_REASON, SKILL.md — that names `|`/`&&`/`||` and not `;`.
             raise UntokenizableCommand(
-                f"pipeline/connector token {t!r} opens a line with nothing to its left"
+                f"pipeline/connector token {t!r} has no command to its left"
             )
         if t == "|":
             self.end_stage()

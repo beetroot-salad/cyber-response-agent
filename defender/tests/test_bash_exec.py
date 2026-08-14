@@ -239,10 +239,42 @@ def test_line_boundary_connector_fails_closed(cmd):
         _run(cmd)
 
 
-def test_leading_connector_on_a_single_line_fails_closed():
-    """The same guard covers the within-a-line spelling, which is a bash syntax error."""
+@pytest.mark.parametrize("cmd", [
+    "| grep a",                 # nothing at all to the left — the only spelling #854 covered
+    "cat /etc/hostname | ; grep a",   # `;` is not a dangling connector, so the :68 guard
+                                      # never saw this one at all — #884 F-28's repro
+    "cat /etc/hostname | && grep a",
+    "cat /etc/hostname | || grep a",
+    "cat /etc/hostname | | grep a",   # used to COLLAPSE into a single pipe
+    "cat /etc/hostname | ;",          # the pipe's right side is the end of the command
+    "cat /etc/hostname | 2> /dev/null",  # right side empties itself, with no separator
+])
+def test_dangling_pipe_within_a_line_fails_closed(cmd):
+    """A `|` with no complete command on one side, spelled within a single line. #854 F-22
+    closed the line-boundary spellings and claimed this one with a test that only ever
+    exercised `| grep a` — everything with a stage banked to the LEFT of the connector fell
+    through, and `A | ; B` ran B on /dev/null while reporting rc 0, indistinguishable from a
+    genuine no-match in the data (#884 F-28).
+
+    Every case here is a bash syntax error EXCEPT the last: `A | 2>/dev/null` is a null
+    command consuming the pipe, which bash accepts and this executor cannot reproduce, so it
+    refuses rather than silently dropping both the pipe and the redirect."""
     with pytest.raises(bash_exec.UntokenizableCommand):
-        _run("| grep a")
+        _run(cmd)
+
+
+@pytest.mark.parametrize(("cmd", "out"), [
+    ("echo a | grep a | wc -l", "1\n"),   # cur_argv is non-empty at the second `|`
+    ("echo a ; ; echo b", "a\nb\n"),      # the leading-`;` carve-out drops NOTHING
+    ("echo a 2>&1 | wc -l", "1\n"),       # a stderr redirect is not an empty right side
+])
+def test_the_dangling_pipe_guard_leaves_real_pipelines_alone(cmd, out):
+    """The positive control for the guard above. Stated separately because the guard is an
+    invariant over pipeline CLOSING, not a token check — the failure mode of getting it wrong
+    is refusing legitimate multi-stage pipelines, which no refusal-only test would catch."""
+    rc, got, _err = _run(cmd)
+    assert rc == 0
+    assert got == out
 
 
 def test_trailing_semicolon_still_parses():

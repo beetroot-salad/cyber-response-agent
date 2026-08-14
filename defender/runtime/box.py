@@ -637,8 +637,18 @@ def _start_boxed(
         _create_argv(name, run_dir, defender_dir, spec, shared_mounts(docker)),
     )
     if created.returncode != 0:
+        # `docker run --detach` is create-THEN-start, so a non-zero rc does not prove no
+        # container exists: a failure at task start (a seccomp/AppArmor profile the runtime
+        # rejects, a missing `runsc`, cgroup or pid exhaustion) leaves the container behind in
+        # `created`. Nothing revisits this name — run ids are not reused and there is no prefix
+        # sweeper — so without this reap the leak accrues forever, one per faulted start, and
+        # O11 ("no box outlives the run that created it") is broken by the host rather than by
+        # a principal. Unconditional, like the pre-create reap above and for the same reason:
+        # C43a records `docker rm -f <missing>` as rc=0 with `Error response from daemon` on
+        # stderr, so a caller that read either would misfire on the success path (#884).
+        _call(docker, ["docker", "rm", "-f", name])
         write_did_not_run(
-            run_dir, f"box create faulted before any container existed: "
+            run_dir, f"box create faulted before the box was startable: "
                      f"{(created.stderr or '').strip()}"
         )
         raise BoxFault(
@@ -721,8 +731,14 @@ def _start_boxed_request(
     _call(docker, ["docker", "rm", "-f", request.name])
     created = _call(docker, _render_argv(request, shared_mounts(docker)))
     if created.returncode != 0:
+        # The investigation lane's reason, verbatim (`_start_boxed`): create-then-start means a
+        # non-zero rc can still leave a `created` container, and this lane's names are no more
+        # revisited than that one's — `defender-drain-{uuid4}` per invocation. The run-cycle
+        # lane happens to self-heal at its own pre-create reap, being keyed on a reused run id;
+        # that is a property of one caller, not of this arm (#884).
+        _call(docker, ["docker", "rm", "-f", request.name])
         _did_not_run_for_request(
-            request, f"box create faulted before any container existed: "
+            request, f"box create faulted before the box was startable: "
                      f"{(created.stderr or '').strip()}"
         )
         raise BoxFault(

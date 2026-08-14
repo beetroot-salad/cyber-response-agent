@@ -81,6 +81,27 @@ def _populate_mount_sources(mounts, tmp_path: Path) -> None:
         (source / "entry.txt").write_text("x", encoding="utf-8")
 
 
+def _reaped_after_create(calls) -> bool:
+    """Whether a reap was issued AFTER create — the only form of this assertion that says
+    anything.
+
+    Both start paths open with an UNCONDITIONAL pre-create `docker rm -f <name>` (box.py:634,
+    :721, the stale-same-name sweep), so `any(c[:3] == [docker, rm, -f] for c in calls)` is
+    true on every path through both functions whether or not the fault arm reaps at all. It
+    passed against the create-fault arm that provably did NOT reap (#884 F-29), which is how
+    that leak survived a test suite that believed it pinned the reap."""
+    create = next(
+        (i for i, c in enumerate(calls) if len(c) > 1 and c[1] == "run"), None
+    )
+    assert create is not None, "no `docker run` was issued — the fault fired before create"
+    return any(c[:3] == ["docker", "rm", "-f"] for c in calls[create + 1:])
+
+
+def _created_name(calls) -> str:
+    argv = next(c for c in calls if len(c) > 1 and c[1] == "run")
+    return argv[argv.index("--name") + 1]
+
+
 def _request(run_dir: Path, *, name="defender-runcycle-abc", env=None, mounts=None, workdir=None):
     return BoxRequest(
         name=name,
@@ -328,7 +349,7 @@ def test_partial_multi_mount_sentinel_validation_leaves_box_in_ambiguous_state(t
     rec = RecordingDocker(sentinel=DockerFault(rc=1, stderr="mount 2 read-back failed", cite="po48"))
     with pytest.raises(box_mod.BoxFault):
         start_box_request(_request(run_dir), docker=rec)
-    assert any(c[:3] == ["docker", "rm", "-f"] for c in rec.calls), \
+    assert _reaped_after_create(rec.calls), \
         "a partially-validated box was not reaped after a sentinel fault"
 
 
@@ -343,6 +364,49 @@ def test_docker_create_partially_applies_mounts_when_one_mount_spec_is_malformed
         box_mod.start_box(run_dir, DEFENDER, docker=rec)
     assert not any(len(c) > 1 and c[1] == "exec" for c in rec.calls), \
         "a sentinel ran though create left no container (create was not treated as atomic)"
+
+
+_SHIM_FAULT = dict(
+    rc=125,
+    stderr="failed to create shim task: OCI runtime create failed",
+    cite="#884 F-29 — observed live: the container is then listed in `created` by docker ps -a",
+)
+
+
+def test_create_fault_that_leaves_a_created_container_is_reaped_investigation_lane(tmp_path):
+    """#884 F-29 — `docker run --detach` is create-THEN-start, so a non-zero rc does not prove
+    no container exists. A failure at TASK START (a seccomp profile runc rejects, a missing
+    `runsc`, cgroup/pid exhaustion) leaves the container behind in `created`, and this arm used
+    to raise with no reap while the very next arm in the same function reaped.
+
+    Nothing else revisits the name — `defender-run-{run_id}`, and run ids are not reused — so
+    the leak accrues one per faulted start, against O11 ("no box outlives the run that created
+    it"). Contrast `test_docker_create_partially_applies_mounts_when_one_mount_spec_is_malformed`
+    above: an API-create failure leaves nothing, and the reap is a rc=0 no-op there."""
+    run_dir = make_run_dir(tmp_path)
+    rec = RecordingDocker(create=DockerFault(**_SHIM_FAULT))
+    with pytest.raises(box_mod.BoxFault):
+        box_mod.start_box(run_dir, DEFENDER, docker=rec)
+    assert _reaped_after_create(rec.calls), \
+        "a container that may exist in `created` was left behind by the create-fault arm"
+    assert ["docker", "rm", "-f", _created_name(rec.calls)] in rec.calls, \
+        "the reap named something other than the container create was asked to make"
+
+
+def test_create_fault_that_leaves_a_created_container_is_reaped_request_lane(tmp_path):
+    """The request lane repeats the investigation lane's arm verbatim, so it repeated the leak
+    verbatim. Its names are no more revisited: `defender-drain-{uuid4}` per invocation. (The
+    run-cycle lane self-heals only because it keys on a REUSED run id and so meets its own
+    pre-create reap on retry — a property of one caller, not of this arm.)"""
+    run_dir = make_run_dir(tmp_path)
+    _populate_mount_sources(_run_cycle_mounts(run_dir), tmp_path)
+    rec = RecordingDocker(create=DockerFault(**_SHIM_FAULT))
+    with pytest.raises(box_mod.BoxFault):
+        start_box_request(_request(run_dir), docker=rec)
+    assert _reaped_after_create(rec.calls), \
+        "a container that may exist in `created` was left behind by the create-fault arm"
+    assert ["docker", "rm", "-f", _created_name(rec.calls)] in rec.calls, \
+        "the reap named something other than the container create was asked to make"
 
 
 def test_container_exits_between_create_and_sentinel(tmp_path):

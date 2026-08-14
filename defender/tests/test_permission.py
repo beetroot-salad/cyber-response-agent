@@ -317,6 +317,41 @@ def test_unparseable_quote_spanning_newline_fails_closed(cmd):
     assert d.pipelines is None  # nothing was parsed, so nothing is handed downstream
 
 
+@pytest.mark.parametrize("cmd", [
+    # #884 F-28 — the WITHIN-a-line half of the same defect. #854 closed the line-boundary
+    # spellings above and believed it had closed these too; it had only closed `| grep a`,
+    # because after a `|` the executor's guard saw a stage already banked and stood down.
+    # `;` never reached that guard at all (it is not a dangling connector), so the spelling
+    # the gather deny-reason itself teaches — `cat <payload> | grep '<substring>'` — silently
+    # dropped its pipe and ran the grep on /dev/null at rc 0.
+    "cat /run/report.md | ; wc -l",
+    "cat /run/report.md | && wc -l",
+    "cat /run/report.md | || wc -l",
+    "cat /run/report.md | | wc -l",
+])
+def test_dangling_pipe_within_a_line_fails_closed_at_the_gate(cmd):
+    """The gate and the executor stay pinned together. Both parse through the same
+    `bash_exec.parse`, so a spelling the executor refuses must reach the model as the LEXING
+    reason rather than a policy one — and, more to the point, a spelling the executor would
+    mis-decompose must never be handed on as a shape the gate then grant-checks."""
+    d = _bash(cmd, GATHER)
+    assert not d.allow
+    assert not _bash(cmd, MAIN).allow
+    assert d.reason == permission.UNTOKENIZABLE_REASON
+    assert d.pipelines is None
+
+
+def test_the_real_pipe_the_gather_deny_reason_teaches_is_still_allowed():
+    """The positive control the refusals above are worthless without: the gather lane's
+    payload-grep idiom must still pass. A guard that over-fired here would deny gather the one
+    command shape its own deny-reason instructs it to use."""
+    d = _bash("cat /run/gather_raw/l-1/0.json | grep hits", GATHER)
+    assert d.allow
+    assert [[list(st.argv) for st in pl.stages] for pl in d.pipelines] == [
+        [["cat", "/run/gather_raw/l-1/0.json"], ["grep", "hits"]]
+    ]
+
+
 # --- read: deny-by-default allowlist over {run_dir, defender_dir} -----------
 
 def _read_roots(tmp_path):
