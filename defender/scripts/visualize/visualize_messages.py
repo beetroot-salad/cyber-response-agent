@@ -70,6 +70,20 @@ def run_metadata(
     }
 
 
+def _iter_tool_uses(events: list[dict], tags: list[str | None]):
+    """Every `tool_use` block an assistant trace event carries, as `(phase, block)`.
+
+    The module's one "walk the trace's assistant turns alongside their phase tags" loop —
+    `_iter_gather_tool_uses` narrows it to the `gather` calls, `transcript_phase_map` reads
+    the call ids out of it."""
+    for ev, ph in zip(events, tags, strict=False):
+        if ev.get("type") != "assistant":
+            continue
+        for blk in (ev.get("message") or {}).get("content") or []:
+            if isinstance(blk, dict) and blk.get("type") == "tool_use":
+                yield ph, blk
+
+
 def msg_phase_map(events: list[dict], tags: list[str | None]) -> dict[str, str]:
     """Phase by TRACE id — the session-store coord `{session_id}/{agent_id}#{seq}`.
 
@@ -102,43 +116,50 @@ def transcript_phase_map(
     Neither WRITER can mint the other's key: the store row for a response is appended a
     round later by `selection.ingest`, so the coord does not exist when the logger runs —
     and making the trace carry a wire id would break #705's invariant that the projection
-    is built from the store alone (`test_projections_are_built_from_the_store_not_from_
-    logger_messages`). The visualizer is the first frame that holds BOTH files, so the
-    translation belongs here.
+    is built from the store alone (see
+    `test_projections_are_built_from_the_store_not_from_logger_messages`). The visualizer
+    is the first frame that holds BOTH files, so the translation belongs here.
 
-    The pairing is POSITIONAL, over the one alignment both sides express: each sequence is
-    this agent's assistant turns, in order. It is deliberately lenient — a fold can move
-    the store's path off rows the wire log still holds, and the surplus simply goes
-    unmapped, leaving `build_transcript` to carry the previous phase forward exactly as it
-    already does for an untagged turn.
+    The join key is the TOOL-CALL ID, which is neither side's invention: both files copy it
+    off the same `ModelResponse.parts[].tool_call_id` — the trace as a `tool_use` block's
+    `id` (`observe._assistant_event`), the wire log as a `tool-call` part's `tool_call_id`
+    (`RequestLogger.log`'s `dump_python`). A POSITIONAL pairing of the two sequences cannot
+    stand in for it, because they are not the same length whenever a fold has fired: a fold
+    re-parents the frontier onto the LINEAGE ROOT, so the store's path — and with it the
+    trace — holds only the turns SINCE the last fold, while the append-only wire log still
+    holds every turn from the first. Zipping those two from the front hands the first wire
+    turn the LAST phase and gets every entry wrong; keying on the id leaves the folded-away
+    turns unmapped instead, and `build_transcript` carries the previous phase forward
+    exactly as it already does for an untagged turn.
+
+    A response with no tool call at all is likewise unmapped. That is only ever the run's
+    terminal turn — a text-only `ModelResponse` ends the agent run — so it inherits the
+    phase of the turn before it, which is the phase it is in.
     """
-    phases = [
-        ph for ev, ph in zip(events, tags, strict=False)
-        if ev.get("type") == "assistant"
-    ]
-    wire_ids = [
-        rec.get("id") for rec in messages
-        if rec.get("kind") == "response" and rec.get("agent_id", "main") == "main"
-    ]
-    return {
-        wid: ph
-        for wid, ph in zip(wire_ids, phases, strict=False)
-        if wid and ph is not None
-    }
+    by_call: dict[str, str] = {}
+    for ph, blk in _iter_tool_uses(events, tags):
+        call_id = blk.get("id")
+        if call_id and ph is not None:
+            by_call.setdefault(str(call_id), ph)
+
+    out: dict[str, str] = {}
+    for rec in messages:
+        wid = rec.get("id")
+        if rec.get("kind") != "response" or rec.get("agent_id", "main") != "main" or not wid:
+            continue
+        for part in (rec.get("message") or {}).get("parts") or []:
+            ph = by_call.get(str(part.get("tool_call_id") or ""))
+            if ph is not None:
+                out[wid] = ph
+                break
+    return out
 
 
 def _iter_gather_tool_uses(events: list[dict], tags: list[str | None]):
-    for ev, ph in zip(events, tags, strict=False):
-        if ev.get("type") != "assistant":
-            continue
-        for blk in (ev.get("message") or {}).get("content") or []:
-            if (
-                isinstance(blk, dict)
-                and blk.get("type") == "tool_use"
-                and blk.get("name") == "gather"
-            ):
-                inp = blk.get("input")
-                yield ph, (inp if isinstance(inp, dict) else {})
+    for ph, blk in _iter_tool_uses(events, tags):
+        if blk.get("name") == "gather":
+            inp = blk.get("input")
+            yield ph, (inp if isinstance(inp, dict) else {})
 
 
 def gather_dispatch_phase(events: list[dict], tags: list[str | None]) -> dict[str, str]:

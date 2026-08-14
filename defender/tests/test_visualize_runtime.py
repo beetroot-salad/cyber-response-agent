@@ -290,8 +290,11 @@ def test_the_trace_and_the_wire_log_name_a_turn_in_two_id_spaces(tmp_path):
     messages = d.load_messages(run)
 
     trace_ids = [e["message"]["id"] for e in events if e.get("type") == "assistant"]
+    # `agent_id` defaulted to "main" exactly as `deduped_main_records` and
+    # `transcript_phase_map` default it — an oracle that filters more narrowly than the
+    # code it checks stops being an oracle for the records the code would have kept.
     wire_ids = [r["id"] for r in messages
-                if r.get("kind") == "response" and r.get("agent_id") == "main"]
+                if r.get("kind") == "response" and r.get("agent_id", "main") == "main"]
     assert trace_ids
     assert wire_ids
     assert not set(trace_ids) & set(wire_ids), (
@@ -312,6 +315,45 @@ def test_the_trace_and_the_wire_log_name_a_turn_in_two_id_spaces(tmp_path):
         "the transcript's map must be keyed by wire id — `build_transcript` has nothing else")
     # Same turns, same phases, two spellings — the translation must not lose a phase.
     assert sorted(coord_map.values()) == sorted(wire_map.values())
+    # And it must not PERMUTE one either: turn n's wire id carries turn n's phase. The
+    # set/multiset assertions above are both blind to a map that pairs every turn with
+    # the wrong one — which is exactly the failure a fold produces, so it is the one
+    # thing this seam test has to say out loud.
+    assert [wire_map[w] for w in wire_ids] == [coord_map[t] for t in trace_ids]
+
+
+def test_the_phase_join_survives_a_fold_that_left_the_trace_holding_only_the_tail(tmp_path):
+    """A fold re-parents the frontier onto the LINEAGE ROOT
+    (`test_folds_are_restart_shaped_with_an_empty_tail`), so `observe.write_trace` — which
+    hydrates the store's path — emits assistant events only for the turns since the last
+    fold, while the append-only wire log still holds every turn from the first.
+
+    The two sequences are therefore different LENGTHS, and a positional pairing of them
+    hands the first wire turn the LAST phase: not "the surplus goes unmapped" but every
+    entry wrong, silently. The join keys on the tool-call id both files copy off the same
+    `ModelResponse`, so the folded-away turns are the ones that go unmapped, and
+    `build_transcript` carries `phase_order[0]` forward across them."""
+    run = _build_run(tmp_path)
+    events = read_jsonl_rows(run / "tool_trace.jsonl")
+    messages = d.load_messages(run)
+    order = _phase_order(run)
+    tags = d.tag_events_by_phase(events, order)
+
+    # Drop the first two assistant turns (and their tags) from the trace, the way a fold
+    # through loop 1 drops them off the store's path. The wire log is untouched.
+    keep = [i for i, ev in enumerate(events) if ev.get("type") == "assistant"][2:]
+    folded_events = [events[i] for i in keep]
+    folded_tags = [tags[i] for i in keep]
+
+    wire_map = d.transcript_phase_map(folded_events, folded_tags, messages)
+    entries = d.build_transcript(messages, wire_map, order)
+    phases = [e["phase"] for e in entries if e["kind"] == "assistant"]
+
+    assert phases[0].startswith("ORIENT"), (
+        f"the folded-away turns must fall back to phase_order[0], got {phases[0]!r} — "
+        f"the join slid the surviving phases onto the wrong turns")
+    assert phases[-1].startswith("REPORT"), (
+        f"the surviving turns must keep their own phases, got {phases!r}")
 
 
 def test_run_health(tmp_path):
