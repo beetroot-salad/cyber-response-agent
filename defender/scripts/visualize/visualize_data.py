@@ -401,4 +401,5 @@ from defender.scripts.visualize.visualize_messages import (  # noqa: F401
     run_health,
     run_metadata,
     tool_usage,
+    transcript_phase_map,
 )

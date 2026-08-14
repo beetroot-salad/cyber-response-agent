@@ -29,14 +29,21 @@ def esc(s) -> str:
 #: pattern still reads as a live handler to a downstream non-HTML-aware consumer (a plain
 #: text viewer, a naive markdown renderer someone pastes this into) — split it with a
 #: zero-width space, invisible in any HTML rendering.
-_EVENT_HANDLER_RE = re.compile(r"\bon(?=[a-zA-Z]\w*\s*=)")
+#:
+#: IGNORECASE is load-bearing, not tidiness (#883 F-35): HTML attribute names are
+#: case-insensitive, so `ONERROR=` and `OnError=` ARE the attribute this covers, and a
+#: case-sensitive pattern covers one spelling of the grammar the comment above claims.
+_EVENT_HANDLER_RE = re.compile(r"\bon(?=[a-zA-Z]\w*\s*=)", re.IGNORECASE)
 
 
 def esc_untrusted(s) -> str:
     """`esc()`, plus the event-handler split above — for text whose source is
     attacker-influenced by construction (a model-authored session store payload, per
     `session_store`'s own access table), as opposed to internal/structural strings."""
-    return _EVENT_HANDLER_RE.sub("on\u200b", esc(s))
+    # The replacement is a CALLABLE, not the literal `"on\u200b"`: under IGNORECASE the
+    # literal rewrites `ONERROR=` to `on\u200bERROR=`, silently case-folding text this
+    # page exists to show verbatim. `m.group(0)` splits the match, casing preserved.
+    return _EVENT_HANDLER_RE.sub(lambda m: m.group(0) + "\u200b", esc(s))
 
 
 def load_yaml(path: Path) -> dict | list | None:

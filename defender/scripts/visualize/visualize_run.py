@@ -19,7 +19,6 @@ from defender.scripts.visualize.visualize_data import (
     gather_cost_by_phase,
     gather_wall_by_phase,
     load_messages,
-    msg_phase_map,
     normalize_phase_names,
     phase_attribution,
     phase_color,
@@ -32,6 +31,7 @@ from defender.scripts.visualize.visualize_data import (
     split_investigation_phases,
     tag_events_by_phase,
     tool_usage,
+    transcript_phase_map,
 )
 from defender.scripts.visualize.visualize_judge import (
     DirectionView,
@@ -506,8 +506,10 @@ def render_runtime_page(run_dir: Path) -> str:
         d["duration_sec"] = base - moved + g_wall_to.get(ph, 0.0)
         wall_times[ph] = d
 
-    msg_phase = msg_phase_map(events, tags)
-    entries = build_transcript(messages, msg_phase, phase_order)
+    # `transcript_phase_map`, not `msg_phase_map`: this reader walks the WIRE LOG, whose
+    # ids are a different space from the trace coords `msg_phase_map` keys on (#883 F-22).
+    entries = build_transcript(
+        messages, transcript_phase_map(events, tags, messages), phase_order)
     tools = tool_usage(events, messages)
     health = run_health(run_dir, events, messages, phase_order, leads=leads, report=report)
     md = run_metadata(run_dir, events, messages)
