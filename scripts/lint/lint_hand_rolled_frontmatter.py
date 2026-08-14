@@ -25,9 +25,11 @@ What it flags — parse-shaped **Call** nodes in defender/ production code:
 - ``re.compile/search/match/fullmatch/sub/subn/finditer/findall/split`` with a
   fence pattern (``^---`` / ``\\A---`` / ``\\n---`` / a ``---``-leading literal).
   A closing-fence pattern is marked in BOTH of its spellings — the raw ``r"\\n---"``,
-  whose constant holds the two characters ``\\``+``n``, and the non-raw ``"\n---"``,
+  whose constant holds the two characters ``\\``+``n``, and the non-raw ``"\\n---"``,
   whose constant holds a real newline. They are different strings by the time the
   AST is read, and only marking one of them misses the other entirely (#885).
+  (This docstring is not raw, so both examples are written ``\\n`` here; what
+  distinguishes them is the ``r`` prefix on the source literal, not the render.)
 
 The ``re`` call is identified by its RESOLVED ORIGIN (``scripts/lint/_astlib.py``), not by
 the spelling ``re.``: ``import re as regex`` and ``from re import search`` are the same

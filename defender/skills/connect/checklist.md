@@ -14,14 +14,20 @@ severity — a WARN is a judgment call left to you, not a cleared bar:
 - adapter module at `scripts/adapters/{system}_adapter.py`, importable and
   exposing a non-empty `VERBS` mapping;
 - `VERBS` includes `health-check`;
-- every verb takes a leading `VerbContext` and declares its model-supplied
-  params keyword-only (`*, host: str`) — a param that binds positionally is
-  one the model can never supply, so the verb is dead on arrival (`adapter.md`
-  §"The keyword-only params ARE the param contract");
+- every verb is dispatchable as `fn(ctx, **params)`: a leading param
+  annotated `VerbContext`, no other positional param, no `**kwargs`, and
+  every model-supplied param keyword-only AND annotated (`*, host: str`) — a
+  param that binds positionally is one the model can never supply, so the
+  verb is dead on arrival (`adapter.md` §"The keyword-only params ARE the
+  param contract");
 - `config.env` carries no inline secrets;
 - `skills/{system}/SKILL.md` frontmatter says `name: defender-{system}`;
-- every seed template names a declared verb, and every `${placeholder}` in
-  its body is a declared param of that verb or a marked `body_substitution`.
+- every seed template with readable frontmatter names a declared verb; and
+  for a **param-only** verb (one with no `@verb(engine=…)`), every
+  `${placeholder}` in its body is a declared param of that verb or listed in
+  the template's `body_substitutions:`. An **engine** verb's body IS the
+  query language, so its placeholders are body text and are NOT checked —
+  the rule is per-verb, not per-system (`adapter.md`, `queries/SCHEMA.md`).
 
 **WARN** (exit 0 — surfaced, not enforced):
 
@@ -29,13 +35,19 @@ severity — a WARN is a judgment call left to you, not a cleared bar:
 - no `execution.md` (or one still inlined as a `## Execution` section in
   `SKILL.md` — split it, per `docs/system-skill-shape.md`);
 - no seed query templates at all. They grow post-merge, so this is not a
-  bar — but note that a tree with none also skips the placeholder check
-  above, which is the widest FAIL in the list.
+  bar — but note that a tree with none also skips the template checks above.
 
-It does **not** check template `id:` frontmatter. That invariant
-(`id` == `{system}.{filename}`) is real and is enforced over the whole
-catalog by `test_d24_every_template_id_matches_its_system_dir_and_filename`
-in CI — just not here.
+Two silent gaps to know about, neither of them a FAIL:
+
+- a template whose frontmatter will not parse, or that carries no `id:`, is
+  dropped from the corpus by `iter_query_templates` with a `warn:` on stderr
+  and is never checked at all. A tree whose ONLY template is malformed
+  reports the "no seed query templates" WARN and exits 0.
+- template `id:` frontmatter is not checked here. That invariant
+  (`id` == `{system}.{filename}`) is real and is enforced in CI over the
+  whole committed catalog by `test_d24_every_template_id_matches_its_system_dir_and_filename`
+  and by `test_verb_roster_632.py`'s census (which also fails a template
+  that declares no `id:` at all) — just not by this script.
 
 (For the MCP path there is no adapter module to check —
 `validate_scaffold.py` is adapter-specific. Run the judgment list below

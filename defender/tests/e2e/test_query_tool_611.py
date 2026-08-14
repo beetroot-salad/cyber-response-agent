@@ -345,27 +345,39 @@ def test_verbs_registry_declares_surface():
     Adding a positional param to a shipped adapter turned the whole test green. An oracle
     that stands in for the property while being incapable of failing is worse than none:
     it reports coverage. The asserts here compare the signature against the CALL SHAPE the
-    tool actually makes (`fn(vctx, **params)`, `query_tool.py:563`), which is a fact about
-    the tool, not a restatement of the reader."""
+    tool actually makes (`fn(vctx, **params)`, in `query_tool.register_query_tool`), which
+    is a fact about the tool, not a restatement of the reader. Spelled out inline rather
+    than delegated to `validate_scaffold.check_signatures`: that script is the OTHER gate on
+    the same property, and a test that calls its checker is back to grading the grader."""
     reg = ModuleVerbRegistry(ADAPTERS_DIR, DENY_ALL)
     on_disk = sorted(
         p.name[: -len("_adapter.py")].replace("_", "-") for p in ADAPTERS_DIR.glob("*_adapter.py")
     )
     assert sorted(reg.systems()) == on_disk, "the registry roster is not the adapter roster"
+    positional = (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
 
     for system in reg.systems():
         verbs = reg.verbs(system)
         assert verbs, f"{system} declares no verbs"
         for name, fn in verbs.items():
             assert callable(fn), f"{system}.{name} is not callable"
-            sig = inspect.signature(fn)
-            sig_params = list(sig.parameters.values())
-            positional = (inspect.Parameter.POSITIONAL_ONLY,
-                          inspect.Parameter.POSITIONAL_OR_KEYWORD)
+            sig_params = list(inspect.signature(fn).parameters.values())
 
             assert sig_params, f"{system}.{name}: takes no parameters at all, not even a ctx"
             assert sig_params[0].kind in positional, \
                 f"{system}.{name}: takes no leading VerbContext — the tool passes it positionally"
+
+            # The KIND alone does not say it is the ctx: `def get_host(host: str)` also leads
+            # with a positional param, and the tool would bind the VerbContext OBJECT into
+            # `host` — a silently wrong request, not a caught error. Adapters carry
+            # `from __future__ import annotations`, so the annotation arrives as a string.
+            ctx_ann = sig_params[0].annotation
+            assert (ctx_ann is VerbContext
+                    or (isinstance(ctx_ann, str) and ctx_ann.rpartition(".")[2] == "VerbContext")), (
+                f"{system}.{name}: leading param `{sig_params[0].name}` is not annotated "
+                f"VerbContext — nothing distinguishes the carriage from a model param the "
+                f"ctx would overwrite"
+            )
 
             # The load-bearing one. `declared_params` collects KEYWORD_ONLY parameters ONLY,
             # so a param declared positionally is invisible to `validate_params`: the model

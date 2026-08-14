@@ -950,43 +950,59 @@ def _scaffold_cmdb_tree(root: Path, template_body: str) -> Path:
     return root
 
 
-def test_validate_scaffold_fails_a_verb_whose_param_is_positional(tmp_path):
-    """validate_scaffold FAILS an adapter whose verb takes a model-supplied param positionally
-    — the check `checklist.md` advertised from the day `check_registry` was written, which was
-    never actually implemented (#885). The param is unbindable, not merely unidiomatic:
-    `declared_params` reads KEYWORD_ONLY only, so `validate_params` refuses every call naming
-    it and the one shape that survives (`params={}`) raises TypeError inside the tool.
+_GET_HOST_SIG = "def get_host(ctx: VerbContext, *, host: str)"
+# Each mutation breaks ONE clause of `fn(ctx, **params)` — the call shape query_tool makes —
+# and names the substring the corresponding FAIL row must carry.
+_UNDISPATCHABLE_VERBS = [
+    ("positional", "def get_host(ctx: VerbContext, host: str)", "positional"),
+    ("no-ctx", "def get_host(host: str)", "VerbContext"),
+    ("var-kw", "def get_host(ctx: VerbContext, *, host: str, **rest)", "**rest"),
+]
 
-    Discriminating control: the SAME tree with `get_host`'s `*` intact passes. The mutation is
-    exactly the `*, ` removal, so a FAIL cannot be an incidental scaffold defect. The template
-    is dropped from the bad tree because the placeholder invariant would ALSO fail it once
-    `host` stops being a declared param — that is a real second symptom, but it would mask
-    which check fired."""
-    def tree(name: str, *, keyword_only: bool) -> Path:
+
+@pytest.mark.parametrize(("label", "signature", "expected"), _UNDISPATCHABLE_VERBS)
+def test_validate_scaffold_fails_a_verb_that_is_not_dispatchable(tmp_path, label, signature,
+                                                                 expected):
+    """validate_scaffold FAILS an adapter whose verb cannot be dispatched as `fn(ctx, **params)`
+    — the check `checklist.md` advertised from the day `check_registry` was written, which was
+    never actually implemented (#885). A positional model param is unbindable, not merely
+    unidiomatic: `declared_params` reads KEYWORD_ONLY only, so `validate_params` refuses every
+    call naming it and the one shape that survives (`params={}`) raises TypeError inside the
+    tool. Dropping the ctx entirely is worse than a crash — the tool binds the VerbContext
+    OBJECT into `host` and issues a garbage request — and `**kwargs` widens the body's surface
+    past the roster the validator reports.
+
+    Discriminating control: the SAME tree with the signature intact passes, so a FAIL cannot be
+    an incidental scaffold defect, and each case asserts the FAIL row names ITS clause. The
+    template is REPLACED (not removed) with a placeholder-free `list-roles` one in every bad
+    tree, because the placeholder invariant would ALSO fail the `${host}` template once `host`
+    stops being a declared param — a real second symptom, but it would mask which check
+    fired."""
+    def tree(name: str, mutated_signature: str | None) -> Path:
         root = _scaffold_cmdb_tree(tmp_path / name, "get-host host=${host}")
-        if not keyword_only:
+        if mutated_signature is not None:
             adapter = root / "scripts" / "adapters" / "cmdb_adapter.py"
             src = adapter.read_text(encoding="utf-8")
-            mutated = src.replace("def get_host(ctx: VerbContext, *, host: str)",
-                                  "def get_host(ctx: VerbContext, host: str)")
+            mutated = src.replace(_GET_HOST_SIG, mutated_signature)
             assert mutated != src, "the get_host signature moved — this mutation no longer applies"
             adapter.write_text(mutated, encoding="utf-8")
             _catalog_template(root / "skills" / "gather" / "queries", "cmdb", "cmdb.tmpl",
                               "query", "list-roles")
         return root
 
-    good = _run_validate_scaffold("cmdb", defender_dir=tree("kwonly", keyword_only=True))
+    good = _run_validate_scaffold("cmdb", defender_dir=tree(f"ok-{label}", None))
     assert good.returncode == 0, (
-        "the control tree (get_host keyword-only) did not pass — the FAIL below cannot be "
+        "the control tree (get_host dispatchable) did not pass — the FAIL below cannot be "
         f"attributed to the signature check\nstdout:\n{good.stdout}"
     )
-    bad = _run_validate_scaffold("cmdb", defender_dir=tree("positional", keyword_only=False))
+    bad = _run_validate_scaffold("cmdb", defender_dir=tree(label, signature))
     assert bad.returncode != 0, (
-        "validate_scaffold passed an adapter whose get-host takes `host` positionally — the "
-        f"model can never bind it\nstdout:\n{bad.stdout}"
+        f"validate_scaffold passed an adapter whose get-host is `{signature}` — the tool "
+        f"cannot dispatch it as fn(ctx, **params)\nstdout:\n{bad.stdout}"
     )
-    assert "positional" in bad.stdout, (
-        f"validate_scaffold FAILED for some other reason than the signature\nstdout:\n{bad.stdout}"
+    assert expected in bad.stdout, (
+        f"validate_scaffold FAILED for some other reason than the {label} signature "
+        f"(expected a row naming {expected!r})\nstdout:\n{bad.stdout}"
     )
 
 
