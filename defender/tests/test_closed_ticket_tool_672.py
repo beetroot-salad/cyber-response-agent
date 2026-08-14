@@ -109,7 +109,7 @@ so those two are test-only tightenings):
 Fakes inject faults; they never classify. Fault content cites the ledger claim that observed
 it on the real dependency: UpstreamFault exit-1 refusals are c2/g5 (executed), the exit-2
 infra classes are c4/g8 (executed), the ``open|in_progress|closed`` store enum is the Fork D
-probe (executed, playground/ticket-server/app.py:27), the outgoing status=closed pin is c3/g6
+probe (executed, playground-v2/ticket-server/app.py:27), the outgoing status=closed pin is c3/g6
 (executed). The fake registry enters through the SAME injection idiom as #611's FakeVerbs —
 `verbs=` handed to the entry point — never monkeypatch.setattr.
 

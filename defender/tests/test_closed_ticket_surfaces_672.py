@@ -336,7 +336,7 @@ def test_ticket_skill_status_vocabulary_matches_server():
     """[d29_skill_status_vocabulary] (V-G — §7 design correction 2 made executable; the
     p1 probe's correction must not ship prose-only in d21's clause) skills/ticket/SKILL.md
     advertises the store's REAL status enum — open|in_progress|closed, executed-probed
-    against the server's own Literal (p1, playground/ticket-server/app.py:27) — not the
+    against the server's own Literal (p1, playground-v2/ticket-server/app.py:27) — not the
     two spellings the server has never had (`in-progress`, `resolved`): a skill teaching
     phantom statuses teaches queries that can never match, against the very store whose
     binary closed/other contract this change's tools now enforce. Positive control: the

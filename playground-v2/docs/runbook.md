@@ -584,12 +584,12 @@ FastAPI over `keycloak/realm.yaml × hosts/inventory.yaml` — the realm-role ×
 - Read-only by design — no overlay/chaos endpoints yet. Defer those until a stale-IdP scenario actually needs them.
 - Cross-check at runtime: `getent passwd <user>` on a host should agree with `authorized_hosts` for that host. Any divergence is a join bug.
 
-#### ticket-server (reused from v1)
+#### ticket-server
 
-Built from `../playground/ticket-server` — the existing v1 FastAPI app. Kept in place (not moved into `playground-v2/`) so v1 integrations stay working. `build:` packages the context into a tar locally before sending to the remote daemon, so the relative path resolves on the client side and works under `--context soc-playground`.
+Built from `./ticket-server` — the FastAPI app carried over from the v1 lab, which was retired and moved in-tree when v1 was deleted. `build:` packages the context into a tar locally before sending to the remote daemon, so the relative path resolves on the client side and works under `--context soc-playground`.
 
-- Seed at `../playground/ticket-server/seed/tickets.json` is bind-mounted read-only (not baked) — edits apply on `compose up -d` with no rebuild. The container's `TICKET_SEED_PATH` default matches the mount point.
-- Endpoints: unchanged from v1 — `GET /health`, `GET /tickets[?status&label&q]`, `GET /tickets/{key}`, `POST /tickets`, `POST /tickets/{key}/transitions`, `POST /tickets/{key}/comments`, `POST /admin/reset`.
+- Seed at `./ticket-server/seed/tickets.json` is bind-mounted read-only (not baked) — edits apply on `compose up -d` with no rebuild. The container's `TICKET_SEED_PATH` default matches the mount point.
+- Endpoints: `GET /health`, `GET /tickets[?status&label&q]`, `GET /tickets/{key}`, `POST /tickets`, `POST /tickets/{key}/transitions`, `POST /tickets/{key}/comments`, `POST /admin/reset`.
 
 #### Verifying the stubs
 

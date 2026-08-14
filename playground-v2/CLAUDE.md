@@ -27,7 +27,7 @@ Web UIs (Kibana 5601, Keycloak 8080, ES 9200, Fleet 8220) are loopback-only on t
 | user seeding | `hosts/base/seed-users.py` (runs at container start) |
 | fleet / enrollment / role policies | `hosts/base/agent-enroll.sh` + the `fleet-init` / `fleet-host-policies` one-shots in `compose.yml`; drift self-heals via the `fleet-outputs-reconciler` sidecar |
 | baseline / the activity generators | `hosts/base/baseline/catalog.yaml` (actions + Poisson schedules) + `scheduler.py`; seeded by `V2_BASELINE_SEED`, kill-switch `V2_BASELINE_ENABLED` |
-| the stubs (CMDB, TI, change-mgmt, identity) | `cmdb/` `threat-intel/` `change-mgmt/` `identity/` — auth-less FastAPI, reachable in-cluster by Docker DNS on :8080; ticket-server is reused from `../playground/ticket-server` |
+| the stubs (CMDB, TI, change-mgmt, identity, ticket-server) | `cmdb/` `threat-intel/` `change-mgmt/` `identity/` `ticket-server/` — auth-less FastAPI, reachable in-cluster by Docker DNS on :8080 |
 | attacks / the runner | `attacks/runner.py` + `attacks/catalog.yaml` (`./runner.py list`, `./runner.py run <id> --seed N`); see `attacks/README.md` |
 | detection rules | `detection-rules/*.json`; install/refresh with `python3 scripts/install_detection_rules.py` (idempotent). Alerts land in `.internal.alerts-security.alerts-default-*` — the defender's `alert.json` input |
 | network/syscall telemetry | `unbound/` (DNS), `squid/` (auth'd proxy), `zeek/` (passive monitor), `falco/` (syscalls) |
