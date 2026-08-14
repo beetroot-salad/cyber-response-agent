@@ -381,7 +381,8 @@ def normalize(text: str, *, run_dir: Path, salt: str, run_id: str) -> str:
 
 def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJECTION SEAM
         run_dir: Path, *, run_id: str, salt: str, main, gather=None, verbs=None,
-        limits=None, box=None, store_factory=None, review_stages=None, bounds=None):
+        limits=None, box=None, store_factory=None, review_stages=None, bounds=None,
+        toolset=None):
     """Run the real driver with injected fake models — no monkeypatching of the
     model symbol. `main`/`gather` are plain replay callables (ReplayFn / DenyProbe
     / NeverEndsModel); this wraps each in `FunctionModel`, so scripts stay
@@ -439,6 +440,17 @@ def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJEC
     discriminated at all — the shipped base and a hardcoded copy of it are the same number.
     Reaching it any other way means the technique this project ratchets in CI, which is why
     the seam is the demand. Passed through only when supplied. RED until
+    `run_investigation` accepts it.
+
+    `toolset` is the EIGHTH injection seam (#872, O7/M6): a foreign toolset — one defender
+    does not own, carrying a tool whose return is a dict or a list — handed straight to
+    `run_investigation(toolset=…)`. It exists because O1 is otherwise UNDRIVABLE on the
+    shipped tree: all fourteen registered tools are annotated `-> str` except `query`, and
+    `query`'s dict is discarded by `QueryCapture` at every candidate seam, so there is no
+    in-tree value for the TOON gate to act on and no way to point one at it without patching
+    a module attribute. Supplied once at the entry point and held for the whole run, like the
+    nine existing optional seams; omitted, the run's tool set, capability list and
+    model-visible text are identical to today's. Passed through only when supplied. RED until
     `run_investigation` accepts it."""
     main_built = BuiltModel(FunctionModel(main), None)
     gather_built = BuiltModel(FunctionModel(gather), None) if gather is not None else None
@@ -467,6 +479,8 @@ def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJEC
     )
     if bounds is not None:
         seams["bounds"] = bounds
+    if toolset is not None:
+        seams["toolset"] = toolset
     seams["box"] = box if box is not None else box_mod.unboxed_executor(
         env=run_common.run_env(DEFENDER, run_dir),
     )
