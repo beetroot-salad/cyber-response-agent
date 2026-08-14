@@ -90,7 +90,17 @@ def main(argv: list[str] | None = None) -> int:
             "lead_id": jl.lead_id,
             "goal": jl.goal,
             "what_to_summarize": jl.what_to_summarize,
-            "queries": [{"query_id": q.query_id, "params": q.params or {}} for q in jl.queries],
+            # `seq` is the QUERIES TABLE's own seq, carried through so `controls.py`
+            # can key its record by the same number the observed payload is named
+            # for (`raw_ref.name` is `{seq}.json`). Not the list position: #841 split
+            # the `∅.`-prefixed sentinels out of `JoinedLead.queries` while the
+            # table's seq still counts them, so one refusal ahead of a real query
+            # makes the position trail the seq for the rest of the lead — and a
+            # control keyed by position is then a different query's baseline.
+            # Oracle-visible but prompt-neutral: `build_lead_user_prompt` renders
+            # only `id` and `params` (oracle/sample.py::_query_lines).
+            "queries": [{"query_id": q.query_id, "params": q.params or {}, "seq": q.seq}
+                        for q in jl.queries],
         })
         # ORACLE-VISIBLE: the redacted sample skeleton, via the production seam.
         (vis / "samples" / f"{jl.lead_id}.txt").write_text(

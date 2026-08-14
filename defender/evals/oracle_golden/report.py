@@ -43,7 +43,8 @@ inflate a slice's apparent independence.
 
 **The mechanical results, separately.** Derived cases (mutation, negative-control) have
 no capture of their own, so they contribute no judged rows at all — their result is the
-grammar and leak checks, reported as counts rather than folded into a measured rate.
+grammar check, the leak check, and the manifest's `expectation:` clauses, reported as
+counts and named failures rather than folded into a measured rate.
 
 Dev and held-out are reported **separately and never pooled**: pooling them would
 launder the pool the prompt was fitted to into the certification number.
@@ -205,7 +206,8 @@ def build_report(cases: list[dict], tag: str, target_lower_bound: float) -> dict
         by_slice: dict[tuple, dict] = defaultdict(
             lambda: {"rows": [], "units": set(), "envs": set()})
         cause_tally: dict[str, dict] = defaultdict(lambda: {"instances": 0, "units": set()})
-        mechanical: dict = {"malformed_leads": 0, "leaked_values": [], "unjudged_cases": []}
+        mechanical: dict = {"malformed_leads": 0, "leaked_values": [],
+                            "expectation_failures": [], "unjudged_cases": []}
 
         for case in members:
             unit = unit_of(case["manifest"])
@@ -222,6 +224,13 @@ def build_report(cases: list[dict], tag: str, target_lower_bound: float) -> dict
             mechanical["malformed_leads"] += len(mech.get("malformed_leads") or {})
             mechanical["leaked_values"] += [f"{case['id']}: {v}"
                                             for v in mech.get("forbidden_emitted") or []]
+            # The manifest's `expectation:` clauses, which are the WHOLE result of a
+            # derived case: it contributes no judged rows by construction, so dropping
+            # this left the roll-up printing such a case's name and not its verdict.
+            # `leaked_values` above is one of the five clauses (`must_not_emit`); the
+            # other four arrived with #762, after #711 had written this aggregation.
+            mechanical["expectation_failures"] += [
+                f"{case['id']}: {f}" for f in mech.get("expectation_failures") or []]
             if not score.get("judged"):
                 # Carried by id, not silently dropped: a case that contributes no rows
                 # must still be visible, or "6 cases" reads as six measurements.
@@ -333,6 +342,10 @@ def _print_mechanical(mechanical: dict) -> None:
     print(f"   mechanical: {mechanical['malformed_leads']} malformed lead(s); "
           f"pre-mutation leaks: "
           f"{'CLEAN' if not mechanical['leaked_values'] else mechanical['leaked_values']}")
+    failures = mechanical["expectation_failures"]
+    print(f"   expectation clauses: {'CLEAN' if not failures else f'{len(failures)} FAILED'}")
+    for failure in failures:
+        print(f"     !! expectation — {failure}")
     for entry in mechanical["unjudged_cases"]:
         print(f"     !! {entry['case']} contributes NO judged rows — {entry['why']}")
 

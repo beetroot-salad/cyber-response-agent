@@ -23,6 +23,19 @@ cause-code sidecar and score reproduction all went with `label.py` and the old
   split, unit        every case carries both, and a derived case inherits its base's
   held-out ledger    every held-out score is in the append-only ledger with a matching
                      hash, so a rewrite, a deletion, or a second run under one tag fail
+  controls           every stored control measures the window its record declares, so a
+                     baseline that silently measured something else cannot be graded
+                     against (#882)
+
+**Two committed control records DO fail the control check today, and that non-zero exit
+is the alarm working** — the same standing this tree already gives `score.py`'s four
+leaking scores. `case-010-crosstier-web2/hidden/controls/l-006/1.json` and
+`case-012-bruteforce-db1/hidden/controls/l-006/6.json` were measured before #882 fixed
+the splice, so their windows sit behind a `LIMIT`/`KEEP` that already reduced the rows.
+Repairing them means re-running `controls.py` against the live stack, which is a capture
+session and not a code change; case-010 is `split: held-out`, so its re-score goes under
+a NEW tag rather than a re-run of the recorded one. A caller sweeping the tree must not
+read exit 1 as "revert something" — read the problem lines and decide.
 
 The second half is a COMPLETENESS REPORT rather than a pass/fail: how many leads carry
 observed telemetry, how many carry a baseline, how many controls landed on a window
@@ -47,6 +60,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
+from defender.evals.oracle_golden import controls as CONTROLS  # noqa: E402
 from defender.evals.oracle_golden.score import DERIVED_KINDS, is_derived  # noqa: E402
 from defender.evals.oracle_golden.story_from_run import eval_tells_in  # noqa: E402
 
@@ -98,6 +112,117 @@ def check_case(case_dir: Path, by_id: dict[str, dict]) -> list[str]:
 
     problems += check_split_and_unit(name, manifest, by_id)
     problems += check_expectation(name, manifest)
+    problems += check_controls(case_dir)
+    return problems
+
+
+def check_controls(case_dir: Path) -> list[str]:
+    """Every stored control must actually measure the window its record claims (#882).
+
+    A control is the baseline a lead is graded against, and a wrong one is silent all the
+    way down: `judge._control` forwards `live` and DROPS the query string, so the label
+    pass sees a live window that observed nothing and reads it as "this stream has no
+    baseline" — against which every observed row is distinguishable, so the lead grades
+    `present`. Nothing downstream can tell that apart from a real empty baseline, which
+    is why it has to be caught here, against the artifact.
+
+    Note what this does NOT key on: a zero row count. 327 of the corpus's controls are
+    live with zero rows and nearly all are honest — plenty of baselines really are empty
+    in their control window. Emptiness is not the signature; a query that does not filter
+    to its own declared window is.
+
+    Two ways that has actually happened, both from #882:
+
+      - the added clause landed after another command. `add_esql_window` used to splice
+        after `splitlines()[0]`, but ES|QL separates commands with `|`, so a one-line
+        `FROM idx | LIMIT 1` took one arbitrary row and THEN filtered it by time.
+      - the shifted bounds were crossed. `shift_esql_window` used to bind its
+        replacements by POSITION against a pair `esql_window` deliberately returns
+        sorted, so a query that wrote its upper bound first got `< start AND >= end` —
+        unsatisfiable, and ES|QL runs it happily.
+
+    Which rewrite a record went through is read from the LEAD's own query rather than
+    guessed from the control's shape: an added clause and a model-authored one can be
+    written identically, and only the original says whether there was a bound to shift.
+    """
+    controls_dir = case_dir / "hidden" / "controls"
+    if not controls_dir.is_dir() or not (case_dir / "oracle_visible" / "leads.jsonl").is_file():
+        return []
+    name = case_dir.name
+    originals = {(lead_id, seq): params.get("query") or ""
+                 for lead_id, seq, params in CONTROLS.lead_queries(case_dir)}
+
+    problems = []
+    for path in sorted(controls_dir.rglob("*.json")):
+        record = json.loads(path.read_text(encoding="utf-8"))
+        lead_id = record.get("lead_id", path.parent.name)
+        rel = f"{lead_id}/{path.name}"
+        original = originals.get((lead_id, record.get("seq")))
+        if original is None:
+            # The pairing itself is broken: this control keys onto no query in the lead
+            # set, so whatever it measured, nothing can say what it is a baseline FOR.
+            problems.append(
+                f"{name}: {rel} keys to (lead {lead_id}, seq {record.get('seq')!r}), which "
+                f"is not a query in leads.jsonl — the control cannot be paired with the "
+                f"observed payload it baselines")
+            continue
+        # No bounds in the lead's own query means `add_esql_window` wrote the clause; a
+        # bounded original means `shift_esql_window` moved what was already there.
+        was_added = not CONTROLS.esql_bounds(original)
+        measured = [*(record.get("controls") or [])]
+        if record.get("attack_contribution") is not None:
+            measured.append({"name": "attack-contribution", **record["attack_contribution"]})
+        for entry in measured:
+            problems += _control_problems(f"{name}: {rel}", entry, was_added=was_added)
+    return problems
+
+
+def _control_problems(where: str, entry: dict, *, was_added: bool) -> list[str]:
+    """One control's own integrity, against the window it declares."""
+    label = entry.get("name", "?")
+    query = entry.get("query") or ""
+    window = entry.get("window") or []
+    if len(window) != 2:
+        return [f"{where} [{label}]: window is {window!r}, not a [start, end] pair"]
+
+    problems = []
+    if not CONTROLS.bounds_name_a_window(query):
+        return [f"{where} [{label}]: the control query's @timestamp bounds are "
+                f"{CONTROLS.esql_operators(query) or 'absent'} — that names no window, so "
+                f"this measured something other than the window it records"]
+
+    # Operator-aware, because that is the whole of what the crossed-pair defect broke:
+    # a positional read cannot tell `>= start AND < end` from `< start AND >= end`, and
+    # the second is unsatisfiable. Compared as instants rather than strings so a literal
+    # written with different precision is not reported as a crossed bound.
+    want = {">": CONTROLS.parse_iso(window[0]), "<": CONTROLS.parse_iso(window[1])}
+    # `strict`: both lists are one entry per `_BOUND` match, so a length mismatch is not a
+    # short query but a broken invariant in the two readers, and it should raise here.
+    for operator, literal in zip(CONTROLS.esql_operators(query),
+                                 CONTROLS.esql_bounds(query), strict=True):
+        if CONTROLS.parse_iso(literal) != want[operator[0]]:
+            problems.append(
+                f"{where} [{label}]: the `{operator}` bound is {literal}, but the record "
+                f"declares the window {window[0]} .. {window[1]} — a bound substituted "
+                f"onto the wrong end of the window inverts it, and an unsatisfiable "
+                f"predicate returns zero rows that read as an empty baseline")
+
+    if was_added:
+        # The lead's query carried no bound, so this clause is one this tool wrote, and
+        # it belongs immediately after the source command: there it narrows the row set
+        # and CANNOT widen it, which is the only property that makes an added window a
+        # control at all. Anywhere later and it filters whatever the commands before it
+        # already reduced the rows to.
+        commands = [c.strip() for c in query.split("|")]
+        if len(commands) < 2 or not commands[1].startswith("WHERE @timestamp"):
+            landed = next((i for i, c in enumerate(commands)
+                           if c.startswith("WHERE @timestamp")), None)
+            problems.append(
+                f"{where} [{label}]: the lead's query carries no @timestamp bound, so this "
+                f"window was ADDED — but it landed at command {landed} rather than "
+                f"immediately after the source command, behind "
+                f"{commands[1:landed] if landed else commands[1:]}. Those run FIRST, so "
+                f"this measured a window over rows they had already reduced")
     return problems
 
 
