@@ -317,6 +317,107 @@ def test_unparseable_quote_spanning_newline_fails_closed(cmd):
     assert d.pipelines is None  # nothing was parsed, so nothing is handed downstream
 
 
+@pytest.mark.parametrize("cmd", [
+    # #884 F-28 — the WITHIN-a-line half of the same defect. #854 closed the line-boundary
+    # spellings above and believed it had closed these too; it had only closed `| grep a`,
+    # because after a `|` the executor's guard saw a stage already banked and stood down.
+    # `;` never reached that guard at all (it is not a dangling connector), so the spelling
+    # the gather deny-reason itself teaches — `cat <payload> | grep '<substring>'` — silently
+    # dropped its pipe and ran the grep on /dev/null at rc 0.
+    "cat /run/report.md | ; wc -l",
+    "cat /run/report.md | && wc -l",
+    "cat /run/report.md | || wc -l",
+    "cat /run/report.md | | wc -l",
+])
+def test_dangling_pipe_within_a_line_fails_closed_at_the_gate(cmd):
+    """The gate and the executor stay pinned together. Both parse through the same
+    `bash_exec.parse`, so a spelling the executor refuses must reach the model as the LEXING
+    reason rather than a policy one — and, more to the point, a spelling the executor would
+    mis-decompose must never be handed on as a shape the gate then grant-checks."""
+    d = _bash(cmd, GATHER)
+    assert not d.allow
+    assert not _bash(cmd, MAIN).allow
+    assert d.reason == permission.UNTOKENIZABLE_REASON
+    assert d.pipelines is None
+
+
+#: Every distinct way a command can fail to become a `Pipeline` list, paired with the phrase
+#: the agent must find in its refusal. The runtime spec no longer teaches ANY of this — the
+#: "One physical line" paragraph was removed as always-on context for a rare failure, and it
+#: lived in MAIN's prompt and the advisory skill while every observed instance came from
+#: GATHER, which never carried it. The reason string is now the only teacher, so it has to be
+#: complete, and this table is what says it still is.
+_LEXING_FAILURES = [
+    ("unbalanced quote",            "cat /run/report.md | grep 'unterminated", "unbalanced quote"),
+    ("newline in a quoted arg",     "cat /run/report.md | grep 'a\nb'",        "quoted argument"),
+    ("trailing backslash",          "cat /run/report.md \\\n | wc -l",         "continues nothing"),
+    ("connector opens a line",      "cat /run/report.md\n| wc -l",             "line boundary"),
+    ("connector closes a line",     "cat /run/report.md |\nwc -l",             "line boundary"),
+    ("leading connector, one line", "| wc -l",                                 "BOTH sides"),
+    ("pipe then `;`",               "cat /run/report.md | ; wc -l",            "BOTH sides"),
+    ("pipe then `|`",               "cat /run/report.md | | wc -l",            "BOTH sides"),
+    ("connector then bare `;`",     "cat /run/report.md && ;",                 "BOTH sides"),
+    ("pipe into a bare redirect",   "cat /run/report.md | 2> /dev/null",       "BOTH sides"),
+    # `bash -c` must carry EXACTLY one command string; a stray trailing word leaves `unwrap`
+    # with nothing single to hand on. (Nested quotes like `bash -c 'cat /a | grep 'x''` are
+    # NOT this case — shlex concatenates them into one token and the command unwraps fine.)
+    ("malformed `bash -c`",         "bash -c 'cat /run/report.md' extra",      "bash -c"),
+    # The other two shapes `unwrap` answers None to. Both used to reach the model as a
+    # CAPABILITY refusal and both now answer the lexing reason, so cause (5) has to name them
+    # rather than the `bash -c` spelling alone — a wrapper with no `-c` at all, and a `timeout`
+    # prefix whose own words are quoted (shlex normalizes them away, so the prefix no longer
+    # matches the raw text and cannot be stripped back off it).
+    ("shell wrapper with no -c",    "bash /run/report.md",                     "bash -c"),
+    ("quoted `timeout` prefix",     "timeout '5' cat /run/report.md",          "timeout"),
+]
+
+
+@pytest.mark.parametrize(("label", "cmd", "phrase"), _LEXING_FAILURES,
+                         ids=[c[0] for c in _LEXING_FAILURES])
+def test_the_lexing_reason_names_every_way_a_command_can_fail_to_parse(label, cmd, phrase):
+    """Each lexing failure answers the LEXING reason, and that reason names the cause.
+
+    Two of these used to answer `policy.deny_reason` instead — the unbalanced quote and the
+    malformed `bash -c`, both of which reach the gate through `unwrap` rather than `tokenize`.
+    That handed a model with a quoting mistake a CAPABILITY message ("not permitted for this
+    agent"), which points it at a different tool rather than at its own quote, while the
+    sibling quote failure one line away answered correctly."""
+    d = _bash(cmd, GATHER)
+    assert not d.allow, f"{label}: a command that cannot be parsed was allowed"
+    assert d.reason == permission.UNTOKENIZABLE_REASON, \
+        f"{label}: answered a non-lexing reason — {d.reason[:90]!r}"
+    assert d.pipelines is None, f"{label}: an unparsed command was handed on as a shape"
+    assert phrase in d.reason, \
+        f"{label}: the reason never names this cause (looked for {phrase!r})"
+
+
+@pytest.mark.parametrize("cmd", [
+    "cat /run/report.md > /tmp/out",     # a write
+    "cat /run/report.md & rm -rf /",     # a background job + an ungranted program
+    "cat $(cat injected)",               # substitution
+])
+def test_a_shape_this_surface_does_not_offer_stays_a_capability_refusal(cmd):
+    """The other side of the split. These LEX fine and ask for something the lane does not
+    have, so they must keep the policy deny reason — the one that teaches the lane's actual
+    capability — rather than being swept into the lexing message and reading as a typo."""
+    d = _bash(cmd, GATHER)
+    assert not d.allow
+    assert d.reason != permission.UNTOKENIZABLE_REASON, \
+        "a capability refusal was reported as a syntax error"
+    assert d.reason == GATHER.deny_reason
+
+
+def test_the_real_pipe_the_gather_deny_reason_teaches_is_still_allowed():
+    """The positive control the refusals above are worthless without: the gather lane's
+    payload-grep idiom must still pass. A guard that over-fired here would deny gather the one
+    command shape its own deny-reason instructs it to use."""
+    d = _bash("cat /run/gather_raw/l-1/0.json | grep hits", GATHER)
+    assert d.allow
+    assert [[list(st.argv) for st in pl.stages] for pl in d.pipelines] == [
+        [["cat", "/run/gather_raw/l-1/0.json"], ["grep", "hits"]]
+    ]
+
+
 # --- read: deny-by-default allowlist over {run_dir, defender_dir} -----------
 
 def _read_roots(tmp_path):

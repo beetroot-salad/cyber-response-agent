@@ -63,25 +63,68 @@ string every grant pattern is `fullmatch`ed against. Refusing the whole command 
 both, and is free: no legitimate command carries one."""
 
 
+#: The whole of what the agent is told about this refusal once it has already happened, and the
+#: only place the full list lives. `defender/SKILL.md` used to carry a "One physical line"
+#: paragraph saying part of it; that file IS the always-on system prompt (`driver.py`
+#: `_instructions`), so it charged every run and every turn for a failure that is rare — and it
+#: sat in MAIN's prompt while every observed instance came from GATHER, which never had it.
+#: Paid once, on the failure, is the right trade there, so this string has to be complete on
+#: its own.
+#:
+#: `skills/advisory/SKILL.md` deliberately still carries a one-line "send it as ONE physical
+#: line" note. That file is loaded ON DEMAND, at the moment its own very long invocation is
+#: composed, so it costs no standing context and preempts the round-trip rather than explaining
+#: it afterwards. On-demand placement is not what the deletion above was about.
+#:
+#: Every cause below is pinned by `test_the_lexing_reason_names_every_way_a_command_can_fail_
+#: to_parse`, which drives one command per cause through the real gate and asserts the reason
+#: NAMES it — the guard against this list drifting from what `parse`/`unwrap` actually refuse.
 UNTOKENIZABLE_REASON = (
-    "Blocked: the command could not be tokenized — an unbalanced quote, a trailing "
-    "`\\`, or a `|`/`&&`/`||` sitting at a line boundary. Each PHYSICAL LINE is lexed on "
-    "its own (there is no shell to join them), so a `\\` line-continuation, a newline "
-    "inside a quoted argument, and a connector that opens or closes a line (`A |` then "
-    "`B`, or `A` then `| B`) all fail here, even when the command is otherwise allowed. "
-    "Rewrite it as a SINGLE line."
+    "Blocked: the command could not be parsed. There is no shell here, so each PHYSICAL LINE "
+    "is lexed on its own and every stage runs as a bare argv. The causes, all of which fail "
+    "even when the command is otherwise allowed:\n"
+    "(1) An unbalanced quote, or a newline INSIDE a quoted argument — a quoted string cannot "
+    "span lines, so a pretty-printed SQL/JSON argument must be collapsed onto one line.\n"
+    "(2) A trailing `\\` — it continues nothing, because there are no lines to join.\n"
+    "(3) A `|`/`&&`/`||` at a line boundary (`A |` then `B`, or `A` then `| B`) — refused, "
+    "not joined. Rewrite as a SINGLE line.\n"
+    "(4) A `|` without a complete command on BOTH sides, or an `&&`/`||` left with no command "
+    "at all to its right on its own line, WITHIN one line — `A | ; B`, `A | | B`, "
+    "`A | 2>/dev/null`, `A && ;`, `A && 2>/dev/null`. Each would drop the connector and leave "
+    "a stage reading nothing, so one line is already the fix and re-sending it on one line "
+    "will not help; give every connector one complete command on each side.\n"
+    "(5) A wrapper that does not unwrap to a single command string: anything other than "
+    "exactly `bash -c '<one command string>'` (a bare `bash`, `bash script.sh`, `sh -lc …`, a "
+    "stray word after the string), or a `timeout …` prefix whose own words are quoted.\n"
+    "Redirects (`>`, `>>`), background `&`, and `$(...)` substitution are a separate matter: "
+    "they are not part of this surface at all, and are refused as capability, not syntax."
 )
 
 
 def _parse(cmd: str) -> list[bash_exec.Pipeline] | None:
     inner = unwrap(cmd)
     if inner is None:
-        return None
+        # A LEXING failure, not a capability one: `unwrap` returns None on an unbalanced quote
+        # (shlex raises), on a `bash`/`sh` wrapper that is not exactly one command string, and
+        # on a `timeout` prefix it cannot strip back off the raw text (its words were quoted).
+        # Returning None here sent all of them to the caller's generic "not permitted for this
+        # agent" reason — a CAPABILITY message for a QUOTING mistake, which tells the model to
+        # reach for another tool when what it needed was to close its quote. The sibling quote
+        # failure (a newline inside a quoted argument, which `tokenize` catches instead) has
+        # always answered `UNTOKENIZABLE_REASON`; these now answer the same way, and
+        # UNTOKENIZABLE_REASON's cause (5) names every one of them rather than the `bash -c`
+        # spelling alone.
+        raise bash_exec.UntokenizableCommand(
+            "command could not be unwrapped to a single command string"
+        )
     try:
         return bash_exec.parse(inner)
     except bash_exec.UntokenizableCommand:
         raise
     except bash_exec.BashExecError:
+        # NOT a lexing refusal — an unexpected redirect or operator token. The command lexed
+        # fine and says something this surface does not offer (a write, a background job), so
+        # it stays on the policy deny reason, which is what teaches the lane's real capability.
         return None
 
 
