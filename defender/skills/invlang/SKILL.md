@@ -159,6 +159,15 @@ slot of the class tuple or as an attribute value. Resolve via
 
 ## Core blocks
 
+A header line ends at its column list. Anything after it — a `# loop 2`
+comment, a `(loop 3)` note, a stray bracket — makes the line a non-header,
+and the block it was meant to open is refused rather than read.
+
+An id is written once per block: a second row repeating `v-001` keeps the
+first and discards the later one, so it is refused. Adding to a committed
+block means sending a SECOND block, where re-emitting a row is legal and
+silent.
+
 A header's `?` marks the columns a row may leave off the end
 (`[id|type|class|ident|attrs?]` — four cells is a complete row). Every
 other column has to be written, empty if it has no value: a row that
@@ -242,7 +251,10 @@ identifier; `key=attrs.<name>` for attribute refinements) — see
 §Open questions. Those three are the ONLY legal keys; any other key
 is flagged, and the flagged row blocks the next write until you repair
 it with `fix_row`. The `target` must name a vertex some `:V` block
-declares.
+declares, and the `value` cell must carry what the lead obtained: an empty
+one is refused, because a blank does not leave the slot open — it closes it
+over nothing. If the lead did not settle the slot, leave the `??` standing
+and escalate.
 
 ### `:R authz` (authz contract resolution)
 
@@ -467,9 +479,12 @@ ac1|proposed|iam-policy|"service account allowed to read object at event time"|e
 `ac<n>` numbers across the DOCUMENT, not per hypothesis the way
 `p<n>`/`r<n>` do: the resolving `:R authz` row names only the contract
 it fulfills, so a second LIVE hypothesis numbering its first contract
-`ac1` is denied on write. (Refuting one of the two also ends the
-ambiguity — a contract on a refuted hypothesis discharges nothing.) Two
-rows in one block may not share an id either — only the first is kept.
+`ac1` is denied on write. Refuting one of the two lifts that denial —
+append-only leaves no other repair — but it does not make the id
+unambiguous: a `:R authz` row for a shared id discharges only the
+contract whose `anchor_kind` it matches, and if both declarers ask under
+the same anchor kind it discharges neither, and `disposition: benign`
+stays blocked.
 
 Authz checks ask whether an interaction edge is permitted; impact
 checks whether the edge's effect crosses a threshold. Integrity is
