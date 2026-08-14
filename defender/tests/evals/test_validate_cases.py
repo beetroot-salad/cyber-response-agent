@@ -563,21 +563,24 @@ def test_the_real_tree_has_no_untracked_control_defect():
     assert untracked == [], untracked
 
 
-@pytest.mark.parametrize(("entry", "why"), [
-    ({"case": "c", "lead": "l-001", "seq": "1"}, "a string seq"),
-    ({"case": "c", "lead": "l-001", "seq": True}, "a bool seq — bool is an int in Python"),
-    ({"case": "c", "seq": 1}, "no lead"),
+@pytest.mark.parametrize(("entry", "expected"), [
+    # The message is asserted, not just the type: each of these fails for a DIFFERENT
+    # reason, and an operator staring at a hand-edited YAML file needs to be told which.
+    ({"case": "c", "lead": "l-001", "seq": "1"}, "needs an integer `seq`"),
+    ({"case": "c", "lead": "l-001", "seq": True}, "needs an integer `seq`"),
+    ({"case": "c", "seq": 1}, "needs string `case` and `lead`"),
     ("not-a-mapping", "not a mapping"),
 ])
 def test_a_malformed_registry_entry_raises_rather_than_waiving_nothing_quietly(
-        entry, why, tmp_path):
+        entry, expected, tmp_path):
     """The registry is operator-authored CONFIG, not an artifact under validation — the
     other readers report a bad artifact and carry on, but a waiver this reader misparses
     is worse than stopping. A `seq: "1"` compares unequal to every real record key, so it
-    would waive nothing while reading, to a human, as though it did."""
+    would waive nothing while reading, to a human, as though it did. `seq: true` is the
+    same trap one layer down, `bool` being an `int` in Python."""
     p = tmp_path / "known_defects.yaml"
     p.write_text(yaml.safe_dump({"entries": [entry]}), encoding="utf-8")
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match=expected):
         validate_cases.load_known_defects(p)
 
 
