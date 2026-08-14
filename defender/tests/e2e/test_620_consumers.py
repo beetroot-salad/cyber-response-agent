@@ -950,6 +950,46 @@ def _scaffold_cmdb_tree(root: Path, template_body: str) -> Path:
     return root
 
 
+def test_validate_scaffold_fails_a_verb_whose_param_is_positional(tmp_path):
+    """validate_scaffold FAILS an adapter whose verb takes a model-supplied param positionally
+    — the check `checklist.md` advertised from the day `check_registry` was written, which was
+    never actually implemented (#885). The param is unbindable, not merely unidiomatic:
+    `declared_params` reads KEYWORD_ONLY only, so `validate_params` refuses every call naming
+    it and the one shape that survives (`params={}`) raises TypeError inside the tool.
+
+    Discriminating control: the SAME tree with `get_host`'s `*` intact passes. The mutation is
+    exactly the `*, ` removal, so a FAIL cannot be an incidental scaffold defect. The template
+    is dropped from the bad tree because the placeholder invariant would ALSO fail it once
+    `host` stops being a declared param — that is a real second symptom, but it would mask
+    which check fired."""
+    def tree(name: str, *, keyword_only: bool) -> Path:
+        root = _scaffold_cmdb_tree(tmp_path / name, "get-host host=${host}")
+        if not keyword_only:
+            adapter = root / "scripts" / "adapters" / "cmdb_adapter.py"
+            src = adapter.read_text(encoding="utf-8")
+            mutated = src.replace("def get_host(ctx: VerbContext, *, host: str)",
+                                  "def get_host(ctx: VerbContext, host: str)")
+            assert mutated != src, "the get_host signature moved — this mutation no longer applies"
+            adapter.write_text(mutated, encoding="utf-8")
+            _catalog_template(root / "skills" / "gather" / "queries", "cmdb", "cmdb.tmpl",
+                              "query", "list-roles")
+        return root
+
+    good = _run_validate_scaffold("cmdb", defender_dir=tree("kwonly", keyword_only=True))
+    assert good.returncode == 0, (
+        "the control tree (get_host keyword-only) did not pass — the FAIL below cannot be "
+        f"attributed to the signature check\nstdout:\n{good.stdout}"
+    )
+    bad = _run_validate_scaffold("cmdb", defender_dir=tree("positional", keyword_only=False))
+    assert bad.returncode != 0, (
+        "validate_scaffold passed an adapter whose get-host takes `host` positionally — the "
+        f"model can never bind it\nstdout:\n{bad.stdout}"
+    )
+    assert "positional" in bad.stdout, (
+        f"validate_scaffold FAILED for some other reason than the signature\nstdout:\n{bad.stdout}"
+    )
+
+
 def test_validate_scaffold_enforces_placeholder_invariant(tmp_path):
     """validate_scaffold_enforces_placeholder_invariant — validate_scaffold FAILS a template whose
     ${placeholder} is neither a declared param of the template's verb nor a marked body

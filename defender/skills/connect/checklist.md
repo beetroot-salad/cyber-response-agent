@@ -6,17 +6,36 @@ The mechanical bar is automated. Run:
 python3 defender/skills/connect/validate_scaffold.py {system}
 ```
 
-and fix every FAIL before going further. It verifies the structural
-contract a script can check:
+and fix every FAIL before going further. What it checks, and at which
+severity — a WARN is a judgment call left to you, not a cleared bar:
+
+**FAIL** (exit 1 — the merge bar):
 
 - adapter module at `scripts/adapters/{system}_adapter.py`, importable and
   exposing a non-empty `VERBS` mapping;
-- `VERBS` includes `health-check`, and every verb is a `VerbContext`-taking
-  function whose model-supplied params are keyword-only;
+- `VERBS` includes `health-check`;
+- every verb takes a leading `VerbContext` and declares its model-supplied
+  params keyword-only (`*, host: str`) — a param that binds positionally is
+  one the model can never supply, so the verb is dead on arrival (`adapter.md`
+  §"The keyword-only params ARE the param contract");
 - `config.env` carries no inline secrets;
-- `skills/{system}/SKILL.md` has `name: defender-{system}` and a
-  `## Execution` pointer, and `execution.md` exists;
-- any seed templates have valid `id: {system}.<name>` frontmatter.
+- `skills/{system}/SKILL.md` frontmatter says `name: defender-{system}`;
+- every seed template names a declared verb, and every `${placeholder}` in
+  its body is a declared param of that verb or a marked `body_substitution`.
+
+**WARN** (exit 0 — surfaced, not enforced):
+
+- no `config.env`, or a value that merely looks high-entropy;
+- no `execution.md` (or one still inlined as a `## Execution` section in
+  `SKILL.md` — split it, per `docs/system-skill-shape.md`);
+- no seed query templates at all. They grow post-merge, so this is not a
+  bar — but note that a tree with none also skips the placeholder check
+  above, which is the widest FAIL in the list.
+
+It does **not** check template `id:` frontmatter. That invariant
+(`id` == `{system}.{filename}`) is real and is enforced over the whole
+catalog by `test_d24_every_template_id_matches_its_system_dir_and_filename`
+in CI — just not here.
 
 (For the MCP path there is no adapter module to check —
 `validate_scaffold.py` is adapter-specific. Run the judgment list below

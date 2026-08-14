@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import os
 import re
 import sys
@@ -23,6 +24,10 @@ from defender.runtime.verbs import (  # noqa: E402
 
 PASS, WARN, FAIL = "PASS", "WARN", "FAIL"
 _GLYPH = {PASS: "✓", WARN: "!", FAIL: "✗"}
+
+# The parameter kinds that bind POSITIONALLY. Legal for the leading ctx (`query_tool`
+# passes it positionally), disqualifying for every param after it.
+_POSITIONAL_KINDS = (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
 
 _SECRET_KEYS = re.compile(r"(PASSWORD|PASSWD|SECRET|TOKEN|CREDENTIAL|API[_-]?KEY)$", re.I)
 _ENV_NAME = re.compile(r"^[A-Z][A-Z0-9_]*$")
@@ -73,7 +78,42 @@ def check_registry(report: Report, defender: Path, system: str):
         report.add(PASS, "VERBS declares a health-check verb")
     else:
         report.add(FAIL, f"VERBS declares no health-check verb (has {sorted(verbs)})")
+    check_signatures(report, verbs)
     return verbs
+
+
+def check_signatures(report: Report, verbs) -> None:
+    """Every verb must be dispatchable as ``fn(ctx, **params)`` — the ONE call shape
+    `query_tool` makes (`fn(vctx, **params)`), with the model's params bound by keyword.
+
+    A verb that takes its params positionally is not merely non-idiomatic, it is
+    unusable: `declared_params` collects KEYWORD_ONLY parameters only, so a
+    positional-or-keyword param is invisible to `validate_params` and the model can
+    never bind it. Every call is then refused at the boundary as an unknown param, and
+    the one shape that survives (`params={}`) raises TypeError on the missing positional
+    inside the tool. The checklist advertised this check from the day `check_registry`
+    was written and it was never here (#885)."""
+    broken: list[str] = []
+    for name, fn in sorted(verbs.items()):
+        try:
+            params = list(inspect.signature(fn).parameters.values())
+        except (TypeError, ValueError):
+            broken.append(f"{name}: signature is unreadable, so the tool cannot bind it")
+            continue
+        if not params or params[0].kind not in _POSITIONAL_KINDS:
+            broken.append(f"{name}: takes no leading VerbContext parameter")
+            continue
+        positional = [p.name for p in params[1:] if p.kind in _POSITIONAL_KINDS]
+        if positional:
+            broken.append(
+                f"{name}: param(s) {positional} are positional — the model can only bind "
+                f"keyword-only params, so spell them `*, {positional[0]}: <type>`"
+            )
+    if broken:
+        for b in broken:
+            report.add(FAIL, f"verb signature: {b}")
+    else:
+        report.add(PASS, f"{len(verbs)} verb(s) take a VerbContext and keyword-only params")
 
 
 def check_config(report: Report, defender: Path, system: str) -> None:
