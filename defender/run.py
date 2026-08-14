@@ -202,7 +202,7 @@ class _Investigate(Protocol):
 
     def __call__(
         self, *, alert_path: Path, run_dir: Path, run_id: str, defender_dir: Path,
-        salt: str, model_name: str, model_override: str | None, box: Any,
+        model_name: str, model_override: str | None, box: Any,
     ) -> dict[str, Any]: ...
 
 
@@ -212,7 +212,6 @@ def _drive_investigation(
     run_dir: Path,
     run_id: str,
     defender_dir: Path,
-    salt: str,
     model_name: str,
     model_override: str | None,
     box: Any,
@@ -240,7 +239,6 @@ def _drive_investigation(
         run_dir=run_dir,
         run_id=run_id,
         defender_dir=defender_dir,
-        salt=salt,
         model_name=model_name,
         model_override=model_override,
         box=box,
@@ -251,7 +249,6 @@ def _drive_investigation(
 def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs plus its four injection seams
     *,
     run_dir: Path,
-    salt: str,
     model: str,
     #: The operator's RAW `--model`, carried alongside the resolved `model` rather than
     #: derived from it. The review roles pin their own default, and a caller that resolved
@@ -282,7 +279,6 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
             run_dir=run_dir,
             run_id=run_dir.name,
             defender_dir=defender_dir,
-            salt=salt,
             model_name=model,
             model_override=model_override,
             box=box,
@@ -321,7 +317,7 @@ def main(
         return rc
 
     alert = ns.alert.resolve()
-    run_dir, salt = _run.materialize_run_dir(alert, ns.run_id)
+    run_dir = _run.materialize_run_dir(alert, ns.run_id)
 
     if ns.update_ticket:
         ticket_writer.open_case_ticket(run_dir)
@@ -330,7 +326,6 @@ def main(
 
     summary = lifecycle(
         run_dir=run_dir,
-        salt=salt,
         model=model,
         model_override=ns.model,
         defender_dir=DEFENDER_DIR,

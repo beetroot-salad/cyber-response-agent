@@ -5,7 +5,6 @@ from __future__ import annotations
 import datetime as _dt
 import hashlib
 import os
-import secrets
 import shutil
 import subprocess
 import sys
@@ -46,7 +45,7 @@ def _alert_label(alert: Path) -> str:
     return alert.parent.name if alert.stem in _GENERIC_ALERT_STEMS else alert.stem
 
 
-def materialize_run_dir(alert: Path, run_id: str | None) -> tuple[Path, str]:
+def materialize_run_dir(alert: Path, run_id: str | None) -> Path:
     if not alert.is_file():
         sys.exit(f"alert not found: {alert}")
     if run_id is None:
@@ -60,8 +59,7 @@ def materialize_run_dir(alert: Path, run_id: str | None) -> tuple[Path, str]:
         sys.exit(f"run dir already exists: {run_dir}")
     RunPaths(run_dir).gather_raw.mkdir(parents=True)
     shutil.copy(alert, RunPaths(run_dir).alert)
-    salt = secrets.token_hex(8)
-    return run_dir, salt
+    return run_dir
 
 
 def run_env(defender_dir: Path, run_dir: Path) -> dict[str, str]:

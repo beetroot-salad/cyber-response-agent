@@ -68,11 +68,10 @@ def test_materialize_accepts_a_valid_run_id(tmp_path, monkeypatch, run_id):
     runs_base = tmp_path / "runs"
     monkeypatch.setenv("DEFENDER_RUNS_BASE", str(runs_base))
 
-    run_dir, salt = run_common.materialize_run_dir(alert, run_id)
+    run_dir = run_common.materialize_run_dir(alert, run_id)
 
     assert run_dir == runs_base / run_id
     assert sorted(path.name for path in run_dir.iterdir()) == ["alert.json", "gather_raw"]
-    assert salt
 
 
 @pytest.mark.parametrize("kind", [("absolute",), ("traversal",)])

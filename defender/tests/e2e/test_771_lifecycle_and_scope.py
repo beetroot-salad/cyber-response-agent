@@ -728,7 +728,7 @@ def test_a_live_run_dir_is_never_reused_and_a_stale_mount_never_follows_it(tmp_p
     monkeypatch.setenv("DEFENDER_RUNS_BASE", str(runs))
 
     # ARM 1 — the mint refuses an id whose directory is still on disk, and touches nothing.
-    first, _salt = run_common.materialize_run_dir(alert, "stale-771")
+    first = run_common.materialize_run_dir(alert, "stale-771")
     (first / "report.md").write_text("FIRST RUN\n", encoding="utf-8")
     before = sorted(p.name for p in first.iterdir())
 
@@ -748,7 +748,7 @@ def test_a_live_run_dir_is_never_reused_and_a_stale_mount_never_follows_it(tmp_p
     )
     # The complementary condition: a FRESH id under the same base materializes, so the refusal
     # above is the existing directory and not a mint that fails on everything.
-    fresh, _ = run_common.materialize_run_dir(alert, "fresh-771")
+    fresh = run_common.materialize_run_dir(alert, "fresh-771")
     assert fresh.is_dir(), "no run dir can be minted at all under this base"
     assert fresh != first, "a fresh id minted the same directory the refusal was about"
 

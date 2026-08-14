@@ -64,7 +64,7 @@ def _drain_request(tmp_path, **kw):
 
 def _actor_deps(run_dir, *, scripts=()):
     return bind(ACTOR_DEF, run_dir, scope=RunScope(read_confine=(run_dir,), scripts=scripts),
-                defender_dir=DEFENDER, salt=SALT)
+                defender_dir=DEFENDER)
 
 
 def _anchor_covered(req, anchor) -> bool:
@@ -489,7 +489,7 @@ def test_host_side_write_tools_write_live_tree_in_process(tmp_path):
     scope = RunScope(corpus_name="lessons",
                      read_confine=tuple((dtree / n).resolve() for n in SHIPPED_LESSON_CORPORA))
     transport = ScriptedTransport()  # any run_parsed would record here
-    deps = bind(CORPUS_AUTHOR_DEF, tmp_path / "lrd", scope=scope, defender_dir=dtree, salt=SALT,
+    deps = bind(CORPUS_AUTHOR_DEF, tmp_path / "lrd", scope=scope, defender_dir=dtree,
                 box=box_mod.BoxExecutor(transport=transport))
     target = dtree / "lessons" / "spec-new.md"
     runtime_tools._tool_write_file(deps, str(target), "spec content")

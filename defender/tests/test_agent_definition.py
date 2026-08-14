@@ -263,7 +263,9 @@ def test_bind_gather_lead_id_channel(tmp_path):
     params = set(inspect.signature(bind).parameters)
     assert "lead_id" not in params
     assert "query_id" not in params
-    assert params == {"defn", "run_dir", "scope", "salt", "defender_dir", "box"}
+    # `salt` left bind's signature with #875: a salt a caller can pass is a salt a caller
+    # can hand to the party the frames it delimits are shown to (F-1).
+    assert params == {"defn", "run_dir", "scope", "defender_dir", "box"}
     deps = bind(GATHER_DEF, tmp_path)
     assert isinstance(deps, GatherDeps)
     assert getattr(deps, "lead_id", None) is None

@@ -218,7 +218,7 @@ def _run(
         Turn(tool_calls=[_dispatch()]), Turn(text="Investigation complete."),
     ])
     gather = ReplayFn(turns)
-    drive(run_dir, run_id=run_id, salt=SALT, main=main, gather=gather,
+    drive(run_dir, run_id=run_id, main=main, gather=gather,
           verbs=verbs if verbs is not None else elastic_ok(rec), box=the_box)
     return _Res(run_dir, main, gather, the_box)
 

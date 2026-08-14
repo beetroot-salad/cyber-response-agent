@@ -548,7 +548,7 @@ def run_gather(tmp_path: Path, *, verbs, turns: list[Turn], system: str = "elast
         Turn(text="Investigation complete."),
     ])
     gather = WatchingReplay(turns, run_dir) if watch else ReplayFn(turns)
-    drive(run_dir, run_id=run_id, salt=SALT, main=main, gather=gather, verbs=verbs)
+    drive(run_dir, run_id=run_id, main=main, gather=gather, verbs=verbs)
     return _Run(run_dir, main, gather)
 
 

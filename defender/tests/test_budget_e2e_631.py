@@ -141,7 +141,7 @@ def test_budget_trip_returns_summary_and_writes_trace(tmp_path, enforced):
         Turn(tool_calls=[("bash", {"command": "echo again"})]),
         Turn(text="Investigation complete."),
     ])
-    summary = drive(run_dir, run_id="trip", salt=SALT, main=replay,
+    summary = drive(run_dir, run_id="trip", main=replay,
                     limits=caps(max_tool_calls=1, wall_clock_timeout=3600,
                                 grace_seconds=600))
 
@@ -161,7 +161,7 @@ def test_a_budget_killed_run_carries_truncated_by_budget(tmp_path, enforced):
     pipeline can see that enforcement stopped the run rather than the defender
     concluding, and does not score a truncated investigation as a complete one."""
     run_dir = materialize(tmp_path, GOLDEN)
-    summary = drive(run_dir, run_id="trunc", salt=SALT,
+    summary = drive(run_dir, run_id="trunc",
                     main=ReplayFn(tail_turns(run_dir, 15)),
                     limits=caps(max_tool_calls=1, wall_clock_timeout=3600,
                                 grace_seconds=600))
@@ -169,7 +169,7 @@ def test_a_budget_killed_run_carries_truncated_by_budget(tmp_path, enforced):
     assert summary["output"] is None, "the kill ended the run before an End node"
 
     clean_dir = materialize(tmp_path / "clean", GOLDEN)
-    clean = drive(clean_dir, run_id="clean", salt=SALT,
+    clean = drive(clean_dir, run_id="clean",
                   main=ReplayFn([Turn(text="Investigation complete.")]),
                   limits=caps())
     assert clean["truncated_by"] is None
@@ -191,7 +191,7 @@ def test_only_the_budget_kill_marks_truncated_by_budget(tmp_path, enforced):
     from defender.tests.e2e._replay_harness import NeverEndsModel
 
     run_dir = materialize(tmp_path, GOLDEN)
-    summary = drive(run_dir, run_id="reqlimit", salt=SALT,
+    summary = drive(run_dir, run_id="reqlimit",
                     main=NeverEndsModel(run_dir), limits=caps())
     assert summary["truncated_by"] == "request-limit", (
         "a request-limit termination was mislabelled as a budget truncation"
@@ -218,7 +218,7 @@ def test_budget_kill_writes_partial_trace(tmp_path, enforced):
     which is exactly the guard P6 bought."""
     run_dir = materialize(tmp_path, GOLDEN)
     burst = [Turn(tool_calls=[("read_file", {"path": str(run_dir / "alert.json")})] * 15)]
-    summary = drive(run_dir, run_id="kill", salt=SALT, main=ReplayFn(burst),
+    summary = drive(run_dir, run_id="kill", main=ReplayFn(burst),
                     limits=caps(max_tool_calls=1, wall_clock_timeout=3600,
                                 grace_seconds=600))
 
@@ -244,7 +244,7 @@ def test_kill_exception_reaches_uncaught_driver_handling(tmp_path, enforced, cap
     guard would emit it. The positive control is test_budget_kill_writes_partial_trace,
     where the kill DOES reach the driver's catch and DOES write the trace."""
     run_dir = materialize(tmp_path, GOLDEN)
-    summary = drive(run_dir, run_id="guard", salt=SALT,
+    summary = drive(run_dir, run_id="guard",
                     main=ReplayFn(tail_turns(run_dir, 15)),
                     limits=caps(max_tool_calls=1, wall_clock_timeout=3600,
                                 grace_seconds=600))
@@ -266,7 +266,7 @@ def test_only_one_shutdown_path_writes_the_run_dir_artifacts(tmp_path, enforced)
     with exactly one `type: result` event and the request log has no duplicated
     request ids."""
     run_dir = materialize(tmp_path, GOLDEN)
-    summary = drive(run_dir, run_id="shutdown", salt=SALT,
+    summary = drive(run_dir, run_id="shutdown",
                     main=ReplayFn(tail_turns(run_dir, 15)),
                     limits=caps(max_tool_calls=1, wall_clock_timeout=3600,
                                 grace_seconds=600))
@@ -295,7 +295,7 @@ def test_budget_kill_and_breaker_kill_are_independent(tmp_path, enforced):
     run_dir = materialize(tmp_path, GOLDEN)
     circuit_breaker.record_outcome(run_dir, "elastic", 2)
     before = json.loads((run_dir / "circuit_breaker.json").read_text())
-    summary = drive(run_dir, run_id="both", salt=SALT,
+    summary = drive(run_dir, run_id="both",
                     main=ReplayFn(tail_turns(run_dir, 15)),
                     limits=caps(max_tool_calls=1, wall_clock_timeout=3600,
                                 grace_seconds=600))
@@ -309,7 +309,7 @@ def test_budget_kill_and_breaker_kill_are_independent(tmp_path, enforced):
     gather = ReplayFn([Turn(tool_calls=[("query", {
         "system": "elastic", "verb": "esql", "params": {"index": "logs"},
         "query_id": "elastic.probe"})])] * 8)
-    summary = drive(other, run_id="brk", salt=SALT,
+    summary = drive(other, run_id="brk",
                     main=ReplayFn([
                         Turn(tool_calls=[("gather", {
                             "lead_id": f"l-00{i}", "system": "elastic",
@@ -353,7 +353,7 @@ def test_stopped_tool_is_refused_not_withdrawn(tmp_path, enforced):
         Turn(tool_calls=[("bash", {"command": "echo again"})]),
         Turn(text="Acknowledged."),
     ])
-    drive(run_dir, run_id="refuse", salt=SALT, main=replay,
+    drive(run_dir, run_id="refuse", main=replay,
           limits=caps(max_tool_calls=1, wall_clock_timeout=3600, grace_seconds=600))
 
     history = "\n".join(replay.seen)
@@ -390,7 +390,6 @@ def test_real_run_uses_a_local_monotonic_origin_after_a_backward_clock_step(
     drive(
         run_dir,
         run_id="clock-step",
-        salt=SALT,
         main=replay,
         limits=caps(max_tool_calls=100, wall_clock_timeout=0, grace_seconds=600),
     )
@@ -421,7 +420,7 @@ def test_repeated_reissue_accumulates_no_retries(tmp_path, enforced):
         Turn(text="Acknowledged; writing the report."),
     ])
     try:
-        summary = drive(run_dir, run_id="reissue", salt=SALT, main=replay,
+        summary = drive(run_dir, run_id="reissue", main=replay,
                         limits=caps(max_tool_calls=1, wall_clock_timeout=3600,
                                     grace_seconds=600))
     except UnexpectedModelBehavior as e:  # pragma: no cover - the failure this pins
@@ -460,7 +459,7 @@ def test_refusal_message_content(tmp_path, enforced):
         *[Turn(tool_calls=[("bash", {"command": f"echo {i}"})]) for i in range(6)],
         Turn(text="ok"),
     ])
-    drive(run_dir, run_id="msg", salt=SALT, main=replay,
+    drive(run_dir, run_id="msg", main=replay,
           limits=caps(max_tool_calls=1, wall_clock_timeout=3600, grace_seconds=600))
 
     constant = BUDGET_REFUSAL_MESSAGE.lower()
@@ -500,7 +499,7 @@ def test_refused_call_does_not_increment_tool_calls(tmp_path, enforced, capsys):
         *[Turn(tool_calls=[("bash", {"command": f"echo {i}"})]) for i in range(20)],
         Turn(text="ok"),
     ])
-    drive(run_dir, run_id="silent", salt=SALT, main=replay,
+    drive(run_dir, run_id="silent", main=replay,
           limits=caps(max_tool_calls=1, wall_clock_timeout=3600, grace_seconds=600))
     err = capsys.readouterr().err
 
@@ -525,7 +524,7 @@ def test_a_refused_call_writes_an_explicit_refusal_record(tmp_path, enforced):
     record. ACCEPTED RESIDUAL, recorded not fixed: the circuit breaker still does not
     observe refusals."""
     run_dir = materialize(tmp_path, GOLDEN)
-    drive(run_dir, run_id="record", salt=SALT,
+    drive(run_dir, run_id="record",
           main=ReplayFn([
               Turn(tool_calls=[("bash", {"command": "echo hi"})]),
               Turn(tool_calls=[("bash", {"command": "echo again"})]),
@@ -565,7 +564,7 @@ def test_replay_run_crosses_budget_and_still_reports(tmp_path, enforced):
         Turn(tool_calls=[("append_block", {"text": inv_text})]),
         Turn(text="Investigation complete."),
     ])
-    summary = drive(run_dir, run_id="e2e", salt=SALT, main=replay,
+    summary = drive(run_dir, run_id="e2e", main=replay,
                     limits=caps(max_tool_calls=2, wall_clock_timeout=3600,
                                 grace_seconds=600))
 
@@ -598,7 +597,7 @@ def test_each_trip_limb_opens_the_same_bounded_report_tail(tmp_path, enforced):
         replay = ReplayFn([*script,
                            Turn(tool_calls=[("append_block", {"text": inv_text})]),
                            Turn(text="done")])
-        drive(rd, run_id=name, salt=SALT, main=replay,
+        drive(rd, run_id=name, main=replay,
               gather=ReplayFn([Turn(text="summary")]), verbs=verbs, limits=limits)
         return "\n".join(replay.seen), rep
 
@@ -654,7 +653,7 @@ def test_kill_lands_between_two_report_writes(tmp_path, enforced):
         *tail_turns(run_dir, 15),
         Turn(text="never reached"),
     ])
-    summary = drive(run_dir, run_id="between", salt=SALT, main=replay,
+    summary = drive(run_dir, run_id="between", main=replay,
                     limits=caps(max_tool_calls=1, wall_clock_timeout=3600,
                                 grace_seconds=600))
 
@@ -682,7 +681,7 @@ def test_main_and_gather_share_one_budget(tmp_path, unenforced):
                                     "query_id": "elastic.probe"})]),
         Turn(text="PARTIAL SUMMARY"),
     ])
-    drive(run_dir, run_id="pool", salt=SALT,
+    drive(run_dir, run_id="pool",
           main=ReplayFn([
               Turn(tool_calls=[("bash", {"command": "echo hi"})]),
               Turn(tool_calls=[("gather", {"lead_id": "l-001", "system": "elastic",
@@ -723,7 +722,7 @@ def test_accounting_runs_regardless_of_posture(tmp_path, monkeypatch, capsys):
         else:
             monkeypatch.delenv(FLAG, raising=False)
         rd = materialize(tmp_path / posture, GOLDEN)
-        drive(rd, run_id=posture, salt=SALT, main=script(),
+        drive(rd, run_id=posture, main=script(),
               limits=caps(max_tool_calls=4))
         states[posture] = budget(rd)
         warned[posture] = "Budget warning" in capsys.readouterr().err
@@ -748,7 +747,7 @@ def test_flag_off_leaves_run_unenforced(tmp_path, unenforced, capsys):
         Turn(tool_calls=[("bash", {"command": "echo again"})]),
         Turn(text="done"),
     ])
-    summary = drive(run_dir, run_id="off", salt=SALT, main=replay,
+    summary = drive(run_dir, run_id="off", main=replay,
                     limits=caps(max_tool_calls=1, wall_clock_timeout=3600,
                                 grace_seconds=600))
     err = capsys.readouterr().err
@@ -780,7 +779,7 @@ def test_refused_gather_and_the_spawn_counter(tmp_path, enforced):
                                      "goal": "g", "what_to_summarize": ["w"]})]),
         Turn(text="done"),
     ])
-    drive(run_dir, run_id="spawn", salt=SALT, main=replay, gather=gather, verbs=verbs,
+    drive(run_dir, run_id="spawn", main=replay, gather=gather, verbs=verbs,
           limits=caps(max_subagent_spawns=1, max_tool_calls=500,
                       wall_clock_timeout=3600, grace_seconds=600))
 
@@ -833,7 +832,7 @@ def test_subagent_dispatched_into_an_already_stopped_pool(tmp_path, enforced):
                                      "goal": "g", "what_to_summarize": ["w"]})]),
         Turn(text="done"),
     ])
-    drive(run_dir, run_id="stopped", salt=SALT, main=main, gather=gather, verbs=verbs,
+    drive(run_dir, run_id="stopped", main=main, gather=gather, verbs=verbs,
           limits=limits)
 
     assert gather.calls == 0, "the subagent's model was invoked on an already-stopped pool"
@@ -887,7 +886,7 @@ def test_stopped_query_writes_no_row(tmp_path, enforced):
                                     "query_id": "elastic.probe2"})]),
         Turn(text="done"),
     ])
-    drive(run_dir, run_id="phantom", salt=SALT,
+    drive(run_dir, run_id="phantom",
           main=ReplayFn([
               Turn(tool_calls=[("gather", {"lead_id": "l-001", "system": "elastic",
                                            "goal": "g", "what_to_summarize": ["w"]})]),
@@ -920,7 +919,7 @@ def test_executed_query_writes_a_row(tmp_path, unenforced):
 
     verbs = FakeVerbs({"elastic": {"esql": esql}})
     run_dir = materialize(tmp_path, GOLDEN)
-    drive(run_dir, run_id="row", salt=SALT,
+    drive(run_dir, run_id="row",
           main=ReplayFn([
               Turn(tool_calls=[("gather", {"lead_id": "l-001", "system": "elastic",
                                            "goal": "g", "what_to_summarize": ["w"]})]),
@@ -977,7 +976,7 @@ def test_gather_abort_becomes_measurement_string(tmp_path, enforced):
                                      "goal": "g", "what_to_summarize": ["w"]})]),
         Turn(text="done"),
     ])
-    drive(run_dir, run_id="limit", salt=SALT, main=main,
+    drive(run_dir, run_id="limit", main=main,
           gather=ReplayFn(distinct_query_turns), verbs=verbs, limits=caps())
     assert "hit its request limit" in "\n".join(main.seen)
     assert "Treat this lead as incomplete" in "\n".join(main.seen)
@@ -995,7 +994,7 @@ def test_gather_abort_becomes_measurement_string(tmp_path, enforced):
                                     "query_id": "elastic.probe2"})]),
         Turn(text="PARTIAL SUMMARY: refused"),
     ])
-    drive(other, run_id="gref", salt=SALT, main=main_b, gather=gather_b, verbs=verbs,
+    drive(other, run_id="gref", main=main_b, gather=gather_b, verbs=verbs,
           limits=caps(max_tool_calls=1, wall_clock_timeout=3600, grace_seconds=600))
     assert gather_b.calls >= 2, "the subagent did not keep working past the refusal"
     history = "\n".join(main_b.seen)
@@ -1028,7 +1027,7 @@ def test_gather_has_no_per_call_timeout(tmp_path, unenforced):
                                      "goal": "g", "what_to_summarize": ["w"]})]),
         Turn(text="done"),
     ])
-    drive(run_dir, run_id="slow", salt=SALT, main=main,
+    drive(run_dir, run_id="slow", main=main,
           gather=ReplayFn([
               Turn(tool_calls=[("query", {"system": "elastic", "verb": "esql",
                                           "params": {"index": "logs"},

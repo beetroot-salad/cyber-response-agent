@@ -53,6 +53,7 @@ because "which call was the shell fetch" is a question every item-1 assertion no
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -87,6 +88,9 @@ HARNESS_PROVENANCE = "harness"     # K11's provenance field VALUE
 PROVENANCE_KEY = "provenance"      # K11's provenance field NAME
 LEAD_ZERO_HEADING = "## Alert ancestors"   # the ORIENT section `orientation()` appends
 
+#: A salt-SHAPED literal, no longer the run's own: since #875 `wrap_fresh` mints each frame's
+#: delimiter after its content is in hand, so nothing here can predict a real one. What is left
+#: is `test_808_orient_framing`'s FORGERY subject — the token an injected alert guesses with.
 SALT = "aabbccddeeff0011"
 # The three rendered notes, spelled in `orient.py`'s own shipped `_(unavailable: …)_` idiom
 # so the block reads like every other degraded ORIENT section rather than inventing a second
@@ -340,12 +344,19 @@ class Res:
         assert len(self.main.seen) >= 2, "main never made a second request"
         return self.main.seen[1]
 
-    def section(self, salt: str = SALT) -> str:
+    def section(self) -> str:
         """Lead-0's ORIENT section BODY — the text inside its own untrusted frame.
 
         Sliced on the frame rather than on the next `##` deliberately: a forged `##` inside
         the frame reads as evidence text (K1), so a heading-to-heading slice would be reading
         the injection's own boundary.
+
+        The frame is found by SHAPE — the first `<run-…-untrusted>` after the heading, and its
+        OWN matching closer via the backreference. It used to be found by a known `SALT`, which
+        #875 removed: `wrap_fresh` mints each frame's delimiter after its content is in hand,
+        so no caller (this harness included) can predict it. Matching the pair is also the
+        stronger read, and the same one MAIN is told to do — a forged closer carrying a
+        different salt inside the body no longer truncates the slice.
 
         Each precondition is its own `assert` (never a bare `.index()`) so a caller that
         never got a lead-0 section at all fails here on an AssertionError naming what is
@@ -354,13 +365,16 @@ class Res:
         assert LEAD_ZERO_HEADING in self.message_zero, \
             "message 0 carries no lead-0 section — the resolution did not happen before ORIENT"
         head = self.message_zero.index(LEAD_ZERO_HEADING)
-        open_tag, close_tag = f"<run-{salt}-untrusted>", f"</run-{salt}-untrusted>"
-        assert open_tag in self.message_zero[head:], \
+        after = self.message_zero[head:]
+        opened = re.search(r"<run-([0-9a-f]+)-untrusted>", after)
+        assert opened is not None, \
             "lead-0's heading appears with no untrusted-frame open tag after it"
-        start = self.message_zero.index(open_tag, head) + len(open_tag)
-        assert close_tag in self.message_zero[start:], \
-            "lead-0's untrusted frame opens but never closes"
-        return self.message_zero[start:self.message_zero.index(close_tag, start)]
+        framed = re.search(
+            rf"<run-{opened.group(1)}-untrusted>\n?(.*?)\n?</run-{opened.group(1)}-untrusted>",
+            after, re.S,
+        )
+        assert framed is not None, "lead-0's untrusted frame opens but never closes"
+        return framed.group(1)
 
     # -- item 1's two-stage call record ---------------------------------------------------
     @property
@@ -469,7 +483,6 @@ def run(  # noqa: PLR0913 — a scenario builder: one parameter per thing a scen
     main_turns: list[Turn] | None = None,
     gather_turns: list[Turn] | None = None,
     run_id: str = "lz808",
-    salt: str = SALT,
     limits: dict | None = None,
     store_factory: Any = None,
     stores: list | None = None,
@@ -517,7 +530,7 @@ def run(  # noqa: PLR0913 — a scenario builder: one parameter per thing a scen
         kw["limits"] = limits
     if store_factory is not None:
         kw["store_factory"] = store_factory
-    out = drive(run_dir, run_id=run_id, salt=salt, main=main, gather=gather, **kw)
+    out = drive(run_dir, run_id=run_id, main=main, gather=gather, **kw)
     return Res(run_dir, main, gather, rec, out or {}, sink, doc.get("alert_id"))
 
 

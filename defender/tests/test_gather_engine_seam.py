@@ -62,7 +62,7 @@ def test_gather_deny_message_is_not_main_loop_worded():
 
 def _deps() -> tools.AgentDeps:
     return tools.AgentDeps(
-        run_dir=Path("/tmp/x"), defender_dir=_DEFENDER, run_id="r", salt="s",
+        run_dir=Path("/tmp/x"), defender_dir=_DEFENDER, run_id="r",
         policy=compile_policy_for(MAIN_DEF, run_dir=Path("/tmp/x"), defender_dir=_DEFENDER),
         cwd_anchor=Path("/tmp/x"),
     )
@@ -158,7 +158,7 @@ def test_a_malformed_system_is_retried_at_the_seam_not_silently_degraded(tmp_pat
 
     run_dir = tmp_path / "run"
     (run_dir / "gather_raw").mkdir(parents=True)
-    deps = bind(MAIN_DEF, run_dir, salt="0011223344556677", defender_dir=_DEFENDER)
+    deps = bind(MAIN_DEF, run_dir, defender_dir=_DEFENDER)
 
     def _never(agent_id, system, request_limit):  # pragma: no cover — reaching it IS the failure
         raise AssertionError(f"a malformed system reached the factory: {system!r}")
@@ -203,7 +203,7 @@ class _StopAfterDispatch:
 def _seam_deps(tmp_path: Path):
     run_dir = tmp_path / "run"
     (run_dir / "gather_raw").mkdir(parents=True)
-    return run_dir, bind(MAIN_DEF, run_dir, salt="0011223344556677", defender_dir=_DEFENDER)
+    return run_dir, bind(MAIN_DEF, run_dir, defender_dir=_DEFENDER)
 
 
 def test_an_empty_goal_is_retried_at_the_seam_and_leaves_the_id_takeable(tmp_path):

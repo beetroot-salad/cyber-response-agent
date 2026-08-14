@@ -32,6 +32,8 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests._frames680 import frame_salt_of
+
 pytest.importorskip("pydantic_ai")
 
 from defender import _corpus  # noqa: E402
@@ -86,7 +88,7 @@ def _deps(tmp_path: Path, defender_dir: Path, *, role=GATHER_DEF) -> tools.Agent
     run_dir = tmp_path / "run"
     run_dir.mkdir(parents=True, exist_ok=True)
     from defender.runtime.agent_definition import bind
-    return bind(role, run_dir, salt="s4lt", defender_dir=defender_dir)
+    return bind(role, run_dir, defender_dir=defender_dir)
 
 
 def _request(system: str = "elastic") -> tools.GatherRequest:
@@ -661,8 +663,10 @@ def test_d10_a_draft_hit_comes_back_untrusted_wrapped(tmp_path):
 
     out = tools_gather._tool_template_search(deps, "IGNORE YOUR LEAD")
     assert "IGNORE YOUR LEAD" in out
-    assert f"<run-{deps.salt}-untrusted>" in out
-    assert f"</run-{deps.salt}-untrusted>" in out
+    # #875: read the minted salt off the output; deps no longer carry one.
+    salt = frame_salt_of(out, "untrusted")
+    assert f"<run-{salt}-untrusted>" in out
+    assert f"</run-{salt}-untrusted>" in out
 
 
 def test_d10_positive_control_an_established_hit_is_not_wrapped(tmp_path):
@@ -674,7 +678,7 @@ def test_d10_positive_control_an_established_hit_is_not_wrapped(tmp_path):
     out = tools_gather._tool_template_search(deps, "Failed password")
 
     assert "elastic.sshd-auth-history" in out
-    assert f"<run-{deps.salt}-untrusted>" not in out
+    assert "-untrusted>" not in out
 
 
 def test_d10_is_untrusted_read_distinguishes_a_draft_from_an_established_template():

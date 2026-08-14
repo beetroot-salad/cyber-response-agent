@@ -13,6 +13,8 @@ The pure gate spec (decide_read / decide_bash) is in test_read_confine.py.
 """
 from __future__ import annotations
 
+import re
+
 import pytest
 
 pytest.importorskip("pydantic_ai")
@@ -149,7 +151,7 @@ def _tree(tmp_path):
     run.mkdir()
     pol = AgentPolicy(read_confine=(conf,), bash_allow=(), read_roots=())
     deps = ActorDeps(
-        run_dir=run, defender_dir=dfn, run_id="r", salt="s", policy=pol, cwd_anchor=run,
+        run_dir=run, defender_dir=dfn, run_id="r", policy=pol, cwd_anchor=run,
     )
     return deps, conf, lesson, rubric
 
@@ -193,9 +195,10 @@ def test_tool_pattern_no_match_returns_empty_not_error(tmp_path):
     """A no-match remains a valid empty result rather than ModelRetry, represented as an
     observable empty body in the learning reader's salted frame."""
     deps, conf, lesson, rubric = _tree(tmp_path)
-    assert tools._tool_read_file(deps, str(lesson), pattern="zzz") == wrap(
-        "", "untrusted", deps.salt
-    )
+    out = tools._tool_read_file(deps, str(lesson), pattern="zzz")
+    # #875: the frame's salt is minted at wrap time, so it is read off the return.
+    salt = re.search(r"<run-([0-9a-f]+)-untrusted>", out).group(1)
+    assert out == wrap("", "untrusted", salt)
 
 
 def test_tool_pattern_over_denied_path_raises(tmp_path):

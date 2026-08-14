@@ -14,6 +14,8 @@ Machinery (ReplayFn/drive/materialize/the model + subprocess fakes) lives in
 """
 from __future__ import annotations
 
+import re
+
 import json
 from pathlib import Path
 
@@ -64,11 +66,11 @@ def test_request_limit_writes_partial_trace(tmp_path):
     its own, so `agent.iter` raises UsageLimitExceeded at DEFAULT_REQUEST_LIMIT.
     The driver must treat it as an expected terminator (not a crash): catch it,
     still project the partial trace, and report no output (no End node)."""
-    run_id, salt = "limit", "ccddeeff00112233"
+    run_id = "limit"
     run_dir = materialize(tmp_path, GOLDEN_AB3)
 
     model = NeverEndsModel(run_dir)
-    result = drive(run_dir, run_id=run_id, salt=salt, main=model)
+    result = drive(run_dir, run_id=run_id, main=model)
 
     from defender.runtime import challenge_gate
 
@@ -93,7 +95,7 @@ def test_circuit_breaker_kill_switch_aborts_run(tmp_path):
     survive its catch-all: the broad `except BaseException` that stops a transport fault from
     unwinding the run is exactly what would swallow the kill switch, because `RunAborted` is a
     plain `Exception` subclass. This test is what says it does not."""
-    run_id, salt = "kill-switch", "0011223344550000"
+    run_id = "kill-switch"
     run_dir = materialize(tmp_path, GOLDEN_AB3)
 
     main = ReplayFn([
@@ -106,7 +108,7 @@ def test_circuit_breaker_kill_switch_aborts_run(tmp_path):
     assert len(systems) == circuit_breaker.RUN_FAIL_KILL_LIMIT
     gather = ReplayFn([_q(s) for s in systems] + [Turn(text="never reached")])
 
-    result = drive(run_dir, run_id=run_id, salt=salt, main=main, gather=gather,
+    result = drive(run_dir, run_id=run_id, main=main, gather=gather,
                    verbs=_down(*systems))
 
     assert result["output"] is None
@@ -132,7 +134,7 @@ def test_invlang_deny_bounces_then_recovers(tmp_path):
     text is on disk, now amend it" and anchors its recovery to a document that never
     received the block — the measured failure this issue exists for. Asserted here
     rather than only at the unit, because it is the bounce that has to carry it."""
-    run_id, salt = "invlang-recover", "1234123412341234"
+    run_id = "invlang-recover"
     run_dir = materialize(tmp_path, GOLDEN_AB3)
     good = (GOLDEN_AB3 / "investigation.md").read_text()
     inv = run_dir / "investigation.md"
@@ -142,7 +144,7 @@ def test_invlang_deny_bounces_then_recovers(tmp_path):
         Turn(tool_calls=[("append_block", {"text": good})]),
         Turn(text="done"),
     ])
-    drive(run_dir, run_id=run_id, salt=salt, main=main)
+    drive(run_dir, run_id=run_id, main=main)
 
     assert main.calls == 3
     assert any("invlang validation" in s for s in main.seen)
@@ -163,7 +165,7 @@ def test_tripped_system_dispatch_returns_down_message(tmp_path):
     return, not a captured query). A SECOND dispatch of the now-tripped system
     short-circuits at the DISPATCH gate: the nested gather is never spawned and the
     main loop gets the transparent 'system down' summary instead."""
-    run_id, salt = "tripped", "55aa55aa55aa55aa"
+    run_id = "tripped"
     run_dir = materialize(tmp_path, GOLDEN_AB3)
 
     main = ReplayFn([
@@ -179,7 +181,7 @@ def test_tripped_system_dispatch_returns_down_message(tmp_path):
         _q("elastic"),
         Turn(text="gather l-001 incomplete"),
     ])
-    drive(run_dir, run_id=run_id, salt=salt, main=main, gather=gather, verbs=_down("elastic"))
+    drive(run_dir, run_id=run_id, main=main, gather=gather, verbs=_down("elastic"))
 
     assert main.calls == 3
     assert gather.calls == 4
@@ -197,7 +199,7 @@ def test_gather_lead_guards_bounce_then_recover(tmp_path):
     lead_id each bounce the main loop (ModelRetry) WITHOUT spawning the nested
     agent; a fresh, well-formed lead then dispatches normally. No data source is
     touched — the nested gather returns a text summary immediately."""
-    run_id, salt = "lead-guards", "9988776655443322"
+    run_id = "lead-guards"
     run_dir = materialize(tmp_path, GOLDEN_AB3)
 
     main = ReplayFn([
@@ -212,7 +214,7 @@ def test_gather_lead_guards_bounce_then_recover(tmp_path):
         Turn(text="done"),
     ])
     gather = ReplayFn([Turn(text="summary l-001"), Turn(text="summary l-002")])
-    drive(run_dir, run_id=run_id, salt=salt, main=main, gather=gather)
+    drive(run_dir, run_id=run_id, main=main, gather=gather)
 
     assert main.calls == 5
     assert gather.calls == 2
@@ -241,7 +243,7 @@ def test_edit_file_guards_bounce_then_recover(tmp_path):
     is still a valid stand-in for exercising the handler."""
     run_dir = materialize(tmp_path, GOLDEN_AB3)
     notes = run_dir / "investigation.md"
-    deps = bind(MAIN_DEF, run_dir, salt="abcdabcdabcdabcd",
+    deps = bind(MAIN_DEF, run_dir,
                 defender_dir=Path(__file__).resolve().parents[2])
 
     runtime_tools._tool_write_file(deps, str(notes), "alpha\nbeta\nalpha\n")
@@ -265,7 +267,7 @@ def test_read_file_not_found_bounces_then_recovers(tmp_path):
     """read_file's not-found guard as retry feedback: a missing run-dir file
     bounces (ModelRetry), then a real read (the untrusted alert) succeeds and comes
     back salt-wrapped — the recovery proves the bounce didn't wedge the loop."""
-    run_id, salt = "read-missing", "f0f0f0f0f0f0f0f0"
+    run_id = "read-missing"
     run_dir = materialize(tmp_path, GOLDEN_AB3)
 
     main = ReplayFn([
@@ -273,8 +275,9 @@ def test_read_file_not_found_bounces_then_recovers(tmp_path):
         Turn(tool_calls=[("read_file", {"path": str(run_dir / "alert.json")})]),
         Turn(text="done"),
     ])
-    drive(run_dir, run_id=run_id, salt=salt, main=main)
+    drive(run_dir, run_id=run_id, main=main)
 
     assert main.calls == 3
     assert any("file not found" in s for s in main.seen)
-    assert salt in main.seen[-1]
+    assert re.search(r"<run-[0-9a-f]+-untrusted>", main.seen[-1]), \
+        "the retry context carries no framed content at all"

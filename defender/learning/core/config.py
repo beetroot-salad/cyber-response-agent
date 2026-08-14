@@ -391,11 +391,15 @@ class StageContext:
     `repo_root` is optional because only the stages that bind a corpus or a skills tree
     (curator, lead author) need one; the pure-prediction stages bind off the run dir alone.
 
-    `run_stage` itself reads only the first four fields — `repo_root`/`box`/`salt` are the
-    BIND inputs, and every engine resolves its deps off THIS object (`bind(..., salt=ctx.salt,
-    box=ctx.box)`) rather than off a parallel local. Set one here and pass another to `bind`
-    and the two silently diverge, with the context reading as the authority it would no longer
-    be."""
+    `run_stage` itself reads only the first four fields — `repo_root`/`box` are the BIND
+    inputs, and every engine resolves its deps off THIS object (`bind(..., box=ctx.box)`)
+    rather than off a parallel local. Set one here and pass another to `bind` and the two
+    silently diverge, with the context reading as the authority it would no longer be.
+
+    `salt` is NOT a bind input since #875 — `bind` takes none, because a tool return is framed
+    by `_untrusted.wrap_fresh`, which mints its delimiter after the content is in hand. It
+    survives here for the one reader left: `curator_engine.run_curator_stage` uses it to tell
+    whether `ctx.user` is already the salted message its own prompt builder assembled."""
 
     learning_run_dir: Path
     user: str

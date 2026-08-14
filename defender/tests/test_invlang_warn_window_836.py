@@ -113,8 +113,13 @@ def test_agentdeps_gains_no_window_field(tmp_path):
 
     from defender.runtime.tools import AgentDeps
 
+    # `salt` left this set with #875 (F-1): a salt on deps is a salt a caller can hand to
+
+    # the party the frames it delimits are shown to.
+
     assert {f.name for f in fields(AgentDeps)} == {
-        "run_dir", "defender_dir", "run_id", "salt", "policy", "cwd_anchor", "box",
+
+        "run_dir", "defender_dir", "run_id", "policy", "cwd_anchor", "box",
         "budget_started_monotonic", "authored_paths", "review_state", "roots", "tool_config",
     }
 

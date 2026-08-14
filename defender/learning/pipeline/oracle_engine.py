@@ -54,13 +54,14 @@ def _run_oracle_pydantic(
     """The oracle's limits are stage-fixed, so the context is built HERE rather than taken
     from the caller — `subagent_timeout()` is read at spawn, never frozen at import (#717).
 
-    The context is built FIRST and `bind` reads the salt off it, so `ctx.salt` is what the
-    agent was actually bound with rather than a second copy nothing reads."""
+    `ctx.salt` is NOT bound (#875): it scopes this stage's PROMPT frames — the set
+    `stage_user_message` announces as one message — while a tool return is framed by
+    `wrap_fresh`, which mints its own salt after the content is in hand."""
     ctx = StageContext(
         learning_run_dir=learning_run_dir, user=user,
         request_limit=ORACLE_REQUEST_LIMIT,
         wall_clock_timeout=subagent_timeout(),
         salt=salt,
     )
-    deps = bind(ORACLE_DEF, ctx.learning_run_dir, salt=ctx.salt)
+    deps = bind(ORACLE_DEF, ctx.learning_run_dir)
     return run_stage(stage="oracle", wiring=wiring, ctx=ctx, deps=deps, make_model=make_model)

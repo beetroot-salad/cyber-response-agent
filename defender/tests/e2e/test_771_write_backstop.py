@@ -1160,7 +1160,7 @@ def test_the_claim_time_and_gather_seam_lead_id_gates_accept_the_same_set(tmp_pa
         d = tmp_path / f"seam-{abs(hash(lead_id))}"
         d.mkdir()
         run = run_tree(d)
-        deps = bind(MAIN_DEF, run, salt="0" * 16, defender_dir=Path(__file__).parents[2])
+        deps = bind(MAIN_DEF, run, defender_dir=Path(__file__).parents[2])
         request = type("R", (), {"lead_id": lead_id, "system": "elastic", "goal": "g",
                                  "what_to_summarize": []})()
         try:
@@ -1308,7 +1308,7 @@ def test_the_gated_model_writers_refuse_a_planted_hard_link(tool, name, seed, dr
     # cause, which is exactly how a plant-shaped oracle certifies a gate that never looked.
     target.write_text(seed, encoding="utf-8")
 
-    deps = bind(MAIN_DEF, run, salt="0" * 16, defender_dir=Path(__file__).resolve().parents[2])
+    deps = bind(MAIN_DEF, run, defender_dir=Path(__file__).resolve().parents[2])
     plant_hardlink(run / name, target)
     # WRITE-CODE-FROM-SPEC FIX: `before` moves to AFTER the plant, not before it. Planting a
     # hard link unconditionally raises the target's own st_nlink 1->2 (plant_hardlink's own
@@ -1347,7 +1347,7 @@ def test_the_gated_model_write_lands_when_nothing_is_planted(tool, name, seed, d
     the negative while silently ending the model's ability to author investigation.md — and a
     control driven on one arm would leave that possible on the other."""
     run = run_tree(tmp_path)
-    deps = bind(MAIN_DEF, run, salt="0" * 16, defender_dir=Path(__file__).resolve().parents[2])
+    deps = bind(MAIN_DEF, run, defender_dir=Path(__file__).resolve().parents[2])
     artifact = run / name
     artifact.write_text(seed, encoding="utf-8")   # `edit_file` needs a baseline to edit
 
@@ -1372,7 +1372,7 @@ def test_report_md_refuses_the_gated_model_writers_even_when_nothing_is_planted(
     to be missing a control for. Both tools refuse it unconditionally now, plant or no plant —
     the close tool (runtime/close_tool.py) is its sole writer."""
     run = run_tree(tmp_path)
-    deps = bind(MAIN_DEF, run, salt="0" * 16, defender_dir=Path(__file__).resolve().parents[2])
+    deps = bind(MAIN_DEF, run, defender_dir=Path(__file__).resolve().parents[2])
     artifact = run / name
     artifact.write_text(seed, encoding="utf-8")   # `edit_file` needs a baseline to edit
 

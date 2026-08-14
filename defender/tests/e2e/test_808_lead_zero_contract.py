@@ -48,6 +48,7 @@ entry — schema.md, "Coin ids from the code's name")
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -60,7 +61,6 @@ from defender.tests.e2e._lead_zero_808 import (  # noqa: E402
     L0,
     L3,
     LEAD_ZERO_HEADING,
-    SALT,
     UNAVAILABLE,
     Res,
     alert_doc,
@@ -119,7 +119,7 @@ class _Watcher(ReplayFn):
 
 def test_lead_zero_returns_section_text_entities_and_status(tmp_path):
     """d0 — `resolve_lead_zero` returns ONE value carrying (a) `text`, item 1's rendered
-    section entirely inside a single `wrap(text, "untrusted", salt=deps.salt)` frame, and
+    section entirely inside a single `wrap_fresh(text, "untrusted")` frame, and
     (b) a `status` distinguishing failed / succeeded-empty / succeeded-truncated /
     succeeded-resolved.
 
@@ -184,7 +184,7 @@ def test_lead_zero_returns_section_text_entities_and_status(tmp_path):
         rec = VerbRecorder()
         return lead_zero.resolve_lead_zero(
             run_dir=run_dir, defender_dir=defender_dir(),
-            alert_path=run_dir / "alert.json", salt=SALT,
+            alert_path=run_dir / "alert.json",
             verbs=elastic_backend(rec, **kw),
         ), rec
 
@@ -213,10 +213,14 @@ def test_lead_zero_returns_section_text_entities_and_status(tmp_path):
             "value missing from it is a value the correlation lead cannot correlate on"
         )
 
-    assert result.text.startswith(f"<run-{SALT}-untrusted>"), \
-        "item 1's block is not inside the run-salted untrusted frame every other " \
-        "externally-sourced ORIENT section carries"
-    assert result.text.rstrip().endswith(f"</run-{SALT}-untrusted>")
+    # #875: the frame's salt is minted at wrap time, so it is read off the result rather than
+    # predicted. Matching the OPEN tag's own salt in the closer is the stronger check anyway —
+    # it is what makes this one frame rather than two lookalikes.
+    opened = re.match(r"<run-([0-9a-f]+)-untrusted>", result.text)
+    assert opened is not None, \
+        "item 1's block is not inside the untrusted frame every other externally-sourced " \
+        "ORIENT section carries"
+    assert result.text.rstrip().endswith(f"</run-{opened.group(1)}-untrusted>")
     assert "dev.dana" in result.text
 
     # The other three states, each by value. `failed` and `succeeded-empty` were exercised
@@ -276,7 +280,7 @@ def test_lead_zero_resolves_before_main_first_request(tmp_path):
     rec = VerbRecorder()
     from defender.tests.e2e._replay_harness import drive
 
-    drive(run_dir, run_id="lz808-order", salt=SALT, main=watcher,
+    drive(run_dir, run_id="lz808-order", main=watcher,
           gather=ReplayFn([Turn(text="correlation summary")]),
           verbs=elastic_backend(rec, answer_hits(TWO_ACTORS)))
 
@@ -456,7 +460,7 @@ def test_a_run_ending_arm_inside_lead_zero_still_produces_a_run_summary(tmp_path
 
     main = ReplayFn([Turn(text="Investigation complete.")])
     summary = drive(
-        run_dir_seed, run_id="lz808-aborted", salt=SALT, main=main,
+        run_dir_seed, run_id="lz808-aborted", main=main,
         gather=ReplayFn([Turn(text="correlation summary")]),
         verbs=elastic_backend(rec, answer_raising(TransportFault("transport down"))),
     )

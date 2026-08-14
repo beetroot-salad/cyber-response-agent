@@ -153,7 +153,9 @@ def _bash_scene(tmp_path: Path, definition, payload: bytes = b"reduced\n"):
 
 def _framed(out: str, deps) -> bool:
     m = FRAME_RE.search(out)
-    return bool(m) and m.group("salt") == deps.salt and m.group("tag") == "untrusted"
+    # #875: a frame is identified by its own matching open/close pair, not by a salt the
+    # caller holds — deps carry none.
+    return bool(m) and m.group("tag") == "untrusted"
 
 
 def test_gathers_reduce_step_returns_the_payload_inside_the_runs_frame(tmp_path):

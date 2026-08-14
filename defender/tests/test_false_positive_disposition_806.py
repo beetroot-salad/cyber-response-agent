@@ -268,7 +268,7 @@ def _close(tmp_path, companion: str, disposition: str):
     (run_dir / "investigation.md").write_text(companion, encoding="utf-8")
     dfn = tmp_path / "defender"
     dfn.mkdir(exist_ok=True)
-    deps = bind(MAIN_DEF, run_dir, defender_dir=dfn, salt="sess-salt")
+    deps = bind(MAIN_DEF, run_dir, defender_dir=dfn)
     return asyncio.run(_close_investigation_async(
         deps, disposition, stages=_bundle(composer=_composer(finding="holds")),
         bounds=challenge_gate.default_bounds(),

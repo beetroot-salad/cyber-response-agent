@@ -80,7 +80,9 @@ demands:
     kind: shape
     form: test
     binds: [stage_salt, run_salt, AgentDeps, stage_user_message.payload]
-    discharged_by: test_d7_one_stage_salt_reaches_frames_and_tool_wraps
+    # #875 split the two populations: the stage salt scopes the PROMPT's frames; a tool
+    # return mints its own. The demand survives, amended — see the test's docstring.
+    discharged_by: test_d7_the_stage_salt_reaches_the_prompt_and_no_further
 
   - id: stage_salt_separate_from_run_salt
     kind: negative

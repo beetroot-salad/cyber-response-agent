@@ -49,7 +49,9 @@ def _main_deps(tmp_path: Path):
 
     run_dir = tmp_path / "run"
     run_dir.mkdir(parents=True)
-    return run_dir, bind(MAIN_DEF, run_dir, salt="0011223344556677", defender_dir=_DEFENDER)
+    # No `salt=`: #875 removed the run-scoped delimiter from `bind`/`AgentDeps` entirely —
+    # a tool return is framed by `_untrusted.wrap_fresh`, which mints its own.
+    return run_dir, bind(MAIN_DEF, run_dir, defender_dir=_DEFENDER)
 
 
 def test_the_read_gate_allows_the_overlong_basename_it_is_then_asked_to_probe(tmp_path):

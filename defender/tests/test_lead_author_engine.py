@@ -189,7 +189,7 @@ def test_lead_author_deps_cannot_be_born_without_policy(tmp_path):
     capability IS a routed Grant; a raw read IS a shape in `read_allow`), so it is asserted through
     the gate, where it is actually decided, rather than as a declared bit that could disagree."""
     with pytest.raises(TypeError):
-        LeadAuthorDeps(run_dir=tmp_path, defender_dir=tmp_path / "defender", run_id="x", salt="s")
+        LeadAuthorDeps(run_dir=tmp_path, defender_dir=tmp_path / "defender", run_id="x")
     deps = _lead_deps(_run_dir(tmp_path), _worktree(tmp_path))
     assert deps.policy.write_allow  # non-empty
     assert not permission.decide_bash("defender-elastic query x", policy=deps.policy).allow

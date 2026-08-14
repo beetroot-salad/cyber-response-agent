@@ -96,9 +96,10 @@ def _run_actor_pydantic(
     from the caller — `subagent_timeout()` is read at spawn, never frozen at import (#717).
 
     The context is built FIRST and `bind` reads the transport off it. Binding off the flat
-    parameters instead would leave `ctx.box`/`ctx.salt` a second copy that nothing reads
-    (`run_stage` consumes only the run dir, user, limit and timeout) and that can silently
-    diverge from what the agent was actually bound with."""
+    parameters instead would leave `ctx.box` a second copy that nothing reads (`run_stage`
+    consumes only the run dir, user, limit and timeout) and that can silently diverge from
+    what the agent was actually bound with. `ctx.salt` is NOT bound (#875): it scopes this
+    stage's PROMPT frames, and a tool return is framed by `wrap_fresh`, which mints its own."""
     ctx = StageContext(
         learning_run_dir=learning_run_dir, user=user,
         request_limit=ACTOR_REQUEST_LIMIT,
@@ -108,6 +109,6 @@ def _run_actor_pydantic(
     deps = bind(
         ACTOR_DEF, ctx.learning_run_dir,
         scope=RunScope(scripts=scope.scripts, read_confine=scope.read_confine),
-        salt=ctx.salt, box=ctx.box,
+        box=ctx.box,
     )
     return run_stage(stage="actor", wiring=wiring, ctx=ctx, deps=deps, make_model=make_model)

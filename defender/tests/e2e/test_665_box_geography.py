@@ -21,6 +21,8 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests._frames680 import assert_one_frame
+
 from _box665 import (  # noqa: E402
     DEFENDER,
     REPO_ROOT,
@@ -39,7 +41,6 @@ pytest.importorskip("pydantic_ai")
 
 from pydantic_ai.exceptions import ModelRetry  # noqa: E402
 
-from defender._untrusted import wrap as _wrap  # noqa: E402
 from defender.runtime import box as box_mod  # noqa: E402
 from defender.runtime import tools as runtime_tools  # noqa: E402
 from defender.learning.pipeline.judge.engine_pydantic import JUDGE_DEF  # noqa: E402
@@ -508,7 +509,7 @@ def _judge_deps(run_dir: Path, box):
     verb grant."""
     from dataclasses import replace
     benign = replace(JUDGE_DEF, tools=replace(JUDGE_DEF.tools, closed_tickets=True))
-    return bind(benign, run_dir, salt=SALT, defender_dir=DEFENDER, box=box)
+    return bind(benign, run_dir, defender_dir=DEFENDER, box=box)
 
 
 def test_boxed_lane_returns_command_output(tmp_path):
@@ -520,7 +521,7 @@ def test_boxed_lane_returns_command_output(tmp_path):
     box = box_mod.BoxExecutor(transport=ScriptedTransport(framed(0, b"hello\n", b"")))
     deps = _judge_deps(run_dir, box)
     out = runtime_tools._tool_bash(deps, f"cat {run_dir / 'alert.json'}")
-    assert out == _wrap(_format_bash_result(0, "hello\n", ""), "untrusted", deps.salt)
+    assert_one_frame(out, _format_bash_result(0, "hello\n", ""), "untrusted")
 
 
 def test_bash_lane_nonzero_exit_returns_wrapped_envelope(tmp_path):
@@ -535,7 +536,7 @@ def test_bash_lane_nonzero_exit_returns_wrapped_envelope(tmp_path):
     box = box_mod.BoxExecutor(transport=ScriptedTransport(framed(3, b"partial\n", b"boom\n")))
     deps = _judge_deps(run_dir, box)
     out = runtime_tools._tool_bash(deps, f"cat {run_dir / 'alert.json'}")
-    assert out == _wrap(_format_bash_result(3, "partial\n", "boom\n"), "untrusted", deps.salt)
+    assert_one_frame(out, _format_bash_result(3, "partial\n", "boom\n"), "untrusted")
     assert "exit=3" in out, "a non-zero exit was not carried inside the #0 envelope"
 
 
@@ -558,7 +559,7 @@ def test_bash_lane_transport_fault_raises_not_wrapped(tmp_path):
         run_dir, box_mod.BoxExecutor(transport=ScriptedTransport(framed(0, b"ok\n", b""))),
     )
     out = runtime_tools._tool_bash(healthy, f"cat {run_dir / 'alert.json'}")
-    assert out == _wrap(_format_bash_result(0, "ok\n", ""), "untrusted", healthy.salt), \
+    assert_one_frame(out, _format_bash_result(0, "ok\n", ""), "untrusted"), \
         "the executed-command positive control did not return the wrapped envelope"
 
 
@@ -571,7 +572,7 @@ def test_judge_boxed_output_wrap_is_the_intended_zero_shape(tmp_path):
     box = box_mod.BoxExecutor(transport=ScriptedTransport(framed(0, b"verdict-evidence\n", b"")))
     deps = _judge_deps(run_dir, box)
     out = runtime_tools._tool_bash(deps, f"cat {run_dir / 'alert.json'}")
-    assert out == _wrap(_format_bash_result(0, "verdict-evidence\n", ""), "untrusted", deps.salt)
+    assert_one_frame(out, _format_bash_result(0, "verdict-evidence\n", ""), "untrusted")
 
 
 def test_box_becomes_unreachable_mid_batch(tmp_path):

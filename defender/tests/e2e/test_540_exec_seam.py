@@ -168,7 +168,7 @@ def _main_deps(run_dir: Path, transport) -> runtime_tools.AgentDeps:
     `BoxSpec`; a test hands one in. The policy, the roots and the gate are all the real
     compiled article — only the thing that would have spawned a container is faked."""
     return bind(
-        MAIN_DEF, run_dir, salt=SALT, defender_dir=DEFENDER,
+        MAIN_DEF, run_dir, defender_dir=DEFENDER,
         box=box.BoxExecutor(spec=box.BoxSpec(), transport=transport),
     )
 
@@ -707,7 +707,7 @@ def test_every_bash_enabled_role_executes_through_a_box(tmp_path):
         # probe is about the box lane, not the verb grant.
         from dataclasses import replace as _replace
         bindable = _replace(defn, tools=effective_tools_for(defn))
-        deps = bind(bindable, run_dir, scope=role_scope, salt=SALT, defender_dir=tree)
+        deps = bind(bindable, run_dir, scope=role_scope, defender_dir=tree)
         assert isinstance(deps.box, box.BoxExecutor), \
             f"{defn.role.name} has bash but no box on its deps"
 
@@ -738,7 +738,7 @@ def test_the_existing_e2e_bash_corpus_completes_through_the_box(tmp_path):
         Turn(tool_calls=[("bash", {"command": f"cat {alert} | wc -l"})]),
         Turn(text="done"),
     ])
-    drive(run_dir, run_id=RUN_ID, salt=SALT, main=main,
+    drive(run_dir, run_id=RUN_ID, main=main,
           box=box.BoxExecutor(spec=box.BoxSpec(), transport=t))
 
     assert main.calls == 3, "the run did not complete its script through the box"

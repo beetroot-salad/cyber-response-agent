@@ -6,7 +6,6 @@ import re
 import subprocess
 import sys
 import time
-import uuid
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -28,7 +27,7 @@ from .agent_definition import ResolvedRoots, ToolSet
 from .agent_role import AgentRole
 from .permission.files import RESOLVE_ERRORS
 
-from defender._untrusted import wrap as _wrap
+from defender._untrusted import wrap_fresh
 # The SAME byte ruler the #629 bounds are measured with — a write tool that reports "bytes"
 # has to report the number the gate will judge, not a codepoint count that under-reads it.
 from defender._artifact_schema import _utf8_len
@@ -126,7 +125,6 @@ class AgentDeps:
     run_dir: Path
     defender_dir: Path
     run_id: str
-    salt: str
     policy: permission.AgentPolicy = field(kw_only=True)
     cwd_anchor: Path = field(kw_only=True)
     box: box_mod.BoxExecutor = field(kw_only=True, default_factory=box_mod.BoxExecutor)
@@ -150,16 +148,15 @@ class AgentDeps:
     @classmethod
     def _for_run(
         cls, run_dir: Path, policy: permission.AgentPolicy,
-        *, cwd_anchor: Path, defender_dir: Path = PATHS.defender_dir, salt: str | None = None,
+        *, cwd_anchor: Path, defender_dir: Path = PATHS.defender_dir,
         box: box_mod.BoxExecutor | None = None,
         roots: ResolvedRoots | None = None,
         tool_config: Any = None,
         **subtype_fields: Any,
     ) -> Self:
-        resolved_salt = salt if salt is not None else uuid.uuid4().hex
         return cls(
             run_dir=run_dir, defender_dir=defender_dir,
-            run_id=run_dir.name, salt=resolved_salt, policy=policy,
+            run_id=run_dir.name, policy=policy,
             box=box if box is not None else box_mod.BoxExecutor(),
             cwd_anchor=cwd_anchor,
             roots=roots, tool_config=tool_config,
@@ -348,7 +345,7 @@ def _tool_bash(deps: AgentDeps, command: str) -> str:
         ),
     )
     if _is_learning_role(deps) or _opens_untrusted_read(operands):
-        return _wrap(formatted, "untrusted", deps.salt)
+        return wrap_fresh(formatted, "untrusted")
     return formatted
 
 
@@ -623,7 +620,7 @@ def _bound_and_wrap(
     if permission.is_untrusted_read(p) or (
         _is_learning_role(deps) and _is_cross_agent_read(deps, p)
     ):
-        return _wrap(text, "untrusted", deps.salt)
+        return wrap_fresh(text, "untrusted")
     return text
 
 

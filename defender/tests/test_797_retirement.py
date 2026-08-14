@@ -81,7 +81,7 @@ def _main_deps(tmp_path: Path):
     (run_dir / "alert.json").write_bytes((GOLDEN / "alert.json").read_bytes())
     dfn = tmp_path / "defender"
     dfn.mkdir(exist_ok=True)
-    return bind(MAIN_DEF, run_dir, defender_dir=dfn, salt="sess-salt"), run_dir
+    return bind(MAIN_DEF, run_dir, defender_dir=dfn), run_dir
 
 
 def test_797_no_review_role_survives_the_retirement():

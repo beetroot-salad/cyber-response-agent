@@ -152,7 +152,7 @@ def test_fifth_bash_enabled_role_outside_the_four_named_construction_paths(tmp_p
     unbuildable). This pins the accepted residual: raw bind stays constructible with an
     inert box."""
     # N5: a raw bind off the four named seams remains constructible with the inert default.
-    deps = bind(agents_registry.AGENTS[AgentRole.ACTOR], tmp_path / "run", salt=SALT,
+    deps = bind(agents_registry.AGENTS[AgentRole.ACTOR], tmp_path / "run",
                 defender_dir=DEFENDER, scope=RunScope(read_confine=(tmp_path / "run",),
                                                       scripts=()))
     assert isinstance(deps.box, box_mod.BoxExecutor)
@@ -348,7 +348,7 @@ def test_role_keyed_census_blind_to_caller_constructed_boxless_instance(tmp_path
     and its bash lane stays dead. Nothing observes it — an accepted, RECORDED non-obligation
     (O2's capability loss the O6 role-keyed census structurally cannot see), not a defect
     this design fixes."""
-    off_path = bind(agents_registry.AGENTS[AgentRole.ACTOR], tmp_path / "run", salt=SALT,
+    off_path = bind(agents_registry.AGENTS[AgentRole.ACTOR], tmp_path / "run",
                     defender_dir=DEFENDER,
                     scope=RunScope(read_confine=(tmp_path / "run",), scripts=()))
     assert off_path.box.transport is box_mod._unattached, \

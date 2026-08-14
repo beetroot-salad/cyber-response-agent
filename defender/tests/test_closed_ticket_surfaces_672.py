@@ -141,14 +141,16 @@ def test_ticket_flips_state_between_list_and_get(tmp_path):
 
 def test_same_case_judged_second_time_fresh_salt_persistent_audit(tmp_path):
     """[d11_untrusted_wrap / d0 — dispositions consensus ×2] Judging the same case a second
-    time is a FRESH bind: a fresh per-bind uuid4 salt — UNPREDICTABLE, not merely new: the
-    second salt must not be a small step from the first, so a counter FAILS this test
-    (V-D/blind: disjointness alone is equally satisfied by a counter, and a predictable
-    salt lets the payload author forge the closing tag — the envelope's whole anti-forgery
-    defense) — while the FIRST judgment's capture rows PERSIST in the audit trail (what
+    time yields FRESH frames — the two judgments share no delimiter — while the FIRST
+    judgment's capture rows PERSIST in the audit trail (what
     stays unpersisted is anything the second judgment's VERDICT can read; the independence
     claim is about verdict inputs, not the record — the §7 revision of the 'nothing
-    persisted' reading). The premise's cross-LEG half is w3, an examined decline (V-F)."""
+    persisted' reading). The premise's cross-LEG half is w3, an examined decline (V-F).
+
+    AMENDED BY #875: the "UNPREDICTABLE, not merely new" half is retired, with its arithmetic
+    (see the inline note below). Anti-forgery no longer rests on entropy — `wrap_fresh` draws
+    each frame's salt after its content is in hand and re-draws while it collides, so the body
+    cannot hold the delimiter regardless of predictability."""
     case = _case(tmp_path)
     reg = partial(_ticket_registry, get=[("return", CLOSED_TKT)])
     run1 = _drive(tmp_path, [_get(OTHER_KEY), DONE], registry=reg(VerbRecorder()), case=case)
@@ -162,15 +164,29 @@ def test_same_case_judged_second_time_fresh_salt_persistent_audit(tmp_path):
     assert salt1, "no salted wrap observed on the first judgment"
     assert salt2, "no salted wrap observed on the second judgment"
     assert set(salt1).isdisjoint(set(salt2)), "the salt survived across binds — forgeable"
-    # UNPREDICTABILITY, not mere freshness: two independent 128-bit draws differ in ~30 of
-    # 32 hex positions; a counter (or any small-step successor) differs in the last few
-    # only. The bound is generous (>= 8) so no honest RNG ever trips it, and every
-    # derivable-successor scheme does.
-    s1, s2 = salt1[0], salt2[0]
-    assert sum(a != b for a, b in zip(s1, s2, strict=True)) >= 8, (
-        "the second bind's salt is a small step from the first — predictable (a counter), "
-        "not fresh entropy: the payload author can name the next closing tag"
-    )
+    # AMENDED PREMISE (#875). This block used to require the two salts differ in >= 8 hex
+    # positions, as a proxy for UNPREDICTABILITY — "a predictable salt lets the payload author
+    # forge the closing tag, the envelope's whole anti-forgery defense". Two things changed.
+    #
+    # The proxy is now WRONG ARITHMETIC: it was calibrated on 32-char uuid4 salts, where two
+    # independent draws differ in ~30 of 32 positions and a >= 8 bound is unreachable by
+    # accident. `wrap_fresh` mints EIGHT hex characters, so >= 8 means "all of them", which two
+    # honest random draws satisfy only ~60% of the time. Kept as-is it is a ~40% flake.
+    #
+    # And the property it stood in for is no longer what carries the defense. `wrap_fresh` draws
+    # the salt AFTER the content is in hand and re-draws while it occurs in that content, so the
+    # body cannot contain the delimiter whether or not an author could predict it. That is
+    # strictly stronger than entropy, and it is what is asserted below — directly, rather than
+    # through a statistical proxy. Disjointness across binds (above) still stands: it is what
+    # says the two judgments do not share an envelope.
+    for label, run in (("first", run1), ("second", run2)):
+        for salt in set(WRAP_RE.findall(run.all_text)):
+            body = run.all_text.split(f"<run-{salt}-untrusted>", 1)[1].split(
+                f"</run-{salt}-untrusted>", 1)[0]
+            assert salt not in body, (
+                f"the {label} judgment's frame salt {salt!r} occurs inside the content it "
+                "delimits — the framed party can close its own frame"
+            )
 
 
 def test_cached_open_payload_beside_live_refusal(tmp_path):

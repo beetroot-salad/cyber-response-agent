@@ -13,6 +13,8 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests._frames680 import frame_salt_of
+
 from defender._io import read_jsonl_rows
 from defender.runtime import challenge_gate
 from defender.runtime.challenge_gate import review_trace_path
@@ -48,7 +50,7 @@ def _deps(tmp_path: Path):
     (run_dir / "investigation.md").write_bytes((GOLDEN / "investigation.md").read_bytes())
     dfn = tmp_path / "defender"
     dfn.mkdir(exist_ok=True)
-    return bind(MAIN_DEF, run_dir, defender_dir=dfn, salt="sess-salt"), run_dir
+    return bind(MAIN_DEF, run_dir, defender_dir=dfn), run_dir
 
 
 
@@ -288,7 +290,7 @@ def test_a_lens_reply_reaches_the_trace_framed_and_never_bare(tmp_path):
     _run(deps, _bundle(lens=poison, composer=_composer("holds")))
     trace = review_trace_path(run_dir, "support").read_text(encoding="utf-8")
     assert poison in trace
-    assert f"<run-{deps.salt}-untrusted>" in trace, "the reply landed unframed"
+    assert frame_salt_of(trace, "untrusted"), "the reply landed unframed"
 
 
 def test_the_record_reaches_each_lens_inside_that_calls_own_fresh_salt(tmp_path):
@@ -316,9 +318,13 @@ def test_the_record_reaches_each_lens_inside_that_calls_own_fresh_salt(tmp_path)
     assert len(salts) == len(seen), "two stage calls shared a salt"
     for request in seen:
         assert f"<run-{request.salt}-untrusted>" in request.prompt, "the record arrived unframed"
-        assert deps.salt not in request.prompt, (
-            "the investigation's own salt reached a review role"
-        )
+    # The obligation this asserted — a review role must never hold the delimiter of the frame
+    # its own output returns inside — is discharged by construction since #875: the
+    # investigation has no salt to reach anyone. What stays checkable is asserted above: each
+    # stage mints its own, they are all distinct, and each frames that stage's record.
+    assert not hasattr(deps, "salt"), (
+        "the investigation carries a salt again — a review role could be handed it"
+    )
 
 
 def test_every_dispatched_lens_leaves_a_row_even_when_an_earlier_one_faults(tmp_path):
@@ -395,7 +401,7 @@ def test_the_composers_json_reply_does_not_stand_as_a_trace_row_of_its_own(tmp_p
         assert "round" in row, f"a round-less row reached the trace: {row}"
         assert "finding" not in row, "the composer's reply parsed as a trace row of its own"
     trace = review_trace_path(run_dir, "composer").read_text(encoding="utf-8")
-    assert f"<run-{deps.salt}-untrusted>" in trace, "the reply landed unframed"
+    assert frame_salt_of(trace, "untrusted"), "the reply landed unframed"
     assert "the close reads sound" in trace, "the reply did not reach the trace at all"
 
 

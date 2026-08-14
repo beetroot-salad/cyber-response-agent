@@ -39,7 +39,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from defender._env import env_int
-from defender._untrusted import wrap as _wrap
+from defender._untrusted import wrap_fresh
 
 EXTRA_TURN_BOUND = 2
 
@@ -311,7 +311,7 @@ def _mark_traces_incomplete(deps: Any, round_no: int, reason: str) -> None:
     restated here — with no roles bound this writes nothing, which is the honest record of a
     gate that dispatched nothing.
 
-    The reason rides FRAMED, on the investigation's salt, exactly as the stage replies on the
+    The reason rides FRAMED, on a wrap-time salt (#875) exactly as the stage replies on the
     same files do. Half of what can land here is stage-derived — a reply the reader refused
     quotes the model's own `finding`/`target`, and a stage error carries the provider's
     message — so an unframed reason puts payload-influenced text into the one artifact whose
@@ -319,7 +319,7 @@ def _mark_traces_incomplete(deps: Any, round_no: int, reason: str) -> None:
     for role in REVIEW_ROLES:
         _write_trace_row(
             deps.run_dir, role, round_no,
-            {"incomplete": True, "reason": _wrap(reason, "untrusted", deps.salt)},
+            {"incomplete": True, "reason": wrap_fresh(reason, "untrusted")},
         )
 
 
@@ -548,7 +548,7 @@ async def challenge_gate(deps: Any, disposition: str, *, stages: Any, bounds: Bo
     for lens, outcome in zip(lenses, outcomes, strict=True):
         _write_trace_row(
             deps.run_dir, lens, round_no, {"ok": outcome.ok},
-            raw_reply=_wrap(outcome.text or outcome.detail or "", "untrusted", deps.salt),
+            raw_reply=wrap_fresh(outcome.text or outcome.detail or "", "untrusted"),
         )
 
     readings: dict[str, str] = {}
@@ -569,7 +569,7 @@ async def challenge_gate(deps: Any, disposition: str, *, stages: Any, bounds: Bo
     )
     _write_trace_row(
         deps.run_dir, "composer", round_no, {"ok": composer.ok},
-        raw_reply=_wrap(composer.text or composer.detail or "", "untrusted", deps.salt),
+        raw_reply=wrap_fresh(composer.text or composer.detail or "", "untrusted"),
     )
     if not composer.ok:
         _mark_traces_incomplete(deps, round_no, composer.detail or "stage fault")

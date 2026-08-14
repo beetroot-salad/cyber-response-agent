@@ -5,20 +5,23 @@ the sweep/relocation half lives in `test_meta_json_retirement_647.py` beside it.
 test per `form: test` demand, named by its `discharged_by`, with the demand's
 observable-outcome prose in the test's docstring.
 
-**What is new here.** The run's central obligation is the salt's ORIGIN, not its coherence
-downstream. The existing coherence canary (`test_salt_coherence_545.py`) injects a hardcoded
-token at BOTH ends — into the harness's fixture builder and into `drive()` — so it never
-crosses the seam this change creates. Every test below that touches the salt calls the REAL
-production builder, `run_common.materialize_run_dir`, and follows the value it RETURNS
-through the real driver to the surfaces the model sees. Nothing here hardcodes a salt.
+**AMENDED BY #875.** This module's original obligation was the salt's ORIGIN: the run has ONE
+trust token, minted by the production builder, and every salted surface carries that same one.
+#875 F-1 found what that shape cost — a token shared across a run is a token the gather
+subagent reads in plaintext on every payload view it is handed, and can therefore echo to
+close the frame its own summary arrives in and keep writing in MAIN's host-text region.
+
+So the origin obligation is retired rather than repaired: `wrap_fresh` mints each frame's
+delimiter AFTER its content is in hand, and there is no run-scoped salt left to originate.
+The four tests below state the successor obligations — the builder mints nothing, every frame
+carries its own delimiter, no frame's salt occurs in its own body, and gather is bound with
+none. Two of them assert the INVERSE of what this file used to require; each says so, and
+says what the old reasoning got wrong.
 
 **The second new pin** is message 0's run-dir listing. `orient` inlines the workspace map
 into MAIN's first model request, and the map enumerates the run dir's children. Nothing
 pinned that listing before, which is why three review passes and a cold review all missed
 that deleting a file out of the run dir changes MAIN's prompt.
-
-RED AGAINST HEAD IS THE EXPECTED STATE: `materialize_run_dir` still returns a bare `Path`,
-so every tuple unpack below raises today. That is the contract, not a skeleton to grow.
 
 The machinery is the real replay harness: `drive()` runs the REAL `driver.run_investigation`
 with a `FunctionModel`, so the salted wrappers observed here are exactly what the model sees.
@@ -68,16 +71,16 @@ PAYLOAD = [
 
 
 def build(tmp_path, monkeypatch, golden: Path = GOLDEN, run_id: str = "origin-647"):
-    """Materialize a run dir with the REAL production builder and return `(run_dir, salt)`.
+    """Materialize a run dir with the REAL production builder.
 
-    This is the seam under test: the runs base is redirected into `tmp_path` through the env
-    var the builder itself resolves, and everything else — the directory layout, the alert
-    copy, the token mint — is production code. No salt is supplied; the builder's is the only
-    one in play.
-    """
+    The runs base is redirected into `tmp_path` through the env var the builder itself
+    resolves; everything else — the directory layout, the alert copy — is production code.
+
+    Returned a `(run_dir, salt)` pair until #875. The builder no longer mints a token at all:
+    `wrap_fresh` mints each frame's delimiter after its content is in hand, so there is no
+    run-scoped salt for a builder to originate."""
     monkeypatch.setenv("DEFENDER_RUNS_BASE", str(tmp_path / "runs"))
-    run_dir, salt = run_common.materialize_run_dir(golden / "alert.json", run_id)
-    return run_dir, salt
+    return run_common.materialize_run_dir(golden / "alert.json", run_id)
 
 
 def tokens(*transcripts: str) -> set[str]:
@@ -98,7 +101,7 @@ def elastic_ok(rec: VerbRecorder) -> FakeVerbs:
     return FakeVerbs({"elastic": {"query": query}})
 
 
-def gather_scenario(run_dir: Path, salt: str, *, run_id: str):
+def gather_scenario(run_dir: Path, *, run_id: str):
     """Drive a run that exercises all three salted vias in one run: orient's inlined raw alert
     and the gather return (api), a read of the alert file (fs), and the gather subagent's query
     against an injected registry (bash). Returns the two replay models."""
@@ -118,7 +121,7 @@ def gather_scenario(run_dir: Path, salt: str, *, run_id: str):
         })]),
         Turn(text="Summary: measured the lead."),
     ])
-    drive(run_dir, run_id=run_id, salt=salt, main=main, gather=gather, verbs=elastic_ok(rec))
+    drive(run_dir, run_id=run_id, main=main, gather=gather, verbs=elastic_ok(rec))
     return main, gather, rec
 
 
@@ -130,271 +133,23 @@ def run_dir_listing(message_zero: str) -> list[str]:
 
 
 
+def test_materialize_run_dir_returns_only_the_run_dir(tmp_path, monkeypatch):
+    """The builder hands back the one thing it still owns: the run directory it created.
 
-def test_materialize_run_dir_returns_run_dir_then_salt_on_the_success_lane(tmp_path, monkeypatch):
-    """On the success lane the builder hands back BOTH things it owns, in order: the run
-    directory it created, then the per-run trust token it minted. The run dir is a real
-    directory carrying the copied alert and the raw-payload subdir; the token is a real
-    non-empty string. The builder itself writes the token nowhere: the metadata file that
-    used to hold a second, readable copy is gone, and no consumer reads one back off disk.
-    What this does NOT claim is that the token has no on-disk presence at all — a DRIVEN run
-    still streams every model message into `llm_requests.jsonl` (runtime/observe.py's request
-    logger), and those messages contain the delimiter verbatim, so the token lands there.
-    That copy is pre-existing, out of scope for this change, and not a regression; the change
-    removes one of the two on-disk copies. The design's own non-obligation says the same:
-    "This is not hardening. The change denies no principal access to the salt.\""""
-    run_dir, salt = build(tmp_path, monkeypatch)
+    AMENDED FROM `..._returns_run_dir_then_salt_on_the_success_lane` (#875). #647's obligation
+    was that the run's ONE trust token has a single origin — the production builder — so that
+    no surface could obtain a delimiter the others did not share. That obligation is discharged
+    now by construction rather than by provenance: `wrap_fresh` mints each frame's salt AFTER
+    its content is in hand, so there is no run-scoped token for anything to originate, share,
+    or diverge from. A builder that returned one would be handing out the very object #875 F-1
+    removed."""
+    run_dir = build(tmp_path, monkeypatch)
 
-    assert isinstance(run_dir, Path), "the builder did not return a Path for the run dir"
+    assert isinstance(run_dir, Path), "the builder no longer returns a bare run dir"
     assert run_dir.is_dir(), "the builder's returned run dir is not a real directory"
     assert run_dir.name == "origin-647"
     assert (run_dir / "alert.json").is_file()
     assert (run_dir / "gather_raw").is_dir()
-
-    assert isinstance(salt, str), "the builder returned a trust token that is not a string"
-    assert salt, "the builder returned no trust token"
-
-    other_dir, other_salt = build(tmp_path, monkeypatch, run_id="origin-647-b")
-    assert other_salt != salt, "two runs share a trust token"
-    assert other_dir != run_dir
-
-
-def test_builder_early_exit_lanes_fire_before_any_salt_is_minted(tmp_path, monkeypatch):
-    """The pair is promised on the success lane ONLY. Both guard lanes above the mint exit the
-    process outright — a missing alert file, and a run id whose directory already exists — so
-    neither returns a run dir, a token, or anything at all. A caller that unpacks the pair can
-    therefore never receive a half-built one, and the exclusive run-dir key survives: a second
-    build on the same id exits rather than adopting the first's directory."""
-    monkeypatch.setenv("DEFENDER_RUNS_BASE", str(tmp_path / "runs"))
-
-    missing = tmp_path / "does-not-exist.json"
-    assert not missing.exists()
-    with pytest.raises(SystemExit) as exc:
-        run_common.materialize_run_dir(missing, "early-exit-647")
-    assert "alert not found" in str(exc.value)
-    assert not (tmp_path / "runs" / "early-exit-647").exists(), (
-        "the missing-alert lane created a run dir before exiting"
-    )
-
-    run_dir, salt = build(tmp_path, monkeypatch, run_id="collision-647")
-    with pytest.raises(SystemExit) as exc:
-        run_common.materialize_run_dir(GOLDEN / "alert.json", "collision-647")
-    assert "already exists" in str(exc.value)
-    assert sorted(p.name for p in run_dir.iterdir()) == ["alert.json", "gather_raw"]
-    assert salt
-
-
-
-
-def test_salt_returned_by_the_builder_is_the_salt_that_reaches_run_investigation(
-    tmp_path, monkeypatch
-):
-    """The token the builder RETURNS is the token that reaches the investigation and shows up
-    on the surfaces the model sees. This crosses the seam the change creates: the value is not
-    supplied by the test, it is minted by production code and followed through — the run dir
-    the builder produced is the run dir driven, and the delimiter wrapped around the raw alert
-    in MAIN's first model request carries that same minted value and no other. A builder that
-    returned one token while the run used another would leave every quarantine delimiter
-    forgeable, and no existing pin crosses this seam: the coherence canary injects a hardcoded
-    token at both ends and never calls the builder at all."""
-    run_dir, salt = build(tmp_path, monkeypatch)
-    assert run_dir.is_dir(), (
-        "there is no run dir to follow the minted token through: the builder returned "
-        f"{run_dir}"
-    )
-    assert salt, (
-        "there is no minted token to follow: the builder returned "
-        f"{salt!r} for {run_dir}"
-    )
-    replay = ReplayFn([Turn(text="Done.")])
-    drive(run_dir, run_id=run_dir.name, salt=salt, main=replay)
-
-    message_zero = replay.seen[0]
-    assert f"<run-{salt}-untrusted>" in message_zero, (
-        "the raw alert in message 0 is not wrapped with the token the builder returned"
-    )
-    assert f"</run-{salt}-untrusted>" in message_zero
-    assert tokens(*replay.seen) == {salt}, (
-        f"a token other than the builder's reached the run: {tokens(*replay.seen)}"
-    )
-
-
-def test_every_salted_surface_in_one_model_context_carries_the_minted_token(
-    tmp_path, monkeypatch
-):
-    """Every salted surface feeding the model carries the SAME token — the one the builder
-    minted — across all three access vias in a single driven run: the raw alert inlined into
-    the orientation and the gather subagent's returned summary (the api lane), the read of the
-    alert file (the fs lane), and the query output the gather subagent pulls from a data source
-    (the bash lane). A constraint pinned on one surface and absent on its sibling is the
-    canonical fail-open: a fresh token per wrap lets the model forge a closing delimiter."""
-    run_dir, salt = build(tmp_path, monkeypatch, golden=GOLDEN_AB3, run_id="coherence-647")
-    assert run_dir.is_dir(), (
-        f"no run dir to carry the salted surfaces: builder returned {run_dir}"
-    )
-    assert salt, (
-        f"no token to carry across the salted surfaces: builder returned {salt!r}"
-    )
-    main, gather, rec = gather_scenario(run_dir, salt, run_id=run_dir.name)
-
-    main_seen = "\n".join(main.seen)
-    gather_seen = "\n".join(gather.seen)
-
-    assert f"<run-{salt}-untrusted>" in main.seen[0], "the orient alert wrap is missing"
-    assert main.seen[-1].count(f"<run-{salt}-untrusted>") >= 2, (
-        "the gather return did not come back untrusted-wrapped with the run's token"
-    )
-    assert f"<run-{salt}-untrusted>" in main.seen[1], "the read_file result is not salt-wrapped"
-    assert rec.calls, "the injected verb never ran — the bash lane was not exercised"
-    assert f"<run-{salt}-untrusted>" in gather_seen, "the query return is not salt-wrapped"
-
-    assert tokens(main_seen, gather_seen) == {salt}, (
-        f"more than one token across the run's salted surfaces: {tokens(main_seen, gather_seen)}"
-    )
-
-
-def test_gather_subagent_is_bound_with_the_parent_token_not_a_fresh_mint(tmp_path, monkeypatch):
-    """The gather subagent INHERITS the parent run's token rather than minting its own. It runs
-    concurrently over the same run dir and returns the primary untrusted channel into the main
-    loop, so a fresh token on its side would wrap the returned summary in a delimiter MAIN was
-    never told about — quarantine failing open at exactly the boundary it exists to guard."""
-    run_dir, salt = build(tmp_path, monkeypatch, golden=GOLDEN_AB3, run_id="inherit-647")
-    assert run_dir.is_dir(), (
-        f"no parent run dir for the subagent to run over: builder returned {run_dir}"
-    )
-    assert salt, (
-        f"no parent token for the subagent to inherit: builder returned {salt!r}"
-    )
-    main, gather, rec = gather_scenario(run_dir, salt, run_id=run_dir.name)
-
-    gather_seen = "\n".join(gather.seen)
-    assert f"<run-{salt}-" in gather_seen, "the subagent's own surfaces carry no token at all"
-    assert tokens(gather_seen) == {salt}, (
-        f"the gather subagent used a token the parent never minted: {tokens(gather_seen)}"
-    )
-    assert f"<run-{salt}-untrusted>" in main.seen[-1]
-
-
-def test_no_surface_on_the_run_lane_obtains_a_salt_from_a_source_no_other_surface_knows(
-    tmp_path, monkeypatch
-):
-    """No surface on the run lane obtains its token from a source the other surfaces do not
-    share. Sweeping every run-scoped delimiter emitted anywhere in a driven run — both model
-    contexts, every via — yields exactly one distinct token, and it is the one the builder
-    returned. The sweep matches ANY token shape, so a foreign one would be seen rather than
-    silently skipped; that a second, independently minted token is genuinely constructible in
-    this system is the paired positive control on the curator leg."""
-    run_dir, salt = build(tmp_path, monkeypatch, golden=GOLDEN_AB3, run_id="one-token-647")
-    assert run_dir.is_dir(), (
-        f"no run dir whose surfaces could be swept: builder returned {run_dir}"
-    )
-    assert salt, (
-        f"no known token to compare the run's surfaces against: builder returned {salt!r}"
-    )
-    main, gather, rec = gather_scenario(run_dir, salt, run_id=run_dir.name)
-
-    seen = tokens("\n".join(main.seen), "\n".join(gather.seen))
-    assert seen, "no run-scoped delimiter was emitted at all — the sweep is vacuous"
-    assert seen == {salt}, f"a surface used an unshared token: {sorted(seen - {salt})}"
-
-
-def test_fail_open_fresh_mint_is_not_reachable_from_run_py_through_the_driver(
-    tmp_path, monkeypatch
-):
-    """The fail-open fresh mint is unreachable from the run lane. The deleted resolver answered
-    an unresolvable run dir with a brand-new token — a caller taking that answer would wrap
-    with something no other surface knew — and nothing reintroduces that shape. On the run lane
-    the token comes straight from the builder, so every delimiter emitted in a driven run
-    carries the builder's 16-character token and never the 32-character shape the fresh-mint
-    fallback produces."""
-    from defender.hooks import _run_dir as hooks_run_dir
-
-    assert not hasattr(hooks_run_dir, "read_meta_salt"), (
-        "the fail-open salt reader survives on the run lane's import graph"
-    )
-
-    run_dir, salt = build(tmp_path, monkeypatch, run_id="no-failopen-647")
-    assert run_dir.is_dir(), (
-        f"the run lane has no builder-supplied run dir at all: builder returned {run_dir}"
-    )
-    assert salt, (
-        f"the run lane has no builder-supplied token at all: builder returned {salt!r}"
-    )
-    replay = ReplayFn([
-        Turn(tool_calls=[("read_file", {"path": str(run_dir / "alert.json")})]),
-        Turn(text="Done."),
-    ])
-    drive(run_dir, run_id=run_dir.name, salt=salt, main=replay)
-
-    seen = tokens(*replay.seen)
-    assert seen == {salt}
-    assert all(len(t) == 16 for t in seen), (
-        f"a token of fallback shape reached the run lane: {sorted(seen)}"
-    )
-
-
-
-
-def test_empty_string_salt_is_not_constructible_once_the_disk_read_is_gone(
-    tmp_path, monkeypatch
-):
-    """An empty token is not constructible on the run lane. It used to be: the salt was read
-    back out of a JSON file with an empty-string default, so any blob missing the key yielded
-    one — and an empty token collapses the delimiter to a frame with no token between the
-    dashes, which the binding seam passes through unresolved because it keys its fallback on
-    the value being absent rather than falsy. With the value coming straight from the mint,
-    that lane is gone: even with a stale metadata blob planted in the run dir carrying no
-    token at all, the run's delimiters carry the builder's real token."""
-    run_dir, salt = build(tmp_path, monkeypatch, run_id="no-empty-647")
-    assert salt != "", "the builder returned an empty token"
-
-    (run_dir / "meta.json").write_text('{"run_id": "no-empty-647"}', encoding="utf-8")
-
-    replay = ReplayFn([Turn(text="Done.")])
-    drive(run_dir, run_id=run_dir.name, salt=salt, main=replay)
-
-    message_zero = replay.seen[0]
-    assert "<run--untrusted>" not in message_zero, (
-        "a degenerate token-less delimiter reached the model"
-    )
-    assert f"<run-{salt}-untrusted>" in message_zero
-    assert tokens(*replay.seen) == {salt}
-
-
-def test_minted_salt_is_sixteen_lowercase_hex_characters(tmp_path, monkeypatch):
-    """The shipped token is sixteen lowercase hexadecimal characters, drawn from the
-    cryptographic generator — the distinguished default column of the token's domain, and the
-    positive control for the empty-token negative. Its alphabet is what keeps the rendered
-    delimiter frame free of anything the surrounding markup could reinterpret, and its
-    unguessability is what a payload author, who writes text before wrapping and never sees the
-    run dir, cannot defeat."""
-    seen = set()
-    for i in range(3):
-        _run_dir, salt = build(tmp_path, monkeypatch, run_id=f"shape-647-{i}")
-        assert re.fullmatch(r"[0-9a-f]{16}", salt), f"token shape drifted: {salt!r}"
-        seen.add(salt)
-    assert len(seen) == 3, "the mint is not per-run"
-
-
-def test_minted_salt_is_independent_of_the_run_id_and_drawn_from_secrets(tmp_path, monkeypatch):
-    """The token's value is INDEPENDENT of the run id — it is drawn from the cryptographic
-    generator, not derived from anything an outsider can name. This is the token's whole
-    security property, and no other pin in this suite has it: uniqueness-per-run, shape, and
-    coherence are all satisfied by a seeded PRNG keyed on the run id
-    (`random.Random(run_id).getrandbits(64)`), which would hand every delimiter to anyone who
-    can guess the run id — and the run id is `{utc_timestamp}-{alert.stem}`, both of which a
-    payload author can influence or predict. Two builds under the SAME run id therefore mint
-    DIFFERENT tokens, and the builder's mint site names `secrets`, whose entropy source is the
-    OS rather than a caller-visible seed."""
-    salts = set()
-    for i in range(3):
-        monkeypatch.setenv("DEFENDER_RUNS_BASE", str(tmp_path / f"runs-{i}"))
-        _run_dir, salt = run_common.materialize_run_dir(GOLDEN / "alert.json", "same-run-id-647")
-        salts.add(salt)
-    assert len(salts) == 3, (
-        "the same run id minted the same token more than once — the mint is a function of the "
-        f"run id, not of an entropy source: {sorted(salts)}"
-    )
 
     src = (DEFENDER / "run_common.py").read_text(encoding="utf-8")
     tree = ast.parse(src)
@@ -407,18 +162,89 @@ def test_minted_salt_is_independent_of_the_run_id_and_drawn_from_secrets(tmp_pat
         if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
         and isinstance(n.func.value, ast.Name) and n.func.value.id == "secrets"
     ]
-    assert mints, (
-        "materialize_run_dir mints its token from something other than `secrets` — the "
-        "unguessability of every quarantine delimiter rests on this generator"
+    assert not mints, (
+        "materialize_run_dir still mints a run-scoped token — #875 removed the run salt; a "
+        "token minted here can only be threaded to a party the frames it delimits are shown to"
     )
-    seeded = [
-        n for n in ast.walk(builder)
-        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
-        and isinstance(n.func.value, ast.Name) and n.func.value.id in {"random", "hashlib"}
-    ]
-    assert not seeded, "the builder derives its token from a seedable generator"
 
 
+def test_every_frame_in_one_model_context_carries_its_own_salt(tmp_path, monkeypatch):
+    """Every frame the model is shown carries a DISTINCT delimiter.
+
+    THE INVERSE of #647's `..._carries_the_minted_token` and of #545's coherence canary, and
+    deliberately so. Those pinned "exactly one distinct salt across the run", on the reasoning
+    that a second token would leave the agent unable to match a delimiter it had been told
+    about. #875 F-1 is what that reasoning cost: one token shared across a run is one token the
+    gather subagent reads in plaintext on every payload view, and can therefore echo to close
+    the frame its own summary arrives in.
+
+    Nothing was actually resting on coherence. Both SKILL.md contracts ship a literal `{salt}`
+    placeholder — neither MAIN nor GATHER is ever told a value — so both already read frames
+    structurally, by matching open/close pairs. What replaces coherence is the property below,
+    which coherence could never have given: no framed party holds its own delimiter."""
+    run_dir = build(tmp_path, monkeypatch, golden=GOLDEN_AB3, run_id="per-frame-647")
+    main, gather, rec = gather_scenario(run_dir, run_id=run_dir.name)
+
+    main_seen, gather_seen = "\n".join(main.seen), "\n".join(gather.seen)
+    seen = tokens(main_seen, gather_seen)
+    assert seen, "no run-scoped delimiter was emitted at all — the sweep is vacuous"
+    assert len(seen) > 1, (
+        "every frame in the run shares one delimiter — the #875 F-1 shape is back: a framed "
+        f"party that sees one frame can close another. tokens={sorted(seen)}"
+    )
+    for token in seen:
+        assert re.fullmatch(r"[0-9a-f]+", token), f"a delimiter is not lowercase hex: {token!r}"
+
+
+def test_no_frames_salt_occurs_inside_the_content_it_delimits(tmp_path, monkeypatch):
+    """A frame's delimiter never appears in that frame's own body.
+
+    This is the guarantee `wrap_fresh`'s re-mint loop buys, and the one the old per-run token
+    could not: the salt is drawn AFTER the content is in hand and re-drawn while it collides,
+    so the body cannot contain the delimiter — by construction, not by improbability."""
+    run_dir = build(tmp_path, monkeypatch, golden=GOLDEN_AB3, run_id="no-echo-647")
+    main, gather, rec = gather_scenario(run_dir, run_id=run_dir.name)
+
+    checked = 0
+    for transcript in ("\n".join(main.seen), "\n".join(gather.seen)):
+        for m in re.finditer(r"<run-([0-9a-f]+)-([a-z_-]+)>\n(.*?)\n</run-\1-\2>", transcript, re.S):
+            salt, body = m.group(1), m.group(3)
+            assert salt not in body, (
+                f"a frame's own salt {salt!r} occurs inside the content it delimits — the "
+                "framed party can close its own frame"
+            )
+            checked += 1
+    assert checked, "no complete frame was found to check — the sweep is vacuous"
+
+
+def test_the_gather_subagent_is_bound_with_no_salt_at_all(tmp_path, monkeypatch):
+    """The gather subagent inherits NO token, because there is none to inherit.
+
+    AMENDED PREMISE (#875 F-1). This test used to require the opposite — that gather
+    INHERITS the parent run's token — reasoning that a fresh token on gather's side "would wrap
+    the returned summary in a delimiter MAIN was never told about, quarantine failing open at
+    exactly the boundary it exists to guard."
+
+    That reasoning inverts the direction of the threat. `_run_gather` re-wraps gather's output
+    unconditionally before it reaches MAIN, so a foreign inner tag is inert TEXT inside MAIN's
+    frame — it cannot close anything. Inheritance is what fails open: it hands the subagent
+    whose output MAIN frames the very delimiter MAIN frames it with. MAIN was never "told" any
+    delimiter in the first place — `defender/SKILL.md` ships a literal `{salt}` placeholder."""
+    run_dir = build(tmp_path, monkeypatch, golden=GOLDEN_AB3, run_id="no-inherit-647")
+    main, gather, rec = gather_scenario(run_dir, run_id=run_dir.name)
+
+    main_seen, gather_seen = "\n".join(main.seen), "\n".join(gather.seen)
+    gather_tokens, main_tokens = tokens(gather_seen), tokens(main_seen)
+    assert gather_tokens, "the subagent's own surfaces carry no delimiter at all"
+    assert main_tokens, "MAIN's surfaces carry no delimiter at all"
+    assert not (gather_tokens & main_tokens), (
+        "a delimiter is shared between the gather subagent and MAIN — gather can close the "
+        f"frame its own summary returns inside (#875 F-1): {sorted(gather_tokens & main_tokens)}"
+    )
+
+    src = (DEFENDER / "runtime" / "tools_gather.py").read_text(encoding="utf-8")
+    assert not re.search(r"bind\(\s*GATHER_DEF[^)]*salt\s*=", src), \
+        "the gather dispatch passes a salt into bind(GATHER_DEF, …)"
 
 
 def test_a_driven_run_leaves_no_meta_json_in_the_run_dir(tmp_path, monkeypatch):
@@ -427,7 +253,7 @@ def test_a_driven_run_leaves_no_meta_json_in_the_run_dir(tmp_path, monkeypatch):
     at any depth. No completion marker replaces it — the file was the last unconditional write
     and so incidentally marked 'materialization finished', but nothing ever consumed that
     property and none is owed."""
-    run_dir, salt = build(tmp_path, monkeypatch, run_id="no-meta-647")
+    run_dir = build(tmp_path, monkeypatch, run_id="no-meta-647")
     assert run_dir.is_dir(), "the builder materialized no run dir to inspect"
     assert not (run_dir / "meta.json").exists(), "the builder still writes the metadata file"
 
@@ -435,7 +261,7 @@ def test_a_driven_run_leaves_no_meta_json_in_the_run_dir(tmp_path, monkeypatch):
         Turn(tool_calls=[("read_file", {"path": str(run_dir / "alert.json")})]),
         Turn(text="Done."),
     ])
-    drive(run_dir, run_id=run_dir.name, salt=salt, main=replay)
+    drive(run_dir, run_id=run_dir.name, main=replay)
 
     assert not list(run_dir.rglob("meta.json")), (
         f"a metadata file reappeared: {[str(p) for p in run_dir.rglob('meta.json')]}"
@@ -450,7 +276,7 @@ def test_run_dir_still_carries_every_investigation_artifact_after_the_removal(
     investigation log and the report the loop's normalizer parses, plus the live request log
     and its projected tool trace. The narrowed obligation is exactly this: the same
     investigation artifacts and the same salted surfaces — not the same directory listing."""
-    run_dir, salt = build(tmp_path, monkeypatch, golden=GOLDEN, run_id="artifacts-647")
+    run_dir = build(tmp_path, monkeypatch, golden=GOLDEN, run_id="artifacts-647")
     assert (run_dir / "alert.json").is_file(), (
         "the builder did not materialize the copied alert it owns"
     )
@@ -469,7 +295,7 @@ def test_run_dir_still_carries_every_investigation_artifact_after_the_removal(
         Turn(tool_calls=[("close_investigation", {"disposition": "inconclusive"})]),
         Turn(text="Done."),
     ])
-    drive(run_dir, run_id=run_dir.name, salt=salt, main=replay)
+    drive(run_dir, run_id=run_dir.name, main=replay)
 
     for name in ("alert.json", "investigation.md", "report.md", "tool_trace.jsonl"):
         assert (run_dir / name).is_file(), f"{name} is missing from the run dir"
@@ -494,18 +320,15 @@ def test_message_zero_orientation_lists_exactly_the_materialized_run_dir_childre
     unpinned before this change, which is precisely why removing a file that gets listed —
     and therefore altering MAIN's prompt — went unnoticed through three review passes. The
     listing legitimately loses that one line; the section itself stays."""
-    run_dir, salt = build(tmp_path, monkeypatch, run_id="msg0-647")
+    run_dir = build(tmp_path, monkeypatch, run_id="msg0-647")
     assert run_dir.is_dir(), (
         "there is no materialized run dir for the orientation to enumerate"
-    )
-    assert salt, (
-        "there is no minted token to drive the orientation with"
     )
     materialized = {p.name for p in run_dir.iterdir()}
     assert "meta.json" not in materialized
 
     replay = ReplayFn([Turn(text="Done.")])
-    drive(run_dir, run_id=run_dir.name, salt=salt, main=replay)
+    drive(run_dir, run_id=run_dir.name, main=replay)
 
     listed = run_dir_listing(replay.seen[0])
     assert listed == sorted(listed), "the listing is not in sorted order"
@@ -536,13 +359,13 @@ def test_replayed_message_zero_listing_matches_the_production_run_dir_file_set(
         "the replay harness still writes the metadata file into its run dir"
     )
 
-    prod_dir, prod_salt = build(tmp_path, monkeypatch, run_id="replay-msg0-647-prod")
+    prod_dir = build(tmp_path, monkeypatch, run_id="replay-msg0-647-prod")
     assert prod_dir.is_dir(), (
         "there is no production run dir to compare the replayed listing against"
     )
 
     replay = ReplayFn([Turn(text="Done.")])
-    drive(harness_dir, run_id="replay-msg0-647", salt="0" * 16, main=replay)
+    drive(harness_dir, run_id="replay-msg0-647", main=replay)
     listed = run_dir_listing(replay.seen[0])
 
     assert "meta.json" not in listed, "the replayed message 0 still advertises the removed file"
@@ -560,7 +383,6 @@ def test_replayed_message_zero_listing_matches_the_production_run_dir_file_set(
         f"the replayed listing names files a production run dir never has: "
         f"{set(listed) - production_names}"
     )
-    assert prod_salt
 
 
 def test_replay_harness_run_dir_and_production_run_dir_present_the_same_file_set(
@@ -587,12 +409,9 @@ def test_replay_harness_run_dir_and_production_run_dir_present_the_same_file_set
         "golden now carries one — the production builder would copy it and the harness would "
         "not, so the scope condition no longer holds and the claim must be re-derived"
     )
-    prod_dir, salt = build(tmp_path, monkeypatch, run_id="parity-647")
+    prod_dir = build(tmp_path, monkeypatch, run_id="parity-647")
     assert prod_dir.is_dir(), (
         "the production builder produced no run dir to compare file sets with"
-    )
-    assert salt, (
-        "the production builder returned no salt to materialize the harness run dir with"
     )
     harness_dir = materialize(tmp_path / "h", GOLDEN)
 

@@ -23,7 +23,7 @@ from typing import Any
 
 from defender._io import read_jsonl_rows, read_text_soft
 from defender._run_paths import RunPaths
-from defender._untrusted import wrap as _wrap
+from defender._untrusted import wrap_fresh
 from defender.hooks.budget_enforcer import (
     DEFAULT_LIMITS,
     BudgetKill,
@@ -182,11 +182,20 @@ def _run_sync(coro: Any) -> Any:
 
 def _sanitize(text: Any) -> str:
     """Neutralize any `<run-…-…>`-shaped delimiter, and any markdown code-fence run, in
-    externally-sourced content BEFORE it is wrapped or interpolated. `wrap()` performs no
-    escaping of its own delimiter shape, so an attacker-authored `message`/`user.name`/
-    `source.ip` carrying a byte-exact close tag would otherwise end the untrusted frame (or
-    item 3's contract) early; a ``` run would likewise end the fenced block whichever
-    consumer put the text inside one.
+    externally-sourced content before it is INTERPOLATED into text that crosses an agent
+    boundary unframed.
+
+    The fence half is unconditional: a ``` run ends the fenced block whichever consumer put
+    the text inside one, and nothing about how a frame is delimited changes that.
+
+    The DELIMITER half was NARROWED BY #875. Its original reason was the untrusted frame —
+    `wrap()` escapes nothing of its own delimiter shape, so a byte-exact close tag in an
+    attacker-authored `message`/`user.name`/`source.ip` would end the frame early. That reason
+    is gone: `wrap_fresh` mints this section's delimiter AFTER the body is assembled and
+    re-mints while it collides, so no content can close the frame that wraps it, sanitized or
+    not. What survives is item 3's contract (`_correlation_goal`): the correlation lead's GOAL
+    is free prose built from those same attacker-derived values and handed to the gather
+    subagent as a dispatch argument, inside no frame at all, so no re-mint covers it.
 
     DEFANGED, NEVER DELETED — the same rule both surfaces' tests assert: the evidence has to
     survive in a form the reader can still see, or the sanitizer passes by destroying what it
@@ -203,7 +212,6 @@ def _sanitize(text: Any) -> str:
 class _CaptureDeps:
     run_dir: Path
     defender_dir: Path
-    salt: str
     run_id: str
     lead_id: str
     box: Any = None
@@ -428,9 +436,9 @@ class _CallLedger:
         return envelope, text
 
 
-def _build_deps(run_dir: Path, defender_dir: Path, salt: str, run_id: str, lead_id: str) -> _CaptureDeps:
+def _build_deps(run_dir: Path, defender_dir: Path, run_id: str, lead_id: str) -> _CaptureDeps:
     return _CaptureDeps(
-        run_dir=run_dir, defender_dir=defender_dir, salt=salt, run_id=run_id, lead_id=lead_id,
+        run_dir=run_dir, defender_dir=defender_dir, run_id=run_id, lead_id=lead_id,
     )
 
 
@@ -612,12 +620,12 @@ async def _fetch_batched(ancestors: list[dict], issue) -> tuple[list[tuple[dict,
 
 
 async def _resolve_item1(  # noqa: C901, PLR0912, PLR0915 — item 1's own branch/call census: the shell fetch, the group/fallback branch, the empty/no-group fallback, per-call budget gating — see the module docstring
-    *, run_dir: Path, defender_dir: Path, salt: str, run_id: str, alert: dict,
+    *, run_dir: Path, defender_dir: Path, run_id: str, alert: dict,
     capture: Any, env: dict, limits: dict,
 ) -> tuple[str, str]:
     from defender.scripts.adapters.elastic_adapter import load_config
 
-    deps = _build_deps(run_dir, defender_dir, salt, run_id, L0)
+    deps = _build_deps(run_dir, defender_dir, run_id, L0)
     claimed = claim_lead({
         "run_dir": str(run_dir), "lead_id": L0, "goal": ITEM1_GOAL,
         "what_to_summarize": ITEM1_WHAT_TO_SUMMARIZE, "provenance": HARNESS_PROVENANCE,
@@ -911,7 +919,7 @@ def _correlation_contract(alert: dict, ancestor_block: str) -> tuple[str, list[s
 
 
 async def dispatch_correlation(  # noqa: C901, PLR0913 — item 3's own dispatch: the narrowed registry, the session/terminator wiring, the pre-claimed seam call — one composition frame
-    *, run_dir: Path, defender_dir: Path, salt: str, run_id: str,
+    *, run_dir: Path, defender_dir: Path, run_id: str,
     goal: str, what_to_summarize: list[str], verbs: Any, limits: dict,
     make_model: Any, logger: Any, box: Any, store: Any = None,
     budget_started_monotonic: float = 0.0,
@@ -993,7 +1001,7 @@ async def dispatch_correlation(  # noqa: C901, PLR0913 — item 3's own dispatch
         except Exception as e:  # noqa: BLE001 — the store may already be the reason we're here
             print(f"[run.py] correlation lead truncated_by write skipped: {e!r}")
 
-    gbase = bind(GATHER_DEF, run_dir, salt=salt, defender_dir=defender_dir, box=box)
+    gbase = bind(GATHER_DEF, run_dir, defender_dir=defender_dir, box=box)
     assert isinstance(gbase, GatherDeps)
     # #808 review fix — thread the RUN's own budget-clock origin through, the same way
     # `_run_gather`'s own model-dispatched path does (`gdeps = replace(gbase, ...,
@@ -1087,12 +1095,12 @@ def prepare_correlation_lead(
 
 # ─── the wrap + section assembly ─────────────────────────────────────────────────────
 
-def _render_section(body: str, salt: str) -> str:
+def _render_section(body: str) -> str:
     """`LeadZeroResult.text` (d0): item 1's rendered block IN ITS ENTIRETY inside ONE
-    `wrap(text, "untrusted", salt)` frame — nothing outside it. The ORIENT heading is a
+    `wrap_fresh(text, "untrusted")` frame — nothing outside it. The ORIENT heading is a
     separate, TRUSTED line `render_orient_section` prepends when assembling the section
     text `orient.py` appends; it is not part of the entry point's own return value."""
-    return _wrap(body, "untrusted", salt)
+    return wrap_fresh(body, "untrusted")
 
 
 def render_orient_section(result: LeadZeroResult) -> str:
@@ -1109,7 +1117,7 @@ def render_orient_section(result: LeadZeroResult) -> str:
 # ─── the entry point (F1) ─────────────────────────────────────────────────────────────
 
 def resolve_lead_zero(
-    *, run_dir: Path, defender_dir: Path, alert_path: Path, salt: str, verbs: Any,
+    *, run_dir: Path, defender_dir: Path, alert_path: Path, verbs: Any,
     limits: dict = DEFAULT_LIMITS, run_id: str | None = None,
 ) -> LeadZeroResult:
     run_dir = Path(run_dir)
@@ -1118,21 +1126,21 @@ def resolve_lead_zero(
 
     if verbs is None:
         unavailable_text = _render_section(
-            _unavailable("no verb registry was injected into this run"), salt)
+            _unavailable("no verb registry was injected into this run"))
         return LeadZeroResult(text=unavailable_text, status=STATUS_FAILED)
 
     alert_text, err = read_text_soft(Path(alert_path))
     if alert_text is None:
         body = _unavailable(f"could not read the alert: {err}")
-        return LeadZeroResult(text=_render_section(body, salt), status=STATUS_FAILED)
+        return LeadZeroResult(text=_render_section(body), status=STATUS_FAILED)
     try:
         alert = json.loads(alert_text)
     except (ValueError, TypeError) as e:
         body = _unavailable(f"the alert is not valid JSON: {e!r}")
-        return LeadZeroResult(text=_render_section(body, salt), status=STATUS_FAILED)
+        return LeadZeroResult(text=_render_section(body), status=STATUS_FAILED)
     if not isinstance(alert, dict):
         body = _unavailable("the alert is not a JSON object")
-        return LeadZeroResult(text=_render_section(body, salt), status=STATUS_FAILED)
+        return LeadZeroResult(text=_render_section(body), status=STATUS_FAILED)
 
     from defender import run_common
     from .query_tool import QueryCapture
@@ -1147,7 +1155,7 @@ def resolve_lead_zero(
     async def _go():
         try:
             return await _resolve_item1(
-                run_dir=run_dir, defender_dir=defender_dir, salt=salt, run_id=resolved_run_id,
+                run_dir=run_dir, defender_dir=defender_dir, run_id=resolved_run_id,
                 alert=alert, capture=capture, env=env, limits=limits,
             )
         except (BudgetKill, circuit_breaker.RunAborted, asyncio.CancelledError,
@@ -1160,7 +1168,7 @@ def resolve_lead_zero(
             return _unavailable(f"{e!r}"), STATUS_FAILED
 
     body, status = _run_sync(_go())
-    return LeadZeroResult(text=_render_section(body, salt), status=status)
+    return LeadZeroResult(text=_render_section(body), status=status)
 
 
 __all__ = [
