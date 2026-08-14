@@ -63,28 +63,53 @@ string every grant pattern is `fullmatch`ed against. Refusing the whole command 
 both, and is free: no legitimate command carries one."""
 
 
+#: The whole of what the agent is told about this refusal — deliberately the ONLY place it is
+#: taught. The runtime spec used to carry a "One physical line" paragraph saying part of it;
+#: that was always-on context (every run, every turn) for a failure that is rare, and it sat in
+#: MAIN's prompt and the advisory skill while every observed instance came from GATHER, which
+#: never had it. Paid once, on the failure, is the right trade — so this string has to be
+#: complete on its own. Every cause below is pinned by `test_the_lexing_reason_names_every_way
+#: _a_command_can_fail_to_parse`, which drives one command per cause through the real gate.
 UNTOKENIZABLE_REASON = (
-    "Blocked: the command could not be tokenized — an unbalanced quote, a trailing "
-    "`\\`, or a `|`/`&&`/`||` without a complete command on BOTH sides. Each PHYSICAL LINE "
-    "is lexed on its own (there is no shell to join them), so a `\\` line-continuation, a "
-    "newline inside a quoted argument, and a connector that opens or closes a line (`A |` "
-    "then `B`, or `A` then `| B`) all fail here, even when the command is otherwise "
-    "allowed — rewrite those as a SINGLE line. A connector whose other side is empty "
-    "WITHIN one line fails for the same reason and rewriting it as one line will not help: "
-    "`A | ; B`, `A | | B`, `A && ;`, `A | 2>/dev/null` each drop the connector and leave a "
-    "stage running on nothing. Give every `|`/`&&`/`||` one complete command on each side."
+    "Blocked: the command could not be parsed. There is no shell here, so each PHYSICAL LINE "
+    "is lexed on its own and every stage runs as a bare argv. The causes, all of which fail "
+    "even when the command is otherwise allowed:\n"
+    "(1) An unbalanced quote, or a newline INSIDE a quoted argument — a quoted string cannot "
+    "span lines, so a pretty-printed SQL/JSON argument must be collapsed onto one line.\n"
+    "(2) A trailing `\\` — it continues nothing, because there are no lines to join.\n"
+    "(3) A `|`/`&&`/`||` at a line boundary (`A |` then `B`, or `A` then `| B`) — refused, "
+    "not joined. Rewrite as a SINGLE line.\n"
+    "(4) A `|`/`&&`/`||` without a complete command on BOTH sides, WITHIN one line — "
+    "`A | ; B`, `A | | B`, `A && ;`, `A | 2>/dev/null`. Each would drop the connector and "
+    "leave a stage reading nothing, so one line is already the fix and re-sending it on one "
+    "line will not help; give every connector one complete command on each side.\n"
+    "(5) A `bash -c` wrapper that is not exactly `bash -c '<one command string>'`.\n"
+    "Redirects (`>`, `>>`), background `&`, and `$(...)` substitution are a separate matter: "
+    "they are not part of this surface at all, and are refused as capability, not syntax."
 )
 
 
 def _parse(cmd: str) -> list[bash_exec.Pipeline] | None:
     inner = unwrap(cmd)
     if inner is None:
-        return None
+        # A LEXING failure, not a capability one: `unwrap` returns None on an unbalanced quote
+        # (shlex raises) and on a `bash -c` wrapper that is not exactly one command string.
+        # Returning None here sent both to the caller's generic "not permitted for this agent"
+        # reason — a CAPABILITY message for a QUOTING mistake, which tells the model to reach
+        # for another tool when what it needed was to close its quote. The sibling quote
+        # failure (a newline inside a quoted argument, which `tokenize` catches instead) has
+        # always answered `UNTOKENIZABLE_REASON`; these two now answer the same way.
+        raise bash_exec.UntokenizableCommand(
+            "command could not be unwrapped to a single command string"
+        )
     try:
         return bash_exec.parse(inner)
     except bash_exec.UntokenizableCommand:
         raise
     except bash_exec.BashExecError:
+        # NOT a lexing refusal — an unexpected redirect or operator token. The command lexed
+        # fine and says something this surface does not offer (a write, a background job), so
+        # it stays on the policy deny reason, which is what teaches the lane's real capability.
         return None
 
 

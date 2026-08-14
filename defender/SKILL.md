@@ -295,11 +295,6 @@ Call (arg order is **corpus_root first, then `advisory`**):
 defender-invlang advisory --signature <signature_id> --class lead_discrimination --frontier '?hypothesis-one' --frontier '?hypothesis-two' --top-k 5
 ```
 
-**One physical line.** There is no shell joining your lines, so a `\` continuation
-does not continue anything — each line is lexed on its own and the command fails to
-tokenize. The same holds for a `|`, `&&`, or `||` at a line boundary (`A |` then `B`,
-or `A` then `| B`): it is refused, not joined. Long invocations stay on one line.
-
 Pass `--signature` from `alert.rule.id` in `alert.json`. Each
 `--frontier` takes one `?hypothesis` name; repeat the flag for each
 live `:H` row. Output is a markdown "Lead discrimination" block
@@ -334,8 +329,6 @@ defender-invlang hypothesis-shape --parent-type identity --parent-class 'service
 # Signature-scoped: names this rule has historically used.
 defender-invlang hypothesis-vocabulary --signature <signature_id>
 ```
-
-(One physical line each — see above.)
 
 Call both when normalizing — signature first (canonical for this
 rule), then shape (canonical for this topology). `--parent-class`
