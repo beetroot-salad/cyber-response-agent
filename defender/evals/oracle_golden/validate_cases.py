@@ -29,16 +29,20 @@ cause-code sidecar and score reproduction all went with `label.py` and the old
   controls           every stored control measures the window its record declares, so a
                      baseline that silently measured something else cannot be graded
                      against (#882)
+  known defects      the accepted-invalid registry still describes the tree it waives
 
-**Two committed control records DO fail the control check today, and that non-zero exit
-is the alarm working** — the same standing this tree already gives `score.py`'s four
-leaking scores. `case-010-crosstier-web2/hidden/controls/l-006/1.json` and
-`case-012-bruteforce-db1/hidden/controls/l-006/6.json` were measured before #882 fixed
+**Two committed control records carry a measurement that is known-invalid and cannot be
+repaired in code** — `case-010-crosstier-web2/hidden/controls/l-006/1.json` and
+`case-012-bruteforce-db1/hidden/controls/l-006/6.json`, both measured before #882 fixed
 the splice, so their windows sit behind a `LIMIT`/`KEEP` that already reduced the rows.
-Repairing them means re-running `controls.py` against the live stack, which is a capture
-session and not a code change; case-010 is `split: held-out`, so its re-score goes under
-a NEW tag rather than a re-run of the recorded one. A caller sweeping the tree must not
-read exit 1 as "revert something" — read the problem lines and decide.
+Repairing them is a capture session against the live stack, not a change to this repo.
+
+They live in `known_defects.yaml` rather than failing the run, because a check that
+always fails is a check nobody reads: eight lines every caller had been told to ignore
+would have buried the ninth. They are still PRINTED on every run, and the registry is
+itself checked — an entry whose record no longer carries the defect fails, so a waiver
+cannot outlive what it waives, and an entry naming a record that does not exist fails
+the way the held-out ledger refuses one. A NEW defect anywhere else still exits 1.
 
 The second half is a COMPLETENESS REPORT rather than a pass/fail: how many leads carry
 observed telemetry, how many carry a baseline, how many controls landed on a window
@@ -69,6 +73,7 @@ from defender.evals.oracle_golden.story_from_run import eval_tells_in  # noqa: E
 
 GOLDEN_DIR = Path(__file__).resolve().parent
 LEDGER = GOLDEN_DIR / "held_out_ledger.yaml"
+KNOWN_DEFECTS = GOLDEN_DIR / "known_defects.yaml"
 
 REQUIRED_FILES = ("manifest.yaml", "environment.yaml",
                   "oracle_visible/story.md", "oracle_visible/leads.jsonl")
@@ -93,8 +98,13 @@ def _leads_of(case_dir: Path) -> dict[str, dict]:
 
 # ------------------------------------------------------------------------- checks
 
-def check_case(case_dir: Path, by_id: dict[str, dict]) -> list[str]:
-    """Every problem with one case, as human-readable lines."""
+def check_case(case_dir: Path, by_id: dict[str, dict],
+               known: dict[tuple[str, str, int], dict] | None = None) -> list[str]:
+    """Every problem with one case, as human-readable lines.
+
+    `known` is the accepted-defect registry (`load_known_defects`); the default of none
+    tracked keeps a caller that only wants the structural checks from having to pass it.
+    """
     problems: list[str] = []
     name = case_dir.name
 
@@ -116,7 +126,82 @@ def check_case(case_dir: Path, by_id: dict[str, dict]) -> list[str]:
     problems += check_split_and_unit(name, manifest, by_id)
     problems += check_expectation(name, manifest)
     problems += check_seq_keying(case_dir)
-    problems += check_controls(case_dir)
+    problems += check_controls(case_dir, known)
+    return problems
+
+
+def load_known_defects(path: Path = KNOWN_DEFECTS) -> dict[tuple[str, str, int], dict]:
+    """The control records whose stored measurement is accepted as invalid (#882).
+
+    Keyed by `(case, lead, seq)` — the same key `hidden/controls/<lead>/<seq>.json` is
+    filed under, so an entry names one record and cannot quietly cover a second.
+
+    Narrowed here rather than trusted, and it RAISES on a malformed entry. This file is
+    operator-authored config, not an artifact under validation — the other readers get to
+    report a bad artifact and carry on, but a registry this reader cannot parse is one
+    whose waivers it also cannot apply, and applying a waiver it misread is the one
+    outcome worse than stopping. A key that is not `(str, str, int)` would compare unequal
+    to every real record key, so a typo'd `seq: "1"` would silently waive nothing while
+    reading as though it did.
+    """
+    if not path.is_file():
+        return {}
+    doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if doc is None:
+        return {}
+    if not isinstance(doc, dict):
+        raise ValueError(f"{path.name}: expected a mapping, found {type(doc).__name__}")
+    raw = doc.get("entries") or []
+    if not isinstance(raw, list):
+        raise ValueError(f"{path.name}: `entries` must be a list, found "
+                         f"{type(raw).__name__}")
+    out: dict[tuple[str, str, int], dict] = {}
+    for i, entry in enumerate(raw):
+        if not isinstance(entry, dict):
+            raise ValueError(f"{path.name}: entry {i} is a {type(entry).__name__}, "
+                             f"not a mapping")
+        case, lead, seq = entry.get("case"), entry.get("lead"), entry.get("seq")
+        if not isinstance(case, str) or not isinstance(lead, str):
+            raise ValueError(f"{path.name}: entry {i} needs string `case` and `lead`, "
+                             f"found {case!r} and {lead!r}")
+        # `bool` is an `int` in Python, and `seq: true` naming record 1 is not a thing
+        # anyone means. Excluded explicitly rather than left to surprise a later reader.
+        if not isinstance(seq, int) or isinstance(seq, bool):
+            raise ValueError(f"{path.name}: entry {i} ({case}/{lead}) needs an integer "
+                             f"`seq`, found {seq!r}")
+        key = (case, lead, seq)
+        if key in out:
+            raise ValueError(f"{path.name}: {case}/{lead}/{seq}.json is listed twice — "
+                             f"one record, one entry, or a repair deletes only one of them")
+        out[key] = entry
+    return out
+
+
+def check_known_defects(cases_dir: Path,
+                        known: dict[tuple[str, str, int], dict]) -> list[str]:
+    """The registry must describe the tree it waives, or it is a silence.
+
+    Two ways it rots, both failures here. An entry naming a record that no longer HAS a
+    defect is the dangerous one: the record was repaired and the line left behind, so the
+    next real defect at that key is waived by a stale entry — the reason `check_controls`
+    is re-run against the record rather than trusted to have been right when written. An
+    entry naming a record that does not exist is the same failure the held-out ledger
+    refuses, one file down.
+    """
+    problems = []
+    for (case, lead, seq), entry in sorted(known.items()):
+        record = cases_dir / case / "hidden" / "controls" / lead / f"{seq}.json"
+        if not record.is_file():
+            problems.append(
+                f"{KNOWN_DEFECTS.name}: names {case}/{lead}/{seq}.json, which does not "
+                f"exist — remove the entry, or restore the record it waives")
+            continue
+        if (case, lead, seq) not in control_problems_by_record(cases_dir / case):
+            problems.append(
+                f"{KNOWN_DEFECTS.name}: {case}/{lead}/{seq}.json no longer carries the "
+                f"{entry.get('defect', '?')} defect it is listed for. Delete this entry "
+                f"in the same change that repaired the record — left behind, it waives "
+                f"the next real defect at this key")
     return problems
 
 
@@ -161,8 +246,14 @@ def check_seq_keying(case_dir: Path) -> list[str]:
     return problems
 
 
-def check_controls(case_dir: Path) -> list[str]:
+def check_controls(case_dir: Path,
+                   known: dict[tuple[str, str, int], dict] | None = None) -> list[str]:
     """Every stored control must actually measure the window its record claims (#882).
+
+    Records listed in `known_defects.yaml` are omitted: their measurement is accepted as
+    invalid and tracked there with the capture session that would repair it. Omitted, not
+    silenced — `main` prints them, and `check_known_defects` fails if such an entry stops
+    reproducing, so the waiver cannot outlive the defect.
 
     A control is the baseline a lead is graded against, and a wrong one is silent all the
     way down: `judge._control` forwards `live` and DROPS the query string, so the label
@@ -190,9 +281,24 @@ def check_controls(case_dir: Path) -> list[str]:
     guessed from the control's shape: an added clause and a model-authored one can be
     written identically, and only the original says whether there was a bound to shift.
     """
+    tracked = known or {}
+    return [problem
+            for key, found in control_problems_by_record(case_dir).items()
+            if key not in tracked
+            for problem in found]
+
+
+def control_problems_by_record(case_dir: Path) -> dict[tuple[str, str, int], list[str]]:
+    """`check_controls`'s findings, kept under the `(case, lead, seq)` each belongs to.
+
+    Split out so the waiver in `known_defects.yaml` can be applied and audited at RECORD
+    granularity. Asking "does this case still have problems?" would let one unrepaired
+    record keep a second record's stale entry alive, which is the rot the registry's own
+    rules exist to prevent.
+    """
     controls_dir = case_dir / "hidden" / "controls"
     if not controls_dir.is_dir() or not (case_dir / "oracle_visible" / "leads.jsonl").is_file():
-        return []
+        return {}
     name = case_dir.name
     # `object` in the key, because the seq this is looked up BY comes off an untrusted
     # record: a control carrying `"seq": "1"` must miss and be reported as pairing with no
@@ -201,8 +307,16 @@ def check_controls(case_dir: Path) -> list[str]:
         (lead_id, seq): params.get("query") or ""
         for lead_id, seq, params in CONTROLS.lead_queries(case_dir)}
 
-    problems = []
+    by_record: dict[tuple[str, str, int], list[str]] = {}
     for path in sorted(controls_dir.rglob("*.json")):
+        # Keyed by the PATH's lead and seq, not the record's own fields: those are what
+        # the file is filed under and what a registry entry can be written against, and
+        # a record whose own `seq` disagrees is exactly what this reports below.
+        try:
+            key = (name, path.parent.name, int(path.stem))
+        except ValueError:
+            key = (name, path.parent.name, -1)
+        problems = by_record.setdefault(key, [])
         # A linter over artifacts must not die on the artifact it exists to catch: a
         # record it cannot read is a problem line, not a traceback out of the sweep that
         # would take every LATER case's findings with it.
@@ -244,7 +358,7 @@ def check_controls(case_dir: Path) -> list[str]:
             measured.append({"name": "attack-contribution", **record["attack_contribution"]})
         for entry in measured:
             problems += _control_problems(f"{name}: {rel}", entry, was_added=was_added)
-    return problems
+    return {k: v for k, v in by_record.items() if v}
 
 
 def _control_problems(where: str, entry: object, *, was_added: bool) -> list[str]:
@@ -564,14 +678,31 @@ def main(argv: list[str] | None = None) -> int:
         by_id[case_dir.name] = manifest
         cases.append((case_dir, manifest))
 
+    known = load_known_defects()
     problems: list[str] = []
     for case_dir in case_dirs:
-        problems += check_case(case_dir, by_id)
+        problems += check_case(case_dir, by_id, known)
     problems += check_held_out_ledger(cases)
     problems += check_replay_boundary()
+    problems += check_known_defects(ns.cases_dir, known)
 
     if not ns.quiet:
         print(render_coverage([coverage(d, m) for d, m in cases]))
+
+    # Printed on every run, clean or not, and BELOW the coverage report rather than above
+    # it — this is the part a reader must not scroll past. A waived defect that stops being
+    # mentioned is a defect that has been forgotten, and the registry exists precisely so
+    # these stay visible while no longer drowning a NEW finding in noise everyone ignores.
+    tracked = [k for k in sorted(known) if k[0] in {d.name for d in case_dirs}]
+    if tracked:
+        print(f"\n!! {len(tracked)} control record(s) carry an ACCEPTED invalid "
+              f"measurement ({KNOWN_DEFECTS.name}) — not repairable in code; each needs a "
+              f"capture session against the live stack:")
+        for key in tracked:
+            entry = known[key]
+            print(f"     {key[0]}/{key[1]}/{key[2]}.json — {entry.get('defect', '?')} "
+                  f"(#{entry.get('issue', '?')}, split: {entry.get('split', '?')})")
+
     if problems:
         print(f"\n{len(problems)} problem(s):", file=sys.stderr)
         for line in problems:
