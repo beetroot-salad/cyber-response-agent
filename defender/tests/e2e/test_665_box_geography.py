@@ -364,7 +364,7 @@ def test_create_fault_that_leaves_a_created_container_is_reaped_investigation_la
     it"). Contrast `test_docker_create_partially_applies_mounts_when_one_mount_spec_is_malformed`
     above: an API-create failure leaves nothing, and the reap is a rc=0 no-op there."""
     run_dir = make_run_dir(tmp_path)
-    rec = RecordingDocker(create=DockerFault(**_SHIM_FAULT))
+    rec = RecordingDocker(create=DockerFault(**_SHIM_FAULT), existing_token="self")
     with pytest.raises(box_mod.BoxFault):
         box_mod.start_box(run_dir, DEFENDER, docker=rec)
     assert reaped_after_create(rec.calls), \
@@ -378,7 +378,7 @@ def test_create_fault_that_leaves_a_created_container_is_reaped_request_lane(tmp
     pre-create reap on retry — a property of one caller, not of this arm.)"""
     run_dir = make_run_dir(tmp_path)
     _populate_mount_sources(_run_cycle_mounts(run_dir), tmp_path)
-    rec = RecordingDocker(create=DockerFault(**_SHIM_FAULT))
+    rec = RecordingDocker(create=DockerFault(**_SHIM_FAULT), existing_token="self")
     with pytest.raises(box_mod.BoxFault):
         start_box_request(_request(run_dir), docker=rec)
     assert reaped_after_create(rec.calls), \
@@ -396,6 +396,54 @@ def _dies_after_create(rec, *subcommands):
     return docker
 
 
+@pytest.mark.parametrize("lane", ["investigation", "request"])
+def test_a_create_that_lost_a_name_race_does_not_reap_the_winner(tmp_path, lane):
+    """#884 F-29's other half: reaping on the create-fault arm must not reap someone ELSE.
+
+    A non-zero `docker run --detach` means either "we created it and the task would not start"
+    (ours, the leak) or "the name was already taken" (another lane's box, still writing its
+    artifacts). Only the start-token label separates them. `_is_running` was tried first and
+    cannot: a concurrent lane's container is itself in `created` for the whole window in which
+    the conflict happens, so it reads as not-running and would be reaped anyway — which is why
+    this test injects `running=False` alongside a foreign token. It is the run-cycle lane that
+    makes this reachable at all, being the one caller that REUSES its container name."""
+    run_dir = make_run_dir(tmp_path)
+    _populate_mount_sources(_run_cycle_mounts(run_dir), tmp_path)
+    rec = RecordingDocker(
+        create=DockerFault(
+            rc=125,
+            stderr='Conflict. The container name "/defender-run-x" is already in use',
+            cite="C43a — the daemon's own name-conflict rc/text",
+        ),
+        existing_token="another-lane-holds-this-name",
+        running=False,   # ...and it is in `created`, exactly as ours would be
+    )
+    start = (
+        (lambda: box_mod.start_box(run_dir, DEFENDER, docker=rec))
+        if lane == "investigation"
+        else (lambda: start_box_request(_request(run_dir), docker=rec))
+    )
+    with pytest.raises(box_mod.BoxFault):
+        start()
+    assert not reaped_after_create(rec.calls), \
+        "the create-fault arm reaped a container another lane owns"
+
+
+def test_the_box_is_stamped_with_the_token_its_own_fault_arm_checks(tmp_path):
+    """The label and the check are one mechanism, so pin them together: a stamp the fault arm
+    does not read, or a read of a label nothing stamps, both leave the reap deciding on
+    nothing. Asserts the create argv carries a NON-EMPTY token under the key box.py inspects."""
+    run_dir = make_run_dir(tmp_path)
+    rec = RecordingDocker()
+    box_mod.start_box(run_dir, DEFENDER, docker=rec)
+    token = rec.create_label(box_mod.START_TOKEN_LABEL)
+    assert token, f"no {box_mod.START_TOKEN_LABEL} label on the create argv"
+    other = RecordingDocker()
+    box_mod.start_box(make_run_dir(tmp_path / "second"), DEFENDER, docker=other)
+    assert other.create_label(box_mod.START_TOKEN_LABEL) != token, \
+        "the token is not per-START — two starts stamped the same value"
+
+
 def test_a_reap_that_cannot_reach_the_daemon_does_not_replace_the_create_fault(tmp_path):
     """The create-fault arm's reap is best-effort on BOTH halves, `docker inspect` included.
 
@@ -404,7 +452,7 @@ def test_a_reap_that_cannot_reach_the_daemon_does_not_replace_the_create_fault(t
     started — so the cleanup would replace the signal it exists to clean up after. That is the
     rule `scrub._write_verdict` already states for the marker written on this same arm."""
     run_dir = make_run_dir(tmp_path)
-    rec = RecordingDocker(create=DockerFault(**_SHIM_FAULT))
+    rec = RecordingDocker(create=DockerFault(**_SHIM_FAULT), existing_token="self")
     with pytest.raises(box_mod.BoxFault) as excinfo:
         box_mod.start_box(run_dir, DEFENDER, docker=_dies_after_create(rec, "inspect", "rm"))
     assert _SHIM_FAULT["stderr"] in str(excinfo.value), \

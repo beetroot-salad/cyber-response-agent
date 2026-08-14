@@ -402,7 +402,45 @@ def _is_running(docker: DockerFn, name: str) -> bool:
     return proc.returncode == 0 and "running" in (proc.stdout or "")
 
 
-def _reap_on_fault(docker: DockerFn, name: str, *, unless_running: bool = False) -> None:
+#: Stamped on every box at create, so a fault arm can tell OUR container from another lane's
+#: under the same name. A name alone cannot: `docker run --detach` is create-then-start, so a
+#: non-zero rc means EITHER "we created it and the task would not start" (ours, leaked in
+#: `created` — #884 F-29) or "the name was already taken" (someone else's, still writing its
+#: artifacts). `_is_running` was tried as the discriminator and cannot serve: a concurrent
+#: lane's container is itself in `created` for the whole window in which the conflict happens,
+#: so it reads as not-running and gets reaped anyway. The token is minted per START, never per
+#: run id, because it is answering "did THIS call create this container" — a reused run-cycle
+#: name is exactly the case where the run id would answer yes for somebody else's box.
+START_TOKEN_LABEL = "defender.start-token"
+
+#: Docker's own text for a label the container does not carry, which `-f {{index …}}` prints
+#: rather than failing. It means "not ours" as surely as a mismatch does.
+_NO_LABEL = "<no value>"
+
+
+def _start_token(docker: DockerFn, name: str) -> str | None:
+    proc = _call(
+        docker,
+        ["docker", "inspect", "-f",
+         f'{{{{index .Config.Labels "{START_TOKEN_LABEL}"}}}}', name],
+    )
+    if proc.returncode != 0:
+        return None          # no such container — nothing to own, and nothing to reap
+    token = (proc.stdout or "").strip()
+    return None if not token or token == _NO_LABEL else token
+
+
+def _reap_stale_before_create(docker: DockerFn, name: str) -> None:
+    """The pre-create sweep, which MAY raise — the one reap in this module that should.
+
+    Nothing has been created yet and no fault is being carried, so a daemon that cannot be
+    reached here has no signal to trample and every reason to abort the start: proceeding to
+    `docker run` against a daemon that just refused `rm -f` would either fail again or, worse,
+    collide with the stale container this call exists to clear. Contrast `_reap_on_fault`."""
+    _call(docker, ["docker", "rm", "-f", name])
+
+
+def _reap_on_fault(docker: DockerFn, name: str, *, owned_token: str | None = None) -> None:
     """Reap a box on a path that is ALREADY unwinding a startup fault — best-effort on BOTH
     halves, which is the whole point of routing every such reap through here.
 
@@ -416,13 +454,18 @@ def _reap_on_fault(docker: DockerFn, name: str, *, unless_running: bool = False)
     ("the marker's own write failure must never REPLACE the signal its caller is holding"), and
     it holds no less for the cleanup standing beside it.
 
-    `unless_running=True` is for the CREATE-fault arms only: there the container under this
-    name may not be ours at all (a create that failed on a name conflict names another lane's
-    box, still writing its artifacts, and no lane may reap that). The startup-fault arms
-    created their box themselves, so they must reap it whatever state it is in and pass
-    nothing."""
+    `owned_token` is for the CREATE-fault arms, where the container under this name may not be
+    ours at all: it is reaped only if it carries the token THIS call stamped on it, so the
+    `created` leak (#884 F-29) goes and another lane's box — whatever state it is in — stays.
+    Absent the label, or on any daemon answer we cannot read, nothing is reaped: an unreapable
+    leak costs one stale container, and reaping the wrong box costs another run its artifacts.
+
+    The startup-fault arms pass nothing. They reached their fault THROUGH a create that
+    returned rc 0, so the box is theirs by construction and must go whatever state it is in;
+    spending an `inspect` to re-derive that on an already-unwinding path would only add a call
+    that can fail."""
     with contextlib.suppress(BoxFault):
-        if unless_running and _is_running(docker, name):
+        if owned_token is not None and _start_token(docker, name) != owned_token:
             return
         _call(docker, ["docker", "rm", "-f", name])
 
@@ -565,7 +608,7 @@ def _uncovered_fault(subject: str, path: Path, mounts: Sequence[tuple[Path, Path
 
 def _create_argv(
     name: str, run_dir: Path, defender_dir: Path, spec: BoxSpec,
-    mounts: Sequence[tuple[Path, Path]] = (),
+    mounts: Sequence[tuple[Path, Path]] = (), start_token: str = "",
 ) -> list[str]:
     env_pairs = {**infra_env(defender_dir, run_dir), **_LOCALE_ENV}
     # The remedy is per-subject: DEFENDER_RUNS_BASE relocates the RUN dir and nothing else,
@@ -580,6 +623,7 @@ def _create_argv(
     defender_src = _daemon_source(defender_dir, mounts)
     argv = [
         "docker", "run", "--detach", "--name", name,
+        "--label", f"{START_TOKEN_LABEL}={start_token}",
         "--runtime", spec.runtime,
         "--network", "none",
         "--read-only",
@@ -657,10 +701,13 @@ def _start_boxed(
             f"a LIVE container named {name} already exists — refusing rather than reaping "
             "it, because that box belongs to another run still writing its artifacts"
         )
-    _call(docker, ["docker", "rm", "-f", name])
+    _reap_stale_before_create(docker, name)
+    start_token = uuid.uuid4().hex
     created = _call(
         docker,
-        _create_argv(name, run_dir, defender_dir, spec, shared_mounts(docker)),
+        _create_argv(
+            name, run_dir, defender_dir, spec, shared_mounts(docker), start_token,
+        ),
     )
     if created.returncode != 0:
         # `docker run --detach` is create-THEN-start, so a non-zero rc does not prove no
@@ -669,9 +716,7 @@ def _start_boxed(
         # `created`. Nothing revisits this name — run ids are not reused and there is no prefix
         # sweeper — so without this reap the leak accrues forever, one per faulted start, and
         # O11 ("no box outlives the run that created it") is broken by the host rather than by
-        # a principal. Unconditional, like the pre-create reap above and for the same reason:
-        # C43a records `docker rm -f <missing>` as rc=0 with `Error response from daemon` on
-        # stderr, so a caller that read either would misfire on the success path (#884).
+        # a principal (#884).
         #
         # Both the marker and the reap are BEST-EFFORT, and neither may replace the signal this
         # arm is about to raise: the create's stderr is the only account of why the box failed.
@@ -679,16 +724,14 @@ def _start_boxed(
         # carries the same rule for the docker side, where a daemon that died between create and
         # reap is the correlated case rather than the exotic one.
         #
-        # `unless_running` for the reason the pre-create arm above refuses outright: a create
-        # that failed on a NAME CONFLICT says the container under this name is someone else's,
-        # still writing its artifacts, and no lane may reap that. The `created` container this
-        # arm exists for never started, so the guard never withholds the reap from the leak it
-        # is here to close.
+        # `owned_token` decides WHOSE container this is. A non-zero rc here means either "we
+        # created it and the task would not start" or "the name was already taken"; only the
+        # first is ours to reap, and only the label can tell them apart (see START_TOKEN_LABEL).
         write_did_not_run(
             run_dir, f"box create faulted before the box was startable: "
                      f"{(created.stderr or '').strip()}"
         )
-        _reap_on_fault(docker, name, unless_running=True)
+        _reap_on_fault(docker, name, owned_token=start_token)
         raise BoxFault(
             f"could not create the box {name}: {(created.stderr or '').strip()}"
         )
@@ -709,9 +752,11 @@ def _start_boxed(
 
 def _render_argv(
     request: BoxRequest, mounts: Sequence[tuple[Path, Path]] = (),
+    start_token: str = "",
 ) -> list[str]:
     argv = [
         "docker", "run", "--detach", "--name", request.name,
+        "--label", f"{START_TOKEN_LABEL}={start_token}",
         "--runtime", request.spec.runtime,
         "--network", "none",
         "--read-only",
@@ -769,8 +814,11 @@ def _start_boxed_request(
             f"a LIVE container named {request.name} already exists — refusing rather than "
             "reaping it, because that box belongs to another batch still writing its artifacts"
         )
-    _call(docker, ["docker", "rm", "-f", request.name])
-    created = _call(docker, _render_argv(request, shared_mounts(docker)))
+    _reap_stale_before_create(docker, request.name)
+    start_token = uuid.uuid4().hex
+    created = _call(
+        docker, _render_argv(request, shared_mounts(docker), start_token),
+    )
     if created.returncode != 0:
         # The investigation lane's reason, verbatim (`_start_boxed`): create-then-start means a
         # non-zero rc can still leave a `created` container, and this lane's names are no more
@@ -785,7 +833,7 @@ def _start_boxed_request(
             request, f"box create faulted before the box was startable: "
                      f"{(created.stderr or '').strip()}"
         )
-        _reap_on_fault(docker, request.name, unless_running=True)
+        _reap_on_fault(docker, request.name, owned_token=start_token)
         raise BoxFault(
             f"could not create the box {request.name}: {(created.stderr or '').strip()}"
         )
