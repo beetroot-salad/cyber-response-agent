@@ -137,6 +137,19 @@ def parse(inner: str) -> list[Pipeline]:
                 f"pipeline/connector token {toks[-1]!r} closes a line with nothing to its right"
             )
         builder.end_pipeline(";")
+    if builder.pending_connector in _DANGLING_CONNECTORS:
+        # An `&&`/`||` that banked its LEFT pipeline and never got a right one, so the
+        # connector was consumed and then dropped. The line-end check above cannot see this:
+        # the line does not END with the connector, it ends with whatever bare `;` follows it
+        # (`A && ;`), which the carve-out lets through. Without this the module refuses `A &&`
+        # but accepts `A && ;` and runs A — an inconsistency with no rule behind it.
+        #
+        # Found by #897's differential sweep against `bash -n`, which is the entire argument
+        # for that test: this spelling is in nobody's list of things to check.
+        raise UntokenizableCommand(
+            f"pipeline/connector token {builder.pending_connector!r} has no command "
+            "to its right"
+        )
     return builder.pipelines
 
 
