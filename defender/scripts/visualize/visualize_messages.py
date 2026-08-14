@@ -71,6 +71,11 @@ def run_metadata(
 
 
 def msg_phase_map(events: list[dict], tags: list[str | None]) -> dict[str, str]:
+    """Phase by TRACE id — the session-store coord `{session_id}/{agent_id}#{seq}`.
+
+    This is `visualize_data._attribute_main_agent`'s key space, and it reads trace events,
+    so it holds coords too. A reader that walks the WIRE LOG instead holds
+    `{agent_id}#{seq}` and cannot use this map — see `transcript_phase_map`."""
     out: dict[str, str] = {}
     for ev, ph in zip(events, tags, strict=False):
         if ev.get("type") != "assistant" or ph is None:
@@ -79,6 +84,47 @@ def msg_phase_map(events: list[dict], tags: list[str | None]) -> dict[str, str]:
         if mid:
             out[mid] = ph
     return out
+
+
+def transcript_phase_map(
+    events: list[dict], tags: list[str | None], messages: list[dict],
+) -> dict[str, str]:
+    """Phase by WIRE-LOG record id — the key space `build_transcript` actually holds.
+
+    #883 F-22: `tool_trace.jsonl` and the wire log name the same assistant turn in two id
+    spaces that cannot be compared. The trace carries the session-store coord
+    (`{session_id}/{agent_id}#{seq}`, seq counting store ROWS — `session_store._actor_row`),
+    the wire log its own `{agent_id}#{seq}` (seq counting every emitted RECORD, requests
+    included — `observe.RequestLogger._emit`). Handing `build_transcript` the coord-keyed
+    map made its `.get` miss on every turn, so `cur_phase` never left its `phase_order[0]`
+    seed and the whole transcript rendered as ORIENT.
+
+    Neither WRITER can mint the other's key: the store row for a response is appended a
+    round later by `selection.ingest`, so the coord does not exist when the logger runs —
+    and making the trace carry a wire id would break #705's invariant that the projection
+    is built from the store alone (`test_projections_are_built_from_the_store_not_from_
+    logger_messages`). The visualizer is the first frame that holds BOTH files, so the
+    translation belongs here.
+
+    The pairing is POSITIONAL, over the one alignment both sides express: each sequence is
+    this agent's assistant turns, in order. It is deliberately lenient — a fold can move
+    the store's path off rows the wire log still holds, and the surplus simply goes
+    unmapped, leaving `build_transcript` to carry the previous phase forward exactly as it
+    already does for an untagged turn.
+    """
+    phases = [
+        ph for ev, ph in zip(events, tags, strict=False)
+        if ev.get("type") == "assistant"
+    ]
+    wire_ids = [
+        rec.get("id") for rec in messages
+        if rec.get("kind") == "response" and rec.get("agent_id", "main") == "main"
+    ]
+    return {
+        wid: ph
+        for wid, ph in zip(wire_ids, phases, strict=False)
+        if wid and ph is not None
+    }
 
 
 def _iter_gather_tool_uses(events: list[dict], tags: list[str | None]):

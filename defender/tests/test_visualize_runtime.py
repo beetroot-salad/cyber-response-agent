@@ -27,11 +27,22 @@ from defender.scripts.visualize.visualize_run import render_runtime_page
 
 _USAGE = {"input_tokens": 100, "output_tokens": 800, "cache_read_input_tokens": 5000, "cache_creation_input_tokens": 200}
 
+#: The fixture's session id — present so the trace's `message.id` is a store COORD
+#: (`{session_id}/{agent_id}#{seq}`) rather than a wire id. Before #883 F-22 this fixture
+#: wrote the SAME `main#N` string as both the trace's `message.id` and the wire record's
+#: `id`, collapsing two id spaces production keeps apart — which is the only reason
+#: `test_transcript_from_messages` passed while every real render stamped one phase.
+_SESSION = "9f2c1ab84e7d4f0e9c3b5a6d7e8f0a1b"
+
+#: `(coord_seq, wire_id, phase, investigation_content, lead_id)`. The two seq spaces
+#: diverge exactly as production's do: the store's counts ROWS (request, response,
+#: request, … so responses land on odd seqs), the logger's counts every emitted RECORD
+#: (each round re-emits the whole request list, so the gaps widen).
 _TURNS = [
-    ("main#0", "ORIENT", "## ORIENT\n\nOriented on the alert: ssh auth anomaly.\n", None),
-    ("main#1", "PLAN", "## ORIENT\n\nOriented.\n\n## PLAN\n\nPlanning to gather ssh auth + identity.\n", "l-001"),
-    ("main#2", "GATHER", "## PLAN\n\nPlanned.\n\n## GATHER\n\nGathered measurements from elastic.\n", None),
-    ("main#3", "REPORT", "## GATHER\n\nGathered.\n\n## REPORT\n\nDisposition: malicious — confirmed pivot.\n", None),
+    (1, "main#1", "ORIENT", "## ORIENT\n\nOriented on the alert: ssh auth anomaly.\n", None),
+    (3, "main#5", "PLAN", "## ORIENT\n\nOriented.\n\n## PLAN\n\nPlanning to gather ssh auth + identity.\n", "l-001"),
+    (5, "main#11", "GATHER", "## PLAN\n\nPlanned.\n\n## GATHER\n\nGathered measurements from elastic.\n", None),
+    (7, "main#19", "REPORT", "## GATHER\n\nGathered.\n\n## REPORT\n\nDisposition: malicious — confirmed pivot.\n", None),
 ]
 
 _FULL_INVESTIGATION = (
@@ -94,7 +105,8 @@ def _build_run(tmp: Path) -> Path:
     def write_call(i: int, content: str) -> dict:
         return {"type": "tool_use", "name": "write_file", "id": f"w{i}", "input": {"path": "investigation.md", "content": content}}
 
-    for i, (mid, _phase, content, lead) in enumerate(_TURNS):
+    for i, (coord_seq, wire_id, _phase, content, lead) in enumerate(_TURNS):
+        coord = f"{_SESSION}/main#{coord_seq}"
         blocks = [write_call(i, content)]
         if lead:
             blocks.append({
@@ -103,7 +115,8 @@ def _build_run(tmp: Path) -> Path:
             })
         trace.append({
             "type": "assistant", "timestamp": f"2026-06-26T14:0{i}:00+00:00",
-            "message": {"id": mid, "model": "claude-sonnet-4-6", "usage": _USAGE, "content": blocks},
+            "message": {"id": coord, "model": "claude-sonnet-4-6",
+                        "usage": _USAGE, "content": blocks},
         })
         trace.append({
             "type": "user", "timestamp": f"2026-06-26T14:0{i}:30+00:00",
@@ -111,7 +124,7 @@ def _build_run(tmp: Path) -> Path:
         })
         parts = [{"part_kind": "tool-call", "tool_name": b["name"], "tool_call_id": b["id"], "args": b["input"]} for b in blocks]
         messages.append({
-            "agent_id": "main", "seq": seq, "id": mid, "kind": "response",
+            "agent_id": "main", "seq": seq, "id": wire_id, "kind": "response",
             "model": "claude-sonnet-4-6", "usage": _USAGE, "duration_ms": 2000.0,
             "message": {"kind": "response", "parts": parts},
         })
@@ -236,7 +249,8 @@ def test_transcript_from_messages(tmp_path):
     order = _phase_order(run)
     tags = d.tag_events_by_phase(events, order)
     messages = d.load_messages(run)
-    entries = d.build_transcript(messages, d.msg_phase_map(events, tags), order)
+    entries = d.build_transcript(
+        messages, d.transcript_phase_map(events, tags, messages), order)
 
     kinds = {e["kind"] for e in entries}
     assert {"assistant", "tool_result", "retry"} <= kinds
@@ -248,6 +262,56 @@ def test_transcript_from_messages(tmp_path):
     plan_calls = [e for e in entries if e["kind"] == "assistant" and "gather" in (e.get("tools") or [])]
     assert plan_calls
     assert plan_calls[0]["phase"].startswith("PLAN")
+
+    # The assertion this test was missing (#883 F-22). Everything above passes when the
+    # phase lookup misses on EVERY turn: `build_transcript` seeds `cur_phase` from
+    # `phase_order[0]` and carries it forward, so a total join failure renders as a
+    # transcript uniformly stamped ORIENT — which is what every run since #705 rendered.
+    # Distinctness is the property; the tagged phases are the fixture's own four.
+    phases = {e["phase"] for e in entries}
+    assert len(phases) > 1, (
+        f"every entry carries one phase ({phases}) — the wire-id/coord join is dead and "
+        f"cur_phase never left its phase_order[0] seed")
+    assert phases == set(order), f"expected every tagged phase to reach the transcript, got {phases}"
+
+
+def test_the_trace_and_the_wire_log_name_a_turn_in_two_id_spaces(tmp_path):
+    """#883 F-22, at the seam itself: `tool_trace.jsonl` keys an assistant turn by the
+    session-store COORD and `llm_requests.jsonl` by the logger's own id, and those two
+    strings are never equal. Each reader therefore needs a map in ITS OWN space —
+    `msg_phase_map` for the trace-walking cost attribution, `transcript_phase_map` for the
+    wire-log-walking transcript. Handing either one the other's map misses on every turn.
+
+    This pins the FIXTURE as much as the code: writing one string into both files (as this
+    file did before #883) erases the divergence the reader has to survive, and every
+    assertion downstream of it becomes vacuous."""
+    run = _build_run(tmp_path)
+    events = read_jsonl_rows(run / "tool_trace.jsonl")
+    messages = d.load_messages(run)
+
+    trace_ids = [e["message"]["id"] for e in events if e.get("type") == "assistant"]
+    wire_ids = [r["id"] for r in messages
+                if r.get("kind") == "response" and r.get("agent_id") == "main"]
+    assert trace_ids
+    assert wire_ids
+    assert not set(trace_ids) & set(wire_ids), (
+        "the fixture collapsed the two id spaces into one — production keeps them apart "
+        "and the join under test only exists because they differ")
+    assert all("/" in tid for tid in trace_ids), "a store coord carries its session prefix"
+    assert all("/" not in wid for wid in wire_ids), "a wire id carries no session prefix"
+
+    order = _phase_order(run)
+    tags = d.tag_events_by_phase(events, order)
+    coord_map = d.msg_phase_map(events, tags)
+    wire_map = d.transcript_phase_map(events, tags, messages)
+
+    assert set(coord_map) == set(trace_ids), (
+        "the cost attribution's map must be keyed by coord — `_attribute_main_agent` "
+        "reads trace events and joins in that space")
+    assert set(wire_map) == set(wire_ids), (
+        "the transcript's map must be keyed by wire id — `build_transcript` has nothing else")
+    # Same turns, same phases, two spellings — the translation must not lose a phase.
+    assert sorted(coord_map.values()) == sorted(wire_map.values())
 
 
 def test_run_health(tmp_path):
