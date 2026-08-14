@@ -9,7 +9,7 @@ the code disagree, the code wins.
 The benign (FP-direction) learning loop wants to ground dispositions in the org's
 *past closed cases* — ticket history as a confirmable policy authority, not just
 routing. That requires a case-history store that **accrues from runs** (no
-bootstrapping). The store exists (`playground/ticket-server`) but starts empty.
+bootstrapping). The store exists (`playground-v2/ticket-server`) but starts empty.
 This slice makes each investigated alert write a case into it, so the read PR has
 real history to sample and confirm against.
 

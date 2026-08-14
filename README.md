@@ -14,7 +14,7 @@ The idea is to provide the agent with a structured way to identify its runtime m
 - `defender/fixtures/`: alert inputs used to drive runs
 - `playground-v2/`: the SOC lab the defender runs against — a Docker Compose stack (Elastic/Fleet, Keycloak, Zeek, Falco, role hosts with baseline-activity generators, attack runner) on a Hetzner VPS
 - `infra/`: Terraform for that VPS, with snapshot lever-up/lever-down scripts for cost control
-- `playground/`: the superseded v1 lab (Wazuh-era); its `ticket-server/` is still reused by v2
+- the v1 lab (Wazuh-era) has been retired and deleted; its `ticket-server/` lives on at `playground-v2/ticket-server/`
 - `spec-flow/`: meta-tooling, not part of the security agent — the Claude Code plugin whose skills drive the spec-first dev workflow used to build this repo
 
 ## Runtime Loop

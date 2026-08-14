@@ -22,7 +22,7 @@ name: soc-playground
 #    cmdb             — FastAPI over hosts/inventory.yaml + in-mem mutation overlay
 #    threat-intel     — FastAPI over offline VT/OTX-shaped indicator seed
 #    change-mgmt      — FastAPI over authorized-change seed tied to inventory change_windows
-#    ticket-server    — reused from v1 playground/ticket-server
+#    ticket-server    — FastAPI over a curated ticket seed (moved in from the retired v1 lab)
 # Exposed on loopback only. External access via SSH tunnel (add 8001-8004 for stubs):
 #   ssh -L 9200:localhost:9200 -L 5601:localhost:5601 -L 8220:localhost:8220 -L 8080:localhost:8080 \
 #       -L 8001:localhost:8001 -L 8002:localhost:8002 -L 8003:localhost:8003 -L 8004:localhost:8004 soc-playground
@@ -930,11 +930,11 @@ services:
     healthcheck: *stub-health
 
   ticket-server:
-    # Reuses the existing v1 FastAPI app in-place (see v2 §Data: "keep stub
-    # over Elastic Cases"). `build:` packages the context into a tar locally
-    # before sending to the remote daemon, so the relative path resolves on
-    # the client side and works against --context soc-playground.
-    build: ../playground/ticket-server
+    # FastAPI ticket stub (see v2 §Data: "keep stub over Elastic Cases").
+    # `build:` packages the context into a tar locally before sending to the
+    # remote daemon, so the relative path resolves on the client side and
+    # works against --context soc-playground.
+    build: ./ticket-server
     image: soc-playground/ticket-server:local
     container_name: ticket-server
     restart: unless-stopped
@@ -943,7 +943,7 @@ services:
       # Bind-mounted so seed edits apply with `compose up -d` alone — no
       # rebuild needed. ticket-server's Dockerfile doesn't COPY the seed dir,
       # and the default TICKET_SEED_PATH points here.
-      - ../playground/ticket-server/seed:/app/seed:ro
+      - ./ticket-server/seed:/app/seed:ro
     ports:
       - "127.0.0.1:8004:8080"
     healthcheck: *stub-health
