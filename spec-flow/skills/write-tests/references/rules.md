@@ -137,8 +137,16 @@ Suite-verification checks that prove properties of the *suite itself* that no pe
 
 One file per spec, committed into the **spec corpus** — the profile's `specGraph.artifacts` directory, named `spec_graph_<issue-or-slug>.yaml` — as the tests' machine-checked derivation. It used to live beside its suite, which made adjacency load-bearing in code rather than convention and scattered the corpus across whichever test tree each spec happened to touch; now the graph **names** its suite (`tests:`, repo-relative) and the graphs live together, so the checkers can gate them as one body with one baseline. A graph naming the wrong suite loses its docstrings and every demand reports as a prose orphan — the mis-declaration is loud, not silent.
 
+`schema_version` is the **rule contract the graph was authored against**, not a file-format
+version — `_schema.SINCE` reads it to decide which rules this graph owes a `gate.evaluated`
+entry for. A rule added after a graph shipped cannot be retroactively evaluated by a run that
+is over, so it is owed only from its own version forward; that is what lets a rule be added
+without either re-baselining the whole corpus or leaving it red (#883). Declare the current
+version (`_schema.CURRENT_SCHEMA_VERSION`); never re-stamp an existing graph to silence a
+finding, which would claim a rule was considered by a run that never saw it.
+
 ```yaml
-schema_version: 1
+schema_version: 2
 design: <issue # or doc path>
 tests: <repo-relative dir of the suite this graph derives — check_binds scans its docstrings>
 base: <SHA the spec branch forked from — write-code-from-spec's gate diffs against it>

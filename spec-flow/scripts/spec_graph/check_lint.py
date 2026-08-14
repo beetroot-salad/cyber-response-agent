@@ -100,9 +100,15 @@ class _Lint:
 def _rule_top_level(lint: _Lint) -> None:
     for k in set(lint.graph) - _TOP:
         lint.add(f"{lint.n}: unknown top-level key `{k}` (schema.md, 'The artifact').")
-    if lint.graph.get("schema_version") != 1:
+    # A closed SET, not a pin: the corpus holds graphs authored against more than one
+    # contract, and `_schema.SINCE` reads the declaration to decide which rules each one
+    # owes a `gate.evaluated` entry for. Pinning a single version would force every new
+    # rule to be paid for by re-baselining history (#883).
+    if lint.graph.get("schema_version") not in _schema.SCHEMA_VERSIONS:
         lint.add(
-            f"{lint.n}: schema_version `{lint.graph.get('schema_version')}` (expected 1)."
+            f"{lint.n}: schema_version `{lint.graph.get('schema_version')}` "
+            f"(expected one of {list(_schema.SCHEMA_VERSIONS)}; "
+            f"new graphs declare {_schema.CURRENT_SCHEMA_VERSION})."
         )
     for field in ("design", "base"):
         if not lint.graph.get(field):

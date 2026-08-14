@@ -8,24 +8,12 @@ check looked and found something, 2 it could not look (never a silent pass).
 """
 from __future__ import annotations
 
-import sys
-
 from conftest import SPEC_GRAPH_DIR  # noqa: F401 — house import; run_script reads it
-from test_mechanical_checks import run_script
-
-# The one in-process import in this suite (the house style is subprocess-only): the rule
-# roster is read from the schema rather than restated, so adding a rule cannot leave this
-# fixture recording a stale set and silently exercising the missing-entry arm instead of
-# the mechanics under test.
-sys.path.insert(0, str(SPEC_GRAPH_DIR))
-import _schema  # noqa: E402 — resolvable only after the sys.path line above
+from test_mechanical_checks import _evaluated, run_script
 
 # Every rule evaluated `fired: true` — no FIRED-FALSE arm, no missing-entry arm, so a
 # test's exit code is decided by the trigger/answer mechanics alone.
-_EVALUATED_TRUE = (
-    "gate:\n  evaluated:\n"
-    + "".join(f"    - {{rule: {r}, fired: true}}\n" for r in _schema.RULES)
-)
+_EVALUATED_TRUE = _evaluated()  # every rule a version-1 graph owes — see test_mechanical_checks
 
 # ---------------------------------------------------------------------------
 # check_gate #1 — answered() must not let a sibling facet silence a trigger
