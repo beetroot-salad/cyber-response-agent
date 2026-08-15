@@ -95,6 +95,45 @@ def seed_repo(
     return repo
 
 
+#: The stub adapter the seeded tree ships, so the fixture's `wazuh` is a system that really
+#: DECLARES verbs. Since #901 the loop's commit gate resolves a promoted template's verb against
+#: the adapters of the tree it is committing, so a seed with a catalog and no adapter is not a
+#: cheaper fixture — it is a tree the real gate would refuse, and every test built on it would be
+#: asserting about a repo the loop cannot produce.
+_WAZUH_ADAPTER = '''\
+from __future__ import annotations
+
+from defender.runtime.verbs import VerbContext, verb
+
+
+@verb()
+def search(ctx: VerbContext, *, index: str = "", window: str = "24h") -> dict:
+    return {"rows": []}
+
+
+@verb()
+def health_check(ctx: VerbContext) -> dict:
+    return {"ok": True}
+
+
+VERBS = {"search": search, "health-check": health_check}
+'''
+
+
+def query_template(tid: str, status: str, *, body: str = "") -> str:
+    """A well-formed query template for the seeded `wazuh` system.
+
+    A writer, never an oracle: tests that stage a promotion need a file the content gate
+    accepts, and hand-spelling that shape at each site is how a fixture drifts from the schema
+    it is standing in for. Pass `body` to stage a MALFORMED one on purpose.
+    """
+    query = body or "```query\nverb: search\nparams:\n  index: ${index}\n```"
+    return (
+        f"---\nid: {tid}\nstatus: {status}\nverb: search\nparams: [index]\n---\n\n"
+        f"## Goal\n\nwazuh auth events.\n\n## Query\n\n{query}\n"
+    )
+
+
 def seed_skills_repo(repo: Path) -> Path:
     """A committed skills tree standing in for a fresh ``lead-author/<id>`` worktree.
 
@@ -110,11 +149,14 @@ def seed_skills_repo(repo: Path) -> Path:
     (catalog / "wazuh" / "_draft").mkdir(parents=True)
     (catalog / "SCHEMA.md").write_text("# template schema\n")
     (catalog / "wazuh" / "auth-events.md").write_text(
-        "---\nid: wazuh.auth-events\nstatus: established\n---\n"
+        query_template("wazuh.auth-events", "established")
     )
     (catalog / "wazuh" / "_draft" / "newthing.md").write_text(
-        "---\nid: wazuh.newthing\nstatus: draft\n---\n"
+        query_template("wazuh.newthing", "draft")
     )
+    adapters = repo / "defender" / "scripts" / "adapters"
+    adapters.mkdir(parents=True)
+    (adapters / "wazuh_adapter.py").write_text(_WAZUH_ADAPTER)
     skill = repo / "defender" / "skills" / "elastic"
     (skill / "_draft").mkdir(parents=True)
     (skill / "SKILL.md").write_text("---\nname: defender-elastic\n---\n# elastic\n")

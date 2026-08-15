@@ -12,14 +12,13 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender._corpus import iter_query_templates  # noqa: E402
-from defender._frontmatter import parse_frontmatter_or_none  # noqa: E402
 from defender._io import read_text_soft  # noqa: E402
+from defender._scaffold_rules import check_system_skill, check_template  # noqa: E402
 from defender.runtime.verb_grant import DENY_ALL  # noqa: E402
 from defender.runtime.verbs import (  # noqa: E402
     ADAPTER_SUFFIX,
     ModuleVerbRegistry,
     VerbContext,
-    declared_params,
     engine_of,
 )
 
@@ -48,8 +47,6 @@ _SECRET_KEYS = re.compile(r"(PASSWORD|PASSWD|SECRET|TOKEN|CREDENTIAL|API[_-]?KEY
 _ENV_NAME = re.compile(r"^[A-Z][A-Z0-9_]*$")
 _HIGH_ENTROPY = re.compile(r"^[A-Za-z0-9+/=_-]{24,}$")
 
-_PLACEHOLDER_RE = re.compile(r"\$\{(\w+)\}")
-_VERB_LINE_RE = re.compile(r"(?m)^\s*verb:\s*(\S+)\s*$")
 
 
 class Report:
@@ -196,11 +193,12 @@ def check_skill(report: Report, defender: Path, system: str) -> None:
         report.add(FAIL, f"per-system skill skills/{system}/SKILL.md is missing")
         return
     text, _reason = read_text_soft(skill)
-    front = parse_frontmatter_or_none(text) if text is not None else None
-    if front is not None and front.get("name") == f"defender-{system}":
-        report.add(PASS, f"skills/{system}/SKILL.md has frontmatter name: defender-{system}")
+    findings = check_system_skill(skill, system)
+    if findings:
+        for f in findings:
+            report.add(FAIL, f"skills/{system}/SKILL.md {f.message}")
     else:
-        report.add(FAIL, f"skills/{system}/SKILL.md frontmatter name is not 'defender-{system}'")
+        report.add(PASS, f"skills/{system}/SKILL.md has frontmatter name: defender-{system}")
 
     execution = defender / "skills" / system / "execution.md"
     has_inline = text is not None and "## Execution" in text
@@ -216,68 +214,39 @@ def check_skill(report: Report, defender: Path, system: str) -> None:
         report.add(WARN, "no execution.md and no inline ## Execution section")
 
 
-def _template_verb(fm: dict, query_body: str) -> str | None:
-    if isinstance(fm, dict) and fm.get("verb"):
-        return str(fm["verb"])
-    m = _VERB_LINE_RE.search(query_body)
-    if m:
-        return m.group(1)
-    for line in query_body.splitlines():
-        s = line.strip()
-        if s and not s.startswith(("#", "```", "~~~")):
-            return s.split()[0]
-    return None
-
-
-def _body_substitutions(fm: dict) -> set[str]:
-    subs = fm.get("body_substitutions") if isinstance(fm, dict) else None
-    return {str(s) for s in subs} if isinstance(subs, (list, tuple)) else set()
-
-
 def check_templates(report: Report, defender: Path, system: str, verbs) -> None:
+    """Every template of `system`, DRAFTS INCLUDED.
+
+    The `_draft/` exclusion that used to sit here is the whole of #901: it excluded exactly the
+    directory the lead-authoring lane mints into, so the one lane that writes this tree
+    continuously was the one lane no content check could reach. The rule itself now lives in
+    `_scaffold_rules`, which the loop's commit gate calls too — the checker and the writer meet
+    because they read the same function, not because two copies were kept in step.
+    """
     qdir = defender / "skills" / "gather" / "queries" / system
-    templates = [
-        t for t in iter_query_templates(qdir.parent)
-        if t.system == system and "_draft" not in t.path.parts
-    ]
+    templates = [t for t in iter_query_templates(qdir.parent) if t.system == system]
     if not templates:
         report.add(WARN, f"no seed query templates under skills/gather/queries/{system}/ (they grow post-merge)")
         return
     verbs = verbs or {}
     failures: list[str] = []
-    checked = 0
+    exempt = 0
     for t in templates:
-        fm = parse_frontmatter_or_none(t.path.read_text(encoding="utf-8")) or {}
-        verb_name = _template_verb(fm, t.query)
-        if verb_name is None:
-            failures.append(f"{t.path.name}: no verb (no `verb:` frontmatter and an empty ## Query)")
-            continue
-        if verb_name not in verbs:
-            failures.append(f"{t.path.name}: verb {verb_name!r} is not a declared verb of {system}")
-            continue
-        placeholders = set(_PLACEHOLDER_RE.findall(t.query))
-        if engine_of(verbs[verb_name]) != "none":
-            # An engine verb's body IS the query language, so its `${…}` are body text, not
-            # params — the rule is per-VERB (`adapter.md`). Counting these as "satisfied"
-            # below reported coverage this check does not have: a system whose whole catalog
-            # is engine verbs had every template skipped and every template claimed (#885).
-            continue
-        checked += 1
-        allowed = set(declared_params(verbs[verb_name])) | _body_substitutions(fm)
-        undeclared = sorted(placeholders - allowed)
-        if undeclared:
-            failures.append(
-                f"{t.path.name}: ${{{undeclared[0]}}} is neither a declared param of {verb_name} "
-                f"nor a marked body_substitution"
-            )
+        findings = check_template(t, verbs)
+        failures.extend(f"{t.path.name}: {f.message}" for f in findings)
+        fn = verbs.get(t.verb)
+        if fn is not None and engine_of(fn) != "none":
+            exempt += 1
     if failures:
         for f in failures:
-            report.add(FAIL, f"template placeholder invariant: {f}")
+            report.add(FAIL, f"template invariant: {f}")
     else:
-        skipped = len(templates) - checked
-        report.add(PASS, f"{len(templates)} template(s) name a declared verb; {checked} "
-                         f"param-only template(s) satisfy the placeholder<->param invariant"
-                         + (f" ({skipped} engine-verb template(s) exempt)" if skipped else ""))
+        checked = len(templates) - exempt
+        drafts = sum(1 for t in templates if "_draft" in t.path.parts)
+        report.add(PASS, f"{len(templates)} template(s) name a declared verb and declare only "
+                         f"real params ({drafts} draft(s) included); {checked} param-only "
+                         f"template(s) satisfy the placeholder<->param invariant"
+                         + (f" ({exempt} engine-verb template(s) exempt)" if exempt else ""))
 
 
 def main() -> None:

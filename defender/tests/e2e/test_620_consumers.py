@@ -253,16 +253,24 @@ def _write_run(run_dir: Path, rows: list[dict], *, goal: str = "measure it") -> 
     return run_dir
 
 
-def _catalog_template(catalog_dir: Path, system: str, tid: str, fence_lang: str,
-                      query_body: str) -> Path:
-    """Write one established `{system}/{name}.md` template with an `id`/`status` frontmatter
-    and a `## Query` fence, and return its path."""
+def _catalog_template(catalog_dir: Path, system: str, tid: str, fence_lang: str,  # noqa: PLR0913 — a template writer mirrors the schema's keys
+                      query_body: str, *, verb: str, params: tuple[str, ...] = ()) -> Path:
+    """Write one established `{system}/{name}.md` template with an `id`/`status`/`verb`/`params`
+    frontmatter and a `## Query` fence, and return its path.
+
+    `verb` is passed, never derived from the body. It used to be absent, and `validate_scaffold`
+    recovered it by reading the first non-fence token of the `## Query` — a prose fallback #901
+    deleted, because the corpus declares `verb:` and a checker that guesses one resolves verbs
+    the corpus never claimed. A fixture that kept relying on the guess would be pinning the
+    behavior of a reader that no longer exists.
+    """
     name = tid.split(".", 1)[1]
     d = catalog_dir / system
     d.mkdir(parents=True, exist_ok=True)
     p = d / f"{name}.md"
     p.write_text(
-        f"---\nid: {tid}\nstatus: established\n---\n\n"
+        f"---\nid: {tid}\nstatus: established\nverb: {verb}\n"
+        f"params: [{', '.join(params)}]\n---\n\n"
         f"## Goal\n\nmeasure {tid}\n\n"
         f"## Query\n\n```{fence_lang}\n{query_body}\n```\n",
         encoding="utf-8",
@@ -384,7 +392,8 @@ def test_handoff_executed_query_and_params_agree(tmp_path):
     collapses to raw_command (the shlex audit string) while params stays honest, so the pair
     disagrees; a space-carrying value exposes the shell quoting the audit string adds."""
     catalog_dir = tmp_path / "defender" / "skills" / "gather" / "queries"
-    _catalog_template(catalog_dir, "cmdb", "cmdb.host-lookup", "query", "get-host host=${host}")
+    _catalog_template(catalog_dir, "cmdb", "cmdb.host-lookup", "query", "get-host host=${host}",
+                      verb="get-host", params=("host",))
     catalog = lead_neighbors.load_catalog(catalog_dir)
 
     rec = VerbRecorder()
@@ -693,8 +702,9 @@ def test_render_query_binds_the_elastic_body(tmp_path):
     placeholders still renders as before."""
     catalog_dir = tmp_path / "defender" / "skills" / "gather" / "queries"
     _catalog_template(catalog_dir, "elastic", "elastic.sshd-esql", "esql",
-                      'FROM logs | WHERE host == "${host}"')
-    _catalog_template(catalog_dir, "cmdb", "cmdb.host-lookup", "query", "get-host host=${host}")
+                      'FROM logs | WHERE host == "${host}"', verb="esql")
+    _catalog_template(catalog_dir, "cmdb", "cmdb.host-lookup", "query", "get-host host=${host}",
+                      verb="get-host", params=("host",))
     catalog = lead_neighbors.load_catalog(catalog_dir)
 
     rec = VerbRecorder()
@@ -930,7 +940,8 @@ def test_validate_scaffold_normalizes_the_spelling_split():
             f"the hyphen/underscore split still sinks {system}: rc={res.returncode}\n{res.stdout}"
 
 
-def _scaffold_cmdb_tree(root: Path, template_body: str) -> Path:
+def _scaffold_cmdb_tree(root: Path, template_body: str, *, verb: str = "get-host",
+                        params: tuple[str, ...] = ("host",)) -> Path:
     """A minimal defender tree that otherwise passes the registry probe: the REAL cmdb adapter +
     shared modules + skill + execution.md, plus one crafted cmdb query template."""
     (root / "scripts" / "adapters").mkdir(parents=True)
@@ -946,7 +957,7 @@ def _scaffold_cmdb_tree(root: Path, template_body: str) -> Path:
         if src.exists():
             dst.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
     _catalog_template(root / "skills" / "gather" / "queries", "cmdb", "cmdb.tmpl",
-                      "query", template_body)
+                      "query", template_body, verb=verb, params=params)
     return root
 
 
@@ -987,7 +998,7 @@ def test_validate_scaffold_fails_a_verb_that_is_not_dispatchable(tmp_path, label
             assert mutated != src, "the get_host signature moved — this mutation no longer applies"
             adapter.write_text(mutated, encoding="utf-8")
             _catalog_template(root / "skills" / "gather" / "queries", "cmdb", "cmdb.tmpl",
-                              "query", "list-roles")
+                              "query", "list-roles", verb="list-roles")
         return root
 
     good = _run_validate_scaffold("cmdb", defender_dir=tree(f"ok-{label}", None))

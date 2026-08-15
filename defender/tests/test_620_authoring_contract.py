@@ -155,30 +155,30 @@ def test_placeholder_is_a_declared_param_or_marked_body_substitution():
     ``params:`` list (declared-param members), and a ``body_substitutions:`` list (the
     in-body-text placeholders). The check classifies each ``${x}`` into
     declared-param / body-substitution / neither and fails on ``neither`` (or on no verb).
-    """
 
-    def violations(fm: dict, query_body: str) -> set[str]:
-        placeholders = set(_PLACEHOLDER_RE.findall(query_body))
-        if not fm.get("verb"):
-            return placeholders
-        params = fm.get("params") or []
-        names: set[str] = set()
-        if isinstance(params, list):
-            for p in params:
-                if isinstance(p, str):
-                    names.add(p)
-                elif isinstance(p, dict):
-                    names.update(str(k) for k in p)
-        elif isinstance(params, dict):
-            names.update(str(k) for k in params)
-        subs = fm.get("body_substitutions") or []
-        sub_names = {str(s) for s in subs} if isinstance(subs, (list, tuple)) else set()
-        return {p for p in placeholders if p not in names and p not in sub_names}
+    Since #901 this demand is judged by ``_scaffold_rules.check_template`` rather than by a copy
+    of the rule written here. The copy was a second ORACLE, not just a second implementation: it
+    classified placeholders against the template's own ``params:`` frontmatter, while
+    ``validate_scaffold`` classified them against the adapter's live signature — so a template
+    declaring a param the adapter had renamed away satisfied both and neither could see it. The
+    fixtures below stay, because what they discriminate is this demand and not that module.
+    """
+    import tempfile
+
+    from defender._corpus import read_query_template
+    from defender._scaffold_rules import VerbResolver, check_template
+
+    resolver = VerbResolver(_DEFENDER)
 
     def passes(text: str) -> bool:
-        fm, body = parse_frontmatter(text)
-        q = _corpus.section_bodies(body).get("Query", "")
-        return bool(fm.get("verb")) and not violations(fm, q)
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp) / "cmdb"
+            d.mkdir()
+            path = d / "probe.md"
+            path.write_text(text, encoding="utf-8")
+            template, _reason = read_query_template(path)
+            assert template is not None
+            return not check_template(template, resolver.verbs(template.system))
 
     good = (
         "---\nid: cmdb.get-host-demo\nstatus: established\n"
@@ -198,11 +198,18 @@ def test_placeholder_is_a_declared_param_or_marked_body_substitution():
     assert not passes(bad_undeclared), "an undeclared ${placeholder} must FAIL the invariant"
     assert not passes(bad_no_verb), "a template that declares no verb is undecidable -> FAIL"
 
-    failing = [t.path for t in _established() if not passes(_read(t.path))]
+    # Over the corpus IN PLACE — a template's system is derived from where it sits, so the
+    # fixtures above are checked through a `cmdb/` tmp dir and the shipped files are not moved.
+    # Drafts included: `_established()` was this sweep's scope until #901, which is the same
+    # exclusion `validate_scaffold` carried and the reason the lead lane's output was outside
+    # every content check.
+    failing = [
+        f"{t.path}: {f.message}"
+        for t in _corpus.iter_query_templates(_QUERIES)
+        for f in check_template(t, resolver.verbs(t.system))
+    ]
     assert failing == [], (
-        f"{len(failing)} established template(s) fail the placeholder<->param invariant "
-        f"(the corpus has not yet gained per-template verb / body-substitution declarations): "
-        f"{[str(p) for p in failing[:5]]}"
+        f"{len(failing)} template(s) fail the placeholder<->param invariant: {failing[:5]}"
     )
 
 

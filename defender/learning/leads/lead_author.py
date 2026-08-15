@@ -14,6 +14,8 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender.learning.author import shared as _author_shared
+from defender import _corpus
+from defender import _scaffold_rules
 from defender._untrusted import wrap
 from defender.learning.core import config as _loop_config
 from defender.learning.core import persist as _loop_persist
@@ -270,7 +272,52 @@ def invoke_agent(
 
 
 
-def _skills_path_rule(repo_root: Path, xy: str, path: str) -> None:
+def _refuse(path: str, findings: list[_scaffold_rules.Finding]) -> None:
+    if not findings:
+        return
+    detail = "; ".join(f.message for f in findings)
+    raise LeadAuthorError(
+        f"agent wrote {path}, which is not well-formed ({detail}); refusing to commit"
+    )
+
+
+def _check_promoted_template(
+    repo_root: Path, resolver: _scaffold_rules.VerbResolver, path: str,
+) -> None:
+    """The content half of the promotion gate (#901).
+
+    `connect`'s invariants were enforced once, by a maintainer, at scaffold time — and
+    `validate_scaffold` excluded `_draft/`, which is the only directory this lane mints into. So
+    the lane that writes this tree continuously was the lane no content check reached, and a
+    template whose `${placeholder}` is not a param its verb declares was refused by nothing.
+
+    Fires at PROMOTION, the same seam the half-promote guard below sits at, and not at the
+    lane's `_draft/` writes: a draft is auto-minted from a query that really ran, and refusing
+    the batch over one would discard signal the loop wanted. What makes that split safe is that
+    the minter now emits a conformant skeleton (`draft_synthesis._draft_frontmatter`), so a
+    promotion starts from a file that already passes this.
+    """
+    template, reason = _corpus.read_query_template(repo_root / path)
+    if template is None:
+        raise LeadAuthorError(
+            f"agent wrote {path}, which is not a readable query template ({reason}); "
+            "refusing to commit"
+        )
+    try:
+        verbs = resolver.verbs(template.system)
+    except _scaffold_rules.ScaffoldRuleError as e:
+        # NOT a skip. A template under a system with no importable adapter is the phantom-system
+        # class (#855 F-06) wearing a catalog path, and "could not check" silently accepted is
+        # the exact defect this gate closes.
+        raise LeadAuthorError(
+            f"agent wrote {path}, whose system could not be resolved ({e}); refusing to commit"
+        ) from e
+    _refuse(path, _scaffold_rules.check_template(template, verbs))
+
+
+def _skills_path_rule(
+    repo_root: Path, resolver: _scaffold_rules.VerbResolver, xy: str, path: str,
+) -> None:
     if not _is_in_scope(path):
         raise LeadAuthorError(
             f"agent edited an out-of-scope skills path ({path}); refusing to commit"
@@ -292,12 +339,26 @@ def _skills_path_rule(repo_root: Path, xy: str, path: str) -> None:
                 f"twin {twin} still exists; refusing to commit (the promote's `rm` "
                 "didn't happen — established + draft would both land)"
             )
+        # After the pair check and only on a file that is still there: a delete has already been
+        # refused above for this surface, and a content rule cannot read a path git says is gone.
+        if "D" not in xy and (repo_root / path).is_file():
+            _check_promoted_template(repo_root, resolver, path)
+    if _is_system_skill_md(path) and "D" not in xy and (repo_root / path).is_file():
+        _refuse(
+            path,
+            _scaffold_rules.check_system_skill(repo_root / path, Path(path).parent.name),
+        )
 
 
 def _verify_skills_state(repo_root: Path, baseline_stray: list[str]) -> list[str]:
+    # ONE resolver for the whole batch, built on the tree being committed rather than on the
+    # process's own: the drain runs this from the main checkout against a `lead-author/<id>`
+    # worktree, and `_load_adapter_module` keys its cache on the resolved absolute path, so this
+    # is what makes the verdict a statement about the commit it is about to make.
+    resolver = _scaffold_rules.VerbResolver(repo_root / "defender")
     return _verify_corpus_scope(
         repo_root, baseline_stray, actor="agent",
-        rule=functools.partial(_skills_path_rule, repo_root),
+        rule=functools.partial(_skills_path_rule, repo_root, resolver),
     )
 
 
