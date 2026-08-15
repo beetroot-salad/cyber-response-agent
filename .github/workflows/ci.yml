@@ -446,6 +446,17 @@ jobs:
       - name: Raw git-subprocess gate (defender._git facade dedup, #460 — baseline-ratcheted)
         run: defender/.venv/bin/python scripts/lint/lint_raw_git_subprocess.py
 
+      # A test computing its EXPECTED value with the same git QUERY the code under
+      # test runs. Such an oracle cannot disagree with the implementation — both read
+      # the tree the same wrong way and the suite stays green, which is how #869's
+      # ls-tree C-quoting, `.split()`-on-spaced-paths and cwd-relative output shipped
+      # past 57 tests (#908). Read subcommands only: a fixture's init/add/commit builds
+      # the state the test planted and cannot rig its own answer. `require_reasons` is
+      # on — the benign shared reads (a facade contract test, an identity read of a
+      # sha) each cost one sentence, and a NEW shared query costs a fix.
+      - name: Shared-oracle gate (a test may not re-run the code's own git query, #869 — baseline-ratcheted)
+        run: defender/.venv/bin/python scripts/lint/lint_shared_oracle.py
+
       # A parameter re-defaulted in-body via `x = x if x is not None else DEFAULT`
       # to a named/called fallback: an Optional immediately made non-None, with the
       # default knowledge duplicated across call sites (and prone to drift). Anchor

@@ -22,6 +22,16 @@ holds. A claim whose sentence makes a runtime prediction (`raises`, `returns`, `
 `defaults to`, `silently`) may not be typed `referential` or `census`, whatever its author
 believed. Grammar only, never judgment; the escape hatch is a reviewed baseline entry.
 
+THE PROBE-CORPUS PASS (same run): the instrument can be right and the probe still blind, if it
+ran over the one input class that cannot fail. A probe that ENUMERATES NAMES out of a tree
+(`ls-tree`, a glob, a directory walk) must record the `alphabet:` it sampled — ordinary names,
+non-ASCII, a name with a space, and the cwd it ran from. #869 shipped three defects through a
+probe that was executed, correctly typed and correctly instrumented, whose output was
+transcribed into the reader and into the test that asserted on it: the tree it enumerated was
+ASCII, at the repo root, so C-quoting, `.split()`-on-spaces and cwd-relative output were all
+invisible. A class that cannot arise closes by saying so; the check reads the presence of the
+sentence, never its content.
+
 THE SPEND-POINT PASS (same run): rules.md's "a spend-point closes only by citation", as a
 field — `cites: [<claim id>, ...]`. Any `cites` anywhere in the gate block or on a demand
 must resolve to a claim that exists and was probed (`holds | refuted | unrefuted`) — a
@@ -35,8 +45,8 @@ check_binds/check_actors would trip over — those citations stay a phase-F hand
 Usage:
     spec-graph claims [graph.yaml ...] [--config <path>]
 (the `spec-graph` wrapper in the plugin's bin/ is on the Bash PATH and finds this script itself.)
-Exit 1 if any claim's instrument is wrong or missing, or any spend-point citation is
-missing, dangling, or unprobed.
+Exit 1 if any claim's instrument is wrong or missing, any name-enumerating probe leaves its
+corpus alphabet unstated, or any spend-point citation is missing, dangling, or unprobed.
 """
 from __future__ import annotations
 
@@ -83,6 +93,88 @@ _RUNTIME_GRAMMAR = re.compile(
     r"|fails?|succeeds?|skips?|drops?|handles?|silently|defaults? to|falls? back)\b",
     re.IGNORECASE,
 )
+
+
+#: Instruments that ENUMERATE names out of a tree — a directory listing, a VCS tree read, a
+#: glob. Closed and concrete on purpose: these are the probes whose recorded OUTPUT becomes an
+#: implementation, and whose answer depends on what the names in the sampled tree looked like.
+#: A probe that runs a function over a value it constructed is not in this class — its input
+#: is written down in the probe itself.
+_ENUMERATION_GRAMMAR = re.compile(
+    r"\b(ls-tree|ls-files|--name-only|--porcelain|rglob|iterdir|scandir|listdir"
+    r"|os\.walk|\.glob\(|glob\(|find -)",
+    re.IGNORECASE,
+)
+
+#: The value classes a name-enumerating probe must say it sampled, and why each is here. Every
+#: one is a class the #869 probe did not sample and the shipped reader then got wrong.
+_ALPHABET_CLASSES: dict[str, str] = {
+    "ascii": "the ordinary names — the sample every probe already takes",
+    "non-ascii": "git C-QUOTES a non-ASCII path under `--name-only`, and a shell tool may "
+                 "transliterate or reorder it; the entry stops having the shape the reader matches",
+    "space": "a whitespace split TEARS a name containing a space into two tokens, and a "
+             "non-`-z` listing gives the reader no way to tell that happened",
+    "cwd": "a VCS listing is resolved from the CWD unless told otherwise, while a "
+           "path-addressed read beside it is resolved from the project root — a probe run "
+           "only at the root cannot see the two disagree",
+}
+
+
+def check_alphabet(path: Path, graph: dict) -> list[str]:
+    """rules.md's "probe values must sample the types the boundary admits", made mechanical
+    for the one value space no reader can enumerate by looking: a NAME read out of a tree.
+
+    The escape this closes is the shipped #869/#908 defect. A `primitive` claim recorded an
+    executed probe — `git ls-tree -r --name-only HEAD -- defender/skills/` over a planted
+    ASCII tree at the repo root — and the observed output, INCLUDING its depth constant, was
+    transcribed verbatim into both the implementation and the test that asserted on it. The
+    probe was honest, executed, correctly typed, and correctly instrumented; every gate in
+    this toolchain passed it. What it never recorded was its ALPHABET, and three preconditions
+    rode along unnoticed: C-quoting of non-ASCII paths, `.split()` tearing a spaced path, and
+    cwd-relative output. Each silently un-declared a real system.
+
+    So a probe that enumerates names owes a sentence per class in `_ALPHABET_CLASSES` — what
+    it sampled, or why the class cannot arise here. The sentence is the whole mechanism: an
+    author who has to write down what `non-ascii` did looks, and looking is what the ASCII
+    fixture prevented. Grammar only, never judgment — an out-of-scope class closes by saying
+    so, exactly as a waiver does, and the check never reads the answer.
+    """
+    findings: list[str] = []
+    for c in graph.get("claims", []) or []:
+        if c.get("probe_kind") != "executed" or c.get("verdict") in _UNPROBED:
+            continue
+        text = " ".join(str(c.get(k, "")) for k in ("claim", "probe", "observed"))
+        m = _ENUMERATION_GRAMMAR.search(text)
+        if not m:
+            continue
+        cid = c.get("id", "<no-id>")
+        alphabet = c.get("alphabet")
+        if alphabet is None:
+            findings.append(
+                f"{path.name}:{cid}: enumerates names (`{m.group(0)}`) and records no "
+                f"`alphabet` — a probe whose OUTPUT becomes the reader cannot be read back "
+                f"for the inputs it never sampled. Name {sorted(_ALPHABET_CLASSES)}."
+            )
+            continue
+        if not isinstance(alphabet, dict):
+            findings.append(
+                f"{path.name}:{cid}: `alphabet` is a {type(alphabet).__name__}, not a "
+                f"mapping of {sorted(_ALPHABET_CLASSES)} -> what was sampled."
+            )
+            continue
+        for cls, why in _ALPHABET_CLASSES.items():
+            value = alphabet.get(cls)
+            if value is None:
+                findings.append(
+                    f"{path.name}:{cid}: `alphabet` names no `{cls}` — {why}. Say what the "
+                    f"probe sampled, or why the class cannot arise at this boundary."
+                )
+            elif not str(value).strip():
+                findings.append(
+                    f"{path.name}:{cid}: `alphabet.{cls}` is empty — a blank value is "
+                    f"nobody looking, which is the state this check exists to end."
+                )
+    return findings
 
 
 def check_typing(path: Path, graph: dict) -> list[str]:
@@ -217,6 +309,7 @@ def main(argv: list[str]) -> int:
     findings: list[str] = []
     spend: list[str] = []
     typing: list[str] = []
+    alphabet: list[str] = []
     unreadable: list[Path] = []
     for p in paths:
         # Parsed ONCE and handed to both passes: the two used to load the same graph
@@ -228,6 +321,7 @@ def main(argv: list[str]) -> int:
             findings.extend(check(p, graph))
             spend.extend(check_spend_points(p, graph))
             typing.extend(check_typing(p, graph))
+            alphabet.extend(check_alphabet(p, graph))
         except (OSError, yaml.YAMLError, TypeError, AttributeError) as e:
             # Collected, not returned on: bailing here threw away every finding the
             # already-checked graphs produced.
@@ -238,16 +332,20 @@ def main(argv: list[str]) -> int:
         print(f"  INSTRUMENT {f}")
     for f in typing:
         print(f"  MISTYPED {f}")
+    for f in alphabet:
+        print(f"  CORPUS {f}")
     for f in spend:
         print(f"  CITATION {f}")
-    # Counted by kind: an instrument mismatch, a mis-typed claim, and an uncited spend-point
-    # are three different slips — and the middle one is how the first is evaded.
+    # Counted by kind: an instrument mismatch, a mis-typed claim, an unstated probe corpus and
+    # an uncited spend-point are four different slips. The middle two are how the first is
+    # evaded — by declaring a weaker kind, or by running the right instrument over the one
+    # input class that cannot fail.
     print(f"\n[check_claims] {len(findings)} claim-instrument finding(s), {len(typing)} "
-          f"claim-typing finding(s), {len(spend)} spend-point citation finding(s) over "
-          f"{len(paths)} graph(s).")
+          f"claim-typing finding(s), {len(alphabet)} probe-corpus finding(s), {len(spend)} "
+          f"spend-point citation finding(s) over {len(paths)} graph(s).")
     if unreadable:
         return 2
-    return 1 if findings or typing or spend else 0
+    return 1 if findings or typing or alphabet or spend else 0
 
 
 if __name__ == "__main__":
