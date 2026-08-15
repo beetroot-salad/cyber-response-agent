@@ -20,7 +20,10 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-import toons  # noqa: E402
+# `toons` ships in the `runtime` EXTRA, so an install without it is a supported one —
+# and a bare module-scope import there is a COLLECTION error, which pytest answers by
+# interrupting the whole session. Guarded like `pydantic_ai` above it.
+toons = pytest.importorskip("toons")  # noqa: E402
 
 from pydantic_ai.messages import BinaryContent  # noqa: E402
 

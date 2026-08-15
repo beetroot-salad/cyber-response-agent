@@ -307,17 +307,16 @@ def build_agent_core(  # noqa: PLR0913 — the single build site's config + 3 DI
     reused_gate = next(
         (c for c in extra_capabilities if isinstance(c, toon_gate_mod.ToonGateCapability)), None,
     )
-    toon_gate_is_fresh = reused_gate is None
-    toon_gate: toon_gate_mod.ToonGateCapability = (
-        reused_gate if reused_gate is not None
-        else toon_gate_mod.ToonGateCapability(encoder=toon_encoder)
+    toon_gate = (
+        toon_gate_mod.ToonGateCapability(encoder=toon_encoder)
+        if reused_gate is None else reused_gate
     )
     capabilities: list[Any] = [
         _make_hooks(logger, agent_id, enforce=defn.budget_enforced, limits=limits,
                     session_id=session_id, store=store, toon_gate=toon_gate),
         *extra_capabilities,
     ]
-    if toon_gate_is_fresh:
+    if reused_gate is None:
         capabilities.append(toon_gate)
     if defn.tools.query:
         from defender._paths import PATHS

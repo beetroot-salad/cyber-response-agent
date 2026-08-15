@@ -185,16 +185,32 @@ def _render_tx_groups(
     return "".join(blocks)
 
 
+#: The three byte sequences that mean something to the HTML tokenizer INSIDE a `<script>`
+#: element, and whose absence is what makes a data island inert. `</script` ends it;
+#: `<script` and `<!--` drive it into the escaped/double-escaped states, where the island's
+#: OWN closing tag stops ending it and the rest of the page is swallowed as script data.
+#:
+#: IGNORECASE is load-bearing, not tidiness — the same correction #883 F-35 made to
+#: `_EVENT_HANDLER_RE`: HTML tag names are case-insensitive, so `</SCRIPT>` and `</Script >`
+#: ARE the terminator, and a case-sensitive `.replace("</script>", ...)` covers exactly one
+#: spelling of a grammar with dozens. The content here is a FOREIGN TOOL's own payload, so
+#: every spelling is reachable by whatever wrote it.
+_SCRIPT_BREAKOUT_RE = re.compile(r"<(?=/?script|!--)", re.IGNORECASE)
+
+
 def _render_original_json(original_json: str | None) -> str:
     """#872 O5 — the TOON gate substituted this result; the original JSON it replaced rides
     beside the view rather than merely surviving unrendered. A
     `<script type="application/json">` data island, not another `esc()`'d `<pre>`:
     HTML-entity-escaping would encode every `"` in the JSON, so a reader (or a test)
-    searching the page for the tool's own JSON bytes would never find them. Only
-    `</script>` needs neutralizing here — JSON has no other HTML metacharacter."""
+    searching the page for the tool's own JSON bytes would never find them.
+
+    `\\u003c` and not `<\\/script>` for the neutralized `<`: it is a JSON escape for the
+    character itself, so `JSON.parse`/`json.loads` recovers the payload byte for byte on all
+    three sequences, whereas `<\\!--` is not JSON at all."""
     if not original_json:
         return ""
-    safe = original_json.replace("</script>", "<\\/script>")
+    safe = _SCRIPT_BREAKOUT_RE.sub(lambda _: "\\u003c", original_json)
     return (
         '<details class="block tx-resultbody"><summary>original JSON '
         '(pre-TOON-gate)</summary><div class="body">'

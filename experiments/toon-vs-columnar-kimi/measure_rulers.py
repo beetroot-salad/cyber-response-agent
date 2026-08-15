@@ -34,6 +34,7 @@ baseline side.
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 import re
 import statistics
@@ -91,10 +92,14 @@ def load_corpus(base: pathlib.Path) -> list[tuple[pathlib.Path, Any]]:
 
 def report_corpus(rows: list[tuple[pathlib.Path, Any]]) -> None:
     print(f"corpus: n={len(rows)}")
+    # Encoded ONCE per payload. `toons.dumps` is the expensive call here and the loop below
+    # asks for it four times (two rulers x two bars) plus once more for `is_tabular`, over a
+    # corpus of whole recorded payloads — five encodes of the same bytes to print one table.
+    measured = [(p, v, toon_bytes(v), is_tabular(v)) for p, v in rows]
     for ruler, size in RULERS.items():
         for bar, ratio in BARS.items():
-            clearing = [(p, v) for p, v in rows if toon_bytes(v) <= ratio * size(v)]
-            leaks = [p for p, v in clearing if not is_tabular(v)]
+            clearing = [(p, tab) for p, v, tb, tab in measured if tb <= ratio * size(v)]
+            leaks = [p for p, tab in clearing if not tab]
             print(
                 f"  ruler={ruler:15s} bar={bar:4s} clear={len(clearing):3d}/{len(rows)}"
                 f"  LEAKS(non-tabular)={len(leaks)}"
@@ -116,7 +121,11 @@ def report_fixtures(name: str, values: list[Any]) -> None:
 
 
 def main() -> int:
-    runs = pathlib.Path("/tmp/defender-runs")
+    # `$DEFENDER_RUNS_BASE` first: the devcontainer is REQUIRED to override the default
+    # (`defender/CLAUDE.md` — the bind source the box needs is not `/tmp`), so a hardcoded
+    # `/tmp/defender-runs` reports "corpus: SKIPPED" on the one machine this sweep is run on
+    # even with a full corpus of recorded payloads sitting under the configured base.
+    runs = pathlib.Path(os.environ.get("DEFENDER_RUNS_BASE") or "/tmp/defender-runs")
     if runs.is_dir():
         report_corpus(load_corpus(runs))
     else:
