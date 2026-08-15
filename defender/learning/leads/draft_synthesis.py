@@ -66,16 +66,45 @@ def _render_query_body(record: str, fence_lang: str) -> str:
     )
 
 
-def _draft_skeleton(query_id: str, goal: str, record: str, engine: str) -> str:
+def _draft_params(lead: ExecutedLead) -> list[str]:
+    """The param names this run bound, as the `params:` frontmatter key SCHEMA.md defines.
+
+    Every name here is a declared param of the verb by construction — the call reached a system,
+    so `validate_params` already accepted its param set — which is why this reads the ROW and
+    imports no adapter. The minter runs in the loop process against a worktree it does not
+    otherwise import from, and an adapter that would not import is not a reason to lose a draft.
+
+    The engine body param is excluded: its VALUE became the fenced `## Query` body
+    (`_executed_query`), so naming it as a param bound by a `${placeholder}` would describe a
+    file that does not exist.
+    """
+    body_param = body_param_for(lead.system, lead.verb)
+    return sorted(n for n in (lead.params or {}) if n != body_param)
+
+
+def _draft_frontmatter(
+    query_id: str, verb_name: str, params: list[str], engine: str,
+) -> str:
+    """Rendered through `yaml.safe_dump`, not an f-string: every value here comes off the queries
+    table, and a frontmatter block a model-coined value can break is a draft that never parses
+    again (#852 F-21, the same failure the id guard exists for). The dump quotes what needs
+    quoting instead of trusting the guards upstream to be the only line."""
+    doc: dict[str, object] = {"id": query_id, "status": "draft", "verb": verb_name}
     if engine != "none":
-        engine_fm = f"\nengine: {engine}"
-        query_block = _render_query_body(record, engine)
-    else:
-        engine_fm = ""
-        query_block = _render_query_body(record, "query")
+        doc["engine"] = engine
+    doc["params"] = params
+    return yaml.safe_dump(
+        doc, sort_keys=False, allow_unicode=True, default_flow_style=None
+    ).strip()
+
+
+def _draft_skeleton(
+    query_id: str, verb_name: str, params: list[str], goal: str, record: str, engine: str,
+) -> str:
+    query_block = _render_query_body(record, engine if engine != "none" else "query")
     goal_line = (goal or "").replace("\n", " ").strip() or "(no lead goal recorded)"
     return (
-        f"---\nid: {query_id}\nstatus: draft{engine_fm}\n---\n\n"
+        f"---\n{_draft_frontmatter(query_id, verb_name, params, engine)}\n---\n\n"
         "## Goal\n\n"
         f"`{query_id}` — auto-drafted from a coined gather query with no matching\n"
         f'catalog template. The defender\'s lead goal was: "{goal_line}".\n\n'
@@ -100,6 +129,13 @@ def _draft_candidate_segments(
         return None
     system, suffix = query_id.split(".", 1)
     if not system or not suffix or suffix == verb_name:
+        return None
+    # The VERB is held to the same alphabet as the id segments, because a draft now DECLARES it
+    # (`verb:` frontmatter, #901) and a declaration nothing can resolve is worse than no draft:
+    # the corpus-wide check refuses it, so a junk verb on one row would fail the whole lane's
+    # next commit. A row this rejects is not lost — the predicate is shared with
+    # `collect_general_failures`, so it lands in the pitfalls residue instead.
+    if not _SAFE_ID_SEGMENT.match(verb_name or ""):
         return None
     if not _SAFE_ID_SEGMENT.match(system) or not _SAFE_ID_SEGMENT.match(suffix):
         return None
@@ -131,7 +167,10 @@ def synthesize_drafts(
         try:
             draft.parent.mkdir(parents=True, exist_ok=True)
             draft.write_text(
-                _draft_skeleton(qid, lead.goal_text, record, engine), encoding="utf-8"
+                _draft_skeleton(
+                    qid, lead.verb, _draft_params(lead), lead.goal_text, record, engine,
+                ),
+                encoding="utf-8",
             )
             created.append(draft)
             by_id.add(qid)

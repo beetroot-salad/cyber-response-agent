@@ -206,6 +206,79 @@ def test_safe_id_segment_anchors_at_the_end_of_the_string():
     assert lead_author._SAFE_ID_SEGMENT.search("!!elastic") is None
 
 
+def _stub_verbs():
+    """A verb roster standing in for a system's adapter, so a minted draft can be run through
+    the SAME rule the loop's commit gate and CI run it through."""
+    from defender.runtime.verbs import VerbContext, verb
+
+    @verb()
+    def esql(ctx: VerbContext, *, query: str = "") -> dict:
+        return {}
+
+    @verb()
+    def map_(ctx: VerbContext, *, name: str = "") -> dict:
+        return {}
+
+    return {"esql": esql, "map": map_}
+
+
+def _minted(cat, system: str, name: str):
+    from defender._corpus import read_query_template
+
+    template, reason = read_query_template(cat / system / "_draft" / f"{name}.md")
+    assert template is not None, reason
+    return template
+
+
+def test_a_minted_draft_declares_the_verb_it_was_minted_from(tmp_path):
+    """#901's positive control for the minter.
+
+    The skeleton emitted `id`, `status` and (for an engine verb) `engine` — no `verb:`, no
+    `params:` — while `SCHEMA.md` makes both part of the format and says outright they exist so
+    the scaffold check can read them. Nothing noticed because no check ever ran on `_draft/`:
+    point one at the directory and every synthesized draft fails it on rule one. The verb is in
+    hand at the mint (`lead.verb`), so this is a declaration the loop was throwing away."""
+    from defender import _scaffold_rules
+
+    cat = _catalog(tmp_path)
+    lead_author.synthesize_drafts(
+        [_lead("stub-cmdb.network-map", {"name": "web-1"}, verb="map")], catalog_dir=cat)
+    template = _minted(cat, "stub-cmdb", "network-map")
+    assert template.verb == "map"
+    assert template.params == ("name",)
+    assert _scaffold_rules.check_template(template, _stub_verbs()) == []
+
+
+def test_a_minted_engine_draft_does_not_declare_the_body_param_it_spent(tmp_path):
+    """An engine verb's body param is not bound by a `${placeholder}` in the minted file — its
+    VALUE became the fenced `## Query` body. Declaring it would describe a file that does not
+    exist, and would be the one `params:` entry no reader could reconcile against the text."""
+    from defender import _scaffold_rules
+
+    cat = _catalog(tmp_path)
+    lead_author.synthesize_drafts([
+        _lead("elastic.sshd-failed-by-srcip", {"query": _ESQL_PIPE}, verb="esql",
+              system="elastic"),
+    ], catalog_dir=cat)
+    template = _minted(cat, "elastic", "sshd-failed-by-srcip")
+    assert template.verb == "esql"
+    assert template.params == ()
+    assert _scaffold_rules.check_template(template, _stub_verbs()) == []
+
+
+def test_a_row_whose_verb_is_not_a_plain_name_mints_nothing(tmp_path):
+    """The verb is spent as a frontmatter DECLARATION now, so it is held to the alphabet the id
+    segments already were (#852 F-21). A draft whose `verb:` resolves to nothing would fail the
+    corpus-wide check and take the lane's next commit down with it — and the row is not lost,
+    the shared candidacy predicate routes it to the pitfalls residue instead."""
+    cat = _catalog(tmp_path)
+    assert lead_author.synthesize_drafts([
+        _lead("stub-cmdb.network-map", {"name": "web-1"}, verb="map\nname: evil"),
+        _lead("stub-cmdb.other-map", {"name": "web-1"}, verb=""),
+    ], catalog_dir=cat) == []
+    assert not (cat / "stub-cmdb" / "_draft").exists()
+
+
 def test_untagged_verb_not_drafted(tmp_path):
     """A bare `{system}.{verb}` id whose suffix IS the recorded verb (no coined --query-id) is a
     non-candidate — an untagged call must not mint a junk catch-all draft."""

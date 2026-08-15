@@ -19,7 +19,7 @@ import pytest
 
 from defender.learning.leads import lead_author  # type: ignore[import-not-found]
 from defender.learning.core.config import LoopPaths  # type: ignore[import-not-found]
-from defender.tests._repo import seed_skills_repo
+from defender.tests._repo import query_template, seed_skills_repo
 
 
 def _deps(tmp_path: Path, **overrides):
@@ -423,10 +423,10 @@ def test_verify_skills_state_accepts_in_scope_edits(tmp_git_repo: Path):
     lift a system skill (edit SKILL.md + rm draft) — all in-scope; returns changed paths."""
     repo = tmp_git_repo
     (repo / _CATALOG / "wazuh" / "auth-events.md").write_text(
-        "---\nid: wazuh.auth-events\nstatus: established\n---\n# folded\n"
+        query_template("wazuh.auth-events", "established") + "\n# folded\n"
     )
     (repo / _CATALOG / "wazuh" / "newthing.md").write_text(
-        "---\nid: wazuh.newthing\nstatus: established\n---\n"
+        query_template("wazuh.newthing", "established")
     )
     (repo / _CATALOG / "wazuh" / "_draft" / "newthing.md").unlink()
     skill = repo / "defender" / "skills" / "elastic" / "SKILL.md"
@@ -498,9 +498,75 @@ def test_verify_skills_state_rejects_half_promote(tmp_git_repo: Path):
     records-only checks can't see it; the filesystem twin probe must catch the half-promote
     rather than letting the loop commit established + draft together."""
     (tmp_git_repo / _CATALOG / "wazuh" / "newthing.md").write_text(
-        "---\nid: wazuh.newthing\nstatus: established\n---\n"
+        query_template("wazuh.newthing", "established")
     )
     with pytest.raises(lead_author.LeadAuthorError, match="half-promote"):
+        lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[])
+
+
+def test_verify_skills_state_rejects_a_promotion_whose_placeholder_is_not_a_param(
+    tmp_git_repo: Path,
+):
+    """#901's negative control, at this lane's own seam.
+
+    Until the fold, every gate here was path-shaped — out-of-scope path, protected surface,
+    delete-prohibition, half-promote — so a promoted template could name a `${placeholder}` the
+    verb does not declare and nothing in the lane would look. `connect`'s check would not catch
+    it either: it ran at scaffold time and excluded `_draft/`, the directory this lane mints
+    into. The gather lead that then bound the template is refused at `validate_params` with its
+    turn already spent."""
+    repo = tmp_git_repo
+    (repo / _CATALOG / "wazuh" / "newthing.md").write_text(
+        query_template(
+            "wazuh.newthing", "established",
+            body="```query\nverb: search\nparams:\n  index: ${mystery}\n```",
+        )
+    )
+    (repo / _CATALOG / "wazuh" / "_draft" / "newthing.md").unlink()
+    with pytest.raises(lead_author.LeadAuthorError, match="mystery"):
+        lead_author._verify_skills_state(repo, baseline_stray=[])
+
+
+def test_verify_skills_state_accepts_a_malformed_draft(tmp_git_repo: Path):
+    """The decided SCOPE, pinned so a later widening is deliberate rather than incidental.
+
+    The content gate fires at PROMOTION, not on the lane's `_draft/` writes: a draft is minted
+    from a query that really ran, and refusing the batch over one would discard the signal the
+    loop wanted. A draft is model-reachable through `template_search` before promotion, which is
+    the cost this accepts; the corpus-wide CI sweep (`test_scaffold_rules_901.py`) is where a
+    malformed draft is caught, one PR later rather than one commit earlier."""
+    repo = tmp_git_repo
+    (repo / _CATALOG / "wazuh" / "_draft" / "rough.md").write_text(
+        query_template(
+            "wazuh.rough", "draft",
+            body="```query\nverb: search\nparams:\n  index: ${mystery}\n```",
+        )
+    )
+    changed = lead_author._verify_skills_state(repo, baseline_stray=[])
+    assert "defender/skills/gather/queries/wazuh/_draft/rough.md" in changed
+
+
+def test_verify_skills_state_rejects_a_skill_md_naming_another_system(tmp_git_repo: Path):
+    """The lift writes `skills/{system}/SKILL.md`, so the frontmatter identity `connect` checks
+    at scaffold time is an invariant this lane can break — `read_description` and the roster
+    audit both key on the directory, so a SKILL.md that calls itself another system is a
+    per-system prompt injected under the wrong system's name."""
+    skill = tmp_git_repo / "defender" / "skills" / "elastic" / "SKILL.md"
+    skill.write_text("---\nname: defender-cmdb\n---\n# elastic\n")
+    with pytest.raises(lead_author.LeadAuthorError, match="defender-elastic"):
+        lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[])
+
+
+def test_verify_skills_state_rejects_a_promotion_under_a_system_with_no_adapter(
+    tmp_git_repo: Path,
+):
+    """"Could not check" must not read as "nothing wrong". A catalog dir for a system no adapter
+    declares is the phantom-system class (#855 F-06) wearing a catalog path, and it is exactly
+    the case a resolver that swallowed its own failure would wave through."""
+    ghost = tmp_git_repo / _CATALOG / "ghost"
+    ghost.mkdir(parents=True)
+    (ghost / "x.md").write_text(query_template("ghost.x", "established"))
+    with pytest.raises(lead_author.LeadAuthorError, match="could not be resolved"):
         lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[])
 
 
@@ -538,7 +604,7 @@ def test_run_loop_commits_agent_edits(tmp_git_repo: Path, tmp_path: Path):
 
     def fake_agent(rd, handoffs, pending, *, box=None):
         (repo / _CATALOG / "wazuh" / "newthing.md").write_text(
-            "---\nid: wazuh.newthing\nstatus: established\n---\n"
+            query_template("wazuh.newthing", "established")
         )
         (repo / _CATALOG / "wazuh" / "_draft" / "newthing.md").unlink()
         return 0
@@ -627,7 +693,7 @@ def test_run_loop_clears_drafts_on_discard_and_promote(tmp_git_repo: Path, tmp_p
     documented ``:*`` form), the loop's commit/clear logic is end-to-end."""
     repo = tmp_git_repo
     (repo / _CATALOG / "wazuh" / "_draft" / "olddraft.md").write_text(
-        "---\nid: wazuh.olddraft\nstatus: draft\n---\n"
+        query_template("wazuh.olddraft", "draft")
     )
     _run_git(repo, "add", "-A")
     _run_git(repo, "commit", "-q", "-m", "seed second draft")
@@ -639,7 +705,7 @@ def test_run_loop_clears_drafts_on_discard_and_promote(tmp_git_repo: Path, tmp_p
     discarded_draft = repo / _CATALOG / "wazuh" / "_draft" / "olddraft.md"
 
     def fake_agent(rd, handoffs, pending, *, box=None):
-        promoted_est.write_text("---\nid: wazuh.newthing\nstatus: established\n---\n")
+        promoted_est.write_text(query_template("wazuh.newthing", "established"))
         promoted_draft.unlink()
         discarded_draft.unlink()
         return 0
@@ -675,7 +741,7 @@ def test_run_quarantines_half_promote(tmp_git_repo: Path, tmp_path: Path):
 
     def fake_agent(rd, handoffs, pending, *, box=None):
         (repo / _CATALOG / "wazuh" / "newthing.md").write_text(
-            "---\nid: wazuh.newthing\nstatus: established\n---\n"
+            query_template("wazuh.newthing", "established")
         )
         return 0
 
@@ -979,7 +1045,7 @@ def test_verify_skills_state_returns_sorted_changed(tmp_git_repo: Path):
     (`.../elastic/...`, sorts EARLY) in raw git order — only `sorted()` flips them.
     A regression to `return changed` would return git order and fail this."""
     (tmp_git_repo / _CATALOG / "wazuh" / "auth-events.md").write_text(
-        "---\nid: wazuh.auth-events\nstatus: established\n---\n# folded\n"
+        query_template("wazuh.auth-events", "established") + "\n# folded\n"
     )
     (tmp_git_repo / "defender" / "skills" / "elastic" / "_draft" / "aa-new.md").write_text(
         "---\nid: elastic.aa-new\nstatus: draft\n---\n# new\n"
