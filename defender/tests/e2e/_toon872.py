@@ -46,8 +46,12 @@ from typing import Any
 import pytest
 
 pytest.importorskip("pydantic_ai")
-
-import toons  # noqa: E402
+#: Guarded like `pydantic_ai` beside it, and for the same reason: `toons` ships in the
+#: `runtime` EXTRA (`defender/pyproject.toml`), so an install without it is a supported one.
+#: A bare `import toons` there is not "these seven modules fail" — it is seven COLLECTION
+#: errors, and pytest answers a collection error by interrupting the whole session, so the
+#: entire suite stops running over a missing optional wheel.
+toons = pytest.importorskip("toons")  # noqa: E402
 
 from pydantic_ai import Agent  # noqa: E402
 from pydantic_ai.messages import (  # noqa: E402
@@ -387,7 +391,16 @@ class Dispatched:
     `parts` is read off the LAST request's message list — the dispatched request messages,
     which §7 r8 made the artifact for O1/O2/O3/O8. `returns` is the wrapper's own return
     value and is deliberately NOT the oracle for any encoding demand; it exists only for the
-    two demands stated over the return contract itself (`d0b`, `d72`)."""
+    two demands stated over the return contract itself (`d0b`, `d72`).
+
+    `text()` RENDERS THE PART THE WAY A PROVIDER DOES — `model_response_str()`, which is
+    `wire_text`'s own serializer — and NOT with `str()`. The design says why in as many words
+    (M5): "`str()` produces Python `repr` text (single quotes, `None`, `True`), which is
+    neither the wire JSON nor recoverable". Under `str()` an UN-GATED `dict` return rendered
+    as `{'a': 1}` while `wire_text` gave `{"a":1}`, so every O2 assertion of the form
+    "the owned/ungated text is unchanged == `wire_text(value)`" compared repr to JSON and
+    could not pass whatever the gate did. A framed `str` renders identically under both, so
+    the substitute arms never saw it."""
 
     def __init__(self, requests: list[list[Any]], returns: list[Any]) -> None:
         self.requests = requests
@@ -409,14 +422,10 @@ class Dispatched:
         return hits[0]
 
     def text(self, tool_name: str = "fetch_rows") -> str:
-        content = self.part(tool_name).content
-        return content if isinstance(content, str) else str(content)
+        return self.part(tool_name).model_response_str()
 
     def texts(self, tool_name: str = "fetch_rows") -> list[str]:
-        return [
-            p.content if isinstance(p.content, str) else str(p.content)
-            for p in self.parts if p.tool_name == tool_name
-        ]
+        return [p.model_response_str() for p in self.parts if p.tool_name == tool_name]
 
     def metadata(self, tool_name: str = "fetch_rows") -> Any:
         return self.part(tool_name).metadata

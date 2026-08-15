@@ -22,7 +22,10 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-import toons  # noqa: E402
+# `toons` ships in the `runtime` EXTRA, so an install without it is a supported one —
+# and a bare module-scope import there is a COLLECTION error, which pytest answers by
+# interrupting the whole session. Guarded like `pydantic_ai` above it.
+toons = pytest.importorskip("toons")  # noqa: E402
 
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender._run_paths import RunPaths  # noqa: E402
@@ -146,10 +149,20 @@ def _every_view(main, view: str) -> bool:
 
 
 def _tool_return_parts(rec: dict) -> list[dict]:
-    """Every tool-return part in one wire-log record. The log records the FULL request
-    messages verbatim, so the parts are nested inside the recorded message list."""
+    """Every tool-return part in one wire-log record.
+
+    THE SHAPE IS ONE MESSAGE PER RECORD, under `message`, which is what `observe.RequestLogger`
+    actually writes — one row per message, carrying the `agent_id` and the per-agent `seq` the
+    join key is built from. The `request_messages` / `messages` spellings this reached for
+    first are a shape no writer in the tree emits, so the walk found nothing on every record
+    and the recoverability demand was vacuous: `found` came back empty whether or not the
+    metadata was there, which is the failure mode a positive control exists to catch. The list
+    form is still accepted, because a record holding a whole history is a shape the logger
+    could grow back."""
     out: list[dict] = []
-    for message in rec.get("request_messages") or rec.get("messages") or []:
+    recorded = rec.get("message") or rec.get("request_messages") or rec.get("messages") or []
+    messages = [recorded] if isinstance(recorded, dict) else recorded
+    for message in messages:
         for part in (message or {}).get("parts", []) or []:
             if (part or {}).get("part_kind") in ("tool-return", "tool_return"):
                 out.append(part)
