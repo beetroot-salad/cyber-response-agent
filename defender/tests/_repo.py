@@ -21,6 +21,50 @@ from pathlib import Path
 from defender import _git
 
 
+#: Directory names a real filesystem and a real git accept, and a naive reader gets wrong.
+#: NOT decoration — each entry is a CLASS that has silently un-declared a system in this repo
+#: (#869/#908), and the tuple is the corpus a `spec-graph claims` `alphabet:` is answered with:
+#:
+#:   "café"      non-ASCII. C-QUOTED by `git ls-tree --name-only`: the entry arrives as
+#:               `"defender/skills/caf\303\251/execution.md"`, quotes included, so it no
+#:               longer ends in `/execution.md` and every suffix test on it answers no.
+#:   "my sys"    a space. NOT quoted — a `.split()` of the listing TEARS it into
+#:               `defender/skills/my` and `sys/execution.md`, and the second half is a
+#:               well-formed path that a suffix test happily accepts at the wrong depth.
+#:   'say"what'  a double quote. C-quoted like the non-ASCII case, and the classic breaker of
+#:               any reader that re-enters a shell or builds a pathspec by concatenation.
+#:
+#: The two mechanisms are INDEPENDENT, which is why the corpus carries both: `-z` alone fixes
+#: the quoting and not the tearing, a NUL split alone fixes the tearing and not the quoting.
+#: Only `-z` READ as NUL-delimited answers for all three. Measured on git 2.47.3 with the
+#: default `core.quotePath=true`; `test_hostile_names.py` is the executed probe and re-grounds
+#: this comment on every run. Deliberately NOT in the corpus: `it's` (a single quote is not
+#: quoted and contains no whitespace, so it breaks neither reader and only pads the fixture).
+#:
+#: A tree reader that answers correctly over these three answers correctly over the names
+#: models and humans actually choose. One that is only ever handed `elastic` has not been
+#: probed — it has been agreed with.
+HOSTILE_NAMES: tuple[str, ...] = ("café", "my sys", 'say"what')
+
+
+def plant_named_dirs(
+    parent: Path, names: tuple[str, ...] = HOSTILE_NAMES, *, filename: str = "execution.md"
+) -> tuple[str, ...]:
+    """Create `parent/<name>/<filename>` for each name; return the names, for the assertion.
+
+    Returning the input is the point, not a convenience: the caller asserts against the names
+    it PLANTED, never against a second reading of the tree. An oracle that re-derives the
+    expected set with the same listing the code under test runs cannot disagree with it —
+    which is how #869's three misreads passed 57 tests — and `scripts/lint/lint_shared_oracle.py`
+    now refuses the shape at the gate.
+    """
+    for name in names:
+        d = parent / name
+        d.mkdir(parents=True, exist_ok=True)
+        (d / filename).write_text(f"# {name}\n", encoding="utf-8")
+    return names
+
+
 def seed_repo(
     repo: Path,
     *,

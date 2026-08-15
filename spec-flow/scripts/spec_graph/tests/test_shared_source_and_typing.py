@@ -196,3 +196,87 @@ def test_running_the_probe_anyway_is_never_a_typing_finding(make_repo):
     ))
     p = run_script("check_claims.py", "g.yaml", cwd=r.root)
     assert "MISTYPED" not in p.stdout
+
+
+# ---------------------------------------------------------------------------
+# check_claims — the probe-corpus pass (#869: an executed probe over ASCII only)
+# ---------------------------------------------------------------------------
+
+_CORPUS = """\
+schema_version: 1
+design: "#t"
+base: abc
+demands: []
+structure: {{axes: [], actors: [], boundaries: [], interacts: [], drives: []}}
+claims:
+  - {{id: X2, kind: primitive, claim: "the marker read answers from HEAD",
+     probe: "{probe}", probe_kind: executed, observed: "o", verdict: holds{alphabet}}}
+"""
+
+_FULL_ALPHABET = (
+    ",\n     alphabet: {ascii: 'elastic', non-ascii: 'café — C-quoted', "
+    "space: 'my sys — torn by split', cwd: 'root and a subdir'}"
+)
+
+
+def _corpus(probe: str, alphabet: str = "") -> str:
+    return _CORPUS.format(probe=probe, alphabet=alphabet) + _EVALUATED_TRUE
+
+
+def test_a_name_enumerating_probe_without_an_alphabet_is_a_finding(make_repo):
+    """The shipped shape: `git ls-tree -r --name-only HEAD` over a planted ASCII tree, its
+    output transcribed into the reader. Executed, correctly typed, correctly instrumented —
+    and blind to every name class the fixture did not contain."""
+    r = make_repo()
+    r.config(code_roots=[])
+    r.write("g.yaml", _corpus("ran `git ls-tree -r --name-only HEAD -- defender/skills/`"))
+    p = run_script("check_claims.py", "g.yaml", cwd=r.root)
+    assert p.returncode == 1
+    assert "CORPUS" in p.stdout and "X2" in p.stdout
+
+
+def test_the_alphabet_closes_the_finding(make_repo):
+    r = make_repo()
+    r.config(code_roots=[])
+    r.write("g.yaml", _corpus(
+        "ran `git ls-tree -r --name-only HEAD -- defender/skills/`", _FULL_ALPHABET
+    ))
+    p = run_script("check_claims.py", "g.yaml", cwd=r.root)
+    assert "CORPUS" not in p.stdout
+
+
+def test_a_missing_class_is_named_rather_than_passed(make_repo):
+    """Partial credit is the failure mode this pass exists to refuse — #869's probe would
+    have honestly filled in `ascii` and stopped there."""
+    r = make_repo()
+    r.config(code_roots=[])
+    r.write("g.yaml", _corpus(
+        "ran `git ls-tree -r --name-only HEAD`",
+        ",\n     alphabet: {ascii: 'elastic', non-ascii: 'café', space: 'my sys'}",
+    ))
+    p = run_script("check_claims.py", "g.yaml", cwd=r.root)
+    assert p.returncode == 1
+    assert "CORPUS" in p.stdout and "cwd" in p.stdout
+
+
+def test_a_blank_class_does_not_count_as_an_answer(make_repo):
+    r = make_repo()
+    r.config(code_roots=[])
+    r.write("g.yaml", _corpus(
+        "ran `git ls-tree -r --name-only HEAD`",
+        ",\n     alphabet: {ascii: 'elastic', non-ascii: '', space: 'my sys', cwd: 'root'}",
+    ))
+    p = run_script("check_claims.py", "g.yaml", cwd=r.root)
+    assert p.returncode == 1
+    assert "CORPUS" in p.stdout and "non-ascii" in p.stdout
+
+
+def test_a_probe_that_enumerates_nothing_owes_no_alphabet(make_repo):
+    """The pass must stay narrow: an executed probe over a value the probe itself constructs
+    has its input written down already, and demanding a name corpus of it would make the
+    field paperwork everyone learns to fill in blind."""
+    r = make_repo()
+    r.config(code_roots=[])
+    r.write("g.yaml", _corpus("called `resolve('elastic.auth-history')` and read the return"))
+    p = run_script("check_claims.py", "g.yaml", cwd=r.root)
+    assert "CORPUS" not in p.stdout

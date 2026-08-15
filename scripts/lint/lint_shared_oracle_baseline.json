@@ -1,0 +1,8 @@
+{
+  "//": "lint_shared_oracle baseline — git QUERY argv shapes run by both a production module and a test module under defender/: a test whose expected value comes from the code's own command cannot disagree with it, so the shared primitive's blind spots are invisible to the suite (#869/#908 — ls-tree C-quoting, .split() on spaced paths, and cwd-relative output, all asserted green by an oracle running the same argv). Fingerprint is file:argv-shape (no line number). CI fails on a fingerprint absent here AND on any entry left un-triaged. Regenerate: python scripts/lint/lint_shared_oracle.py --update-baseline. Say why the shared query is not an oracle (an identity read, a facade contract test) or fix it.",
+  "entries": {
+    "defender/tests/test_author_shared.py:rev-parse|HEAD": "intentional: `test_git_head_sha_matches_rev_parse` is a FACADE CONTRACT test — its whole subject is whether `shared.git_head_sha` agrees with raw git, so running the same command is the assertion, not a second copy of it. This is the one shape of shared query that is the test's point.",
+    "defender/tests/test_curator_glm_dispatch_dlq.py:rev-parse|HEAD": "false positive: an IDENTITY read, not a derived expectation. `_head()` learns the sha of the commit the fixture just made so the test can compare it against the `consumed_commit` the drain recorded. A sha is not something a test can plant and know — git is its only source — so there is no independent oracle to prefer, and no parsing rule is being duplicated.",
+    "defender/tests/test_drain719_fold.py:rev-parse|HEAD": "false positive: an IDENTITY read, as above — the sha of the commit just made, compared against the row's `consumed_commit`. No derivation is shared, only the one fact git alone holds."
+  }
+}
