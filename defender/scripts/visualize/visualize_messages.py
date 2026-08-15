@@ -384,6 +384,20 @@ def _response_entry(rec: dict, phase: str | None, turn: int) -> dict:
     }
 
 
+def _gate_original_json(part: dict) -> str | None:
+    """#872 O5 — the TOON gate's substituted view carries the tool's own JSON alongside it,
+    under `toon_gate.GATE_METADATA_KEY` on the part's `metadata`. `load_messages` returns
+    `metadata` verbatim (it is a tolerant JSONL reader), so the ONLY place this field can be
+    lost between the wire log and the page is here, in the entry this function builds — which
+    used to construct a fixed-key entry with no `metadata` key at all, dropping it silently."""
+    from defender.runtime.toon_gate import GATE_METADATA_KEY
+
+    meta = part.get("metadata")
+    if not isinstance(meta, dict) or GATE_METADATA_KEY not in meta:
+        return None
+    return json.dumps(meta[GATE_METADATA_KEY], default=str)
+
+
 def _request_entries(rec: dict, phase: str | None, turn: int) -> list[dict]:
     out: list[dict] = []
     for p in (rec.get("message") or {}).get("parts") or []:
@@ -398,6 +412,7 @@ def _request_entries(rec: dict, phase: str | None, turn: int) -> list[dict]:
             "tool": name,
             "is_error": pk == "retry-prompt",
             "content": _part_text(p),
+            "original_json": _gate_original_json(p) if pk == "tool-return" else None,
             "tools": [name] if name else [],
         })
     return out

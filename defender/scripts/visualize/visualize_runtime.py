@@ -185,6 +185,24 @@ def _render_tx_groups(
     return "".join(blocks)
 
 
+def _render_original_json(original_json: str | None) -> str:
+    """#872 O5 — the TOON gate substituted this result; the original JSON it replaced rides
+    beside the view rather than merely surviving unrendered. A
+    `<script type="application/json">` data island, not another `esc()`'d `<pre>`:
+    HTML-entity-escaping would encode every `"` in the JSON, so a reader (or a test)
+    searching the page for the tool's own JSON bytes would never find them. Only
+    `</script>` needs neutralizing here — JSON has no other HTML metacharacter."""
+    if not original_json:
+        return ""
+    safe = original_json.replace("</script>", "<\\/script>")
+    return (
+        '<details class="block tx-resultbody"><summary>original JSON '
+        '(pre-TOON-gate)</summary><div class="body">'
+        f'<script type="application/json" class="tx-original-json">{safe}</script>'
+        "</div></details>"
+    )
+
+
 def _render_tx_entry(e: dict, anchor_attr: str = "") -> str:
     kind = e["kind"]
     phase = e.get("phase") or ""
@@ -233,6 +251,7 @@ def _render_tx_entry(e: dict, anchor_attr: str = "") -> str:
             if content
             else '<div class="empty">(empty result)</div>'
         )
+        inner += _render_original_json(e.get("original_json"))
         return (
             f'<div class="tx-entry tx-result"{anchor_attr} data-kind="tool_result" '
             f'data-phase="{esc(phase)}" data-tool="{esc(e.get("tool", ""))}" data-tools="{esc(data_tools)}">'
