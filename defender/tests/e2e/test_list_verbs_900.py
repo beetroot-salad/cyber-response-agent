@@ -1,7 +1,7 @@
 """Executable spec for #900 — `list_verbs`, gather's verb/param discovery tool.
 
 The only complete, accurate statement of a verb's param surface a gather lead reliably meets
-today is a REJECTION: `validate_params` (`runtime/verbs.py:177`) names the declared set from
+today is a REJECTION: `validate_params` (`runtime/verbs.py:196`) names the declared set from
 inside `_screen`, one failed call after the model guessed. Every published surface is
 hand-authored prose (`skills/*/execution.md`'s `## Verbs` blocks), the pointer in
 `skills/gather/SKILL.md:104` names a catalog that carries no params at all, and the generated
@@ -28,7 +28,7 @@ What each test pins (the obligation ids are #900's):
       neither see nor bind it, because the pin only NARROWS and would silently drop the open
       siblings a lead is dispatched to correlate.
   O3  no over-promising on types — `_resolved_hints` SWALLOWS an unresolvable annotation
-      (`verbs.py:147-151`) and `validate_params` then accepts ANY value for that param, so a
+      (`verbs.py:166-170`) and `validate_params` then accepts ANY value for that param, so a
       param whose annotation does not resolve must be published as type-UNENFORCED. No shipped
       adapter triggers this (0 of 44 declared params over 28 granted verbs), so the case is
       driven by a SYNTHETIC verb through the registry injection seam.
@@ -573,7 +573,7 @@ def test_o3_an_unresolvable_annotation_is_published_as_type_unenforced(tmp_path)
     """O3 — the case the shipped adapters do not reach, driven through the registry seam.
 
     `_resolved_hints` swallows an unresolvable annotation and returns `{}` for the WHOLE
-    function (`verbs.py:94-98`: `get_type_hints` raises once and the mapping is empty), after
+    function (`verbs.py:166-170`: `get_type_hints` raises once and the mapping is empty), after
     which `validate_params` accepts any value for any of that verb's params. So the tool must
     publish `window` AND its perfectly-ordinary `host: str` sibling as type-unenforced: a
     claimed `str` on `host` would be exactly the over-promise O3 forbids, and it is the arm an
