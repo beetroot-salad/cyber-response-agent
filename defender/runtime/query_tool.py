@@ -584,7 +584,7 @@ class QueryCapture(AbstractCapability[Any]):
 
 
 #: What a param renders as when its declared annotation could not be resolved. NOT cosmetic:
-#: `_resolved_hints` swallows an unresolvable annotation and returns `{}` (verbs.py:94-98),
+#: `_resolved_hints` swallows an unresolvable annotation and returns `{}` (verbs.py:147-151),
 #: after which `validate_params` type-checks NOTHING and accepts any value. A surface that
 #: printed the annotation there would promise a check the boundary does not make — the one way
 #: this tool could lie about the thing it exists to report (#900 O3).
@@ -595,6 +595,26 @@ class QueryCapture(AbstractCapability[Any]):
 #: param unenforced, and every one of them must say so — which is why this marker is applied
 #: from the absence of a hint rather than from the presence of a bad one.
 UNENFORCED_TYPE = "type unenforced"
+
+#: The GRANT-FIRST answer, and the one branch that deliberately refuses to distinguish two
+#: conditions (#900 review R2). `VerbRegistry.decide` decides "from the grant ALONE first — no
+#: adapter is resolved (no import) unless the grant admits the call" (§7 R11); a discovery tool
+#: that resolved first would both execute an ungranted adapter's import-time code and turn its
+#: own four degradations into an oracle over the on-disk roster — "no such adapter" vs "present
+#: but broken" vs "present and healthy", read across the grant boundary. So a system the grant
+#: does not reach is answered here, before any import, and absent is spelled exactly like
+#: withheld.
+#:
+#: Naming the reachable systems costs nothing: the dispatch prompt's descriptor index already
+#: lists every system in this role's grant, so this discloses nothing the lead was not handed
+#: on turn one — and it is a BETTER correction than the "no adapter by that name" it replaces
+#: for the overwhelmingly common cause, a mistyped name.
+_LIST_VERBS_UNREACHABLE = (
+    "`{system}` — your grant reaches no verb on any system by that name, so there is nothing "
+    "here you may run and no surface to show you.{roster} Measure this lead against a system "
+    "you do hold, or say so in your summary rather than reporting a measurement you could not "
+    "take."
+)
 
 _LIST_VERBS_UNKNOWN_SYSTEM = (
     "`{system}` — no adapter is registered under that name, so no verb surface can be derived "
@@ -685,20 +705,23 @@ def _json_default(value: Any) -> str:
         return json.dumps(repr(value))
 
 
-def _rendered_param(name: str, param: inspect.Parameter, hints: Mapping[str, Any]) -> str:
+def _rendered_param(param: inspect.Parameter, hints: Mapping[str, Any]) -> str:
     """One declared param as a `"name": <descriptor>` entry of a `params={…}` body.
 
     Keyed on the param, never on `hints`: `_resolved_hints` also returns `ctx` and `return`,
     neither of which is a param the model may bind.
     """
-    inner = _ann_name(hints[name]) if name in hints else UNENFORCED_TYPE
+    inner = _ann_name(hints[param.name]) if param.name in hints else UNENFORCED_TYPE
     if param.default is not inspect.Parameter.empty:
         inner = f"{inner}, default {_json_default(param.default)}"
-    return f'"{name}": <{inner}>'
+    return f'"{param.name}": <{inner}>'
 
 
-#: The longest model-named system this tool will echo back verbatim. Same bound and same
-#: reason as `tools_gather._SYSTEM_MAX_LEN`: the name is unbounded model text.
+#: The longest model-named system this tool will echo back verbatim. The same bound as
+#: `tools_gather._SYSTEM_MAX_LEN` and for the same underlying fact — the name is unbounded
+#: model text — but NOT for the same downstream reason, so the two are stated separately
+#: rather than shared: that one bounds a string #835 routes into a provider request field
+#: (`openai_prompt_cache_key`), this one bounds a string that lands in a markdown answer.
 _ECHO_SYSTEM_MAX_LEN = 64
 
 
@@ -734,6 +757,18 @@ def _registry_declares(registry: Any, system: str) -> bool:
         return False
 
 
+def _granted_systems(registry: Any) -> tuple[str, ...]:
+    """The systems this role's grant reaches, or `()` when the registry cannot say."""
+    try:
+        return tuple(sorted(registry.grant.systems))
+    except CONTROL_FLOW_EXCEPTIONS:
+        raise
+    except (BudgetKill, KeyboardInterrupt, GeneratorExit, asyncio.CancelledError):
+        raise
+    except BaseException:  # noqa: BLE001 — a registry that cannot name its grant reaches nothing
+        return ()
+
+
 def _list_verbs_declared(
     registry: Any, system: str, shown: str,
 ) -> tuple[Mapping[str, Any], str | None]:
@@ -764,39 +799,56 @@ def _list_verbs_declared(
     return declared, None
 
 
-def _list_verbs_decision(
-    registry: Any, system: str, verb: str, shown: str,
-) -> tuple[Any, str | None]:
-    """`(granted_decision_or_None, degradation)` for one verb.
+def _list_verbs_line(
+    registry: Any, system: str, verb: Any, shown: str,
+) -> tuple[tuple[str, bool] | None, str | None]:
+    """`((rendered_call, any_param_unenforced), degradation)` for one verb — `(None, None)`
+    when the grant withholds it, which is a skip and not a failure.
 
-    GUARDED, exactly as `QueryCapture._decide_guarded` guards the dispatch path's own call:
-    `decide` RAISES `GrantError` on a grant/declaration class disagreement, and an exception
-    out of a discovery tool ends the lead's turn — the one thing O4 forbids of every branch
-    here. A withheld verb is `(None, None)`: skipped, not a failure.
+    GUARDED END TO END, exactly as `QueryCapture._decide_guarded` guards the dispatch path's
+    own call, and over the RENDER as much as over the decision: `decide` raises `GrantError` on
+    a grant/declaration class disagreement, and the render raises just as readily on a
+    malformed `VERBS` table — `ModuleVerbRegistry.verbs` checks only that the table is a
+    Mapping, so a non-callable body reaches `inspect.signature` inside `model_facing_params`
+    and comes back as `TypeError`. An exception out of a discovery tool ends the lead's turn,
+    the one thing O4 forbids of every branch here; deciding and rendering are one guarded unit
+    because a broken adapter can fail either half and the lead reads the same answer for both.
     """
     try:
         decision = registry.decide(system, verb)
+        if decision.outcome != GRANTED or decision.fn is None:
+            return None, None
+        # `model_facing_params`, not `declared_params`: a `wrapper_only` param is refused by
+        # `validate_params`, so publishing it would advertise a binding that cannot be made.
+        params = model_facing_params(decision.fn)
+        hints = _resolved_hints(decision.fn)
+        rendered = ", ".join(_rendered_param(p, hints) for p in params.values())
+        # `shown`, not the raw `system` (`_echoed_system`): every other span of this answer
+        # goes through that bound, and the one line the lead is told to COPY is the last place
+        # an unbounded model-authored name should land unescaped.
+        line = f'query(system="{shown}", verb="{verb}", params={{{rendered}}})'
+        return (line, any(name not in hints for name in params)), None
     except CONTROL_FLOW_EXCEPTIONS:
         raise
     except (BudgetKill, KeyboardInterrupt, GeneratorExit, asyncio.CancelledError):
         raise
-    except BaseException as e:  # noqa: BLE001 — a registry that cannot decide degrades loud
+    except BaseException as e:  # noqa: BLE001 — a surface that cannot be derived degrades loud
         return None, _LIST_VERBS_UNDERIVABLE.format(
-            system=shown, err=f"{system}.{verb}: {type(e).__name__}: {e}",
+            system=shown, err=f"{shown}.{verb}: {type(e).__name__}: {e}",
         )
-    if decision.outcome != GRANTED or decision.fn is None:
-        return None, None
-    return decision, None
 
 
 def _tool_list_verbs(registry: Any, system: str) -> str:
     """`system`'s granted verbs and their declared params, derived at call time.
 
-    The two readers are `declared_params` and `_resolved_hints` — the SAME pair
-    `validate_params` enforces on (verbs.py:124-151) — so what this publishes and what the
+    The two readers are `model_facing_params` and `_resolved_hints` — the SAME pair
+    `validate_params` enforces on (verbs.py:177-213) — so what this publishes and what the
     boundary accepts cannot drift apart. The grant filter goes through `registry.decide`
     rather than `grant.allows` for the same reason one layer up: `decide` is the dispatch
     path's own decision point, so a verb this names is a verb `query` would admit.
+
+    The SYSTEM-level grant check runs first and separately, because `decide` is per-verb and
+    reaching it already costs the adapter import this ordering exists to withhold.
 
     Nothing is persisted. This writes no queries-table row, touches no circuit breaker and no
     repeat guard — it is a read of our own adapter signatures, not a measurement of a system
@@ -805,25 +857,32 @@ def _tool_list_verbs(registry: Any, system: str) -> str:
     it carries no `wrap_fresh` untrusted frame the way a payload does.
     """
     shown = _echoed_system(system)
+    # GRANT FIRST, before anything resolves an adapter — `decide`'s own ordering (§7 R11).
+    reachable = _granted_systems(registry)
+    if system not in reachable:
+        roster = f" The systems your grant reaches: {', '.join(reachable)}." if reachable else ""
+        return _LIST_VERBS_UNREACHABLE.format(system=shown, roster=roster)
+
     declared, degradation = _list_verbs_declared(registry, system, shown)
     if degradation is not None:
         return degradation
 
     lines: list[str] = []
     any_unenforced = False
-    for verb in sorted(declared):
-        decision, failure = _list_verbs_decision(registry, system, verb, shown)
+    # `key=str`, because the sort must not be the branch that raises: a broken adapter's
+    # `VERBS` may mix key types (`{"a": …, 7: …}`), and a bare `sorted` over that is the
+    # TypeError that ends the lead's turn before any degradation can be composed. A non-string
+    # key survives the sort and is then withheld by the grant filter below, where a name no
+    # grant can name belongs.
+    for verb in sorted(declared, key=str):
+        rendered, failure = _list_verbs_line(registry, system, verb, shown)
         if failure is not None:
             return failure
-        if decision is None:
+        if rendered is None:
             continue
-        # `model_facing_params`, not `declared_params`: a `wrapper_only` param is refused by
-        # `validate_params`, so publishing it would advertise a binding that cannot be made.
-        params = model_facing_params(decision.fn)
-        hints = _resolved_hints(decision.fn)
-        any_unenforced = any_unenforced or any(name not in hints for name in params)
-        rendered = ", ".join(_rendered_param(n, p, hints) for n, p in params.items())
-        lines.append(f'query(system="{system}", verb="{verb}", params={{{rendered}}})')
+        line, unenforced = rendered
+        any_unenforced = any_unenforced or unenforced
+        lines.append(line)
 
     if not lines:
         return _LIST_VERBS_NONE_GRANTED.format(system=shown)
@@ -849,7 +908,11 @@ def register_list_verbs_tool(agent, registry) -> None:
         is the system you were dispatched to (the Dispatch block names it); call it again for
         another system if this lead crosses one. It runs nothing against the system of record
         and is not recorded as a query."""
-        return _tool_list_verbs(registry, system)
+        # OFF THE EVENT LOOP, for the same reason the `query` tool's own dispatch is: this
+        # reads no system of record, but it does import the adapter MODULE on first use and
+        # re-read/re-parse its source per withheld verb (`declared_verb_names`) — synchronous
+        # filesystem work that would otherwise stall every sibling lead's turn in the process.
+        return await asyncio.to_thread(_tool_list_verbs, registry, system)
 
 
 def register_query_tool(agent, registry) -> None:
@@ -859,9 +922,10 @@ def register_query_tool(agent, registry) -> None:
         ctx: RunContext[Any], system: str, verb: str,
         params: dict[str, Any], query_id: str | None = None,
     ) -> Any:
-        """Run one data-source query. `system` and `verb` name a declared verb from the systems
-        catalog in your dispatch prompt; `params` binds that verb's declared params by NAME (a
-        verb declares exactly what it takes — there are no flags, no shell, and no `--help`).
+        """Run one data-source query. `system` and `verb` name a declared verb — `list_verbs`
+        answers which verbs this role holds on a system and what each one binds; `params` binds
+        that verb's declared params by NAME (a verb declares exactly what it takes — there are
+        no flags, no shell, and no `--help`).
         `query_id` binds this call to a catalog template id (`{system}.{template}`), or a fresh
         `{system}.{kebab-name}` you coin for a query no template covers; omit it and it derives
         as `{system}.{verb}`. The payload is captured to the queries table and persisted whole on

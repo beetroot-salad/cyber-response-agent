@@ -76,12 +76,31 @@ def verb(
     reserved = frozenset(wrapper_only)
 
     def decorate(fn: Verb) -> Verb:
-        undeclared = sorted(reserved - set(declared_params(fn)))
+        declared = declared_params(fn)
+        undeclared = sorted(reserved - set(declared))
         if undeclared:
             raise ValueError(
                 f"@verb(wrapper_only=…) on {getattr(fn, '__name__', fn)!r} reserves "
                 f"{undeclared}, which the signature does not declare as keyword-only param(s) "
                 f"— a reserved name that matches nothing is silently no reservation at all"
+            )
+        # AND it must carry a DEFAULT, checked here for the same reason the two above are:
+        # the failure is silent and lands at the wrong layer. `validate_params` computes its
+        # required set from `model_facing_params`, which a reserved param is by definition not
+        # in — so a default-less one is never reported missing, and a model call that omits it
+        # (the only call it can make) reaches `fn(vctx, **params)` and raises TypeError inside
+        # the query tool: an infra-class row and a circuit-breaker contribution for what is
+        # really a declaration defect.
+        undefaulted = sorted(
+            n for n in reserved if declared[n].default is inspect.Parameter.empty
+        )
+        if undefaulted:
+            raise ValueError(
+                f"@verb(wrapper_only=…) on {getattr(fn, '__name__', fn)!r} reserves "
+                f"{undefaulted}, which the signature declares WITHOUT a default — a reserved "
+                f"param is dropped from the required set the boundary checks, so no model call "
+                f"can ever supply it and every one of them would fault inside the verb body. "
+                f"Give it the default the wrapper overrides"
             )
         setattr(fn, _ENGINE_ATTR, engine)
         setattr(fn, _BODY_PARAM_ATTR, body_param)

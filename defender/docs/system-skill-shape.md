@@ -9,9 +9,14 @@ two surfaces by audience, across two files:
   *can* and *cannot* answer in this deployment, and how to read its
   output. Independent of how queries are dispatched.
 - **Execution** — `execution.md`, a sibling file read **only** by the
-  gather subagent when it dispatches a query. The `query` tool's verb
-  surface, params, connectivity, exit codes, dispatch-time adapter quirks.
-  `SKILL.md` keeps a one-line `## Execution` pointer to it.
+  gather subagent when it dispatches a query. Connectivity, exit codes,
+  query syntax, and dispatch-time adapter quirks — plus the VALUE
+  constraints a signature cannot state (an enum a param accepts, a clamp,
+  a required timestamp format). It does **not** carry the verb roster or
+  each verb's params: those come from the `list_verbs` tool, derived at
+  call time from the live signatures, so hand-authored copies here are
+  drift waiting to happen (#900). `SKILL.md` keeps a one-line
+  `## Execution` pointer to it.
 
 The two files exist so the orchestrator — which loads `SKILL.md` to
 **route** to a system but never queries it — physically cannot ingest

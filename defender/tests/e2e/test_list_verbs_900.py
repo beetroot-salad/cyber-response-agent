@@ -1,7 +1,7 @@
 """Executable spec for #900 — `list_verbs`, gather's verb/param discovery tool.
 
 The only complete, accurate statement of a verb's param surface a gather lead reliably meets
-today is a REJECTION: `validate_params` (`runtime/verbs.py:124`) names the declared set from
+today is a REJECTION: `validate_params` (`runtime/verbs.py:177`) names the declared set from
 inside `_screen`, one failed call after the model guessed. Every published surface is
 hand-authored prose (`skills/*/execution.md`'s `## Verbs` blocks), the pointer in
 `skills/gather/SKILL.md:104` names a catalog that carries no params at all, and the generated
@@ -28,7 +28,7 @@ What each test pins (the obligation ids are #900's):
       neither see nor bind it, because the pin only NARROWS and would silently drop the open
       siblings a lead is dispatched to correlate.
   O3  no over-promising on types — `_resolved_hints` SWALLOWS an unresolvable annotation
-      (`verbs.py:94-98`) and `validate_params` then accepts ANY value for that param, so a
+      (`verbs.py:147-151`) and `validate_params` then accepts ANY value for that param, so a
       param whose annotation does not resolve must be published as type-UNENFORCED. No shipped
       adapter triggers this (0 of 44 declared params over 28 granted verbs), so the case is
       driven by a SYNTHETIC verb through the registry injection seam.
@@ -131,7 +131,7 @@ LEAD = "l-001"
 #: new system in `GATHER_PAIRS` is covered by this suite the day it lands.
 _GRANT_SYSTEMS = tuple(sorted(GATHER_DEF.verb_grant.systems))
 
-#: Verbs the adapters DECLARE and gather's grant WITHHOLDS (`driver.py:366-368` names the first
+#: Verbs the adapters DECLARE and gather's grant WITHHOLDS (`driver.py:375-377` names the first
 #: two outright; the three `ticket` ones are the judge's closed-ticket surface). Each is checked
 #: to be really declared before it is asserted absent, so the test cannot pass by the verb
 #: having been deleted.

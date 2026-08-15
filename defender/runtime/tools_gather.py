@@ -276,8 +276,10 @@ def _gather_prompt(
             "Dispatch at the end of this message; confirm it here. These descriptions are "
             "usually enough to pick a template or name a measurement — Read the target's full "
             f"`{deps.defender_dir}/skills/{request.system}/SKILL.md` ONLY on demand, when you "
-            "need field vocab the descriptor lacks; not on every dispatch. Verbs and the "
-            "params each one binds come from `list_verbs`, not from either file. "
+            "need field vocab the descriptor lacks; not on every dispatch. Which verbs you may "
+            "run and what params each one binds come from `list_verbs`, not from either file — "
+            "but the VALUES a param accepts (an enum, a clamp, a timestamp format) are still "
+            "the execution surface's to state. "
             f"{_execution_surface(deps.defender_dir, request.system)}\n\n"
             f"{catalog}\n"
         )
