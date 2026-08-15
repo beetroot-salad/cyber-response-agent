@@ -35,6 +35,7 @@ Verb = Callable[..., Any]
 _ENGINE_ATTR = "__verb_engine__"
 _BODY_PARAM_ATTR = "__verb_body_param__"
 _VERB_CLASS_ATTR = "__verb_class__"
+_WRAPPER_ONLY_ATTR = "__verb_wrapper_only__"
 
 _ENGINE_DECL: dict[tuple[str, str], tuple[str, str]] = {
     ("elastic", "esql"): ("esql", "query"),          # lint-shippable: ok — real queries-table `system` value
@@ -45,12 +46,66 @@ _ENGINE_DECL: dict[tuple[str, str], tuple[str, str]] = {
 
 def verb(
     *, engine: str = "none", body_param: str | None = None, verb_class: str = "r",
+    wrapper_only: tuple[str, ...] = (),
 ) -> Callable[[Verb], Verb]:
+    """`wrapper_only` names params a first-party WRAPPER binds and no model may (#900).
+
+    The case it exists for is `ticket`'s `require_closed`: the benign judge's closed-ticket
+    tool hard-codes it on the wire (`closed_ticket_tool.py:490,532`) and deliberately keeps it
+    off its own model-facing schema, while gather — which shares the verb — has no business
+    setting it at all. It only ever NARROWS (it pins `status=closed`), so this is not a
+    privilege boundary; it is a correctness one. A gather lead that bound it would silently
+    drop the open and in-progress siblings it was dispatched to correlate, and could then
+    report "no open work touching this host" from a read it had quietly narrowed itself.
+
+    A marked param is refused by `validate_params` and omitted from `model_facing_params`, so
+    the surface a model is shown and the surface the boundary accepts stay the same set. The
+    wrapper is unaffected: it calls `fn(ctx, **params)` directly and never crosses this check.
+    """
+    # CHECKED AT DECORATION, because both ways of getting it wrong are SILENT and both undo
+    # the one property this feature buys. A bare string iterates into its characters
+    # (`frozenset("require_closed")` reserves 13 letters and no param), and a misspelt name
+    # reserves nothing at all — after either, `list_verbs` publishes the param and
+    # `validate_params` accepts it, which is exactly the publication/enforcement disagreement
+    # `model_facing_params` exists to make impossible.
+    if isinstance(wrapper_only, str):
+        raise TypeError(
+            f"@verb(wrapper_only={wrapper_only!r}) is a bare string — it would iterate into "
+            "characters and reserve no param. Pass a tuple: (\"<param>\",)"
+        )
+    reserved = frozenset(wrapper_only)
 
     def decorate(fn: Verb) -> Verb:
+        declared = declared_params(fn)
+        undeclared = sorted(reserved - set(declared))
+        if undeclared:
+            raise ValueError(
+                f"@verb(wrapper_only=…) on {getattr(fn, '__name__', fn)!r} reserves "
+                f"{undeclared}, which the signature does not declare as keyword-only param(s) "
+                f"— a reserved name that matches nothing is silently no reservation at all"
+            )
+        # AND it must carry a DEFAULT, checked here for the same reason the two above are:
+        # the failure is silent and lands at the wrong layer. `validate_params` computes its
+        # required set from `model_facing_params`, which a reserved param is by definition not
+        # in — so a default-less one is never reported missing, and a model call that omits it
+        # (the only call it can make) reaches `fn(vctx, **params)` and raises TypeError inside
+        # the query tool: an infra-class row and a circuit-breaker contribution for what is
+        # really a declaration defect.
+        undefaulted = sorted(
+            n for n in reserved if declared[n].default is inspect.Parameter.empty
+        )
+        if undefaulted:
+            raise ValueError(
+                f"@verb(wrapper_only=…) on {getattr(fn, '__name__', fn)!r} reserves "
+                f"{undefaulted}, which the signature declares WITHOUT a default — a reserved "
+                f"param is dropped from the required set the boundary checks, so no model call "
+                f"can ever supply it and every one of them would fault inside the verb body. "
+                f"Give it the default the wrapper overrides"
+            )
         setattr(fn, _ENGINE_ATTR, engine)
         setattr(fn, _BODY_PARAM_ATTR, body_param)
         setattr(fn, _VERB_CLASS_ATTR, verb_class)
+        setattr(fn, _WRAPPER_ONLY_ATTR, reserved)
         return fn
 
     return decorate
@@ -88,6 +143,23 @@ def declared_params(fn: Verb) -> dict[str, inspect.Parameter]:
     }
 
 
+def wrapper_only_params(fn: Verb) -> frozenset[str]:
+    """The params `@verb(wrapper_only=…)` reserves to a first-party wrapper."""
+    return getattr(fn, _WRAPPER_ONLY_ATTR, frozenset())
+
+
+def model_facing_params(fn: Verb) -> dict[str, inspect.Parameter]:
+    """The declared params a MODEL may bind — `declared_params` minus the wrapper-only set.
+
+    THE surface for anything model-facing: what `validate_params` accepts and what
+    `list_verbs` publishes are both this, so the two cannot disagree. `declared_params` stays
+    the raw signature read, which is what a binding call and the scaffold's placeholder
+    invariant want.
+    """
+    hidden = wrapper_only_params(fn)
+    return {n: p for n, p in declared_params(fn).items() if n not in hidden}
+
+
 _NONE_TYPE = type(None)
 
 
@@ -122,7 +194,16 @@ def _ann_name(ann: Any) -> str:
 
 
 def validate_params(fn: Verb, params: Mapping[str, Any]) -> str | None:
-    declared = declared_params(fn)
+    declared = model_facing_params(fn)
+    # BEFORE the unknown check, which would otherwise absorb these: a wrapper-only param is
+    # declared on the signature, so "unknown param" would be a lie about why it was refused
+    # and would send the model looking for a typo it did not make.
+    reserved = sorted(set(params) & wrapper_only_params(fn))
+    if reserved:
+        return (
+            f"param(s) {reserved} are set by the first-party tool that owns this read, never "
+            f"by you — this verb's caller-settable params are {sorted(declared)}."
+        )
     unknown = sorted(set(params) - set(declared))
     if unknown:
         return (
@@ -345,7 +426,9 @@ __all__ = [
     "declared_verb_names",
     "engine_for",
     "engine_of",
+    "model_facing_params",
     "validate_params",
     "verb",
     "verb_class_of",
+    "wrapper_only_params",
 ]

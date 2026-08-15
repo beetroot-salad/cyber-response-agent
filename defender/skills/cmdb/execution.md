@@ -9,19 +9,13 @@ surface.
 Reached with the **`query` tool** — there is no command, no shim, and no `--help`.
 Params bind **by name**, with literal JSON types.
 
-```
-query(system="cmdb", verb="health-check", params={})
-query(system="cmdb", verb="get-host",   params={"host": "<name>"})
-query(system="cmdb", verb="list-hosts", params={"role": "X", "criticality": "X", "owner": "X"})
-```
-
-`get-host` requires `host`; every `list-hosts` param is an optional filter.
-cmdb declares a role-listing verb too, but gather's verb_grant does not name
-it — not part of gather's catalog.
-
-**Do not Read `cmdb_adapter.py` source to discover params.** This file plus the systems
-catalog in your dispatch prompt is the authoritative surface, and a call with an
-unknown/missing/mistyped param is rejected with the declared list anyway.
+**Call `list_verbs(system="cmdb")` for the verbs you may run and the params each one
+binds**, with types, defaults and which are required. It reads the adapter's live
+signatures and is filtered to your grant, so it is the same surface the `query` tool
+enforces — a param it names will bind, one it omits is refused. Don't Read
+`cmdb_adapter.py` to discover params either. (cmdb declares a role-listing verb that
+gather's grant withholds; `list_verbs` will not show it, which is correct — it is not
+part of gather's catalog.)
 
 Each verb returns the upstream JSON response unchanged — a flat object
 for `get-host`, a list/object for `list-hosts`. That

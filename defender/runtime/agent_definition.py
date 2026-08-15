@@ -39,6 +39,11 @@ class ToolSet:
     lesson_read: bool = False
     template_search: bool = False
     query: bool = False
+    #: The verb-surface read lane: `list_verbs`, the grant-filtered discovery tool that
+    #: answers "what does this system declare, and what params does each verb bind" from the
+    #: live signatures (#900). Verb-bearing like `query` — it reads the role's grant to filter
+    #: — so it counts toward the R7 agreement below.
+    list_verbs: bool = False
     closed_tickets: bool = False
     close: bool = False
 
@@ -163,12 +168,17 @@ def effective_tools_for(defn: AgentDefinition) -> ToolSet:
 def _require_verb_grant_agreement(defn: AgentDefinition, tools: ToolSet) -> None:
     """§7 R7: a role's verb_grant and the bit that reaches a verb-bearing tool agree, in
     EITHER direction. A grant naming verbs while every verb-bearing bit (`query`,
-    `closed_tickets`) is off is a stale grant behind a switched-off capability; a verb-bearing
-    bit on with an empty grant is a capability with nothing behind it. Checked against `tools`
-    — the EFFECTIVE ToolSet a build actually has, not only the one `defn` declares — because a
-    stage can switch its capability on with a runtime `replace()` after `bind` compiled its
-    policy from the static definition (g16)."""
-    has_verb_tool = bool(tools.query or tools.closed_tickets)
+    `list_verbs`, `closed_tickets`) is off is a stale grant behind a switched-off capability; a
+    verb-bearing bit on with an empty grant is a capability with nothing behind it. Checked
+    against `tools` — the EFFECTIVE ToolSet a build actually has, not only the one `defn`
+    declares — because a stage can switch its capability on with a runtime `replace()` after
+    `bind` compiled its policy from the static definition (g16).
+
+    `list_verbs` joins the disjunction rather than sitting outside it (#900): it does not
+    DISPATCH a verb, but it reads the grant to decide what to name, so a role holding it over
+    an empty grant is a discovery tool that can only ever answer "nothing" — the same
+    capability-with-nothing-behind-it this refuses for `query`."""
+    has_verb_tool = bool(tools.query or tools.list_verbs or tools.closed_tickets)
     has_grant = bool(defn.verb_grant.entries)
     if has_verb_tool != has_grant:
         raise GrantError(

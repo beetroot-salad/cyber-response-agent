@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import shlex
 import sys
+from collections.abc import Mapping
 from typing import Any
 
 from pydantic import ValidationError
@@ -54,7 +56,16 @@ from .ticket_screen import (
     screen_list,
     self_case_key,
 )
-from .verbs import DENIED, GRANTED, VerbContext, validate_params
+from .verbs import (
+    DENIED,
+    GRANTED,
+    VerbContext,
+    _ann_name,
+    _resolved_hints,
+    _SYSTEM_RE,
+    model_facing_params,
+    validate_params,
+)
 
 TOOL_NAME = "query"
 
@@ -572,6 +583,338 @@ class QueryCapture(AbstractCapability[Any]):
 
 
 
+#: What a param renders as when its declared annotation could not be resolved. NOT cosmetic:
+#: `_resolved_hints` swallows an unresolvable annotation and returns `{}` (verbs.py:147-151),
+#: after which `validate_params` type-checks NOTHING and accepts any value. A surface that
+#: printed the annotation there would promise a check the boundary does not make — the one way
+#: this tool could lie about the thing it exists to report (#900 O3).
+#:
+#: The blast radius is the whole VERB, not the one bad param: `typing.get_type_hints` resolves
+#: a signature as a unit and raises on the first name it cannot see, so `_resolved_hints`
+#: returns `{}` for ALL of them. A verb with one unresolvable annotation therefore has every
+#: param unenforced, and every one of them must say so — which is why this marker is applied
+#: from the absence of a hint rather than from the presence of a bad one.
+UNENFORCED_TYPE = "type unenforced"
+
+#: The GRANT-FIRST answer, and the one branch that deliberately refuses to distinguish two
+#: conditions (#900 review R2). `VerbRegistry.decide` decides "from the grant ALONE first — no
+#: adapter is resolved (no import) unless the grant admits the call" (§7 R11); a discovery tool
+#: that resolved first would both execute an ungranted adapter's import-time code and turn its
+#: own four degradations into an oracle over the on-disk roster — "no such adapter" vs "present
+#: but broken" vs "present and healthy", read across the grant boundary. So a system the grant
+#: does not reach is answered here, before any import, and absent is spelled exactly like
+#: withheld.
+#:
+#: Naming the reachable systems costs nothing: the dispatch prompt's descriptor index already
+#: lists every system in this role's grant, so this discloses nothing the lead was not handed
+#: on turn one — and it is a BETTER correction than the "no adapter by that name" it replaces
+#: for the overwhelmingly common cause, a mistyped name.
+_LIST_VERBS_UNREACHABLE = (
+    "`{system}` — your grant reaches no verb on any system by that name, so there is nothing "
+    "here you may run and no surface to show you.{roster} Measure this lead against a system "
+    "you do hold, or say so in your summary rather than reporting a measurement you could not "
+    "take."
+)
+
+_LIST_VERBS_UNKNOWN_SYSTEM = (
+    "`{system}` — no adapter is registered under that name, so no verb surface can be derived "
+    "for it. The Dispatch block at the end of your prompt names the system you were dispatched "
+    "to; confirm it there and call this again with that name."
+)
+
+#: Reached only for a name that already passed `_adapter_path`'s `_SYSTEM_RE` match AND its
+#: containment check under the adapters dir — an unmatched name raises `KeyError` into the
+#: branch above — so interpolating it into a path here cannot mint an arbitrary model-named
+#: one (the #855 F-06 concern, which is about a model string reaching a corpus WRITE).
+_LIST_VERBS_UNLOADABLE = (
+    "`{system}` — UNAVAILABLE: its adapter could not be loaded ({err}). No verb surface can be "
+    "derived for it right now. Its documented surface is "
+    "`defender/skills/{system}/execution.md`; report the failure in your summary rather than "
+    "guessing a verb or a param name."
+)
+
+#: A THIRD failure, distinct from both of the above: the adapter loaded and the grant is not
+#: the question — the surface itself could not be derived (a grant/declaration class
+#: disagreement raised out of `decide`, say). Saying "could not be loaded" there would be
+#: false, and saying "your grant admits none" would send the lead to re-dispatch over a
+#: defender-side fault it cannot route around.
+_LIST_VERBS_UNDERIVABLE = (
+    "`{system}` — UNAVAILABLE: its verb surface could not be derived ({err}). That is a "
+    "defender-side fault, not something your call can fix. Its documented surface is "
+    "`defender/skills/{system}/execution.md`; report the failure in your summary rather than "
+    "guessing a verb or a param name."
+)
+
+#: A system whose registry answer carries NO verb at all — a missing or malformed `VERBS`
+#: table reads as `{}` through `ModuleVerbRegistry.verbs`, which is a broken adapter and not a
+#: withheld grant. It must not fall into `_LIST_VERBS_NONE_GRANTED` below, whose whole point is
+#: that the two emptinesses call for opposite responses.
+_LIST_VERBS_NO_VERBS = (
+    "`{system}` — UNAVAILABLE: its adapter declares no verbs at all, so no verb surface can be "
+    "derived for it. Its documented surface is `defender/skills/{system}/execution.md`; report "
+    "the failure in your summary rather than guessing a verb or a param name."
+)
+
+#: The OTHER emptiness, and it is not the one above — the same split `_INDEX_NONE_GRANTED`
+#: draws for the template index. A system that will not load and a system whose every verb
+#: this role is refused both render "nothing to show", and they call for opposite responses.
+_LIST_VERBS_NONE_GRANTED = (
+    "`{system}` — its adapter declares verbs, but your grant admits none of them. This is not "
+    "an empty system and not a read failure: there is nothing here you may run. Measure this "
+    "lead against a system you do hold, or say so in your summary rather than reporting a "
+    "measurement you could not take."
+)
+
+_LIST_VERBS_HEADER = (
+    "`{system}` — the {count} verb(s) your grant admits, read from the adapter's live "
+    "signatures. Copy a line and bind the values in place of each `<…>`:\n"
+)
+
+_LIST_VERBS_LEGEND = (
+    "\nParams bind **by name**; there are no flags and no positional args. Types are literal "
+    "JSON: a number is a number (`20`, never `\"20\"`), a boolean is `true`/`false` (never "
+    "`\"false\"`, which is truthy and would have meant the opposite). A param whose descriptor "
+    "carries a `default` is OPTIONAL — drop it to take that default; every other param is "
+    "REQUIRED.\n"
+    "\nAdd `query_id=\"{system}.<id>\"` to the call — a catalog template's id when you reused "
+    "one, or a coined `{system}.<descriptive-kebab>` when none fit.\n"
+)
+
+#: Names the marker as a PREFIX, not as the whole descriptor: an unenforced param that also
+#: declares a default renders `<type unenforced, default …>`, so a note quoting `<{marker}>`
+#: whole would name a string that appears nowhere in the answer it is annotating.
+_LIST_VERBS_UNENFORCED_NOTE = (
+    "\nA descriptor opening `<{marker}` marks a param whose declared annotation could not be "
+    "resolved, so the boundary does NOT type-check it — a wrong-typed value there reaches the "
+    "adapter instead of being refused. Bind it as that verb's `execution.md` documents.\n"
+)
+
+
+def _json_default(value: Any) -> str:
+    """A param default in the JSON spelling the legend demands, never `repr`'s python one.
+
+    `repr` renders `None`/`True`/`'desc'` where the call the model must emit needs
+    `null`/`true`/`"desc"` — and a lead that copies the descriptor verbatim then sends invalid
+    JSON, or (for a quoted `"false"`) the exact truthiness inversion the legend warns about.
+    This tool exists to stop param guesswork; publishing a default in a syntax the call cannot
+    carry reintroduces it at the last step.
+    """
+    try:
+        return json.dumps(value)
+    except (TypeError, ValueError):
+        return json.dumps(repr(value))
+
+
+def _rendered_param(param: inspect.Parameter, hints: Mapping[str, Any]) -> str:
+    """One declared param as a `"name": <descriptor>` entry of a `params={…}` body.
+
+    Keyed on the param, never on `hints`: `_resolved_hints` also returns `ctx` and `return`,
+    neither of which is a param the model may bind.
+    """
+    inner = _ann_name(hints[param.name]) if param.name in hints else UNENFORCED_TYPE
+    if param.default is not inspect.Parameter.empty:
+        inner = f"{inner}, default {_json_default(param.default)}"
+    return f'"{param.name}": <{inner}>'
+
+
+#: The longest model-named system this tool will echo back verbatim. The same bound as
+#: `tools_gather._SYSTEM_MAX_LEN` and for the same underlying fact — the name is unbounded
+#: model text — but NOT for the same downstream reason, so the two are stated separately
+#: rather than shared: that one bounds a string #835 routes into a provider request field
+#: (`openai_prompt_cache_key`), this one bounds a string that lands in a markdown answer.
+_ECHO_SYSTEM_MAX_LEN = 64
+
+
+def _echoed_system(system: str) -> str:
+    """The `system` string a degradation message may interpolate.
+
+    A well-formed name goes back verbatim — that is what makes the correction actionable. Any
+    other string is a model-authored blob that would otherwise land unescaped inside a
+    backticked span of a markdown answer, where a newline or a `#` forges document structure
+    in the lead's own context (`_QID_FORBIDDEN`'s render half, and the reason
+    `_undeclared_target` refuses to echo one at all). `repr` on a bounded slice keeps the
+    string legible without letting it carry structure.
+    """
+    if _SYSTEM_RE.match(system) and len(system) <= _ECHO_SYSTEM_MAX_LEN:
+        return system
+    return repr(system[:_ECHO_SYSTEM_MAX_LEN])
+
+
+def _registry_declares(registry: Any, system: str) -> bool:
+    """Does the registry list `system` among the systems it knows? `False` when it cannot say.
+
+    Fails toward "unknown", which is the answer the caller already gave before this split
+    existed — a registry that cannot list its systems must not be read as evidence that a
+    system exists.
+    """
+    try:
+        return system in registry.systems()
+    except CONTROL_FLOW_EXCEPTIONS:
+        raise
+    except (BudgetKill, KeyboardInterrupt, GeneratorExit, asyncio.CancelledError):
+        raise
+    except BaseException:  # noqa: BLE001 — a registry that cannot list declares nothing
+        return False
+
+
+def _granted_systems(registry: Any) -> tuple[str, ...]:
+    """The systems this role's grant reaches, or `()` when the registry cannot say."""
+    try:
+        return tuple(sorted(registry.grant.systems))
+    except CONTROL_FLOW_EXCEPTIONS:
+        raise
+    except (BudgetKill, KeyboardInterrupt, GeneratorExit, asyncio.CancelledError):
+        raise
+    except BaseException:  # noqa: BLE001 — a registry that cannot name its grant reaches nothing
+        return ()
+
+
+def _list_verbs_declared(
+    registry: Any, system: str, shown: str,
+) -> tuple[Mapping[str, Any], str | None]:
+    """`(declared_verbs, degradation)` — the registry's own table for `system`, or the message
+    that must be answered instead. Never both, and never an exception out of the tool."""
+    try:
+        declared = registry.verbs(system)
+    except KeyError:
+        # A bare `KeyError` is `ModuleVerbRegistry.verbs`' "no adapter under that name" — but it
+        # is ALSO whatever a broken adapter raises while importing (a module-scope
+        # `os.environ[...]`, a missing dict key). Answering the second with "confirm the name
+        # and call again" sends the lead to re-ask a question that will keep failing, so the
+        # registry's own system list decides which of the two this is.
+        if _registry_declares(registry, system):
+            return {}, _LIST_VERBS_UNLOADABLE.format(system=shown, err="KeyError")
+        return {}, _LIST_VERBS_UNKNOWN_SYSTEM.format(system=shown)
+    except CONTROL_FLOW_EXCEPTIONS:
+        raise
+    except (BudgetKill, KeyboardInterrupt, GeneratorExit, asyncio.CancelledError):
+        raise
+    except BaseException as e:  # noqa: BLE001 — an adapter that will not import is a degradation
+        return {}, _LIST_VERBS_UNLOADABLE.format(system=shown, err=f"{type(e).__name__}: {e}")
+    if not declared:
+        # NOT the grant's emptiness: `ModuleVerbRegistry.verbs` answers `{}` for a module whose
+        # `VERBS` is absent or is not a Mapping, which is a broken adapter wearing the shape of
+        # a fully-withheld one.
+        return {}, _LIST_VERBS_NO_VERBS.format(system=shown)
+    return declared, None
+
+
+def _list_verbs_line(
+    registry: Any, system: str, verb: Any, shown: str,
+) -> tuple[tuple[str, bool] | None, str | None]:
+    """`((rendered_call, any_param_unenforced), degradation)` for one verb — `(None, None)`
+    when the grant withholds it, which is a skip and not a failure.
+
+    GUARDED END TO END, exactly as `QueryCapture._decide_guarded` guards the dispatch path's
+    own call, and over the RENDER as much as over the decision: `decide` raises `GrantError` on
+    a grant/declaration class disagreement, and the render raises just as readily on a
+    malformed `VERBS` table — `ModuleVerbRegistry.verbs` checks only that the table is a
+    Mapping, so a non-callable body reaches `inspect.signature` inside `model_facing_params`
+    and comes back as `TypeError`. An exception out of a discovery tool ends the lead's turn,
+    the one thing O4 forbids of every branch here; deciding and rendering are one guarded unit
+    because a broken adapter can fail either half and the lead reads the same answer for both.
+    """
+    try:
+        decision = registry.decide(system, verb)
+        if decision.outcome != GRANTED or decision.fn is None:
+            return None, None
+        # `model_facing_params`, not `declared_params`: a `wrapper_only` param is refused by
+        # `validate_params`, so publishing it would advertise a binding that cannot be made.
+        params = model_facing_params(decision.fn)
+        hints = _resolved_hints(decision.fn)
+        rendered = ", ".join(_rendered_param(p, hints) for p in params.values())
+        # `shown`, not the raw `system` (`_echoed_system`): every other span of this answer
+        # goes through that bound, and the one line the lead is told to COPY is the last place
+        # an unbounded model-authored name should land unescaped.
+        line = f'query(system="{shown}", verb="{verb}", params={{{rendered}}})'
+        return (line, any(name not in hints for name in params)), None
+    except CONTROL_FLOW_EXCEPTIONS:
+        raise
+    except (BudgetKill, KeyboardInterrupt, GeneratorExit, asyncio.CancelledError):
+        raise
+    except BaseException as e:  # noqa: BLE001 — a surface that cannot be derived degrades loud
+        return None, _LIST_VERBS_UNDERIVABLE.format(
+            system=shown, err=f"{shown}.{verb}: {type(e).__name__}: {e}",
+        )
+
+
+def _tool_list_verbs(registry: Any, system: str) -> str:
+    """`system`'s granted verbs and their declared params, derived at call time.
+
+    The two readers are `model_facing_params` and `_resolved_hints` — the SAME pair
+    `validate_params` enforces on (verbs.py:177-213) — so what this publishes and what the
+    boundary accepts cannot drift apart. The grant filter goes through `registry.decide`
+    rather than `grant.allows` for the same reason one layer up: `decide` is the dispatch
+    path's own decision point, so a verb this names is a verb `query` would admit.
+
+    The SYSTEM-level grant check runs first and separately, because `decide` is per-verb and
+    reaching it already costs the adapter import this ordering exists to withhold.
+
+    Nothing is persisted. This writes no queries-table row, touches no circuit breaker and no
+    repeat guard — it is a read of our own adapter signatures, not a measurement of a system
+    of record, and the offline loop's `.queries` must keep meaning "what the defender ran".
+    Its output is trusted for the same reason: the text is derived from first-party source, so
+    it carries no `wrap_fresh` untrusted frame the way a payload does.
+    """
+    shown = _echoed_system(system)
+    # GRANT FIRST, before anything resolves an adapter — `decide`'s own ordering (§7 R11).
+    reachable = _granted_systems(registry)
+    if system not in reachable:
+        roster = f" The systems your grant reaches: {', '.join(reachable)}." if reachable else ""
+        return _LIST_VERBS_UNREACHABLE.format(system=shown, roster=roster)
+
+    declared, degradation = _list_verbs_declared(registry, system, shown)
+    if degradation is not None:
+        return degradation
+
+    lines: list[str] = []
+    any_unenforced = False
+    # `key=str`, because the sort must not be the branch that raises: a broken adapter's
+    # `VERBS` may mix key types (`{"a": …, 7: …}`), and a bare `sorted` over that is the
+    # TypeError that ends the lead's turn before any degradation can be composed. A non-string
+    # key survives the sort and is then withheld by the grant filter below, where a name no
+    # grant can name belongs.
+    for verb in sorted(declared, key=str):
+        rendered, failure = _list_verbs_line(registry, system, verb, shown)
+        if failure is not None:
+            return failure
+        if rendered is None:
+            continue
+        line, unenforced = rendered
+        any_unenforced = any_unenforced or unenforced
+        lines.append(line)
+
+    if not lines:
+        return _LIST_VERBS_NONE_GRANTED.format(system=shown)
+
+    out = (
+        _LIST_VERBS_HEADER.format(system=shown, count=len(lines))
+        + "\n" + "\n".join(f"    {line}" for line in lines) + "\n"
+        + _LIST_VERBS_LEGEND.format(system=shown)
+    )
+    if any_unenforced:
+        out += _LIST_VERBS_UNENFORCED_NOTE.format(marker=UNENFORCED_TYPE)
+    return out
+
+
+def register_list_verbs_tool(agent, registry) -> None:
+
+    @agent.tool
+    async def list_verbs(ctx: RunContext[Any], system: str) -> str:
+        """The verbs one system of record declares and the params each one binds — read from
+        the adapter's live signatures, filtered to what your grant admits. Call it before you
+        coin a query no template covers: it is the same surface the `query` tool enforces, so
+        a param it names is a param that will bind and one it omits will be refused. `system`
+        is the system you were dispatched to (the Dispatch block names it); call it again for
+        another system if this lead crosses one. It runs nothing against the system of record
+        and is not recorded as a query."""
+        # OFF THE EVENT LOOP, for the same reason the `query` tool's own dispatch is: this
+        # reads no system of record, but it does import the adapter MODULE on first use and
+        # re-read/re-parse its source per withheld verb (`declared_verb_names`) — synchronous
+        # filesystem work that would otherwise stall every sibling lead's turn in the process.
+        return await asyncio.to_thread(_tool_list_verbs, registry, system)
+
+
 def register_query_tool(agent, registry) -> None:
 
     @agent.tool
@@ -579,9 +922,10 @@ def register_query_tool(agent, registry) -> None:
         ctx: RunContext[Any], system: str, verb: str,
         params: dict[str, Any], query_id: str | None = None,
     ) -> Any:
-        """Run one data-source query. `system` and `verb` name a declared verb from the systems
-        catalog in your dispatch prompt; `params` binds that verb's declared params by NAME (a
-        verb declares exactly what it takes — there are no flags, no shell, and no `--help`).
+        """Run one data-source query. `system` and `verb` name a declared verb — `list_verbs`
+        answers which verbs this role holds on a system and what each one binds; `params` binds
+        that verb's declared params by NAME (a verb declares exactly what it takes — there are
+        no flags, no shell, and no `--help`).
         `query_id` binds this call to a catalog template id (`{system}.{template}`), or a fresh
         `{system}.{kebab-name}` you coin for a query no template covers; omit it and it derives
         as `{system}.{verb}`. The payload is captured to the queries table and persisted whole on
@@ -621,6 +965,8 @@ __all__ = [
     "DEFAULT_FAULT_EXIT",
     "QueryCapture",
     "TOOL_NAME",
+    "UNENFORCED_TYPE",
+    "register_list_verbs_tool",
     "register_query_tool",
     "resolve_query_id",
 ]

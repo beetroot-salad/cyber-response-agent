@@ -349,8 +349,11 @@ def test_closed_ticket_tools_registration_order(tmp_path):
     # `append` sits beside `write` (#810): the two write lanes are adjacent because they are
     # the same kind of grant, and the invariant this pins is unchanged — closed_tickets is
     # LAST, so the deferred tail never migrates into the middle of the fixed order.
+    # `list_verbs` (#900) enters between `query` and closed_tickets: it belongs beside the
+    # verb-bearing tool whose surface it reports, and inserting it there is what keeps the
+    # closed-ticket pair at the tail rather than displacing them.
     assert bits == ["bash", "read", "write", "append", "forward_check", "lesson_read",
-                    "template_search", "query", BIT], (
+                    "template_search", "query", "list_verbs", BIT], (
         f"register_tools' presence-table order is {bits} — the closed_tickets guard must "
         "enter the fixed order at the TAIL, after query"
     )

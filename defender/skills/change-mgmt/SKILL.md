@@ -18,11 +18,11 @@ the defender, the author skill, and the actor-reviewer judge.
 
 ### available_queries
 
-| Subcommand | Measurement |
+| Verb | Measurement |
 |---|---|
-| `active-changes --host <h> --at <iso>` | CRs covering host at the given instant — the discriminating "was this in a CR" lookup |
-| `get-change <id>` | One CR by id |
-| `list-changes [--status approved] [--host h] [--active-at iso]` | Filtered CR list |
+| `active-changes` | CRs covering a host at a given instant — the discriminating "was this in a CR" lookup |
+| `get-change` | One CR by id |
+| `list-changes` | Filtered CR list (by status, host, or active-at instant) |
 
 ### gaps
 
@@ -65,8 +65,8 @@ the defender, the author skill, and the actor-reviewer judge.
   timestamp.
 - **Use for cross-checking a referenced CR id** — `get-change` on
   a CR id named in an alert payload or a ticket comment.
-- **Use to enumerate currently-active CRs** — `list-changes --status
-  in_progress` for what's executing right now; `--status approved`
+- **Use to enumerate currently-active CRs** — `list-changes` on
+  status `in_progress` for what's executing right now, or `approved`
   for what's been signed off but not yet started. Status enum:
   `planned`, `approved`, `in_progress`, `implemented`, `cancelled`.
 

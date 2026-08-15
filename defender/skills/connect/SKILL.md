@@ -152,8 +152,12 @@ everything here grows post-merge.
   rather than an error). A declared gap separates "we didn't ask" from
   "we can't ask."
 - **`execution.md`** — the **Execution surface**, read only by gather at
-  dispatch. For a generated adapter: the verb roster, each verb's declared
-  params, query syntax, and exit codes (including 64 for a param mistake).
+  dispatch. For a generated adapter: query syntax, exit codes (including 64
+  for a param mistake), and the VALUE constraints a signature cannot state
+  (an enum a param accepts, a clamp, a required timestamp format). Do
+  **not** hand-author the verb roster or each verb's params here — gather
+  gets those from the `list_verbs` tool, read off the live signatures, and
+  a prose copy only drifts from them (#900); point at `list_verbs` instead.
   For MCP: the server and tool names (see `mcp.md`). Credential and
   connectivity detail live here, never in `SKILL.md` — the split exists so
   the orchestrator physically can't ingest it.

@@ -26,6 +26,7 @@ from defender.runtime.verb_grant import DENY_ALL  # noqa: E402
 from defender.runtime.verbs import (  # noqa: E402
     ModuleVerbRegistry,
     VerbContext,
+    model_facing_params,
     validate_params,
 )
 from defender.tests.e2e._replay_harness import (  # noqa: E402
@@ -161,12 +162,23 @@ def test_well_typed_params_including_optionals_and_containers_are_admitted(tmp_p
 @pytest.mark.parametrize(("system", "verb", "params", "why"), [
     ("elastic", "query", {"native_query": "FROM logs", "limit": "20"}, "limit"),
     ("identity", "list-users", {"enabled": "false"}, "enabled"),
-    ("ticket", "list-tickets", {"require_closed": "true"}, "require_closed"),
+    # `ticket.list-tickets`' `require_closed` was the third row until #900 reserved it
+    # `@verb(wrapper_only=…)`. It is DROPPED rather than left in place: a reserved param is
+    # refused ahead of the type check, so the row still passed (the refusal names it) while
+    # measuring nothing about types — a green arm that had stopped being an arm. The reserved
+    # refusal has its own oracle in `test_list_verbs_900.py`'s O1.
 ])
 def test_the_real_registry_rejects_a_mistyped_param(system, verb, params, why):
     """The shipped adapters, not a fake: each of these signatures has a non-`str` param a model
-    can plausibly send as a string, and each was admitted before."""
+    can plausibly BIND and plausibly send as a string, and each was admitted before.
+
+    Model-bindable is load-bearing in that sentence — a param the boundary reserves before it
+    ever type-checks cannot exercise this."""
     fn = ModuleVerbRegistry(ADAPTERS_DIR, DENY_ALL).verbs(system)[verb]
+    assert why in model_facing_params(fn), (
+        f"{why} is not a param a model may bind on {system}.{verb} — this row cannot reach the "
+        "type check it exists to measure"
+    )
     reason = validate_params(fn, params)
     assert reason is not None, f"{system}.{verb} admitted a mistyped {why}"
     assert why in reason, f"the rejection does not name the offending param: {reason}"

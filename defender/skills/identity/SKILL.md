@@ -12,9 +12,9 @@ sufficient evidence of authorization; the identity stub's
 `can_access` answer is.
 
 This file is the **visibility surface** — read by the defender, the
-author skill, and the actor-reviewer judge. CLI invocation details
-(subcommand flags, transport, exit codes) live in `execution.md`,
-read only by gather. The defender treats this system as a question
+author skill, and the actor-reviewer judge. Execution details (the
+verb surface, transport, exit codes) live in `execution.md`, read
+only by gather. The defender treats this system as a question
 source; gather decides how to ask.
 
 ## Visibility surface
@@ -75,9 +75,9 @@ path.
 - **Use for scope-checking** an observed login or sudo event — does
   the user actually have a role mapping for that host, or is this
   cross-credential anomaly?
-- **Use for user-enumeration cross-checks** — pair `list-users
-  --role developer` with cmdb's `list-hosts --role dev-ws` to derive
-  expected user-host pairs.
+- **Use for user-enumeration cross-checks** — pair `list-users`
+  filtered to the `developer` role with cmdb's `list-hosts` filtered
+  to `dev-ws` to derive expected user-host pairs.
 
 ### when_not_to_use
 
@@ -92,5 +92,5 @@ path.
 
 ## Execution
 
-CLI invocation, connectivity, config, and exit codes live in
+Verb dispatch, connectivity, config, and exit codes live in
 `execution.md` — read by gather only.

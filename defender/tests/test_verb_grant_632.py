@@ -332,8 +332,12 @@ def test_a_grant_and_a_switched_off_tool_disagree_in_either_direction_at_build(t
     # driving it on a NON-judge role is what closes the other half: a check that exempts the
     # judge by name satisfies the judge-shaped cases above and fails here.
     for defn, grant in (
-        # a grant naming verbs behind a switched-off query capability
-        (replace(GATHER_DEF, tools=replace(GATHER_DEF.tools, query=False)),
+        # a grant naming verbs behind switched-off verb-bearing capabilities. BOTH bits go
+        # off, not just `query`: since #900 gather also holds `list_verbs`, which reads the
+        # grant to decide what it may name and so counts toward the same agreement. Switching
+        # off only one would leave a verb-bearing bit ON and describe an AGREEING pair — the
+        # setup would stop expressing the condition this loop exists to refuse.
+        (replace(GATHER_DEF, tools=replace(GATHER_DEF.tools, query=False, list_verbs=False)),
          grant_of("gather", (("elastic", "query"),))),
         # the capability on, and a grant that reaches none of its verbs
         (GATHER_DEF, DENY_ALL),

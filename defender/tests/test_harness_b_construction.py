@@ -357,7 +357,9 @@ def test_build_gather_agent_is_read_only_and_cannot_self_dispatch(monkeypatch, l
     read-only surface ONLY — no writers, and NO 'gather' dispatch tool (the gather subagent
     must not dispatch itself).
 
-    #611 adds `query` (the typed data-source tool) to that surface and #585 added `template_search`:
+    #611 adds `query` (the typed data-source tool) to that surface, #585 added `template_search`
+    and #900 added `list_verbs` (the grant-filtered verb/param surface, read off the live
+    signatures so the coin branch stops learning a verb's params from a rejection):
     gather's query-template discovery is dead on the
     bash lane (`find` was never there, `grep -r` denies since #581, a glob reaches grep as a
     literal filename, and #575 removes `ls`), so the grep comes back as a gated tool with a
@@ -371,7 +373,9 @@ def test_build_gather_agent_is_read_only_and_cannot_self_dispatch(monkeypatch, l
         agent = driver.build_gather_agent(
             _DEFENDER, logger, "gather:l-001", make_model=fake, verbs=FakeVerbs({}),
         )
-    assert list(agent._function_toolset.tools) == ["bash", "read_file", "template_search", "query"]
+    assert list(agent._function_toolset.tools) == [
+        "bash", "read_file", "template_search", "query", "list_verbs",
+    ]
     assert "gather" not in agent._function_toolset.tools
     assert "write_file" not in agent._function_toolset.tools
 

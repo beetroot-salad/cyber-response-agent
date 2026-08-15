@@ -6,19 +6,14 @@ surface.
 
 ## Verbs
 
-```
-query(system="threat-intel", verb="health-check",    params={})
-query(system="threat-intel", verb="lookup",          params={"value": "<value>"})
-query(system="threat-intel", verb="list-indicators", params={"verdict": "X", "type": "X", "tag": "X"})
-```
-
 Reached with the **`query` tool** — there is no command, no shim, and no `--help`.
-Params bind **by name**, with literal JSON types. `lookup` requires `value`; every
-`list-indicators` param is an optional filter.
+Params bind **by name**, with literal JSON types.
 
-**Do not Read `threat_intel_adapter.py` source to discover params.** This file plus the
-systems catalog in your dispatch prompt is the authoritative surface, and a call
-with an unknown/missing/mistyped param is rejected with the declared list anyway.
+**Call `list_verbs(system="threat-intel")` for the verbs you may run and the params each
+one binds**, with types, defaults and which are required. It reads the adapter's live
+signatures and is filtered to your grant, so it is the same surface the `query` tool
+enforces — a param it names will bind, one it omits is refused. Don't Read
+`threat_intel_adapter.py` to discover params either.
 
 `lookup` emits the upstream JSON payload (`{value, verdict, score, …}`).
 Treat `verdict: unknown` as *absence of signal*, never as refutation.
