@@ -19,7 +19,6 @@ pytest.importorskip("pydantic_ai")
 import toons  # noqa: E402
 
 from defender.tests.e2e._toon872 import (  # noqa: E402
-    SALT,
     agent_run,
     corpus,
     delivered_percent,
@@ -71,7 +70,7 @@ def test_foreign_dict_row_clearing_the_bar_reaches_the_model_as_toon() -> None:
     for bar in (85, 90):
         label, value = _pick(bar, clearing=True)
         out = agent_run(toolset=foreign_toolset(value), env={MAX_PERCENT_ENV: str(bar)})
-        view = framed_content(out.dispatched.text(), salt=SALT)
+        view = framed_content(out.dispatched.text())
         assert view == toons.dumps(value), f"{label} did not reach the model as TOON at bar {bar}"
         assert toons.loads(view) == value
 
@@ -91,7 +90,7 @@ def test_the_bytes_the_model_receives_clear_the_bar_the_gate_measured() -> None:
     fails loudly instead of quietly testing an ordinary passthrough.
     """
     bar = 85
-    overhead = frame_overhead(SALT)
+    overhead = frame_overhead()
     window = [
         (f"{name}/{arm}", value)
         for name, columnar in sorted(corpus().items())
@@ -105,14 +104,14 @@ def test_the_bytes_the_model_receives_clear_the_bar_the_gate_measured() -> None:
     )
     label, value = window[0]
     out = agent_run(toolset=foreign_toolset(value), env={MAX_PERCENT_ENV: str(bar)})
-    assert framed_content(out.dispatched.text(), salt=SALT) == wire_text(value), (
+    assert framed_content(out.dispatched.text()) == wire_text(value), (
         f"{label} was substituted: the gate measured the encoder's bytes, not the delivered ones"
     )
 
     _, clears = _pick(bar, clearing=True)
     assert 100 * (toon_bytes(clears) + overhead) <= bar * (wire_bytes(clears) + overhead)
     control = agent_run(toolset=foreign_toolset(clears), env={MAX_PERCENT_ENV: str(bar)})
-    assert framed_content(control.dispatched.text(), salt=SALT) == toons.dumps(clears), (
+    assert framed_content(control.dispatched.text()) == toons.dumps(clears), (
         "nothing clears the delivered-bytes bar either, so the assertion above is not about "
         "the frame"
     )
@@ -136,7 +135,7 @@ def test_a_fixture_whose_verdict_differs_between_rulers_takes_the_wire_rulers_ve
     which the type admission excludes anyway — unscoped, the demand would pin a false
     universal.
     """
-    overhead = frame_overhead(SALT)
+    overhead = frame_overhead()
 
     def _verdict(value, denominator: int, bar: int) -> bool:
         """The gate's own comparison against a candidate baseline — delivered bytes on both
@@ -155,7 +154,7 @@ def test_a_fixture_whose_verdict_differs_between_rulers_takes_the_wire_rulers_ve
         assert discriminators, f"no committed arm discriminates the two rulers at bar {bar}"
         label, value = discriminators[0]
         out = agent_run(toolset=foreign_toolset(value), env={MAX_PERCENT_ENV: str(bar)})
-        substituted = framed_content(out.dispatched.text(), salt=SALT) != wire_text(value)
+        substituted = framed_content(out.dispatched.text()) != wire_text(value)
         assert substituted == _verdict(value, wire_bytes(value), bar), (
             f"{label} took the json.dumps ruler's verdict at bar {bar}"
         )
@@ -184,7 +183,7 @@ def test_a_cjk_payload_is_measured_in_bytes_not_characters() -> None:
     the selection loudly rather than quietly emptying the demand.
     """
     bar = 85
-    overhead = frame_overhead(SALT)
+    overhead = frame_overhead()
 
     def _straddles(value) -> tuple[bool, bool]:
         view, wire = toons.dumps(value), wire_text(value)
@@ -206,7 +205,7 @@ def test_a_cjk_payload_is_measured_in_bytes_not_characters() -> None:
     by_bytes, by_chars = _straddles(value)
 
     out = agent_run(toolset=foreign_toolset(value), env={MAX_PERCENT_ENV: str(bar)})
-    substituted = framed_content(out.dispatched.text(), salt=SALT) != wire_text(value)
+    substituted = framed_content(out.dispatched.text()) != wire_text(value)
     assert substituted == by_bytes, (
         f"the CJK payload was measured in characters (verdict {by_chars}), not in UTF-8 bytes"
     )
@@ -241,7 +240,7 @@ def test_each_call_is_gated_independently_with_no_cross_call_or_run_position_sta
     assert len(texts) == len(values), f"expected {len(values)} returns, got {len(texts)}"
     for i, (value, text) in enumerate(zip(values, texts, strict=True)):
         expected = toons.dumps(value) if value is under else wire_text(value)
-        assert framed_content(text, salt=SALT) == expected, (
+        assert framed_content(text) == expected, (
             f"call {i + 1} took a verdict that depends on its position or on an earlier call"
         )
 
@@ -267,12 +266,12 @@ def test_a_payload_just_under_the_configured_bar_substitutes_and_one_just_over_i
         over_label, over = _pick(bar, clearing=False)
 
         subbed = agent_run(toolset=foreign_toolset(under), env=env)
-        assert framed_content(subbed.dispatched.text(), salt=SALT) == toons.dumps(under), (
+        assert framed_content(subbed.dispatched.text()) == toons.dumps(under), (
             f"{under_label} did not substitute at bar {bar}"
         )
 
         passed = agent_run(toolset=foreign_toolset(over), env=env)
-        assert framed_content(passed.dispatched.text(), salt=SALT) == wire_text(over), (
+        assert framed_content(passed.dispatched.text()) == wire_text(over), (
             f"{over_label} substituted at bar {bar}"
         )
 
@@ -294,10 +293,10 @@ def test_a_payload_just_under_the_configured_bar_substitutes_and_one_just_over_i
     low, high = math.floor(ratio), math.ceil(ratio)
     assert low != high, "the boundary fixture's ratio is exactly integral; pick another arm"
     passed = agent_run(toolset=foreign_toolset(value), env={MAX_PERCENT_ENV: str(low)})
-    assert framed_content(passed.dispatched.text(), salt=SALT) == wire_text(value), (
+    assert framed_content(passed.dispatched.text()) == wire_text(value), (
         f"a payload at {ratio:.2f}% substituted at a configured bar of {low}"
     )
     subbed = agent_run(toolset=foreign_toolset(value), env={MAX_PERCENT_ENV: str(high)})
-    assert framed_content(subbed.dispatched.text(), salt=SALT) == toons.dumps(value), (
+    assert framed_content(subbed.dispatched.text()) == toons.dumps(value), (
         f"a payload at {ratio:.2f}% passed through at a configured bar of {high}"
     )

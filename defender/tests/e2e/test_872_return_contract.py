@@ -21,7 +21,6 @@ from pydantic_ai.toolsets import FunctionToolset  # noqa: E402
 
 from defender.tests.e2e._toon872 import (  # noqa: E402
     gate_metadata_key,
-    SALT,
     agent_run,
     corpus,
     delivered_percent,
@@ -77,7 +76,7 @@ def test_passthrough_carries_the_tools_own_json_unchanged_inside_the_frame() -> 
     for value in (_over_bar(), "a plain string", 7, None):
         out = agent_run(toolset=foreign_toolset(value))
         delivered = out.dispatched.text()
-        assert framed_content(delivered, salt=SALT) == wire_text(value), (
+        assert framed_content(delivered) == wire_text(value), (
             f"passthrough content diverged from the no-gate wire bytes for {type(value).__name__}"
         )
         assert out.encoder.loads_calls == 0, "a passthrough decoded a view it did not deliver"
@@ -101,7 +100,7 @@ def test_substitute_branch_return_shape() -> None:
     part = out.dispatched.part("fetch_rows")
 
     assert gate_metadata_key() == "json", "§7 r1 spelled the metadata key; it is not the gate's to pick"
-    assert framed_content(part.content, salt=SALT) == toons.dumps(value), (
+    assert framed_content(part.content) == toons.dumps(value), (
         "the model was handed something other than the framed TOON view"
     )
     assert isinstance(part.metadata, dict)
@@ -155,7 +154,7 @@ def test_a_dict_an_int_and_none_are_stringified_before_the_frame_and_the_frame_n
         out = agent_run(toolset=foreign_toolset(value))
         assert out.error is None, f"the frame raised on {value!r}"
         delivered = out.dispatched.text()
-        assert framed_content(delivered, salt=SALT) == wire_text(value)
+        assert framed_content(delivered) == wire_text(value)
         if repr(value) != wire_text(value):
             assert repr(value) not in delivered, (
                 f"{value!r} was stringified with str()/repr(), not with the wire serializer"
@@ -188,7 +187,7 @@ def test_the_byte_gate_and_the_stringify_step_measure_the_bytes_the_model_receiv
     """
     for value in ({"x": float("nan")}, {"x": b"ab"}, [], {"x": float("-inf")}):
         out = agent_run(toolset=foreign_toolset(value))
-        assert framed_content(out.dispatched.text(), salt=SALT) == wire_text(value), (
+        assert framed_content(out.dispatched.text()) == wire_text(value), (
             f"the gate measured {value!r} with the wrong serializer"
         )
 
@@ -202,7 +201,7 @@ def test_the_byte_gate_and_the_stringify_step_measure_the_bytes_the_model_receiv
         "decide it and M3 would never be consulted"
     )
     out = agent_run(toolset=foreign_toolset(oracle))
-    assert framed_content(out.dispatched.text(), salt=SALT) == toons.dumps(oracle), (
+    assert framed_content(out.dispatched.text()) == toons.dumps(oracle), (
         "a payload M3's oracle blesses under the WIRE serializer passed through — the oracle "
         "is spelled with `pydantic_core.to_json`, the site `d71` left unruled"
     )
@@ -240,7 +239,7 @@ def test_a_tool_body_that_returns_its_own_toolreturn_is_unwrapped_framed_and_los
     assert "body_private" not in part.content, "the tool body's private metadata leaked to the model"
     assert "tool-return" not in part.content
     assert "return_value" not in part.content
-    assert framed_content(part.content, salt=SALT) == toons.dumps(value), (
+    assert framed_content(part.content) == toons.dumps(value), (
         "a pre-wrapped ToolReturn opted out of the gate"
     )
     assert part.metadata["body_private"] == "kept", "the gate destroyed application data"

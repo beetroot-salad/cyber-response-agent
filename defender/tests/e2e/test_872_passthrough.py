@@ -27,7 +27,6 @@ from pydantic_ai.messages import BinaryContent  # noqa: E402
 from defender.hooks.budget_enforcer import BudgetKill  # noqa: E402
 from defender.tests.e2e._toon872 import (  # noqa: E402
     PANIC,
-    SALT,
     EncoderFault,
     SpyEncoder,
     agent_run,
@@ -78,7 +77,7 @@ def test_str_scalar_none_and_content_block_returns_never_reach_the_encoder() -> 
         out = agent_run(toolset=foreign_toolset(value))
         assert out.encoder.dumps_calls == 0, f"{type(value).__name__} reached the encoder"
         assert out.encoder.loads_calls == 0
-        assert framed_content(out.dispatched.text(), salt=SALT) == wire_text(value), (
+        assert framed_content(out.dispatched.text()) == wire_text(value), (
             f"{type(value).__name__} reached the model as something other than its own wire bytes"
         )
 
@@ -89,7 +88,7 @@ def test_str_scalar_none_and_content_block_returns_never_reach_the_encoder() -> 
 
     control = agent_run(toolset=foreign_toolset(_substituting()))
     assert control.encoder.dumps_calls == 1, "the spy cannot see an encode at all"
-    assert framed_content(control.dispatched.text(), salt=SALT) == toons.dumps(_substituting()), (
+    assert framed_content(control.dispatched.text()) == toons.dumps(_substituting()), (
         "nothing substituted, so the model-visible assertions above hold over a gate that "
         "never encodes anything"
     )
@@ -113,7 +112,7 @@ def test_a_raising_toon_encoder_emits_json() -> None:
 
     assert out.error is None, "an encoder fault escaped the gate"
     assert spy.dumps_calls == 1
-    assert framed_content(out.dispatched.text(), salt=SALT) == wire_text(value)
+    assert framed_content(out.dispatched.text()) == wire_text(value)
 
 
 def test_a_pydantic_serialization_error_on_the_baseline_emits_json() -> None:
@@ -178,7 +177,7 @@ def test_a_nested_payload_and_one_toon_enlarges_pass_through() -> None:
     non_uniform = {"rows": [{"a": 1, "b": 2}, {"c": 3}, {"a": 4, "b": 5, "d": 6}] * 20}
     for value in (nested, non_uniform):
         out = agent_run(toolset=foreign_toolset(value))
-        assert framed_content(out.dispatched.text(), salt=SALT) == wire_text(value), (
+        assert framed_content(out.dispatched.text()) == wire_text(value), (
             "a payload TOON does not shrink was substituted anyway"
         )
 
@@ -206,13 +205,13 @@ def test_a_silently_coerced_value_fails_the_round_trip_and_emits_json() -> None:
         "discriminating between the two oracles"
     )
     out = agent_run(toolset=foreign_toolset(big))
-    assert framed_content(out.dispatched.text(), salt=SALT) == wire_text(big), (
+    assert framed_content(out.dispatched.text()) == wire_text(big), (
         "an integer >= 2**63 reached the model in float notation — the `==` oracle, not f8 = B's"
     )
 
     coerced = {"rows": [{"a": {i, i + 1}, "b": f"pad-{i}"} for i in range(40)]}
     out = agent_run(toolset=foreign_toolset(coerced))
-    assert framed_content(out.dispatched.text(), salt=SALT) == wire_text(coerced), (
+    assert framed_content(out.dispatched.text()) == wire_text(coerced), (
         "a silently nulled `set` substituted"
     )
 
@@ -257,12 +256,12 @@ def test_every_passthrough_arm_is_byte_identical_with_and_without_the_gate() -> 
         out = agent_run(toolset=foreign_toolset(value),
                         encoder=SpyEncoder(fault) if fault else None)
         assert out.error is None, f"the {arm} arm raised"
-        assert framed_content(out.dispatched.text(), salt=SALT) == wire_text(value), (
+        assert framed_content(out.dispatched.text()) == wire_text(value), (
             f"the {arm} arm's content is not the no-gate run's bytes"
         )
 
     control = agent_run(toolset=foreign_toolset(_substituting()))
-    assert framed_content(control.dispatched.text(), salt=SALT) != wire_text(_substituting()), (
+    assert framed_content(control.dispatched.text()) != wire_text(_substituting()), (
         "the comparison cannot see a substitution, so every arm above passed vacuously"
     )
 
@@ -289,17 +288,17 @@ def test_a_payload_failing_the_byte_gate_is_never_decoded() -> None:
     over_value = corpus()["fx-33"]
     over = agent_run(toolset=foreign_toolset(over_value))
     assert (over.encoder.dumps_calls, over.encoder.loads_calls) == (1, 0)
-    assert framed_content(over.dispatched.text(), salt=SALT) == wire_text(over_value)
+    assert framed_content(over.dispatched.text()) == wire_text(over_value)
 
     refused_value = {"rows": [{"a": "x\x00y"}]}
     refused = agent_run(toolset=foreign_toolset(refused_value))
     assert (refused.encoder.dumps_calls, refused.encoder.loads_calls) == (0, 0)
-    assert framed_content(refused.dispatched.text(), salt=SALT) == wire_text(refused_value)
+    assert framed_content(refused.dispatched.text()) == wire_text(refused_value)
 
     under_value = _substituting()
     under = agent_run(toolset=foreign_toolset(under_value))
     assert (under.encoder.dumps_calls, under.encoder.loads_calls) == (1, 1)
-    assert framed_content(under.dispatched.text(), salt=SALT) == toons.dumps(under_value)
+    assert framed_content(under.dispatched.text()) == toons.dumps(under_value)
 
 
 def test_a_payload_whose_toon_form_is_empty_is_not_substituted() -> None:
@@ -326,7 +325,7 @@ def test_a_payload_whose_toon_form_is_empty_is_not_substituted() -> None:
     for value in ({}, []):
         out = agent_run(toolset=foreign_toolset(value))
         assert out.error is None
-        assert framed_content(out.dispatched.text(), salt=SALT) == wire_text(value), (
+        assert framed_content(out.dispatched.text()) == wire_text(value), (
             f"{value!r} was substituted"
         )
 
@@ -352,7 +351,7 @@ def test_a_baseexception_from_the_encoder_passes_through_and_a_control_flow_exce
         encoder=SpyEncoder(EncoderFault(dumps_raises=PANIC("S5's class, captured"))),
     )
     assert caught.error is None
-    assert framed_content(caught.dispatched.text(), salt=SALT) == wire_text(value)
+    assert framed_content(caught.dispatched.text()) == wire_text(value)
 
     for exc in (asyncio.CancelledError(), KeyboardInterrupt(), GeneratorExit(),
                 SystemExit(1), BudgetKill("budget tail exhausted")):
@@ -398,7 +397,7 @@ def test_a_view_the_encoder_produced_that_the_decoder_cannot_read_passes_through
     assert out.error is None, "a decoder fault escaped the gate"
     assert out.encoder.dumps_calls == 1
     assert out.encoder.loads_calls == 1
-    assert framed_content(out.dispatched.text(), salt=SALT) == wire_text(value)
+    assert framed_content(out.dispatched.text()) == wire_text(value)
 
 
 def test_a_nan_or_infinite_float_reaches_the_model_identically_with_and_without_the_gate() -> None:
@@ -441,7 +440,7 @@ def test_a_nan_or_infinite_float_reaches_the_model_identically_with_and_without_
             )
             out = agent_run(toolset=foreign_toolset(value))
             assert out.error is None
-            view = framed_content(out.dispatched.text(), salt=SALT)
+            view = framed_content(out.dispatched.text())
 
             clears = delivered_percent(value) <= 85
             expected = toons.dumps(value) if clears else wire_text(value)

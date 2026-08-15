@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -65,10 +66,10 @@ from defender.tests.e2e._replay_harness import DEFENDER, ReplayFn  # noqa: E402
 
 REPO_ROOT = DEFENDER.parent
 
-#: The one place this suite spells the run's frame identity. 16 hex chars, the width
-#: `run_common.materialize_run_dir` mints (`G12`), because the frame's fixed cost is a
-#: function of that width and `d3` is measured in delivered bytes.
-SALT = "0011223344556677"
+#: #875 retired the run's one standing salt: every frame now mints its OWN (`_untrusted.
+#: wrap_fresh`), 16 hex chars, after its content is in hand. `d3`'s delivered-bytes measure
+#: still rests on that WIDTH (`frame_overhead`), never on a value a test could inject or
+#: predict — `framed_content`/`frame_count` below match the frame's SHAPE, not a known salt.
 RUN_ID = "toon-872"
 
 #: Address-space ceiling for every `run_isolated` child, in MiB. A measured `agent_run`
@@ -149,7 +150,7 @@ def percent(value: Any) -> float:
     return 100.0 * toon_bytes(value) / wire_bytes(value)
 
 
-def delivered_percent(value: Any, *, salt: str = SALT) -> float:
+def delivered_percent(value: Any) -> float:
     """`d3`'s ruler, spelled ONCE: the bytes the model receives on each arm, frame included.
 
     Under f2 = B every exit is framed, so both arms of the comparison carry the same fixed
@@ -160,7 +161,7 @@ def delivered_percent(value: Any, *, salt: str = SALT) -> float:
     gate decides the other way, which is a test no correct implementation makes green
     (`92-reconciliation.md` F1). `design-872-r3.md` M2 carries the frame after the same
     correction."""
-    overhead = frame_overhead(salt)
+    overhead = frame_overhead()
     return 100.0 * (toon_bytes(value) + overhead) / (wire_bytes(value) + overhead)
 
 
@@ -177,14 +178,32 @@ def wire_roundtrip_equal(value: Any) -> bool:
     return wire_text(toons.loads(toons.dumps(value))) == wire_text(value)
 
 
-def frame_overhead(salt: str = SALT) -> int:
-    """The fixed byte cost `_untrusted.wrap` adds at this salt width (`r20`), measured off the
-    real primitive rather than recalled as 67."""
+def frame_overhead() -> int:
+    """The fixed byte cost `_untrusted.wrap_fresh` adds (`r20`), measured off the real
+    primitive rather than recalled as 67. A fresh-minted salt is always 16 hex chars
+    (`secrets.token_hex(8)`), so the overhead is a function of the tag alone, never of which
+    salt a particular call happened to draw."""
     from defender import _untrusted
-    return len(_untrusted.wrap("", "untrusted", salt).encode("utf-8"))
+    return len(_untrusted.wrap_fresh("", "untrusted").encode("utf-8"))
 
 
-def framed_content(text: str, *, salt: str = SALT, tag: str = "untrusted") -> str:
+_FRAME_RE_CACHE: dict[str, re.Pattern] = {}
+
+
+def _frame_re(tag: str) -> re.Pattern:
+    """A frame's SHAPE, salt unpinned — #875 mints one per call (`wrap_fresh`), so no test can
+    know it ahead of time. The open and close delimiters' salts are tied by backreference:
+    that they MATCH is exactly what makes the span one frame rather than two independent
+    stray tags."""
+    pat = _FRAME_RE_CACHE.get(tag)
+    if pat is None:
+        tag_re = re.escape(tag)
+        pat = re.compile(rf"<run-([0-9a-f]+)-{tag_re}>\n(.*)\n</run-\1-{tag_re}>", re.DOTALL)
+        _FRAME_RE_CACHE[tag] = pat
+    return pat
+
+
+def framed_content(text: str, *, tag: str = "untrusted") -> str:
     """The bytes BETWEEN the frame's delimiters — O2's re-read oracle after §7 r3 (f2 = B).
 
     Raises rather than returning the input when the text is not framed: a helper that
@@ -201,14 +220,14 @@ def framed_content(text: str, *, salt: str = SALT, tag: str = "untrusted") -> st
             f"a {type(text).__name__} reached the frame unstringified — under f2 = B every "
             f"foreign exit is a `str` before it is framed: {text!r:.120}"
         )
-    open_d, close_d = f"<run-{salt}-{tag}>", f"</run-{salt}-{tag}>"
-    if not (text.startswith(open_d + "\n") and text.endswith("\n" + close_d)):
-        raise AssertionError(f"not framed with {open_d!r}: {text[:120]!r}")
-    return text[len(open_d) + 1: -(len(close_d) + 1)]
+    m = _frame_re(tag).fullmatch(text)
+    if not m:
+        raise AssertionError(f"not framed (tag={tag!r}): {text[:120]!r}")
+    return m.group(2)
 
 
-def frame_count(text: str, *, salt: str = SALT, tag: str = "untrusted") -> int:
-    return text.count(f"<run-{salt}-{tag}>")
+def frame_count(text: str, *, tag: str = "untrusted") -> int:
+    return len(re.findall(rf"<run-[0-9a-f]+-{re.escape(tag)}>", text))
 
 
 # ---------------------------------------------------------------------------------------
@@ -561,10 +580,9 @@ def agent_run(  # noqa: PLR0913 — one parameter per seam this drive threads
 def _deps(defn: Any = None, run_dir: Path | None = None):
     """A real `AgentDeps`, bound the way the composition root binds one.
 
-    The frame demands (`d17a`, `d61`, `d67`) are stated over the INVOCATION's standing salt,
-    which lives on the frozen `AgentDeps` every agent deps class subclasses (`G12`) and which
-    the gate reads at `ctx.deps.salt`. A `None` deps would let a gate that framed with a
-    literal pass every framing assertion in this suite.
+    The frame demands (`d17a`, `d61`, `d67`) are stated over the gate's use of
+    `_untrusted.wrap_fresh` — #875 retired `AgentDeps.salt` and `bind`'s `salt=` parameter
+    entirely, so there is no standing value left to inject here; every frame mints its own.
 
     THE SCOPE IS PART OF THE STRIP. `ACTOR_DEF` sets `requires_confine`, so `bind` refuses it
     against the default empty `RunScope` ("an empty confine widens the agent's reads to the
@@ -578,7 +596,7 @@ def _deps(defn: Any = None, run_dir: Path | None = None):
         run_dir = Path(tempfile.mkdtemp(prefix="toon872-"))
         (run_dir / "gather_raw").mkdir(parents=True, exist_ok=True)
     scope = RunScope(read_confine=(run_dir,)) if resolved.requires_confine else RunScope()
-    return bind(resolved, run_dir, scope=scope, salt=SALT, defender_dir=DEFENDER)
+    return bind(resolved, run_dir, scope=scope, defender_dir=DEFENDER)
 
 
 def _build(  # noqa: PLR0913 — one parameter per seam this build threads, plus the two the

@@ -26,7 +26,7 @@ from pydantic_ai.messages import ToolReturn, ToolReturnPart
 from pydantic_ai.toolsets import SetMetadataToolset, WrapperToolset
 
 from defender._env import env_int
-from defender._untrusted import wrap as _frame
+from defender._untrusted import wrap_fresh as _frame
 from defender.hooks.budget_enforcer import BudgetKill
 
 #: §7 r1's spelling — the reserved metadata key the original JSON rides on. Not the gate's
@@ -261,7 +261,7 @@ class ToonGateCapability(AbstractCapability[Any]):
         if not meta.get(_CANDIDATE_METADATA_KEY):
             return await handler(args)
         result = await handler(args)
-        text, metadata = self._gate(ctx, call.tool_name, call.tool_call_id, result)
+        text, metadata = self._gate(call.tool_name, call.tool_call_id, result)
         if metadata is not None:
             self._pending[call.tool_call_id] = (text, metadata)
         return text
@@ -278,11 +278,11 @@ class ToonGateCapability(AbstractCapability[Any]):
             return result
         return ToolReturn(return_value=result, metadata=metadata)
 
-    def _gate(self, ctx, tool_name: str, tool_call_id: str, result: Any) -> tuple[str, dict | None]:
+    def _gate(self, tool_name: str, tool_call_id: str, result: Any) -> tuple[str, dict | None]:
         body_value, body_metadata = _unwrap(result)
 
         if not isinstance(body_value, (dict, list)):
-            return self._passthrough(ctx, tool_name, tool_call_id, body_value, body_metadata)
+            return self._passthrough(tool_name, tool_call_id, body_value, body_metadata)
 
         max_depth = env_int(MAX_DEPTH_ENV, DEFAULT_MAX_DEPTH)
         max_nodes = env_int(MAX_NODES_ENV, DEFAULT_MAX_NODES)
@@ -290,20 +290,20 @@ class ToonGateCapability(AbstractCapability[Any]):
             _prevalidate(body_value, max_depth=max_depth, max_nodes=max_nodes)
         except _Refused:
             self._refused += 1
-            return self._passthrough(ctx, tool_name, tool_call_id, body_value, body_metadata)
+            return self._passthrough(tool_name, tool_call_id, body_value, body_metadata)
 
         try:
             toon_view = self._encoder.dumps(body_value)
         except _REPROPAGATE:
             raise
         except BaseException:  # noqa: BLE001 — the encoder's own panic is a BaseException
-            return self._passthrough(ctx, tool_name, tool_call_id, body_value, body_metadata)
+            return self._passthrough(tool_name, tool_call_id, body_value, body_metadata)
 
         if not toon_view:
             # The empty-view floor (`d18`): an empty dict encodes to zero bytes and would
             # otherwise clear any bar and round-trip, substituting NOTHING where the JSON
             # said `{}`.
-            return self._passthrough(ctx, tool_name, tool_call_id, body_value, body_metadata)
+            return self._passthrough(tool_name, tool_call_id, body_value, body_metadata)
 
         # Computed OUTSIDE the guard above: a payload the pre-validator admits but the wire
         # serializer cannot represent (an arbitrary object as a value) must raise exactly as
@@ -311,12 +311,12 @@ class ToonGateCapability(AbstractCapability[Any]):
         wire_text_value = _wire_text(tool_name, tool_call_id, body_value)
         wire_bytes_value = len(wire_text_value.encode("utf-8"))
         toon_bytes_value = len(toon_view.encode("utf-8"))
-        overhead = len(_frame("", "untrusted", ctx.deps.salt))
+        overhead = len(_frame("", "untrusted"))
         bar = env_int(MAX_PERCENT_ENV, DEFAULT_MAX_PERCENT)
         clears = 100 * (toon_bytes_value + overhead) <= bar * (wire_bytes_value + overhead)
         if not clears:
             return self._passthrough(
-                ctx, tool_name, tool_call_id, body_value, body_metadata,
+                tool_name, tool_call_id, body_value, body_metadata,
                 wire_text_value=wire_text_value,
             )
 
@@ -327,24 +327,24 @@ class ToonGateCapability(AbstractCapability[Any]):
             raise
         except BaseException:  # noqa: BLE001 — the decoder's own fault is a BaseException too
             return self._passthrough(
-                ctx, tool_name, tool_call_id, body_value, body_metadata,
+                tool_name, tool_call_id, body_value, body_metadata,
                 wire_text_value=wire_text_value,
             )
 
         if recovered_wire != wire_text_value:
             return self._passthrough(
-                ctx, tool_name, tool_call_id, body_value, body_metadata,
+                tool_name, tool_call_id, body_value, body_metadata,
                 wire_text_value=wire_text_value,
             )
 
         self._examined += 1
         self._substituted += 1
         self._bytes_saved += max(0, wire_bytes_value - toon_bytes_value)
-        framed = _frame(toon_view, "untrusted", ctx.deps.salt)
+        framed = _frame(toon_view, "untrusted")
         return framed, _merge_metadata(body_metadata, body_value)
 
     def _passthrough(
-        self, ctx, tool_name: str, tool_call_id: str, body_value: Any,
+        self, tool_name: str, tool_call_id: str, body_value: Any,
         body_metadata: dict | None, *, wire_text_value: str | None = None,
     ) -> tuple[str, dict | None]:
         self._examined += 1
@@ -352,6 +352,6 @@ class ToonGateCapability(AbstractCapability[Any]):
             wire_text_value if wire_text_value is not None
             else _wire_text(tool_name, tool_call_id, body_value)
         )
-        framed = _frame(text, "untrusted", ctx.deps.salt)
+        framed = _frame(text, "untrusted")
         metadata = dict(body_metadata) if body_metadata else None
         return framed, metadata

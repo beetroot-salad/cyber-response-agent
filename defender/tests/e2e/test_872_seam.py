@@ -11,6 +11,7 @@ model-visible text. Signature inspection discharges nothing, and there is no
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -32,7 +33,6 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
 from defender.tests.e2e._toon872 import (  # noqa: E402
     REPO_ROOT,
     RUN_ID,
-    SALT,
     Dispatched,
     PartRecorder,
     agent_run,
@@ -80,10 +80,10 @@ def test_a_foreign_toolset_injected_at_the_entry_point_reaches_the_model_through
     value = _payload()
     run_dir = materialize(tmp_path, GOLDEN_AB3)
     main = PartRecorder([Turn(tool_calls=[("fetch_rows", {})]), Turn(text="Complete.")])
-    drive(run_dir, run_id=RUN_ID, salt=SALT, main=main, toolset=foreign_toolset(value))
+    drive(run_dir, run_id=RUN_ID, main=main, toolset=foreign_toolset(value))
 
     view = main.dispatched.text("fetch_rows")
-    assert framed_content(view, salt=SALT) == toons.dumps(value), (
+    assert framed_content(view) == toons.dumps(value), (
         "the foreign result did not reach the model as the framed TOON view"
     )
 
@@ -126,12 +126,12 @@ def test_the_gate_declares_its_encoder_and_toolset_seams_at_the_composition_root
         "the injected encoder is never reached, so every call count this suite reads through "
         "it is measuring nothing"
     )
-    assert framed_content(substituted.dispatched.text(), salt=SALT) == toons.dumps(value)
+    assert framed_content(substituted.dispatched.text()) == toons.dumps(value)
 
     run_dir = materialize(tmp_path, GOLDEN_AB3)
     main = PartRecorder([Turn(tool_calls=[("fetch_rows", {})]), Turn(text="Complete.")])
-    drive(run_dir, run_id=RUN_ID, salt=SALT, main=main, toolset=foreign_toolset(value))
-    assert framed_content(main.dispatched.text("fetch_rows"), salt=SALT) == toons.dumps(value), (
+    drive(run_dir, run_id=RUN_ID, main=main, toolset=foreign_toolset(value))
+    assert framed_content(main.dispatched.text("fetch_rows")) == toons.dumps(value), (
         "the toolset seam does not thread from the entry point to the agent the model talks to"
     )
 
@@ -155,7 +155,7 @@ def test_the_shipped_tool_set_is_unchanged_when_the_seam_is_not_supplied(
     """
     bare_dir = materialize(tmp_path / "bare", GOLDEN_AB3)
     bare = ToolRoster([Turn(text="Complete.")])
-    drive(bare_dir, run_id=RUN_ID, salt=SALT, main=bare)
+    drive(bare_dir, run_id=RUN_ID, main=bare)
     bare_names = sorted(t.name for t in (bare.tool_defs or []))
     assert bare_names, "the roster was never captured, so this negative reads an empty list"
     assert "fetch_rows" not in bare_names
@@ -163,7 +163,7 @@ def test_the_shipped_tool_set_is_unchanged_when_the_seam_is_not_supplied(
 
     with_dir = materialize(tmp_path / "with", GOLDEN_AB3)
     supplied = ToolRoster([Turn(tool_calls=[("fetch_rows", {})]), Turn(text="Complete.")])
-    drive(with_dir, run_id=RUN_ID, salt=SALT, main=supplied,
+    drive(with_dir, run_id=RUN_ID, main=supplied,
           toolset=foreign_toolset(_payload()))
     supplied_names = sorted(t.name for t in (supplied.tool_defs or []))
     assert "fetch_rows" in supplied_names, (
@@ -194,12 +194,12 @@ def test_the_seams_presence_or_absence_holds_for_every_call_across_the_whole_run
         Turn(tool_calls=[("fetch_rows", {})]),
         Turn(text="Complete."),
     ])
-    drive(run_dir, run_id=RUN_ID, salt=SALT, main=main, toolset=foreign_toolset(value))
+    drive(run_dir, run_id=RUN_ID, main=main, toolset=foreign_toolset(value))
 
     texts = main.dispatched.texts("fetch_rows")
     assert len(texts) == 3, f"expected three foreign returns in the final history, got {len(texts)}"
     for i, text in enumerate(texts):
-        assert framed_content(text, salt=SALT) == toons.dumps(value), (
+        assert framed_content(text) == toons.dumps(value), (
             f"call {i + 1} of 3 was not gated — the seam did not hold for the whole run"
         )
 
@@ -263,7 +263,7 @@ def test_call_tool_receives_the_tools_own_return_with_a_capture_shaped_capabilit
         "the outer hook did not override the wrapper's return, so the ordering this demand "
         "is about is not the ordering under test"
     )
-    assert framed_content(str(outer.seen[0]), salt=SALT) == toons.dumps(value), (
+    assert framed_content(str(outer.seen[0])) == toons.dumps(value), (
         "the wrapper was handed something other than the tool's own value"
     )
 
@@ -296,7 +296,7 @@ def test_the_query_tool_path_is_byte_identical_with_the_gate_installed(
             Turn(text="Complete."),
         ])
         gather = PartRecorder([q("elastic", "query", {"native_query": "FROM logs"}), DONE])
-        drive(run_dir, run_id=RUN_ID, salt=SALT, main=main, gather=gather,
+        drive(run_dir, run_id=RUN_ID, main=main, gather=gather,
               verbs=elastic_ok(rec), toolset=toolset)
         return run_dir, main, gather
 
@@ -309,12 +309,12 @@ def test_the_query_tool_path_is_byte_identical_with_the_gate_installed(
     assert live_gather.dispatched.text("query") == idle_gather.dispatched.text("query"), (
         "the query tool's model-visible text changed in the run where the gate was active"
     )
-    assert f"<run-{SALT}-untrusted>" in live_gather.dispatched.text("query"), (
+    assert re.search(r"<run-[0-9a-f]+-untrusted>", live_gather.dispatched.text("query")), (
         "query's own rendering lost its frame, so the comparison above is over empty text"
     )
     assert read_jsonl_rows(RunPaths(live_dir).executed_queries) == read_jsonl_rows(
         RunPaths(idle_dir).executed_queries), "the queries table diverged between the two runs"
-    assert framed_content(live_main.dispatched.text("fetch_rows"), salt=SALT) == toons.dumps(
+    assert framed_content(live_main.dispatched.text("fetch_rows")) == toons.dumps(
         _payload()), "no foreign substitution happened, so the inertness above proves nothing"
 
 
@@ -350,7 +350,7 @@ def test_an_owned_agent_tool_result_is_untouched_while_a_foreign_one_is_gated() 
     # THE SAME-NAME DISCRIMINATOR, at the finest grain the library allows.
     foreign = agent_run(toolset=foreign_toolset(value, name="fetch_rows"))
     owned = agent_run(toolset=owned_toolset(value, name="fetch_rows"))
-    assert framed_content(foreign.dispatched.text("fetch_rows"), salt=SALT) == toons.dumps(value), (
+    assert framed_content(foreign.dispatched.text("fetch_rows")) == toons.dumps(value), (
         "the foreign `fetch_rows` was not gated"
     )
     assert owned.dispatched.text("fetch_rows") == wire_text(value), (
@@ -370,7 +370,7 @@ def test_an_owned_agent_tool_result_is_untouched_while_a_foreign_one_is_gated() 
     foreign_text = out.dispatched.text("fetch_rows")
     owned_text = out.dispatched.text("own_rows")
 
-    assert framed_content(foreign_text, salt=SALT) == toons.dumps(value), (
+    assert framed_content(foreign_text) == toons.dumps(value), (
         "the foreign result was not gated"
     )
     assert owned_text == wire_text(value), (
@@ -396,7 +396,7 @@ def test_an_unlabelled_toolset_is_treated_as_foreign_and_only_the_composition_ro
     """
     value = _payload()
     unlabelled = agent_run(toolset=foreign_toolset(value, name="fetch_rows"))
-    assert framed_content(unlabelled.dispatched.text(), salt=SALT) == toons.dumps(value), (
+    assert framed_content(unlabelled.dispatched.text()) == toons.dumps(value), (
         "an unlabelled toolset defaulted to owned — the unsafe direction"
     )
 
@@ -463,7 +463,7 @@ def test_every_build_function_routes_through_the_site_that_installs_the_gate(
 
     def _check(label: str, dispatched) -> None:
         text = dispatched.text("fetch_rows")
-        assert framed_content(text, salt=SALT) == expected, (
+        assert framed_content(text) == expected, (
             f"{label} returned an agent whose foreign result is not gated — the build path "
             "does not route through the composition root that installs the gate"
         )
@@ -609,8 +609,7 @@ def _bound(defn):
     run_dir = Path(tempfile.mkdtemp())
     (run_dir / "gather_raw").mkdir(parents=True, exist_ok=True)
     scope = RunScope(read_confine=(run_dir,)) if defn.requires_confine else RunScope()
-    return bind(defn, run_dir, scope=scope, salt="0011223344556677",
-                defender_dir=DEFENDER_DIR)
+    return bind(defn, run_dir, scope=scope, defender_dir=DEFENDER_DIR)
 
 built = []
 for role in (AgentRole.MAIN, AgentRole.GATHER, AgentRole.SUPPORT, AgentRole.ACTOR,
@@ -726,7 +725,7 @@ import toons
 value = T.toon_rows(T.corpus()["fx-33"])
 out = T.agent_run(toolset=T.foreign_toolset(value))
 print(json.dumps({
-    "gated": T.framed_content(out.dispatched.text(), salt=T.SALT) == toons.dumps(value),
+    "gated": T.framed_content(out.dispatched.text()) == toons.dumps(value),
     "encoded": out.encoder.dumps_calls,
 }))
 '''

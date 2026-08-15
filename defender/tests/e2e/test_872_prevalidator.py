@@ -30,7 +30,6 @@ pytest.importorskip("pydantic_ai")
 import toons  # noqa: E402
 
 from defender.tests.e2e._toon872 import (  # noqa: E402
-    SALT,
     EncoderFault,
     SpyEncoder,
     agent_run,
@@ -76,7 +75,7 @@ def _refused_and_unchanged(label: str, value, *, encoder: SpyEncoder | None = No
     assert spy.dumps_calls == 0, f"{label} reached the encoder"
     assert spy.loads_calls == 0, f"{label} was decoded"
     if gated.error is None:
-        assert framed_content(gated.dispatched.text(), salt=SALT) == wire_text(value), (
+        assert framed_content(gated.dispatched.text()) == wire_text(value), (
             f"{label} was refused, but the model did not get the tool's own wire bytes"
         )
     else:
@@ -148,7 +147,7 @@ def test_a_non_str_or_non_utf8_mapping_key_is_refused_and_the_encoder_is_never_c
         out = agent_run(toolset=foreign_toolset(value), encoder=spy)
         assert out.error is None, f"{label} escaped the guard"
         assert spy.dumps_calls == 0, f"{label} reached the encoder"
-        assert framed_content(out.dispatched.text(), salt=SALT) == wire_text(value)
+        assert framed_content(out.dispatched.text()) == wire_text(value)
 
     admitted = {"rows": [{StrKey("a"): i, "b": f"pad-{i}"} for i in range(40)]}
     out = agent_run(toolset=foreign_toolset(admitted))
@@ -247,7 +246,7 @@ def test_the_validators_container_set_equals_the_encoders() -> None:
         # `null` cannot carry the payload back, so M3 rejects and the JSON arm is what the
         # model reads — where the baseline serializes it at all.
         if out.error is None:
-            assert framed_content(out.dispatched.text(), salt=SALT) == wire_text(value), (
+            assert framed_content(out.dispatched.text()) == wire_text(value), (
                 f"a hazard inside a {label} was ADMITTED and then substituted over a view "
                 "that lost it"
             )
@@ -280,7 +279,7 @@ def test_a_payload_one_level_over_the_configured_depth_cap_is_refused_and_one_un
         spy = _sealed()
         out = agent_run(toolset=foreign_toolset(over), encoder=spy, env=env)
         assert spy.dumps_calls == 0, f"depth {cap + 1} reached the encoder at a cap of {cap}"
-        assert framed_content(out.dispatched.text(), salt=SALT) == wire_text(over)
+        assert framed_content(out.dispatched.text()) == wire_text(over)
 
         under = _nest(cap - 1)
         admitted = agent_run(toolset=foreign_toolset(under), env=env)
@@ -322,7 +321,7 @@ out = T.agent_run(toolset=T.foreign_toolset(value), encoder=spy,
 print(json.dumps({{
     "dumps_calls": spy.dumps_calls,
     "raised": out.error is not None,
-    "content_is_wire": T.framed_content(out.dispatched.text(), salt=T.SALT) == T.wire_text(value),
+    "content_is_wire": T.framed_content(out.dispatched.text()) == T.wire_text(value),
 }}))
 '''
     outcome = run_isolated(child, timeout=90.0)
@@ -391,7 +390,7 @@ def test_a_payload_under_the_budget_in_containers_and_over_it_in_values_is_refus
             f"a payload holding 63 containers and {32 * over_width} scalar values reached the "
             f"encoder at a budget of {budget} — the budget is counting containers, not values"
         )
-        assert framed_content(out.dispatched.text(), salt=SALT) == wire_text(over), (
+        assert framed_content(out.dispatched.text()) == wire_text(over), (
             "the over-budget payload was refused, but the model did not get the tool's own "
             "wire bytes"
         )
@@ -427,7 +426,7 @@ def test_one_leaf_object_referenced_three_times_encodes_round_trips_and_substitu
     )
     out = agent_run(toolset=foreign_toolset(value))
     assert out.encoder.dumps_calls == 1, "benign shared structure was refused before the encoder"
-    assert framed_content(out.dispatched.text(), salt=SALT) == toons.dumps(value), (
+    assert framed_content(out.dispatched.text()) == toons.dumps(value), (
         "benign shared structure was not substituted"
     )
 
@@ -460,7 +459,7 @@ def test_the_guard_refuses_no_committed_fixture_and_changes_no_verdict() -> None
             out = agent_run(toolset=foreign_toolset(value),
                             env={MAX_PERCENT_ENV: str(bar)})
             assert out.encoder.dumps_calls == 1, f"{name} {arm} was refused by the guard"
-            substituted = framed_content(out.dispatched.text(), salt=SALT) != wire_text(value)
+            substituted = framed_content(out.dispatched.text()) != wire_text(value)
             assert substituted == (delivered_percent(value) <= bar), (
                 f"{name} {arm}: the guarded verdict differs from the un-guarded bar's"
             )
@@ -577,6 +576,6 @@ def test_a_payload_carrying_a_raw_nul_is_refused_and_the_encoder_is_never_called
     out = agent_run(toolset=foreign_toolset(value), encoder=spy)
     assert spy.dumps_calls == 0, "a raw NUL reached the encoder"
     delivered = out.dispatched.text()
-    assert framed_content(delivered, salt=SALT) == wire_text(value)
+    assert framed_content(delivered) == wire_text(value)
     assert nul not in delivered, "a raw U+0000 reached the model"
     assert "\\u0000" in delivered, "the escaped form the un-gated run sends is missing"

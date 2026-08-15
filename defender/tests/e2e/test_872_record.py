@@ -39,7 +39,6 @@ from defender.tests.e2e._toon872 import (  # noqa: E402
     gate_metadata_key,
     DEFENDER,
     RUN_ID,
-    SALT,
     PartRecorder,
     corpus,
     foreign_toolset,
@@ -75,7 +74,7 @@ def _substituting_run(tmp_path: Path, *, turns: int = 2, stores: list | None = N
         seams["verbs"] = elastic_ok(rec)
     if stores is not None:
         seams["store_factory"] = store_factory(tmp_path / "store", sink=stores)
-    drive(run_dir, run_id=RUN_ID, salt=SALT, main=main, **seams)
+    drive(run_dir, run_id=RUN_ID, main=main, **seams)
     return run_dir, main
 
 
@@ -127,7 +126,7 @@ def test_both_encodings_are_recoverable_from_the_wire_log_joined_by_agent_seq_an
     assert seq is not None, incomplete
     assert tool_call_id is not None, incomplete
     assert original == value, "the original JSON is not recoverable from the wire log"
-    assert framed_content(view, salt=SALT) == toons.dumps(value), (
+    assert framed_content(view) == toons.dumps(value), (
         "the view is not recoverable from the wire log after decoding the log's own escaping"
     )
 
@@ -143,7 +142,7 @@ def _every_view(main, view: str) -> bool:
     arity and not the gate's behaviour."""
     texts = main.dispatched.texts("fetch_rows")
     assert texts, "no foreign return reached the model at all"
-    return all(framed_content(t, salt=SALT) == view for t in texts)
+    return all(framed_content(t) == view for t in texts)
 
 
 def _tool_return_parts(rec: dict) -> list[dict]:
@@ -220,7 +219,7 @@ def test_a_substituted_return_survives_the_history_the_run_rebuilds_before_sendi
         "rebuild dropped one and this assertion would be about the survivors only"
     )
     for i, view in enumerate(views):
-        assert framed_content(view, salt=SALT) == toons.dumps(value), (
+        assert framed_content(view) == toons.dumps(value), (
             f"substituted return {i + 1} did not survive the send-history rebuild"
         )
 
@@ -508,7 +507,7 @@ def test_a_queries_row_written_before_the_wrapper_sees_the_return_is_unchanged_b
         keys are spelled INLINE at that site, and a copy in this test would compare the test's
         idea of the row against itself."""
         deps = lead_zero._CaptureDeps(
-            run_dir=run_dir, defender_dir=DEFENDER, salt=SALT, run_id=RUN_ID,
+            run_dir=run_dir, defender_dir=DEFENDER, run_id=RUN_ID,
             lead_id="l-000",
         )
         lead_zero._record_manual_row(
@@ -529,7 +528,7 @@ def test_a_queries_row_written_before_the_wrapper_sees_the_return_is_unchanged_b
         })]),
         Turn(text="Complete."),
     ])
-    drive(idle_dir, run_id=RUN_ID, salt=SALT, main=idle_main,
+    drive(idle_dir, run_id=RUN_ID, main=idle_main,
           gather=ReplayFn([q("elastic", "query", {"native_query": "FROM logs"}), DONE]),
           verbs=elastic_ok(rec))
 
@@ -594,7 +593,7 @@ def test_the_rendered_runtime_page_shows_the_original_json_of_a_substituted_call
 
     plain_dir = materialize(tmp_path / "plain", GOLDEN_AB3)
     rec = VerbRecorder()
-    drive(plain_dir, run_id=RUN_ID, salt=SALT,
+    drive(plain_dir, run_id=RUN_ID,
           main=PartRecorder([Turn(tool_calls=[("gather", {
               "lead_id": "l-001", "system": "elastic", "goal": "measure this lead",
               "what_to_summarize": ["auth events"],
