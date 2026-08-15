@@ -45,10 +45,10 @@ a config file.
 
 ## Safety
 
-- `--user` is validated against a strict username regex
+- `user` is validated against a strict username regex
   (`[a-zA-Z_][a-zA-Z0-9._-]{0,63}`) before being interpolated into
   the `getent` argv. Refused values exit 1 with a clear message.
-- `fim-checksum <path>` is validated against a safe-path regex and
+- `fim-checksum`'s `path` is validated against a safe-path regex and
   must be absolute. Refused values exit 1.
 - Bastions / target hosts are passed to `docker exec` as a separate
   argv element (not via a shell), so a malformed name fails at

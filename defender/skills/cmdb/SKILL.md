@@ -10,9 +10,9 @@ read. The merged view is what callers see — overlay endpoints exist
 for chaos scenarios and are **not** exposed by this adapter.
 
 This file is the **visibility surface** — read by the defender, the
-author skill, and the actor-reviewer judge. CLI invocation details
-(subcommand flags, transport, exit codes) live in `execution.md`,
-read only by gather. The defender treats this system as a question
+author skill, and the actor-reviewer judge. Execution details (the
+verb surface, transport, exit codes) live in `execution.md`, read
+only by gather. The defender treats this system as a question
 source; gather decides how to ask.
 
 ## Visibility surface
@@ -91,5 +91,5 @@ not the input path.
 
 ## Execution
 
-CLI invocation, connectivity, config, and exit codes live in
+Verb dispatch, connectivity, config, and exit codes live in
 `execution.md` — read by gather only.

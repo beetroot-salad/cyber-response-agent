@@ -318,7 +318,12 @@ def build_agent_core(  # noqa: PLR0913 — the single build site's config + 3 DI
     ]
     if reused_gate is None:
         capabilities.append(toon_gate)
-    if defn.tools.query:
+    # EVERY verb-bearing bit this builder registers, not `query` alone (#900): `list_verbs`
+    # reads the grant to decide what it may name, so it needs the same production registry
+    # default AND the same nominal type check (§7 R15) — a registry-shaped stand-in that
+    # answers GRANTED to everything would otherwise publish the whole verb surface through it.
+    # `QueryCapture` stays behind `query`: it wraps the dispatch tool, which `list_verbs` is not.
+    if defn.tools.query or defn.tools.list_verbs:
         from defender._paths import PATHS
 
         from .query_tool import QueryCapture
@@ -328,10 +333,11 @@ def build_agent_core(  # noqa: PLR0913 — the single build site's config + 3 DI
             verbs = ModuleVerbRegistry(PATHS.defender_dir / "scripts" / "adapters", defn.verb_grant)
         if not isinstance(verbs, VerbRegistry):
             raise TypeError(
-                f"the query tool needs a real VerbRegistry, got {type(verbs).__name__} — a "
+                f"a verb-bearing tool needs a real VerbRegistry, got {type(verbs).__name__} — a "
                 "registry-shaped stand-in that never went through the constructor is refused"
             )
-        capabilities.append(QueryCapture(verbs, defn.role.value))
+        if defn.tools.query:
+            capabilities.append(QueryCapture(verbs, defn.role.value))
     agent: Agent[Any, str] = Agent(
         built.model,
         deps_type=deps_type,

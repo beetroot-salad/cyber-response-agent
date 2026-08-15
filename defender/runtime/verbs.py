@@ -62,11 +62,31 @@ def verb(
     the surface a model is shown and the surface the boundary accepts stay the same set. The
     wrapper is unaffected: it calls `fn(ctx, **params)` directly and never crosses this check.
     """
+    # CHECKED AT DECORATION, because both ways of getting it wrong are SILENT and both undo
+    # the one property this feature buys. A bare string iterates into its characters
+    # (`frozenset("require_closed")` reserves 13 letters and no param), and a misspelt name
+    # reserves nothing at all — after either, `list_verbs` publishes the param and
+    # `validate_params` accepts it, which is exactly the publication/enforcement disagreement
+    # `model_facing_params` exists to make impossible.
+    if isinstance(wrapper_only, str):
+        raise TypeError(
+            f"@verb(wrapper_only={wrapper_only!r}) is a bare string — it would iterate into "
+            "characters and reserve no param. Pass a tuple: (\"<param>\",)"
+        )
+    reserved = frozenset(wrapper_only)
+
     def decorate(fn: Verb) -> Verb:
+        undeclared = sorted(reserved - set(declared_params(fn)))
+        if undeclared:
+            raise ValueError(
+                f"@verb(wrapper_only=…) on {getattr(fn, '__name__', fn)!r} reserves "
+                f"{undeclared}, which the signature does not declare as keyword-only param(s) "
+                f"— a reserved name that matches nothing is silently no reservation at all"
+            )
         setattr(fn, _ENGINE_ATTR, engine)
         setattr(fn, _BODY_PARAM_ATTR, body_param)
         setattr(fn, _VERB_CLASS_ATTR, verb_class)
-        setattr(fn, _WRAPPER_ONLY_ATTR, frozenset(wrapper_only))
+        setattr(fn, _WRAPPER_ONLY_ATTR, reserved)
         return fn
 
     return decorate

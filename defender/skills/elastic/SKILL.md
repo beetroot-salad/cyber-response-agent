@@ -14,7 +14,7 @@ This file is the **Visibility surface** — read by the defender (gather
 routing, judge), the author (template scaffolding), and the
 actor-reviewer judge. It describes what the v2 ES instance can answer,
 regardless of how queries are dispatched. The **Execution** surface
-(CLI, query syntax, index scoping, connectivity) lives in the adjacent
+(verbs, query syntax, index scoping, connectivity) lives in the adjacent
 `execution.md`, read only by the gather subagent when it dispatches a
 query — not by the orchestrator, which routes here and never queries a
 data source directly.
@@ -167,5 +167,5 @@ Things this Elasticsearch deployment **cannot** answer:
 
 ## Execution
 
-CLI invocation, query syntax, index scoping, connectivity, and exit
+Verb dispatch, query syntax, index scoping, connectivity, and exit
 codes live in `execution.md` — read by gather only.
