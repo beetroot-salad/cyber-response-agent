@@ -1227,6 +1227,17 @@ def _register_deferred_tools(agent, tools: ToolSet, verbs: Any = None) -> None:
             )
         register_query_tool(agent, verbs)
 
+    if tools.list_verbs:
+        from defender.runtime.query_tool import register_list_verbs_tool
+
+        if verbs is None:
+            raise ValueError(
+                "ToolSet(list_verbs=True) needs a verb registry — thread one from "
+                "run_investigation(verbs=…); the tool answers off the registry's grant, and "
+                "with no registry it has no surface to report and no allowlist to filter by."
+            )
+        register_list_verbs_tool(agent, verbs)
+
     if tools.closed_tickets:
         from defender.learning.pipeline.judge.closed_ticket_tool import (
             register_closed_ticket_tools,

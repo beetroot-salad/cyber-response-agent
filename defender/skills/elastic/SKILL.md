@@ -26,7 +26,7 @@ data source directly.
 Both surfaces share one Elasticsearch cluster, one adapter, one auth
 context — only the default index pattern and the field vocabulary differ.
 
-| Subcommand | Surface | Default index pattern |
+| Verb | Surface | Default index pattern |
 |---|---|---|
 | `query` | Raw events from Elastic Agent + Falco | `logs-*` |
 | `alerts` | Detection-engine signals from custom rules | `.internal.alerts-security.alerts-default-*` |

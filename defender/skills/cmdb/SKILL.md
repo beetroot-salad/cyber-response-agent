@@ -65,9 +65,9 @@ not the input path.
   cross-tier evidence." Don't auto-escalate based on criticality
   alone — pair with a real anomaly.
 - **Filter result is a flat list, not paginated.** Total counts in
-  the response envelope are the full match count; no `next_cursor`.
-  If `--limit` is reached in raw mode, narrow the filter — there is
-  no second page.
+  the response envelope are the full match count; there is no
+  `next_cursor`, no result cap to raise, and no second page. Narrow
+  the filter instead.
 
 ### when_to_use
 
@@ -75,9 +75,9 @@ not the input path.
   inform escalation routing and disposition.
 - **Use for "is this connection in policy"** — `trust_edges_out` on
   the source host vs the destination host's role.
-- **Use to enumerate a tier** — `list-hosts --role web` gives the
-  expected populated set; observed members outside that set are a
-  candidate finding.
+- **Use to enumerate a tier** — `list-hosts` filtered to the `web`
+  role gives the expected populated set; observed members outside
+  that set are a candidate finding.
 
 ### when_not_to_use
 

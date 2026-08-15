@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import shlex
 import sys
+from collections.abc import Mapping
 from typing import Any
 
 from pydantic import ValidationError
@@ -54,7 +56,15 @@ from .ticket_screen import (
     screen_list,
     self_case_key,
 )
-from .verbs import DENIED, GRANTED, VerbContext, validate_params
+from .verbs import (
+    DENIED,
+    GRANTED,
+    VerbContext,
+    _ann_name,
+    _resolved_hints,
+    model_facing_params,
+    validate_params,
+)
 
 TOOL_NAME = "query"
 
@@ -572,6 +582,149 @@ class QueryCapture(AbstractCapability[Any]):
 
 
 
+#: What a param renders as when its declared annotation could not be resolved. NOT cosmetic:
+#: `_resolved_hints` swallows an unresolvable annotation and returns `{}` (verbs.py:94-98),
+#: after which `validate_params` type-checks NOTHING and accepts any value. A surface that
+#: printed the annotation there would promise a check the boundary does not make — the one way
+#: this tool could lie about the thing it exists to report (#900 O3).
+#:
+#: The blast radius is the whole VERB, not the one bad param: `typing.get_type_hints` resolves
+#: a signature as a unit and raises on the first name it cannot see, so `_resolved_hints`
+#: returns `{}` for ALL of them. A verb with one unresolvable annotation therefore has every
+#: param unenforced, and every one of them must say so — which is why this marker is applied
+#: from the absence of a hint rather than from the presence of a bad one.
+UNENFORCED_TYPE = "type unenforced"
+
+LIST_VERBS_TOOL_NAME = "list_verbs"
+
+_LIST_VERBS_UNKNOWN_SYSTEM = (
+    "`{system}` — no adapter is registered under that name, so no verb surface can be derived "
+    "for it. The Dispatch block at the end of your prompt names the system you were dispatched "
+    "to; confirm it there and call this again with that name."
+)
+
+#: Reached only for a name that already passed `_adapter_path`'s `_SYSTEM_RE` match AND its
+#: containment check under the adapters dir — an unmatched name raises `KeyError` into the
+#: branch above — so interpolating it into a path here cannot mint an arbitrary model-named
+#: one (the #855 F-06 concern, which is about a model string reaching a corpus WRITE).
+_LIST_VERBS_UNLOADABLE = (
+    "`{system}` — UNAVAILABLE: its adapter could not be loaded ({err}). No verb surface can be "
+    "derived for it right now. Its documented surface is "
+    "`defender/skills/{system}/execution.md`; report the failure in your summary rather than "
+    "guessing a verb or a param name."
+)
+
+#: The OTHER emptiness, and it is not the one above — the same split `_INDEX_NONE_GRANTED`
+#: draws for the template index. A system that will not load and a system whose every verb
+#: this role is refused both render "nothing to show", and they call for opposite responses.
+_LIST_VERBS_NONE_GRANTED = (
+    "`{system}` — its adapter declares verbs, but your grant admits none of them. This is not "
+    "an empty system and not a read failure: there is nothing here you may run. Measure this "
+    "lead against a system you do hold, or say so in your summary rather than reporting a "
+    "measurement you could not take."
+)
+
+_LIST_VERBS_HEADER = (
+    "`{system}` — the {count} verb(s) your grant admits, read from the adapter's live "
+    "signatures. Copy a line and bind the values in place of each `<…>`:\n"
+)
+
+_LIST_VERBS_LEGEND = (
+    "\nParams bind **by name**; there are no flags and no positional args. Types are literal "
+    "JSON: a number is a number (`20`, never `\"20\"`), a boolean is `true`/`false` (never "
+    "`\"false\"`, which is truthy and would have meant the opposite). A param whose descriptor "
+    "carries a `default` is OPTIONAL — drop it to take that default; every other param is "
+    "REQUIRED.\n"
+    "\nAdd `query_id=\"{system}.<id>\"` to the call — a catalog template's id when you reused "
+    "one, or a coined `{system}.<descriptive-kebab>` when none fit.\n"
+)
+
+_LIST_VERBS_UNENFORCED_NOTE = (
+    "\n`<{marker}>` marks a param whose declared annotation could not be resolved, so the "
+    "boundary does NOT type-check it — a wrong-typed value there reaches the adapter instead "
+    "of being refused. Bind it as that verb's `execution.md` documents.\n"
+)
+
+
+def _rendered_param(name: str, param: inspect.Parameter, hints: Mapping[str, Any]) -> str:
+    """One declared param as a `"name": <descriptor>` entry of a `params={…}` body.
+
+    Keyed on the param, never on `hints`: `_resolved_hints` also returns `ctx` and `return`,
+    neither of which is a param the model may bind.
+    """
+    inner = _ann_name(hints[name]) if name in hints else UNENFORCED_TYPE
+    if param.default is not inspect.Parameter.empty:
+        inner = f"{inner}, default {param.default!r}"
+    return f'"{name}": <{inner}>'
+
+
+def _tool_list_verbs(registry: Any, system: str) -> str:
+    """`system`'s granted verbs and their declared params, derived at call time.
+
+    The two readers are `declared_params` and `_resolved_hints` — the SAME pair
+    `validate_params` enforces on (verbs.py:124-151) — so what this publishes and what the
+    boundary accepts cannot drift apart. The grant filter goes through `registry.decide`
+    rather than `grant.allows` for the same reason one layer up: `decide` is the dispatch
+    path's own decision point, so a verb this names is a verb `query` would admit.
+
+    Nothing is persisted. This writes no queries-table row, touches no circuit breaker and no
+    repeat guard — it is a read of our own adapter signatures, not a measurement of a system
+    of record, and the offline loop's `.queries` must keep meaning "what the defender ran".
+    Its output is trusted for the same reason: the text is derived from first-party source, so
+    it carries no `wrap_fresh` untrusted frame the way a payload does.
+    """
+    try:
+        declared = registry.verbs(system)
+    except KeyError:
+        return _LIST_VERBS_UNKNOWN_SYSTEM.format(system=system)
+    except CONTROL_FLOW_EXCEPTIONS:
+        raise
+    except (BudgetKill, KeyboardInterrupt, GeneratorExit, asyncio.CancelledError):
+        raise
+    except BaseException as e:  # noqa: BLE001 — an adapter that will not import is a degradation
+        return _LIST_VERBS_UNLOADABLE.format(system=system, err=f"{type(e).__name__}: {e}")
+
+    lines: list[str] = []
+    any_unenforced = False
+    for verb in sorted(declared):
+        decision = registry.decide(system, verb)
+        if decision.outcome != GRANTED or decision.fn is None:
+            continue
+        # `model_facing_params`, not `declared_params`: a `wrapper_only` param is refused by
+        # `validate_params`, so publishing it would advertise a binding that cannot be made.
+        params = model_facing_params(decision.fn)
+        hints = _resolved_hints(decision.fn)
+        any_unenforced = any_unenforced or any(name not in hints for name in params)
+        rendered = ", ".join(_rendered_param(n, p, hints) for n, p in params.items())
+        lines.append(f'query(system="{system}", verb="{verb}", params={{{rendered}}})')
+
+    if not lines:
+        return _LIST_VERBS_NONE_GRANTED.format(system=system)
+
+    out = (
+        _LIST_VERBS_HEADER.format(system=system, count=len(lines))
+        + "\n" + "\n".join(f"    {line}" for line in lines) + "\n"
+        + _LIST_VERBS_LEGEND.format(system=system)
+    )
+    if any_unenforced:
+        out += _LIST_VERBS_UNENFORCED_NOTE.format(marker=UNENFORCED_TYPE)
+    return out
+
+
+def register_list_verbs_tool(agent, registry) -> None:
+
+    @agent.tool
+    async def list_verbs(ctx: RunContext[Any], system: str) -> str:
+        """The verbs one system of record declares and the params each one binds — read from
+        the adapter's live signatures, filtered to what your grant admits. Call it before you
+        coin a query no template covers: it is the same surface the `query` tool enforces, so
+        a param it names is a param that will bind and one it omits will be refused. `system`
+        is the system you were dispatched to (the Dispatch block names it); call it again for
+        another system if this lead crosses one. It runs nothing against the system of record
+        and is not recorded as a query."""
+        return _tool_list_verbs(registry, system)
+
+
 def register_query_tool(agent, registry) -> None:
 
     @agent.tool
@@ -619,8 +772,11 @@ from .tools_gather import _payload_note, _tripped_message  # noqa: E402
 __all__ = [
     "CONTROL_FLOW_EXCEPTIONS",
     "DEFAULT_FAULT_EXIT",
+    "LIST_VERBS_TOOL_NAME",
     "QueryCapture",
     "TOOL_NAME",
+    "UNENFORCED_TYPE",
+    "register_list_verbs_tool",
     "register_query_tool",
     "resolve_query_id",
 ]

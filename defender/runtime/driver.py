@@ -420,7 +420,7 @@ GATHER_DEF = AgentDefinition(
     role=AgentRole.GATHER,
     model=gather_model,
     effort="none",
-    tools=ToolSet(read=True, bash=True, template_search=True, query=True),
+    tools=ToolSet(read=True, bash=True, template_search=True, query=True, list_verbs=True),
     corpus_dirs=_CORPUS_DIRS,
     bash_shapes=(_gather_bash_shapes,),
     deps_cls=GatherDeps,

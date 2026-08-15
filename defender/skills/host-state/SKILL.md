@@ -19,14 +19,14 @@ the defender, the author skill, and the actor-reviewer judge.
 
 ### available_queries
 
-| Subcommand | Measurement |
+| Verb | Measurement |
 |---|---|
-| `container-inspect <container_id>` | Container name + image by id (daemon `docker inspect`) — takes a container id, not a host name |
-| `proc-tree <host>` | Process forest (`ps -eo pid,ppid,user,stat,etime,cmd --forest`) |
-| `passwd <host>` | `/etc/passwd` entries — UNIX-level account presence on this host |
-| `authorized-keys <host> [--user U]` | `~U/.ssh/authorized_keys` (user defaults to root) |
-| `fim-checksum <host> <path>` | SHA-256 of a single absolute path |
-| `package-list <host>` | Installed `dpkg` packages (name + version) |
+| `container-inspect` | Container name + image (daemon `docker inspect`) — keyed on a container id, not a host name |
+| `proc-tree` | Process forest for a host (`ps -eo pid,ppid,user,stat,etime,cmd --forest`) |
+| `passwd` | `/etc/passwd` entries for a host — UNIX-level account presence |
+| `authorized-keys` | `~/.ssh/authorized_keys` for a host, per user (defaults to root) |
+| `fim-checksum` | SHA-256 of a single absolute path on a host |
+| `package-list` | Installed `dpkg` packages (name + version) for a host |
 
 ### gaps
 

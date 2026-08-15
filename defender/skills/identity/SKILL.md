@@ -75,9 +75,9 @@ path.
 - **Use for scope-checking** an observed login or sudo event — does
   the user actually have a role mapping for that host, or is this
   cross-credential anomaly?
-- **Use for user-enumeration cross-checks** — pair `list-users
-  --role developer` with cmdb's `list-hosts --role dev-ws` to derive
-  expected user-host pairs.
+- **Use for user-enumeration cross-checks** — pair `list-users`
+  filtered to the `developer` role with cmdb's `list-hosts` filtered
+  to `dev-ws` to derive expected user-host pairs.
 
 ### when_not_to_use
 

@@ -19,9 +19,9 @@ they are not part of gather's catalog and are not documented here.
 
 ### available_queries
 
-| Subcommand | Measurement |
+| Verb | Measurement |
 |---|---|
-| `list-tickets [--status X] [--label X] [--q X]` | Filtered ticket list with summary + labels |
+| `list-tickets` | Filtered ticket list with summary + labels (by status, label, or free-text query) |
 
 ### gaps
 
@@ -66,12 +66,12 @@ they are not part of gather's catalog and are not documented here.
 - **Use for precedent matching at REPORT time** — when a similar
   alert has been investigated before, the matched_ticket_id is the
   citation; confirm the precedent's disposition is still applicable via
-  `list-tickets --q <ticket key>`.
+  `list-tickets` free-text-searched on the ticket key.
 - **Use for "is this alert already on the SOC's radar"** —
-  `list-tickets --q <host or user>` finds open work touching the
-  same entities.
-- **Use to enumerate by label** — `list-tickets --label
-  false-positive` for known-FP precedents.
+  `list-tickets` free-text-searched on a host or user finds open work
+  touching the same entities.
+- **Use to enumerate by label** — `list-tickets` on the
+  `false-positive` label for known-FP precedents.
 
 ### when_not_to_use
 
