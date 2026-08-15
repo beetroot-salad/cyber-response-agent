@@ -134,6 +134,20 @@ def test_a_non_str_or_non_utf8_mapping_key_is_refused_and_the_encoder_is_never_c
     plain `TypeError` in row position, and a surrogate raises `PanicException` /
     `UnicodeEncodeError` the same way. A test that placed the hazard at one position only would
     pass over an implementation that guards one encoder path.
+
+    WHAT REFUSAL MEANS HERE, CORRECTED. This asserted `out.error is None` for all four, i.e.
+    that every refused payload still delivers. That is unachievable for the surrogate pair and
+    demanding it would require the gate to do BETTER than the un-gated run, which `d47` forbids
+    in as many words. Executed against the shipped serializer: a non-`str` key serializes fine
+    (pydantic-core coerces `{1: "x"}` to `{"1":"x"}`), while a lone surrogate raises
+    `PydanticSerializationError` from `ToolReturnPart.model_response_str` — the ruler the gate
+    and the baseline share. So a surrogate payload is undeliverable by ANY path, gate or no
+    gate, and the gate's job is to reach that failure without having called the encoder.
+
+    The demand this test exists for is untouched and is the one asserted in every position:
+    the encoder is NEVER reached. What is now derived rather than assumed is whether the run
+    then survives — read off the baseline serializer, so the gate is pinned to parity with it
+    instead of to a constant that happened to hold for two of the four cases.
     """
     class StrKey(str):
         pass
@@ -146,11 +160,26 @@ def test_a_non_str_or_non_utf8_mapping_key_is_refused_and_the_encoder_is_never_c
         "surrogate, row position": {"rows": [{surrogate: "x", "z": 2}]},
     }
     for label, value in refused.items():
+        try:
+            baseline = wire_text(value)
+        except BaseException as e:  # noqa: BLE001 — the un-gated run's own fault, whatever it is
+            baseline = None
+            baseline_error: BaseException | None = e
+        else:
+            baseline_error = None
+
         spy = _sealed()
         out = agent_run(toolset=foreign_toolset(value), encoder=spy)
-        assert out.error is None, f"{label} escaped the guard"
         assert spy.dumps_calls == 0, f"{label} reached the encoder"
-        assert framed_content(out.dispatched.text()) == wire_text(value)
+        if baseline_error is None:
+            assert out.error is None, f"{label} escaped the guard"
+            assert framed_content(out.dispatched.text()) == baseline
+        else:
+            assert out.error is not None, (
+                f"{label}: the un-gated run cannot serialize this payload "
+                f"({type(baseline_error).__name__}), so a gated run that DELIVERS it is the "
+                "gate doing better than the baseline, which d47 forbids"
+            )
 
     admitted = {"rows": [{StrKey("a"): i, "b": f"pad-{i}"} for i in range(40)]}
     out = agent_run(toolset=foreign_toolset(admitted))
@@ -309,13 +338,25 @@ def test_a_shallow_acyclic_payload_whose_node_count_exceeds_the_budget_is_refuse
     ceiling here rather than failing quietly. The budget is configured low, so a correct walk
     stops after a bounded number of visits whatever k is, which is the second reason M7
     precedes the encoder rather than wrapping it.
+
+    TWO ARMS, BECAUSE ONE k CANNOT CARRY BOTH HALVES. This drove k=28 and then asserted the
+    child exits 0. It cannot: a 2**28-node payload is UNDELIVERABLE, and not by the gate's
+    doing — the passthrough has to serialize what it declined to encode, and so does the
+    un-gated run, and both need >2 GiB. Executed both ways at k=28: `returncode -6`, SIGABRT,
+    identically with the capability installed and absent. Demanding survival there asked the
+    gate to beat the baseline, which `d47` forbids.
+
+    So the refusal is observed at k=16 — 65_536 containers against a budget of 1_000, far
+    enough over to prove the walk stopped early, small enough that the passthrough's own
+    serialization is trivial — and k=28 is kept for the half only it can prove: that the walk
+    TERMINATES instead of visiting 2**k nodes, plus parity of the death that follows.
     """
     child = f'''
 import json
 from defender.tests.e2e import _toon872 as T
 
 value = {{"leaf": 1}}
-for _ in range(28):
+for _ in range(16):
     value = {{"a": value, "b": value}}
 
 spy = T.SpyEncoder(T.EncoderFault(dumps_returns="<must not be called>"))
@@ -330,13 +371,35 @@ print(json.dumps({{
     outcome = run_isolated(child, timeout=90.0)
     assert not outcome.timed_out, (
         "the walk did not terminate on the expansion bomb — a validator with no node budget "
-        "visits 2**28 nodes before it decides anything"
+        "visits 2**16 nodes before it decides anything"
     )
     assert outcome.returncode == 0, f"the child died: {outcome.stderr[-800:]}"
     result = json.loads(outcome.stdout.strip().splitlines()[-1])
     assert result["dumps_calls"] == 0, "the expansion bomb reached the encoder"
     assert result["raised"] is False
     assert result["content_is_wire"] is True
+
+    # The k=28 arm: the walk must TERMINATE rather than visit 2**28 nodes. The process then
+    # dies serializing a payload no serializer can hold — so what is asserted is termination
+    # (not a hang) and PARITY of that death, never survival.
+    bomb = (
+        "from defender.tests.e2e import _toon872 as T\n"
+        'value = {"leaf": 1}\n'
+        "for _ in range(28):\n"
+        '    value = {"a": value, "b": value}\n'
+        "T.agent_run(toolset=T.foreign_toolset(value), capabilities=%s)\n"
+    )
+    gated_bomb = run_isolated(bomb % "True", timeout=90.0)
+    plain_bomb = run_isolated(bomb % "False", timeout=90.0)
+    assert not gated_bomb.timed_out, (
+        "the guarded walk did not terminate on a 2**28-node payload — the node budget is not "
+        "bounding the walk's own cost, which is the half a smaller k cannot prove"
+    )
+    assert not plain_bomb.timed_out, "the un-gated arm hung, so the comparison below is unsound"
+    assert (gated_bomb.returncode == 0) == (plain_bomb.returncode == 0), (
+        "the gate changed whether a 2**28-node payload takes the process down; it is "
+        "undeliverable either way, and the gate may not be worse OR better than the baseline"
+    )
 
 
 def _shared_leaf_dag(*, width: int, share: int) -> dict:
@@ -483,6 +546,16 @@ def test_every_input_class_kills_or_survives_the_run_identically_with_and_withou
     payload the guarded run prints a Rust panic line to STDERR that the un-gated run does not.
     Model-visible text is identical; process stderr is not.
 
+    THE PROBE MUST NOT CREATE THE DIVERGENCE IT MEASURES. The child used to harvest its result
+    with a bare `out.dispatched.texts()`, and that call SERIALIZES the tool return — so on an
+    unserializable payload (a lone surrogate in a mapping key, a circular container) the probe
+    itself raised, killing the un-gated child while the gated one exited cleanly, because the
+    gated arm's text is already a plain framed `str` with nothing left to serialize. The
+    measurement, not the gate, was the asymmetry: executed both ways, the two arms reach the
+    SAME outcome (neither delivers) whenever the harvest is not the thing that dies. The
+    harvest is now guarded and its own failure is reported as `text_raised`, so a real change
+    in what the gate does to a process still fails this test while a probe artefact cannot.
+
     Each arm runs in its own child interpreter, because the point of the demand is what a
     PROCESS does and because a SIGSEGV in the test process is not a test result.
     """
@@ -508,15 +581,27 @@ def test_every_input_class_kills_or_survives_the_run_identically_with_and_withou
                 "from defender.tests.e2e import _toon872 as T\n"
                 f"{build}\n"
                 f"out = T.agent_run(toolset=T.foreign_toolset(value), capabilities={gated})\n"
+                # HARVESTED DEFENSIVELY, and this is load-bearing: `texts()` SERIALIZES the
+                # tool return, so on an unserializable payload the probe itself raises — in
+                # the un-gated arm only, because the gated arm's text is already a plain
+                # framed `str` with nothing left to serialize. Harvesting it bare made this
+                # test report a divergence it had created: the RUN reached the same outcome in
+                # both arms (neither delivers), and only the measurement died.
+                "try:\n"
+                "    text, text_raised = (out.dispatched.texts() or [None])[0], False\n"
+                "except BaseException:\n"
+                "    text, text_raised = None, True\n"
                 "print(json.dumps({'raised': out.error is not None,\n"
                 "                  'type': type(out.error).__name__ if out.error else None,\n"
-                "                  'text': (out.dispatched.texts() or [None])[0]}))\n"
+                "                  'text_raised': text_raised,\n"
+                "                  'text': text}))\n"
             )
             arms[gated] = run_isolated(child, timeout=120.0)
 
         gated_out, plain_out = arms[True], arms[False]
         assert not gated_out.timed_out, f"{label} hung with the gate"
         assert not plain_out.timed_out, f"{label} hung without the gate"
+
         assert gated_out.signalled == plain_out.signalled, (
             f"{label}: the gate changed whether the process was killed by a signal"
         )
@@ -531,19 +616,34 @@ def test_every_input_class_kills_or_survives_the_run_identically_with_and_withou
                 f"{label}: the gate changed the class of the failure"
             )
 
-    panic_marker = "panicked at"
+    # THE PROBED STDERR DIVERGENCE DOES NOT EXIST, and asserting it made this test depend on a
+    # panic being ABSENT from an arm that also emits it. Executed over a 2x2 — {benign,
+    # `}`-in-key} x {gated, un-gated} — the `serialization.rs` panic line appears in ALL FOUR,
+    # including a benign dict-row payload with no capability installed at all. It is ambient to
+    # driving an agent in this harness, not something the gate does and not something the
+    # `}` key provokes: a bare `toons.dumps({"rows": [{"a": 1}]})` in a child prints nothing.
+    #
+    # So the honest statement is the ABSENCE of a gate-attributable stderr difference, and the
+    # demand that actually carries O9 is the model-visible one: the text is identical.
     brace = '{"rows": [{"}": i, "z": i} for i in range(20)]}'
-    gated = run_isolated(
+    harvest = (
         "from defender.tests.e2e import _toon872 as T\n"
-        f"T.agent_run(toolset=T.foreign_toolset({brace}))\n", timeout=120.0)
-    plain = run_isolated(
-        "from defender.tests.e2e import _toon872 as T\n"
-        f"T.agent_run(toolset=T.foreign_toolset({brace}), capabilities=False)\n", timeout=120.0)
-    gone = ("the probed stderr divergence is gone: the guarded run no longer prints the "
-            "decoder's Rust panic line that the un-gated run does not, so either the arm "
-            "moved or the decoder stopped panicking")
-    assert panic_marker in gated.stderr, gone
-    assert panic_marker not in plain.stderr, gone
+        f"out = T.agent_run(toolset=T.foreign_toolset({brace}), capabilities=%s)\n"
+        "print((out.dispatched.texts() or [None])[0])\n"
+    )
+    gated = run_isolated(harvest % "True", timeout=120.0)
+    plain = run_isolated(harvest % "False", timeout=120.0)
+    assert gated.returncode == 0, "a `}`-in-key payload stopped delivering with the gate"
+    assert plain.returncode == 0, "a `}`-in-key payload stopped delivering without the gate"
+    assert ("panicked at" in gated.stderr) == ("panicked at" in plain.stderr), (
+        "a Rust panic line became gate-attributable — it is ambient to this harness today, so "
+        "an asymmetry here is a real change in what the gate does to the process"
+    )
+    # The gate ALWAYS frames, so raw stdout differs by construction (and by run id). What must
+    # match is the framed CONTENT against the un-gated text — the bytes the model reads.
+    assert framed_content(gated.stdout.strip()) == plain.stdout.strip(), (
+        "the gate changed the model-visible text on a `}`-in-key payload"
+    )
 
 
 def test_a_payload_carrying_a_raw_nul_is_refused_and_the_encoder_is_never_called() -> None:

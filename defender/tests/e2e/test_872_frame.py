@@ -120,9 +120,19 @@ def test_a_hazard_value_in_a_foreign_dict_rows_field_name_forges_no_field_bounda
     THE DISCHARGE HAS TWO HALVES AND THE SECOND IS THE LIVE FAULT. `R7` settled the encode
     side: quoting is at PARITY between key and value position, every hazard is quoted
     identically, and no case produced a forged view that still compared equal — so P3-B needs
-    no key sanitiser. But the DECODE side is a live fault: a `}` in a key is a perfectly legal
-    `str` that M7 ADMITS, `dumps` emits it inside the header and `loads` raises on the view it
-    just produced. Pre-validation cannot cover it, so the guard is the only thing that does.
+    no key sanitiser. The DECODE side is the live one: a `}` in a key is a perfectly legal
+    `str` that M7 ADMITS, and `dumps` emits it inside the header. Pre-validation cannot cover
+    it, so the round-trip guard is the only thing that does.
+
+    HOW THAT FAULT PRESENTS — CORRECTED. This asserted `loads` RAISES on the view `dumps` just
+    produced. Executed against the shipped decoder, it does not raise: it returns a value that
+    is not equal to the original, i.e. it corrupts SILENTLY. That is the more dangerous of the
+    two shapes and the guard catches it for the same reason either way — `_gate` substitutes
+    only on a byte-exact round-trip, so a decoder that raises and a decoder that quietly
+    returns something else both land on the passthrough branch. What must be pinned is
+    therefore "the round-trip does not reproduce the original", not "the round-trip raises";
+    the old spelling passed only on a decoder that failed loudly, and would have gone green on
+    no guard at all the moment the decoder stopped raising — which is what happened.
     """
     value = hazard_key_rows()
     out = agent_run(toolset=foreign_toolset(value))
@@ -132,8 +142,18 @@ def test_a_hazard_value_in_a_foreign_dict_rows_field_name_forges_no_field_bounda
         assert declared == emitted, "a key forged a row boundary"
 
     if view == wire_text(value):
-        with pytest.raises(BaseException):  # noqa: B017, PT011 — the decoder's own fault
-            toons.loads(toons.dumps(value))
+        # Passthrough: the guard refused to substitute. Whatever the decoder does with the
+        # view — raise, or hand back something else — it must not reproduce the original,
+        # because that is the only reason a passthrough was the right answer.
+        try:
+            recovered = toons.loads(toons.dumps(value))
+        except BaseException:  # noqa: BLE001 — a decoder that raises discharges this too
+            pass
+        else:
+            assert recovered != value, (
+                "the round-trip reproduced the original, so this payload was safe to "
+                "substitute and the passthrough is unexplained"
+            )
     else:
         assert toons.loads(view) == value, "a key forged a field boundary"
 
