@@ -195,7 +195,7 @@ def test_wire_sha_joins_a_store_row_to_its_wire_log_line(tmp_path):
         Turn(tool_calls=[("read_file", {"path": str(run_dir / "alert.json")})]),
         Turn(text="done"),
     ])
-    drive(run_dir, run_id="join", salt=SALT, main=replay,
+    drive(run_dir, run_id="join", main=replay,
           store_factory=store_factory(tmp_path, sink=opened))
 
     store = opened[0]

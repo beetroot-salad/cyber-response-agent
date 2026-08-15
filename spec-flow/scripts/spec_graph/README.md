@@ -1,7 +1,7 @@
 # spec_graph — mechanical granularity checks for write-tests spec graphs
 
 A write-tests spec graph (`spec_graph_*.yaml`, committed beside the tests) is a lossy projection
-of the code's behavioral domain: *demands* bound to graph elements, with gate rules R0–R7 computing
+of the code's behavioral domain: *demands* bound to graph elements, with gate rules R0–R8 computing
 blind-spot shapes over the bindings. The gate rules are only as good as the partition, the axes,
 and the binding-edges they're handed — so a graph **coarser than reality** passes green while real
 bugs escape.
@@ -98,7 +98,7 @@ exist) but never derived.
 
 schema.md's slot discipline, mechanical: demand kinds/forms and the form-conditional fields (a
 `form: test` demand is a pointer — no `outcome`; clause/waiver carry `outcome.nl`), actor/edge/
-facet vocabularies, unique ids, gate entries naming rules R0–R7 and demands that exist. Replaces
+facet vocabularies, unique ids, gate entries naming rules R0–R8 and demands that exist. Replaces
 the per-run hand check that used to land in `handoff.deviations`. Grow a vocabulary by growing
 schema.md and this linter's table in one commit.
 

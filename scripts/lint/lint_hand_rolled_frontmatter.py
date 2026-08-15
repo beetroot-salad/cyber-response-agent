@@ -23,7 +23,13 @@ What it flags — parse-shaped **Call** nodes in defender/ production code:
 - ``<x>.startswith/removeprefix/removesuffix("---…" | "\\n---…")`` — a hand-rolled
   opening/closing-fence check or strip
 - ``re.compile/search/match/fullmatch/sub/subn/finditer/findall/split`` with a
-  fence pattern (``^---`` / ``\\A---`` / ``\\n---`` / a ``---``-leading literal)
+  fence pattern (``^---`` / ``\\A---`` / ``\\n---`` / a ``---``-leading literal).
+  A closing-fence pattern is marked in BOTH of its spellings — the raw ``r"\\n---"``,
+  whose constant holds the two characters ``\\``+``n``, and the non-raw ``"\\n---"``,
+  whose constant holds a real newline. They are different strings by the time the
+  AST is read, and only marking one of them misses the other entirely (#885).
+  (This docstring is not raw, so both examples are written ``\\n`` here; what
+  distinguishes them is the ``r`` prefix on the source literal, not the render.)
 
 The ``re`` call is identified by its RESOLVED ORIGIN (``scripts/lint/_astlib.py``), not by
 the spelling ``re.``: ``import re as regex`` and ``from re import search`` are the same
@@ -87,7 +93,12 @@ _RE_FUNCS = (
     "sub", "subn", "finditer", "findall", "split",
 )
 # A regex arg is fence-shaped when it anchors or searches for a '---' fence line.
-_FENCE_PATTERN_MARKS = ("^---", "\\A---", "\n---")
+# These are matched against the CONSTANT, so an escape has two distinct spellings and
+# both must be listed: `"\\A---"` / `"\\n---"` are the regex-SOURCE forms (what a raw
+# `r"\A---"` / `r"\n---"` actually contains), while `"\n---"` is a real newline — what a
+# non-raw `"\n---"` contains. `r"\n---"` is how the closing-fence pattern is normally
+# written, and marking only the newline form let it through (#885).
+_FENCE_PATTERN_MARKS = ("^---", "\\A---", "\\n---", "\n---")
 
 
 def _in_scope(path: Path) -> bool:

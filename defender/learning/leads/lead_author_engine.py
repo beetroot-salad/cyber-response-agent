@@ -84,7 +84,10 @@ def _run_lead_author_pydantic(
         )
     deps = bind(
         LEAD_AUTHOR_DEF, ctx.learning_run_dir,
-        defender_dir=repo_root / "defender", salt=ctx.salt, box=ctx.box,
+        # `ctx.salt` is NOT bound (#875): it scopes this stage's PROMPT frames — the set
+        # `stage_user_message` announces as one message — while a tool return is framed by
+        # `wrap_fresh`, which mints its own salt after the content is in hand.
+        defender_dir=repo_root / "defender", box=ctx.box,
     )
     return run_stage(
         stage="lead_author",

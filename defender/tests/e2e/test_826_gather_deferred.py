@@ -105,7 +105,7 @@ def _run(root: Path, *, verbs, turns: list[Turn], run_id: str, tmp_path: Path,
     ])
     gather = ReplayFn(turns)
     stores: list = []
-    drive(run_dir, run_id=run_id, salt=SALT, main=main, gather=gather, verbs=verbs,
+    drive(run_dir, run_id=run_id, main=main, gather=gather, verbs=verbs,
           store_factory=store_factory(tmp_path, sink=stores))
     return _Res(run_dir, main, gather, stores)
 
@@ -132,7 +132,7 @@ def test_every_gather_terminator_arm_stamps_its_own_reason(tmp_path):
             async def run(self, *a, **kw):
                 raise exc
 
-        return lambda agent_id, system: _Agent()
+        return lambda agent_id, system, request_limit: _Agent()
 
     arms = {
         UsageLimitExceeded("limit"): session_store.TRUNCATED_BY_REQUEST_LIMIT,
@@ -144,7 +144,7 @@ def test_every_gather_terminator_arm_stamps_its_own_reason(tmp_path):
 
     for i, (exc, expected) in enumerate(arms.items()):
         run_dir = materialize(tmp_path / f"arm{i}", GOLDEN_AB3)
-        deps = bind(MAIN_DEF, run_dir, salt=SALT, defender_dir=DEFENDER)
+        deps = bind(MAIN_DEF, run_dir, defender_dir=DEFENDER)
         lead = f"l-00{i}"
         out = asyncio.run(tools_gather._run_gather(
             deps, _factory_raising(exc), 40,
@@ -169,7 +169,7 @@ def test_every_gather_terminator_arm_stamps_its_own_reason(tmp_path):
 
     for i, (exc, expected) in enumerate(propagating.items()):
         run_dir = materialize(tmp_path / f"prop{i}", GOLDEN_AB3)
-        deps = bind(MAIN_DEF, run_dir, salt=SALT, defender_dir=DEFENDER)
+        deps = bind(MAIN_DEF, run_dir, defender_dir=DEFENDER)
         lead = f"l-01{i}"
         with pytest.raises(type(exc)):
             asyncio.run(tools_gather._run_gather(
@@ -188,10 +188,10 @@ def test_every_gather_terminator_arm_stamps_its_own_reason(tmp_path):
             return R()
 
     run_dir = materialize(tmp_path / "clean", GOLDEN_AB3)
-    deps = bind(MAIN_DEF, run_dir, salt=SALT, defender_dir=DEFENDER)
+    deps = bind(MAIN_DEF, run_dir, defender_dir=DEFENDER)
     before = len(stamped)
     asyncio.run(tools_gather._run_gather(
-        deps, lambda agent_id, system: _Clean(), 40,
+        deps, lambda agent_id, system, request_limit: _Clean(), 40,
         GatherRequest("l-009", "elastic", "goal", ("what",)), GATHER_DEF.verb_grant,
         lambda agent_id, reason: stamped.append((agent_id, reason)),
     ))
@@ -218,7 +218,7 @@ def test_a_cut_off_lead_is_distinguishable_in_the_store_from_one_that_finished(t
         q("elastic", "query", {"native_query": "FROM other"}), DONE,   # the second lead
     ])
     stores: list = []
-    drive(run_dir, run_id="d826-store", salt=SALT, main=main, gather=gather,
+    drive(run_dir, run_id="d826-store", main=main, gather=gather,
           verbs=elastic_ok(rec), store_factory=store_factory(tmp_path, sink=stores))
 
     sessions = dict(sql(stores[-1], "SELECT agent_id, truncated_by FROM session"))
@@ -274,7 +274,7 @@ def test_a_broken_store_cannot_turn_a_lost_terminator_into_a_lost_lead(tmp_path)
         wrapped.append(handle)
         return handle
 
-    drive(run_dir, run_id="d826-nostamp", salt=SALT, main=main, gather=gather,
+    drive(run_dir, run_id="d826-nostamp", main=main, gather=gather,
           verbs=elastic_ok(rec), store_factory=factory)
 
     attempts = [reason for h in wrapped for _, reason in h.attempts]
@@ -306,7 +306,7 @@ def test_both_writers_of_the_column_draw_on_one_vocabulary(tmp_path):
         q("elastic", "query", PARAMS), DONE,
     ])
     stores: list = []
-    drive(run_dir, run_id="d826-vocab", salt=SALT, main=main, gather=gather,
+    drive(run_dir, run_id="d826-vocab", main=main, gather=gather,
           verbs=elastic_ok(rec), store_factory=store_factory(tmp_path, sink=stores))
 
     stamped = [

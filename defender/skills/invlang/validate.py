@@ -21,6 +21,7 @@ from .parser import (
     parse_dense_companion,
 )
 from .schema import (
+    AuthorizationContract,
     CompanionBody,
     EdgeRecord,
     FindingRecord,
@@ -441,10 +442,16 @@ def _check_authz_contract_ids(companion: CompanionBody) -> list[str]:
     edited away — under a declared-set reading, every later write to that document would be
     denied for a row the author is no longer allowed to touch, and `learning/core/persist.py`
     dead-letters the run. Refuting one of the two is an in-grammar, append-only move that
-    ends the ambiguity honestly, and it is the same set `_check_benign_authz` reads: a
-    contract on a refuted hypothesis discharges nothing, so a collision there costs nothing.
-    Two hypotheses that are both still live is the case with no honest reading, and it stays
-    refused.
+    ends the ambiguity honestly. Two hypotheses that are both still live is the case with no
+    honest reading, and it stays refused.
+
+    What refuting does NOT do is make the id unambiguous, and this docstring used to claim it
+    did — "a contract on a refuted hypothesis discharges nothing, so a collision there costs
+    nothing" was true of the CONTRACT and false of the ROW that fulfills it (#876/F-3). The
+    `:R authz` row carries no hypothesis column, so the refuted declarer's row discharged the
+    live declarer's same-numbered contract too. `_check_benign_authz` is what closes that, by
+    scoping a shared id to the ANCHOR KIND both sides carry; the exemption here is what leaves
+    the author a repair, and it is not on its own sufficient.
 
     Only the cross-hypothesis collision reaches here: `_extend_by_id` keeps the first row per
     id when ONE `:H <h>.authz` block repeats an id, so the folded record this walks carries
@@ -704,7 +711,8 @@ def _is_legal_refinement_key(key: str) -> bool:
 
 
 def _check_attr_update_keys(proposed_text: str) -> list[Diagnostic]:
-    """`:R attr_updates` keys, checked over the ROWS rather than the folded records.
+    """`:R attr_updates` refinement rows — the KEY, and the value that key promises to carry
+    — checked over the ROWS rather than the folded records.
 
     Reads blocks straight from the document because this is the one check that quotes a row
     back and offers a corrected one. The fold keeps `{key: value}` per target and drops the
@@ -715,21 +723,46 @@ def _check_attr_update_keys(proposed_text: str) -> list[Diagnostic]:
 
     Here the `key` CELL is replaced in place and every other cell stays where the author put
     it. A block whose header names no `key` column has no cell to substitute and no row this
-    can honestly point at, so it yields nothing — the row is not a refinement at all."""
+    can honestly point at, so it yields nothing — the row is not a refinement at all.
+
+    The VALUE cell is the second family and it is a REFUSAL, not a warning (#876/F-6). A
+    present-but-blank value is not inert: `_apply_attr_updates` assigned it unconditionally,
+    and since neither `_has_open_slot("")` nor `_is_unresolved("")` reads `""` as open, the
+    empty cell was not taken as a downgrade but as a RESOLUTION — `l-001|v-001|class|` and
+    `l-001|v-001|attrs.knowledge|` made two benign-blocking errors vanish and the document
+    close. The truncated 3-cell row is the control: it is already refused by the cell-count
+    rule, so the hole is exactly the cell that is present and says nothing. No `fix` is
+    offered, because the missing value is the one thing this check cannot supply."""
     out: list[Diagnostic] = []
     for block in iter_blocks(proposed_text):
         cols = block.columns or []
-        if block.name != "attr_updates" or "key" not in cols:
+        if block.name != "attr_updates":
             continue
-        at = cols.index("key")
         for row in block.rows:
             try:
                 rec = _row_dict(block, row)
             except RowError:
                 continue  # already a parse warning; not this check's business
             key = rec.get("key")
-            if not key or _is_legal_refinement_key(key):
+            if not key:
                 continue
+            if _is_legal_refinement_key(key):
+                value = rec.get("value")
+                if "value" in cols and not (value or "").strip():
+                    out.append(Diagnostic(
+                        message=(
+                            f":R attr_updates on {rec.get('target', '?')}: the `value` cell "
+                            f"for key {key!r} is empty — a refinement settles a slot by "
+                            f"naming the value the lead obtained, and an empty cell settles "
+                            f"nothing. Write that value, or leave the `??` standing and "
+                            f"escalate"
+                        ),
+                        locus=Locus(block=":R attr_updates", row_text=row),
+                    ))
+                continue
+            # `rec`'s keys are the block's DECLARED columns, so a non-empty `key` is proof
+            # the header names a `key` column to substitute into.
+            at = cols.index("key")
             cells = [rec.get(c, "") for c in cols]
             out.append(Diagnostic(
                 message=(
@@ -810,11 +843,26 @@ def _is_unresolved(value: Any) -> bool:
     Anchored to the whole value on purpose. A "contains braces" test would refuse a benign
     close over a legitimate `attrs.cmdline` that happens to carry `{...}`, which is a
     different and much larger change than closing the gap.
+
+    An OPENING brace with no close counts as open (#876/F-26). `_has_open_slot` has carried an
+    unterminated-brace guard since a single dropped `}` read as CONCRETE and closed benign over
+    the class it was still enumerating; the ATTRIBUTE arm calls this predicate directly, where
+    `role={internal, dmz` satisfied neither test and read as a settled fact.
+
+    "With no close" is the SAME `count("{") > count("}")` test `_has_open_slot` states one
+    function down, and it is load-bearing on top of the whole-value anchor rather than replaced
+    by it. The anchor alone reads any value that merely BEGINS with a brace as open, closed or
+    not — `attrs.cmdline={ cd /x && ls; } >out` and a JSON-shaped attribute both start with `{`
+    and both carry their close — so it newly refused a benign close over concrete facts. The
+    anchor still does the narrowing the fix needs: a shell command carrying an unclosed `{`
+    does not START with one, so it stays clean.
     """
     if not isinstance(value, str):
         return False
     v = value.strip()
-    return v == "??" or (v.startswith("{") and v.endswith("}"))
+    if v == "??":
+        return True
+    return v.startswith("{") and (v.endswith("}") or v.count("{") > v.count("}"))
 
 
 def _class_slots(classification: str) -> list[str]:
@@ -902,6 +950,16 @@ def _apply_attr_updates(
             tgt, {"classification": "", "identifier": "", "attributes": {}}
         )
         for key, val in updates.items():
+            # A refinement with nothing in its value cell resolves nothing. The parser
+            # defaults an absent value to `""`, and `_has_open_slot("")` / `_is_unresolved("")`
+            # are both False — so assigning it did not read as a downgrade, it read as a
+            # RESOLUTION, and `l-001|v-001|class|` cleared the very `??` the row was meant to
+            # settle (#876/F-6). The no-downgrade guard `_seed_vertex_state` carries two
+            # functions up, on the path whose whole job is to CLEAR an open slot.
+            # `_check_attr_update_keys` refuses the row outright; this keeps the read side
+            # honest on a document that never went through the gate.
+            if not isinstance(val, str) or not val.strip():
+                continue
             if key == "class":
                 st["classification"] = val
             elif key == IDENT_REFINEMENT_KEY:
@@ -941,17 +999,134 @@ def _check_benign_open_slots(companion: CompanionBody) -> list[str]:
     return errors
 
 
+def _anchor_kind(record: Any) -> str:
+    return (record.get("anchor_kind") or "").strip() if isinstance(record, dict) else ""
+
+
+def _declarers_by_contract_id(
+    companion: CompanionBody,
+) -> dict[str, list[tuple[str, str]]]:
+    """Every `(hypothesis, anchor kind)` that declares each `ac*` id — LIVE OR NOT.
+
+    A different question from the one `_check_authz_contract_ids` indexes, which is why the
+    live filter is not shared. That check asks "is this collision still repairable", and
+    refuting one side is the append-only repair it accepts. This one asks "which contract
+    does a `:R authz` row naming this id answer", and a refuted declarer competes for the row
+    exactly as a live one does: the row carries no hypothesis column either way.
+    """
+    declared_by: dict[str, list[tuple[str, str]]] = {}
+    for hid, hyp in _walkers.all_hypotheses(companion).items():
+        for c in hyp.get("authorization_contract") or []:
+            if not isinstance(c, dict):
+                continue
+            cid = c.get("id")
+            if isinstance(cid, str) and cid:
+                declared_by.setdefault(cid, []).append((hid, _anchor_kind(c)))
+    return declared_by
+
+
+def _authz_contract_error(
+    hid: str,
+    contract: AuthorizationContract,
+    declarers: dict[str, list[tuple[str, str]]],
+    verdicts: dict[str, list[tuple[str, str]]],
+) -> str | None:
+    """Why this ONE contract on this LIVE hypothesis does not close benign — or `None`.
+
+    Split out of `_check_benign_authz` so the shared-id arm can be read on its own; the
+    caller is the walk over live hypotheses and holds no rule of its own.
+    """
+    cid = contract.get("id", "?")
+    anchor = _anchor_kind(contract)
+    competing = [(h, a) for h, a in declarers.get(cid, []) if h != hid]
+    candidates = verdicts.get(cid) or []
+
+    if competing:
+        # Not "if the kinds are both blank": a contract cannot have one. `_hyp_sub_authz_row`
+        # `_require`s `anchor_kind`, so a `:H <h>.authz` row without it is a parse error and
+        # the contract never reaches the companion — which is what makes the kind a usable
+        # discriminator here rather than one more cell that might say nothing.
+        twins = sorted(h for h, a in competing if a == anchor)
+        if twins:
+            return (
+                f"disposition benign blocked: authz contract {cid} on live hypothesis "
+                f"{hid} shares BOTH its id and its anchor kind {anchor!r} with a contract "
+                f"on {', '.join(twins)} — a `:R authz` row names only the contract it "
+                f"fulfills, so no row can be attributed to this one and none discharges "
+                f"it; number `ac*` across the document, not per hypothesis"
+            )
+        rows = [v for v, a in candidates if a == anchor]
+        if not rows:
+            return (
+                f"disposition benign blocked: authz contract {cid} on live hypothesis "
+                f"{hid} asks an {anchor!r} question, and {cid} is also declared by "
+                f"{', '.join(sorted(h for h, _a in competing))} — so only a `:R authz` row "
+                f"carrying anchor kind {anchor!r} discharges it, and the document has none"
+            )
+    else:
+        rows = [v for v, _a in candidates]
+
+    if not rows:
+        return (
+            f"disposition benign blocked: authz contract {cid} on "
+            f"live hypothesis {hid} resolved 'no fulfilling :R authz "
+            f"row', not 'authorized' — benign requires every contract "
+            f"authorized"
+        )
+    # The LIST, not `next(..., None)`: `None` is a verdict a row can carry, so the sentinel
+    # and the value would be the same object and a `None` verdict would discharge the contract
+    # it is the strongest evidence against. Emptiness is the only test that cannot collide.
+    bad = [v for v in rows if v != "authorized"]
+    if bad:
+        return (
+            f"disposition benign blocked: authz contract {cid} on "
+            f"live hypothesis {hid} resolved {bad[0]!r}, not 'authorized' "
+            f"— benign requires every contract authorized"
+        )
+    return None
+
+
 def _check_benign_authz(companion: CompanionBody) -> list[str]:
-    errors: list[str] = []
+    """Every authz contract on a LIVE hypothesis is discharged by an `authorized` row.
+
+    The row that discharges it has to be attributable to it, and a bare `fulfills_contract`
+    id is not always enough. `_check_authz_contract_ids` deliberately exempts a collision
+    whose other side is REFUTED, because on an append-only document refuting is the only
+    repair left once the rows are on disk. That exemption is sound about the CONTRACT — a
+    refuted hypothesis's contract discharges nothing — and was false about the ROW: a
+    `:R authz` row written against the refuted declarer's `ac1`, a different anchor kind
+    asking a different question, discharged the LIVE declarer's `ac1` too, and a benign close
+    landed over a change-management question nobody ever asked (#876/F-3).
+
+    So a shared id is scoped by ANCHOR KIND, which is the one column both sides carry and the
+    one that says which question the row answers. Scoping rather than refusing outright is
+    what keeps the rule repairable: `:H` rows are immutable, so a live contract holding a
+    shared `ac1` could never be renumbered, and "an ambiguous id discharges nothing" would
+    make `disposition: benign` unreachable for the rest of that document's life — over a
+    question the author may well have gone on to answer. Writing the `:R authz` row that
+    carries THIS contract's anchor kind is an ordinary append, and it discharges it.
+
+    Two declarers sharing an id AND an anchor kind is the case with no honest reading left,
+    and that one is refused: no row can be attributed, so none discharges.
+
+    The scoping applies only where the id is shared. A contract nobody competes for is
+    discharged by its id alone, as it always was — the `:R authz` rows in the shipped corpus
+    do carry an anchor kind, but making it load-bearing document-wide would newly refuse
+    every document that left the cell empty, which is a far larger change than this gap.
+    """
     live = set(_walkers.live_hypothesis_ids(companion))
     hyps = _walkers.all_hypotheses(companion)
+    declarers = _declarers_by_contract_id(companion)
 
-    verdicts: dict[str, list[str]] = {}
+    verdicts: dict[str, list[tuple[str, str]]] = {}
     for row in _walkers.iter_authz_resolutions(companion):
         cid = row.get("fulfills_contract")
         if isinstance(cid, str):
-            verdicts.setdefault(cid, []).append(row.get("verdict", "indeterminate"))
+            verdicts.setdefault(cid, []).append(
+                (row.get("verdict", "indeterminate"), _anchor_kind(row))
+            )
 
+    errors: list[str] = []
     for hid in sorted(live):
         hyp = hyps.get(hid)
         if hyp is None:
@@ -959,22 +1134,9 @@ def _check_benign_authz(companion: CompanionBody) -> list[str]:
         for c in hyp.get("authorization_contract") or []:
             if not isinstance(c, dict):
                 continue
-            cid = c.get("id", "?")
-            rows = verdicts.get(cid)
-            if not rows:
-                errors.append(
-                    f"disposition benign blocked: authz contract {cid} on "
-                    f"live hypothesis {hid} resolved 'no fulfilling :R authz "
-                    f"row', not 'authorized' — benign requires every contract "
-                    f"authorized"
-                )
-            elif any(v != "authorized" for v in rows):
-                bad = next(v for v in rows if v != "authorized")
-                errors.append(
-                    f"disposition benign blocked: authz contract {cid} on "
-                    f"live hypothesis {hid} resolved {bad!r}, not 'authorized' "
-                    f"— benign requires every contract authorized"
-                )
+            found = _authz_contract_error(hid, c, declarers, verdicts)
+            if found is not None:
+                errors.append(found)
     return errors
 
 
@@ -1105,39 +1267,165 @@ def _check_false_positive_gating(companion: CompanionBody) -> list[str]:
     return errors
 
 
+def _check_benign_grounding(companion: CompanionBody) -> list[str]:
+    """`benign` needs a log that recorded WHAT THE ALERT WAS ABOUT.
+
+    The other two benign checks refuse CONTRADICTIONS — an unresolved slot, an unfulfilled
+    contract — which is exactly the right shape for a log that did the work, and vacuous for
+    one that did not: a document with no vertices has no slot to be open and no hypothesis to
+    carry a contract, so it clears a price it never paid. Absent, empty, whitespace-only and
+    fence-less `investigation.md` files all reach the close that way, and `benign` is the
+    disposition that asserts the alerted activity was accounted for. Nothing accounts for
+    anything in a log that never says what was alerted on.
+
+    So the prologue has to carry a vertex, and the point is less the clause itself than what
+    it does to the two beside it: once a vertex is guaranteed, `_check_benign_open_slots` has
+    something to check on every benign close, and "the classification is resolved" stops being
+    a claim a document can satisfy by staying silent. ORIENT writes this block before PLAN
+    runs, so every real run has cleared it long before it can conclude anything — what it
+    refuses is a close over a work log that was never written.
+
+    Deliberately NOT a demand for leads, committed or declared. How much measurement a
+    disposition needs is a judgment about the case, which the review gate makes; this is the
+    structural floor beneath it, and a trivially-benign alert closed off the payload alone is
+    a run this must not refuse.
+    """
+    if not (companion.get("prologue") or {}).get("vertices"):
+        return [
+            "disposition benign blocked: no `:V prologue.vertices` row — benign says the "
+            "alerted activity was accounted for, so the log has to name the entity the "
+            "alert was about. An `investigation.md` that records no vertex records no "
+            "investigation; conclude `inconclusive` instead."
+        ]
+    return []
+
+
 def _check_benign_gating(companion: CompanionBody) -> list[str]:
     errors: list[str] = []
+    errors += _check_benign_grounding(companion)
     errors += _check_benign_open_slots(companion)
     errors += _check_benign_authz(companion)
     return errors
+
+
+@dataclass(frozen=True)
+class _Price:
+    """What a keyword costs, and why it costs it.
+
+    Two columns because the price has two audiences. `check` answers whether THIS document
+    has paid, and its strings name the blocking vertex, contract or row. `rationale` answers
+    why the price exists at all, which is what a model that has just been refused needs in
+    order to choose between paying it and concluding in another vocabulary — and it is a
+    property of the KEYWORD, equally true at either boundary, so it belongs beside the check
+    rather than in a second keyword-keyed table at whichever boundary happens to print it.
+    """
+
+    check: Callable[[CompanionBody], list[str]]
+    rationale: str
 
 
 #: The structural price of a keyword, keyed by the keyword. Two dispositions carry one; the
 #: rest carry none. Declared as a table rather than as a guard clause inside each gate so a
 #: third priced keyword is a row here, not a third copy of the "is this my disposition"
 #: preamble — which is the line that has to get #722 right every time it is written.
-_DISPOSITION_GATES: dict[str, Callable[[CompanionBody], list[str]]] = {
-    "benign": _check_benign_gating,
-    "false-positive": _check_false_positive_gating,
+#:
+#: Two readers dispatch on it and both must, because a price owed by the document alone is
+#: not owed at all: `_check_disposition_gating` on what `:T conclude` says, and
+#: `disposition_entry_price` on what the close is about to commit. Adding a row arms both.
+#:
+#: The rationale rides in the row for the same reason (#879). The close briefly kept its own
+#: `{keyword: prose}` table, which is the owner/consumer split this issue was about wearing a
+#: different hat: a third row here would have been collected but not explained, and
+#: `lint_half_read_table` cannot see that shape — a consumer enumerating EVERY key is its
+#: documented blind spot, so the ratchet that just cleaned this site would not notice it
+#: regrowing. One row, both readers, nothing to keep in sync.
+#: Each row is BOUND TO A NAME rather than built inline in the table, and that is load-bearing
+#: rather than style: `lint_half_read_table` recognizes a keyed gate table only when every
+#: value is a `Name`/`Attribute`/`Lambda` — "each key has its own ANSWER" — so writing these as
+#: `_Price(...)` calls in the literal makes the table invisible to the one gate that watches
+#: it, disarming it for every consumer at once and silently dropping its other findings too.
+_BENIGN_PRICE = _Price(
+    check=_check_benign_gating,
+    rationale=(
+        "`benign` says the alerted activity was accounted for, which an unresolved slot or "
+        "an unfulfilled authorization contract on a live hypothesis directly contradicts, "
+        "and which a log that never named the alerted entity does not support at all — so "
+        "it is reachable only from an `investigation.md` that recorded the entity and "
+        "settled what it left open."
+    ),
+)
+_FALSE_POSITIVE_PRICE = _Price(
+    check=_check_false_positive_gating,
+    rationale=(
+        "`false-positive` says the RULE misfired, which is no evidence about the alerted "
+        "entity — so it is reachable only from an `investigation.md` that states the defect "
+        "and names the lead that checked the entity anyway."
+    ),
+)
+
+_DISPOSITION_GATES: dict[str, _Price] = {
+    "benign": _BENIGN_PRICE,
+    "false-positive": _FALSE_POSITIVE_PRICE,
 }
 
 
-def false_positive_entry_price(companion_text: str) -> list[str]:
-    """What `disposition false-positive` still owes, read off an `investigation.md` — empty when
-    it owes nothing.
+@dataclass(frozen=True)
+class EntryPrice:
+    """What a close still owes for its keyword, and why that keyword owes anything.
 
-    Public because the price has to be collected at BOTH boundaries. This module gates the
+    Both halves come back from ONE dispatch so a caller cannot look the second up on a
+    differently-normalized value than the first — which is how the refusal would lose its
+    explanation on exactly the zero-width-laced keyword #722 exists for.
+    """
+
+    owed: tuple[str, ...]
+    rationale: str
+
+    def __bool__(self) -> bool:
+        """Truthy when something is owed, so `if price:` reads as "is anything outstanding".
+        An unpriced keyword and a paid document are both falsy — the caller does not care
+        which, and neither blocks a close."""
+        return bool(self.owed)
+
+
+def disposition_entry_price(disposition: str, companion_text: str) -> EntryPrice:
+    """What `disposition` still owes, read off an `investigation.md` — nothing owed when it
+    owes nothing, and nothing owed for the keywords `_DISPOSITION_GATES` prices at nothing.
+
+    Public because a price has to be collected at BOTH boundaries. This module gates the
     `investigation.md` write; `report.md` is written by `close_investigation`, which takes its
-    disposition as a tool argument and never reads the companion. Without a second reader the
+    disposition as a tool argument and never reads the companion. Without a second reader an
     entry price is bypassable by writing `:T conclude` with a cheaper keyword — or none — and
-    passing `false-positive` to the close, which is the artifact the learning loop, the evals
+    passing the priced one to the close, which is the artifact the learning loop, the evals
     and the ticket lane all actually read.
 
-    A missing or unparseable companion yields the same denials an empty one does: you cannot
-    close on a defect you never wrote down.
+    The mirror of `_check_disposition_gating`, and deliberately the same table read: that one
+    dispatches on the disposition the DOCUMENT wrote, this one on the disposition the CALLER
+    is about to commit, and a row added to `_DISPOSITION_GATES` is collected at both the day
+    it lands. #806 shipped this half as a `false-positive`-only reader, which left `benign`
+    priced at the write gate and collected nowhere at the close (#879) — the half-read table
+    the two-sided phrasing here exists to prevent.
+
+    `disposition` is normalized through `normalized_disposition` for the same #722 reason the
+    write-side dispatch is: a keyword is judged on what it RENDERS as, so a zero-width
+    character cannot turn a gate off. Typed `str` rather than `object` even though the
+    normalizer accepts anything: an unrecognized value takes the unpriced branch, so this
+    dispatch fails OPEN on a wrong one, and `object` would let the type checker pass a caller
+    that swapped these two arguments — both are `str` — and silently waive the price. The
+    write-side dispatch reads a value off a parsed DOCUMENT and keeps the wider type honestly;
+    a caller of this one always holds a keyword. What each price means about an ABSENT
+    companion is the gate's own business, and both priced ones answer it the same way for
+    different reasons: `false-positive` demands stated content, so nothing written owes
+    everything, and `benign` demands a prologue vertex beneath its contradiction checks
+    (`_check_benign_grounding`), because those checks are vacuous over a document with no
+    vertices and a close on an empty log is the case they exist to refuse.
     """
+    priced = normalized_disposition(disposition)
+    price = _DISPOSITION_GATES.get(priced) if priced else None
+    if price is None:
+        return EntryPrice(owed=(), rationale="")
     companion, _ = parse_dense_companion(companion_text)
-    return _check_false_positive_gating(companion)
+    return EntryPrice(owed=tuple(price.check(companion)), rationale=price.rationale)
 
 
 def _check_disposition_gating(companion: CompanionBody) -> list[str]:
@@ -1152,8 +1440,8 @@ def _check_disposition_gating(companion: CompanionBody) -> list[str]:
     disposition = normalized_disposition(
         (companion.get("conclude") or {}).get("disposition")
     )
-    gate = _DISPOSITION_GATES.get(disposition) if disposition else None
-    return gate(companion) if gate is not None else []
+    price = _DISPOSITION_GATES.get(disposition) if disposition else None
+    return price.check(companion) if price is not None else []
 
 
 

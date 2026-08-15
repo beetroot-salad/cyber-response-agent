@@ -37,6 +37,7 @@ from defender.runtime.tools import (
 from defender.tests._by_path import load_module, on_sys_path
 from defender.tests._engine_helpers import fake_model, replay_turns
 from defender.tests._frames680 import (
+    frame_salt_of,
     DEFENDER,
     FRAME_RE,
     JUDGE_BENIGN_DEF,
@@ -57,6 +58,7 @@ from defender.tests._frames680 import (
     _drive_learning_bash,
     _drive_learning_read,
     _expected_frame,
+    assert_one_frame,
     _findings_prompt,
     _judge_deps,
     _judge_fixture,
@@ -183,7 +185,10 @@ def test_main_bash_call_occurs_before_and_after_a_learning_bash_call(tmp_path):
     middle = _tool_bash(learning, f"cat {p}")
     after = _main_bash(tmp_path / "after", b"after")
     assert before.startswith("exit=0")
-    assert learning.salt in middle
+    # The learning role's return is FRAMED and MAIN's two are not — the property this
+    # interleaving is about. Read off the return rather than compared to a deps field, which
+    # #875 removed: the frame's salt is minted at wrap time and nobody else holds it.
+    assert frame_salt_of(middle, "untrusted")
     assert after.startswith("exit=0")
 
 
@@ -241,8 +246,8 @@ def test_new_learning_role_is_registered_with_read_and_bash_tools(tmp_path):
     )
     read_out = _tool_read_file(deps, str(artifact))
     bash_out = _tool_bash(deps, f"cat {artifact}")
-    assert deps.salt in read_out
-    assert deps.salt in bash_out
+    assert frame_salt_of(read_out, "untrusted")
+    assert frame_salt_of(bash_out, "untrusted")
     assert read_out != "future role bytes"
     assert bash_out != _format_bash_result(0, "future role bytes", "")
 
@@ -375,38 +380,60 @@ def test_d0_wrap_returns_exact_salted_frame():
 
 
 def test_d1_shared_wrap_seam():
-    """The sole frame primitive is `defender._untrusted.wrap(content: str, tag: str, salt: str) -> str`, imported by runtime and every learning prompt producer."""
+    """The frame primitives are `defender._untrusted.wrap(content, tag, salt)` and
+    `wrap_fresh(content, tag)` — BOTH defined there and nowhere else.
+
+    AMENDED BY #875. This demand read "the SOLE frame primitive", one function for every
+    frame in the tree. That was the shape F-1 lived in: one entry point taking a
+    caller-supplied salt meant a tool return could be framed with a salt its own framed party
+    already held, and the gather dispatch did exactly that. The seam is now a PAIR, split by
+    which population a frame belongs to — `wrap` for a message's prompt sections, where a
+    stage deliberately shares one salt across the set it assembles, and `wrap_fresh` for a
+    tool return, where the salt is minted after the content is in hand and cannot be shared
+    with anyone. What "sole" was protecting — one owner, no second implementation — is
+    unchanged and still asserted below."""
     fn = _shared_wrap()
     assert list(inspect.signature(fn).parameters) == ["content", "tag", "salt"]
     assert fn("body", "tag", STAGE_SALT) == _expected_frame("body", "tag")
-    definitions = []
+
+    import defender._untrusted as untrusted
+    assert list(inspect.signature(untrusted.wrap_fresh).parameters) == ["content", "tag"]
+    assert_one_frame(untrusted.wrap_fresh("body", "tag"), "body", "tag")
+
+    definitions = {"wrap": [], "wrap_fresh": []}
     imports = []
     for path in _python_sources():
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if (
                 isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-                and node.name == "wrap"
+                and node.name in definitions
             ):
-                definitions.append(path.relative_to(ROOT).as_posix())
+                definitions[node.name].append(path.relative_to(ROOT).as_posix())
             if isinstance(node, ast.ImportFrom) and node.module:
                 for alias in node.names:
-                    if alias.name == "wrap":
-                        imports.append((path.relative_to(ROOT).as_posix(), node.module))
-    assert definitions == ["defender/_untrusted.py"]
+                    if alias.name in ("wrap", "wrap_fresh"):
+                        imports.append(
+                            (path.relative_to(ROOT).as_posix(), node.module, alias.name)
+                        )
+    assert definitions["wrap"] == ["defender/_untrusted.py"]
+    assert definitions["wrap_fresh"] == ["defender/_untrusted.py"]
+    # The runtime frames TOOL RETURNS, so it takes the minting entry point — never `wrap`,
+    # which would reintroduce the caller-supplied salt F-1 turned on.
     assert any(
-        (
-            path == "defender/runtime/tools.py" and module == "defender._untrusted"
-            for path, module in imports
-        )
+        path == "defender/runtime/tools.py"
+        and module == "defender._untrusted"
+        and name == "wrap_fresh"
+        for path, module, name in imports
     )
+    # The learning stages assemble MESSAGES, so they take the salt-sharing entry point.
     assert any(
-        (
-            path.startswith("defender/learning/") and module == "defender._untrusted"
-            for path, module in imports
-        )
+        path.startswith("defender/learning/")
+        and module == "defender._untrusted"
+        and name == "wrap"
+        for path, module, name in imports
     )
-    assert all((module != "defender.runtime.untrusted" for _, module in imports))
+    assert all(module != "defender.runtime.untrusted" for _, module, _ in imports)
 
 
 def test_d2_legacy_frame_helpers_are_unreachable():
@@ -511,8 +538,18 @@ def test_d6_every_stage_boundary_grammar_uses_wrap(tmp_path, monkeypatch):
     assert called == producer_files
 
 
-def test_d7_one_stage_salt_reaches_frames_and_tool_wraps(tmp_path):
-    """One real Judge invocation threads one freshly minted token to its complete prompt, dependency object, `read_file`, and Bash-output wraps."""
+def test_d7_the_stage_salt_reaches_the_prompt_and_no_further(tmp_path):
+    """One real Judge invocation threads its freshly minted token to its complete PROMPT — and
+    to nothing else. Its `read_file` and Bash returns carry their OWN wrap-time salts.
+
+    AMENDED BY #875. The demand used to be that one stage token reaches "the prompt, the
+    dependency object, `read_file`, and Bash-output wraps" — one salt for everything the stage
+    touches. That is the F-1 shape at stage scope: a salt on the deps is a salt every tool
+    return is framed with, and therefore a salt any party shown one return can use to close
+    another. The stage salt now has exactly one job, the one that actually needs a SHARED
+    value: identifying the frames of one assembled message, which is what
+    `stage_user_message`'s reader contract announces. Nothing else needs to agree, so nothing
+    else is given the chance to."""
     from uuid import uuid4
     from defender.learning.pipeline.judge.run import invoke_judge
 
@@ -539,7 +576,6 @@ def test_d7_one_stage_salt_reaches_frames_and_tool_wraps(tmp_path):
         deps = bind(
             JUDGE_BENIGN_DEF,
             learning,
-            salt=salt,
             scope=RunScope(add_dirs=(comparison,)),
             box=box,
         )
@@ -567,10 +603,20 @@ def test_d7_one_stage_salt_reaches_frames_and_tool_wraps(tmp_path):
         salt=expected,
         box=None,
     )
-    frames = list(FRAME_RE.finditer(seen["prompt"] + seen["read"] + seen["bash"]))
     assert result == "done"
-    assert seen["deps"].salt == expected
-    assert {m.group("salt") for m in frames} == {expected}
+    assert not hasattr(seen["deps"], "salt"), \
+        "the stage salt landed on deps — every tool return would be framed with it again"
+
+    prompt_salts = {m.group("salt") for m in FRAME_RE.finditer(seen["prompt"])}
+    assert prompt_salts == {expected}, \
+        f"the prompt's frames are not the stage's own set: {sorted(prompt_salts)}"
+
+    read_salt = frame_salt_of(seen["read"], "untrusted")
+    bash_salt = frame_salt_of(seen["bash"], "untrusted")
+    assert expected not in {read_salt, bash_salt}, \
+        "a tool return is framed with the stage salt — the judge holds its own delimiter"
+    assert read_salt != bash_salt, \
+        "two tool returns share one delimiter — the salt is not minted per wrap"
 
 
 def test_d8_stage_salt_is_never_the_run_salt(tmp_path):
@@ -687,14 +733,14 @@ def test_d13_learning_stage_cross_agent_read_is_salt_tagged(tmp_path):
     """A real learning-stage cross-agent `read_file` returns one exact untrusted frame under that stage salt, including a novel permitted filename."""
     body = "MODEL_AUTHORED_BREAKOUT_680"
     out = _drive_learning_read(tmp_path, body, name="new-derived-name.md")
-    assert out == _expected_frame(body, "untrusted")
+    assert_one_frame(out, body, "untrusted")
 
 
 def test_d14_learning_stage_cannot_observe_raw_cross_agent_read(tmp_path):
     """A real learning-stage `read_file` cannot return the other agent's bytes raw; the same bytes remain observable inside exactly one sanctioned frame."""
     body = "RAW_CROSS_AGENT_680"
     out = _drive_learning_read(tmp_path, body)
-    assert out == _expected_frame(body, "untrusted")
+    assert_one_frame(out, body, "untrusted")
     assert out != body
     assert list(FRAME_RE.fullmatch(out).groups())
 
@@ -705,7 +751,7 @@ def test_d15_main_self_reads_report_and_investigation_without_wrap(tmp_path):
     defender_dir = tmp_path / "defender"
     run.mkdir()
     defender_dir.mkdir()
-    deps = bind(MAIN_DEF, run, salt=RUN_SALT, defender_dir=defender_dir)
+    deps = bind(MAIN_DEF, run, defender_dir=defender_dir)
     for name, body in (
         ("report.md", "report body"),
         ("investigation.md", "investigation body"),
@@ -740,7 +786,7 @@ def test_d18_run_stage_still_accepts_prejoined_user_string(tmp_path):
     run.mkdir()
     prompt = tmp_path / "oracle.md"
     prompt.write_text("Return done.", encoding="utf-8")
-    deps = bind(ORACLE_DEF, run, salt=STAGE_SALT)
+    deps = bind(ORACLE_DEF, run)
     seen: list[str] = []
     replay = replay_turns([{"text": "done"}], seen=seen)
     with override_allow_model_requests(False):
@@ -795,7 +841,6 @@ def test_d20_learning_stage_bash_output_is_salt_tagged(tmp_path):
     judge = bind(
         JUDGE_BENIGN_DEF,
         tmp_path / "judge-run",
-        salt=None,
         scope=RunScope(add_dirs=(judge_root,)),
         box=Box(result),
     )
@@ -811,11 +856,12 @@ def test_d20_learning_stage_bash_output_is_salt_tagged(tmp_path):
         (lead_deps, lead_command),
         (corpus_deps, corpus_command),
     ]
-    outputs = [(_tool_bash(deps, command), deps.salt) for deps, command in scenes]
-    assert [out for out, salt in outputs] == [
-        _expected_frame(ordinary, "untrusted", salt) for out, salt in outputs
-    ]
-    assert all((FRAME_RE.fullmatch(out) for out, _ in outputs))
+    outputs = [_tool_bash(deps, command) for deps, command in scenes]
+    # #875: each return is framed on its OWN minted salt, so the expected frame is built from
+    # the salt read off that return — every role still gets exactly one verbatim frame.
+    for out in outputs:
+        assert_one_frame(out, ordinary, "untrusted")
+    assert all(FRAME_RE.fullmatch(out) for out in outputs)
 
 
 def test_d21_learning_stage_cannot_observe_raw_bash_output(tmp_path):
@@ -826,7 +872,7 @@ def test_d21_learning_stage_cannot_observe_raw_bash_output(tmp_path):
     message = "learning Bash must expose only the framed ordinary envelope"
     assert match is not None, message
     assert match.group("body") == ordinary, message
-    assert out == _expected_frame(ordinary, "untrusted")
+    assert_one_frame(out, ordinary, "untrusted")
     assert out != ordinary
 
 
@@ -872,4 +918,4 @@ def test_gate_r1_bound_and_wrap_output_shape(tmp_path):
     artifact = comparison / "captured.md"
     body = "captured inbound body"
     out = _bound_and_wrap(deps, artifact, str(artifact), body, read_tool="read_file")
-    assert out == _expected_frame(body, "untrusted")
+    assert_one_frame(out, body, "untrusted")

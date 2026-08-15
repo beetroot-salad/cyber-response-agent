@@ -83,7 +83,7 @@ CLOSED_TKT = dated(
     resolution="benign — [grounded: approved-window] TKT-RESOLUTION-777",
 )
 
-WRAP_RE = re.compile(r"<run-([0-9a-f]{32})-untrusted>")
+WRAP_RE = re.compile(r"<run-([0-9a-f]+)-untrusted>")
 
 
 def _get(key) -> Turn:

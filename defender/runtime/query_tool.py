@@ -19,7 +19,7 @@ from pydantic_ai.exceptions import (
 )
 
 from defender.hooks.budget_enforcer import BudgetKill
-from defender._untrusted import wrap as _wrap
+from defender._untrusted import wrap_fresh
 from defender.scripts.adapters.faults import USAGE_EXIT_CODE, AdapterFault
 from defender.scripts.gather_tools.payload_view import render as _render_payload
 from defender.scripts.gather_tools.record_query import (
@@ -69,7 +69,14 @@ CONTROL_FLOW_EXCEPTIONS: tuple[type[BaseException], ...] = (
 
 DEFAULT_FAULT_EXIT = 2
 
-_QID_TRAVERSAL = ("/", "\\", "..", "\x00")
+#: Characters a `query_id` may not carry. The first four are PATH shapes — a traversal that
+#: would walk the id out of the directory it names a file in. The last two are RENDER shapes
+#: (#875 F-8): a catalog id is interpolated into markdown three offline collectors read, and a
+#: newline or a heading marker in it forges document structure inside the judge's per-lead
+#: comparison — which lead a section describes, which sample event is the run's real one. Both
+#: families are here for one reason, so they screen as one rule: a `query_id` is a catalog
+#: IDENTIFIER the collectors partition on, not free text, and neither shape belongs in one.
+_QID_FORBIDDEN = ("/", "\\", "..", "\x00", "\n", "\r", "#")
 
 
 def resolve_query_id(system: str, verb: str, model_query_id: str | None) -> str:
@@ -85,7 +92,7 @@ def resolve_query_id(system: str, verb: str, model_query_id: str | None) -> str:
     if (
         model_query_id
         and not is_reserved_query_id(model_query_id)
-        and not any(t in model_query_id for t in _QID_TRAVERSAL)
+        and not any(t in model_query_id for t in _QID_FORBIDDEN)
     ):
         return model_query_id
     return f"{system}.{verb}" if verb else f"{system}.ad-hoc"
@@ -227,7 +234,7 @@ class QueryCapture(AbstractCapability[Any]):
         and the third ends the lead. That is the reading this coarsening commits to — the
         request identity below the grant is "a call to no system this run declares", and a
         model that issues three of those in a row has repeated one mistake, not made three. It
-        is also the only reading available: the guard's identity is recovered from the twelve
+        is also the only reading available: the guard's identity is recovered from the frozen
         frozen row keys, so a `system` the row does not carry cannot separate them. What must
         NOT follow is a dead-end that tells main those calls named one system —
         `_undeclared_target` is why the message says an undeclared system instead."""
@@ -260,11 +267,15 @@ class QueryCapture(AbstractCapability[Any]):
         every member of this repeat group."""
         return recorded or ("an undeclared system" if raw.strip() else "")
 
-    def _traversal_reject(self, model_query_id: Any) -> str | None:
-        if model_query_id and any(t in str(model_query_id) for t in _QID_TRAVERSAL):
+    def _forbidden_reject(self, model_query_id: Any) -> str | None:
+        # The message names the WHOLE screen, not the path half of it: a refusal that lists
+        # four characters the caller did not use is one the caller cannot act on, and #875 F-8
+        # widened `_QID_FORBIDDEN` past the traversal set.
+        if model_query_id and any(t in str(model_query_id) for t in _QID_FORBIDDEN):
             return (
-                f"invalid query_id {model_query_id!r}: no '/', '\\', '..' or NUL — it becomes a "
-                "catalog path segment. Coin a `{system}.{kebab-name}` id."
+                f"invalid query_id {model_query_id!r}: no '/', '\\', '..', NUL, newline or '#' "
+                "— it becomes a catalog path segment and a markdown span the offline collectors "
+                "render. Coin a `{system}.{kebab-name}` id."
             )
         return None
 
@@ -332,6 +343,24 @@ class QueryCapture(AbstractCapability[Any]):
         caller must return without ever reaching execution."""
         decision, load_error = self._decide_guarded(system, verb)
         if load_error is not None:
+            # THE BREAKER CHECK, consulted HERE rather than only at `wrap_tool_execute:429`
+            # (#878 F-07). Two modules promise this class's repeat is owned end to end by
+            # `circuit_breaker` — `rejection_trip`'s docstring excludes these `infra` rows from
+            # the companion guard on exactly that promise, and the comment at the unresolvable
+            # branch below repeats it. The promise was false for as long as the check sat
+            # BELOW this return: `verbs._load_adapter_module` caches only on success, so the
+            # same import re-failed on every call, `_record`'s tail fed each one to
+            # `record_outcome`, and no call of this class was ever answered by the
+            # down-message. The second failure marked the system down and nothing read it; the
+            # fifth crossed `RUN_FAIL_KILL_LIMIT` and `RunAborted` ended the run with no
+            # disposition. Ahead of `_record`, so the down-answer neither writes a third row
+            # nor counts a third failure — the point of a tripped breaker is that the call did
+            # not happen. NOT hoisted above `_grant_check` entirely: the DENIED branch below
+            # owes its denial record whatever else is wrong with the call (§7 R3/R23), and a
+            # breaker answer ahead of the grant would swallow it.
+            tripped = _tripped_message(deps, system)
+            if tripped is not None:
+                return None, tripped
             row, text = await self._record(
                 deps, system=system, verb=verb,
                 query_id=ABOVE_GUARD_QUERY_ID, params=params, payload=None,
@@ -345,15 +374,16 @@ class QueryCapture(AbstractCapability[Any]):
                 call_id=f"{system}.{verb}", params=params,
             )
             return None, _format_bash_result(
-                DEFAULT_FAULT_EXIT, "", _wrap(decision.refusal or "", "untrusted", deps.salt), "",
+                DEFAULT_FAULT_EXIT, "", wrap_fresh(decision.refusal or "", "untrusted"), "",
             )
 
         if decision.outcome != GRANTED:
             # The unresolvable-verb repeat class — the same shape as the schema class at a
             # different placement (#826 item 4), and the reason the companion guard is reached
-            # from both. The load-error branch above is deliberately NOT guarded: its rows are
-            # `infra`, outside `rejection_trip`'s domain, and `circuit_breaker` already owns
-            # that repeat end to end.
+            # from both. The load-error branch above is deliberately NOT guarded by THIS
+            # guard: its rows are `infra`, outside `rejection_trip`'s domain, and
+            # `circuit_breaker` owns that repeat end to end — which since #878 F-07 it
+            # actually does, by consulting the breaker in the branch itself.
             # The same coarsening the schema placement applies, for the same reason (#855
             # F-06) and with the same domain: an unresolvable call is unresolvable precisely
             # because the grant reached no system by that name, so the string it names is the
@@ -387,7 +417,7 @@ class QueryCapture(AbstractCapability[Any]):
         """The per-call screens BELOW the grant and the breaker: the traversal screen, param
         validation, and the self-ticket screen. Raises `ModelRetry` (after its usage row) when
         one of them refuses."""
-        reason = self._traversal_reject(model_query_id)
+        reason = self._forbidden_reject(model_query_id)
         if reason is None:
             reason = validate_params(decision.fn, params)
         if reason is None:
@@ -487,7 +517,7 @@ class QueryCapture(AbstractCapability[Any]):
         run_dir = deps.run_dir
 
         async with self._seq_lock:
-            # The twelve keys are assembled by `append_query_row` (#823 F1), which the gather
+            # The thirteen keys are assembled by `append_query_row` (#823 F1), which the gather
             # bash lane's shim recorder also calls. The lock stays: it is this path's, and it
             # is cheaper to keep than to argue that nothing will ever add an `await` here.
             row = append_query_row(
@@ -521,7 +551,8 @@ class QueryCapture(AbstractCapability[Any]):
         repeat = repeat_note(
             deps.run_dir, deps.lead_id, seq=row["seq"], system=row["system"],
             verb=row["verb"], params=row["params"],
-            payload_digest=row["payload_digest"], exit_code=exit_code,
+            payload_digest=row["payload_digest"], payload_sha256=row["payload_sha256"],
+            exit_code=exit_code,
         )
         if exit_code != 0:
             # Prepended to `detail` INSIDE the wrap, mirroring the success arm: the wrap is
@@ -529,7 +560,7 @@ class QueryCapture(AbstractCapability[Any]):
             # line out of it would put a second, differently-trusted region in a result the
             # main loop reads as one span.
             body = detail if repeat is None else f"{repeat}\n{detail}"
-            return _format_bash_result(exit_code, "", _wrap(body, "untrusted", deps.salt), note)
+            return _format_bash_result(exit_code, "", wrap_fresh(body, "untrusted"), note)
         # ONE call, no condition: `render` returns the payload verbatim when it fits and a
         # bounded view when it does not (#832). The condition used to live here AND at the
         # judge's mirror of this method, so "what counts as too big" was stated twice and could
@@ -537,7 +568,7 @@ class QueryCapture(AbstractCapability[Any]):
         view = _render_payload(text, row["payload_path"], deps.run_dir)
         if repeat is not None:
             view = f"{repeat}\n{view}"
-        return _format_bash_result(0, _wrap(view, "untrusted", deps.salt), "", note)
+        return _format_bash_result(0, wrap_fresh(view, "untrusted"), "", note)
 
 
 

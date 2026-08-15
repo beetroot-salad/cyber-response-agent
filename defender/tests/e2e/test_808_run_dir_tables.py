@@ -50,7 +50,6 @@ from defender.tests.e2e._lead_zero_808 import (  # noqa: E402
     L0,
     L3,
     PROVENANCE_KEY,
-    SALT,
     alert_doc,
     ancestor,
     answer_hits,
@@ -169,7 +168,7 @@ def test_a_harness_side_reclaim_takes_claim_leads_return_two_arm(tmp_path):
 
     rec = VerbRecorder()
     main = ReplayFn([Turn(text="Investigation complete.")])
-    summary = drive(run_dir, run_id="lz808-reclaim", salt=SALT, main=main,
+    summary = drive(run_dir, run_id="lz808-reclaim", main=main,
                     gather=ReplayFn([Turn(text="correlation summary")]),
                     verbs=elastic_backend(rec, _ah(DOCS)))
 
@@ -234,7 +233,7 @@ def test_lead_zero_and_the_model_share_one_payload_seq_counter(tmp_path):
     from defender.tests.e2e._replay_harness import ReplayFn, VerbRecorder, drive
 
     rec = VerbRecorder()
-    drive(run_dir, run_id="lz808-seq", salt=SALT,
+    drive(run_dir, run_id="lz808-seq",
           main=ReplayFn([Turn(text="Investigation complete.")]),
           gather=ReplayFn([Turn(text="correlation summary")]),
           verbs=elastic_backend(rec, answer_hits(DOCS)))

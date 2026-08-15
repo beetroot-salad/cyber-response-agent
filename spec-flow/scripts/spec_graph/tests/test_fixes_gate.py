@@ -9,14 +9,11 @@ check looked and found something, 2 it could not look (never a silent pass).
 from __future__ import annotations
 
 from conftest import SPEC_GRAPH_DIR  # noqa: F401 — house import; run_script reads it
-from test_mechanical_checks import run_script
+from test_mechanical_checks import _evaluated, run_script
 
 # Every rule evaluated `fired: true` — no FIRED-FALSE arm, no missing-entry arm, so a
 # test's exit code is decided by the trigger/answer mechanics alone.
-_EVALUATED_TRUE = (
-    "gate:\n  evaluated:\n"
-    + "".join(f"    - {{rule: R{i}, fired: true}}\n" for i in range(8))
-)
+_EVALUATED_TRUE = _evaluated()  # every rule a version-1 graph owes — see test_mechanical_checks
 
 # ---------------------------------------------------------------------------
 # check_gate #1 — answered() must not let a sibling facet silence a trigger

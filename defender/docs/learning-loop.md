@@ -211,7 +211,7 @@ The source run materializes that ordered contract as **two live tables**
   block, keyed on the `:L` invlang row id (`l-001`).
 - **queries** — `executed_queries.jsonl`, one row per executed query
   (`{lead_id, seq, system, query_id, params, payload_status, payload_digest,
-  payload_path, …}`), written by the `record_query.py` capture wrapper;
+  payload_sha256, payload_path, …}`), written by the `record_query.py` capture wrapper;
   raw payloads land by-ref at `gather_raw/{lead_id}/{seq}.json`.
 
 Consumers call `lead_repository.joined(run_dir)` / `actor_view(run_dir)`;

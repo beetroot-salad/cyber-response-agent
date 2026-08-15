@@ -91,42 +91,44 @@ def _main_instructions(defender_dir: Path) -> str:
 
 
 def _user_prompt(  # noqa: PLR0913 — the harness's own pre-turn seams (#808)
-    run_dir: Path, alert_path: Path, defender_dir: Path, salt: str,
+    run_dir: Path, alert_path: Path, defender_dir: Path,
     *, verbs: Any = None, limits: dict = DEFAULT_LIMITS, run_id: str | None = None,
-) -> tuple[str, Any, str]:
+) -> tuple[str, str, str]:
     """#808 — lead-0's own call site. It takes its OWN exception handler (K8/N3): a
     `BudgetKill` or `circuit_breaker.RunAborted` raised inside `resolve_lead_zero` (its
     QueryCapture path inherits both) is caught HERE, so it never escapes `_user_prompt` and
     ends the run before MAIN's first prompt — the run degrades the section instead.
 
-    Returns `(prompt, entities, status)`: the entities/status feed item 3's dispatch gate
-    (`d22`), computed once here rather than re-resolved by a second lead_zero call."""
+    Returns `(prompt, ancestor_block, status)`: the block/status feed item 3's dispatch gate
+    (`d22`), computed once here rather than re-resolved by a second lead_zero call. The middle
+    element was `entities` until #867 — a harness-extracted host/user/source-ip triple. Item 3
+    now hands the lead item 1's rendered block itself and lets it choose its own correlation
+    axes, so what threads through here is that block, verbatim."""
     from . import lead_zero as lead_zero_mod
     from .circuit_breaker import RunAborted
 
-    entities: Any = lead_zero_mod.Entities()
+    ancestor_block = ""
     status = lead_zero_mod.STATUS_FAILED
     try:
         result = lead_zero_mod.resolve_lead_zero(
-            run_dir=run_dir, defender_dir=defender_dir, alert_path=alert_path, salt=salt,
+            run_dir=run_dir, defender_dir=defender_dir, alert_path=alert_path,
             verbs=verbs, limits=limits, run_id=run_id,
         )
         lead_zero_text = lead_zero_mod.render_orient_section(result)
-        entities = result.entities
+        ancestor_block = result.text
         status = result.status
     except (BudgetKill, RunAborted) as e:
         print(f"[run.py] lead-0 degraded ({e!r}); continuing without it", file=sys.stderr)
         degraded = lead_zero_mod.LeadZeroResult(
             text=lead_zero_mod._render_section(
                 lead_zero_mod._unavailable(f"a run-level fault interrupted resolution: {e!r}"),
-                salt,
             ),
-            entities=lead_zero_mod.Entities(), status=lead_zero_mod.STATUS_FAILED,
+            status=lead_zero_mod.STATUS_FAILED,
         )
         lead_zero_text = lead_zero_mod.render_orient_section(degraded)
 
     orientation = orient.orientation(
-        run_dir, defender_dir, alert_path, salt, lead_zero_section=lead_zero_text,
+        run_dir, defender_dir, alert_path, lead_zero_section=lead_zero_text,
     )
     prompt = (
         "Begin the investigation.\n\n"
@@ -134,7 +136,7 @@ def _user_prompt(  # noqa: PLR0913 — the harness's own pre-turn seams (#808)
         f"alert: {alert_path}\n\n"
         f"{orientation}"
     )
-    return prompt, entities, status
+    return prompt, ancestor_block, status
 
 
 def _budget_state_for_enforcement(state: dict, deps: AgentDeps) -> dict:
@@ -585,7 +587,14 @@ def _make_store_render_processor(  # noqa: PLR0913 — #808's correlation inject
     return process
 
 
-def _make_gather_recorder(store: Any, session_id: str, agent_id: str):
+def _make_gather_recorder(store: Any, session_id: str, agent_id: str, *, request_limit: int):
+    """`request_limit` is the ceiling THIS dispatch will hand `_run_gather`, and it is
+    required rather than defaulted to the module constant (#880 F-19): the constant is only
+    MAIN's own leads' ceiling, and the correlation lead runs the same recorder under
+    `CORRELATION_REQUEST_LIMIT`. Measured against the constant, the check below was `8 >= 40`
+    on every correlation round — never true, so the doomed round was committed after all and
+    the session ended on an unanswered request, the one state
+    `_stamp_gather_terminator`'s docstring rests on being impossible."""
     async def process(ctx: RunContext[GatherDeps], messages: list) -> list:
         # Same withholding rule as the main processor: pydantic_ai appends the round's own
         # continuation to history BEFORE it checks the request limit, so on the doomed
@@ -594,7 +603,7 @@ def _make_gather_recorder(store: Any, session_id: str, agent_id: str):
         # unlike main there is no run-end flush on this side to reconcile it afterwards.
         usage = getattr(ctx, "usage", None)
         requests = int(getattr(usage, "requests", 0) or 0)
-        if requests >= GATHER_REQUEST_LIMIT:
+        if requests >= request_limit:
             selection.ingest(store, session_id, messages[:-1], agent_id=agent_id)
             return messages
         selection.ingest(store, session_id, messages, agent_id=agent_id)
@@ -628,8 +637,15 @@ def _main_extra_capabilities(
         correlation_task=correlation_task))]
 
 
-def _gather_extra_capabilities(store: Any, session_id: str, agent_id: str) -> list[ProcessHistory[Any]]:
-    return [ProcessHistory(_make_gather_recorder(store, session_id, agent_id))]
+def _gather_extra_capabilities(
+    store: Any, session_id: str, agent_id: str, *, request_limit: int,
+) -> list[ProcessHistory[Any]]:
+    """`request_limit` has no default for the reason `_make_gather_recorder`'s docstring
+    gives: this factory serves two dispatches with two different ceilings, and the one that
+    omitted it is the one that was wrong."""
+    return [ProcessHistory(
+        _make_gather_recorder(store, session_id, agent_id, request_limit=request_limit)
+    )]
 
 
 def build_agent(  # noqa: PLR0913 — composition root: config + DI seams + the store's identity
@@ -685,13 +701,19 @@ def build_agent(  # noqa: PLR0913 — composition root: config + DI seams + the 
     # reused `lead_id`, so it is unique within a run.
     gather_sessions: dict[str, str] = {}
 
-    def _build_gather(agent_id: str, system: str) -> Agent[GatherDeps, str]:
+    def _build_gather(agent_id: str, system: str, request_limit: int) -> Agent[GatherDeps, str]:
         gather_extra: Sequence[Any] = ()
         gather_session_id: str | None = None
         if store is not None:
             gather_session_id = store.new_session(agent_id=agent_id)
             gather_sessions[agent_id] = gather_session_id
-            gather_extra = _gather_extra_capabilities(store, gather_session_id, agent_id)
+            # `request_limit` is THE DISPATCH'S OWN, handed down by `_run_gather` — not
+            # `GATHER_REQUEST_LIMIT` read again here (#880 F-19 residue). The recorder's
+            # withholding check and the `UsageLimits` that actually stops the loop are now the
+            # same number by construction rather than by two literals matching.
+            gather_extra = _gather_extra_capabilities(
+                store, gather_session_id, agent_id, request_limit=request_limit,
+            )
         return build_gather_agent(
             defender_dir, logger, agent_id, make_model, verbs, limits,
             extra_capabilities=gather_extra, session_id=gather_session_id,
@@ -936,7 +958,6 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     run_dir: Path,
     run_id: str,
     defender_dir: Path,
-    salt: str,
     model_name: str | None = None,
     make_model: MakeModel | None = None,
     verbs: Any = None,
@@ -1033,8 +1054,8 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
             case_id=case_id, store_path=None,
         )
 
-    prompt, lead_zero_entities, lead_zero_status = _user_prompt(
-        run_dir, alert_path, defender_dir, salt,
+    prompt, lead_zero_block, lead_zero_status = _user_prompt(
+        run_dir, alert_path, defender_dir,
         verbs=lead_zero_verbs, limits=limits, run_id=run_id,
     )
 
@@ -1051,7 +1072,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
         except (OSError, ValueError):
             alert_doc = {}
         contract = lead_zero_mod.prepare_correlation_lead(
-            run_dir, alert_doc, lead_zero_entities, lead_zero_status,
+            run_dir, alert_doc, lead_zero_block, lead_zero_status,
         )
         if contract is not None:
             goal, what_to_summarize = contract
@@ -1061,7 +1082,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
             # which a harness dispatch never emits.
             lead_zero_mod._budget_account(run_dir, run_id, "gather", limits)
             correlation_task = asyncio.ensure_future(lead_zero_mod.dispatch_correlation(
-                run_dir=run_dir, defender_dir=defender_dir, salt=salt, run_id=run_id,
+                run_dir=run_dir, defender_dir=defender_dir, run_id=run_id,
                 goal=goal, what_to_summarize=what_to_summarize, verbs=lead_zero_verbs,
                 limits=limits, make_model=make_model, logger=logger, box=box, store=store,
                 # #808 review fix — share the RUN's own budget-clock origin (see
@@ -1077,7 +1098,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
         correlation_task=correlation_task, toolset=toolset,
     )
     deps = replace(
-        bind(MAIN_DEF, run_dir, salt=salt, defender_dir=defender_dir, box=box),
+        bind(MAIN_DEF, run_dir, defender_dir=defender_dir, box=box),
         run_id=run_id,
         budget_started_monotonic=budget_started_monotonic,
     )

@@ -23,6 +23,8 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests._frames680 import frame_salt_of
+
 pytest.importorskip("pydantic_ai")
 
 from pydantic_ai import RunContext  # noqa: E402
@@ -289,8 +291,11 @@ def test_l11_trusted_lesson_returned_raw_no_wrap(tmp_path):
     finally:
         logger.close()
     assert "L11-RAW-BODY" in out
-    assert out.startswith(f"<run-{deps.salt}-untrusted>\n")
-    assert out.endswith(f"\n</run-{deps.salt}-untrusted>")
+    # #875: the frame's salt is minted at wrap time, so it is READ off the return, never
+    # predicted from deps — which no longer carry one.
+    salt = frame_salt_of(out, "untrusted")
+    assert out.startswith(f"<run-{salt}-untrusted>\n")
+    assert out.endswith(f"\n</run-{salt}-untrusted>")
 
 
 def test_l12_records_lesson_load_across_all_three_corpora(tmp_path):

@@ -186,7 +186,7 @@ def run_gather(
         Turn(text="Investigation complete."),
     ])
     gather = ReplayFn(turns)
-    drive(run_dir, run_id=run_id, salt=SALT, main=main, gather=gather, verbs=verbs)
+    drive(run_dir, run_id=run_id, main=main, gather=gather, verbs=verbs)
     return _Run(run_dir, main, gather)
 
 
@@ -241,23 +241,33 @@ def test_query_returns_wrapped_truncated_view_and_payload_note(tmp_path):
     assert rec.only().params == {"native_query": "FROM logs | LIMIT 2", "limit": 10}
 
     assert "exit=0" in seen
-    assert f"<run-{SALT}-untrusted>" in seen
-    assert f"</run-{SALT}-untrusted>" in seen
+    assert re.search(r"<run-[0-9a-f]+-untrusted>", seen), "the return was not framed"
+    assert re.search(r"</run-[0-9a-f]+-untrusted>", seen), "the frame never closed"
     assert f"[record_query] raw payload: {payload_abs}" in seen
     assert "dev.dana" in seen, "the truncated view of the payload must reach the model"
 
 
-def test_query_return_wrap_uses_the_run_salt(tmp_path):
-    """query_return_wrap_uses_the_run_salt — the wrap uses deps.salt (the per-run token), never
-    a freshly minted one: with a fresh salt the model can forge the closing tag and the
-    injection defense fails open."""
+def test_query_return_wrap_mints_its_own_salt(tmp_path):
+    """query_return_wrap_mints_its_own_salt — the wrap mints a FRESH token per return, never a
+    per-run one shared with the party being framed.
+
+    AMENDED PREMISE (#875 F-1). This demand read "the wrap uses deps.salt (the per-run token),
+    never a freshly minted one: with a fresh salt the model can forge the closing tag and the
+    injection defense fails open." It is exactly inverted. Gather reads the per-run token in
+    plaintext on every payload view it is handed — THIS return — so sharing it is what lets
+    gather forge a closer. A salt minted after the content is in hand, and re-minted while it
+    collides with that content, cannot occur in the body at all."""
     rec = VerbRecorder()
     r = run_gather(tmp_path, verbs=elastic_ok(rec), turns=[
         q("elastic", "query", {"native_query": "FROM logs"}), DONE,
     ])
     tags = re.findall(r"<run-([0-9a-zA-Z]+)-untrusted>", r.gather_saw)
     assert tags, "the query return carried no untrusted wrap at all"
-    assert set(tags) == {SALT}, f"a wrap used a salt other than the run's: {set(tags)}"
+    for tag in set(tags):
+        body = r.gather_saw.split(f"<run-{tag}-untrusted>", 1)[1].split(
+            f"</run-{tag}-untrusted>", 1)[0]
+        assert tag not in body, \
+            f"the frame salt {tag!r} occurs inside its own body — gather can close its frame"
 
 
 def test_query_payload_is_not_double_wrapped_on_read_back(tmp_path):
@@ -270,11 +280,11 @@ def test_query_payload_is_not_double_wrapped_on_read_back(tmp_path):
     ])
     payload_abs = r.run_dir / "gather_raw" / LEAD / "0.json"
 
-    gdeps = bind(GATHER_DEF, r.run_dir, salt=SALT, defender_dir=DEFENDER)
+    gdeps = bind(GATHER_DEF, r.run_dir, defender_dir=DEFENDER)
     out = runtime_tools._tool_read_file(gdeps, str(payload_abs))
 
-    assert out.count(f"<run-{SALT}-untrusted>") == 1
-    assert out.count(f"</run-{SALT}-untrusted>") == 1
+    assert len(re.findall(r"<run-[0-9a-f]+-untrusted>", out)) == 1
+    assert len(re.findall(r"</run-[0-9a-f]+-untrusted>", out)) == 1
     assert "dev.dana" in out
 
 
@@ -305,7 +315,7 @@ def test_query_return_wrap_positive_control(tmp_path):
         Turn(text="done"),
     ])
     gather = ReplayFn(turns)
-    drive(run_dir, run_id="q611-ctl", salt=SALT, main=main, gather=gather, verbs=elastic_ok(rec))
+    drive(run_dir, run_id="q611-ctl", main=main, gather=gather, verbs=elastic_ok(rec))
 
     on_disk = payload_abs.read_text(encoding="utf-8")
     assert "<run-" not in on_disk, "the persisted payload must be the raw bytes, never wrapped"
@@ -323,27 +333,72 @@ def test_query_return_wrap_positive_control(tmp_path):
 
 def test_verbs_registry_declares_surface():
     """verbs_registry_declares_surface — every adapter module exports a VERBS mapping of
-    verb → callable whose ANNOTATED signature declares that verb's params, and
-    `declared_params` (the one reader the tool's validator uses) reads exactly that."""
+    verb → callable dispatchable as `fn(ctx, **params)`, whose model-supplied params are
+    ANNOTATED and keyword-only.
+
+    Read the SIGNATURE, never `declared_params`. Until #885 this test asserted
+    `set(declared_params(fn)) == {p.name for p in sig.parameters.values() if p.kind is
+    KEYWORD_ONLY}` — but `declared_params` IS that comprehension (`verbs.py:83-88`), so
+    both sides were the same filter over the same signature and the assert held for every
+    callable alive, including one with no keyword-only params at all (`set() == set()`).
+    The annotation assert below it then iterated that same empty dict and checked nothing.
+    Adding a positional param to a shipped adapter turned the whole test green. An oracle
+    that stands in for the property while being incapable of failing is worse than none:
+    it reports coverage. The asserts here compare the signature against the CALL SHAPE the
+    tool actually makes (`fn(vctx, **params)`, in `query_tool.register_query_tool`), which
+    is a fact about the tool, not a restatement of the reader. Spelled out inline rather
+    than delegated to `validate_scaffold.check_signatures`: that script is the OTHER gate on
+    the same property, and a test that calls its checker is back to grading the grader."""
     reg = ModuleVerbRegistry(ADAPTERS_DIR, DENY_ALL)
     on_disk = sorted(
         p.name[: -len("_adapter.py")].replace("_", "-") for p in ADAPTERS_DIR.glob("*_adapter.py")
     )
     assert sorted(reg.systems()) == on_disk, "the registry roster is not the adapter roster"
+    positional = (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
 
     for system in reg.systems():
         verbs = reg.verbs(system)
         assert verbs, f"{system} declares no verbs"
         for name, fn in verbs.items():
             assert callable(fn), f"{system}.{name} is not callable"
-            sig = inspect.signature(fn)
-            params = declared_params(fn)
-            kwonly = {
-                p.name for p in sig.parameters.values()
-                if p.kind is inspect.Parameter.KEYWORD_ONLY
-            }
-            assert set(params) == kwonly, f"{system}.{name}: declared params != kw-only params"
-            for p in params.values():
+            sig_params = list(inspect.signature(fn).parameters.values())
+
+            assert sig_params, f"{system}.{name}: takes no parameters at all, not even a ctx"
+            assert sig_params[0].kind in positional, \
+                f"{system}.{name}: takes no leading VerbContext — the tool passes it positionally"
+
+            # The KIND alone does not say it is the ctx: `def get_host(host: str)` also leads
+            # with a positional param, and the tool would bind the VerbContext OBJECT into
+            # `host` — a silently wrong request, not a caught error. Adapters carry
+            # `from __future__ import annotations`, so the annotation arrives as a string.
+            ctx_ann = sig_params[0].annotation
+            assert (ctx_ann is VerbContext
+                    or (isinstance(ctx_ann, str) and ctx_ann.rpartition(".")[2] == "VerbContext")), (
+                f"{system}.{name}: leading param `{sig_params[0].name}` is not annotated "
+                f"VerbContext — nothing distinguishes the carriage from a model param the "
+                f"ctx would overwrite"
+            )
+
+            # The load-bearing one. `declared_params` collects KEYWORD_ONLY parameters ONLY,
+            # so a param declared positionally is invisible to `validate_params`: the model
+            # can never bind it, every call naming it is refused as unknown, and the one shape
+            # that survives (`params={}`) raises TypeError on the missing positional inside
+            # `fn(vctx, **params)`. The verb is unusable in every form.
+            leaked = [p.name for p in sig_params[1:] if p.kind in positional]
+            assert not leaked, (
+                f"{system}.{name}: param(s) {leaked} bind positionally, so the model can never "
+                f"supply them — spell them `*, {leaked[0]}: <type>`"
+            )
+
+            # Same reason `**kwargs` is out: it widens what the FUNCTION accepts without
+            # widening what `declared_params` reports, so the roster the validator names is
+            # not the roster the body reads.
+            var_kw = [p.name for p in sig_params if p.kind is inspect.Parameter.VAR_KEYWORD]
+            assert not var_kw, \
+                f"{system}.{name}: **{var_kw[0]} is not a declared param surface the validator can read"
+
+            model_params = [p for p in sig_params if p.kind is inspect.Parameter.KEYWORD_ONLY]
+            for p in model_params:
                 assert p.annotation is not inspect.Parameter.empty, \
                     f"{system}.{name}.{p.name} carries no annotation — the validator has no type"
 
@@ -729,7 +784,7 @@ def test_capture_fires_only_for_the_query_tool(tmp_path):
         Turn(tool_calls=[("template_search", {"pattern": "sshd"})]),
         DONE,
     ])
-    drive(run_dir, run_id="q611-other", salt=SALT, main=main, gather=gather,
+    drive(run_dir, run_id="q611-other", main=main, gather=gather,
           verbs=elastic_ok(rec))
 
     assert gather.calls == 4, "one of the three non-query tools was intercepted and derailed"
@@ -1097,11 +1152,16 @@ def test_verb_resolves_config_from_deps_tree(tmp_path):
 ROW_KEYS = {
     "lead_id", "seq", "system", "verb", "query_id", "params", "raw_command",
     "payload_path", "exit_code", "error_class", "payload_status", "payload_digest",
+    # #877 F-9: the payload's CONTENT identity, beside the display digest rather than inside
+    # it — `repeat_note` asserts byte identity from this, the digest stays prose a curator
+    # reads. Derived by the writer from the text it persists, so no caller can disagree with
+    # the sidecar it just wrote.
+    "payload_sha256",
 }
 
 
 def test_row_contract_frozen(tmp_path):
-    """row_contract_frozen — the twelve-key queries row: params keyed by the REGISTRY's real param
+    """row_contract_frozen — the thirteen-key queries row: params keyed by the REGISTRY's real param
     names (not arg0/arg1), verb holding the tool's REAL verb (the column has zero production
     readers today and finally becomes honest), raw_command a derived audit string."""
     rec = VerbRecorder()

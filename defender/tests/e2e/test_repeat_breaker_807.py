@@ -226,7 +226,7 @@ def _run(
         circuit_breaker.record_outcome(run_dir, brk_system, brk_exit)
     main = ReplayFn([Turn(tool_calls=[_dispatch(lead, system)]), Turn(text="Investigation complete.")])
     gather = ReplayFn(turns)
-    drive(run_dir, run_id=run_id, salt=SALT, main=main, gather=gather, verbs=verbs)
+    drive(run_dir, run_id=run_id, main=main, gather=gather, verbs=verbs)
     return _Res(run_dir, main, gather)
 
 
@@ -244,17 +244,26 @@ def _run_two_leads(
         Turn(text="Investigation complete."),
     ])
     gather = ReplayFn(turns)
-    drive(run_dir, run_id=run_id, salt=SALT, main=main, gather=gather, verbs=verbs)
+    drive(run_dir, run_id=run_id, main=main, gather=gather, verbs=verbs)
     return _Res(run_dir, main, gather)
+
+
+#: The payload text a seeded SUCCESS row stands for — one text, so two seeded successes are
+#: byte-identical the way two rows of one repeated request are, and the fixture's digest and
+#: content hash are both derived from it (#877 F-9).
+_SEEDED_PAYLOAD = "abcdefghijkl"
 
 
 def _row(
     lead: str, seq: int, system: str, verb: str, params: dict, *,
     exit_code: int = 0, query_id: str | None = None, digest: str | None = None,
 ) -> dict:
-    """One queries-table row in the frozen twelve-key shape, with `error_class` computed by
-    the PRODUCTION classifier rather than restated — a seeded fixture that disagrees with
-    `error_class_for_exit` would be a fixture asserting its own arithmetic."""
+    """One queries-table row in the frozen key shape, with `error_class`, `payload_digest` and
+    `payload_sha256` computed by the PRODUCTION helpers rather than restated — a seeded fixture
+    that disagrees with `error_class_for_exit`, or one whose recorded hash does not belong to
+    the payload it claims (#877 F-9), would be a fixture asserting its own arithmetic. A failed
+    row's payload text is `""`, as both writers persist it."""
+    payload_text = "" if exit_code != 0 else _SEEDED_PAYLOAD
     return {
         "lead_id": lead,
         "seq": seq,
@@ -268,8 +277,10 @@ def _row(
         "error_class": circuit_breaker.error_class_for_exit(exit_code),
         "payload_status": "error" if exit_code != 0 else "ok",
         "payload_digest": digest if digest is not None else (
-            f"exit={exit_code}; seeded" if exit_code != 0 else "12 bytes, 1 line(s)"
+            f"exit={exit_code}; seeded" if exit_code != 0
+            else record_query.payload_digest(payload_text, "", 0)
         ),
+        "payload_sha256": record_query.payload_sha256(payload_text),
     }
 
 
@@ -796,13 +807,14 @@ def test_repeat_trip_leaves_the_infra_breaker_untouched(tmp_path):
 
 def test_trip_row_conforms_to_the_frozen_row_contract(tmp_path):
     """trip_row_conforms_to_the_frozen_row_contract — the trip row's payload carries the SAME
-    twelve frozen keys as any other queries row: no thirteenth key, no amendment to
-    `test_row_contract_frozen`. Every downstream reader written against twelve keys still
+    frozen keys as any other queries row: no key of its own, no amendment to
+    `test_row_contract_frozen`. Every downstream reader written against the frozen set still
     reads it, and the key set is imported from the existing contract rather than restated, so
-    the two cannot drift."""
-    # rejected: a thirteenth key (e.g. `refusal_kind`) — typed and unambiguous, but it breaks
-    #   `test_row_contract_frozen` and every reader written against twelve keys; that is a
-    #   deliberate contract amendment this issue did not propose. F-I option 2 puts the
+    the two cannot drift. (The set is thirteen keys since #877 F-9 added `payload_sha256` for
+    every writer alike; the argument below is about a key only ONE writer would fill.)"""
+    # rejected: a key of the trip row's own (e.g. `refusal_kind`) — typed and unambiguous, but
+    #   it breaks `test_row_contract_frozen` and every reader written against the frozen set;
+    #   that is a deliberate contract amendment this issue did not propose. F-I option 2 puts the
     #   repetition in the existing detail field instead (see trip_row_detail_names_the_repetition).
     rec = VerbRecorder()
     r = _run(tmp_path, verbs=elastic_ok(rec), run_id="d807-frozen", turns=[
@@ -871,8 +883,9 @@ def test_dead_end_return_contract(tmp_path):
 
     assert f"gather for {LEAD}" in summary
     assert INCOMPLETE_IDIOM in summary
-    assert summary.startswith(f"<run-{SALT}-untrusted>")
-    assert summary.endswith(f"</run-{SALT}-untrusted>")
+    assert re.match(r"<run-[0-9a-f]+-untrusted>", summary), "the summary was not framed"
+    salt = re.match(r"<run-([0-9a-f]+)-untrusted>", summary).group(1)
+    assert summary.endswith(f"</run-{salt}-untrusted>"), "the frame never closed on its own salt"
     assert "sshd-auth-window" in summary, "the message does not name the repeated request"
     assert REPEAT_ESCAPE in summary, "the escape never reached the string main receives"
     assert summary in r.main_saw, \
@@ -1158,14 +1171,22 @@ def test_repeat_guard_never_fires_above_its_own_placement(tmp_path):
     """repeat_guard_never_fires_above_its_own_placement — three identical calls to a system
     whose ADAPTER FAILS TO LOAD produce NO `GatherDeadEnd` and no trip row: the load-error
     branch records its row from `_grant_check`, ABOVE M2, so no such call ever reaches the
-    repeat check, and two exit-2 rows mark the system DOWN so the third is answered by the
-    infra breaker's down-message in any case. The `circuit_breaker` owns this shape end to
-    end. Because no such call can reach the guard, its rows are outside the counted domain
+    repeat check, and two exit-2 rows mark the system DOWN so the third IS answered by the
+    infra breaker's down-message. The `circuit_breaker` owns this shape end to end. Because no
+    such call can reach the guard, its rows are outside the counted domain
     (`counted_domain_excludes_validate_path_rows`) and a REPLAY over this run's own table must
     reach the same verdict the live run did — at any threshold, including the N = 2 the two
     recorded rows would otherwise satisfy. Positive control:
     `repeat_trips_on_third_identical_request`, the same three identical calls against a
-    loadable adapter, which DOES trip."""
+    loadable adapter, which DOES trip.
+
+    AMENDED at #878 F-07. The count assertion was `>= 2`, which passed at 3 — the shape where
+    the third call is recorded and answered by the load error again, never by the breaker. That
+    is what the code did, and it contradicted this docstring, the demand in
+    `spec_graph_807.yaml:450-461` and `rejection_trip`'s own justification for excluding these
+    rows. It is now `== 2`, and the down-message is asserted positively rather than inferred
+    from `is_tripped`. `load_error_repeat_is_answered_by_the_breaker_not_the_run_kill` drives
+    the same shape past the fifth call, where the old behaviour cost the run."""
     r = _run(
         tmp_path / "run", verbs=unloadable_adapter(tmp_path / "tree"), run_id="d807-loaderr",
         turns=[
@@ -1175,15 +1196,50 @@ def test_repeat_guard_never_fires_above_its_own_placement(tmp_path):
             DONE,
         ])
     rows = r.own_rows
-    assert len(rows) >= 2, "the load-error branch stopped recording its rows"
+    assert len(rows) == 2, \
+        "the third load-error call was recorded — the breaker that owns this repeat never answered it"
     assert {row["exit_code"] for row in rows} == {2}, \
         "a load-error call was recorded as anything other than the infra fault it is"
     assert all(row["exit_code"] != 64 for row in rows), "the guard wrote a trip row above its placement"
     assert circuit_breaker.is_tripped(r.run_dir, "elastic") is True
+    assert "is DOWN" in r.gather_saw, "the third call was not answered by the down-message"
     assert r.gather.calls == 4, "a GatherDeadEnd ended the lead where the infra breaker owns it"
     assert INCOMPLETE_IDIOM not in r.summary()
     assert _replay(rows, threshold=2) == [], \
         "replay tripped on rows `_grant_check` wrote above M2 — live and replay disagree"
+
+
+def test_load_error_repeat_is_answered_by_the_breaker_not_the_run_kill(tmp_path):
+    """#878 F-07 — FIVE identical calls to a system whose adapter fails to load leave exactly
+    TWO rows and three down-messages, and the run survives.
+
+    `verbs._load_adapter_module` caches only on success, so every call in this class re-runs
+    the failing import and `_record`'s tail hands every one of them to
+    `circuit_breaker.record_outcome`. With the breaker consulted only BELOW `_grant_check`'s
+    return, all five were recorded: the second marked the system down with nothing reading it,
+    and the fifth crossed `RUN_FAIL_KILL_LIMIT = 5` and raised `RunAborted` — which
+    `_run_gather` does not catch and `_drive_agent`'s `RunAborted` arm does not force a close
+    for, so the run ended with no gather summary, no resumed MAIN and no `report.md`.
+
+    The three assertions that separate the fix from the defect: `total_failures` stays at
+    `PER_SYSTEM_FAIL_LIMIT` rather than reaching the kill limit (a tripped breaker means the
+    call did not happen, so it counts no failure), the lead still produces its summary, and
+    MAIN still reaches its own final turn."""
+    r = _run(
+        tmp_path / "run", verbs=unloadable_adapter(tmp_path / "tree"), run_id="d878-loaderr",
+        turns=[q("elastic", "probe", {"native_query": "FROM logs"})] * 5 + [DONE])
+    rows = r.own_rows
+    assert len(rows) == 2, "a call answered by the down-message still recorded an evidence row"
+    assert {row["exit_code"] for row in rows} == {2}
+    assert r.gather_saw.count("is DOWN") == 3, \
+        "the three calls past the trip were not each answered by the breaker's down-message"
+    assert r.breaker["total_failures"] == circuit_breaker.PER_SYSTEM_FAIL_LIMIT, \
+        "a down-answered call counted a failure — five of them spend RUN_FAIL_KILL_LIMIT"
+    assert r.breaker["total_failures"] < circuit_breaker.RUN_FAIL_KILL_LIMIT
+    assert r.gather.calls == 6, "the lead ended early — RunAborted or a dead end cut it short"
+    assert INCOMPLETE_IDIOM not in r.summary(), "the lead reported itself incomplete"
+    assert r.main.calls == 2, \
+        "MAIN never resumed after the gather lead — the run died inside it"
 
 
 def test_repeat_trip_empty_params_is_its_own_domain_member(tmp_path):
@@ -1277,10 +1333,10 @@ def test_counted_domain_excludes_validate_path_rows(tmp_path):
     justification forbids, and the only argument the artifact gives for why the trip row itself
     counts. Every arm therefore asserts the LIVE verdict and the REPLAY verdict over the same
     table. P-a, an executed break-attempt over all five rejection shapes, found NO discriminator
-    among the twelve frozen keys, so an above-M2 row must carry a sentinel identity the guard
+    among the frozen row keys, so an above-M2 row must carry a sentinel identity the guard
     skips: that sentinel is production work this test only observes, and it must live INSIDE
-    the twelve (`set(row) == ROW_KEYS` is asserted on every such row here, so a thirteenth key
-    is not an available implementation).
+    the frozen set (`set(row) == ROW_KEYS` is asserted on every such row here, so a key of the
+    sentinel's own is not an available implementation).
 
     WHAT THIS TEST NO LONGER SAYS (#826 item 4). Its second arm used to pin that three
     identical UNRESOLVABLE-verb calls end the lead nowhere — `gather.calls == 4`, no incomplete
@@ -1643,7 +1699,7 @@ def test_trip_row_detail_names_the_repetition(tmp_path):
     """trip_row_detail_names_the_repetition — the trip row announces itself as a repeat in the
     row's EXISTING detail field, `payload_digest`, which `_record` already fills for a non-zero
     exit as `f"exit={code}; {detail[:160]}"`. Without it the trip row is byte-shaped like a
-    bad-parameter refusal — same exit, same error_class, same empty payload, same twelve keys
+    bad-parameter refusal — same exit, same error_class, same empty payload, same row keys
     — and O4's named audience, the learning loop, reads "fix this parameter" off it. Contrast
     asserted in the same run: an ordinary `_screen` parameter refusal's detail names the
     parameter and never the repetition."""

@@ -87,7 +87,7 @@ def test_a_bound_deps_is_copied_with_one_field_replaced(tmp_path):
     are copied through byte-identical (c11's bind-then-replace idiom)."""
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     deps = bind_curator(wt, rd, "lessons")
-    copy = replace(deps, salt="other-salt")
+    copy = replace(deps, run_id="other-run")
     assert copy.policy == deps.policy
     assert copy.roots == deps.roots            # provisional M6 field — retained, copied through
 
@@ -297,7 +297,10 @@ def test_spawn_identity_fields_do_not_move_into_the_tool_config_slot(tmp_path):
     assert deps.run_dir == rd
     assert deps.defender_dir == wt / "defender"
     base_names = {f.name for f in fields(AgentDeps)}
-    assert {"run_dir", "defender_dir", "run_id", "salt", "cwd_anchor"} <= base_names
+    assert {"run_dir", "defender_dir", "run_id", "cwd_anchor"} <= base_names
+    # #875 removed `salt` from the base deps: a salt a caller can set is a salt a
+    # caller can hand to the party the frame it delimits is shown to (F-1).
+    assert "salt" not in base_names
 
 
 def test_tool_config_slot_survives_two_successive_replace_calls(tmp_path):
@@ -311,7 +314,7 @@ def test_tool_config_slot_survives_two_successive_replace_calls(tmp_path):
         check=FINDINGS_CHECK, runs_dir=wt / "runs",
         pending=wt / "_pending" / "f.jsonl", queued_ids=frozenset(), run_verify=lambda **_: "GOOD",
     )
-    b2 = replace(replace(replace(deps, tool_config=cfg), run_id="a"), salt="b")
+    b2 = replace(replace(deps, tool_config=cfg), run_id="a")
     assert b2.tool_config is cfg
 
 

@@ -76,11 +76,31 @@ def claim_lead(dispatch: dict) -> int:
             return ALREADY_CLAIMED
         return NOT_CLAIMED
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(payload)
+        fh = os.fdopen(fd, "w", encoding="utf-8")
     except OSError:
+        # THE ONLY branch where this hook still owns `fd`: `fdopen` takes ownership when it
+        # succeeds, and from then on the fd is the file object's to close. `fd` here comes from
+        # `os.open` on a freshly created regular file, so this arm is close to unreachable —
+        # it is kept scoped to the one case rather than deleted so the never-took-ownership
+        # path stays covered without covering anything else.
         with contextlib.suppress(OSError):
             os.close(fd)
+        with contextlib.suppress(OSError):
+            os.unlink(sidecar_path)
+        return NOT_CLAIMED
+    try:
+        with fh:
+            fh.write(payload)
+    except OSError:
+        # No `os.close(fd)` (#878 F-36). The `with` closes the fd on the way out INCLUDING when
+        # the failure is the implicit flush inside `close()` — the ENOSPC/EDQUOT/EIO case this
+        # arm exists for — so a second `os.close(fd)` here hit either EBADF or, in the window
+        # before it, whatever unrelated descriptor the OS had since handed that same number.
+        # `contextlib.suppress(OSError)` made both outcomes silent. That race is real rather
+        # than theoretical: `claim_lead` runs on the event-loop thread while lead-0's
+        # fire-and-forget correlation task issues adapter calls through `asyncio.to_thread`
+        # into `subprocess.run`, which opens pipes. `_io.write_guarded`'s replace-mode rollback
+        # is this shape written correctly — it removes the staged file and does not close.
         with contextlib.suppress(OSError):
             os.unlink(sidecar_path)
         return NOT_CLAIMED

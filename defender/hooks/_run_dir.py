@@ -7,7 +7,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from defender._io import locked_for_rewrite
+from defender._io import TEXT_READ_ERRORS, locked_for_rewrite
 
 
 def update_json_locked(
@@ -17,13 +17,33 @@ def update_json_locked(
     `_io.locked_for_rewrite`'s, not a second copy of it (#771 M3): the old
     `path.touch(exist_ok=True)` + `open(path, "r+")` both followed a planted symlink — `touch`
     would create/update the OUTSIDE target, and the `r+` open would then lock and rewrite it.
-    The refusal happens before the lock is ever taken."""
+    The refusal happens before the lock is ever taken.
+
+    A document that parses to a NON-DICT falls back to `default()` too (#878 F-17/F-25). `[]`,
+    `3`, `"x"` and `null` are all valid JSON and none of them is any of the three states written
+    through here; each `mutate` is typed `Callable[[dict], Any]` and opens with `state[...]` or
+    `state.setdefault(...)`, so a non-dict raised `TypeError`/`AttributeError` out of the
+    writer — out of `open_budget` before MAIN's first prompt, and out of
+    `circuit_breaker.record_outcome` past every handler in the run. Coercing at this seam keeps
+    the signature's promise once instead of in each of the three `mutate`s, and it is the same
+    judgement `json.JSONDecodeError` above already makes: a document this function cannot
+    read as state is a document it starts over from."""
     path = Path(path)
     with locked_for_rewrite(path) as f:
-        raw = f.read()
+        # UNDECODABLE is the same case as unparseable, and it is reached one step EARLIER: the
+        # handle is text-mode utf-8, so a `budget.json` holding non-UTF-8 bytes raised
+        # `UnicodeDecodeError` out of the read, above every guard below it — out of
+        # `open_budget` before MAIN's first prompt, which is the F-17 harm reached through the
+        # read rather than the parse. `""` here, so the fallback is `default()` below.
+        try:
+            raw = f.read()
+        except UnicodeDecodeError:
+            raw = ""
         try:
             state = json.loads(raw) if raw else default()
         except json.JSONDecodeError:
+            state = default()
+        if not isinstance(state, dict):
             state = default()
         mutate(state)
         f.seek(0)
@@ -33,16 +53,41 @@ def update_json_locked(
 
 
 def read_json_locked(path: Path) -> dict:
+    """The document at `path` as a dict — `{}` for absent, unreadable, unparseable, and (since
+    #878 F-17) for a document that parses to something that is not a dict.
+
+    `-> dict` was a claim this function did not keep: `json.loads` is typed `Any` and `Any`
+    satisfies every annotation, so `3`, `"x"`, `null` and `[]` type-checked clean and came back
+    as the state. Every caller then dereferenced them — `read_budget`'s state is spread with
+    `{**state, …}`, `_record_alias_refusal` does `state.get("alias_refusals", [])` — and raised
+    `TypeError`/`AttributeError` from a fault path with no handler for it, ending the run with
+    no disposition.
+
+    Narrowed HERE rather than at each reader, which is the argument
+    `scripts/lint/lint_unnarrowed_parse.py` makes for gating this seam and deliberately not the
+    readers of what it launders: fixing the seam fixes every reader, present and future."""
     path = Path(path)
     if not path.is_file():
         return {}
+    # A SYMLINK at the state's name is not this run's state, the same judgement
+    # `locked_for_rewrite` makes on the write side (#771 M3) and `circuit_breaker._load` makes
+    # on its own read side. `is_file()` above DEREFERENCES, so without this the reader followed
+    # a planted alias and read whatever the planter aimed it at as `budget.json` — the one
+    # shape the write side spends the whole of M3 refusing, left open on the read.
+    if path.is_symlink():
+        return {}
+    # `TEXT_READ_ERRORS`, not a bare `OSError`: `f.read()` on a text handle also raises
+    # `UnicodeDecodeError` (a `ValueError`), and non-UTF-8 bytes in the rw-bound run root came
+    # back out of `read_budget` un-caught — the F-17(a) harm reached through the read instead of
+    # the parse, on the very seam this function narrows.
     try:
         with open(path, encoding="utf-8") as f:
             fcntl.flock(f, fcntl.LOCK_SH)
             raw = f.read()
-    except OSError:
+    except TEXT_READ_ERRORS:
         return {}
     try:
-        return json.loads(raw) if raw else {}
+        doc = json.loads(raw) if raw else {}
     except json.JSONDecodeError:
         return {}
+    return doc if isinstance(doc, dict) else {}

@@ -77,7 +77,7 @@ def _driven_run(tmp_path: Path, *, run_id: str, turns=None, text: str = "done"):
     ]
     replay = ReplayFn(scripted)
     opened: list = []
-    drive(run_dir, run_id=run_id, salt=SALT, main=replay,
+    drive(run_dir, run_id=run_id, main=replay,
           store_factory=store_factory(tmp_path, sink=opened))
     return run_dir, opened[0], replay
 
@@ -427,7 +427,7 @@ def test_transcript_html_escapes_message_payload_content_reaching_the_store_back
         Turn(text=payload),
     ])
     opened: list = []
-    drive(run_dir, run_id="escaping", salt=SALT, main=replay,
+    drive(run_dir, run_id="escaping", main=replay,
           store_factory=store_factory(tmp_path, sink=opened))
 
     bodies = "".join(row[0] for row in
@@ -446,3 +446,28 @@ def test_transcript_html_escapes_message_payload_content_reaching_the_store_back
             f"{page_name}: the crafted script element broke out of its container")
         assert "onerror=alert(1)" not in page, (
             f"{page_name}: the crafted event-handler attribute survived unescaped")
+
+
+@pytest.mark.parametrize("spelling", ["onerror", "ONERROR", "OnError", "oNeRrOr"])
+def test_the_event_handler_split_covers_every_casing_and_preserves_the_original(spelling):
+    """#883 F-35 — HTML attribute names are case-insensitive, so `ONERROR=` IS the
+    attribute `esc_untrusted`'s split exists to break up; a case-sensitive pattern covers
+    one spelling of the grammar its own comment claims.
+
+    Both halves are asserted because fixing only the first introduces the second: the
+    substitution used to be the LITERAL `"on\\u200b"`, which under IGNORECASE rewrites
+    `ONERROR=` to `on\\u200bERROR=` — silently case-folding text the page exists to show
+    verbatim. The split must fire AND the author's casing must survive it."""
+    from defender.scripts.visualize.visualize_primitives import esc_untrusted
+
+    zwsp = "​"
+    raw = f"<img src=x {spelling}=alert(1)>"
+    out = esc_untrusted(raw)
+
+    assert f"{spelling}=" not in out, (
+        f"{spelling}= passed through unsplit — the pattern is blind to this casing")
+    assert f"{spelling[:2]}{zwsp}{spelling[2:]}=" in out, (
+        f"expected the split after {spelling[:2]!r} with the casing intact, got {out!r}")
+    # The split is the ONLY edit the helper makes: strip it and what is left is exactly
+    # `esc()`'s output. This is what fails if the literal replacement case-folds the text.
+    assert out.replace(zwsp, "") == html.escape(raw)

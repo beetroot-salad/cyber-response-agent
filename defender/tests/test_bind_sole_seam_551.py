@@ -86,6 +86,7 @@ directly. No network, no key, no fault-injection fakes (the entry points are pur
 from __future__ import annotations
 
 import os
+import inspect
 import re
 from dataclasses import replace
 from pathlib import Path
@@ -243,11 +244,11 @@ def test_d0_bind_return_contract(tmp_path):
     # RED@HEAD: bind's signature has `repo_root`, not `defender_dir` → TypeError.
     run = tmp_path / "run-xyz"
     wt = tmp_path / "wt" / "defender"
-    deps = bind(MAIN_DEF, run, scope=RunScope(), salt="a" * 32, defender_dir=wt)
+    deps = bind(MAIN_DEF, run, scope=RunScope(), defender_dir=wt)
     assert isinstance(deps, AgentDeps)
     assert isinstance(deps.policy, permission.AgentPolicy)
     assert deps.run_id == run.name
-    assert deps.salt == "a" * 32
+    assert not hasattr(deps, "salt")   # #875: bind hands out no delimiter
     assert deps.defender_dir == wt          # the threaded tree, NOT PATHS
 
 
@@ -359,27 +360,41 @@ def test_d1_lead_author_via_bind(tmp_path):
     assert permission.decide_bash(f"rm {skills}/gather/_draft/x.md", policy=pol, run_dir=run, defender_dir=wtd).allow
 
 
-def test_d1_stages_mint_fresh_salt(tmp_path):
-    """d1_stages_mint_fresh_salt: salt=None mints a fresh 32-hex uuid4 (two binds differ); a
-    carried salt threads verbatim; MAIN carries the run's minted salt."""
-    # GREEN@HEAD: the salt seam shipped with #545; the fold must keep it.
+def test_d1_bind_carries_no_salt(tmp_path):
+    """d1_bind_carries_no_salt: `bind` neither takes a salt nor puts one on deps.
+
+    AMENDED FROM `d1_stages_mint_fresh_salt` (#875). That demand pinned the #545 seam — deps
+    carry a salt, `salt=None` mints a fresh uuid4, a passed salt threads verbatim — and the
+    mint-per-bind half of it was a real defence: it is what kept the review roles and the
+    learning stages from holding the delimiter of the frame their own output returns inside.
+
+    What #875 F-1 found is that the seam could not deliver that defence GENERALLY, because a
+    salt on deps is a salt some caller can pass, and one did: the gather dispatch threaded
+    MAIN's own salt into the subagent whose output MAIN then framed with it. The fix is not a
+    better rule about who may pass what — it is removing the thing that can be passed.
+    `wrap_fresh` mints a frame's delimiter after the content is in hand, so no token outlives
+    the string it delimits and there is nothing to bind.
+
+    The obligation the old demand served therefore survives in a stronger form, asserted here
+    as an absence: a framed party cannot hold a delimiter that no longer exists on deps."""
     run = tmp_path / "run"
-    d1 = bind(ORACLE_DEF, run)
-    d2 = bind(ORACLE_DEF, run)
-    assert re.fullmatch(r"[0-9a-f]{32}", d1.salt)
-    assert d1.salt != d2.salt
-    assert bind(ORACLE_DEF, run, salt="feed" * 8).salt == "feed" * 8
-    assert bind(MAIN_DEF, run, salt="beef" * 8).salt == "beef" * 8
+    assert "salt" not in inspect.signature(bind).parameters, \
+        "bind must not take a salt (#875): a salt a caller can pass is a salt a caller can share"
+    for defn in (ORACLE_DEF, MAIN_DEF, GATHER_DEF):
+        deps = bind(defn, run)
+        assert not hasattr(deps, "salt"), \
+            f"{defn.role.name} deps still carry a salt field — the #875 F-1 class is not closed"
 
 
 def test_d1_base_for_run_spine_survives(tmp_path):
     """d1_base_for_run_spine_survives (survival): the BASE AgentDeps._for_run spine bind calls
     is CONSERVED — an over-eager subtraction that deletes it would break bind itself."""
-    # GREEN@HEAD (conservation guard): bind routes through _for_run (run_id + minted salt prove it).
+    # GREEN@HEAD (conservation guard): bind routes through _for_run (run_id proves it — the
+    # minted salt that used to be the second witness is gone with #875).
     run = tmp_path / "run-abc"
     deps = bind(ORACLE_DEF, run)
     assert deps.run_id == run.name                 # _for_run sets run_id = run_dir.name
-    assert re.fullmatch(r"[0-9a-f]{32}", deps.salt)  # _for_run minted the salt
+    assert deps.cwd_anchor is not None             # _for_run sets the anchor
     assert hasattr(AgentDeps, "_for_run")            # the base spine survives
 
 
@@ -664,7 +679,7 @@ def test_d3_main_driver_threads_param_into_bind():
     """d3_main_driver_threads_param_into_bind (behavior): run_investigation threads its defender_dir
     param into the bind(MAIN_DEF, …) call (so prompt tree == gate tree), not only into
     build_agent/_user_prompt while bind anchors PATHS."""
-    # RED@HEAD: the driver's bind(MAIN_DEF, run_dir, salt=salt) call has no defender_dir today.
+    # RED@HEAD: the driver's bind(MAIN_DEF, run_dir) call has no defender_dir today.
     src = (PATHS.repo_root / "defender" / "runtime" / "driver.py").read_text()
     assert re.search(r"bind\(\s*MAIN_DEF[^)]*defender_dir\s*=", src), \
         "run_investigation must thread defender_dir into bind(MAIN_DEF, …)"
@@ -672,19 +687,30 @@ def test_d3_main_driver_threads_param_into_bind():
 
 def test_d3_gather_threads_not_restamps():
     """d3_gather_threads_not_restamps (parity): the GATHER dispatch builds deps as
-    bind(GATHER_DEF, deps.run_dir, salt=deps.salt, defender_dir=deps.defender_dir) and DROPS the
-    replace(defender_dir=…) restamp — policy anchor and deps field are one tree (no restamp split),
-    and the PARENT run's salt is threaded in (a fresh uuid4 would split the run's ONE untrusted-data
-    trust token and fail the injection defence open — the #546 footgun)."""
-    # RED@HEAD: bind(GATHER_DEF, …) has no defender_dir kwarg; the tree rides a replace() restamp.
+    bind(GATHER_DEF, deps.run_dir, defender_dir=deps.defender_dir) and DROPS the
+    replace(defender_dir=…) restamp — policy anchor and deps field are one tree (no restamp
+    split). The gather dispatch passes NO salt, because there is none to pass.
+
+    AMENDED PREMISE (#875 F-1). This test used to require the opposite of its last assertion:
+    `salt=deps.salt` on the bind, on #546's reasoning that "a fresh uuid4 would split the run's
+    ONE untrusted-data trust token and fail the injection defence open."
+
+    That reasoning does not survive contact with the two directions. Splitting cannot fail
+    open: `_run_gather` re-wraps gather's output unconditionally, so an inner tag carrying a
+    foreign salt is inert TEXT inside MAIN's frame rather than a delimiter that closes it.
+    Sharing, by contrast, fails open exactly as F-1 reproduces — gather reads the run salt in
+    plaintext on every payload view it is handed, so it can close the frame its own summary
+    arrives in and keep writing in MAIN's host-text region. #546 read "one run" as "one trust
+    boundary" when there are two: MAIN's view of gather, and gather's view of the payloads.
+
+    The `defender_dir` half of the demand is untouched — that argument was always about the
+    policy anchor and never about the salt."""
     src = (PATHS.repo_root / "defender" / "runtime" / "tools_gather.py").read_text()
     assert re.search(r"bind\(\s*GATHER_DEF[^)]*defender_dir\s*=", src), \
         "the gather dispatch must thread defender_dir into bind(GATHER_DEF, …)"
-    # Salt-not-split (the #546 injection-defense footgun): the bind(GATHER_DEF, …) call must carry
-    # the parent run's salt (salt=deps.salt), never let bind mint a fresh uuid4 for the subagent.
-    assert re.search(r"bind\(\s*GATHER_DEF[^)]*salt\s*=\s*deps\.salt", src), \
-        "the gather dispatch must thread the parent run's salt (salt=deps.salt) into " \
-        "bind(GATHER_DEF, …) — a fresh uuid4 would split the run's untrusted-data trust token"
+    assert not re.search(r"bind\(\s*GATHER_DEF[^)]*salt\s*=", src), \
+        "the gather dispatch must pass NO salt into bind(GATHER_DEF, …) — handing a subagent " \
+        "the delimiter of the frame its own output returns inside is #875 F-1"
     assert "defender_dir=deps.defender_dir, lead_id=" not in src, \
         "the replace(defender_dir=…) restamp must be dropped (bind anchors the tree)"
 
@@ -880,7 +906,7 @@ def test_d6_writers_pass_roots(tmp_path):
         write_allow=(permission.build_write_allow(escape, suffix=".md"),), deny_reason="d",
     )
     deps = AgentDeps(
-        run_dir=run, defender_dir=dfn, run_id="r", salt="s", policy=escape_pol,
+        run_dir=run, defender_dir=dfn, run_id="r", policy=escape_pol,
         cwd_anchor=run,
     )
     # RED@#551-HEAD: _tool_write_file called decide_write WITHOUT roots → guard dormant → allowed.

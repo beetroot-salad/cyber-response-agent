@@ -102,7 +102,6 @@ def _drive(
     drive(
         run_dir,
         run_id=run_id,
-        salt=SALT,
         main=main,
         gather=gather,
         verbs=verbs,

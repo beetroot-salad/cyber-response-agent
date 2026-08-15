@@ -183,7 +183,7 @@ def test_three_different_undeclared_systems_are_one_repeat_group(tmp_path):
 
     This is the reading the fix commits to: below the grant the identity is "a call to no
     system this run declares", and a model issuing three of those has repeated one mistake.
-    It is also the only reading available — the guard recovers its identity from the twelve
+    It is also the only reading available — the guard recovers its identity from the frozen
     frozen row keys, so a `system` the row deliberately does not carry cannot separate them.
 
     What the coarsening may NOT do is make the dead-end LIE. The message must not claim those

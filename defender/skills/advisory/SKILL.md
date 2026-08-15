@@ -40,11 +40,9 @@ goal: <one-sentence: what the caller wants past cases to tell them>
    defender-invlang advisory --signature <signature_id> --class lead_discrimination --frontier '?hypothesis-one' --frontier '?hypothesis-two' --top-k 5
    ```
 
-   **One physical line.** No shell joins your lines, so a `\` continuation
-   continues nothing: each line is lexed on its own and the command fails to
-   tokenize. The same holds for a `|`, `&&`, or `||` at a line boundary
-   (`A |` then `B`, or `A` then `| B`): it is refused, not joined. Long
-   invocations stay on one line.
+   Send it as ONE physical line, however long it gets. Nothing joins
+   lines here, so a `\` continuation continues nothing and the command
+   is refused rather than wrapped.
 
    `--frontier` is repeatable — one flag per hypothesis name, not
    comma-joined. When the dispatch frontier is empty, omit the

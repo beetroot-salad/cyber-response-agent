@@ -155,9 +155,21 @@ where the lead choice itself depends on which story you're testing.
 **Disposition gate.** An unresolved slot on any vertex blocks
 `disposition: benign` — `??` or a `{a, b, c}` candidate set, in any
 slot of the class tuple or as an attribute value. Resolve via
-`:R attr_updates` before concluding, or escalate.
+`:R attr_updates` before concluding, or escalate. A companion carrying
+NO vertices is blocked too, for the same reason rather than a different
+one: with nothing declared there is no slot to resolve, and "every slot
+is resolved" would otherwise be satisfied by never declaring one.
 
 ## Core blocks
+
+A header line ends at its column list. Anything after it — a `# loop 2`
+comment, a `(loop 3)` note, a stray bracket — makes the line a non-header,
+and the block it was meant to open is refused rather than read.
+
+An id is written once per block: a second row repeating `v-001` keeps the
+first and discards the later one, so it is refused. Adding to a committed
+block means sending a SECOND block, where re-emitting a row is legal and
+silent.
 
 A header's `?` marks the columns a row may leave off the end
 (`[id|type|class|ident|attrs?]` — four cells is a complete row). Every
@@ -242,7 +254,10 @@ identifier; `key=attrs.<name>` for attribute refinements) — see
 §Open questions. Those three are the ONLY legal keys; any other key
 is flagged, and the flagged row blocks the next write until you repair
 it with `fix_row`. The `target` must name a vertex some `:V` block
-declares.
+declares, and the `value` cell must carry what the lead obtained: an empty
+one is refused, because a blank does not leave the slot open — it closes it
+over nothing. If the lead did not settle the slot, leave the `??` standing
+and escalate.
 
 ### `:R authz` (authz contract resolution)
 
@@ -312,10 +327,18 @@ summary                "Login matched established bastion usage"
   `report.md`'s frontmatter carries. A value outside it is denied on
   write; there is no `escalate` keyword — an escalation is
   `termination.category exhaustion-escalation` with `disposition
-  inconclusive`. One keyword describes the RULE rather than the alerted
-  entity — `false-positive`, for a rule that fired on a different kind of
-  behavior than it claims — and it is the one with an entry price: it
-  requires `detection_notes` and `entity_check` below.
+  inconclusive`. Two keywords carry an ENTRY PRICE. `benign` needs at least
+  one `:V prologue.vertices` row — a log that never recorded the alerted
+  entity accounts for nothing — plus every `??` slot resolved (§Open
+  questions) and every authz contract on a live hypothesis `authorized`
+  (§`:R authz`); `false-positive` — the one keyword
+  that describes the RULE rather than the alerted entity, for a rule that
+  fired on a different kind of behavior than it claims — needs
+  `detection_notes` and `entity_check` below. Both prices are charged twice:
+  on the write, against the keyword you conclude under, and again by
+  `close_investigation`, against the keyword you close under. So concluding
+  under a cheaper keyword buys nothing — the log itself still has to have
+  paid for the keyword the close commits.
 - `ceiling_test` — the checks you could NOT make. One row per gap, repeated,
   naming the host and the data source:
   `ceiling_test  "authorized_keys FIM on web-1 (auditd write events) not retrieved"`
@@ -467,9 +490,12 @@ ac1|proposed|iam-policy|"service account allowed to read object at event time"|e
 `ac<n>` numbers across the DOCUMENT, not per hypothesis the way
 `p<n>`/`r<n>` do: the resolving `:R authz` row names only the contract
 it fulfills, so a second LIVE hypothesis numbering its first contract
-`ac1` is denied on write. (Refuting one of the two also ends the
-ambiguity — a contract on a refuted hypothesis discharges nothing.) Two
-rows in one block may not share an id either — only the first is kept.
+`ac1` is denied on write. Refuting one of the two lifts that denial —
+append-only leaves no other repair — but it does not make the id
+unambiguous: a `:R authz` row for a shared id discharges only the
+contract whose `anchor_kind` it matches, and if both declarers ask under
+the same anchor kind it discharges neither, and `disposition: benign`
+stays blocked.
 
 Authz checks ask whether an interaction edge is permitted; impact
 checks whether the edge's effect crosses a threshold. Integrity is

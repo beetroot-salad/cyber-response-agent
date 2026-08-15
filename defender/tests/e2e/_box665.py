@@ -112,8 +112,16 @@ class RecordingDocker:
     def __init__(
         self, *, running: bool = False, create: DockerFault | None = None,
         sentinel: DockerFault | None = None, reap: DockerFault | None = None,
-        exec_replies: list | None = None,
+        exec_replies: list | None = None, existing_token: str | None = None,
     ):
+        # What a `docker inspect` of the START-TOKEN LABEL finds under this name (#884 F-29's
+        # ownership check). Three states, and the middle one is the whole point:
+        #   None     no such container — the healthy path, and every create that left nothing
+        #   "self"   the container THIS start asked for, carrying the token it stamped: the
+        #            create-then-start leak, the only case a fault arm may reap
+        #   <other>  another lane's box holding the same name: a create that lost a NAME
+        #            RACE, which must survive whatever state it is in
+        self.existing_token = existing_token
         self.running = running          # _is_running → a LIVE same-name container (F3/po4)
         self.create = create            # DockerFault on `docker run` (create)
         self.sentinel = sentinel        # DockerFault on the sentinel exec readback
@@ -122,12 +130,31 @@ class RecordingDocker:
         self.calls: list[list[str]] = []
         self.create_argv: list[str] | None = None
 
+    def _inspect(self, argv: list[str]) -> subprocess.CompletedProcess:
+        """`docker inspect -f …`, which box.py asks two different questions through: the
+        container's STATE (`_is_running`) and its start-token LABEL (`_start_token`). The
+        format string is what separates them, exactly as it does on a real daemon."""
+        fmt = argv[argv.index("-f") + 1] if "-f" in argv else ""
+        if "Config.Labels" not in fmt:
+            return _cp(0, "running\n") if self.running else _cp(1, "", "No such object\n")
+        if self.existing_token is None:
+            return _cp(1, "", "No such object\n")
+        token = self.existing_token
+        if token == "self":
+            # Echo back what THIS start stamped, which is what a real daemon would report for
+            # a container `docker run` created before its task failed. Read off the captured
+            # argv rather than stored, so a token box.py never actually sent cannot make the
+            # ownership check look right. `<no value>` is docker's own text for a missing
+            # label — the fake must not invent a friendlier one.
+            token = self.create_label(box_mod.START_TOKEN_LABEL) or "<no value>"
+        return _cp(0, f"{token}\n")
+
     def __call__(self, argv, **_kw) -> subprocess.CompletedProcess:
         argv = list(argv)
         self.calls.append(argv)
         sub = argv[1] if len(argv) > 1 else ""
         if sub == "inspect":
-            return _cp(0, "running\n") if self.running else _cp(1, "", "No such object\n")
+            return self._inspect(argv)
         if sub == "rm":
             f = self.reap
             return _cp(f.rc, f.stdout, f.stderr) if f else _cp(0)
@@ -202,8 +229,44 @@ class RecordingDocker:
     def has_flag(self, flag: str) -> bool:
         return flag in self._argv()
 
+    def create_label(self, key: str) -> str | None:
+        """The value `docker run --label <key>=…` carried on the captured create argv.
+
+        Read straight off the argv rather than stored, so the fake cannot answer an ownership
+        `inspect` with a token box.py never actually stamped — which is the one way this fake
+        could make the #884 F-29 reap look correct while the label was going astray."""
+        for i, tok in enumerate(self._argv()):
+            if tok == "--label" and i + 1 < len(self._argv()):
+                k, _, v = self._argv()[i + 1].partition("=")
+                if k == key:
+                    return v
+        return None
+
     def tmpfs(self) -> str | None:
         return self.flag_value("--tmpfs")
+
+
+def reaped_after_create(calls) -> bool:
+    """Whether the container CREATE ASKED FOR was reaped AFTER create — the only form of this
+    assertion that says anything.
+
+    Both start paths open with an UNCONDITIONAL pre-create `docker rm -f <name>` (the
+    stale-same-name sweep in each of `_start_boxed`/`_start_boxed_request`), so on every path
+    through both functions — whether or not the fault arm reaps at all — BOTH of the obvious
+    spellings are already true: `any(c[:3] == [docker, rm, -f] for c in calls)`, and equally
+    `[docker, rm, -f, <the created name>] in calls`, since the pre-create reap names that same
+    container. The first passed against the create-fault arm that provably did NOT reap
+    (#884 F-29), which is how that leak survived a test suite that believed it pinned the reap;
+    naming the container does not rescue it. Only the POSITION discriminates, so position and
+    name are asserted together, here, once — and here rather than in either test module,
+    because BOTH #665's create-fault arms and #771's startup-fault arm need exactly it."""
+    create = next(
+        (i for i, c in enumerate(calls) if len(c) > 1 and c[1] == "run"), None
+    )
+    assert create is not None, "no `docker run` was issued — the fault fired before create"
+    argv = calls[create]
+    name = argv[argv.index("--name") + 1]
+    return ["docker", "rm", "-f", name] in calls[create + 1:]
 
 
 # --------------------------------------------------------------------------- #

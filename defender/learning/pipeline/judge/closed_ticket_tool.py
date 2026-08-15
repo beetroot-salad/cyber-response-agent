@@ -112,7 +112,7 @@ from defender.runtime.query_tool import (
 )
 from defender.runtime.ticket_screen import screen_get, screen_list, self_case_key
 from defender.runtime.tools import AgentDeps, _bash_env, _format_bash_result
-from defender._untrusted import wrap as _wrap
+from defender._untrusted import wrap_fresh
 from defender.runtime.verbs import DENIED, GRANTED, VerbContext
 from defender.scripts.adapters.faults import AdapterFault
 from defender.scripts.gather_tools.payload_view import render as _render_payload
@@ -360,10 +360,10 @@ def _capture_and_view(
         note = _capture_payload_note(run_dir, payload_rel)
         if exit_code != 0:
             return _format_bash_result(
-                exit_code, "", _wrap(detail, "untrusted", deps.salt), note,
+                exit_code, "", wrap_fresh(detail, "untrusted"), note,
             )
         view = _render_payload(text, payload_rel, run_dir)
-        return _format_bash_result(0, _wrap(view, "untrusted", deps.salt), "", note)
+        return _format_bash_result(0, wrap_fresh(view, "untrusted"), "", note)
 
     return _go()
 
@@ -460,12 +460,12 @@ async def _grant_gate(
     if decision.outcome == DENIED:
         _log_denial(deps.run_dir, verb=verb, params={})
         return _format_bash_result(
-            DEFAULT_FAULT_EXIT, "", _wrap(decision.refusal or "", "untrusted", deps.salt), "",
+            DEFAULT_FAULT_EXIT, "", wrap_fresh(decision.refusal or "", "untrusted"), "",
         )
     if decision.outcome != GRANTED:
         return _format_bash_result(
             DEFAULT_FAULT_EXIT, "",
-            _wrap(decision.refusal or f"unresolvable: {SYSTEM}.{verb}", "untrusted", deps.salt),
+            wrap_fresh(decision.refusal or f"unresolvable: {SYSTEM}.{verb}", "untrusted"),
             "",
         )
     return None

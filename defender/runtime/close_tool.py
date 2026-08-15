@@ -27,7 +27,7 @@ from pydantic_ai import RunContext
 from pydantic_ai.exceptions import ModelRetry
 
 from defender._artifact_schema import validate_artifact
-from defender._untrusted import wrap as _wrap
+from defender._untrusted import wrap_fresh
 # The vocabulary from its OWNER, not second-hand through the report schema — `_artifact_schema`
 # has its own gate to run on it and names it for that, but it was never this module's supplier
 # (#785's rule: a module that USES the vocabulary imports it from the owner, so a consumer's
@@ -36,7 +36,7 @@ from defender._untrusted import wrap as _wrap
 # argument schema below.
 from defender._vocab import DISPOSITION_ENUM, DISPOSITION_VALUES
 from defender.hooks.budget_enforcer import BUDGET_EXEMPT_TOOLS  # noqa: F401 — re-export, RS16
-from defender.skills.invlang.validate import false_positive_entry_price
+from defender.skills.invlang.validate import disposition_entry_price
 
 from . import challenge_gate
 from . import tools as tools_mod
@@ -257,10 +257,10 @@ def _render_challenged_message(material: tuple[RecommendedLead, ...], deps: Agen
     assert material, "the challenged arm never returns without discriminating material"
     lines = [f"- {item.target}: {item.ask}" for item in material]
     # O6/O7: the discriminating material is derived from a payload-influenced role's output —
-    # it returns inside the SAME run-salted untrusted frame the gather subagent's return
-    # already uses (`defender._untrusted.wrap`, keyed on the INVESTIGATION's own salt, never
-    # the review role's own — the review role minted a fresh one and never held this one).
-    framed = _wrap("\n".join(lines), "untrusted", deps.salt)
+    # it returns inside the same KIND of untrusted frame the gather subagent's return uses
+    # (`defender._untrusted.wrap_fresh`) — since #875 NOT the same salt: the delimiter is minted
+    # after this content is in hand, so no party has seen it, the review role included.
+    framed = wrap_fresh("\n".join(lines), "untrusted")
     # "measurement", not "lead": #796's ask names the entity, edge, lead or hypothesis to
     # measure and the DIMENSION to measure it on — the investigation chooses the lead. Calling
     # a vertex a lead here told the model a `v-` id was something it could go run.
@@ -285,7 +285,7 @@ def _record_dict(verdict: challenge_gate.GateVerdict, disposition: str, deps: Ag
     return {
         "verdict": verdict.outcome,
         "reviewed_disposition": disposition,
-        "detail": _wrap(verdict.detail, "untrusted", deps.salt) if verdict.detail else "",
+        "detail": wrap_fresh(verdict.detail, "untrusted") if verdict.detail else "",
         "failure_kind": verdict.failure_kind,
     }
 
@@ -429,23 +429,10 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
             raise ModelRetry(tools_mod.flagged_write_refusal(
                 "close_investigation", flagged, offered_text=False,
             ))
-    # #806: the one disposition with an entry price, collected here as well as at the
-    # `investigation.md` write gate. `report.md` is written FROM this argument, and nothing else
-    # on this path reads the companion — so without this the price is bypassable by concluding
-    # under a cheaper keyword and passing `false-positive` to the close. Placed AFTER the
-    # terminal-close refusal so R4's ordering holds, and before the gate so a close that owes
-    # the price never spends a review on it.
-    if disposition == "false-positive":
-        owed = false_positive_entry_price(
-            _read_companion_text(Path(deps.run_dir) / "investigation.md")
-        )
-        if owed:
-            raise ModelRetry(
-                "close blocked: `false-positive` says the RULE misfired, which is no evidence "
-                "about the alerted entity — so it is reachable only from an `investigation.md` "
-                "that states the defect and names the lead that checked the entity anyway. "
-                + " ".join(owed)
-            )
+    # #806/#879: the dispositions carrying a structural entry price, collected here as well as
+    # at the `investigation.md` write gate. Placed AFTER the terminal-close refusal so R4's
+    # ordering holds, and before the gate so a close that owes the price never spends a review.
+    _refuse_if_entry_price_is_owed(deps, disposition)
     if disposition == "inconclusive":
         # The gate reviews CONFIDENT closes only, so nothing was reviewed and there is no
         # stage output to diagnose — the empty detail here is the honest value, not a gap.
@@ -512,18 +499,79 @@ async def _tool_close_investigation(
     return result.message
 
 
-def _read_companion_text(path: Path) -> str:
-    """The investigation log as text, or empty when there is none to read.
+def _refuse_if_entry_price_is_owed(deps: AgentDeps, disposition: str) -> None:
+    """Collect the structural price this close's KEYWORD owes, and refuse if it is unpaid.
 
-    Absence is not an error to raise here: an unwritten (or unreadable) companion states no
-    defect and names no entity check, so it owes the whole price and the caller denies with the
-    same actionable text a blank `:T conclude` earns. Raising instead would hand the model an
-    exception where it needs an instruction.
+    `report.md` is written FROM the close's disposition argument and nothing else on that path
+    reads the companion, so a price collected only at the `investigation.md` write gate is owed
+    by the document the model chooses to write and by nothing the model calls. #806 collected
+    `false-positive` here with `if disposition == "false-positive"`, which read one row of a
+    two-row table and left `benign` ungated at the close (#879) — so the dispatch goes through
+    the OWNER's `_DISPOSITION_GATES`, and nothing in this module is keyed on a disposition. A
+    fourth priced keyword is a row there, collected and explained by this seam the day it lands.
+
+    Fails CLOSED on both ways the check can fail to happen. The read raises a `ModelRetry` of
+    its own for an I/O fault (see `_read_companion_text`), and the parse is wrapped here because
+    this gate parses a file it did not write — an imported run dir, a replayed fixture, a hand
+    edit — the same reason `_artifact_schema.validate_investigation` wraps its own `diagnose`
+    call. Either fault would otherwise leave the close as a traceback rather than a refusal,
+    which is the shape #851 and #878 spent two PRs removing from this runtime.
     """
     try:
-        return path.read_text(encoding="utf-8")
-    except OSError:
+        price = disposition_entry_price(
+            disposition, _read_companion_text(Path(deps.run_dir) / "investigation.md")
+        )
+    except ModelRetry:
+        raise
+    except Exception as exc:
+        raise ModelRetry(
+            f"close blocked: `investigation.md` could not be parsed to check the entry price "
+            f"your disposition may owe ({type(exc).__name__}: {exc}). Repair the document — a "
+            f"close is not permitted while the gate cannot look."
+        ) from exc
+    if price:
+        # One owed string per line. `false-positive` owes at most five, but
+        # `_check_benign_open_slots` files one per unresolved slot PER VERTEX, so a real log can
+        # owe dozens — space-joined that is a wall the model has to pick a row out of, and the
+        # write gate already hands it the same diagnostics one per line.
+        raise ModelRetry("close blocked: " + price.rationale + "\n" + "\n".join(price.owed))
+
+
+def _read_companion_text(path: Path) -> str:
+    """The investigation log as text, or empty when it was never written.
+
+    NEVER WRITTEN is not an error to raise here: an unwritten companion states no defect, names
+    no entity check and records no alerted entity, so it owes BOTH priced keywords their whole
+    price and the caller denies with the same actionable text a blank `:T conclude` earns.
+    Raising instead would hand the model an exception where it needs an instruction.
+
+    COULD NOT LOOK is a different answer, and since #879 it has to be: every close reads this
+    file now, so an EACCES, an EIO or a run dir that is not a directory reaches a gate none of
+    them used to, and on that path `""` would not mean "nothing was written" — it would mean
+    "this gate did not run", waiving `benign`'s entire price on an I/O fault. `false-positive`
+    happens to fail closed over an empty read where `benign` fails open, so swallowing the
+    error would also leave the two priced keywords disagreeing about what a fault means. A gate
+    that cannot look must not report clean (#618/#621/#652), so the fault becomes a refusal —
+    which is also what #851 and #878 settled for every other fault path in this runtime.
+
+    Undecodable BYTES are read leniently, which is neither of those: the file IS readable, and
+    replacing the bad byte leaves every readable `??` slot and unfulfilled contract still owed,
+    where `""` would waive the whole price over one byte. A gate reads what is readable and
+    judges THAT. `investigation.md` is written through `append_block`, which refuses an
+    undecodable document for its own reason, so this is reached only by a file that arrived
+    some other way — an imported run dir, a replayed fixture, a hand edit.
+    """
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")
+    except FileNotFoundError:
         return ""
+    except OSError as exc:
+        raise ModelRetry(
+            f"close blocked: `investigation.md` could not be read ({exc.strerror or exc}), so "
+            f"the entry price your disposition may owe could not be checked. This is a fault "
+            f"in the run dir, not something to conclude around — a close is not permitted "
+            f"while the gate cannot look."
+        ) from exc
 
 
 #: The `disposition` argument AS THE MODEL IS OFFERED IT (#750): a plain `str` carrying the

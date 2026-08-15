@@ -6,7 +6,6 @@ import re
 import subprocess
 import sys
 import time
-import uuid
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -28,7 +27,7 @@ from .agent_definition import ResolvedRoots, ToolSet
 from .agent_role import AgentRole
 from .permission.files import RESOLVE_ERRORS
 
-from defender._untrusted import wrap as _wrap
+from defender._untrusted import wrap_fresh
 # The SAME byte ruler the #629 bounds are measured with — a write tool that reports "bytes"
 # has to report the number the gate will judge, not a codepoint count that under-reads it.
 from defender._artifact_schema import _utf8_len
@@ -126,7 +125,6 @@ class AgentDeps:
     run_dir: Path
     defender_dir: Path
     run_id: str
-    salt: str
     policy: permission.AgentPolicy = field(kw_only=True)
     cwd_anchor: Path = field(kw_only=True)
     box: box_mod.BoxExecutor = field(kw_only=True, default_factory=box_mod.BoxExecutor)
@@ -150,16 +148,15 @@ class AgentDeps:
     @classmethod
     def _for_run(
         cls, run_dir: Path, policy: permission.AgentPolicy,
-        *, cwd_anchor: Path, defender_dir: Path = PATHS.defender_dir, salt: str | None = None,
+        *, cwd_anchor: Path, defender_dir: Path = PATHS.defender_dir,
         box: box_mod.BoxExecutor | None = None,
         roots: ResolvedRoots | None = None,
         tool_config: Any = None,
         **subtype_fields: Any,
     ) -> Self:
-        resolved_salt = salt if salt is not None else uuid.uuid4().hex
         return cls(
             run_dir=run_dir, defender_dir=defender_dir,
-            run_id=run_dir.name, salt=resolved_salt, policy=policy,
+            run_id=run_dir.name, policy=policy,
             box=box if box is not None else box_mod.BoxExecutor(),
             cwd_anchor=cwd_anchor,
             roots=roots, tool_config=tool_config,
@@ -348,7 +345,7 @@ def _tool_bash(deps: AgentDeps, command: str) -> str:
         ),
     )
     if _is_learning_role(deps) or _opens_untrusted_read(operands):
-        return _wrap(formatted, "untrusted", deps.salt)
+        return wrap_fresh(formatted, "untrusted")
     return formatted
 
 
@@ -558,6 +555,42 @@ def _is_cross_agent_read(deps: AgentDeps, path: Path) -> bool:
     return bool(role_name) and resolved.name == f"{role_name}.md"
 
 
+def _probe_is_file(p: Path, path: str) -> bool:
+    """`p.is_file()` over a MODEL-AUTHORED path, as a refusal rather than a traceback (#878
+    F-15).
+
+    `pathlib` swallows only `_IGNORED_ERRNOS` — ENOENT/ENOTDIR/EBADF/ELOOP — and every other
+    `os.stat` error comes back out. The reachable one is ENAMETOOLONG (errno 36): the read gate
+    ALLOWS a basename over `NAME_MAX`, because MAIN's and GATHER's run-root read shape is
+    `under(run, SEG)` with `SEG = [\\w.@=+-]+`, which places no length bound, and
+    `Path.resolve()` does not stat. So an allowed path reached the probe and raised — outside
+    every `try`, past `on_tool_execute_error`, past all five of `_drive_agent`'s handlers and
+    out of `asyncio.run` — ending the run with no disposition and no `report.md`.
+
+    Bounding `SEG` is deliberately NOT the fix: the probe has to survive an allowed path
+    whatever its shape. This is the read-side twin of the bound `_run_paths.LEAD_ID_BODY` that
+    #855 F-12 gave the write side for the same reason — a model-minted string spent as a
+    filename component."""
+    try:
+        return p.is_file()
+    except OSError as e:
+        raise ModelRetry(f"could not read {path}: {e}") from None
+
+
+def _probe_read_text(p: Path, path: str) -> str:
+    """`read_text_utf8(p)` over a MODEL-AUTHORED path, as a refusal rather than a traceback.
+
+    The other half of `_probe_is_file`, and ONE copy of it: `_gated_read` and `_tool_edit_file`
+    both read the same operand under the same two fault classes (undecodable, unreadable) and
+    owe the model the same two refusals, which they had been spelling separately."""
+    try:
+        return read_text_utf8(p)
+    except UnicodeDecodeError:
+        raise ModelRetry(f"{path} is not valid UTF-8 text (binary or corrupt)") from None
+    except OSError as e:
+        raise ModelRetry(f"could not read {path}: {e}") from None
+
+
 def _gated_read(
     deps: AgentDeps, path: str, *, lesson_corpora: frozenset[str] = _RUNTIME_LESSON_CORPORA
 ) -> tuple[Path, str]:
@@ -568,15 +601,10 @@ def _gated_read(
     )
     if not decision.allow:
         raise ModelRetry(decision.reason)
-    if not p.is_file():
+    if not _probe_is_file(p, path):
         raise ModelRetry(f"file not found: {path}")
     _deny_authored_read(deps, p)
-    try:
-        text = read_text_utf8(p)
-    except UnicodeDecodeError:
-        raise ModelRetry(f"{path} is not valid UTF-8 text (binary or corrupt)") from None
-    except OSError as e:
-        raise ModelRetry(f"could not read {path}: {e}") from None
+    text = _probe_read_text(p, path)
     _record_lesson_load(deps, p, lesson_corpora)
     return p, text
 
@@ -592,7 +620,7 @@ def _bound_and_wrap(
     if permission.is_untrusted_read(p) or (
         _is_learning_role(deps) and _is_cross_agent_read(deps, p)
     ):
-        return _wrap(text, "untrusted", deps.salt)
+        return wrap_fresh(text, "untrusted")
     return text
 
 
@@ -680,11 +708,12 @@ def _tool_edit_file(deps: AgentDeps, path: str, old_string: str, new_string: str
     )
     if not read_decision.allow:
         raise ModelRetry(read_decision.reason)
-    try:
-        current = read_text_utf8(p) if p.is_file() else ""
-    except UnicodeDecodeError:
-        raise ModelRetry(f"{path} is not valid UTF-8 text (binary or corrupt)") from None
-    if not old_string and p.is_file():
+    # ONE probe, not the two this read (#878 F-15: each was its own unguarded `os.stat`) and
+    # the empty-`old_string` check below used to make: they are asking the same question about
+    # the same path, and a second stat could answer it differently.
+    exists = _probe_is_file(p, path)
+    current = _probe_read_text(p, path) if exists else ""
+    if not old_string and exists:
         raise ModelRetry(
             f"{path} already exists; an empty old_string would overwrite it. "
             "Pass a unique old_string to edit, or use write_file to replace it."

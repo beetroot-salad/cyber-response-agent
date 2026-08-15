@@ -333,28 +333,44 @@ def test_clean_tree_still_scans(tmp_path):
     assert _quals(_GATE._scan(_scope(tmp_path, _DROPS))) == {"_Projector.project_drop"}
 
 
-def test_gate_fires_on_its_motivating_findings():
-    """#876, the three drops this gate exists for — the tokenizer half and the two
-    projector halves. They are baselined (landing the gate fixes nothing), so this is the
-    assertion that the gate still SEES them: a gate that stops reporting its own motivating
-    finding is not a gate, and the baseline would hide that silently."""
+def test_every_finding_this_gate_was_built_on_stays_fixed():
+    """The four real drops `lint_silent_row_drop` shipped with, asserted GONE — neither
+    reported nor baselined.
+
+    They were baselined at the gate's landing because that change was forbidden from editing
+    `parser.py`; #876 fixed all four, so the shipped baseline now holds nothing but false
+    positives. Absent-from-BOTH is the assertion that matters: a later edit that reverted a
+    landing would make the site a finding again, and regenerating the baseline would then
+    accept it in silence — this test is what refuses that.
+
+    That the gate can still SEE a drop is proved by the synthetic-scope tests above
+    (`test_clean_tree_still_scans` and its siblings), which build a projector with a real
+    drop in it and assert the gate reports exactly that one. Nothing in the shipped tree is
+    load-bearing for the gate's sight any more, which is the point of having fixed them.
+    """
     reported = {f.fingerprint for f in _GATE._scan(_GATE.INVLANG)}
+    baselined = json.loads(_GATE.BASELINE_PATH.read_text(encoding="utf-8"))["entries"]
     for fingerprint in (
+        # F-2's two spellings — the guard was split, so both are gone.
         "defender/skills/invlang/parser.py:_tokenize_fence:continue:in_story or cur is None",
+        "defender/skills/invlang/parser.py:_tokenize_fence:continue:in_story",
         "defender/skills/invlang/parser.py:_Projector._project_shelved_block:continue:not hyp",
         "defender/skills/invlang/parser.py:_Projector._project_surviving_block:"
         "continue:not hid or is_conclude_empty_marker(hid)",
     ):
-        assert fingerprint in reported, f"the gate went blind on {fingerprint}"
+        assert fingerprint not in reported, f"{fingerprint} came back"
+        assert fingerprint not in baselined, f"{fingerprint} was re-baselined"
 
 
 def test_every_baseline_entry_carries_a_reason():
     """The baseline is the gate's triage record: an entry with no reason is a finding
-    nobody looked at. `require_reasons` enforces it at run time; this pins it as intent."""
+    nobody looked at. `require_reasons` enforces it at run time; this pins it as intent.
+
+    Not asserted non-empty any more. Every true positive the gate found is fixed, so an
+    empty baseline is now a legal — and better — state, and a test demanding entries would
+    stand in the way of the last two false positives being retired."""
     data = json.loads(_GATE.BASELINE_PATH.read_text(encoding="utf-8"))
-    entries = data["entries"]
-    assert entries, "the shipped baseline must not be empty — #876 is live"
-    assert all(reason.strip() for reason in entries.values())
+    assert all(reason.strip() for reason in data["entries"].values())
 
 
 @pytest.mark.gate  # covered by code-smells' "Silent invlang row drop gate"

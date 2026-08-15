@@ -872,7 +872,7 @@ def _invoke_lesson_load(run_dir: Path) -> None:
     from defender.runtime import tools as runtime_tools
     from defender.runtime.agent_definition import bind
 
-    deps = bind(MAIN_DEF, run_dir, salt="0" * 16, defender_dir=DEFENDER)
+    deps = bind(MAIN_DEF, run_dir, defender_dir=DEFENDER)
     runtime_tools._record_lesson_load(deps, DEFENDER / "lessons" / "spec-771.md")
 
 
@@ -889,7 +889,7 @@ def _invoke_queries_table(run_dir: Path) -> Any:
     from defender.runtime.agent_definition import bind
     from defender.runtime.query_tool import QueryCapture
 
-    deps = replace(bind(GATHER_DEF, run_dir, salt="0" * 16, defender_dir=DEFENDER),
+    deps = replace(bind(GATHER_DEF, run_dir, defender_dir=DEFENDER),
                    lead_id="l-001")
     return asyncio.run(QueryCapture(registry=None)._record(
         deps, system="elastic", verb="search", query_id="elastic.ad-hoc", params={},
@@ -1053,7 +1053,7 @@ def _x5_accounting_site(run_dir: Path) -> object:
     from defender.runtime.agent_definition import bind
 
     (run_dir / "budget.json").mkdir()
-    deps = bind(MAIN_DEF, run_dir, salt="0" * 16, defender_dir=DEFENDER)
+    deps = bind(MAIN_DEF, run_dir, defender_dir=DEFENDER)
     returned = driver._account_executed_call(
         deps, "bash", active=True, limits=budget_enforcer.DEFAULT_LIMITS)
     advanced = budget_enforcer.accounting_failure_state(run_dir)["consecutive_failures"] > 0
@@ -1185,7 +1185,7 @@ def drive_fault_exit_trace(run_dir: Path, *, run_id: str = "r-771", salt: str = 
             ss.open_store(case_id=case_id, runs_base=Path(target).parent))
 
     replay = ReplayFn([Turn(text="done.")])
-    drive(run_dir, run_id=run_id, salt=salt, main=replay, store_factory=factory)
+    drive(run_dir, run_id=run_id, main=replay, store_factory=factory)
     return replay
 
 
@@ -1201,7 +1201,7 @@ def drive_normal_exit_trace(run_dir: Path, *, run_id: str = "r-771-happy",
     from defender.tests.e2e._replay_harness import ReplayFn, Turn, drive
 
     replay = ReplayFn([Turn(text="done.")])
-    drive(run_dir, run_id=run_id, salt=salt, main=replay)
+    drive(run_dir, run_id=run_id, main=replay)
     return replay
 
 

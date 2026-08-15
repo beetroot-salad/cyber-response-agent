@@ -119,7 +119,16 @@ GROUPS: dict[str, GroupSpec] = {
         "desc_key": "relevance_criteria",
         "fields": [
             {"label": "Alert rules", "key": "alert_rule_ids", "kind": "chips"},
-            {"label": "Entities", "key": "entities", "kind": "chips"},
+            # The display label for an environment lesson's own `entities` frontmatter key
+            # (learning/core/validate.py's `environment_observations[].entities` selectors),
+            # not a reference to the `Entities` dataclass #867 retired from
+            # runtime/lead_zero.py. Same word, unrelated domain: renaming it would change a
+            # user-visible chip label and a corpus schema key. The suppression marker sits on
+            # the REFERENCING line because that is where lint_stale_refs reads it
+            # (`_batch_grep`: `if SUPPRESS in content`, content being the matched line) — above
+            # it, the gate is silent only for as long as this file stays in the PR's own
+            # changed-file set.
+            {"label": "Entities", "key": "entities", "kind": "chips"},  # lint-stale-ref: ok — display label, not the retired dataclass
             {"label": "Recorded", "key": "recorded_at", "kind": "text"},
         ],
     },

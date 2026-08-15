@@ -13,35 +13,47 @@ base: be8d2c27
 demands:
 
   # --- Demand #0: the return contract -------------------------------------
+  # AMENDED THROUGHOUT BY #875 (F-1). d0..d5 are all about the RUN SALT: that the builder mints
+  # one, that it is returned as a pair and threaded rather than re-read, that every surface in a
+  # model context carries the SAME one, and that the gather subagent INHERITS it. #875 found
+  # that the last of those was the defect and the rest were what made it possible — a token
+  # shared across a run is a token gather reads in plaintext on every payload view it is handed,
+  # so it can close the frame its own summary arrives in and keep writing in MAIN's host-text
+  # region. `wrap_fresh` mints each frame's delimiter AFTER its content is in hand, so there is
+  # no run salt to originate, thread, share or inherit. Each demand below now points at its
+  # successor; d4 and d5 assert the INVERSE of what they originally required.
   - {id: d0_builder_returns_run_dir_and_salt, kind: behavior, form: test,
-     discharged_by: test_materialize_run_dir_returns_run_dir_then_salt_on_the_success_lane,
-     binds: ["materialize_run_dir", "interacts(materialize_run_dir->run_dir)",
-             "interacts(materialize_run_dir->salt)"]}
+     discharged_by: test_materialize_run_dir_returns_only_the_run_dir,
+     binds: ["materialize_run_dir", "interacts(materialize_run_dir->run_dir)"]}
 
+  # #875: there is no pair any more, so what this seam scopes is simply the SUCCESS lane's
+  # return contract — the early-exit lanes still return nothing at all.
   - {id: d1_return_pair_is_promised_on_the_success_lane_only, kind: seam, form: test,
-     discharged_by: test_builder_early_exit_lanes_fire_before_any_salt_is_minted,
-     binds: ["materialize_run_dir", "interacts(materialize_run_dir->salt)"]}
+     discharged_by: test_materialize_run_dir_returns_only_the_run_dir,
+     binds: ["materialize_run_dir"]}
 
   - {id: d2_run_py_unpacks_both_elements_in_order, kind: behavior, form: test,
-     discharged_by: test_run_py_unpacks_the_pair_and_threads_both_elements_onward,
-     binds: ["run_investigation", "interacts(run_investigation->run_dir)",
-             "interacts(run_investigation->salt)"]}
+     discharged_by: test_run_py_binds_the_run_dir_and_threads_it_onward,
+     binds: ["run_investigation", "interacts(run_investigation->run_dir)"]}
 
-  # --- The origin pin (C39 — the obligation this change actually creates) ---
+  # --- The origin pin (C39 — the obligation #647 created, discharged differently now) ---
+  # #875 INVERTS this. #647's obligation was that the run's ONE salt has a single provenance so
+  # that no surface could obtain a delimiter the others did not share. That is now discharged by
+  # construction instead: a salt minted after its content exists is shared with nobody, so no
+  # salt reaches `run_investigation` at all — which is what the successor observes.
   - {id: d3_salt_origin_reaches_run_investigation, kind: behavior, form: test,
-     discharged_by: test_salt_returned_by_the_builder_is_the_salt_that_reaches_run_investigation,
-     binds: ["interacts(materialize_run_dir->salt)", "interacts(run_investigation->salt)",
-             "drives(run_investigation->orient)"]}
+     discharged_by: test_no_frames_salt_occurs_inside_the_content_it_delimits,
+     binds: ["interacts(run_investigation->salt)", "drives(run_investigation->orient)"]}
 
-  # --- Coherence: one token per model context ------------------------------
+  # --- Coherence: one token per model context (INVERTED by #875) -----------
   - {id: d4_salt_coherence_under_a_real_mint, kind: parity, form: test,
-     discharged_by: test_every_salted_surface_in_one_model_context_carries_the_minted_token,
+     discharged_by: test_every_frame_in_one_model_context_carries_its_own_salt,
      binds: ["salt.access[api]", "salt.access[fs]", "salt.access[bash]",
              "interacts(orient->wrap)", "interacts(tool_write_file->wrap)",
              "interacts(query_tool->wrap)", "interacts(gather_dispatch->wrap)"]}
 
   - {id: d5_gather_inherits_the_parent_token, kind: behavior, form: test,
-     discharged_by: test_gather_subagent_is_bound_with_the_parent_token_not_a_fresh_mint,
+     discharged_by: test_the_gather_subagent_is_bound_with_no_salt_at_all,
      binds: ["gather_dispatch", "interacts(gather_dispatch->salt)",
              "drives(run_investigation->gather_dispatch)"]}
 
@@ -51,36 +63,51 @@ demands:
      binds: ["salt.domain.alternatives[salt-is-None]", "lesson_read",
              "interacts(lesson_read->wrap)"]}
 
-  # NEGATIVE — paired positive control: d6_curator_leg_mints_its_own_token.
+  # INVERTED BY #875 (F-1). The demand was that no main-lane surface takes a token the others
+  # do not share. That sharing is precisely what let the gather subagent close the frame its
+  # own summary arrives in, so the successor requires the opposite: every frame carries its
+  # own delimiter, and no framed party holds the one that delimits it.
   - {id: d7_no_main_lane_surface_takes_an_unshared_token, kind: negative, form: test,
-     discharged_by: test_no_surface_on_the_run_lane_obtains_a_salt_from_a_source_no_other_surface_knows,
+     discharged_by: test_every_frame_in_one_model_context_carries_its_own_salt,
      binds: ["salt.access[api]", "salt.access[fs]", "salt.access[bash]",
              "salt.domain.alternatives[salt-is-None]", "interacts(run_investigation->salt)"]}
 
   # NEGATIVE — paired positive control: d6_curator_leg_mints_its_own_token
   # (it shows the uuid4 fallback channel works at all).
+  # INVERTED BY #875 (F-1). A fresh per-frame mint was #647's fail-open case; it is now the
+  # mechanism. Splitting cannot fail open — `_run_gather` re-wraps gather's output
+  # unconditionally, so a foreign inner tag is inert text rather than a closer — while
+  # sharing fails open exactly as F-1 reproduces.
   - {id: d8_fail_open_fresh_mint_unreachable_from_the_run_lane, kind: negative, form: test,
-     discharged_by: test_fail_open_fresh_mint_is_not_reachable_from_run_py_through_the_driver,
+     discharged_by: test_the_gather_subagent_is_bound_with_no_salt_at_all,
      binds: ["salt.domain.alternatives[salt-is-None]", "interacts(run_investigation->salt)",
              "drives(run_investigation->gather_dispatch)"]}
 
+  # #875: the run lane constructs no salt at all now, which subsumes 'not an empty one'.
+  # `wrap`'s own empty-salt ValueError survives for the message-assembly callers.
   - {id: d9_empty_salt_is_not_constructible_on_the_run_lane, kind: negative, form: test,
-     discharged_by: test_empty_string_salt_is_not_constructible_once_the_disk_read_is_gone,
+     discharged_by: test_no_frames_salt_occurs_inside_the_content_it_delimits,
      binds: ["salt.domain.distinguished[]", "interacts(run_investigation->salt)"]}
 
   # POSITIVE CONTROL for d9: a real 16-hex token flows and renders correctly.
+  # AMENDED BY #875. `materialize_run_dir` mints nothing; `wrap_fresh` mints per frame, and it
+  # mints EIGHT hex characters, not sixteen. The length shrank on purpose: the re-mint loop
+  # ("draw again while the token occurs in the content") makes the delimiter unguessable BY
+  # CONSTRUCTION, so length is no longer buying collision resistance. The alphabet half of the
+  # shape — lowercase hex, from `secrets` — is what the successor still observes.
   - {id: d10_minted_token_shape_is_sixteen_hex, kind: shape, form: test,
-     discharged_by: test_minted_salt_is_sixteen_lowercase_hex_characters,
-     binds: ["salt.domain.distinguished[secrets-token-hex-8]",
-             "interacts(materialize_run_dir->salt)"]}
+     discharged_by: test_every_frame_in_one_model_context_carries_its_own_salt,
+     binds: ["salt.domain.distinguished[secrets-token-hex-8]"]}
 
   # The token's SECURITY property, which d10 does NOT cover: shape, per-run uniqueness and
   # coherence are all satisfied by `random.Random(run_id).getrandbits(64)`, and the run id is
   # `{utc_timestamp}-{alert.stem}` — predictable. The mint must be independent of it.
+  # #875: the builder mints nothing, so it cannot derive anything from the run id. The
+  # successor asserts that absence directly (no `secrets` call inside `materialize_run_dir`),
+  # which subsumes "the mint does not key on the run id".
   - {id: d33_mint_is_independent_of_the_run_id, kind: negative, form: test,
-     discharged_by: test_minted_salt_is_independent_of_the_run_id_and_drawn_from_secrets,
-     binds: ["salt.domain.distinguished[secrets-token-hex-8]", "salt.identity",
-             "interacts(materialize_run_dir->salt)"]}
+     discharged_by: test_materialize_run_dir_returns_only_the_run_dir,
+     binds: ["salt.domain.distinguished[secrets-token-hex-8]", "salt.identity"]}
 
   # --- The removed file -----------------------------------------------------
   # NEGATIVE — paired positive control: d12_investigation_artifacts_survive.

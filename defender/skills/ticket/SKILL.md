@@ -3,13 +3,10 @@ name: defender-ticket
 description: Ticket-server stub system reference — read-only ticket lookups for the v2 playground. Resolves incident / case context referenced from an alert or required for precedent matching.
 ---
 
-The ticket-server stub is the v1 FastAPI app reused under
-playground-v2's compose (kept under the playground's `ticket-server`
-so v1 integrations stay working). v1's
-`soc-agent/scripts/tools/playground_ticket_cli.py` is a separate
-ActionContract-shaped adapter for that ecosystem; this adapter is
-v2-flavored (`_stub_transport.py` + docker-exec-curl) and
-read-only.
+The ticket-server stub is a FastAPI app under playground-v2's compose
+(`playground-v2/ticket-server`), carried over when the v1 lab was
+retired. This adapter is v2-flavored (`_stub_transport.py` +
+docker-exec-curl) and read-only.
 
 This file briefs **gather**, which reaches this store through the `query`
 tool — its verb_grant names `list-tickets` only. The judge's closed-ticket
@@ -30,7 +27,7 @@ they are not part of gather's catalog and are not documented here.
 
 - **Seed-driven; no live human ticket authoring.** Tickets present
   in the store come from
-  `playground/ticket-server/seed/tickets.json` (bind-mounted) plus
+  `playground-v2/ticket-server/seed/tickets.json` (bind-mounted) plus
   any `POST /tickets` calls earlier in the session. Absence of a
   ticket for a hypothesis is not refutation — the seed is a
   curated, sparse subset.

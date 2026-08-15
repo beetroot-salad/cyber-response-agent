@@ -368,33 +368,53 @@ def test_untriaged_baseline_entry_fails_the_gate(tmp_path):
     assert _GATE.main([], scope=tree, baseline_path=bp) == 1
 
 
+def _shipped_baseline_entries() -> dict[str, str]:
+    return json.loads(Path(_GATE.BASELINE_PATH).read_text(encoding="utf-8"))["entries"]
+
+
 def test_shipped_baseline_has_a_reason_for_every_entry():
-    data = json.loads(
-        (Path(_GATE.BASELINE_PATH)).read_text(encoding="utf-8")
-    )
-    assert data["entries"], "the shipped baseline is not empty — #879 is live"
-    for fingerprint, reason in data["entries"].items():
+    entries = _shipped_baseline_entries()
+    assert entries, "an empty baseline makes this test vacuous — assert something or delete it"
+    for fingerprint, reason in entries.items():
         assert reason.strip(), f"{fingerprint} carries no reason"
 
 
-def test_fires_on_its_motivating_finding():
-    """#879 itself. A gate that does not fire on the defect it exists for is not landed — so
-    this asserts the real file, function and unread key, not merely that something was found.
+def test_the_scan_still_produces_exactly_what_the_shipped_baseline_buries():
+    """The real-tree POSITIVE control, and the only test that has one since #879 stopped
+    being a live finding.
 
-    Not `gate`-marked: it asserts the finding is PRESENT, which the code-smells step (which
-    asserts exit 0 against the baseline) cannot.
+    `test_real_tree_clean` and `test_its_motivating_finding_is_fixed_and_not_baselined` both
+    assert an ABSENCE, so a scanner that regressed into finding nothing on the real tree
+    passes both — and the synthetic fixtures cannot catch that, because they exercise a tree
+    this gate's import-edge and key-identity rules never have to resolve for real. Equality
+    (rather than "something was found") also catches the other direction: a baseline entry
+    that no longer fires is a burial the ratchet is still carrying."""
+    assert {f.fingerprint for f in _GATE._scan()} == set(_shipped_baseline_entries())
+
+
+def test_its_motivating_finding_is_fixed_and_not_baselined():
+    """#879 itself, now closed. `_close_investigation_async` charged the `false-positive`
+    entry price by branching on the literal, leaving `benign` — the table's other key —
+    with no reader at the close; it now dispatches through `disposition_entry_price`, which
+    reads `_DISPOSITION_GATES` whole.
+
+    Asserted on the SCAN, not merely on the baseline: dropping the entry while the branch
+    stood would fail `test_real_tree_clean` but would not say why, and re-introducing the
+    literal branch under a fresh baseline entry would pass it. Both halves are pinned —
+    nothing fires at that site, and the ratchet is not hiding one that does.
+
+    Not `gate`-marked: the code-smells step's exit-0 check covers the tree being clean; this
+    covers the ONE site the gate was written for being clean for the right reason.
     """
-    findings = _GATE._scan()
-    motivating = [
-        f for f in findings
-        if f.fingerprint == (
-            "defender/runtime/close_tool.py:_close_investigation_async:"
-            "defender.skills.invlang.validate._DISPOSITION_GATES:unread:benign"
-        )
+    at_the_close = [
+        f for f in _GATE._scan()
+        if f.fingerprint.startswith("defender/runtime/close_tool.py:")
     ]
-    assert motivating, [f.fingerprint for f in findings]
-    assert "defender/runtime/close_tool.py:438:" in motivating[0].display
-    assert "'benign' has no reader here" in motivating[0].display
+    assert at_the_close == [], [f.display for f in at_the_close]
+    assert not any(
+        fp.startswith("defender/runtime/close_tool.py:")
+        for fp in _shipped_baseline_entries()
+    ), "#879 was fixed — a close_tool entry here means the branch came back and was buried"
 
 
 @pytest.mark.gate  # covered by code-smells' "Half-read-table gate"

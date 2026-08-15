@@ -27,14 +27,21 @@ from defender.scripts.gather_tools import record_query as rq
 LEAD = "l-001"
 
 
+#: The payload text a seeded SUCCESS row stands for (#877 F-9): the fixture derives both its
+#: digest and its content hash from it rather than stating either.
+_SEEDED_PAYLOAD = "abcdefghijkl"
+
+
 def _row(
     seq: int, *, system: str = "elastic", verb: str = "query",
     params: dict | None = None, exit_code: int = 64, query_id: str | None = None,
     lead: str = LEAD, digest: str | None = None,
 ) -> dict:
-    """One queries-table row, with `error_class` computed by the PRODUCTION classifier — a
-    fixture that restated it would be asserting its own arithmetic against the domain filter
-    under test."""
+    """One queries-table row, with `error_class` and `payload_sha256` computed by the
+    PRODUCTION helpers — a fixture that restated either would be asserting its own arithmetic
+    against the domain filter under test. A failed row's persisted payload text is `""`, which
+    is what both writers hash, so every failure shares one content hash and the digest is what
+    separates two of them (#877 F-9)."""
     return {
         "lead_id": lead,
         "seq": seq,
@@ -48,8 +55,10 @@ def _row(
         "error_class": error_class_for_exit(exit_code),
         "payload_status": "error" if exit_code else "ok",
         "payload_digest": digest if digest is not None else (
-            f"exit={exit_code}; rejected" if exit_code else "12 bytes, 1 line(s)"
+            f"exit={exit_code}; rejected" if exit_code
+            else rq.payload_digest(_SEEDED_PAYLOAD, "", 0)
         ),
+        "payload_sha256": rq.payload_sha256("" if exit_code else _SEEDED_PAYLOAD),
     }
 
 
@@ -163,7 +172,8 @@ def test_a_repeat_whose_calls_keep_failing_is_named(tmp_path):
     _write(tmp_path, [_row(0, exit_code=1, digest=digest)])
     note = rq.repeat_note(
         tmp_path, LEAD, seq=1, system="elastic", verb="query",
-        params={"native_query": "FROM logs"}, payload_digest=digest, exit_code=1,
+        params={"native_query": "FROM logs"}, payload_digest=digest,
+        payload_sha256=rq.payload_sha256(""), exit_code=1,
     )
     assert note is not None, "a failing repeat still gets no signal"
     assert "REPEAT" in note
@@ -178,17 +188,19 @@ def test_a_failing_repeat_is_never_told_it_returned_a_payload(tmp_path):
     _write(tmp_path, [_row(0, exit_code=64, digest=digest)])
     failing = rq.repeat_note(
         tmp_path, LEAD, seq=1, system="elastic", verb="query",
-        params={"native_query": "FROM logs"}, payload_digest=digest, exit_code=64,
+        params={"native_query": "FROM logs"}, payload_digest=digest,
+        payload_sha256=rq.payload_sha256(""), exit_code=64,
     )
     assert failing is not None
     assert "payload" not in failing, failing
     assert "failed the same way" in failing
 
-    ok_digest = "12 bytes, 1 line(s)"
-    _write(tmp_path / "ok", [_row(0, exit_code=0, digest=ok_digest)])
+    ok_digest = rq.payload_digest(_SEEDED_PAYLOAD, "", 0)
+    _write(tmp_path / "ok", [_row(0, exit_code=0)])
     succeeding = rq.repeat_note(
         tmp_path / "ok", LEAD, seq=1, system="elastic", verb="query",
         params={"native_query": "FROM logs"}, payload_digest=ok_digest,
+        payload_sha256=rq.payload_sha256(_SEEDED_PAYLOAD),
     )
     assert succeeding is not None
     assert "same payload byte for byte" in succeeding, \
@@ -203,7 +215,8 @@ def test_a_changed_request_that_fails_identically_is_a_no_op_too(tmp_path):
     _write(tmp_path, [_row(0, exit_code=64, params={"native_query": "a"}, digest=digest)])
     note = rq.repeat_note(
         tmp_path, LEAD, seq=1, system="elastic", verb="query",
-        params={"native_query": "b"}, payload_digest=digest, exit_code=64,
+        params={"native_query": "b"}, payload_digest=digest,
+        payload_sha256=rq.payload_sha256(""), exit_code=64,
     )
     assert note is not None
     assert "NO-OP" in note
@@ -219,6 +232,7 @@ def test_the_exit_code_selects_wording_and_never_whether_a_note_fires(tmp_path):
     kw = dict(
         seq=1, system="elastic", verb="query",
         params={"native_query": "FROM logs"}, payload_digest=digest,
+        payload_sha256=rq.payload_sha256(""),
     )
     assert rq.repeat_note(tmp_path, LEAD, exit_code=1, **kw) is not None
     assert rq.repeat_note(tmp_path, LEAD, exit_code=0, **kw) is not None

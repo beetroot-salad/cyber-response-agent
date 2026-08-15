@@ -47,6 +47,7 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
+from defender._io import read_jsonl_rows  # noqa: E402
 from defender._run_paths import RunPaths  # noqa: E402
 from defender.scripts.adapters.confinement import ConfinementFault, confine_index  # noqa: E402
 from defender.scripts.adapters.faults import TransportFault  # noqa: E402
@@ -69,11 +70,15 @@ from defender.tests.e2e._lead_zero_808 import (  # noqa: E402
     answer_raising,
     answer_sequence,
     building_block,
+    defender_dir,
+    elastic_backend,
     envelope,
     hit,
+    materialize_alert,
     run,
     shell_doc,
 )
+from defender.tests.e2e._replay_harness import VerbRecorder  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
@@ -89,6 +94,20 @@ NEWEST_FIRST = [SUCCESS, FAILED_2, FAILED_1]
 
 FOUR_ANCESTORS = [ancestor(f"anc-{i}") for i in range(1, 5)]
 SEQUENCE_SHELL = shell_doc(group_id="grp-0")
+
+# The three sentences the empty-body arms render, spelled as production spells them. Pinned
+# whole rather than by a fragment because what #880 F-14 is about is WHICH of them a run gets:
+# all three are `_(unavailable: …)`, and a test that matched only the shared prefix read the
+# false one as green.
+RESOLVED_ABSENCE = "the resolution reached the backend and found nothing"
+ANCESTOR_CALLS_FAILED = "every backend call that could have resolved an ancestor failed"
+#: Nothing answered at all, and no ancestor call was ever issuable because the shell fetch
+#: that decides whether one exists is what failed.
+SHELL_ONLY_FAILED = "every backend call this resolution attempted failed"
+#: The PARTIAL case: some ancestor fetches answered and some did not. Matched as a fragment
+#: rather than whole because the same words appear in two notes — the empty-body sentence and
+#: the docs-present shortfall — and what this asserts is that one of them is there.
+ANCESTOR_FETCHES_FAILED = "ancestor fetches failed"
 
 
 def _order(section: str, *needles: str) -> list[int]:
@@ -227,6 +246,219 @@ def test_a_shell_fetch_that_raises_falls_through_to_the_ancestor_branch(tmp_path
             f"[{label}] the run recorded {recorded} elastic failures, not {breaker_expected} — "
             "the exit-code partition is the adapter's and the breaker's, not this suite's"
         )
+
+
+def test_a_shell_fetch_that_answers_does_not_stand_in_for_the_ancestor_calls(tmp_path):
+    """#880 F-14 — the resolution's success flag counts only calls that COULD have produced an
+    ancestor. The shell fetch is not one of them: it resolves the alert's own document, it
+    answers on every alert with a resolvable `alert_id`, and it used to set the same flag both
+    empty-body readers spend — the `_(unavailable: … found nothing)` sentence and the only path
+    to `STATUS_FAILED`. Once it answered, no fault on the ancestor calls could be reported: an
+    absence of ancestors, which is triage evidence, was asserted over a backend outage.
+
+    THE SPLIT IS THE POINT, so it is driven at the seam the old suite could not reach. The
+    shipped FAILED arm (`test_808_lead_zero_contract.py`) faults EVERY call through
+    `answer_raising`, shell included, so a flag set from any call and a flag set only from the
+    ancestor calls are indistinguishable there — the defect shipped with that arm green. Here
+    the shell fetch ANSWERS and only the ancestor branch faults, and the run dir shows both
+    halves: row `seq 0` is the shell fetch at `exit_code 0`, row `seq 1` the faulted batched
+    query at a nonzero code. Every classification in that table is production's — the fake
+    raises the adapter's own `TransportFault` and maps nothing.
+
+    Read at `resolve_lead_zero`'s own return rather than off the block, because the status is
+    the half no rendered text can carry and `prepare_correlation_lead` refuses FAILED and EMPTY
+    alike (so no dispatch decision distinguishes them either).
+
+    FOUR ARMS, ASSERTED AGAINST EACH OTHER. An ancestor call that faults is FAILED; one that
+    answers and matches nothing is EMPTY; an alert with no usable ancestor to ask about stays
+    EMPTY, because a resolution that issued no ancestor call has no failed call to report — and
+    that same "no ancestor call issued" shape with the SHELL FETCH FAILING is FAILED, because
+    the group id that decides whether an ancestor branch exists at all is read off the shell
+    document. Splitting the flag WITHOUT the fourth arm turns the likeliest real outage — a
+    transport blip on an alert carrying no usable `ancestor_events` — into
+    `_(unavailable: … found nothing)`, reintroducing this finding's own defect through the
+    branch it did not name."""
+    from defender.runtime import lead_zero
+
+    def _resolve(name, alert=None, **kw):
+        """One arm in its OWN run dir — the shared-run-dir starvation
+        `test_lead_zero_returns_section_text_entities_and_status` documents applies here too: these
+        arms carry identical shell predicates."""
+        run_dir = materialize_alert(tmp_path / name, alert if alert is not None else alert_doc())
+        rec = VerbRecorder()
+        result = lead_zero.resolve_lead_zero(
+            run_dir=run_dir, defender_dir=defender_dir(),
+            alert_path=run_dir / "alert.json",
+            verbs=elastic_backend(rec, **kw),
+        )
+        return result, rec, run_dir
+
+    faulted, rec, run_dir = _resolve(
+        "ancestor_fault", answer=answer_raising(TransportFault("docker exec failed")))
+
+    assert [c.verb for c in rec.calls] == ["alerts", "query"], (
+        f"the scenario never reached the split it is about: {[c.verb for c in rec.calls]} — "
+        "the shell fetch must ANSWER and the ancestor call must fault"
+    )
+    rows = read_jsonl_rows(RunPaths(run_dir).executed_queries)
+    assert len(rows) == 2, f"the two calls did not both record a row: {rows}"
+    shell_row, ancestor_row = rows
+    assert shell_row["exit_code"] == 0, \
+        f"the shell fetch did not succeed, so this arm proves nothing: {shell_row}"
+    assert ancestor_row["exit_code"] != 0, \
+        f"the ancestor call did not fault, so this arm proves nothing: {ancestor_row}"
+
+    assert faulted.status == lead_zero.STATUS_FAILED, (
+        f"the resolution reports {faulted.status!r} while every call that could have produced "
+        "an ancestor faulted — the shell fetch's own success is being spent as theirs, and "
+        "STATUS_FAILED is unreachable on any alert whose alert_id resolves"
+    )
+    assert ANCESTOR_CALLS_FAILED in faulted.text, \
+        f"the failed resolution carries no failed-call note: {faulted.text!r}"
+    assert RESOLVED_ABSENCE not in faulted.text, (
+        "MAIN is told this alert HAS no ancestors while the calls that would have found them "
+        "never answered — an absence is triage evidence and this one was never established"
+    )
+
+    # Complementary condition #1: the same shape with the ancestor call ANSWERING empty. The
+    # resolved absence is real here, and it must still read as one.
+    empty, empty_rec, _ = _resolve("ancestor_empty", answer=answer_hits([]))
+    assert [c.verb for c in empty_rec.calls] == ["alerts", "query"]
+    assert empty.status == lead_zero.STATUS_EMPTY, \
+        "a resolution whose ancestor call answered and matched nothing now reads as a failure"
+    assert RESOLVED_ABSENCE in empty.text
+    assert ANCESTOR_CALLS_FAILED not in empty.text
+
+    # Complementary condition #2: no ancestor call was ISSUED at all (K13's degenerate
+    # predicate) and the shell fetch answered. Nothing failed, so nothing is reported failed.
+    none_asked, none_rec, _ = _resolve(
+        "no_ancestor_call", alert=alert_doc(ancestors=[ancestor("")]),
+        answer=answer_hits([hit(ts="2026-05-25T15:22:00.000Z")]))
+    assert [c.verb for c in none_rec.calls] == ["alerts"], \
+        "an ancestor call was issued with no usable id — this arm is not about that"
+    assert none_asked.status == lead_zero.STATUS_EMPTY, (
+        "an alert with nothing to ask about reports a FAILED resolution — the flag now means "
+        "'an ancestor call answered' but the reader that spends it forgot that no ancestor "
+        "call was made"
+    )
+    assert RESOLVED_ABSENCE in none_asked.text
+    assert ANCESTOR_CALLS_FAILED not in none_asked.text
+
+    # Complementary condition #3 — THE ARM THAT SPLITTING THE FLAG BREAKS IF `answered_any` IS
+    # NOT TRACKED BESIDE IT. Same "no ancestor call was issued" shape as #2, but the shell
+    # fetch FAILED instead of answering. "No ancestor call to report as failed" is true and
+    # irrelevant: the group id that decides whether an ancestor branch exists at all is read
+    # off the shell document, so a shell fetch that never answered leaves the branch
+    # unreachable rather than empty. A resolution that establishes nothing must not report a
+    # resolved absence — which is the whole of F-14, arriving through the other door.
+    shell_only, shell_rec, _ = _resolve(
+        "shell_only_fault", alert=alert_doc(ancestors=[]), answer=answer_hits([]),
+        shell=TransportFault("docker exec failed"))
+    assert [c.verb for c in shell_rec.calls] == ["alerts"], \
+        f"this arm is about the shell fetch being the ONLY call: {[c.verb for c in shell_rec.calls]}"
+    assert shell_only.status == lead_zero.STATUS_FAILED, (
+        "the resolution's only backend call failed and it reports "
+        f"{shell_only.status!r} — an alert with nothing left to ask about because the answer "
+        "that would have said what to ask never came is not an alert with nothing to ask"
+    )
+    assert RESOLVED_ABSENCE not in shell_only.text, (
+        "MAIN is told this alert HAS no ancestors on the strength of a call that faulted — "
+        "the same false absence the ancestor-call arm above rules out"
+    )
+    assert SHELL_ONLY_FAILED in shell_only.text, \
+        f"the failed resolution carries no failed-call note: {shell_only.text!r}"
+
+
+def test_one_ancestor_fetch_answering_does_not_establish_an_absence_for_the_others(tmp_path):
+    """#880 F-14's residue — "an ancestor call answered" and "the ancestor calls answered" are
+    different facts, and the block used to render only the first.
+
+    `d5` puts ONE call on each distinct mapped backing index, so a resolution can hold both an
+    answering ancestor call and a faulting one at the same time. The empty-body sentence was
+    gated on "at least one ancestor call answered", so an alert whose ancestors span
+    `logs-system.auth-*` and `logs-falco.alerts-*` — two of this environment's own backing
+    indices, and the pair `test_one_backend_call_per_distinct_backing_index_never_one_per
+    _ancestor` already drives — where the first matches nothing and the second faults, rendered
+    `_(unavailable: the resolution reached the backend and found nothing)`. That is a resolved
+    absence claimed over an index that never answered: the same over-claim as F-14 itself, one
+    level down, and the reason the fix counts calls instead of setting a flag.
+
+    BOTH HALVES, because the residue has two. With nothing resolved the SENTENCE is what
+    over-claims, and it now names how many fetches failed instead of generalizing to the alert.
+    With something resolved the sentence is gone and the count note — "resolved 1 of 2
+    requested ancestor document(s)" — reads as "the backend did not have the other one", which
+    is the same false absence wearing a number; a second note now says the other thing that was
+    true at the same time.
+
+    The complementary condition is the arm where every ancestor call ANSWERS and finds nothing:
+    that absence is real, is the common case, and must keep its plain sentence with no
+    failed-fetch note beside it — or the note says nothing by always firing."""
+    from defender.runtime import lead_zero
+
+    def _resolve(name, table):
+        run_dir = materialize_alert(tmp_path / name, alert_doc(ancestors=[
+            ancestor("anc-auth", index=AUTH_BACKING),
+            ancestor("anc-falco", index=FALCO_BACKING),
+        ]))
+        rec = VerbRecorder()
+        result = lead_zero.resolve_lead_zero(
+            run_dir=run_dir, defender_dir=defender_dir(),
+            alert_path=run_dir / "alert.json",
+            verbs=elastic_backend(rec, answer=answer_by_index(table)),
+        )
+        return result, rec
+
+    empty_envelope = envelope([], index="logs-system.auth-*")
+    fault = TransportFault("docker exec failed")
+
+    # Half 1 — nothing resolved. One index answers and matches nothing; the other faults.
+    partial, rec = _resolve("partial_empty", {
+        "logs-system.auth-*": empty_envelope,
+        "logs-falco.alerts-*": fault,
+    })
+    assert len(rec.calls) == 3, (
+        f"the scenario did not issue the shell fetch plus one call per backing index: "
+        f"{[(c.verb, c.params.get('index')) for c in rec.calls]}"
+    )
+    assert RESOLVED_ABSENCE not in partial.text, (
+        "MAIN is told this alert's ancestors were reached and there were none, while one of "
+        "the two backing indices never answered — the absence holds only over the index that "
+        "did, and the sentence generalizes it to the alert"
+    )
+    assert ANCESTOR_FETCHES_FAILED in partial.text, (
+        "nothing in the block says a fetch failed at all: the run reads as a clean empty "
+        f"resolution. Block was {partial.text!r}"
+    )
+
+    # Half 2 — something resolved, and one fetch still failed. The count note alone reads as
+    # "the backend did not have the other document".
+    resolved, rec2 = _resolve("partial_docs", {
+        "logs-system.auth-*": envelope([hit(ts="2026-05-25T15:22:00.000Z")],
+                                       index="logs-system.auth-*"),
+        "logs-falco.alerts-*": fault,
+    })
+    assert len(rec2.calls) == 3
+    assert "2026-05-25T15:22:00" in resolved.text, \
+        "the document the answering index returned was dropped along with the failed fetch"
+    assert ANCESTOR_FETCHES_FAILED in resolved.text, (
+        "the block carries the shortfall COUNT but nothing saying a fetch failed — a reader "
+        "cannot tell 'the backend did not have it' from 'we never asked successfully'"
+    )
+
+    # Complementary condition — every ancestor fetch answers, nothing matches. A real absence,
+    # and the note must not fire on it.
+    clean, rec3 = _resolve("both_empty", {
+        "logs-system.auth-*": empty_envelope,
+        "logs-falco.alerts-*": envelope([], index="logs-falco.alerts-*"),
+    })
+    assert len(rec3.calls) == 3
+    assert clean.status == lead_zero.STATUS_EMPTY
+    assert RESOLVED_ABSENCE in clean.text, \
+        "a resolution whose every fetch answered and matched nothing lost its plain sentence"
+    assert ANCESTOR_FETCHES_FAILED not in clean.text, (
+        "the failed-fetch note fires when no fetch failed — a note that always fires says "
+        "nothing, which is how the residue survived the first fix"
+    )
 
 
 def test_item_one_stops_at_one_recorded_per_system_failure(tmp_path):
@@ -723,7 +955,17 @@ def test_an_oversized_ancestor_message_is_elided_with_a_pointer_to_its_payload(t
 
     Asserted as a property rather than a magic number: the rendered block is materially
     smaller than the payload it points at, the elision is announced, and the pointer names a
-    file that is really there."""
+    file that is really there.
+
+    THE PATH IS RESOLVED, NOT PREFIX-MATCHED (#867 review fix). `f"gather_raw/{L0}/" in section`
+    is green for every seq the implementation could print, and the implementation printed the
+    DOCUMENT'S POSITION in the block rather than the seq of the call that returned it — which
+    coincides at position 0 and at nothing else, so a single-document scenario could not see it.
+    The second arm below drives four documents off one batched fetch: three of the four pointers
+    named a file no writer ever produced, and the first named the SHELL fetch's payload — a
+    different document. Every pointer the block prints is now opened."""
+    import re
+
     huge = "A" * 200_000
     res = run(tmp_path, run_id="lz808-huge",
               answer=answer_hits([hit(ts="2026-05-25T15:22:00.000Z", message=huge)]))
@@ -735,6 +977,24 @@ def test_an_oversized_ancestor_message_is_elided_with_a_pointer_to_its_payload(t
     assert f"gather_raw/{L0}/" in section, \
         "the elision points nowhere — the full payload is on disk and unreferenced"
     assert res.payloads(L0), "the pointer's target was never persisted"
+
+    # FOUR documents off ONE batched fetch, so a pointer built from the document's own position
+    # in the block and a pointer built from the call's queries-table seq are different numbers.
+    many = run(tmp_path / "many", run_id="lz808-huge-many",
+               alert=alert_doc(ancestors=[ancestor(f"a{i}") for i in range(4)]),
+               answer=answer_hits([
+                   hit(ts=f"2026-05-25T15:22:{10 + 10 * i}.000Z", message=huge, user=f"u{i}")
+                   for i in range(4)
+               ]))
+    pointers = re.findall(rf"gather_raw/{L0}/(\d+)\.json", many.section())
+    assert len(pointers) == 4, \
+        f"four elided documents rendered {len(pointers)} payload pointers: {pointers}"
+    for seq in pointers:
+        assert (many.run_dir / "gather_raw" / L0 / f"{seq}.json").is_file(), (
+            f"the elision points at gather_raw/{L0}/{seq}.json, which no call wrote — the "
+            "pointer is built from the document's position in the block rather than from the "
+            "seq of the fetch that returned it"
+        )
 
 
 def test_the_rendered_block_survives_a_failed_queries_table_write(tmp_path):

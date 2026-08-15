@@ -7,6 +7,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
+from defender._clock import parse_iso_utc
 from defender._io import write_atomic
 from defender.hooks._run_dir import read_json_locked, update_json_locked
 from defender.runtime.agent_role import AgentRole
@@ -74,6 +75,27 @@ def open_budget(run_dir: Path, run_id: str) -> dict:
 
 
 def read_budget(run_dir: Path) -> dict:
+    """The budget state, `{}` when there is none — including when `budget.json` holds valid
+    JSON that is not a state at all.
+
+    That last case is #878 F-17(a), and the narrowing for it lives at
+    `read_json_locked`, not here: `[]`, `3`, `"x"` and `null` came back as the state itself, and
+    `_budget_state_for_enforcement`'s `{**state, …}` then raised `TypeError: 'list' object is
+    not a mapping` out of `_budget_short_circuit` — and out of `lead_zero._budget_gate`, on the
+    path that is NOT gated on `DEFENDER_BUDGET_ENFORCE`, before MAIN's first prompt was ever
+    built. The asymmetry it exposed is one line wide: `_account_executed_call` wraps the
+    identical state in `except Exception` and logs "budget accounting skipped", so the same
+    corruption was swallowed immediately after it was fatal.
+
+    `{}` rather than `make_budget_state(...)`: this reader has no run id, and every caller
+    already treats a missing state as "no budget recorded yet" (`account_call` coalesces with
+    `or make_budget_state`, `tail_exhausted` and `should_refuse` read absent counters as
+    unspent). Inventing a fresh `created_at` here would restart the wall clock on every read.
+
+    The named writer is the boxed adapter subprocess: `box.py:561` bind-mounts the run root rw
+    while the defender tree is mounted readonly, and it is the process that handles
+    attacker-influenced payloads. This is the DoS lever `docs/runtime-sandbox-design.md` §7 D3
+    exists to deny."""
     return read_json_locked(run_dir / "budget.json")
 
 
@@ -141,10 +163,23 @@ def _accounting_failure_path(run_dir: Path) -> Path:
 
 
 def accounting_failure_state(run_dir: Path) -> dict:
+    """The two accounting-failure counters, NORMALISED — a corrupt sidecar reads as "no
+    failures yet", never as a value the callers then arithmetic on.
+
+    `read_json_locked` narrows the DOCUMENT to a dict; it says nothing about the values inside
+    it, and both readers of this state do arithmetic: `int(state.get(...))` raised `ValueError`
+    on a string count, and `_record_accounting_failure`'s `time.monotonic() - first_failure_at`
+    raised `TypeError` on a non-number stamp — from inside `account_call`'s `except OSError`
+    arm, which has no handler for either. The seam narrowing #878 landed does not reach here,
+    which is the half `lint_unnarrowed_parse`'s own docstring says it deliberately does not
+    mechanize."""
     state = read_json_locked(_accounting_failure_path(run_dir))
+    stamp = state.get("first_failure_at")
     return {
-        "consecutive_failures": int(state.get("consecutive_failures", 0) or 0),
-        "first_failure_at": state.get("first_failure_at"),
+        "consecutive_failures": _valid_count(state.get("consecutive_failures")) or 0,
+        "first_failure_at": (
+            stamp if isinstance(stamp, (int, float)) and not isinstance(stamp, bool) else None
+        ),
     }
 
 
@@ -193,13 +228,22 @@ def _record_alias_refusal(run_dir: Path, path: Path) -> None:
 
 
 def _wall_origin(state: dict) -> datetime | None:
+    """The run's wall-clock origin as an AWARE UTC datetime, never a naive one.
+
+    `datetime.fromisoformat` was called bare here, so an offset-less stamp — `"2026-08-13T00:
+    00:00"`, which `open_budget`'s `setdefault` PRESERVES rather than replaces — parsed fine
+    and came back naive, and `_elapsed`'s `datetime.now(UTC) - origin` raised `TypeError: can't
+    subtract offset-naive and offset-aware datetimes` (#878 F-17b). The `except ValueError` was
+    the whole guard and this shape never raises `ValueError`.
+
+    `_clock.parse_iso_utc` is the in-repo answer: it reads a naive stamp AS UTC, accepts the
+    trailing `Z` this file's own writers do not mint but hand-written seeds do, and names this
+    exact `TypeError` in its docstring. `payload_view.py:211` made the same swap for the same
+    reason."""
     for key in ("created_at", "started_at"):
-        raw = state.get(key)
-        if isinstance(raw, str):
-            try:
-                return datetime.fromisoformat(raw)
-            except ValueError:
-                continue
+        parsed = parse_iso_utc(state.get(key))
+        if parsed is not None:
+            return parsed
     return None
 
 

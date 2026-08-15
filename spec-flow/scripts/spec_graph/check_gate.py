@@ -42,7 +42,7 @@ import yaml
 
 import _cli
 import _config
-from _schema import JUDGMENT, RULES
+from _schema import JUDGMENT, RULES, SINCE
 
 _INTERACTS = re.compile(r"^interacts\(\s*([\w.-]+)\s*->\s*([\w.-]+)\s*\)(\.\w+)?$")
 _DRIVES = re.compile(r"^drives\(\s*([\w.-]+)\s*->\s*([\w.-]+)\s*\)$")
@@ -68,6 +68,11 @@ class Graph:
     def __init__(self, path: Path) -> None:
         self.path = path
         raw = _cli.load_graph(path)
+        # The contract this graph was authored against. Absent or unparseable reads as 1 —
+        # the oldest, which owes the fewest entries; a graph that fails to declare its
+        # version is check_lint's finding to make, not a reason for this check to pile on.
+        version = raw.get("schema_version")
+        self.schema_version: int = version if isinstance(version, int) else 1
         self.demands: list[dict] = raw.get("demands", []) or []
         structure = raw.get("structure", {}) or {}
         self.axes: list[str] = structure.get("axes", []) or []
@@ -601,6 +606,11 @@ def check(path: Path) -> tuple[list[str], list[Trigger]]:
     triggers, coverage = _triggers(g)
     findings.extend(coverage)
     for rule in RULES:
+        # A rule that postdates this graph's schema version is not owed an entry: the run
+        # that would have recorded it predates the rule (`_schema.SINCE`). Triggers below
+        # are NOT version-gated — those are findings about structure that is really there.
+        if SINCE.get(rule, 1) > g.schema_version:
+            continue
         if rule not in g.evaluated:
             hint = f" ({JUDGMENT[rule]})" if rule in JUDGMENT else ""
             findings.append(

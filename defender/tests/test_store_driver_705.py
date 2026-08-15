@@ -145,7 +145,7 @@ def test_run_investigation_takes_a_store_factory_seam(tmp_path):
         handles.append((case_id, rd, handle))
         return handle
 
-    result = drive(run_dir, run_id="seam", salt=SALT,
+    result = drive(run_dir, run_id="seam",
                    main=ReplayFn([Turn(text="Investigation complete.")]),
                    store_factory=recording)
 
@@ -169,7 +169,7 @@ def test_run_investigation_mints_a_case_id_and_writes_a_run_dir_pointer(tmp_path
     resolver's contract is the pointer file, not a convention."""
     ss = store_mod()
     run_dir = materialize(tmp_path, GOLDEN)
-    result = drive(run_dir, run_id="pointer", salt=SALT,
+    result = drive(run_dir, run_id="pointer",
                    main=ReplayFn([Turn(text="done")]),
                    store_factory=store_factory(tmp_path))
 
@@ -213,7 +213,7 @@ def test_capability_attaches_at_the_existing_extra_capabilities_seam(tmp_path):
     ])
     gather = ReplayFn([Turn(text="lead summarised")])
 
-    drive(run_dir, run_id="seam-attach", salt=SALT, main=main, gather=gather,
+    drive(run_dir, run_id="seam-attach", main=main, gather=gather,
           verbs=FakeVerbs({"elastic": {}}),
           store_factory=store_factory(tmp_path, sink=opened))
 
@@ -244,7 +244,7 @@ def test_node_iteration_and_node_hooks_are_untouched(tmp_path):
 
     run_dir = materialize(tmp_path, GOLDEN)
     opened: list = []
-    drive(run_dir, run_id="no-hooks", salt=SALT,
+    drive(run_dir, run_id="no-hooks",
           main=ReplayFn([Turn(tool_calls=[("read_file", {"path": str(run_dir / "alert.json")})]),
                          Turn(text="done")]),
           store_factory=store_factory(tmp_path, sink=opened))
@@ -269,7 +269,7 @@ def test_capability_is_unconditional_with_DEFENDER_COMPACTION_unset(tmp_path, mo
 
     run_dir = materialize(tmp_path, GOLDEN)
     opened: list = []
-    drive(run_dir, run_id=f"flag-{flag}", salt=SALT,
+    drive(run_dir, run_id=f"flag-{flag}",
           main=ReplayFn(_read_alert_turns(run_dir, 3) + [Turn(text="done")]),
           store_factory=store_factory(tmp_path, sink=opened))
 
@@ -319,7 +319,7 @@ def test_main_history_is_store_rendered(tmp_path):
     run_dir = materialize(tmp_path, GOLDEN)
     opened: list = []
     replay = ReplayFn(_read_alert_turns(run_dir, 2) + [Turn(text="done")])
-    drive(run_dir, run_id="store-render", salt=SALT, main=replay,
+    drive(run_dir, run_id="store-render", main=replay,
           store_factory=store_factory(tmp_path, sink=opened))
 
     store = opened[0]
@@ -360,7 +360,7 @@ def test_gather_history_is_not_store_rendered_and_learning_stages_get_neither(tm
         Turn(tool_calls=[("query", {"system": "elastic", "verb": "probe", "params": {}})]),
         Turn(text="lead summarised"),
     ])
-    drive(run_dir, run_id="gather-render", salt=SALT, main=main, gather=gather,
+    drive(run_dir, run_id="gather-render", main=main, gather=gather,
           verbs=FakeVerbs({"elastic": {"probe": _one_hit}}),
           store_factory=store_factory(tmp_path, sink=opened))
 
@@ -429,7 +429,7 @@ def test_store_append_is_fail_closed(tmp_path, mode):
     factory = store_factory(tmp_path, fault=StoreFault(on="append", after=2, mode=mode),
                             sink=opened)
 
-    result = drive(run_dir, run_id=f"fail-{mode}", salt=SALT, main=replay,
+    result = drive(run_dir, run_id=f"fail-{mode}", main=replay,
                    store_factory=factory)
 
     handle = opened[0]
@@ -456,7 +456,7 @@ def test_store_append_failure_stops_the_run_through_a_handled_exit(tmp_path):
     opened: list = []
     replay = ReplayFn(_read_alert_turns(run_dir, 6) + [Turn(text="done")])
 
-    result = drive(run_dir, run_id="handled", salt=SALT, main=replay,
+    result = drive(run_dir, run_id="handled", main=replay,
                    store_factory=store_factory(
                        tmp_path, fault=StoreFault(on="append", after=1, mode="corrupt"),
                        sink=opened))
@@ -481,7 +481,7 @@ def test_a_swallowed_store_error_never_sends_an_unrecorded_list(tmp_path):
     run_dir = materialize(tmp_path, GOLDEN)
     opened: list = []
     replay = ReplayFn(_read_alert_turns(run_dir, 8) + [Turn(text="done")])
-    drive(run_dir, run_id="no-swallow", salt=SALT, main=replay,
+    drive(run_dir, run_id="no-swallow", main=replay,
           store_factory=store_factory(
               tmp_path, fault=StoreFault(on="append", after=2, mode="corrupt"), sink=opened))
 
@@ -531,7 +531,7 @@ def test_the_request_logging_guard_stays_around_the_log_path_only(tmp_path):
             return ModelResponse(parts=[TextPart(content="Investigation complete.")])
 
     model = SurrogateModel()
-    result = drive(run_dir, run_id="log-guard", salt=SALT, main=model,
+    result = drive(run_dir, run_id="log-guard", main=model,
                    store_factory=store_factory(tmp_path, sink=opened))
 
     assert model.calls >= 2, "a wire-log encoding failure must NOT stop the run"
@@ -566,7 +566,7 @@ def test_run_end_flush_captures_the_terminal_response_on_every_exit(tmp_path, mo
     # (1) UsageLimitExceeded — the request limit
     rd = materialize(tmp_path / "limit", GOLDEN_AB3)
     opened: list = []
-    drive(rd, run_id="flush-limit", salt=SALT, main=NeverEndsModel(rd),
+    drive(rd, run_id="flush-limit", main=NeverEndsModel(rd),
           store_factory=store_factory(tmp_path / "limit", sink=opened))
     exits["UsageLimitExceeded"] = (opened[0], "request-limit")
 
@@ -574,7 +574,7 @@ def test_run_end_flush_captures_the_terminal_response_on_every_exit(tmp_path, mo
     rd = materialize(tmp_path / "budget", GOLDEN)
     opened = []
     monkeypatch.setenv("DEFENDER_BUDGET_ENFORCE", "1")
-    drive(rd, run_id="flush-budget", salt=SALT,
+    drive(rd, run_id="flush-budget",
           main=ReplayFn(_read_alert_turns(rd, 15)),
           limits=caps(max_tool_calls=1, wall_clock_timeout=3600, grace_seconds=600),
           store_factory=store_factory(tmp_path / "budget", sink=opened))
@@ -585,7 +585,7 @@ def test_run_end_flush_captures_the_terminal_response_on_every_exit(tmp_path, mo
     opened = []
     systems = ("elastic", "identity", "cmdb", "ticket", "host-state")
     assert len(systems) == circuit_breaker.RUN_FAIL_KILL_LIMIT
-    drive(rd, run_id="flush-abort", salt=SALT,
+    drive(rd, run_id="flush-abort",
           main=ReplayFn([Turn(tool_calls=[("gather", {
               "lead_id": "l-001", "system": "elastic", "goal": "probe",
               "what_to_summarize": ["x"]})]), Turn(text="unreached")]),
@@ -611,7 +611,7 @@ def test_run_end_flush_captures_the_terminal_response_on_every_exit(tmp_path, mo
     # complete in the store, not orphaned, once round two's own model raises instead of
     # the store ever seeing an unanswered call).
     with pytest.raises(RuntimeError):
-        drive(rd, run_id="flush-uncaught", salt=SALT,
+        drive(rd, run_id="flush-uncaught",
               main=ReplayFn([Turn(tool_calls=[("gather", {
                   "lead_id": "l-001", "system": "elastic", "goal": "probe",
                   "what_to_summarize": ["x"]})])]),
@@ -646,7 +646,7 @@ def test_the_moved_projection_is_built_after_the_run_end_flush(tmp_path):
     ss = store_mod()
     rd = materialize(tmp_path, GOLDEN_AB3)
     opened: list = []
-    drive(rd, run_id="order", salt=SALT, main=NeverEndsModel(rd),
+    drive(rd, run_id="order", main=NeverEndsModel(rd),
           store_factory=store_factory(tmp_path, sink=opened))
 
     store = opened[0]
@@ -692,7 +692,7 @@ def test_minted_row_round_trips_after_fill_run_metadata(tmp_path, monkeypatch):
     rd = materialize(tmp_path, GOLDEN)
     (rd / "investigation.md").write_text(_CLOSED_LOOP_INVLANG, encoding="utf-8")
     opened: list = []
-    drive(rd, run_id="minted", salt=SALT,
+    drive(rd, run_id="minted",
           main=ReplayFn(_read_alert_turns(rd, 6) + [Turn(text="done")]),
           store_factory=store_factory(tmp_path, sink=opened))
 
@@ -720,7 +720,7 @@ def test_the_wire_log_is_still_written_and_still_human_readable(tmp_path):
     trimming stays legal once nothing forks from it."""
     rd = materialize(tmp_path, GOLDEN)
     replay = ReplayFn(_read_alert_turns(rd, 2) + [Turn(text="done")])
-    drive(rd, run_id="log-alive", salt=SALT, main=replay,
+    drive(rd, run_id="log-alive", main=replay,
           store_factory=store_factory(tmp_path))
 
     log = RunPaths(rd).wire_log

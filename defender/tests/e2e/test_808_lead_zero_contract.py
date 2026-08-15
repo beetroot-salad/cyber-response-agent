@@ -19,18 +19,24 @@ entry — schema.md, "Coin ids from the code's name")
         It takes the INJECTED registry because 62 of 95 `drive()` sites omit `verbs=` (g8) and
         a scenario that never asked for a backend must not acquire one (K12) — which means
         `orientation()` and `_user_prompt` gain that parameter, a new bound surface.
-    `LeadZeroResult(text, entities, status)`
+    `LeadZeroResult(text, status)`
         `text`   — item 1's rendered section, IN ITS ENTIRETY inside one
                    `wrap(text, "untrusted", salt)` frame, `_(unavailable: …)` notes and
-                   shortfall notes included (K1).
-        `entities` — `Entities(hosts, users, source_ips)`, deduplicated and deterministically
-                   sorted SETS, never singletons (K9: the issue's own worked example resolves
-                   to two users from two source IPs, and a singular bind drops half the
-                   discriminator the change exists to surface).
+                   shortfall notes included (K1). Since #867 this is ALSO item 3's entity
+                   evidence: the correlation lead is handed this block and chooses its own
+                   correlation axes off it.
         `status` — one of `STATUS_FAILED` / `STATUS_EMPTY` / `STATUS_TRUNCATED` /
-                   `STATUS_WITH_ENTITIES`. `d22`'s gate is written against this VALUE, not
-                   against an absence of entities, because K13 makes the distinction
-                   load-bearing and P1b makes "empty" ambiguous at the wire.
+                   `STATUS_RESOLVED`. `d22`'s gate is written against this VALUE because K13
+                   makes the distinction load-bearing and P1b makes "empty" ambiguous at the
+                   wire.
+
+    THE THIRD FIELD IS RETIRED (#867). `entities` — `Entities(hosts, users, source_ips)`,
+    deduplicated and deterministically sorted SETS — was a harness-side extraction of three
+    fixed ECS fields. K9 was right that the bind had to be set-shaped rather than singular; the
+    error was one level up, in fixing WHICH fields at all. Half the environment's detection
+    rules fire on `logs-falco.alerts-*`, where that triple resolves to the shared VPS host and
+    nothing else. `STATUS_WITH_ENTITIES` was renamed to `STATUS_RESOLVED` in the same change:
+    it was computed from resolved document counts and never from an entity.
     `RESERVED_LEAD_IDS = ("l-000", "l-00c")`, `CORRELATION_REQUEST_LIMIT = 8` (F5/F6).
 
     IT DOES NOT NEVER-RAISE, and the restated `d0` says so: a fault inside an item renders
@@ -42,6 +48,7 @@ entry — schema.md, "Coin ids from the code's name")
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -54,7 +61,6 @@ from defender.tests.e2e._lead_zero_808 import (  # noqa: E402
     L0,
     L3,
     LEAD_ZERO_HEADING,
-    SALT,
     UNAVAILABLE,
     Res,
     alert_doc,
@@ -113,27 +119,38 @@ class _Watcher(ReplayFn):
 
 def test_lead_zero_returns_section_text_entities_and_status(tmp_path):
     """d0 — `resolve_lead_zero` returns ONE value carrying (a) `text`, item 1's rendered
-    section entirely inside a single `wrap(text, "untrusted", salt=deps.salt)` frame,
-    (b) `entities`, the `host.name` / `user.name` / `source.ip` values read off the RESOLVED
-    ancestor documents as deduplicated, deterministically sorted SETS, and (c) a `status`
-    distinguishing failed / succeeded-empty / succeeded-truncated / succeeded-with-entities.
+    section entirely inside a single `wrap_fresh(text, "untrusted")` frame, and
+    (b) a `status` distinguishing failed / succeeded-empty / succeeded-truncated /
+    succeeded-resolved.
+
+    THE SECOND COMPONENT IS GONE, and deliberately (#867). It was `entities` — the `host.name`
+    / `user.name` / `source.ip` values read off the resolved ancestor documents as
+    deduplicated, sorted sets — and the demand rested on the premise that a rendered `str`
+    could not carry what `d17` binds. That premise was the defect. The triple fits the four
+    detection rules that fire on `logs-system.auth-*` and measures nothing on the four that
+    fire on `logs-falco.alerts-*`, where the only resolvable host is the shared VPS every
+    containerized alert reports from. So item 3 now binds the RENDERED BLOCK itself and the
+    correlation lead reads the documents and picks its own axes, which is what every other
+    gather lead in this tree already does. Nothing typed replaced the field; `text` carries it.
+
+    The status arm is unchanged in substance and renamed in one value: `succeeded-with-entities`
+    was never computed from an entity and is now `succeeded-resolved`. It always meant "every
+    requested ancestor document resolved", which is exactly what `d22`'s gate needs.
 
     Driven at the entry point because the return value is what every other demand reads its
-    observable off: a rendered `str` cannot carry the entities `d17` binds, and `d22`'s gate
-    cannot tell "resolution failed" from "resolution found nothing" without the status.
+    observable off: `d22`'s gate cannot tell "resolution failed" from "resolution found
+    nothing" without the status.
 
     ALL FOUR STATUSES ARE ASSERTED BY VALUE, and `d22` reads their consequence rather than
-    their name — a gate written against an ABSENCE of entities cannot tell the first two
-    apart, which is the whole reason the third component exists. Prose in a docstring that no
-    test asserts reads as covered and pins nothing, and `check_binds` scans this docstring in
-    place of the demand's `outcome`, so naming the four here without checking them is exactly
-    the shape that passes review while binding nothing.
+    their name. Prose in a docstring that no test asserts reads as covered and pins nothing,
+    and `check_binds` scans this docstring in place of the demand's `outcome`, so naming the
+    four here without checking them is exactly the shape that passes review while binding
+    nothing.
 
-    DEDUPLICATION IS DRIVEN, NOT DESCRIBED: the four resolved documents name `dev.dana` three
-    times, `office-ws-1` twice and `172.18.0.15` twice, and the entity sets carry each once.
-    The sort is deterministic and NUMERIC BY OCTET on `source_ips` — `172.18.0.4` before
-    `172.18.0.15`, which is the opposite of the lexicographic order a string sort produces and
-    precisely the detail an implementer would invert.
+    THE RESOLVED DOCUMENTS REACH THE BLOCK, and that is now the whole of the payload
+    obligation: the four documents this scenario resolves name `dev.dana` three times, and the
+    rendered frame carries that content rather than a summary of it — which is what makes the
+    correlation lead's own entity judgement possible downstream.
 
     EACH ARM GETS ITS OWN RUN DIR, and that is load-bearing rather than tidy. The first cut of
     these four arms shared one, so all four shell fetches carried an identical request key —
@@ -167,7 +184,7 @@ def test_lead_zero_returns_section_text_entities_and_status(tmp_path):
         rec = VerbRecorder()
         return lead_zero.resolve_lead_zero(
             run_dir=run_dir, defender_dir=defender_dir(),
-            alert_path=run_dir / "alert.json", salt=SALT,
+            alert_path=run_dir / "alert.json",
             verbs=elastic_backend(rec, **kw),
         ), rec
 
@@ -180,30 +197,35 @@ def test_lead_zero_returns_section_text_entities_and_status(tmp_path):
             "arms shared one run dir"
         )
 
-    result, rec = _resolve("with_entities", answer=answer_hits(REPEATED_ACTORS))
-    _reached(rec, "with_entities")
+    result, rec = _resolve("resolved", answer=answer_hits(REPEATED_ACTORS))
+    _reached(rec, "resolved")
 
-    assert result.status == lead_zero.STATUS_WITH_ENTITIES
+    assert result.status == lead_zero.STATUS_RESOLVED
 
-    # SETS, sorted, DEDUPLICATED — not "whichever document was resolved first", and not one
-    # entry per document. Both users and both source IPs of the issue's own worked example, or
-    # half the discriminator is silently dropped; `dev.dana` resolved three times is one user.
-    assert result.entities.users == ("dev.dana", "svc.config-mgmt")
-    assert result.entities.source_ips == ("172.18.0.4", "172.18.0.15"), (
-        "the source IPs are not in numeric octet order — a lexicographic sort puts "
-        "172.18.0.15 first, and a set that sorts differently run to run is not deterministic"
-    )
-    assert result.entities.hosts == ("db-1", "office-ws-1")
+    # The resolved documents' own values reach the block. #867 deleted the extracted entity
+    # sets that used to be asserted here; what replaces them is not a weaker version of the
+    # same check but the thing that made the extraction unnecessary — every actor the
+    # documents name is IN the rendered text, so the correlation lead can read them itself.
+    for named in ("dev.dana", "svc.config-mgmt", "office-ws-1", "db-1"):
+        assert named in result.text, (
+            f"{named!r} was resolved off an ancestor document but does not appear in item 1's "
+            "rendered block — item 3 now binds that block as its whole entity evidence, so a "
+            "value missing from it is a value the correlation lead cannot correlate on"
+        )
 
-    assert result.text.startswith(f"<run-{SALT}-untrusted>"), \
-        "item 1's block is not inside the run-salted untrusted frame every other " \
-        "externally-sourced ORIENT section carries"
-    assert result.text.rstrip().endswith(f"</run-{SALT}-untrusted>")
+    # #875: the frame's salt is minted at wrap time, so it is read off the result rather than
+    # predicted. Matching the OPEN tag's own salt in the closer is the stronger check anyway —
+    # it is what makes this one frame rather than two lookalikes.
+    opened = re.match(r"<run-([0-9a-f]+)-untrusted>", result.text)
+    assert opened is not None, \
+        "item 1's block is not inside the untrusted frame every other externally-sourced " \
+        "ORIENT section carries"
+    assert result.text.rstrip().endswith(f"</run-{opened.group(1)}-untrusted>")
     assert "dev.dana" in result.text
 
     # The other three states, each by value. `failed` and `succeeded-empty` were exercised
     # only indirectly, through `d22`'s dispatch gating, so nothing pinned that they are
-    # distinct values rather than two spellings of "no entities".
+    # distinct values rather than two spellings of "nothing resolved".
     empty, empty_rec = _resolve("empty", answer=answer_hits([]))
     _reached(empty_rec, "empty")
     assert empty.status == lead_zero.STATUS_EMPTY, (
@@ -211,7 +233,6 @@ def test_lead_zero_returns_section_text_entities_and_status(tmp_path):
         "succeeded-empty — d22's gate then cannot tell it from a failure, and K13 makes that "
         "distinction load-bearing"
     )
-    assert empty.entities.users == ()
 
     failed, failed_rec = _resolve(
         "failed", shell=TransportFault("docker exec failed"),
@@ -227,17 +248,17 @@ def test_lead_zero_returns_section_text_entities_and_status(tmp_path):
     _reached(trunc_rec, "truncated")
     assert truncated.status == lead_zero.STATUS_TRUNCATED, \
         "a truncated but nonempty resolution reports as if it were complete"
-    assert truncated.entities.users == ("dev.dana", "svc.config-mgmt"), \
-        "a truncated resolution dropped the entities it did resolve; d22 still dispatches on them"
+    assert "dev.dana" in truncated.text, \
+        "a truncated resolution dropped the documents it did resolve; d22 still dispatches on it"
 
     # ALL FOUR, PAIRWISE. `failed != empty` above catches one pair; a by-value equality
     # assertion against each status individually is satisfied by an implementation that
-    # collapses any OTHER two into one value too (e.g. STATUS_TRUNCATED == STATUS_WITH_ENTITIES
+    # collapses any OTHER two into one value too (e.g. STATUS_TRUNCATED == STATUS_RESOLVED
     # would leave every assertion above still green) — the four-state return is then a
     # two- or three-state one wearing four names, which is exactly the shape this demand
     # exists to rule out.
     assert len({result.status, empty.status, failed.status, truncated.status}) == 4, (
-        f"the four statuses are not four distinct values: with_entities={result.status!r} "
+        f"the four statuses are not four distinct values: resolved={result.status!r} "
         f"empty={empty.status!r} failed={failed.status!r} truncated={truncated.status!r} — "
         "d22's gate reads the VALUE, so two states sharing one value are indistinguishable to it"
     )
@@ -259,7 +280,7 @@ def test_lead_zero_resolves_before_main_first_request(tmp_path):
     rec = VerbRecorder()
     from defender.tests.e2e._replay_harness import drive
 
-    drive(run_dir, run_id="lz808-order", salt=SALT, main=watcher,
+    drive(run_dir, run_id="lz808-order", main=watcher,
           gather=ReplayFn([Turn(text="correlation summary")]),
           verbs=elastic_backend(rec, answer_hits(TWO_ACTORS)))
 
@@ -288,7 +309,7 @@ def test_lead_zero_issues_its_backend_calls_through_the_query_capture_seam(tmp_p
     anyway and a TRIPPED breaker was ignored, because six of the eight screens live inside
     `QueryCapture` and are not inherited.
 
-    Observed at the writer, which only `QueryCapture._record` reaches: a twelve-key row under
+    Observed at the writer, which only `QueryCapture._record` reaches: a thirteen-key row under
     `l-000`, a persisted payload sidecar at `gather_raw/l-000/{seq}.json` allocated by the
     shared `record_query._next_seq`, and a breaker outcome recorded on the same tail.
 
@@ -306,6 +327,7 @@ def test_lead_zero_issues_its_backend_calls_through_the_query_capture_seam(tmp_p
     assert set(rows[0]) == {
         "lead_id", "seq", "system", "verb", "query_id", "params", "raw_command",
         "payload_path", "exit_code", "error_class", "payload_status", "payload_digest",
+        "payload_sha256",
     }, "lead-0's row is not the row QueryCapture._record builds — a second writer " \
        "re-implemented the schema, which is exactly what the tree's other queries-table " \
        "writer already did (g4)"
@@ -438,7 +460,7 @@ def test_a_run_ending_arm_inside_lead_zero_still_produces_a_run_summary(tmp_path
 
     main = ReplayFn([Turn(text="Investigation complete.")])
     summary = drive(
-        run_dir_seed, run_id="lz808-aborted", salt=SALT, main=main,
+        run_dir_seed, run_id="lz808-aborted", main=main,
         gather=ReplayFn([Turn(text="correlation summary")]),
         verbs=elastic_backend(rec, answer_raising(TransportFault("transport down"))),
     )

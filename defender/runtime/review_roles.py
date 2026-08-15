@@ -14,11 +14,13 @@ unconditionally ahead of any narrowing, so a role that could read or run bash co
 reach the live working document — undoing the projection every blind role rests on. The only
 input a review role receives is what the host inlines into its prompt.
 
-`bind_review_role` mints its OWN fresh salt on every call and never receives the
-investigation's — the gather subagent bind is the ONE place in this tree that shares salt
-with its parent, and a review role built on that precedent would hold the delimiter of the
-frame its own output returns inside (a role that reads attacker-influenced payloads must
-never hold that key).
+A review role receives no salt, because since #875 there is none to receive: `wrap_fresh`
+mints a frame's delimiter AFTER the content is in hand, so no token outlives the string it
+delimits and there is nothing left to hand a framed party. This paragraph used to name the
+gather subagent bind as the ONE place in the tree that shared a salt with its parent, and
+warned that a review role built on that precedent would hold the delimiter of the frame its
+own output returns inside. That precedent WAS the defect (#875 F-1) and is gone; the posture
+it argued for is now the tree's only shape rather than this module's exception to it.
 """
 
 from __future__ import annotations
@@ -102,8 +104,12 @@ def resolve_review_model(explicit: str | None = None) -> str:
 def bind_review_role(
     defn: AgentDefinition, run_dir: Path, *, defender_dir: Path | None = None,
 ) -> AgentDeps:
-    """Bind a review role's deps with its OWN fresh salt — PR7/PR8: never the session's."""
-    return bind(defn, run_dir, scope=RunScope(), salt=None, defender_dir=defender_dir)
+    """Bind a review role's deps — with NO salt, because since #875 there is none to bind.
+
+    PR7/PR8's obligation (a review role must never hold the delimiter of the frame its own
+    output returns inside) is discharged by `wrap_fresh` minting at wrap time rather than by
+    this call minting a fresh one per bind."""
+    return bind(defn, run_dir, scope=RunScope(), defender_dir=defender_dir)
 
 
 @dataclass(frozen=True)

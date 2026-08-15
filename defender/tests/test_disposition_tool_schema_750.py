@@ -72,7 +72,7 @@ def _deps(tmp_path: Path):
     (run_dir / "investigation.md").write_bytes((GOLDEN / "investigation.md").read_bytes())
     dfn = tmp_path / "defender"
     dfn.mkdir(exist_ok=True)
-    return bind(MAIN_DEF, run_dir, defender_dir=dfn, salt="sess-salt"), run_dir
+    return bind(MAIN_DEF, run_dir, defender_dir=dfn), run_dir
 
 
 def _stages():

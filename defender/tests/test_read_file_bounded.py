@@ -30,6 +30,8 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests._frames680 import assert_one_frame, frame_salt_of
+
 _DEFENDER = Path(__file__).resolve().parents[1]
 
 pytest.importorskip("pydantic_ai")
@@ -226,7 +228,7 @@ def test_char_slice_never_splits_multibyte() -> None:
     head.encode("utf-8")
 
 
-def _read_file_tool_output(run_dir: Path, path: Path, salt: str) -> str:
+def _read_file_tool_output(run_dir: Path, path: Path) -> str:
     """Drive the real `read_file` tool through a FunctionModel that issues one
     read_file call, and return the ToolReturn content the model would see. No
     network — the model is scripted, so this needs no API key."""
@@ -247,7 +249,7 @@ def _read_file_tool_output(run_dir: Path, path: Path, salt: str) -> str:
     agent = Agent(deps_type=tools.AgentDeps)
     tools.register_tools(agent, ToolSet(read=True))
     deps = tools.AgentDeps(
-        run_dir=run_dir, defender_dir=_DEFENDER, run_id="t", salt=salt,
+        run_dir=run_dir, defender_dir=_DEFENDER, run_id="t",
         policy=compile_policy_for(MAIN_DEF, run_dir=run_dir, defender_dir=_DEFENDER),
         cwd_anchor=run_dir,
     )
@@ -267,14 +269,15 @@ def test_oversized_untrusted_read_caps_before_wrapping(tmp_path) -> None:
     a full multi-MB dump, and never a wrap whose closing tag was truncated away.
     Driven through the real `read_file` tool, so a refactor that inverted the
     order (wrap then cap) would fail here, not just in a comment."""
-    salt = "SALT123"
     run_dir = tmp_path / "run"
     (run_dir / "gather_raw").mkdir(parents=True)
     alert = run_dir / "alert.json"
     alert.write_text("y" * (CAP + 5000))
 
-    out = _read_file_tool_output(run_dir, alert, salt)
+    out = _read_file_tool_output(run_dir, alert)
 
+    # #875: the delimiter is minted at wrap time, so it is read off the return.
+    salt = frame_salt_of(out, "untrusted")
     opener, closer = f"<run-{salt}-untrusted>", f"</run-{salt}-untrusted>"
     assert out.startswith(opener), "untrusted read was not wrapped"
     assert out.rstrip().endswith(closer), "closing delimiter missing/truncated"
@@ -285,12 +288,11 @@ def test_oversized_untrusted_read_caps_before_wrapping(tmp_path) -> None:
 
 def test_under_cap_untrusted_read_is_verbatim_and_wrapped(tmp_path) -> None:
     """A small untrusted file comes back whole (no notice) but still wrapped."""
-    salt = "SALT123"
     run_dir = tmp_path / "run"
     (run_dir / "gather_raw").mkdir(parents=True)
     alert = run_dir / "alert.json"
     alert.write_text('{"id": 1}')
 
-    out = _read_file_tool_output(run_dir, alert, salt)
-    assert out == f'<run-{salt}-untrusted>\n{{"id": 1}}\n</run-{salt}-untrusted>'
+    out = _read_file_tool_output(run_dir, alert)
+    assert_one_frame(out, '{"id": 1}', "untrusted")
     assert "[read_file]" not in out

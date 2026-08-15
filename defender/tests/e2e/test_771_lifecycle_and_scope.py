@@ -50,6 +50,7 @@ import pytest
 
 from defender.runtime import box as box_mod
 from defender.runtime import scrub as scrub_mod
+from defender.tests.e2e._box665 import reaped_after_create
 from defender.tests.e2e._spec771 import (
     BAN_ABSENT,
     BAN_IN_FORCE,
@@ -728,7 +729,7 @@ def test_a_live_run_dir_is_never_reused_and_a_stale_mount_never_follows_it(tmp_p
     monkeypatch.setenv("DEFENDER_RUNS_BASE", str(runs))
 
     # ARM 1 — the mint refuses an id whose directory is still on disk, and touches nothing.
-    first, _salt = run_common.materialize_run_dir(alert, "stale-771")
+    first = run_common.materialize_run_dir(alert, "stale-771")
     (first / "report.md").write_text("FIRST RUN\n", encoding="utf-8")
     before = sorted(p.name for p in first.iterdir())
 
@@ -748,7 +749,7 @@ def test_a_live_run_dir_is_never_reused_and_a_stale_mount_never_follows_it(tmp_p
     )
     # The complementary condition: a FRESH id under the same base materializes, so the refusal
     # above is the existing directory and not a mint that fails on everything.
-    fresh, _ = run_common.materialize_run_dir(alert, "fresh-771")
+    fresh = run_common.materialize_run_dir(alert, "fresh-771")
     assert fresh.is_dir(), "no run dir can be minted at all under this base"
     assert fresh != first, "a fresh id minted the same directory the refusal was about"
 
@@ -849,9 +850,12 @@ def test_the_box_start_fault_removes_the_container_it_created(tmp_path):
     with pytest.raises(ban_not_in_force_error()):
         box_mod.start_box(run_tree(tmp_path), DEFENDER, docker=rec)
 
-    assert any(a[:3] == ["docker", "rm", "-f"] for a in rec.calls), (
-        "the faulted start left its container running"
-    )
+    # AFTER the create, and naming what create made — `_box665.reaped_after_create` carries
+    # why the two obvious spellings say nothing here (`start_box` opens with an unconditional
+    # pre-create `docker rm -f <name>`), and it is shared rather than restated so a future
+    # weakening cannot land on one arm's copy alone. It is the assertion #884 F-29 slipped past
+    # on the sibling create arm.
+    assert reaped_after_create(rec.calls), "the faulted start left its container running"
 
 
 def test_a_teardown_fault_under_an_in_flight_failure_still_reports_both(tmp_path):

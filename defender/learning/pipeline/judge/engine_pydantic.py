@@ -116,8 +116,10 @@ def _run_judge_pydantic(
     """The judge's limits are stage-fixed, so the context is built HERE rather than taken
     from the caller — `subagent_timeout()` is read at spawn, never frozen at import (#717).
 
-    The context is built FIRST and `bind` reads the transport off it, so `ctx.box`/`ctx.salt`
-    are what the agent was actually bound with rather than a second copy nothing reads."""
+    The context is built FIRST and `bind` reads the transport off it, so `ctx.box` is what the
+    agent was actually bound with rather than a second copy nothing reads. `ctx.salt` is NOT
+    bound (#875): it scopes this stage's PROMPT frames — the set `stage_user_message` announces
+    as one message — and a tool return is framed by `wrap_fresh`, which mints its own."""
     read_roots = tuple(scope.add_dir) if isinstance(scope.add_dir, list) else ()
     ctx = StageContext(
         learning_run_dir=learning_run_dir, user=user,
@@ -134,7 +136,7 @@ def _run_judge_pydantic(
     scoped_def = replace(JUDGE_DEF, tools=tools, verb_grant=effective_grant)
     deps = bind(
         scoped_def, ctx.learning_run_dir, scope=RunScope(add_dirs=read_roots),
-        salt=ctx.salt, box=ctx.box,
+        box=ctx.box,
     )
     if tools.closed_tickets:
         if verbs is None:

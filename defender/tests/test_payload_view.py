@@ -361,6 +361,72 @@ def test_a_bare_truncated_flag_still_reports_the_server_cap(tmp_path):
     assert "count(*)" not in view
 
 
+# --------------------------------------------------------------------------------------- #
+# #877 F-10 — the envelope may not derive a fact from itself.
+# --------------------------------------------------------------------------------------- #
+
+def _esql_rows(n: int) -> list[list]:
+    return [[f"host-{i:04d}", i] for i in range(n)]
+
+
+def test_an_esql_payload_at_the_row_cap_is_never_called_complete(tmp_path):
+    """THE regression, driven through the REAL adapter shape rather than a hand-built dict.
+
+    `esql_payload` computes `row_count: len(values)` from the very array `completeness` then
+    measures, so `row_count > n` was unsatisfiable and EVERY ES|QL payload read `complete` —
+    `The SERVER returned everything it had — nothing was capped upstream`. A 1000-row `STATS …
+    BY host` is exactly ES's own default row cap, i.e. the population most likely to have been
+    truncated, and the prose only renders above the passthrough ceiling, so the false claim
+    reached precisely the payloads big enough to be clipped."""
+    from defender.scripts.adapters.elastic_adapter import esql_payload
+
+    payload = esql_payload("FROM logs-* | STATS c = COUNT(*) BY host", {
+        "columns": [{"name": "host", "type": "keyword"}, {"name": "c", "type": "long"}],
+        "values": _esql_rows(1000),
+    })
+    assert payload["row_count"] == 1000, "the adapter shape changed under the test"
+    assert pv.completeness(payload).state != "complete"
+
+    view = _view(json.dumps(payload), ceiling=8192, run_dir=tmp_path)
+    assert "nothing was capped upstream" not in view
+    assert "counts are exact" not in view
+
+
+def test_an_unknown_envelope_is_not_offered_as_a_full_payload_to_count(tmp_path):
+    """THE SAME CLAIM, ONE LINE FURTHER DOWN. `_prose` and `_footer` read the SAME
+    `Completeness` and both speak to the lead, so narrowing only the prose left `unknown`
+    falling through `_footer`'s `!= "capped"` arm onto `full payload: <path>` plus
+    `defender-sql 'SELECT count(*) FROM data'` — the file named as the whole result and a count
+    over it advertised as the answer, on exactly the ES|QL payload the test above just stopped
+    calling complete."""
+    from defender.scripts.adapters.elastic_adapter import esql_payload
+
+    payload = esql_payload("FROM logs-* | STATS c = COUNT(*) BY host", {
+        "columns": [{"name": "host", "type": "keyword"}, {"name": "c", "type": "long"}],
+        "values": _esql_rows(1000),
+    })
+    assert pv.completeness(payload).state == "unknown", "the fixture stopped exercising it"
+    view = _view(json.dumps(payload), ceiling=8192, run_dir=tmp_path)
+
+    assert "full payload" not in view, "an envelope declaring nothing was called complete"
+    assert "count(*)" not in view, "a count over an unknown slice was offered as the answer"
+    assert "payload on disk" in view, "the file the lead must read was not named at all"
+
+
+def test_a_row_count_above_the_rows_present_is_still_a_cap(tmp_path):
+    """The reading that survives, and the reason the branch was narrowed rather than deleted: a
+    `row_count` ABOVE the rows carried is a real declaration — whoever wrote it knew of rows
+    this payload does not hold — while a `row_count` EQUAL to them declares nothing."""
+    text = json.dumps({
+        "query": "FROM logs-* | LIMIT 400", "columns": [{"name": "host", "type": "keyword"}],
+        "row_count": 400, "values": _esql_rows(20),
+    })
+    assert pv.completeness(json.loads(text)) == pv.Completeness("capped", 400, 20)
+    view = _view(text, ceiling=1200, run_dir=tmp_path)
+    assert "400" in view
+    assert "count(*)" not in view, "a capped payload was offered a count over its own slice"
+
+
 def _json_block(view: str) -> str:
     """The payload region of a rendered view — everything after the `[record_query]` prose."""
     lines = [ln for ln in view.splitlines() if not ln.startswith(("[record_query]", "→", "  "))]

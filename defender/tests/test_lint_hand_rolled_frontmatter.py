@@ -32,6 +32,10 @@ _FIND = 'def f_find(t):\n    return t.find("\\n---", 4)\n'
 _SPLIT = 'def f_split(t):\n    return t.split("---", 2)\n'
 _STARTS = 'def f_starts(t):\n    return t.startswith("---")\n'
 _REGEX = 'import re\n\ndef f_regex(t):\n    return re.search(r"^---\\s*\\n", t)\n'
+# The CLOSING half, spelled the way a regex is normally spelled: the constant holds
+# `\` + `n` + `---`, not a newline. Every other regex fixture here happens to match on
+# its OPENER, so this is the only one that pins the closing-fence mark (#885).
+_REGEX_CLOSING = 'import re\n\ndef f_regex_closing(t):\n    return re.search(r"\\n---", t[4:])\n'
 
 
 def _pyfile(tree: Path, rel: str, src: str) -> Path:
@@ -88,6 +92,23 @@ def test_d_lint_flags_each_idiom(tmp_path):
     flagged_funcs = set(_by_function(findings))
     for func in ("f_find", "f_split", "f_starts", "f_regex"):
         assert func in flagged_funcs, f"{func} idiom must be flagged"
+    assert gate.main([], scope=tree, baseline_path=tmp_path / "empty.json") == 1
+
+
+def test_d_lint_flags_the_raw_closing_fence_regex(tmp_path):
+    """The closing-fence pattern written as a raw regex — `re.search(r"\\n---", text[4:])`,
+    the shape `split_frontmatter` itself uses — is flagged as kind `regex`. Before #885 the
+    mark tuple held only the literal-newline spelling, so this exact call scanned clean while
+    the non-raw `"\\n---"` beside it was caught: the gate saw the closing half of the grammar
+    only when the author had NOT written the pattern as a regex."""
+    gate = _GATE
+    tree = tmp_path / "scope"
+    _pyfile(tree, "prod.py", _REGEX_CLOSING)
+
+    findings = gate._scan(tree)
+    assert findings, "the raw closing-fence regex must be flagged"
+    assert [f.fingerprint.split(":")[-1] for f in findings] == ["regex"]
+    assert all("f_regex_closing" in f.fingerprint for f in findings)
     assert gate.main([], scope=tree, baseline_path=tmp_path / "empty.json") == 1
 
 
