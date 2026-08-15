@@ -121,21 +121,43 @@ def test_the_recovered_json_equals_the_value_the_tool_returned() -> None:
     looking identical — every recoverability assertion downstream would pass over a gate that
     had already lost the original.
 
-    Driven with a payload the encoder is LOSSY on in one field, so a re-encode is
-    distinguishable from the original rather than merely equal to it: `toons` nulls a `set`
-    silently (`r10`), so a metadata half round-tripped through the view could not carry it
-    back.
+    THE PROBE MUST SURVIVE SUBSTITUTION, AND A LOSSY ONE CANNOT. This test drove a payload
+    carrying a `set`, reasoning that `toons` nulls it (`r10`) so a re-encode would be
+    distinguishable. That probe is unreachable: `_gate` substitutes only when the view's
+    round-trip reproduces the wire text BYTE FOR BYTE, so a payload the encoder is lossy on
+    takes the passthrough branch — which attaches no metadata at all, and the assertions below
+    could never run on it. (Executed: `{"tag": {"a","b"}}` and `{"tag": ("a","b")}` both encode
+    to `tag: null`, and both pass through.) The demand was right; its instrument was not.
+
+    Two discriminators that DO survive a lossless round-trip, and both are stronger than the
+    one they replace: object IDENTITY, which no re-encode can forge at all, and a `str`
+    SUBCLASS, which is JSON-identical to its base — so the round-trip stays byte-exact and the
+    gate still substitutes — while a value rebuilt from the view would be a plain `str`.
     """
-    value = {"rows": [{"a": i, "b": f"row-{i}"} for i in range(40)], "tag": {"a", "b"}}
+    class _Tag(str):
+        pass
+
+    value = {"rows": [{"a": i, "b": f"row-{i}"} for i in range(40)], "tag": _Tag("ab")}
     out = agent_run(toolset=foreign_toolset(value))
     part = out.dispatched.part("fetch_rows")
+    assert "rows[" in part.content, (
+        "the gate passed this payload through, so the substitution branch under test never "
+        "ran — the probe must round-trip losslessly or it measures nothing"
+    )
     unmet = ("the substituted call carries no metadata under the reserved key, so there is "
              "nothing to recover and O5 is unmet")
     assert isinstance(part.metadata, dict), unmet
     assert gate_metadata_key() in part.metadata, unmet
     recovered = part.metadata[gate_metadata_key()]
     assert recovered == value
-    assert recovered["tag"] == {"a", "b"}, "the recovered half is a re-encode of the view"
+    assert recovered is value, (
+        "the recovered half is not the tool's own object — a re-encode of the view can compare "
+        "equal, but it cannot BE the same object"
+    )
+    assert type(recovered["tag"]) is _Tag, (
+        "the recovered half flattened a str subclass to str, which is exactly what a value "
+        "rebuilt from the view would look like"
+    )
 
 
 def test_a_dict_an_int_and_none_are_stringified_before_the_frame_and_the_frame_never_raises() -> None:
