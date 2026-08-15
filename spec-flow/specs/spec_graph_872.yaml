@@ -494,7 +494,7 @@ demands:
     reading: A
     resolved_by: human            # §7 r3 — f2 = B, which SUPERSETS this demand rather than dropping it
     binds: ["interacts(toon_gate->untrusted_frame)", "interacts(toon_gate->model_view).payload", "invocation_salt"]
-    discharged_by: test_the_substituted_view_the_model_sees_is_inside_the_invocation_salt_frame
+    discharged_by: test_the_substituted_view_the_model_sees_is_inside_an_untrusted_frame
     resolution: >-
       LIVE. §7 r3 took f2 = B, and B is a superset of A rather than its alternative: "every foreign
       result the wrapper returns is framed" includes the substituted ones. This demand survives as
@@ -510,6 +510,14 @@ demands:
       "invocation-scoped"), and every framed span in one run therefore shares one frame identity.
       Note the altitude: the observable is that a substituted view and another untrusted span in the
       same run carry the SAME DELIMITER — not that the code read `ctx.deps.salt`.
+
+      SUPERSEDED, POST-SEAM, BY #875 (see d67's own amendment for the full account): the run's one
+      standing salt is retired — `_untrusted.wrap_fresh` mints a fresh salt per frame, after its
+      content is known. What survives of this demand is the SHAPE obligation (a substituted view
+      reaches the model inside one well-formed, singular `<run-{salt}-untrusted>` span); the "shares
+      one frame identity with every other untrusted span" half is exactly the vulnerability #875
+      closes and is no longer a property this gate should have. `d17b`'s cross-branch parity (every
+      exit is framed, whichever branch it takes) is unaffected by this correction.
 
   - id: d17b_every_foreign_result_is_framed
     kind: parity
@@ -1482,7 +1490,7 @@ demands:
     resolved_by: human            # §7 r3 (f2 = B) — residue item 6
     binds: ["interacts(gather_dispatch->invocation_salt)", "interacts(toon_gate->invocation_salt)",
             "interacts(toon_gate->untrusted_frame)"]
-    discharged_by: test_a_substituted_view_and_a_gather_summary_in_one_run_carry_the_same_frame_identity
+    discharged_by: test_a_substituted_view_and_a_gather_summary_in_one_run_are_each_independently_framed
     source: "60-residue.md item 6 (R7), unblocked by §7 r3"
     note: >-
       THE UNMOVED SALT READER THAT DOES NOT DISAGREE BY DESIGN, and the cheap one of the three salt
@@ -1493,6 +1501,24 @@ demands:
       `ctx.deps.salt`, but that the two delimiters match. The two readers that DO disagree by design
       — the review lenses and the learning stages, each with its own per-stage salt — are not this
       demand's and are the examined no at d68.
+
+      SUPERSEDED, POST-SEAM, BY A CONCURRENT FIX RATHER THAN BY THIS CHANGE — `fix(frames): a
+      frame's salt is minted after its content, so no framed party holds it` (#875) landed on
+      `main` while this branch was in flight and retired the run's one standing salt entirely:
+      `AgentDeps.salt`, `bind(salt=...)` and `_persist_gather_summary`'s shared token are gone,
+      replaced by `_untrusted.wrap_fresh`, which mints AFTER content is in hand and per call. The
+      vulnerability #875 closes is exactly what this demand's OLD reading would have kept open for
+      a foreign result specifically: sharing one salt across the gate's frame and gather's summary
+      frame is the shape F-1 reproduces (a foreign payload closing the shared frame early plants a
+      tag gather itself later echoes back into MAIN's trusted region). So the literal text above —
+      "the SAME FRAME IDENTITY" — is now the WRONG answer to O6's own question, and the demand's
+      discharge was re-read rather than the demand renamed: the same test function now asserts each
+      frame is independently well-formed AND carries a DIFFERENT delimiter, which is what
+      "invocation-scoped" means once every span mints its own salt. d68's framing (the review
+      lenses and learning stages "disagree by design" while this reader "agrees") is likewise
+      stale prose this correction did not re-derive — every untrusted-tag reader now mints its own
+      salt, so the distinction d68 draws has collapsed; flagged here rather than silently left for
+      a reader to trust.
 
   - id: d68_the_lens_and_stage_lanes_are_installed_but_undriven
     kind: coherence
