@@ -476,16 +476,25 @@ the engine tests beside each module:
 
 - every case carries `split`, `unit`, and `capture_environment`;
 - a derived case's `split` and `unit` equal its base's;
-- `heterogeneous` matches what `label.py` recomputes from the envelope, wherever
-  that is measurable;
-- the cause sidecar covers exactly the errors the score artifact reports;
-- every held-out `scores/<tag>.json` matches its append-only ledger hash;
-- every `scores/<tag>.json` re-derives from its projection;
+- a derived case declares an `expectation:`, because the judge never runs on it
+  and nothing else would grade it;
+- every held-out `scores/<tag>.json` matches its append-only ledger hash, and a
+  ledger entry with no score file carries a `retired:` reason;
 - no `story.md` carries evaluation vocabulary, and `replay.py` names no `hidden/`
   path in code;
+- every observed payload is named for a seq some query in `leads.jsonl` is keyed
+  by, so a control cannot baseline a different query's envelope (#882);
+- every stored control measures the window its record declares, and the
+  accepted-invalid registry (`known_defects.yaml`) still describes the tree it
+  waives (#882);
 - the reporter refuses to publish an interval below the unit floor, and never
-  pools dev with held-out;
-- the labeler reproduces the hand-derived seed labels (`audit_labels.py`).
+  pools dev with held-out.
+
+Four bullets here used to name machinery the judge redesign removed — `label.py`,
+the `scores/<tag>.causes.yaml` sidecar, score reproduction, and an
+`audit_labels.py` that is now `audit_judge.py`. A gate list that names checks
+nobody runs is worse than a short one: it is read as coverage. `validate_cases.py`'s
+own module docstring is the list of record; this mirrors it.
 
 **Review-only, and labelled as such** — no code can check these:
 

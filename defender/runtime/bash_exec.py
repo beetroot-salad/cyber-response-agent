@@ -57,6 +57,20 @@ class _PipelineBuilder:
         self.cur_stderr = "capture"
 
     def end_pipeline(self, next_connector: str) -> None:
+        if self.cur_stages and not self.cur_argv:
+            # A `|` banked a stage and nothing COMPLETE follows it, so this pipeline would
+            # close holding only its left side and the `|` would vanish — `A | ; B` runs B on
+            # /dev/null exactly as #854 F-22's line-boundary spellings did. The check lives
+            # here, where a pipeline closes, rather than in `feed_token` where the two
+            # existing halves live, because the token that exposes it is not always a
+            # connector: `;` is not in `_DANGLING_CONNECTORS` (the leading-`;` carve-out
+            # below), and `A | 2>/dev/null` empties its right side with no separator at all.
+            # Stating the invariant once — no pipeline banks a stage list whose last `|` had
+            # an empty right side — covers every spelling instead of naming the tokens that
+            # can follow a pipe, which is the enumeration that let this survive #854 (#884).
+            raise UntokenizableCommand(
+                "pipeline token '|' has nothing to its right"
+            )
         self.end_stage()
         if self.cur_stages:
             self.pipelines.append(Pipeline(self.pending_connector, self.cur_stages))
@@ -65,18 +79,23 @@ class _PipelineBuilder:
 
     def feed_token(self, toks: list[str], i: int) -> int:
         t, n = toks[i], len(toks)
-        if t in _DANGLING_CONNECTORS and not self.cur_argv and not self.cur_stages:
-            # A connector with nothing to its left. Within a line that is a bash syntax error;
-            # ACROSS lines (`A\n| B`) it is the half of #854 F-22 where the token was dropped
-            # and `A | B` silently became `A ; B` — a second stage on /dev/null, reported as
-            # the last pipeline's rc.
+        if t in _DANGLING_CONNECTORS and not self.cur_argv:
+            # A connector with no COMPLETE command to its left. Within a line that is a bash
+            # syntax error; ACROSS lines (`A\n| B`) it is the half of #854 F-22 where the
+            # token was dropped and `A | B` silently became `A ; B` — a second stage on
+            # /dev/null, reported as the last pipeline's rc.
+            #
+            # `cur_stages` is deliberately NOT consulted: `A | | B` reaches here with a stage
+            # already banked, and the second `|` is just as dropped as a leading one (it used
+            # to collapse into the single pipe `A | B`, which bash rejects outright) (#884).
             #
             # Same set as the trailing check, and for the same reason: a leading `;` drops
             # NOTHING (`A` then `; B` already means the two commands it runs), so refusing it
-            # would deny a harmless command under a reason — this module's docstring, the
-            # gate's UNTOKENIZABLE_REASON, SKILL.md — that names `|`/`&&`/`||` and not `;`.
+            # would deny a harmless command under the only reason the agent is ever shown for
+            # it — `permission/bash.UNTOKENIZABLE_REASON` — which names `|`/`&&`/`||` and
+            # not `;`.
             raise UntokenizableCommand(
-                f"pipeline/connector token {t!r} opens a line with nothing to its left"
+                f"pipeline/connector token {t!r} has no command to its left"
             )
         if t == "|":
             self.end_stage()
@@ -119,6 +138,23 @@ def parse(inner: str) -> list[Pipeline]:
                 f"pipeline/connector token {toks[-1]!r} closes a line with nothing to its right"
             )
         builder.end_pipeline(";")
+        if builder.pending_connector in _DANGLING_CONNECTORS:
+            # An `&&`/`||` that banked its LEFT pipeline and never got a right one WITHIN ITS
+            # OWN LINE, so the connector was consumed and then dropped. The token check above
+            # cannot see this: the line does not END with the connector, it ends with whatever
+            # bare `;` follows it (`A && ;`), which the carve-out lets through. Without this
+            # the module refuses `A &&` but accepts `A && ;` and runs A — an inconsistency
+            # with no rule behind it. Found by #897's differential sweep against `bash -n`.
+            #
+            # PER LINE, not once after the loop: `pending_connector` is builder state that
+            # outlives a line, so an end-of-parse check leaves `A && ;\nB` accepted — the `&&`
+            # then reaches ACROSS the line boundary and runs B conditionally on A, which is
+            # the one thing #854 F-22 refuses to guess at (`A &&\nB` is refused outright).
+            # The connector's right side must arrive on the connector's own line or not at all.
+            raise UntokenizableCommand(
+                f"pipeline/connector token {builder.pending_connector!r} has no command "
+                "to its right"
+            )
     return builder.pipelines
 
 

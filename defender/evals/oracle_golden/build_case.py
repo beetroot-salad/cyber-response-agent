@@ -90,7 +90,25 @@ def main(argv: list[str] | None = None) -> int:
             "lead_id": jl.lead_id,
             "goal": jl.goal,
             "what_to_summarize": jl.what_to_summarize,
-            "queries": [{"query_id": q.query_id, "params": q.params or {}} for q in jl.queries],
+            # `seq` is the QUERIES TABLE's own seq, carried through so `controls.py`
+            # can key its record by the same number the observed payload is named
+            # for (`raw_ref.name` is `{seq}.json`). Not the list position: #841 split
+            # the `∅.`-prefixed sentinels out of `JoinedLead.queries` while the
+            # table's seq still counts them, so one refusal ahead of a real query
+            # makes the position trail the seq for the rest of the lead — and a
+            # control keyed by position is then a different query's baseline.
+            # Reaches NO model prompt, and that is enforced at each reader rather than
+            # asserted here. The oracle renders only `id` and `params`
+            # (oracle/sample.py::_query_lines) and `replay.py` rebuilds its `_Query`
+            # from the same two. The judge would have carried it — `label_user_prompt`
+            # yaml-dumps this whole row into its `<lead>` block — so `judge` projects
+            # through `lead_for_model` (an allowlist) before either pass sees it. That
+            # matters because a prompt that gains a line is a different measurement
+            # taken under an unchanged `prompts_sha8` and an unchanged
+            # `labels/<judge-suffix>.json` cache key: a rebuilt case would be labelled
+            # from a different shape than its siblings and nothing would say so.
+            "queries": [{"query_id": q.query_id, "params": q.params or {}, "seq": q.seq}
+                        for q in jl.queries],
         })
         # ORACLE-VISIBLE: the redacted sample skeleton, via the production seam.
         (vis / "samples" / f"{jl.lead_id}.txt").write_text(

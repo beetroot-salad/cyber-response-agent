@@ -298,6 +298,29 @@ jobs:
       - name: Mypy (type-check — hard gate)
         run: defender/.venv/bin/mypy --config-file defender/pyproject.toml
 
+      # The golden case tree, not code — `validate_cases.py` checks the ARTIFACTS the
+      # oracle-calibration tooling produces and consumes: every case's structure and
+      # calibration metadata, the append-only held-out ledger, the story/replay
+      # hidden-visible boundary, and (since #882) that every stored control measures the
+      # window its record declares and keys to the observed payload it baselines.
+      #
+      # `docs/oracle-calibration.md` claimed "CI runs it" for a long time while nothing
+      # did. It could not: the command exited 1 on every run over the committed tree,
+      # because two control records carry a measurement that is invalid and repairable
+      # only by a capture session against the live stack. Those are now tracked in
+      # `evals/oracle_golden/known_defects.yaml` — printed on every run, and themselves
+      # checked, so a waiver cannot outlive the defect it waives — which is what lets
+      # this be a gate rather than a permanent red.
+      #
+      # It lives in `lint` rather than `code-smells` for a dependency reason: it imports
+      # `controls` -> `elastic_adapter` -> `defender.runtime.verbs`, and only this job
+      # syncs `--extra runtime`. Run WITHOUT `--quiet` on purpose — the coverage report
+      # it prints (dead control windows, zero-byte payloads, cases excluded as defective)
+      # is the instrument's own limits, and a log that hides them invites a reader to
+      # assume they are zero.
+      - name: Golden case tree (hard gate — artifacts, not code)
+        run: defender/.venv/bin/python defender/evals/oracle_golden/validate_cases.py
+
   code-smells:
     runs-on: ubuntu-latest
     steps:
