@@ -6,18 +6,14 @@ surface.
 
 ## Verbs
 
-```
-query(system="ticket", verb="health-check", params={})
-query(system="ticket", verb="list-tickets", params={"status": "X", "label": "X", "q": "X"})
-```
-
 Reached with the **`query` tool** — there is no command, no shim, and no `--help`.
-Params bind **by name**, with literal JSON types; every `list-tickets` param
-is an optional filter.
+Params bind **by name**, with literal JSON types.
 
-**Do not Read `ticket_adapter.py` source to discover params.** This file plus the
-systems catalog in your dispatch prompt is the authoritative surface, and a call
-with an unknown/missing/mistyped param is rejected with the declared list anyway.
+**Call `list_verbs(system="ticket")` for the verbs you may run and the params each one
+binds**, with types, defaults and which are required. It reads the adapter's live
+signatures and is filtered to your grant, so it is the same surface the `query` tool
+enforces — a param it names will bind, one it omits is refused. Don't Read
+`ticket_adapter.py` to discover params either.
 
 The adapter returns the upstream JSON response unchanged. At gather's query
 boundary, the current run's own ticket is removed before both the model-facing

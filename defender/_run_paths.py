@@ -75,6 +75,15 @@ from pathlib import Path
 WIRE_LOG_DIR = "wire_logs"
 WIRE_LOG = "llm_requests.jsonl"
 
+#: #872 O5 — the reserved key on a `tool-return` part's `metadata` that the TOON view gate
+#: parks the tool's ORIGINAL JSON under when it substitutes a smaller view. Spelled HERE for
+#: the reason the wire log's own location is: the WRITER is `runtime.toon_gate` (which imports
+#: pydantic-ai, a `runtime`-extra-only dependency) and the READER is `scripts/visualize/
+#: visualize_messages`, which a learning-loop or CI install renders transcripts with and must
+#: not pay a pydantic-ai edge to learn a field name. `runtime.toon_gate` re-exports it under
+#: its own name, which is where §7 r1 pins the literal.
+GATE_METADATA_KEY = "json"
+
 
 @dataclass(frozen=True)
 class RunPaths:

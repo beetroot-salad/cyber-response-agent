@@ -6,7 +6,7 @@ from pathlib import Path
 
 from defender._io import read_jsonl_rows
 from defender._report import ReportRead
-from defender._run_paths import WIRE_LOG, RunPaths
+from defender._run_paths import GATE_METADATA_KEY, WIRE_LOG, RunPaths
 # `agent_role` and NOT `review_roles`, though the latter re-exports the same constant:
 # `review_roles` pulls `runtime.tools` and with it the whole in-process runtime (pydantic-ai
 # included), and `learning/frontend/build.py` imports this package at module scope for the
@@ -451,6 +451,26 @@ def _response_entry(rec: dict, phase: str | None, turn: int) -> dict:
     }
 
 
+def _gate_original_json(part: dict) -> str | None:
+    """#872 O5 — the TOON gate's substituted view carries the tool's own JSON alongside it,
+    under `GATE_METADATA_KEY` on the part's `metadata`. `load_messages` returns `metadata`
+    verbatim (it is a tolerant JSONL reader), so the ONLY place this field can be lost
+    between the wire log and the page is here, in the entry this function builds — which used
+    to construct a fixed-key entry with no `metadata` key at all, dropping it silently.
+
+    The key is read from `defender._run_paths`, NOT from `defender.runtime.toon_gate` that
+    writes it: the gate module imports pydantic-ai, which is a `runtime`-extra-only dependency
+    (see `defender/pyproject.toml` — "kept out of the core deps so learning-loop / CI installs
+    don't pull the Anthropic + MCP stack"). An import of it here would raise
+    `ModuleNotFoundError` while rendering the first tool return of any transcript on such an
+    install — the same edge this module's `agent_role`-not-`review_roles` import already
+    refuses to pay."""
+    meta = part.get("metadata")
+    if not isinstance(meta, dict) or GATE_METADATA_KEY not in meta:
+        return None
+    return json.dumps(meta[GATE_METADATA_KEY], default=str)
+
+
 def _request_entries(rec: dict, phase: str | None, turn: int) -> list[dict]:
     out: list[dict] = []
     for p in (rec.get("message") or {}).get("parts") or []:
@@ -465,6 +485,7 @@ def _request_entries(rec: dict, phase: str | None, turn: int) -> list[dict]:
             "tool": name,
             "is_error": pk == "retry-prompt",
             "content": _part_text(p),
+            "original_json": _gate_original_json(p) if pk == "tool-return" else None,
             "tools": [name] if name else [],
         })
     return out

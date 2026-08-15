@@ -74,6 +74,14 @@ Two kinds of `${name}` placeholder, and the frontmatter classifies each so
   query-language body. The classification is per-VERB, not per-system: `${start}` is a
   *param* of elastic `query`/`alerts` but a *body substitution* inside an ES|QL pipe.
 
+`verb:` and `params:` are **required of every template, drafts included** — the rule is
+per-verb, so a file naming no verb is undecidable rather than exempt, and `params:` must name
+only params the verb really declares (checked against the adapter's live signature, not against
+this file's own claims). A draft auto-minted from an executed query arrives carrying both.
+The rule lives in `defender/_scaffold_rules.py` and runs in three places: `validate_scaffold`
+at scaffold time, the lead-author loop's commit gate on every promotion, and CI over the whole
+corpus. One rule, three callers — not three copies (#901).
+
 This is a **wide/superset** query — carry every filter axis (`user`, `src`,
 `dst`, window) and a broad aggregation. **Gather narrows it to the lead**: drops
 the predicates the lead doesn't constrain and the `BY` keys it doesn't ask for.

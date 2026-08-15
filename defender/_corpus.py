@@ -63,6 +63,13 @@ class QueryTemplate:
     query: str
     body: str
     verb: str = ""
+    #: The two DECLARATION keys `SCHEMA.md` defines alongside `verb:` — the params the verb
+    #: declares, and the `${name}`s that are query-language body text rather than params. They
+    #: ride on the one corpus walk for the same reason `verb` does: the scaffold rules
+    #: (`_scaffold_rules`) are the only reader that needs them, and a second frontmatter parse
+    #: in each caller is how the two enforcement copies of one rule drifted apart (#901).
+    params: tuple[str, ...] = ()
+    body_substitutions: tuple[str, ...] = ()
 
 
 def section_bodies(body: str) -> dict[str, str]:
@@ -83,38 +90,64 @@ def section_bodies(body: str) -> dict[str, str]:
     return out
 
 
-def iter_query_templates(catalog_dir: Path) -> Iterator[QueryTemplate]:
+def _declared_names(value: Any) -> tuple[str, ...]:
+    """A frontmatter declaration list, normalized to names. A shape that is not a sequence
+    declares NOTHING rather than raising — the same tolerance `validate_scaffold` already read
+    `body_substitutions:` with, kept deliberately because it fails in the safe direction: a
+    declaration the walk cannot read narrows the allowed set, so the placeholder rule refuses
+    the template rather than waving it through."""
+    if isinstance(value, (list, tuple)):
+        return tuple(str(v) for v in value if isinstance(v, (str, int, float)))
+    return ()
+
+
+def read_query_template(path: Path) -> tuple[QueryTemplate | None, str]:
+    """One template file, as `(template, reason)` — `reason` empty on success, else why the file
+    is not a template.
+
+    Split out of the walk so a caller holding ONE path (the loop's commit gate, which is handed
+    changed paths by git and not a directory to walk) reads it through the same parser the
+    corpus does. Returning the reason rather than printing it is what lets that caller refuse a
+    commit *with* the reason; `iter_query_templates` keeps the warn-and-skip behavior its
+    readers depend on."""
     from defender._frontmatter import FrontmatterError, parse_frontmatter
 
     malformed: tuple[type[BaseException], ...] = (FrontmatterError, *TEXT_READ_ERRORS)
+    try:
+        fm, body = parse_frontmatter(read_text_utf8(path))
+    except malformed as e:
+        return None, f"malformed template: {e}"
+    tid = fm.get("id")
+    if not tid or not isinstance(tid, str):
+        return None, "malformed template: no `id:`"
+    status = fm.get("status")
+    sections = section_bodies(body)
+    parent = path.parent
+    system = parent.parent.name if parent.name == "_draft" else parent.name
+    verb = fm.get("verb")
+    return QueryTemplate(
+        path=path,
+        id=tid,
+        system=system,
+        status=status if isinstance(status, str) else "",
+        goal=sections.get("Goal", ""),
+        query=sections.get("Query", ""),
+        body=body,
+        verb=verb if isinstance(verb, str) else "",
+        params=_declared_names(fm.get("params")),
+        body_substitutions=_declared_names(fm.get("body_substitutions")),
+    ), ""
 
+
+def iter_query_templates(catalog_dir: Path) -> Iterator[QueryTemplate]:
     if not catalog_dir.is_dir():
         return
     paths = sorted(
         list(catalog_dir.glob("*/*.md")) + list(catalog_dir.glob("*/_draft/*.md"))
     )
     for path in paths:
-        try:
-            fm, body = parse_frontmatter(read_text_utf8(path))
-        except malformed as e:
-            print(f"warn: skipping {path.name} (malformed template: {e})", file=sys.stderr)
+        template, reason = read_query_template(path)
+        if template is None:
+            print(f"warn: skipping {path.name} ({reason})", file=sys.stderr)
             continue
-        tid = fm.get("id")
-        if not tid or not isinstance(tid, str):
-            print(f"warn: skipping {path.name} (malformed template: no `id:`)", file=sys.stderr)
-            continue
-        status = fm.get("status")
-        sections = section_bodies(body)
-        parent = path.parent
-        system = parent.parent.name if parent.name == "_draft" else parent.name
-        verb = fm.get("verb")
-        yield QueryTemplate(
-            path=path,
-            id=tid,
-            system=system,
-            status=status if isinstance(status, str) else "",
-            goal=sections.get("Goal", ""),
-            query=sections.get("Query", ""),
-            body=body,
-            verb=verb if isinstance(verb, str) else "",
-        )
+        yield template

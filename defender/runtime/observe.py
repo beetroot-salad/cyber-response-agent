@@ -159,11 +159,19 @@ class RequestLogger:
     def log(
         self, *, request_messages: list[Any], response: Any, run_step: int = 0,
         duration_ms: float = 0.0, agent_id: str = "main", session_id: str | None = None,
+        toon_gate: dict | None = None,
     ) -> None:
         cap = self._cap
         for dumped in ModelMessagesTypeAdapter.dump_python(request_messages, mode="json"):
             self._emit(agent_id, "request", dumped, cap)
         resp_dump = ModelMessagesTypeAdapter.dump_python([response], mode="json")[0]
+        extra: dict[str, Any] = {}
+        if toon_gate is not None:
+            # #872 O1 — the gate's own operator-facing record: how many foreign results it
+            # examined, refused, substituted, and how many bytes that saved. Rides the SAME
+            # wire-log record every other run-level observable does (§7 r1, P6 = B) — no new
+            # run-dir sink.
+            extra["toon_gate"] = toon_gate
         self._emit(
             agent_id, "response", resp_dump, cap,
             model=getattr(response, "model_name", None),
@@ -172,6 +180,7 @@ class RequestLogger:
             run_step=run_step,
             session_id=session_id,
             wire_sha=wire_digest(request_messages),
+            **extra,
         )
         self.n_requests += 1
 

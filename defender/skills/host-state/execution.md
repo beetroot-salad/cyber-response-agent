@@ -6,23 +6,17 @@ surface.
 
 ## Verbs
 
-```
-query(system="host-state", verb="health-check",      params={})
-query(system="host-state", verb="container-inspect", params={"container_id": "<container_id>"})
-query(system="host-state", verb="proc-tree",         params={"host": "<host>"})
-query(system="host-state", verb="passwd",            params={"host": "<host>"})
-query(system="host-state", verb="authorized-keys",   params={"host": "<host>", "user": "U"})
-query(system="host-state", verb="fim-checksum",      params={"host": "<host>", "path": "<path>"})
-query(system="host-state", verb="package-list",      params={"host": "<host>"})
-```
-
 Reached with the **`query` tool** — there is no command, no shim, and no `--help`.
-Params bind **by name**, with literal JSON types. `authorized-keys`' `user`
-defaults to `root`; every other param above is required.
+Params bind **by name**, with literal JSON types.
 
-**Do not Read `host_state_adapter.py` source to discover params.** This file plus the
-systems catalog in your dispatch prompt is the authoritative surface, and a call
-with an unknown/missing/mistyped param is rejected with the declared list anyway.
+**Call `list_verbs(system="host-state")` for the verbs you may run and the params each
+one binds**, with types, defaults and which are required. It reads the adapter's live
+signatures and is filtered to your grant, so it is the same surface the `query` tool
+enforces — a param it names will bind, one it omits is refused. Don't Read
+`host_state_adapter.py` to discover params either.
+
+`container-inspect` takes a container id, **not** a host name — the one verb here that
+is not host-keyed.
 
 Each verb returns a JSON object with `captured_at` and the
 verb-specific payload. The host-keyed verbs (`proc-tree`, `passwd`,
@@ -51,10 +45,10 @@ a config file.
 
 ## Safety
 
-- `--user` is validated against a strict username regex
+- `user` is validated against a strict username regex
   (`[a-zA-Z_][a-zA-Z0-9._-]{0,63}`) before being interpolated into
   the `getent` argv. Refused values exit 1 with a clear message.
-- `fim-checksum <path>` is validated against a safe-path regex and
+- `fim-checksum`'s `path` is validated against a safe-path regex and
   must be absolute. Refused values exit 1.
 - Bastions / target hosts are passed to `docker exec` as a separate
   argv element (not via a shell), so a malformed name fails at

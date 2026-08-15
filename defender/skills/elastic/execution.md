@@ -2,23 +2,22 @@
 
 Read this file when gather is dispatched against `system: elastic`.
 Defender does not read this file; it sees only `SKILL.md`'s visibility
-surface. It carries the verb surface, query syntax, and index scoping.
+surface. It carries query syntax, index scoping, and the value
+constraints a signature cannot state; the verb roster and each verb's
+params come from the `list_verbs` tool.
 
 ## Verbs
 
 Reached with the **`query` tool** — there is no command, no shim, and no `--help`.
 Params bind **by name**, with literal JSON types (`"limit": 20`, never `"20"`).
 
-```
-query(system="elastic", verb="health-check", params={})
-query(system="elastic", verb="query",  params={"native_query": "<query_string>", "start": "<iso>", "end": "<iso>", "limit": 20, "index": "<pattern>", "sort": "desc"})
-query(system="elastic", verb="alerts", params={"native_query": "<query_string>", "start": "<iso>", "end": "<iso>", "limit": 20, "index": "<pattern>", "sort": "desc"})
-query(system="elastic", verb="esql",   params={"query": "<ES|QL pipe>"})
-```
+**Call `list_verbs(system="elastic")` for the verbs you may run and the params each one
+binds**, with types, defaults and which are required. It reads the adapter's live
+signatures and is filtered to your grant, so it is the same surface the `query` tool
+enforces — a param it names will bind, one it omits is refused.
 
-Only `native_query` (for `query`/`alerts`) and `query` (for `esql`) are required;
-the rest have defaults. `limit` is clamped to a 20-doc cap — read the envelope's
-`total` for magnitudes, never pull-and-count.
+`limit` is clamped to a 20-doc cap — read the envelope's `total` for magnitudes, never
+pull-and-count.
 
 `sort` is `@timestamp` order and takes `"desc"` (the default, newest first) or
 `"asc"` (oldest first); any other value is refused. It decides **which end of your
@@ -42,12 +41,11 @@ add an explicit `LIMIT`. Prefer `esql` for any count / distribution / cardinalit
 timing dimension; use `query` (KQL search) only when you need raw event
 documents themselves.
 
-**Do not Read `elastic_adapter.py` source to discover params.** This doc plus the
-systems catalog in your dispatch prompt is the authoritative surface, and a call
-with an unknown/missing/mistyped param is rejected with the declared list anyway.
-The source is ~500 lines and reading it shows up as the single largest source of
-wasted Read calls across runs. If a param you need isn't here, treat it as
-unsupported and escalate — don't infer one from the source.
+**Do not Read `elastic_adapter.py` source to discover params** — `list_verbs` already
+answers that from the same signatures, and the source is ~500 lines that show up as the
+single largest source of wasted Read calls across runs. If a param you need is not in
+`list_verbs`' answer, it does not exist: treat it as unsupported and escalate rather than
+inferring one from the source.
 
 `query` / `alerts` emit a JSON payload
 `{"index": ..., "total": ..., "returned": ..., "sort": ..., "truncated": ..., "hits": [...]}`

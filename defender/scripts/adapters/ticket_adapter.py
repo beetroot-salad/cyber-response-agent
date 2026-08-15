@@ -49,7 +49,7 @@ from pathlib import Path as _Path
 if (_root := str(_Path(__file__).resolve().parents[3])) not in _sys.path:
     _sys.path.insert(0, _root)
 
-from defender.runtime.verbs import VerbContext
+from defender.runtime.verbs import VerbContext, verb
 from defender.scripts.adapters import _stub_transport as transport
 from defender.scripts.adapters.faults import AdapterFault, TransportFault, UpstreamFault
 
@@ -126,6 +126,7 @@ def health_check(ctx: VerbContext) -> dict:
     return transport.health_check(ctx, _config(ctx), SYSTEM)
 
 
+@verb(wrapper_only=("require_closed",))
 def list_tickets(
     ctx: VerbContext,
     *,
@@ -140,6 +141,11 @@ def list_tickets(
     scoped list (#338): it pins status=closed regardless of any `status` value, so a
     stray/duplicate `--status open` (argparse keeps the last, and the grant's shape would
     otherwise admit it) cannot widen the read to the in-flight OPEN ticket.
+
+    It is `wrapper_only` (#900): the judge's closed-ticket tool hard-codes it and keeps it off
+    its own model-facing schema, so NO model in either role is meant to bind it. Gather shares
+    this verb and must not — the pin only narrows, and a lead that set it would silently drop
+    the open and in-progress siblings it is dispatched to correlate.
     """
     params: dict[str, str] = {}
     if status:
@@ -153,6 +159,7 @@ def list_tickets(
     return transport.http_get(ctx, _config(ctx), "/tickets", system=SYSTEM, params=params or None)
 
 
+@verb(wrapper_only=("require_closed",))
 def get_ticket(ctx: VerbContext, *, key: str, require_closed: bool = False) -> dict:
     """One ticket by key, incl. comments.
 

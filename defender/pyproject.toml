@@ -15,6 +15,16 @@ dependencies = [
 # via a `fireworks:`/`glm-*` model id). Install with: uv pip install -e '.[runtime]'.
 runtime = [
     "pydantic-ai-slim[anthropic,mcp,openai]>=1.107",
+    # toons — the TOON encoder behind the tool-boundary view gate (#872,
+    # scripts/gather_tools/): a foreign toolset's dict/list result is re-encoded
+    # and substituted only when the re-encoding is measurably cheaper on the
+    # wire. Pinned to the 0.7 minor because the whole gate rests on ONE probed
+    # property of THIS encoder — it escapes per TOON SPEC §7.1, so no value
+    # inside a payload can forge a row (#872 O4); the sibling package
+    # `py-toon-format` 0.1.0 emits a literal newline inside a row and does not.
+    # A maturin-built Rust abi3 wheel with zero Python dependencies, so it is a
+    # platform-specific binary like duckdb, not a pure-Python drop-in.
+    "toons>=0.7,<0.8",
     # duckdb — the engine behind the `defender-sql` shim
     # (scripts/gather_tools/sql.py), the gather subagent's aggregation
     # fallback for filter-only sources (no server-side aggregation of their

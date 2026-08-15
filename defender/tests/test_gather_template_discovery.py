@@ -477,7 +477,7 @@ def test_d5_gather_registers_template_search_and_main_does_not():
     g = _ToolRecorder()
     tools.register_tools(g, GATHER_DEF.tools, FakeVerbs({}))
     assert "template_search" in g.names
-    assert g.names == ["bash", "read_file", "template_search", "query"]
+    assert g.names == ["bash", "read_file", "template_search", "query", "list_verbs"]
 
     m = _ToolRecorder()
     tools.register_tools(m, MAIN_DEF.tools)

@@ -29,6 +29,7 @@ from . import permission
 from . import providers
 from . import selection
 from . import session_store
+from . import toon_gate as toon_gate_mod
 from .agent_definition import AgentDefinition, ResolvedRoots, ToolSet, bind
 from .agent_role import GATHER_AGENT_ID_PREFIX, AgentRole
 from . import challenge_gate
@@ -198,7 +199,7 @@ def _stamp_duration(store: Any, session_id: str | None, duration_ms: float) -> N
 
 def _make_hooks(  # noqa: PLR0913 — the hook set's full wiring: logging, budget, and the store stamp
     logger: observe.RequestLogger, agent_id: str, *, enforce: bool, limits: dict = DEFAULT_LIMITS,
-    session_id: str | None = None, store: Any = None,
+    session_id: str | None = None, store: Any = None, toon_gate: Any = None,
 ) -> Hooks[Any]:
     hooks = Hooks()
 
@@ -228,6 +229,7 @@ def _make_hooks(  # noqa: PLR0913 — the hook set's full wiring: logging, budge
                 duration_ms=duration_ms,
                 agent_id=agent_id,
                 session_id=session_id,
+                toon_gate=toon_gate.snapshot() if toon_gate is not None else None,
             )
         except Exception as e:  # noqa: BLE001
             print(f"[run.py] request logging skipped: {e!r}", file=sys.stderr)
@@ -285,6 +287,8 @@ def build_agent_core(  # noqa: PLR0913 — the single build site's config + 3 DI
     session_id: str | None = None,
     store: Any = None,
     cache_key: str | None = None,
+    toolset: Any = None,
+    toon_encoder: Any = None,
 ) -> Agent[Any, str]:
     model_name = defn.model()
     built = make_model(model_name, defn.effort)
@@ -294,25 +298,47 @@ def build_agent_core(  # noqa: PLR0913 — the single build site's config + 3 DI
     settings = providers.cache_affinity(
         model_name, built.settings, _affinity_key(agent_id, session_id, cache_key),
     )
+    # #872 §7 r5 (P2 = A) — the TOON view gate is installed UNCONDITIONALLY, at the single
+    # `Agent(...)` every one of the five build paths reaches, so no build path can miss it.
+    # A capability already present in `extra_capabilities` (the "install it twice" case —
+    # `test_a_foreign_result_is_framed_once_however_many_times_the_gate_is_installed`) is
+    # reused rather than shadowed by a second one, which is what keeps a foreign result framed
+    # exactly once no matter how many times the gate is handed to a build.
+    reused_gate = next(
+        (c for c in extra_capabilities if isinstance(c, toon_gate_mod.ToonGateCapability)), None,
+    )
+    toon_gate = (
+        toon_gate_mod.ToonGateCapability(encoder=toon_encoder)
+        if reused_gate is None else reused_gate
+    )
     capabilities: list[Any] = [
         _make_hooks(logger, agent_id, enforce=defn.budget_enforced, limits=limits,
-                    session_id=session_id, store=store),
+                    session_id=session_id, store=store, toon_gate=toon_gate),
         *extra_capabilities,
     ]
-    if defn.tools.query:
+    if reused_gate is None:
+        capabilities.append(toon_gate)
+    # EVERY verb-bearing bit this builder registers, not `query` alone (#900): `list_verbs`
+    # reads the grant to decide what it may name, so it needs the same production registry
+    # default AND the same nominal type check (§7 R15) — a registry-shaped stand-in that
+    # answers GRANTED to everything would otherwise publish the whole verb surface through it.
+    # `QueryCapture` stays behind `query`: it wraps the dispatch tool, which `list_verbs` is not.
+    if defn.tools.query or defn.tools.list_verbs:
         from defender._paths import PATHS
 
-        from .query_tool import QueryCapture
         from .verbs import VerbRegistry
 
         if verbs is None:
             verbs = ModuleVerbRegistry(PATHS.defender_dir / "scripts" / "adapters", defn.verb_grant)
         if not isinstance(verbs, VerbRegistry):
             raise TypeError(
-                f"the query tool needs a real VerbRegistry, got {type(verbs).__name__} — a "
+                f"a verb-bearing tool needs a real VerbRegistry, got {type(verbs).__name__} — a "
                 "registry-shaped stand-in that never went through the constructor is refused"
             )
-        capabilities.append(QueryCapture(verbs, defn.role.value))
+        if defn.tools.query:
+            from .query_tool import QueryCapture
+
+            capabilities.append(QueryCapture(verbs, defn.role.value))
     agent: Agent[Any, str] = Agent(
         built.model,
         deps_type=deps_type,
@@ -320,7 +346,13 @@ def build_agent_core(  # noqa: PLR0913 — the single build site's config + 3 DI
         capabilities=capabilities,
         model_settings=settings,
         retries={"tools": DEFAULT_TOOL_RETRIES, "output": 0},
+        toolsets=[toolset] if toolset is not None else [],
     )
+    # The gate's identity check for "is this an owned tool" — every `agent.tool`/
+    # `agent.tool_plain` registration (this call's own `register_tools`, plus the gather tool
+    # and the close tool registered onto this same agent by `build_agent`) shares this ONE
+    # object, so binding it once here covers all of them regardless of registration order.
+    toon_gate.bind_native_toolset(agent._function_toolset)  # noqa: SLF001 — the identity IS the contract; see toon_gate.py
     register_tools(agent, defn.tools, verbs)
     return agent
 
@@ -395,7 +427,7 @@ GATHER_DEF = AgentDefinition(
     role=AgentRole.GATHER,
     model=gather_model,
     effort="none",
-    tools=ToolSet(read=True, bash=True, template_search=True, query=True),
+    tools=ToolSet(read=True, bash=True, template_search=True, query=True, list_verbs=True),
     corpus_dirs=_CORPUS_DIRS,
     bash_shapes=(_gather_bash_shapes,),
     deps_cls=GatherDeps,
@@ -629,6 +661,7 @@ def build_agent(  # noqa: PLR0913 — composition root: config + DI seams + the 
     store: Any = None, session_id: str | None = None, review_stages: Any = None,
     bounds: challenge_gate.Bounds,
     correlation_task: Any = None,
+    toolset: Any = None,
 ) -> Agent[AgentDeps, str]:
     # The bounds arrive RESOLVED, non-`Optional`, and are used under their own name. They
     # used to be re-coalesced here, which gave the gate's ONE bounds object a default at four
@@ -664,6 +697,7 @@ def build_agent(  # noqa: PLR0913 — composition root: config + DI seams + the 
         limits=limits,
         session_id=session_id,
         store=store,
+        toolset=toolset,
     )
 
     # agent_id → the gather session opened for it. Keyed by agent_id and not "the last one
@@ -939,6 +973,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     review_stages: Any = None,
     bounds: challenge_gate.Bounds | None = None,
     model_override: str | None = None,
+    toolset: Any = None,
 ) -> dict:
     model_name = resolve_main_model(model_name)
     # #808/K12/d49 — lead-0's OWN registry seam: a scenario that injected no `verbs=` at all
@@ -1066,7 +1101,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     agent = build_agent(
         defender_dir, logger, make_model, main_model=model_name, verbs=verbs, limits=limits,
         store=store, session_id=session_id, review_stages=stages, bounds=gate_bounds,
-        correlation_task=correlation_task,
+        correlation_task=correlation_task, toolset=toolset,
     )
     deps = replace(
         bind(MAIN_DEF, run_dir, defender_dir=defender_dir, box=box),

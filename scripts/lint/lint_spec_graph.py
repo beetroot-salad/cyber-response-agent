@@ -81,6 +81,12 @@ def _findings_for(mods: dict, path: Path, cfg: dict) -> list[str]:
     out += [f"binds: {f}" for f in mods["binds"].check(path, cfg)]
     out += [f"claims: {f}" for f in mods["claims"].check(path, graph)]
     out += [f"claims: {f}" for f in mods["claims"].check_typing(path, graph)]
+    # Every pass check_claims' own main() runs has to be listed here too. The passes are
+    # enumerated by name rather than discovered, so a pass added to the checker and not added
+    # to this line runs at authoring time and never in CI — which is precisely the gap this
+    # gate was minted to close, re-opened one level up. `check_alphabet` (the probe-corpus
+    # pass) was added by the #869 post-mortem and is the first to have to pay this tax.
+    out += [f"claims: {f}" for f in mods["claims"].check_alphabet(path, graph)]
     out += [f"claims: {f}" for f in mods["claims"].check_spend_points(path, graph)]
     return out
 

@@ -39,9 +39,10 @@ Read `{run_dir}/alert.json` and the lead. Confirm the lead actually wants
 through the `esql` verb (an ES|QL pipe against the `logs-*` data streams) and
 filters through `query`/`alerts`; other systems have their own verbs (e.g.
 cmdb `get-host`, identity `can-access`), each binding named params — so
-ES|QL is the SIEM's language, not the universal query shape. Read the
-`execution.md` your dispatch prompt names only if you need the index list or
-the system's verb/param details.
+ES|QL is the SIEM's language, not the universal query shape. `list_verbs` answers
+what a system declares and what each verb binds; Read the `execution.md` your
+dispatch prompt names for what a signature cannot say — the index list,
+connectivity, exit codes, and the pitfalls recorded there.
 
 **You own the retrieval — the time window included.** The lead names the
 question and its anchors (a timestamp, an identity, a host); it does not name
@@ -101,10 +102,15 @@ scalar params. The call shape is the same for every system:
 query(system="{system}", verb="{verb}", params={...}, query_id="{system}.<id>")
 ```
 
-- **`verb` + `params` come from the systems catalog in your dispatch prompt.** A verb
-  declares exactly the params it takes, bound **by name** — there are no flags and no
-  positional args. Pass an unknown param, omit a required one, or send the wrong *type*
-  and the call is rejected (exit 64) with the declared list; it never reaches the system.
+- **`verb` + `params` come from `list_verbs(system="<system>")`.** It names every verb your
+  grant admits on that system and the params each one binds — types, defaults, and which are
+  required — read from the adapter's live signatures, so it cannot go stale. It is the same
+  surface the `query` tool enforces: a param it names will bind, one it omits is refused.
+  Call it before you coin a query no template covers; it runs nothing against the system and
+  is not recorded as a query. A verb declares exactly the params it takes, bound **by name** —
+  there are no flags and no positional args. Pass an unknown param, omit a required one, or
+  send the wrong *type* and the call is rejected (exit 64) with the declared list; it never
+  reaches the system.
   **Types are literal:** a number is a number (`"limit": 20`, never `"20"`), a boolean is
   `true`/`false` (never `"false"` — a quoted one is rejected, and would have meant the
   opposite).

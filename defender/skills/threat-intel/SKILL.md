@@ -16,10 +16,10 @@ the defender, the author skill, and the actor-reviewer judge.
 
 ### available_queries
 
-| Subcommand | Measurement |
+| Verb | Measurement |
 |---|---|
-| `lookup <value>` | Reputation record `{value, type, verdict, score, tags}` for an IP, domain, or hash |
-| `list-indicators [--verdict X] [--type X] [--tag X]` | Seed catalog (filterable) |
+| `lookup` | Reputation record `{value, type, verdict, score, tags}` for an IP, domain, or hash |
+| `list-indicators` | Seed catalog, filterable by verdict, type or tag |
 
 ### gaps
 

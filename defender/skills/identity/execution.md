@@ -11,20 +11,11 @@ Params bind **by name**, with literal JSON types: `enabled` is a real boolean
 (`true`/`false`), and a quoted `"false"` is rejected — it would have meant the
 opposite.
 
-```
-query(system="identity", verb="health-check",          params={})
-query(system="identity", verb="can-access",            params={"user": "<user>", "host": "<host>"})
-query(system="identity", verb="get-user",              params={"user": "<user>"})
-query(system="identity", verb="list-users",            params={"role": "X", "enabled": true})
-query(system="identity", verb="list-roles",            params={})
-```
-
-`can-access` requires both `user` and `host`; `list-users`' two params are
-optional filters.
-
-**Do not Read `identity_adapter.py` source to discover params.** This file plus the
-systems catalog in your dispatch prompt is the authoritative surface, and a call
-with an unknown/missing/mistyped param is rejected with the declared list anyway.
+**Call `list_verbs(system="identity")` for the verbs you may run and the params each one
+binds**, with types, defaults and which are required. It reads the adapter's live
+signatures and is filtered to your grant, so it is the same surface the `query` tool
+enforces — a param it names will bind, one it omits is refused. Don't Read
+`identity_adapter.py` to discover params either.
 
 Each verb returns the upstream JSON response unchanged (the FastAPI
 response body). That payload IS the output; the harness captures it

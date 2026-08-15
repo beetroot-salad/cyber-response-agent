@@ -9,9 +9,14 @@ two surfaces by audience, across two files:
   *can* and *cannot* answer in this deployment, and how to read its
   output. Independent of how queries are dispatched.
 - **Execution** — `execution.md`, a sibling file read **only** by the
-  gather subagent when it dispatches a query. The `query` tool's verb
-  surface, params, connectivity, exit codes, dispatch-time adapter quirks.
-  `SKILL.md` keeps a one-line `## Execution` pointer to it.
+  gather subagent when it dispatches a query. Connectivity, exit codes,
+  query syntax, and dispatch-time adapter quirks — plus the VALUE
+  constraints a signature cannot state (an enum a param accepts, a clamp,
+  a required timestamp format). It does **not** carry the verb roster or
+  each verb's params: those come from the `list_verbs` tool, derived at
+  call time from the live signatures, so hand-authored copies here are
+  drift waiting to happen (#900). `SKILL.md` keeps a one-line
+  `## Execution` pointer to it.
 
 The two files exist so the orchestrator — which loads `SKILL.md` to
 **route** to a system but never queries it — physically cannot ingest
@@ -54,9 +59,14 @@ Each system's Visibility surface section uses the same four fields:
 
 ## Execution — what belongs here
 
-- The `query` tool's verb surface — which verbs the system's `VERBS`
-  registry exposes.
-- What each declared param binds and does at the dispatch layer.
+- **Not** the verb roster and **not** each verb's declared params
+  (#900): those are read at call time off the live signatures by the
+  `list_verbs` tool, and a hand-authored copy here can only drift out of
+  agreement with the boundary that enforces them. Point at `list_verbs`
+  instead.
+- The VALUE constraints a signature cannot state, which is the half that
+  does belong here: an enum a param accepts, a clamp, a required
+  timestamp format, a param whose meaning is not its name.
 - Output-format conventions imposed by the adapter (e.g., salted
   untrusted-data delimiters, raw payload persistence under
   `{run_dir}/gather_raw/`).

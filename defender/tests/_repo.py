@@ -21,6 +21,50 @@ from pathlib import Path
 from defender import _git
 
 
+#: Directory names a real filesystem and a real git accept, and a naive reader gets wrong.
+#: NOT decoration — each entry is a CLASS that has silently un-declared a system in this repo
+#: (#869/#908), and the tuple is the corpus a `spec-graph claims` `alphabet:` is answered with:
+#:
+#:   "café"      non-ASCII. C-QUOTED by `git ls-tree --name-only`: the entry arrives as
+#:               `"defender/skills/caf\303\251/execution.md"`, quotes included, so it no
+#:               longer ends in `/execution.md` and every suffix test on it answers no.
+#:   "my sys"    a space. NOT quoted — a `.split()` of the listing TEARS it into
+#:               `defender/skills/my` and `sys/execution.md`, and the second half is a
+#:               well-formed path that a suffix test happily accepts at the wrong depth.
+#:   'say"what'  a double quote. C-quoted like the non-ASCII case, and the classic breaker of
+#:               any reader that re-enters a shell or builds a pathspec by concatenation.
+#:
+#: The two mechanisms are INDEPENDENT, which is why the corpus carries both: `-z` alone fixes
+#: the quoting and not the tearing, a NUL split alone fixes the tearing and not the quoting.
+#: Only `-z` READ as NUL-delimited answers for all three. Measured on git 2.47.3 with the
+#: default `core.quotePath=true`; `test_hostile_names.py` is the executed probe and re-grounds
+#: this comment on every run. Deliberately NOT in the corpus: `it's` (a single quote is not
+#: quoted and contains no whitespace, so it breaks neither reader and only pads the fixture).
+#:
+#: A tree reader that answers correctly over these three answers correctly over the names
+#: models and humans actually choose. One that is only ever handed `elastic` has not been
+#: probed — it has been agreed with.
+HOSTILE_NAMES: tuple[str, ...] = ("café", "my sys", 'say"what')
+
+
+def plant_named_dirs(
+    parent: Path, names: tuple[str, ...] = HOSTILE_NAMES, *, filename: str = "execution.md"
+) -> tuple[str, ...]:
+    """Create `parent/<name>/<filename>` for each name; return the names, for the assertion.
+
+    Returning the input is the point, not a convenience: the caller asserts against the names
+    it PLANTED, never against a second reading of the tree. An oracle that re-derives the
+    expected set with the same listing the code under test runs cannot disagree with it —
+    which is how #869's three misreads passed 57 tests — and `scripts/lint/lint_shared_oracle.py`
+    now refuses the shape at the gate.
+    """
+    for name in names:
+        d = parent / name
+        d.mkdir(parents=True, exist_ok=True)
+        (d / filename).write_text(f"# {name}\n", encoding="utf-8")
+    return names
+
+
 def seed_repo(
     repo: Path,
     *,
@@ -51,6 +95,45 @@ def seed_repo(
     return repo
 
 
+#: The stub adapter the seeded tree ships, so the fixture's `wazuh` is a system that really
+#: DECLARES verbs. Since #901 the loop's commit gate resolves a promoted template's verb against
+#: the adapters of the tree it is committing, so a seed with a catalog and no adapter is not a
+#: cheaper fixture — it is a tree the real gate would refuse, and every test built on it would be
+#: asserting about a repo the loop cannot produce.
+_WAZUH_ADAPTER = '''\
+from __future__ import annotations
+
+from defender.runtime.verbs import VerbContext, verb
+
+
+@verb()
+def search(ctx: VerbContext, *, index: str = "", window: str = "24h") -> dict:
+    return {"rows": []}
+
+
+@verb()
+def health_check(ctx: VerbContext) -> dict:
+    return {"ok": True}
+
+
+VERBS = {"search": search, "health-check": health_check}
+'''
+
+
+def query_template(tid: str, status: str, *, body: str = "") -> str:
+    """A well-formed query template for the seeded `wazuh` system.
+
+    A writer, never an oracle: tests that stage a promotion need a file the content gate
+    accepts, and hand-spelling that shape at each site is how a fixture drifts from the schema
+    it is standing in for. Pass `body` to stage a MALFORMED one on purpose.
+    """
+    query = body or "```query\nverb: search\nparams:\n  index: ${index}\n```"
+    return (
+        f"---\nid: {tid}\nstatus: {status}\nverb: search\nparams: [index]\n---\n\n"
+        f"## Goal\n\nwazuh auth events.\n\n## Query\n\n{query}\n"
+    )
+
+
 def seed_skills_repo(repo: Path) -> Path:
     """A committed skills tree standing in for a fresh ``lead-author/<id>`` worktree.
 
@@ -64,16 +147,19 @@ def seed_skills_repo(repo: Path) -> Path:
     """
     adapters = repo / "defender" / "scripts" / "adapters"
     adapters.mkdir(parents=True)
-    (adapters / "wazuh_adapter.py").write_text("VERBS = {}\n")
+    # wazuh gets the real adapter shape (#901): it owns every seeded catalog template, so the
+    # content gate resolves its verbs. elastic owns no template here and only has to EXIST, so
+    # that `declared_systems` counts it among the declared systems (#869).
+    (adapters / "wazuh_adapter.py").write_text(_WAZUH_ADAPTER)
     (adapters / "elastic_adapter.py").write_text("VERBS = {}\n")
     catalog = repo / "defender" / "skills" / "gather" / "queries"
     (catalog / "wazuh" / "_draft").mkdir(parents=True)
     (catalog / "SCHEMA.md").write_text("# template schema\n")
     (catalog / "wazuh" / "auth-events.md").write_text(
-        "---\nid: wazuh.auth-events\nstatus: established\n---\n"
+        query_template("wazuh.auth-events", "established")
     )
     (catalog / "wazuh" / "_draft" / "newthing.md").write_text(
-        "---\nid: wazuh.newthing\nstatus: draft\n---\n"
+        query_template("wazuh.newthing", "draft")
     )
     skill = repo / "defender" / "skills" / "elastic"
     (skill / "_draft").mkdir(parents=True)

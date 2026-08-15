@@ -182,6 +182,17 @@ retry-cap / health signal for the transient lane.
   root) so the dropped git injection didn't make its repo-level ops untestable — the
   #389 inject-the-root pattern, which lets the branch tests run real git against a tmp
   repo.
+- **The test side of the seam (#869/#908).** `lint_raw_git_subprocess` exempts test
+  modules wholesale — fixtures build throwaway repos with raw `git init`/`commit` on
+  purpose — and that exemption has a cost the facade cannot see: a test is also free to
+  run the *same query* the code under test runs, and then assert on it. Such an oracle
+  cannot disagree with the implementation, so a misread of git's output is green on both
+  sides at once (`ls-tree --name-only` C-quoting, `.split()` tearing a spaced path — the
+  latter the same class this seam's own `-z` porcelain reader was minted for in #460).
+  `scripts/lint/lint_shared_oracle.py` covers exactly that gap: shared *read* argv shapes
+  only, so fixture setup stays exempt as intended. The two gates partition the tree
+  rather than overlap — this one asks who runs git, that one asks who is allowed to
+  believe its answer.
 - **Transient-lane spin detection.** Sustained push/forge failure re-authors a
   growing backlog with no cap. Out of scope here; would close with a drain-wide
   retry-cap or health signal applied uniformly to all infra retries, not a git
