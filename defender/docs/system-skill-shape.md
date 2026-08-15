@@ -59,9 +59,14 @@ Each system's Visibility surface section uses the same four fields:
 
 ## Execution — what belongs here
 
-- The `query` tool's verb surface — which verbs the system's `VERBS`
-  registry exposes.
-- What each declared param binds and does at the dispatch layer.
+- **Not** the verb roster and **not** each verb's declared params
+  (#900): those are read at call time off the live signatures by the
+  `list_verbs` tool, and a hand-authored copy here can only drift out of
+  agreement with the boundary that enforces them. Point at `list_verbs`
+  instead.
+- The VALUE constraints a signature cannot state, which is the half that
+  does belong here: an enum a param accepts, a clamp, a required
+  timestamp format, a param whose meaning is not its name.
 - Output-format conventions imposed by the adapter (e.g., salted
   untrusted-data delimiters, raw payload persistence under
   `{run_dir}/gather_raw/`).

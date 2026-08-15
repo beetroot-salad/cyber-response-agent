@@ -326,7 +326,6 @@ def build_agent_core(  # noqa: PLR0913 — the single build site's config + 3 DI
     if defn.tools.query or defn.tools.list_verbs:
         from defender._paths import PATHS
 
-        from .query_tool import QueryCapture
         from .verbs import VerbRegistry
 
         if verbs is None:
@@ -337,6 +336,8 @@ def build_agent_core(  # noqa: PLR0913 — the single build site's config + 3 DI
                 "registry-shaped stand-in that never went through the constructor is refused"
             )
         if defn.tools.query:
+            from .query_tool import QueryCapture
+
             capabilities.append(QueryCapture(verbs, defn.role.value))
     agent: Agent[Any, str] = Agent(
         built.model,

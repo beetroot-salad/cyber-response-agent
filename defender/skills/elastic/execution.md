@@ -2,7 +2,9 @@
 
 Read this file when gather is dispatched against `system: elastic`.
 Defender does not read this file; it sees only `SKILL.md`'s visibility
-surface. It carries the verb surface, query syntax, and index scoping.
+surface. It carries query syntax, index scoping, and the value
+constraints a signature cannot state; the verb roster and each verb's
+params come from the `list_verbs` tool.
 
 ## Verbs
 
