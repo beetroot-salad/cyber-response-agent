@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 import sys
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -91,13 +91,32 @@ def section_bodies(body: str) -> dict[str, str]:
 
 
 def _declared_names(value: Any) -> tuple[str, ...]:
-    """A frontmatter declaration list, normalized to names. A shape that is not a sequence
-    declares NOTHING rather than raising — the same tolerance `validate_scaffold` already read
-    `body_substitutions:` with, kept deliberately because it fails in the safe direction: a
-    declaration the walk cannot read narrows the allowed set, so the placeholder rule refuses
-    the template rather than waving it through."""
+    """A frontmatter declaration list, normalized to names.
+
+    Every shape YAML can give a "list of names" is read, not just the flat sequence
+    `SCHEMA.md` shows: a mapping (`params:` with a per-param note under it) and a sequence of
+    single-key mappings are both natural spellings a template author reaches for, and both
+    were read by the authoring contract's own oracle before #901 folded it into this walk.
+    Dropping them would NOT fail safe for the `params:` rule: `check_template` reports the
+    entries a verb does not declare, so an unread declaration is an unenforced one — the rule
+    is skipped rather than tightened. (For the placeholder rule the direction is the other
+    way, and either way the answer is to read the shape.)
+
+    A shape that is not one of those declares nothing rather than raising: the walk's readers
+    depend on a malformed key skipping one template, not on it sinking the corpus.
+    """
+    if isinstance(value, Mapping):
+        return tuple(str(k) for k in value)
     if isinstance(value, (list, tuple)):
-        return tuple(str(v) for v in value if isinstance(v, (str, int, float)))
+        out: list[str] = []
+        for v in value:
+            if isinstance(v, Mapping):
+                out.extend(str(k) for k in v)
+            elif isinstance(v, str):
+                out.append(v)
+            elif isinstance(v, (int, float)) and not isinstance(v, bool):
+                out.append(str(v))
+        return tuple(out)
     return ()
 
 

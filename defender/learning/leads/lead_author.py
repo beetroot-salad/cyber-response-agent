@@ -33,6 +33,7 @@ from defender.learning.leads.path_validation import (  # noqa: F401  (re-exporte
     SKILLS_REL,
     _draft_twin,
     _is_catalog_path,
+    _is_catalog_template,
     _is_draft_readme,
     _is_in_scope,
     _is_schema_md,
@@ -370,7 +371,12 @@ def _skills_content_rule(
             )
         # After the pair check and only on a file that is still there: a delete has already been
         # refused by the path half, and a content rule cannot read a path git says is gone.
-        if "D" not in xy and (repo_root / path).is_file():
+        #
+        # `_is_catalog_template`, not `_is_catalog_path`: the content rule reads a file as a
+        # TEMPLATE, and the catalog also holds files that are not one (a `{system}/README.md`,
+        # a note at the catalog root). Judging those by the template rule refuses them for a
+        # reason that is not their defect — "no `id:`", or a system named `queries`.
+        if "D" not in xy and (repo_root / path).is_file() and _is_catalog_template(path):
             _check_promoted_template(repo_root, resolver, path)
     if _is_system_skill_md(path) and "D" not in xy and (repo_root / path).is_file():
         _refuse(

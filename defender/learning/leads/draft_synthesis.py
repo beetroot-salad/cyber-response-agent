@@ -34,6 +34,10 @@ _SAFE_ID_SEGMENT = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._-]*\Z")
 
 _FENCE_LINE = re.compile(r"^(?:```|~~~)")
 
+#: The same grammar `_scaffold_rules._PLACEHOLDER_RE` checks, read here so the minter classifies
+#: what the checker will find rather than a near-miss of it.
+_PLACEHOLDER_RE = re.compile(r"\$\{(\w+)\}")
+
 
 def _structured_call(verb_name: str, params: dict) -> str:
     doc = {"verb": verb_name, "params": dict(params or {})}
@@ -86,7 +90,7 @@ def _draft_params(lead: ExecutedLead) -> list[str]:
 
 
 def _draft_frontmatter(
-    query_id: str, verb_name: str, params: list[str], engine: str,
+    query_id: str, verb_name: str, params: list[str], engine: str, body_subs: list[str],
 ) -> str:
     """Rendered through `yaml.safe_dump`, not an f-string: every value here comes off the queries
     table, and a frontmatter block a model-coined value can break is a draft that never parses
@@ -96,9 +100,26 @@ def _draft_frontmatter(
     if engine != "none":
         doc["engine"] = engine
     doc["params"] = params
+    if body_subs:
+        doc["body_substitutions"] = body_subs
     return yaml.safe_dump(
         doc, sort_keys=False, allow_unicode=True, default_flow_style=None
     ).strip()
+
+
+def _body_substitutions(query_block: str, params: list[str]) -> list[str]:
+    """The `${name}`s the rendered `## Query` actually carries that are NOT declared params.
+
+    A param-only verb's minted body holds literal VALUES, never `${placeholder}`s — so a
+    `${…}` reaching here came out of a bound value (`host: web-${env}-1`) or out of an engine
+    body's own query language. Either way it is body text, which is exactly what
+    `body_substitutions:` means in `SCHEMA.md`, and declaring it is what keeps the mint
+    conformant to the rule the corpus-wide sweep runs (#901). Left undeclared, one such value
+    mints a draft the sweep refuses — and the lane's commit gate deliberately does not check
+    `_draft/`, so the refusal lands in CI on everyone rather than on the batch that wrote it.
+    """
+    declared = set(params)
+    return sorted({n for n in _PLACEHOLDER_RE.findall(query_block) if n not in declared})
 
 
 def _draft_skeleton(
@@ -106,8 +127,9 @@ def _draft_skeleton(
 ) -> str:
     query_block = _render_query_body(record, engine if engine != "none" else "query")
     goal_line = (goal or "").replace("\n", " ").strip() or "(no lead goal recorded)"
+    body_subs = _body_substitutions(query_block, params)
     return (
-        f"---\n{_draft_frontmatter(query_id, verb_name, params, engine)}\n---\n\n"
+        f"---\n{_draft_frontmatter(query_id, verb_name, params, engine, body_subs)}\n---\n\n"
         "## Goal\n\n"
         f"`{query_id}` — auto-drafted from a coined gather query with no matching\n"
         f'catalog template. The defender\'s lead goal was: "{goal_line}".\n\n'
@@ -126,12 +148,23 @@ def _draft_skeleton(
 
 
 def _draft_candidate_segments(
-    query_id: str, verb_name: str, by_id: set[str],
+    query_id: str, verb_name: str, by_id: set[str], *, row_system: str,
 ) -> tuple[str, str] | None:
     if not query_id or "." not in query_id or query_id in by_id:
         return None
     system, suffix = query_id.split(".", 1)
     if not system or not suffix or suffix == verb_name:
+        return None
+    # The id's routing prefix must BE the system the row reached. `resolve_query_id` returns a
+    # model-coined `query_id` verbatim once it clears the reserved/traversal screen, so nothing
+    # upstream ties the prefix to `system`: a call that ran against `cmdb` under the coined id
+    # `ghost.something` would otherwise mint `queries/ghost/_draft/something.md` — a catalog
+    # directory for a system no adapter declares (the phantom-system class, #855 F-06), whose
+    # `verb:`/`engine:` were resolved against `cmdb` and which the corpus-wide scaffold sweep
+    # cannot even evaluate (it raises `ScaffoldRuleError` rather than reporting a finding).
+    # The row is not lost: this predicate is shared with `collect_general_failures`, so a
+    # rejected row lands in the pitfalls residue instead.
+    if system != row_system:
         return None
     # The VERB is held to the same alphabet as the id segments, because a draft now DECLARES it
     # (`verb:` frontmatter, #901) and a declaration nothing can resolve is worse than no draft:
@@ -155,7 +188,7 @@ def synthesize_drafts(
     created: list[Path] = []
     for lead in executed:
         qid = lead.query_id
-        segs = _draft_candidate_segments(qid, lead.verb, by_id)
+        segs = _draft_candidate_segments(qid, lead.verb, by_id, row_system=lead.system)
         if segs is None:
             continue
         system, suffix = segs

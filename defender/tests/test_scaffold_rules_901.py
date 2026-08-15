@@ -135,6 +135,34 @@ def test_a_wrapper_only_param_is_not_bindable_from_a_template(tmp_path, resolver
     ]
 
 
+def test_a_wrapper_only_param_cannot_be_smuggled_in_as_a_body_substitution(tmp_path, resolver):
+    """`body_substitutions:` is an UNCHECKED escape from the placeholder rule — it names what
+    the checker must not classify — so the reserved set has to be refused there too. Otherwise
+    the `model_facing_params` surface above is one frontmatter line from being optional, and
+    the refusal lands back at `validate_params` with the gather turn spent (#900)."""
+    text = (
+        "---\nid: ticket.probe\nstatus: established\nverb: get-ticket\n"
+        "params: [key]\nbody_substitutions: [require_closed]\n---\n\n"
+        "## Query\n\n```query\nverb: get-ticket\nparams:\n  key: ${key}\n"
+        "  require_closed: ${require_closed}\n```\n"
+    )
+    assert _codes(text, "ticket", tmp_path, resolver) == [
+        "reserved-body-substitution", "undeclared-placeholder",
+    ]
+
+
+def test_a_params_mapping_is_read_as_a_declaration_not_as_nothing(tmp_path, resolver):
+    """YAML gives "a list of names" more than one spelling, and `params:` carrying a per-param
+    note is the one a template author reaches for. Read as nothing, the entries the verb does
+    not declare go unreported — for THIS rule an unread declaration is an unenforced one, not a
+    conservative one."""
+    text = _GOOD.replace(
+        "params: [host]", "params:\n  host: the hostname\n  hostname: the other one", 1)
+    assert _codes(text, "cmdb", tmp_path, resolver) == ["undeclared-param"]
+    listed = _GOOD.replace("params: [host]", "params:\n  - host: the hostname", 1)
+    assert _codes(listed, "cmdb", tmp_path, resolver) == []
+
+
 def test_every_shipped_template_including_drafts_satisfies_the_rule(resolver):
     """The scope half. `validate_scaffold` excluded `_draft/`; this does not, which is the only
     reason the lead lane's output is inside any check at all."""

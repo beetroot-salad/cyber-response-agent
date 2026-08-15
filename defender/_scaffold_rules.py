@@ -22,7 +22,9 @@ The allowed param surface is `model_facing_params`, not `declared_params`: a tem
 `${placeholder}` and its `params:` list are both things a MODEL binds at dispatch, so a param
 `@verb(wrapper_only=…)` reserves to a first-party wrapper is not bindable from a template. Under
 `declared_params` such a template would pass here and then be refused at `validate_params` with
-the run already spent.
+the run already spent. `body_substitutions:` is held to the same set from the other side: it is
+the one key that tells this checker *not* to classify a `${name}`, so a reserved name spelled
+there would put the surface one frontmatter line from optional.
 """
 from __future__ import annotations
 
@@ -40,6 +42,7 @@ from defender.runtime.verbs import (
     Verb,
     engine_of,
     model_facing_params,
+    wrapper_only_params,
 )
 
 #: The one checked placeholder grammar, and the only one `SCHEMA.md` documents. `lead_render`
@@ -95,6 +98,21 @@ def check_template(t: QueryTemplate, verbs: Mapping[str, Verb]) -> list[Finding]
         for name in sorted(set(t.params) - allowed)
     ]
 
+    # A `body_substitutions:` entry is an UNCHECKED escape from the placeholder rule, so a name
+    # a model may not bind must not be spellable there either: `body_substitutions:
+    # [require_closed]` would otherwise readmit exactly the `@verb(wrapper_only=…)` param the
+    # `model_facing_params` surface above exists to keep out, and the refusal would land at
+    # `validate_params` with the gather turn already spent (#900).
+    reserved = wrapper_only_params(fn)
+    out.extend(
+        Finding(
+            "reserved-body-substitution",
+            f"`body_substitutions:` names {name!r}, which {t.system}.{t.verb} reserves to a "
+            f"first-party wrapper — no model may bind it, from a template or anywhere else",
+        )
+        for name in sorted(set(t.body_substitutions) & reserved)
+    )
+
     if engine_of(fn) != "none":
         # An engine verb's body IS the query language, so its `${…}` are body text, not params —
         # the rule is per-VERB (`adapter.md`). Counting these as satisfied reported coverage the
@@ -102,7 +120,9 @@ def check_template(t: QueryTemplate, verbs: Mapping[str, Verb]) -> list[Finding]
         # skipped and every template claimed (#885).
         return out
 
-    undeclared = sorted(set(_PLACEHOLDER_RE.findall(t.query)) - allowed - set(t.body_substitutions))
+    undeclared = sorted(
+        set(_PLACEHOLDER_RE.findall(t.query)) - allowed - (set(t.body_substitutions) - reserved)
+    )
     out.extend(
         Finding(
             "undeclared-placeholder",
@@ -156,6 +176,21 @@ class VerbResolver:
         self._registry = ModuleVerbRegistry(self._adapters_dir, DENY_ALL)
         self._cache: dict[str, Mapping[str, Verb]] = {}
 
+    def is_system(self, system: str) -> bool:
+        """Does `system` name an adapter in this tree at all — COLD, no import.
+
+        The membership question, which is not the same as `verbs()`'s "what does it declare":
+        `defender/skills/` holds authored surfaces that are not systems of record (`advisory`,
+        `connect`, `gather`, `handbook`, `invlang`), and a per-SYSTEM rule asked about one of
+        those answers about the wrong thing.
+        """
+        return system in self._systems()
+
+    def _systems(self) -> frozenset[str]:
+        # Not memoized: the callers that matter check a handful of paths against a tree that is
+        # being written, and a glob of one directory is cheaper than a stale answer about it.
+        return frozenset(self._registry.systems())
+
     def verbs(self, system: str) -> Mapping[str, Verb]:
         # Cached per SYSTEM because the gate asks once per changed path and a batch routinely
         # touches several templates of one system; a failure is deliberately NOT cached, so it
@@ -171,6 +206,12 @@ class VerbResolver:
             raise ScaffoldRuleError(
                 f"no adapter for system {system!r} under {self._adapters_dir}"
             ) from None
+        except (KeyboardInterrupt, GeneratorExit):
+            # Ahead of the blanket clause below, the way every other site in this codebase that
+            # widens to `BaseException` orders it (`query_tool.wrap_tool_execute`,
+            # `closed_ticket_tool._grant_gate`): an interrupt is the operator, not a broken
+            # adapter, and reporting it as one makes a corpus sweep un-interruptible.
+            raise
         except BaseException as exc:  # noqa: BLE001 — a module that will not import is a broken adapter
             raise ScaffoldRuleError(
                 f"adapter for system {system!r} failed to import: {type(exc).__name__}: {exc}"

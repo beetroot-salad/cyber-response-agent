@@ -113,14 +113,27 @@ def test_synthesize_drafts_screens_a_row_recorded_before_the_writer_rule(tmp_pat
     by the old writer keeps its phantom id forever, and `synthesize_drafts` reads those rows
     on every later tick. The row here is appended through the PRODUCTION writer and read back
     through the production join and extraction, so it is a real historical row rather than
-    this test's idea of one — and the shared predicate still calls it a draft candidate,
-    which is exactly why the membership screen has to be the thing that refuses it.
+    this test's idea of one.
+
+    The shared predicate USED to call this row a draft candidate, which is why #869 put the
+    membership screen behind it. #901 then gave the predicate its own reason to refuse: the
+    seeded row ran against `elastic` while its id claims `fakesys`, and a routing prefix that
+    disagrees with the system the row reached mints under the wrong directory whether or not
+    that directory names a declared system. So the row is now refused one screen EARLIER, and
+    both screens are asserted here — the second is not made redundant by the first, because a
+    coined id can name a declared system just as easily as a phantom one.
     """
     run_dir = tmp_path / "run-x"
     seed_executed_query(run_dir, query_id="fakesys.hunt-creds")
     _joined, executed = extract(run_dir)
     assert [lead.query_id for lead in executed] == ["fakesys.hunt-creds"]
-    assert _draft_candidate_segments("fakesys.hunt-creds", "esql", set()) == (
+    assert executed[0].system == "elastic"
+    assert _draft_candidate_segments(
+        "fakesys.hunt-creds", "esql", set(), row_system="elastic") is None
+    # …and with the id/row disagreement removed, the membership screen #869 added is still
+    # what stands between the row and a `queries/fakesys/` directory.
+    assert _draft_candidate_segments(
+        "fakesys.hunt-creds", "esql", set(), row_system="fakesys") == (
         "fakesys", "hunt-creds",
     )
 

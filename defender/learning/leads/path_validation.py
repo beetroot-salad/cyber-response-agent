@@ -31,6 +31,20 @@ def _is_catalog_path(path: str) -> bool:
     return path.startswith(CATALOG_REL)
 
 
+def _is_catalog_template(path: str) -> bool:
+    """`{catalog}/{system}/{name}.md` — an ESTABLISHED template file, and only that.
+
+    Narrower than `_is_catalog_path`, which is true of anything under the catalog including
+    `SCHEMA.md`, a `{system}/README.md` and a note dropped at the catalog root. The scaffold
+    content rule reads a file as a template (`id:`, `verb:`, a system derived from its parent
+    dir), so pointing it at one of those refuses the file for a reason that is not its defect.
+    """
+    if not path.startswith(CATALOG_REL) or not path.endswith(".md"):
+        return False
+    parts = path[len(CATALOG_REL):].split("/")
+    return len(parts) == 2 and parts[0] != "_draft"
+
+
 def _is_system_file(path: str, name: str) -> bool:
     if not path.startswith(SKILLS_REL):
         return False

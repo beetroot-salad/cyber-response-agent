@@ -96,10 +96,11 @@ def seed_repo(
 
 
 #: The stub adapter the seeded tree ships, so the fixture's `wazuh` is a system that really
-#: DECLARES verbs. Since #901 the loop's commit gate resolves a promoted template's verb against
-#: the adapters of the tree it is committing, so a seed with a catalog and no adapter is not a
-#: cheaper fixture — it is a tree the real gate would refuse, and every test built on it would be
-#: asserting about a repo the loop cannot produce.
+#: DECLARES verbs. Since #901 the loop's commit gate resolves a promoted template's verb — and
+#: the per-system `SKILL.md` identity rule — against the ADAPTERS of the tree it is committing,
+#: so a seed with a catalog and no adapter is not a cheaper fixture — it is a tree the real gate
+#: would refuse, and every test built on it would be asserting about a repo the loop cannot
+#: produce.
 _WAZUH_ADAPTER = '''\
 from __future__ import annotations
 
