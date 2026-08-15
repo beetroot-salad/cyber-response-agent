@@ -1,4 +1,4 @@
-# Environment corpus and invlang vocabulary (2026-08-12)
+# Environment corpus and invlang vocabulary (2026-08-12, revised 2026-08-15)
 
 ## Status
 
@@ -8,20 +8,37 @@ docs have different readers and different timelines: the training loop is
 unbuilt, while everything here concerns a corpus that exists today (15 facts) and
 a vocabulary that is already drifting in production runs.
 
-Read `learning-architecture-redesign.md` first for why this corpus matters to the
-training loop. The short version: with `playground-v2/` config files ruled out as
-inputs, environment facts became the **grounding substrate** — the questioner's
-world knowledge, the placeholder vocabulary, and the defender's standing world
-model — so this is on the critical path rather than an appendix.
+### The 2026-08-15 revision demoted this document, and improved it
 
-Two dependencies point the other way, and they are the reason this is a split
-rather than a separate concern:
+An earlier version of this section claimed the corpus was **the grounding
+substrate** for the questioner — its world knowledge and placeholder vocabulary —
+and therefore on the training loop's critical path. **That claim is withdrawn.**
+The training doc's §Grounding by falsification search replaces it: the questioner
+declares a story, predicts the data that would falsify it, and searches for that
+data, so grounding happens per story on the discriminating axis rather than
+against a corpus read up front.
 
-- **Placeholder binding** (the training doc §Placeholders and binding) is how referent
-  facts get resolved live instead of cached, and it is also how the corpus gets
-  mined.
-- **The environment-defect judge bucket** (the training doc §The discriminator spine)
-  is one of this corpus's two producers.
+What that costs this document is its urgency-by-association. What it buys is a
+cleaner subject, because the two halves that were fused can now separate:
+
+- **The vocabulary defect (§The vocabulary defect, §The current schema) is
+  independent and still live.** Class slot values are unvalidated and drifting.
+  That blocks entity selectors as a retrieval key for the *defender*, regardless
+  of what the questioner does, and it is the part of this document with a shipped
+  bug behind it.
+- **The interpretation-cache argument survives, aimed at one class.** §Cache
+  economics already grades semantics half-life "~never" and highest value per
+  entry; falsification search re-derives everything *except* that class. So the
+  corpus this document should end up describing is the semantics corpus, and the
+  right way to size it is to feel the cost of re-deriving rather than to design it
+  in advance.
+- **Referent and norm caching lose their strongest customer.** They were carrying
+  the questioner. §Cache economics still argues norms are expensive and
+  slow-moving, but the reader they serve is now the defender alone.
+
+One dependency still points the other way: **the environment-defect judge bucket**
+(the training doc §The discriminator spine) remains one of this corpus's
+producers.
 
 `§`-references below without qualification are to sections of this document.
 
@@ -378,7 +395,13 @@ lives inside the benign-actor author package:
 Both fold into one corpus through `learning/author/benign_actor/prompt.md` ("You
 are the **environment lessons curator**"), gated by a deterministic retrieval
 check and committing their own batch. **Deferring the actor work therefore
-orphans the corpus** — which is why it cannot simply be deferred alongside it.
+orphans the corpus.**
+
+That was an argument for urgency while the questioner depended on this corpus. It
+no longer is — with the grounding-substrate role retired (§Status), an orphaned
+corpus is a corpus that stops growing, not a blocked training loop. The miner
+below is still the right replacement; it is no longer on anyone's critical path,
+and it should be sequenced on its own merits.
 
 **The replacement is one mechanism with two feeds.** Both the oracle and the
 runtime are the same thing: a component holding a corpus of (query, response)
@@ -431,9 +454,28 @@ One guard: selectors need a specificity floor — fewer-slots-matching-more make
 an empty selector an every-loop lesson.
 
 **The schema defect this fixes** is the same one §The current schema removes
-`alert_rule_ids` for: lessons key on the alert signature they were born from,
-which is right for coverage lessons and wrong for observable-semantics lessons,
-whose trigger condition has nothing to do with which rule fired.
+`alert_rule_ids` for: a lesson's trigger condition is tied to the alert it was
+born from, which is right for coverage lessons and wrong for observable-semantics
+lessons, whose trigger has nothing to do with which rule fired.
+
+**Correction: the two corpora are broken in opposite directions.** An earlier
+draft said flatly that "lessons key on the alert signature they were born from."
+That is true of the *environment* corpus, which hard-gates on rule-id disjointness
+(`lessons_env_retrieve.py:104`) — a mandatory anchor the questioner cannot even
+populate, which is what §The current schema removes it for. It is **not** true of
+`defender/lessons/`: `scripts/lessons/lessons_fm.py` greps frontmatter across
+`DIMENSIONS = ("source_signature", "telemetry_source", "attack_phase")` with
+**model-supplied patterns**, so nothing gates anything — what retrieves is
+whatever the model chose to grep for.
+
+The training doc §It is not one case records both failure modes in the same run
+corpus. A lesson born on `v2-falco-suspicious-network-tool` reached an
+`authorized_keys` case because they share `telemetry_source: falco` and did real
+damage there; the loginuid lesson missed its own motivating case because the
+model's pattern did not match it. So the defender corpus is not over-keyed but
+**under-determined**, and frontier keying is the fix for a genuine gap rather than
+a replacement for a gate that exists. Only one of these two corpora has a gate to
+remove.
 
 ## Sequencing
 
@@ -452,8 +494,10 @@ enough to do in an afternoon each. Ordered by what unblocks what:
    anchor, promote entity/topic selectors to primary, add the broadening query
    mode, add `derivation` and the `observed | exhaustive` marker.
 5. **The miner** (§Producers) — one pass over the (query, response) corpus,
-   runtime feed first. This is the item the training loop is actually waiting on,
-   because the current producer is the actor direction being deferred.
+   runtime feed first. An earlier draft called this "the item the training loop is
+   actually waiting on"; it is not, since §Status. It earns its place here on its
+   own terms: the current producer is being deferred, and without a replacement
+   the corpus stops growing.
 6. **Frontier retrieval** (§Retrieval) — give the invlang advisory a lessons
    recall class, extend its frontier from open hypotheses to `??` slots, derive
    the frontier mechanically per gather loop.
@@ -465,3 +509,11 @@ existing facts were authored under the old schema and the drifted vocabulary. Ar
 they re-derived, grandfathered, or re-keyed only? Re-keying is cheapest and leaves
 the interpretations unaudited, which §Staleness argues is the half that
 verification cannot check anyway.
+
+**And the training doc raises the stakes on that answer.** Its §It is not one case
+found a *defender* lesson that is actively harmful — it survives its own
+forward-check, retrieves across signatures, and causes the defender to report
+attack chains that did not happen. It was found by hand. Nothing in either corpus's
+authoring path would have caught it, and §Staleness explains why: verification
+catches staleness, not birth defects. So the migration question is not only "which
+entries are stale" but "which are **wrong**," and re-keying answers neither.

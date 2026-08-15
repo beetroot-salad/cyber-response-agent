@@ -1,4 +1,4 @@
-# Training loop architecture (2026-07-30, revised 2026-08-12)
+# Training loop architecture (2026-07-30, revised 2026-08-15)
 
 ## Status
 
@@ -10,12 +10,43 @@ this ships, those sections get rewritten rather than cross-referenced.
 
 **Held-out recruitment blocks less than an earlier draft claimed.** It gates the
 overfitting gap (§What dies) and promotion gating (§Lesson attribution), and
-nothing else. The pairwise metrics inside the loop — realized fork depth, "no fork
-point is a finding," fork position as a difficulty read, A-vs-B trajectory
+nothing else. The contrastive metrics inside the loop — realized fork depth, "no
+fork point is a finding," fork position as a difficulty read, triplet trajectory
 comparison, question fitness, and the with/without-lesson ablation — are computed
-on synthetic sibling pairs and need no held-out fixture. Recruitment is still
-sequenced first because promotion is worthless without it, but it does not block
-building the loop. `defender/fixtures/held-out/` still contains only a README.
+on synthetic siblings and need no held-out fixture. Recruitment is still sequenced
+early because promotion is worthless without it, but it does not block building
+the loop. `defender/fixtures/held-out/` still contains only a README.
+
+### What the 2026-08-15 revision changed
+
+A design session worked the questioner's grounding problem, then went looking for
+defects in the accumulated run corpus. Both halves moved the design:
+
+- **The questioner grounds by falsification search, and the environment-facts
+  grounding substrate is retired.** It declares a story, predicts the data that
+  would falsify it, and searches for that data (§Grounding by falsification
+  search). Grounding is per-story and lands on the discriminating axis — the only
+  axis that needed it. This retires the corpus-as-substrate claim the previous
+  revision introduced, and with it the cold-start and staleness problems that role
+  carried.
+- **Solvability stops needing its own pass.** If the questioner found the
+  falsifying data, the resolving path exists and it just walked it. The walk is
+  the proof, so the old sequencing step for deriving it is gone.
+- **The discriminator declaration and the falsification prediction are one
+  object**, not two artifacts to keep consistent.
+- **The judge's unit is a triplet, not a pair** — malicious, benign, and a third
+  sibling mutated on a *different* axis, serving as a negative control
+  (§Comparison, not rating).
+- **The judge emits findings; the curators author.** Authoring, testing and dedup
+  stay outside the judge, on incentive grounds as much as workload.
+- **The failure-mode taxonomy is demoted** from a design input to post-hoc
+  description. The buckets are not orthogonal and the architecture does not need
+  them complete or accurate.
+- **§Empirical grounding is no longer one case.** A survey of the 21 run dirs
+  carrying a report found the same defect four times, a shipped lesson driving it,
+  and a case mix that explains the thin yield without appealing to loop design.
+- **Two factual corrections.** Defender lessons do not retrieve through a
+  signature gate, and the Elastic config swap covers one index of two.
 
 ### What the 2026-08-11/12 revision changed
 
@@ -93,6 +124,8 @@ Three deltas carry most of the argument below:
 
 ## Empirical grounding
 
+### The case that started it
+
 Two findings from `20260728T161845Z-fresh-case`, a Falco `authorized_keys` write
 correctly disposed `malicious`.
 
@@ -130,16 +163,126 @@ its place at the front: it is the source of the environment-defect judge bucket
 (§The discriminator spine) and, in the corpus doc, of both the null-reading trap
 and the interpretation-cache argument.
 
-**Two cheap fixes remain available, independent of everything above**, and
-neither has landed:
+### It is not one case
+
+A pass over the 21 run dirs carrying a `report.md` (of 27 under
+`$DEFENDER_RUNS_BASE`) found the same defect three more times, and a shipped
+lesson driving it.
+
+**The case mix explains the thin yield on its own.** 14 malicious, 6
+inconclusive, 1 benign. Malicious routes to the FP hunt
+(`directions.UNTRAINED_DISPOSITIONS`), and the section above says what the FP hunt
+does with a key comment reading `attacker@elsewhere`. The training signal is not
+thin because the loop is badly shaped; it is thin because two thirds of the corpus
+routes to the direction that cannot resolve it.
+
+**One defect shape, four instances.** In each, an artifact of how the environment
+is built is read as evidence about the adversary:
+
+| Run | What it concluded | What it actually was |
+|---|---|---|
+| `golden-case-014-authkeys-db1` | co-occurring `curl`/`nc` → "a multi-stage attack sequence" | `svc-health-probe`, every ~300s |
+| `golden-case-002b` | "8 curl file-copy events, 8 netcat (nc) events… confirming a multi-stage attack chain" | the same scheduler |
+| `golden-case-011-lotl-canary-2` | "root not existing as a registered principal in the identity system" | `root` is a local account and was never going to be in Keycloak |
+| `20260728T161845Z-fresh-case` | host absent from CMDB; `loginuid=-1` | Falco reports the Docker host; the runner executes everything with `loginuid=-1` |
+
+All four were disposed `malicious` at `confidence: high`, and the first three
+reached that on 6, 7 and 11 queries. `golden-case-011` went further and called
+malicious/high while recording that "the Elasticsearch cluster was unreachable
+during investigation, preventing retrieval of the actual Falco event details" —
+a confidence defect distinct from the environment-artifact one, and equally
+invisible to outcome grading.
+
+**A shipped lesson is driving it.** `golden-case-002b` names it:
+`defender/lessons/falco-terminal-phase-no-upstream-chain.md`, whose check reads
+*"scan for co-occurring Falco rules from adjacent attack phases … if any fire in
+the same window, add them as upstream corroboration leads."* The baseline
+guarantees the hit — `svc-health-probe` runs `curl … || nc -z 127.0.0.1 22` every
+~300s across six host roles, and a second action sweeps `nc -z` over all eight
+hosts and five ports — so every container window on every host contains exactly
+the events the lesson sends the defender to look for.
+
+The uncomfortable part is that **the lesson is carefully written.** It says add
+them as *leads*, and its own body warns that "a container whose legitimate cadence
+occasionally includes outbound tool calls would pass that check." The defender
+collapsed *investigate these* into *these corroborate*, and shipped attack chains
+that did not happen. The defect lives in the gap between what the lesson licenses
+and what was concluded — the licenses-not-likelihood rule of §Its goals conflict,
+showing up as an incident rather than as a style guideline.
+
+**Nothing could have caught it at birth.** The forward-check tests that a lesson
+does not flip its own source case. This one does not flip its source case; it
+corrupts *other* cases. That is precisely the over-generalization risk §What dies
+says the forward-check never tested — now observed rather than predicted.
+
+Three consequences for this design:
+
+- **It is the argument for the triplet.** No single run exposes it: in each, the
+  inference reads as plausible and the disposition is correct. It becomes visible
+  only when the same inference survives a world where it should not. Run the
+  benign sibling and the off-axis sibling and the attack chain appears in all
+  three, because the baseline noise is in all three. A non-discriminating
+  inference is one that does not vary with the world, which is what the triplet
+  measures directly.
+- **It is the argument for findings-over-authoring.** The right fix is not
+  obvious — delete the lesson, narrow it, or add a counter-lesson about baseline
+  cadence? That is a judgment against the whole corpus, with dedup and a
+  regression check. A judge holding one trajectory has no basis for it.
+- **It is an acceptance test available before anything is built.** Does the
+  triplet flag `falco-terminal-phase-no-upstream-chain` as non-discriminating? The
+  fixtures, the lesson and the confounding baseline all exist today. A design that
+  cannot catch a defect already found by hand is not ready.
+
+**And it is live.** That lesson is in the corpus now, producing reports that
+assert attack chains that did not happen. Deciding what to do about it waits on
+nothing in this document.
+
+### Correction: how lesson retrieval actually works
+
+An earlier draft of this section said the loginuid lesson did not retrieve because
+it is keyed to the signature it was born from. Defender lessons have **no
+signature gate**. `scripts/lessons/lessons_fm.py` greps frontmatter across
+`DIMENSIONS = ("source_signature", "telemetry_source", "attack_phase")` using
+**model-supplied patterns**; only the environment corpus hard-gates on rule-id
+disjointness (`lessons_env_retrieve.py:104`).
+
+That explains both halves of the record: the terminal-phase lesson reached an
+`authorized_keys` case because the two share `telemetry_source: falco`, and the
+loginuid lesson missed because the model's grep did not match it. Retrieval is not
+over-keyed, it is **under-determined** — which changes what re-keying can buy.
+
+### Two environment defects found on the way
+
+Neither is about the defender, and both are the shape the corpus doc's semantics
+class exists for:
+
+- **`v2-off-hours-sudo` has no time filter.** Its query is
+  `falco.rule: "Sudo execution"` at threshold 3 per host. The `name` field is
+  honest ("v2 sudo activity burst") and the description says outright that the
+  rule "fires regardless of hour" — but the **`rule_id` says off-hours, and the
+  `rule_id` is what propagates into the alert.** A reader keying on what the alert
+  carries gets the wrong premise unless it opens the rule definition.
+- **The change-mgmt seed is anchored to a fixed past date.** `changes.yaml` opens
+  with *"Today (plan reference): 2026-04-24"*, months behind the running
+  environment, so ad-hoc CRs are effectively historical and only the standing
+  windows are live. That interacts with the absolute-time-anchor constraint in
+  §The mechanism splits by system class: absolute anchors are right for Elastic,
+  but change-mgmt answers relative to a `now` that disagrees with everything else.
+
+### The two cheap fixes
+
+**Both remain available, independent of everything above**, and neither has landed
+across three revisions of this document:
 
 - Make the judge's likelihood-ratio check **symmetric**. It still runs only on
-  benign dispositions (`learning/pipeline/judge/malicious.md:146` — *"When
-  `report.md` records a **benign** disposition"*); on a malicious call it should
-  ask whether the incriminating observables fit routine automation equally well.
-- **Re-key observable-semantics lessons** off the alert signature (minding that
-  the two corpora disagree on rule-id namespace) — the stopgap for
-  the corpus doc §Retrieval.
+  benign dispositions (`learning/pipeline/judge/malicious.md`, §Likelihood-ratio
+  check — *"When `report.md` records a **benign** disposition"*); on a malicious
+  call it should ask whether the incriminating observables fit routine automation
+  equally well. Every run in the table above is a case it would have caught.
+- **Re-key observable-semantics lessons** off the alert signature — the stopgap
+  for the corpus doc §Retrieval. Minding the correction above: for defender
+  lessons this changes what the model can usefully grep for, not the removal of a
+  gate. Only the environment corpus has a gate to remove.
 
 ## The three moving pieces
 
@@ -276,6 +419,39 @@ It keeps revalidation incremental (one edit's feasibility, not a whole world),
 keeps every child close to a *validated* ancestor, and keeps matched descent
 meaningful — it is only informative at short distances.
 
+### Grounding by falsification search
+
+**The questioner declares a story, predicts what data would falsify it, and goes
+looking for that data.** Grounding is not a corpus it reads before it starts; it
+is a search it runs per story, against the real deployment, on the axis that
+decides the case.
+
+This **retires the grounding-substrate role** environment facts acquired in the
+previous revision, and with it the problems that role carried: cold start (the
+first story works), staleness (every story re-grounds), and the epistemics of
+absence (a stale source answers confidently and wrongly). What replaces them is
+one search whose failure is local to one story rather than corpus-wide.
+
+Three things fall out:
+
+- **Solvability is proven by construction.** §The discriminator spine requires the
+  resolving path be derived from the world and never accepted from the
+  questioner. Here the questioner derives it *by walking it*, and
+  `oracle_queries.jsonl` is the record of the walk. There is no separate
+  solvability pass left to build.
+- **The discriminator declaration and the falsification prediction are the same
+  object** — not two artifacts that have to be kept consistent with each other.
+- **A failed search is informative and localized.** It resolves to one of three
+  states — the story is wrong, the query was wrong, or the deployment cannot see
+  this — and all three are useful. The third is an observability finding, which
+  §What dies otherwise says this loop is structurally unable to produce.
+
+**What this does not ground is the deviation.** The search establishes the
+*setting*: this host exists, this identity reaches it, this path is exercised. It
+cannot establish "and had the attacker done X, Y would have appeared," because
+that is counterfactual. Authoring the deviation coherently is the oracle's
+problem, and none of this solves it — see §The cost of a wrong premise.
+
 ### Placeholders and binding
 
 **The questioner writes placeholders; the oracle binds them against the real
@@ -297,7 +473,15 @@ ways:
   another org, so the curriculum is not bound to one lab.
 - **Training does the mining.** Every binding is a real query whose answer is a
   deployment fact, so the bindings ledger accumulates an environment corpus as a
-  byproduct.
+  byproduct. Note this is now a *byproduct* and not a dependency: since
+  §Grounding by falsification search, nothing the questioner does waits on that
+  corpus existing.
+
+**Binding cardinality is a declared part of the contract.** A placeholder resolves
+to a *set*, and its size changes the investigation — `{{compute:web-server/internal}}`
+binding to forty hosts is a different case from binding to one. The questioner
+declares the expected range and materialization asserts it, or the same archived
+scenario silently changes difficulty as the deployment grows.
 
 **Scope limit on the mining claim: binding mines the entity graph, not query
 semantics.** Resolving a placeholder teaches you which hosts exist. It does not
@@ -405,6 +589,16 @@ against the same config value that was swapped, a defender query reaching the re
 index is not a silent scenario deletion — it is a `ConfinementFault`. The hazard
 this document previously had to pin with a test becomes structurally impossible on
 the one system where volume made it most likely.
+
+**The swap covers two indices, not one.** `confine_index` validates against
+`(ELASTIC_EVENTS_INDEX, ELASTIC_ALERTS_INDEX)`, and only the first is the events
+target. The alerts index is a live query surface in its own right —
+`runtime/lead_zero.py:574` reads it for lead-0 resolution, `elastic_adapter.py:305`
+serves it, and four shipped templates target it. Swapping only events leaves the
+scenario's own alert absent from the alerts index while real alerts leak into the
+scenario world: the cross-system corroboration failure this section calls
+load-bearing, occurring inside the one system it declares solved. Both config
+values get swapped, or the guarantee is half a guarantee.
 
 **Do not write overlay events into the raw index.** Bulk indexing would accept
 them, and it is wrong four ways: synthetic attack events contaminate real
@@ -565,29 +759,85 @@ What the log cannot catch is a contradiction between the overlay and the *real*
 substrate it was applied to; that surfaces only as an implausible answer, and it
 is why `discard` also has to be available to the judge as a declared verdict.
 
+### The cost of a wrong premise
+
+The overlay can be wrong about the deployment in a way nothing catches at
+authoring time — an assumed firewall rule, an assumed group membership.
+§Grounding by falsification search grounds the setting but not the deviation, so
+this residue is real and worth pricing, because it bounds how much authoring rigor
+is worth buying.
+
+**Direct contradiction is the cheapest layer** and often costs nothing, because
+most premises have no system that answers them. There is no network-policy verb
+among the seven, so a fabricated firewall rule is not directly checkable here at
+all.
+
+**Implication cost is what actually bites.** An injected connection implies an
+inbound session on the far side, an auth record, possibly a process. The defender
+corroborates, finds none of them, and concludes the telemetry is unreliable.
+Nothing asserted the premise and nothing had to: **an injected fact costs every
+fact it implies.** That yields an authoring heuristic worth more than a validation
+pass — **inject at the leaves**. A key comment or a single field implies little; a
+network path, a role assignment or a permission implies a subgraph.
+
+**The teaching inversion is the real cost.** Both available defender behaviors
+teach the wrong thing. If it notices the incoherence and flags it, the episode
+punishes correct skepticism. If it does not notice, the episode teaches it to
+accept incoherent evidence — which is the analyze-discipline defect this loop
+exists to fix. There is no branch where a wrong premise is harmless, and the
+asymmetry *worsens as the defender improves*, because catching the inaccuracy
+becomes the correct behavior and gets graded as failure.
+
+**But it is detectable after the fact, which is what makes it manageable.** The
+overlay is known and the trajectory is recorded, so an episode in which the
+defender reached ground the overlay could not support is identifiable. That is
+`discard` earning a second job: today it covers the oracle contradicting itself,
+and this extends it to the defender reaching unsupported ground. Scenarios
+therefore do not have to be accurate — they have to be **accurate or detectably
+not**, which is a far cheaper standard to hit.
+
 ## The judge
 
 ### Comparison, not rating
 
-**The judge is given pairs, not rubrics.** Asking a model to rate an
+**The judge is given contrasts, not rubrics.** Asking a model to rate an
 investigation 1–10 is a weaker instrument than asking it which of two
 investigations handled something better, and the contrast family supplies the
-pair for free.
+comparison for free.
 
-**The unit of judgment is therefore the sibling pair, not the run.** Nothing is
-judged until both siblings have been investigated. That is a real scheduling
-constraint on the loop, accepted deliberately.
+**The unit of judgment is a triplet, not a run and not a pair:** one malicious
+sibling, one benign sibling, and a third mutated on a **different axis** from the
+discriminator. Nothing is judged until all three have been investigated — a real
+scheduling constraint, accepted deliberately.
 
-Three comparisons, all same-unit and all pairwise:
+The third sibling is a **negative control**, and it supplies what a pair cannot.
+A/B tells you the trajectory changed; it cannot tell you the change was *specific
+to the discriminating axis* rather than a response to being perturbed at all. An
+inference that moves on the off-axis sibling too is non-discriminating — which is
+exactly the defect §It is not one case found by hand, and which no single run
+exposes.
+
+This also upgrades the probe sibling's job. C was a transfer test on the
+*defender* (did it learn the rule or the story). The off-axis sibling tests
+whether the *judge's attribution* is real, which is the more load-bearing of the
+two while the loop is young.
+
+Three comparisons, all same-unit and all contrastive:
 
 | Comparison | Answers |
 |---|---|
-| A vs. B trajectory | did the defender move on the discriminator; did the questioner's predicted failure land |
+| the triplet's trajectories | did the defender move on the discriminator, and only on it; did the questioner's predicted failure land |
 | with-lesson vs. without | causal lesson lift (§Lesson attribution) |
 | current defender vs. frozen archive | overfitting to the simulator (§What dies) |
 
 Same-unit is the general principle, and it is why the retired frozen-actor
 metric read as a vibe: it compared accuracy against catch rate.
+
+**The third sibling's disposition may be sampled; its axis must be declared.** An
+arbitrary third story restores the confounding the contrast exists to remove. What
+makes it a control is that the questioner names which axis it moved and commits to
+the prediction that the defender's discriminating inference should *not* move
+with it.
 
 ### The fork
 
@@ -656,6 +906,31 @@ With minimal-twin invariance gone, `ΔW` is no longer a literal diff and the
 Only the third requires reading prose (the `:T resolutions` belief trace).
 A fourth bucket belongs beside them — see §Environment facts.
 
+**These buckets are description, not a design input, and they are not
+orthogonal.** The defect in §It is not one case is simultaneously lead quality
+(the wrong window), analyze discipline (over-reading co-occurrence), an
+environment defect (the baseline misled it) and a lesson defect (a lesson licensed
+it); naming the bucket adds nothing that the comparison did not already give.
+Nothing in this architecture requires the taxonomy to be complete or accurate —
+the questioner poses a question, the triplet says whether the defender's inference
+tracked the world, and the category is applied afterwards for routing. A design
+that had to classify first would inherit every gap in the classification.
+
+**Where the fact is placed decides which stage is under test.** Off the default
+lead path, the question is whether the defender chose to go get it — a PLAN-time
+consequence. On the guaranteed path (the alert itself, or lead-0), delivery is
+certain and the only remaining question is what was concluded — an ANALYZE-time
+consequence, and the class §It is not one case is full of. Both screen cheaply
+before a full investigation: the first on the planned lead set, the second on
+whether the delivering query appears in the queries table.
+
+**Prefer a discriminator that lands on a typed invlang slot.** An authz contract
+carries `verdict ∈ authorized | unauthorized | indeterminate` and gates
+`disposition: benign`; weights carry `STRONG_WEIGHTS = {++, --}`; hypotheses are
+refuted or not. When the discriminating fact bears on one of those, "did the
+defender update correctly" is a check on a row rather than a reading of prose —
+which shrinks the one bucket above that needs an LLM at all.
+
 The questioner also declares **where it expects the defender to fail**. The
 trajectory confirms or falsifies that prediction, and this half needs almost no
 reasoning: the prediction was declared, the outcome is observed. Failure
@@ -676,6 +951,17 @@ about either player and blaming one is worse than dropping it.
 lessons corpus; questioner findings feed question fitness. Different consumers,
 different schemas.
 
+**The judge emits findings; it does not author.** Authoring, testing and dedup
+against the existing corpus are curation work and stay with the curators under
+`learning/author/`, which is where they live today. The separation is an incentive
+boundary as much as a division of labor: a component that both detects a defect
+and writes its fix writes fixes shaped to the instance that triggered detection —
+the same shape of hazard §Seeds and mutations refuses when it keeps fork depth a
+diagnostic rather than a fitness term.
+§It is not one case is the concrete instance: the right response to the
+terminal-phase lesson is a judgment against the whole corpus, and a judge holding
+one trajectory has no basis on which to make it.
+
 **The failure mode moves, and the original draft under-weighted it.** Today's
 judge is white-box over raw payloads on a real case, so its error is
 "hallucinates a gap." A judge grading against an authored answer key errs by
@@ -685,32 +971,31 @@ verdict are the defenses, and both are load-bearing rather than nice-to-have.
 
 ## Environment facts — see the companion doc
 
-Environment facts were a byproduct of the old loop. With the `playground-v2/`
-config files ruled out as inputs (§Seeds and mutations) they became the
-**grounding substrate**: the questioner's world knowledge, the placeholder
-vocabulary, and the defender's standing world model.
+**The grounding-substrate role is retired** (§Grounding by falsification search).
+Environment facts were promoted to it in the previous revision because the
+`playground-v2/` config files had been ruled out as inputs and *something* had to
+replace them. Falsification search replaces them instead — per story, on the
+discriminating axis — so **the corpus is no longer on this loop's critical path**,
+and the previous revision's "environment mining blocks the questioner" claim is
+withdrawn.
 
-That made them large enough to own a document.
-**`environment-corpus-and-vocabulary.md`** carries the corpus design — the
-interpretation-cache framing, the referent/norm/semantics/sanctioned-path
-clusters and their cache economics, the subject-keyed graph data model, the
-schema change that drops `alert_rule_ids`, the vocabulary defect blocking it, and
-frontier-keyed retrieval.
+That is a demotion, not a deletion, and what survives is narrower and better
+targeted. **`environment-corpus-and-vocabulary.md`** carries the corpus design;
+four things from it still bear on the training loop:
 
-Three things from it bear on the training loop directly, and are stated here so
-this document stands alone on them:
+**The invlang vocabulary defect is independent and still live.** Class slot values
+are unvalidated and already drifting — `compute.zone` carrying `prod`/`preprod`
+against an enum that means network topology. That blocks entity selectors as a
+retrieval key regardless of what the questioner does, so its sequence runs on its
+own timeline rather than gating this one.
 
-**The corpus is on the critical path, and its only current producer is being
-deferred.** Both feeds are judge-emitted from actor directions, and the curator
-lives inside the benign-actor author package — so deferring actor work orphans
-the corpus. The replacement is one miner over a (query, response) corpus with two
-feeds: the oracle in training, the persisted run tables at runtime.
-
-**Interception is what lets training runs author environment facts at all.** The
-original draft ruled they could not, because a training reviewer sees only
-synthetic worlds. With the real deployment as the base, a fact is sound as long as
-its supporting rows were not patched — and the applier knows exactly which rows it
-touched, so row-level provenance makes that a mechanical check.
+**Instrument semantics is the durable class**, and it is the one thing
+falsification search re-derives rather than knows. The `v2-off-hours-sudo` trap in
+§Two environment defects is the type case: no observation of the deployment tells
+you the `rule_id` lies. Whether re-deriving it costs enough to justify caching is
+a question to answer by feeling the cost, not by deciding in advance — the corpus
+that gets built because it was needed will be smaller and truer than the one
+designed up front.
 
 **Environment defect is the judge's fourth attribution bucket** (§The
 discriminator spine). When `ΔT` diverges, is not explained by the mutation, and is
@@ -718,9 +1003,18 @@ not a reasoning error, the deployment misled the defender. §Empirical grounding
 CMDB case is exactly this, and no adversary was needed to find it — a comparison
 found it.
 
-Two classes the training loop **cannot** produce, both of which must come from the
-runtime feed: observability facts (rule coverage bounds them — §What dies), and
-semantics facts that surface mid-investigation rather than at bind time.
+**Interception is what lets training runs author environment facts at all.** The
+original draft ruled they could not, because a training reviewer sees only
+synthetic worlds. With the real deployment as the base, a fact is sound as long as
+its supporting rows were not patched — and the applier knows exactly which rows it
+touched, so row-level provenance makes that a mechanical check.
+
+One class the training loop still cannot produce: semantics facts that surface
+mid-investigation rather than at bind time. Observability facts are no longer
+wholly excluded — §Grounding by falsification search generates one whenever a
+falsifier exists in the story and nothing in the deployment records it — though
+the *alert-coverage* half of that class remains bounded by rule coverage
+(§What dies).
 
 ## Authoring flow
 
@@ -787,7 +1081,8 @@ This yields two separate fitness signals:
   across mechanics without creating benign false positives?
 
 The pipeline is therefore: #695 attribution nominates; paired ablation estimates
-causal lift; probe siblings test generalization; held-out performance controls
+causal lift; the off-axis sibling separates axis-specific effects from general
+ones; held-out performance controls
 promotion and retrieval rank. Scenario evolution may use attribution as a prior,
 but only replicated causal lift is an effectiveness result.
 
@@ -844,34 +1139,42 @@ and the lessons corpora themselves.
 
 ## Sequencing
 
-**The corpus doc carries its own sequence, and items 1–5 there run first.** The
-vocabulary fixes, the schema change and the miner are prerequisites for the
-questioner having anything to ground on, and none of them waits on the training
-loop. What follows is this document's own order, assuming that work is in flight.
+**The corpus doc no longer gates this one.** Its vocabulary items still run, and
+still run early, but for a defender-side reason (entity selectors as a
+trustworthy retrieval key) rather than because the questioner needs something to
+ground on. That dependency is gone with §Grounding by falsification search, and
+the two sequences are now independent.
 
-1. **Held-out recruitment** — separate session. It gates promotion and the
-   overfitting gap, not the in-loop pairwise metrics (§Status), so it is first
+1. **Decide what to do about `falco-terminal-phase-no-upstream-chain`**
+   (§It is not one case). It is live and producing reports asserting attack chains
+   that did not happen. This waits on nothing and is not a design question.
+2. **The two cheap fixes** — prompt edits, no architecture. Unlanded across three
+   revisions of this document, and the symmetric likelihood-ratio check would have
+   caught every row in that section's table.
+3. **Held-out recruitment** — separate session. It gates promotion and the
+   overfitting gap, not the in-loop contrastive metrics (§Status), so it is early
    because promotion is worthless without it, not because it blocks the build.
    `fixtures/held-out/` is still a README.
-2. **The two cheap fixes above** — prompt edits, no architecture.
-3. **The oracle seam, Elastic side first.** Measure a typical investigation
+4. **The oracle seam, Elastic side first.** Measure a typical investigation
    window in documents, then build the scenario index (`_reindex` with a
-   transform script) and the `ELASTIC_EVENTS_INDEX` swap. This half needs no
-   interception code and inherits fail-closed from `confine_index`, so it is both
-   the cheaper half and the one that retires the aggregate problem.
-4. **The state side.** `VerbRegistry` subclass, overlay ledger, binding minting,
+   transform script) and swap **both** index config values. This half needs no
+   interception code and inherits fail-closed from `confine_index` — and its one
+   unknown, window size, can invalidate the plan, which is the argument for
+   putting it before anything that depends on it.
+5. **The state side.** `VerbRegistry` subclass, overlay ledger, binding minting,
    realization log, `oracle_queries.jsonl` — failing closed on *un-applied*
-   rather than on *leaked*. Then placeholder binding on top of it.
-5. **Solvability and resolving-path derivation**, from the world — one validation
-   pass with three stages (bind, probe, derive), not three gates.
-6. **The judge's discriminator spine, the fork, and the pair as the unit of
-   judgment.** Requires agent-state resumability.
+   rather than on *leaked*. Then placeholder binding, and falsification search on
+   top of it. There is no separate solvability step here any more: the search is
+   the derivation (§Grounding by falsification search).
+6. **The judge's discriminator spine, the fork, and the triplet as the unit of
+   judgment.** Requires agent-state resumability. The acceptance test is item 1's
+   lesson: does the triplet flag it as non-discriminating?
 7. **Questioner strategy corpus + seed pipeline** — including filling the ticket
     corpus with adjudicated cases and making the intel feed technique-shaped.
 8. **Lesson attribution in shadow mode.** #695's stable identity and
     loaded/applied/decisive sidecar without changing retrieval order. Also the
     forward-check's retirement point.
-9. **Paired ablation and probe siblings.** Establish causal lift before any
+9. **Paired ablation and off-axis siblings.** Establish causal lift before any
     attribution score affects promotion.
 10. **Curriculum search.** Mutation policy and score-informed retrieval only after
     the validity gates and held-out archive are trustworthy. Note that fork depth
@@ -884,25 +1187,37 @@ Resolved since the first draft, recorded so they are not reopened: the scenario
 spec format for systems-of-record state (dissolved by interception); whether the
 oracle needs a materialized base world (no); whether siblings must be minimal
 twins (no); whether the questioner and runtime reviewer share a corpus (moot —
-the shipped gate writes no counter-story).
+the shipped gate writes no counter-story); whether the questioner needs an
+environment corpus to ground on (no — §Grounding by falsification search); whether
+the judge's unit is the sibling pair (no — the triplet, with an off-axis control);
+and whether the judge authors its own fixes (no — it emits findings).
+
+**The largest remaining unknown is how the deviation is authored.** The retired
+spec-format question has been replaced rather than removed: falsification search
+grounds the setting, and nothing grounds the counterfactual. §The cost of a wrong
+premise prices the damage and offers two partial answers — inject at the leaves,
+and extend `discard` to episodes that reached unsupported ground — but neither is
+a method for authoring a coherent deviation across seven systems. This is where
+the next design session should start.
 
 **Decisions, not questions.** Three items block sequencing steps, so each carries
 a default and a failure branch rather than waiting for an answer:
 
-- **Removal predicates** (blocks step 6). *Default:* removal happens during
+- **Removal predicates** (blocks step 4). *Default:* removal happens during
   `_reindex` — the transform script omits the documents the overlay withdraws, so
   no contradicting rows survive because the scratch index never contains them.
   *If the window turns out too large to copy:* fall back to a filtered alias, and
   if ES|QL does not honor alias filters, scenarios that require removal are
   restricted to windows small enough to reindex, and the FP-hunt direction is
   scoped accordingly.
-- **Agent-state resumability** (blocks step 9). *Default:* snapshot the message
+- **Agent-state resumability** (blocks step 6). *Default:* snapshot the message
   history plus a copy of the run dir at a turn boundary; the two tables are
   append-only so a fork is a copy rather than a merge. *If a turn-boundary
-  snapshot proves insufficient:* the fork degrades to two independent runs, `ΔT`
-  reacquires full run-to-run variance, and the replication budget in step 12 must
-  absorb it. The design still works; it gets more expensive.
-- **The second node family for semantics facts** (blocks step 4). *Default:* two
+  snapshot proves insufficient:* the fork degrades to independent runs, `ΔT`
+  reacquires full run-to-run variance, and the replication budget in step 9 must
+  absorb it. The design still works; it gets more expensive — and it gets more
+  expensive again under the triplet, which is three trajectories rather than two.
+- **The second node family for semantics facts** (blocks step 5). *Default:* two
   discriminated subject shapes in one schema — `entity/<type>/<id>` and
   `instrument/<system>.<verb>` — rather than a synthetic vertex type that pretends
   an instrument is a deployment entity. *If that proves unwieldy:* semantics facts
@@ -928,8 +1243,23 @@ Still open:
   nothing under `learning/` reads it.
 - **Retirement path for the current corpora.** 16 defender lessons, 15
   environment facts and 12 actor lessons were authored under the old warrant and
-  the old schema. Re-derived, grandfathered, or re-keyed only?
-- **Whether the questioner counts as an actor for corpus segregation.**
-  `lessons_env_retrieve.py`'s containment guard deliberately stops the malicious
-  actor reaching `defender/lessons`. If environment facts become both questioner
-  grounding and defender world model, that boundary needs a ruling.
+  the old schema. Re-derived, grandfathered, or re-keyed only? §It is not one case
+  raises the stakes: at least one of the 16 is actively harmful, and it was found
+  by hand rather than by any gate — so the question is not only which corpora are
+  stale but which are *wrong*, and nothing currently answers that.
+- **Replication cost under the triplet.** Three trajectories per judgment instead
+  of two, against a shared prefix that only reduces variance up to the fork. The
+  control is worth paying for; how much it costs per promoted lesson is not known,
+  and it compounds with the resumability decision above.
+- **Whether the off-axis sibling needs its own solvability.** Its job is to *not*
+  move the defender's discriminating inference. That is a weaker obligation than
+  the malicious sibling's, but "nothing to find" and "something to find that the
+  defender did not look for" are different worlds and probably grade differently.
+- **What the questioner may read.** `lessons_env_retrieve.py`'s containment guard
+  stops the malicious actor reaching `defender/lessons`, on hygiene grounds that
+  do not obviously transfer — targeting blind spots is an adversary's job. There
+  is a better reason to keep the boundary anyway: lessons record what the defender
+  was *told*, outcomes record what it *does*, and the gap between them is the most
+  valuable signal in the system (§It is not one case is exactly that gap). A
+  questioner reading lessons directly cannot see it; one learning the frontier
+  from measured outcomes can.
