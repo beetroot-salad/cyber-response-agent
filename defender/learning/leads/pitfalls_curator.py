@@ -10,7 +10,9 @@ from uuid import uuid4
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
+from defender.learning.author import drain as _author_drain
 from defender.learning.author import shared as _author_shared
+from defender._io import append_jsonl
 from defender._untrusted import wrap
 from defender.learning.core import config as _loop_config
 from defender.learning.core import persist as _loop_persist
@@ -21,11 +23,15 @@ from defender.learning.leads._lead_spine import (
     _spawn_author_agent,
     _verify_corpus_scope,
 )
+from defender.learning.leads.declared_systems import (
+    ADAPTERS_REL,
+    _is_system_name,
+    adapter_declared_systems,
+)
 from defender.learning.leads.lead_extraction import LeadAuthorError
 from defender.learning.pipeline._prompt import stage_user_message, structured_json_body
 from defender.learning.leads.path_validation import (
     LEARNING_DIR,
-    SKILLS_DIR,
     SKILLS_REL,
     _is_system_execution_md,
 )
@@ -33,35 +39,7 @@ from defender.learning.leads.path_validation import (
 LEAD_PITFALLS_PROMPT = LEARNING_DIR / "leads" / "lead_pitfalls.md"
 
 
-def _is_real_system(system: str, skills_dir: Path) -> bool:
-    """Does `defender/skills/<system>/` already exist, as a checked-in system directory?
-
-    A check against MINTING, not a membership check — membership belongs to the writer that
-    set the row's `system` (`query_tool._system_of_record`), which is where #855 F-06 is
-    actually closed. This is the offline half: `execution_md_path` below is a PATH built from
-    a queue field, and the curator is told to write it, so a `system` that reached the queue
-    from anywhere unvetted mints a brand-new single-segment directory under `defender/skills/`
-    — the phantom-system class #821/#828 closed for `h-*` and `system_for_payload_operands`
-    closed for the bash shim's reducer names.
-
-    `SKILL.md`, not `execution.md`: only 3 of the 7 systems split their execution surface into
-    a sibling file today, and creating that file for a system that lacks one is exactly what
-    the curator is FOR (`docs/system-skill-shape.md`). What it may never do is invent the
-    directory around it."""
-    # A NAME, not a path. `system` is spent as ONE directory component both here and in the
-    # `execution_md_path` this predicate is gating, so a value carrying a separator, a NUL or
-    # a leading dot is not a system whose dir might exist — it is a traversal, and probing for
-    # it answers about somewhere else entirely. `".."` is the one that matters: `skills_dir /
-    # ".." / "SKILL.md"` IS `defender/SKILL.md`, which exists, so the bare probe returned True
-    # for it and the handoff minted `defender/skills/../execution.md`. Same alphabet the
-    # dispatch seam already holds a system name to (`runtime/verbs._SYSTEM_RE`), asked as the
-    # question this site has: is it a single, ordinary component.
-    if not system or system.startswith(".") or any(c in system for c in "/\\\x00"):
-        return False
-    return (skills_dir / system / "SKILL.md").is_file()
-
-
-def _build_pitfalls_handoffs(rows: list[dict], *, skills_dir: Path = SKILLS_DIR) -> list[dict]:
+def _build_pitfalls_handoffs(rows: list[dict], *, systems: frozenset[str]) -> list[dict]:
     """One entry per system, one failure per distinct MISTAKE (#840).
 
     Merges the rows itself rather than trusting its caller to have merged them — the merge
@@ -69,22 +47,18 @@ def _build_pitfalls_handoffs(rows: list[dict], *, skills_dir: Path = SKILLS_DIR)
     can hand the curator N copies of one bullet. `occurrences` rides along and orders the
     list, so the mistake a lead made eight times is the first failure the curator weighs,
     not the eighth copy it has to notice is a copy.
+
+    `systems` is the threaded membership value (NF2's adapter half alone) — a queued row
+    naming a system nothing declares yields no handoff, which is the M6 gate #869 exists for.
+    The shape check (`_is_system_name`) runs regardless of what `systems` contains, so a
+    traversal-shaped name is never a set lookup (FK-5).
     """
     by_system: dict[str, list[dict]] = {}
-    dropped: set[str] = set()
     for r in _loop_persist.merge_pitfalls(rows):
         system = str(r.get("system") or "").strip()
-        if not system:
-            continue
-        if not _is_real_system(system, skills_dir):
-            dropped.add(system)
+        if not system or not _is_system_name(system) or system not in systems:
             continue
         by_system.setdefault(system, []).append(r)
-    if dropped:
-        # Named, never dropped quietly: a batch that silently loses a system reads exactly
-        # like one that had nothing to teach it.
-        _log(f"pitfalls: dropped {len(dropped)} queued system(s) with no "
-             f"{SKILLS_REL}<system>/SKILL.md: {sorted(dropped)}")
     out: list[dict] = []
     for system in sorted(by_system):
         # `occurrences` is stamped on every record `merge_pitfalls` returns, so it is read
@@ -132,21 +106,23 @@ def _invoke_pitfalls_agent(
     )
 
 
-def _pitfalls_path_rule(xy: str, path: str, *, repo_root: Path) -> None:
+def _pitfalls_path_rule(xy: str, path: str, *, systems: frozenset[str]) -> None:
     if not _is_system_execution_md(path):
         raise LeadAuthorError(
             f"pitfalls curator edited a non-execution.md skills path ({path}); "
             "refusing to commit (its scope is execution.md only)"
         )
     # The LAST gate on the same phantom-system class the handoff filters (#855 F-06): an
-    # `execution.md` under a directory that holds no `SKILL.md` is not a system's execution
-    # surface, it is a new system directory being minted one file at a time. Creating the
-    # FILE stays legal — 4 of the 7 systems have no `execution.md` yet and the curator's job
-    # is to write the first one — so this asks about the directory, not the file.
-    if not _is_real_system(Path(path).parent.name, repo_root / SKILLS_REL):
+    # `execution.md` under an UNDECLARED directory is not a system's execution surface, it is
+    # a new system directory being minted one file at a time. Creating the FILE stays legal —
+    # a declared system may have no `execution.md` yet and the curator's job is to write the
+    # first one — so this asks about the directory's membership, not the file's existence.
+    system = Path(path).parent.name
+    if system not in systems:
         raise LeadAuthorError(
-            f"pitfalls curator wrote {path} under a directory with no SKILL.md; refusing to "
-            "commit (execution.md lands in an existing system's dir, never mints a new one)"
+            f"pitfalls curator wrote {path} under an undeclared system ({system!r}); "
+            "refusing to commit (execution.md lands in a declared system's dir, never mints "
+            "a new one)"
         )
     if "D" in xy:
         raise LeadAuthorError(
@@ -155,10 +131,12 @@ def _pitfalls_path_rule(xy: str, path: str, *, repo_root: Path) -> None:
         )
 
 
-def _verify_pitfalls_state(repo_root: Path, baseline_stray: list[str]) -> list[str]:
+def _verify_pitfalls_state(
+    repo_root: Path, baseline_stray: list[str], *, systems: frozenset[str],
+) -> list[str]:
     return _verify_corpus_scope(
         repo_root, baseline_stray, actor="pitfalls curator",
-        rule=partial(_pitfalls_path_rule, repo_root=repo_root),
+        rule=partial(_pitfalls_path_rule, systems=systems),
     )
 
 
@@ -169,6 +147,50 @@ def _pitfalls_commit_message(changed: list[str]) -> str:
         "## Common pitfalls; loop-committed (the agent runs no git).",
         changed,
     )
+
+
+def _require_adapter_declared_systems(repo_root: Path) -> frozenset[str]:
+    """NF2's second resolution point, resolved once at the pitfalls lane's own boundary
+    (adapter half alone), refusing loudly rather than spending an empty set as an ordinary
+    per-row membership "no" (RF6)."""
+    systems = adapter_declared_systems(repo_root)
+    if not systems:
+        message = (
+            f"pitfalls curation refused: {repo_root / ADAPTERS_REL} declares no systems; "
+            "refusing to run the pitfalls lane against an empty declared set"
+        )
+        _log(message)
+        raise LeadAuthorError(message)
+    return systems
+
+
+def _split_batch_by_membership(
+    rows: list[dict], batch_ids: list[str], kept: set[str],
+) -> tuple[list[str], list[str]]:
+    committed_ids = [
+        str(r["pitfall_id"]) for r in rows
+        if r.get("pitfall_id") and str(r.get("system") or "").strip() in kept
+    ]
+    dropped_ids = [i for i in batch_ids if i not in set(committed_ids)]
+    return committed_ids, dropped_ids
+
+
+def _graveyard_dropped_rows(paths, rows: list[dict], dropped_ids: list[str]) -> None:
+    """FK-2: a dropped row is TERMINAL and leaves a durable record for human review — the
+    queue's own bump-and-retire ceiling (`drain.retire`) does not apply, since an undeclared
+    name is refused on the FIRST tick, never retried."""
+    if not dropped_ids:
+        return
+    ids = set(dropped_ids)
+    key = paths.pitfalls.id_key
+    entries = [
+        {key: r[key], "deadletter_reason": "system not in the declared adapter set", "row": r}
+        for r in rows if r.get(key) in ids
+    ]
+    if entries:
+        append_jsonl(  # lint-unguarded-tree-write: ok — learning_queue sidecar, host-side, outside every box mount
+            _author_drain.graveyard_file(paths.pitfalls), entries,
+        )
 
 
 def run_pitfalls(
@@ -195,15 +217,35 @@ def run_pitfalls(
     # that fed a record, not just the exemplar the merge kept.
     batch_ids = [str(r["pitfall_id"]) for r in rows if r.get("pitfall_id")]
     repo_root = paths.repo_root
-    # The WORKTREE's skills tree, not the process's own: this run commits into `repo_root`, so
-    # the directories that exist there are the ones a handoff path may name.
-    handoffs = _build_pitfalls_handoffs(records, skills_dir=repo_root / SKILLS_REL)
+    # The WORKTREE's own sources, not the process's own checkout: this run commits into
+    # `repo_root`, so this is the tree a handoff path may name. NF2's second resolution
+    # point — the ADAPTER HALF ALONE — resolved ONCE here, before the agent is ever spawned.
+    systems = _require_adapter_declared_systems(repo_root)
+    handoffs = _build_pitfalls_handoffs(records, systems=systems)
+    kept = {h["system"] for h in handoffs}
+    dropped = sorted({
+        s for r in records
+        if (s := str(r.get("system") or "").strip()) and s not in kept
+    })
+    if dropped:
+        # Named, never dropped quietly: a batch that silently loses a system reads exactly
+        # like one that had nothing to teach it. Names the ONE source this lane consulted
+        # (NF2) — never the marker source, which this lane never reads.
+        _log(
+            f"pitfalls: dropped {len(dropped)} queued system(s) not in the declared adapter "
+            f"set ({repo_root / ADAPTERS_REL}): {dropped}"
+        )
+    committed_ids, dropped_ids = _split_batch_by_membership(rows, batch_ids, kept)
+
     if not handoffs:
         _log(
             f"{len(records)} queued pitfall(s) in {len(batch_ids)} row(s) but none named a "
-            "system with a checked-in defender/skills/<system>/SKILL.md — dropping"
+            f"system the adapter set at {repo_root / ADAPTERS_REL} declares — dropping"
         )
-        _loop_persist.rotate_pitfalls(batch_ids, None, paths=paths)
+        _graveyard_dropped_rows(paths, rows, dropped_ids)
+        _loop_persist.rotate_pitfalls(
+            dropped_ids, None, paths=paths, category="consumed_undeclared",
+        )
         return 0
     baseline_stray = _author_shared.changes_outside(repo_root, SKILLS_REL)
     # `len(rows)`, not `sum(occurrences)`: a queue row IS one occurrence, so the two are the
@@ -223,7 +265,7 @@ def run_pitfalls(
             f"pitfalls curator exited rc={rc}; leaving queue intact"
         )
 
-    changed = _verify_pitfalls_state(repo_root, baseline_stray)
+    changed = _verify_pitfalls_state(repo_root, baseline_stray, systems=systems)
     sha = None
     if changed:
         sha = _author_shared.commit_corpus(
@@ -232,9 +274,18 @@ def run_pitfalls(
         )
     else:
         _log("pitfalls curator made no execution.md edits (valid no-edit tick)")
-    _loop_persist.rotate_pitfalls(batch_ids, sha, paths=paths)
+    if committed_ids:
+        _loop_persist.rotate_pitfalls(
+            committed_ids, sha, paths=paths, category="consumed_committed",
+        )
+    if dropped_ids:
+        _graveyard_dropped_rows(paths, rows, dropped_ids)
+        _loop_persist.rotate_pitfalls(
+            dropped_ids, None, paths=paths, category="consumed_undeclared",
+        )
     _log(
         f"pitfalls curation done; commit={(sha or 'none')[:12]}, edits={len(changed)}, "
-        f"rotated {len(batch_ids)} row(s) out of the queue"
+        f"rotated {len(batch_ids)} row(s) out of the queue "
+        f"({len(dropped_ids)} undeclared)"
     )
     return 0

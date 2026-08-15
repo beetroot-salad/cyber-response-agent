@@ -301,6 +301,27 @@ def test_declared_systems_raises_when_either_source_is_unresolvable(tmp_path):
         declared_systems(not_a_repo)
 
 
+def test_declared_systems_raises_on_an_unborn_head(tmp_path):
+    """The fourth arm of the git-primitive taxonomy the spec deferred to this phase
+    (`spec_graph_869.yaml` handoff.deferred, NF1's exception taxonomy): a repository that
+    exists and is readable but has never been committed to. `HEAD` does not resolve to any
+    object at all — distinct from `no_skills` (HEAD resolves; the path is absent there) and
+    from `not_a_repo` (no `.git` at all) — and `git cat-file -e HEAD:...` fails the same way
+    `git ls-tree -r --name-only HEAD` does, `fatal: invalid object name 'HEAD'` (rc=128), so
+    the resolver's existing HEAD-existence probe already refuses it; this pins that as a
+    tested contract rather than an accident of the primitive.
+
+    A detached HEAD is NOT a fifth arm: once a commit is checked out, `HEAD` resolves
+    identically whether attached to a branch or not, so `declared_systems` cannot
+    distinguish it from the ordinary case and no separate test is owed."""
+    unborn = init_git(tmp_path / "unborn")
+    write_adapter(unborn, "elastic")
+    write_marker(unborn, "elastic")
+    assert not _git.git_ok(["rev-parse", "--verify", "--quiet", "HEAD"], cwd=unborn)
+    with pytest.raises(LeadAuthorError):
+        declared_systems(unborn)
+
+
 def test_the_resolver_tests_each_source_rather_than_trusting_the_glob(tmp_path):
     """The raise comes from an EXPLICIT per-source test, never inherited from `Path.glob`.
 

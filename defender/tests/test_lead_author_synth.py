@@ -50,7 +50,8 @@ def _catalog(tmp_path) -> Path:
 def test_unresolved_verb_is_drafted(tmp_path):
     cat = _catalog(tmp_path)
     created = lead_author.synthesize_drafts(
-        [_lead("stub-cmdb.network-map", {"name": "web-1"}, verb="map")], catalog_dir=cat)
+        [_lead("stub-cmdb.network-map", {"name": "web-1"}, verb="map")], catalog_dir=cat,
+        systems=frozenset({"stub-cmdb"}))
     draft = cat / "stub-cmdb" / "_draft" / "network-map.md"
     assert created == [draft]
     text = draft.read_text()
@@ -60,22 +61,27 @@ def test_unresolved_verb_is_drafted(tmp_path):
 
 def test_resolved_verb_not_drafted(tmp_path):
     cat = _catalog(tmp_path)
-    assert lead_author.synthesize_drafts([_lead("host-query.proc-tree")], catalog_dir=cat) == []
+    assert lead_author.synthesize_drafts(
+        [_lead("host-query.proc-tree")], catalog_dir=cat,
+        systems=frozenset({"host-query"})) == []
 
 
 def test_adhoc_query_id_skipped(tmp_path):
     cat = _catalog(tmp_path)
-    assert lead_author.synthesize_drafts([_lead("ad-hoc")], catalog_dir=cat) == []
+    assert lead_author.synthesize_drafts(
+        [_lead("ad-hoc")], catalog_dir=cat, systems=frozenset()) == []
     assert not (cat / "ad-hoc").exists()
 
 
 def test_idempotent(tmp_path):
     cat = _catalog(tmp_path)
     first = lead_author.synthesize_drafts(
-        [_lead("stub-cmdb.network-map", {"name": "web-1"}, verb="map")], catalog_dir=cat)
+        [_lead("stub-cmdb.network-map", {"name": "web-1"}, verb="map")], catalog_dir=cat,
+        systems=frozenset({"stub-cmdb"}))
     assert first
     second = lead_author.synthesize_drafts(
-        [_lead("stub-cmdb.network-map", {"name": "web-1"}, verb="map")], catalog_dir=cat)
+        [_lead("stub-cmdb.network-map", {"name": "web-1"}, verb="map")], catalog_dir=cat,
+        systems=frozenset({"stub-cmdb"}))
     assert second == []
 
 
@@ -95,7 +101,7 @@ def test_esql_draft_carries_literal_query_not_placeholder(tmp_path):
     lead_author.synthesize_drafts([
         _lead("elastic.sshd-failed-by-srcip", {"query": _ESQL_PIPE}, verb="esql",
               system="elastic"),
-    ], catalog_dir=cat)
+    ], catalog_dir=cat, systems=frozenset({"elastic"}))
     text = (cat / "elastic" / "_draft" / "sshd-failed-by-srcip.md").read_text()
     assert "engine: esql" in text
     assert "```esql" in text
@@ -140,7 +146,7 @@ def test_malformed_query_id_does_not_mint_off_surface_draft(tmp_path):
     created = lead_author.synthesize_drafts([
         _lead(".verb", {"query": _ESQL_PIPE}, verb="esql", system="elastic"),
         _lead("elastic.", {"query": _ESQL_PIPE}, verb="esql", system="elastic"),
-    ], catalog_dir=cat)
+    ], catalog_dir=cat, systems=frozenset({"elastic"}))
     assert created == []
     assert not (cat / "_draft").exists()
     assert not (cat / "elastic" / "_draft" / ".md").exists()
@@ -152,7 +158,7 @@ def test_grok_braces_in_query_do_not_crash_skeleton(tmp_path):
     grok_pipe = 'FROM logs-* | GROK message "%{IP:src} %{WORD:action}" | STATS c = COUNT(*) BY action'
     created = lead_author.synthesize_drafts([
         _lead("elastic.grok-probe", {"query": grok_pipe}, verb="esql", system="elastic"),
-    ], catalog_dir=cat)
+    ], catalog_dir=cat, systems=frozenset({"elastic"}))
     assert created
     assert "%{IP:src}" in (cat / "elastic" / "_draft" / "grok-probe.md").read_text()
 
@@ -166,7 +172,7 @@ def test_traversal_query_id_does_not_escape_catalog(tmp_path):
     created = lead_author.synthesize_drafts([
         _lead("elastic.../../../../PWNED", {"query": _ESQL_PIPE}, verb="esql", system="elastic"),
         _lead("../../etc.passwd", {"query": _ESQL_PIPE}, verb="esql", system="elastic"),
-    ], catalog_dir=cat)
+    ], catalog_dir=cat, systems=frozenset({"elastic"}))
     assert created == []
     assert not (tmp_path / "PWNED.md").exists()
     assert list(tmp_path.rglob("PWNED.md")) == []
@@ -188,7 +194,7 @@ def test_control_character_query_id_does_not_mint_an_unparseable_draft(tmp_path)
     created = lead_author.synthesize_drafts([
         _lead("elastic\n.probe", {"query": _ESQL_PIPE}, verb="esql", system="elastic"),
         _lead("elastic.probe\n", {"query": _ESQL_PIPE}, verb="esql", system="elastic"),
-    ], catalog_dir=cat)
+    ], catalog_dir=cat, systems=frozenset({"elastic"}))
     assert created == []
     assert [p for p in cat.rglob("*") if "\n" in p.name] == []
     assert not (cat / "elastic" / "_draft").exists()
@@ -212,5 +218,5 @@ def test_untagged_verb_not_drafted(tmp_path):
     cat = _catalog(tmp_path)
     assert lead_author.synthesize_drafts([
         _lead("elastic.esql", {"query": _ESQL_PIPE}, verb="esql", system="elastic"),
-    ], catalog_dir=cat) == []
+    ], catalog_dir=cat, systems=frozenset({"elastic"})) == []
     assert not (cat / "elastic" / "_draft" / "esql.md").exists()

@@ -700,13 +700,16 @@ def test_the_self_case_list_filter_still_excludes_the_current_ticket(tmp_path: P
 
 def test_an_impersonated_query_id_does_not_change_the_grant_decision(tmp_path: Path):
     """A `query_id` impersonating a committed template id belonging to another system or
-    verb changes neither what the verb_grant enforces nor what the call is recorded as
-    having been: the grant decision is a function of role, system and verb, and of nothing
-    else. The role grant expresses no per-params, per-template or per-`query_id` constraint.
+    verb changes neither what the verb_grant enforces nor what SYSTEM/VERB the call is
+    recorded as having been: the grant decision is a function of role, system and verb, and
+    of nothing else. The role grant expresses no per-params, per-template or per-`query_id`
+    constraint.
 
-    Recorded and NOT built (RS8): whether a DOWNSTREAM consumer attributes a call to a
-    template by that forgeable id matters only if the unused-grant flag ships, which §7 R18
-    leaves to the design's own open question."""
+    The `query_id` itself is a DIFFERENT story since #869 (M3/FK-7): `resolve_query_id`
+    refuses a prefix that disagrees with the call's own dispatched system — the fix for the
+    exact impersonation this test builds — so the forged, foreign-prefixed id never reaches
+    the row at all; it falls back to the untagged `{system}.{verb}` value, which is what is
+    asserted below instead of the forged string."""
     rec = VerbRecorder()
     forged = "ticket.get-ticket-by-key"
 
@@ -718,6 +721,7 @@ def test_an_impersonated_query_id_does_not_change_the_grant_decision(tmp_path: P
     allowed = run_gather(tmp_path / "b", verbs=_registry(rec),
                          turns=[q(*GRANTED_PAIR, query_id=forged), DONE], run_id="d69-allowed")
     assert [c.verb for c in rec.calls] == ["query"]
-    assert allowed.own_rows[0]["query_id"] == forged
+    assert allowed.own_rows[0]["query_id"] == "elastic.query"
+    assert "ticket" not in allowed.own_rows[0]["query_id"]
     assert allowed.own_rows[0]["system"] == "elastic"
     assert allowed.own_rows[0]["verb"] == "query"

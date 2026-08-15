@@ -14,6 +14,7 @@ class DefenderPaths:
 
     catalog_rel: ClassVar[str] = "defender/skills/gather/queries/"
     skills_rel: ClassVar[str] = "defender/skills/"
+    adapters_rel: ClassVar[str] = "defender/scripts/adapters/"
     lessons_dir_rel: ClassVar[str] = "defender/lessons/"
     lessons_actor_dir_rel: ClassVar[str] = "defender/lessons-actor/"
     lessons_environment_dir_rel: ClassVar[str] = "defender/lessons-environment/"
@@ -33,6 +34,10 @@ class DefenderPaths:
     @property
     def skills_dir(self) -> Path:
         return self.defender_dir / "skills"
+
+    @property
+    def adapters_dir(self) -> Path:
+        return self.defender_dir / "scripts" / "adapters"
 
     @property
     def lessons_dir(self) -> Path:

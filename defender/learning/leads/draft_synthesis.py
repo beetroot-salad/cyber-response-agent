@@ -11,12 +11,15 @@ import yaml
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
+from defender.learning.core import config as _loop_config
 from defender.learning.leads import lead_neighbors
 from defender.learning.leads.path_validation import CATALOG_DIR
 from defender.runtime.verbs import body_param_for, engine_for
 
 if TYPE_CHECKING:
     from defender.learning.leads.lead_extraction import ExecutedLead
+
+_log = _loop_config.make_logger("lead-author", flush=True)
 
 
 #: The sink-side hostile-id guard on a MODEL-COINED `query_id` segment, anchored at both
@@ -108,7 +111,7 @@ def _draft_candidate_segments(
 
 def synthesize_drafts(
     executed: list[ExecutedLead], *, catalog_dir: Path = CATALOG_DIR,
-    catalog: list | None = None,
+    catalog: list | None = None, systems: frozenset[str],
 ) -> list[Path]:
     if catalog is None:
         catalog = lead_neighbors.load_catalog(catalog_dir)
@@ -120,6 +123,15 @@ def synthesize_drafts(
         if segs is None:
             continue
         system, suffix = segs
+        if system not in systems:
+            # M4/FK-3: site 3, the host-side writer, is reachable TODAY — a mkdir+write_text
+            # from a model-supplied query_id, before the agent is ever spawned. Refused and
+            # REPORTED (O3 mints this surface; there is none today).
+            _log(
+                f"synthesize_drafts: refused to mint a draft for {system!r} "
+                f"(query_id={qid!r}); not a declared system"
+            )
+            continue
         draft = catalog_dir / system / "_draft" / f"{suffix}.md"
         draft_root = (catalog_dir / system / "_draft").resolve()
         if not draft.resolve().is_relative_to(draft_root):

@@ -62,6 +62,10 @@ def seed_skills_repo(repo: Path) -> Path:
     which is the one part that should differ: each names its own subject. Those stay with
     their fixtures.
     """
+    adapters = repo / "defender" / "scripts" / "adapters"
+    adapters.mkdir(parents=True)
+    (adapters / "wazuh_adapter.py").write_text("VERBS = {}\n")
+    (adapters / "elastic_adapter.py").write_text("VERBS = {}\n")
     catalog = repo / "defender" / "skills" / "gather" / "queries"
     (catalog / "wazuh" / "_draft").mkdir(parents=True)
     (catalog / "SCHEMA.md").write_text("# template schema\n")
