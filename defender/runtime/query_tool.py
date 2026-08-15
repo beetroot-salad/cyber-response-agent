@@ -584,7 +584,7 @@ class QueryCapture(AbstractCapability[Any]):
 
 
 #: What a param renders as when its declared annotation could not be resolved. NOT cosmetic:
-#: `_resolved_hints` swallows an unresolvable annotation and returns `{}` (verbs.py:147-151),
+#: `_resolved_hints` swallows an unresolvable annotation and returns `{}` (verbs.py:166-170),
 #: after which `validate_params` type-checks NOTHING and accepts any value. A surface that
 #: printed the annotation there would promise a check the boundary does not make — the one way
 #: this tool could lie about the thing it exists to report (#900 O3).
@@ -626,11 +626,19 @@ _LIST_VERBS_UNKNOWN_SYSTEM = (
 #: containment check under the adapters dir — an unmatched name raises `KeyError` into the
 #: branch above — so interpolating it into a path here cannot mint an arbitrary model-named
 #: one (the #855 F-06 concern, which is about a model string reaching a corpus WRITE).
+#:
+#: THE FALLBACK NAMES WHAT THAT FILE STILL HOLDS, and no more (#900): the same change that
+#: added this tool deleted the hand-authored verb/param blocks from every `execution.md`, so
+#: sending the lead there for "its documented surface" would send it to a file whose `## Verbs`
+#: section now says "call `list_verbs`" — the call that just failed. Value constraints and
+#: recorded pitfalls DO still live there, and those are what it is offered for.
 _LIST_VERBS_UNLOADABLE = (
     "`{system}` — UNAVAILABLE: its adapter could not be loaded ({err}). No verb surface can be "
-    "derived for it right now. Its documented surface is "
-    "`defender/skills/{system}/execution.md`; report the failure in your summary rather than "
-    "guessing a verb or a param name."
+    "derived for it right now, and no file carries a copy — the verb roster and its params are "
+    "read from the live signatures and nowhere else. "
+    "`defender/skills/{system}/execution.md` still states this system's value constraints and "
+    "recorded pitfalls; report the failure in your summary rather than guessing a verb or a "
+    "param name."
 )
 
 #: A THIRD failure, distinct from both of the above: the adapter loaded and the grant is not
@@ -640,9 +648,10 @@ _LIST_VERBS_UNLOADABLE = (
 #: defender-side fault it cannot route around.
 _LIST_VERBS_UNDERIVABLE = (
     "`{system}` — UNAVAILABLE: its verb surface could not be derived ({err}). That is a "
-    "defender-side fault, not something your call can fix. Its documented surface is "
-    "`defender/skills/{system}/execution.md`; report the failure in your summary rather than "
-    "guessing a verb or a param name."
+    "defender-side fault, not something your call can fix, and no file carries a copy of the "
+    "surface. `defender/skills/{system}/execution.md` still states this system's value "
+    "constraints and recorded pitfalls; report the failure in your summary rather than guessing "
+    "a verb or a param name."
 )
 
 #: A system whose registry answer carries NO verb at all — a missing or malformed `VERBS`
@@ -651,8 +660,10 @@ _LIST_VERBS_UNDERIVABLE = (
 #: that the two emptinesses call for opposite responses.
 _LIST_VERBS_NO_VERBS = (
     "`{system}` — UNAVAILABLE: its adapter declares no verbs at all, so no verb surface can be "
-    "derived for it. Its documented surface is `defender/skills/{system}/execution.md`; report "
-    "the failure in your summary rather than guessing a verb or a param name."
+    "derived for it, and no file carries a copy. "
+    "`defender/skills/{system}/execution.md` still states this system's value constraints and "
+    "recorded pitfalls; report the failure in your summary rather than guessing a verb or a "
+    "param name."
 )
 
 #: The OTHER emptiness, and it is not the one above — the same split `_INDEX_NONE_GRANTED`
@@ -686,7 +697,8 @@ _LIST_VERBS_LEGEND = (
 _LIST_VERBS_UNENFORCED_NOTE = (
     "\nA descriptor opening `<{marker}` marks a param whose declared annotation could not be "
     "resolved, so the boundary does NOT type-check it — a wrong-typed value there reaches the "
-    "adapter instead of being refused. Bind it as that verb's `execution.md` documents.\n"
+    "adapter instead of being refused. Bind it to the value constraint this system's "
+    "`execution.md` states, and treat a surprising answer as suspect rather than as data.\n"
 )
 
 
@@ -734,10 +746,25 @@ def _echoed_system(system: str) -> str:
     in the lead's own context (`_QID_FORBIDDEN`'s render half, and the reason
     `_undeclared_target` refuses to echo one at all). `repr` on a bounded slice keeps the
     string legible without letting it carry structure.
+
+    The BACKTICK is dropped rather than left to `repr`, which escapes newlines and quotes and
+    passes a backtick through untouched: every interpolation site wraps this value in a `` ` ``
+    span, so one backtick inside closes the span early and the rest of the model's string lands
+    as prose in the lead's context. Dropping it costs nothing a debug echo needs.
     """
     if _SYSTEM_RE.match(system) and len(system) <= _ECHO_SYSTEM_MAX_LEN:
         return system
-    return repr(system[:_ECHO_SYSTEM_MAX_LEN])
+    return repr(system[:_ECHO_SYSTEM_MAX_LEN]).replace("`", "")
+
+
+#: What every guarded read below RE-RAISES rather than degrading: the framework's own control
+#: flow plus the kills that end the process. Named once because the four readers below repeated
+#: the same two `except` clauses verbatim, and a fifth reader added later must not be able to
+#: copy half of them.
+_RERAISE: tuple[type[BaseException], ...] = (
+    *CONTROL_FLOW_EXCEPTIONS,
+    BudgetKill, KeyboardInterrupt, GeneratorExit, asyncio.CancelledError,
+)
 
 
 def _registry_declares(registry: Any, system: str) -> bool:
@@ -749,9 +776,7 @@ def _registry_declares(registry: Any, system: str) -> bool:
     """
     try:
         return system in registry.systems()
-    except CONTROL_FLOW_EXCEPTIONS:
-        raise
-    except (BudgetKill, KeyboardInterrupt, GeneratorExit, asyncio.CancelledError):
+    except _RERAISE:
         raise
     except BaseException:  # noqa: BLE001 — a registry that cannot list declares nothing
         return False
@@ -761,11 +786,17 @@ def _granted_systems(registry: Any) -> tuple[str, ...]:
     """The systems this role's grant reaches, or `()` when the registry cannot say."""
     try:
         return tuple(sorted(registry.grant.systems))
-    except CONTROL_FLOW_EXCEPTIONS:
+    except _RERAISE:
         raise
-    except (BudgetKill, KeyboardInterrupt, GeneratorExit, asyncio.CancelledError):
-        raise
-    except BaseException:  # noqa: BLE001 — a registry that cannot name its grant reaches nothing
+    except BaseException as e:  # noqa: BLE001 — a registry that cannot name its grant reaches nothing
+        # LOUD on the operator channel, for the same reason `_system_of_record` is: this arm
+        # answers "your grant reaches nothing" for EVERY system in the run, which reads to the
+        # lead as a correctly-empty grant rather than as a broken registry. The tool's own
+        # answer cannot carry the distinction without turning a defender fault into a routing
+        # instruction, so the transcript is where it has to land.
+        print(f"[query_tool] verb registry could not name its grant "
+              f"({type(e).__name__}: {e}); list_verbs will answer 'no system reached'",
+              file=sys.stderr)
         return ()
 
 
@@ -776,18 +807,21 @@ def _list_verbs_declared(
     that must be answered instead. Never both, and never an exception out of the tool."""
     try:
         declared = registry.verbs(system)
-    except KeyError:
+    except KeyError as e:
         # A bare `KeyError` is `ModuleVerbRegistry.verbs`' "no adapter under that name" — but it
         # is ALSO whatever a broken adapter raises while importing (a module-scope
         # `os.environ[...]`, a missing dict key). Answering the second with "confirm the name
         # and call again" sends the lead to re-ask a question that will keep failing, so the
         # registry's own system list decides which of the two this is.
+        #
+        # The KEY is carried into the message, exactly as the general arm below carries its
+        # exception's text: this arm is reached for the import-time `KeyError`, where the
+        # missing name (`TICKET_URL`, say) is the whole of the diagnosis, and a bare
+        # "(KeyError)" hands the operator reading the transcript nothing to act on.
         if _registry_declares(registry, system):
-            return {}, _LIST_VERBS_UNLOADABLE.format(system=shown, err="KeyError")
+            return {}, _LIST_VERBS_UNLOADABLE.format(system=shown, err=f"KeyError: {e}")
         return {}, _LIST_VERBS_UNKNOWN_SYSTEM.format(system=shown)
-    except CONTROL_FLOW_EXCEPTIONS:
-        raise
-    except (BudgetKill, KeyboardInterrupt, GeneratorExit, asyncio.CancelledError):
+    except _RERAISE:
         raise
     except BaseException as e:  # noqa: BLE001 — an adapter that will not import is a degradation
         return {}, _LIST_VERBS_UNLOADABLE.format(system=shown, err=f"{type(e).__name__}: {e}")
@@ -828,9 +862,7 @@ def _list_verbs_line(
         # an unbounded model-authored name should land unescaped.
         line = f'query(system="{shown}", verb="{verb}", params={{{rendered}}})'
         return (line, any(name not in hints for name in params)), None
-    except CONTROL_FLOW_EXCEPTIONS:
-        raise
-    except (BudgetKill, KeyboardInterrupt, GeneratorExit, asyncio.CancelledError):
+    except _RERAISE:
         raise
     except BaseException as e:  # noqa: BLE001 — a surface that cannot be derived degrades loud
         return None, _LIST_VERBS_UNDERIVABLE.format(
@@ -842,7 +874,7 @@ def _tool_list_verbs(registry: Any, system: str) -> str:
     """`system`'s granted verbs and their declared params, derived at call time.
 
     The two readers are `model_facing_params` and `_resolved_hints` — the SAME pair
-    `validate_params` enforces on (verbs.py:177-213) — so what this publishes and what the
+    `validate_params` enforces on (verbs.py:196-232) — so what this publishes and what the
     boundary accepts cannot drift apart. The grant filter goes through `registry.decide`
     rather than `grant.allows` for the same reason one layer up: `decide` is the dispatch
     path's own decision point, so a verb this names is a verb `query` would admit.

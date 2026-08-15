@@ -10,9 +10,10 @@ read. The merged view is what callers see — overlay endpoints exist
 for chaos scenarios and are **not** exposed by this adapter.
 
 This file is the **visibility surface** — read by the defender, the
-author skill, and the actor-reviewer judge. Execution details (the
-verb surface, transport, exit codes) live in `execution.md`, read
-only by gather. The defender treats this system as a question
+author skill, and the actor-reviewer judge. Execution details
+(transport, exit codes, param value constraints) live in
+`execution.md`, read only by gather; the verb roster and each verb's
+params come from the `list_verbs` tool. The defender treats this system as a question
 source; gather decides how to ask.
 
 ## Visibility surface

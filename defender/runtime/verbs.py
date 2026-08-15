@@ -5,6 +5,7 @@ import ast
 import importlib.util
 import inspect
 import re
+import threading
 import types
 import typing
 from collections.abc import Callable, Mapping
@@ -239,18 +240,30 @@ def _system_of(path: Path) -> str:
 
 _MODULES: dict[str, Any] = {}
 
+#: Serializes the check-then-exec below. `list_verbs` (#900) is the first reader that resolves
+#: an adapter off the EVENT LOOP — `asyncio.to_thread(_tool_list_verbs, …)` — and the main
+#: agent dispatches sibling gather leads in parallel, so two leads naming the same system can
+#: both miss `_MODULES` and both `exec_module` the adapter: its module-scope side effects run
+#: twice and the two halves of the run hold different function objects for one verb. `RLock`,
+#: not `Lock`: an adapter whose import reaches back into the registry would deadlock a plain
+#: one on its own thread.
+_MODULES_LOCK = threading.RLock()
+
 
 def _load_adapter_module(path: Path) -> Any:
     resolved = path.resolve()
     key = str(resolved)
-    if key not in _MODULES:
-        spec = importlib.util.spec_from_file_location(f"_defender_adapter_{abs(hash(key))}", resolved)
-        if spec is None or spec.loader is None:
-            raise ImportError(f"could not load adapter module {resolved}")
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        _MODULES[key] = module
-    return _MODULES[key]
+    with _MODULES_LOCK:
+        if key not in _MODULES:
+            spec = importlib.util.spec_from_file_location(
+                f"_defender_adapter_{abs(hash(key))}", resolved,
+            )
+            if spec is None or spec.loader is None:
+                raise ImportError(f"could not load adapter module {resolved}")
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            _MODULES[key] = module
+        return _MODULES[key]
 
 
 def _adapter_path(adapters_dir: Path, system: str) -> Path | None:
