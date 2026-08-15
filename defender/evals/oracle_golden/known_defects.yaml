@@ -1,0 +1,71 @@
+# Control records whose STORED MEASUREMENT is known to be invalid (#882).
+#
+# This is not a suppression list. Every entry names a measurement that is wrong and
+# stays wrong until someone re-measures it against the live playground-v2 stack, which
+# is a capture session and not a code change. What the file buys is the ability to tell
+# an ACCEPTED, tracked defect from a NEW one: before it existed, `validate_cases.py`
+# exited 1 on every run over the committed tree with eight lines every caller had been
+# told to ignore, so a third corrupted record next month would have added lines 9-12 to
+# a command nobody reads. Now the tracked ones are printed and non-fatal, and anything
+# else fails.
+#
+# Two rules keep it from rotting into a silence:
+#
+#   - an entry whose record no longer HAS the defect is itself a failure. Repairing a
+#     record means deleting its entry in the same change; leaving it behind would let
+#     the next real defect at that key be waived by a stale line.
+#   - an entry naming a record that does not exist is a failure, for the same reason
+#     the held-out ledger refuses one.
+#
+# `judge.load_lead_inputs` does NOT read this file. The label pass is still shown these
+# controls as ordinary baselines, which is the remaining exposure: an invalidly measured
+# control reads as an empty baseline, and every observed row is distinguishable from an
+# empty baseline. Withholding them honestly needs a `prompts/label.md` change (the
+# existing "not measured" route is `window_live: false`, which asserts the environment
+# was down — untrue here), and that changes `prompts_sha8`, which re-tags every committed
+# score. Tracked as a separate decision rather than smuggled in here.
+
+entries:
+  - case: case-010-crosstier-web2
+    lead: l-006
+    seq: 1
+    defect: added-window-behind-another-command
+    issue: 882
+    reason: >
+      Measured before #882 fixed `add_esql_window`, which spliced on newlines while
+      ES|QL separates commands with `|`. The lead's query is the single line
+      `FROM logs-zeek.ssh-* | LIMIT 1`, so the control window was appended AFTER
+      `LIMIT`: one arbitrary row is taken and then filtered by timestamp. All three
+      controls and the attack_contribution record `live: true` with `row_count: 0`,
+      and that zero is the splice rather than a quiet stream — the sibling record
+      `l-006/6.json` is a multi-line query over the same index and the same three
+      windows and returns 20 rows in each.
+    split: held-out
+    repair: >
+      Re-run `controls.py` for this case against the live stack. The recorded held-out
+      score for tag glm-5.2_effort-none_prompt-711__judge-claude-opus-5-high_47d6044a
+      was taken against this baseline, so it must be re-scored under a NEW tag — the
+      ledger refuses a second write under a recorded one. The ledger hashes
+      `scores/<tag>.json` and not `hidden/`, so repairing the artifact does not break
+      `check_held_out_ledger`.
+
+  - case: case-012-bruteforce-db1
+    lead: l-006
+    seq: 6
+    defect: added-window-behind-another-command
+    issue: 882
+    reason: >
+      The same splice. The lead's query is a by-`_id` fetch
+      (`FROM .ds-logs-system.auth-default-… METADATA _id | WHERE _id == … | KEEP … |
+      LIMIT 10`), so the window landed at command 4, behind the `_id` filter, the
+      `KEEP` and the `LIMIT`. This one would read zero rows wherever the clause
+      landed — two specific documents cannot appear in a window 14 to 28 days before
+      they were written — so the stored row counts are not themselves misleading; the
+      record is listed because the query string is not the control it claims to be,
+      and a by-`_id` control is not a baseline in the first place.
+    split: dev
+    repair: >
+      Re-run `controls.py` for this case against the live stack. `split: dev`, so no
+      ledger constraint applies. Consider instead whether a by-`_id` fetch should be
+      controlled at all — it has no baseline semantics, and `measure_controls`
+      refusing it outright would be the better fix.

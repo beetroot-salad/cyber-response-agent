@@ -480,3 +480,121 @@ def test_a_lead_whose_payloads_match_its_own_seqs_is_not_a_problem(tmp_path):
             {"query_id": "elastic.b", "params": {"query": "FROM b"}, "seq": 4}]}) + "\n",
         encoding="utf-8")
     assert validate_cases.check_seq_keying(d) == []
+
+
+# ------------------------------------------------------- the accepted-defect registry
+
+_BAD = (f'FROM logs-zeek.ssh-* | LIMIT 1 | WHERE @timestamp >= "{_WINDOW[0]}" '
+        f'AND @timestamp < "{_WINDOW[1]}"')
+
+
+def _two_bad_records(root, name="case-x"):
+    """One case whose lead has two queries, BOTH controlled by a misplaced window."""
+    d = _case(root, name)
+    (d / "oracle_visible" / "leads.jsonl").write_text(
+        json.dumps({"lead_id": "l-001", "queries": [
+            {"query_id": "elastic.ad-hoc", "params": {"query": _UNBOUNDED}, "seq": s}
+            for s in (0, 1)]}) + "\n", encoding="utf-8")
+    cd = d / "hidden" / "controls" / "l-001"
+    cd.mkdir(parents=True)
+    for s in (0, 1):
+        (cd / f"{s}.json").write_text(json.dumps({
+            "lead_id": "l-001", "seq": s,
+            "controls": [{"name": "C-14d", "window": _WINDOW, "query": _BAD,
+                          "live": True, "payload": {"row_count": 0}}],
+        }), encoding="utf-8")
+    return d
+
+
+def test_a_waiver_covers_one_record_and_not_its_neighbour(tmp_path):
+    """The registry is keyed by `(case, lead, seq)` because a case is the wrong
+    granularity: waiving at case level would let one accepted defect hide every later one
+    in the same case, which is the failure the file exists to prevent."""
+    d = _two_bad_records(tmp_path)
+    known = {("case-x", "l-001", 0): {"defect": "added-window-behind-another-command"}}
+
+    assert validate_cases.check_controls(d, known), "the unwaived record must still report"
+    assert all("l-001/1.json" in p for p in validate_cases.check_controls(d, known)), (
+        "only the UNWAIVED record may report")
+    assert validate_cases.check_controls(d, {}) != validate_cases.check_controls(d, known)
+
+
+def test_an_entry_whose_record_no_longer_has_the_defect_fails(tmp_path):
+    """The dangerous rot. A record repaired with its entry left behind waives the next
+    real defect at that key — so the registry is re-checked against the tree rather than
+    trusted to have been right when it was written."""
+    _controlled_case(  # a CORRECTLY spliced control: no defect to waive
+        tmp_path, "case-x", lead_query=_UNBOUNDED,
+        control_query=f'FROM logs-zeek.ssh-*\n| WHERE @timestamp >= "{_WINDOW[0]}" '
+                      f'AND @timestamp < "{_WINDOW[1]}"\n| LIMIT 1')
+    known = {("case-x", "l-001", 0): {"defect": "added-window-behind-another-command"}}
+    problems = validate_cases.check_known_defects(tmp_path, known)
+    assert any("no longer carries" in p for p in problems), problems
+
+
+def test_an_entry_naming_a_record_that_does_not_exist_fails(tmp_path):
+    """The same failure the held-out ledger refuses one file down: a waiver for something
+    that is not there describes a tree that no longer exists."""
+    _two_bad_records(tmp_path)
+    known = {("case-x", "l-999", 7): {"defect": "added-window-behind-another-command"}}
+    assert any("does not exist" in p
+               for p in validate_cases.check_known_defects(tmp_path, known))
+
+
+def test_the_committed_registry_still_describes_the_committed_tree():
+    """The integration pin. Both entries must still reproduce against the real cases —
+    if a capture session repairs one, this fails until its entry is deleted, which is
+    exactly the coupling that stops the waiver outliving the defect."""
+    known = validate_cases.load_known_defects()
+    assert set(known) == {("case-010-crosstier-web2", "l-006", 1),
+                          ("case-012-bruteforce-db1", "l-006", 6)}
+    assert validate_cases.check_known_defects(validate_cases.GOLDEN_DIR / "cases",
+                                              known) == []
+
+
+def test_the_real_tree_has_no_untracked_control_defect():
+    """What the registry buys: the suite can now assert the ABSENCE of a new defect. With
+    the two accepted records waived, any other control that does not measure the window it
+    declares fails here — which it could not do while the command always exited 1."""
+    cases = validate_cases.GOLDEN_DIR / "cases"
+    known = validate_cases.load_known_defects()
+    untracked = [p for d in sorted(x for x in cases.iterdir() if x.is_dir())
+                 for p in validate_cases.check_controls(d, known)]
+    assert untracked == [], untracked
+
+
+@pytest.mark.parametrize(("entry", "expected"), [
+    # The message is asserted, not just the type: each of these fails for a DIFFERENT
+    # reason, and an operator staring at a hand-edited YAML file needs to be told which.
+    ({"case": "c", "lead": "l-001", "seq": "1"}, "needs an integer `seq`"),
+    ({"case": "c", "lead": "l-001", "seq": True}, "needs an integer `seq`"),
+    ({"case": "c", "seq": 1}, "needs string `case` and `lead`"),
+    ("not-a-mapping", "not a mapping"),
+])
+def test_a_malformed_registry_entry_raises_rather_than_waiving_nothing_quietly(
+        entry, expected, tmp_path):
+    """The registry is operator-authored CONFIG, not an artifact under validation — the
+    other readers report a bad artifact and carry on, but a waiver this reader misparses
+    is worse than stopping. A `seq: "1"` compares unequal to every real record key, so it
+    would waive nothing while reading, to a human, as though it did. `seq: true` is the
+    same trap one layer down, `bool` being an `int` in Python."""
+    p = tmp_path / "known_defects.yaml"
+    p.write_text(yaml.safe_dump({"entries": [entry]}), encoding="utf-8")
+    with pytest.raises(ValueError, match=expected):
+        validate_cases.load_known_defects(p)
+
+
+def test_one_record_listed_twice_is_refused(tmp_path):
+    """Two entries for one record means a repair deletes only one of them, and the
+    survivor waives the next real defect at that key."""
+    p = tmp_path / "known_defects.yaml"
+    p.write_text(yaml.safe_dump({"entries": [
+        {"case": "c", "lead": "l-001", "seq": 1, "defect": "a"},
+        {"case": "c", "lead": "l-001", "seq": 1, "defect": "b"}]}), encoding="utf-8")
+    with pytest.raises(ValueError, match="listed twice"):
+        validate_cases.load_known_defects(p)
+
+
+def test_an_absent_registry_waives_nothing(tmp_path):
+    """A missing file is 'nothing is accepted', never 'everything is'."""
+    assert validate_cases.load_known_defects(tmp_path / "nope.yaml") == {}
