@@ -254,7 +254,7 @@ def test_the_marker_source_is_exactly_depth_one(tmp_path):
     assert "cmdb" in got, "the depth-1 marker-only control is not declared either"
 
 
-def test_the_marker_half_reads_the_whole_name_alphabet_the_boundary_admits(tmp_path, capsys):
+def test_the_marker_half_reads_every_name_the_tree_carries(tmp_path, capsys):
     """The marker half declares a system whose directory name holds a SPACE or a NON-ASCII
     byte, exactly as the adapter half already does.
 
