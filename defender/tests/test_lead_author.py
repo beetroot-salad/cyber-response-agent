@@ -609,6 +609,10 @@ def test_is_catalog_template_excludes_what_is_not_a_template(tmp_git_repo: Path)
     the gate would assert about the wrong refusal. The predicate is what #901 changed.
     """
     assert lead_author._is_catalog_template("defender/skills/gather/queries/wazuh/auth.md")
+    # `README.md` is excluded by NAME, not by depth: it sits at `{system}/README.md`, exactly
+    # where a template sits, so the depth test alone let the content rule refuse a system's
+    # catalog notes for "no `id:`" — the very failure this predicate was split out to stop.
+    assert not lead_author._is_catalog_template("defender/skills/gather/queries/wazuh/README.md")
     assert not lead_author._is_catalog_template("defender/skills/gather/queries/NOTES.md")
     assert not lead_author._is_catalog_template("defender/skills/gather/queries/SCHEMA.md")
     assert not lead_author._is_catalog_template(

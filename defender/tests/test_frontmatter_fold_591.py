@@ -62,13 +62,21 @@ def _skill(skills_dir: Path, system: str, content: bytes) -> None:
 
 
 def _name_status(scaffold, defroot: Path, system: str) -> str:
-    """The name-check outcome of check_skill: 'PASS', 'FAIL', or 'MISSING' — or the
-    raised exception propagates (the pre-fold crash on unreadable bytes)."""
+    """The name-check outcome of check_skill: 'PASS', 'FAIL', 'MISSING' or 'UNREADABLE' — or
+    the raised exception propagates (the pre-fold crash on unreadable bytes).
+
+    'UNREADABLE' is its own answer because the rule splits it out from the identity one (#901):
+    a file that cannot be decoded reported as "frontmatter name is not defender-x" sends the
+    reader to a line that may be perfectly correct. It is still a FAIL row in the report — what
+    changed is which sentence it carries, so a helper keyed on the identity sentence alone would
+    read the split as "no row at all"."""
     rep = scaffold.Report()
     scaffold.check_skill(rep, defroot, system)
     for status, msg in rep.rows:
         if "frontmatter name" in msg:
             return status
+        if "could not be read" in msg:
+            return "UNREADABLE" if status == scaffold.FAIL else status
         if "is missing" in msg:
             return "MISSING"
     return "NONE"
@@ -196,9 +204,10 @@ def test_d0_check_skill(tmp_path):
     assert _name_status(
         scaffold, _mk_scaffold_tree(tmp_path, "nn", b"---\nmap:\n  name: defender-nn\n---\n"), "nn"
     ) == "FAIL"
+    # Undecodable bytes are a FAIL row of their OWN sentence, not the identity one (#901).
     assert _name_status(
         scaffold, _mk_scaffold_tree(tmp_path, "nb", b"---\nname: defender-nb\ndesc: x\xff\xfe\n---\n"), "nb"
-    ) == "FAIL"
+    ) == "UNREADABLE"
 
 
 def test_d0_strip_frontmatter():
@@ -432,7 +441,9 @@ def test_d_scaffold_wellformed_pass(tmp_path):
 def test_d_unreadable_skill_fail_row(tmp_path):
     scaffold = _scaffold()
     nb = _mk_scaffold_tree(tmp_path, "nb", b"---\nname: defender-nb\ndesc: x\xff\xfe\n---\n")
-    assert _name_status(scaffold, nb, "nb") == "FAIL"
+    # A FAIL ROW either way — the pre-fold behavior was an uncaught UnicodeDecodeError — but it
+    # names the decode failure rather than asserting the frontmatter name is wrong (#901).
+    assert _name_status(scaffold, nb, "nb") == "UNREADABLE"
     defroot = tmp_path / "missing"
     (defroot / "skills" / "gone").mkdir(parents=True)
     assert _name_status(scaffold, defroot, "gone") == "MISSING"

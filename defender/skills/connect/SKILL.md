@@ -169,10 +169,14 @@ encode a sensitive deployment. Secrets are always env vars.
 
 `defender/skills/gather/queries/{system}/` — write only the **couple of
 seed templates you're certain of** (an entry-point measurement, a by-key
-lookup), per `queries/SCHEMA.md` (`id: {system}.{template-id}`, Goal, What
-to summarize, a parameterized Query body, Common pitfalls). Do **not** build a
-catalog from API docs — the offline lead-author mints the rest from real
-runs.
+lookup), per `queries/SCHEMA.md` (`id: {system}.{template-id}`, `verb:`,
+`params:`, Goal, What to summarize, a parameterized Query body, Common
+pitfalls). `verb:` and `params:` are **required and checked** in step 6
+against the adapter's live signature — a `${placeholder}` that is neither a
+declared param nor a listed `body_substitutions:` entry is a FAIL, and there
+is no longer any fallback that guesses a verb from the query body. Do **not**
+build a catalog from API docs — the offline lead-author mints the rest from
+real runs.
 
 ### 5. Test
 

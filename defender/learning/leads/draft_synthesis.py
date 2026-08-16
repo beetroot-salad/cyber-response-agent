@@ -11,6 +11,7 @@ import yaml
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
+from defender._scaffold_rules import placeholders
 from defender.learning.core import config as _loop_config
 from defender.learning.leads import lead_neighbors
 from defender.learning.leads.path_validation import CATALOG_DIR
@@ -33,10 +34,6 @@ _log = _loop_config.make_logger("lead-author", flush=True)
 _SAFE_ID_SEGMENT = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._-]*\Z")
 
 _FENCE_LINE = re.compile(r"^(?:```|~~~)")
-
-#: The same grammar `_scaffold_rules._PLACEHOLDER_RE` checks, read here so the minter classifies
-#: what the checker will find rather than a near-miss of it.
-_PLACEHOLDER_RE = re.compile(r"\$\{(\w+)\}")
 
 
 def _structured_call(verb_name: str, params: dict) -> str:
@@ -117,9 +114,13 @@ def _body_substitutions(query_block: str, params: list[str]) -> list[str]:
     conformant to the rule the corpus-wide sweep runs (#901). Left undeclared, one such value
     mints a draft the sweep refuses — and the lane's commit gate deliberately does not check
     `_draft/`, so the refusal lands in CI on everyone rather than on the batch that wrote it.
+
+    Classified through `_scaffold_rules.placeholders`, the CHECKER's own reader, rather than
+    against a second copy of its regex here: a writer that classifies by a near-miss of the
+    grammar it is writing for is the drift this issue is about.
     """
     declared = set(params)
-    return sorted({n for n in _PLACEHOLDER_RE.findall(query_block) if n not in declared})
+    return sorted(placeholders(query_block) - declared)
 
 
 def _draft_skeleton(

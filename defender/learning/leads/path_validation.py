@@ -38,11 +38,16 @@ def _is_catalog_template(path: str) -> bool:
     `SCHEMA.md`, a `{system}/README.md` and a note dropped at the catalog root. The scaffold
     content rule reads a file as a template (`id:`, `verb:`, a system derived from its parent
     dir), so pointing it at one of those refuses the file for a reason that is not its defect.
+
+    `README.md` is excluded by NAME, not by depth: it sits at `{system}/README.md`, exactly
+    where a template sits, so the depth test alone let the content rule refuse a system's
+    catalog notes for "no `id:`" — the very failure this predicate was split out to stop, on
+    the one example of it the docstring above already named.
     """
     if not path.startswith(CATALOG_REL) or not path.endswith(".md"):
         return False
     parts = path[len(CATALOG_REL):].split("/")
-    return len(parts) == 2 and parts[0] != "_draft"
+    return len(parts) == 2 and parts[0] != "_draft" and parts[1] != "README.md"
 
 
 def _is_system_file(path: str, name: str) -> bool:

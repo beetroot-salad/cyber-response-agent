@@ -86,10 +86,13 @@ Then pick one action.
 2. **skip** — leave the draft in place for a future tick. Use when invocations don't give you enough signal to tell narrowing from novel yet.
 3. **promote** — Write the established file `defender/skills/gather/queries/{system}/{id}.md` (frontmatter `status: established`, and a `## Query` shaped into the **wide/superset** form — carry every filter axis the measurement could take, not just the ones this run bound — with a short "narrowing examples" note), then `rm defender/skills/gather/queries/{system}/_draft/{id}.md`. Promote **only** when the draft is a genuinely new measurement no neighbor covers — low top neighbor score, different index or different core aggregation in `executed_query`. A promote you're unsure about is an underfold waiting to happen; prefer discard-into-widen or skip.
 
-   **Every established or split template you write is checked before the commit, and a template that fails the check refuses the WHOLE batch — every other edit in it included.** Carry the draft's `verb:` through, and keep the frontmatter honest about each `${name}` the widened `## Query` now carries (`SCHEMA.md` is the format; read it before you widen):
-   - `params: [...]` — names the verb really declares. Not "the axis I wish existed": if you widen onto an axis the verb has no param for, the axis belongs in the query body as a `body_substitutions:` entry, or the widening does not belong in this template.
-   - `body_substitutions: [...]` — every `${name}` that is interpolated into a query-LANGUAGE body rather than binding a param.
-   - A `${name}` in the `## Query` that appears in neither list is a refusal. So is a `params:` entry the verb does not declare, and so is a missing `verb:`.
+**The frontmatter contract — it applies to every established template you touch (`fold`, `split`, `promote` alike).** Each one is checked before the commit, and a template that fails the check refuses the WHOLE batch — every other edit in it included. Carry the draft's `verb:` through on a promote, keep the parent's on a split, and keep the frontmatter honest about each `${name}` the `## Query` carries after your edit (`SCHEMA.md` is the format; read it before you widen):
+
+- `verb:` — required. A template that names none is undecidable, not exempt.
+- `id:` — `{system}.{template-id}`, and the `{system}` half must be the directory the file sits in.
+- `params: [...]` — names the verb really declares. Not "the axis I wish existed": if you widen onto an axis the verb has no param for, the axis belongs in the query body as a `body_substitutions:` entry, or the widening does not belong in this template.
+- `body_substitutions: [...]` — every `${name}` that is interpolated into a query-LANGUAGE body rather than binding a param.
+- A `${name}` in the `## Query` that appears in neither list is a refusal. So is a `params:` entry the verb does not declare.
 
 **Pitfall signal — `error` / `suspect_empty`:** an invocation with `payload_status: error` or `payload_status: suspect_empty` is the strongest signal you'll see for a fold. Before folding, still confirm: (a) the failure mode isn't already documented in the template, (b) you can describe what happened from the payload itself (not from imagined related failures), (c) the description names what the agent did or saw, not what it might do in adjacent cases. If any of those fails, skip.
 

@@ -53,6 +53,18 @@ from defender.runtime.verbs import (
 _PLACEHOLDER_RE = re.compile(r"\$\{(\w+)\}")
 
 
+def placeholders(text: str) -> set[str]:
+    """Every `${name}` the CHECKED grammar finds in `text`.
+
+    THE reader of `_PLACEHOLDER_RE`, exported so a writer classifies against the same grammar
+    the checker will apply rather than a second copy of it — the lead lane's minter has to
+    decide, at mint time, which `${name}`s of a body it must declare as `body_substitutions:`,
+    and a near-miss of this pattern there mints drafts the corpus-wide sweep then refuses
+    (#901: one rule, three callers, not three copies).
+    """
+    return set(_PLACEHOLDER_RE.findall(text))
+
+
 @dataclass(frozen=True)
 class Finding:
     """One violated invariant. `code` is the stable machine name (tests bind to it); `message` is
@@ -68,10 +80,34 @@ class ScaffoldRuleError(Exception):
     a caller that treats the two alike re-opens the hole this module closes."""
 
 
+def _id_findings(t: QueryTemplate) -> list[Finding]:
+    """The `id: {system}.{template-id}` invariant `SCHEMA.md` states.
+
+    Checked HERE because this is the seam that finally reads a template as data: a template's
+    system is derived from WHERE IT SITS, while every consumer of the corpus routes on the id's
+    prefix (`query_id` is `{system}.{kebab-name}`, and `lead_neighbors` keys `by_id` on it), so a
+    file filed under one system's directory while calling itself `{other}.x` sends the row to
+    the wrong system and mints a sibling draft besides. The minter is already held to exactly this on the writing side
+    (`_draft_candidate_segments`'s `system != row_system`); a promotion — the other lane that
+    writes an established file — was held to nothing.
+    """
+    prefix = t.id.split(".", 1)[0] if "." in t.id else ""
+    if prefix == t.system:
+        return []
+    return [
+        Finding(
+            "id-system-mismatch",
+            f"`id: {t.id}` does not name the system it is filed under — `SCHEMA.md` spells an "
+            f"id `{{system}}.{{template-id}}`, so this file's id must start with {t.system!r}",
+        )
+    ]
+
+
 def check_template(t: QueryTemplate, verbs: Mapping[str, Verb]) -> list[Finding]:
     """Every well-formedness finding against one template, given its system's declared verbs."""
+    out = _id_findings(t)
     if not t.verb:
-        return [
+        return out + [
             Finding(
                 "no-verb",
                 "declares no `verb:` — the placeholder rule is per-VERB, so a template that "
@@ -80,7 +116,7 @@ def check_template(t: QueryTemplate, verbs: Mapping[str, Verb]) -> list[Finding]
         ]
     fn = verbs.get(t.verb)
     if fn is None:
-        return [
+        return out + [
             Finding(
                 "unknown-verb",
                 f"verb {t.verb!r} is not a declared verb of {t.system} "
@@ -89,7 +125,7 @@ def check_template(t: QueryTemplate, verbs: Mapping[str, Verb]) -> list[Finding]
         ]
 
     allowed = set(model_facing_params(fn))
-    out = [
+    out += [
         Finding(
             "undeclared-param",
             f"`params:` names {name!r}, which {t.system}.{t.verb} does not declare as a "
@@ -121,7 +157,7 @@ def check_template(t: QueryTemplate, verbs: Mapping[str, Verb]) -> list[Finding]
         return out
 
     undeclared = sorted(
-        set(_PLACEHOLDER_RE.findall(t.query)) - allowed - (set(t.body_substitutions) - reserved)
+        placeholders(t.query) - allowed - (set(t.body_substitutions) - reserved)
     )
     out.extend(
         Finding(
@@ -138,8 +174,13 @@ def check_system_skill(skill_md: Path, system: str) -> list[Finding]:
     """The per-system `SKILL.md` frontmatter identity. The `execution.md` shape stays a
     `connect`-local WARN and is not here: it is authoring advice, not an invariant, and the
     pitfalls curator writes that file under a rule of its own."""
-    text, _reason = read_text_soft(skill_md)
-    front = parse_frontmatter_or_none(text) if text is not None else None
+    text, reason = read_text_soft(skill_md)
+    if text is None:
+        # Its OWN finding, not the identity one: `read_text_soft` answers `None` for a file that
+        # is unreadable or undecodable as much as for one that is absent, and reporting either as
+        # "frontmatter name is not …" sends the reader to a line that may be perfectly correct.
+        return [Finding("skill-unreadable", f"could not be read ({reason})")]
+    front = parse_frontmatter_or_none(text)
     if front is not None and front.get("name") == f"defender-{system}":
         return []
     return [
@@ -200,12 +241,18 @@ class VerbResolver:
         return self._cache[system]
 
     def _resolve(self, system: str) -> Mapping[str, Verb]:
-        try:
-            verbs = self._registry.verbs(system)
-        except KeyError:
+        # The membership question FIRST, so the two verdicts stay distinguishable. `verbs()`
+        # raises `KeyError(system)` when it finds no adapter file — but a `KeyError` raised by
+        # the adapter's own import (a module-scope `os.environ["…"]` is the shipped shape of it)
+        # is indistinguishable from that one at the `except`, and swallowing it there reported a
+        # file that EXISTS as missing, sending an operator to look for a path that is right where
+        # it should be. Asked ahead of the import, "is there an adapter" has one answer.
+        if not self.is_system(system):
             raise ScaffoldRuleError(
                 f"no adapter for system {system!r} under {self._adapters_dir}"
-            ) from None
+            )
+        try:
+            verbs = self._registry.verbs(system)
         except (KeyboardInterrupt, GeneratorExit):
             # Ahead of the blanket clause below, the way every other site in this codebase that
             # widens to `BaseException` orders it (`query_tool.wrap_tool_execute`,
@@ -229,4 +276,5 @@ __all__ = [
     "VerbResolver",
     "check_system_skill",
     "check_template",
+    "placeholders",
 ]
