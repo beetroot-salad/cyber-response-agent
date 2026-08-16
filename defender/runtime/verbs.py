@@ -15,15 +15,18 @@ from typing import Any, Union, get_args, get_origin
 
 from .verb_grant import GrantError, VerbGrant
 
-#: THE shape of a system name, and THE bound on its length. Public because they cross module
-#: lines: the leading underscore was always a fiction, `query_tool` imported `_SYSTEM_RE`
-#: through it, and `tools_gather` kept a verbatim second copy of the pattern.
+#: THE shape of a system name. PRIVATE, and it stays private: the shape is only half the
+#: answer, and `is_system_name` below is the whole of it. A public pattern is an invitation to
+#: match it and forget the bound — which is precisely the bug #914 closed at `_adapter_path`,
+#: so re-exporting the pattern would re-open the class of defect that motivated the merge.
+#: Cross-module callers reach the PREDICATE (`query_tool`, `tools_gather`, `declared_systems`,
+#: `pitfalls_curator`); nothing outside this module needs the raw object.
 #:
-#: Anchored at BOTH ends. `\Z` alone is only half a shape when the pattern is public: every
-#: caller today reaches it through `.match`, which anchors the start for them, but a
-#: `SYSTEM_RE.search("BAD name")` matches the trailing `name` SUFFIX and reads as well-formed.
-#: `\A` makes the object itself carry the anchor rather than each caller's choice of method.
-SYSTEM_RE = re.compile(r"\A[a-z0-9][a-z0-9-]*\Z")
+#: Anchored at BOTH ends. `\Z` alone is only half a shape: every caller today reaches it
+#: through `.match`, which anchors the start for them, but a `.search("BAD name")` matches the
+#: trailing `name` SUFFIX and reads as well-formed. `\A` makes the object itself carry the
+#: anchor rather than each caller's choice of method.
+_SYSTEM_RE = re.compile(r"\A[a-z0-9][a-z0-9-]*\Z")
 #: The name is unbounded model text at three of the readers below (#835's prompt-cache key, the
 #: `query` tool's echo, the gather tool's retry message), so the shape needs a ceiling to go
 #: with it. One number rather than one per downstream reason: the reasons differ, but the FACT
@@ -51,7 +54,7 @@ def is_system_name(name: str) -> bool:
     # Length FIRST: `name` is unbounded model text at three of the callers, and the cheap
     # ceiling is what keeps an arbitrarily long blob from being scanned character by
     # character before it is refused. The two orders admit exactly the same set.
-    return len(name) <= SYSTEM_MAX_LEN and bool(SYSTEM_RE.match(name))
+    return len(name) <= SYSTEM_MAX_LEN and bool(_SYSTEM_RE.match(name))
 
 
 ADAPTER_SUFFIX = "_adapter.py"
@@ -445,16 +448,28 @@ class ModuleVerbRegistry(VerbRegistry):
             )
 
     def systems(self) -> tuple[str, ...]:
-        """The systems this adapters directory declares — held to the SAME predicate
-        `_adapter_path` resolves with (#914).
+        """The systems this adapters directory declares — every one of them resolved through
+        `_adapter_path`, the SAME call `verbs()` dispatches with (#914).
 
         Without the filter this roster and `verbs()` disagree over one directory: a
         `MySys_adapter.py` lands in `systems()` while `_adapter_path` refuses the name, so
         `verbs("MySys")` raises `KeyError` for a system the registry just said it had — and
         `learning.leads.declared_systems._adapter_names`, whose docstring calls this "the same
-        set", refuses it too. A name this roster carries is a name that dispatches."""
-        named = (_system_of(p) for p in self.adapters_dir.glob("*" + ADAPTER_SUFFIX))
-        return tuple(sorted(n for n in named if is_system_name(n)))
+        set", refuses it too. A name this roster carries is a name that dispatches.
+
+        `_adapter_path`, not `is_system_name` alone: the shape is only half of what makes a
+        name dispatchable. `_system_of` maps `_`->`-`, and the inverse `_adapter_path` applies
+        is NOT onto — a `change-mgmt_adapter.py` (hyphen in the FILENAME) derives the
+        well-formed name `change-mgmt`, which `_adapter_path` then looks for at
+        `change_mgmt_adapter.py` and does not find. So does a DIRECTORY named
+        `foo_adapter.py`, which the glob yields and `is_file()` refuses. Both are names a
+        shape-only filter carries and `verbs()` raises `KeyError` for — the very disagreement
+        this filter exists to remove. Deduplicated for the same reason: two filenames can
+        derive one system, and a roster naming it twice is not a set."""
+        named = {_system_of(p) for p in self.adapters_dir.glob("*" + ADAPTER_SUFFIX)}
+        return tuple(sorted(
+            n for n in named if _adapter_path(self.adapters_dir, n) is not None
+        ))
 
     def _cold_verb_names(self, system: str) -> frozenset[str] | None:
         return declared_verb_names(self.adapters_dir, system)
@@ -474,7 +489,6 @@ __all__ = [
     "DENIED",
     "GRANTED",
     "SYSTEM_MAX_LEN",
-    "SYSTEM_RE",
     "UNDECLARED",
     "ModuleVerbRegistry",
     "Verb",

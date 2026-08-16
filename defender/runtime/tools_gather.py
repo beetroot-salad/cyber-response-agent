@@ -31,7 +31,7 @@ from defender.hooks.inject_system_skill_description import descriptor_catalog as
 from defender._untrusted import wrap_fresh
 from defender.scripts.gather_tools.record_query import GatherDeadEnd
 from defender.scripts.gather_tools.record_query import LEAD_ID_RE as _LEAD_ID_RE
-from .verbs import is_system_name
+from .verbs import SYSTEM_MAX_LEN, is_system_name
 from defender.runtime.verb_grant import VerbGrant
 
 
@@ -483,8 +483,9 @@ async def _run_gather(  # noqa: C901 — the branch count IS the terminator cens
     if not is_system_name(system):
         raise ModelRetry(
             f"malformed system {system!r}: a system name is lowercase letters, digits and "
-            "hyphens (`host-state`, `change-mgmt`) — the `:L` row's system, spelled as the "
-            "descriptor index spells it. Re-dispatch this same lead_id with the corrected name."
+            f"hyphens, at most {SYSTEM_MAX_LEN} characters (`host-state`, `change-mgmt`) — the "
+            "`:L` row's system, spelled as the descriptor index spells it. Re-dispatch this "
+            "same lead_id with the corrected name."
         )
     # Same placement and same reason as `system` (#855 F-12): `goal` is a bare `str` on the
     # tool signature, so the schema admits `""` and nothing below here has an opinion about it

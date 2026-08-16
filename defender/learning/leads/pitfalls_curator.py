@@ -56,7 +56,10 @@ def _build_pitfalls_handoffs(rows: list[dict], *, systems: frozenset[str]) -> li
     by_system: dict[str, list[dict]] = {}
     for r in _loop_persist.merge_pitfalls(rows):
         system = str(r.get("system") or "").strip()
-        if not system or not is_system_name(system) or system not in systems:
+        # No `not system` arm: `is_system_name("")` is already False (the pattern needs one
+        # `[a-z0-9]`), and a second spelling of "the empty string is not a name" is one more
+        # place for the two to disagree — which is the whole of what #914 was about.
+        if not is_system_name(system) or system not in systems:
             continue
         by_system.setdefault(system, []).append(r)
     out: list[dict] = []

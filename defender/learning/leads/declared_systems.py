@@ -30,7 +30,7 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
 from defender import _git
 from defender.learning.core import config as _loop_config
 from defender.learning.leads.lead_extraction import LeadAuthorError
-from defender.runtime.verbs import ADAPTER_SUFFIX, _system_of, is_system_name
+from defender.runtime.verbs import ADAPTER_SUFFIX, _adapter_path, _system_of, is_system_name
 
 ADAPTERS_REL = "defender/scripts/adapters/"
 SKILLS_REL = "defender/skills/"
@@ -57,12 +57,18 @@ def _adapter_names(adapters_dir: Path) -> frozenset[str]:
     names: set[str] = set()
     for p in adapters_dir.glob("*" + ADAPTER_SUFFIX):
         name = _system_of(p)
-        if p.is_file() and is_system_name(name):
+        # `_adapter_path`, which is `is_system_name` PLUS the resolution `verbs()` performs —
+        # the same call `ModuleVerbRegistry.systems()` filters on, so this half and the runtime
+        # roster this docstring calls "the same set" really are one set. Shape alone is not
+        # enough: `_system_of` maps `_`->`-` and its inverse is not onto, so a
+        # `change-mgmt_adapter.py` derives the well-formed `change-mgmt` that `_adapter_path`
+        # then fails to find at `change_mgmt_adapter.py` — declared here, unresolvable there.
+        if _adapter_path(adapters_dir, name) is not None:
             names.add(name)
         else:
             _log(
-                f"declared_systems: refused shape-anomalous adapter name {name!r} "
-                f"from {adapters_dir}"
+                f"declared_systems: refused anomalous adapter name {name!r} "
+                f"from {adapters_dir} — it is not a name the dispatch seam resolves"
             )
     return frozenset(names)
 

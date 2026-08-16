@@ -19,22 +19,29 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from .verb_grant import DENY_ALL, VerbGrant
-from .verbs import declared_verb_names
+from .verbs import ADAPTER_SUFFIX, _system_of, declared_verb_names, is_system_name
 
 _AUDIT_DEFAULT_ROLE = "gather"
 _ROSTER_FILENAME = "verb-roster.md"
 
 _HEADER_RE = re.compile(r"\A<!-- GENERATED verb-roster role=(\S+) digest=([0-9a-f]{64}) -->\n")
 
-#: NOT `verbs.SYSTEM_RE`, and deliberately so — these are PROSE SCANNERS, not validators, and
+#: NOT `verbs._SYSTEM_RE`, and deliberately so — these are PROSE SCANNERS, not validators, and
 #: the two want different alphabets (#914's census of the shape stops here for that reason).
 #: `_QUALIFIED_CALL_RE` is anchored on the literal `query(system="` so it can afford the full
-#: system alphabet, digit-leading names included: a widening there only audits MORE.
+#: system alphabet, digit-leading names included.
 #: `_CALL_ID_RE` cannot — it is unanchored, so `[a-z0-9]` in the leading position would make it
 #: read `1.2`, `0.7` and every other version string in a markdown surface as a `system.verb`
-#: call and attribute a withheld verb to it. It stays `[a-z]`-leading, which is the narrower
-#: half of the real alphabet: a digit-leading system would be invisible to THIS rule alone,
-#: and the qualified-call rule above still sees it.
+#: pair. It stays `[a-z]`-leading, which is the narrower half of the real alphabet: a
+#: digit-leading system would be invisible to THIS rule alone, and the qualified-call rule
+#: above still sees it.
+#:
+#: NEITHER widening is free on its own, and the reason is `audit_read_surfaces`' span
+#: exclusion: a match here suppresses `_bare_offenders` over the text it covers. A match whose
+#: (system, verb) is NOT a real declared pair therefore has to be dropped from the exclusion
+#: set — otherwise `query(system="7", verb="esql")` in a committed surface both fails to
+#: attribute (`7` declares nothing) and hides the bare `esql` the fallback rule would have
+#: caught, which is a withheld verb advertised past the audit.
 _QUALIFIED_CALL_RE = re.compile(
     r"""query\(\s*system\s*=\s*['"]([a-z0-9][a-z0-9-]*)['"]\s*,\s*verb\s*=\s*['"]([a-z][a-z0-9-]*)['"]"""
 )
@@ -188,10 +195,13 @@ def audit_read_surfaces(defender_dir: Path, grants: Mapping[str, VerbGrant]) -> 
     root = Path(defender_dir)
     skills_dir = root / "skills"
     adapters_dir = root / "scripts" / "adapters"
-    systems = sorted(
-        p.name[: -len("_adapter.py")].replace("_", "-")
-        for p in adapters_dir.glob("*_adapter.py")
-    ) if adapters_dir.is_dir() else []
+    # `_system_of` + `is_system_name` rather than a second spelling of either (#914): the
+    # audit's notion of "a system this tree declares" must be the dispatch seam's, or a name
+    # only one of them recognises is a pair the other cannot score.
+    systems = sorted({
+        _system_of(p) for p in adapters_dir.glob("*" + ADAPTER_SUFFIX)
+        if is_system_name(_system_of(p))
+    }) if adapters_dir.is_dir() else []
     declared_by_system = {s: declared_verb_names(adapters_dir, s) for s in systems}
 
     hits: list[str] = []
@@ -210,7 +220,14 @@ def audit_read_surfaces(defender_dir: Path, grants: Mapping[str, VerbGrant]) -> 
             pair for pair, _ in qualified
             if pair[1] in declared_by_system.get(pair[0], ())
         }
-        spans = [span for _, span in qualified]
+        # SPANS FROM THE KEPT PAIRS ONLY. The exclusion exists to stop `_bare_offenders`
+        # re-attributing a verb the qualified rules already attributed — so a match that was
+        # just discarded as "not a real (system, verb)" must not suppress anything, or the
+        # discard silently becomes a way to hide a verb name from the fallback rule.
+        spans = [
+            span for pair, span in qualified
+            if pair[1] in declared_by_system.get(pair[0], ())
+        ]
         owning = _owning_system(path, skills_dir)
         pairs |= _bare_offenders(text, spans, owning, declared_by_system)
 

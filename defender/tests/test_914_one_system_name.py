@@ -31,7 +31,7 @@ import pytest
 
 from defender.learning.leads import declared_systems, pitfalls_curator
 from defender.runtime import query_tool, tools_gather, verbs
-from defender.runtime.verbs import SYSTEM_MAX_LEN, SYSTEM_RE, is_system_name
+from defender.runtime.verbs import SYSTEM_MAX_LEN, is_system_name
 
 #: The names every real source in this repo carries, and the shapes #869/#868 pinned as
 #: refused. `gather` and `fakesys` are deliberately in the ADMITTED column: they are
@@ -159,5 +159,8 @@ def test_the_bound_is_the_predicate_s_own():
     pattern and forgot the length (`verbs._adapter_path` did exactly that)."""
     assert is_system_name("a" * SYSTEM_MAX_LEN) is True
     assert is_system_name("a" * (SYSTEM_MAX_LEN + 1)) is False
-    # And the raw pattern alone does NOT bound it, which is why callers must not use it.
-    assert SYSTEM_RE.match("a" * (SYSTEM_MAX_LEN + 1)) is not None
+    # And the raw pattern alone does NOT bound it, which is why it is PRIVATE and why no
+    # caller outside `verbs` may reach for it: matching the shape and forgetting the bound is
+    # the defect this issue closed, so the pattern must not be re-exported as a second answer.
+    assert verbs._SYSTEM_RE.match("a" * (SYSTEM_MAX_LEN + 1)) is not None
+    assert "SYSTEM_RE" not in verbs.__all__

@@ -95,13 +95,13 @@ from defender.runtime.driver import GATHER_DEF, MAIN_DEF  # noqa: E402
 from defender.runtime.verb_grant import VerbGrant  # noqa: E402
 from defender.runtime.verbs import (  # noqa: E402
     GRANTED,
-    SYSTEM_RE,
     ModuleVerbRegistry,
     VerbContext,
     VerbRegistry,
     _resolved_hints,
     declared_params,
     declared_verb_names,
+    is_system_name,
     model_facing_params,
     validate_params,
     wrapper_only_params,
@@ -170,10 +170,13 @@ _KEY_RE = re.compile(r"""["'](?P<name>[A-Za-z_][A-Za-z0-9_]*)["']\s*:""")
 #: params={...})` TEMPLATE line alongside the per-verb ones; a placeholder is not a published
 #: verb, and this is what tells them apart.
 #:
-#: THE shared pattern rather than a local copy of it (#914): a verb name is held to the same
-#: alphabet as a system name — the tree has no separate verb pattern — so a copy here would be
-#: a second place to edit and a place for this suite to drift from what it is checking.
-_NAME_RE = SYSTEM_RE
+#: THE shared PREDICATE rather than a local copy of the pattern (#914): a verb name is held to
+#: the same alphabet as a system name — the tree has no separate verb pattern — so a copy here
+#: would be a second place to edit and a place for this suite to drift from what it is
+#: checking. The predicate rather than `verbs._SYSTEM_RE`, because the pattern alone does not
+#: carry `SYSTEM_MAX_LEN` and matching it while forgetting the bound is the exact defect #914
+#: closed.
+_is_name = is_system_name
 
 #: The type spellings a descriptor may claim, and a value of the WRONG type for each. A claim
 #: is only honest if `validate_params` refuses the mismatch (O3).
@@ -188,7 +191,7 @@ def _parse(out: str) -> dict[tuple[str, str], dict[str, str]]:
     """`{(system, verb): {param: descriptor}}` — the whole of this spec's rendering contract."""
     calls: dict[tuple[str, str], dict[str, str]] = {}
     for m in _CALL_RE.finditer(out):
-        if not (_NAME_RE.match(m.group("system")) and _NAME_RE.match(m.group("verb"))):
+        if not (_is_name(m.group("system")) and _is_name(m.group("verb"))):
             continue
         body = m.group("params")
         keys = list(_KEY_RE.finditer(body))
