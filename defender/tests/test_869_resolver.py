@@ -254,7 +254,7 @@ def test_the_marker_source_is_exactly_depth_one(tmp_path):
     assert "cmdb" in got, "the depth-1 marker-only control is not declared either"
 
 
-def test_the_marker_half_reads_the_whole_name_alphabet_the_boundary_admits(tmp_path):
+def test_the_marker_half_reads_the_whole_name_alphabet_the_boundary_admits(tmp_path, capsys):
     """The marker half declares a system whose directory name holds a SPACE or a NON-ASCII
     byte, exactly as the adapter half already does.
 
@@ -271,21 +271,47 @@ def test_the_marker_half_reads_the_whole_name_alphabet_the_boundary_admits(tmp_p
 
     Both are the failure this resolver exists to prevent — a real system silently
     un-declared — and both are WORSE than a loud refusal, because the name never reached the
-    `_is_system_name` shape check to be logged as anomalous. Whether these names should be
-    ADMITTED is a separate question from whether they should be SEEN: `_is_system_name` takes
+    `is_system_name` shape check to be logged as anomalous. Whether these names should be
+    ADMITTED is a separate question from whether they should be SEEN: `is_system_name` takes
     the alphabet decision, and this pins that the read hands it every name the tree carries
     rather than losing some in transit.
 
-    The oracle is the planted set, not a second `ls-tree` — that shared query is what hid
-    this for the whole of #869.
-    """
-    planted = ("elastic", "wazuh-café", "my sys")
-    repo = seed_tree(tmp_path, adapters=(), markers=planted, skills=(), catalog=())
+    SEEN is not the same as ADMITTED, and #914 split the two apart: `is_system_name` now holds
+    every channel to the dispatch seam's own alphabet, so both of these names are REFUSED. That
+    is the right answer and it is not what this demand is about. What this demand is about is
+    the difference between the two ways of saying no:
 
-    assert declared_systems(repo) == frozenset(planted)
-    # And the independent committed-tree read agrees, so this is the tree's answer rather
-    # than a resolver that happens to echo its argument back.
-    assert _marker_half_of(repo) == set(planted)
+    * lost in the PARSE (the shipped defect) — the name never appears anywhere, no line is
+      logged, and an operator asking why their system stopped being declared has nothing to
+      read;
+    * refused by the PREDICATE (the contract) — the name reaches the shape check and is logged
+      with the source directory it came from, which is FK-5's whole point.
+
+    So the assertion is that each name is NAMED IN THE LOG. A resolver that tore the listing
+    would pass a bare `== frozenset({"elastic"})` check just as well; only the log line
+    separates the two, and only the `-z` read can produce it.
+
+    The oracle is the planted set, not a second `ls-tree` — that shared query is what hid this
+    for the whole of #869.
+    """
+    anomalous = ("wazuh-café", "my sys")
+    repo = seed_tree(
+        tmp_path, adapters=(), markers=("elastic", *anomalous), skills=(), catalog=(),
+    )
+
+    capsys.readouterr()
+    got = declared_systems(repo)
+
+    assert got == frozenset({"elastic"}), "the shape check no longer holds the marker half"
+    log = loop_log(capsys)
+    for name in anomalous:
+        assert log_lines_naming(log, repr(name), repo / SKILLS_REL), (
+            f"{name!r} was dropped without a refusal line naming its source — which is what a "
+            f"torn listing looks like, and is indistinguishable from it here: {log}"
+        )
+    # The independent committed-tree read SEES all three, so the two the resolver dropped were
+    # dropped by the predicate and not by the read.
+    assert _marker_half_of(repo) == {"elastic", *anomalous}
 
 
 def test_the_union_equals_the_adapter_set_on_the_committed_tree():

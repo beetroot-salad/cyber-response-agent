@@ -15,7 +15,36 @@ from typing import Any, Union, get_args, get_origin
 
 from .verb_grant import GrantError, VerbGrant
 
-_SYSTEM_RE = re.compile(r"[a-z0-9][a-z0-9-]*\Z")
+#: THE shape of a system name, and THE bound on its length. Public because they cross module
+#: lines: the leading underscore was always a fiction, `query_tool` imported `_SYSTEM_RE`
+#: through it, and `tools_gather` kept a verbatim second copy of the pattern.
+SYSTEM_RE = re.compile(r"[a-z0-9][a-z0-9-]*\Z")
+#: The name is unbounded model text at three of the readers below (#835's prompt-cache key, the
+#: `query` tool's echo, the gather tool's retry message), so the shape needs a ceiling to go
+#: with it. One number rather than one per downstream reason: the reasons differ, but the FACT
+#: they each bound — how long a system name may be — is the same fact, and two copies of it
+#: drift. Split them again if a reader ever genuinely needs a different bound.
+SYSTEM_MAX_LEN = 64
+
+
+def is_system_name(name: str) -> bool:
+    """Is `name` a well-formed system name — lowercase letters, digits and hyphens, bounded?
+
+    THE one answer, for every channel a system name arrives on: an adapter filename, a
+    committed `execution.md` marker, a queued pitfall row, a model-supplied tool argument.
+    Before #914 there were four spellings of this question — this pattern, a verbatim copy of
+    it in `tools_gather`, two separately-named 64s, and `declared_systems._is_system_name`,
+    which refused only the empty string, a leading dot, `/`, `\\` and NUL while its docstring
+    claimed to be holding names to THIS pattern. That last one was the outlier that mattered:
+    it admitted names the dispatch seam would later reject, so a name could be declared a
+    system and then fail to resolve as one.
+
+    Shape only, never membership. `gather` and `fakesys` are well-formed names that no source
+    declares; keeping the two questions apart is what lets a drop be attributed to membership
+    rather than to shape (`test_869_pitfalls_gate`).
+    """
+    return bool(SYSTEM_RE.match(name)) and len(name) <= SYSTEM_MAX_LEN
+
 
 ADAPTER_SUFFIX = "_adapter.py"
 
@@ -267,7 +296,7 @@ def _load_adapter_module(path: Path) -> Any:
 
 
 def _adapter_path(adapters_dir: Path, system: str) -> Path | None:
-    if not _SYSTEM_RE.match(system):
+    if not is_system_name(system):
         return None
     root = Path(adapters_dir).resolve()
     path = (Path(adapters_dir) / (system.replace("-", "_") + ADAPTER_SUFFIX)).resolve()

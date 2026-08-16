@@ -95,6 +95,7 @@ from defender.runtime.driver import GATHER_DEF, MAIN_DEF  # noqa: E402
 from defender.runtime.verb_grant import VerbGrant  # noqa: E402
 from defender.runtime.verbs import (  # noqa: E402
     GRANTED,
+    SYSTEM_RE,
     ModuleVerbRegistry,
     VerbContext,
     VerbRegistry,
@@ -165,10 +166,14 @@ _CALL_RE = re.compile(
 )
 _KEY_RE = re.compile(r"""["'](?P<name>[A-Za-z_][A-Za-z0-9_]*)["']\s*:""")
 
-#: A real system / verb name (`verbs._SYSTEM_RE`'s shape). A rendering may carry a `query(
-#: system="x", verb="<verb>", params={...})` TEMPLATE line alongside the per-verb ones; a
-#: placeholder is not a published verb, and this is what tells them apart.
-_NAME_RE = re.compile(r"[a-z0-9][a-z0-9-]*\Z")
+#: A real system / verb name. A rendering may carry a `query(system="x", verb="<verb>",
+#: params={...})` TEMPLATE line alongside the per-verb ones; a placeholder is not a published
+#: verb, and this is what tells them apart.
+#:
+#: THE shared pattern rather than a local copy of it (#914): a verb name is held to the same
+#: alphabet as a system name — the tree has no separate verb pattern — so a copy here would be
+#: a second place to edit and a place for this suite to drift from what it is checking.
+_NAME_RE = SYSTEM_RE
 
 #: The type spellings a descriptor may claim, and a value of the WRONG type for each. A claim
 #: is only honest if `validate_params` refuses the mismatch (O3).

@@ -7,7 +7,7 @@ lives in `defender/tests/_declared869.py`.
 The subtraction is the headline: `_is_real_system` — "does `defender/skills/<system>/SKILL.md`
 exist" — is deleted, along with the two in-code justifications C34 refuted (they argue the
 census that chose `SKILL.md` over `execution.md`, and that census no longer holds: 7 of 7
-systems have an `execution.md`). What replaces it is `_is_system_name`'s shape half plus
+systems have an `execution.md`). What replaces it is `is_system_name`'s shape half plus
 membership in the threaded value.
 """
 from __future__ import annotations
@@ -23,7 +23,7 @@ from defender.learning.leads.path_validation import _is_in_scope
 from defender.tests._declared869 import (
     SKILLS_REL,
     Spawn,
-    _is_system_name,
+    is_system_name,
     git,
     head_files,
     loop_log,
@@ -48,8 +48,8 @@ def test_pitfalls_handoff_drops_an_undeclared_system(tmp_path):
     passes the shape predicate, which is asserted here so the two reasons cannot be confused.
     """
     rows = [pitfall_row("r:0", "gather"), pitfall_row("r:1", "fakesys")]
-    assert _is_system_name("gather")
-    assert _is_system_name("fakesys")
+    assert is_system_name("gather")
+    assert is_system_name("fakesys")
     assert pitfalls_curator._build_pitfalls_handoffs(rows, systems=DECLARED) == []
 
     # And over the real tree's own names, where `gather` is the directory this issue is about.
@@ -93,9 +93,9 @@ def test_system_name_shape_still_refuses_a_traversal(tmp_path):
     assert _is_in_scope("defender/skills/../SKILL.md")
 
     for bad in ("..", "", ".hidden", "a/b", "a\\b", "a\x00b"):
-        assert _is_system_name(bad) is False, bad
+        assert is_system_name(bad) is False, bad
     for good in ("elastic", "change-mgmt", "host-state"):
-        assert _is_system_name(good) is True, good
+        assert is_system_name(good) is True, good
 
     hostile = frozenset({"..", "", ".hidden", "elastic"})
     assert pitfalls_curator._build_pitfalls_handoffs(
