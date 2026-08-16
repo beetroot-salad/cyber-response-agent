@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar
 
+from defender._paths import adapters_under
 from defender.learning.core import config
 from defender.learning.core.config import RunUnprocessable, StageContext, StageWiring
 from defender.learning.leads.declared_systems import adapter_systems_under
@@ -22,9 +23,9 @@ _LEAD_AUTHOR_DENY_REASON = (
     "Blocked: the lead author curates the gather query catalog and the per-SYSTEM skill docs. "
     "Its write scope is the catalog under defender/skills/gather/queries/{system}/, plus "
     "defender/skills/{system}/SKILL.md and defender/skills/{system}/_draft/ — where {system} is "
-    "a system this tree declares an adapter for. The other directories under defender/skills/ "
-    "(gather, invlang, handbook, connect, advisory, judge) are authored surfaces this lane does "
-    "not write: two of them ARE agent system prompts. It rm's a draft it promotes or discards "
+    "a system this tree declares an adapter for. Every OTHER directory under defender/skills/ "
+    "is an authored surface this lane does not write — including two that are agent system "
+    "prompts. It rm's a draft it promotes or discards "
     "— no data-source adapters, no gather_raw reads, no shell beyond the scoped rm."
 )
 
@@ -55,7 +56,7 @@ def _systems_or_raise(defender_dir: Path) -> tuple[str, ...]:
     # `defender_dir`, and `.parent / "defender"` would read a sibling tree's adapters the
     # moment that directory is not literally named `defender` — a write gate silently guarding
     # a different tree than the one it was threaded.
-    adapters_dir = defender_dir / "scripts" / "adapters"
+    adapters_dir = adapters_under(defender_dir)
     systems = tuple(sorted(adapter_systems_under(adapters_dir)))
     if not systems:
         raise ValueError(
@@ -147,10 +148,14 @@ def _skill_write_lanes(skills_dir: Path, systems: tuple[str, ...]) -> tuple[re.P
             # L2 — catalog drafts. The lane `synthesize_drafts` mints into and the agent
             # promotes or discards out of.
             _draft_tail(cat, sys_alt),
-            # L3 — THE per-system skill doc. Named exactly, so the sibling authored surfaces
-            # (`gather`, `invlang`, `handbook`, `connect`, `advisory`, `judge`) have no lane at
-            # all: they are not systems, and `declared_systems.adapter_declared_systems` — the
-            # adapter half of the set this lane's COMMIT gate resolves — is what says so.
+            # L3 — THE per-system skill doc. Named exactly, so every sibling directory that is
+            # not a system has no lane at all — `gather/SKILL.md` and `invlang/SKILL.md` among
+            # them, which is the whole of #772. Which directories those ARE is not spelled
+            # here and must not be: `declared_systems.adapter_declared_systems`, the adapter
+            # half of the set this lane's COMMIT gate resolves, is what answers it, and a
+            # roster copied into a comment is one a seventh authored directory falsifies.
+            # `tests/test_hardening_772._AUTHORED_SURFACES` carries the shipped roster, with
+            # the assertion that keeps it true.
             rf"(?:{sys_alt})/SKILL\.md",
             # L4 — system-skill drafts, the pending lifts `discover_system_drafts` hands over.
             _draft_tail("", sys_alt),

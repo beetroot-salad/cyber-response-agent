@@ -28,12 +28,17 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender import _git
+from defender._paths import DefenderPaths
 from defender.learning.core import config as _loop_config
 from defender.learning.leads.lead_extraction import LeadAuthorError
 from defender.runtime.verbs import ADAPTER_SUFFIX, _adapter_path, _system_of, is_system_name
 
-ADAPTERS_REL = "defender/scripts/adapters/"
-SKILLS_REL = "defender/skills/"
+#: Both re-exported from `DefenderPaths` rather than re-spelled: this module is one of the
+#: four that owned its own copy of the adapters path (#772 review), and a resolver whose
+#: idea of where adapters live can drift from the gate that reads its answer is the whole
+#: class of defect it exists to close.
+ADAPTERS_REL = DefenderPaths.adapters_rel
+SKILLS_REL = DefenderPaths.skills_rel
 
 _log = _loop_config.make_logger("lead-author", flush=True)
 

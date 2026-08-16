@@ -37,6 +37,7 @@ from pathlib import Path
 from defender._corpus import QueryTemplate
 from defender._frontmatter import parse_frontmatter_or_none
 from defender._io import read_text_soft
+from defender._paths import adapters_under
 from defender.runtime.verb_grant import DENY_ALL
 from defender.runtime.verbs import (
     ModuleVerbRegistry,
@@ -220,7 +221,7 @@ class VerbResolver:
     """
 
     def __init__(self, defender_dir: Path) -> None:
-        self._adapters_dir = Path(defender_dir) / "scripts" / "adapters"
+        self._adapters_dir = adapters_under(Path(defender_dir))
         self._registry = ModuleVerbRegistry(self._adapters_dir, DENY_ALL)
         self._cache: dict[str, Mapping[str, Verb]] = {}
 
@@ -228,9 +229,19 @@ class VerbResolver:
         """Does `system` name an adapter in this tree at all — COLD, no import.
 
         The membership question, which is not the same as `verbs()`'s "what does it declare":
-        `defender/skills/` holds authored surfaces that are not systems of record (`advisory`,
-        `connect`, `gather`, `handbook`, `invlang`), and a per-SYSTEM rule asked about one of
-        those answers about the wrong thing.
+        `defender/skills/` holds authored surfaces that are not systems of record, and a
+        per-SYSTEM rule asked about one of those answers about the wrong thing.
+
+        WHICH directories those are is deliberately not listed here. Every copy of that roster
+        is one a newly authored directory falsifies, and the copy this docstring used to carry
+        was already stale by a name (it omitted `judge`) while three more copies of it lived in
+        the lead lane. `tests/test_hardening_772._AUTHORED_SURFACES` holds the shipped set and
+        asserts it against the tree, so there is one roster and it cannot drift quietly.
+
+        Two of the surfaces it names are agent system prompts — `gather/SKILL.md` is the gather
+        subagent's whole `instructions=` and `invlang/SKILL.md` is inlined into MAIN's ORIENT
+        message — which is why the lead author's WRITE gate consumes this answer too, not only
+        its commit gate (#772).
         """
         return system in self._systems()
 

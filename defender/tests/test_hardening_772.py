@@ -32,6 +32,8 @@ import pytest
 pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherwise
 
 from defender import _git  # noqa: E402
+from defender._paths import PATHS, adapters_under  # noqa: E402
+from defender.learning.leads.declared_systems import adapter_systems_under  # noqa: E402
 from defender.learning.leads import lead_author, pitfalls_curator  # noqa: E402
 from defender.learning.leads.lead_author_engine import LEAD_AUTHOR_DEF  # noqa: E402
 from defender.learning.leads.lead_author import _membership_segment  # noqa: E402
@@ -56,11 +58,24 @@ from defender.tests._repo import (  # noqa: E402
 _SYSTEMS = ("elastic", "cmdb")
 
 
+#: THE roster of directories under `defender/skills/` that are NOT systems of record — the one
+#: copy, after this list had four of them (two comments, the agent's deny reason and the agent
+#: prompt) and the copy at the concept's own definition point had already gone stale by a name.
+#: Those now state the RULE — "a directory the tree declares no adapter for" — which is what
+#: production must ask anyway, and this stays because a FIXTURE needs names to plant.
+#:
+#: `test_the_authored_surface_roster_is_the_shipped_one` is what keeps it honest: it asserts
+#: this set against the tree, so a seventh authored directory fails here rather than silently
+#: making every prose copy wrong. Two of these are agent system prompts (`gather/SKILL.md`,
+#: `invlang/SKILL.md`), which is the whole of #772.
+_AUTHORED_SURFACES = ("advisory", "connect", "gather", "handbook", "invlang", "judge")
+
+
 def _tree(tmp_path: Path, systems: tuple[str, ...] = _SYSTEMS) -> Path:
     """A worktree declaring `systems`, with the authored surfaces of the shipped tree beside
     them — so a probe at `gather/SKILL.md` is asking about a directory that really is there."""
     defender_dir = tmp_path / "wt" / "defender"
-    for name in (*systems, "gather", "invlang", "handbook", "connect", "advisory", "judge"):
+    for name in (*systems, *_AUTHORED_SURFACES):
         (defender_dir / "skills" / name).mkdir(parents=True, exist_ok=True)
     (defender_dir / "skills" / "gather" / "queries").mkdir(exist_ok=True)
     seed_adapter_stubs(defender_dir, systems)
@@ -135,6 +150,32 @@ def test_the_other_authored_surfaces_are_not_this_lanes_to_write(tmp_path: Path,
     tail: it was unbounded in DEPTH as well as in directory."""
     admits, _ = _gate(tmp_path)
     assert not admits(rel)
+
+
+def test_the_authored_surface_roster_is_the_shipped_one(tmp_path: Path):
+    """`_AUTHORED_SURFACES` is what the shipped tree actually has, not what a comment remembers.
+
+    The roster used to be spelled four times — `_LEAD_AUTHOR_DENY_REASON`, the L3 lane comment,
+    `VerbResolver.is_system`'s docstring and this fixture — and none was derived. The docstring
+    copy was already wrong: it listed five names and the tree has six, so the one text a reader
+    would treat as the definition of "authored surface" omitted `judge`. Those three now state
+    the RULE instead, which is what production asks anyway; this is the surviving copy, and a
+    fixture needs names to plant.
+
+    So it is asserted against the tree: every directory under `defender/skills/` is either a
+    system the tree declares an adapter for, or a member of this roster — no third case. A
+    seventh authored directory, or a system whose adapter is deleted, fails HERE.
+    """
+    skills = PATHS.defender_dir / "skills"
+    on_disk = {p.name for p in skills.iterdir() if p.is_dir() and not p.name.startswith("__")}
+    declared = adapter_systems_under(adapters_under(PATHS.defender_dir))
+
+    assert on_disk - declared == set(_AUTHORED_SURFACES)
+    # …and the halves really are disjoint, so the equality above is a partition and not an
+    # accident of one name appearing in both.
+    assert declared & set(_AUTHORED_SURFACES) == set()
+    # the two this issue is about are in it, and they are there because they are PROMPTS
+    assert {"gather", "invlang"} <= set(_AUTHORED_SURFACES)
 
 
 # =========================================================================== #
