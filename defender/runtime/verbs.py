@@ -18,7 +18,12 @@ from .verb_grant import GrantError, VerbGrant
 #: THE shape of a system name, and THE bound on its length. Public because they cross module
 #: lines: the leading underscore was always a fiction, `query_tool` imported `_SYSTEM_RE`
 #: through it, and `tools_gather` kept a verbatim second copy of the pattern.
-SYSTEM_RE = re.compile(r"[a-z0-9][a-z0-9-]*\Z")
+#:
+#: Anchored at BOTH ends. `\Z` alone is only half a shape when the pattern is public: every
+#: caller today reaches it through `.match`, which anchors the start for them, but a
+#: `SYSTEM_RE.search("BAD name")` matches the trailing `name` SUFFIX and reads as well-formed.
+#: `\A` makes the object itself carry the anchor rather than each caller's choice of method.
+SYSTEM_RE = re.compile(r"\A[a-z0-9][a-z0-9-]*\Z")
 #: The name is unbounded model text at three of the readers below (#835's prompt-cache key, the
 #: `query` tool's echo, the gather tool's retry message), so the shape needs a ceiling to go
 #: with it. One number rather than one per downstream reason: the reasons differ, but the FACT
@@ -43,7 +48,10 @@ def is_system_name(name: str) -> bool:
     declares; keeping the two questions apart is what lets a drop be attributed to membership
     rather than to shape (`test_869_pitfalls_gate`).
     """
-    return bool(SYSTEM_RE.match(name)) and len(name) <= SYSTEM_MAX_LEN
+    # Length FIRST: `name` is unbounded model text at three of the callers, and the cheap
+    # ceiling is what keeps an arbitrarily long blob from being scanned character by
+    # character before it is refused. The two orders admit exactly the same set.
+    return len(name) <= SYSTEM_MAX_LEN and bool(SYSTEM_RE.match(name))
 
 
 ADAPTER_SUFFIX = "_adapter.py"
@@ -437,7 +445,16 @@ class ModuleVerbRegistry(VerbRegistry):
             )
 
     def systems(self) -> tuple[str, ...]:
-        return tuple(sorted(_system_of(p) for p in self.adapters_dir.glob("*" + ADAPTER_SUFFIX)))
+        """The systems this adapters directory declares — held to the SAME predicate
+        `_adapter_path` resolves with (#914).
+
+        Without the filter this roster and `verbs()` disagree over one directory: a
+        `MySys_adapter.py` lands in `systems()` while `_adapter_path` refuses the name, so
+        `verbs("MySys")` raises `KeyError` for a system the registry just said it had — and
+        `learning.leads.declared_systems._adapter_names`, whose docstring calls this "the same
+        set", refuses it too. A name this roster carries is a name that dispatches."""
+        named = (_system_of(p) for p in self.adapters_dir.glob("*" + ADAPTER_SUFFIX))
+        return tuple(sorted(n for n in named if is_system_name(n)))
 
     def _cold_verb_names(self, system: str) -> frozenset[str] | None:
         return declared_verb_names(self.adapters_dir, system)
@@ -456,6 +473,8 @@ __all__ = [
     "ADAPTER_SUFFIX",
     "DENIED",
     "GRANTED",
+    "SYSTEM_MAX_LEN",
+    "SYSTEM_RE",
     "UNDECLARED",
     "ModuleVerbRegistry",
     "Verb",
@@ -468,6 +487,7 @@ __all__ = [
     "declared_verb_names",
     "engine_for",
     "engine_of",
+    "is_system_name",
     "model_facing_params",
     "validate_params",
     "verb",

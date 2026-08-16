@@ -301,7 +301,7 @@ def test_835_a_system_with_no_templates_says_so_rather_than_rendering_nothing(tm
     reads to the model as a truncated index — the silent-empty failure #585 exists to stop — so
     the block renders and names itself empty, echoing the system so the lead can see WHICH tier
     came back empty. A MALFORMED system never reaches here: `_run_gather` holds the param to
-    `_SYSTEM_RE` first, so a mis-cased name is a retry rather than a catalog silently stripped of
+    `verbs.is_system_name` first, so a mis-cased name is a retry rather than a catalog stripped of
     every `## Goal`. A well-formed name the catalog simply has no template for is this case."""
     dfn = _catalog(tmp_path)
     prompt = _prompt_for(tmp_path, dfn, system="ticket")

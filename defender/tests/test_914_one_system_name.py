@@ -74,6 +74,7 @@ def test_every_real_system_in_the_tree_passes_the_predicate():
     }
     assert adapters, "no adapters found — the comparison would be vacuous"
     assert markers, "no markers found — the comparison would be vacuous"
+    assert catalog, "no catalog systems found — the comparison would be vacuous"
     for source, names in (("adapter", adapters), ("marker", markers), ("catalog", catalog)):
         for name in names:
             assert is_system_name(name), f"{source} source carries {name!r}, which the predicate refuses"
@@ -94,10 +95,16 @@ def test_the_resolver_and_the_dispatch_seam_cannot_disagree(tmp_path):
         assert verbs._adapter_path(adapters, name) is not None, name
 
     for name in REFUSED:
-        # A name the resolver must not declare is a name dispatch must not resolve. Only the
-        # shapes that can BE a filename are planted; the rest cannot reach dispatch at all.
+        # A name the resolver must not declare is a name dispatch must not resolve. The file
+        # is planted for every shape that can BE one — INCLUDING the separator-bearing `a/b`,
+        # whose parent directory is created first. Without the mkdir that one assertion is
+        # vacuous: `_adapter_path` returns None for the missing file, so it passes just as
+        # well against a predicate that admits everything, and the traversal shape is the one
+        # FK-5 is most about. `a\x00b` is the single shape no filesystem can hold.
+        planted = adapters / (name.replace("-", "_") + verbs.ADAPTER_SUFFIX)
         with contextlib.suppress(OSError, ValueError):
-            (adapters / (name.replace("-", "_") + verbs.ADAPTER_SUFFIX)).write_text("VERBS = {}\n")
+            planted.parent.mkdir(parents=True, exist_ok=True)
+            planted.write_text("VERBS = {}\n")
         assert verbs._adapter_path(adapters, name) is None, name
 
 
@@ -108,13 +115,26 @@ def test_no_module_restates_the_shape_or_the_bound():
     freshly-compiled local copy are indistinguishable at runtime.
     """
     root = Path(__file__).resolve().parents[1]
-    pattern = re.compile(r"re\.compile\(\s*r?['\"]\[a-z0-9\]")
+    # The two restatements this issue retired, each read as SOURCE TEXT: a second copy of the
+    # pattern, and a second constant naming the same 64. The bound half is what makes this
+    # test answer to its own name — the `hasattr` probes below only refuse the two spellings
+    # that existed, and a third `_FOO_MAX_LEN = 64` would have walked past them.
+    shape = re.compile(r"re\.compile\(\s*r?['\"](?:\\A)?\[a-z0-9\]")
+    bound = re.compile(r"^\s*_?[A-Z][A-Z0-9_]*MAX_LEN[A-Z0-9_]*\s*=\s*64\b", re.M)
+    # Exempted by PATH, not by basename: `p.name != "verbs.py"` would silently pardon any
+    # future module that happened to be called that.
+    home = (root / "runtime" / "verbs.py").resolve()
+
+    def restates(path: Path) -> bool:
+        text = path.read_text(encoding="utf-8", errors="replace")
+        return bool(shape.search(text) or bound.search(text))
+
     offenders = [
         str(p.relative_to(root)) for p in root.rglob("*.py")
-        if ".venv" not in p.parts and p.name != "verbs.py" and p.name != Path(__file__).name
-        and pattern.search(p.read_text(encoding="utf-8", errors="replace"))
+        if ".venv" not in p.parts and p.resolve() != home and p.name != Path(__file__).name
+        and restates(p)
     ]
-    assert offenders == [], f"the system-name pattern is restated in: {offenders}"
+    assert offenders == [], f"the system-name shape or bound is restated in: {offenders}"
 
     assert not hasattr(tools_gather, "_SYSTEM_RE")
     assert not hasattr(tools_gather, "_SYSTEM_MAX_LEN")

@@ -26,8 +26,17 @@ _ROSTER_FILENAME = "verb-roster.md"
 
 _HEADER_RE = re.compile(r"\A<!-- GENERATED verb-roster role=(\S+) digest=([0-9a-f]{64}) -->\n")
 
+#: NOT `verbs.SYSTEM_RE`, and deliberately so — these are PROSE SCANNERS, not validators, and
+#: the two want different alphabets (#914's census of the shape stops here for that reason).
+#: `_QUALIFIED_CALL_RE` is anchored on the literal `query(system="` so it can afford the full
+#: system alphabet, digit-leading names included: a widening there only audits MORE.
+#: `_CALL_ID_RE` cannot — it is unanchored, so `[a-z0-9]` in the leading position would make it
+#: read `1.2`, `0.7` and every other version string in a markdown surface as a `system.verb`
+#: call and attribute a withheld verb to it. It stays `[a-z]`-leading, which is the narrower
+#: half of the real alphabet: a digit-leading system would be invisible to THIS rule alone,
+#: and the qualified-call rule above still sees it.
 _QUALIFIED_CALL_RE = re.compile(
-    r"""query\(\s*system\s*=\s*['"]([a-z][a-z0-9-]*)['"]\s*,\s*verb\s*=\s*['"]([a-z][a-z0-9-]*)['"]"""
+    r"""query\(\s*system\s*=\s*['"]([a-z0-9][a-z0-9-]*)['"]\s*,\s*verb\s*=\s*['"]([a-z][a-z0-9-]*)['"]"""
 )
 _CALL_ID_RE = re.compile(r"\b([a-z][a-z0-9-]*)\.([a-z][a-z0-9-]*)\b")
 
