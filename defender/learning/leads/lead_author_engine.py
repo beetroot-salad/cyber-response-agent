@@ -92,8 +92,12 @@ def _md_name(*also: str) -> str:
     return rf"(?!(?:{names})\Z){SEG}\.md"
 
 
-def _draft_tail(prefix: str, systems: str) -> str:
-    """`{prefix}(?:{systems})/_draft/{name}.md`, minus `README.md`.
+def _draft_tail(prefix: str, sys_alt: str) -> str:
+    """`{prefix}(?:{sys_alt})/_draft/{name}.md`, minus `README.md`.
+
+    `sys_alt` is the pre-joined regex ALTERNATION of the declared system names, not the
+    `tuple[str, ...]` every `systems` parameter in this module carries — spelled apart so the
+    two cannot be swapped at a call site.
 
     One spelling for the two `_draft/` lanes (catalog drafts and system-skill drafts) because
     they ARE one shape at two depths; two copies of it is how the pair drifts. `README.md` is
@@ -101,7 +105,7 @@ def _draft_tail(prefix: str, systems: str) -> str:
     about: `_is_draft_readme` refuses it at the DRAIN, which discards the batch, while a write
     gate refusal is one denied tool call the agent can recover from.
     """
-    return rf"{prefix}(?:{systems})/_draft/{_md_name('README.md')}"
+    return rf"{prefix}(?:{sys_alt})/_draft/{_md_name('README.md')}"
 
 
 def _skill_write_lanes(skills_dir: Path, systems: tuple[str, ...]) -> tuple[re.Pattern[str], ...]:

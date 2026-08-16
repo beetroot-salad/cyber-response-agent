@@ -114,7 +114,14 @@ def _declared_names(value: Any) -> tuple[str, ...]:
                 out.extend(str(k) for k in v)
             elif isinstance(v, str):
                 out.append(v)
-            elif isinstance(v, (int, float)) and not isinstance(v, bool):
+            elif isinstance(v, (int, float)):
+                # `bool` is an `int`, and it is read like one ON PURPOSE. An unquoted `on` /
+                # `yes` / `no` is a BOOLEAN to YAML, so excluding it would drop the entry —
+                # which is the outcome the paragraph above rules out for this rule, and which
+                # disagreed with the `Mapping` branch two lines up, where the same value is a
+                # key and gets stringified. `str(True)` is not a name either, and that is the
+                # point: `check_template` reports it as an undeclared param, so the author is
+                # told their `on` was coerced instead of the declaration going unenforced.
                 out.append(str(v))
         return tuple(out)
     return ()

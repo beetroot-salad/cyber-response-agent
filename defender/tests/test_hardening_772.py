@@ -336,6 +336,16 @@ _EVERY_SHAPE = (
 )
 
 
+def _commit_scopes_admit_lead_author(repo_root: Path, path: str) -> bool:
+    """The LEAD AUTHOR's path rule alone — the union helper above answers for either role, and
+    the point here is the one path where the two roles disagree."""
+    try:
+        lead_author._skills_path_rule(repo_root, "M", path, systems=frozenset(_SYSTEMS))
+    except LeadAuthorError:
+        return False
+    return True
+
+
 def _commit_scopes_admit(repo_root: Path, path: str) -> bool:
     """Does EITHER role's real commit-gate path rule accept `path` as a modification?
 
@@ -400,13 +410,41 @@ def test_nothing_the_write_gate_admits_is_refused_at_the_drain(tmp_path: Path):
 def test_the_write_gate_refuses_the_protected_surfaces_first(tmp_path: Path):
     """`SCHEMA.md` and a `_draft/README.md` are surface declarations the commit gate calls
     "protected" and refuses — by discarding the batch. No lane reaches them now, so the same
-    refusal arrives as a recoverable denial instead. `SCHEMA.md` needs no exclusion of its own:
-    it sits at the catalog ROOT, one segment above where any lane starts."""
+    refusal arrives as a recoverable denial instead. `SCHEMA.md` needs BOTH halves: the catalog
+    ROOT copy is one segment above where any lane starts, and `_is_schema_md` reads the basename
+    at any depth, so `_REFUSED_BASENAMES` keeps a `{system}/SCHEMA.md` out of L1 and L2 too."""
     admits, _ = _gate(tmp_path)
     assert not admits("gather/queries/SCHEMA.md")
     assert not admits("gather/queries/elastic/_draft/README.md")
     assert not admits("elastic/_draft/README.md")
     assert admits("gather/queries/elastic/_draft/real-draft.md")   # control
+
+
+def test_the_prompt_names_the_one_lane_it_cannot_promise_a_recoverable_denial_for(tmp_path: Path):
+    """L5 is the pitfalls curator's lane, and the lead author shares its grants — so
+    `{system}/execution.md` is the one path the write gate admits that THIS role's commit gate
+    refuses, by discarding the batch.
+
+    The prompt has to say so. `lead_author.md` tells the agent a write outside its scope costs
+    one denied call rather than the batch, which is true of every other shape and false of this
+    one; an agent trusting the general claim reads the tool's ALLOW as confirmation and spends
+    the tick. Pinned here rather than left to the code comment because the comment is read by
+    maintainers and the prompt is read by the thing that does it.
+
+    Retire this with the role split, not before — the code comment on L5 files it.
+    """
+    admits, defender_dir = _gate(tmp_path)
+    assert admits("elastic/execution.md")                       # the shared lane really is open
+    assert not _commit_scopes_admit_lead_author(
+        defender_dir.parent, f"{SKILLS_REL}elastic/execution.md"
+    )
+    prompt = (
+        Path(__file__).resolve().parents[1] / "learning" / "leads" / "lead_author.md"
+    ).read_text(encoding="utf-8")
+    scope_rule = next(ln for ln in prompt.splitlines() if ln.startswith("- **Stay in scope."))
+    assert "execution.md" in scope_rule, (
+        "the scope rule promises a recoverable denial without naming the one path that is not"
+    )
 
 
 # =========================================================================== #

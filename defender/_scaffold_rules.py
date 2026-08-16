@@ -88,9 +88,15 @@ def _id_findings(t: QueryTemplate) -> list[Finding]:
     system is derived from WHERE IT SITS, while every consumer of the corpus routes on the id's
     prefix (`query_id` is `{system}.{kebab-name}`, and `lead_neighbors` keys `by_id` on it), so a
     file filed under one system's directory while calling itself `{other}.x` sends the row to
-    the wrong system and mints a sibling draft besides. The minter is already held to exactly this on the writing side
-    (`_draft_candidate_segments`'s `system != row_system`); a promotion — the other lane that
-    writes an established file — was held to nothing.
+    the wrong system and mints a sibling draft besides.
+
+    The two WRITERS are each already held to this from their own side — the minter by
+    `_draft_candidate_segments`'s `system != row_system`, and the loop's commit gate by
+    `lead_author._skills_path_rule`'s RF2 clause (`_frontmatter_id` vs `_membership_segment`),
+    which covers a promotion. What was held to nothing is every READER that takes a template as
+    data without a repo-relative path to key on: `connect`'s scaffold-time sweep and the
+    corpus-wide CI check both parse the file and neither compared its id to its directory, so a
+    hand-authored mismatch shipped unremarked until some consumer routed on it.
     """
     prefix = t.id.split(".", 1)[0] if "." in t.id else ""
     if prefix == t.system:
@@ -255,13 +261,17 @@ class VerbResolver:
         try:
             verbs = self._registry.verbs(system)
         except (KeyboardInterrupt, GeneratorExit, asyncio.CancelledError):
-            # Ahead of the blanket clause below, the SAME tuple every other site in this
-            # codebase that widens to `BaseException` re-raises (`query_tool
-            # .CONTROL_FLOW_EXCEPTIONS`, `closed_ticket_tool._grant_gate`): an interrupt is the
-            # operator and a cancellation is the event loop, not a broken adapter, and
-            # reporting either as one makes a corpus sweep un-interruptible — `CancelledError`
-            # is a `BaseException` since 3.8, so leaving it to the clause below would swallow
-            # a cancel into a finding about the adapter that happened to be importing.
+            # Ahead of the blanket clause below. An interrupt is the operator and a
+            # cancellation is the event loop, not a broken adapter, and reporting either as one
+            # makes a corpus sweep un-interruptible — `CancelledError` is a `BaseException`
+            # since 3.8, so leaving it to the clause below would swallow a cancel into a
+            # finding about whichever adapter happened to be importing.
+            #
+            # NOT imported from `query_tool`, though it names the same interrupts: `_RERAISE`
+            # there is those unioned with `BudgetKill` and `CONTROL_FLOW_EXCEPTIONS` (the
+            # pydantic-ai signals), and this module is the plain-data rule layer — it has no
+            # pydantic-ai dependency and no budget to be killed by. Same three interrupts, the
+            # subset that means anything here.
             raise
         except BaseException as exc:  # noqa: BLE001 — a module that will not import is a broken adapter
             raise ScaffoldRuleError(

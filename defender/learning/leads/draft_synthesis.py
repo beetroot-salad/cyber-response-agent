@@ -14,7 +14,12 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
 from defender._scaffold_rules import placeholders
 from defender.learning.core import config as _loop_config
 from defender.learning.leads import lead_neighbors
-from defender.learning.leads.path_validation import CATALOG_DIR
+from defender.learning.leads.path_validation import (
+    CATALOG_DIR,
+    CATALOG_REL,
+    _is_draft_readme,
+    _is_schema_md,
+)
 from defender.runtime.verbs import body_param_for, engine_for
 
 if TYPE_CHECKING:
@@ -127,7 +132,16 @@ def _draft_skeleton(
     query_id: str, verb_name: str, params: list[str], goal: str, record: str, engine: str,
 ) -> str:
     query_block = _render_query_body(record, engine if engine != "none" else "query")
-    goal_line = (goal or "").replace("\n", " ").strip() or "(no lead goal recorded)"
+    # `split()`, not `replace("\n", " ")`: the reader this line has to survive is
+    # `_corpus.section_bodies`, which walks `body.splitlines()` — and that splits on `\r`,
+    # `\v`, `\f`, `\x1c`-`\x1e`, `\x85` and `\u2028`/`\u2029` as well as on `\n`. A
+    # model-authored `goal_text` carrying any of them opened a new LINE in the draft, so a `## `
+    # heading or a ``` fence smuggled into a goal re-partitioned the template's sections and
+    # could swallow `## Query` whole. Every one of those separators is `str.isspace()`, which
+    # is exactly what a bare `split()` breaks on, so one call neutralizes the set (#852 F-21's
+    # argument about a control character in an id, applied to the other model-supplied string
+    # this skeleton interpolates).
+    goal_line = " ".join((goal or "").split()) or "(no lead goal recorded)"
     body_subs = _body_substitutions(query_block, params)
     return (
         f"---\n{_draft_frontmatter(query_id, verb_name, params, engine, body_subs)}\n---\n\n"
@@ -175,6 +189,19 @@ def _draft_candidate_segments(
     if not _SAFE_ID_SEGMENT.match(verb_name or ""):
         return None
     if not _SAFE_ID_SEGMENT.match(system) or not _SAFE_ID_SEGMENT.match(suffix):
+        return None
+    # …and the BASENAME the mint would take must not be one the commit gate refuses by
+    # DISCARDING the batch. `resolve_query_id`'s kebab segment admits `SCHEMA`, `README` and
+    # `execution` like any other name, so a coined `{system}.SCHEMA` mints
+    # `queries/{system}/_draft/SCHEMA.md` — which `_is_schema_md` calls a protected surface at
+    # ANY depth under the catalog — and `{system}.README` / `{system}.execution` land on
+    # `_is_draft_readme` and `_skills_path_rule`'s basename rule the same way. Each costs the
+    # whole tick's batch, from a model-coined id, before the agent is even spawned. #772 closed
+    # exactly these three on the AGENT's write lane; this is the host-side minter, the other
+    # writer of the same paths, held to the same set — through the gate's OWN predicates rather
+    # than a second copy of the name list.
+    minted = f"{CATALOG_REL}{system}/_draft/{suffix}.md"
+    if _is_schema_md(minted) or _is_draft_readme(minted) or Path(minted).name == "execution.md":
         return None
     return system, suffix
 

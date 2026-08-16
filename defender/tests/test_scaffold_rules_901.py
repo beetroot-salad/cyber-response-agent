@@ -163,6 +163,22 @@ def test_a_params_mapping_is_read_as_a_declaration_not_as_nothing(tmp_path, reso
     assert _codes(listed, "cmdb", tmp_path, resolver) == []
 
 
+def test_a_yaml_boolean_param_entry_is_read_the_same_in_every_spelling(tmp_path, resolver):
+    """`params: [on]` is a BOOLEAN to YAML, not the name the author typed — and the reader has
+    to answer about it the same way in all three spellings, because it is one declaration.
+
+    It did not. The sequence branch excluded `bool`, so the entry was dropped and went
+    unreported, while the mapping branches stringified the same value and reported it. That is
+    the split `_declared_names`' own docstring rules out for this rule: an unread declaration is
+    an unenforced one, so a template carrying an unquoted `on` / `yes` / `no` passed a sweep
+    that used to refuse it. `'True'` is not a name either — reporting it is what tells the
+    author their `on` was coerced, instead of the declaration silently going unchecked.
+    """
+    for spelling in ("params: [on]", "params:\n  on: a note", "params:\n  - on: a note"):
+        text = _GOOD.replace("params: [host]", spelling, 1)
+        assert _codes(text, "cmdb", tmp_path, resolver) == ["undeclared-param"], spelling
+
+
 def test_every_shipped_template_including_drafts_satisfies_the_rule(resolver):
     """The scope half. `validate_scaffold` excluded `_draft/`; this does not, which is the only
     reason the lead lane's output is inside any check at all."""
