@@ -2384,7 +2384,7 @@ gate:
        resolved_to: id_prefix_rule_spares_idless_surfaces}
     - {rule: R4, element: "_is_system_name.domain.alternatives[applied-at-the-resolver]",
        witness: "FK-5: does the resolver shape-filter what it emits, or does every consumer re-check? J4 (executed) shows sites 2 and 3 have no character-class check to re-apply today, and this same gap is what R6's log-line finding rests on.",
-       resolution: "ADOPTED (human, §7) — FILTER AT THE RESOLVER, AND LOG EACH REFUSAL. READING TAKEN: `_is_system_name` moves beside the resolver (learning-side, with it — FK-11 answers the layering question in the same direction) and screens every candidate BOTH sources produce, so the set can never CARRY 'dir', '.hidden', '' or '..'. THIS RESOLUTION IS THE ONLY THING CLOSING R6's LOG SINK — the dropped-names line renders a raw system name and filtering at the source is its sanitizer, so a later reader cannot revisit FK-5 without re-opening that gap with nothing else pinning it.",
+       resolution: "ADOPTED (human, §7) — FILTER AT THE RESOLVER, AND LOG EACH REFUSAL. READING TAKEN: `_is_system_name` moves beside the resolver (learning-side, with it — FK-11 answers the layering question in the same direction) and screens every candidate BOTH sources produce, so the set can never CARRY 'dir', '.hidden', '' or '..'. THIS RESOLUTION IS THE ONLY THING CLOSING R6's LOG SINK — the dropped-names line renders a raw system name and filtering at the source is its sanitizer, so a later reader cannot revisit FK-5 without re-opening that gap with nothing else pinning it. AMENDED (human, #915) — THE SIDE IS REVERSED; NOTHING ELSE IS. The predicate is now `runtime.verbs.is_system_name` and this artifact's `_is_system_name` resolves against nothing. WHAT THE AMENDMENT DOES NOT TOUCH: the filter still runs AT THE RESOLVER, on BOTH resolution points, and every refusal is still logged with the source directory it came from — so R6's log sink stays closed by exactly the mechanism this resolution named, and the sentence above about re-opening it still binds. WHAT IT CHANGES: where the predicate is DEFINED. #908's probe found the learning-side version admitting `my sys` and a non-ASCII name that `_adapter_path` refuses — a name DECLARED a system that cannot RESOLVE as one — because it screened against an alphabet of its own while claiming to hold names to the dispatch seam's. The seam is where the alphabet is enforced, so it is the only place a single definition makes the two unable to disagree. SCOPE: this amends the layering for the SHAPE HALF ALONE. `declared_systems` and `adapter_declared_systems` remain learning-side, so FK-11's answer stands for them unchanged.",
        resolved_to: resolver_refuses_shape_anomalous_names}
     - {rule: R4, element: "consumed_category.domain.alternatives[consumed_undeclared]",
        witness: "FK-2 (un-gated by P9/PO-R — the dropped row is not stuck in pending): which terminal category does a dropped pitfalls row take?",
@@ -2594,7 +2594,12 @@ handoff:
        THIS RESOLUTION IS THE ONLY THING CLOSING R6's LOG SINK — the dropped-names line renders a
        raw system name and filtering at the source is its sanitizer; re-opening FK-5 re-opens that
        gap with nothing else pinning it. Demand: `resolver_refuses_shape_anomalous_names`.
-       resolved_by: human."
+       resolved_by: human.
+       AMENDED (human, #915): the predicate moved RUNTIME-side (`runtime.verbs.is_system_name`).
+       Both halves of this resolution survive it — the filter still runs at the resolver, on both
+       resolution points, and each refusal is still logged — so R6's log sink is closed by the same
+       mechanism and the warning above still binds. Only the DEFINITION SITE changed, and only for
+       the shape half; the resolver stays learning-side per FK-11."
     - "FK-6 — case, whitespace, Unicode: exact equality or normalisation? RESOLVED: **exact
        codepoint equality**, no folding and no NFC, KEEPING the existing `.strip()`. Nothing in
        any input discussed it as an obligation or as a non-obligation, which is why it went to the
@@ -2923,7 +2928,8 @@ handoff:
        ASSERT THE VIEW THAT READS IT'), so it is orthogonal to the resolver by design."
 
   deviations:
-    - "SUPERSEDED BY #914 — THE LAYERING FK-5 (§7) ADOPTED IS REVERSED, AND THE SYMBOL IS GONE.
+    - "SUPERSEDED BY #914, ACCEPTED BY THE HUMAN AT #915 — THE LAYERING FK-5 (§7) ADOPTED IS
+       REVERSED, AND THE SYMBOL IS GONE.
        Was: `_is_system_name` lives learning-side, beside the resolver (FK-5's §7 resolution,
        ADOPTED by the human, with FK-11 cited as answering the layering question in the same
        direction). It is now `runtime.verbs.is_system_name`. Every `_is_system_name` reference
@@ -2982,7 +2988,8 @@ handoff:
        seam contract in its module docstring.
        THE NAME THIS SPEC DID NOT PIN AND THE SUITE HAD TO: no input — not the design doc, not
        `35`, not `70` — ever named a MODULE for the resolver. The header mints the SYMBOLS
-       (`declared_systems`, `_is_system_name`) and FK-11 fixes the SIDE (learning), and an
+       (`declared_systems`, `_is_system_name` — the latter RUNTIME-side since #914/#915, though
+       the resolver itself is not) and FK-11 fixes the SIDE (learning), and an
        import statement cannot be written from that alone. The suite imports them from
        `defender/learning/leads/declared_systems.py`, beside `path_validation.py`'s sibling
        shape predicates and importable by all three consuming lanes without inverting C27's
