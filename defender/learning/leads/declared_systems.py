@@ -30,19 +30,12 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
 from defender import _git
 from defender.learning.core import config as _loop_config
 from defender.learning.leads.lead_extraction import LeadAuthorError
-from defender.runtime.verbs import ADAPTER_SUFFIX, _system_of
+from defender.runtime.verbs import ADAPTER_SUFFIX, _adapter_path, _system_of, is_system_name
 
 ADAPTERS_REL = "defender/scripts/adapters/"
 SKILLS_REL = "defender/skills/"
 
 _log = _loop_config.make_logger("lead-author", flush=True)
-
-
-def _is_system_name(name: str) -> bool:
-    """#868's shape half: refuse empty, a leading dot, and any value carrying `/`, `\\` or
-    NUL — the same alphabet the dispatch seam already holds a system name to
-    (`runtime.verbs._SYSTEM_RE`), asked as a pure shape question independent of membership."""
-    return bool(name) and not name.startswith(".") and not any(c in name for c in "/\\\x00")
 
 
 def _adapter_names(adapters_dir: Path) -> frozenset[str]:
@@ -64,12 +57,18 @@ def _adapter_names(adapters_dir: Path) -> frozenset[str]:
     names: set[str] = set()
     for p in adapters_dir.glob("*" + ADAPTER_SUFFIX):
         name = _system_of(p)
-        if p.is_file() and _is_system_name(name):
+        # `_adapter_path`, which is `is_system_name` PLUS the resolution `verbs()` performs —
+        # the same call `ModuleVerbRegistry.systems()` filters on, so this half and the runtime
+        # roster this docstring calls "the same set" really are one set. Shape alone is not
+        # enough: `_system_of` maps `_`->`-` and its inverse is not onto, so a
+        # `change-mgmt_adapter.py` derives the well-formed `change-mgmt` that `_adapter_path`
+        # then fails to find at `change_mgmt_adapter.py` — declared here, unresolvable there.
+        if _adapter_path(adapters_dir, name) is not None:
             names.add(name)
         else:
             _log(
-                f"declared_systems: refused shape-anomalous adapter name {name!r} "
-                f"from {adapters_dir}"
+                f"declared_systems: refused anomalous adapter name {name!r} "
+                f"from {adapters_dir} — it is not a name the dispatch seam resolves"
             )
     return frozenset(names)
 
@@ -102,7 +101,7 @@ def _marker_names(repo_root: Path) -> frozenset[str]:
     #
     # Each of those silently un-declared a real system — the precise failure this resolver
     # exists to prevent, and worse than a loud refusal because the name never even reaches
-    # the `_is_system_name` shape check below to be logged as anomalous.
+    # the `is_system_name` shape check below to be logged as anomalous.
     try:
         listing = _git.git(
             ["ls-tree", "-r", "-z", "--full-name", "--name-only", "HEAD", "--", SKILLS_REL],
@@ -117,7 +116,7 @@ def _marker_names(repo_root: Path) -> frozenset[str]:
         if not rel or not rel.endswith("/execution.md") or rel.count("/") != 3:
             continue
         name = Path(rel).parent.name
-        if _is_system_name(name):
+        if is_system_name(name):
             names.add(name)
         else:
             _log(

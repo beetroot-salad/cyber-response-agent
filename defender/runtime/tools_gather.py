@@ -1,7 +1,6 @@
 
 from __future__ import annotations
 
-import re
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -32,6 +31,7 @@ from defender.hooks.inject_system_skill_description import descriptor_catalog as
 from defender._untrusted import wrap_fresh
 from defender.scripts.gather_tools.record_query import GatherDeadEnd
 from defender.scripts.gather_tools.record_query import LEAD_ID_RE as _LEAD_ID_RE
+from .verbs import SYSTEM_MAX_LEN, is_system_name
 from defender.runtime.verb_grant import VerbGrant
 
 
@@ -148,8 +148,8 @@ def _template_index(
     # No positional word ("above"/"below") in this arm: the descriptor index is absent whenever
     # `_descriptor_catalog` returns None, and the other tier is absent on a one-system corpus, so
     # a pointer at either is a dangling reference in exactly the degradation this block exists to
-    # make legible. `_run_gather` holds `system` to `_SYSTEM_RE` before the prompt is built, so
-    # reaching here means a well-formed system the catalog simply has no template for.
+    # make legible. `_run_gather` holds `system` to `is_system_name` before the prompt is built,
+    # so reaching here means a well-formed system the catalog simply has no template for.
     on_target_block = "\n".join(on_target) if on_target else (
         f"(none — the catalog has no established `{dispatched}` template. Nothing is on-target: "
         "`template_search` for a near neighbour, or read an off-tier path, before you coin.)"
@@ -306,11 +306,6 @@ def _gather_prompt(
 
 
 
-_SYSTEM_RE = re.compile(r"[a-z0-9][a-z0-9-]*\Z")
-#: A ceiling on the same param, because #835 routes it into a provider request field
-#: (`openai_prompt_cache_key`) where the shape alone leaves the length model-controlled.
-_SYSTEM_MAX_LEN = 64
-
 _NO_HITS = (
     "no template matches {pattern!r} (searched {scope}). This means no template's text carries "
     "that text — NOT that the catalog is empty. Try a different keyword (a daemon name, a field, "
@@ -327,7 +322,7 @@ def _search_root(deps: AgentDeps, system: str | None) -> Path:
         return root
     systems = sorted({p.name for p in root.iterdir() if p.is_dir()}) if root.is_dir() else []
     known = ", ".join(systems) or "(none — the corpus is unreadable)"
-    if not _SYSTEM_RE.match(system) or system not in systems:
+    if not is_system_name(system) or system not in systems:
         raise ModelRetry(
             f"unknown system {system!r}. `system` is one of: {known} — or omit it to search "
             "every system. It is a system name, never a path."
@@ -481,15 +476,16 @@ async def _run_gather(  # noqa: C901 — the branch count IS the terminator cens
     # hands the provider — so the one key component that WAS validated (`lead_id`) got replaced
     # by one that was not. Both new uses fail silently on a mis-cased or whitespace-bearing name:
     # the catalog collapses to bare ids with every `## Goal` stripped, and the string goes out
-    # verbatim as `openai_prompt_cache_key`. `_SYSTEM_RE` is the same shape `template_search`
+    # verbatim as `openai_prompt_cache_key`. `is_system_name` is the same predicate `template_search`
     # already holds this param to. NOT `verb_grant.systems`: the role grant is deliberately
     # decoupled from the per-run registry (see `register_gather_tool`'s call site in driver.py),
     # so a system an injected registry declares must still dispatch.
-    if not _SYSTEM_RE.match(system) or len(system) > _SYSTEM_MAX_LEN:
+    if not is_system_name(system):
         raise ModelRetry(
             f"malformed system {system!r}: a system name is lowercase letters, digits and "
-            "hyphens (`host-state`, `change-mgmt`) — the `:L` row's system, spelled as the "
-            "descriptor index spells it. Re-dispatch this same lead_id with the corrected name."
+            f"hyphens, at most {SYSTEM_MAX_LEN} characters (`host-state`, `change-mgmt`) — the "
+            "`:L` row's system, spelled as the descriptor index spells it. Re-dispatch this "
+            "same lead_id with the corrected name."
         )
     # Same placement and same reason as `system` (#855 F-12): `goal` is a bare `str` on the
     # tool signature, so the schema admits `""` and nothing below here has an opinion about it

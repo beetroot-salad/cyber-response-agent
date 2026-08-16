@@ -19,17 +19,46 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from .verb_grant import DENY_ALL, VerbGrant
-from .verbs import declared_verb_names
+from .verbs import (
+    ADAPTER_SUFFIX,
+    SYSTEM_PATTERN,
+    _system_of,
+    declared_verb_names,
+    is_system_name,
+)
 
 _AUDIT_DEFAULT_ROLE = "gather"
 _ROSTER_FILENAME = "verb-roster.md"
 
 _HEADER_RE = re.compile(r"\A<!-- GENERATED verb-roster role=(\S+) digest=([0-9a-f]{64}) -->\n")
 
+#: Both scanners spell their name groups from `verbs.SYSTEM_PATTERN` — the SAME alphabet the
+#: predicate is built on — except for one deliberate, documented narrowing below.
+#:
+#: `_QUALIFIED_CALL_RE` takes the alphabet whole. It is anchored on the literal `query(system="`,
+#: so it can afford every name the tree can carry, digit-leading ones included; verb names share
+#: the alphabet, so the same fragment spells that group too.
+#:
+#: `_CALL_ID_RE` is the exception and cannot. It is UNANCHORED — it hunts a bare `system.verb`
+#: anywhere in prose — so a digit-leading first character would make it read `1.2`, `0.7` and
+#: every other version string in a markdown surface as a `system.verb` pair. It therefore keeps
+#: an `[a-z]` head over the shared tail: strictly narrower than the real alphabet, which costs
+#: it a digit-leading system that `_QUALIFIED_CALL_RE` still sees, and buys back every false
+#: pair a version number would otherwise mint.
+#:
+#: NEITHER alphabet is free on its own, and the reason is `audit_read_surfaces`' span
+#: exclusion: a match here suppresses `_bare_offenders` over the text it covers. A match whose
+#: (system, verb) is NOT a real declared pair therefore has to be dropped from the exclusion
+#: set — otherwise `query(system="7", verb="esql")` in a committed surface both fails to
+#: attribute (`7` declares nothing) and hides the bare `esql` the fallback rule would have
+#: caught, which is a withheld verb advertised past the audit.
 _QUALIFIED_CALL_RE = re.compile(
-    r"""query\(\s*system\s*=\s*['"]([a-z][a-z0-9-]*)['"]\s*,\s*verb\s*=\s*['"]([a-z][a-z0-9-]*)['"]"""
+    rf"""query\(\s*system\s*=\s*['"]({SYSTEM_PATTERN})['"]\s*,\s*verb\s*=\s*['"]({SYSTEM_PATTERN})['"]"""
 )
-_CALL_ID_RE = re.compile(r"\b([a-z][a-z0-9-]*)\.([a-z][a-z0-9-]*)\b")
+#: The narrowing named above: an `[a-z]` head, then the shared tail, spelled by slicing the
+#: leading character class off `SYSTEM_PATTERN` so the TAIL still has exactly one source.
+_CALL_ID_TAIL = SYSTEM_PATTERN[len("[a-z0-9]"):]
+_CALL_ID_RE = re.compile(rf"\b([a-z]{_CALL_ID_TAIL})\.([a-z]{_CALL_ID_TAIL})\b")
 
 
 class RosterError(Exception):
@@ -179,10 +208,13 @@ def audit_read_surfaces(defender_dir: Path, grants: Mapping[str, VerbGrant]) -> 
     root = Path(defender_dir)
     skills_dir = root / "skills"
     adapters_dir = root / "scripts" / "adapters"
-    systems = sorted(
-        p.name[: -len("_adapter.py")].replace("_", "-")
-        for p in adapters_dir.glob("*_adapter.py")
-    ) if adapters_dir.is_dir() else []
+    # `_system_of` + `is_system_name` rather than a second spelling of either (#914): the
+    # audit's notion of "a system this tree declares" must be the dispatch seam's, or a name
+    # only one of them recognises is a pair the other cannot score.
+    systems = sorted({
+        _system_of(p) for p in adapters_dir.glob("*" + ADAPTER_SUFFIX)
+        if is_system_name(_system_of(p))
+    }) if adapters_dir.is_dir() else []
     declared_by_system = {s: declared_verb_names(adapters_dir, s) for s in systems}
 
     hits: list[str] = []
@@ -201,7 +233,14 @@ def audit_read_surfaces(defender_dir: Path, grants: Mapping[str, VerbGrant]) -> 
             pair for pair, _ in qualified
             if pair[1] in declared_by_system.get(pair[0], ())
         }
-        spans = [span for _, span in qualified]
+        # SPANS FROM THE KEPT PAIRS ONLY. The exclusion exists to stop `_bare_offenders`
+        # re-attributing a verb the qualified rules already attributed — so a match that was
+        # just discarded as "not a real (system, verb)" must not suppress anything, or the
+        # discard silently becomes a way to hide a verb name from the fallback rule.
+        spans = [
+            span for pair, span in qualified
+            if pair[1] in declared_by_system.get(pair[0], ())
+        ]
         owning = _owning_system(path, skills_dir)
         pairs |= _bare_offenders(text, spans, owning, declared_by_system)
 

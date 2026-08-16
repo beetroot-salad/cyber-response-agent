@@ -18,7 +18,7 @@ did not name them would leave the seam unpinned:
     unresolvable RAISES `LeadAuthorError` (`lead_extraction.LeadAuthorError`, which per J2
     must not be an `OSError` subclass). Both present and the union empty returns
     `frozenset()` plus one log line naming BOTH directories. Every emitted name has passed
-    `_is_system_name`, and each refusal is logged with the source it came from (FK-5).
+    `verbs.is_system_name`, and each refusal is logged with the source it came from (FK-5).
   - `adapter_declared_systems(repo_root: Path) -> frozenset[str]` — NF2's SECOND
     RESOLUTION POINT, and the value the PITFALLS lane is handed: the adapter half ALONE.
     Named here because NF2 requires a different value at that lane and no input named the
@@ -27,11 +27,13 @@ did not name them would leave the seam unpinned:
     unresolvable marker source is not its fault to raise — only an unresolvable ADAPTER
     source is; (b) emptiness is measured on the ADAPTER HALF, so a tree with committed
     markers and no adapters refuses the whole pitfalls lane while genuinely declaring
-    systems; (c) it applies FK-5's `_is_system_name` filter and logs one line per refusal
+    systems; (c) it applies FK-5's `verbs.is_system_name` filter and logs one line per refusal
     naming the source, which is the only thing closing R6's log sink on this path.
-  - `_is_system_name(name: str) -> bool` — #868's shape half, split out of the deleted
-    `pitfalls_curator._is_real_system` unchanged: refuse empty, a leading dot, and any value
-    carrying `/`, `\\` or NUL.
+  - the shape half is `runtime.verbs.is_system_name(name: str) -> bool` — #868's check, which
+    #914 folded into the ONE system-name predicate the dispatch seam already had, so a name
+    this resolver declares is a name `_adapter_path` will also resolve. Lowercase letters,
+    digits and hyphens, bounded by `verbs.SYSTEM_MAX_LEN`; membership stays a separate
+    question, so `gather` and `fakesys` are well-formed and simply undeclared.
 * `defender/_paths.py::DefenderPaths` gains `adapters_dir` (and its `adapters_rel` spelling),
   so a worktree-rooted `LoopPaths` answers for the worktree at BOTH source directories.
 * `pitfalls_curator._build_pitfalls_handoffs(rows, *, systems: frozenset[str])` and
@@ -66,11 +68,13 @@ import subprocess
 from pathlib import Path
 
 from defender import _git
+#: Re-exported so the #869 suites keep importing the shape predicate from the one module that
+#: states this seam's contract, rather than each reaching into `runtime.verbs` themselves.
+from defender.runtime.verbs import is_system_name  # noqa: F401  (re-exported)
 
 # ---- THE SURFACE UNDER TEST — it does not exist on this base (RED by construction) ----
 try:  # pragma: no cover — the post-implementation branch
     from defender.learning.leads.declared_systems import (  # type: ignore[import-not-found]
-        _is_system_name,
         adapter_declared_systems,
         declared_systems,
     )
@@ -99,7 +103,6 @@ except ImportError as _err:  # pragma: no cover — the pre-implementation state
     adapter_declared_systems = _not_yet_written(  # type: ignore[assignment]
         "adapter_declared_systems"
     )
-    _is_system_name = _not_yet_written("_is_system_name")  # type: ignore[assignment]
 
 
 #: The two source directories, spelled here once so a fixture cannot disagree with the

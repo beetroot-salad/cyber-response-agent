@@ -25,9 +25,9 @@ from defender.learning.leads._lead_spine import (
 )
 from defender.learning.leads.declared_systems import (
     ADAPTERS_REL,
-    _is_system_name,
     adapter_declared_systems,
 )
+from defender.runtime.verbs import is_system_name
 from defender.learning.leads.lead_extraction import LeadAuthorError
 from defender.learning.pipeline._prompt import stage_user_message, structured_json_body
 from defender.learning.leads.path_validation import (
@@ -50,13 +50,16 @@ def _build_pitfalls_handoffs(rows: list[dict], *, systems: frozenset[str]) -> li
 
     `systems` is the threaded membership value (NF2's adapter half alone) — a queued row
     naming a system nothing declares yields no handoff, which is the M6 gate #869 exists for.
-    The shape check (`_is_system_name`) runs regardless of what `systems` contains, so a
+    The shape check (`is_system_name`) runs regardless of what `systems` contains, so a
     traversal-shaped name is never a set lookup (FK-5).
     """
     by_system: dict[str, list[dict]] = {}
     for r in _loop_persist.merge_pitfalls(rows):
         system = str(r.get("system") or "").strip()
-        if not system or not _is_system_name(system) or system not in systems:
+        # No `not system` arm: `is_system_name("")` is already False (the pattern needs one
+        # `[a-z0-9]`), and a second spelling of "the empty string is not a name" is one more
+        # place for the two to disagree — which is the whole of what #914 was about.
+        if not is_system_name(system) or system not in systems:
             continue
         by_system.setdefault(system, []).append(r)
     out: list[dict] = []
