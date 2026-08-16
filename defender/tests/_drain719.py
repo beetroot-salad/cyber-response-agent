@@ -152,6 +152,9 @@ def make_repo(tmp_path: Path) -> Path:
     # the one of the four that `git add -A` silently dropped.
     (elastic / "SKILL.md").write_text("---\nname: defender-elastic\n---\n# elastic\n")
     (repo / "defender" / "skills" / "gather" / "queries").mkdir(parents=True)
+    adapters = repo / "defender" / "scripts" / "adapters"
+    adapters.mkdir(parents=True)
+    (adapters / "elastic_adapter.py").write_text("VERBS = {}\n")
     (repo / ".gitignore").write_text(GIT_IGNORE)
     git(repo, "init", "-q", "-b", "main")
     git(repo, "config", "user.email", "t@t")

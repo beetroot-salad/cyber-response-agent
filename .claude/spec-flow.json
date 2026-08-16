@@ -223,12 +223,19 @@
           "defender/learning/author/drain.py::_restore_corpus",
           "defender/learning/author/drain.py::_revert_strays",
           "defender/runtime/tools.py::_tool_write_file",
-          "defender/runtime/tools.py::_tool_edit_file"
+          "defender/runtime/tools.py::_tool_edit_file",
+          "defender/learning/leads/draft_synthesis.py::synthesize_drafts",
+          "defender/learning/author/shared.py::commit_corpus"
         ],
         "readers": [
           "defender/runtime/scrub.py::scrub",
           "defender/learning/author/drain.py::_snapshot_corpus",
-          "defender/learning/author/branch.py::AuthorBranch"
+          "defender/learning/author/branch.py::AuthorBranch",
+          "defender/learning/leads/_lead_spine.py::_verify_corpus_scope",
+          "defender/learning/leads/lead_author.py::discover_system_drafts",
+          "defender/learning/leads/pitfalls_curator.py::_pitfalls_path_rule",
+          "defender/learning/leads/lead_author.py::_skills_path_rule",
+          "defender/learning/leads/declared_systems.py::declared_systems"
         ],
         "grep": [
           "corpus_dir",
@@ -236,7 +243,8 @@
           "start_batch",
           "finish_batch",
           "changes_outside"
-        ]
+        ],
+        "note": "#869's grounding added the two writers the SPAWNED-AGENT-ONLY reading of this root missed. `synthesize_drafts` is a HOST-side writer into the worktree's catalog — it mkdir+writes `<catalog>/{system}/_draft/{suffix}.md` from a model-supplied `query_id` BEFORE the agent is spawned, which is the whole of #869's C12 reachability finding and was invisible to a census that only listed the agent's file tools. `commit_corpus` is the sink's actual commit (git add over the `defender/skills` pathspec) and the last gate any path rule sits in front of. The readers added are the ones that ask the tree a MEMBERSHIP question: the git-status scope walk that applies the per-actor path rule, the `_draft/` discovery that turns a directory name into a handoff `system`, and the two per-actor path rules themselves. THE THIRD READER THIS ORIGINALLY LISTED WAS `pitfalls_curator.py::_is_real_system`, THE `SKILL.md` PROBE — and #869 DELETES that symbol, so the entry that seeds the next run's census would have named a symbol resolving to nothing, which this block's own rule forbids and which a resolver cannot distinguish from a row nobody wrote. Replaced with the threaded membership readers that survive the change (`_pitfalls_path_rule`, `_skills_path_rule`); the resolver they are threaded from, `learning/leads/declared_systems.py::declared_systems`, is deliberately NOT listed yet because it does not exist until write-code-from-spec builds it — add it in the same commit that does, or this list under-counts the membership readers by one."
       }
     }
   },

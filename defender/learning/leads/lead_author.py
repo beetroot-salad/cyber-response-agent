@@ -190,12 +190,25 @@ def build_handoff(
 _DRAFT_README_NAMES = frozenset({"README.md", "_TEMPLATE.md"})
 
 
-def discover_system_drafts(*, skills_dir: Path = SKILLS_DIR) -> list[Path]:
+def discover_system_drafts(
+    *, skills_dir: Path = SKILLS_DIR, systems: frozenset[str],
+) -> list[Path]:
+    """FK-4's fourth composition site: walks every child of `skills_dir` and skips any
+    directory `systems` (this lane's UNION, NF2) does not declare, so an undeclared `_draft/`
+    never becomes work the agent is instructed to do and the commit gate then refuses.
+
+    Every skip is reported (O3, phase F): a skipped directory reads from the outside exactly
+    like a tree that had none, so a silent skip is a refusal with no trace."""
     out: list[Path] = []
     if not skills_dir.is_dir():
         return out
     for system_dir in sorted(skills_dir.iterdir()):
         if not system_dir.is_dir():
+            continue
+        if system_dir.name not in systems:
+            _log(
+                f"discover_system_drafts: skipped undeclared directory {system_dir.name!r}"
+            )
             continue
         draft_dir = system_dir / "_draft"
         if not draft_dir.is_dir():
@@ -272,6 +285,27 @@ def invoke_agent(
 
 
 
+def _membership_segment(path: str) -> str:
+    """The segment the rule keys membership on (F2's two-key reading): catalog paths key on
+    the segment after `queries/`, hopping over `_draft`; system-skill and system-draft paths
+    key on the segment after `defender/skills/`."""
+    rest = path[len(CATALOG_REL):] if _is_catalog_path(path) else path[len(SKILLS_REL):]
+    return rest.split("/", 1)[0]
+
+
+def _frontmatter_id(repo_root: Path, path: str) -> str | None:
+    from defender._frontmatter import parse_frontmatter_or_none
+
+    full = repo_root / path
+    if not full.is_file():
+        return None
+    fm = parse_frontmatter_or_none(full.read_text(encoding="utf-8"))
+    if not fm:
+        return None
+    value = fm.get("id")
+    return value if isinstance(value, str) and value else None
+
+
 def _refuse(path: str, findings: list[_scaffold_rules.Finding]) -> None:
     if not findings:
         return
@@ -315,22 +349,17 @@ def _check_promoted_template(
     _refuse(path, _scaffold_rules.check_template(template, verbs))
 
 
-def _skills_path_rule(
+def _skills_content_rule(
     repo_root: Path, resolver: _scaffold_rules.VerbResolver, xy: str, path: str,
 ) -> None:
-    if not _is_in_scope(path):
-        raise LeadAuthorError(
-            f"agent edited an out-of-scope skills path ({path}); refusing to commit"
-        )
-    if _is_draft_readme(path) or _is_schema_md(path):
-        raise LeadAuthorError(
-            f"agent mutated a protected surface file ({path}); refusing to commit"
-        )
-    if "D" in xy and not (_under_draft(path) or _is_system_skill_draft(path)):
-        raise LeadAuthorError(
-            f"agent deleted an established template / SKILL.md ({path}); refusing to "
-            "commit (delete-prohibition; a demotion is rejected the same way)"
-        )
+    """The content half of the gate, split out from the path half above it.
+
+    Both halves grew independently (#869 gave the path half its membership and identity rules,
+    #901 gave the gate a content half at all) and together they overran one function's budget.
+    The seam is the honest one: everything above answers "may the agent touch this path", and
+    everything here answers "is what it wrote well-formed" — which is why only this half needs
+    the resolver, and why it runs last, on paths the path half has already admitted.
+    """
     if _is_catalog_path(path) and not _under_draft(path) and not _is_schema_md(path):
         twin = _draft_twin(path)
         if (repo_root / twin).exists():
@@ -340,7 +369,7 @@ def _skills_path_rule(
                 "didn't happen — established + draft would both land)"
             )
         # After the pair check and only on a file that is still there: a delete has already been
-        # refused above for this surface, and a content rule cannot read a path git says is gone.
+        # refused by the path half, and a content rule cannot read a path git says is gone.
         if "D" not in xy and (repo_root / path).is_file():
             _check_promoted_template(repo_root, resolver, path)
     if _is_system_skill_md(path) and "D" not in xy and (repo_root / path).is_file():
@@ -350,7 +379,68 @@ def _skills_path_rule(
         )
 
 
-def _verify_skills_state(repo_root: Path, baseline_stray: list[str]) -> list[str]:
+def _skills_path_rule(repo_root: Path, xy: str, path: str, *, systems: frozenset[str]) -> None:
+    # `execution.md`, at ANY depth under `defender/skills`, is the one per-system file this
+    # lane can never get committed (C32/F1) — under NF1 the marker's integrity IS the commit
+    # gate, so this keys on the BASENAME rather than on which in-scope form owns the path.
+    if Path(path).name == "execution.md":
+        raise LeadAuthorError(
+            f"agent wrote {path}; refusing to commit (execution.md is not "
+            "agent-committable at any depth)"
+        )
+    if not _is_in_scope(path):
+        raise LeadAuthorError(
+            f"agent edited an out-of-scope skills path ({path}); refusing to commit"
+        )
+    if _is_draft_readme(path) or _is_schema_md(path):
+        raise LeadAuthorError(
+            f"agent mutated a protected surface file ({path}); refusing to commit"
+        )
+    # M5/RF2/FK-16: membership fires BEFORE the delete-prohibition, so a `D` record under an
+    # undeclared directory is reported by NAME with the registry reason, never absorbed into
+    # a deletion complaint about a directory that should never have been written to.
+    system = _membership_segment(path)
+    if system not in systems:
+        raise LeadAuthorError(
+            f"agent wrote {path} under an undeclared system ({system!r}); refusing to commit"
+        )
+    if "D" in xy and not (_under_draft(path) or _is_system_skill_draft(path)):
+        raise LeadAuthorError(
+            f"agent deleted an established template / SKILL.md ({path}); refusing to "
+            "commit (delete-prohibition; a demotion is rejected the same way)"
+        )
+    # RF2: the frontmatter `id:` prefix must agree with the directory it sits in, closing the
+    # CONTENT channel alongside the directory channel — an idless in-scope file (a system
+    # `SKILL.md`, `SCHEMA.md`) is spared (NF3).
+    ident = _frontmatter_id(repo_root, path)
+    if ident is not None and ident.split(".", 1)[0] != system:
+        raise LeadAuthorError(
+            f"agent wrote {path} with id {ident!r} disagreeing with its directory "
+            f"({system!r}); refusing to commit"
+        )
+
+
+def _skills_rule(
+    repo_root: Path,
+    resolver: _scaffold_rules.VerbResolver,
+    xy: str,
+    path: str,
+    *,
+    systems: frozenset[str],
+) -> None:
+    """The whole per-path gate: the path half, then the content half on what it admitted.
+
+    Composed rather than folded into one function because the two halves ask different
+    questions and arrived from different changes (#869, #901) — and because the content half
+    must not read a path the path half has already refused.
+    """
+    _skills_path_rule(repo_root, xy, path, systems=systems)
+    _skills_content_rule(repo_root, resolver, xy, path)
+
+
+def _verify_skills_state(
+    repo_root: Path, baseline_stray: list[str], *, systems: frozenset[str],
+) -> list[str]:
     # ONE resolver for the whole batch, built on the tree being committed rather than on the
     # process's own: the drain runs this from the main checkout against a `lead-author/<id>`
     # worktree, and `_load_adapter_module` keys its cache on the resolved absolute path, so this
@@ -358,7 +448,7 @@ def _verify_skills_state(repo_root: Path, baseline_stray: list[str]) -> list[str
     resolver = _scaffold_rules.VerbResolver(repo_root / "defender")
     return _verify_corpus_scope(
         repo_root, baseline_stray, actor="agent",
-        rule=functools.partial(_skills_path_rule, repo_root, resolver),
+        rule=functools.partial(_skills_rule, repo_root, resolver, systems=systems),
     )
 
 
@@ -399,6 +489,11 @@ def _write_state(path: Path, content: str) -> None:
 @dataclass(frozen=True)
 class LeadAuthorDeps:
     paths: _loop_config.LoopPaths
+    #: The UNION (adapter glob ∪ committed marker, NF2) resolved ONCE at the boundary — before
+    #: the agent is ever spawned — and threaded non-Optional into every path-composition
+    #: consumer on this lane (M2). Never re-derived by any consumer (`consumers_do_not_
+    #: rederive`).
+    systems: frozenset[str]
     invoke_agent: Callable[..., int]
     extract: Callable[[Path], tuple[list, list[ExecutedLead]]]
     synthesize: Callable[..., list[Path]]
@@ -411,8 +506,12 @@ class LeadAuthorDeps:
 def build_lead_author_deps(
     paths: _loop_config.LoopPaths = _loop_config.DEFAULT_PATHS,
 ) -> LeadAuthorDeps:
+    from defender.learning.leads.declared_systems import declared_systems
+
+    systems = declared_systems(paths.repo_root)
     return LeadAuthorDeps(
         paths=paths,
+        systems=systems,
         invoke_agent=functools.partial(invoke_agent, repo_root=paths.repo_root),
         extract=extract,
         synthesize=synthesize_drafts,
@@ -420,7 +519,7 @@ def build_lead_author_deps(
             build_handoff, repo_root=paths.repo_root, catalog_dir=paths.catalog_dir
         ),
         discover_system_drafts=functools.partial(
-            discover_system_drafts, skills_dir=paths.skills_dir
+            discover_system_drafts, skills_dir=paths.skills_dir, systems=systems
         ),
         acquire_queue_lock=acquire_queue_lock,
         release_queue_lock=release_queue_lock,
@@ -438,21 +537,44 @@ def run(
         _log(f"FATAL: run_dir not found: {run_dir}")
         return 2
 
-    if deps is None:
-        deps = build_lead_author_deps(paths)
-    queue_lock = deps.acquire_queue_lock()
+    # The lock is checked BEFORE `deps` is built when the caller supplied none: resolving
+    # membership (#869) is real subprocess work, and a tick that is about to skip on a
+    # contended lock should not pay for it, nor fail hard on a tree the resolver cannot yet
+    # read (#852 F-03 — a skip must never present as anything but the skip rc).
+    if deps is not None:
+        queue_lock = deps.acquire_queue_lock()
+        if queue_lock is None:
+            return QUEUE_LOCK_SKIP_RC
+        try:
+            return _run_locked(run_dir, deps, box=box)
+        finally:
+            deps.release_queue_lock(queue_lock)
+
+    queue_lock = acquire_queue_lock()
     if queue_lock is None:
         return QUEUE_LOCK_SKIP_RC
     try:
+        deps = build_lead_author_deps(paths)
         return _run_locked(run_dir, deps, box=box)
     finally:
-        deps.release_queue_lock(queue_lock)
+        release_queue_lock(queue_lock)
 
 
 def _run_locked(run_dir: Path, deps: LeadAuthorDeps, *, box: Any = None) -> int:
     if _done_sentinel(run_dir).is_file():
         _log("already processed (done sentinel exists) — nothing to do")
         return 0
+
+    if not deps.systems:
+        # RF6, at this lane's own boundary: an empty declared set is not spendable as an
+        # ordinary membership "no" — that would refuse every path one at a time and the tick
+        # would report a clean no-op, which is precisely the failure O4 names. Refused loudly,
+        # before the agent is ever spawned and regardless of what work this tick would
+        # otherwise have found.
+        raise LeadAuthorError(
+            f"lead-author refused: {deps.paths.repo_root} declares no systems (empty "
+            "adapter glob and no committed execution.md); refusing to run the lane"
+        )
 
     try:
         joined_leads, executed = deps.extract(run_dir)
@@ -463,7 +585,7 @@ def _run_locked(run_dir: Path, deps: LeadAuthorDeps, *, box: Any = None) -> int:
     catalog = lead_neighbors.load_catalog(deps.paths.catalog_dir)
 
     synth = deps.synthesize(
-        executed, catalog_dir=deps.paths.catalog_dir, catalog=catalog
+        executed, catalog_dir=deps.paths.catalog_dir, catalog=catalog, systems=deps.systems,
     )
     if synth:
         _log(
@@ -509,7 +631,7 @@ def _run_locked(run_dir: Path, deps: LeadAuthorDeps, *, box: Any = None) -> int:
         _log(f"FATAL: lead-author spawn exited rc={rc}; see the trace under {run_dir} (drain will quarantine)")
         return 2
 
-    changed = _verify_skills_state(repo_root, baseline_stray)
+    changed = _verify_skills_state(repo_root, baseline_stray, systems=deps.systems)
     sha = _author_shared.commit_corpus(
         repo_root, repo_root / "defender" / "skills",
         _loop_commit_message(run_dir, changed),

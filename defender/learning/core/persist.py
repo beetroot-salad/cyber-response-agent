@@ -408,11 +408,12 @@ def read_pitfalls(paths: LoopPaths = DEFAULT_PATHS) -> list[dict]:
 
 
 def rotate_pitfalls(
-    batch_ids: list[str], commit_sha: str | None, *, paths: LoopPaths = DEFAULT_PATHS
+    batch_ids: list[str], commit_sha: str | None, *, paths: LoopPaths = DEFAULT_PATHS,
+    category: str = "consumed_committed",
 ) -> None:
     ids = set(batch_ids)
     consumed = [
-        {**r, "consumed_category": "consumed_committed"}
+        {**r, "consumed_category": category}
         for r in read_jsonl_rows(paths.pitfalls.file)
         if r.get("pitfall_id") in ids
     ]

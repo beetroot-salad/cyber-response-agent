@@ -145,6 +145,13 @@ def seed_skills_repo(repo: Path) -> Path:
     which is the one part that should differ: each names its own subject. Those stay with
     their fixtures.
     """
+    adapters = repo / "defender" / "scripts" / "adapters"
+    adapters.mkdir(parents=True)
+    # wazuh gets the real adapter shape (#901): it owns every seeded catalog template, so the
+    # content gate resolves its verbs. elastic owns no template here and only has to EXIST, so
+    # that `declared_systems` counts it among the declared systems (#869).
+    (adapters / "wazuh_adapter.py").write_text(_WAZUH_ADAPTER)
+    (adapters / "elastic_adapter.py").write_text("VERBS = {}\n")
     catalog = repo / "defender" / "skills" / "gather" / "queries"
     (catalog / "wazuh" / "_draft").mkdir(parents=True)
     (catalog / "SCHEMA.md").write_text("# template schema\n")
@@ -154,9 +161,6 @@ def seed_skills_repo(repo: Path) -> Path:
     (catalog / "wazuh" / "_draft" / "newthing.md").write_text(
         query_template("wazuh.newthing", "draft")
     )
-    adapters = repo / "defender" / "scripts" / "adapters"
-    adapters.mkdir(parents=True)
-    (adapters / "wazuh_adapter.py").write_text(_WAZUH_ADAPTER)
     skill = repo / "defender" / "skills" / "elastic"
     (skill / "_draft").mkdir(parents=True)
     (skill / "SKILL.md").write_text("---\nname: defender-elastic\n---\n# elastic\n")

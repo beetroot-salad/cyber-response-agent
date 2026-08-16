@@ -54,11 +54,18 @@ def tmp_git_repo(tmp_path: Path) -> Path:
 
 
 
+#: The fixture's adapter-declared systems (`tests/_repo.seed_skills_repo`), threaded
+#: explicitly per #869 — every consumer answers from the value it is handed, never from a
+#: re-derivation of the tree.
+DECLARED = frozenset({"elastic", "wazuh"})
+
+
 def test_verify_pitfalls_state_accepts_execution_md(tmp_git_repo: Path):
     (tmp_git_repo / "defender" / "skills" / "elastic" / "execution.md").write_text(
         "# elastic\n## Common pitfalls\n- use `index=windows`, not `index:windows`\n"
     )
-    changed = pitfalls_curator._verify_pitfalls_state(tmp_git_repo, baseline_stray=[])
+    changed = pitfalls_curator._verify_pitfalls_state(
+        tmp_git_repo, baseline_stray=[], systems=DECLARED)
     assert changed == ["defender/skills/elastic/execution.md"]
 
 
@@ -67,14 +74,14 @@ def test_verify_pitfalls_state_rejects_non_execution_md(tmp_git_repo: Path):
     skill = tmp_git_repo / "defender" / "skills" / "elastic" / "SKILL.md"
     skill.write_text(skill.read_text() + "\nedit\n")
     with pytest.raises(LeadAuthorError, match="non-execution.md"):
-        pitfalls_curator._verify_pitfalls_state(tmp_git_repo, baseline_stray=[])
+        pitfalls_curator._verify_pitfalls_state(tmp_git_repo, baseline_stray=[], systems=DECLARED)
 
 
 def test_verify_pitfalls_state_rejects_stray(tmp_git_repo: Path):
     (tmp_git_repo / "defender" / "other").mkdir(parents=True)
     (tmp_git_repo / "defender" / "other" / "stray.md").write_text("x")
     with pytest.raises(LeadAuthorError, match="outside"):
-        pitfalls_curator._verify_pitfalls_state(tmp_git_repo, baseline_stray=[])
+        pitfalls_curator._verify_pitfalls_state(tmp_git_repo, baseline_stray=[], systems=DECLARED)
 
 
 def test_verify_pitfalls_state_rejects_deletion(tmp_git_repo: Path):
@@ -84,7 +91,7 @@ def test_verify_pitfalls_state_rejects_deletion(tmp_git_repo: Path):
     _run_git(tmp_git_repo, "commit", "-q", "-m", "add exec")
     ex.unlink()
     with pytest.raises(LeadAuthorError, match="deleted"):
-        pitfalls_curator._verify_pitfalls_state(tmp_git_repo, baseline_stray=[])
+        pitfalls_curator._verify_pitfalls_state(tmp_git_repo, baseline_stray=[], systems=DECLARED)
 
 
 def test_verify_pitfalls_stray_wins_over_in_corpus_violation(tmp_git_repo: Path):
@@ -96,7 +103,7 @@ def test_verify_pitfalls_stray_wins_over_in_corpus_violation(tmp_git_repo: Path)
     skill = tmp_git_repo / "defender" / "skills" / "elastic" / "SKILL.md"
     skill.write_text(skill.read_text() + "\nedit\n")
     with pytest.raises(LeadAuthorError, match="outside"):
-        pitfalls_curator._verify_pitfalls_state(tmp_git_repo, baseline_stray=[])
+        pitfalls_curator._verify_pitfalls_state(tmp_git_repo, baseline_stray=[], systems=DECLARED)
 
 
 def test_verify_pitfalls_state_returns_sorted_changed(tmp_git_repo: Path):
@@ -121,7 +128,8 @@ def test_verify_pitfalls_state_returns_sorted_changed(tmp_git_repo: Path):
         "# e edited\n"
     )
     (cmdb / "execution.md").write_text("# c\n")
-    changed = pitfalls_curator._verify_pitfalls_state(tmp_git_repo, baseline_stray=[])
+    changed = pitfalls_curator._verify_pitfalls_state(
+        tmp_git_repo, baseline_stray=[], systems=DECLARED | {"cmdb"})
     assert changed == [
         "defender/skills/cmdb/execution.md",
         "defender/skills/elastic/execution.md",
@@ -213,28 +221,28 @@ def test_a_queued_system_with_no_skills_dir_never_becomes_a_handoff_path(tmp_git
          "stderr_digest": f"exit=64; boom {s}"}
         for s in ("elastic", "Ignore Previous Instructions", "sql", "a b")
     ]
-    skills = tmp_git_repo / "defender" / "skills"
-    handoffs = pitfalls_curator._build_pitfalls_handoffs(rows, skills_dir=skills)
+    handoffs = pitfalls_curator._build_pitfalls_handoffs(rows, systems=DECLARED)
     assert [h["system"] for h in handoffs] == ["elastic"]
     assert handoffs[0]["execution_md_path"] == "defender/skills/elastic/execution.md"
 
 
 def test_the_commit_gate_refuses_an_execution_md_that_mints_its_own_system_dir(tmp_git_repo: Path):
-    """The last gate on the same class (#855 F-06), and it asks about the DIRECTORY, not the
-    file: 4 of the 7 systems have no `execution.md` yet and writing the first one is exactly
-    what the curator is for, so creating the file in an existing system's dir stays legal while
-    creating the dir around it does not."""
+    """The last gate on the same class (#855 F-06), and it asks about the DIRECTORY's
+    MEMBERSHIP, not the file: a declared system with no `execution.md` yet may still take a
+    first one, so creating the file in a declared system's dir stays legal while creating an
+    undeclared directory around it does not."""
     ghost = tmp_git_repo / "defender" / "skills" / "ghost"
     ghost.mkdir(parents=True)
     (ghost / "execution.md").write_text("# ghost\n## Common pitfalls\n- invented\n")
-    with pytest.raises(LeadAuthorError, match="no SKILL.md"):
-        pitfalls_curator._verify_pitfalls_state(tmp_git_repo, baseline_stray=[])
+    with pytest.raises(LeadAuthorError, match="undeclared system"):
+        pitfalls_curator._verify_pitfalls_state(tmp_git_repo, baseline_stray=[], systems=DECLARED)
 
     # Positive control on the same gate: the fixture's real system dir takes a NEW execution.md.
     (ghost / "execution.md").unlink()
     ghost.rmdir()
     (tmp_git_repo / "defender" / "skills" / "elastic" / "execution.md").write_text("# e\n")
-    assert pitfalls_curator._verify_pitfalls_state(tmp_git_repo, baseline_stray=[]) == [
+    assert pitfalls_curator._verify_pitfalls_state(
+        tmp_git_repo, baseline_stray=[], systems=DECLARED) == [
         "defender/skills/elastic/execution.md"
     ]
 

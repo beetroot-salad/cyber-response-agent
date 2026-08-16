@@ -216,7 +216,8 @@ def test_the_merge_key_normalises_system_the_way_the_handoff_groups_it():
     exists to prevent."""
     rows = [_row("r:l-001:0"), _row("r:l-002:0", system="elastic "),
             _row("r:l-003:0", system=" elastic")]
-    failures = pitfalls_curator._build_pitfalls_handoffs(rows)[0]["failures"]
+    failures = pitfalls_curator._build_pitfalls_handoffs(
+        rows, systems=frozenset({"elastic"}))[0]["failures"]
     assert len(failures) == 1, "one mistake reached the curator as three bullets"
     assert failures[0]["occurrences"] == 3
 
@@ -297,7 +298,7 @@ def test_the_handoff_carries_the_count_and_leads_with_it():
     handoffs = pitfalls_curator._build_pitfalls_handoffs([
         _row("r:l-001:0", digest="exit=1; made once"),
         *[_row(f"r:l-003:{i}") for i in range(8)],
-    ])
+    ], systems=frozenset({"elastic"}))
     failures = handoffs[0]["failures"]
     assert [f["occurrences"] for f in failures] == [8, 1]
     assert failures[0]["stderr_digest"] == UNNEST
@@ -310,7 +311,8 @@ def test_the_handoff_builder_collapses_raw_queue_rows_itself():
     rows = [_row(f"r:l-003:{i}") for i in range(4)]
     for row in rows:
         assert "occurrences" not in row
-    failures = pitfalls_curator._build_pitfalls_handoffs(rows)[0]["failures"]
+    failures = pitfalls_curator._build_pitfalls_handoffs(
+        rows, systems=frozenset({"elastic"}))[0]["failures"]
     assert len(failures) == 1
     assert failures[0]["occurrences"] == 4
 

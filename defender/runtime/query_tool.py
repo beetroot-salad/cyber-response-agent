@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import re
 import shlex
 import sys
 from collections.abc import Mapping
@@ -89,6 +90,12 @@ DEFAULT_FAULT_EXIT = 2
 #: IDENTIFIER the collectors partition on, not free text, and neither shape belongs in one.
 _QID_FORBIDDEN = ("/", "\\", "..", "\x00", "\n", "\r", "#")
 
+#: M3/FK-7's kebab half: the remainder after the first `.` in a coined `query_id`. No dot —
+#: a second dot lets `'system.foo.bar'` slip past a prefix-only check and become a SECOND
+#: unvalidated model-supplied path component at the host-side draft writer
+#: (`draft_synthesis._draft_candidate_segments`'s `split('.', 1)`).
+_KEBAB_SEGMENT = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9_-]*\Z")
+
 
 def resolve_query_id(system: str, verb: str, model_query_id: str | None) -> str:
     # The `∅.` sentinels are reserved for the writer sites that pass them directly (never
@@ -105,7 +112,14 @@ def resolve_query_id(system: str, verb: str, model_query_id: str | None) -> str:
         and not is_reserved_query_id(model_query_id)
         and not any(t in model_query_id for t in _QID_FORBIDDEN)
     ):
-        return model_query_id
+        # FK-7 (§7): the WHOLE `{system}.{kebab-name}` shape, not only the prefix. The prefix
+        # must EXACTLY equal the dispatched system (no case folding, no NFC — FK-6), and the
+        # remainder must be a single well-formed segment. A foreign prefix, a missing
+        # separator, an empty remainder, or a remainder carrying a second `.` all fall back to
+        # the untagged value — the same one an ordinary call already records.
+        prefix, sep, remainder = model_query_id.partition(".")
+        if sep and prefix == system and remainder and _KEBAB_SEGMENT.match(remainder):
+            return model_query_id
     return f"{system}.{verb}" if verb else f"{system}.ad-hoc"
 
 

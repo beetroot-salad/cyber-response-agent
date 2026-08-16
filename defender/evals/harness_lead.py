@@ -45,10 +45,19 @@ def materialize(scenario: Path, tmp: Path) -> Path:
         REAL_DEFENDER / "skills" / "gather" / "queries",
         tmp / "defender" / "skills" / "gather" / "queries",
     )
+    adapters_dst = tmp / "defender" / "scripts" / "adapters"
+    adapters_dst.mkdir(parents=True)
     for skill in sorted((REAL_DEFENDER / "skills").glob("*/SKILL.md")):
         dst = tmp / "defender" / "skills" / skill.parent.name / "SKILL.md"
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(skill, dst)
+        # #869: the materialized tree carries no `defender/scripts/adapters/`, so the
+        # declared-systems resolver would refuse the whole lane. A stub adapter per copied
+        # SKILL.md declares the same systems this harness has always driven the lead author
+        # against — cold (never imported), matching the resolver's own contract.
+        (adapters_dst / f"{skill.parent.name.replace('-', '_')}_adapter.py").write_text(
+            "VERBS = {}\n", encoding="utf-8",
+        )
 
     overlay = scenario / "catalog_overlay"
     if overlay.is_dir():
