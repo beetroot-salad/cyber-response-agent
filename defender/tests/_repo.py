@@ -130,20 +130,26 @@ def seed_adapter_stubs(defender_dir: Path, systems: tuple[str, ...]) -> tuple[st
     not a cheaper fixture — it is a tree in which `elastic` is not a system, so `bind` compiles
     no per-system write lane there and refuses outright.
 
-    A thin adapter over `_declared869.write_adapter` rather than its own writer: that module
-    owns the filename inverse of `verbs._system_of` (a hyphenated system is an underscored
-    file), and a second copy of that mapping is a fixture that can silently declare a system
-    nobody asked for. What this adds is the ergonomics these call sites want — many systems at
-    once, rooted at a `defender_dir` rather than a repo root.
+    Borrows `_declared869`'s FILENAME rule (`.name` off `adapter_file`) rather than copying
+    it: that module owns the inverse of `verbs._system_of` — a hyphenated system is an
+    underscored file — and a second copy of that mapping is a fixture that can silently declare
+    a system nobody asked for. What it does NOT borrow is that helper's rooting, which starts
+    from a repo root; this writes under the `defender_dir` it was handed, so a tree that is not
+    literally named `defender` declares its own systems instead of a sibling's (the same
+    footgun `_systems_or_raise` closes on the production side, #772).
 
     Returning the input is the point, the same reason `plant_named_dirs` does: the caller
     asserts against the systems it DECLARED, never against a second reading of the adapters
     dir with the glob the code under test runs (`scripts/lint/lint_shared_oracle.py`).
     """
-    from defender.tests._declared869 import write_adapter
+    from defender.tests._declared869 import ADAPTER_BODY, adapter_file
 
+    adapters = defender_dir / "scripts" / "adapters"
+    adapters.mkdir(parents=True, exist_ok=True)
     for system in systems:
-        write_adapter(defender_dir.parent, system)
+        (adapters / adapter_file(Path("."), system).name).write_text(
+            ADAPTER_BODY, encoding="utf-8"
+        )
     return systems
 
 

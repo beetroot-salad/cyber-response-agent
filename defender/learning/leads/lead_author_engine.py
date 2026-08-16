@@ -8,8 +8,8 @@ from typing import Any, ClassVar
 
 from defender.learning.core import config
 from defender.learning.core.config import RunUnprocessable, StageContext, StageWiring
-from defender.learning.leads.declared_systems import ADAPTERS_REL, adapter_declared_systems
-from defender.learning.leads.path_validation import SKILLS_REL
+from defender.learning.leads.declared_systems import adapter_systems_under
+from defender.learning.leads.path_validation import CATALOG_REL, SKILLS_REL
 from defender.learning.pipeline._pydantic_stage import run_stage as _run_stage_fn
 from defender.runtime import providers
 from defender.runtime.agent_definition import AgentDefinition, ResolvedRoots, ToolSet, bind
@@ -51,16 +51,45 @@ def _systems_or_raise(defender_dir: Path) -> tuple[str, ...]:
     `_run_lead_author_pydantic` raises on a missing `ctx.repo_root` — a stage that cannot be
     built against this tree says so at the seam, rather than one frame down and inexplicably.
     """
-    # `defender_dir.parent` is the repo root `bind` was handed — `AgentDefinition` threads the
-    # tree as `<repo>/defender`, and the resolver's own contract is repo-rooted.
-    systems = tuple(sorted(adapter_declared_systems(defender_dir.parent)))
+    # Rooted on the BOUND tree, not on a repo root reconstructed from it: `bind` is handed a
+    # `defender_dir`, and `.parent / "defender"` would read a sibling tree's adapters the
+    # moment that directory is not literally named `defender` — a write gate silently guarding
+    # a different tree than the one it was threaded.
+    adapters_dir = defender_dir / "scripts" / "adapters"
+    systems = tuple(sorted(adapter_systems_under(adapters_dir)))
     if not systems:
         raise ValueError(
-            f"lead-author write scope is empty: {defender_dir.parent}/{ADAPTERS_REL} declares "
-            "no system, so no per-system write lane compiles and the spawned agent could not "
-            "write the edits its own handoff asks for"
+            f"lead-author write scope is empty: {adapters_dir} declares no system, so no "
+            "per-system write lane compiles and the spawned agent could not write the edits "
+            "its own handoff asks for"
         )
     return systems
+
+
+#: The catalog's tail under `<skills>/`, derived from the two path constants rather than
+#: spelled twice: the write lanes and the `rm` lanes must name the same directory, and a
+#: second copy of the literal is how the pair drifts.
+_CATALOG_TAIL = CATALOG_REL[len(SKILLS_REL):]
+
+#: Basenames NO variable lane segment may mint, because BOTH commit gates refuse them by
+#: DISCARDING the batch rather than by denying one call — the difference this whole change is
+#: about. `SCHEMA.md` is `_is_schema_md`'s protected surface at ANY depth under the catalog
+#: (not only at its root, which is why keeping the lanes one segment below the root is not
+#: enough), and `execution.md` is refused BY BASENAME at any depth by `_skills_path_rule`. The
+#: one `{system}/execution.md` the pitfalls curator owns is reached by L5 as a LITERAL, so
+#: excluding the name from every VARIABLE segment costs that lane nothing.
+_REFUSED_BASENAMES = ("SCHEMA.md", "execution.md")
+
+
+def _md_name(*also: str) -> str:
+    """A `{name}.md` filename segment: `SEG`-shaped, and not a basename a commit gate refuses.
+
+    Anchored with `\\Z` because both consumers put this segment last (the write allow is
+    `fullmatch`ed, the `rm` pattern ends the line after it), so an unanchored lookahead would
+    additionally refuse a legitimate `README.md.md` while admitting nothing extra.
+    """
+    names = "|".join(re.escape(n) for n in (*also, *_REFUSED_BASENAMES))
+    return rf"(?!(?:{names})\Z){SEG}\.md"
 
 
 def _draft_tail(prefix: str, systems: str) -> str:
@@ -72,7 +101,7 @@ def _draft_tail(prefix: str, systems: str) -> str:
     about: `_is_draft_readme` refuses it at the DRAIN, which discards the batch, while a write
     gate refusal is one denied tool call the agent can recover from.
     """
-    return rf"{prefix}(?:{systems})/_draft/(?!README\.md){SEG}\.md"
+    return rf"{prefix}(?:{systems})/_draft/{_md_name('README.md')}"
 
 
 def _skill_write_lanes(skills_dir: Path, systems: tuple[str, ...]) -> tuple[re.Pattern[str], ...]:
@@ -101,20 +130,23 @@ def _skill_write_lanes(skills_dir: Path, systems: tuple[str, ...]) -> tuple[re.P
     """
     base = re.escape(str(skills_dir.resolve()))
     sys_alt = "|".join(re.escape(s) for s in systems)
-    cat = "gather/queries/"
+    cat = _CATALOG_TAIL
     return tuple(
         re.compile(base + "/" + tail)
         for tail in (
             # L1 — established catalog templates, and a system's `{system}/README.md` catalog
-            # notes. `SCHEMA.md` sits at the catalog ROOT, one segment up, so no lane reaches it.
-            rf"{cat}(?:{sys_alt})/{SEG}\.md",
+            # notes. `SCHEMA.md` is excluded by NAME (`_md_name`), not by depth: the catalog
+            # ROOT copy is one segment up and out of reach, but `_is_schema_md` refuses the
+            # basename at ANY depth, so a `{system}/SCHEMA.md` this lane admitted would be a
+            # protected-surface refusal at the drain — a discarded batch.
+            rf"{cat}(?:{sys_alt})/{_md_name()}",
             # L2 — catalog drafts. The lane `synthesize_drafts` mints into and the agent
             # promotes or discards out of.
             _draft_tail(cat, sys_alt),
             # L3 — THE per-system skill doc. Named exactly, so the sibling authored surfaces
             # (`gather`, `invlang`, `handbook`, `connect`, `advisory`, `judge`) have no lane at
-            # all: they are not systems, and `_scaffold_rules.VerbResolver.is_system` — the same
-            # answer the commit gate reads — is what says so.
+            # all: they are not systems, and `declared_systems.adapter_declared_systems` — the
+            # adapter half of the set this lane's COMMIT gate resolves — is what says so.
             rf"(?:{sys_alt})/SKILL\.md",
             # L4 — system-skill drafts, the pending lifts `discover_system_drafts` hands over.
             _draft_tail("", sys_alt),
@@ -142,7 +174,7 @@ def _rm_skills_grant(skills_dir: Path, systems: tuple[str, ...]) -> Grant:
     """
     spellings = "|".join(re.escape(s) for s in (SKILLS_REL.rstrip("/"), str(skills_dir)))
     sys_alt = "|".join(re.escape(s) for s in systems)
-    lanes = "|".join((_draft_tail("gather/queries/", sys_alt), _draft_tail("", sys_alt)))
+    lanes = "|".join((_draft_tail(_CATALOG_TAIL, sys_alt), _draft_tail("", sys_alt)))
     return Grant(
         program="rm",
         pattern=re.compile(rf"^rm (?:{spellings})/(?:{lanes})$"),

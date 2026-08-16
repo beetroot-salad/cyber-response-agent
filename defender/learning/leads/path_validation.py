@@ -32,7 +32,7 @@ def _is_catalog_path(path: str) -> bool:
 
 
 def _is_catalog_template(path: str) -> bool:
-    """`{catalog}/{system}/{name}.md` — an ESTABLISHED template file, and only that.
+    """`{catalog}/{system}/…/{name}.md` — a file the content rule may read AS a template.
 
     Narrower than `_is_catalog_path`, which is true of anything under the catalog including
     `SCHEMA.md`, a `{system}/README.md` and a note dropped at the catalog root. The scaffold
@@ -43,11 +43,17 @@ def _is_catalog_template(path: str) -> bool:
     where a template sits, so the depth test alone let the content rule refuse a system's
     catalog notes for "no `id:`" — the very failure this predicate was split out to stop, on
     the one example of it the docstring above already named.
+
+    What is NOT excluded is EXTRA depth. A `{system}/sub/x.md` is nobody's catalog note: the
+    shape the catalog documents is two segments, so a third one is a file the content rule
+    should still read and refuse (its parent dir names no system, so the resolver raises and
+    the commit is refused). Keying on `len(parts) == 2` instead would have handed that shape a
+    silent pass — a guard dropped, not a false refusal removed.
     """
     if not path.startswith(CATALOG_REL) or not path.endswith(".md"):
         return False
     parts = path[len(CATALOG_REL):].split("/")
-    return len(parts) == 2 and parts[0] != "_draft" and parts[1] != "README.md"
+    return len(parts) >= 2 and "_draft" not in parts and parts[-1] != "README.md"
 
 
 def _is_system_file(path: str, name: str) -> bool:

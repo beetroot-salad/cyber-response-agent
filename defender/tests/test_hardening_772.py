@@ -32,6 +32,7 @@ import pytest
 pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherwise
 
 from defender import _git  # noqa: E402
+from defender.learning.leads import lead_author, pitfalls_curator  # noqa: E402
 from defender.learning.leads.lead_author_engine import LEAD_AUTHOR_DEF  # noqa: E402
 from defender.learning.leads.lead_author import _membership_segment  # noqa: E402
 from defender.learning.leads.lead_extraction import LeadAuthorError  # noqa: E402
@@ -162,7 +163,8 @@ def test_every_surface_the_two_roles_author_still_has_a_lane(tmp_path: Path, rel
 def test_the_lanes_follow_the_tree_rather_than_a_hardcoded_list(tmp_path: Path):
     """MEMBERSHIP, not a name list. `ghost` is refused in a tree that declares no adapter for it
     and admitted in one that does — the same directory name, the same two paths, decided by
-    `_scaffold_rules.VerbResolver.is_system`, which is also what the commit gate reads.
+    `declared_systems.adapter_declared_systems`, the adapter half of the very set the commit
+    gate resolves (`declared_systems`, the union with the committed `execution.md` marker).
 
     This is the property a hardcoded `EDITABLE_SKILL_DIRS` frozenset could not have: it would
     answer identically about both trees, and drift the first time `connect` scaffolds a system.
@@ -186,9 +188,10 @@ def test_a_tree_that_declares_no_system_is_refused_rather_than_bound_lane_less(t
     disjunctive reading #869 gives its resolver, applied at this seam:
 
     * the adapters directory is not there at all, so the SOURCE is unresolvable and
-      `adapter_declared_systems` raises `LeadAuthorError`. That is the useful class here: it is
-      a member of the drain's `RETIRE_SET`, so a broken worktree quarantines one batch instead
-      of halting the drain;
+      `adapter_declared_systems` raises `LeadAuthorError` — this lane's own fault class, which
+      `_drain_lead_author_markers` runs under `run_or_dead_letter`, so a broken worktree
+      quarantines one batch instead of halting the drain (it is NOT in the author drain's
+      `RETIRE_SET`, which is `(AuthorError, GitError, ModelRetry)` and gates a different queue);
     * the directory resolves and declares nothing, which is a statement about the tree rather
       than about reading it, and is this module's own `ValueError`.
     """
@@ -205,6 +208,42 @@ def test_a_tree_that_declares_no_system_is_refused_rather_than_bound_lane_less(t
 
     seed_adapter_stubs(defender_dir, ("elastic",))
     assert bind(LEAD_AUTHOR_DEF, run, defender_dir=defender_dir).policy.write_allow
+
+
+def test_the_lanes_read_the_tree_that_was_bound_not_a_sibling_of_it(tmp_path: Path):
+    """The lanes resolve their systems under the BOUND `defender_dir`, never under a repo root
+    reconstructed from it.
+
+    `bind` is handed a tree; `test_h4_grants_anchor_on_the_threaded_tree_not_module_paths`
+    asserts every grant anchors on that tree rather than on import-time `PATHS`. Deriving
+    `repo_root` back out as `defender_dir.parent` and re-appending `defender/` holds only while
+    the bound directory is literally named `defender` — so a tree named anything else compiled
+    its write scope from a SIBLING's adapters, and the write gate then guarded a different tree
+    than the one it was given. Silent, and in the unsafe direction: the sibling may declare
+    systems this tree does not.
+
+    The fixture is the discriminating one — a tree NOT named `defender`, with a decoy beside it
+    declaring a system the bound tree never does.
+    """
+    root = tmp_path / "wt"
+    bound = root / "tree"                      # deliberately not named `defender`
+    (bound / "skills" / "elastic").mkdir(parents=True)
+    seed_adapter_stubs(bound, ("elastic",))
+    decoy = root / "defender"                  # what `.parent / "defender"` would have read
+    (decoy / "skills").mkdir(parents=True)
+    seed_adapter_stubs(decoy, ("ghost",))
+
+    run = tmp_path / "run"
+    run.mkdir()
+    pol = bind(LEAD_AUTHOR_DEF, run, defender_dir=bound).policy
+
+    def admits(rel: str) -> bool:
+        return permission.decide_write(
+            bound / "skills" / rel, "body\n", run_dir=run, defender_dir=bound, policy=pol,
+        ).allow
+
+    assert admits("elastic/SKILL.md")          # the bound tree's system has its lane
+    assert not admits("ghost/SKILL.md")        # the sibling's does not
 
 
 # =========================================================================== #
@@ -265,13 +304,22 @@ def test_the_porcelain_reader_does_not_quote_so_the_commit_gate_never_saw_this(t
 # =========================================================================== #
 
 #: Representative of every shape either gate has an opinion about — the five lanes, the
-#: protected surfaces, the authored surfaces, a phantom system, and a hostile name.
+#: protected surfaces at every depth they can appear, the authored surfaces, a phantom system,
+#: and a hostile name.
 _EVERY_SHAPE = (
     "gather/queries/elastic/auth-events.md",
     "gather/queries/elastic/README.md",
     "gather/queries/elastic/_draft/newthing.md",
     "gather/queries/elastic/_draft/README.md",
     "gather/queries/SCHEMA.md",
+    # `SCHEMA.md` and `execution.md` are refused by BASENAME, not by the one depth they are
+    # shipped at: `_is_schema_md` is any `SCHEMA.md` under the catalog and `_skills_path_rule`
+    # refuses `execution.md` at ANY depth. Each spelling below reached a lane once.
+    "gather/queries/elastic/SCHEMA.md",
+    "gather/queries/elastic/_draft/SCHEMA.md",
+    "gather/queries/elastic/execution.md",
+    "gather/queries/elastic/_draft/execution.md",
+    "elastic/_draft/execution.md",
     "gather/queries/NOTES.md",
     "gather/queries/ghost/x.md",
     "elastic/SKILL.md",
@@ -288,6 +336,30 @@ _EVERY_SHAPE = (
 )
 
 
+def _commit_scopes_admit(repo_root: Path, path: str) -> bool:
+    """Does EITHER role's real commit-gate path rule accept `path` as a modification?
+
+    The two production predicates, called — not a hand-rolled model of them assembled out of
+    `path_validation`'s helpers. The model is what let this invariant pass while the lanes
+    admitted `{system}/execution.md` at three depths the lead author's rule refuses by
+    BASENAME: a clause spelled here is a clause that can go missing here.
+    """
+    for rule in (
+        lambda: lead_author._skills_path_rule(
+            repo_root, "M", path, systems=frozenset(_SYSTEMS)
+        ),
+        lambda: pitfalls_curator._pitfalls_path_rule(
+            "M", path, systems=frozenset(_SYSTEMS)
+        ),
+    ):
+        try:
+            rule()
+        except LeadAuthorError:
+            continue
+        return True
+    return False
+
+
 def test_nothing_the_write_gate_admits_is_refused_at_the_drain(tmp_path: Path):
     """The anti-drift invariant, and the second half of what #772 asked for.
 
@@ -295,9 +367,9 @@ def test_nothing_the_write_gate_admits_is_refused_at_the_drain(tmp_path: Path):
     the COMMIT gate raises `LeadAuthorError` out of the drain and discards the whole batch —
     every other edit in it included. So the write allow must be a SUBSET of the union of the two
     roles' commit scopes, and this asserts exactly that implication over every shape either gate
-    has an opinion about. It is not a re-spelling of the lanes: the two are now separate
-    spellings sharing only the system set, and this is what keeps them from drifting apart in
-    the expensive direction.
+    has an opinion about, by RUNNING both commit rules. It is not a re-spelling of the lanes:
+    the two are now separate spellings sharing only the system set, and this is what keeps them
+    from drifting apart in the expensive direction.
 
     Note the implication is one-way on purpose. The write gate is STRICTER for
     `queries/SCHEMA.md`, `queries/NOTES.md` and `_draft/README.md` — all in scope for the commit
@@ -308,13 +380,17 @@ def test_nothing_the_write_gate_admits_is_refused_at_the_drain(tmp_path: Path):
     by, and the lanes are compiled off the same declared set, so the two answers cannot part
     without this failing.
     """
-    admits, _ = _gate(tmp_path)
+    admits, defender_dir = _gate(tmp_path)
+    repo_root = defender_dir.parent
     admitted = [f"{SKILLS_REL}{rel}" for rel in _EVERY_SHAPE if admits(rel)]
     # A gate that admitted nothing would satisfy the implication vacuously.
     assert len(admitted) >= 5, admitted
     for path in admitted:
         # the lead author's commit scope, or the pitfalls curator's — one write allow serves
         # both roles, so the union is what it has to be a subset of
+        assert _commit_scopes_admit(repo_root, path), path
+        # the same statement in the helpers the two rules are built from, kept because they
+        # name WHICH clause a regression broke
         assert _is_in_scope(path) or _is_system_execution_md(path), path
         assert not _is_schema_md(path), path
         assert not _is_draft_readme(path), path
@@ -334,7 +410,7 @@ def test_the_write_gate_refuses_the_protected_surfaces_first(tmp_path: Path):
 
 
 # =========================================================================== #
-# 6. The `rm` lane, which had the same recoverable-vs-discard problem.
+# 5. The `rm` lane, which had the same recoverable-vs-discard problem.
 # =========================================================================== #
 
 def test_rm_can_no_longer_name_an_agent_prompt(tmp_path: Path):

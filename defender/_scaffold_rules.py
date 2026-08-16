@@ -28,6 +28,7 @@ there would put the surface one frontmatter line from optional.
 """
 from __future__ import annotations
 
+import asyncio
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -253,11 +254,14 @@ class VerbResolver:
             )
         try:
             verbs = self._registry.verbs(system)
-        except (KeyboardInterrupt, GeneratorExit):
-            # Ahead of the blanket clause below, the way every other site in this codebase that
-            # widens to `BaseException` orders it (`query_tool.wrap_tool_execute`,
-            # `closed_ticket_tool._grant_gate`): an interrupt is the operator, not a broken
-            # adapter, and reporting it as one makes a corpus sweep un-interruptible.
+        except (KeyboardInterrupt, GeneratorExit, asyncio.CancelledError):
+            # Ahead of the blanket clause below, the SAME tuple every other site in this
+            # codebase that widens to `BaseException` re-raises (`query_tool
+            # .CONTROL_FLOW_EXCEPTIONS`, `closed_ticket_tool._grant_gate`): an interrupt is the
+            # operator and a cancellation is the event loop, not a broken adapter, and
+            # reporting either as one makes a corpus sweep un-interruptible — `CancelledError`
+            # is a `BaseException` since 3.8, so leaving it to the clause below would swallow
+            # a cancel into a finding about the adapter that happened to be importing.
             raise
         except BaseException as exc:  # noqa: BLE001 — a module that will not import is a broken adapter
             raise ScaffoldRuleError(

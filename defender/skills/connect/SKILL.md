@@ -171,12 +171,14 @@ encode a sensitive deployment. Secrets are always env vars.
 seed templates you're certain of** (an entry-point measurement, a by-key
 lookup), per `queries/SCHEMA.md` (`id: {system}.{template-id}`, `verb:`,
 `params:`, Goal, What to summarize, a parameterized Query body, Common
-pitfalls). `verb:` and `params:` are **required and checked** in step 6
-against the adapter's live signature — a `${placeholder}` that is neither a
-declared param nor a listed `body_substitutions:` entry is a FAIL, and there
-is no longer any fallback that guesses a verb from the query body. Do **not**
-build a catalog from API docs — the offline lead-author mints the rest from
-real runs.
+pitfalls). `verb:` is **required**; `id:` and `params:` are **checked** in
+step 6 against the directory and the adapter's live signature — the `{system}`
+half of the `id:` must be the directory the file sits in, a `params:` entry
+the verb does not declare as a model-bindable param is a FAIL, and so is a
+`${placeholder}` that is neither a declared param nor a listed
+`body_substitutions:` entry. There is no longer any fallback that guesses a
+verb from the query body. Do **not** build a catalog from API docs — the
+offline lead-author mints the rest from real runs.
 
 ### 5. Test
 

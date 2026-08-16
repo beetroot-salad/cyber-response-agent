@@ -145,4 +145,20 @@ def adapter_declared_systems(repo_root: Path) -> frozenset[str]:
     """NF2's second resolution point: the ADAPTER HALF ALONE, the value the pitfalls lane
     resolves. Never consults the marker source — an unresolvable marker is not its fault to
     raise, and emptiness is measured on the adapter half alone."""
-    return _adapter_names(repo_root / ADAPTERS_REL)
+    return adapter_systems_under(repo_root / ADAPTERS_REL)
+
+
+def adapter_systems_under(adapters_dir: Path) -> frozenset[str]:
+    """The adapter half rooted at the ADAPTERS DIRECTORY itself, for a caller that holds the
+    tree rather than the repo (#772).
+
+    `adapter_declared_systems` derives that directory from `repo_root`, which is the right
+    entry point for the lanes that start from a `LoopPaths`. The permission gate does not: it
+    is handed a `defender_dir` by `bind`, and reconstructing a repo root from it by taking
+    `.parent` is a guess that silently reads a SIBLING tree's adapters the moment the bound
+    tree is not literally named `defender` — while the grant it compiles claims, and
+    `test_h4_grants_anchor_on_the_threaded_tree_not_module_paths` asserts, that every grant
+    anchors on the tree it was threaded. Same answer, asked about the directory the caller
+    actually has.
+    """
+    return _adapter_names(adapters_dir)

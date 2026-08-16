@@ -120,7 +120,7 @@ def _worktree(tmp_path):
     lane PER declared system — a worktree with a skills dir and no adapters is a tree in which
     nothing under `skills/` is a system, so the policy has no lane at all and `bind` refuses it.
     That is the tree's fault, not the policy's, which is why the probe paths below moved off the
-    old `queries/elastic/` (a system this tree never declared) onto `queries/elastic/`.
+    old `queries/foo/` (a name no tree ever declared) onto `queries/elastic/`.
     """
     root = tmp_path / "wt"
     (root / "defender" / "skills" / "gather" / "queries" / "elastic" / "_draft").mkdir(

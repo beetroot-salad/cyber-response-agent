@@ -13,11 +13,14 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
 
 from defender._corpus import iter_query_templates  # noqa: E402
 from defender._io import read_text_soft  # noqa: E402
-from defender._scaffold_rules import check_system_skill, check_template  # noqa: E402
-from defender.runtime.verb_grant import DENY_ALL  # noqa: E402
+from defender._scaffold_rules import (  # noqa: E402
+    ScaffoldRuleError,
+    VerbResolver,
+    check_system_skill,
+    check_template,
+)
 from defender.runtime.verbs import (  # noqa: E402
     ADAPTER_SUFFIX,
-    ModuleVerbRegistry,
     VerbContext,
     engine_of,
 )
@@ -72,18 +75,22 @@ def _defender_dir() -> Path:
 
 
 def check_registry(report: Report, defender: Path, system: str):
+    """Resolve `system`'s verbs through `VerbResolver` — THE resolution rule, not a second
+    copy of it (#901).
+
+    This used to spell the same three verdicts inline (`KeyError` -> missing, any other
+    `BaseException` -> failed to import, empty -> declares no verbs), and it carried the same
+    two defects the resolver has since had fixed: a `KeyError` raised by the ADAPTER'S OWN
+    import is indistinguishable from the registry's "no such adapter" one at that `except`, so
+    a file that exists was reported as missing; and the blanket clause swallowed an interrupt
+    or a cancellation into "broken adapter", making a scaffold sweep un-interruptible. Both
+    now live in one place, with one caller here and one at the loop's commit gate.
+    """
     adapter = defender / "scripts" / "adapters" / f"{system.replace('-', '_')}{ADAPTER_SUFFIX}"
-    registry = ModuleVerbRegistry(defender / "scripts" / "adapters", DENY_ALL)
     try:
-        verbs = registry.verbs(system)
-    except KeyError:
-        report.add(FAIL, f"adapter module {adapter.name} is missing or its `system` is malformed")
-        return None
-    except BaseException as exc:  # noqa: BLE001 — a module that will not import is a broken adapter
-        report.add(FAIL, f"adapter module {adapter.name} failed to import: {type(exc).__name__}: {exc}")
-        return None
-    if not verbs:
-        report.add(FAIL, f"adapter module {adapter.name} declares no verbs (empty or missing VERBS)")
+        verbs = VerbResolver(defender).verbs(system)
+    except ScaffoldRuleError as exc:
+        report.add(FAIL, f"adapter module {adapter.name}: {exc}")
         return None
     report.add(PASS, f"adapter {adapter.name} imports; VERBS declares {len(verbs)} verb(s)")
     if "health-check" in verbs:
