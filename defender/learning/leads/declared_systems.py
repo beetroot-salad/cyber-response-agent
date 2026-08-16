@@ -90,17 +90,31 @@ def _marker_names(repo_root: Path) -> frozenset[str]:
             f"declared_systems: {skills_dir} is not resolvable at HEAD "
             "(no commits, detached from a real repo, or the path is absent there)"
         )
+    # `-z` and `--full-name` are LOAD-BEARING, not tidiness (#908 probe over the alphabet
+    # `_marker_names` actually admits):
+    #
+    #   * without `-z`, `--name-only` C-QUOTES any path holding a non-ASCII byte — the entry
+    #     comes back double-quoted with the byte escaped, so it no longer ends in
+    #     `/execution.md` and the system is dropped — and splitting the listing on whitespace
+    #     TEARS a name containing a space into two tokens that each match nothing;
+    #   * without `--full-name`, output is CWD-relative, and `count("/") == 3` is a statement
+    #     about a ROOT-relative path.
+    #
+    # Each of those silently un-declared a real system — the precise failure this resolver
+    # exists to prevent, and worse than a loud refusal because the name never even reaches
+    # the `_is_system_name` shape check below to be logged as anomalous.
     try:
         listing = _git.git(
-            ["ls-tree", "-r", "--name-only", "HEAD", "--", SKILLS_REL], cwd=repo_root,
+            ["ls-tree", "-r", "-z", "--full-name", "--name-only", "HEAD", "--", SKILLS_REL],
+            cwd=repo_root,
         )
     except _git.GitError as e:
         raise LeadAuthorError(
             f"declared_systems: cannot list the committed tree at {skills_dir}: {e}"
         ) from e
     names: set[str] = set()
-    for rel in listing.split():
-        if not rel.endswith("/execution.md") or rel.count("/") != 3:
+    for rel in listing.split("\0"):
+        if not rel or not rel.endswith("/execution.md") or rel.count("/") != 3:
             continue
         name = Path(rel).parent.name
         if _is_system_name(name):

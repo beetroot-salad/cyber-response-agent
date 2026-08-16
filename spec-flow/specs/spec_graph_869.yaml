@@ -1732,7 +1732,11 @@ claims:
   - {id: C2, source: discuss, kind: behavior, probe_kind: executed, verdict: holds,
      claim: "The adapter set is enumerable offline against an arbitrary worktree by a pure glob, with no adapter import.",
      probe: "sorted(verbs._system_of(p) for p in Path('scripts/adapters').glob('*'+verbs.ADAPTER_SUFFIX))",
-     observed: "['change-mgmt','cmdb','elastic','host-state','identity','threat-intel','ticket'] — underscore->hyphen mapping correct, no import executed. Re-probed as G1 and as the adapter half of C31."}
+     observed: "['change-mgmt','cmdb','elastic','host-state','identity','threat-intel','ticket'] — underscore->hyphen mapping correct, no import executed. Re-probed as G1 and as the adapter half of C31.",
+     alphabet: {ascii: "the 7 real adapter filenames, all [a-z-]; the probe's original sample.",
+                non-ascii: "RE-PROBED at #908 — `wazuh-café_adapter.py` globs and declares `wazuh-café`. Path.glob neither shells out nor C-quotes, so the byte survives to `_system_of` intact; this half was never at risk from the class that broke the marker half.",
+                space: "RE-PROBED at #908 — `my sys_adapter.py` globs and declares `my sys`. Nothing on this path splits on whitespace.",
+                cwd: "Not an input: the glob is rooted at an absolute adapters_dir derived from the repo_root ARGUMENT, so the process CWD cannot move it. Re-probed at #908 from three CWDs, same answer."}}
 
   - {id: C3, source: discuss, kind: census, probe_kind: search, verdict: holds,
      claim: "Five directories under defender/skills/ carry a SKILL.md and are not systems of record; judge is the sixth non-system and carries none.",
@@ -1834,7 +1838,11 @@ claims:
   - {id: G12, kind: behavior, probe_kind: executed, verdict: holds,
      claim: "An OSError escaping the pitfalls curator is swallowed by the drain and reported as a successful tick.",
      probe: "RE-EXECUTED at phase D (the brief closed this on a read, which cannot falsify a prediction over an input): drains._run_curator_module('pitfalls_curator', <callable raising PermissionError(13)>), then drains._invoke_pitfalls with the module map pointed at a stub whose run_pitfalls raises the same.",
-     observed: "_run_curator_module logged '[loop] pitfalls_curator crashed: PermissionError(13, ...) (continuing)' and returned None; _invoke_pitfalls returned rc 0. Path.glob/iterdir raise PermissionError (an OSError) on an unreadable directory, and OSError is in test_drain719_guard.py's NON_MEMBERS."}
+     observed: "_run_curator_module logged '[loop] pitfalls_curator crashed: PermissionError(13, ...) (continuing)' and returned None; _invoke_pitfalls returned rc 0. Path.glob/iterdir raise PermissionError (an OSError) on an unreadable directory, and OSError is in test_drain719_guard.py's NON_MEMBERS.",
+     alphabet: {ascii: "Sampled, incidentally: the fixtures carry ordinary names. But the class axis does not apply — this probe's value space is the exception TYPE a curator raises.",
+                non-ascii: "Cannot arise at this boundary: `Path.glob`/`iterdir` are named here only as the calls that RAISE PermissionError; no name is read out of the tree and none reaches the reader. A name's bytes cannot change the answer.",
+                space: "Cannot arise, same reason — no listing is split, joined, or matched here.",
+                cwd: "Not an input: every arm is driven against an absolute path handed to it."}}
 
   - {id: G13, kind: census, probe_kind: search, verdict: holds,
      claim: "The three composition sites have exactly one production execution context between them: `loop.py --lead-author-drain`, which re-execs into the venv and then runs both lanes in-process against a git worktree.",
@@ -1943,7 +1951,11 @@ claims:
   - {id: C31, kind: behavior, probe_kind: executed, verdict: holds,
      claim: "The union of the adapter glob and the execution.md marker equals the adapter set exactly on the committed tree.",
      probe: "sorted(verbs._system_of(p) for p in adapters.glob('*'+ADAPTER_SUFFIX)) vs [d.name for d in skills.iterdir() if (d/'execution.md').is_file()]",
-     observed: "both sources -> the same 7 names; marker-only = [], adapter-only = []; union == adapter set."}
+     observed: "both sources -> the same 7 names; marker-only = [], adapter-only = []; union == adapter set.",
+     alphabet: {ascii: "the real committed tree's 7 names, all [a-z-] — the only class this tree carries.",
+                non-ascii: "Cannot arise on the REAL tree probed here. But note what this probe's shape hid: both halves are read from the WORKING tree (`glob` + `iterdir`), while production's marker half runs `ls-tree` — so this equality could not have caught the C-quoting defect X2 records, and did not. Re-probed synthetically at #908; both halves agree once the marker read is `-z`.",
+                space: "Same as non-ascii — absent from the real tree, and structurally invisible to a working-tree `iterdir` even when present. Covered synthetically at #908.",
+                cwd: "Not an input: both sides are absolute-path reads (`adapters.glob`, `skills.iterdir`)."}}
 
   - {id: C32, kind: reachability, probe_kind: executed, verdict: unrefuted,
      claim: "execution.md is the only candidate marker the lead-author lane cannot get committed; SKILL.md, system drafts and every catalog path are admitted.",
@@ -1995,7 +2007,11 @@ claims:
   - {id: J1, kind: behavior, probe_kind: executed, verdict: holds,
      claim: "Path.glob('*_adapter.py') returns [] — no exception — both for a path that does not exist and for a path that is a regular file.",
      probe: "tmp: list(missing.glob('*'+ADAPTER_SUFFIX)); list(regular_file.glob('*'+ADAPTER_SUFFIX))",
-     observed: "[] and [] — neither raises. So M1/§1.5's 'absent or unreadable -> raises' is not obtainable from the glob: the resolver must test each source explicitly, or an absent adapters directory is a SILENT EMPTY SET."}
+     observed: "[] and [] — neither raises. So M1/§1.5's 'absent or unreadable -> raises' is not obtainable from the glob: the resolver must test each source explicitly, or an absent adapters directory is a SILENT EMPTY SET.",
+     alphabet: {ascii: "Sampled, incidentally: the fixtures carry ordinary names. But the class axis does not apply — this probe's value space is the SOURCE STATE of the glob target (absent, regular file).",
+                non-ascii: "Cannot arise at this boundary: the probe's output is `[]` in both arms — the value space is whether an exception occurs, not which names come back. A name's bytes cannot change the answer.",
+                space: "Cannot arise, same reason — no listing is split, joined, or matched here.",
+                cwd: "Not an input: every arm is driven against an absolute path handed to it."}}
 
   - {id: J2, kind: behavior, probe_kind: executed, verdict: holds,
      claim: "On the production path an OSError escaping run_pitfalls is swallowed and the tick returns rc 0; run_or_dead_letter never sees it.",
@@ -2022,12 +2038,20 @@ claims:
   - {id: P1, kind: primitive, probe_kind: executed, verdict: holds,
      claim: "Path.glob over a single-component pattern materializes the whole directory before its first yield, so it can never return a partially-yielded set followed by a raise.",
      probe: "seven arms on CPython 3.11.15 — a 200-entry dir mutated during iteration; an injected _scandir raising OSError(EIO) after 2 entries; the same raising PermissionError",
-     observed: "P5 yielded 200 of 200 after 199 were unlinked mid-loop (eager list(scandir_it)). P6 raised OSError(errno=5) AFTER yielding [] — zero entries handed out. P7 was swallowed entirely: [], zero yields. Source confirms pathlib.py:353-375, `entries = list(scandir_it)` inside the try and `except PermissionError: return` at 374; dironly is False for '*_adapter.py' so the per-entry raise site is unreachable on the production call. FK-19's mid-iteration state is UNREACHABLE; no wrapper demand is owed."}
+     observed: "P5 yielded 200 of 200 after 199 were unlinked mid-loop (eager list(scandir_it)). P6 raised OSError(errno=5) AFTER yielding [] — zero entries handed out. P7 was swallowed entirely: [], zero yields. Source confirms pathlib.py:353-375, `entries = list(scandir_it)` inside the try and `except PermissionError: return` at 374; dironly is False for '*_adapter.py' so the per-entry raise site is unreachable on the production call. FK-19's mid-iteration state is UNREACHABLE; no wrapper demand is owed.",
+     alphabet: {ascii: "Sampled, incidentally: the fixtures carry ordinary names. But the class axis does not apply — this probe's value space is the ITERATION ORDER and raise timing of Path.glob.",
+                non-ascii: "Cannot arise at this boundary: the arms count yields and observe when the raise lands; the entries' names are never read. A name's bytes cannot change the answer.",
+                space: "Cannot arise, same reason — no listing is split, joined, or matched here.",
+                cwd: "Not an input: every arm is driven against an absolute path handed to it."}}
 
   - {id: P2, kind: behavior, probe_kind: executed, verdict: holds,
      claim: "An UNREADABLE adapters directory returns [] from Path.glob with no exception, under a real non-root uid.",
      probe: "glob a mode-000 dir as uid 0, then the same dir at mode 0o711 inside an os.fork() child that ran setgroups([])/setgid(65534)/setuid(65534)",
-     observed: "uid 0 listed all three entries (permission bits bypassed). uid 65534: os.scandir raised PermissionError(errno=13) and Path.glob returned [] with NO exception. A THIRD silent-empty state beyond J1's pair; the loop runs as uid 0 in this container, where the state is bypassed, so the demand pins it anyway because the production uid is not this design's to fix."}
+     observed: "uid 0 listed all three entries (permission bits bypassed). uid 65534: os.scandir raised PermissionError(errno=13) and Path.glob returned [] with NO exception. A THIRD silent-empty state beyond J1's pair; the loop runs as uid 0 in this container, where the state is bypassed, so the demand pins it anyway because the production uid is not this design's to fix.",
+     alphabet: {ascii: "Sampled, incidentally: the fixtures carry ordinary names. But the class axis does not apply — this probe's value space is the PERMISSION state of the adapters directory, under two uids.",
+                non-ascii: "Cannot arise at this boundary: the observation is `[]`-vs-PermissionError, not which names were listed. A name's bytes cannot change the answer.",
+                space: "Cannot arise, same reason — no listing is split, joined, or matched here.",
+                cwd: "Not an input: every arm is driven against an absolute path handed to it."}}
 
   - {id: P3, kind: behavior, probe_kind: executed, verdict: holds,
      claim: "The lead-author drain box sees the identical on-disk worktree the host resolved — a bind mount, not a provisioned copy.",
@@ -2114,7 +2138,11 @@ claims:
   - {id: X2, kind: primitive, probe_kind: executed, verdict: holds,
      claim: "A recursive committed-tree marker read filtered on the `execution.md` basename yields the NESTED parent directory name alongside the depth-1 names; the depth-1 filter yields only the depth-1 names, over the identical tree.",
      probe: "commit the four paths of X1 into a real repo (git 2.47.3) and run `git ls-tree -r --name-only HEAD -- defender/skills/`, deriving the parent name under both filters",
-     observed: "recursive-basename read -> ['elastic', 'mcpsys']; depth-1 read (`p.count('/') == 3`) -> ['elastic']. The obvious implementation of the marker half — the one `test_869_resolver.py`'s own helper uses modulo its depth guard — declares a system whose name the model chose, out of a tree in which every other control of this spec holds."}
+     observed: "recursive-basename read -> ['elastic', 'mcpsys']; depth-1 read (`p.count('/') == 3`) -> ['elastic']. The obvious implementation of the marker half — the one `test_869_resolver.py`'s own helper uses modulo its depth guard — declares a system whose name the model chose, out of a tree in which every other control of this spec holds.",
+     alphabet: {ascii: "the original sample: recursive-basename -> ['elastic','mcpsys'], depth-1 -> ['elastic'], over an ASCII tree at the repo root.",
+                non-ascii: "RE-PROBED at #908, and it REFUTED the read this claim was transcribed into. `git ls-tree -r --name-only HEAD` returns a non-ASCII path C-QUOTED — `defender/skills/wazuh-caf\\303\\251/execution.md` wrapped in double quotes — which no longer ends in `/execution.md`, so the filter dropped it and the system was silently un-declared. Closed by reading with `-z` (`declared_systems._marker_names`), pinned by `test_the_marker_half_reads_the_whole_name_alphabet_the_boundary_admits`.",
+                space: "RE-PROBED at #908, also refuting. `listing.split()` TORE `defender/skills/my sys/execution.md` into two tokens, neither of which ends in `/execution.md`; the system was silently un-declared. Same `-z` fix, same test.",
+                cwd: "RE-PROBED at #908. Run from `defender/skills`, the `-- defender/skills/` pathspec resolves against the CWD and matches NOTHING, so the read returns empty rather than wrong. Production always passes `cwd=repo_root`, and `--full-name` now makes the root-relativity that `count('/') == 3` depends on explicit rather than incidental."}}
 
 gate:
 

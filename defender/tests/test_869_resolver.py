@@ -17,7 +17,6 @@ the contract §7 rejected.
 """
 from __future__ import annotations
 
-import subprocess
 import sys
 from pathlib import Path
 
@@ -65,11 +64,27 @@ def _adapter_half_of(repo: Path) -> set[str]:
 
 
 def _committed_skills_paths(repo: Path) -> list[str]:
-    """Every path under `defender/skills/` at HEAD — the committed tree, listed once."""
-    return subprocess.run(
-        ["git", "-C", str(repo), "ls-tree", "-r", "--name-only", "HEAD", "--", SKILLS_REL],
-        capture_output=True, text=True, check=True,
-    ).stdout.split()
+    """Every path under `defender/skills/` at HEAD — the committed tree, listed once.
+
+    DELIBERATELY NOT the plumbing the resolver runs (#910's shared-oracle gate). `_marker_names`
+    asks `ls-tree` for HEAD; an oracle that re-ran that same query could not disagree with the
+    code about how the tree is read — it could only confirm the implementation does what the
+    test's own copy does, and every input on which the shared primitive is wrong would be
+    invisible BY CONSTRUCTION. That is not a hypothetical here: it is how #869 shipped a
+    marker half that dropped every non-ASCII and every spaced name.
+
+    `ls-files` answers from the INDEX rather than from HEAD — a different command, a different
+    parse, and a different question. For these fixtures the two coincide exactly, because
+    every one of them reaches this helper through `commit_all`, and a file merely WRITTEN is
+    in neither (which is the NF1 asymmetry this suite turns on, so the substitution does not
+    quietly relax it). `-z` and `--full-name` are for the oracle's own correctness: NUL
+    delimiting so a spaced or non-ASCII path is neither torn nor C-quoted, and root-relative
+    output so `count("/") == 3` means what it says.
+    """
+    listing = _git.git(
+        ["ls-files", "-z", "--full-name", "--cached", "--", SKILLS_REL], cwd=repo,
+    )
+    return [rel for rel in listing.split("\0") if rel]
 
 
 def _marker_half_of(repo: Path) -> set[str]:
@@ -239,6 +254,40 @@ def test_the_marker_source_is_exactly_depth_one(tmp_path):
     assert "cmdb" in got, "the depth-1 marker-only control is not declared either"
 
 
+def test_the_marker_half_reads_the_whole_name_alphabet_the_boundary_admits(tmp_path):
+    """The marker half declares a system whose directory name holds a SPACE or a NON-ASCII
+    byte, exactly as the adapter half already does.
+
+    THE SHIPPED DEFECT (#908, found by the alphabet the spec now records). Every fixture in
+    this suite planted ASCII names at the repo root, so `_marker_names` was only ever asked
+    the one question it could not get wrong. Over the other two classes it silently answered
+    LESS than the tree declares:
+
+    * `git ls-tree --name-only` C-QUOTES a path holding a non-ASCII byte — it comes back as
+      `"defender/skills/wazuh-caf\\303\\251/execution.md"`, which no longer ends in
+      `/execution.md`, so the filter dropped it;
+    * splitting that listing on whitespace TORE `defender/skills/my sys/execution.md` into
+      two tokens, neither of which matches either.
+
+    Both are the failure this resolver exists to prevent — a real system silently
+    un-declared — and both are WORSE than a loud refusal, because the name never reached the
+    `_is_system_name` shape check to be logged as anomalous. Whether these names should be
+    ADMITTED is a separate question from whether they should be SEEN: `_is_system_name` takes
+    the alphabet decision, and this pins that the read hands it every name the tree carries
+    rather than losing some in transit.
+
+    The oracle is the planted set, not a second `ls-tree` — that shared query is what hid
+    this for the whole of #869.
+    """
+    planted = ("elastic", "wazuh-café", "my sys")
+    repo = seed_tree(tmp_path, adapters=(), markers=planted, skills=(), catalog=())
+
+    assert declared_systems(repo) == frozenset(planted)
+    # And the independent committed-tree read agrees, so this is the tree's answer rather
+    # than a resolver that happens to echo its argument back.
+    assert _marker_half_of(repo) == set(planted)
+
+
 def test_the_union_equals_the_adapter_set_on_the_committed_tree():
     """On the real committed tree both sources yield the SAME names — zero marker-only, zero
     adapter-only — so the widening evicts nothing and admits nothing (RF1's positive control,
@@ -374,10 +423,9 @@ def test_declared_systems_reports_an_empty_union(tmp_path, capsys):
     # Both sources PRESENT and both EMPTY of what they are read for — the state this demand
     # is about, and the one an absent source must not be confused with.
     assert (repo / ADAPTERS_REL).is_dir()
-    assert subprocess.run(
-        ["git", "-C", str(repo), "ls-tree", "-r", "--name-only", "HEAD", "--", SKILLS_REL],
-        capture_output=True, text=True, check=True,
-    ).stdout.split(), "defender/skills is absent at HEAD, which is a different demand"
+    assert _committed_skills_paths(repo), (
+        "defender/skills is absent at HEAD, which is a different demand"
+    )
     assert _adapter_half_of(repo) == set()
     assert _marker_half_of(repo) == set()
 
