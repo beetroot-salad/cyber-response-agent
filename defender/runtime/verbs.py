@@ -26,7 +26,14 @@ from .verb_grant import GrantError, VerbGrant
 #: through `.match`, which anchors the start for them, but a `.search("BAD name")` matches the
 #: trailing `name` SUFFIX and reads as well-formed. `\A` makes the object itself carry the
 #: anchor rather than each caller's choice of method.
-_SYSTEM_RE = re.compile(r"\A[a-z0-9][a-z0-9-]*\Z")
+#: The alphabet itself, UNANCHORED, so a scanner that must recognise a name INSIDE
+#: surrounding text embeds this rather than respelling it (`verb_roster`'s `query(system="…"`
+#: matcher does exactly that). A fragment, deliberately not a compiled pattern: there is
+#: nothing here to `.match()` with, so it cannot become the shape-without-the-bound shortcut
+#: `is_system_name` exists to prevent. Verb names share this alphabet — the tree declares no
+#: verb outside it and has no separate verb pattern — so the same fragment spells both.
+SYSTEM_PATTERN = r"[a-z0-9][a-z0-9-]*"
+_SYSTEM_RE = re.compile(rf"\A{SYSTEM_PATTERN}\Z")
 #: The name is unbounded model text at three of the readers below (#835's prompt-cache key, the
 #: `query` tool's echo, the gather tool's retry message), so the shape needs a ceiling to go
 #: with it. One number rather than one per downstream reason: the reasons differ, but the FACT
@@ -489,6 +496,7 @@ __all__ = [
     "DENIED",
     "GRANTED",
     "SYSTEM_MAX_LEN",
+    "SYSTEM_PATTERN",
     "UNDECLARED",
     "ModuleVerbRegistry",
     "Verb",

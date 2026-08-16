@@ -119,7 +119,12 @@ def test_no_module_restates_the_shape_or_the_bound():
     # pattern, and a second constant naming the same 64. The bound half is what makes this
     # test answer to its own name — the `hasattr` probes below only refuse the two spellings
     # that existed, and a third `_FOO_MAX_LEN = 64` would have walked past them.
-    shape = re.compile(r"re\.compile\(\s*r?['\"](?:\\A)?\[a-z0-9\]")
+    # The ALPHABET ITSELF, anywhere in the source — not just at the head of a `re.compile(`.
+    # The earlier spelling of this detector anchored on `re.compile(r"[a-z0-9]` and so was
+    # blind to the nearest surviving copy in the tree: `verb_roster._QUALIFIED_CALL_RE` had
+    # the system alphabet spelled INSIDE a larger pattern, after `query\(`. A restatement is a
+    # restatement wherever it sits.
+    shape = re.compile(re.escape("[a-z0-9][a-z0-9-]*"))
     bound = re.compile(r"^\s*_?[A-Z][A-Z0-9_]*MAX_LEN[A-Z0-9_]*\s*=\s*64\b", re.M)
     # Exempted by PATH, not by basename: `p.name != "verbs.py"` would silently pardon any
     # future module that happened to be called that.
