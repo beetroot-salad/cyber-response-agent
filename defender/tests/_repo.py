@@ -121,6 +121,32 @@ VERBS = {"search": search, "health-check": health_check}
 '''
 
 
+def seed_adapter_stubs(defender_dir: Path, systems: tuple[str, ...]) -> tuple[str, ...]:
+    """Declare `systems` in `defender_dir`'s tree; return the names.
+
+    THE way a synthetic worktree declares its systems, now that the lead author's WRITE gate
+    reads `declared_systems.adapter_declared_systems` the way its commit gate reads
+    `declared_systems` (#772). A tree with a `skills/elastic/` and no `elastic_adapter.py` is
+    not a cheaper fixture — it is a tree in which `elastic` is not a system, so `bind` compiles
+    no per-system write lane there and refuses outright.
+
+    A thin adapter over `_declared869.write_adapter` rather than its own writer: that module
+    owns the filename inverse of `verbs._system_of` (a hyphenated system is an underscored
+    file), and a second copy of that mapping is a fixture that can silently declare a system
+    nobody asked for. What this adds is the ergonomics these call sites want — many systems at
+    once, rooted at a `defender_dir` rather than a repo root.
+
+    Returning the input is the point, the same reason `plant_named_dirs` does: the caller
+    asserts against the systems it DECLARED, never against a second reading of the adapters
+    dir with the glob the code under test runs (`scripts/lint/lint_shared_oracle.py`).
+    """
+    from defender.tests._declared869 import write_adapter
+
+    for system in systems:
+        write_adapter(defender_dir.parent, system)
+    return systems
+
+
 def query_template(tid: str, status: str, *, body: str = "") -> str:
     """A well-formed query template for the seeded `wazuh` system.
 

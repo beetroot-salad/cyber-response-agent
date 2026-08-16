@@ -48,6 +48,7 @@ from defender.learning.pipeline._pydantic_stage import (  # noqa: E402
     run_stage,
 )
 from defender.learning.pipeline.oracle_engine import _run_oracle_pydantic  # noqa: E402
+from defender.tests._repo import seed_adapter_stubs  # noqa: E402
 from defender.runtime import observe  # noqa: E402
 from defender.runtime.agent_definition import bind  # noqa: E402
 from defender.tests._engine_helpers import fake_model as _fake_model  # noqa: E402
@@ -111,6 +112,9 @@ def _lead_author(tmp_path: Path, text: str, tag: str, **over) -> str:
     """The REAL shipped ``require_output=False`` lane (the lead author, a writer stage)."""
     wt = tmp_path / "wt"
     (wt / "defender" / "skills").mkdir(parents=True, exist_ok=True)
+    # The lead author's write lanes are compiled per DECLARED system (#772), so the tree has
+    # to declare one for the policy to have any lane at all.
+    seed_adapter_stubs(wt / "defender", ("elastic",))
     rd = tmp_path / "runs" / "run-A"
     rd.mkdir(parents=True, exist_ok=True)
     deps = bind(LEAD_AUTHOR_DEF, rd, defender_dir=wt / "defender")

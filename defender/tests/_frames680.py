@@ -32,6 +32,7 @@ from defender.agents import (
     MAIN_DEF,
 )
 from defender.learning.author import shared as author_shared
+from defender.tests._repo import seed_adapter_stubs
 from defender.learning.author.curator_engine import CuratorDeps, ForwardCheckConfig
 from defender.learning.author.verify_forward.checks import (
     ACTOR_CHECK,
@@ -511,6 +512,9 @@ def _lead_author_deps_scene(tmp_path: Path, result: BoxResult):
     run = tmp_path / "run"
     skills.mkdir(parents=True)
     run.mkdir(parents=True)
+    # `system` in the rm spelling below has to BE one since #772 — the grant is compiled per
+    # system the tree declares an adapter for, not over an anonymous `<name>/_draft/` shape.
+    seed_adapter_stubs(defender_dir, ("system",))
     deps = bind(LEAD_AUTHOR_DEF, run, defender_dir=defender_dir, box=Box(result))
     return deps, skills, "rm defender/skills/system/_draft/lesson.md"
 

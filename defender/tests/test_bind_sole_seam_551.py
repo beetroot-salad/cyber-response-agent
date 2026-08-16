@@ -118,6 +118,7 @@ from defender.runtime.review_roles import (  # noqa: E402
 )
 from defender.runtime.tools import AgentDeps, GatherDeps, _tool_write_file  # noqa: E402
 
+from defender.tests._repo import seed_adapter_stubs  # noqa: E402
 from defender.runtime.agent_definition import (  # noqa: E402
     AgentDefinition,
     ResolvedRoots,
@@ -342,22 +343,38 @@ def test_d1_verifier_via_bind(tmp_path):
         run / "x.md", "c", run_dir=run, defender_dir=wtd, policy=vpol).allow
 
 
+def _lead_wtd(tmp_path):
+    """A worktree tree the lead author can actually bind against.
+
+    Since #772 its write lanes and `rm` grant are compiled one per system the tree DECLARES an
+    adapter for, so `defender_dir` is an input to the policy's shape and not just its anchor —
+    a bare `<tmp>/wt/defender` with nothing in it binds to no lanes and is refused. `elastic`
+    is the system every probe below spells; `gather` is deliberately NOT one, which is what
+    the negative controls in this file lean on.
+    """
+    wtd = tmp_path / "wt" / "defender"
+    (wtd / "skills" / "gather" / "queries" / "elastic").mkdir(parents=True, exist_ok=True)
+    (wtd / "skills" / "elastic" / "_draft").mkdir(parents=True, exist_ok=True)
+    seed_adapter_stubs(wtd, ("elastic",))
+    return wtd
+
+
 def test_d1_lead_author_via_bind(tmp_path):
     """d1_lead_author_via_bind (survival): bind(LEAD_AUTHOR_DEF, run_dir, defender_dir=<wt>/defender)
     flows through resolve_roots→compile_policy (no early-return); the worktree write scope + rm grant
     (formerly `_lead_author_policy`, now compile_policy via write_shapes) both reproduce."""
     # RED@HEAD: bind takes `repo_root`, not `defender_dir` → TypeError (the early-return path).
     run = tmp_path / "run"
-    wtd = tmp_path / "wt" / "defender"
+    wtd = _lead_wtd(tmp_path)
     skills = wtd / "skills"
     deps = bind(LEAD_AUTHOR_DEF, run, defender_dir=wtd)
     assert isinstance(deps, LeadAuthorDeps)
     pol = deps.policy
     # write scope: the worktree skills .md corpus.
     assert permission.decide_write(
-        skills / "gather" / "x.md", "c", run_dir=run, defender_dir=wtd, policy=pol).allow
+        skills / "elastic" / "SKILL.md", "c", run_dir=run, defender_dir=wtd, policy=pol).allow
     # rm-of-drafts grant.
-    assert permission.decide_bash(f"rm {skills}/gather/_draft/x.md", policy=pol, run_dir=run, defender_dir=wtd).allow
+    assert permission.decide_bash(f"rm {skills}/elastic/_draft/x.md", policy=pol, run_dir=run, defender_dir=wtd).allow
 
 
 def test_d1_bind_carries_no_salt(tmp_path):
@@ -464,15 +481,15 @@ def test_d2_lead_author_write_shape_anchors_skills(tmp_path):
     DENIES run_dir/x.md (wrong root) and skills/x.txt (wrong suffix)."""
     # RED@HEAD: bind(LEAD_AUTHOR_DEF, …, defender_dir=) → TypeError (repo_root today).
     run = tmp_path / "run"
-    wtd = tmp_path / "wt" / "defender"
+    wtd = _lead_wtd(tmp_path)
     skills = wtd / "skills"
     pol = bind(LEAD_AUTHOR_DEF, run, defender_dir=wtd).policy
     assert permission.decide_write(                                                     # positive control (.md)
-        skills / "gather" / "x.md", "c", run_dir=run, defender_dir=wtd, policy=pol).allow
+        skills / "elastic" / "SKILL.md", "c", run_dir=run, defender_dir=wtd, policy=pol).allow
     assert not permission.decide_write(                                                 # wrong root
         run / "x.md", "c", run_dir=run, defender_dir=wtd, policy=pol).allow
     assert not permission.decide_write(                                                 # wrong suffix
-        skills / "gather" / "x.txt", "c", run_dir=run, defender_dir=wtd, policy=pol).allow
+        skills / "elastic" / "SKILL.txt", "c", run_dir=run, defender_dir=wtd, policy=pol).allow
 
 
 def test_d2_write_shape_resolves_symlinked_root(tmp_path):
@@ -500,7 +517,7 @@ def test_d2_main_lead_shapes_no_cross_contamination(tmp_path):
     sanctioned write)."""
     # RED@HEAD: the LEAD half needs bind(LEAD_AUTHOR_DEF, defender_dir=) → TypeError.
     run = tmp_path / "run"
-    wtd = tmp_path / "wt" / "defender"
+    wtd = _lead_wtd(tmp_path)
     skills = wtd / "skills"
     main_pol = bind(MAIN_DEF, run).policy
     lead_pol = bind(LEAD_AUTHOR_DEF, run, defender_dir=wtd).policy
@@ -512,7 +529,7 @@ def test_d2_main_lead_shapes_no_cross_contamination(tmp_path):
     assert not permission.decide_write(                                                 # R1: report.md refused too
         run / "report.md", _VALID_REPORT, run_dir=run, defender_dir=_DEFENDER, policy=main_pol).allow
     assert permission.decide_write(                                                     # LEAD: sanctioned .md
-        skills / "gather" / "x.md", "c", run_dir=run, defender_dir=wtd, policy=lead_pol).allow
+        skills / "elastic" / "SKILL.md", "c", run_dir=run, defender_dir=wtd, policy=lead_pol).allow
     assert not permission.decide_write(                                                 # LEAD doesn't widen into run_dir
         run / "x.md", "c", run_dir=run, defender_dir=wtd, policy=lead_pol).allow
 
@@ -523,14 +540,14 @@ def test_d2_lead_author_rm_scope(tmp_path):
     outside the skills subtree, and `rm defender/skills/../../x` (textual `..`, no symlink follow)."""
     # RED@HEAD: bind(LEAD_AUTHOR_DEF, defender_dir=) → TypeError.
     run = tmp_path / "run"
-    wtd = tmp_path / "wt" / "defender"
+    wtd = _lead_wtd(tmp_path)
     skills = wtd / "skills"
     pol = bind(LEAD_AUTHOR_DEF, run, defender_dir=wtd).policy
 
     def _bash(cmd: str) -> bool:
         return permission.decide_bash(cmd, policy=pol, run_dir=run, defender_dir=wtd).allow
 
-    assert _bash(f"rm {skills}/gather/_draft/x.md")   # positive control (scoped rm)
+    assert _bash(f"rm {skills}/elastic/_draft/x.md")   # positive control (scoped rm)
     assert not _bash("rm -rf /")                       # not a general rm
     assert not _bash(f"rm {run}/report.md")            # not outside the skills subtree
     assert not _bash("rm defender/skills/../../x")     # textual `..` rejected
@@ -542,7 +559,7 @@ def test_d2_lead_author_early_return_removed(tmp_path):
     returns LeadAuthorDeps via the uniform spine."""
     # RED@HEAD: bind has no defender_dir kwarg (early-return path takes repo_root) → TypeError.
     run = tmp_path / "run"
-    wtd = tmp_path / "wt" / "defender"
+    wtd = _lead_wtd(tmp_path)
     deps = bind(LEAD_AUTHOR_DEF, run, defender_dir=wtd)
     assert isinstance(deps, LeadAuthorDeps)
     assert deps.run_id == run.name           # the uniform _for_run tail ran
@@ -571,7 +588,7 @@ def test_d2_deps_class_maps_every_bindable_role(tmp_path):
         (bind(ACTOR_DEF, tmp_path, scope=RunScope(read_confine=(tmp_path / "env",))), ActorDeps),
         (bind(ORACLE_DEF, tmp_path), OracleDeps),
         (bind(VERIFY_DEF, tmp_path, defender_dir=tmp_path / "vwt" / "defender"), VerifierDeps),
-        (bind(LEAD_AUTHOR_DEF, tmp_path / "run", defender_dir=tmp_path / "wt" / "defender"),
+        (bind(LEAD_AUTHOR_DEF, tmp_path / "run", defender_dir=_lead_wtd(tmp_path)),
          LeadAuthorDeps),
         (bind(SUPPORT_DEF, tmp_path), SupportDeps),
         (bind(COMPOSER_DEF, tmp_path), ComposerDeps),
@@ -641,13 +658,15 @@ def test_d3_lead_author_worktree_anchor(tmp_path):
     yields deps.defender_dir == wt/defender AND the policy's write_allow anchors on wt/defender."""
     # RED@HEAD: bind(LEAD_AUTHOR_DEF, defender_dir=) → TypeError (repo_root today).
     run = tmp_path / "run"
-    wtd = tmp_path / "wt" / "defender"
+    wtd = _lead_wtd(tmp_path)
     deps = bind(LEAD_AUTHOR_DEF, run, defender_dir=wtd)
     assert deps.defender_dir == wtd
     assert permission.decide_write(
-        wtd / "skills" / "x.md", "c", run_dir=run, defender_dir=wtd, policy=deps.policy).allow
+        wtd / "skills" / "elastic" / "SKILL.md", "c",
+        run_dir=run, defender_dir=wtd, policy=deps.policy).allow
     assert not permission.decide_write(
-        _DEFENDER / "skills" / "x.md", "c", run_dir=run, defender_dir=wtd, policy=deps.policy).allow
+        _DEFENDER / "skills" / "elastic" / "SKILL.md", "c",
+        run_dir=run, defender_dir=wtd, policy=deps.policy).allow
 
 
 def test_d3_main_gather_non_paths_defender_dir(tmp_path):
@@ -798,8 +817,8 @@ def test_d4_lead_author_no_tree_raises(tmp_path):
     run_dir) with NO defender_dir RAISES via the requires_explicit_tree data bit — never a silent
     PATHS/run_dir fallback authoring the MAIN checkout; positive control: an explicit worktree tree succeeds."""
     run = tmp_path / "run"
-    wtd = tmp_path / "wt" / "defender"
-    with pytest.raises((ValueError, TypeError)):
+    wtd = _lead_wtd(tmp_path)
+    with pytest.raises((ValueError, TypeError), match="explicit NON-PATHS defender_dir"):
         bind(LEAD_AUTHOR_DEF, run)                        # no tree — raises today (repo_root) + post-#551 (data bit)
     # RED@HEAD: the positive control uses the new defender_dir kwarg → TypeError.
     assert isinstance(bind(LEAD_AUTHOR_DEF, run, defender_dir=wtd), LeadAuthorDeps)
@@ -946,7 +965,7 @@ def test_d6_guard_noop_for_real_writers(tmp_path):
     the guard is a no-op for every real writer (D6 behaviour-preserving)."""
     # GREEN@HEAD.
     run = tmp_path / "run"
-    wtd = tmp_path / "wt" / "defender"
+    wtd = _lead_wtd(tmp_path)
     skills = wtd / "skills"
     main_pol = bind(MAIN_DEF, run).policy
     # #629 reconciliation: run_dir/investigation.md carries an output-structure gate too (byte
@@ -958,7 +977,7 @@ def test_d6_guard_noop_for_real_writers(tmp_path):
     assert permission.decide_write(run / "investigation.md", "", run_dir=run, defender_dir=_DEFENDER, policy=main_pol).allow
     assert not permission.decide_write(run / "report.md", _VALID_REPORT, run_dir=run, defender_dir=_DEFENDER, policy=main_pol).allow
     lead_pol = AgentPolicy(write_allow=(permission.build_write_allow(skills, suffix=".md"),), deny_reason="d")
-    assert permission.decide_write(skills / "gather" / "x.md", "c", run_dir=run, defender_dir=wtd, policy=lead_pol).allow
+    assert permission.decide_write(skills / "elastic" / "SKILL.md", "c", run_dir=run, defender_dir=wtd, policy=lead_pol).allow
 
 
 def test_d6_guard_needs_worktree_defender_dir(tmp_path):
@@ -967,8 +986,8 @@ def test_d6_guard_needs_worktree_defender_dir(tmp_path):
     on; if deps=PATHS (the split) the legit lead-author write DENIES — the split is observable on WRITES."""
     # RED@HEAD: the lead-author policy anchored on a worktree needs bind(defender_dir=) → TypeError.
     run = tmp_path / "run"
-    wtd = tmp_path / "wt" / "defender"
-    target = wtd / "skills" / "gather" / "x.md"
+    wtd = _lead_wtd(tmp_path)
+    target = wtd / "skills" / "elastic" / "SKILL.md"
     pol = bind(LEAD_AUTHOR_DEF, run, defender_dir=wtd).policy
     # consistent tree → admitted.
     assert permission.decide_write(target, "c", run_dir=run, defender_dir=wtd, policy=pol).allow
@@ -1108,7 +1127,7 @@ def test_d7_lead_author_main_tree_unbuildable(tmp_path):
     configured right). Positive control: an explicit worktree tree (!= PATHS) succeeds."""
     # RED@HEAD: bind has no defender_dir kwarg → TypeError (the #551 ValueError can't yet fire).
     run = tmp_path / "run"
-    wtd = tmp_path / "wt" / "defender"
-    with pytest.raises((ValueError, TypeError)):
+    wtd = _lead_wtd(tmp_path)
+    with pytest.raises((ValueError, TypeError), match="explicit NON-PATHS defender_dir"):
         bind(LEAD_AUTHOR_DEF, run, defender_dir=_DEFENDER)      # main-checkout tree — UNBUILDABLE
     assert isinstance(bind(LEAD_AUTHOR_DEF, run, defender_dir=wtd), LeadAuthorDeps)  # positive control
