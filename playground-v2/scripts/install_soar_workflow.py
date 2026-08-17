@@ -1,31 +1,25 @@
 #!/usr/bin/env python3
 """Install Shuffle workflows from playground-v2/soar/workflows/*.json.
 
-Upserts each workflow by name: looks it up in the running instance, rewrites the
-instance-specific fields an exported workflow carries (org_id, execution
-environment), then creates or updates it. Idempotent and order-independent —
-the same role scripts/install_detection_rules.py plays for detection rules.
+Upserts each workflow by name: rewrites the instance-specific fields an exported
+workflow carries (org_id, execution environment), then creates or updates it.
+Idempotent and order-independent.
 
 Transport: shells out to `docker --context soc-playground exec kibana curl`
-against http://shuffle-backend:5001. Kibana is used as the curl host because the
-shuffle-backend image ships no curl, and because Kibana is dual-homed onto the
-`soar` network and so can resolve shuffle-backend. Same reason as
-install_detection_rules.py: no SSH tunnel needed from the devcontainer.
+against http://shuffle-backend:5001. Kibana is the curl host because the
+shuffle-backend image ships no curl, and Kibana is dual-homed onto `soar` — so
+no SSH tunnel is needed from the devcontainer.
 
-Auth: bearer token. Key from $V2_SHUFFLE_API_KEY or playground-v2/.env. The key
-is whatever SHUFFLE_DEFAULT_APIKEY was set to at first boot, so nothing has to
-be minted in the UI.
+Auth: bearer token from $V2_SHUFFLE_API_KEY or playground-v2/.env — whatever
+SHUFFLE_DEFAULT_APIKEY was set to at first boot.
 
-Workflow JSON is produced by building the workflow in the UI once and exporting
-it — see playground-v2/soar/workflows/README.md. Shuffle documents no API for
-generating apps from an OpenAPI spec, so app creation stays a UI step; this
-script only manages workflows.
+Workflow JSON comes from building a workflow in the UI and exporting it (see
+soar/workflows/README.md); app creation has no API and stays a UI step.
 
-NOTE: Shuffle does not publish an API reference for these routes. The paths below
-were taken from the running instance's own surface and are declared in ROUTES so
-there is one place to correct them. Run `--probe` first against any new Shuffle
-version — it exercises auth and every read path without writing anything, and
-reports exactly which route disagrees.
+Shuffle publishes no reference for these routes — they were read off a running
+instance and collected in ROUTES. Run `--probe` after a Shuffle upgrade: it
+exercises auth and every read path without writing, and names the route that
+disagrees.
 
 Usage:
   python3 playground-v2/scripts/install_soar_workflow.py [--dry-run|--probe]
@@ -33,7 +27,7 @@ Usage:
 Exit codes:
   0 — all workflows installed (or probe passed)
   1 — Shuffle API error on at least one workflow (others may still have
-      installed), or a config/auth/connectivity failure with the reason on stderr
+      installed), or a config/auth/connectivity failure, reason on stderr
 """
 
 from __future__ import annotations
@@ -49,12 +43,9 @@ PLAYGROUND = Path(__file__).resolve().parent.parent
 WORKFLOW_DIR = PLAYGROUND / "soar" / "workflows"
 ENV_FILE = PLAYGROUND / ".env"
 DOCKER_CONTEXT = "soc-playground"
-# Kibana, not shuffle-backend: the backend image has no curl, and Kibana is
-# dual-homed onto `soar` so it can reach the backend by Docker DNS.
 CURL_CONTAINER = "kibana"
 SHUFFLE_URL = "http://shuffle-backend:5001"
 
-# Single place to correct if a Shuffle upgrade moves these.
 ROUTES = {
     "orgs": "/api/v1/orgs",
     "environments": "/api/v1/getenvironments",
@@ -82,7 +73,7 @@ def _curl_command(method: str, path: str, has_body: bool) -> str:
     ]
     if has_body:
         parts.append('--data "$BODY"')
-    # http code on its own trailing line so it can be split off the body
+    # http code on its own trailing line so it splits off the body
     parts.append(r'-w "\n%{http_code}\n"')
     return " ".join(parts)
 
@@ -142,7 +133,7 @@ def resolve_context(key: str) -> tuple[str, str]:
     names = [n for n in names if n]
     if not names:
         sys.exit("no execution environments returned — is shuffle-orborus running?")
-    # Prefer the one Orborus registers (ENVIRONMENT_NAME=Shuffle in soar/compose.yml).
+    # Prefer the one Orborus registers (ENVIRONMENT_NAME in soar/compose.yml).
     env_name = "Shuffle" if "Shuffle" in names else names[0]
     return org_id, env_name
 

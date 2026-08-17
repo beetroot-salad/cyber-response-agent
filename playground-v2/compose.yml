@@ -1,10 +1,10 @@
 name: soc-playground
 
-# Shuffle SOAR (batch 12) lives in its own file so it can be levered down
-# independently. `project_directory` + `env_file` are NOT optional: an included
-# file otherwise interpolates against a .env in its OWN directory, so every
-# ${V2_SHUFFLE_*} would silently resolve to empty and Shuffle would come up
-# wired to its insecure code defaults.
+# Shuffle SOAR lives in its own file so it can be levered down independently.
+# `project_directory` + `env_file` are NOT optional: an included file otherwise
+# interpolates against a .env in its OWN directory, so every ${V2_SHUFFLE_*}
+# would silently resolve to empty and Shuffle would come up on its insecure
+# code defaults.
 include:
   - path: ./soar/compose.yml
     project_directory: .
@@ -34,7 +34,7 @@ include:
 #    change-mgmt      — FastAPI over authorized-change seed tied to inventory change_windows
 #    ticket-server    — FastAPI over a curated ticket seed (moved in from the retired v1 lab)
 #    identity         — FastAPI authz API over keycloak/realm.yaml × hosts/inventory.yaml
-#  Shuffle SOAR (batch 12 — defined in soar/compose.yml, see the include: above):
+#  Shuffle SOAR (defined in soar/compose.yml, see the include: above):
 #    shuffle-frontend   — UI on 8006; shuffle-backend — API/scheduler on 5001
 #    shuffle-orborus    — execution supervisor; shuffle-opensearch — Shuffle's own state store
 # Exposed on loopback only. External access via SSH tunnel:
@@ -210,18 +210,17 @@ services:
       - kibana_data:/usr/share/kibana/data
     ports:
       - "127.0.0.1:5601:5601"
-    # Dual-homed onto `soar`: the Kibana webhook connector fires FROM Kibana, so
-    # Kibana is what has to resolve shuffle-backend. `default` must be listed
-    # explicitly — adding a networks: key drops a service off the implicit
-    # default network, which would cut Kibana off from Elasticsearch.
+    # Dual-homed onto `soar`: the webhook connector fires FROM Kibana, so Kibana
+    # is what has to resolve shuffle-backend. `default` must be listed
+    # explicitly — a networks: key drops a service off the implicit default
+    # network, which would cut Kibana off from Elasticsearch.
     #
-    # Elasticsearch itself is deliberately NOT dual-homed. Shuffle reaches
-    # Elastic data through Kibana's API on :5601 (the same transport
-    # scripts/install_detection_rules.py uses), which avoids handing Shuffle the
-    # CA from the certs volume. It also keeps Kibana↔ES on a single path: if
-    # both ends of a talking pair shared two networks, Docker's embedded DNS
-    # would return an address on each and the traffic could take the uncaptured
-    # bridge, silently vanishing from Zeek's conn.log.
+    # Elasticsearch is deliberately NOT dual-homed: Shuffle reaches Elastic data
+    # through Kibana's API on :5601, so it never needs the CA from the certs
+    # volume. It also keeps Kibana↔ES on a single path — if both ends of a
+    # talking pair shared two networks, Docker's embedded DNS would return an
+    # address on each and the traffic could take the uncaptured bridge, silently
+    # vanishing from Zeek's conn.log.
     networks:
       - default
       - soar
@@ -934,7 +933,7 @@ services:
       - "127.0.0.1:8001:8080"
     # All five stubs are dual-homed so Shuffle apps can call them. `default` is
     # listed explicitly or the stub drops off the network the role hosts and the
-    # baseline generators reach it on. Anchored because it repeats five times.
+    # baseline generators reach it on.
     networks: &stub-networks
       - default
       - soar
@@ -1003,30 +1002,25 @@ services:
     healthcheck: *stub-health
 
 networks:
-  # `default` is left undeclared on purpose. Declaring it would force Compose to
-  # recreate it, which stops every one of the ~30 containers on the stack — a
-  # full outage in exchange for nothing.
+  # `default` is left undeclared on purpose: declaring it forces Compose to
+  # recreate it, stopping every one of the ~30 containers on the stack.
   #
-  # soar — carries Shuffle plus the services it orchestrates. Two deliberate
-  # choices here:
+  # soar — carries Shuffle plus the services it orchestrates.
   #
-  #  * `com.docker.network.bridge.name` pins the host interface name. Without
-  #    it Docker derives `br-<12 hex of network id>`, and zeek/entrypoint.sh
-  #    picks its capture interface with `awk '/^br-/ {print $1; exit}'` — the
-  #    FIRST matching bridge. A second br-* makes that a coin flip, and losing
-  #    it means Zeek silently captures the 4-container SOAR network instead of
-  #    the playground, with nothing but a log line to show for it. A bridge
-  #    named `soar0` is skipped by that awk by construction, so Zeek needs no
-  #    change and no restart. Max 15 chars (IFNAMSIZ).
+  #  * The bridge name is pinned. Otherwise Docker derives `br-<12 hex>`, and
+  #    zeek/entrypoint.sh picks its capture interface with
+  #    `awk '/^br-/ {print $1; exit}'` — the FIRST matching bridge, so a second
+  #    br-* makes it a coin flip and Zeek may silently capture the SOAR network
+  #    instead of the playground. `soar0` is skipped by that awk by
+  #    construction, so Zeek needs no change. Max 15 chars (IFNAMSIZ).
   #
   #  * The subnet sits outside Docker's default 172.17.0.0/12 pool, so it can
-  #    never collide with an auto-allocated network, and it is obvious on sight
-  #    in a log line or a pcap.
+  #    never collide with an auto-allocated network and is obvious in a log
+  #    line or a pcap.
   #
-  # Consequence worth knowing: SOAR traffic does not cross the captured bridge,
-  # so none of it appears in Zeek's conn.log. That is desirable — the defender
-  # should not find its own tooling in the telemetry — but it is a property of
-  # the design, not an accident.
+  # Consequence: SOAR traffic never crosses the captured bridge, so none of it
+  # appears in Zeek's conn.log — intended, so the defender does not find its own
+  # tooling in the telemetry.
   soar:
     driver: bridge
     driver_opts:
