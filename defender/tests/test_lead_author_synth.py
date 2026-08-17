@@ -512,9 +512,10 @@ def test_the_recorded_instance_is_one_that_succeeded(tmp_path):
 def test_the_first_successful_instance_wins_not_the_last(tmp_path):
     """The partition is STABLE — among rows that succeeded, document order still decides.
 
-    Bound because a `sorted(key=…)` would pass the test above and silently reorder the
-    successful rows among themselves, making which instance gets recorded depend on Python's
-    sort rather than on the order the defender ran them in."""
+    Bound separately from the test above because that one is satisfied by ANY reordering that
+    floats a successful row to the front, including one that also shuffles the successful rows
+    among themselves — which would make the recorded instance depend on how the ordering is
+    spelled rather than on the order the defender ran them in."""
     cat = _catalog(tmp_path)
     lead_author.synthesize_drafts([
         _lead("stub-cmdb.network-map", {"name": "first"}, verb="map"),

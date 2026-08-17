@@ -169,9 +169,11 @@ it promotes a coined measurement; gather only supplies the id.
 
 ## Drafts and `covers:`
 
-A **draft** under `{system}/_draft/` is not a small template — it is a **recording**. The
+A **minted draft** under `{system}/_draft/` is not a small template — it is a **recording**. The
 lead-author loop mints one when a gather call coined a `query_id` no template answered, and
-what it writes is a transcript of that one execution:
+what it writes is a transcript of that one execution. (A hand-authored draft predates the shape
+and carries none of it — no digest name, no `covers:`, and a `## Query` rather than a
+recording; it is freely discardable, and the checker accepts both.)
 
 - Its **name is a digest**, not a name. `{system}/_draft/{sha256(query_id)[:12]}.md`, and `id:`
   matches. Naming a template for *what it measures* is a decision that needs the recording, the

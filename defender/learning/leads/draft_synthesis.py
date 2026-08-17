@@ -216,8 +216,9 @@ def _mint_order(executed: list[ExecutedLead]) -> list[ExecutedLead]:
     as the exemplar for a measurement while a later row under the same `query_id` that actually
     returned data was dropped by the dedup. Under "the values are instances of the identity"
     that is simply the wrong instance — a failed call is evidence about the call, not about the
-    measurement. A stable partition (not a sort) keeps the tie-break document order, so the
-    choice among successful rows is unchanged.
+    measurement. Document order is kept WITHIN each group, so the choice among successful rows
+    is unchanged — one `sorted(key=…)` on the same predicate would give that too (Python's sort
+    is stable); the partition is spelled out because it names the two groups.
     """
     ok = [lead for lead in executed if lead.payload_status == "ok"]
     rest = [lead for lead in executed if lead.payload_status != "ok"]

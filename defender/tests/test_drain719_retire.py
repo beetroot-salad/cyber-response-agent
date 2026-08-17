@@ -562,6 +562,17 @@ def test_retirement_retains_row_appended_mid_window(tmp_path: Path):
     assert [r["observation_id"] for r in h.graveyard(ch)] == ["a/0"]
 
 
+#: `(file, function)` pairs that reach `write_atomic` without writing a QUEUE — the census's
+#: proxy for "rewrites a queue file wholesale" went wide the moment a second kind of writer
+#: adopted the same seam. `synthesize_drafts` writes one `_draft/{digest}.md` catalog template
+#: per identity, into the corpus, never into `state_dir`: no queue, nothing to merge, no
+#: lost-append race for a rotation to close. Keyed on the FUNCTION and not on the file (the way
+#: `markers.py` is skipped whole) so the rest of `draft_synthesis.py` stays inside the census —
+#: an exclusion the width of a module is one that stops answering the moment that module grows
+#: a second writer.
+_NOT_A_QUEUE_WRITER = frozenset({("draft_synthesis.py", "synthesize_drafts")})
+
+
 def test_exactly_one_function_rewrites_a_pending_file(tmp_path: Path):
     """D9 removes the second write path rather than adding a lock to it: after the fold
     exactly one function under `defender/learning` rewrites a queue file wholesale, and the
@@ -575,19 +586,11 @@ def test_exactly_one_function_rewrites_a_pending_file(tmp_path: Path):
     for py in sorted(root.rglob("*.py")):
         if py.name == "markers.py":
             continue  # a marker-directory queue, explicitly out of scope (A5)
-        if py.name == "draft_synthesis.py":
-            # Not a queue writer. `write_atomic` is this census's PROXY for "rewrites a queue
-            # file wholesale", and the proxy went wide the moment a second kind of writer
-            # adopted the same seam: the mint writes one `_draft/{digest}.md` catalog template
-            # per identity, into the corpus, never into `state_dir` — no queue, nothing to
-            # merge, and no lost-append race for a rotation to close. D9's property (exactly
-            # ONE function rewrites a queue) is untouched; what is excluded here is a file that
-            # never wrote a queue to begin with. Excluded by name, like `markers.py` above,
-            # because the target is not decidable from the AST.
-            continue
         tree = ast.parse(py.read_text(encoding="utf-8"), filename=str(py))
         for node in ast.walk(tree):
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            if (py.name, node.name) in _NOT_A_QUEUE_WRITER:
                 continue
             for call in ast.walk(node):
                 if isinstance(call, ast.Call):

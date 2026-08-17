@@ -563,6 +563,65 @@ def test_a_bare_discard_of_a_covered_draft_is_refused(tmp_git_repo: Path):
         lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED)
 
 
+def _mint_uncommitted_draft(repo: Path, query_id: str) -> Path:
+    """A `wazuh` draft written but NOT committed — what `synthesize_drafts` leaves behind, and
+    what the same tick then hands to the author."""
+    draft = repo / _CATALOG / "wazuh" / "_draft" / f"{lead_author._draft_basename(query_id)}.md"
+    draft.write_text(query_template(f"wazuh.{lead_author._draft_basename(query_id)}",
+                                    "draft", covers=[query_id]))
+    return draft
+
+
+def test_a_bare_discard_of_a_draft_minted_this_tick_is_refused(tmp_git_repo: Path):
+    """The transfer rule's DOMINANT case, and the one git cannot report.
+
+    `_run_locked` mints and then hands the same draft to the author in the same tick (it
+    reloads the catalog after the mint precisely so the row resolves), so the draft the author
+    bare-discards is almost always one that was never committed: no `D` porcelain record, no
+    `git show HEAD:` pre-image, nothing for a gate reading only git to see. The identities are
+    captured between the mint and the agent instead."""
+    repo = tmp_git_repo
+    draft = _mint_uncommitted_draft(repo, "wazuh.hunt-failed-logins")
+    minted = lead_author._minted_identities([draft])
+    draft.unlink()
+
+    with pytest.raises(lead_author.LeadAuthorError, match="wazuh.hunt-failed-logins"):
+        lead_author._verify_skills_state(
+            repo, baseline_stray=[], systems=DECLARED, minted=minted
+        )
+
+
+def test_a_promote_of_a_draft_minted_this_tick_is_accepted(tmp_git_repo: Path):
+    """The positive control for the rule above — the identity lands, so the delete costs
+    nothing and the batch commits."""
+    repo = tmp_git_repo
+    draft = _mint_uncommitted_draft(repo, "wazuh.hunt-failed-logins")
+    minted = lead_author._minted_identities([draft])
+    (repo / _CATALOG / "wazuh" / "auth-failure-rate.md").write_text(
+        query_template("wazuh.auth-failure-rate", "established",
+                       covers=["wazuh.hunt-failed-logins"])
+    )
+    draft.unlink()
+
+    changed = lead_author._verify_skills_state(
+        repo, baseline_stray=[], systems=DECLARED, minted=minted
+    )
+    assert "defender/skills/gather/queries/wazuh/auth-failure-rate.md" in changed
+
+
+def test_a_draft_minted_this_tick_and_left_alone_is_not_a_departure(tmp_git_repo: Path):
+    """SKIP is a legal disposition, and it is the one the prompt names for a draft that fits
+    nowhere — the rule must fire on the `rm`, never on the file still being there."""
+    repo = tmp_git_repo
+    draft = _mint_uncommitted_draft(repo, "wazuh.hunt-failed-logins")
+    minted = lead_author._minted_identities([draft])
+
+    changed = lead_author._verify_skills_state(
+        repo, baseline_stray=[], systems=DECLARED, minted=minted
+    )
+    assert changed == [draft.relative_to(repo).as_posix()]
+
+
 def test_a_promote_that_leaves_the_draft_behind_is_refused(tmp_git_repo: Path):
     """The half-promote, now that no basename links the two files.
 
@@ -991,6 +1050,47 @@ def test_run_quarantines_half_promote(tmp_git_repo: Path, tmp_path: Path):
     assert not (run_dir / "lead_author" / "done").is_file()
 
 
+
+
+def test_run_refuses_a_bare_discard_of_a_draft_it_minted_this_tick(
+    tmp_git_repo: Path, tmp_path: Path
+):
+    """End-to-end, through `run` — the WIRING, not the rule.
+
+    The rule's own tests hand `_verify_skills_state` a `minted` mapping they built themselves,
+    so every one of them passes against a `_run_locked` that stopped threading it. That is the
+    shape of the defect this test exists for: the transfer rule was unit-tested from the moment
+    it was written and was still inert in production, because the drafts it was written to guard
+    are minted untracked in the same tick and no test drove that path. Here the mint is the real
+    one (`synthesize_drafts` off a real queries row), the discard is the agent's, and the only
+    thing under test is that the two are connected."""
+    repo = tmp_git_repo
+    run_dir = tmp_path / "lead-run"
+    (run_dir / "gather_raw").mkdir(parents=True)
+    _write_lead_meta(run_dir, "l-001", "probe a brand-new measurement")
+    _write_query(run_dir, "l-001", 0, "wazuh.hunt-failed-logins", verb="search",
+                 payload_status="ok")
+
+    def fake_agent(rd, handoffs, pending, *, box=None):
+        # A bare discard: `rm` the minted draft, attribute it nowhere.
+        minted = repo / _CATALOG / "wazuh" / "_draft" / (
+            f"{lead_author._draft_basename('wazuh.hunt-failed-logins')}.md"
+        )
+        assert minted.is_file(), "the mint did not produce the draft this test is about"
+        minted.unlink()
+        return 0
+
+    deps = replace(
+        lead_author.build_lead_author_deps(LoopPaths(repo_root=repo, state_dir=tmp_path / "st")),
+        acquire_queue_lock=lambda: object(),
+        release_queue_lock=lambda fh: None,
+        invoke_agent=fake_agent,
+    )
+    head_before = _run_git(repo, "rev-parse", "HEAD").stdout.strip()
+    with pytest.raises(lead_author.LeadAuthorError, match="wazuh.hunt-failed-logins"):
+        lead_author.run(run_dir, deps=deps)
+    assert _run_git(repo, "rev-parse", "HEAD").stdout.strip() == head_before
+    assert not (run_dir / "lead_author" / "done").is_file()
 
 
 def test_prepare_handoffs_below_lift_threshold_returns_empty_drafts(
