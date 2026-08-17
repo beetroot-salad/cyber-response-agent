@@ -151,9 +151,10 @@ def test_report_frontmatter_gate(env):
 
 
 def test_report_case_id_confidence_not_required(env):
-    """D1b — a report.md with a valid disposition but NEITHER case_id NOR confidence still
-    commits (Decision(True)); only `disposition` is validated (matches
-    test_540_scrub_lifecycle.py:108 — no over-tightening past the design's one required key)."""
+    """D1b (and fb7, its fault-enumeration twin — one assertion, so one test) — a report.md
+    with a valid disposition but NEITHER case_id NOR confidence still commits (Decision(True));
+    only `disposition` is validated (matches test_540_scrub_lifecycle.py:108 — no
+    over-tightening past the design's one required key)."""
     assert env.decide("report.md", report()).allow is True
 
 
@@ -247,24 +248,33 @@ def test_report_md_in_subdir_not_gated(env):
     assert env.decide("report.md", bad).allow is False  # positive control
 
 
-def test_symlink_operand_resolves_before_keying(env):
-    """ak3 (Fork 6c -> resolve symlinks) — the branch keys on the RESOLVED path, closing the
-    symlink-disguise bypass: an operand `<run_dir>/decoy.md` symlinked to `<run_dir>/report.md`
-    resolves to report.md and IS gated (over-bound -> deny). Its inverse — a `<run_dir>/report.md`
-    symlink pointing ELSEWHERE (to `<run_dir>/sub/other.md`) resolves away from report.md and is
-    NOT gated (the positive/negative pair proving resolution, not the reported name, decides)."""
+# ak3 / ak7 (Fork 6c -> resolve symlinks). The size branch keys on the RESOLVED path, not on
+# the name the operand was reported under. Both artifacts must be closed the same way: ak7 is
+# the leg that FAILS if the implementer leaves the investigation branch keyed name-only
+# (files.py:269), re-opening for investigation.md the disguise bypass §7 closes for both.
+@pytest.mark.parametrize(("case", "artifact", "decoy_name", "bad"), [
+    ("report", "report.md", "decoy.md", whole_file_of(BODY_BOUND + 1)),
+    ("investigation", "investigation.md", "decoy2.md",
+     GOLDEN_INV + "x" * (INV_BOUND + 100)),
+], ids=lambda v: v if isinstance(v, str) and len(v) < 30 else "")
+def test_a_symlink_operand_resolves_before_keying(env, case, artifact, decoy_name, bad):
+    """The positive/negative pair that proves RESOLUTION decides, not the reported name: an
+    operand disguised as something else but resolving ONTO the gated artifact is gated
+    (over-bound -> deny), and the gated artifact's own name symlinked ELSEWHERE resolves away
+    from the key and is not."""
     import os
     (env.run / "sub").mkdir()
-    bad = whole_file_of(BODY_BOUND + 1)
-    # disguise-INTO report.md -> resolves to <run_dir>/report.md -> gated -> deny
-    decoy = env.run / "decoy.md"
-    os.symlink(env.run / "report.md", decoy)
-    assert decoy.resolve() == (env.run / "report.md").resolve()
+
+    # disguise-INTO the artifact -> resolves onto it -> gated -> deny
+    decoy = env.run / decoy_name
+    os.symlink(env.run / artifact, decoy)
+    assert decoy.resolve() == (env.run / artifact).resolve()
     assert env.decide_path(decoy, bad).allow is False
-    # a real report.md symlinked ELSEWHERE resolves away from the key -> not gated
-    disguised_root = env.run / "report.md"
+
+    # the artifact's own name symlinked ELSEWHERE resolves away from the key -> not gated
+    disguised_root = env.run / artifact
     os.symlink(env.run / "sub" / "other.md", disguised_root)
-    assert disguised_root.resolve() != (env.run / "report.md")
+    assert disguised_root.resolve() != (env.run / artifact)
     assert env.decide_path(disguised_root, bad).allow is True
 
 
@@ -322,30 +332,6 @@ def test_investigation_md_in_subdir_not_gated(env):
     assert env.decide("investigation.md", bad).allow is False  # positive control
 
 
-def test_investigation_symlink_operand_resolves_before_keying(env):
-    """ak7 (Fork 6c -> resolve symlinks, investigation half — THE critical leg; mirrors ak3) — the
-    branch keys on the RESOLVED path, closing the symlink-disguise size-bypass for investigation.md
-    exactly as ak3 closes it for report.md: an operand `<run_dir>/decoy2.md` symlinked to
-    `<run_dir>/investigation.md` resolves to investigation.md and IS gated (over-bound -> deny). Its
-    inverse — a `<run_dir>/investigation.md` symlink pointing ELSEWHERE (to `<run_dir>/sub/other.md`)
-    resolves away from investigation.md and is NOT gated. This is the leg that FAILS if the
-    implementer leaves the investigation branch keyed name-only (files.py:269), re-opening the
-    disguise bypass the §7 resolution closes for BOTH artifacts."""
-    import os
-    (env.run / "sub").mkdir()
-    bad = GOLDEN_INV + "x" * (INV_BOUND + 100)
-    # disguise-INTO investigation.md -> resolves to <run_dir>/investigation.md -> gated -> deny
-    decoy = env.run / "decoy2.md"
-    os.symlink(env.run / "investigation.md", decoy)
-    assert decoy.resolve() == (env.run / "investigation.md").resolve()
-    assert env.decide_path(decoy, bad).allow is False
-    # a real investigation.md symlinked ELSEWHERE resolves away from the key -> not gated
-    disguised_root = env.run / "investigation.md"
-    os.symlink(env.run / "sub" / "other.md", disguised_root)
-    assert disguised_root.resolve() != (env.run / "investigation.md")
-    assert env.decide_path(disguised_root, bad).allow is True
-
-
 # ═══════════════════════════════════════════════════════════════════════════
 # section B — frontmatter / content shape (split_frontmatter failure modes + disposition)
 # ═══════════════════════════════════════════════════════════════════════════
@@ -388,12 +374,6 @@ def test_report_md_disposition_outside_enum(env):
     reason). Positive control: an in-enum value commits."""
     assert env.decide("report.md", report(disposition="suspicious")).allow is False
     assert env.decide("report.md", report(disposition="benign")).allow is True
-
-
-def test_report_md_valid_disposition_no_case_id_no_confidence(env):
-    """fb7 — a valid disposition with NEITHER case_id NOR confidence -> Decision(True); only
-    `disposition` is required (matches test_540_scrub_lifecycle.py:108)."""
-    assert env.decide("report.md", report()).allow is True
 
 
 def test_report_md_empty_proposed_text(env):

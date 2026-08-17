@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from defender.skills.invlang.corpus import Companion
 from defender.skills.invlang.queries import (
     hypothesis_name_wildcard,
@@ -314,12 +316,25 @@ def test_lead_branch_effects_min_support_drops_low_n_rows():
     assert [r["lead_name"] for r in out["leads"]] == ["common"]
 
 
-def test_lead_branch_effects_uncapped_ordering_is_deterministic():
-    """Codex P3 follow-up: uncapped per_hypothesis_effect dicts must also
-    have stable key order, since the seeding loop iterates the `matching`
-    set (hash-order). Required for stable JSON output across runs.
-    """
-    hypotheses = [{"id": f"h-{i:03}", "name": f"?z{i}", "weight": "+"} for i in range(4)]
+# Codex P3: `per_hypothesis_effect` is seeded by iterating the `matching` SET, so its key
+# order is hash order unless the builder sorts. Both the uncapped and the capped path have to
+# sort — the capped one because the retained K is chosen under a bucket-sum TIE, where
+# set-iteration order (varying with PYTHONHASHSEED) would otherwise pick the winners.
+@pytest.mark.parametrize(("case", "touched", "cap", "expected"), [
+    # uncapped: every touched hypothesis is retained, in name order
+    ("uncapped", 4, 10, ["?z0", "?z1", "?z2", "?z3"]),
+    # capped under ties: the retained 3 are the name-sorted first 3, not an arbitrary 3
+    ("capped-under-ties", 6, 3, ["?z0", "?z1", "?z2"]),
+], ids=lambda v: v if isinstance(v, str) else "")
+def test_lead_branch_effects_hypothesis_ordering_is_deterministic(
+    case, touched, cap, expected
+):
+    """Stable key order across runs, which is what makes the JSON output diffable. Every
+    hypothesis here ties on bucket sum on purpose, so name-sorting is the ONLY thing that can
+    produce a repeatable answer."""
+    hypotheses = [
+        {"id": f"h-{i:03}", "name": f"?z{i}", "weight": "+"} for i in range(touched)
+    ]
     resolutions = [
         {"hypothesis": h["id"], "before": "+", "after": "++"} for h in hypotheses
     ]
@@ -330,32 +345,9 @@ def test_lead_branch_effects_uncapped_ordering_is_deterministic():
             leads=[{"name": "L", "outcome": {}, "resolutions": resolutions}],
         ),
     ]
-    out = lead_branch_effects(corpus, max_hypotheses_per_lead=10)
+    out = lead_branch_effects(corpus, max_hypotheses_per_lead=cap)
     keys = list(out["leads"][0]["per_hypothesis_effect"].keys())
-    assert keys == ["?z0", "?z1", "?z2", "?z3"]
-
-
-def test_lead_branch_effects_capped_ordering_is_deterministic_under_ties():
-    """Codex P3: when many touched hypotheses tie on bucket sum and we cap
-    via max_hypotheses_per_lead, the retained K must be name-sorted, not
-    set-iteration-ordered (which varies with PYTHONHASHSEED).
-    """
-    hypotheses = [{"id": f"h-{i:03}", "name": f"?z{i}", "weight": "+"} for i in range(6)]
-    resolutions = [
-        {"hypothesis": h["id"], "before": "+", "after": "++"} for h in hypotheses
-    ]
-    corpus = [
-        _case(
-            "case-a",
-            hypotheses=hypotheses,
-            leads=[{"name": "L", "outcome": {}, "resolutions": resolutions}],
-        ),
-    ]
-    out = lead_branch_effects(corpus, max_hypotheses_per_lead=3)
-    kept = list(out["leads"][0]["per_hypothesis_effect"].keys())
-    assert kept == ["?z0", "?z1", "?z2"], (
-        f"capped output should be name-sorted under ties; got {kept}"
-    )
+    assert keys == expected, f"expected name-sorted keys under ties; got {keys}"
 
 
 def test_lead_branch_effects_caps_hypotheses_per_lead_without_patterns():

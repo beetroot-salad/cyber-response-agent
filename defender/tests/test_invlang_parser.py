@@ -15,6 +15,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from defender.skills.invlang.parser import (
     RowError,
     _resolution_record,
@@ -847,58 +849,43 @@ def _wrap_prologue(vertex_row: str) -> str:
     )
 
 
-def test_vertex_classification_admits_double_question_mark():
-    body, warnings = parse_dense_companion(
-        _wrap_prologue("v-001|compute|endpoint:??/??/??|host|")
-    )
+# The two uncertainty spellings the vocabulary admits — `??` (unknown) and a `{a, b}` enum
+# (one of these) — are legal in BOTH a classification and an attribute value. Each row parses
+# one prologue vertex and pins the value through verbatim: the parser records uncertainty, it
+# does not resolve or normalise it.
+@pytest.mark.parametrize(("case", "row", "path", "expected"), [
+    # a wholly-unknown classification
+    ("classification-all-double-question-marks",
+     "v-001|compute|endpoint:??/??/??|host|",
+     ("classification",), "endpoint:??/??/??"),
+    # ... and one where only the middle facet is unknown
+    ("classification-partial-double-question-mark",
+     "v-001|compute|endpoint:monitoring-agent/??/known-corp|host|",
+     ("classification",), "endpoint:monitoring-agent/??/known-corp"),
+    # a curly enum in the classification slot, spaces and all
+    ("classification-curly-enum",
+     "v-001|compute|endpoint:{monitoring-agent/internal/known-corp, "
+     "ip-only/internet/novel}|host|",
+     ("classification",),
+     "endpoint:{monitoring-agent/internal/known-corp, ip-only/internet/novel}"),
+    # the same two spellings in an ATTRIBUTE value, where `=` and `,` are also delimiters
+    ("attrs-value-double-question-mark",
+     "v-001|process|process:bash|bash[pid=42]|signing=??",
+     ("attributes", "signing"), "??"),
+    ("attrs-value-curly-enum",
+     "v-001|process|process:bash|bash[pid=42]|signing={signed:microsoft, unsigned}",
+     ("attributes", "signing"), "{signed:microsoft, unsigned}"),
+], ids=lambda v: v if isinstance(v, str) and len(v) < 50 and "|" not in v else "")
+def test_the_parser_admits_an_uncertain_value_verbatim(case, row, path, expected):
+    """`??` and `{a, b}` are vocabulary, not defects: a vertex carrying either parses without
+    a warning and the value survives byte-for-byte, in a classification and in an attribute
+    alike. A parser that split on the enum's `,` or choked on `??` would drop the row."""
+    body, warnings = parse_dense_companion(_wrap_prologue(row))
     assert warnings == []
-    v = body["prologue"]["vertices"][0]
-    assert v["classification"] == "endpoint:??/??/??"
-
-
-def test_vertex_classification_admits_partial_question_mark():
-    body, warnings = parse_dense_companion(
-        _wrap_prologue("v-001|compute|endpoint:monitoring-agent/??/known-corp|host|")
-    )
-    assert warnings == []
-    v = body["prologue"]["vertices"][0]
-    assert v["classification"] == "endpoint:monitoring-agent/??/known-corp"
-
-
-def test_vertex_classification_admits_curly_enum():
-    body, warnings = parse_dense_companion(
-        _wrap_prologue(
-            "v-001|compute|endpoint:{monitoring-agent/internal/known-corp, "
-            "ip-only/internet/novel}|host|"
-        )
-    )
-    assert warnings == []
-    v = body["prologue"]["vertices"][0]
-    assert v["classification"] == (
-        "endpoint:{monitoring-agent/internal/known-corp, "
-        "ip-only/internet/novel}"
-    )
-
-
-def test_attrs_value_admits_double_question_mark():
-    body, warnings = parse_dense_companion(
-        _wrap_prologue("v-001|process|process:bash|bash[pid=42]|signing=??")
-    )
-    assert warnings == []
-    v = body["prologue"]["vertices"][0]
-    assert v["attributes"]["signing"] == "??"
-
-
-def test_attrs_value_admits_curly_enum():
-    body, warnings = parse_dense_companion(
-        _wrap_prologue(
-            "v-001|process|process:bash|bash[pid=42]|"
-            "signing={signed:microsoft, unsigned}"
-        )
-    )
-    assert warnings == []
-    v = body["prologue"]["vertices"][0]
-    assert v["attributes"]["signing"] == "{signed:microsoft, unsigned}"
+    value = body["prologue"]["vertices"][0]
+    for key in path:
+        value = value[key]
+    assert value == expected
 
 
 def _mixed_corpus(tmp_path):

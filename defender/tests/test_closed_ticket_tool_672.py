@@ -167,7 +167,7 @@ their own name land inside the named test):
   judged_cases_own_ticket_already_closed -> test_case_own_key_refused_at_tool_boundary
   closed_ticket_content_names_the_open_ticket -> test_closed_ticket_naming_self_key_refused
   list_response_contains_non_closed_item -> test_list_response_non_closed_item_dropped_or_faulted
-  store_breaker_open_when_judge_reads -> test_store_breaker_open_when_judge_reads
+  store_breaker_open_when_judge_reads -> test_an_open_breaker_is_honored_on_every_read_path
   repeated_store_failures_across_one_judge_run -> test_repeated_store_failures_across_one_judge_run
   ticket_tool_call_in_flight_when_run_cut_off -> test_control_flow_exceptions_propagate (Fork F)
   operator_policy_cli_after_the_demo_scope_removal -> test_operator_policy_cli_after_demo_scope_removal

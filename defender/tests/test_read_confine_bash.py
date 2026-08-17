@@ -110,110 +110,97 @@ def test_compile_policy_for_rejects_degenerate_roots(tmp_path):
 # B. In-scope reads ALLOW (positive controls — the reads real runs actually make)#
 # ===========================================================================  #
 
-def test_cat_run_investigation_allowed(env):
-    """cat {RUN}/investigation.md → ALLOW: the agent's own case log, absolute, under the run dir."""
-    assert _bash(env, f"cat {env.run}/investigation.md", "main").allow
-    assert _bash(env, f"cat {env.run}/investigation.md", "gather").allow
+# The positive controls: the reads real runs actually make. A confinement gate that denies
+# everything is trivially "secure", so each of these is a capability the lane must keep.
+@pytest.mark.parametrize(("case", "cmd", "lane"), [
+    # the agent's own case log, absolute, under the run dir — readable on BOTH lanes
+    ("run-investigation-main", "cat {run}/investigation.md", "main"),
+    ("run-investigation-gather", "cat {run}/investigation.md", "gather"),
 
+    # the per-lead summary, built inline at tools_gather.py and NOT a RunPaths prop — the
+    # scope must still cover it. Read on the MAIN lane on purpose: the summary is main's
+    # sanctioned view of a lead's data (the raw payload is gather's).
+    ("run-gather-summary-on-main", "cat {run}/gather_summaries/l-001.md", "main"),
 
-def test_cat_run_gather_summary_allowed(env):
-    """cat {RUN}/gather_summaries/l-001.md → ALLOW: the per-lead summary (built inline at
-    tools_gather.py, NOT a RunPaths prop — the scope must still cover it).
+    # a plain run-dir artifact (RunPaths.executed_queries)
+    ("run-executed-queries", "cat {run}/executed_queries.jsonl", "main"),
 
-    Read on the MAIN lane on purpose: the summary is main's sanctioned view of a lead's data
-    (the raw payload is gather's), and it is a shape main's grants carry."""
-    assert _bash(env, f"cat {env.run}/gather_summaries/l-001.md", "main").allow
+    # The real read/format shapes from run traces, in their #575 form: the viewers have NO
+    # file slot, so `cat` opens the file and the reduction happens on STDIN. The FILE forms of
+    # these same three commands are the deny half of the c1 ledger
+    # (test_viewer_file_operand_denied below); these are the surviving capability — identical,
+    # one extra `cat |`.
+    ("investigation-piped-to-tail", "cat {run}/investigation.md | tail -5", "main"),
+    ("investigation-piped-to-wc", "cat {run}/investigation.md | wc -l", "main"),
+    ("investigation-piped-to-grep",
+     'cat {run}/investigation.md | grep -n "T resolutions"', "main"),
 
+    # a lessons-corpus read (absolute, .md under lessons/)
+    ("corpus-lesson", "cat {dfn}/lessons/auth-log-scope.md", "main"),
 
-def test_cat_run_executed_queries_allowed(env):
-    """cat {RUN}/executed_queries.jsonl → ALLOW: a run-dir artifact (RunPaths.executed_queries)."""
-    assert _bash(env, f"cat {env.run}/executed_queries.jsonl", "main").allow
+    # the real multi-file lesson cat: multiple in-scope operands + a benign stderr discard.
+    # EVERY operand is resolved and scope-checked, not just the first.
+    ("corpus-multi-lesson", "cat {dfn}/lessons/a.md {dfn}/lessons/b.md 2>/dev/null", "main"),
 
+    # the enumerated corpus .md shapes
+    ("corpus-system-skill", "cat {dfn}/skills/elastic/SKILL.md", "gather"),
+    ("corpus-query-template", "cat {dfn}/skills/gather/queries/elastic/x.md", "gather"),
 
-def test_tail_wc_grep_over_investigation_allowed_as_pipe_stages(env):
-    """The real read/format shapes from run traces, in their #575 form: the viewers have NO file
-    slot, so `cat` opens the file and the reduction happens on STDIN. The FILE forms of the same
-    three commands are the deny half of the c1 ledger (test_viewer_file_operand_denied below);
-    these are the surviving capability — identical, one extra `cat |`."""
-    for cmd in (f"cat {env.run}/investigation.md | tail -5",
-                f"cat {env.run}/investigation.md | wc -l",
-                f'cat {env.run}/investigation.md | grep -n "T resolutions"'):
-        assert _bash(env, cmd, "main").allow, cmd
-
-
-def test_cat_corpus_lesson_allowed(env):
-    """cat {DFN}/lessons/<slug>.md → ALLOW: a lessons-corpus read (absolute, .md under lessons/)."""
-    assert _bash(env, f"cat {env.dfn}/lessons/auth-log-scope.md", "main").allow
-
-
-def test_cat_multi_lesson_allowed(env):
-    """cat {DFN}/lessons/a.md {DFN}/lessons/b.md 2>/dev/null → ALLOW: the real multi-file lesson cat
-    (multiple in-scope operands + benign stderr discard). EVERY operand is resolved and scope-checked,
-    not just the first."""
-    cmd = (f"cat {env.dfn}/lessons/a.md {env.dfn}/lessons/b.md 2>/dev/null")
-    assert _bash(env, cmd, "main").allow
-
-
-def test_cat_corpus_skill_and_query_template_allowed(env):
-    """cat {DFN}/skills/<sys>/SKILL.md and a query template → ALLOW: enumerated corpus .md shapes."""
-    assert _bash(env, f"cat {env.dfn}/skills/elastic/SKILL.md", "gather").allow
-    assert _bash(env, f"cat {env.dfn}/skills/gather/queries/elastic/x.md", "gather").allow
-
-
-def test_gather_reads_its_own_gather_raw_absolute(env):
-    """cat {RUN}/gather_raw/l-001/1.json → ALLOW for gather: the machine-tight payload shape
-    (`gather_raw/l-<digits>/<seq>.json`) is in GATHER's grants — and in nobody else's."""
-    assert _bash(env, f"cat {env.run}/gather_raw/l-001/1.json", "gather").allow
+    # the machine-tight payload shape (`gather_raw/l-<digits>/<seq>.json`) is in GATHER's
+    # grants — and in nobody else's
+    ("gather-raw-absolute-on-gather", "cat {run}/gather_raw/l-001/1.json", "gather"),
+], ids=lambda v: v if isinstance(v, str) and len(v) < 40 and "/" not in v else "")
+def test_an_in_scope_read_is_allowed(env, case, cmd, lane):
+    """The capability half of the ledger: the run-dir artifacts and corpus documents each lane
+    is actually granted stay readable — absolute, piped, multi-operand and all."""
+    assert _bash(env, cmd.format(run=env.run, dfn=env.dfn), lane).allow
 
 
 # ===========================================================================  #
 # C. Out-of-scope reads DENY (guarded negatives, each with a positive control)  #
 # ===========================================================================  #
 
-def test_cat_etc_passwd_denied_both(env):
-    """cat /etc/passwd → DENY (both agents): the demonstrated bypass #535 closed.
-    Positive control: cat {RUN}/investigation.md (same program, in-scope) is allowed."""
-    assert not _bash(env, "cat /etc/passwd", "gather").allow
-    assert not _bash(env, "cat /etc/passwd", "main").allow
-    assert _bash(env, f"cat {env.run}/investigation.md", "gather").allow  # positive control
+# Each row is one out-of-scope read plus, where one exists, the in-scope read that proves the
+# deny came from the SCOPE check and not from the program being unsupported. Without that
+# control, a gate that denied `cat` outright would pass every row here.
+@pytest.mark.parametrize(("case", "denied", "control", "lane"), [
+    # The demonstrated bypass #535 closed, on both lanes.
+    ("etc-passwd-gather", "cat /etc/passwd", "cat {run}/investigation.md", "gather"),
+    ("etc-passwd-main", "cat /etc/passwd", None, "main"),
 
+    # The out-of-root read cannot be laundered through the PIPE lane either: this denies on
+    # the cat stage's scope (grep opens nothing, so grep is not what saves us).
+    ("through-a-pipe", "cat /etc/passwd | grep root",
+     "cat {run}/investigation.md | grep root", "gather"),
 
-def test_out_of_scope_file_denied_through_a_pipe(env):
-    """The out-of-root read cannot be laundered through the pipe lane either: `cat /etc/passwd |
-    grep root` DENIES on the cat stage's SCOPE (grep opens nothing, so it is not what saves us).
-    Positive control: the same pipe over an in-scope file is allowed."""
-    assert not _bash(env, "cat /etc/passwd | grep root", "gather").allow
-    assert _bash(env, f"cat {env.run}/investigation.md | grep root", "gather").allow
+    # `..` collapses at resolve() and the result lands outside every scope shape. (#535
+    # rejected `..` TEXTUALLY because the lane did not resolve; #575 resolves, so the
+    # traversal is closed by the same check that closes symlinks — one mechanism, not two.)
+    ("traversal-out-of-prefix", "cat {run}/../outside.txt", "cat {run}/report.md", "gather"),
 
+    # Starts WITH the run-dir prefix — it would pass a naive startswith — but the `..`
+    # segments tunnel out, and resolve() collapses them to /etc/passwd.
+    ("in-prefix-traversal-escape", "cat {run}/gather_raw/../../../etc/passwd", None, "gather"),
 
-def test_cat_traversal_out_of_prefix_denied(env):
-    """cat {RUN}/../outside.txt → DENY: `..` collapses at resolve() and the result lands outside
-    every scope shape. (#535 rejected `..` TEXTUALLY because the lane did not resolve; #575 resolves,
-    so the traversal is closed by the same check that closes symlinks — one mechanism, not two.)
-    Positive control: cat {RUN}/report.md (no traversal) is allowed."""
-    assert not _bash(env, f"cat {env.run}/../outside.txt", "gather").allow
-    assert _bash(env, f"cat {env.run}/report.md", "gather").allow  # positive control
+    # The FIRST operand is in-scope and the SECOND escapes: every operand the extractor
+    # reports is scope-checked, not just the first. The control is the same command with both
+    # operands in scope.
+    ("second-operand-escape", "cat {run}/investigation.md /etc/passwd",
+     "cat {run}/investigation.md {run}/report.md", "gather"),
 
-
-def test_cat_in_prefix_traversal_escape_denied(env):
-    """cat {RUN}/gather_raw/../../../etc/passwd → DENY: starts with the run-dir prefix (would pass a
-    naive startswith) but the `..` segments tunnel out — resolve() collapses them to /etc/passwd."""
-    assert not _bash(env, f"cat {env.run}/gather_raw/../../../etc/passwd", "gather").allow
-
-
-def test_second_operand_escape_denied(env):
-    """cat {RUN}/investigation.md /etc/passwd → DENY: the FIRST operand is in-scope but the SECOND
-    escapes — every operand the extractor reports is scope-checked, not just the first.
-    Positive control: cat {RUN}/investigation.md {RUN}/report.md (both in-scope) is allowed."""
-    assert not _bash(env, f"cat {env.run}/investigation.md /etc/passwd", "gather").allow
-    assert _bash(env, f"cat {env.run}/investigation.md {env.run}/report.md", "gather").allow
-
-
-def test_corpus_lookalike_sibling_denied(env):
-    """cat {DFN}-evil/x.md → DENY: a sibling dir sharing the corpus PREFIX but not under it must
-    not match — `under()` closes the root with a `/` boundary, so the anchor is a path boundary,
-    not a string prefix."""
-    assert not _bash(env, f"cat {env.dfn}-evil/x.md", "gather").allow
+    # A sibling dir sharing the corpus PREFIX but not under it must not match — `under()`
+    # closes the root with a `/` boundary, so the anchor is a path boundary, not a string
+    # prefix.
+    ("corpus-lookalike-sibling", "cat {dfn}-evil/x.md", None, "gather"),
+], ids=lambda v: v if isinstance(v, str) and len(v) < 40 and "/" not in v else "")
+def test_an_out_of_scope_read_is_denied(env, case, denied, control, lane):
+    """A read that resolves outside every scope shape is denied — spelled directly, hidden
+    behind a pipe stage, tunnelled through `..`, banked behind an in-scope first operand, or
+    aimed at a sibling that merely shares the corpus prefix."""
+    fmt = {"run": env.run, "dfn": env.dfn}
+    assert not _bash(env, denied.format(**fmt), lane).allow
+    if control is not None:
+        assert _bash(env, control.format(**fmt), lane).allow, "positive control"
 
 
 # ===========================================================================  #

@@ -94,30 +94,42 @@ _ECS_PAYLOAD = json.dumps({
 })
 
 
-def test_duplicate_output_columns_all_survive(monkeypatch, capsys):
-    """ECS nests the interesting fields, so an unaliased two-field projection collides
-    on the leaf name. Both values must reach the row — zipping into a dict used to keep
-    only the last, and exit 0 said nothing about it (#854 F-13)."""
-    code, out, err = _run_full(
-        monkeypatch, capsys, _ECS_PAYLOAD,
-        "SELECT h.user.name, h.process.name FROM (SELECT unnest(hits) h FROM data)",
-    )
-    assert code == defender_sql.EXIT_OK
-    assert json.loads(out) == [{"name": "sre.alice", "name_1": "nc"}]
-    assert "name -> name_1" in err
+# ECS nests the interesting fields, so an unaliased projection collides on the LEAF name.
+# Every colliding column must reach the row — zipping into a dict used to keep only the last,
+# and exit 0 said nothing about it (#854 F-13). The stderr note is the other half: a rename
+# the agent is not told about is a silently different answer.
+@pytest.mark.parametrize(("case", "sql", "rows", "notes", "absent"), [
+    ("two-way-collision",
+     "SELECT h.user.name, h.process.name FROM (SELECT unnest(hits) h FROM data)",
+     [{"name": "sre.alice", "name_1": "nc"}],
+     ["name -> name_1"], []),
 
+    ("three-way-collision-renames-stably",
+     "SELECT h.user.name, h.process.name, h.host.name "
+     "FROM (SELECT unnest(hits) h FROM data)",
+     [{"name": "sre.alice", "name_1": "nc", "name_2": "web-04"}],
+     ["name -> name_1", "name -> name_2"], []),
 
-def test_duplicate_column_rename_is_stable_across_three_way_collision(monkeypatch, capsys):
-    code, out, err = _run_full(
-        monkeypatch, capsys, _ECS_PAYLOAD,
-        "SELECT h.user.name, h.process.name, h.host.name "
-        "FROM (SELECT unnest(hits) h FROM data)",
-    )
+    # The control: aliased projections do not collide, so nothing is renamed and the note is
+    # ABSENT — without this row, an implementation that renamed unconditionally would pass.
+    ("unique-columns-emit-no-note",
+     "SELECT h.user.name AS user_name, h.process.name AS process_name "
+     "FROM (SELECT unnest(hits) h FROM data)",
+     [{"user_name": "sre.alice", "process_name": "nc"}],
+     [], ["renamed"]),
+], ids=lambda v: v if isinstance(v, str) and len(v) < 50 and "SELECT" not in v else "")
+def test_colliding_output_columns_all_survive_and_are_reported(
+    monkeypatch, capsys, case, sql, rows, notes, absent
+):
+    """A projection whose leaf names collide keeps EVERY value, under a deterministic
+    `_1`/`_2` suffix, and says on stderr what it renamed."""
+    code, out, err = _run_full(monkeypatch, capsys, _ECS_PAYLOAD, sql)
     assert code == defender_sql.EXIT_OK
-    assert json.loads(out) == [
-        {"name": "sre.alice", "name_1": "nc", "name_2": "web-04"}]
-    assert "name -> name_1" in err
-    assert "name -> name_2" in err
+    assert json.loads(out) == rows
+    for note in notes:
+        assert note in err
+    for fragment in absent:
+        assert fragment not in err
 
 
 def test_rename_does_not_collide_with_a_literal_alias_of_the_same_name():
@@ -133,17 +145,6 @@ def test_rename_does_not_collide_with_a_literal_alias_of_the_same_name():
         ["name", "name_3", "name_4", "name_1", "name_2"],
         ["name -> name_3", "name -> name_4"])
     assert defender_sql._disambiguate_columns(["a", "b"]) == (["a", "b"], [])
-
-
-def test_unique_columns_emit_no_collision_note(monkeypatch, capsys):
-    code, out, err = _run_full(
-        monkeypatch, capsys, _ECS_PAYLOAD,
-        "SELECT h.user.name AS user_name, h.process.name AS process_name "
-        "FROM (SELECT unnest(hits) h FROM data)",
-    )
-    assert code == defender_sql.EXIT_OK
-    assert json.loads(out) == [{"user_name": "sre.alice", "process_name": "nc"}]
-    assert "renamed" not in err
 
 
 def test_empty_stdin_is_input_error(monkeypatch, capsys):

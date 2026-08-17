@@ -191,28 +191,37 @@ def test_path_pythonpath_from_one_shared_helper(tmp_path):
     assert str(DEFENDER / "bin") in env["PATH"], "the shared helper did not supply the infra PATH"
 
 
-def test_infra_env_helper_supplies_module_path_on_every_tier(tmp_path):
-    """test_infra_env_helper_supplies_module_path_on_every_tier — the module search path the
-    in-box entrypoint imports through (PYTHONPATH) is present in the RENDERED box env on every
-    tier, independent of what a caller supplies. Asserts the rendered create argv carries
-    PYTHONPATH even when the caller's request env omits it."""
+# What the RENDERED box env carries for one key, given what the caller's request env supplied.
+# The shared infra helper is unconditional (po10) and the allowlist is key-only (S8), so a
+# caller can neither omit an infra key nor be screened on an allowlisted key's value.
+@pytest.mark.parametrize(("case", "request_env", "key", "expected", "why"), [
+    # The module search path the in-box entrypoint imports through is present on EVERY tier,
+    # independent of what the caller supplies — here, a caller supplying no env at all.
+    ("infra-helper-supplies-pythonpath", {}, "PYTHONPATH", lambda: str(DEFENDER.parent),
+     "PYTHONPATH was not supplied by the infra helper on this tier"),
+
+    # po10: the helper unconditionally supplies the infra keys (DEFENDER_DIR / RUN_DIR / PATH /
+    # PYTHONPATH) regardless of what the caller's env OMITS.
+    ("infra-helper-supplies-a-key-the-caller-omitted", {"LANG": "C.UTF-8"},
+     "DEFENDER_DIR", lambda: str(DEFENDER),
+     "the helper did not supply DEFENDER_DIR the caller omitted"),
+
+    # S8: the allowlist filters by KEY only, so a credential-shaped or wrong VALUE on an
+    # allowlisted key rides through unexamined. A design-CONCEDED residual (RF-G) — the value
+    # channel is not inspected; the key filter is value-blind.
+    ("allowlisted-key-carries-a-credential-shaped-value", {"TZ": "sk-ant-shaped-value"},
+     "TZ", lambda: "sk-ant-shaped-value",
+     "the value-blind key filter unexpectedly inspected the value"),
+], ids=lambda v: v if isinstance(v, str) and len(v) < 60 and " " not in v else "")
+def test_the_rendered_box_env_carries_what_the_helper_and_allowlist_decide(
+    tmp_path, case, request_env, key, expected, why
+):
+    """The rendered create argv is the observable: the infra helper's keys are there whatever
+    the caller sent, and an allowlisted key's value arrives exactly as the caller wrote it."""
     run_dir = make_run_dir(tmp_path)
     rec = RecordingDocker()
-    start_box_request(_request(run_dir, env={}), docker=rec)  # caller supplies NO env
-    assert rec.env().get("PYTHONPATH") == str(DEFENDER.parent), \
-        "PYTHONPATH was not supplied by the infra helper on this tier"
-
-
-def test_caller_env_omits_a_key_the_shared_helper_is_supposed_to_always_set(tmp_path):
-    """test_caller_env_omits_a_key_the_shared_helper_is_supposed_to_always_set (po10) — the
-    shared helper unconditionally supplies the infra keys (DEFENDER_DIR/RUN_DIR/PATH/
-    PYTHONPATH) regardless of what the caller's env omits. Asserts a request env missing
-    DEFENDER_DIR still renders it."""
-    run_dir = make_run_dir(tmp_path)
-    rec = RecordingDocker()
-    start_box_request(_request(run_dir, env={"LANG": "C.UTF-8"}), docker=rec)
-    assert rec.env().get("DEFENDER_DIR") == str(DEFENDER), \
-        "the helper did not supply DEFENDER_DIR the caller omitted"
+    start_box_request(_request(run_dir, env=request_env), docker=rec)
+    assert rec.env().get(key) == expected(), why
 
 
 def test_caller_env_dict_key_collides_with_the_shared_infra_helpers_derived_key(tmp_path):
@@ -230,18 +239,6 @@ def test_caller_env_dict_key_collides_with_the_shared_infra_helpers_derived_key(
         "a caller-supplied PATH won over the infra helper (S8 hole)"
     assert "/attacker/bin" not in rec.env()["PATH"], "the caller's PATH override survived"
     assert rec.env().get("TZ") == "Europe/Paris", "a non-infra allowlisted key was dropped"
-
-
-def test_allowlisted_env_key_carries_a_credential_shaped_or_wrong_value(tmp_path):
-    """test_allowlisted_env_key_carries_a_credential_shaped_or_wrong_value — the allowlist
-    filters by KEY only (S8), so a credential-shaped or wrong VALUE on an allowlisted key
-    rides through unexamined. This is a design-CONCEDED residual (RF-G): the value channel is
-    not inspected; the key filter is value-blind."""
-    run_dir = make_run_dir(tmp_path)
-    rec = RecordingDocker()
-    start_box_request(_request(run_dir, env={"TZ": "sk-ant-shaped-value"}), docker=rec)
-    assert rec.env().get("TZ") == "sk-ant-shaped-value", \
-        "the value-blind key filter unexpectedly inspected the value"
 
 
 def test_env_reaching_the_program_differs_between_the_boxed_path_and_the_loud_fallback(tmp_path):
@@ -638,32 +635,36 @@ def _judge_deps(run_dir: Path, box):
     return bind(benign, run_dir, defender_dir=DEFENDER, box=box)
 
 
-def test_boxed_lane_returns_command_output(tmp_path):
-    """return_contract (R9) — a granted command in an ATTACHED box returns
-    `_format_bash_result(rc,out,err)` (`exit=<rc>\\n--- stdout ---\\n<out>…`) wrapped in the
-    untrusted-content frame for a learning role — matching the runtime boxed lane byte-for-byte
-    modulo the wrap. Drives the REAL _tool_bash for the judge over an injected transport."""
+# return_contract (R9) — the executed→WRAP half of the split return contract. An EXECUTED
+# command's rc/out/err come back as `_format_bash_result(rc,out,err)` inside the untrusted #0
+# frame, matching the runtime boxed lane byte-for-byte modulo the wrap. The transport→RAISE
+# half is test_bash_lane_transport_fault_raises_not_wrapped, below. Each row drives the REAL
+# _tool_bash for the judge over an injected transport.
+@pytest.mark.parametrize(("case", "rc", "out_bytes", "err_bytes", "fragment"), [
+    ("granted-command-returns-output", 0, b"hello\n", b"", None),
+
+    # RF-D1 / SB-return: a NON-ZERO exit is still a completed exec — the runtime lane wraps
+    # _format_bash_result for ANY exit code, so this returns rather than raising.
+    ("nonzero-exit-is-still-wrapped", 3, b"partial\n", b"boom\n", "exit=3"),
+
+    # F12: the judge, whose job is to consume its boxed output as a VERDICT input, gets the
+    # identical untrusted wrap as every other learning role (byte-uniform #0 shape).
+    ("judge-output-wrap-is-the-same-zero-shape", 0, b"verdict-evidence\n", b"", None),
+], ids=lambda v: v if isinstance(v, str) and len(v) < 60 and " " not in v else "")
+def test_an_executed_boxed_command_returns_the_wrapped_envelope(
+    tmp_path, case, rc, out_bytes, err_bytes, fragment
+):
+    """Whatever the command exited with, a learning role reads its output through one shape:
+    the canonical `_format_bash_result` inside a single untrusted frame."""
     run_dir = make_run_dir(tmp_path)
-    box = box_mod.BoxExecutor(transport=ScriptedTransport(framed(0, b"hello\n", b"")))
+    box = box_mod.BoxExecutor(transport=ScriptedTransport(framed(rc, out_bytes, err_bytes)))
     deps = _judge_deps(run_dir, box)
     out = runtime_tools._tool_bash(deps, f"cat {run_dir / 'alert.json'}")
-    assert_one_frame(out, _format_bash_result(0, "hello\n", ""), "untrusted")
-
-
-def test_bash_lane_nonzero_exit_returns_wrapped_envelope(tmp_path):
-    """test_bash_lane_nonzero_exit_returns_wrapped_envelope (RF-D1 / SB-return → R9) — an
-    EXECUTED command that exited NON-ZERO is still a completed exec: its rc/out/err are wrapped
-    in the untrusted #0 envelope for a learning role, matching the runtime boxed lane byte-for-byte
-    modulo the wrap (the runtime lane wraps _format_bash_result for ANY exit code, non-zero
-    included), never raised. This is the executed→wrap half of the split return contract; the
-    transport→raise half is test_bash_lane_transport_fault_raises_not_wrapped. Drives the REAL
-    _tool_bash for the judge over a transport that frames a non-zero exit."""
-    run_dir = make_run_dir(tmp_path)
-    box = box_mod.BoxExecutor(transport=ScriptedTransport(framed(3, b"partial\n", b"boom\n")))
-    deps = _judge_deps(run_dir, box)
-    out = runtime_tools._tool_bash(deps, f"cat {run_dir / 'alert.json'}")
-    assert_one_frame(out, _format_bash_result(3, "partial\n", "boom\n"), "untrusted")
-    assert "exit=3" in out, "a non-zero exit was not carried inside the #0 envelope"
+    assert_one_frame(
+        out, _format_bash_result(rc, out_bytes.decode(), err_bytes.decode()), "untrusted"
+    )
+    if fragment is not None:
+        assert fragment in out, "the exit code was not carried inside the #0 envelope"
 
 
 def test_bash_lane_transport_fault_raises_not_wrapped(tmp_path):
@@ -689,16 +690,6 @@ def test_bash_lane_transport_fault_raises_not_wrapped(tmp_path):
         "the executed-command positive control did not return the wrapped envelope"
 
 
-def test_judge_boxed_output_wrap_is_the_intended_zero_shape(tmp_path):
-    """test_judge_boxed_output_wrap_is_the_intended_zero_shape (F12 → R9) — the judge, whose
-    job is to consume its boxed command output as a verdict input, gets the IDENTICAL untrusted
-    wrap as the other learning roles (byte-uniform #0 shape). Asserts the judge's wrapped output
-    equals the canonical wrap for the same bytes."""
-    run_dir = make_run_dir(tmp_path)
-    box = box_mod.BoxExecutor(transport=ScriptedTransport(framed(0, b"verdict-evidence\n", b"")))
-    deps = _judge_deps(run_dir, box)
-    out = runtime_tools._tool_bash(deps, f"cat {run_dir / 'alert.json'}")
-    assert_one_frame(out, _format_bash_result(0, "verdict-evidence\n", ""), "untrusted")
 
 
 def test_box_becomes_unreachable_mid_batch(tmp_path):

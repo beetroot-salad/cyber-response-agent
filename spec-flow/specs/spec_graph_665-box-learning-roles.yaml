@@ -9,7 +9,7 @@ demands:
   binds:
   - interacts(actor->run_cycle_box).response
   - interacts(curator->drain_box).response
-  discharged_by: test_boxed_lane_returns_command_output
+  discharged_by: test_an_executed_boxed_command_returns_the_wrapped_envelope
   disposition: resolved
   fork: F0
   resolution: 'R9 CORRECTED by RF-D1 (Phase-F seam): the boxed learning bash lane matches the runtime
@@ -230,7 +230,7 @@ demands:
   - venv_probe
   - interacts(run_one->run_cycle_box)
   - interacts(run_worktree_batch->drain_box)
-  discharged_by: test_box_start_runs_granted_programs_and_refuses_on_failure
+  discharged_by: test_box_start_probes_the_granted_repertoire_by_running_it
   disposition: consensus
   live_probe: c12 discharged live (po63/c12/c14 executed, holds) — interpreter match + native dep import
     confirmed; drain needs no venv.
@@ -458,7 +458,7 @@ demands:
   - run_cycle_box.env
   - drain_box.env
   - runtime_box.env
-  discharged_by: test_infra_env_helper_supplies_module_path_on_every_tier
+  discharged_by: test_the_rendered_box_env_carries_what_the_helper_and_allowlist_decide
   disposition: consensus
 - id: test_env_reaching_the_program_differs_between_the_boxed_path_and_the_loud_fallback
   kind: parity
@@ -474,7 +474,7 @@ demands:
   binds:
   - run_cycle_box.env
   - box_request.env
-  discharged_by: test_caller_env_omits_a_key_the_shared_helper_is_supposed_to_always_set
+  discharged_by: test_the_rendered_box_env_carries_what_the_helper_and_allowlist_decide
   disposition: consensus
 - id: test_allowlisted_env_key_carries_a_credential_shaped_or_wrong_value
   kind: behavior
@@ -482,7 +482,7 @@ demands:
   binds:
   - box_request.env
   - run_cycle_box.env
-  discharged_by: test_allowlisted_env_key_carries_a_credential_shaped_or_wrong_value
+  discharged_by: test_the_rendered_box_env_carries_what_the_helper_and_allowlist_decide
   disposition: consensus
 - id: test_container_exits_between_create_and_sentinel
   kind: behavior
@@ -535,7 +535,7 @@ demands:
   binds:
   - venv_probe
   - interacts(run_one->run_cycle_box)
-  discharged_by: test_venv_interpreter_does_not_match_the_image
+  discharged_by: test_box_start_probes_the_granted_repertoire_by_running_it
   disposition: consensus
 - id: test_interpreter_matches_but_a_native_dependency_inside_the_venv_is_broken
   kind: behavior
@@ -543,7 +543,7 @@ demands:
   binds:
   - venv_probe
   - interacts(run_one->run_cycle_box)
-  discharged_by: test_interpreter_matches_but_a_native_dependency_inside_the_venv_is_broken
+  discharged_by: test_box_start_probes_the_granted_repertoire_by_running_it
   disposition: consensus
 - id: test_drain_tier_repertoire_grows_to_need_the_dangling_venv
   kind: behavior
@@ -898,7 +898,7 @@ demands:
   binds:
   - interacts(judge->run_cycle_box)
   - interacts(actor->run_cycle_box).response
-  discharged_by: test_judge_boxed_output_wrap_is_the_intended_zero_shape
+  discharged_by: test_an_executed_boxed_command_returns_the_wrapped_envelope
   disposition: resolved
   fork: F12
   cluster: return-contract
@@ -970,7 +970,7 @@ demands:
   binds:
   - interacts(actor->run_cycle_box).response
   - interacts(curator->drain_box).response
-  discharged_by: test_bash_lane_nonzero_exit_returns_wrapped_envelope
+  discharged_by: test_an_executed_boxed_command_returns_the_wrapped_envelope
   disposition: resolved
   silent_branch: SB-return
   resolution: 'RF-D1 (return-contract split): the executed->wrap half — an EXECUTED command with a

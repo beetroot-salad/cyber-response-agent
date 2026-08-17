@@ -193,95 +193,83 @@ def test_suppression_marker(tmp_path):
 # ---------------------------------------------------------------- the roles
 
 
-def test_a_class_that_only_carries_warnings_is_not_a_projector(tmp_path):
-    """`corpus.Companion`'s shape: it declares a `list[ParseWarning]` field but never
-    raises one, so it owns no drop channel and its read-side filters are not drops. Both
-    halves of the PROJECTOR test are required — this is the half a name list would miss."""
+_COMPANION_CARRIER = (
+    "from dataclasses import dataclass, field\n"
+    "from ._types import ParseWarning\n"
+    "\n"
+    "@dataclass\n"
+    "class Companion:\n"
+    "    parse_warnings: list[ParseWarning] = field(default_factory=list)\n"
+    "\n"
+)
+_COMPANION_RAISES = (
+    "    def complain(self, block):\n"
+    '        self.parse_warnings.append(ParseWarning(block=block, reason="x"))\n'
+    "\n"
+)
+_COMPANION_FILTER = (
+    "    def matching(self, rows):\n"
+    "        out = []\n"
+    "        for row in rows:\n"
+    "            if not row:\n"
+    "                continue\n"
+    "            out.append(row)\n"
+    "        return out\n"
+)
+
+
+# Each row plants one module beside `_types.py` and pins the gate's whole verdict as a set
+# of qualnames — empty means the shape is not this gate's business. The role anchor is the
+# only thing that varies; the identical read-side filter body appears in three of the four,
+# which is the point: the FILTER is never what decides.
+@pytest.mark.parametrize(("case", "filename", "source", "expected"), [
+    # `corpus.Companion`'s real shape: it DECLARES a `list[ParseWarning]` field but never
+    # raises one, so it owns no drop channel and its read-side filters are not drops. Both
+    # halves of the PROJECTOR test are required — this is the half a name list would miss.
+    ("carrier-that-never-raises-is-not-a-projector", "corpus.py",
+     _COMPANION_CARRIER + _COMPANION_FILTER, set()),
+
+    # The control for the above: add a method that CONSTRUCTS the warning and the same class
+    # arms — so the exemption is the missing raise, not the class.
+    ("carrier-that-also-raises-is-a-projector", "corpus.py",
+     _COMPANION_CARRIER + _COMPANION_RAISES + _COMPANION_FILTER, {"Companion.matching"}),
+
+    # The TOKENIZER is resolved through `_astlib.origin`, so `from ._types import Block as B`
+    # is the same case as `Block` (#602) — a gate keyed on the SPELLING would go blind on the
+    # one-word rename.
+    ("aliased-block-return-annotation-is-still-a-tokenizer", "tok.py",
+     "from ._types import Block as B\n"
+     "\n"
+     "def _tokenize(body: str) -> list[B]:\n"
+     "    blocks = []\n"
+     "    cur = None\n"
+     "    for raw in body.splitlines():\n"
+     "        stripped = raw.strip()\n"
+     "        if cur is None:\n"
+     "            continue\n"
+     "        cur.rows.append(stripped)\n"
+     "    return blocks\n", {"_tokenize"}),
+
+    # The scoping that took the rule from 61 findings to 8: a read-side filter that drops
+    # nothing is not this gate's business, and only the role anchor tells them apart.
+    ("function-in-neither-role-is-left-alone", "queries.py",
+     "def summarize(rows) -> list[str]:\n"
+     "    out = []\n"
+     "    for row in rows:\n"
+     "        if not row:\n"
+     "            continue\n"
+     "        out.append(row)\n"
+     "    return out\n", set()),
+], ids=lambda v: v if isinstance(v, str) and "\n" not in v and len(v) < 60 else "")
+def test_only_a_role_anchor_arms_the_gate(tmp_path, case, filename, source, expected):
+    """The gate fires on a function in one of two ROLES — a projector that owns a drop
+    channel, or a tokenizer that returns blocks — and on nothing else. The same read-side
+    filter is a drop in one role and ordinary code in another, so the role is what the scan
+    has to resolve; a name list or a spelling match would get every one of these wrong."""
     tree = tmp_path / "scope"
     _pyfile(tree, "_types.py", _TYPES)
-    _pyfile(tree, "corpus.py", (
-        "from dataclasses import dataclass, field\n"
-        "from ._types import ParseWarning\n"
-        "\n"
-        "@dataclass\n"
-        "class Companion:\n"
-        "    parse_warnings: list[ParseWarning] = field(default_factory=list)\n"
-        "\n"
-        "    def matching(self, rows):\n"
-        "        out = []\n"
-        "        for row in rows:\n"
-        "            if not row:\n"
-        "                continue\n"
-        "            out.append(row)\n"
-        "        return out\n"
-    ))
-    assert _GATE._scan(tree) == []
-
-
-def test_a_carrier_class_that_also_raises_is_a_projector(tmp_path):
-    """The control for the above: add a method that CONSTRUCTS the warning and the same
-    class arms, so the exemption is the missing raise and not the class."""
-    tree = tmp_path / "scope"
-    _pyfile(tree, "_types.py", _TYPES)
-    _pyfile(tree, "corpus.py", (
-        "from dataclasses import dataclass, field\n"
-        "from ._types import ParseWarning\n"
-        "\n"
-        "@dataclass\n"
-        "class Companion:\n"
-        "    parse_warnings: list[ParseWarning] = field(default_factory=list)\n"
-        "\n"
-        "    def complain(self, block):\n"
-        '        self.parse_warnings.append(ParseWarning(block=block, reason="x"))\n'
-        "\n"
-        "    def matching(self, rows):\n"
-        "        out = []\n"
-        "        for row in rows:\n"
-        "            if not row:\n"
-        "                continue\n"
-        "            out.append(row)\n"
-        "        return out\n"
-    ))
-    assert _quals(_GATE._scan(tree)) == {"Companion.matching"}
-
-
-def test_an_aliased_block_return_annotation_is_still_a_tokenizer(tmp_path):
-    """The TOKENIZER is resolved through `_astlib.origin`, so `from ._types import Block
-    as B` is the same case as `Block` (#602) — a gate keyed on the spelling would go blind
-    on the one-word rename."""
-    tree = tmp_path / "scope"
-    _pyfile(tree, "_types.py", _TYPES)
-    _pyfile(tree, "tok.py", (
-        "from ._types import Block as B\n"
-        "\n"
-        "def _tokenize(body: str) -> list[B]:\n"
-        "    blocks = []\n"
-        "    cur = None\n"
-        "    for raw in body.splitlines():\n"
-        "        stripped = raw.strip()\n"
-        "        if cur is None:\n"
-        "            continue\n"
-        "        cur.rows.append(stripped)\n"
-        "    return blocks\n"
-    ))
-    assert _quals(_GATE._scan(tree)) == {"_tokenize"}
-
-
-def test_a_function_in_neither_role_is_left_alone(tmp_path):
-    """The scoping that took the rule from 61 findings to 8: a read-side filter that drops
-    nothing is not this gate's business, and only the role anchor tells them apart."""
-    tree = tmp_path / "scope"
-    _pyfile(tree, "_types.py", _TYPES)
-    _pyfile(tree, "queries.py", (
-        "def summarize(rows) -> list[str]:\n"
-        "    out = []\n"
-        "    for row in rows:\n"
-        "        if not row:\n"
-        "            continue\n"
-        "        out.append(row)\n"
-        "    return out\n"
-    ))
-    assert _GATE._scan(tree) == []
+    _pyfile(tree, filename, source)
+    assert _quals(_GATE._scan(tree)) == expected
 
 
 # ---------------------------------------------------------------- ratchet + corpus

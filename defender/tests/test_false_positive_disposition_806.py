@@ -71,84 +71,75 @@ def test_false_positive_is_in_the_shared_vocabulary():
 # the six ways the exit could be faked
 # ═══════════════════════════════════════════════════════════════════════════
 
-def test_a_stated_defect_is_required():
-    """An FP close with no `detection_notes` is a close with no reason. The disposition is a
-    claim about the rule; if the run cannot say what the rule got wrong, it has not made one."""
-    doc = _doc(_PROLOGUE, _LEADS, _outcome("l-001", "v-011"),
-               _conclude(disposition="false-positive", entity_check="l-001"))
+_FAILED_LEAD = (
+    "```invlang\n"
+    ":L findings [id|loop|name|target|tests|system|window|fail_reason]\n"
+    "l-003|1|db1-authorized-keys|v-001||elastic|30d|index unavailable\n"
+    "```\n"
+)
+
+
+# Each row is one way the FP exit could be faked, and the fragment the resulting error must
+# carry. `false-positive` is a claim about the RULE, so every row is a close that failed to
+# earn that claim.
+@pytest.mark.parametrize(("case", "parts", "conclude_kwargs", "fragment"), [
+    # An FP close with no `detection_notes` is a close with no reason: if the run cannot say
+    # what the rule got wrong, it has not made the claim.
+    ("no-stated-defect", (_PROLOGUE, _LEADS, _outcome("l-001", "v-011")),
+     {"entity_check": "l-001"}, "detection_notes"),
+
+    # `none` / `n/a` are what a conclude row writes where it has NOTHING to say, and the parser
+    # strips them only from LIST rows — a scalar keeps them as literal text. A gate testing
+    # `notes.strip()` alone therefore reads "no defect found" as a stated defect, which is the
+    # emptiest possible FP close passing the check written to stop exactly that.
+    ("empty-marker-none", (_PROLOGUE, _LEADS, _outcome("l-001", "v-011")),
+     {"detection_notes": "none", "entity_check": "l-001"}, "detection_notes"),
+    ("empty-marker-n-a", (_PROLOGUE, _LEADS, _outcome("l-001", "v-011")),
+     {"detection_notes": "n/a", "entity_check": "l-001"}, "detection_notes"),
+    ("empty-marker-capitalised", (_PROLOGUE, _LEADS, _outcome("l-001", "v-011")),
+     {"detection_notes": "None", "entity_check": "l-001"}, "detection_notes"),
+    ("empty-marker-padded", (_PROLOGUE, _LEADS, _outcome("l-001", "v-011")),
+     {"detection_notes": "  N/A  ", "entity_check": "l-001"}, "detection_notes"),
+
+    # Refuting the detector says nothing about the HOST. Without this the disposition is a
+    # cheaper `benign` — the exact substitution that closed a host carrying three
+    # `attacker@elsewhere` keys in root's `authorized_keys`.
+    ("no-entity-check", (_PROLOGUE, _LEADS, _outcome("l-001", "v-011")),
+     {"detection_notes": _NOTES}, "entity_check"),
+
+    # `:L findings`' `fail_reason` column projects into the lead's `outcome`, so a lead whose
+    # query ERRORED reads as "committed" to the loose test `_check_loop_close` uses. For
+    # closing a loop that is right — the loop was worked. Here it is the gate's own failure
+    # mode: a query that never landed tested the alerted entity for nothing.
+    ("lead-whose-only-outcome-is-a-failure", (_PROLOGUE, _FAILED_LEAD),
+     {"detection_notes": _NOTES, "entity_check": "l-003"}, "committed no result"),
+
+    # The named lead has to exist at all.
+    ("named-lead-does-not-exist", (_PROLOGUE, _LEADS, _outcome("l-001", "v-011")),
+     {"detection_notes": _NOTES, "entity_check": "l-404"}, "not a lead in"),
+
+    # A lead with no committed result is the shape of an investigation that stopped at the
+    # PLAN. `l-002` is written into `:L findings` and never resolved.
+    ("planned-but-undispatched-lead", (_PROLOGUE, _LEADS, _outcome("l-001", "v-011")),
+     {"detection_notes": _NOTES, "entity_check": "l-002"}, "committed no result"),
+
+    # THE regression. `l-002` is committed and real work — it just tests the source the rule
+    # wrongly implicated, not the host the alert was about. Every post-refutation lead in
+    # `pr815-rerun-0808` but one had this shape, so a gate without the prologue clause passes
+    # the run it was written for.
+    ("lead-against-an-entity-the-refutation-introduced",
+     (_PROLOGUE, _LEADS, _outcome("l-002", "v-012")),
+     {"detection_notes": _NOTES, "entity_check": "l-002"}, "prologue does not carry"),
+], ids=lambda v: v if isinstance(v, str) and len(v) < 50 and " " not in v else "")
+def test_a_false_positive_exit_that_was_not_earned_is_rejected(
+    case, parts, conclude_kwargs, fragment
+):
+    """The disposition is a claim about the RULE, and the close has to pay for it: a stated
+    defect that is really stated, and an entity check carried by a lead that really ran
+    against the entity the alert named. Each row here fakes one of those and is refused."""
+    doc = _doc(*parts, _conclude(disposition="false-positive", **conclude_kwargs))
     errors = validate_companion(doc, None)
-    assert any("detection_notes" in e for e in errors)
-
-
-def test_an_entity_check_is_required():
-    """Refuting the detector says nothing about the host. Without this the disposition is a
-    cheaper `benign` — the exact substitution that closed a host carrying three
-    `attacker@elsewhere` keys in root's `authorized_keys`."""
-    doc = _doc(_PROLOGUE, _LEADS, _outcome("l-001", "v-011"),
-               _conclude(disposition="false-positive", detection_notes=_NOTES))
-    errors = validate_companion(doc, None)
-    assert any("entity_check" in e for e in errors)
-
-
-@pytest.mark.parametrize("marker", ["none", "n/a", "None", "  N/A  "])
-def test_the_formats_empty_marker_is_not_a_stated_defect(marker):
-    """`none` / `n/a` are what a conclude row writes where it has NOTHING to say, and the
-    parser strips them only from list rows — a scalar keeps them as the literal text. A gate
-    testing `notes.strip()` alone therefore reads "no defect found" as a stated defect, which
-    is the emptiest possible FP close passing the check written to stop exactly that."""
-    doc = _doc(_PROLOGUE, _LEADS, _outcome("l-001", "v-011"),
-               _conclude(disposition="false-positive", detection_notes=marker,
-                         entity_check="l-001"))
-    errors = validate_companion(doc, None)
-    assert any("detection_notes" in e for e in errors)
-
-
-def test_a_lead_whose_only_outcome_is_a_failure_does_not_count():
-    """`:L findings`' `fail_reason` column projects into the lead's `outcome`, so a lead whose
-    query errored reads as "committed" to the loose test `_check_loop_close` uses. For closing
-    a loop that is right — the loop was worked. Here it is the gate's own failure mode: a
-    query that never landed tested the alerted entity for nothing."""
-    failed_lead = (
-        "```invlang\n"
-        ":L findings [id|loop|name|target|tests|system|window|fail_reason]\n"
-        "l-003|1|db1-authorized-keys|v-001||elastic|30d|index unavailable\n"
-        "```\n"
-    )
-    doc = _doc(_PROLOGUE, failed_lead,
-               _conclude(disposition="false-positive", detection_notes=_NOTES,
-                         entity_check="l-003"))
-    errors = validate_companion(doc, None)
-    assert any("committed no result" in e for e in errors)
-
-
-def test_the_named_lead_has_to_exist():
-    doc = _doc(_PROLOGUE, _LEADS, _outcome("l-001", "v-011"),
-               _conclude(disposition="false-positive", detection_notes=_NOTES,
-                         entity_check="l-404"))
-    errors = validate_companion(doc, None)
-    assert any("not a lead in" in e for e in errors)
-
-
-def test_a_planned_but_undispatched_lead_does_not_count():
-    """A lead with no committed result is the shape of an investigation that stopped at the
-    plan. `l-002` is written into `:L findings` and never resolved."""
-    doc = _doc(_PROLOGUE, _LEADS, _outcome("l-001", "v-011"),
-               _conclude(disposition="false-positive", detection_notes=_NOTES,
-                         entity_check="l-002"))
-    errors = validate_companion(doc, None)
-    assert any("committed no result" in e for e in errors)
-
-
-def test_a_lead_against_an_entity_the_refutation_introduced_does_not_count():
-    """THE regression. `l-002` is committed and real work — it just tests the source the rule
-    wrongly implicated, not the host the alert was about. Every post-refutation lead in
-    `pr815-rerun-0808` but one had this shape, so a gate without the prologue clause passes the
-    run it was written for."""
-    doc = _doc(_PROLOGUE, _LEADS, _outcome("l-002", "v-012"),
-               _conclude(disposition="false-positive", detection_notes=_NOTES,
-                         entity_check="l-002"))
-    errors = validate_companion(doc, None)
-    assert any("prologue does not carry" in e for e in errors)
+    assert any(fragment in e for e in errors), f"no error mentioned {fragment!r}"
 
 
 # ═══════════════════════════════════════════════════════════════════════════

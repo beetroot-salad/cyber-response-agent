@@ -219,43 +219,43 @@ def test_spread_dict_has_no_closed_key_set(tmp_path):
     assert _GATE._scan(_tree(tmp_path, owner=owner)) == []
 
 
-def test_no_import_edge_is_clean(tmp_path):
-    """Key identity is VALUE-based, so the import edge is what stops every module in the tree
-    that ever writes `"benign"` from being tied to this table."""
-    consumer = 'def close(d):\n    if d == "false-positive":\n        return 1\n    return 0\n'
-    assert _GATE._scan(_tree(tmp_path, consumer=consumer)) == []
+# Consumers the gate must leave alone. Each is a shape that LOOKS like a half-read of the
+# owner's table until you ask the question the detector actually asks.
+@pytest.mark.parametrize(("case", "consumer"), [
+    # Key identity is VALUE-based, so the IMPORT EDGE is what stops every module in the tree
+    # that ever writes `"benign"` from being tied to this table.
+    ("no-import-edge",
+     'def close(d):\n    if d == "false-positive":\n        return 1\n    return 0\n'),
 
+    # A function that looks the table up generically is deciding through the OWNER's answer;
+    # a literal beside that is a special case of a decision that was made, not one taken here.
+    ("reaches-the-owners-lookup-in-the-same-function",
+     "import owner\n"
+     "\n"
+     "def close(d, body):\n"
+     "    checker = owner._DISPOSITION_GATES.get(d)\n"
+     '    if d == "false-positive":\n'
+     "        return checker\n"
+     "    return checker\n"),
 
-def test_reaching_the_owners_lookup_in_the_same_function_is_clean(tmp_path):
-    """A function that looks the table up generically is deciding through the owner's answer;
-    a literal beside that is a special case of a decision that was made, not one taken here."""
-    consumer = (
-        "import owner\n"
-        "\n"
-        "def close(d, body):\n"
-        "    checker = owner._DISPOSITION_GATES.get(d)\n"
-        '    if d == "false-positive":\n'
-        "        return checker\n"
-        "    return checker\n"
-    )
-    assert _GATE._scan(_tree(tmp_path, consumer=consumer)) == []
-
-
-def test_every_key_enumerated_is_a_documented_blind_spot(tmp_path):
-    """Pinned, not endorsed. The detector fires on the GAP, so a consumer that spells out ALL
-    of the table's keys — the fullest copy of someone else's dispatch, and the one that goes
-    stale the day a key is added — produces nothing. Module docstring, "WHAT IS NOT
-    MECHANIZED" (1). If this ever starts firing, the docstring is the thing to fix."""
-    consumer = (
-        "from owner import entry_price\n"
-        "\n"
-        "def close(d):\n"
-        '    if d == "false-positive":\n'
-        "        return 1\n"
-        '    if d == "benign":\n'
-        "        return 2\n"
-        "    return 0\n"
-    )
+    # Pinned, not endorsed. The detector fires on the GAP, so a consumer that spells out ALL
+    # of the table's keys — the fullest copy of someone else's dispatch, and the one that goes
+    # stale the day a key is added — produces nothing. Module docstring, "WHAT IS NOT
+    # MECHANIZED" (1). If this ever starts firing, the docstring is the thing to fix.
+    ("every-key-enumerated-is-a-documented-blind-spot",
+     "from owner import entry_price\n"
+     "\n"
+     "def close(d):\n"
+     '    if d == "false-positive":\n'
+     "        return 1\n"
+     '    if d == "benign":\n'
+     "        return 2\n"
+     "    return 0\n"),
+], ids=lambda v: v if isinstance(v, str) and len(v) < 60 and "\n" not in v else "")
+def test_a_consumer_the_gate_leaves_alone(tmp_path, case, consumer):
+    """Not every literal beside an owned key is a half-read: without the import edge there is
+    no table to half-read, with the owner's lookup in hand the decision was delegated, and a
+    consumer that enumerates every key has copied the dispatch whole."""
     assert _GATE._scan(_tree(tmp_path, consumer=consumer)) == []
 
 
@@ -269,36 +269,38 @@ def test_tests_directory_is_out_of_scope(tmp_path):
 # ------------------------------------------------------------ (c) the suppression marker
 
 
-def test_suppression_on_the_branch_line(tmp_path):
-    consumer = _CONSUMER.replace(
-        '    if disposition == "false-positive":\n',
-        '    if disposition == "false-positive":  # lint-half-table: ok — entry price only\n',
-    )
-    assert _GATE._scan(_tree(tmp_path, consumer=consumer)) == []
-
-
-def test_suppression_in_the_comment_block_above(tmp_path):
-    consumer = _CONSUMER.replace(
-        '    if disposition == "false-positive":\n',
-        "    # lint-half-table: ok — the price is this disposition's alone;\n"
-        "    # benign is gated at the investigation.md write.\n"
-        '    if disposition == "false-positive":\n',
-    )
-    assert _GATE._scan(_tree(tmp_path, consumer=consumer)) == []
-
-
-def test_a_marker_far_above_does_not_suppress(tmp_path):
-    consumer = (
-        "from owner import entry_price\n"
-        "# lint-half-table: ok — far above, not the site's comment block\n"
-        "\n"
-        "def close(disposition):\n"
-        "    x = 1\n"
-        '    if disposition == "false-positive":\n'
-        "        return x\n"
-        "    return None\n"
-    )
-    assert _GATE._scan(_tree(tmp_path, consumer=consumer))
+# The marker is scoped to ITS OWN SITE — the branch line, or the comment block directly above
+# it. A marker anywhere else in the module is not this site's answer, and a gate that honoured
+# it would let one stale comment disarm every half-read below it.
+@pytest.mark.parametrize(("case", "consumer", "suppressed"), [
+    ("marker-on-the-branch-line",
+     _CONSUMER.replace(
+         '    if disposition == "false-positive":\n',
+         '    if disposition == "false-positive":  # lint-half-table: ok — entry price only\n',
+     ), True),
+    ("marker-in-the-comment-block-directly-above",
+     _CONSUMER.replace(
+         '    if disposition == "false-positive":\n',
+         "    # lint-half-table: ok — the price is this disposition's alone;\n"
+         "    # benign is gated at the investigation.md write.\n"
+         '    if disposition == "false-positive":\n',
+     ), True),
+    # ... and the same marker hoisted to module level, separated from the site by a blank
+    # line and a def, suppresses NOTHING.
+    ("marker-far-above-is-not-the-sites-comment-block",
+     "from owner import entry_price\n"
+     "# lint-half-table: ok — far above, not the site's comment block\n"
+     "\n"
+     "def close(disposition):\n"
+     "    x = 1\n"
+     '    if disposition == "false-positive":\n'
+     "        return x\n"
+     "    return None\n", False),
+], ids=lambda v: v if isinstance(v, str) and len(v) < 60 and "\n" not in v else "")
+def test_the_marker_suppresses_only_at_its_own_site(tmp_path, case, consumer, suppressed):
+    """A deliberate half-read is suppressed by a marker ON the branch line or in the comment
+    block immediately above it — and by a marker nowhere else."""
+    assert (_GATE._scan(_tree(tmp_path, consumer=consumer)) == []) is suppressed
 
 
 # ------------------------------------------------------------------- (d) ScanBlind

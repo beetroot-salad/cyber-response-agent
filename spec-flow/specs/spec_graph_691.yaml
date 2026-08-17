@@ -131,25 +131,25 @@ demands:
 
   # ================= M7 : the corpus-name domain =============================
   - {id: corpus_name_is_the_empty_string, kind: domain-outcome, form: test,
-     discharged_by: test_corpus_name_is_the_empty_string,
+     discharged_by: test_a_degenerate_corpus_name_is_rejected_at_bind,
      binds: ["corpus_name.domain.distinguished[]"]}
   - {id: corpus_name_is_a_single_dot, kind: domain-outcome, form: test,
-     discharged_by: test_corpus_name_is_a_single_dot,
+     discharged_by: test_a_degenerate_corpus_name_is_rejected_at_bind,
      binds: ["corpus_name.domain.distinguished[.]"]}
   - {id: corpus_name_has_two_segments, kind: domain-outcome, form: test,
-     discharged_by: test_corpus_name_has_two_segments,
+     discharged_by: test_a_degenerate_corpus_name_is_rejected_at_bind,
      binds: ["corpus_name.domain.distinguished[a/b]"]}
   - {id: corpus_name_is_an_absolute_path, kind: domain-outcome, form: test,
-     discharged_by: test_corpus_name_is_an_absolute_path,
+     discharged_by: test_a_degenerate_corpus_name_is_rejected_at_bind,
      binds: ["corpus_name.domain.distinguished[/etc/passwd]"]}
   - {id: corpus_name_contains_parent_segments, kind: domain-outcome, form: test,
-     discharged_by: test_corpus_name_contains_parent_directory_segments,
+     discharged_by: test_a_degenerate_corpus_name_is_rejected_at_bind,
      binds: ["corpus_name.domain.distinguished[..]"]}
   - {id: corpus_name_leading_dot_slash_normalises, kind: domain-outcome, form: test,
-     discharged_by: test_the_spawn_corpus_name_dot_slash_normalises_to_one_segment,
+     discharged_by: test_a_corpus_name_that_normalises_to_one_segment_binds_the_same_dir,
      binds: ["corpus_name.domain.distinguished[./x]"]}
   - {id: corpus_name_has_a_trailing_slash, kind: domain-outcome, form: test,
-     discharged_by: test_corpus_name_has_a_trailing_slash,
+     discharged_by: test_a_corpus_name_that_normalises_to_one_segment_binds_the_same_dir,
      binds: ["corpus_name.domain"]}
   - {id: names_that_resolve_to_the_tree_itself, kind: negative, form: test,
      discharged_by: test_the_names_that_resolve_to_the_tree_itself,
@@ -158,8 +158,11 @@ demands:
   - {id: standing_prohibition_whole_tree_scope, kind: negative, form: test,
      discharged_by: test_the_standing_prohibition_on_a_whole_tree_authoring_scope,
      binds: ["corpus_name.domain", "corpus_dir.access[write-tool]"], cites: [g23]}
+  # discharged by the same assertion as corpus_name_has_two_segments: both nodes ask whether
+  # the multi-segment name `a/b` is refused at construction, and the test was a byte-identical
+  # copy. Folded into one; this node keeps its own binds/cites.
   - {id: front_door_handed_a_nested_corpus, kind: behavior, form: test,
-     discharged_by: test_the_front_door_is_handed_a_corpus_nested_below_the_tree,
+     discharged_by: test_a_degenerate_corpus_name_is_rejected_at_bind,
      binds: ["corpus_name.domain.distinguished[a/b]", "CORPUS_AUTHOR_DEF"], cites: [c16, g9]}
   # --- MD-6 / F30 / P109 (§7 D2 PINNED it — upgraded from a fork-gated clause to a form:test):
   #     M7 as a shape rule accepts `skills`/`learning` (real non-lesson dirs); `learning` roots

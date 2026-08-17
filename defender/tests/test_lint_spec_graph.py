@@ -35,56 +35,38 @@ def _baseline(tmp_path: Path, entries: dict[str, str]) -> Path:
     return p
 
 
-def test_a_graph_not_in_the_baseline_must_be_clean(lint, tmp_path):
-    """The point of the whole gate: every graph write-tests produces from here on passes
-    all four checkers, whatever the corpus behind it looks like."""
-    rc = lint.main(
-        [], results={"new.yaml": ["claims: mistyped C1"]},
-        baseline_path=_baseline(tmp_path, {}),
-    )
-    assert rc == 1
+# The ratchet, one row per arm. `results` is what the checkers reported this run; the baseline
+# entry is the ceiling recorded for that graph; `rc` is the gate's verdict.
+@pytest.mark.parametrize(("case", "results", "entries", "rc"), [
+    # The point of the whole gate: a graph ABSENT from the baseline must be clean, whatever
+    # the corpus behind it looks like — every graph write-tests produces from here on.
+    ("new-graph-with-a-finding-fails", {"new.yaml": ["claims: mistyped C1"]}, {}, 1),
+    ("new-graph-clean-passes", {"new.yaml": []}, {}, 0),
 
+    # A baselined graph may sit AT its ceiling ...
+    ("baselined-graph-at-its-ceiling-passes",
+     {"old.yaml": ["a", "b", "c"]}, {"old.yaml": "3 — pre-#674"}, 0),
+    # ... and may not exceed it.
+    ("baselined-graph-that-gains-a-finding-fails",
+     {"old.yaml": ["a", "b", "c", "d"]}, {"old.yaml": "3 — pre-#674"}, 1),
 
-def test_a_new_clean_graph_passes(lint, tmp_path):
-    rc = lint.main([], results={"new.yaml": []}, baseline_path=_baseline(tmp_path, {}))
-    assert rc == 0
+    # The arm a fingerprint-MEMBERSHIP ratchet gets wrong: fixing findings changes the graph's
+    # identity under a (path, count) key, and a naive "absent from baseline" rule would fail
+    # the build for an improvement.
+    ("paying-debt-down-is-not-a-failure",
+     {"old.yaml": ["a"]}, {"old.yaml": "3 — pre-#674"}, 0),
 
-
-def test_a_baselined_graph_at_its_ceiling_passes(lint, tmp_path):
-    rc = lint.main(
-        [], results={"old.yaml": ["a", "b", "c"]},
-        baseline_path=_baseline(tmp_path, {"old.yaml": "3 — pre-#674"}),
-    )
-    assert rc == 0
-
-
-def test_a_baselined_graph_that_gains_a_finding_fails(lint, tmp_path):
-    rc = lint.main(
-        [], results={"old.yaml": ["a", "b", "c", "d"]},
-        baseline_path=_baseline(tmp_path, {"old.yaml": "3 — pre-#674"}),
-    )
-    assert rc == 1
-
-
-def test_paying_debt_down_is_not_a_failure(lint, tmp_path):
-    """The arm a fingerprint-membership ratchet gets wrong: fixing findings changes the
-    graph's identity under a (path, count) key, and a naive 'absent from baseline' rule
-    would fail the build for an improvement."""
-    rc = lint.main(
-        [], results={"old.yaml": ["a"]},
-        baseline_path=_baseline(tmp_path, {"old.yaml": "3 — pre-#674"}),
-    )
-    assert rc == 0
-
-
-def test_an_unparseable_ceiling_tightens_rather_than_loosens(lint, tmp_path):
-    """A malformed baseline entry must not read as 'anything goes' — the direction a
-    corrupted config fails in is itself a decision."""
-    rc = lint.main(
-        [], results={"old.yaml": ["a"]},
-        baseline_path=_baseline(tmp_path, {"old.yaml": "no number here"}),
-    )
-    assert rc == 1
+    # A malformed baseline entry must not read as "anything goes" — the direction a corrupted
+    # config fails in is itself a decision.
+    ("unparseable-ceiling-tightens-rather-than-loosens",
+     {"old.yaml": ["a"]}, {"old.yaml": "no number here"}, 1),
+], ids=lambda v: v if isinstance(v, str) and len(v) < 60 and " " not in v else "")
+def test_the_ratchet_blocks_growth_without_blocking_repair(
+    lint, tmp_path, case, results, entries, rc
+):
+    """The gate blocks a graph that is newly dirty or that gained findings, and stays out of
+    the way of one that paid debt down — with a corrupted ceiling failing CLOSED."""
+    assert lint.main([], results=results, baseline_path=_baseline(tmp_path, entries)) == rc
 
 
 def test_a_gate_that_cannot_look_exits_2(lint, tmp_path):
