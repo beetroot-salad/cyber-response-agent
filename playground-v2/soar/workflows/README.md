@@ -44,8 +44,17 @@ is a UI pass. Once, per workflow:
 4. Commit the export here and re-install it with
    `python3 scripts/install_soar_workflow.py` so a fresh lever-up reproduces it.
 
-Step 4 is what keeps the repo's "committed YAML is source of truth" rule true
-for the SOAR: anything built only in the UI is lost on a volume reset.
+Step 4 keeps the repo's "committed YAML is source of truth" rule true for
+*workflows*: anything built only in the UI is lost on a volume reset.
+
+**It does not cover the apps from step 2, and that gap is load-bearing.** The
+generated apps live only in `shuffle_opensearch_data`, and the workflow JSON
+references them by `app_id`. So after `down -v` (or any reset of that volume),
+re-running the installer recreates the workflows against apps that no longer
+exist — they import without error and fail at execution. Until app creation has
+an API, step 2 has to be redone by hand *before* step 4, and the app names must
+match the ones the committed workflows reference. Treat a volume reset as a full
+re-do of this README, not as a re-run of the installer.
 
 ## Wiring the Kibana trigger
 

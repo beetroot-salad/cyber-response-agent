@@ -98,10 +98,27 @@ def shuffle_curl(key: str, method: str, path: str, body: str | None = None) -> t
     return code, "\n".join(lines[: -2 if lines[-1] == "" else -1])
 
 
+def api_failure(body: str) -> str | None:
+    """Shuffle answers many errors with HTTP 200 and {"success": false, ...}.
+
+    Returns the failure reason if the body is one of those, else None. Without
+    this the status code alone reports a rejected write as a success.
+    """
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        return None
+    if isinstance(payload, dict) and payload.get("success") is False:
+        return str(payload.get("reason") or payload)[:400]
+    return None
+
+
 def get_json(key: str, route: str) -> object:
     code, body = shuffle_curl(key, "GET", ROUTES[route])
     if code != 200:
         sys.exit(f"GET {ROUTES[route]} returned HTTP {code}: {body[:400]}")
+    if reason := api_failure(body):
+        sys.exit(f"GET {ROUTES[route]} returned success=false: {reason}")
     try:
         return json.loads(body)
     except json.JSONDecodeError:
@@ -124,7 +141,8 @@ def resolve_context(key: str) -> tuple[str, str]:
     orgs = _as_list(get_json(key, "orgs"))
     if not orgs:
         sys.exit("no orgs returned — has the first-boot admin bootstrap run?")
-    org_id = orgs[0].get("id") or orgs[0].get("Id") or ""
+    org = orgs[0]
+    org_id = (org.get("id") or org.get("Id") or "") if isinstance(org, dict) else ""
     if not org_id:
         sys.exit(f"could not read an org id from: {json.dumps(orgs[0])[:300]}")
 
@@ -151,6 +169,12 @@ def retarget(workflow: dict, org_id: str, env_name: str) -> dict:
     wf = json.loads(json.dumps(workflow))  # deep copy
     wf["org_id"] = org_id
     wf.pop("owner", None)
+    # The workflow-level default, not just the per-node ones: leaving the source
+    # instance's name here is the "queued forever, no error" failure the
+    # ENVIRONMENT_NAME comment in soar/compose.yml warns about. Only rewritten
+    # when the export actually carries the field, so nothing is invented.
+    if "execution_environment" in wf:
+        wf["execution_environment"] = env_name
     for action in wf.get("actions") or []:
         if isinstance(action, dict):
             action["environment"] = env_name
@@ -158,6 +182,17 @@ def retarget(workflow: dict, org_id: str, env_name: str) -> dict:
         if isinstance(trigger, dict):
             trigger["environment"] = env_name
     return wf
+
+
+def read_workflow(path: Path) -> dict:
+    """Parse a committed workflow file, naming the file if it is malformed."""
+    try:
+        workflow = json.loads(path.read_text())
+    except json.JSONDecodeError as exc:
+        sys.exit(f"{path.name}: not valid JSON ({exc})")
+    if not isinstance(workflow, dict):
+        sys.exit(f"{path.name}: expected a workflow object, got {type(workflow).__name__}")
+    return workflow
 
 
 def install(key: str, workflow: dict, existing: dict[str, str], org_id: str, env_name: str) -> bool:
@@ -178,6 +213,9 @@ def install(key: str, workflow: dict, existing: dict[str, str], org_id: str, env
 
     if code not in (200, 201):
         print(f"  ERROR {name!r}: HTTP {code}: {body[:400]}", file=sys.stderr)
+        return False
+    if reason := api_failure(body):
+        print(f"  ERROR {name!r}: HTTP {code} but success=false: {reason}", file=sys.stderr)
         return False
     print(f"  {verb} {name!r} (org={org_id} env={env_name})")
     return True
@@ -213,7 +251,7 @@ def main() -> int:
     if args.dry_run:
         print(f"DRY-RUN {len(files)} workflow(s) from {WORKFLOW_DIR}")
         for path in files:
-            wf = json.loads(path.read_text())
+            wf = read_workflow(path)
             print(f"  would install {wf.get('name', path.stem)!r} from {path.name}")
         return 0
 
@@ -224,7 +262,7 @@ def main() -> int:
     print(f"installing {len(files)} workflow(s) from {WORKFLOW_DIR}")
     all_ok = True
     for path in files:
-        if not install(key, json.loads(path.read_text()), existing, org_id, env_name):
+        if not install(key, read_workflow(path), existing, org_id, env_name):
             all_ok = False
     return 0 if all_ok else 1
 

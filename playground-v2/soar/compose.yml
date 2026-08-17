@@ -40,6 +40,14 @@ services:
     image: ghcr.io/shuffle/shuffle-backend:${SHUFFLE_VERSION}
     container_name: shuffle-backend
     hostname: shuffle-backend
+    # Waits for the store, not just for the container: the first-boot admin
+    # bootstrap is gated on the user table being empty, so a backend that
+    # starts while OpenSearch is still coming up (60-120s) runs that gate
+    # against a store it cannot read. Same shape as kibana→elasticsearch in
+    # ../compose.yml, and it is what the healthcheck below is for.
+    depends_on:
+      shuffle-opensearch:
+        condition: service_healthy
     volumes:
       # The same engine that runs the investigated hosts — accepted
       # deliberately. Orborus also mounts the socket into every ephemeral
@@ -154,7 +162,10 @@ services:
       # 1g (upstream: 3g) is ample for workflow/execution metadata. Keep it at
       # 50% of mem_limit: with memory_lock on, mem_limit must stay >= 2x the
       # heap or the JVM fails to lock and dies.
-      - "OPENSEARCH_JAVA_OPTS=-Xms${SHUFFLE_OPENSEARCH_HEAP} -Xmx${SHUFFLE_OPENSEARCH_HEAP}"
+      # Defaulted, not bare: an .env that predates this file interpolates to
+      # `-Xms -Xmx`, which the JVM rejects at startup — a crash loop that reads
+      # like an image problem rather than a missing variable.
+      - "OPENSEARCH_JAVA_OPTS=-Xms${SHUFFLE_OPENSEARCH_HEAP:-1g} -Xmx${SHUFFLE_OPENSEARCH_HEAP:-1g}"
       - bootstrap.memory_lock=true
       - DISABLE_PERFORMANCE_ANALYZER_AGENT_CLI=true
       - cluster.name=shuffle-cluster

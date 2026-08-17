@@ -1,10 +1,18 @@
 name: soc-playground
 
 # Shuffle SOAR lives in its own file so it can be levered down independently.
-# `project_directory` + `env_file` are NOT optional: an included file otherwise
-# interpolates against a .env in its OWN directory, so every ${V2_SHUFFLE_*}
-# would silently resolve to empty and Shuffle would come up on its insecure
-# code defaults.
+#
+# `env_file: .env` is NOT here for interpolation — measured on Compose v5.3.1,
+# an included file resolves ${...} from the project .env (playground-v2/.env)
+# with or without this key; a .env in soar/ is consulted only if the project
+# has none. It is here to make a MISSING .env loud. Without it, no .env yields
+# warnings and a stack that boots anyway — which for Shuffle means its code
+# defaults, one of which polls uk.shuffler.io. With it, every subcommand (`ps`,
+# `logs`, `down`, `config`) fails first with `stat .../.env: no such file or
+# directory`. env_file entries are mandatory and the short form takes no
+# `required: false`, so that loudness is the whole point, not a side effect.
+# `project_directory: .` resolves relative paths in the included file against
+# playground-v2/ rather than soar/.
 include:
   - path: ./soar/compose.yml
     project_directory: .
@@ -40,7 +48,7 @@ include:
 # Exposed on loopback only. External access via SSH tunnel:
 #   ssh -L 9200:localhost:9200 -L 5601:localhost:5601 -L 8220:localhost:8220 -L 8080:localhost:8080 \
 #       -L 8001:localhost:8001 -L 8002:localhost:8002 -L 8003:localhost:8003 -L 8004:localhost:8004 \
-#       -L 8005:localhost:8005 -L 8006:localhost:8006 soc-playground
+#       -L 8005:localhost:8005 -L 8006:localhost:8006 -L 5001:localhost:5001 soc-playground
 
 x-es-image: &es-image docker.elastic.co/elasticsearch/elasticsearch:${STACK_VERSION}
 
