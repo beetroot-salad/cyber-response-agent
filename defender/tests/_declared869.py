@@ -45,7 +45,9 @@ did not name them would leave the seam unpinned:
 * the two composed gates take the same threaded value rather than re-deriving one behind
   their callers' backs: `lead_author._verify_skills_state(repo_root, baseline_stray, *,
   systems)` and `pitfalls_curator._verify_pitfalls_state(repo_root, baseline_stray, *,
-  systems)`.
+  systems)`. (#870's review adds a second threaded value to the pitfalls half,
+  `reducer_offered` — the same principle one round on: the tick's own facts are handed to the
+  gate rather than re-derived behind its caller's back.)
 * `draft_synthesis.synthesize_drafts(executed, *, catalog_dir, catalog, systems)` (M4/FK-3).
 * `LeadAuthorDeps` carries the resolved `systems: frozenset[str]`, built once in
   `build_lead_author_deps` from `paths` — the UNION on this lane (NF2).

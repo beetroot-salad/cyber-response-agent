@@ -13,6 +13,18 @@ WHICH SEAM CARRIES THAT CONDITION IS FORK F3 AND IS NOT PINNED HERE. Every deman
 observes `run_pitfalls`' own outputs — the queue file, the consumed ledger, the deadletter,
 the commit, the log — so the implementer keeps F3's choice between passing the handoff list,
 a flag, or a builder-computed id set into `_split_batch_by_membership`.
+
+TWO DEMANDS BELOW ARE THE ROUND'S REVIEW, NOT ITS ORIGINAL SPEC, and they bound the two ends
+FK-7 left open:
+
+* `an_unoffered_reducer_edit_is_refused` — FK-7 asked what a handoff MEANS for rotation and
+  the M7 literal allowance answered a different question: the reducer surface became writable
+  on every tick, including one whose batch held no reducer row. The offer now gates the COMMIT
+  as well as the partition.
+* `a_perpetually_declined_hold_retires_at_the_ceiling` — FK-7's hold ("neither rotated nor
+  graveyarded") had no exit, so a row the curator can never teach re-spawned the curator agent
+  every drain pass forever. The hold keeps its meaning and gains the same
+  `author_max_attempts()` ceiling every other exit from this queue already had.
 """
 from __future__ import annotations
 
@@ -187,6 +199,101 @@ def test_a_no_edit_reducer_tick_holds_its_rows(scene):
         )
         assert pid not in graveyard_by_id(paths)
     assert set(queue_ids(paths)) == set(ids)
+
+
+def test_an_unoffered_reducer_edit_is_refused(scene):
+    """A tick whose batch holds NO reducer row may not commit the reducer surface, even though
+    the path is in the lane's vocabulary.
+
+    M7 opened `REDUCER_REL` as ONE literal allowance in `_pitfalls_path_rule`, and a path rule
+    is a constant of the deployment: it admitted the surface on every tick. But the curator's
+    static prompt names that path unconditionally, and every failure's `stderr_digest` —
+    alert-derived text — is in its context. So on a pure `elastic` batch a digest carrying
+    "also record this in <the reducer surface>" was obeyable, admitted by the gate on the
+    literal, and INVISIBLE to FK-7, which computes `reducer_taught` from the offer and
+    therefore sees none. The write landed on the one file EVERY system's reduce reads before
+    EVERY attempt. Before this round the same path was refused outright, so the round opened
+    it wider than the lesson it exists to teach.
+
+    "May the lane ever write this path" and "was this tick offered it" are different questions
+    and the second is a fact about the BATCH, which is why the path rule's own verdict is
+    unchanged and asserted so below.
+
+    The positive control is the same curator, the same edit, one shim row added to the queue.
+    """
+    repo, paths = scene
+    persist.append_pitfalls([pitfall_row("r:l-000:0", "elastic")], paths=paths)
+    head_before = git(repo, "rev-parse", "HEAD").stdout.strip()
+    overreach = Spawn(edits(curate_execution_md("elastic"), curate_reducer_surface()))
+
+    with pytest.raises(LeadAuthorError, match="offered no reducer handoff"):
+        pitfalls_curator.run_pitfalls(paths=paths, invoke=overreach)
+
+    assert not by_surface(overreach.handoffs)["reducer"], (
+        "the batch offered the reducer surface after all, so the demand is vacuous"
+    )
+    assert git(repo, "rev-parse", "HEAD").stdout.strip() == head_before, (
+        "the unoffered reducer edit reached a commit"
+    )
+    # The PATH rule's verdict is untouched: the literal is still in the lane's vocabulary, and
+    # what refused this tick is the offer, not the path.
+    assert pitfalls_curator._pitfalls_path_rule(
+        " M", REDUCER_REL, systems=frozenset({"elastic", "cmdb"}),
+    ) is None
+
+    # Positive control: one shim row makes the offer, and the identical edit now commits.
+    _shim_batch(paths, n=1)
+    offered = Spawn(edits(curate_execution_md("elastic"), curate_reducer_surface()))
+    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=offered) == 0
+    assert by_surface(offered.handoffs)["reducer"]
+    assert REDUCER_REL in head_files(repo), "the offered edit was refused too"
+
+
+def test_a_perpetually_declined_hold_retires_at_the_ceiling(scene, monkeypatch):
+    """A held reducer row survives being declined, and being declined again, and then LEAVES —
+    on the same `author_max_attempts()` ceiling every other exit from this queue rides on.
+
+    FK-7 made a no-edit reducer tick a first-class outcome and left the rows in the queue,
+    which is right: `lead_pitfalls.md`'s "skip that failure; never invent one" makes declining
+    a correct answer, and PO-R2 makes the undiagnosable reduce the frequent shape. What the
+    hold had no version of was an EXIT. The row satisfied the arrival gate on its own
+    occurrences, was offered, was declined, and came back byte-identical: the wake gate stayed
+    open, `attempts` was never bumped by anything, and the drain re-spawned an LLM curator on
+    every pass with nothing to show for it and no operator signal beyond "held for a later
+    tick". Every other route out of this queue is bounded — `consumed_committed` on a taught
+    row, `consumed_unattributable` plus the graveyard on an undeclared name, the `batch-error:`
+    ceiling on a faulting batch — and the hold was the one that was not.
+
+    So the ceiling is what this pins, and the HOLD is what it does not touch: the row is still
+    there after the first decline and after the second, which is `a_no_edit_reducer_tick_holds_
+    its_rows`' demand and stays true. The attempt is spent only on a tick that actually made
+    the offer.
+    """
+    monkeypatch.setenv("LEARNING_AUTHOR_MAX_ATTEMPTS", "3")
+    repo, paths = scene
+    ids = _shim_batch(paths)
+
+    for tick in (1, 2):
+        assert pitfalls_curator.run_pitfalls(paths=paths, invoke=Spawn(None)) == 0
+        assert queue_ids(paths) == ids, f"the hold did not survive tick {tick}"
+        assert [r.get("attempts") for r in persist.read_pitfalls(paths)] == [tick] * len(ids), (
+            f"the declined offer was not counted on tick {tick}"
+        )
+        assert graveyard_by_id(paths) == {}, f"the row retired early, on tick {tick}"
+
+    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=Spawn(None)) == 0
+    assert queue_ids(paths) == [], "the queue never drains, so the curator re-spawns forever"
+    grave = graveyard_by_id(paths)
+    assert set(grave) == set(ids)
+    for pid in ids:
+        assert grave[pid]["deadletter_reason"] == pitfalls_curator.HELD_CEILING_REASON, (
+            "the retirement is filed as a fault, but the tick worked and the curator declined"
+        )
+    # Conserved, not merely gone: the retirement is terminal through the channel's own ledger.
+    assert {
+        pid: consumed_by_id(paths)[pid]["consumed_category"] for pid in ids
+    } == {pid: "consumed_retired" for pid in ids}
+    assert repo.is_dir()
 
 
 def test_a_reducer_only_batch_still_reaches_the_curator(scene):

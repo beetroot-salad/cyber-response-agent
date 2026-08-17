@@ -180,15 +180,24 @@ def test_an_undeclared_name_retires_naming_itself(paths):
 
 def test_a_ceiling_retirement_names_its_exception_class(tmp_path, monkeypatch):
     """A row retired by the ATTEMPTS CEILING files under `'batch-error:<exception-class-name>'`
-    — the fourth and last member of M9's vocabulary, which is pinned CLOSED at four.
+    — the CLASS is what M9's vocabulary is closed over, and it is the reason's PREFIX.
 
     Two writers append to one `pitfalls.deadletter.jsonl` with two incompatible reason shapes:
-    `_graveyard_dropped_rows`' three named classes, and `drain.retire`'s
-    `deadletter_reason: str(e)` — a raw free-text exception message — from the ceiling path.
-    That ceiling shape is the one a REDUCER row most plausibly gets, because its system is
-    neither missing nor malformed nor undeclared: it is `""` by design after M5′. A human
-    triaging one file sees three named classes and a traceback string, and O2′'s "carries a
-    reason naming its CLASS" stops being true at the writer that produces it most often.
+    `_graveyard_dropped_rows`' named classes, and `drain.retire`'s `deadletter_reason: str(e)`
+    — a raw free-text exception message — from the ceiling path. That ceiling shape is the one
+    a REDUCER row most plausibly gets, because its system is neither missing nor malformed nor
+    undeclared: it is `""` by design after M5′. A human triaging one file sees named classes
+    and a traceback string, and O2′'s "carries a reason naming its CLASS" stops being true at
+    the writer that produces it most often.
+
+    THE MESSAGE RIDES AFTER THE CLASS rather than replacing it (the round's review). Pinning
+    the class as the WHOLE reason closed the vocabulary and lost the diagnosis: a curator that
+    exited rc=124, one that tried to delete a section and one that wrote outside
+    `defender/skills` all raise `LeadAuthorError` and all filed as the same four words, in the
+    one durable record this lane leaves — unread until #903, so the operator log the message
+    also reached is long gone by the time anyone looks. So the demand is on the PREFIX, which
+    is what a reader groups on and what `REASONS` is closed over, exactly as the undeclared
+    class carries its name after the same `:` separator.
 
     `ImportError` is the class FK-10's answerer traced through the guard: it is not in
     `SYSTEMIC_FAULTS`, so it reaches `_retire_pitfalls_batch` → `drain.retire` rather than
@@ -209,10 +218,15 @@ def test_a_ceiling_retirement_names_its_exception_class(tmp_path, monkeypatch):
     drains._drain_pitfalls(paths, _explodes)
 
     entry = graveyard_by_id(paths).get("r:l-003:0", {})
-    assert entry.get("deadletter_reason") == "batch-error:ImportError", (
+    reason = str(entry.get("deadletter_reason", ""))
+    assert reason.startswith("batch-error:ImportError"), (
         "the ceiling path files a raw exception message where every other writer names a class"
     )
-    assert str(entry.get("deadletter_reason", "")).split(":")[0] in REASONS
+    assert reason.split(":")[0] in REASONS
+    assert "the curator module vanished mid-tick" in reason, (
+        "the class survived and the diagnosis did not — the graveyard cannot tell this "
+        "retirement from any other ImportError the lane ever raises"
+    )
     assert queue_ids(paths) == []
 
 

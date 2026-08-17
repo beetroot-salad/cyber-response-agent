@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import difflib
+import re
 import sys
 from collections.abc import Callable
 from functools import partial
@@ -12,10 +13,11 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender import _git
+from defender._corpus import _FENCE_RE
 from defender._frontmatter import FrontmatterError, split_frontmatter
 from defender.learning.author import drain as _author_drain
 from defender.learning.author import shared as _author_shared
-from defender._io import append_jsonl
+from defender._io import TEXT_READ_ERRORS, append_jsonl, read_text_utf8
 from defender._untrusted import wrap
 from defender.learning.core import config as _loop_config
 from defender.learning.core import persist as _loop_persist
@@ -38,7 +40,6 @@ from defender.learning.leads.path_validation import (
     SKILLS_REL,
     _is_system_execution_md,
 )
-from defender.scripts.gather_tools.record_query import BASH_SHIM_QUERY_ID
 
 LEAD_PITFALLS_PROMPT = LEARNING_DIR / "leads" / "lead_pitfalls.md"
 
@@ -52,14 +53,20 @@ REDUCER_REL = "defender/skills/gather/defender-sql.md"
 #: enforces it on the reducer surface; the prompt asks for it on both.
 PITFALLS_SECTION = "## Common pitfalls"
 
+#: A setext heading's underline — `Title` on one line, `===` (H1) or `---` (H2) on the next.
+#: Both outrank `## Common pitfalls`, so `_outline` has to close the section on them the same
+#: way it does on their ATX spellings; matched only after a non-blank, non-heading line, which
+#: is what separates a setext underline from a thematic break.
+_SETEXT_UNDERLINE_RE = re.compile(r"^(?:=+|-+)[ \t]*$")
 
-def _is_reducer_row(row: dict) -> bool:
-    """Is this queued row the REDUCER's mistake rather than a system's?
 
-    EQUALITY with the reserved sentinel (U3), the same predicate `collect_general_failures`
-    routes on — and unconditional in the row's `system`, because a `defender-sql` mistake
-    belongs to `defender-sql` however the reduce happened to be attributed (F1)."""
-    return str(row.get("query_id") or "") == BASH_SHIM_QUERY_ID
+#: Is this queued row the REDUCER's mistake rather than a system's? THE lane predicate, and
+#: bound here rather than restated: `persist` owns it because the merge key and the arrival
+#: gate ask it too, and three modules spelling one question three ways is what let a pre-M5′
+#: attributed reducer row be routed to the reducer surface here, refused the lane there, and
+#: split per-system by the merge (#870, review). Re-exported under the module's own name so
+#: this file's readers still find it where they look for it.
+_is_reducer_row = _loop_persist.is_reducer_row
 
 
 def _failures_of(records: list[dict], *, keep_goal: bool = True) -> list[dict]:
@@ -214,23 +221,88 @@ def _frontmatter_block(text: str) -> str | None:
         return None
 
 
-def _headings(text: str) -> list[str]:
-    return [ln for ln in text.splitlines() if ln.startswith("## ")]
+def _outline(lines: list[str]) -> tuple[list[str], list[str | None]]:
+    """The document's `##` headings, and the section each of its lines sits in.
+
+    One pass for both, because they are one reading of the same structure and two walks are
+    two places for the answers to disagree. Takes the SPLIT lines rather than the text: the
+    section index is positional, so every reader of it already holds the same list and a
+    second split is a second chance for the indices to mean different lines.
+
+    FENCE-AWARE through `_corpus._FENCE_RE`, the corpus walk's own fence, and that is a rule
+    and not a nicety: a fenced block's contents are prose. A curator that retired a real
+    heading and re-planted its text inside a ``` block under `## Common pitfalls` would
+    otherwise have that line counted as the heading surviving — the surviving-sections check
+    passing on a document that no longer carries the section. The HEADING test stays
+    `startswith("## ")` rather than `_corpus._HEADING_RE`: the regex needs a non-empty title,
+    so a bare `## ` line would leave the section open and admit prose after it, and this gate
+    wants the stricter reading.
+
+    A SECTION ALSO CLOSES ON ANYTHING THAT OUTRANKS IT, and that is what makes the placement
+    rule below true rather than nearly true. A walk that only ever opened a section on `## `
+    reads every line after `## Common pitfalls` as being inside it — including an `# H1`, or a
+    setext `Title` over `===`/`---`, which markdown renders as a NEW top-level section that the
+    `##` above no longer owns. That is the whole escape: a bullet is untrusted text on the one
+    file every reduce reads before every attempt, so a curator (or the alert-derived digest
+    driving it) could plant `# How to read this file` at the end and have the gate certify it
+    as landing "under `## Common pitfalls`". Closing on the higher-ranked heading makes such a
+    line land in NO section, which is exactly what the placement rule refuses. A setext
+    underline closes the section from its TITLE line, which this walk has already passed, so
+    the title's own entry is corrected in place.
+    """
+    headings: list[str] = []
+    sections: list[str | None] = []
+    section: str | None = None
+    fenced = False
+    for i, line in enumerate(lines):
+        if _FENCE_RE.match(line.lstrip()):
+            fenced = not fenced
+        elif fenced:
+            pass
+        elif line.startswith("## "):
+            section = line.strip()
+            headings.append(line)
+        elif line.startswith("# "):
+            section = None
+        elif (
+            _SETEXT_UNDERLINE_RE.match(line)
+            and i
+            and lines[i - 1].strip()
+            and not lines[i - 1].startswith("#")
+        ):
+            # Only after a non-blank, non-ATX line: a `---` or `===` run that follows a blank
+            # line is a thematic break, not a heading, and reading it as one would refuse an
+            # ordinary edit.
+            section = None
+            sections[-1] = None
+        sections.append(section)
+    return headings, sections
 
 
-def _added_lines(before: str, after: str) -> list[int]:
-    """The indices, in `after`, of the lines this edit ADDED.
+def _line_ops(
+    old: list[str], new: list[str],
+) -> tuple[list[int], list[int], list[tuple[int, int]]]:
+    """The indices this edit ADDED (in `new`), the ones it REMOVED (in `old`), and the
+    `(old, new)` index pairs of the lines it KEPT.
 
-    A replaced line counts as an addition: the point of the rule below is where new prose
-    lands, and prose that overwrote an existing line landed exactly where that line was."""
-    old, new = before.splitlines(), after.splitlines()
+    A replaced line counts as BOTH added and removed: the rule below is about where new prose
+    lands and about what it displaced, and prose that overwrote an existing line landed
+    exactly where that line was and took it with it. The kept pairs are the third answer the
+    same walk already knows — which surviving line is which — and the re-parenting check needs
+    it to ask where a line that did not change now SITS."""
     added: list[int] = []
-    for tag, _i1, _i2, j1, j2 in difflib.SequenceMatcher(
+    removed: list[int] = []
+    kept: list[tuple[int, int]] = []
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(
         a=old, b=new, autojunk=False,
     ).get_opcodes():
         if tag in ("insert", "replace"):
             added.extend(range(j1, j2))
-    return added
+        if tag in ("delete", "replace"):
+            removed.extend(range(i1, i2))
+        if tag == "equal":
+            kept.extend((i1 + k, j1 + k) for k in range(i2 - i1))
+    return added, removed, kept
 
 
 def _pitfalls_content_rule(repo_root: Path, xy: str, path: str) -> None:
@@ -241,10 +313,16 @@ def _pitfalls_content_rule(repo_root: Path, xy: str, path: str) -> None:
     Scoped to the REDUCER SURFACE, because that is the target this round opens and it is the
     one corpus write target with no correspondence audit (C13, refuted — it is not a
     `verb_roster.model_read_surface`), no scaffold rule (FF-12, `_scaffold_rules` is scoped to
-    `skills/{system}/SKILL.md`) and, until now, no lane content rule. Three things must
+    `skills/{system}/SKILL.md`) and, until now, no lane content rule. Five things must
     survive a curator's tick: the YAML frontmatter block, every `##` section the committed
-    file already carried, and the placement of everything added — under `## Common pitfalls`,
-    created if absent.
+    file already carried, every non-blank line those sections already held, the placement of
+    everything added — under `## Common pitfalls`, created if absent, where "under" is read at
+    the section's real markdown extent, so an added `# H1` or setext heading is OUTSIDE it
+    rather than a line the section swallows — and the BOUNDARY of
+    that section over the lines the document already had. The document is APPEND-ONLY outside
+    that one section, in both directions: a rule that watched only what arrived would admit a
+    tick that emptied every section it left the heading of, and one that watched both but not
+    the boundary would admit a two-tick edit that moved the boundary first.
 
     Markdown INSIDE a bullet is deliberately NOT sanitized. The same untrusted-text-to-corpus
     laundering already exists on every `execution.md` and re-keying it is a round of its own;
@@ -265,28 +343,33 @@ def _pitfalls_content_rule(repo_root: Path, xy: str, path: str) -> None:
         raise LeadAuthorError(
             f"pitfalls curator left {path} unreadable as a file; refusing to commit"
         )
-    current = full.read_text(encoding="utf-8")
+    # Through the pinned reader, and NARROWED: a curator that leaves bytes this gate cannot
+    # decode has failed the same way it fails by leaving a directory, and the refusal has to
+    # reach the caller as this rule's own error rather than as a `UnicodeDecodeError` escaping
+    # the gate into the batch-retire path.
+    try:
+        current = read_text_utf8(full)
+    except TEXT_READ_ERRORS as e:
+        raise LeadAuthorError(
+            f"pitfalls curator left {path} unreadable as UTF-8 text ({e}); refusing to commit"
+        ) from e
     if _frontmatter_block(current) != _frontmatter_block(committed):
         raise LeadAuthorError(
             f"pitfalls curator rewrote {path}'s frontmatter block; refusing to commit "
             "(the reducer surface's metadata is not a pitfalls edit)"
         )
-    survived = _headings(current)
-    lost = [h for h in _headings(committed) if h not in survived]
+    lines, committed_lines = current.splitlines(), committed.splitlines()
+    survived, sections = _outline(lines)
+    committed_headings, committed_sections = _outline(committed_lines)
+    lost = [h for h in committed_headings if h not in survived]
     if lost:
         raise LeadAuthorError(
             f"pitfalls curator dropped section(s) {lost} from {path}; refusing to commit "
             "(a pitfall is appended, never written over the document)"
         )
-    section: str | None = None
-    lines = current.splitlines()
-    sections = []
-    for line in lines:
-        if line.startswith("## "):
-            section = line.strip()
-        sections.append(section)
+    added, removed, kept = _line_ops(committed_lines, lines)
     stray = sorted({
-        lines[i] for i in _added_lines(committed, current)
+        lines[i] for i in added
         if lines[i].strip() and sections[i] != PITFALLS_SECTION
     })
     if stray:
@@ -294,24 +377,106 @@ def _pitfalls_content_rule(repo_root: Path, xy: str, path: str) -> None:
             f"pitfalls curator added {stray} to {path} outside `{PITFALLS_SECTION}`; "
             f"refusing to commit (a pitfall lands in that section, created if absent)"
         )
+    # The other half of "appended, never written over", and it is not the heading check
+    # restated: the headings surviving says nothing about what stood UNDER them. Without this
+    # a tick may empty every existing section, leave the three headings as bare stubs, and
+    # land one bullet under `## Common pitfalls` — a gutted document on the one file EVERY
+    # system's reduce reads before EVERY attempt, admitted by a gate whose whole claim is that
+    # the document survives. Pruning stays legal exactly where the prompt grants it: inside
+    # `## Common pitfalls`, the section this lane owns.
+    erased = sorted({
+        committed_lines[i] for i in removed
+        if committed_lines[i].strip() and committed_sections[i] != PITFALLS_SECTION
+    })
+    if erased:
+        raise LeadAuthorError(
+            f"pitfalls curator removed {erased} from {path} outside `{PITFALLS_SECTION}`; "
+            "refusing to commit (a pitfall is appended, and only that section is pruned "
+            "in place)"
+        )
+    # The BOUNDARY of the lane-owned section, and without it the two checks above are asked
+    # about a scope the curator itself just moved. Planting `## Common pitfalls` mid-document
+    # is ONE added line and both checks admit it — a heading's own section is itself, and no
+    # committed line was touched — but every line between it and the next `##` is now INSIDE
+    # the one section this lane may prune, so the NEXT tick empties a section whose heading
+    # survives and the gutted-document refusal above never fires. So: a line the committed
+    # document already carried may not change which side of that boundary it sits on. Says
+    # nothing about where a HAND-added section lands, which is what keeps the rule reading the
+    # real document rather than a constant.
+    reparented = sorted({
+        committed_lines[i] for i, j in kept
+        if committed_lines[i].strip()
+        and (committed_sections[i] == PITFALLS_SECTION)
+        != (sections[j] == PITFALLS_SECTION)
+    })
+    if reparented:
+        raise LeadAuthorError(
+            f"pitfalls curator moved {reparented} across `{PITFALLS_SECTION}`'s boundary in "
+            f"{path}; refusing to commit (the section is created at the end of the file, "
+            "never planted around prose it does not own)"
+        )
 
 
-def _pitfalls_rule(repo_root: Path, xy: str, path: str, *, systems: frozenset[str]) -> None:
-    """The whole per-path gate: the path half, then the content half on what it admitted.
+def _pitfalls_offer_rule(path: str, *, reducer_offered: bool) -> None:
+    """Was this tick's curator offered the surface it wrote (#870, review)?
 
-    Composed rather than folded, exactly as the sibling lane's `_skills_rule` is: the two
-    halves ask different questions, and the content half must not read a path the path half
-    has already refused."""
+    Asked of the REDUCER LITERAL alone, and it is a different question from the path half's.
+    `_pitfalls_path_rule` adjudicates the lane's VOCABULARY — is this string a path the lane
+    may ever write — and its answer is a constant of the deployment. This asks whether the
+    target was opened on THIS TICK, which is a fact about the batch, so it is neither a
+    property of the path nor something the path rule's signature should have to carry.
+
+    Why it exists: the literal allowance made the reducer surface writable on every tick,
+    including one whose batch held no reducer row at all. The curator's static prompt names
+    that path unconditionally, and each failure's `stderr_digest` — alert-derived text, on the
+    one corpus file EVERY system's reduce reads before EVERY attempt — is in its context. A
+    digest carrying "also record this in <the reducer surface>" was therefore obeyable on a
+    batch of pure system rows, admitted by the gate on the literal, and invisible to FK-7 (which
+    computes `reducer_taught` from the offer and so sees none). Before this round the same
+    path was refused outright. The system half needs no mirror of this: an `execution.md` is
+    already bounded by the DECLARED set, and a curator writing a declared system's file on a
+    tick that did not queue that system is writing a legal document to a legal target.
+    """
+    if path == REDUCER_REL and not reducer_offered:
+        raise LeadAuthorError(
+            f"pitfalls curator wrote {path} on a tick that offered no reducer handoff; "
+            "refusing to commit (the reducer surface is opened by a queued "
+            "defender-sql mistake, never by the prompt alone)"
+        )
+
+
+def _pitfalls_rule(
+    repo_root: Path, xy: str, path: str, *,
+    systems: frozenset[str], reducer_offered: bool,
+) -> None:
+    """The whole per-path gate: may the lane write this path at all, was this tick offered it,
+    and is what the curator wrote still the document.
+
+    Composed rather than folded, exactly as the sibling lane's `_skills_rule` is: the halves
+    ask different questions, and each must not read a path an earlier one has already refused.
+    The OFFER half sits between them — after the vocabulary check, because a path outside the
+    lane's scope is refused by scope whatever the batch held, and before the content check,
+    because a document the curator was never invited to touch is not a document whose diff is
+    worth reading."""
     _pitfalls_path_rule(xy, path, systems=systems)
+    _pitfalls_offer_rule(path, reducer_offered=reducer_offered)
     _pitfalls_content_rule(repo_root, xy, path)
 
 
 def _verify_pitfalls_state(
-    repo_root: Path, baseline_stray: list[str], *, systems: frozenset[str],
+    repo_root: Path, baseline_stray: list[str], *,
+    systems: frozenset[str], reducer_offered: bool,
 ) -> list[str]:
+    """`reducer_offered` is REQUIRED rather than defaulted, and that is the point: a default
+    would have to be one of "every tick may write the reducer surface" (the hole this closes)
+    or "no tick may" (which breaks the lane), and both are wrong for a caller that forgot to
+    pass it. Every call site names the tick it is verifying."""
     return _verify_corpus_scope(
         repo_root, baseline_stray, actor="pitfalls curator",
-        rule=partial(_pitfalls_rule, repo_root, systems=systems),
+        rule=partial(
+            _pitfalls_rule, repo_root,
+            systems=systems, reducer_offered=reducer_offered,
+        ),
     )
 
 
@@ -359,7 +524,7 @@ def _require_adapter_declared_systems(repo_root: Path) -> frozenset[str]:
 
 def _split_batch_by_membership(
     rows: list[dict], batch_ids: list[str], kept: set[str],
-    *, handoffs: list[dict], changed: list[str],
+    *, reducer_offered: bool, changed: list[str],
 ) -> tuple[list[str], list[str]]:
     """The tick's three-way partition, ASYMMETRIC by row class (#870 M8 / FK-7).
 
@@ -375,16 +540,16 @@ def _split_batch_by_membership(
     containing nothing about it — and its queue row is the only record the mistake ever
     produced.
 
-    F3 — WHICH SEAM CARRIES THE CRITERION — IS RESOLVED HERE AS THE HANDOFF LIST (the judge's
-    provisional). The alternatives were a `reducer_emitted: bool` and a builder-computed
-    curated id set; the list keeps the criterion a question about the OFFER THAT WAS ACTUALLY
-    MADE rather than about a re-derivation of it, and leaves this function the single place
-    that answers "was this row curated". `changed` is the second conjunct and rides beside it
-    under either reading.
+    F3 — WHICH SEAM CARRIES THE CRITERION — IS RESOLVED AS THE `reducer_emitted: bool` OF THE
+    THREE F3 NAMED, and it is passed in rather than re-derived from the handoff list here. The
+    round's review is why: the same "was a reducer handoff emitted" question is now also the
+    commit gate's (`_pitfalls_offer_rule`), and two readers deriving one fact from one list
+    twice is the shape that already cost this lane three disagreeing spellings of "is this the
+    reducer's row". One derivation, at the tick's own scope, handed to both. `changed` is the
+    second conjunct and rides beside it under either reading; this function is still the single
+    place that answers "was this row curated".
     """
-    reducer_taught = (
-        any(h.get("surface") == "reducer" for h in handoffs) and REDUCER_REL in changed
-    )
+    reducer_taught = reducer_offered and REDUCER_REL in changed
     committed_ids: list[str] = []
     held_ids: set[str] = set()
     for r in rows:
@@ -438,6 +603,55 @@ def _graveyard_dropped_rows(paths, rows: list[dict], dropped_ids: list[str]) -> 
         )
 
 
+#: The graveyard reason a held reducer row finally retires under. Its own class, beside
+#: `_deadletter_reason`'s three and `drains._retire_pitfalls_batch`' `batch-error:`, because it
+#: is the one retirement that follows no fault at all: the tick worked, the offer was made, and
+#: the curator declined it — which is a legitimate outcome the ceiling exists to bound rather
+#: than an error to diagnose.
+HELD_CEILING_REASON = "reducer-offered-never-taught"
+
+
+def _retire_exhausted_holds(paths, held_ids: list[str]) -> int:
+    """Bump every held row once, and retire the ones that have now been offered too often.
+
+    FK-7 makes a no-edit reducer tick a first-class outcome — `lead_pitfalls.md`'s "skip that
+    failure; never invent one" — and leaves the rows in the queue. What it did not give them is
+    an EXIT. A row the curator can never turn into a concrete fix (PO-R2's own frequent shape,
+    an undiagnosable reduce) satisfied the arrival gate on its own occurrences, was offered,
+    was declined, and came back byte-identical on the next tick: the wake gate stayed open, the
+    curator agent was re-spawned every drain pass, and nothing ever progressed. Measured over
+    consecutive ticks before this: the queue unchanged, `attempts` still unset, one LLM spawn
+    per pass, forever. Every OTHER exit from this queue is bounded — `consumed_committed` on a
+    taught row, `consumed_unattributable` plus the graveyard on an undeclared name, the
+    `batch-error:` ceiling on a faulting batch — and the hold was the one that was not.
+
+    So the hold KEEPS its meaning and gains a ceiling: the row survives being declined, and
+    survives being declined again, and leaves on the same `author_max_attempts()` the rest of
+    the lane retires on, with a durable record naming what happened to it. `drain.retire` is
+    the shared primitive that does exactly this, so the bump, the graveyard entry and the
+    `consumed_retired` ledger row are the channel's own — not a fourth hand-rolled rotation.
+
+    Bumped only on a tick that actually MADE the offer, because that is what this counts. The
+    caller reaches here only past the arrival gate and the spawn, so a row cannot spend an
+    attempt on a tick the curator never saw.
+    """
+    if not held_ids:
+        return 0
+    outcome = _author_drain.retire(
+        channel=paths.pitfalls,
+        batch_ids=held_ids,
+        reason=HELD_CEILING_REASON,
+        max_attempts=_loop_config.author_max_attempts(),
+    )
+    if outcome.retired:
+        _log(
+            f"pitfalls: retired {len(outcome.retired)} held reducer row(s) at the offer "
+            f"ceiling ({_loop_config.author_max_attempts()} tick(s) offered and declined): "
+            f"{list(outcome.retired)}"
+        )
+    return len(outcome.retired)
+
+
 def run_pitfalls(
     *,
     paths: _loop_config.LoopPaths = _loop_config.DEFAULT_PATHS,
@@ -467,8 +681,13 @@ def run_pitfalls(
     # point — the ADAPTER HALF ALONE — resolved ONCE here, before the agent is ever spawned.
     systems = _require_adapter_declared_systems(repo_root)
     handoffs = _build_pitfalls_handoffs(records, systems=systems)
-    # `.get`, never a bare subscript: the reducer entry OMITS `system` (FK-9), so `kept` is
-    # built from the SYSTEM half alone and a reducer handoff contributes no name to it.
+    # ONE derivation of "was the reducer surface opened on this tick", at the tick's own scope,
+    # spent by three readers: the commit gate (`_pitfalls_offer_rule`, which refuses the
+    # literal on a tick that never offered it), FK-7's partition, and the hold's ceiling below.
+    reducer_offered = any(h.get("surface") == "reducer" for h in handoffs)
+    # The `surface` FILTER runs first and is what makes the subscript safe: the reducer entry
+    # OMITS `system` (FK-9), so `kept` is built from the SYSTEM half alone and a reducer
+    # handoff contributes no name to it.
     kept = {str(h["system"]) for h in handoffs if h.get("surface") == "system"}
     # A REDUCER row is excluded from this set whatever it is attributed to: it is routed by
     # its `query_id`, so its system name was never asked a membership question and reporting
@@ -493,7 +712,7 @@ def run_pitfalls(
         # Nothing in this batch could ever be taught — no system entry and no reducer entry —
         # so there is no offer to hold rows against and the whole batch retires.
         _, dropped_ids = _split_batch_by_membership(
-            rows, batch_ids, kept, handoffs=handoffs, changed=[],
+            rows, batch_ids, kept, reducer_offered=reducer_offered, changed=[],
         )
         _log(
             f"{len(records)} queued pitfall(s) in {len(batch_ids)} row(s) but none named a "
@@ -525,7 +744,9 @@ def run_pitfalls(
             f"pitfalls curator exited rc={rc}; leaving queue intact"
         )
 
-    changed = _verify_pitfalls_state(repo_root, baseline_stray, systems=systems)
+    changed = _verify_pitfalls_state(
+        repo_root, baseline_stray, systems=systems, reducer_offered=reducer_offered,
+    )
     sha = None
     if changed:
         sha = _author_shared.commit_corpus(
@@ -537,7 +758,7 @@ def run_pitfalls(
     # AFTER the commit, not before it: FK-7's criterion for a reducer row is the handoff AND
     # the confirmed edit, and `changed` is the only place the second conjunct exists.
     committed_ids, dropped_ids = _split_batch_by_membership(
-        rows, batch_ids, kept, handoffs=handoffs, changed=changed,
+        rows, batch_ids, kept, reducer_offered=reducer_offered, changed=changed,
     )
     if committed_ids:
         _loop_persist.rotate_pitfalls(
@@ -548,11 +769,18 @@ def run_pitfalls(
         _loop_persist.rotate_pitfalls(
             dropped_ids, None, paths=paths, category="consumed_unattributable",
         )
-    held = len(batch_ids) - len(set(committed_ids)) - len(set(dropped_ids))
+    # Every count off the same DISTINCT id sets: `batch_ids` is read from the queue file and
+    # a repeated `pitfall_id` there would otherwise make `held` a difference between a row
+    # count and two id counts, i.e. report rows held that are not.
+    rotated = set(committed_ids) | set(dropped_ids)
+    held_ids = sorted(set(batch_ids) - rotated)
+    retired = _retire_exhausted_holds(paths, held_ids)
     _log(
         f"pitfalls curation done; commit={(sha or 'none')[:12]}, "
         f"taught {len(changed)} surface(s): {changed}, "
-        f"rotated {len(set(committed_ids)) + len(set(dropped_ids))} row(s) out of the queue "
-        f"({len(dropped_ids)} unattributable, {held} held for a later tick)"
+        f"rotated {len(rotated)} row(s) out of the queue "
+        f"({len(set(dropped_ids))} unattributable, {len(held_ids)} held for a later tick"
+        + (f", {retired} retired at the hold ceiling" if retired else "")
+        + ")"
     )
     return 0

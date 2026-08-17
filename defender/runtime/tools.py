@@ -270,7 +270,9 @@ def _record_shim_failure(
             # The system of the PAYLOAD the reducer read, never one parsed out of the argv —
             # the argv names `defender-sql`, and a row saying `system: "sql"` would send the
             # curator at a `skills/sql/execution.md` that must never exist. `""` when the
-            # command opened no run payload: `collect_general_failures` skips a systemless row.
+            # command opened no run payload; since #870 M5′ the attribution no longer decides
+            # the row's fate either way — `collect_general_failures` routes it by its sentinel
+            # `query_id` onto the reducer surface and normalizes this field to `""` there.
             system=record_query.system_for_payload_operands(
                 deps.run_dir, _opened_operands(deps, decision),
             ),

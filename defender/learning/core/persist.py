@@ -30,6 +30,11 @@ from defender.learning.core.config import (
     make_logger,
 )
 from defender.learning.core.validate import _benign_outcome_keyword, _outcome_keyword
+# The reducer lane's routing key, at its owner (#870). Imported for the VALUE, the same way
+# `lead_extraction` and `pitfalls_curator` take it: the three seams that ask "is this the
+# reducer's row" have to compare the same literal, and a second spelling of it here is exactly
+# the drift `is_reducer_row` was introduced to end.
+from defender.scripts.gather_tools.record_query import BASH_SHIM_QUERY_ID
 
 
 
@@ -320,20 +325,57 @@ def _digest_diagnosis(digest: str) -> str:
     return _EXIT_ENVELOPE.sub("", digest, count=1)
 
 
+def is_reducer_row(row: dict) -> bool:
+    """Is this queued row the REDUCER's mistake rather than a system's?
+
+    THE ONE SPELLING, and it lives here because three seams ask it and they were three
+    different questions until #870's review: `pitfalls_curator._is_reducer_row` asked the
+    sentinel, `pitfalls_lane_is_open` asked `system == ""`, and `pitfall_key` did not ask at
+    all. The three disagreed on exactly one population — a row queued BEFORE M5′ deployed,
+    which carries the system its payload was attributed to AND the sentinel id — so the same
+    row was routed to the reducer surface by one reader, refused the lane by another, and
+    split into a record per attributed system by the third.
+
+    EQUALITY with the reserved sentinel (U3). It is the `query_id` half of the predicate
+    `lead_extraction.collect_general_failures` routes on; the `is_sentinel` half is the
+    projection's verdict on a QUERIES-TABLE row and is not a field the queue carries, so this
+    is the strongest form a queue reader can ask. Unconditional in the row's `system`, because
+    a `defender-sql` mistake belongs to `defender-sql` however the reduce happened to be
+    attributed (F1) — which is the whole content of the disagreement above.
+    """
+    return str(row.get("query_id") or "") == BASH_SHIM_QUERY_ID
+
+
 def pitfall_key(row: dict) -> tuple[str, str]:
     """The identity of a MISTAKE, which is not the identity of a failing row (#840).
 
-    `(system, stderr_digest)`. The digest is the adapter's own diagnosis of what went wrong
-    and is what `lead_pitfalls.md` step 2 reads to name the mistake and its fix, so two rows
-    carrying the same one in the same system are the same lesson however differently the
-    agent phrased the query that provoked it — which is exactly the l-003 shape: eight turns
-    varying the SQL against one unchanging `Binder Error`. `query_id` is deliberately OUT of
-    the key: two coined queries that earn the identical rejection teach one bullet, and
-    every bash-shim row carries the same sentinel id anyway.
+    `(owner, stderr_digest)`, where the OWNER is the surface the lesson would be taught on:
+    the reducer sentinel for a reducer row (#870), the stripped system name otherwise. It was
+    `system` alone, and that spelling split and merged the wrong rows in both directions once
+    the reducer surface became a second target. A pre-M5′ reducer row still attributed to the
+    system it reduced and a post-M5′ one carrying `""` are ONE diagnosis of ONE `defender-sql`
+    mistake and were
+    two records — handing the curator the same bullet twice on the entry whose whole purpose
+    is that it collects them. Converse, and worse: a system row and a reducer row that happen
+    to share a digest were ONE record, whose fate was then decided by whichever of the two the
+    merge kept as exemplar — so a reducer lesson could be taught onto that system's
+    `execution.md` while its own queue row was held. The sentinel is collision-free as an
+    owner name because
+    `is_system_name` admits no `∅`, so no declared system can ever spell it.
 
-    `system` is STRIPPED, because `_build_pitfalls_handoffs` groups on the stripped value:
-    keys coarser than the grouping would hand the curator two entries it then reads as two
-    bullets, which is the one thing the collapse exists to prevent.
+    The digest is the adapter's own diagnosis of what went wrong
+    and is what `lead_pitfalls.md` step 2 reads to name the mistake and its fix, so two rows
+    carrying the same one under the same owner are the same lesson however differently the
+    agent phrased the query that provoked it — which is exactly the l-003 shape: eight turns
+    varying the SQL against one unchanging `Binder Error`. `query_id` is deliberately out of
+    the key as an IDENTITY: two coined queries that earn the identical rejection teach one
+    bullet. It is read only to answer WHICH SURFACE owns the lesson, which is a different
+    question and the one `is_reducer_row` exists for.
+
+    The system name is STRIPPED, because `_build_pitfalls_handoffs` groups on the stripped
+    value: keys coarser than the grouping would hand the curator two entries it then reads as
+    two bullets, which is the one thing the collapse exists to prevent. The reducer half needs
+    no such agreement — the builder collects every reducer record into ONE entry.
 
     A row whose digest carries NO diagnosis — absent, blank, or nothing but the adapter's
     `exit=N;` envelope, which an adapter that fails with an empty stderr writes on every
@@ -343,11 +385,14 @@ def pitfall_key(row: dict) -> tuple[str, str]:
     curated. `is_content_less`, not `.strip()`, so a digest of zero-width filler cannot
     read as a diagnosis either (#722's rule, same reason).
     """
-    system = str(row.get("system") or "").strip()
+    owner = (
+        BASH_SHIM_QUERY_ID if is_reducer_row(row)
+        else str(row.get("system") or "").strip()
+    )
     digest = str(row.get("stderr_digest") or "")
     if is_content_less(_digest_diagnosis(digest)):
-        return (system, "\x00" + str(row.get("pitfall_id") or ""))
-    return (system, digest)
+        return (owner, "\x00" + str(row.get("pitfall_id") or ""))
+    return (owner, digest)
 
 
 def _occurrences(row: dict) -> int:
@@ -387,8 +432,19 @@ def pitfalls_lane_is_open(records: list[dict], threshold: int) -> bool:
     tick gate and `drains._has_lead_author_work`' wake gate.
 
     The DISTINCT COUNT of merged records reaching the threshold, every record included and
-    systemless ones with them, EXACTLY AS BEFORE — **or** some record whose `system` is `""`
-    carrying `occurrences >= threshold` on its own.
+    systemless ones with them, EXACTLY AS BEFORE — **or** some REDUCER record carrying
+    `occurrences >= threshold` on its own.
+
+    "Reducer record" is `is_reducer_row`, the lane's one spelling, and FK-3's own `system == ""`
+    is what that replaces. The two agree on every row `collect_general_failures` has minted
+    since M5′, which normalizes `system` to `""`; they disagree on the population `run_pitfalls`
+    names in its own comment — rows queued BEFORE M5′ deployed, which still carry the system
+    their payload was attributed to. Under the narrower spelling such a row was routed to the
+    reducer surface by every other seam and yet could never open the lane on its own
+    occurrences, so the round's own motivating incident (one unchanging `Binder Error` under
+    eight varied attempts against one attributed envelope) sat in the queue untaught — the exact
+    unreachability FK-3 was added to close. Asking the routing predicate is what makes the gate
+    and the routing one decision.
 
     The disjunct is ADDED; nothing is removed. It exists because the count alone was
     anti-correlated with evidence quality on the reducer lane: the round's motivating incident
@@ -401,10 +457,7 @@ def pitfalls_lane_is_open(records: list[dict], threshold: int) -> bool:
     """
     if len(records) >= threshold:
         return True
-    return any(
-        not str(r.get("system") or "").strip() and _occurrences(r) >= threshold
-        for r in records
-    )
+    return any(is_reducer_row(r) and _occurrences(r) >= threshold for r in records)
 
 
 def append_pitfalls(rows: list[dict], *, paths: LoopPaths = DEFAULT_PATHS) -> int:

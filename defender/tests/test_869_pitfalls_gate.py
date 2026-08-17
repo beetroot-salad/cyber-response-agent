@@ -130,7 +130,8 @@ def test_pitfalls_path_rule_refuses_an_undeclared_directory(tmp_path):
     write(repo / SKILLS_REL / "fakesys" / "execution.md", "# fakesys\n")
     before = head_files(repo)
     with pytest.raises(LeadAuthorError):
-        pitfalls_curator._verify_pitfalls_state(repo, baseline_stray=[], systems=DECLARED)
+        pitfalls_curator._verify_pitfalls_state(
+            repo, baseline_stray=[], systems=DECLARED, reducer_offered=False)
     assert head_files(repo) == before
 
 

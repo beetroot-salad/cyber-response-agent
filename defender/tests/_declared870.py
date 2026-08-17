@@ -23,6 +23,13 @@ code's own wherever the code already owns one; the two new ones are marked NEW.
 * `pitfalls_curator._pitfalls_path_rule(xy, path, *, systems)` — signature UNCHANGED. M7 adds
   one literal allowance for `REDUCER_REL` which **falls through** to the delete branch rather
   than returning early (FK-1): every `D`-carrying status shape still raises on that path.
+* `pitfalls_curator._pitfalls_offer_rule(path, *, reducer_offered)` — **NEW**, and it is the
+  ROUND'S REVIEW rather than its original spec. M7's allowance is a fact about the lane's
+  VOCABULARY and so is constant across ticks, which made the reducer surface writable on a
+  tick whose batch held no reducer row at all — while the curator's static prompt names that
+  path unconditionally and every failure's alert-derived `stderr_digest` sits in its context.
+  The offer is a fact about the BATCH, so it is asked at its own seam and the path rule's
+  signature and verdict are untouched. Composed BETWEEN the path half and the content half.
 * `pitfalls_curator._pitfalls_content_rule(repo_root, xy, path)` — **NEW** (FK-2), the mirror
   of `lead_author._skills_content_rule(repo_root, resolver, xy, path)`: the content half of
   the gate, composed AFTER the path half and reached through `_verify_pitfalls_state`. A
@@ -44,11 +51,29 @@ code's own wherever the code already owns one; the two new ones are marked NEW.
   below), and the two human-visible records (FK-6) — the operator log names the reducer
   surface on a tick that taught it, and the commit message stops saying "per-system
   execution.md" unconditionally.
+* `persist.is_reducer_row(row)` — **NEW**, the round's review, and the reason it exists is that
+  "is this the reducer's row" was spelled three ways in three modules and the three disagreed:
+  `pitfalls_curator` asked the sentinel `query_id`, `pitfalls_lane_is_open` asked
+  `system == ""`, and `pitfall_key` did not ask at all. They agree on every row minted since
+  M5′ (which normalizes `system` to `""`) and disagree on exactly the population `run_pitfalls`
+  names in its own comment — rows queued BEFORE M5′ deployed, still carrying the system their
+  payload was attributed to. `persist` owns it because the merge key and the arrival gate both
+  ask it; `pitfalls_curator._is_reducer_row` re-exports it under the name its readers look for.
+* `persist.pitfall_key(row)` — return shape UNCHANGED (`tuple[str, str]`), first component
+  REDEFINED: the OWNER, i.e. the surface the lesson is taught on — the reducer sentinel for a
+  reducer row, the stripped system name otherwise. It was `system` alone, which both SPLIT one
+  `defender-sql` diagnosis across the systems that provoked it (two entries on the one handoff
+  that exists to collect them) and MERGED a system row with a reducer row sharing a digest,
+  leaving the surface the lesson reached to whichever the merge kept as exemplar. The sentinel
+  cannot collide with a system name because `is_system_name` admits no `∅`.
 * THE TICK GATE AND THE WAKE GATE, one criterion at two readers (FK-3), ADDITIVE:
   `pitfalls_curator.run_pitfalls` and `drains._has_lead_author_work` both open the lane when
   the DISTINCT count of merged records reaches the threshold — every record, systemless ones
-  included, EXACTLY AS TODAY — **or** when some record whose `system` is `""` carries
-  `occurrences >= threshold` on its own. FK-3 adds a disjunct; it removes nothing. That is
+  included, EXACTLY AS TODAY — **or** when some REDUCER record carries `occurrences >=
+  threshold` on its own. FK-3 wrote that disjunct as `system == ""`; the round's review spells
+  it `is_reducer_row`, so the gate and the routing are one decision and the pre-M5′ attributed
+  row — the round's own motivating incident — can open the lane it is already routed to. FK-3
+  adds a disjunct; it removes nothing. That is
   what makes the one eight-times-repeated diagnosed mistake reachable (one record, count 1,
   occurrences 8) while leaving the SYSTEM lane's arrival condition untouched — a queue of two
   declared-system mistakes plus a reducer record still clears a threshold of 3 on the count
@@ -61,18 +86,32 @@ code's own wherever the code already owns one; the two new ones are marked NEW.
   silently raised the system lane's own bar, which is not FK-3's decision to make.
 * THE PARTITION, ASYMMETRIC (FK-7). System rows keep `kept`-membership, unchanged. A shim row
   is curated only when a reducer handoff was emitted AND the tick's `changed` list contains
-  `REDUCER_REL`; a handoff without that edit leaves its rows IN THE QUEUE — neither rotated
-  nor graveyarded. Which seam carries the condition (`_split_batch_by_membership`'s input, a
-  flag, or a builder-computed id set) is fork F3 and is deliberately NOT pinned: every demand
-  here observes `run_pitfalls`' own outputs — the queue file, the consumed ledger, the
-  deadletter — so the implementer keeps F3's choice.
+  `REDUCER_REL`; a handoff without that edit leaves its rows IN THE QUEUE. Which seam carries
+  the condition (`_split_batch_by_membership`'s input, a flag, or a builder-computed id set) is
+  fork F3 and is deliberately NOT pinned: every demand here observes `run_pitfalls`' own
+  outputs — the queue file, the consumed ledger, the deadletter — so the implementer keeps
+  F3's choice. (Resolved in code as the flag, because the offer rule above needs the same fact
+  and one derivation serving both readers is what this round's review was mostly about.)
+* THE HOLD IS BOUNDED — the round's review, correcting FK-7's "neither rotated nor
+  graveyarded". A held row keeps that status for `author_max_attempts()` offers and then
+  retires through `drain.retire` with `deadletter_reason` `reducer-offered-never-taught`. FK-7
+  described the hold's MEANING correctly and gave it no exit: a row the curator can never turn
+  into a concrete fix (PO-R2's frequent shape) satisfied the arrival gate on its own
+  occurrences, was offered, was declined, and returned byte-identical — so the wake gate stayed
+  open and the drain re-spawned an LLM curator on every pass, forever, with `attempts` never
+  bumped by anything. Every other exit from this queue was already bounded; this was the one
+  that was not. The reason is its OWN class, not a `batch-error:`, because no fault occurred.
 * `pitfalls_curator._graveyard_dropped_rows(paths, rows, dropped_ids)` — signature UNCHANGED,
   reason string per CLASS (M9): `no-system`, `malformed-system`, `undeclared-system:<name>`,
   in place of the one false `"system not in the declared adapter set"` all three share today.
 * `persist.rotate_pitfalls(..., category=...)` — the uncurated category becomes
   `consumed_unattributable` (F4).
-* `drains._retire_pitfalls_batch` retires with `reason=f"batch-error:{type(e).__name__}"`
-  (FK-11), the fourth and last member of the deadletter vocabulary.
+* `drains._retire_pitfalls_batch` retires with `reason=f"batch-error:{type(e).__name__}: {e}"`,
+  truncated (FK-11, widened by the round's review). The `batch-error:<class>` PREFIX is FK-11's
+  closed vocabulary and is what a reader groups on; the message rides after the same `:` the
+  undeclared class already carries its name after. The class alone filed a timed-out spawn, a
+  refused scope and an attempted section deletion — all `LeadAuthorError` — as one
+  indistinguishable string, in the one durable record this lane leaves.
 * THE SHIM EXIT TRANSLATION (FK-15): an exit code the translation table does not map — a
   signal kill, 137 — must not reach the queue as an agent-fixable lesson. Whether
   `tools._shim_exit_code` or `circuit_breaker.error_class_for_exit` grows the case is the

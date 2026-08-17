@@ -295,11 +295,19 @@ def test_pitfalls_batch_retires_at_the_ceiling(tmp_path: Path, monkeypatch):
     grave = h.graveyard(paths.pitfalls)
     assert h.pending(paths.pitfalls) == []
     assert [r.get("attempts") for r in grave] == [3, 3]
-    # #870 FK-11: the ceiling path files the exception's CLASS, not its message — two writers
-    # append to one `pitfalls.deadletter.jsonl`, and a raw `str(e)` beside
-    # `_graveyard_dropped_rows`' named classes leaves a human triaging that file with three
-    # classes and a traceback string.
-    assert grave[0]["deadletter_reason"] == "batch-error:AuthorError"
+    # #870 FK-11: the ceiling path files `batch-error:<class>` — two writers append to one
+    # `pitfalls.deadletter.jsonl`, and a bare `str(e)` beside `_graveyard_dropped_rows`' named
+    # classes leaves a human triaging that file with three classes and a traceback string.
+    # The PREFIX is what closes the vocabulary, so it is pinned as a prefix; the MESSAGE rides
+    # after the same `:` separator the undeclared class already carries its name after, because
+    # the class alone made a timed-out spawn, a refused scope and an attempted section deletion
+    # — all `LeadAuthorError` — the same four indistinguishable words in the one durable record
+    # this lane leaves.
+    reason = grave[0]["deadletter_reason"]
+    assert reason.startswith("batch-error:AuthorError"), reason
+    assert "pitfalls curation failed" in reason, (
+        "the graveyard kept the class and lost the diagnosis"
+    )
 
 
 def test_pitfalls_retirement_removes_batch_ids_not_the_whole_queue(tmp_path: Path, monkeypatch):

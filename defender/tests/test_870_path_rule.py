@@ -4,10 +4,18 @@ Every test here is one demand of `spec-flow/specs/spec_graph_870.yaml`, named af
 demand's `discharged_by` pointer and carrying its prose in its docstring. The seam contract
 lives in `defender/tests/_declared870.py`.
 
-`_pitfalls_path_rule` is the SOLE gate on the reducer surface. G13 (executed) settled that:
-the curator agent's own write grant compiles to `<skills dir>/[^\\x00]*\\.md` and matches every
-`.md` under `defender/skills` at any depth, including this file — so an identity disagreement
-between the two layers is a BYPASS, not a defence-in-depth gap.
+`_pitfalls_path_rule` is the sole gate on the reducer surface AT THE PERMISSION LAYER, which is
+what G13 (executed) settled: the curator agent's own write grant compiles to
+`<skills dir>/[^\\x00]*\\.md` and matches every `.md` under `defender/skills` at any depth,
+including this file — so an identity disagreement between the two layers is a BYPASS, not a
+defence-in-depth gap. Every demand here is about that identity and is unchanged.
+
+It is NOT the sole gate on the commit. The round's review added two more, and they ask
+questions this rule deliberately does not: `_pitfalls_offer_rule` asks whether THIS TICK was
+offered the surface (a fact about the batch, not about the path — `test_870_partition.py::
+test_an_unoffered_reducer_edit_is_refused`), and `_pitfalls_content_rule` asks whether what was
+written is still the document (FK-2, `test_870_handoff.py`). A path rule's verdict is a
+constant of the deployment, so neither belongs here.
 """
 from __future__ import annotations
 

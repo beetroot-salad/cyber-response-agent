@@ -278,13 +278,24 @@ def _retire_pitfalls_batch(paths: LoopPaths, batch_ids: list[str], e: Exception)
     drain.retire(
         channel=paths.pitfalls,
         batch_ids=batch_ids,
-        # `batch-error:<class>`, not `str(e)` (#870 FK-11): two writers append to one
-        # `pitfalls.deadletter.jsonl`, and a raw exception message beside
-        # `_graveyard_dropped_rows`' three named classes leaves a human triaging that file
-        # with three classes and a traceback string. This is the shape a REDUCER row most
-        # plausibly gets — its system is neither missing nor malformed nor undeclared, it is
-        # `""` by design — so the class name is what keeps the vocabulary closed at four.
-        reason=f"batch-error:{type(e).__name__}",
+        # `batch-error:<class>: <message>` (#870 FK-11, widened by the round's review).
+        #
+        # FK-11's decision was that two writers append to one `pitfalls.deadletter.jsonl` and
+        # a raw `str(e)` beside `_graveyard_dropped_rows`' three named classes leaves a human
+        # triaging that file with three classes and a traceback string. That holds, and the
+        # PREFIX is what carries it: `batch-error:<class>` is still the vocabulary — closed,
+        # groupable, one member per fault class beside `_graveyard_dropped_rows`' three and the
+        # hold ceiling's `reducer-offered-never-taught` — exactly as the undeclared class
+        # carries its name after the same `:` separator.
+        #
+        # What the class ALONE cost was the diagnosis. A curator that exited rc=124, one that
+        # tried to delete a section, and one that wrote outside `defender/skills` all raise
+        # `LeadAuthorError` and all filed as the identical four words, so the graveyard — the
+        # only durable record this lane leaves, unread until #903 — could not tell a timed-out
+        # spawn from an attempted gutting. The message survived solely in the transient
+        # operator log. Truncated, because a reason is a label and a row is not a place to
+        # store a traceback.
+        reason=f"batch-error:{type(e).__name__}: {str(e)[:200]}",
         max_attempts=author_max_attempts(),
     )
 
