@@ -94,7 +94,13 @@ code's own wherever the code already owns one; the two new ones are marked NEW.
   and one derivation serving both readers is what this round's review was mostly about.)
 * THE HOLD IS BOUNDED — the round's review, correcting FK-7's "neither rotated nor
   graveyarded". A held row keeps that status for `author_max_attempts()` offers and then
-  retires through `drain.retire` with `deadletter_reason` `reducer-offered-never-taught`. FK-7
+  retires through `drain.retire` with `deadletter_reason` `reducer-offered-never-taught`,
+  counted on its OWN row field (`pitfalls_curator.OFFERS_DECLINED_KEY`) via `drain.retire`'s
+  `counter_key`. Not on the shared `attempts`, which is the lane's FAULT counter and is bumped
+  for the whole batch by `_retire_pitfalls_batch` on any tick that raised: one counter serving
+  both ceilings makes each arrive early in the other's traffic, and two infra-faulting ticks
+  would spend a freshly-queued row's whole offer budget so that its FIRST decline retired it —
+  the loss FK-7's hold exists to prevent, reintroduced by the bound meant to complete it. FK-7
   described the hold's MEANING correctly and gave it no exit: a row the curator can never turn
   into a concrete fix (PO-R2's frequent shape) satisfied the arrival gate on its own
   occurrences, was offered, was declined, and returned byte-identical — so the wake gate stayed

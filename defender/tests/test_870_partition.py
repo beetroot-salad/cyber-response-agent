@@ -276,9 +276,9 @@ def test_a_perpetually_declined_hold_retires_at_the_ceiling(scene, monkeypatch):
     for tick in (1, 2):
         assert pitfalls_curator.run_pitfalls(paths=paths, invoke=Spawn(None)) == 0
         assert queue_ids(paths) == ids, f"the hold did not survive tick {tick}"
-        assert [r.get("attempts") for r in persist.read_pitfalls(paths)] == [tick] * len(ids), (
-            f"the declined offer was not counted on tick {tick}"
-        )
+        assert [
+            r.get(pitfalls_curator.OFFERS_DECLINED_KEY) for r in persist.read_pitfalls(paths)
+        ] == [tick] * len(ids), f"the declined offer was not counted on tick {tick}"
         assert graveyard_by_id(paths) == {}, f"the row retired early, on tick {tick}"
 
     assert pitfalls_curator.run_pitfalls(paths=paths, invoke=Spawn(None)) == 0
@@ -294,6 +294,54 @@ def test_a_perpetually_declined_hold_retires_at_the_ceiling(scene, monkeypatch):
         pid: consumed_by_id(paths)[pid]["consumed_category"] for pid in ids
     } == {pid: "consumed_retired" for pid in ids}
     assert repo.is_dir()
+
+
+def test_a_faulting_tick_does_not_spend_the_offer_budget(scene, monkeypatch):
+    """The hold's ceiling counts DECLINES. A tick that raised is not a decline, and must not
+    bring a row any closer to retiring as `reducer-offered-never-taught`.
+
+    The ceiling above was first written on `drain.retire`'s default `attempts`, which is the
+    lane's FAULT counter — `drains._retire_pitfalls_batch` bumps it for every row in the batch
+    on any tick that raised, whether or not that row was ever offered anything. One counter
+    serving both ceilings makes each arrive early in the other's traffic, and the direction
+    that bites is this one: two infra-faulting ticks spend a freshly-queued row's whole offer
+    budget, so its FIRST decline retires it terminally with its lesson never taught. That is
+    verbatim the loss FK-7's hold exists to prevent, reintroduced by the bound meant to
+    complete it — and it is invisible in the ceiling demand above, whose ticks all decline.
+
+    So the two counters are driven apart here: faults accumulate on `attempts` while the offer
+    budget stays untouched, and the row still gets its full complement of declines afterwards.
+    The converse (a decline not spending the fault budget) rides on the same separation.
+    """
+    monkeypatch.setenv("LEARNING_AUTHOR_MAX_ATTEMPTS", "3")
+    _repo, paths = scene
+    ids = _shim_batch(paths, n=1)
+
+    def _faulting(_paths, box=None):
+        raise ImportError("the curator module vanished mid-tick")
+
+    for tick in (1, 2):
+        drains._drain_pitfalls(paths, _faulting)
+        assert queue_ids(paths) == ids, f"the faulting tick {tick} retired the row early"
+    rows = persist.read_pitfalls(paths)
+    assert [r.get("attempts") for r in rows] == [2], "the fault counter did not move"
+    assert [r.get(pitfalls_curator.OFFERS_DECLINED_KEY) for r in rows] == [None], (
+        "a tick that never offered the row spent its offer budget"
+    )
+
+    # The row now gets its FULL complement of declines — the third is what retires it, not the
+    # first riding on two unrelated faults.
+    for tick in (1, 2):
+        assert pitfalls_curator.run_pitfalls(paths=paths, invoke=Spawn(None)) == 0
+        assert queue_ids(paths) == ids, f"the row retired on decline {tick} of 3"
+        assert [
+            r.get(pitfalls_curator.OFFERS_DECLINED_KEY) for r in persist.read_pitfalls(paths)
+        ] == [tick]
+        assert graveyard_by_id(paths) == {}
+
+    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=Spawn(None)) == 0
+    assert queue_ids(paths) == [], "the offer ceiling stopped bounding the hold"
+    assert set(graveyard_by_id(paths)) == set(ids)
 
 
 def test_a_reducer_only_batch_still_reaches_the_curator(scene):

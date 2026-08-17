@@ -140,6 +140,7 @@ def retire(
     batch_ids: list[str],
     reason: str,
     max_attempts: int,
+    counter_key: str = "attempts",
     timeout_seconds: int | None = None,
 ) -> RetireOutcome:
     """Bump every named row by one; retire the rows now at or over the ceiling.
@@ -148,6 +149,17 @@ def retire(
     a requeue — and the ceiling is consulted only here, i.e. only after an observed
     failure. A row that arrives already over the ceiling rides through a clean tick
     untouched.
+
+    `counter_key` NAMES WHAT IS BEING COUNTED, and it exists because one channel came to have
+    two independent reasons to bump a row and no way to tell them apart. `attempts` — the
+    default, and every caller's answer but one — counts FAULTS: ticks that raised. The pitfalls
+    lane also bounds a row that the curator was OFFERED and declined, which is not a fault at
+    all (#870's review), and folding both into `attempts` made each ceiling arrive early in the
+    other's traffic: two infra-faulting ticks would spend a freshly-queued row's whole offer
+    budget, so its FIRST decline retired it terminally with its lesson never taught — verbatim
+    the loss FK-7's hold was resolved to close. Two counters, two ceilings, one primitive; the
+    graveyard's own `attempts` slot still reports whichever count drove the retirement, so the
+    record keeps its ONE shape and the other counter rides along inside `row`.
 
     Ordering is decision 3's: the graveyard entry lands FIRST, then the row is written into
     the consumed ledger by the same locked rotation that rewrites the queue. The ledger
@@ -171,10 +183,10 @@ def retire(
             rid = row.get(key)
             if not isinstance(rid, str) or rid not in ids:
                 continue
-            attempts = int(row.get("attempts") or 0) + 1
+            attempts = int(row.get(counter_key) or 0) + 1
             bumped[rid] = attempts
             rec = dict(row)
-            rec["attempts"] = attempts
+            rec[counter_key] = attempts
             (retired if attempts >= max_attempts else survivors).append(rec)
         if retired:
             append_jsonl(  # lint-unguarded-tree-write: ok — learning_queue sidecar, host-side, outside every box mount
@@ -182,12 +194,15 @@ def retire(
                 [
                     {
                         key: rec[key],
-                        "attempts": rec["attempts"],
+                        # Whichever count reached ITS ceiling, under the slot every channel's
+                        # reader already knows. A row bumped on the other counter too keeps
+                        # that one inside `row`, where it is provenance rather than the verdict.
+                        "attempts": rec[counter_key],
                         "deadletter_reason": reason,
                         # The retired work itself, nested rather than spread: a graveyard
                         # entry has ONE shape on every channel, so the record is readable
                         # without knowing which queue produced it.
-                        "row": {k: v for k, v in rec.items() if k != "attempts"},
+                        "row": {k: v for k, v in rec.items() if k != counter_key},
                     }
                     for rec in retired
                 ],

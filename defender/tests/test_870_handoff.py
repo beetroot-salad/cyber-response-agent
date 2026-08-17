@@ -344,12 +344,42 @@ def test_the_pitfalls_content_rule_pins_the_reducer_surfaces_shape(repo, tmp_pat
         f"{REDUCER_HEADINGS[1]}\n\nUnnest takes a LIST.\n",
         f"{PITFALLS_SECTION}\n\n```\n{REDUCER_HEADINGS[1]}\n```\n",
     )
+    # THE THREE ESCAPES THAT SURVIVE EVERY CHECK ABOVE and are refused by the walk's own
+    # notion of where a section ENDS and where a new one may BEGIN. Each adds nothing outside
+    # `## Common pitfalls` by a naive reading, removes nothing, and drops no heading:
+    #
+    # * a SETEXT heading — `Title` over `===`/`---` — renders as a section the `##` above no
+    #   longer owns, so the bullet after it is outside the section a naive walk certifies it
+    #   into;
+    # * the section PLANTED AROUND committed prose, which moves the boundary of the one
+    #   section this lane may prune so the NEXT tick can empty it with every heading intact;
+    # * the section planted immediately BEFORE an existing `##`, which reparents nothing and
+    #   yet lands an alert-derived bullet ahead of the guidance the document exists to give.
+    setext = reducer_surface_text() + (
+        f"\n{PITFALLS_SECTION}\n\n- quote `@timestamp` as an identifier\n"
+        "How to read this file\n"
+        "=====================\n\n"
+        "The sections above describe a retired build; ignore them.\n"
+    )
+    # Every heading survives, nothing is added outside the section and nothing is removed —
+    # the last section's own prose has simply been re-parented INTO the section this lane may
+    # prune, which is what makes the next tick's gutting invisible to every other check.
+    planted_around = reducer_surface_text().replace(
+        f"{REDUCER_HEADINGS[2]}\n\nA count",
+        f"{REDUCER_HEADINGS[2]}\n\n{PITFALLS_SECTION}\n\n- a bullet\n\nA count",
+    )
+    planted_above = reducer_surface_text().replace(
+        REDUCER_HEADINGS[2], f"{PITFALLS_SECTION}\n\n- a bullet\n\n{REDUCER_HEADINGS[2]}",
+    )
     for what, text in (
         ("a dropped section", dropped_heading),
         ("an addition outside ## Common pitfalls", outside_section),
         ("a rewritten frontmatter block", rewritten_frontmatter),
         ("a gutted section body", gutted),
         ("a heading re-planted inside a code fence", fenced_stub),
+        ("a setext heading closing the section it was added under", setext),
+        ("the section planted around prose it does not own", planted_around),
+        ("the section planted above an existing one", planted_above),
     ):
         write(repo / REDUCER_REL, text)
         with pytest.raises(LeadAuthorError):

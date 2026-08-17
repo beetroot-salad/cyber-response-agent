@@ -221,8 +221,9 @@ def _frontmatter_block(text: str) -> str | None:
         return None
 
 
-def _outline(lines: list[str]) -> tuple[list[str], list[str | None]]:
-    """The document's `##` headings, and the section each of its lines sits in.
+def _outline(lines: list[str]) -> tuple[list[tuple[int, str]], list[str | None]]:
+    """The document's `##` headings as `(line index, text)`, and the section each of its
+    lines sits in.
 
     One pass for both, because they are one reading of the same structure and two walks are
     two places for the answers to disagree. Takes the SPLIT lines rather than the text: the
@@ -249,8 +250,13 @@ def _outline(lines: list[str]) -> tuple[list[str], list[str | None]]:
     line land in NO section, which is exactly what the placement rule refuses. A setext
     underline closes the section from its TITLE line, which this walk has already passed, so
     the title's own entry is corrected in place.
+
+    The heading's INDEX rides beside its text because the placement rule below asks WHERE a
+    heading sits, not just whether it survived — and a second scan for `## ` over the same
+    lines would be a second reading of this structure, i.e. the drift this one pass exists to
+    prevent (a fenced `## …` line is prose here and would be a heading there).
     """
-    headings: list[str] = []
+    headings: list[tuple[int, str]] = []
     sections: list[str | None] = []
     section: str | None = None
     fenced = False
@@ -261,7 +267,7 @@ def _outline(lines: list[str]) -> tuple[list[str], list[str | None]]:
             pass
         elif line.startswith("## "):
             section = line.strip()
-            headings.append(line)
+            headings.append((i, line))
         elif line.startswith("# "):
             section = None
         elif (
@@ -305,33 +311,15 @@ def _line_ops(
     return added, removed, kept
 
 
-def _pitfalls_content_rule(repo_root: Path, xy: str, path: str) -> None:
-    """The content half of the gate (#870 FK-2), the mirror of `lead_author._skills_content_
-    rule`: everything above answers "may the curator touch this path", this answers "is what
-    it wrote still the document".
+def _readable_pair(repo_root: Path, path: str) -> tuple[str, str]:
+    """The document as COMMITTED and as the curator left it, or this rule's own refusal.
 
-    Scoped to the REDUCER SURFACE, because that is the target this round opens and it is the
-    one corpus write target with no correspondence audit (C13, refuted — it is not a
-    `verb_roster.model_read_surface`), no scaffold rule (FF-12, `_scaffold_rules` is scoped to
-    `skills/{system}/SKILL.md`) and, until now, no lane content rule. Five things must
-    survive a curator's tick: the YAML frontmatter block, every `##` section the committed
-    file already carried, every non-blank line those sections already held, the placement of
-    everything added — under `## Common pitfalls`, created if absent, where "under" is read at
-    the section's real markdown extent, so an added `# H1` or setext heading is OUTSIDE it
-    rather than a line the section swallows — and the BOUNDARY of
-    that section over the lines the document already had. The document is APPEND-ONLY outside
-    that one section, in both directions: a rule that watched only what arrived would admit a
-    tick that emptied every section it left the heading of, and one that watched both but not
-    the boundary would admit a two-tick edit that moved the boundary first.
-
-    Markdown INSIDE a bullet is deliberately NOT sanitized. The same untrusted-text-to-corpus
-    laundering already exists on every `execution.md` and re-keying it is a round of its own;
-    what this round takes instead is the prompt requirement that a reducer bullet name the
-    payload shape it applies to, since this is the one file EVERY system's reduce reads before
-    EVERY attempt.
+    Split out of `_pitfalls_content_rule` so the structural comparisons below read as one
+    list of invariants rather than as a list with a four-branch read in front of it: this half
+    asks only "are there two documents to compare", and every one of its answers is the same
+    refusal shape. The frontmatter rides here because it is the one comparison that reads the
+    RAW text rather than the line walk — the rest of the rule works off `splitlines()`.
     """
-    if path != REDUCER_REL or "D" in xy:
-        return
     committed = _git.git_show_file(repo_root, "HEAD", path)
     if committed is None:
         raise LeadAuthorError(
@@ -358,10 +346,42 @@ def _pitfalls_content_rule(repo_root: Path, xy: str, path: str) -> None:
             f"pitfalls curator rewrote {path}'s frontmatter block; refusing to commit "
             "(the reducer surface's metadata is not a pitfalls edit)"
         )
+    return committed, current
+
+
+def _pitfalls_content_rule(repo_root: Path, xy: str, path: str) -> None:
+    """The content half of the gate (#870 FK-2), the mirror of `lead_author._skills_content_
+    rule`: everything above answers "may the curator touch this path", this answers "is what
+    it wrote still the document".
+
+    Scoped to the REDUCER SURFACE, because that is the target this round opens and it is the
+    one corpus write target with no correspondence audit (C13, refuted — it is not a
+    `verb_roster.model_read_surface`), no scaffold rule (FF-12, `_scaffold_rules` is scoped to
+    `skills/{system}/SKILL.md`) and, until now, no lane content rule. Five things must
+    survive a curator's tick: the YAML frontmatter block, every `##` section the committed
+    file already carried, every non-blank line those sections already held, the placement of
+    everything added — under `## Common pitfalls`, created AT THE END if absent, where "under"
+    is read at the section's real markdown extent, so an added `# H1` or setext heading is
+    OUTSIDE it rather than a line the section swallows — and the BOUNDARY of
+    that section over the lines the document already had. The document is APPEND-ONLY outside
+    that one section, in both directions: a rule that watched only what arrived would admit a
+    tick that emptied every section it left the heading of, and one that watched both but not
+    the boundary would admit a two-tick edit that moved the boundary first.
+
+    Markdown INSIDE a bullet is deliberately NOT sanitized. The same untrusted-text-to-corpus
+    laundering already exists on every `execution.md` and re-keying it is a round of its own;
+    what this round takes instead is the prompt requirement that a reducer bullet name the
+    payload shape it applies to, since this is the one file EVERY system's reduce reads before
+    EVERY attempt.
+    """
+    if path != REDUCER_REL or "D" in xy:
+        return
+    committed, current = _readable_pair(repo_root, path)
     lines, committed_lines = current.splitlines(), committed.splitlines()
     survived, sections = _outline(lines)
     committed_headings, committed_sections = _outline(committed_lines)
-    lost = [h for h in committed_headings if h not in survived]
+    survived_text = [h for _, h in survived]
+    lost = [h for _, h in committed_headings if h not in survived_text]
     if lost:
         raise LeadAuthorError(
             f"pitfalls curator dropped section(s) {lost} from {path}; refusing to commit "
@@ -414,6 +434,24 @@ def _pitfalls_content_rule(repo_root: Path, xy: str, path: str) -> None:
             f"pitfalls curator moved {reparented} across `{PITFALLS_SECTION}`'s boundary in "
             f"{path}; refusing to commit (the section is created at the end of the file, "
             "never planted around prose it does not own)"
+        )
+    # AT THE END, which is what the refusal above already says and what `lead_pitfalls.md`
+    # asks for — and until now only the reparenting half of it was enforced. Planting the
+    # heading IMMEDIATELY BEFORE an existing `##` reparents nothing (the next heading closes
+    # it on the same line the committed document already closed it), so the boundary check
+    # admits it and an alert-derived bullet lands ahead of the guidance this document exists
+    # to give — on the one file EVERY system's reduce reads before EVERY attempt, where order
+    # is what the reader spends its attention in. Asked ONLY of a heading THIS TICK ADDED:
+    # where a HAND-added section sits is not this lane's business, the same scope the boundary
+    # check keeps.
+    added_lines = set(added)
+    planted = [i for i, h in survived if i in added_lines and h.strip() == PITFALLS_SECTION]
+    ahead_of = [h for i, h in survived if planted and i > max(planted)]
+    if ahead_of:
+        raise LeadAuthorError(
+            f"pitfalls curator planted `{PITFALLS_SECTION}` in {path} above {ahead_of}; "
+            "refusing to commit (the section is created at the END of the file, so a bullet "
+            "never lands ahead of the guidance the document already carries)"
         )
 
 
@@ -525,8 +563,14 @@ def _require_adapter_declared_systems(repo_root: Path) -> frozenset[str]:
 def _split_batch_by_membership(
     rows: list[dict], batch_ids: list[str], kept: set[str],
     *, reducer_offered: bool, changed: list[str],
-) -> tuple[list[str], list[str]]:
+) -> tuple[list[str], list[str], list[str]]:
     """The tick's three-way partition, ASYMMETRIC by row class (#870 M8 / FK-7).
+
+    THREE lists, because the partition is three-way: the ids curated, the ids dropped, and the
+    ids HELD. The held half was returned by set arithmetic at the caller
+    (`set(batch_ids) - committed - dropped`) while this function had already computed it —
+    two derivations of one partition, which is the shape this round spent its review ending
+    everywhere else in the lane.
 
     A SYSTEM row keeps `kept`-membership, unchanged: its lesson either had a handoff or it had
     nothing that could ever be taught, and an undeclared name is refused on the first tick.
@@ -565,7 +609,10 @@ def _split_batch_by_membership(
             committed_ids.append(str(pid))
     curated = set(committed_ids)
     dropped_ids = [i for i in batch_ids if i not in curated and i not in held_ids]
-    return committed_ids, dropped_ids
+    # `- curated` because a duplicate `pitfall_id` on disk could put one id on both sides, and
+    # a row that WAS curated is not also held: rotating it twice is the double-count the
+    # caller's own set arithmetic was written to avoid.
+    return committed_ids, dropped_ids, sorted(held_ids - curated)
 
 
 def _deadletter_reason(row: dict) -> str:
@@ -610,6 +657,13 @@ def _graveyard_dropped_rows(paths, rows: list[dict], dropped_ids: list[str]) -> 
 #: than an error to diagnose.
 HELD_CEILING_REASON = "reducer-offered-never-taught"
 
+#: The queue-row field counting how many ticks OFFERED this row its surface and had the
+#: curator decline. Distinct from `attempts`, which is the lane's FAULT counter and is bumped
+#: for the whole batch by `drains._retire_pitfalls_batch` on any tick that raised: a decline is
+#: not a fault, and one counter serving both retires a row on its first decline whenever
+#: unrelated infra faults happened to spend its budget first.
+OFFERS_DECLINED_KEY = "offers_declined"
+
 
 def _retire_exhausted_holds(paths, held_ids: list[str]) -> int:
     """Bump every held row once, and retire the ones that have now been offered too often.
@@ -631,9 +685,16 @@ def _retire_exhausted_holds(paths, held_ids: list[str]) -> int:
     the shared primitive that does exactly this, so the bump, the graveyard entry and the
     `consumed_retired` ledger row are the channel's own — not a fourth hand-rolled rotation.
 
-    Bumped only on a tick that actually MADE the offer, because that is what this counts. The
-    caller reaches here only past the arrival gate and the spawn, so a row cannot spend an
-    attempt on a tick the curator never saw.
+    COUNTED ON ITS OWN COUNTER, and that is what makes the ceiling mean what it says. The bump
+    happens only on a tick that actually made the offer — the caller reaches here past the
+    arrival gate and the spawn — but `drain.retire`'s default `attempts` is the LANE'S FAULT
+    counter, which `drains._retire_pitfalls_batch` bumps for every row in the batch on any tick
+    that raised. Sharing it made each ceiling arrive early in the other's traffic: two
+    infra-faulting ticks spent a freshly-queued row's whole offer budget, so its FIRST decline
+    retired it terminally with its lesson never taught — verbatim the loss FK-7's hold exists
+    to prevent, reintroduced by the bound meant to complete it. `OFFERS_DECLINED_KEY` therefore
+    counts declines and nothing else, and the two ceilings are independent: a row may fault its
+    way out, or be declined its way out, and neither spends the other's budget.
     """
     if not held_ids:
         return 0
@@ -642,6 +703,7 @@ def _retire_exhausted_holds(paths, held_ids: list[str]) -> int:
         batch_ids=held_ids,
         reason=HELD_CEILING_REASON,
         max_attempts=_loop_config.author_max_attempts(),
+        counter_key=OFFERS_DECLINED_KEY,
     )
     if outcome.retired:
         _log(
@@ -711,7 +773,7 @@ def run_pitfalls(
     if not handoffs:
         # Nothing in this batch could ever be taught — no system entry and no reducer entry —
         # so there is no offer to hold rows against and the whole batch retires.
-        _, dropped_ids = _split_batch_by_membership(
+        _, dropped_ids, _ = _split_batch_by_membership(
             rows, batch_ids, kept, reducer_offered=reducer_offered, changed=[],
         )
         _log(
@@ -757,7 +819,7 @@ def run_pitfalls(
         _log("pitfalls curator made no corpus edits (valid no-edit tick)")
     # AFTER the commit, not before it: FK-7's criterion for a reducer row is the handoff AND
     # the confirmed edit, and `changed` is the only place the second conjunct exists.
-    committed_ids, dropped_ids = _split_batch_by_membership(
+    committed_ids, dropped_ids, held_ids = _split_batch_by_membership(
         rows, batch_ids, kept, reducer_offered=reducer_offered, changed=changed,
     )
     if committed_ids:
@@ -770,16 +832,18 @@ def run_pitfalls(
             dropped_ids, None, paths=paths, category="consumed_unattributable",
         )
     # Every count off the same DISTINCT id sets: `batch_ids` is read from the queue file and
-    # a repeated `pitfall_id` there would otherwise make `held` a difference between a row
+    # a repeated `pitfall_id` there would otherwise make the counts a difference between a row
     # count and two id counts, i.e. report rows held that are not.
     rotated = set(committed_ids) | set(dropped_ids)
-    held_ids = sorted(set(batch_ids) - rotated)
     retired = _retire_exhausted_holds(paths, held_ids)
+    # The retired rows LEFT on this tick, so they are not also "held for a later tick" — the
+    # two numbers partition the held set rather than overlapping it.
     _log(
         f"pitfalls curation done; commit={(sha or 'none')[:12]}, "
         f"taught {len(changed)} surface(s): {changed}, "
-        f"rotated {len(rotated)} row(s) out of the queue "
-        f"({len(set(dropped_ids))} unattributable, {len(held_ids)} held for a later tick"
+        f"rotated {len(rotated) + retired} row(s) out of the queue "
+        f"({len(set(dropped_ids))} unattributable, "
+        f"{len(held_ids) - retired} held for a later tick"
         + (f", {retired} retired at the hold ceiling" if retired else "")
         + ")"
     )
