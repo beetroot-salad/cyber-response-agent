@@ -1,531 +1,538 @@
-# Learning architecture — redesign (2026-07-30)
+# Learning architecture — redesign (2026-07-30, revised 2026-08-16)
 
 ## Status
 
-**Design, pre-implementation.** Nothing here is built. Amends the loop shape in
-`learning-loop.md` and absorbs the deferred pointers in
-`learning-loop-actor-learning.md` (learning actor) and `learning-loop.md`
-§Future Enhancements (live self-evaluation). When this ships, those sections get
-rewritten rather than cross-referenced.
+**Partly shipped, and the training half is redesigned.** Three things landed since the
+first draft and are no longer proposals:
 
-Held-out fixture recruitment is a **prerequisite for measuring any of this** and
-is being handled separately. Every metric below is uncomputable until it lands.
+- **Runtime review is live.** `runtime/challenge_gate.py` (#774/#783, 08-04) plus the
+  blind lenses in `runtime/review/` (#796/#802, 08-07). §Runtime review is now a
+  comparison between what was asked for and what exists.
+- **The frozen-actor metric is already retired** (#795, 08-07) — §What dies described its
+  death prospectively; `evals/README.md` records it.
+- **The oracle stage left the loop** (#791). `run_cycle.py:113`: "the retired oracle stage
+  leaves the leg's own call chain entirely — the judge is driven straight off the actor's
+  story and the run's own executed evidence." §The diagnosis below is therefore a
+  post-mortem, not a critique of a running system.
 
-## The diagnosis
+**What this revision changes.** The first draft proposed generating a base world from
+scratch. That design is replaced by the **turn-N branch**: fork a real investigation at
+the moment its evidence is in hand, and propose a pair of worlds consistent with that
+evidence. The generated world survives only as the thing we decided not to build, and
+§Captured base records why. Executing against a live estate stays on the table as a later
+platform bet, not a prerequisite (§Execution, later).
 
-The current loop is two mechanisms wearing one coat.
+Held-out fixture recruitment is still a **prerequisite for measuring any of this** and is
+handled separately. Every metric below is uncomputable until it lands.
 
-One mechanism is **counterfactual review of a real case**: a blind actor writes a
-story against the lead sequence the defender actually ran, and the judge tests it
-against the raw payloads. The other is **training against a simulated world**: the
-oracle stands in for telemetry that was never produced.
+## The diagnosis (post-mortem)
 
-They are fused because the oracle exists to bridge the actor's blindness. The
-actor cannot see results (or it would mark its own homework), so its story has to
-be converted into a falsifiable per-lead prediction before the real payloads can
-contradict it. That is the oracle's actual job in this design: **it is a blinding
-device, not a world model.** The judge has been white-box over the raw payloads
-all along.
+The loop was two mechanisms wearing one coat.
 
-The cost of the fusion is that the oracle sits in the one place where its error is
-undetectable. It answers a counterfactual about a world where something *else*
-actually happened, which is why its whole vocabulary is a signed delta over
-baseline, and why calibrating it required an entire golden-set campaign with a
-held-out ledger. Move it to a generated world and the scenario spec becomes the
-answer key.
+One was **counterfactual review of a real case**: a blind actor wrote a story against the
+lead sequence the defender actually ran, and the judge tested it against the raw payloads.
+The other was **training against a simulated world**: the oracle stood in for telemetry
+that was never produced.
+
+They were fused because the oracle existed to bridge the actor's blindness. The actor
+could not see results (or it would mark its own homework), so its story had to be
+converted into a falsifiable per-lead prediction before the real payloads could contradict
+it. That was the oracle's actual job: **a blinding device, not a world model.**
+
+The fusion put the oracle in the one place where its error was undetectable — answering a
+counterfactual about a world where something *else* actually happened, which is why its
+whole vocabulary was a signed delta over baseline, and why calibrating it required a golden-set
+campaign with a held-out ledger. #791 resolved this by deletion. What survives is the
+half that was always sound: **the judge is white-box over the raw payloads**, and that is
+now the entire mechanism. The redesign's job is to give it a question worth grading.
 
 ## The three components
 
-### 1. Training loop — student / questioner / reviewer
+### 1. Training loop — the turn-N branch
 
-The **questioner** (today's actor) generates a scenario. The oracle synthesizes an
-alert from the deployed detection rules, then serves every world-facing query the
-defender issues. The **student** (the runtime defender) investigates it as an
-ordinary case. The **reviewer** (today's judge) grades against the scenario's known
-ground truth and composes lessons for *both* players.
-
-This is where learning happens. The answer key is known by construction, so
-findings carry a warrant the current loop cannot supply.
+Fork a real investigation at turn N. A **questioner** proposes a pair of worlds both
+consistent with the evidence gathered so far, differing by one mutation. The **student**
+(the runtime defender) continues the investigation in each. The **reviewer** grades
+against a ground truth known by construction — the mutation itself.
 
 ### 2. Frontier-keyed lesson retrieval
 
-Lessons are retrieved by containment over the **invlang frontier** — the shape
-of what is currently unresolved — rather than by alert signature. See §Retrieval for
-the two consequences that decides.
+Lessons are retrieved by containment over the **invlang frontier** — the shape of what is
+currently unresolved — rather than by alert signature. See §Retrieval.
 
 ### 3. Runtime adversarial review
 
-Each live investigation is challenged before it closes, by a distilled
-counterfactual reviewer that reads the same actor-side corpus the questioner does.
-Review is no longer a learning stage; it is a per-case quality gate.
+Each confident close is challenged before it commits. This shipped; §Runtime review is now
+about the gap between its design and its implementation.
 
-## What the oracle becomes
+## The turn-N branch
 
-The oracle serves **every** `query()` call — lookups included, not just log
-queries. Its ledger is the **family base world** (§Contrast families): pinned
-state facts plus a base event log, generated once per family. A sibling owns no
-events of its own — serving a query in sibling B means reading the base and
-applying B's declared mutation set.
+At turn N the defender holds a concrete set of payloads and has concluded nothing. Author
+two worlds **both consistent with those payloads**, differing by one fact. Resume the run
+in each. Ask whether the defender's trajectory diverges.
 
-Laziness survives in exactly one place. A query that reaches unmaterialized
-territory may generate it — into the **base**, once, family-scoped — under one
-rule: lazy generation never touches an entity named in the discriminator or in
-any sibling's mutation set. Those regions exist before the run anyway, because
-the solvability pass has to walk them to derive the resolving path; lazy was
-only ever available for decoration.
+**This is the question PLAN already asks.** `SKILL.md`: *"the right next lead is the one
+whose result divides them. State which hypotheses it separates and why; if you can't, you
+don't yet have the lead."* A pair of worlds consistent with the evidence **is** a pair of
+live hypotheses; the mutation **is** the discriminating predicate; "can the defender
+discriminate the worlds" **is** "can the defender pick the discriminating lead." The
+training loop stops needing a vocabulary of its own — no actor story, no oracle
+projection, no judge translation layer.
 
-If the oracle decides state lazily, it authors the case's verdict mid-run and can
-contradict the answer key it is being graded against. Per-sibling lazy events
-fail differently but as badly: siblings inventing their own background make
-every observation diff carry junk beyond the intended difference, and the junk
-correlates with disposition — a tell the defender can learn.
+The collapse goes one further. The defender at PLAN enumerates hypotheses and picks a
+divider; the runtime reviewer instantiates the counter-disposition and demands a
+discriminating query; the questioner proposes a pair and looks for a mutation that is
+*not* divided. **One procedure at three objectives** — cooperative, adversarial-in-the-small,
+adversarial-in-the-large. That is the real argument for §One corpus.
 
-**Consistency is the load-bearing risk, not fidelity.** The defender's whole
-method is corroborating one system against another and pivoting on values it got
-from an earlier answer. A world that contradicts itself across a run teaches it
-that corroboration is noise. The memoized ledger is the whole implementation of
-that guarantee; there is nothing else holding it up. One seam fact belongs next
-to that: the query seam's verb registry falls back to the real adapters when no
-override is threaded, so a missed hook in a training run silently answers from
-the real playground. The training hook must fail closed.
+What the construction buys:
 
-**"Telemetry" undersells the spec.** Seven systems of record sit behind the typed
-query tool and only one is an event stream. A scenario that synthesizes events and
-lets identity / CMDB / change-mgmt / ticket / threat-intel answer from the real
-world produces a host unknown to inventory and no CR for anything — and the
-defender learns "no CR means malicious." The ambiguity that makes a case hard
-lives in the state, so the state is the substance of the spec, not a detail of
-it. The oracle golden set says the same from the other side: state and lookup
-leads are already its largest label class, and the current oracle only ever
-answers them with "unchanged" — state *synthesis* is the slice with zero
-calibration precedent.
+- **The discriminator is open by construction.** A pair consistent with everything the
+  defender knows is, by definition, undecided at turn N. "Informative failure near the
+  frontier" stops being something selection has to search for, which deletes most of the
+  tournament machinery and the hazard it needed guarding against.
+- **Invariance is total and free.** Both siblings share the entire observed prefix — the
+  same real payloads, not "identical outside the mutation set by construction." `ΔW` is
+  exactly the mutation, with no generated background to audit for tells.
+- **Both siblings are runnable**, so the A/B anchor pair is the default rather than an
+  authoring obligation. Which world is true is the harness's choice, and it is the key.
+- **Volume from few cases.** Every real run offers N−1 branch points.
+- **A real anchor.** The prefix is real payloads from a real alert, so the loop cannot
+  drift into a purely synthetic distribution.
 
-**Scenario solvability must be proven, not asserted.** The questioner authors both
-the world and the answer key, so it can produce a case no query path resolves —
-and the reviewer will still grade the defender against it. Reality supplies
-solvability for free in a real case; here it is a pre-run obligation. The pass
-that proves it is the same pass that derives the resolving path, and it must
-derive that path **from the world, never accept it from the questioner** — the
-golden set's rule ("a label may be corrected from the environment, never from the
-projection") reappearing one level up.
+**Solvability collapses from a proof to a check.** The first draft required a pass that
+derives a resolving path across a synthesized seven-system world — a reasoner as capable
+as the defender, uncalibrated, on the critical path, replacing the oracle in the seat
+where error is invisible. Here the obligation is *"does any proposed fact contradict these
+N concrete payloads"*: a checkable predicate over a finite record set. A small **forward
+reachability** check survives — the siblings agree on everything observed, so they must
+differ somewhere a not-yet-run query can reach, or the pair is undiscriminable — but it is
+local, not a path derivation.
 
-**Alert realism is bounded by rule coverage**, which is correct — triage only ever
-sees what fired — but it means the training loop structurally cannot produce
-observability findings. Every scenario begins from something the detection stack
-caught. It can teach "you saw this and reasoned wrong"; it can never teach
-"nothing would have told you."
+**Consistency is checked against the payloads, never against the defender's beliefs.**
+`executed_queries.jsonl` plus `gather_raw/`, not the `:T resolutions`. Check against its
+interpretations and every branch inherits the misreadings of the run it came from.
+
+**It distills discrimination, not hypothesis generation.** If pairs are drawn only from the
+defender's stated frontier, the loop can teach it to divide hypotheses it already had and
+nothing else — and the motivating case in §Empirical grounding is the other failure: the
+defender never generated "this is baseline noise," it generated an attack chain. So the
+questioner may propose worlds **outside** the stated frontier, bound only by consistency
+with the observed evidence. That is a different selection rule from "branch at the
+frontier," and both are needed.
+
+**Calibration risk.** Branch always at the frontier and every case is hard by construction;
+the defender never meets an easy one and can be trained toward over-investigation. Mix in
+siblings that resolve cheaply, deliberately.
+
+## The captured base world
+
+The base is **captured, not authored**. Its state across the seven systems and its event
+log are whatever the real adapters returned during the real run; a sibling is that capture
+plus a declared mutation.
+
+**The questioner cannot pin state, only diff it.** This is the guard the generated design
+could not have. A worked probe of the generated design (§Empirical grounding) planted one
+false environmental premise — a prod-criticality `canary-1` with a standing Sunday change
+window, where `hosts/inventory.yaml` says `criticality: sandbox`, `change_window: null`,
+and `change-mgmt/seed/standing.yaml` materializes CRs for db-1 and web-1/web-2 only — and
+walked it through every gate. **All four passed.** Validity, oracle consistency,
+solvability and absence-of-tells are each defined over the *authored* world; none compares
+it to the deployment, and a memoized ledger makes a false premise *more* invisible by
+guaranteeing every corroboration agrees. The draft had imported the golden set's rule —
+*"a label may be corrected from the environment, never from the projection"* — into a
+design with no environment left to be corrected from.
+
+Under capture, that premise cannot be stated. Reaching the same world requires declaring
+`change-mgmt: +CHG-CANARY-ROTATE covering canary-1` against a base where canary-1 has
+never had a CR — a one-line auditable claim, catchable by a rule as cheap as *"this
+mutation invents the first CR this host has ever had."* **Silence inverts**: in a generated
+world anything unspecified is invented; in a captured one anything unmutated is true.
+
+This does not make a mutation *correct* — a questioner can still declare an implausible
+diff. It makes it visible and small, which is the difference between a review problem and
+an undetectable one. It also does not cover a mutation's cross-system consequences falling
+outside what was captured.
+
+**What the oracle still has to do.** It serves **every** `query()` call after the branch —
+lookups included, not just log queries. Serving means reading the captured base and
+applying the sibling's mutation, and where the base is silent, deciding **once** and
+memoizing. A per-call judgment recomputed each time is the mid-run authoring that made the
+old oracle fatal; the write-through ledger is what makes `ΔO` checkable against `ΔW`.
+
+Two seam facts belong here. The verb registry **falls back to the real adapters when no
+override is threaded** (`driver.py`'s `verbs is not None` default), so a missed hook
+answers from the real playground — the training hook must fail closed. And the answer
+*shape* is undeclared: across the seven adapters the return annotations are `dict` ×21,
+`str` ×8, `dict | list` ×2, and the query templates' frontmatter declares `verb` / `params`
+/ `body_substitutions` — inputs only. An oracle can know exactly what was asked and have
+nothing constraining a well-formed answer. The empirical route is the recorded payload
+corpus per verb; adding a `returns:` block to the ~29 templates, seeded from it, is the
+cheap fix. Note where the evidence is thinnest: the recorded corpus reachable here is 43
+non-sentinel queries, 30 of them `elastic` and 3 across `cmdb` and `change-mgmt` combined,
+with three of the seven systems unrepresented — so the *state* side, which carries the
+substance, is exactly where there is least shape evidence to synthesize against.
+
+**Laziness mostly evaporates.** A captured base has no unmaterialized territory to invent
+into. Where generation is kept anyway, the guard is not a name check ("never touch an
+entity named in the discriminator or a mutation set") — a lazily invented CR covering the
+window names no discriminator entity and neutralizes it anyway, self-consistently, so no
+contradiction check fires. The guard is: log raw lookup values, then **re-run the
+discriminator reachability check against the final ledger** and `discard` if it moved.
+
+**"Telemetry" undersells the spec.** Seven systems of record sit behind the typed query
+tool and only one is an event stream. The ambiguity that makes a case hard lives in the
+state — which is precisely what capture supplies for free and authoring supplies worst.
 
 ## The compare suite — discriminator spine
 
-Every scenario names its **discriminator**: the predicate whose value separates
-the dispositions, the value it takes in each world, which system holds it, and
-the permitted query envelope through which the defender can establish it. The
-declaration is the questioner's falsifiable claim about its question, not an
-answer the harness trusts. Before a run, the solvability pass derives the
-resolving path from the world ledger and verifies that the declared discriminator
-is both disposition-changing and reachable. A mismatch is a questioner finding
-or a `discard`, never a defender failure.
+Every pair names its **discriminator**: the predicate whose value separates the
+dispositions, the value it takes in each world, which system holds it, and the query
+envelope through which the defender could establish it.
 
-The reviewer's context is spined on these **discriminating facts** — one row per
-fact that must be established to resolve the case — not on the leads the defender
-ran. Today's spine is defender-authored, which is why anything about the
-questioner has to be reasoned in from the side. On a discriminator spine, each
-row carries:
+The reviewer's context is spined on these discriminating facts rather than on the leads the
+defender ran — and under turn-N that spine is **already written**. It is the invlang
+frontier at the branch point plus the mutation, in `investigation.md`, not a new artifact
+to design. Each row carries the predicate and its value per sibling, the holding system and
+envelope, the expected observation difference, whether and when the trajectory touched it,
+and what the defender concluded on receiving it.
 
-- the predicate and its value in each sibling world;
-- the system and query envelope that expose it;
-- the expected oracle-observation difference;
-- whether and when the defender's trajectory touched it; and
-- what the defender concluded after receiving it.
+Three diffs the reviewer compares directly:
 
-This creates three diffs the reviewer can compare directly:
-
-- **world diff (`ΔW`)** — the sibling's mutation set: the intended difference,
-  a literal diff rather than prose;
+- **world diff (`ΔW`)** — the mutation: a literal diff, not prose;
 - **observation diff (`ΔO`)** — the difference the oracle actually exposed; and
 - **trajectory diff (`ΔT`)** — the defender's changed investigation and verdict.
 
-Root-cause attribution then mostly falls out of the comparison. A `ΔW` with no
-reachable `ΔO` is an invalid question. An unexpected `ΔO` outside `ΔW` is an
-oracle or harness leak — and with `ΔW` a literal diff, that check is code, not
-judgment. Never querying the holding system is a lead-set gap;
-querying it at the wrong scope is lead-quality; receiving the fact and reasoning
-past it is analyze-discipline; establishing the fact without the warranted
-disposition change is decision discipline. The reviewer names the gap; it does
-not have to reconstruct it from prose.
+Attribution then mostly falls out. A `ΔW` with no reachable `ΔO` is an invalid pair. An
+unexpected `ΔO` outside `ΔW` is a harness leak — and with `ΔW` literal, that check is code.
+Never querying the holding system is a lead-set gap; querying it at the wrong scope is
+lead-quality; receiving the fact and reasoning past it is analyze-discipline; establishing
+it without the warranted disposition change is decision discipline.
 
-The questioner also declares where it expects the defender to fail. The
-trajectory confirms or falsifies that prediction. Failure somewhere else means
-the scenario was hard by accident; cheap resolution means it was too easy.
-Cost-to-reach is a second axis, making questioner scoring a gradient rather than
-a coin flip and restoring the falsifiability the blind actor used to provide.
+A `discard` verdict is required (no current outcome enum has one — `core/config.py:245`).
+If the oracle contradicted the base or an earlier answer, the episode teaches nothing about
+either player. Most contradictions are mechanical and belong upstream of the reviewer, but
+the reviewer needs a verdict for corruption found during comparison.
 
-A `discard` verdict is required (no current outcome enum has one). If the oracle contradicted the spec or an
-earlier answer, the episode teaches nothing about either player and blaming one
-is worse than dropping it. Most contradictions are detectable mechanically
-against the ledger and belong upstream of the reviewer, but the reviewer needs a
-verdict for corruption discovered during comparison.
+**One outcome is still missing: corpus-versus-world contradiction.** When the defender holds
+an environment fact contradicting the world it is served, it has no typed way to report it.
+Stay silent and the contradiction is invisible; follow the corpus and the reviewer scores a
+defender failure when the world was wrong. `discard` covers the oracle contradicting itself,
+not the oracle contradicting the corpus.
 
-## Contrast families and curriculum search
+## Sibling families and scenario sources
 
-The discriminator makes one scenario gradeable. It does not tell the questioner
-which scenarios teach well. That signal comes from a **contrast family**: one
-**base world** — pinned state plus a base event log, generated once — and one
-declared **mutation set** per sibling. A sibling *is* base + diff; it owns
-nothing else:
+A family is a captured base plus declared mutations:
 
-- **A — benign anchor:** one value of the discriminator;
-- **B — malicious minimal twin:** the opposite value and nothing else — its
-  mutation set is the minimal diff; and
-- **C — probe sibling:** preserves the underlying distinction while changing one
-  mechanic, or moves one controlled step toward the decision boundary.
+- **A / B** — the minimal pair: one predicate, both values, everything else identical
+  because it is literally the same prefix.
+- **C — probe sibling** — preserves the underlying distinction while changing one mechanic
+  (process, identity, timing, authorization), or moves one controlled step toward the
+  decision boundary. C tests transfer: a defender that succeeds on B and fails when the
+  same principle arrives through a different mechanic learned the surface, not the rule.
 
-The mutation set is what makes the family well-defined rather than three
-stories sharing a premise. `ΔW` *is* the diff. Minimal-twin invariance is
-mechanical — everything outside the mutation set is identical by construction,
-not an obligation the questioner has to honor. "One controlled step" for C
-means one mutation. Auditing for unintended tells reduces to reading a small
-diff instead of comparing two freely generated worlds.
+**The mutation vocabulary and the scenario menu are the same artifact.** Scenario selection
+should start from a technique menu — the approach the malicious actor already uses — rather
+than from whatever the alert stream happened to emit: coverage becomes declarative and
+auditable, and the menu is human-curated, which is the one external anchor the loop
+otherwise lacks. Choosing a scenario and choosing sibling C's mutation are then the same
+operation at two depths, over the same technique × variant axes. `playground-v2/attacks/`
+already carries a runner and 9 scenarios; they are id-keyed, not technique-keyed, and
+adding that axis is what makes them the shared table.
 
-A/B makes attribution cheap: the reviewer knows exactly what should change and
-what must remain invariant. C tests transfer. A defender that succeeds on B and
-fails when the same principle appears through a different process, identity,
-timing, or authorization mechanism learned the story's surface rather than its
-rule. A boundary sibling tests calibration rather than surface invariance. The
-third sibling's disposition may be sampled, but its mutation role and expected
-effect must be declared; an arbitrary third story restores the confounding that
-the minimal pair removed.
+**Runtime review is one source of scenarios, not the source.** Its output is a
+counter-disposition story anchored on a real alert and a real frontier, which is a good
+seed — but it is not a coverage plan, and the first draft's claim that "no separate seeding
+pathway is needed" does not survive. The mix of menu-generated and review-seeded scenarios
+should be a declared ratio, not an accident.
 
-Three is a bootstrap, not an architectural limit. The questioner can generate a
-small brood of controlled siblings, retain useful mutations, and continue from
-them. Its mutation vocabulary should come from established attacker frameworks
-and environment bindings: technique variant, execution mechanism, identity,
-timing, cover activity, and authorization state. This is curriculum evolution,
-with the base world plus each sibling's mutation set acting as the genome and
-the validated ledger as the phenotype.
-
-Selection must not reward whichever child defeats the defender most often. That
-converges on unobservable questions, gratuitous ambiguity, oracle quirks, and
-judge exploits. Validity, oracle consistency, solvability, and absence of
-unintended tells are hard gates. Among scenarios that pass them, prefer an
-**informative failure near the defender's frontier**: the intended gap is exposed,
-the resolving path is affordable, and the resulting lesson improves later
-behavior.
-
-Complexity is controlled primarily by matched descent, not by pretending every
-story has a reliable universal difficulty score. Compare a child with its parent
-or siblings when only one mechanic changed — mutation-set edit distance is the
-metric matched descent was missing. When cross-family normalization is
-unavoidable, use structural investigation cost:
-
-- minimum oracle calls on a resolving path;
-- systems, entities, and temporal joins required;
-- reasonable hypotheses that must be eliminated; and
-- irrelevant observations that must be traversed.
-
-Text length and number of decorative facts are not complexity. Defender cost can
-then be expressed as excess work over the derived resolving path, alongside
-disposition correctness and whether the discriminator was reached. Because model
-runs are stochastic, no scenario or lesson is promoted from one tournament.
-Evaluation uses repeated runs and a held-out sibling/archive so the questioner
-cannot overfit the current defender snapshot.
+Selection must not reward whichever child defeats the defender most often — that converges
+on unobservable questions and harness exploits. Validity, consistency and reachability are
+hard gates. Beyond them, turn-N supplies frontier proximity for free, so what remains for
+selection is much smaller than the first draft assumed: mutation-set edit distance for
+matched descent, and structural investigation cost (minimum calls on a resolving path;
+systems, entities and temporal joins required; hypotheses to eliminate) only where
+cross-family comparison is unavoidable. Text length and decorative facts are not
+complexity. Because model runs are stochastic, nothing is promoted from one tournament.
 
 ## Lesson attribution and effectiveness
 
-Issue [#695](https://github.com/beetroot-salad/cyber-response-agent/issues/695)
-provides the cheap observational signal. Its `loaded` / `applied` / `decisive`
-split is the correct contract: record `applied` at the lead or plan change before
-the outcome is known, then join it to a calibrated win/loss/no-update result.
-This can nominate promising lessons and order them within the already-relevant
-retrieval set.
+Issue [#695](https://github.com/beetroot-salad/cyber-response-agent/issues/695) provides the
+cheap observational signal. Its `loaded` / `applied` / `decisive` split is the correct
+contract: record `applied` at the lead or plan change before the outcome is known, then join
+it to a calibrated win/loss/no-update result. This can nominate promising lessons and order
+them within the already-relevant retrieval set.
 
-Application is evidence of involvement, not proof of effectiveness. A defender
-can confidently credit a lesson that merely restates its existing belief;
-preventative lessons may never feel decisive; and several applied lessons make
-credit ambiguous. Successful-run self-attribution alone would therefore produce
-a salience and confirmation loop.
+Application is evidence of involvement, not proof of effectiveness. A defender can credit a
+lesson that merely restates its existing belief; preventative lessons never feel decisive;
+several applied lessons make credit ambiguous. Self-attribution alone produces a salience
+loop.
 
-Effectiveness needs a paired intervention. For a nominated lesson, run the same
-contrast family with and without the lesson available (or use a trusted
-counterfactual replay), then evaluate withheld siblings. The useful quantity is
-not raw failure rate but **causal learning lift**:
+Effectiveness needs a paired intervention — run the same family with and without the lesson
+available, then evaluate withheld siblings. The useful quantity is **causal learning lift**:
 
-> improvement attributable to the lesson in disposition accuracy, discriminator
-> reach, and investigation cost, without regressions on the opposite-disposition
-> siblings.
+> improvement attributable to the lesson in disposition accuracy, discriminator reach, and
+> investigation cost, without regressions on the opposite-disposition siblings.
 
-This yields two separate fitness signals:
+Two separate fitness signals follow: **question fitness, before learning** (did a valid and
+affordable pair expose the intended gap?) and **lesson fitness, after learning** (did the
+lesson close it and transfer across mechanics without creating benign false positives?).
 
-- **question fitness, before learning:** did a valid and affordable scenario
-  expose the intended defender gap?; and
-- **lesson fitness, after learning:** did the lesson close that gap and transfer
-  across mechanics without creating benign false positives?
-
-The operational pipeline is therefore: #695 attribution nominates; paired
-ablation estimates causal lift; probe siblings test generalization; held-out
-performance controls promotion and retrieval rank. Scenario evolution may use
-attribution as a prior or exploration weight, but only replicated causal lift is
-an effectiveness result.
+The pipeline: #695 attribution nominates; paired ablation estimates causal lift; probe
+siblings test generalization; held-out performance controls promotion and retrieval rank.
+Attribution may act as a prior or exploration weight, but only replicated causal lift is an
+effectiveness result.
 
 ## Retrieval — frontier keying
 
-Two consequences, both load-bearing.
+**Retrieval must fire per gather loop, not once.** A lesson about what a field does and does
+not license is only relevant once the field is in hand. `SKILL.md` already ties discovery to
+the lead ("once you know its telemetry source and the ATT&CK tactic"), and the shim is
+available all run — so the mechanism is not the blocker. What is missing is a frontier
+derived mechanically per loop instead of restated by the model, which the parser and
+validator already know how to do.
 
-**Retrieval must run per gather loop, not once at PLAN.** A lesson about what a
-field does and does not license is only relevant once the field is in hand. See
-§Empirical grounding: in the case we examined, the process class was still `??`
-when lessons loaded, so no keying scheme could have surfaced the applicable lesson
-at that moment. Frontier keying that still fires once buys much less than it looks
-like.
+**Match by containment, not by similarity score.** The frontier has structure — typed slots
+with `??`, plus the open hypothesis set — so a lesson declares the pattern it applies to and
+matching is mechanical, fewer slots matching more. This is assembly: the invlang advisory
+verb already does frontier-keyed recall (signature anchor plus open hypothesis names), and
+`scripts/lessons/lessons_env_retrieve.py` already matches by slot-wise selector containment,
+`*` and fewer-slots-matching-more included.
 
-**Match by containment, not by similarity score.** The frontier has structure —
-typed slots with `??`, plus the open hypothesis set (the invlang CLI already
-calls the latter "frontier"; here the word means both) — so a lesson declares
-the pattern it applies to and matching is mechanical, fewer slots matching
-more. This is assembly, not construction: the invlang advisory verb already
-does frontier-keyed recall (signature anchor plus open hypothesis names,
-composed precedent back), and the environment corpus already matches by
-slot-wise selector containment. (The oracle router this section once cited as
-precedent is gone — deleted with the per-lead baseline-diff oracle; containment
-survives there only as a prompt instruction.)
+Three gaps close it. The advisory recalls precedent *cases*; lessons need selectors and
+become a recall class. Its frontier is hypothesis names only — `??` slots are out of scope,
+and the motivating case's frontier item is slot-shaped. And the frontier is model-supplied at
+the prompt.
 
-Three gaps close it. The advisory recalls precedent *cases*; lessons need
-selectors and become a recall class. Its frontier is hypothesis names only —
-`??` slots are explicitly out of its scope today, and the motivating case's
-frontier item is exactly slot-shaped, so hypothesis keying alone still misses
-the loginuid lesson. And the frontier is model-supplied at the prompt;
-per-gather-loop retrieval derives it mechanically from the investigation file,
-which the parser and validator already know how to do. One guard: selectors
-need a specificity floor — fewer-slots-matching-more makes an empty selector an
-every-loop lesson.
+**The specificity floor is not hypothetical.** An empty selector is an every-loop lesson, and
+one is live: `lessons-environment/authorized-keys-host-cr-baseline.md` carries `entities: []`
+with the comment `# migrated #298: entities best-effort, source prologue unrecoverable`, so a
+lesson born from one host now matches every authorized_keys alert on every host — while
+asserting *"a missing CR is positive evidence of anomaly"* against `skills/change-mgmt/SKILL.md:39`,
+*"Absence of a CR is the realistic case, not the exception."* The floor should ship on its own,
+and the #298 migration audited for other survivors.
 
-**The schema defect this fixes.** Lessons currently key on the alert signature
-they were born from. That is right for coverage lessons and wrong for
-observable-semantics lessons, whose trigger condition has nothing to do with which
-rule fired.
+**The schema defect this fixes.** Lessons currently key on the alert signature they were born
+from. That is right for coverage lessons and wrong for observable-semantics lessons, whose
+trigger condition has nothing to do with which rule fired.
 
-## Runtime review
+## Runtime review — asked for, and shipped
 
-**The failure mode is agreement.** A reviewer holding the defender's context
-ratifies it. What makes it real is instantiating it on the **counter-disposition**
-and requiring a committed output: a concrete discriminating query, or an explicit
-concession that none exists. Prose is not an output.
+What landed matches the design's **action** contract and not its **instantiation** contract.
 
-**Exactly two allowed actions:** spawn one more lead, or force the disposition to
-`inconclusive`. Anything else is decoration, and anything unbounded collides with
-budget enforcement — a review-triggered loop needs a cap and a budget line, or a
-hard case silently becomes an expensive one.
+**Met.** Exactly two outcomes — send the close back or force `inconclusive` (`CHALLENGED` /
+`FORCED_INCONCLUSIVE`) — and the demand that anything unbounded carry a cap and a budget line:
+`Bounds`, `raised_request_limit`, `CAUSE_TURN_BUDGET_SPENT`.
 
-**A concession is an output, not an exit.** It persists, typed: the
-counter-story, the observed fact that kills it, and the load-bearing inferences
-the case never tested. On the case in §Empirical grounding it is the *only*
-thing review produces — the benign twin dies on the key comment, neither action
-fires — and the killing fact is exactly what the generator mutates to build the
-twin. Without it, seeds flow only from cases where review acts, which excludes
-the correct-but-unsound class the whole split rests on.
+**Not met.** The design requires instantiating the **counter-disposition** — the failure mode
+is agreement, and prose is not an output. What shipped is `support` + `ablation` + `composer`,
+where ablation is the same lens with one edge withheld (`review/projector.py`). That tests
+whether a conclusion survives losing an edge; it never asks whether an alternative story
+survives. §Empirical grounding shows the difference empirically: with the strongest edge
+removed the ablation lens *raised* confidence, because the remaining supports were also junk.
+**Redundant junk passes an ablation test with distinction.**
 
-**This deletes design principle #1.** "Offline only. No live latency cost" was
-load-bearing enough to be first in `learning-loop.md`. We are now paying review
-cost on every investigation. Worth it, but it is an explicit trade, not something
-a reader should discover.
+**Also not met: the typed concession.** "A concession is an output, not an exit" — the
+counter-story, the observed fact that kills it, and the load-bearing inferences the case never
+tested. On a clear-cut case it is the *only* thing review should produce, and it carries the
+mutation target. Today the review record persists `verdict` / `reviewed_disposition` /
+`detail` / `failure_kind`, and its only readers are `close_tool`, `challenge_gate`,
+`_run_paths` and the visualizer. Nothing under `learning/` consumes it.
+
+**`inconclusive` bypasses the gate** (`close_tool.py:436`), which makes review a one-way
+ratchet: it manufactures the one disposition class it never examines. The fix is a rule worth
+having anyway — **`inconclusive` must name a missing source.** Not "I gave up" but a typed,
+falsifiable claim: *predicate P would resolve this; no system in this deployment exposes P.*
+That is adjudicable by the reachability check run in reverse, and a forced close that cannot
+produce the claim should be refused rather than committed. It also fills the hole the training
+loop structurally cannot: every scenario begins from something that fired, so training can
+teach "you saw this and reasoned wrong" but never "nothing would have told you" — under this
+rule the live stream produces exactly those findings.
+
+One live consequence: the gate forces inconclusive on three causes —
+`CAUSE_EVIDENCE_CANNOT_DISCRIMINATE`, `CAUSE_NOTHING_LEFT_TO_ASK`, `CAUSE_TURN_BUDGET_SPENT`.
+Only the first can carry a gap claim. The other two are exhaustion, and shipping them as
+`inconclusive` launders a run failure into a deployment gap, poisoning the coverage channel
+with noise that correlates with budget rather than telemetry.
+
+**This deletes design principle #1.** "Offline only. No live latency cost" was first in
+`learning-loop.md`. We now pay review cost on every confident investigation. Worth it, but it
+is an explicit trade.
 
 ## One corpus, one role
 
-The questioner and the runtime reviewer are the **same role**: both construct a
-plausible alternative story. The reviewer is a questioner with a narrower prior —
-constrained to the case in hand. "What worked as an attack" and "what to check"
-are the same content read by the same kind of reader, so there is one actor-side
-corpus, one selector mechanism, and no view split.
+The questioner and the runtime reviewer are the **same role**: both construct a plausible
+alternative story, the reviewer with a narrower prior. §The turn-N branch gives the stronger
+version — the defender's own PLAN step is the third instance of the same procedure. "What
+worked as an attack" and "what to check" are the same content read by the same kind of reader,
+so there is one actor-side corpus, one selector mechanism, and no view split.
 
-Two consequences.
+Nothing reads it yet: the shipped lenses reference no corpus at all. Wiring them to the
+actor-side corpus is the concrete next unit of work, and it is smaller than "build runtime
+review" was.
 
-**Runtime review recruits the curriculum for free.** Its output is a
-counter-disposition story anchored on a real alert, real entities, and a real
-frontier shape — exactly what the training questioner wants as a seed.
-Concessions included: on clear-cut cases they are the only output, and they
-carry the mutation target. No separate seeding pathway is needed.
+**The flow runs both ways.** Lessons moving generator→runtime pull the live reviewer toward
+synthetic attack shapes; seeds moving runtime→generator pull the curriculum back toward real
+alert surfaces. With a captured base and a technique menu, the real-alert anchor no longer
+depends on that return path alone.
 
-**The flow runs both ways, so it self-anchors.** Lessons moving generator→runtime
-pull the live reviewer toward synthetic attack shapes; seeds moving
-runtime→generator pull the curriculum back toward real alert surfaces. That is
-the real-alert anchor among the Red Queen mitigations `learning-loop.md` asks
-for, falling out of the architecture rather than bolted on. Of the other two,
-the frozen-actor replay is replaced better-typed in §What dies, and the fixed
-regression suite of historical attack shapes survives only by folding into the
-frozen scenario archive — it has no other home here.
-
-**The cost of merging** is that a wrong tradecraft lesson now skews the curriculum
-and the live challenge in the same direction, with nothing left to cross-check it.
-Actor lessons become production-facing: until now a bad one only made synthetic
-stories worse. They need the same promotion bar as defender lessons, not a lighter
-one.
-
-One reader genuinely has no frontier to match on: the training questioner writes
-its scenario *before* an alert exists, so it retrieves against the detection
-surface rather than unresolved slots. Same corpus, same selectors — worth knowing
-when picking selector defaults.
+**The cost of merging** is that a wrong tradecraft lesson skews the curriculum and the live
+challenge in the same direction, with nothing left to cross-check it. Actor lessons become
+production-facing: until now a bad one only made synthetic stories worse. They need the same
+promotion bar as defender lessons.
 
 ## What dies, what transfers
 
-**The frozen-actor secondary metric dies.** It needs a blind actor emitting
-falsifiable projections. Its replacement is better-typed: real-held-out
-disposition accuracy against synthetic-scenario disposition accuracy. The current
-pair compares accuracy against catch rate — two different units, which is why the
-divergence diagnostic reads as a vibe. Same unit on both sides makes the gap
-directly the overfitting-to-simulator number — provided the synthetic side is
-measured on the **frozen scenario archive**, never the live curriculum.
-Selection deliberately holds the defender near informative failure, so
-live-curriculum accuracy is depressed by design and the gap would measure
-curriculum pressure instead. The archive doubles as the home for historical
-attack shapes (§One corpus).
+**The frozen-actor secondary metric is already dead** (#795). Its replacement is better-typed:
+real-held-out disposition accuracy against synthetic-scenario disposition accuracy — the same
+unit on both sides, so the gap is directly the overfitting number. It must be measured on a
+**frozen scenario archive**: pairs pulled permanently out of training and selection, re-run
+periodically, so the questioner cannot have optimized against them. Selection holds the
+defender near informative failure by design, so live-curriculum accuracy is depressed and the
+gap would otherwise measure curriculum pressure. Two things the first draft left undefined and
+should be settled before the metric is trusted: the archive's refresh policy (a frozen set goes
+stale as the curriculum moves, and refreshing it is the contamination the freeze prevents), and
+whether it should also be the home for historical attack shapes — a regression suite and a
+measurement holdout have different lifecycles.
 
-Note the exposure this creates: real-case runs now consume actor lessons distilled
-from synthetic worlds, via the runtime reviewer. The gap still measures cleanly
-(both sides run the same reviewer), but the surface through which simulator
-artifacts reach real conclusions is wider than it was.
+**The oracle golden set re-aims rather than pausing.** What a serving oracle needs measured is
+"does the world I served match a real capture of this activity" — what that apparatus already
+does, and what a captured base narrows to the mutation. The envelope measurement survives. The
+four-class baseline-diff labeling goes with the projection.
 
-**The oracle golden set re-aims rather than pausing.** What a serving oracle needs
-measured is "does the world I served match a real capture of this activity" — what
-that apparatus already does. The envelope measurement survives (containment was
-never a measured quantity there). The four-class baseline-diff labeling already
-half-died — retired as the scoring contract, kept as a stratification axis —
-and the rest goes with the projection. The in-flight capture campaign should be
-re-pointed, not stopped.
+**The forward-check retires late, and is not replaced by a birth gate.** It guards a rare
+failure — a lesson flipping its own source case. The live risk is the one it never tested:
+over-generalization downgrading the opposite-disposition sibling. No cheap birth gate covers
+that, so behavioral quality is the learning process's job. Birth-time validation shrinks to two
+free checks: a curator fold must preserve the gap the lesson was born from, and a selector must
+be satisfiable by its source case's prologue. Retirement point is lesson attribution landing.
 
-**The forward-check retires late, and is not replaced by a birth gate.** It
-guards a rare failure — a lesson flipping its own source case. The live risk is
-the one it never tested: over-generalization downgrading the
-opposite-disposition sibling. No cheap birth gate covers that — checking it
-means re-running the defender with the lesson loaded, which is already half of
-paired ablation — so behavioral quality is the learning process's job (later
-families, attribution, ablation), not a gate's. Birth-time validation shrinks
-to two free checks: a curator fold must preserve the gap the lesson was born
-from, and a selector must be satisfiable by its source case's prologue (the one
-mechanical job the forward-check does that nothing else does). The retirement
-point is lesson attribution landing (§Sequencing): a sibling downgrade is only
-attributable once lesson loading on family runs is observable. Until then the
-forward-check stays.
+**Real cases stop being a lesson source — except through review.** The training reviewer only
+ever sees branched worlds, and an environment fact authored there describes a mutation, not the
+deployment. The curators' real-case input is the runtime-review artifact (challenge, concession,
+killing fact), which is where environment facts keep being born from the real world. Note the
+firewall's limit, which the probe found: "lessons about the players, never about the
+environment" filters by **topic, not by truth** — a player lesson's warrant can be a false
+environmental premise, and it ships to production as the lesson's implicit claim.
 
-**Real cases stop being a lesson source — except through review.** Today every
-lesson, environment facts included, is born from the judge reading a real run.
-The training reviewer only ever sees synthetic worlds, and an environment fact
-authored there describes the questioner's invented deployment — folding it into
-the corpus poisons the well the questioner drinks from. So the curators stay
-offline and re-point: their real-case input is the runtime-review artifact
-(challenge, concession, killing fact), which is also where environment facts
-keep being born from the real world. The training reviewer's lessons are about
-the players, never about the environment.
-
-**Unchanged and reused:** the runtime defender and its phase discipline, the
-permission gate, the seven adapters and the typed query seam (one interception
-point; verbs return plain JSON values — the two ticket verbs that return bare
-strings do so as the answer-key defense, and a serving oracle must preserve
-that), the two tables and their join surface, the curators, the
-drain/worktree/PR machinery, and the lessons corpora themselves.
+**Unchanged and reused:** the runtime defender and its phase discipline, the permission gate,
+the seven adapters and the typed query seam (one interception point; verbs return plain JSON
+values — the two ticket verbs returning bare strings do so as the answer-key defense), the two
+tables and their join surface, the curators, the drain/worktree/PR machinery, the lessons
+corpora, and — newly load-bearing — `session_store.fork()`.
 
 ## Empirical grounding
 
-Two findings from `20260728T161845Z-fresh-case`, a Falco `authorized_keys`
-write correctly disposed `malicious`.
+### The case
 
-**The current loop yields nothing on it.** A malicious disposition routes to the
-FP hunt, and no benign story survives an SSH key whose comment is literally
-`attacker@elsewhere`. Skip or incoherent. A whole disposition class is silent.
+`20260728T161845Z-fresh-case`, a Falco `authorized_keys` write correctly disposed `malicious`.
 
-**A directly applicable lesson existed and did not retrieve.** The corpus holds a
-lesson stating that `loginuid=-1` licenses "non-interactive automated context" and
-nothing more, that container init and cron produce an identical profile, and that
-origin claims require ancestry Falco cannot supply. Two lessons loaded for this
-run; that was not one of them — it is keyed to the signature it was born from, a
-different rule. The investigation then inferred "no authenticated session
-initiated this process — classic remote execution pattern," and separately
-recorded that no parent process was captured, and reasoned past it.
+**The current loop yields nothing on it.** A malicious disposition routes to the FP hunt, and no
+benign story survives an SSH key whose comment is literally `attacker@elsewhere`.
 
-That defect is the shape of thing this redesign has to handle, and it lands in an
-awkward place:
+**A directly applicable lesson existed and did not retrieve.** The corpus holds a lesson stating
+that `loginuid=-1` licenses "non-interactive automated context" and nothing more, and that origin
+claims require ancestry Falco cannot supply. Two lessons loaded for this run; that was not one of
+them — it is keyed to `v2-falco-suspicious-network-tool`, a different rule.
 
-- **Training grades it as a clean win.** The disposition was right, and rests
-  on one thing: the key comment literally reads `attacker@elsewhere`. Each
-  other support is an artifact of the environment rather than a fact about the
-  adversary. `loginuid=-1` is how the scenario runner executes *anything*,
-  benign included. "Host absent from CMDB" holds for every container case,
-  because Falco reports the Docker host while the logical host (`canary-1`) is
-  registered — the defender queried the wrong entity and read the null as
-  incriminating. And the co-occurring `nc` events it reported as a multi-stage
-  attack chain belong to the baseline scheduler, which generates them
-  `category: noise` to fire that exact rule against that exact host. **The
-  shipped report asserts an attack chain that did not happen.** Outcome grading
-  sees none of this, because the disposition matched.
-- **Review cannot prove it either.** It can only say the inference is unsound. The
-  proof is generating that twin and watching the defender escalate.
+**Training would grade it a clean win.** The disposition was right and rests on one thing: the key
+comment. Each other support is an artifact of the environment. `loginuid=-1` is how the scenario
+runner executes anything. "Host absent from CMDB" holds for every container case. And the
+co-occurring `nc` events reported as a multi-stage attack chain are the baseline scheduler's
+`monitoring-port-probe`, which `hosts/base/baseline/catalog.yaml` generates as `category: noise`
+to fire that exact rule. **The shipped report asserts an attack chain that did not happen.**
 
-So: **review nominates on real data, the generator falsifies.** Neither half gets
-there alone. This is the concrete instance the whole split rests on.
+### The turn-N experiment (2026-08-16)
 
-**Two cheap fixes available now, independent of everything above:** make the
-judge's likelihood-ratio check symmetric (it currently runs only on benign
-dispositions — on a malicious call it should ask whether the incriminating
-observables fit routine automation equally well), and re-key
-observable-semantics lessons off the alert signature (minding that the two
-corpora disagree on rule-id namespace). The first fix inherits a caveat: an
-actor SKIP bypasses the judge entirely, and on this case a SKIP is the likely
-outcome — so the symmetric check catches this run only if skips stop
-short-circuiting the episode. Skips are a valid path and carry a rationale
-nothing currently reads; persist and judge it — the same discipline §Runtime
-review demands of a concession.
+Forked the case at message 59 — the `ModelRequest` carrying all four leads' returns, 13 hydrated
+prefix messages — and resumed it in two sibling worlds differing only in whether the `nc` activity
+has a recurring cadence outside the alert window (world A: it does, matching the real playground;
+world B: it does not).
+
+**Result: `ΔW` ≠ ∅, `ΔO` = ∅, `ΔT` = ∅.** Neither run dispatched a single `gather` — post-fork
+tools were `read_file`/`append_block`/`close_investigation` only, and the world-serving stub was
+never called in either. Both closed `malicious`. Both were ratified.
+
+Three arms, one case:
+
+| Arm | Output |
+|---|---|
+| Turn-N pair | A typed finding: the trajectory never queried the system holding the discriminator |
+| Runtime reviewer | `stands` — "the challenge review ran and left nothing about the finding unsettled" |
+| Learning loop (actor→judge) | `SKIP`. No story, judge never invoked, no findings |
+
+The composer ratified while citing the fabricated chain as *"one of three discriminating
+refutations"*, and reported the ablation lens as *"confirming the disposition does not rest on any
+single edge"* — the failure mode named in §Runtime review, observed. It also reproduced the corpus
+inversion above: *"an empty array from a responding system is evidence of absence."*
+
+**The wiring cost was near zero.** `store_factory` is already an injection seam and the render
+processor rebuilds history from the store each request, so a store whose `new_session("main")`
+returns `fork(main, at=59)` resumes the run — no driver change. One real defect surfaced:
+`fork()` seeds `last_render_len` to the inherited prefix length while a fresh `agent.iter` starts
+the framework's list empty, so `selection.ingest` underflows unless the prefix is passed as
+`message_history`. `fork()` had no production caller before this.
+
+**Caveats.** One trial per world. The continuation prompt said "close it when the evidence supports
+a disposition," which biases toward closing over gathering — identical in both worlds, so the A/B
+contrast holds, but "never asked" is partly the prompt's doing. The judge arm needed
+`DEFENDER_BOX_RUNTIME=runc`, and ran with the playground down and an empty ticket pool, which may
+have contributed to the SKIP. World A's cadence rows were hand-authored; a captured base removes
+that authorship.
+
+### Cheap fixes, independent of everything above
+
+Make the judge's likelihood-ratio check symmetric (it runs only on benign dispositions; on a
+malicious call it should ask whether the incriminating observables fit routine automation equally
+well). Re-key observable-semantics lessons off the alert signature, minding that the two corpora
+disagree on rule-id namespace (`v2-…` versus `rule-v2-…`). Ship the selector specificity floor.
+The first fix inherits a caveat: an actor SKIP bypasses the judge entirely — the story is persisted
+with `judge_yaml=None` — and on this case SKIP is the outcome, so persist *and judge* the rationale.
 
 ## Sequencing
 
 1. **Held-out recruitment** — separate session, blocking every metric here.
-2. **The two cheap fixes above** — prompt edits, no architecture.
-3. **Frontier retrieval.** Assembly, not construction: give the invlang
-   advisory a lessons recall class (reusing the environment corpus's containment
-   matcher), extend its frontier from open hypotheses to `??` slots, and derive
-   the frontier mechanically per gather loop instead of trusting the model to
-   restate it. Independent of the training loop; the real fix behind cheap fix
-   #2's stopgap re-key.
-4. **Scope the scenario spec format** — now concretely: the base-world ledger
-   and the mutation-set encoding. Pinning state across seven systems is the one
-   part with no precedent in the tree. Worth a spike before committing to the
-   rest of the training loop.
-5. **Training loop.** Ledger and hook first (single seam, failing closed), then
-   solvability / resolving-path derivation, then the reviewer's discriminator
-   spine and A/B anchor pairs.
-6. **Runtime review**, once there is an actor-side corpus worth reading.
-7. **Lesson attribution in shadow mode.** Land #695's stable identity and
-   loaded/applied/decisive sidecar without changing retrieval order. This is
-   also the forward-check's retirement point (§What dies).
-8. **Paired ablation and probe siblings.** Establish causal lesson lift before
-   any attribution score affects promotion.
-9. **Curriculum search.** Add controlled mutation, tournaments, and score-informed
-   retrieval only after the validity gates and held-out archive are trustworthy.
+2. **The cheap fixes above** — prompt edits and a selector floor, no architecture.
+3. **Frontier retrieval.** Give the invlang advisory a lessons recall class (reusing the
+   environment corpus's containment matcher), extend its frontier from open hypotheses to `??`
+   slots, and derive it mechanically per gather loop.
+4. **Turn-N branch wiring.** Promote the throwaway resume seam: a supported entry point that
+   takes a session and a branch message, the `last_render_len` fix, and the capture format for a
+   base plus a mutation. The scenario-spec spike the first draft called its largest unknown is
+   deleted — state is captured, not authored.
+5. **Pair authoring and the consistency check** — worlds proposed against the payload prefix,
+   forward reachability, and both siblings run.
+6. **Wire the shipped reviewer to the actor-side corpus**, add the typed concession, and give
+   `inconclusive` its missing-source claim.
+7. **Lesson attribution in shadow mode.** #695's stable identity and loaded/applied/decisive
+   sidecar without changing retrieval order. Also the forward-check's retirement point.
+8. **Paired ablation and probe siblings.** Establish causal lift before any score affects promotion.
+9. **Menu-driven scenario selection and controlled mutation**, once the validity gates and the
+   archive are trustworthy.
+
+**Execution against a live estate** stays out of this sequence. It would delete the oracle
+entirely and make solvability empirical, and `playground-v2/attacks/` already has the runner — but
+it needs deterministic snapshot-restore per sibling for A/B invariance, and it gives events cheaply
+and *state* expensively, which is the inverse of what the ambiguity requires. Revisit as a platform
+bet after turn-N is measured.
 
 ## Open questions
 
-- **Scenario spec format for systems-of-record state.** The largest unknown.
-- **Mutation catalog and family policy.** Which framework-backed dimensions may
-  vary independently, and which must remain coupled to preserve realism?
-- **Cross-family cost calibration.** Matched siblings avoid most normalization;
-  the remaining question is whether structural resolving-path cost is stable
-  enough to compare unrelated families.
-- **Ablation execution.** Whether trusted counterfactual replay is sufficient for
-  lesson lift, or paired fresh runs are required for promotion-grade evidence.
-- **Replication budget and promotion threshold.** Enough to avoid selecting on
-  model noise without making every curriculum generation prohibitively costly.
-- **Does the runtime reviewer see the defender's reasoning, or only its
-  conclusion and the lead results?** Seeing the reasoning risks ratification;
-  not seeing it wastes the `:T resolutions` belief trace, which is where
-  analyze-discipline defects are visible.
-- **Where the sufficiency verdict lives.** Runtime review produces an
-  earned / unearned / underdetermined judgment per case that needs no labels and
-  runs on every real investigation. That is the only quality signal that moves
-  between held-out evaluations — but it is currently homeless.
-- **What the actor-lesson promotion bar concretely tests.** "Same bar as
-  defender lessons" does not type-check — causal learning lift is defined over
-  defender behavior. The questioner half has question fitness; the
-  production-facing reviewer half has no metric, and likely shares a home with
-  the sufficiency verdict above.
-- **Retirement path for the current review pipeline's artifacts.** 16 lessons, 12
-  actor lessons, 15 environment facts (templates excluded) were authored under
-  the old warrant. Do they get re-derived under the new gate, grandfathered, or
-  re-keyed only?
+- **Capture format for a base plus a mutation.** Smaller than the old spec question, not zero.
+- **Which mutation dimensions may vary independently**, and which must stay coupled to preserve
+  realism — the same question as the technique menu's variant axes.
+- **How far outside the stated frontier** a proposed world may go before "consistent with the
+  evidence" stops being a meaningful constraint.
+- **Ablation execution.** Whether trusted counterfactual replay suffices for lesson lift, or paired
+  fresh runs are required for promotion-grade evidence.
+- **Replication budget and promotion threshold**, given stochastic runs.
+- **Does the runtime reviewer see the defender's reasoning, or only its conclusion and the lead
+  results?** Seeing it risks ratification; not seeing it wastes the `:T resolutions` belief trace.
+- **Where the sufficiency verdict lives.** Runtime review produces an earned / unearned /
+  underdetermined judgment per case that needs no labels and runs on every real investigation — the
+  only quality signal that moves between held-out evaluations, and currently homeless.
+- **What the actor-lesson promotion bar concretely tests.** "Same bar as defender lessons" does not
+  type-check — causal lift is defined over defender behavior. The production-facing reviewer half
+  has no metric, and likely shares a home with the sufficiency verdict.
+- **Retirement path for the current review pipeline's artifacts.** 16 lessons, 12 actor lessons, 15
+  environment facts were authored under the old warrant. Re-derived, grandfathered, or re-keyed?

@@ -63,7 +63,8 @@ from .verbs import (
     VerbContext,
     _ann_name,
     _resolved_hints,
-    _SYSTEM_RE,
+    SYSTEM_MAX_LEN,
+    is_system_name,
     model_facing_params,
     validate_params,
 )
@@ -636,7 +637,7 @@ _LIST_VERBS_UNKNOWN_SYSTEM = (
     "to; confirm it there and call this again with that name."
 )
 
-#: Reached only for a name that already passed `_adapter_path`'s `_SYSTEM_RE` match AND its
+#: Reached only for a name that already passed `_adapter_path`'s `is_system_name` check AND its
 #: containment check under the adapters dir — an unmatched name raises `KeyError` into the
 #: branch above — so interpolating it into a path here cannot mint an arbitrary model-named
 #: one (the #855 F-06 concern, which is about a model string reaching a corpus WRITE).
@@ -743,14 +744,6 @@ def _rendered_param(param: inspect.Parameter, hints: Mapping[str, Any]) -> str:
     return f'"{param.name}": <{inner}>'
 
 
-#: The longest model-named system this tool will echo back verbatim. The same bound as
-#: `tools_gather._SYSTEM_MAX_LEN` and for the same underlying fact — the name is unbounded
-#: model text — but NOT for the same downstream reason, so the two are stated separately
-#: rather than shared: that one bounds a string #835 routes into a provider request field
-#: (`openai_prompt_cache_key`), this one bounds a string that lands in a markdown answer.
-_ECHO_SYSTEM_MAX_LEN = 64
-
-
 def _echoed_system(system: str) -> str:
     """The `system` string a degradation message may interpolate.
 
@@ -766,9 +759,9 @@ def _echoed_system(system: str) -> str:
     span, so one backtick inside closes the span early and the rest of the model's string lands
     as prose in the lead's context. Dropping it costs nothing a debug echo needs.
     """
-    if _SYSTEM_RE.match(system) and len(system) <= _ECHO_SYSTEM_MAX_LEN:
+    if is_system_name(system):
         return system
-    return repr(system[:_ECHO_SYSTEM_MAX_LEN]).replace("`", "")
+    return repr(system[:SYSTEM_MAX_LEN]).replace("`", "")
 
 
 #: What every guarded read below RE-RAISES rather than degrading: the framework's own control

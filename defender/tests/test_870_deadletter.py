@@ -26,7 +26,7 @@ import pytest
 from defender.learning.core import drains, persist
 from defender.learning.core.config import LoopPaths
 from defender.learning.leads import pitfalls_curator
-from defender.learning.leads.declared_systems import _is_system_name
+from defender.runtime.verbs import is_system_name
 from defender.tests._declared870 import (
     Spawn,
     commit_all,
@@ -87,30 +87,49 @@ def test_a_malformed_name_retires_as_malformed_system(paths, tmp_path, monkeypat
     an ordinary onboarding miss in the one record a human will triage.
 
     FK-12's two open branches are pinned here as EXECUTED assertions rather than decided in
-    prose, and `_is_system_name` is re-probed in this test so the expected reason follows from
-    the predicate's real answer instead of from a remembered one:
+    prose, and the predicate is re-probed in this test so the expected reason follows from its
+    real answer instead of from a remembered one. THE PREDICATE MOVED UNDER THIS ROUND: #914
+    deletes `declared_systems._is_system_name` and re-homes it as
+    `defender.runtime.verbs.is_system_name`, whose alphabet is strictly narrower — lowercase
+    letters, digits and hyphens, bounded. FK-12 anticipated exactly this: it routed both
+    branches to an executed assertion rather than deciding them, and the demand's own note
+    enumerates the two outcomes. So this is the narrower branch being SELECTED, not the round's
+    classification being wrong.
 
-    * an ALL-WHITESPACE `system` passes the shape check, and every reader on this path applies
-      `str(r.get("system") or "").strip()` before classifying — so it normalizes to `""`
-      upstream and files under `no-system`, not `malformed-system`;
-    * a NON-ASCII LOOKALIKE of a declared name also passes the shape check (`_is_system_name`
-      does not reject non-ASCII), so it is a well-formed name nothing declares and files under
-      `undeclared-system:<lookalike>`.
+    * an ALL-WHITESPACE `system` files under `no-system`, and that reason is INDEPENDENT of the
+      predicate: every reader on this path applies `str(r.get("system") or "").strip()` before
+      classifying, so the value is already `""` when the shape check would see it. It is
+      probed here anyway, to keep the row's reason traceable to a fact rather than to a habit
+      — under #914 the predicate now refuses it too, and the reason does not move.
+    * a NON-ASCII LOOKALIKE of a declared name — and, on the same footing, an UPPERCASE
+      spelling of one — is now OUTSIDE the alphabet, so it files under `malformed-system`
+      where it used to file under `undeclared-system:<lookalike>`.
 
-    Both are the classifier agreeing with the predicate it is built on. If the implementation
-    narrows `_is_system_name`'s character class instead, these two rows change reason together
-    and this test says so at the seam rather than leaving a silent divergence.
+    THAT RECLASSIFICATION IS A DECISION, AND IT IS THE RIGHT ONE, so it is written down rather
+    than absorbed as drift: a homoglyph of a declared system name is attacker-shaped, and
+    `malformed-system` says so, where `undeclared-system:еlastic` reads to the human triaging
+    the file exactly like an ordinary onboarding miss — a name someone will get round to
+    declaring. The one class M9 exists to separate from the other two is the one that was
+    being spelled as its neighbour. What did NOT change: `../evil` and friends stay
+    `malformed-system`, a well-formed undeclared name stays `undeclared-system:<name>`, and a
+    systemless row stays `no-system`.
     """
     for i, malformed in enumerate(("../evil", "a\\b", ".hidden", "a\x00b")):
-        assert _is_system_name(malformed) is False, malformed
+        assert is_system_name(malformed) is False, malformed
         assert _reason(paths, pitfall_row(f"m:l-00{i}:0", malformed)) == "malformed-system"
 
-    assert _is_system_name("   ") is True, "the shape check now rejects whitespace"
+    # The strip runs upstream of the shape check, so this row's reason is the same under
+    # either alphabet — the probe is here to keep that traceable, not to carry the reason.
+    assert is_system_name("   ") is False, "#914's alphabet admits whitespace again"
     assert _reason(paths, pitfall_row("w:l-000:0", "   ")) == "no-system"
 
-    lookalike = "ｅlastic"
-    assert _is_system_name(lookalike) is True, "the shape check now rejects non-ASCII"
-    assert _reason(paths, pitfall_row("u:l-000:0", lookalike)) == f"undeclared-system:{lookalike}"
+    # Outside the alphabet, both of them, and the one class that MOVED under #914.
+    for i, outside in enumerate(("\u0435lastic", "\uff45lastic", "Elastic")):
+        assert is_system_name(outside) is False, (
+            f"#914's alphabet admits {outside!r} again, so it is a well-formed name nothing "
+            f"declares and reads as an onboarding miss rather than as attacker-shaped"
+        )
+        assert _reason(paths, pitfall_row(f"u:l-00{i}:0", outside)) == "malformed-system"
 
     # FK-12's THIRD member, pinned as an executed assertion on the same terms as the two
     # above — a row carrying no `pitfall_id` at all. The resolution declined a DEMAND for it

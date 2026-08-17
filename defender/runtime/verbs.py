@@ -15,7 +15,54 @@ from typing import Any, Union, get_args, get_origin
 
 from .verb_grant import GrantError, VerbGrant
 
-_SYSTEM_RE = re.compile(r"[a-z0-9][a-z0-9-]*\Z")
+#: THE shape of a system name. PRIVATE, and it stays private: the shape is only half the
+#: answer, and `is_system_name` below is the whole of it. A public pattern is an invitation to
+#: match it and forget the bound — which is precisely the bug #914 closed at `_adapter_path`,
+#: so re-exporting the pattern would re-open the class of defect that motivated the merge.
+#: Cross-module callers reach the PREDICATE (`query_tool`, `tools_gather`, `declared_systems`,
+#: `pitfalls_curator`); nothing outside this module needs the raw object.
+#:
+#: Anchored at BOTH ends. `\Z` alone is only half a shape: every caller today reaches it
+#: through `.match`, which anchors the start for them, but a `.search("BAD name")` matches the
+#: trailing `name` SUFFIX and reads as well-formed. `\A` makes the object itself carry the
+#: anchor rather than each caller's choice of method.
+#: The alphabet itself, UNANCHORED, so a scanner that must recognise a name INSIDE
+#: surrounding text embeds this rather than respelling it (`verb_roster`'s `query(system="…"`
+#: matcher does exactly that). A fragment, deliberately not a compiled pattern: there is
+#: nothing here to `.match()` with, so it cannot become the shape-without-the-bound shortcut
+#: `is_system_name` exists to prevent. Verb names share this alphabet — the tree declares no
+#: verb outside it and has no separate verb pattern — so the same fragment spells both.
+SYSTEM_PATTERN = r"[a-z0-9][a-z0-9-]*"
+_SYSTEM_RE = re.compile(rf"\A{SYSTEM_PATTERN}\Z")
+#: The name is unbounded model text at three of the readers below (#835's prompt-cache key, the
+#: `query` tool's echo, the gather tool's retry message), so the shape needs a ceiling to go
+#: with it. One number rather than one per downstream reason: the reasons differ, but the FACT
+#: they each bound — how long a system name may be — is the same fact, and two copies of it
+#: drift. Split them again if a reader ever genuinely needs a different bound.
+SYSTEM_MAX_LEN = 64
+
+
+def is_system_name(name: str) -> bool:
+    """Is `name` a well-formed system name — lowercase letters, digits and hyphens, bounded?
+
+    THE one answer, for every channel a system name arrives on: an adapter filename, a
+    committed `execution.md` marker, a queued pitfall row, a model-supplied tool argument.
+    Before #914 there were four spellings of this question — this pattern, a verbatim copy of
+    it in `tools_gather`, two separately-named 64s, and `declared_systems._is_system_name`,
+    which refused only the empty string, a leading dot, `/`, `\\` and NUL while its docstring
+    claimed to be holding names to THIS pattern. That last one was the outlier that mattered:
+    it admitted names the dispatch seam would later reject, so a name could be declared a
+    system and then fail to resolve as one.
+
+    Shape only, never membership. `gather` and `fakesys` are well-formed names that no source
+    declares; keeping the two questions apart is what lets a drop be attributed to membership
+    rather than to shape (`test_869_pitfalls_gate`).
+    """
+    # Length FIRST: `name` is unbounded model text at three of the callers, and the cheap
+    # ceiling is what keeps an arbitrarily long blob from being scanned character by
+    # character before it is refused. The two orders admit exactly the same set.
+    return len(name) <= SYSTEM_MAX_LEN and bool(_SYSTEM_RE.match(name))
+
 
 ADAPTER_SUFFIX = "_adapter.py"
 
@@ -267,7 +314,7 @@ def _load_adapter_module(path: Path) -> Any:
 
 
 def _adapter_path(adapters_dir: Path, system: str) -> Path | None:
-    if not _SYSTEM_RE.match(system):
+    if not is_system_name(system):
         return None
     root = Path(adapters_dir).resolve()
     path = (Path(adapters_dir) / (system.replace("-", "_") + ADAPTER_SUFFIX)).resolve()
@@ -408,7 +455,28 @@ class ModuleVerbRegistry(VerbRegistry):
             )
 
     def systems(self) -> tuple[str, ...]:
-        return tuple(sorted(_system_of(p) for p in self.adapters_dir.glob("*" + ADAPTER_SUFFIX)))
+        """The systems this adapters directory declares — every one of them resolved through
+        `_adapter_path`, the SAME call `verbs()` dispatches with (#914).
+
+        Without the filter this roster and `verbs()` disagree over one directory: a
+        `MySys_adapter.py` lands in `systems()` while `_adapter_path` refuses the name, so
+        `verbs("MySys")` raises `KeyError` for a system the registry just said it had — and
+        `learning.leads.declared_systems._adapter_names`, whose docstring calls this "the same
+        set", refuses it too. A name this roster carries is a name that dispatches.
+
+        `_adapter_path`, not `is_system_name` alone: the shape is only half of what makes a
+        name dispatchable. `_system_of` maps `_`->`-`, and the inverse `_adapter_path` applies
+        is NOT onto — a `change-mgmt_adapter.py` (hyphen in the FILENAME) derives the
+        well-formed name `change-mgmt`, which `_adapter_path` then looks for at
+        `change_mgmt_adapter.py` and does not find. So does a DIRECTORY named
+        `foo_adapter.py`, which the glob yields and `is_file()` refuses. Both are names a
+        shape-only filter carries and `verbs()` raises `KeyError` for — the very disagreement
+        this filter exists to remove. Deduplicated for the same reason: two filenames can
+        derive one system, and a roster naming it twice is not a set."""
+        named = {_system_of(p) for p in self.adapters_dir.glob("*" + ADAPTER_SUFFIX)}
+        return tuple(sorted(
+            n for n in named if _adapter_path(self.adapters_dir, n) is not None
+        ))
 
     def _cold_verb_names(self, system: str) -> frozenset[str] | None:
         return declared_verb_names(self.adapters_dir, system)
@@ -427,6 +495,8 @@ __all__ = [
     "ADAPTER_SUFFIX",
     "DENIED",
     "GRANTED",
+    "SYSTEM_MAX_LEN",
+    "SYSTEM_PATTERN",
     "UNDECLARED",
     "ModuleVerbRegistry",
     "Verb",
@@ -439,6 +509,7 @@ __all__ = [
     "declared_verb_names",
     "engine_for",
     "engine_of",
+    "is_system_name",
     "model_facing_params",
     "validate_params",
     "verb",

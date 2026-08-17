@@ -107,6 +107,9 @@ base: 5d204917780eecb5f6c61a97a1f9e2dd2498bc0f   # the fork commit write-code-fr
 #   _is_system_name(name) -> bool                      # M6's shape half, split out of _is_real_system
 #                                                      # and applied AT THE RESOLVER too (FK-5),
 #                                                      # on BOTH resolution points
+#     SUPERSEDED BY #914 — this symbol no longer exists. It is now
+#     `runtime.verbs.is_system_name`, RUNTIME-side, which reverses the layering FK-5 (§7)
+#     adopted below. The record of that decision stands as written; see handoff.deviations.
 #   DefenderPaths.adapters_dir                          # M2's boundary name (skills_dir exists)
 # AND ONE IT DELETES: `pitfalls_curator._is_real_system`, with the two stale in-code
 # justifications at `:47` and `:144` that C34 refuted (they argue the census that chose SKILL.md
@@ -2140,7 +2143,7 @@ claims:
      probe: "commit the four paths of X1 into a real repo (git 2.47.3) and run `git ls-tree -r --name-only HEAD -- defender/skills/`, deriving the parent name under both filters",
      observed: "recursive-basename read -> ['elastic', 'mcpsys']; depth-1 read (`p.count('/') == 3`) -> ['elastic']. The obvious implementation of the marker half — the one `test_869_resolver.py`'s own helper uses modulo its depth guard — declares a system whose name the model chose, out of a tree in which every other control of this spec holds.",
      alphabet: {ascii: "the original sample: recursive-basename -> ['elastic','mcpsys'], depth-1 -> ['elastic'], over an ASCII tree at the repo root.",
-                non-ascii: "RE-PROBED at #908, and it REFUTED the read this claim was transcribed into. `git ls-tree -r --name-only HEAD` returns a non-ASCII path C-QUOTED — `defender/skills/wazuh-caf\\303\\251/execution.md` wrapped in double quotes — which no longer ends in `/execution.md`, so the filter dropped it and the system was silently un-declared. Closed by reading with `-z` (`declared_systems._marker_names`), pinned by `test_the_marker_half_reads_the_whole_name_alphabet_the_boundary_admits`.",
+                non-ascii: "RE-PROBED at #908, and it REFUTED the read this claim was transcribed into. `git ls-tree -r --name-only HEAD` returns a non-ASCII path C-QUOTED — `defender/skills/wazuh-caf\\303\\251/execution.md` wrapped in double quotes — which no longer ends in `/execution.md`, so the filter dropped it and the system was silently un-declared. Closed by reading with `-z` (`declared_systems._marker_names`), pinned by `test_the_marker_half_reads_every_name_the_tree_carries`.",
                 space: "RE-PROBED at #908, also refuting. `listing.split()` TORE `defender/skills/my sys/execution.md` into two tokens, neither of which ends in `/execution.md`; the system was silently un-declared. Same `-z` fix, same test.",
                 cwd: "RE-PROBED at #908. Run from `defender/skills`, the `-- defender/skills/` pathspec resolves against the CWD and matches NOTHING, so the read returns empty rather than wrong. Production always passes `cwd=repo_root`, and `--full-name` now makes the root-relativity that `count('/') == 3` depends on explicit rather than incidental."}}
 
@@ -2381,7 +2384,7 @@ gate:
        resolved_to: id_prefix_rule_spares_idless_surfaces}
     - {rule: R4, element: "_is_system_name.domain.alternatives[applied-at-the-resolver]",
        witness: "FK-5: does the resolver shape-filter what it emits, or does every consumer re-check? J4 (executed) shows sites 2 and 3 have no character-class check to re-apply today, and this same gap is what R6's log-line finding rests on.",
-       resolution: "ADOPTED (human, §7) — FILTER AT THE RESOLVER, AND LOG EACH REFUSAL. READING TAKEN: `_is_system_name` moves beside the resolver (learning-side, with it — FK-11 answers the layering question in the same direction) and screens every candidate BOTH sources produce, so the set can never CARRY 'dir', '.hidden', '' or '..'. THIS RESOLUTION IS THE ONLY THING CLOSING R6's LOG SINK — the dropped-names line renders a raw system name and filtering at the source is its sanitizer, so a later reader cannot revisit FK-5 without re-opening that gap with nothing else pinning it.",
+       resolution: "ADOPTED (human, §7) — FILTER AT THE RESOLVER, AND LOG EACH REFUSAL. READING TAKEN: `_is_system_name` moves beside the resolver (learning-side, with it — FK-11 answers the layering question in the same direction) and screens every candidate BOTH sources produce, so the set can never CARRY 'dir', '.hidden', '' or '..'. THIS RESOLUTION IS THE ONLY THING CLOSING R6's LOG SINK — the dropped-names line renders a raw system name and filtering at the source is its sanitizer, so a later reader cannot revisit FK-5 without re-opening that gap with nothing else pinning it. AMENDED (human, #915) — THE SIDE IS REVERSED; NOTHING ELSE IS. The predicate is now `runtime.verbs.is_system_name` and this artifact's `_is_system_name` resolves against nothing. WHAT THE AMENDMENT DOES NOT TOUCH: the filter still runs AT THE RESOLVER, on BOTH resolution points, and every refusal is still logged with the source directory it came from — so R6's log sink stays closed by exactly the mechanism this resolution named, and the sentence above about re-opening it still binds. WHAT IT CHANGES: where the predicate is DEFINED. #908's probe found the learning-side version admitting `my sys` and a non-ASCII name that `_adapter_path` refuses — a name DECLARED a system that cannot RESOLVE as one — because it screened against an alphabet of its own while claiming to hold names to the dispatch seam's. The seam is where the alphabet is enforced, so it is the only place a single definition makes the two unable to disagree. SCOPE: this amends the layering for the SHAPE HALF ALONE. `declared_systems` and `adapter_declared_systems` remain learning-side, so FK-11's answer stands for them unchanged.",
        resolved_to: resolver_refuses_shape_anomalous_names}
     - {rule: R4, element: "consumed_category.domain.alternatives[consumed_undeclared]",
        witness: "FK-2 (un-gated by P9/PO-R — the dropped row is not stuck in pending): which terminal category does a dropped pitfalls row take?",
@@ -2591,7 +2594,12 @@ handoff:
        THIS RESOLUTION IS THE ONLY THING CLOSING R6's LOG SINK — the dropped-names line renders a
        raw system name and filtering at the source is its sanitizer; re-opening FK-5 re-opens that
        gap with nothing else pinning it. Demand: `resolver_refuses_shape_anomalous_names`.
-       resolved_by: human."
+       resolved_by: human.
+       AMENDED (human, #915): the predicate moved RUNTIME-side (`runtime.verbs.is_system_name`).
+       Both halves of this resolution survive it — the filter still runs at the resolver, on both
+       resolution points, and each refusal is still logged — so R6's log sink is closed by the same
+       mechanism and the warning above still binds. Only the DEFINITION SITE changed, and only for
+       the shape half; the resolver stays learning-side per FK-11."
     - "FK-6 — case, whitespace, Unicode: exact equality or normalisation? RESOLVED: **exact
        codepoint equality**, no folding and no NFC, KEEPING the existing `.strip()`. Nothing in
        any input discussed it as an obligation or as a non-obligation, which is why it went to the
@@ -2920,6 +2928,35 @@ handoff:
        ASSERT THE VIEW THAT READS IT'), so it is orthogonal to the resolver by design."
 
   deviations:
+    - "SUPERSEDED BY #914, ACCEPTED BY THE HUMAN AT #915 — THE LAYERING FK-5 (§7) ADOPTED IS
+       REVERSED, AND THE SYMBOL IS GONE.
+       Was: `_is_system_name` lives learning-side, beside the resolver (FK-5's §7 resolution,
+       ADOPTED by the human, with FK-11 cited as answering the layering question in the same
+       direction). It is now `runtime.verbs.is_system_name`. Every `_is_system_name` reference
+       in this artifact — the element at `structure`, the five demands that bind it, its four
+       distinguished domain members and the R4 rows over them — is retained AS THE RECORD OF
+       WHAT WAS DECIDED, and none of it resolves against the tree any more.
+
+       WHY IT MOVED, because the reason is the thing FK-5 could not see from where it stood.
+       The predicate #869 shipped refused only the empty string, a leading dot, `/`, `\\` and
+       NUL, while its own docstring claimed to be holding names to `runtime.verbs._SYSTEM_RE`
+       (`[a-z0-9][a-z0-9-]*`). Those are not the same alphabet, and the gap was live: #908's
+       probe found the marker half admitting `my sys` and a non-ASCII name, both of which
+       `_adapter_path` then REFUSES — a name DECLARED a system that cannot RESOLVE as one.
+       Learning-side placement is what made the divergence invisible; the alphabet is
+       enforced at the dispatch seam, so the seam is where the one answer has to live.
+
+       WHAT SURVIVES OF FK-5 UNCHANGED, and it is the load-bearing half: the filter still runs
+       AT THE RESOLVER, on BOTH resolution points, and every refusal is still logged with the
+       source directory it came from. That is what closes R6's log sink — the dropped-names
+       line renders a raw system name and filtering at the source is its sanitizer — and #914
+       does not touch it. What changed is WHERE the predicate is defined, not where it is
+       applied or whether it logs.
+
+       #914 also tightened it: the shape check alone was not enough either, because
+       `_system_of` maps `_`->`-` and its inverse is not onto, so both resolution points now
+       filter on `_adapter_path(...) is not None` — shape PLUS the resolution dispatch
+       performs."
     - "PHASE F — THE REPAIR PASS, AND WHAT IT CHANGED IN THIS ARTIFACT. Phase F's cold walk,
        mechanical leaf and blind reader produced 16 findings; `93-f-resolutions.md` is the
        human's disposition of all 16 and `95-repair-digest.md` is this pass's record. Two
@@ -2951,7 +2988,8 @@ handoff:
        seam contract in its module docstring.
        THE NAME THIS SPEC DID NOT PIN AND THE SUITE HAD TO: no input — not the design doc, not
        `35`, not `70` — ever named a MODULE for the resolver. The header mints the SYMBOLS
-       (`declared_systems`, `_is_system_name`) and FK-11 fixes the SIDE (learning), and an
+       (`declared_systems`, `_is_system_name` — the latter RUNTIME-side since #914/#915, though
+       the resolver itself is not) and FK-11 fixes the SIDE (learning), and an
        import statement cannot be written from that alone. The suite imports them from
        `defender/learning/leads/declared_systems.py`, beside `path_validation.py`'s sibling
        shape predicates and importable by all three consuming lanes without inverting C27's
