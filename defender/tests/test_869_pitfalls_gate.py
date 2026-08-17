@@ -42,7 +42,7 @@ def test_pitfalls_handoff_drops_an_undeclared_system(tmp_path):
     `defender/skills/<name>/execution.md` path is ever composed from it.
 
     The issue's headline, executed on base (G2): a row with `system: "gather"` yields
-    `execution_md_path: defender/skills/gather/execution.md` today, purely because `gather`
+    `path: defender/skills/gather/execution.md` today, purely because `gather`
     carries a `SKILL.md`. Under the union it is still dropped — no adapter AND no
     `execution.md` — and the drop is a MEMBERSHIP answer, not a shape accident: the same name
     passes the shape predicate, which is asserted here so the two reasons cannot be confused.
@@ -69,7 +69,7 @@ def test_pitfalls_handoff_keeps_a_declared_system(tmp_path):
     rows = [pitfall_row("r:0", "elastic"), pitfall_row("r:1", "gather")]
     handoffs = pitfalls_curator._build_pitfalls_handoffs(rows, systems=DECLARED)
     assert [h["system"] for h in handoffs] == ["elastic"]
-    assert handoffs[0]["execution_md_path"] == "defender/skills/elastic/execution.md"
+    assert handoffs[0]["path"] == "defender/skills/elastic/execution.md"
     assert [f["query_id"] for f in handoffs[0]["failures"]] == ["elastic.esql"]
 
 
@@ -169,7 +169,7 @@ def test_a_declared_system_with_no_skill_md_is_admitted(tmp_path, monkeypatch, c
 
     assert pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn) == 0
     assert spawn.systems_seen == ["ticket"]
-    assert spawn.handoffs[0]["execution_md_path"] == "defender/skills/ticket/execution.md"
+    assert spawn.handoffs[0]["path"] == "defender/skills/ticket/execution.md"
     assert "defender/skills/ticket/execution.md" in head_files(repo)
     assert persist.read_pitfalls(paths) == []
     assert not skill_md(repo, "ticket").exists()

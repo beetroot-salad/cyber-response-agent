@@ -812,7 +812,7 @@ def test_pitfall_for_a_system_without_execution_md_does_not_dead_end(tmp_path, m
 
     def synthesizing_curator(handoffs, *, repo_root, box=None):
         assert handoffs[0]["system"] == "host-state"
-        assert handoffs[0]["execution_md_path"] == "defender/skills/host-state/execution.md"
+        assert handoffs[0]["path"] == "defender/skills/host-state/execution.md"
         p = repo_root / "defender" / "skills" / "host-state" / "execution.md"
         p.write_text("# host-state — execution\n\n## Verbs\n\n- processes\n\n"
                      "## Exit codes\n\n- 64: a param mistake\n\n## Common pitfalls\n\n- proc\n")

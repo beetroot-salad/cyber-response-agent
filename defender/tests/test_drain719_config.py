@@ -295,7 +295,11 @@ def test_pitfalls_batch_retires_at_the_ceiling(tmp_path: Path, monkeypatch):
     grave = h.graveyard(paths.pitfalls)
     assert h.pending(paths.pitfalls) == []
     assert [r.get("attempts") for r in grave] == [3, 3]
-    assert "pitfalls curation failed" in grave[0]["deadletter_reason"]
+    # #870 FK-11: the ceiling path files the exception's CLASS, not its message — two writers
+    # append to one `pitfalls.deadletter.jsonl`, and a raw `str(e)` beside
+    # `_graveyard_dropped_rows`' named classes leaves a human triaging that file with three
+    # classes and a traceback string.
+    assert grave[0]["deadletter_reason"] == "batch-error:AuthorError"
 
 
 def test_pitfalls_retirement_removes_batch_ids_not_the_whole_queue(tmp_path: Path, monkeypatch):

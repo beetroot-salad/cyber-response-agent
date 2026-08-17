@@ -83,6 +83,18 @@ def git_head_sha(cwd: Path) -> str:
     return git(["rev-parse", "HEAD"], cwd=cwd)
 
 
+def git_show_file(cwd: Path, rev: str, path: str) -> str | None:
+    """The text a path carries at `rev`, or `None` when it is not there.
+
+    Deliberately NOT `git()`: that helper strips the output, and a caller comparing a committed
+    document against a working-tree one needs the bytes as committed — a stripped trailing
+    newline reads as an edit nobody made."""
+    proc = _run(["show", f"{rev}:{path}"], cwd=cwd, check=False)
+    if proc.returncode != 0:
+        return None
+    return proc.stdout
+
+
 def git_rev_list_count(
     cwd: Path, *, grep: str | None = None, rev_range: str = "HEAD"
 ) -> int:

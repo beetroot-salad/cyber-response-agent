@@ -175,7 +175,7 @@ def test_run_pitfalls_at_threshold_commits_and_rotates(tmp_git_repo: Path, tmp_p
 
     def fake_invoke(handoffs, *, repo_root, box=None):
         assert handoffs[0]["system"] == "elastic"
-        assert handoffs[0]["execution_md_path"] == "defender/skills/elastic/execution.md"
+        assert handoffs[0]["path"] == "defender/skills/elastic/execution.md"
         assert len(handoffs[0]["failures"]) == 2
         p = repo_root / "defender" / "skills" / "elastic" / "execution.md"
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -207,7 +207,7 @@ def test_run_pitfalls_no_edit_tick_still_rotates(tmp_git_repo: Path, tmp_path: P
 
 
 def test_a_queued_system_with_no_skills_dir_never_becomes_a_handoff_path(tmp_git_repo: Path):
-    """#855 F-06, the offline half. `execution_md_path` is a PATH BUILT FROM A QUEUE FIELD and
+    """#855 F-06, the offline half. The handoff's `path` is a PATH BUILT FROM A QUEUE FIELD and
     the curator is told to read and write it, so a `system` that reached the queue from
     anywhere unvetted mints a brand-new single-segment directory under `defender/skills/` — the
     phantom-system class #821/#828 closed for `h-*` and `system_for_payload_operands` closed
@@ -223,7 +223,7 @@ def test_a_queued_system_with_no_skills_dir_never_becomes_a_handoff_path(tmp_git
     ]
     handoffs = pitfalls_curator._build_pitfalls_handoffs(rows, systems=DECLARED)
     assert [h["system"] for h in handoffs] == ["elastic"]
-    assert handoffs[0]["execution_md_path"] == "defender/skills/elastic/execution.md"
+    assert handoffs[0]["path"] == "defender/skills/elastic/execution.md"
 
 
 def test_the_commit_gate_refuses_an_execution_md_that_mints_its_own_system_dir(tmp_git_repo: Path):
@@ -298,8 +298,8 @@ def test_invoke_pitfalls_agent_prompt_reaches_engine(tmp_path: Path, monkeypatch
     """The pitfalls prompt (skills_dir + pitfalls_handoffs, and NONE of the per-run keys) reaches
     the in-process engine as the ``user_prompt`` payload."""
     cap = _capture_engine(monkeypatch)
-    handoffs = [{"system": "elastic",
-                 "execution_md_path": "defender/skills/elastic/execution.md",
+    handoffs = [{"surface": "system", "system": "elastic",
+                 "path": "defender/skills/elastic/execution.md",
                  "failures": []}]
     rc = pitfalls_curator._invoke_pitfalls_agent(handoffs, repo_root=tmp_path)
     assert rc == 0

@@ -260,10 +260,18 @@ def test_a_single_lesson_repeated_does_not_clear_the_threshold(paths, monkeypatc
 
 def test_three_distinct_lessons_do_clear_it(paths, monkeypatch):
     """The positive control: the gate still opens, so the negative above is a dedup and not
-    a channel that stopped working."""
+    a channel that stopped working.
+
+    Driven on the SYSTEM lane (an ordinary `elastic.esql` id) since #870: a `∅.bash-shim` row
+    is a REDUCER row now, and a reducer row's rotation is governed by FK-7's confirmed-edit
+    rule rather than by membership — which is a demand of that round
+    (`a_no_edit_reducer_tick_holds_its_rows`) and not what #840's collapse-then-rotate seam is
+    about. The merge key is `(system, stderr_digest)` either way, so the collapse under test is
+    unchanged."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "3")
     persist.append_pitfalls(
-        [_row(f"r:l-00{i}:0", digest=f"exit=1; distinct error {i}") for i in range(3)],
+        [_row(f"r:l-00{i}:0", digest=f"exit=1; distinct error {i}",
+              query_id="elastic.esql") for i in range(3)],
         paths=paths,
     )
     calls: list = []
@@ -320,9 +328,15 @@ def test_the_handoff_builder_collapses_raw_queue_rows_itself():
 def test_every_duplicate_row_behind_a_curated_record_rotates(paths, monkeypatch):
     """The orphan hazard the collapse creates: the curator sees one record, but the batch is
     named by RAW `pitfall_id`s, so all four rows behind it leave the queue. A row left
-    behind would sit in pending forever and re-clear the threshold with a curated lesson."""
+    behind would sit in pending forever and re-clear the threshold with a curated lesson.
+
+    On the SYSTEM lane since #870, for the reason `three_distinct_lessons_do_clear_it` records:
+    a `∅.bash-shim` row is a reducer row now and is HELD, not rotated, on a tick whose curator
+    made no reducer edit."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
-    persist.append_pitfalls([_row(f"r:l-003:{i}") for i in range(4)], paths=paths)
+    persist.append_pitfalls(
+        [_row(f"r:l-003:{i}", query_id="elastic.esql") for i in range(4)], paths=paths,
+    )
 
     calls: list = []
     assert pitfalls_curator.run_pitfalls(paths=paths, invoke=_invoke_spy(calls)) == 0

@@ -382,6 +382,31 @@ def merge_pitfalls(rows: list[dict]) -> list[dict]:
     return out
 
 
+def pitfalls_lane_is_open(records: list[dict], threshold: int) -> bool:
+    """ONE arrival condition, at both readers (#870 FK-3) — `pitfalls_curator.run_pitfalls`'
+    tick gate and `drains._has_lead_author_work`' wake gate.
+
+    The DISTINCT COUNT of merged records reaching the threshold, every record included and
+    systemless ones with them, EXACTLY AS BEFORE — **or** some record whose `system` is `""`
+    carrying `occurrences >= threshold` on its own.
+
+    The disjunct is ADDED; nothing is removed. It exists because the count alone was
+    anti-correlated with evidence quality on the reducer lane: the round's motivating incident
+    is ONE merged record (one unchanging `Binder Error` under eight varied attempts), which
+    could never clear a threshold of 3 alone, while N silent failures carrying no diagnosis
+    ARE N records and did. And the narrower encoding — a systemless record leaving the count
+    entirely — was rejected: it would silently raise the SYSTEM lane's own bar, which this is
+    not the decision to make. A content-less digest keys to `(system, "\\x00" + pitfall_id)`,
+    unique per row, so no number of silent failures ever satisfies the new disjunct.
+    """
+    if len(records) >= threshold:
+        return True
+    return any(
+        not str(r.get("system") or "").strip() and _occurrences(r) >= threshold
+        for r in records
+    )
+
+
 def append_pitfalls(rows: list[dict], *, paths: LoopPaths = DEFAULT_PATHS) -> int:
     """Append the failing rows verbatim. The COLLAPSE happens on the way out (#840).
 

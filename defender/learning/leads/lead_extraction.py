@@ -15,6 +15,7 @@ from defender.learning.leads.draft_synthesis import (
     _draft_candidate_segments,
     _executed_query,
 )
+from defender.scripts.gather_tools.record_query import BASH_SHIM_QUERY_ID
 
 
 class LeadAuthorError(Exception):
@@ -97,6 +98,19 @@ def extract_from_joined(joined_leads: list) -> list[ExecutedLead]:
     return out
 
 
+def _is_reducer_failure(lead: ExecutedLead) -> bool:
+    """#870 M5′ — is this row the REDUCER's mistake rather than a system's?
+
+    EQUALITY with the reserved sentinel, never a suffix, a substring or `is_sentinel` alone:
+    `resolve_query_id` returns a well-formed `<system>.bash-shim` verbatim (C15), so a model
+    that spells a near miss must not be able to route its own row onto the reducer surface
+    (U3). `is_sentinel` rides along because it is the projection's own verdict
+    on the row (#841) — the collectors partition on the SAME predicate the split did rather
+    than each re-deriving one from the string.
+    """
+    return lead.is_sentinel and lead.query_id == BASH_SHIM_QUERY_ID
+
+
 def collect_general_failures(
     executed: list[ExecutedLead], run_dir: Path, *, catalog_dir: Path | None = None,
     catalog: list | None = None,
@@ -108,7 +122,15 @@ def collect_general_failures(
     for lead in executed:
         if lead.error_class != "agent-fixable":
             continue
-        if not (lead.system or "").strip():
+        # #870 M5′: the reducer lane, tested BEFORE the systemless guard below. A failed
+        # `… | defender-sql …` reduce belongs to `defender-sql`, not to whichever system's
+        # payload it happened to open, so the row is admitted on the sentinel id alone and its
+        # `system` is normalized to `""` HERE, at collection — which is what makes three
+        # attributed rows carrying one diagnosis ONE record under `pitfall_key` (F2/C8)
+        # instead of three bullets of one lesson. The infra guard above still runs first (N9):
+        # a broken deployment is not a lesson any corpus file should carry.
+        is_reducer = _is_reducer_failure(lead)
+        if not is_reducer and not (lead.system or "").strip():
             continue
         if lead.query_id in by_id:
             continue
@@ -119,7 +141,7 @@ def collect_general_failures(
                 "schema_version": 1,
                 "pitfall_id": f"{run_dir.name}:{lead.lead_id}:{lead.query_index}",
                 "source_run": run_dir.name,
-                "system": lead.system,
+                "system": "" if is_reducer else lead.system,
                 "query_id": lead.query_id,
                 "goal": lead.goal_text,
                 "executed_query": _executed_query(lead),

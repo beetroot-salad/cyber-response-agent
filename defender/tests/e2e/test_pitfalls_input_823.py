@@ -451,8 +451,14 @@ def test_no_record_names_a_system_absent_from_the_run(tmp_path):
 def test_shim_without_a_payload_operand_has_no_system_and_is_skipped(tmp_path):
     """shim_without_a_payload_operand_has_no_system_and_is_skipped — a reduce that opens no
     run payload has nothing to attribute to. The row is still written (the failure happened),
-    with an empty system, and `collect_general_failures` skips it at `lead_extraction.py:100` —
-    the existing guard, not a new branch. Inventing a system here is what O4 forbids."""
+    with an empty system, and NO SYSTEM IS INVENTED for it, which is what O4 forbids.
+
+    THE SECOND HALF OF THIS DEMAND WAS SUPERSEDED BY #870 M5′ and is re-asserted here as what
+    now happens: the row is no longer SKIPPED at the systemless guard. It is admitted on its
+    sentinel `query_id` and carries `system: ""` into the queue, because a `defender-sql`
+    mistake belongs to the reducer surface (`skills/gather/defender-sql.md`) rather than to a
+    system — and the reduce that attributed to nothing is the one this channel had never seen.
+    The name is #823's demand id and is kept so its graph's `discharged_by` still resolves."""
     r = _run(tmp_path, run_id="d823-nopayload", turns=[
         q("elastic", "query", {"native_query": "FROM logs"}),
         Turn(tool_calls=[("bash", {"command": f"{SQL} 'SELECT 1'"})]),
@@ -462,7 +468,9 @@ def test_shim_without_a_payload_operand_has_no_system_and_is_skipped(tmp_path):
     assert len(shim) == 1, "the failure still produced its row"
     assert shim[0]["system"] == ""
     pitfalls = collect_general_failures(r.leads(), r.run_dir)
-    assert [p for p in pitfalls if p["query_id"] == BASH_SHIM_QUERY_ID] == []
+    shim_pitfalls = [p for p in pitfalls if p["query_id"] == BASH_SHIM_QUERY_ID]
+    assert len(shim_pitfalls) == 1, "#870 M5′: the unattributed reduce reaches the queue"
+    assert shim_pitfalls[0]["system"] == "", "a system was invented for it"
 
 
 def test_shim_row_reaches_the_curator_and_nothing_else(tmp_path):
@@ -470,7 +478,11 @@ def test_shim_row_reaches_the_curator_and_nothing_else(tmp_path):
     join, the real extraction and the three real collectors: the shim row lands in the pitfalls
     residue, mints no `_draft/` template, and is not handed to the lead-author. The record
     carries the argv as its `executed_query` and the shim's diagnosis as its digest, which is
-    what `lead_pitfalls.md` step 2 reads to name a mistake and a fix."""
+    what `lead_pitfalls.md` step 2 reads to name a mistake and a fix.
+
+    Since #870 M5′ the record's `system` is `""` however the reduce was attributed: the
+    payload it opened selects nothing about whose mistake the SQL was, and the row is routed
+    by its sentinel `query_id` to the reducer surface."""
     run_dir = materialize(tmp_path, GOLDEN_AB3)
     r = _run(tmp_path, run_dir=run_dir, run_id="d823-route", turns=[
         q("elastic", "query", {"native_query": "FROM logs"}), _reduce(run_dir), DONE,
@@ -478,7 +490,7 @@ def test_shim_row_reaches_the_curator_and_nothing_else(tmp_path):
     pitfalls = collect_general_failures(r.own_leads(), r.run_dir)
     assert len(pitfalls) == 1, "the shim failure did not reach the pitfalls curator"
     rec = pitfalls[0]
-    assert rec["system"] == "elastic"
+    assert rec["system"] == ""
     assert rec["query_id"] == BASH_SHIM_QUERY_ID
     assert SQL in rec["executed_query"]
     assert "unnest" in rec["stderr_digest"]

@@ -32,7 +32,11 @@ from defender.learning.core.markers import (
     quarantine_marker,
     requeue_marker,
 )
-from defender.learning.core.persist import merge_pitfalls, read_pitfalls
+from defender.learning.core.persist import (
+    merge_pitfalls,
+    pitfalls_lane_is_open,
+    read_pitfalls,
+)
 from defender.learning.core.quarantine import preserve_tainted_tree
 
 
@@ -142,9 +146,11 @@ def _has_lead_author_work(paths: LoopPaths) -> bool:
     inflight = qdir / "inflight"
     if inflight.is_dir() and any(inflight.glob("*.json")):
         return True
-    # Distinct mistakes, the same count `run_pitfalls` gates on (#840) — a wake gate that
-    # counted rows would spin the drain up for a curation that then declines to run.
-    return len(merge_pitfalls(read_pitfalls(paths))) >= threshold
+    # The same arrival condition `run_pitfalls` gates on, asked through the same function
+    # (#840 + #870 FK-3) — a wake gate that counted rows, or that answered a different
+    # question from the tick's, would spin the drain up for a curation that then declines to
+    # run, or (worse) never wake for work the tick would have taken.
+    return pitfalls_lane_is_open(merge_pitfalls(read_pitfalls(paths)), threshold)
 
 
 def _drain_curators(
@@ -272,7 +278,13 @@ def _retire_pitfalls_batch(paths: LoopPaths, batch_ids: list[str], e: Exception)
     drain.retire(
         channel=paths.pitfalls,
         batch_ids=batch_ids,
-        reason=str(e),
+        # `batch-error:<class>`, not `str(e)` (#870 FK-11): two writers append to one
+        # `pitfalls.deadletter.jsonl`, and a raw exception message beside
+        # `_graveyard_dropped_rows`' three named classes leaves a human triaging that file
+        # with three classes and a traceback string. This is the shape a REDUCER row most
+        # plausibly gets — its system is neither missing nor malformed nor undeclared, it is
+        # `""` by design — so the class name is what keeps the vocabulary closed at four.
+        reason=f"batch-error:{type(e).__name__}",
         max_attempts=author_max_attempts(),
     )
 
