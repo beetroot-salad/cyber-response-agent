@@ -147,7 +147,19 @@ def _draft_skeleton(
     # this skeleton interpolates).
     goal_line = " ".join((goal or "").split()) or "(no lead goal recorded)"
     return (
-        f"---\n{_draft_frontmatter(draft_id, verb_name, params, engine, [query_id])}\n---\n\n"
+        # `covers:` holds BOTH identities this file answers: the coined `query_id` the row
+        # carried, and the draft's OWN `id:`. The second is not redundant and not decoration —
+        # `template_search` publishes `_draft/` hits and tells gather to "Read the path before
+        # you bind the `id` as `query_id`" (`tools_gather`), so a draft's derived id is itself
+        # dispatchable and rows really are recorded under it. While the draft exists its `id:`
+        # answers those rows; the moment it is promoted the id is replaced by the name the
+        # author chose, and an identity that only ever lived in `id:` is orphaned — the next
+        # drain that reaches a row carrying it mints a draft OF THE DIGEST, whose goal reads
+        # "auto-drafted from a coined gather query `{system}.{hex}`". Carrying it here means the
+        # author's one instruction — copy `covers:` onto the file you promote — transfers both,
+        # with no second clause to forget.
+        f"---\n{_draft_frontmatter(draft_id, verb_name, params, engine, [draft_id, query_id])}"
+        "\n---\n\n"
         "## Goal\n\n"
         f"`{query_id}` — auto-drafted from a coined gather query with no matching\n"
         f'catalog template. The defender\'s lead goal was: "{goal_line}".\n\n'
@@ -225,6 +237,23 @@ def _mint_order(executed: list[ExecutedLead]) -> list[ExecutedLead]:
     return ok + rest
 
 
+def answered_identities(catalog: list) -> set[str]:
+    """Every identity the catalog already answers — ids UNION `covers:`.
+
+    THE reader of that rule, so the two collectors that partition a row on it give the same
+    answer. An identity is answered either by a template that IS it (the `id:`) or by one that
+    took it over (`covers:` — a promote that renamed the file, a widen that absorbed the draft),
+    and once the author names the established file for what it measures the id no longer echoes
+    the coined `query_id`. Both `synthesize_drafts` (decide whether to mint) and
+    `collect_general_failures` (decide whether a failed row is a draft candidate or pitfalls
+    residue) key on this set; a second copy in either is how one of them starts dropping a row
+    the other still expects to handle (#901: one rule, one reader, not a copy per caller).
+
+    A fresh `set` each call: `synthesize_drafts` adds to it as it mints.
+    """
+    return {t.id for t in catalog} | {c for t in catalog for c in t.covers}
+
+
 def _draft_candidate_segments(
     query_id: str, verb_name: str, by_id: set[str], *, row_system: str,
 ) -> tuple[str, str] | None:
@@ -288,13 +317,11 @@ def synthesize_drafts(
 ) -> list[Path]:
     if catalog is None:
         catalog = lead_neighbors.load_catalog(catalog_dir)
-    # Ids UNION `covers:`. An identity is answered either by a template that IS it (the id) or
-    # by one that took it over (a promote that renamed the file, a widen that absorbed the
-    # draft) — and once the author names the established file for what it measures, the id no
-    # longer echoes the coined `query_id`, so `covers:` is the only thing left tying the two
-    # together. Without this half, every promoted or discarded draft is re-minted the next time
-    # a run coins its id, and the author spends a tick discarding it again.
-    by_id = {t.id for t in catalog} | {c for t in catalog for c in t.covers}
+    # Ids UNION `covers:` — through the shared reader, because `collect_general_failures`
+    # partitions the same rows on the same question. Without the `covers:` half, every promoted
+    # or discarded draft is re-minted the next time a run coins its id, and the author spends a
+    # tick discarding it again.
+    by_id = answered_identities(catalog)
     created: list[Path] = []
     for lead in _mint_order(executed):
         # `is_sentinel` explicitly, not by the id alphabet. A `∅.`-prefixed row is a writer-only
@@ -346,6 +373,12 @@ def synthesize_drafts(
             )
             created.append(draft)
             by_id.add(qid)
-        except OSError:
+        except OSError as e:
+            # REPORTED, not just skipped (O3, the same posture as the undeclared-system refusal
+            # above). Since the write moved onto the #771 M3 seam an `OSError` here is no longer
+            # only "the disk is full": `guarded_mkdir` and `write_atomic` raise it to REFUSE a
+            # planted symlink or hard link at the draft's name, and a refusal nothing prints
+            # reads from the outside exactly like a tick that had no draft to mint.
+            _log(f"synthesize_drafts: could not write {draft} (query_id={qid!r}): {e}")
             continue
     return created

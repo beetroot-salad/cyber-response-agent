@@ -50,6 +50,7 @@ from defender.learning.leads.draft_synthesis import (  # noqa: F401  (re-exporte
     _draft_candidate_segments,
     _draft_skeleton,
     _executed_query,
+    answered_identities,
     synthesize_drafts,
 )
 from defender.learning.leads.lead_extraction import (  # noqa: F401  (re-exported)
@@ -506,21 +507,25 @@ def _minted_identities(created: list[Path]) -> Mapping[Path, tuple[str, ...]]:
     return out
 
 
-def _covered_by_established(repo_root: Path) -> set[str]:
-    """Every identity an ESTABLISHED template in the tree accounts for once this batch lands.
+def _answered_after_batch(repo_root: Path) -> set[str]:
+    """Every identity the catalog answers once this batch lands, through the mint's OWN reader.
 
-    Read off the working tree, so it already includes whatever the agent just wrote. The
-    transfer rule below is about one question — "will this identity be re-minted next run?" —
-    and `synthesize_drafts` answers it from the whole catalog, not from one batch's diff. Scored
-    against the batch alone, a draft whose identity a template took over in an EARLIER tick is
-    refused for a delete that costs nothing, and the refusal discards the tick's whole batch.
+    Read off the working tree, so it already includes whatever the agent just wrote. The transfer
+    rule below asks exactly one question — "will this identity be re-minted next run?" — and the
+    only thing entitled to answer it is the function the mint asks: `answered_identities`, ids
+    UNION `covers:`, over the whole catalog.
+
+    It used to be a private walk over `{system}/*.md` reading `covers:` alone, which answered a
+    NARROWER question in two ways and refused legitimate work for both. Established-only: a draft
+    can be the wide neighbor (`top_k_neighbors` iterates the whole catalog, and `lead_author.md`
+    says "a coined draft (or an established template)"), so folding one draft into another and
+    attributing it there was refused for a delete that could never cause a re-mint. And
+    covers-only: an identity answered by a template's `id:` is answered, which is the ordinary
+    case for anything not yet renamed. Scored against a set the mint does not use, this gate
+    discards a whole tick's batch over a delete that costs nothing — the exact false-refusal
+    class its own docstring claimed to be avoiding.
     """
-    covered: set[str] = set()
-    for path in sorted((repo_root / CATALOG_REL).glob("*/*.md")):
-        template = _corpus.read_query_template(path)[0]
-        if template is not None:
-            covered.update(template.covers)
-    return covered
+    return answered_identities(lead_neighbors.load_catalog(repo_root / CATALOG_REL))
 
 
 def _refuse_half_promote(repo_root: Path, taken_over: set[str]) -> None:
@@ -616,7 +621,7 @@ def _covers_rule(
     template is one to SKIP, not to delete. Unenforced, the omission is silent and self-
     repeating — the identity is re-minted the next time a run coins it, the author discards it
     again, and nothing in the loop ever reports that it is going in circles. Scored against the
-    whole tree (`_covered_by_established`) rather than against this batch's edits, because the
+    whole tree (`_answered_after_batch`) rather than against this batch's edits, because the
     question is the one `synthesize_drafts` will ask next run and it reads the whole catalog.
     Both provenances of a departed draft are read — the committed one out of git, the one this
     tick minted out of `minted`, which git cannot see (`_departed_drafts`). Its mirror is
@@ -649,11 +654,11 @@ def _covers_rule(
         _refuse_lost_provenance(path, before, after)
         taken_over.update(set(after.covers) - set(before.covers if before is not None else ()))
 
-    # The tree walk is behind the `if`: `_covered_by_established` parses every established
-    # template in the catalog, and the question it answers is only ever asked about a draft
-    # that left. A batch that deleted none pays nothing.
+    # The tree walk is behind the `if`: `_answered_after_batch` parses the whole catalog, and
+    # the question it answers is only ever asked about a draft that left. A batch that
+    # deleted none pays nothing.
     if departed := _departed_drafts(repo_root, minted, records):
-        covered = _covered_by_established(repo_root)
+        covered = _answered_after_batch(repo_root)
         for path, identities in departed:
             if orphaned := sorted(set(identities) - covered):
                 raise LeadAuthorError(
@@ -665,6 +670,29 @@ def _covers_rule(
                 )
 
     _refuse_half_promote(repo_root, taken_over)
+
+
+def _repairs_the_id(
+    before: _corpus.QueryTemplate, after: _corpus.QueryTemplate,
+) -> bool:
+    """Is this `id:` change the REPAIR of an id that disagreed with its directory?
+
+    Without this the two rules deadlock, and the deadlock has no exit. A template filed at
+    `queries/{system}/{name}.md` while calling itself `{other}.{name}` is refused by
+    `check_template`'s `id-system-mismatch` on every edit — with a message telling the author
+    the id must start with `{system}`. The author does exactly that, and the monotonicity rule
+    refuses the batch for "rewriting the identity of an established template". Moving the file
+    instead is refused by the delete-prohibition. Every tick that touches the file discards its
+    whole batch, following two instructions that contradict each other.
+
+    Narrow on purpose: the id must have been wrong BEFORE and right AFTER. A change between two
+    well-formed ids is still the clobber the rule is here to catch, and a change that swaps one
+    mismatch for another is not a repair.
+    """
+    def _prefix(t: _corpus.QueryTemplate) -> str:
+        return t.id.split(".", 1)[0] if "." in t.id else ""
+
+    return _prefix(before) != before.system and _prefix(after) == after.system
 
 
 def _refuse_lost_provenance(
@@ -680,7 +708,7 @@ def _refuse_lost_provenance(
     """
     if before is None:
         return
-    if before.id != after.id:
+    if before.id != after.id and not _repairs_the_id(before, after):
         raise LeadAuthorError(
             f"agent rewrote the identity of an established template ({path}): it was "
             f"{before.id!r} at HEAD and is {after.id!r} now; refusing to commit (a promote "

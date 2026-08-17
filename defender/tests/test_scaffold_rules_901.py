@@ -223,13 +223,35 @@ def test_covers_reads_every_spelling_and_is_not_a_placeholder_declaration(tmp_pa
     assert _covers("covers: cmdb.a\n") == ("cmdb.a",)
     assert _covers("") == ()
 
-    # …and the half the docstring promises: covering an identity does not declare a name.
+    # …and the half the docstring promises: covering an identity does not declare a name. The
+    # entry is well-formed (`cmdb.probe`), so the ONLY finding is the placeholder one — a bare
+    # `probe` would be refused by the shape rule and would not test this.
     smuggled = (
         "---\nid: cmdb.probe\nstatus: established\nverb: get-host\nparams: [host]\n"
-        "covers: [probe]\n---\n\n"
+        "covers: [cmdb.probe]\n---\n\n"
         "## Query\n\n```query\nverb: get-host\nparams:\n  host: ${host}-${probe}\n```\n"
     )
     assert _codes(smuggled, "cmdb", tmp_path, resolver) == ["undeclared-placeholder"]
+
+
+def test_a_covers_entry_must_be_an_identity_of_the_system_it_is_filed_under(tmp_path, resolver):
+    """`covers:` is believed by the mint, so a wrong entry is a silent, permanent loss.
+
+    `synthesize_drafts` reads ids UNION `covers:` to decide whether an identity is already
+    answered. A `cmdb` template claiming `elastic.hunt-creds` — one copy-paste from a
+    cross-system neighbor — means `elastic` never gets that draft minted again, with nothing
+    reporting it. The shape half matters for the same reason: `_declared_names` is deliberately
+    tolerant, so an unquoted `covers: on` arrives as the string `True`, which no row can ever
+    match and which still reads as provenance to a human.
+    """
+    body = "## Query\n\n```query\nverb: get-host\nparams:\n  host: ${host}\n```\n"
+    head = "---\nid: cmdb.probe\nstatus: established\nverb: get-host\nparams: [host]\n"
+
+    assert _codes(head + "covers: [cmdb.other]\n---\n\n" + body, "cmdb", tmp_path, resolver) == []
+    for spelling in ("covers: [elastic.hunt-creds]", "covers: [probe]", "covers: on"):
+        assert _codes(
+            head + spelling + "\n---\n\n" + body, "cmdb", tmp_path, resolver
+        ) == ["covers-system-mismatch"], spelling
 
 
 def test_every_shipped_template_including_drafts_satisfies_the_rule(resolver):

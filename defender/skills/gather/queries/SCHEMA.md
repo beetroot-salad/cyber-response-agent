@@ -183,7 +183,11 @@ recording; it is freely discardable, and the checker accepts both.)
   its `${name}`s are holes a dispatch fills, which is why they are checked against the verb's
   params. A recording has no holes — every `${…}` in it is text that was literally sent. So a
   draft declares no `body_substitutions:`, and the placeholder rule does not apply to it.
-- Its **`covers:`** lists the coined `query_id`s it accounts for.
+- Its **`covers:`** lists every `query_id` it answers — the coined one the row carried **and
+  its own derived `id:`**. The second is not redundant: `template_search` publishes `_draft/`
+  hits and tells gather to bind the hit's `id` as `query_id`, so rows really are recorded under
+  the digest. Copying the whole list onto the promoted file is what keeps both resolving once
+  the `id:` is replaced by the name you chose.
 
 `covers:` is what survives the draft. It is the dedup key (`synthesize_drafts` will re-mint an
 identity that no template covers), it is how the commit gate matches a deleted draft to the

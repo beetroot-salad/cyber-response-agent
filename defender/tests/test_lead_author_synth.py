@@ -359,10 +359,11 @@ def test_a_coined_id_cannot_mint_a_basename_the_commit_gate_discards_the_batch_f
         assert path.name != "execution.md"
     # Each one still records which coined id it came from, so the author can see that gather
     # called this measurement `SCHEMA` and name it something a catalog can carry.
-    assert {
-        _minted(cat, "stub-cmdb", f"stub-cmdb.{seg}").covers
-        for seg in ("SCHEMA", "README", "execution")
-    } == {("stub-cmdb.SCHEMA",), ("stub-cmdb.README",), ("stub-cmdb.execution",)}
+    for seg in ("SCHEMA", "README", "execution"):
+        template = _minted(cat, "stub-cmdb", f"stub-cmdb.{seg}")
+        # Both identities the file answers: its own derived id (dispatchable, because
+        # `template_search` publishes drafts) and the coined id the row carried.
+        assert template.covers == (template.id, f"stub-cmdb.{seg}")
 
 
 def test_a_goal_carrying_a_line_separator_cannot_forge_a_section(tmp_path):

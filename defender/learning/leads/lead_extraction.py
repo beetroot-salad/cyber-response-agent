@@ -14,6 +14,7 @@ from defender.learning.leads import lead_neighbors
 from defender.learning.leads.draft_synthesis import (
     _draft_candidate_segments,
     _executed_query,
+    answered_identities,
 )
 
 
@@ -103,7 +104,14 @@ def collect_general_failures(
 ) -> list[dict]:
     if catalog is None:
         catalog = lead_neighbors.load_catalog(catalog_dir)
-    by_id = {t.id for t in catalog}
+    # The SAME "is this identity already answered" set `synthesize_drafts` mints against
+    # (`answered_identities`: ids UNION `covers:`), not a second copy keyed on ids alone. The
+    # two verdicts happen to coincide today — a covered id that this function reads as a draft
+    # candidate is skipped here, which is what a covered id should be — but that is arithmetic,
+    # not agreement: this is the ONE partition that decides whether an `agent-fixable` failure
+    # becomes a draft or pitfalls residue, and a row the mint calls answered while this calls it
+    # draftable is a row that lands in neither. Two spellings of one rule is how that starts.
+    by_id = answered_identities(catalog)
     out: list[dict] = []
     for lead in executed:
         if lead.error_class != "agent-fixable":

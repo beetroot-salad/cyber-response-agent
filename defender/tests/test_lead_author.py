@@ -565,10 +565,14 @@ def test_a_bare_discard_of_a_covered_draft_is_refused(tmp_git_repo: Path):
 
 def _mint_uncommitted_draft(repo: Path, query_id: str) -> Path:
     """A `wazuh` draft written but NOT committed — what `synthesize_drafts` leaves behind, and
-    what the same tick then hands to the author."""
+    what the same tick then hands to the author.
+
+    `covers:` carries BOTH identities the real mint writes: the draft's own derived id (which
+    `template_search` publishes and gather may bind) and the coined `query_id`. A fixture that
+    wrote only one would test a file the loop never produces."""
+    draft_id = f"wazuh.{lead_author._draft_basename(query_id)}"
     draft = repo / _CATALOG / "wazuh" / "_draft" / f"{lead_author._draft_basename(query_id)}.md"
-    draft.write_text(query_template(f"wazuh.{lead_author._draft_basename(query_id)}",
-                                    "draft", covers=[query_id]))
+    draft.write_text(query_template(draft_id, "draft", covers=[draft_id, query_id]))
     return draft
 
 
@@ -599,7 +603,7 @@ def test_a_promote_of_a_draft_minted_this_tick_is_accepted(tmp_git_repo: Path):
     minted = lead_author._minted_identities([draft])
     (repo / _CATALOG / "wazuh" / "auth-failure-rate.md").write_text(
         query_template("wazuh.auth-failure-rate", "established",
-                       covers=["wazuh.hunt-failed-logins"])
+                       covers=[draft.stem.join(("wazuh.", "")), "wazuh.hunt-failed-logins"])
     )
     draft.unlink()
 
@@ -663,6 +667,70 @@ def test_a_discard_is_accepted_when_an_untouched_template_already_covers_it(
     changed = lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED)
     assert changed == ["defender/skills/gather/queries/wazuh/_draft/"
                        f"{lead_author._draft_basename('wazuh.hunt-failed-logins')}.md"]
+
+
+def test_repairing_an_id_that_disagrees_with_its_directory_is_not_a_clobber(
+    tmp_git_repo: Path
+):
+    """The two rules deadlocked, and the deadlock had no exit.
+
+    A template filed under `wazuh/` while calling itself `elastic.…` is refused by
+    `check_template`'s `id-system-mismatch` on every edit, with a message telling the author to
+    make the id start with `wazuh`. Doing that was then refused by the monotonicity rule as
+    "rewriting the identity of an established template", and moving the file instead is refused
+    by the delete-prohibition — so every tick that touched the file discarded its whole batch
+    while following two contradictory instructions."""
+    repo = tmp_git_repo
+    broken = repo / _CATALOG / "wazuh" / "auth-events.md"
+    broken.write_text(query_template("elastic.auth-events", "established"))
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "a mismatched id"], cwd=repo, check=True)
+
+    broken.write_text(query_template("wazuh.auth-events", "established"))
+    changed = lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED)
+    assert "defender/skills/gather/queries/wazuh/auth-events.md" in changed
+
+
+def test_swapping_one_well_formed_id_for_another_is_still_a_clobber(tmp_git_repo: Path):
+    """The narrowness of the repair exemption above — its own repo, because the gate imports
+    the seeded adapter and the `__pycache__` it leaves is a stray to a second call in the same
+    tree. The id must have been WRONG before and right after; a change between two well-formed
+    ids is the name collision the monotonicity rule exists to catch."""
+    repo = tmp_git_repo
+    (repo / _CATALOG / "wazuh" / "auth-events.md").write_text(
+        query_template("wazuh.something-else", "established")
+    )
+    with pytest.raises(lead_author.LeadAuthorError, match="rewrote the identity"):
+        lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED)
+
+
+def test_a_draft_folded_into_another_draft_is_attributed(tmp_git_repo: Path):
+    """A draft is a legal home for a transferred identity, because the MINT thinks so.
+
+    `top_k_neighbors` iterates the whole catalog and `lead_author.md` calls a coined draft a
+    possible wide neighbor, so folding a narrow draft into a wider one is real curation. The
+    transfer rule scored attribution against established templates' `covers:` alone, which is a
+    narrower set than the `answered_identities` the mint actually reads — so a delete that could
+    never cause a re-mint was refused, and the tick's every other edit went with it."""
+    repo = tmp_git_repo
+    narrow = _mint_uncommitted_draft(repo, "wazuh.narrow-probe")
+    wide = _mint_uncommitted_draft(repo, "wazuh.wide-probe")
+    minted = lead_author._minted_identities([narrow, wide])
+
+    # The survivor absorbs the narrow one's identities; the narrow one goes.
+    wide.write_text(query_template(
+        f"wazuh.{lead_author._draft_basename('wazuh.wide-probe')}", "draft",
+        covers=[
+            f"wazuh.{lead_author._draft_basename('wazuh.wide-probe')}", "wazuh.wide-probe",
+            f"wazuh.{lead_author._draft_basename('wazuh.narrow-probe')}", "wazuh.narrow-probe",
+        ],
+    ))
+    narrow.unlink()
+
+    changed = lead_author._verify_skills_state(
+        repo, baseline_stray=[], systems=DECLARED, minted=minted
+    )
+    assert wide.relative_to(repo).as_posix() in changed
 
 
 def test_a_draft_with_no_covers_is_still_freely_discardable(tmp_git_repo: Path):
