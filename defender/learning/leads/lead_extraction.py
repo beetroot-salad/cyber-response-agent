@@ -112,7 +112,9 @@ def collect_general_failures(
             continue
         if lead.query_id in by_id:
             continue
-        if _draft_candidate_segments(lead.query_id, lead.verb, by_id) is not None:
+        if _draft_candidate_segments(
+            lead.query_id, lead.verb, by_id, row_system=lead.system
+        ) is not None:
             continue
         out.append(
             {

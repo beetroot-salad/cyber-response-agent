@@ -47,6 +47,7 @@ from defender.learning.pipeline.oracle.sample import build_lead_user_prompt
 from defender.runtime.agent_definition import RunScope, bind, effective_tools_for
 from defender.runtime.box import BoxResult
 from defender.runtime.tools import _tool_bash, _tool_read_file
+from defender.tests._repo import seed_adapter_stubs
 
 #: #632's §7 R7 grant/capability agreement: JUDGE_DEF's static `closed_tickets` bit stays
 #: False (only the per-leg replace() in _run_judge_pydantic turns it on, together with the
@@ -511,6 +512,9 @@ def _lead_author_deps_scene(tmp_path: Path, result: BoxResult):
     run = tmp_path / "run"
     skills.mkdir(parents=True)
     run.mkdir(parents=True)
+    # `system` in the rm spelling below has to BE one since #772 — the grant is compiled per
+    # system the tree declares an adapter for, not over an anonymous `<name>/_draft/` shape.
+    seed_adapter_stubs(defender_dir, ("system",))
     deps = bind(LEAD_AUTHOR_DEF, run, defender_dir=defender_dir, box=Box(result))
     return deps, skills, "rm defender/skills/system/_draft/lesson.md"
 

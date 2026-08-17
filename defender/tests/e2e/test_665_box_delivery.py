@@ -35,7 +35,8 @@ pytest.importorskip("pydantic_ai")
 
 from defender import agents as agents_registry  # noqa: E402
 from defender.learning.core.config import StageContext, StageWiring  # noqa: E402
-from defender.runtime import box as box_mod  # noqa: E402
+from defender.runtime import box as box_mod
+from defender.tests._repo import seed_adapter_stubs  # noqa: E402
 from defender.runtime.agent_definition import RunScope, bind  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402
 
@@ -287,6 +288,11 @@ def test_box_reaches_both_actor_legs_and_both_drain_chains(tmp_path):
     curator_deps = _curator_for_run(tmp_path, box=delivered)
     # drain chain 2 — lead_author engine
     from defender.learning.leads import lead_author_engine
+
+    # The engine binds a policy off `repo_root/defender`, and since #772 that policy's write
+    # lanes are compiled per system the tree declares — so the tree has to declare one for the
+    # bind to reach the box threading this case is about.
+    seed_adapter_stubs(tmp_path / "repo" / "defender", ("elastic",))
 
     lead_deps = lead_author_engine._run_lead_author_pydantic(
         StageWiring(

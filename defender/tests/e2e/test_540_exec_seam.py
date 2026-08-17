@@ -68,6 +68,7 @@ from defender.runtime import tools as runtime_tools  # noqa: E402
 from defender.runtime.agent_definition import RunScope, bind, effective_tools_for  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402
 from defender.runtime.driver import MAIN_DEF  # noqa: E402
+from defender.tests._repo import seed_adapter_stubs  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
@@ -692,6 +693,10 @@ def test_every_bash_enabled_role_executes_through_a_box(tmp_path):
         tree = tmp_path / "tree" / "defender" if defn.requires_explicit_tree else DEFENDER
         if defn.requires_explicit_tree:
             tree.mkdir(parents=True, exist_ok=True)
+            # The lead author's write lanes are compiled per system the tree declares (#772),
+            # so an explicit tree has to declare one or the bind is refused before the box
+            # lane — which is what this probe is actually about — is ever reached.
+            seed_adapter_stubs(tree, ("elastic",))
         if defn.requires_corpus:
             corpora = ("lessons", "lessons-actor", "lessons-environment")
             for name in corpora:

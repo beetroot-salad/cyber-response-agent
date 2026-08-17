@@ -11,9 +11,15 @@ import yaml
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
+from defender._scaffold_rules import placeholders
 from defender.learning.core import config as _loop_config
 from defender.learning.leads import lead_neighbors
-from defender.learning.leads.path_validation import CATALOG_DIR
+from defender.learning.leads.path_validation import (
+    CATALOG_DIR,
+    CATALOG_REL,
+    _is_draft_readme,
+    _is_schema_md,
+)
 from defender.runtime.verbs import body_param_for, engine_for
 
 if TYPE_CHECKING:
@@ -86,7 +92,7 @@ def _draft_params(lead: ExecutedLead) -> list[str]:
 
 
 def _draft_frontmatter(
-    query_id: str, verb_name: str, params: list[str], engine: str,
+    query_id: str, verb_name: str, params: list[str], engine: str, body_subs: list[str],
 ) -> str:
     """Rendered through `yaml.safe_dump`, not an f-string: every value here comes off the queries
     table, and a frontmatter block a model-coined value can break is a draft that never parses
@@ -96,18 +102,49 @@ def _draft_frontmatter(
     if engine != "none":
         doc["engine"] = engine
     doc["params"] = params
+    if body_subs:
+        doc["body_substitutions"] = body_subs
     return yaml.safe_dump(
         doc, sort_keys=False, allow_unicode=True, default_flow_style=None
     ).strip()
+
+
+def _body_substitutions(query_block: str, params: list[str]) -> list[str]:
+    """The `${name}`s the rendered `## Query` actually carries that are NOT declared params.
+
+    A param-only verb's minted body holds literal VALUES, never `${placeholder}`s — so a
+    `${…}` reaching here came out of a bound value (`host: web-${env}-1`) or out of an engine
+    body's own query language. Either way it is body text, which is exactly what
+    `body_substitutions:` means in `SCHEMA.md`, and declaring it is what keeps the mint
+    conformant to the rule the corpus-wide sweep runs (#901). Left undeclared, one such value
+    mints a draft the sweep refuses — and the lane's commit gate deliberately does not check
+    `_draft/`, so the refusal lands in CI on everyone rather than on the batch that wrote it.
+
+    Classified through `_scaffold_rules.placeholders`, the CHECKER's own reader, rather than
+    against a second copy of its regex here: a writer that classifies by a near-miss of the
+    grammar it is writing for is the drift this issue is about.
+    """
+    declared = set(params)
+    return sorted(placeholders(query_block) - declared)
 
 
 def _draft_skeleton(
     query_id: str, verb_name: str, params: list[str], goal: str, record: str, engine: str,
 ) -> str:
     query_block = _render_query_body(record, engine if engine != "none" else "query")
-    goal_line = (goal or "").replace("\n", " ").strip() or "(no lead goal recorded)"
+    # `split()`, not `replace("\n", " ")`: the reader this line has to survive is
+    # `_corpus.section_bodies`, which walks `body.splitlines()` — and that splits on `\r`,
+    # `\v`, `\f`, `\x1c`-`\x1e`, `\x85` and `\u2028`/`\u2029` as well as on `\n`. A
+    # model-authored `goal_text` carrying any of them opened a new LINE in the draft, so a `## `
+    # heading or a ``` fence smuggled into a goal re-partitioned the template's sections and
+    # could swallow `## Query` whole. Every one of those separators is `str.isspace()`, which
+    # is exactly what a bare `split()` breaks on, so one call neutralizes the set (#852 F-21's
+    # argument about a control character in an id, applied to the other model-supplied string
+    # this skeleton interpolates).
+    goal_line = " ".join((goal or "").split()) or "(no lead goal recorded)"
+    body_subs = _body_substitutions(query_block, params)
     return (
-        f"---\n{_draft_frontmatter(query_id, verb_name, params, engine)}\n---\n\n"
+        f"---\n{_draft_frontmatter(query_id, verb_name, params, engine, body_subs)}\n---\n\n"
         "## Goal\n\n"
         f"`{query_id}` — auto-drafted from a coined gather query with no matching\n"
         f'catalog template. The defender\'s lead goal was: "{goal_line}".\n\n'
@@ -126,12 +163,32 @@ def _draft_skeleton(
 
 
 def _draft_candidate_segments(
-    query_id: str, verb_name: str, by_id: set[str],
+    query_id: str, verb_name: str, by_id: set[str], *, row_system: str,
 ) -> tuple[str, str] | None:
     if not query_id or "." not in query_id or query_id in by_id:
         return None
     system, suffix = query_id.split(".", 1)
     if not system or not suffix or suffix == verb_name:
+        return None
+    # The id's routing prefix must BE the system the row reached. A call that ran against `cmdb`
+    # under the coined id `ghost.something` would otherwise mint `queries/ghost/_draft/
+    # something.md` — a catalog directory for a system no adapter declares (the phantom-system
+    # class, #855 F-06), whose `verb:`/`engine:` were resolved against `cmdb` and which the
+    # corpus-wide scaffold sweep cannot even evaluate (it raises `ScaffoldRuleError` rather than
+    # reporting a finding).
+    #
+    # The LIVE writer already pins this: `query_tool.resolve_query_id`'s FK-7 clause returns a
+    # model-coined id verbatim only when `prefix == system`, and falls back to `{system}.{verb}`
+    # otherwise. What this screen covers is the rows that writer did not mint — every row
+    # appended to `executed_queries.jsonl` BEFORE FK-7 landed keeps its phantom prefix forever
+    # and is re-read on every later tick (`test_synthesize_drafts_screens_a_row_recorded_before_
+    # the_writer_rule` seeds exactly one) — plus any future second writer of that table. The
+    # sink asserting the invariant its source claims is the point; do not delete this on the
+    # strength of the source's clause.
+    #
+    # The row is not lost: this predicate is shared with `collect_general_failures`, so a
+    # rejected row lands in the pitfalls residue instead.
+    if system != row_system:
         return None
     # The VERB is held to the same alphabet as the id segments, because a draft now DECLARES it
     # (`verb:` frontmatter, #901) and a declaration nothing can resolve is worse than no draft:
@@ -141,6 +198,19 @@ def _draft_candidate_segments(
     if not _SAFE_ID_SEGMENT.match(verb_name or ""):
         return None
     if not _SAFE_ID_SEGMENT.match(system) or not _SAFE_ID_SEGMENT.match(suffix):
+        return None
+    # …and the BASENAME the mint would take must not be one the commit gate refuses by
+    # DISCARDING the batch. `resolve_query_id`'s kebab segment admits `SCHEMA`, `README` and
+    # `execution` like any other name, so a coined `{system}.SCHEMA` mints
+    # `queries/{system}/_draft/SCHEMA.md` — which `_is_schema_md` calls a protected surface at
+    # ANY depth under the catalog — and `{system}.README` / `{system}.execution` land on
+    # `_is_draft_readme` and `_skills_path_rule`'s basename rule the same way. Each costs the
+    # whole tick's batch, from a model-coined id, before the agent is even spawned. #772 closed
+    # exactly these three on the AGENT's write lane; this is the host-side minter, the other
+    # writer of the same paths, held to the same set — through the gate's OWN predicates rather
+    # than a second copy of the name list.
+    minted = f"{CATALOG_REL}{system}/_draft/{suffix}.md"
+    if _is_schema_md(minted) or _is_draft_readme(minted) or Path(minted).name == "execution.md":
         return None
     return system, suffix
 
@@ -155,7 +225,7 @@ def synthesize_drafts(
     created: list[Path] = []
     for lead in executed:
         qid = lead.query_id
-        segs = _draft_candidate_segments(qid, lead.verb, by_id)
+        segs = _draft_candidate_segments(qid, lead.verb, by_id, row_system=lead.system)
         if segs is None:
             continue
         system, suffix = segs

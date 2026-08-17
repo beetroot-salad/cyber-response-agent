@@ -43,10 +43,6 @@ _EXAMPLES = _CONNECT / "examples"
 _DOCS = _DEFENDER / "docs"
 _HANDBOOK = _DEFENDER / "skills" / "handbook" / "content"
 
-_PLACEHOLDER_RE = re.compile(r"\$\{(\w+)\}")
-
-
-
 def _established():
     """Every ESTABLISHED template (outside ``_draft/``), as ``_corpus.QueryTemplate``."""
     return [
@@ -142,7 +138,7 @@ def test_draft_arg0_raw_templates_are_dropped():
     assert idf, "build_idf produced an empty IDF over the post-drop corpus"
 
 
-def test_placeholder_is_a_declared_param_or_marked_body_substitution():
+def test_placeholder_is_a_declared_param_or_marked_body_substitution(tmp_path):
     """demand: placeholder_is_a_declared_param_or_marked_body_substitution.
 
     The corpus invariant must FAIL a template whose ``${placeholder}`` is neither a declared
@@ -163,22 +159,19 @@ def test_placeholder_is_a_declared_param_or_marked_body_substitution():
     declaring a param the adapter had renamed away satisfied both and neither could see it. The
     fixtures below stay, because what they discriminate is this demand and not that module.
     """
-    import tempfile
-
     from defender._corpus import read_query_template
     from defender._scaffold_rules import VerbResolver, check_template
 
     resolver = VerbResolver(_DEFENDER)
+    probes = tmp_path / "cmdb"
+    probes.mkdir()
 
     def passes(text: str) -> bool:
-        with tempfile.TemporaryDirectory() as tmp:
-            d = Path(tmp) / "cmdb"
-            d.mkdir()
-            path = d / "probe.md"
-            path.write_text(text, encoding="utf-8")
-            template, _reason = read_query_template(path)
-            assert template is not None
-            return not check_template(template, resolver.verbs(template.system))
+        path = probes / "probe.md"
+        path.write_text(text, encoding="utf-8")
+        template, reason = read_query_template(path)
+        assert template is not None, reason
+        return not check_template(template, resolver.verbs(template.system))
 
     good = (
         "---\nid: cmdb.get-host-demo\nstatus: established\n"

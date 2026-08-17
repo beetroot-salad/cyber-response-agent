@@ -597,6 +597,38 @@ def test_verify_skills_state_rejects_a_skill_md_naming_another_system(tmp_git_re
         lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[], systems=DECLARED)
 
 
+def test_is_catalog_template_excludes_what_is_not_a_template(tmp_git_repo: Path):
+    """A template lives at `{catalog}/{system}/{name}.md`, and the catalog holds files that are
+    not one. The content rule reads a file AS a template (`id:`, `verb:`, a system derived from
+    its parent dir), so pointing it at one of those refuses the file for a reason that is not
+    its defect — "no `id:`", or the verbs of a system called `queries`.
+
+    A classifier test rather than a `_verify_skills_state` one: since #869 a catalog-root note
+    and a `_draft` twin are refused by the MEMBERSHIP rule before any content rule reads them
+    (`_membership_segment` yields `NOTES.md`, which no tree declares), so driving this through
+    the gate would assert about the wrong refusal. The predicate is what #901 changed.
+    """
+    assert lead_author._is_catalog_template("defender/skills/gather/queries/wazuh/auth.md")
+    # `README.md` is excluded by NAME, not by depth: it sits at `{system}/README.md`, exactly
+    # where a template sits, so the depth test alone let the content rule refuse a system's
+    # catalog notes for "no `id:`" — the very failure this predicate was split out to stop.
+    assert not lead_author._is_catalog_template("defender/skills/gather/queries/wazuh/README.md")
+    assert not lead_author._is_catalog_template("defender/skills/gather/queries/NOTES.md")
+    assert not lead_author._is_catalog_template("defender/skills/gather/queries/SCHEMA.md")
+    assert not lead_author._is_catalog_template(
+        "defender/skills/gather/queries/wazuh/_draft/rough.md"
+    )
+    # EXTRA depth stays IN, `_draft` at extra depth included. `{system}/sub/_draft/x.md` is not
+    # the documented draft shape (`_under_draft` is depth-1), so the content rule must still
+    # read it and refuse it — its parent dir names no system, so the resolver raises. A
+    # `"_draft" not in parts` membership test over every segment handed exactly that shape a
+    # silent pass, which is the guard-dropped direction this predicate was split out to avoid.
+    assert lead_author._is_catalog_template("defender/skills/gather/queries/wazuh/sub/x.md")
+    assert lead_author._is_catalog_template(
+        "defender/skills/gather/queries/wazuh/sub/_draft/x.md"
+    )
+
+
 def test_verify_skills_state_rejects_a_promotion_under_a_system_with_no_adapter(
     tmp_git_repo: Path,
 ):
@@ -990,7 +1022,8 @@ def test_collect_and_synthesize_partition_disjointly(tmp_path: Path, catalog: Pa
     ]
     by_id = {t.id for t in lead_author.lead_neighbors.load_catalog(catalog)}
     drafted = {ld.query_id for ld in leads
-               if lead_author._draft_candidate_segments(ld.query_id, ld.verb, by_id) is not None}
+               if lead_author._draft_candidate_segments(
+                   ld.query_id, ld.verb, by_id, row_system=ld.system) is not None}
     collected = {r["query_id"]
                  for r in lead_author.collect_general_failures(leads, tmp_path / "r", catalog_dir=catalog)}
     assert drafted == {"elastic.new-thing"}

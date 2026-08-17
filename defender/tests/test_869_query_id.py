@@ -88,9 +88,14 @@ def test_resolve_query_id_enforces_the_whole_schema_shape():
     assert resolve_query_id("elastic", "esql", "elastic.foo.bar") == "elastic.esql"
 
     # What the third one would have spent at the draft writer, and what it spends instead.
-    assert _draft_candidate_segments("elastic.foo.bar", "esql", set()) == ("elastic", "foo.bar")
+    # `row_system="elastic"` throughout: these ids all claim the system the row really reached,
+    # so #901's id/row agreement check admits them and the shape rule is the only thing under
+    # test here.
     assert _draft_candidate_segments(
-        resolve_query_id("elastic", "esql", "elastic.foo.bar"), "esql", set()
+        "elastic.foo.bar", "esql", set(), row_system="elastic") == ("elastic", "foo.bar")
+    assert _draft_candidate_segments(
+        resolve_query_id("elastic", "esql", "elastic.foo.bar"), "esql", set(),
+        row_system="elastic",
     ) is None
 
     # The control on the same address: a well-formed coined id still survives.

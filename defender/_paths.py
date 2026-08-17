@@ -7,6 +7,24 @@ from typing import ClassVar
 from defender._git import REPO_ROOT
 
 
+def adapters_under(defender_dir: Path) -> Path:
+    """`<defender_dir>/scripts/adapters` — the adapters directory of an ARBITRARY tree.
+
+    `DefenderPaths.adapters_dir` answers for the tree an instance is rooted at, which is the
+    main checkout for the `PATHS` singleton. The callers that matter here are not in the tree
+    they ask about: the loop's commit gate and the lead author's permission gate are both
+    handed a WORKTREE's `defender_dir` and must resolve its adapters, not the running process's
+    (#772). Each of them spelled this join for itself, so the directory had four independent
+    owners and moving it would have left them disagreeing silently — the write gate compiling
+    lanes off a path that no longer exists while the commit gate read the real one.
+
+    A function, not a second `ClassVar`: `adapters_rel` is the REPO-relative spelling git
+    pathspecs and porcelain paths use, and this is the absolute join off a tree. Both exist
+    because both questions are asked; neither is derivable from the other without a repo root.
+    """
+    return defender_dir / "scripts" / "adapters"
+
+
 @dataclass(frozen=True)
 class DefenderPaths:
 
@@ -37,7 +55,7 @@ class DefenderPaths:
 
     @property
     def adapters_dir(self) -> Path:
-        return self.defender_dir / "scripts" / "adapters"
+        return adapters_under(self.defender_dir)
 
     @property
     def lessons_dir(self) -> Path:

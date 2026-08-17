@@ -73,8 +73,15 @@ def build_write_allow(root: Path, *, suffix: str = "") -> re.Pattern[str]:
     e.g. `".md"`). `decide_write` `fullmatch`es this against the RESOLVED operand, so `root`
     is `resolve()`d here to align the two, and a `..` in the operand is collapsed before the
     match (a subtree, not a string prefix — `<root>-evil/x` can't match either). The write
-    twin of the bash lane's baked reader anchors (`policies._common`), used by every writer's
-    policy (`policies.main`, `lead_author_engine`) so the flat allowlist has one builder."""
+    twin of the bash lane's baked reader anchors (`policies._common`).
+
+    NO production caller left, as of #772: the lead author was the last one, and its
+    `<skills>/[^\\x00]*\\.md` scope is exactly what that issue was — the tail admitted
+    `gather/SKILL.md`, an agent's own system prompt, and every space/newline filename besides.
+    Retirement is DEFERRED, not overlooked: ~10 tests still build a policy through it as their
+    stand-in for "a subtree writer", and moving them is its own change. Do not reach for this
+    for a new writer — `build_scoped_write_allow` or a per-lane builder is what a writer that
+    knows its own shape should compile."""
     base = re.escape(str(root.resolve()))
     tail = r"/[^\x00]*" + re.escape(suffix) if suffix else r"(?:/[^\x00]*)?"
     return re.compile(base + tail)

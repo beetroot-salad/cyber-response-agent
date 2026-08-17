@@ -135,6 +135,72 @@ def test_a_wrapper_only_param_is_not_bindable_from_a_template(tmp_path, resolver
     ]
 
 
+def test_a_wrapper_only_param_cannot_be_smuggled_in_as_a_body_substitution(tmp_path, resolver):
+    """`body_substitutions:` is an UNCHECKED escape from the placeholder rule — it names what
+    the checker must not classify — so the reserved set has to be refused there too. Otherwise
+    the `model_facing_params` surface above is one frontmatter line from being optional, and
+    the refusal lands back at `validate_params` with the gather turn spent (#900)."""
+    text = (
+        "---\nid: ticket.probe\nstatus: established\nverb: get-ticket\n"
+        "params: [key]\nbody_substitutions: [require_closed]\n---\n\n"
+        "## Query\n\n```query\nverb: get-ticket\nparams:\n  key: ${key}\n"
+        "  require_closed: ${require_closed}\n```\n"
+    )
+    assert _codes(text, "ticket", tmp_path, resolver) == [
+        "reserved-body-substitution", "undeclared-placeholder",
+    ]
+
+
+def test_a_params_mapping_is_read_as_a_declaration_not_as_nothing(tmp_path, resolver):
+    """YAML gives "a list of names" more than one spelling, and `params:` carrying a per-param
+    note is the one a template author reaches for. Read as nothing, the entries the verb does
+    not declare go unreported — for THIS rule an unread declaration is an unenforced one, not a
+    conservative one."""
+    text = _GOOD.replace(
+        "params: [host]", "params:\n  host: the hostname\n  hostname: the other one", 1)
+    assert _codes(text, "cmdb", tmp_path, resolver) == ["undeclared-param"]
+    listed = _GOOD.replace("params: [host]", "params:\n  - host: the hostname", 1)
+    assert _codes(listed, "cmdb", tmp_path, resolver) == []
+
+
+def test_a_yaml_boolean_param_entry_is_read_the_same_in_every_spelling(tmp_path, resolver):
+    """`params: [on]` is a BOOLEAN to YAML, not the name the author typed — and the reader has
+    to answer about it the same way in all three spellings, because it is one declaration.
+
+    It did not. The sequence branch excluded `bool`, so the entry was dropped and went
+    unreported, while the mapping branches stringified the same value and reported it. That is
+    the split `_declared_names`' own docstring rules out for this rule: an unread declaration is
+    an unenforced one, so a template carrying an unquoted `on` / `yes` / `no` passed a sweep
+    that used to refuse it. `'True'` is not a name either — reporting it is what tells the
+    author their `on` was coerced, instead of the declaration silently going unchecked.
+    """
+    for spelling in (
+        "params: [on]", "params: on", "params:\n  on: a note", "params:\n  - on: a note",
+    ):
+        text = _GOOD.replace("params: [host]", spelling, 1)
+        assert _codes(text, "cmdb", tmp_path, resolver) == ["undeclared-param"], spelling
+
+
+def test_a_bare_scalar_declaration_is_the_one_entry_spelling_not_nothing(tmp_path, resolver):
+    """`body_substitutions: window` is a one-entry list to everyone but YAML, which hands it
+    over as a plain string. Read as nothing, the ESCAPE the author wrote is unread and the
+    `${window}` it covers is refused as undeclared — a refusal naming a name the file declares,
+    and on the lead lane's promote it discards the whole batch. (For `params:` the same scalar
+    fails the other way, unenforced rather than over-refused; both are the shape going unread.)
+
+    A `str` is also ITERABLE, which is why it is answered ahead of the sequence branch: read as
+    a sequence it would declare one name per character.
+    """
+    body = "## Query\n\n```query\nverb: get-host\nparams:\n  host: ${host}-${window}\n```\n"
+    listed = (
+        "---\nid: cmdb.probe\nstatus: established\nverb: get-host\n"
+        "params: [host]\nbody_substitutions: [window]\n---\n\n" + body
+    )
+    scalar = listed.replace("body_substitutions: [window]", "body_substitutions: window", 1)
+    assert _codes(listed, "cmdb", tmp_path, resolver) == []
+    assert _codes(scalar, "cmdb", tmp_path, resolver) == []
+
+
 def test_every_shipped_template_including_drafts_satisfies_the_rule(resolver):
     """The scope half. `validate_scaffold` excluded `_draft/`; this does not, which is the only
     reason the lead lane's output is inside any check at all."""

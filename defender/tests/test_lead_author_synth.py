@@ -286,6 +286,106 @@ def test_a_row_whose_verb_is_not_a_plain_name_mints_nothing(tmp_path):
     assert not (cat / "stub-cmdb" / "_draft").exists()
 
 
+def test_a_coined_id_naming_another_system_mints_nothing(tmp_path):
+    """`resolve_query_id` returns a model-coined `query_id` VERBATIM once it clears the
+    reserved/traversal screen, so nothing upstream ties its routing prefix to the system the
+    call actually reached. Unpinned, a `cmdb` call coined `ghost.something` mints
+    `queries/ghost/_draft/something.md`: a catalog directory for a system no adapter declares
+    (#855 F-06), carrying a `verb:`/`engine:` resolved against `cmdb`, which the corpus-wide
+    scaffold sweep cannot even evaluate — it raises rather than reporting a finding, so one
+    such draft is a CI break rather than a refusal. The row is not lost: the predicate is
+    shared with `collect_general_failures`, so it lands in the pitfalls residue instead."""
+    cat = _catalog(tmp_path)
+    # `ghost` is DECLARED here, deliberately: #869's `system not in systems` filter would
+    # reject an undeclared prefix on its own, so a test that left it undeclared would pass
+    # without this check existing. Declaring it leaves the id/row DISAGREEMENT as the only
+    # thing that can refuse the mint.
+    assert lead_author.synthesize_drafts(
+        [_lead("ghost.something", {"name": "web-1"}, verb="map", system="stub-cmdb")],
+        catalog_dir=cat, systems=frozenset({"ghost", "stub-cmdb"})) == []
+    assert not (cat / "ghost").exists()
+
+
+def test_a_coined_id_cannot_mint_a_basename_the_commit_gate_discards_the_batch_for(tmp_path):
+    """The three basenames the write gate stopped admitting (#772) are the three the HOST-side
+    minter could still write.
+
+    `resolve_query_id`'s kebab segment (`[A-Za-z0-9][A-Za-z0-9_-]*`) admits `SCHEMA`, `README`
+    and `execution` like any other name, so a model-coined `{system}.SCHEMA` minted
+    `queries/{system}/_draft/SCHEMA.md` before the agent was ever spawned — and
+    `_skills_path_rule` then refuses that file as a protected surface (`_is_schema_md` reads the
+    basename at ANY depth under the catalog), which discards the WHOLE tick's batch rather than
+    denying one call. `README.md` (`_is_draft_readme`) and `execution.md` (the basename clause
+    at the top of the rule) are the same failure on the other two names.
+
+    The controls matter here: an ordinary kebab name still mints, and a name that merely
+    CONTAINS one of the three is not refused — the gate's predicates key on the whole basename,
+    so a stricter reading here would drop real drafts."""
+    cat = _catalog(tmp_path)
+    hostile = [
+        _lead(f"stub-cmdb.{seg}", {"name": "web-1"}, verb="map")
+        for seg in ("SCHEMA", "README", "execution")
+    ]
+    assert lead_author.synthesize_drafts(
+        hostile, catalog_dir=cat, systems=frozenset({"stub-cmdb"})) == []
+    assert not (cat / "stub-cmdb" / "_draft").exists()
+
+    ok = [
+        _lead("stub-cmdb.network-map", {"name": "web-1"}, verb="map"),
+        _lead("stub-cmdb.SCHEMA-drift", {"name": "web-1"}, verb="map"),
+    ]
+    created = lead_author.synthesize_drafts(
+        ok, catalog_dir=cat, systems=frozenset({"stub-cmdb"}))
+    assert [p.name for p in created] == ["network-map.md", "SCHEMA-drift.md"]
+
+
+def test_a_goal_carrying_a_line_separator_cannot_forge_a_section(tmp_path):
+    """`goal_text` is model-authored, and `_corpus.section_bodies` walks `splitlines()` — which
+    breaks on `\\r`, `\\x1c`-`\\x1e`, `\\x85` and `\\u2028` as well as on `\\n`. Stripping only
+    `\\n` let a goal open a new LINE in the minted draft, so a `## ` heading or a ``` fence
+    smuggled into one re-partitioned the template and could swallow `## Query` — the same
+    control-character class `_SAFE_ID_SEGMENT`'s `\\Z` anchor closes on the id (#852 F-21).
+
+    Asserted through the CORPUS READER, not on the raw text: what has to survive is the section
+    walk, and the `## Query` body it returns is what the placeholder rule reads."""
+    import dataclasses
+
+    cat = _catalog(tmp_path)
+    lead = dataclasses.replace(
+        _lead("stub-cmdb.network-map", {"name": "web-1"}, verb="map"),
+        goal_text="probe\r## Query\r```query\rverb: evil\r```",
+    )
+    lead_author.synthesize_drafts(
+        [lead], catalog_dir=cat, systems=frozenset({"stub-cmdb"}))
+    template = _minted(cat, "stub-cmdb", "network-map")
+    assert "evil" not in template.query
+    assert "name: web-1" in template.query
+    # The goal still CARRIES the model's characters — they are just no longer at a line start,
+    # which is the only position `section_bodies` and the fence walker give meaning to.
+    assert "## Query" in template.goal
+    assert not any(
+        ln.lstrip().startswith(("## ", "```", "~~~")) for ln in template.goal.splitlines()
+    )
+
+
+def test_a_placeholder_inside_a_bound_value_is_declared_body_text(tmp_path):
+    """A param-only verb's minted `## Query` holds literal VALUES, so any `${…}` reaching the
+    file came out of the DATA (`host: web-${env}-1`) — and the placeholder rule reads the
+    rendered body, not the intent. Undeclared, that one value mints a draft the corpus-wide
+    sweep refuses; and the lane's commit gate deliberately does not check `_draft/`, so the
+    refusal lands in CI on everyone rather than on the batch that wrote it."""
+    from defender import _scaffold_rules
+
+    cat = _catalog(tmp_path)
+    lead_author.synthesize_drafts(
+        [_lead("stub-cmdb.network-map", {"name": "web-${env}-1"}, verb="map")],
+        catalog_dir=cat, systems=frozenset({"stub-cmdb"}))
+    template = _minted(cat, "stub-cmdb", "network-map")
+    assert template.params == ("name",)
+    assert template.body_substitutions == ("env",)
+    assert _scaffold_rules.check_template(template, _stub_verbs()) == []
+
+
 def test_untagged_verb_not_drafted(tmp_path):
     """A bare `{system}.{verb}` id whose suffix IS the recorded verb (no coined --query-id) is a
     non-candidate — an untagged call must not mint a junk catch-all draft."""

@@ -187,7 +187,8 @@ class _Res:
         pitfalls = collect_general_failures(leads, self.run_dir, catalog=catalog)
         drafts = [
             lead for lead in leads
-            if draft_synthesis._draft_candidate_segments(lead.query_id, lead.verb, by_id)
+            if draft_synthesis._draft_candidate_segments(
+                lead.query_id, lead.verb, by_id, row_system=lead.system)
             is not None
         ]
         handoff = build_handoff(self.run_dir, leads, catalog=catalog)
@@ -487,7 +488,8 @@ def test_shim_row_reaches_the_curator_and_nothing_else(tmp_path):
     shim_leads = [lead for lead in r.leads() if lead.query_id == BASH_SHIM_QUERY_ID]
     assert len(shim_leads) == 1, "the shim row was dropped before extraction (missing payload?)"
     assert draft_synthesis._draft_candidate_segments(
-        shim_leads[0].query_id, shim_leads[0].verb, by_id) is None
+        shim_leads[0].query_id, shim_leads[0].verb, by_id,
+        row_system=shim_leads[0].system) is None
     assert BASH_SHIM_QUERY_ID not in by_id
 
 

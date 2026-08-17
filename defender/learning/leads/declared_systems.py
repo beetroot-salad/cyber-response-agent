@@ -28,12 +28,17 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender import _git
+from defender._paths import DefenderPaths
 from defender.learning.core import config as _loop_config
 from defender.learning.leads.lead_extraction import LeadAuthorError
 from defender.runtime.verbs import ADAPTER_SUFFIX, _adapter_path, _system_of, is_system_name
 
-ADAPTERS_REL = "defender/scripts/adapters/"
-SKILLS_REL = "defender/skills/"
+#: Both re-exported from `DefenderPaths` rather than re-spelled: this module is one of the
+#: four that owned its own copy of the adapters path (#772 review), and a resolver whose
+#: idea of where adapters live can drift from the gate that reads its answer is the whole
+#: class of defect it exists to close.
+ADAPTERS_REL = DefenderPaths.adapters_rel
+SKILLS_REL = DefenderPaths.skills_rel
 
 _log = _loop_config.make_logger("lead-author", flush=True)
 
@@ -145,4 +150,20 @@ def adapter_declared_systems(repo_root: Path) -> frozenset[str]:
     """NF2's second resolution point: the ADAPTER HALF ALONE, the value the pitfalls lane
     resolves. Never consults the marker source — an unresolvable marker is not its fault to
     raise, and emptiness is measured on the adapter half alone."""
-    return _adapter_names(repo_root / ADAPTERS_REL)
+    return adapter_systems_under(repo_root / ADAPTERS_REL)
+
+
+def adapter_systems_under(adapters_dir: Path) -> frozenset[str]:
+    """The adapter half rooted at the ADAPTERS DIRECTORY itself, for a caller that holds the
+    tree rather than the repo (#772).
+
+    `adapter_declared_systems` derives that directory from `repo_root`, which is the right
+    entry point for the lanes that start from a `LoopPaths`. The permission gate does not: it
+    is handed a `defender_dir` by `bind`, and reconstructing a repo root from it by taking
+    `.parent` is a guess that silently reads a SIBLING tree's adapters the moment the bound
+    tree is not literally named `defender` — while the grant it compiles claims, and
+    `test_h4_grants_anchor_on_the_threaded_tree_not_module_paths` asserts, that every grant
+    anchors on the tree it was threaded. Same answer, asked about the directory the caller
+    actually has.
+    """
+    return _adapter_names(adapters_dir)

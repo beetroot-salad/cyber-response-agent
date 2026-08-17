@@ -86,6 +86,7 @@ from defender.runtime.permission import (  # noqa: E402
     under,
 )
 from defender.runtime.permission.command_shape import SQL_SHIM  # noqa: E402
+from defender.tests._repo import seed_adapter_stubs  # noqa: E402
 
 _DEFENDER = PATHS.defender_dir
 _POLICY_CLI = _DEFENDER / "bin" / "defender-policy"
@@ -116,6 +117,11 @@ def env(tmp_path):
                 "docs/x.md", "skills/elastic/SKILL.md",
                 "fixtures/held-out/m01/ground_truth.yaml"):
         (dfn / rel).write_text("x\n")
+    # `elastic` is declared, not merely present: since #772 the lead author's write lanes and
+    # `rm` grant are compiled one per system the tree declares an adapter for, so a tree with a
+    # `skills/elastic/` and no `elastic_adapter.py` binds to no lanes at all — and the audit
+    # demands below sweep that policy.
+    seed_adapter_stubs(dfn, ("elastic",))
     main = compile_policy_for(MAIN_DEF, run_dir=run, defender_dir=dfn)
     gather = compile_policy_for(GATHER_DEF, run_dir=run, defender_dir=dfn)
     return SimpleNamespace(run=run, dfn=dfn, main=main, gather=gather, tmp=tmp_path)
@@ -734,13 +740,19 @@ def test_e1_judge_grants_no_ticket_shape_on_either_leg(env):
 def test_e4_actor_script_and_lead_author_rm_survive(env):
     """e4: the other two exempt grants still work and still contain. The actor's pinned
     `python3 <script>` ALLOWs while `python3 /etc/evil.py` DENIES; the lead author's
-    `rm {skills}/<name>.md` ALLOWs while `rm {skills}/../../etc/passwd` DENIES (rm unlinks the LINK,
-    not the target — resolve() is the wrong operand model for it, which is why it stays a pattern)."""
+    `rm {skills}/{system}/_draft/<name>.md` ALLOWs while `rm {skills}/../../etc/passwd` DENIES
+    (rm unlinks the LINK, not the target — resolve() is the wrong operand model for it, which is
+    why it stays a pattern).
+
+    The allowed spelling gained its `{system}/` segment in #772: the grant used to accept any
+    depth and any filename under `skills/`, including `skills/gather/SKILL.md`, which the commit
+    gate then refused by discarding the batch. `_draft/` under a DECLARED system is the only
+    removal the prompt gives this lane."""
     actor = _actor(env)
     assert _bash(env, f"python3 {_ENV_RETRIEVE} --tags", actor).allow
     assert not _bash(env, "python3 /etc/evil.py", actor).allow
     la = _lead_author(env)
-    assert _bash(env, f"rm {env.dfn}/skills/_draft/x.md", la).allow
+    assert _bash(env, f"rm {env.dfn}/skills/elastic/_draft/x.md", la).allow
     assert not _bash(env, f"rm {env.dfn}/skills/../../etc/passwd", la).allow
 
 
@@ -1090,6 +1102,7 @@ def test_h4_grants_anchor_on_the_threaded_tree_not_module_paths(tmp_path):
     policy compiled from `PATHS` (the main checkout) fails this outright."""
     worktree = tmp_path / "wt" / "defender"
     (worktree / "skills").mkdir(parents=True)
+    seed_adapter_stubs(worktree, ("elastic",))
     run = tmp_path / "learn-run"
     run.mkdir()
 
@@ -1103,8 +1116,8 @@ def test_h4_grants_anchor_on_the_threaded_tree_not_module_paths(tmp_path):
 
     assert worktree.resolve() != PATHS.defender_dir.resolve(), "fixture must differ from PATHS"
 
-    assert verdict(f"rm {worktree}/skills/stale.md")
-    assert not verdict(f"rm {PATHS.defender_dir}/skills/stale.md"), (
+    assert verdict(f"rm {worktree}/skills/elastic/_draft/stale.md")
+    assert not verdict(f"rm {PATHS.defender_dir}/skills/elastic/_draft/stale.md"), (
         "the lead author's rm grant is anchored on the import-time PATHS constant, "
         "not on the defender_dir it was bound with — a worktree run would rm the main checkout"
     )
