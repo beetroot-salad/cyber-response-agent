@@ -5,11 +5,15 @@
 # healthchecks, and DNS lookups from healthcheck curl commands. Each
 # override appends a `not <pattern>` clause to the upstream rule's
 # condition rather than redefining the rule, so any future tightening
-# in falco-sandbox / falco-incubating still applies.
+# in falco-sandbox / falco-incubating still applies. Where upstream
+# ships a macro meant to be overridden for this purpose, that is used
+# instead — same intent, and it leaves the rule itself untouched.
 #
-# Scoping principle: match against `proc.exepath` (absolute binary path)
-# rather than `proc.name`, so an attacker dropping a binary named "curl"
-# at a non-system path doesn't inherit the suppression.
+# Scoping principle: match on the durable identity, not the chosen name
+# — `proc.exepath` (absolute binary path) rather than `proc.name`, so an
+# attacker dropping a binary named "curl" at a non-system path doesn't
+# inherit the suppression, and `container.image.repository` rather than
+# `container.name`.
 
 # elastic-agent runs as elastic-otel-collector and routinely probes
 # 169.254.169.254 for EC2/cloud metadata + reads /proc/<pid>/environ for
@@ -47,6 +51,37 @@
   override:
     condition: append
   condition: and not proc.exepath = /usr/bin/curl
+
+# The SOAR mounts /var/run/docker.sock into shuffle-backend and
+# shuffle-orborus, and Orborus mounts it into one ephemeral worker per
+# workflow run — each of which trips `Launch Sensitive Mount Container`
+# (falco-sandbox) at container start. falco.alerts is tailed into the
+# defender's own Elasticsearch, so left alone the defender finds its own
+# tooling in the telemetry, shaped like a container escape, at a rate
+# that tracks SOAR activity. The `soar` network keeps the SOAR out of
+# Zeek's conn.log; this is the syscall half of that same isolation.
+#
+# Overriding `user_sensitive_mount_containers` is what upstream provides
+# for this — it ships as `never_true` with a comment saying to redefine
+# it in a local file. Suppressing here rather than on the rule keeps
+# `Launch Sensitive Mount Container` firing for every OTHER container
+# that mounts a sensitive path, which is the signal worth having.
+#
+# Listed by image because the pinned image is what legitimately holds
+# the socket; a container name is chosen by whoever starts it. The
+# worker is included (Orborus bind-mounts the socket into it); the
+# Shuffle app containers the worker then spawns are not, so an app
+# container that acquires a sensitive mount still alerts.
+- list: soar_socket_mount_images
+  items:
+    - ghcr.io/shuffle/shuffle-backend
+    - ghcr.io/shuffle/shuffle-orborus
+    - ghcr.io/shuffle/shuffle-worker
+
+- macro: user_sensitive_mount_containers
+  override:
+    condition: replace
+  condition: (container.image.repository in (soar_socket_mount_images))
 
 # Custom rule: every sudo execve in a container emits a NOTICE. The Kibana
 # detection rule `v2-off-hours-sudo` thresholds on this stream (>=3 per host

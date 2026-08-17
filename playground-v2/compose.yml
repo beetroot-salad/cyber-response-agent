@@ -1,5 +1,23 @@
 name: soc-playground
 
+# Shuffle SOAR lives in its own file so it can be levered down independently.
+#
+# `env_file: .env` is NOT here for interpolation — measured on Compose v5.3.1,
+# an included file resolves ${...} from the project .env (playground-v2/.env)
+# with or without this key; a .env in soar/ is consulted only if the project
+# has none. It is here to make a MISSING .env loud. Without it, no .env yields
+# warnings and a stack that boots anyway — which for Shuffle means its code
+# defaults, one of which polls uk.shuffler.io. With it, every subcommand (`ps`,
+# `logs`, `down`, `config`) fails first with `stat .../.env: no such file or
+# directory`. env_file entries are mandatory and the short form takes no
+# `required: false`, so that loudness is the whole point, not a side effect.
+# `project_directory: .` resolves relative paths in the included file against
+# playground-v2/ rather than soar/.
+include:
+  - path: ./soar/compose.yml
+    project_directory: .
+    env_file: .env
+
 # Services:
 #  setup         — one-shot: generates self-signed CA + ES cert, waits for ES, sets kibana_system password, exits
 #  elasticsearch — single-node, TLS on (HTTP + transport), xpack.security.enabled
@@ -23,9 +41,14 @@ name: soc-playground
 #    threat-intel     — FastAPI over offline VT/OTX-shaped indicator seed
 #    change-mgmt      — FastAPI over authorized-change seed tied to inventory change_windows
 #    ticket-server    — FastAPI over a curated ticket seed (moved in from the retired v1 lab)
-# Exposed on loopback only. External access via SSH tunnel (add 8001-8004 for stubs):
+#    identity         — FastAPI authz API over keycloak/realm.yaml × hosts/inventory.yaml
+#  Shuffle SOAR (defined in soar/compose.yml, see the include: above):
+#    shuffle-frontend   — UI on 8006; shuffle-backend — API/scheduler on 5001
+#    shuffle-orborus    — execution supervisor; shuffle-opensearch — Shuffle's own state store
+# Exposed on loopback only. External access via SSH tunnel:
 #   ssh -L 9200:localhost:9200 -L 5601:localhost:5601 -L 8220:localhost:8220 -L 8080:localhost:8080 \
-#       -L 8001:localhost:8001 -L 8002:localhost:8002 -L 8003:localhost:8003 -L 8004:localhost:8004 soc-playground
+#       -L 8001:localhost:8001 -L 8002:localhost:8002 -L 8003:localhost:8003 -L 8004:localhost:8004 \
+#       -L 8005:localhost:8005 -L 8006:localhost:8006 -L 5001:localhost:5001 soc-playground
 
 x-es-image: &es-image docker.elastic.co/elasticsearch/elasticsearch:${STACK_VERSION}
 
@@ -195,6 +218,20 @@ services:
       - kibana_data:/usr/share/kibana/data
     ports:
       - "127.0.0.1:5601:5601"
+    # Dual-homed onto `soar`: the webhook connector fires FROM Kibana, so Kibana
+    # is what has to resolve shuffle-backend. `default` must be listed
+    # explicitly — a networks: key drops a service off the implicit default
+    # network, which would cut Kibana off from Elasticsearch.
+    #
+    # Elasticsearch is deliberately NOT dual-homed: Shuffle reaches Elastic data
+    # through Kibana's API on :5601, so it never needs the CA from the certs
+    # volume. It also keeps Kibana↔ES on a single path — if both ends of a
+    # talking pair shared two networks, Docker's embedded DNS would return an
+    # address on each and the traffic could take the uncaptured bridge, silently
+    # vanishing from Zeek's conn.log.
+    networks:
+      - default
+      - soar
     mem_limit: 2g
     healthcheck:
       test:
@@ -902,6 +939,12 @@ services:
     mem_limit: 256m
     ports:
       - "127.0.0.1:8001:8080"
+    # All five stubs are dual-homed so Shuffle apps can call them. `default` is
+    # listed explicitly or the stub drops off the network the role hosts and the
+    # baseline generators reach it on.
+    networks: &stub-networks
+      - default
+      - soar
     healthcheck: &stub-health
       test: ["CMD-SHELL", "python -c 'import urllib.request,sys; sys.exit(0 if urllib.request.urlopen(\"http://127.0.0.1:8080/health\",timeout=2).status==200 else 1)'"]
       interval: 10s
@@ -917,6 +960,7 @@ services:
     mem_limit: 256m
     ports:
       - "127.0.0.1:8002:8080"
+    networks: *stub-networks
     healthcheck: *stub-health
 
   change-mgmt:
@@ -927,6 +971,7 @@ services:
     mem_limit: 256m
     ports:
       - "127.0.0.1:8003:8080"
+    networks: *stub-networks
     healthcheck: *stub-health
 
   ticket-server:
@@ -946,6 +991,7 @@ services:
       - ./ticket-server/seed:/app/seed:ro
     ports:
       - "127.0.0.1:8004:8080"
+    networks: *stub-networks
     healthcheck: *stub-health
 
   identity:
@@ -960,7 +1006,36 @@ services:
     mem_limit: 256m
     ports:
       - "127.0.0.1:8005:8080"
+    networks: *stub-networks
     healthcheck: *stub-health
+
+networks:
+  # `default` is left undeclared on purpose: declaring it forces Compose to
+  # recreate it, stopping every one of the ~30 containers on the stack.
+  #
+  # soar — carries Shuffle plus the services it orchestrates.
+  #
+  #  * The bridge name is pinned. Otherwise Docker derives `br-<12 hex>`, and
+  #    zeek/entrypoint.sh picks its capture interface with
+  #    `awk '/^br-/ {print $1; exit}'` — the FIRST matching bridge, so a second
+  #    br-* makes it a coin flip and Zeek may silently capture the SOAR network
+  #    instead of the playground. `soar0` is skipped by that awk by
+  #    construction, so Zeek needs no change. Max 15 chars (IFNAMSIZ).
+  #
+  #  * The subnet sits outside Docker's default 172.17.0.0/12 pool, so it can
+  #    never collide with an auto-allocated network and is obvious in a log
+  #    line or a pcap.
+  #
+  # Consequence: SOAR traffic never crosses the captured bridge, so none of it
+  # appears in Zeek's conn.log — intended, so the defender does not find its own
+  # tooling in the telemetry.
+  soar:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: soar0
+    ipam:
+      config:
+        - subnet: 10.77.0.0/24
 
 volumes:
   certs:

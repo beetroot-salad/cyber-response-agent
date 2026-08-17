@@ -31,11 +31,13 @@ Web UIs (Kibana 5601, Keycloak 8080, ES 9200, Fleet 8220) are loopback-only on t
 | attacks / the runner | `attacks/runner.py` + `attacks/catalog.yaml` (`./runner.py list`, `./runner.py run <id> --seed N`); see `attacks/README.md` |
 | detection rules | `detection-rules/*.json`; install/refresh with `python3 scripts/install_detection_rules.py` (idempotent). Alerts land in `.internal.alerts-security.alerts-default-*` — the defender's `alert.json` input |
 | network/syscall telemetry | `unbound/` (DNS), `squid/` (auth'd proxy), `zeek/` (passive monitor), `falco/` (syscalls) |
+| the SOAR / automations | `soar/compose.yml` (four Shuffle services, `include:`d from `compose.yml`) + `soar/workflows/`; UI on `127.0.0.1:8006`. Lives on the isolated `soar` network with Kibana and the five stubs — the role hosts can't see it |
 
 ## Conventions & invariants
 
 - **Namespace env vars with `V2_`** (e.g. `V2_ELASTIC_PASSWORD`). `/workspace/.env` (v1 creds) is auto-sourced into every shell and shell env overrides compose `.env` values — unprefixed names get silently shadowed.
 - **Cross-file invariant, maintained by hand:** users in `keycloak/realm.yaml` ↔ roles in `hosts/inventory.yaml` ↔ the htpasswd list in `squid/Dockerfile`. Divergence fails silently (a user just gets no accounts / no proxy auth).
+- **Cross-file invariant, enforced by nothing:** Shuffle's Orborus runs a reaper (`zombiecheck`) every cycle that lists **every container on the engine**, not just its own, and stops + force-removes any container older than the worker timeout whose image contains `frikky/shuffle`, whose command contains `python app.py` or `walkoff`, whose command is exactly `./worker`, or that carries **any label whose value is `shuffle`**. No service in this stack matches today (the stubs run `uvicorn app:app`), and that is the only thing keeping them alive. So: no container here may use `python app.py` as its command or carry a `shuffle` label value. Like the other invariants, divergence fails silently — containers just start disappearing ten minutes in.
 - **Committed YAML is source of truth.** Runtime edits (kcadm, admin UIs, stub POSTs) must be folded back so a fresh lever-up matches.
 - Most config edits apply with `docker --context soc-playground compose up -d --build <svc>`. Exceptions with recovery procedures in the runbook: Keycloak realm changes (import is create-only) and cert/volume resets (never wipe the `certs` volume alone).
 - Several images use `playground-v2/` as their build context because they COPY `inventory.yaml`/`realm.yaml` across dirs; `.dockerignore` whitelists what they need.
