@@ -170,13 +170,22 @@ def _draft_candidate_segments(
     system, suffix = query_id.split(".", 1)
     if not system or not suffix or suffix == verb_name:
         return None
-    # The id's routing prefix must BE the system the row reached. `resolve_query_id` returns a
-    # model-coined `query_id` verbatim once it clears the reserved/traversal screen, so nothing
-    # upstream ties the prefix to `system`: a call that ran against `cmdb` under the coined id
-    # `ghost.something` would otherwise mint `queries/ghost/_draft/something.md` — a catalog
-    # directory for a system no adapter declares (the phantom-system class, #855 F-06), whose
-    # `verb:`/`engine:` were resolved against `cmdb` and which the corpus-wide scaffold sweep
-    # cannot even evaluate (it raises `ScaffoldRuleError` rather than reporting a finding).
+    # The id's routing prefix must BE the system the row reached. A call that ran against `cmdb`
+    # under the coined id `ghost.something` would otherwise mint `queries/ghost/_draft/
+    # something.md` — a catalog directory for a system no adapter declares (the phantom-system
+    # class, #855 F-06), whose `verb:`/`engine:` were resolved against `cmdb` and which the
+    # corpus-wide scaffold sweep cannot even evaluate (it raises `ScaffoldRuleError` rather than
+    # reporting a finding).
+    #
+    # The LIVE writer already pins this: `query_tool.resolve_query_id`'s FK-7 clause returns a
+    # model-coined id verbatim only when `prefix == system`, and falls back to `{system}.{verb}`
+    # otherwise. What this screen covers is the rows that writer did not mint — every row
+    # appended to `executed_queries.jsonl` BEFORE FK-7 landed keeps its phantom prefix forever
+    # and is re-read on every later tick (`test_synthesize_drafts_screens_a_row_recorded_before_
+    # the_writer_rule` seeds exactly one) — plus any future second writer of that table. The
+    # sink asserting the invariant its source claims is the point; do not delete this on the
+    # strength of the source's clause.
+    #
     # The row is not lost: this predicate is shared with `collect_general_failures`, so a
     # rejected row lands in the pitfalls residue instead.
     if system != row_system:

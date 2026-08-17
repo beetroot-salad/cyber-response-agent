@@ -94,19 +94,26 @@ def _declared_names(value: Any) -> tuple[str, ...]:
     """A frontmatter declaration list, normalized to names.
 
     Every shape YAML can give a "list of names" is read, not just the flat sequence
-    `SCHEMA.md` shows: a mapping (`params:` with a per-param note under it) and a sequence of
-    single-key mappings are both natural spellings a template author reaches for, and both
-    were read by the authoring contract's own oracle before #901 folded it into this walk.
+    `SCHEMA.md` shows: a mapping (`params:` with a per-param note under it), a sequence of
+    single-key mappings, and a BARE SCALAR (`body_substitutions: window`, the one-entry
+    spelling) are all natural spellings a template author reaches for, and the first two were
+    read by the authoring contract's own oracle before #901 folded it into this walk.
     Dropping them would NOT fail safe for the `params:` rule: `check_template` reports the
     entries a verb does not declare, so an unread declaration is an unenforced one — the rule
-    is skipped rather than tightened. (For the placeholder rule the direction is the other
-    way, and either way the answer is to read the shape.)
+    is skipped rather than tightened. For the `body_substitutions:` rule the direction is the
+    other way and worse: an unread entry makes `check_template` refuse a `${name}` the author
+    DID declare, and on the lead lane's promote that refusal discards the whole batch. Either
+    way the answer is to read the shape.
 
     A shape that is not one of those declares nothing rather than raising: the walk's readers
     depend on a malformed key skipping one template, not on it sinking the corpus.
     """
     if isinstance(value, Mapping):
         return tuple(str(k) for k in value)
+    if isinstance(value, str):
+        # THE one-entry spelling, and a scalar before the sequence branch because a `str` is
+        # iterable: read as a sequence it would declare one name per CHARACTER.
+        return (value,)
     if isinstance(value, (list, tuple)):
         out: list[str] = []
         for v in value:
@@ -124,6 +131,10 @@ def _declared_names(value: Any) -> tuple[str, ...]:
                 # told their `on` was coerced instead of the declaration going unenforced.
                 out.append(str(v))
         return tuple(out)
+    if isinstance(value, (int, float)):
+        # The scalar twin of the `bool`/number entry above, for the same reason and with the
+        # same coercion: `params: on` is a one-entry declaration YAML hands over as `True`.
+        return (str(value),)
     return ()
 
 

@@ -618,6 +618,15 @@ def test_is_catalog_template_excludes_what_is_not_a_template(tmp_git_repo: Path)
     assert not lead_author._is_catalog_template(
         "defender/skills/gather/queries/wazuh/_draft/rough.md"
     )
+    # EXTRA depth stays IN, `_draft` at extra depth included. `{system}/sub/_draft/x.md` is not
+    # the documented draft shape (`_under_draft` is depth-1), so the content rule must still
+    # read it and refuse it — its parent dir names no system, so the resolver raises. A
+    # `"_draft" not in parts` membership test over every segment handed exactly that shape a
+    # silent pass, which is the guard-dropped direction this predicate was split out to avoid.
+    assert lead_author._is_catalog_template("defender/skills/gather/queries/wazuh/sub/x.md")
+    assert lead_author._is_catalog_template(
+        "defender/skills/gather/queries/wazuh/sub/_draft/x.md"
+    )
 
 
 def test_verify_skills_state_rejects_a_promotion_under_a_system_with_no_adapter(

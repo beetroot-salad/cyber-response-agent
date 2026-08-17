@@ -21,6 +21,13 @@ queries/
 prefix for the template id and as the optional `system` argument that
 narrows a `template_search` to one system's dir.
 
+The two must AGREE, and it is checked: a file's `id:` must begin
+`{system}.` where `{system}` is the directory the file sits in. A template
+filed under one system's dir while calling itself `{other}.x` routes its
+row to the wrong system — `query_id` is `{system}.{kebab-name}` and every
+consumer keys on that prefix — so the mismatch is a FAIL at
+`validate_scaffold` and refuses the lead author's commit.
+
 `{template-id}` is kebab-case. Name it for **what the query measures**
 (`auth-events`), not the axis you happen to filter on (`auth-events-by-host`)
 and not why the defender asked for it (`check-if-bastion-was-pivoted`). A

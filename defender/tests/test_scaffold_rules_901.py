@@ -174,9 +174,31 @@ def test_a_yaml_boolean_param_entry_is_read_the_same_in_every_spelling(tmp_path,
     that used to refuse it. `'True'` is not a name either — reporting it is what tells the
     author their `on` was coerced, instead of the declaration silently going unchecked.
     """
-    for spelling in ("params: [on]", "params:\n  on: a note", "params:\n  - on: a note"):
+    for spelling in (
+        "params: [on]", "params: on", "params:\n  on: a note", "params:\n  - on: a note",
+    ):
         text = _GOOD.replace("params: [host]", spelling, 1)
         assert _codes(text, "cmdb", tmp_path, resolver) == ["undeclared-param"], spelling
+
+
+def test_a_bare_scalar_declaration_is_the_one_entry_spelling_not_nothing(tmp_path, resolver):
+    """`body_substitutions: window` is a one-entry list to everyone but YAML, which hands it
+    over as a plain string. Read as nothing, the ESCAPE the author wrote is unread and the
+    `${window}` it covers is refused as undeclared — a refusal naming a name the file declares,
+    and on the lead lane's promote it discards the whole batch. (For `params:` the same scalar
+    fails the other way, unenforced rather than over-refused; both are the shape going unread.)
+
+    A `str` is also ITERABLE, which is why it is answered ahead of the sequence branch: read as
+    a sequence it would declare one name per character.
+    """
+    body = "## Query\n\n```query\nverb: get-host\nparams:\n  host: ${host}-${window}\n```\n"
+    listed = (
+        "---\nid: cmdb.probe\nstatus: established\nverb: get-host\n"
+        "params: [host]\nbody_substitutions: [window]\n---\n\n" + body
+    )
+    scalar = listed.replace("body_substitutions: [window]", "body_substitutions: window", 1)
+    assert _codes(listed, "cmdb", tmp_path, resolver) == []
+    assert _codes(scalar, "cmdb", tmp_path, resolver) == []
 
 
 def test_every_shipped_template_including_drafts_satisfies_the_rule(resolver):

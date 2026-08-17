@@ -32,7 +32,6 @@ from defender.agents import (
     MAIN_DEF,
 )
 from defender.learning.author import shared as author_shared
-from defender.tests._repo import seed_adapter_stubs
 from defender.learning.author.curator_engine import CuratorDeps, ForwardCheckConfig
 from defender.learning.author.verify_forward.checks import (
     ACTOR_CHECK,
@@ -48,6 +47,7 @@ from defender.learning.pipeline.oracle.sample import build_lead_user_prompt
 from defender.runtime.agent_definition import RunScope, bind, effective_tools_for
 from defender.runtime.box import BoxResult
 from defender.runtime.tools import _tool_bash, _tool_read_file
+from defender.tests._repo import seed_adapter_stubs
 
 #: #632's §7 R7 grant/capability agreement: JUDGE_DEF's static `closed_tickets` bit stays
 #: False (only the per-leg replace() in _run_judge_pydantic turns it on, together with the

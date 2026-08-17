@@ -92,7 +92,7 @@ Then pick one action.
 - `id:` — `{system}.{template-id}`, and the `{system}` half must be the directory the file sits in.
 - `params: [...]` — names the verb really declares. Not "the axis I wish existed": if you widen onto an axis the verb has no param for, the axis belongs in the query body as a `body_substitutions:` entry, or the widening does not belong in this template.
 - `body_substitutions: [...]` — every `${name}` that is interpolated into a query-LANGUAGE body rather than binding a param.
-- A `${name}` in the `## Query` that appears in neither list is a refusal. So is a `params:` entry the verb does not declare.
+- A `${name}` in the `## Query` that appears in neither list is a refusal. So is a `params:` entry the verb does not declare. So is a `body_substitutions:` entry naming a param the verb reserves to a first-party wrapper — that name is not bindable from a template by either route, and listing it there does not make the `${name}` legal.
 
 **Pitfall signal — `error` / `suspect_empty`:** an invocation with `payload_status: error` or `payload_status: suspect_empty` is the strongest signal you'll see for a fold. Before folding, still confirm: (a) the failure mode isn't already documented in the template, (b) you can describe what happened from the payload itself (not from imagined related failures), (c) the description names what the agent did or saw, not what it might do in adjacent cases. If any of those fails, skip.
 

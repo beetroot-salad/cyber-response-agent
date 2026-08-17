@@ -49,11 +49,16 @@ def _is_catalog_template(path: str) -> bool:
     should still read and refuse (its parent dir names no system, so the resolver raises and
     the commit is refused). Keying on `len(parts) == 2` instead would have handed that shape a
     silent pass — a guard dropped, not a false refusal removed.
+
+    The draft exclusion is `_under_draft`, the DOCUMENTED depth, not "`_draft` appears anywhere
+    in the path": a `{system}/sub/_draft/x.md` is the extra-depth shape the paragraph above
+    keeps in, and a membership test over every segment quietly took it back out — the same
+    dropped guard, reached by the other spelling.
     """
     if not path.startswith(CATALOG_REL) or not path.endswith(".md"):
         return False
     parts = path[len(CATALOG_REL):].split("/")
-    return len(parts) >= 2 and "_draft" not in parts and parts[-1] != "README.md"
+    return len(parts) >= 2 and not _under_draft(path) and parts[-1] != "README.md"
 
 
 def _is_system_file(path: str, name: str) -> bool:
