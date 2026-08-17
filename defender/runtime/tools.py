@@ -207,12 +207,21 @@ def _shim_exit_code(rc: int) -> int:
     broken deployment is not a lesson any `execution.md` should carry. A query error (1) is
     already agent-fixable and passes through. The shim's real status stays legible either way —
     `payload_digest` records the raw `exit=N` and its stderr.
+
+    A code the shim does not spend is the THIRD meaning and it is infra too (#870 FK-15). The
+    shim's own failure vocabulary is exactly {1, 2, 69}; anything else — 137 from a SIGKILL,
+    127 from a missing binary — was produced by the kernel or the shell, not by the reducer
+    judging its input, and `error_class_for_exit` calls every unlisted non-zero code
+    agent-fixable. Left untranslated, a reduce the box killed reached the queue as a lesson
+    about SQL the agent should have written differently, which it is not.
     """
     if rc == defender_sql.EXIT_INPUT_ERROR:
         return USAGE_EXIT_CODE
     if rc == defender_sql.EXIT_NO_RUNTIME:
         return _INFRA_EXIT_CODE
-    return rc
+    if rc in (defender_sql.EXIT_OK, defender_sql.EXIT_QUERY_ERROR):
+        return rc
+    return _INFRA_EXIT_CODE
 
 
 def _record_shim_failure(
@@ -261,7 +270,9 @@ def _record_shim_failure(
             # The system of the PAYLOAD the reducer read, never one parsed out of the argv —
             # the argv names `defender-sql`, and a row saying `system: "sql"` would send the
             # curator at a `skills/sql/execution.md` that must never exist. `""` when the
-            # command opened no run payload: `collect_general_failures` skips a systemless row.
+            # command opened no run payload; since #870 M5′ the attribution no longer decides
+            # the row's fate either way — `collect_general_failures` routes it by its sentinel
+            # `query_id` onto the reducer surface and normalizes this field to `""` there.
             system=record_query.system_for_payload_operands(
                 deps.run_dir, _opened_operands(deps, decision),
             ),

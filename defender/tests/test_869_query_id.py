@@ -143,7 +143,7 @@ def test_the_prefix_comparison_folds_nothing():
     padded = pitfalls_curator._build_pitfalls_handoffs(
         [pitfall_row("r:0", "elastic ")], systems=systems)
     assert [h["system"] for h in padded] == ["elastic"]
-    assert padded[0]["execution_md_path"] == "defender/skills/elastic/execution.md"
+    assert padded[0]["path"] == "defender/skills/elastic/execution.md"
 
     assert pitfalls_curator._build_pitfalls_handoffs(
         [pitfall_row("r:1", "Elastic")], systems=systems) == []

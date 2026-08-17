@@ -32,7 +32,11 @@ from defender.learning.core.markers import (
     quarantine_marker,
     requeue_marker,
 )
-from defender.learning.core.persist import merge_pitfalls, read_pitfalls
+from defender.learning.core.persist import (
+    merge_pitfalls,
+    pitfalls_lane_is_open,
+    read_pitfalls,
+)
 from defender.learning.core.quarantine import preserve_tainted_tree
 
 
@@ -142,9 +146,11 @@ def _has_lead_author_work(paths: LoopPaths) -> bool:
     inflight = qdir / "inflight"
     if inflight.is_dir() and any(inflight.glob("*.json")):
         return True
-    # Distinct mistakes, the same count `run_pitfalls` gates on (#840) — a wake gate that
-    # counted rows would spin the drain up for a curation that then declines to run.
-    return len(merge_pitfalls(read_pitfalls(paths))) >= threshold
+    # The same arrival condition `run_pitfalls` gates on, asked through the same function
+    # (#840 + #870 FK-3) — a wake gate that counted rows, or that answered a different
+    # question from the tick's, would spin the drain up for a curation that then declines to
+    # run, or (worse) never wake for work the tick would have taken.
+    return pitfalls_lane_is_open(merge_pitfalls(read_pitfalls(paths)), threshold)
 
 
 def _drain_curators(
@@ -272,7 +278,24 @@ def _retire_pitfalls_batch(paths: LoopPaths, batch_ids: list[str], e: Exception)
     drain.retire(
         channel=paths.pitfalls,
         batch_ids=batch_ids,
-        reason=str(e),
+        # `batch-error:<class>: <message>` (#870 FK-11, widened by the round's review).
+        #
+        # FK-11's decision was that two writers append to one `pitfalls.deadletter.jsonl` and
+        # a raw `str(e)` beside `_graveyard_dropped_rows`' three named classes leaves a human
+        # triaging that file with three classes and a traceback string. That holds, and the
+        # PREFIX is what carries it: `batch-error:<class>` is still the vocabulary — closed,
+        # groupable, one member per fault class beside `_graveyard_dropped_rows`' three and the
+        # hold ceiling's `reducer-offered-never-taught` — exactly as the undeclared class
+        # carries its name after the same `:` separator.
+        #
+        # What the class ALONE cost was the diagnosis. A curator that exited rc=124, one that
+        # tried to delete a section, and one that wrote outside `defender/skills` all raise
+        # `LeadAuthorError` and all filed as the identical four words, so the graveyard — the
+        # only durable record this lane leaves, unread until #903 — could not tell a timed-out
+        # spawn from an attempted gutting. The message survived solely in the transient
+        # operator log. Truncated, because a reason is a label and a row is not a place to
+        # store a traceback.
+        reason=f"batch-error:{type(e).__name__}: {str(e)[:200]}",
         max_attempts=author_max_attempts(),
     )
 

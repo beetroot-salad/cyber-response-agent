@@ -273,7 +273,7 @@ def test_pitfalls_resolves_the_tree_it_commits_into(tmp_path, monkeypatch, capsy
 
     assert pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn) == 0
     assert spawn.systems_seen == ["wtonly"]
-    assert spawn.handoffs[0]["execution_md_path"] == "defender/skills/wtonly/execution.md"
+    assert spawn.handoffs[0]["path"] == "defender/skills/wtonly/execution.md"
     assert persist.read_pitfalls(paths) == []
 
 

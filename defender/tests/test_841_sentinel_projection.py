@@ -263,13 +263,17 @@ def test_extraction_still_yields_every_row_in_table_order(run):
 
 def test_pitfalls_residue_still_collects_the_shim_row(run):
     """#823's whole point, and the reason the filter is not in `load_queries`: the failed
-    reduce reaches the pitfalls curator, which edits `skills/{system}/execution.md` — the file
-    the gather subagent reads before coining its next query."""
+    reduce reaches the pitfalls curator, which edits the surface the gather subagent reads
+    before its next attempt.
+
+    Since #870 M5′ that surface is `skills/gather/defender-sql.md` and the collected row's
+    `system` is normalized to `""` at collection — a `defender-sql` mistake is the reducer's,
+    not the mistake of whichever system's payload the reduce happened to open."""
     extracted = lead_extraction.extract_from_joined(lr.joined(run))
     pitfalls = lead_extraction.collect_general_failures(extracted, run, catalog=[])
     assert [p["query_id"] for p in pitfalls] == [REPEAT_TRIP_QUERY_ID, BASH_SHIM_QUERY_ID]
     shim = pitfalls[-1]
-    assert shim["system"] == "elastic"
+    assert shim["system"] == ""
     assert shim["pitfall_id"] == f"{run.name}:l-002:0"
 
 

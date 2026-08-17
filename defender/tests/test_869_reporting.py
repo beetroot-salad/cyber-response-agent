@@ -178,13 +178,14 @@ def test_a_dropped_row_is_never_labelled_committed(tmp_path, monkeypatch):
 
 
 def test_a_dropped_row_takes_a_terminal_undeclared_category(tmp_path, monkeypatch):
-    """A dropped row takes the DISTINCT TERMINAL category `consumed_undeclared` and goes to
+    """A dropped row takes the DISTINCT TERMINAL category `consumed_unattributable` and goes to
     the graveyard record for a human to act on (FK-2, §7).
 
     `dropped_rows_are_never_labelled_committed`'s positive control on the same address: the
     negative alone is satisfied by any label at all, including one that reads like an ordinary
     skip. Over the same mixed batch, the two declared rows carry `consumed_committed` plus the
-    real sha and the dropped row carries `consumed_undeclared`, no `consumed_commit`, and a
+    real sha and the dropped row carries `consumed_unattributable` (#870 F4 renamed it:
+    "undeclared" was false of a systemless row and of `../evil`), no `consumed_commit`, and a
     durable record naming it.
 
     REJECTED, and why: reusing `consumed_skip`, which already means something else to every
@@ -198,7 +199,7 @@ def test_a_dropped_row_takes_a_terminal_undeclared_category(tmp_path, monkeypatc
     pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn)
 
     consumed = {r["pitfall_id"]: r for r in read_rows(paths.pitfalls.consumed)}
-    assert consumed["r:l-002:0"]["consumed_category"] == "consumed_undeclared"
+    assert consumed["r:l-002:0"]["consumed_category"] == "consumed_unattributable"
     assert "consumed_commit" not in consumed["r:l-002:0"]
     assert consumed["r:l-000:0"]["consumed_category"] == "consumed_committed"
 

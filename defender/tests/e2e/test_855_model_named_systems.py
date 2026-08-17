@@ -92,7 +92,7 @@ def test_a_schema_rejected_call_cannot_name_a_system_of_record(tmp_path):
     assert rows[0]["system"] == "", \
         "a model-named system reached the queries table as a system of record"
     assert _build_pitfalls_handoffs(_queued(rows), systems=frozenset({"elastic"})) == [], \
-        "the model's string became an execution_md_path the curator is pointed at"
+        "the model's string became a handoff path the curator is pointed at"
 
 
 def test_a_schema_rejected_call_on_a_real_system_still_records_it(tmp_path):
@@ -107,7 +107,7 @@ def test_a_schema_rejected_call_on_a_real_system_still_records_it(tmp_path):
     assert rows[0]["system"] == "elastic", "a real system's rejection lost its attribution"
 
     handoffs = _build_pitfalls_handoffs(_queued(rows), systems=frozenset({"elastic"}))
-    assert [h["execution_md_path"] for h in handoffs] == [
+    assert [h["path"] for h in handoffs] == [
         "defender/skills/elastic/execution.md"
     ], "the rejection no longer reaches the pitfalls curator at all"
 
@@ -235,7 +235,7 @@ def test_the_dispatch_argument_is_the_only_system_the_run_can_name(tmp_path):
              turns=[_bad_args(PHANTOM), q(PHANTOM, "query", PARAMS), DONE])
 
     handoffs = _build_pitfalls_handoffs(_queued(r.own_rows), systems=frozenset({"elastic"}))
-    paths = [h["execution_md_path"] for h in handoffs]
+    paths = [h["path"] for h in handoffs]
     assert not any(PHANTOM in p for p in paths), f"the curator is pointed at {paths}"
     assert all(Path(p).parts[:2] == ("defender", "skills") for p in paths)
 

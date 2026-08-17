@@ -220,8 +220,10 @@ def system_for_payload_operands(run_dir: Path, operands: Iterable[Path]) -> str:
     cross-lead read still attributes correctly.
 
     `""` when no operand resolves to a run payload, which is the honest answer and not a
-    guess: `collect_general_failures` skips a systemless row at its existing guard
-    (lead_extraction.py:100).
+    guess. Since #870 M5′ that answer no longer decides whether the row is collected: a
+    `BASH_SHIM_QUERY_ID` row is admitted by `collect_general_failures` on its sentinel id and
+    has its `system` normalized to `""` there anyway, because a `defender-sql` mistake belongs
+    to the reducer surface however the reduce happened to be attributed.
 
     The operands are keyed FIRST and the table read only if one of them is a payload path, so
     the common `defender-sql` call that opens no run payload costs no read at all — and the
@@ -433,8 +435,9 @@ Shares `ABOVE_GUARD_QUERY_ID`'s `∅.` prefix because it needs the same property
 reader: `∅` fails `draft_synthesis._SAFE_ID_SEGMENT`, so `_draft_candidate_segments` returns
 `None` and the row falls past `synthesize_drafts`; it is not a catalog id, so `build_handoff`
 does not claim it either. What is left is `collect_general_failures` — the pitfalls residue,
-which is where a reducer mistake belongs, because `skills/{system}/execution.md` is the file
-the gather subagent reads before coining its next query.
+which is where a reducer mistake belongs. Since #870 the surface it is taught on is
+`skills/gather/defender-sql.md`, the file the gather subagent reads before it writes the SQL,
+rather than the `skills/{system}/execution.md` of whichever system's payload it opened.
 
 The routing is therefore BY CONSTRUCTION: no collector learned a new case and none was edited.
 A descriptive id would have been the trap — `{system}.defender-sql-unnest` passes the

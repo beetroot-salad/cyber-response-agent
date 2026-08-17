@@ -65,7 +65,7 @@ def test_verify_pitfalls_state_accepts_execution_md(tmp_git_repo: Path):
         "# elastic\n## Common pitfalls\n- use `index=windows`, not `index:windows`\n"
     )
     changed = pitfalls_curator._verify_pitfalls_state(
-        tmp_git_repo, baseline_stray=[], systems=DECLARED)
+        tmp_git_repo, baseline_stray=[], systems=DECLARED, reducer_offered=False)
     assert changed == ["defender/skills/elastic/execution.md"]
 
 
@@ -74,14 +74,16 @@ def test_verify_pitfalls_state_rejects_non_execution_md(tmp_git_repo: Path):
     skill = tmp_git_repo / "defender" / "skills" / "elastic" / "SKILL.md"
     skill.write_text(skill.read_text() + "\nedit\n")
     with pytest.raises(LeadAuthorError, match="non-execution.md"):
-        pitfalls_curator._verify_pitfalls_state(tmp_git_repo, baseline_stray=[], systems=DECLARED)
+        pitfalls_curator._verify_pitfalls_state(
+            tmp_git_repo, baseline_stray=[], systems=DECLARED, reducer_offered=False)
 
 
 def test_verify_pitfalls_state_rejects_stray(tmp_git_repo: Path):
     (tmp_git_repo / "defender" / "other").mkdir(parents=True)
     (tmp_git_repo / "defender" / "other" / "stray.md").write_text("x")
     with pytest.raises(LeadAuthorError, match="outside"):
-        pitfalls_curator._verify_pitfalls_state(tmp_git_repo, baseline_stray=[], systems=DECLARED)
+        pitfalls_curator._verify_pitfalls_state(
+            tmp_git_repo, baseline_stray=[], systems=DECLARED, reducer_offered=False)
 
 
 def test_verify_pitfalls_state_rejects_deletion(tmp_git_repo: Path):
@@ -91,7 +93,8 @@ def test_verify_pitfalls_state_rejects_deletion(tmp_git_repo: Path):
     _run_git(tmp_git_repo, "commit", "-q", "-m", "add exec")
     ex.unlink()
     with pytest.raises(LeadAuthorError, match="deleted"):
-        pitfalls_curator._verify_pitfalls_state(tmp_git_repo, baseline_stray=[], systems=DECLARED)
+        pitfalls_curator._verify_pitfalls_state(
+            tmp_git_repo, baseline_stray=[], systems=DECLARED, reducer_offered=False)
 
 
 def test_verify_pitfalls_stray_wins_over_in_corpus_violation(tmp_git_repo: Path):
@@ -103,7 +106,8 @@ def test_verify_pitfalls_stray_wins_over_in_corpus_violation(tmp_git_repo: Path)
     skill = tmp_git_repo / "defender" / "skills" / "elastic" / "SKILL.md"
     skill.write_text(skill.read_text() + "\nedit\n")
     with pytest.raises(LeadAuthorError, match="outside"):
-        pitfalls_curator._verify_pitfalls_state(tmp_git_repo, baseline_stray=[], systems=DECLARED)
+        pitfalls_curator._verify_pitfalls_state(
+            tmp_git_repo, baseline_stray=[], systems=DECLARED, reducer_offered=False)
 
 
 def test_verify_pitfalls_state_returns_sorted_changed(tmp_git_repo: Path):
@@ -129,7 +133,7 @@ def test_verify_pitfalls_state_returns_sorted_changed(tmp_git_repo: Path):
     )
     (cmdb / "execution.md").write_text("# c\n")
     changed = pitfalls_curator._verify_pitfalls_state(
-        tmp_git_repo, baseline_stray=[], systems=DECLARED | {"cmdb"})
+        tmp_git_repo, baseline_stray=[], systems=DECLARED | {"cmdb"}, reducer_offered=False)
     assert changed == [
         "defender/skills/cmdb/execution.md",
         "defender/skills/elastic/execution.md",
@@ -175,7 +179,7 @@ def test_run_pitfalls_at_threshold_commits_and_rotates(tmp_git_repo: Path, tmp_p
 
     def fake_invoke(handoffs, *, repo_root, box=None):
         assert handoffs[0]["system"] == "elastic"
-        assert handoffs[0]["execution_md_path"] == "defender/skills/elastic/execution.md"
+        assert handoffs[0]["path"] == "defender/skills/elastic/execution.md"
         assert len(handoffs[0]["failures"]) == 2
         p = repo_root / "defender" / "skills" / "elastic" / "execution.md"
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -207,7 +211,7 @@ def test_run_pitfalls_no_edit_tick_still_rotates(tmp_git_repo: Path, tmp_path: P
 
 
 def test_a_queued_system_with_no_skills_dir_never_becomes_a_handoff_path(tmp_git_repo: Path):
-    """#855 F-06, the offline half. `execution_md_path` is a PATH BUILT FROM A QUEUE FIELD and
+    """#855 F-06, the offline half. The handoff's `path` is a PATH BUILT FROM A QUEUE FIELD and
     the curator is told to read and write it, so a `system` that reached the queue from
     anywhere unvetted mints a brand-new single-segment directory under `defender/skills/` — the
     phantom-system class #821/#828 closed for `h-*` and `system_for_payload_operands` closed
@@ -223,7 +227,7 @@ def test_a_queued_system_with_no_skills_dir_never_becomes_a_handoff_path(tmp_git
     ]
     handoffs = pitfalls_curator._build_pitfalls_handoffs(rows, systems=DECLARED)
     assert [h["system"] for h in handoffs] == ["elastic"]
-    assert handoffs[0]["execution_md_path"] == "defender/skills/elastic/execution.md"
+    assert handoffs[0]["path"] == "defender/skills/elastic/execution.md"
 
 
 def test_the_commit_gate_refuses_an_execution_md_that_mints_its_own_system_dir(tmp_git_repo: Path):
@@ -235,14 +239,15 @@ def test_the_commit_gate_refuses_an_execution_md_that_mints_its_own_system_dir(t
     ghost.mkdir(parents=True)
     (ghost / "execution.md").write_text("# ghost\n## Common pitfalls\n- invented\n")
     with pytest.raises(LeadAuthorError, match="undeclared system"):
-        pitfalls_curator._verify_pitfalls_state(tmp_git_repo, baseline_stray=[], systems=DECLARED)
+        pitfalls_curator._verify_pitfalls_state(
+            tmp_git_repo, baseline_stray=[], systems=DECLARED, reducer_offered=False)
 
     # Positive control on the same gate: the fixture's real system dir takes a NEW execution.md.
     (ghost / "execution.md").unlink()
     ghost.rmdir()
     (tmp_git_repo / "defender" / "skills" / "elastic" / "execution.md").write_text("# e\n")
     assert pitfalls_curator._verify_pitfalls_state(
-        tmp_git_repo, baseline_stray=[], systems=DECLARED) == [
+        tmp_git_repo, baseline_stray=[], systems=DECLARED, reducer_offered=False) == [
         "defender/skills/elastic/execution.md"
     ]
 
@@ -298,8 +303,8 @@ def test_invoke_pitfalls_agent_prompt_reaches_engine(tmp_path: Path, monkeypatch
     """The pitfalls prompt (skills_dir + pitfalls_handoffs, and NONE of the per-run keys) reaches
     the in-process engine as the ``user_prompt`` payload."""
     cap = _capture_engine(monkeypatch)
-    handoffs = [{"system": "elastic",
-                 "execution_md_path": "defender/skills/elastic/execution.md",
+    handoffs = [{"surface": "system", "system": "elastic",
+                 "path": "defender/skills/elastic/execution.md",
                  "failures": []}]
     rc = pitfalls_curator._invoke_pitfalls_agent(handoffs, repo_root=tmp_path)
     assert rc == 0
