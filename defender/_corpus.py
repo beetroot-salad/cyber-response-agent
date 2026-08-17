@@ -70,6 +70,33 @@ class QueryTemplate:
     #: in each caller is how the two enforcement copies of one rule drifted apart (#901).
     params: tuple[str, ...] = ()
     body_substitutions: tuple[str, ...] = ()
+    #: Every coined `query_id` this template accounts for — the `covers:` key.
+    #:
+    #: `query_id` is the IDENTITY a gather call asserts (`{system}.{descriptive-kebab}`, coined
+    #: by the subagent when no template fit) and the bound values are instances under it, so a
+    #: template is the thing that answers one or more such identities. Recording them on the
+    #: file is what lets `synthesize_drafts` know an identity is already answered: `by_id` is
+    #: ids UNION covers, so a promoted template suppresses the draft it came from and a widened
+    #: one suppresses the draft it absorbed. Without it the same draft is re-minted every time
+    #: a later run coins the same id, and the author discards it again (#917 review).
+    #:
+    #: It carries two other loads. The commit gate matches a deleted draft to the established
+    #: template that took it over (there is no shared basename to derive it from once the
+    #: author names the file), and the coined name is the gather subagent's own one-line
+    #: description of a measurement it had just judged novel — the best single input to the
+    #: naming decision the author makes at promote.
+    covers: tuple[str, ...] = ()
+    #: A DRAFT's `## Executed query` — the verbatim recording of the call that minted it.
+    #:
+    #: Deliberately NOT `query`. A template's `## Query` is an INTERFACE: its `${name}`s are
+    #: holes a dispatch fills, which is why `_scaffold_rules.check_template` holds them to the
+    #: verb's params. A draft is a TRANSCRIPT of one execution, so it has no holes — every
+    #: `${…}` in it is text that was sent literally. Parsing it into `query` would put the
+    #: recording under the placeholder rule and refuse a draft for the shape of the data it
+    #: recorded; parsing it here leaves that rule vacuous for drafts by construction, and the
+    #: author writes the real parameterized `## Query` at promote (`lead_author.md`: "carry
+    #: every filter axis the measurement could take, not just the ones this run bound").
+    recording: str = ""
 
 
 def section_bodies(body: str) -> dict[str, str]:
@@ -147,12 +174,28 @@ def read_query_template(path: Path) -> tuple[QueryTemplate | None, str]:
     corpus does. Returning the reason rather than printing it is what lets that caller refuse a
     commit *with* the reason; `iter_query_templates` keeps the warn-and-skip behavior its
     readers depend on."""
+    try:
+        text = read_text_utf8(path)
+    except TEXT_READ_ERRORS as e:
+        return None, f"malformed template: {e}"
+    return parse_query_template(text, path)
+
+
+def parse_query_template(text: str, path: Path) -> tuple[QueryTemplate | None, str]:
+    """`read_query_template` for content already in hand, with `path` supplying only the
+    LOCATION facts (the file's system, and the template's own `path` field).
+
+    Split from the read because the commit gate has to ask the same questions of a version of
+    the file that is not on disk: matching a DELETED draft to the established template that
+    took it over means parsing the draft's pre-image out of `git show HEAD:…`, and comparing a
+    modified template against what it replaced means parsing both. Routing those through the
+    corpus's own parser is what keeps "what the gate thinks this file declares" and "what every
+    reader thinks it declares" the same answer."""
     from defender._frontmatter import FrontmatterError, parse_frontmatter
 
-    malformed: tuple[type[BaseException], ...] = (FrontmatterError, *TEXT_READ_ERRORS)
     try:
-        fm, body = parse_frontmatter(read_text_utf8(path))
-    except malformed as e:
+        fm, body = parse_frontmatter(text)
+    except FrontmatterError as e:
         return None, f"malformed template: {e}"
     tid = fm.get("id")
     if not tid or not isinstance(tid, str):
@@ -169,10 +212,16 @@ def read_query_template(path: Path) -> tuple[QueryTemplate | None, str]:
         status=status if isinstance(status, str) else "",
         goal=sections.get("Goal", ""),
         query=sections.get("Query", ""),
+        recording=sections.get("Executed query", ""),
         body=body,
         verb=verb if isinstance(verb, str) else "",
         params=_declared_names(fm.get("params")),
         body_substitutions=_declared_names(fm.get("body_substitutions")),
+        # Through `_declared_names` like the declaration keys, for its shape tolerance rather
+        # than for its name semantics: a one-entry `covers: cmdb.network-map` is the spelling a
+        # hand-editing author reaches for, and read as a sequence a `str` would yield one entry
+        # per character. What rides here are `query_id`s, not param names.
+        covers=_declared_names(fm.get("covers")),
     ), ""
 
 

@@ -79,6 +79,19 @@ def git_status(cwd: Path, *, pathspec: Path | str | None = None) -> list[tuple[s
     return records
 
 
+def git_show_head(cwd: Path, path: str) -> str | None:
+    """`path`'s content at HEAD, or `None` when HEAD does not carry it.
+
+    `check=False` and a `None` return rather than a `GitError`, because "the file is new in this
+    batch" is an ORDINARY answer to this question and the caller has to branch on it either way
+    — a promoted template and a deleted draft are read through the same call, and only one of
+    them is expected to exist at HEAD. Unstripped: the caller parses frontmatter out of this,
+    and `strip()` would eat the leading `---` delimiter's line structure.
+    """
+    proc = _run(["show", f"HEAD:{path}"], cwd=cwd, check=False)
+    return proc.stdout if proc.returncode == 0 else None
+
+
 def git_head_sha(cwd: Path) -> str:
     return git(["rev-parse", "HEAD"], cwd=cwd)
 

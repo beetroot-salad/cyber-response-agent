@@ -500,6 +500,114 @@ def test_verify_skills_state_rejects_execution_md(tmp_git_repo: Path):
         lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[], systems=DECLARED)
 
 
+def _stage_covered_draft(repo: Path, query_id: str) -> Path:
+    """Commit a `wazuh` draft that accounts for `query_id`, as the mint would write it.
+
+    Committed, not merely written, because the invariants under test read the draft's PRE-IMAGE
+    out of `git show HEAD:…` — a draft that only ever existed in the working tree carries no
+    identities to orphan when the agent deletes it.
+    """
+    draft = repo / _CATALOG / "wazuh" / "_draft" / f"{lead_author._draft_basename(query_id)}.md"
+    draft.write_text(query_template(f"wazuh.{lead_author._draft_basename(query_id)}",
+                                    "draft", covers=[query_id]))
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "mint"], cwd=repo, check=True)
+    return draft
+
+
+def test_a_promote_that_carries_covers_is_accepted(tmp_git_repo: Path):
+    """The disposition the rule is shaped around: the author names the file for what it
+    measures and carries the coined identity onto it.
+
+    The name is deliberately unrelated to the draft's — that is the whole point of deriving the
+    draft's basename — so nothing but `covers:` connects the two files."""
+    repo = tmp_git_repo
+    draft = _stage_covered_draft(repo, "wazuh.hunt-failed-logins")
+    (repo / _CATALOG / "wazuh" / "auth-failure-rate.md").write_text(
+        query_template("wazuh.auth-failure-rate", "established",
+                       covers=["wazuh.hunt-failed-logins"])
+    )
+    draft.unlink()
+
+    changed = lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED)
+    assert "defender/skills/gather/queries/wazuh/auth-failure-rate.md" in changed
+
+
+def test_a_discard_into_widen_that_carries_covers_is_accepted(tmp_git_repo: Path):
+    """The PREFERRED disposition (`lead_author.md`: discard-into-widen > skip > promote), and
+    the one the old basename link could never have expressed — the identity lands on a template
+    that already existed under an unrelated name."""
+    repo = tmp_git_repo
+    draft = _stage_covered_draft(repo, "wazuh.hunt-failed-logins")
+    (repo / _CATALOG / "wazuh" / "auth-events.md").write_text(
+        query_template("wazuh.auth-events", "established",
+                       covers=["wazuh.hunt-failed-logins"]) + "\n# widened\n"
+    )
+    draft.unlink()
+
+    changed = lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED)
+    assert "defender/skills/gather/queries/wazuh/auth-events.md" in changed
+
+
+def test_a_bare_discard_of_a_covered_draft_is_refused(tmp_git_repo: Path):
+    """Deleting a draft without attributing it is the silent, self-repeating failure.
+
+    Nothing observable happens: the batch commits, and the identity is minted again the next
+    time a run coins it, discarded again, forever. The refusal names the alternative the prompt
+    already gives — a draft that fits no template is one to SKIP."""
+    repo = tmp_git_repo
+    draft = _stage_covered_draft(repo, "wazuh.hunt-failed-logins")
+    draft.unlink()
+
+    with pytest.raises(lead_author.LeadAuthorError, match="wazuh.hunt-failed-logins"):
+        lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED)
+
+
+def test_a_draft_with_no_covers_is_still_freely_discardable(tmp_git_repo: Path):
+    """The control. A hand-authored draft carries no minted identity, so there is nothing to
+    orphan and the transfer rule must not invent an obligation — the seeded tree's own
+    `_draft/newthing.md` is exactly that shape, and every promotion test in this file depends
+    on it staying discardable."""
+    repo = tmp_git_repo
+    (repo / _CATALOG / "wazuh" / "_draft" / "newthing.md").unlink()
+    changed = lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED)
+    assert "defender/skills/gather/queries/wazuh/_draft/newthing.md" in changed
+
+
+def test_an_established_template_may_not_lose_the_identities_it_covers(tmp_git_repo: Path):
+    """Monotonicity — the collision detector.
+
+    The L1 write lane admits ANY `{system}/{name}.md` and overwriting an established template
+    is a legal fold, so an author who picks a name that already exists gets no error: the write
+    silently replaces a different measurement. Dropping that template's `covers:` is what
+    separates a clobber from a widen, and it is what the clobbered measurement's future
+    re-mints depended on."""
+    repo = tmp_git_repo
+    established = repo / _CATALOG / "wazuh" / "auth-events.md"
+    established.write_text(
+        query_template("wazuh.auth-events", "established", covers=["wazuh.old-probe"])
+    )
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "covered"], cwd=repo, check=True)
+
+    established.write_text(query_template("wazuh.auth-events", "established"))
+    with pytest.raises(lead_author.LeadAuthorError, match="wazuh.old-probe"):
+        lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED)
+
+
+def test_an_established_template_may_not_have_its_id_rewritten(tmp_git_repo: Path):
+    """The other half of the clobber: a promote writes a NEW file, so an edit that replaces an
+    existing template's `id:` is a name collision that has already overwritten a different
+    measurement. Refused by identity rather than by content, because the content of a clobber
+    is perfectly well-formed — it is a valid template, just not the one that was there."""
+    repo = tmp_git_repo
+    (repo / _CATALOG / "wazuh" / "auth-events.md").write_text(
+        query_template("wazuh.something-else", "established")
+    )
+    with pytest.raises(lead_author.LeadAuthorError, match="rewrote the identity"):
+        lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED)
+
+
 def test_verify_skills_state_rejects_established_deletion(tmp_git_repo: Path):
     (tmp_git_repo / _CATALOG / "wazuh" / "auth-events.md").unlink()
     with pytest.raises(lead_author.LeadAuthorError, match="delete-prohibition"):
@@ -1086,8 +1194,13 @@ def test_run_reloads_catalog_after_mint_so_minted_draft_resolves(
     _write_query(run_dir, "l-001", 0, "wazuh.brandnew", verb="lookup", payload_status="ok")
 
     assert lead_author.run(run_dir, deps=deps) == 0
-    assert (tmp_git_repo / _CATALOG / "wazuh" / "_draft" / "brandnew.md").is_file()
-    assert "wazuh.brandnew" in {h["query_id"] for h in seen["handoffs"]}
+    minted = lead_author._draft_basename("wazuh.brandnew")
+    assert (tmp_git_repo / _CATALOG / "wazuh" / "_draft" / f"{minted}.md").is_file()
+    # The row still resolves, through `covers:` rather than through a matching `id:`. The
+    # draft's name is now derived, so the coined `wazuh.brandnew` the row carries is no
+    # template's id — and a `by_id` that indexed only ids would drop this row as an unresolved
+    # contract violation, handing the author nothing about the draft this tick just minted.
+    assert f"wazuh.{minted}" in {h["query_id"] for h in seen["handoffs"]}
 
 
 def test_collect_general_failures_skips_systemless(tmp_path: Path, catalog: Path):

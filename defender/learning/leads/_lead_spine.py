@@ -60,7 +60,17 @@ def _verify_corpus_scope(
     *,
     actor: str,
     rule: Callable[[str, str], None],
+    batch_rule: Callable[[list[tuple[str, str]]], None] | None = None,
 ) -> list[str]:
+    """Per-path `rule` over every in-corpus change, then an optional whole-batch `batch_rule`.
+
+    Two hooks because two kinds of invariant live here. Almost everything the gate asks is
+    answerable from one path ("may the agent touch this", "is what it wrote well-formed"), and
+    `rule` keeps those cheap and independent. What `batch_rule` is for is the questions that are
+    only decidable across the batch — a deleted draft is legitimate or not depending on whether
+    some OTHER file in the same commit took over the identity it carried, and no per-path pass
+    can see that. It runs last, on the records the per-path rule already admitted, so a batch
+    rule never reasons about a path the gate has refused."""
     records = _porcelain_records(repo_root)
 
     def _in_corpus(p: str) -> bool:
@@ -72,11 +82,15 @@ def _verify_corpus_scope(
             f"{actor} changed files outside {SKILLS_REL}*.md: {new_stray}; refusing to commit"
         )
     changed: list[str] = []
+    in_corpus: list[tuple[str, str]] = []
     for xy, path in records:
         if not _in_corpus(path):
             continue
         rule(xy, path)
+        in_corpus.append((xy, path))
         changed.append(path)
+    if batch_rule is not None:
+        batch_rule(in_corpus)
     return sorted(changed)
 
 

@@ -16,6 +16,7 @@ Underscore-prefixed so pytest does not collect it; it defines no tests.
 """
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 
 from defender import _git
@@ -153,16 +154,21 @@ def seed_adapter_stubs(defender_dir: Path, systems: tuple[str, ...]) -> tuple[st
     return systems
 
 
-def query_template(tid: str, status: str, *, body: str = "") -> str:
+def query_template(
+    tid: str, status: str, *, body: str = "", covers: Sequence[str] = ()
+) -> str:
     """A well-formed query template for the seeded `wazuh` system.
 
     A writer, never an oracle: tests that stage a promotion need a file the content gate
     accepts, and hand-spelling that shape at each site is how a fixture drifts from the schema
-    it is standing in for. Pass `body` to stage a MALFORMED one on purpose.
+    it is standing in for. Pass `body` to stage a MALFORMED one on purpose, and `covers` to
+    stage a file that accounts for coined `query_id`s (what the mint writes, and what a promote
+    or a widen has to carry).
     """
     query = body or "```query\nverb: search\nparams:\n  index: ${index}\n```"
+    covers_line = f"covers: [{', '.join(covers)}]\n" if covers else ""
     return (
-        f"---\nid: {tid}\nstatus: {status}\nverb: search\nparams: [index]\n---\n\n"
+        f"---\nid: {tid}\nstatus: {status}\nverb: search\nparams: [index]\n{covers_line}---\n\n"
         f"## Goal\n\nwazuh auth events.\n\n## Query\n\n{query}\n"
     )
 

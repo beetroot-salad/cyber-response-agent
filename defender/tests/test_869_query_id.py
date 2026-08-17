@@ -12,7 +12,10 @@ SHAPE rule (the #855 posture), which is why it can close the one reachable insta
 from __future__ import annotations
 
 from defender.learning.leads import pitfalls_curator
-from defender.learning.leads.draft_synthesis import _draft_candidate_segments
+from defender.learning.leads.draft_synthesis import (
+    _draft_basename,
+    _draft_candidate_segments,
+)
 from defender.runtime.query_tool import resolve_query_id
 from defender.tests._declared869 import pitfall_row
 
@@ -77,22 +80,36 @@ def test_resolve_query_id_enforces_the_whole_schema_shape():
 
     Closing D1 is the point: a prefix-only rule leaves a model-supplied string in the filename
     position of a `mkdir` + `write_text`, which is the shape of the very finding this issue
-    exists to close, one field over. The third value's consequence is shown rather than
-    described — the segments the draft writer would spend are read here from the refused id
-    and from the value it falls back to. `id_prefix_rule_admits_the_committed_corpus` is the
+    exists to close, one field over. `id_prefix_rule_admits_the_committed_corpus` is the
     positive control over the committed corpus; the well-formed coined id below is the one on
     this address.
+
+    Since #917's review the writer no longer spends ANY part of the id as a path component —
+    the basename is `sha256(query_id)`, so the filename position holds a hex digest whatever
+    the model coined. That is a second line, not a replacement for this one: FK-7 is still what
+    keeps a malformed id out of `covers:`, out of the dedup, and off the author's desk, and
+    this test is about FK-7. The third value's consequence is asserted below as it now stands
+    rather than as it stood — a refused id yields a derived name, and the fallback yields no
+    candidate at all.
     """
     assert resolve_query_id("elastic", "esql", "elastic") == "elastic.esql"
     assert resolve_query_id("elastic", "esql", "elastic.") == "elastic.esql"
     assert resolve_query_id("elastic", "esql", "elastic.foo.bar") == "elastic.esql"
 
-    # What the third one would have spent at the draft writer, and what it spends instead.
+    # What the third one reaches the draft writer as, and what it spends instead.
     # `row_system="elastic"` throughout: these ids all claim the system the row really reached,
     # so #901's id/row agreement check admits them and the shape rule is the only thing under
     # test here.
-    assert _draft_candidate_segments(
-        "elastic.foo.bar", "esql", set(), row_system="elastic") == ("elastic", "foo.bar")
+    #
+    # `'foo.bar'` used to come straight back as the basename — the second model-supplied path
+    # component the docstring names. It is a digest now, so the assertion is that NOTHING of the
+    # coined string reaches the path: the segment is derived, and `.` is not in its alphabet.
+    system, basename = _draft_candidate_segments(
+        "elastic.foo.bar", "esql", set(), row_system="elastic")
+    assert system == "elastic"
+    assert basename == _draft_basename("elastic.foo.bar")
+    assert "foo" not in basename
+    assert "." not in basename
     assert _draft_candidate_segments(
         resolve_query_id("elastic", "esql", "elastic.foo.bar"), "esql", set(),
         row_system="elastic",

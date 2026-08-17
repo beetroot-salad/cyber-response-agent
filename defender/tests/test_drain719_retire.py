@@ -575,6 +575,16 @@ def test_exactly_one_function_rewrites_a_pending_file(tmp_path: Path):
     for py in sorted(root.rglob("*.py")):
         if py.name == "markers.py":
             continue  # a marker-directory queue, explicitly out of scope (A5)
+        if py.name == "draft_synthesis.py":
+            # Not a queue writer. `write_atomic` is this census's PROXY for "rewrites a queue
+            # file wholesale", and the proxy went wide the moment a second kind of writer
+            # adopted the same seam: the mint writes one `_draft/{digest}.md` catalog template
+            # per identity, into the corpus, never into `state_dir` — no queue, nothing to
+            # merge, and no lost-append race for a rotation to close. D9's property (exactly
+            # ONE function rewrites a queue) is untouched; what is excluded here is a file that
+            # never wrote a queue to begin with. Excluded by name, like `markers.py` above,
+            # because the target is not decidable from the AST.
+            continue
         tree = ast.parse(py.read_text(encoding="utf-8"), filename=str(py))
         for node in ast.walk(tree):
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):

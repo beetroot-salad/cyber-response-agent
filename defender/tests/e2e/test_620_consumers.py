@@ -40,6 +40,7 @@ import yaml  # noqa: E402  (pyyaml is a runtime dep)
 from defender import _corpus  # noqa: E402
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender.learning import lead_repository  # noqa: E402
+from defender.learning.leads.draft_synthesis import _draft_basename  # noqa: E402
 from defender.learning.core import persist as _persist  # noqa: E402
 from defender.learning.core.config import LoopPaths  # noqa: E402
 from defender.learning.leads import (  # noqa: E402
@@ -322,7 +323,7 @@ def test_canonical_record_param_only_is_structured_call(tmp_path):
     text = drafts[0].read_text(encoding="utf-8")
 
     assert "```query" in text, "the param-only record is not fenced ```query"
-    qbody = _corpus.section_bodies(text).get("Query", "")
+    qbody = _corpus.section_bodies(text).get("Executed query", "")
     assert "get-host" in qbody, "the structured render dropped the verb"
     assert "host" in qbody, "the structured render dropped the param key"
     assert "db-1" in qbody, "the structured render dropped the param value"
@@ -533,11 +534,11 @@ def test_canonical_record_value_cannot_forge_a_draft_section(tmp_path):
     text = drafts[0].read_text(encoding="utf-8")
     bodies = _corpus.section_bodies(text)
 
-    assert set(bodies) <= {"Goal", "Query", "Pitfalls"}, \
+    assert set(bodies) <= {"Goal", "Executed query", "Pitfalls"}, \
         f"the body value forged a sibling section: {sorted(bodies)}"
     assert "InjectedSection" not in bodies, "the body value forged a sibling ## section"
-    assert "OWNED" in bodies.get("Query", ""), \
-        "the exact body value did not round-trip as data inside the ## Query fence"
+    assert "OWNED" in bodies.get("Executed query", ""), \
+        "the exact body value did not round-trip as data inside the recording fence"
 
 
 def test_benign_body_renders_in_one_intact_fence_positive_control(tmp_path):
@@ -554,8 +555,8 @@ def test_benign_body_renders_in_one_intact_fence_positive_control(tmp_path):
         systems=frozenset({"elastic"}))
     text = drafts[0].read_text(encoding="utf-8")
     bodies = _corpus.section_bodies(text)
-    assert set(bodies) == {"Goal", "Query", "Pitfalls"}
-    assert pipe in bodies["Query"]
+    assert set(bodies) == {"Goal", "Executed query", "Pitfalls"}
+    assert pipe in bodies["Executed query"]
     assert text.count("```") == 2, "the benign body did not render inside exactly one fence"
 
 
@@ -672,7 +673,9 @@ def test_noncandidate_rule_is_declared_verb_name(tmp_path):
     drafts_c = draft_synthesis.synthesize_drafts(
         _executed_leads(r_coined.run_dir), catalog_dir=tmp_path / "cc", catalog=[],
         systems=frozenset({"elastic"}))
-    assert any("sshd-by-srcip" in p.name for p in drafts_c), "a coined id was not drafted"
+    assert [p.name for p in drafts_c] == [
+        f"{_draft_basename('elastic.sshd-by-srcip')}.md"
+    ], "a coined id was not drafted"
 
 
 def test_candidacy_is_stable_across_the_replaying_tree(tmp_path):
@@ -698,7 +701,7 @@ def test_candidacy_is_stable_across_the_replaying_tree(tmp_path):
     drafts_b = draft_synthesis.synthesize_drafts(
         _executed_leads(r_b.run_dir), catalog_dir=tmp_path / "cb", catalog=[],
         systems=frozenset({"elastic"}))
-    assert any(p.name == "foo.md" for p in drafts_b), \
+    assert any(p.name == f"{_draft_basename('elastic.foo')}.md" for p in drafts_b), \
         "candidacy did not follow the row's recorded verb"
 
 

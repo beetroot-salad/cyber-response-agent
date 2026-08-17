@@ -44,6 +44,8 @@ verb: esql                # the declared verb this template dispatches; its engi
 params: [index]           # the verb's declared params, each bound by a `${name}` placeholder
 body_substitutions: [start, end, user, src, dst]  # in-body-text `${name}` substitutions —
                           # placeholders inside a query LANGUAGE body, NOT declared verb params
+covers: [{system}.hunt-failed-logins]  # coined `query_id`s this template accounts for
+                          # (see "Drafts and `covers:`" below)
 ---
 
 ## Goal
@@ -145,9 +147,9 @@ won't be reused. A lead may run several queries — see
 
 When the lead has no matching template, gather does **not** author a
 template file — it coins a measurement id and runs under it (see
-`defender/skills/gather/SKILL.md` §2). The offline lead-author mints the
-`_draft/{id}.md` file from the execution record and curates it. To coin
-the id:
+`defender/skills/gather/SKILL.md` §2). The offline lead-author mints a
+draft from the execution record and curates it (see "Drafts and
+`covers:`" below). To coin the id:
 
 1. Pick a `{system}` based on which data source the query must hit.
 2. Pick a kebab-case `{template-id}` describing what the query measures,
@@ -164,3 +166,29 @@ carries the **capability** you need with a different parameter binding
 
 This file documents the template *shape* the lead-author produces when
 it promotes a coined measurement; gather only supplies the id.
+
+## Drafts and `covers:`
+
+A **draft** under `{system}/_draft/` is not a small template — it is a **recording**. The
+lead-author loop mints one when a gather call coined a `query_id` no template answered, and
+what it writes is a transcript of that one execution:
+
+- Its **name is a digest**, not a name. `{system}/_draft/{sha256(query_id)[:12]}.md`, and `id:`
+  matches. Naming a template for *what it measures* is a decision that needs the recording, the
+  neighbor scores and the catalog in hand — none of which the gather subagent had when it
+  coined the id mid-investigation. **Naming it is the promoter's job.**
+- Its query sits under **`## Executed query`**, not `## Query`. A `## Query` is an interface:
+  its `${name}`s are holes a dispatch fills, which is why they are checked against the verb's
+  params. A recording has no holes — every `${…}` in it is text that was literally sent. So a
+  draft declares no `body_substitutions:`, and the placeholder rule does not apply to it.
+- Its **`covers:`** lists the coined `query_id`s it accounts for.
+
+`covers:` is what survives the draft. It is the dedup key (`synthesize_drafts` will re-mint an
+identity that no template covers), it is how the commit gate matches a deleted draft to the
+template that took it over, and it carries gather's own one-line description of the
+measurement — the best single input to naming it.
+
+So on **promote**, write the established file under a name that says what it measures and copy
+the draft's `covers:` onto it. On **discard-into-widen**, add the entry to the template you
+widen. A template may **gain** covered identities and may never lose them; the loop's commit
+gate refuses both a dropped entry and a deleted draft whose identities land nowhere.
