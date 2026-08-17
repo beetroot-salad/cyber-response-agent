@@ -1,0 +1,217 @@
+# Shuffle SOAR (batch 12) — pulled into the root stack via `include:` in
+# ../compose.yml, so bare `docker --context soc-playground compose up -d` still
+# brings up everything.
+#
+# Services:
+#  shuffle-frontend   — React UI behind nginx; proxies to the backend
+#  shuffle-backend    — Go API + workflow scheduler; owns the docker socket for app management
+#  shuffle-orborus    — execution supervisor; spawns one ephemeral worker container per run
+#  shuffle-opensearch — Shuffle's own state store (workflows, executions, apps, org)
+#
+# Topology: everything here lives ONLY on the `soar` network. Kibana and the
+# stubs are dual-homed onto it from ../compose.yml; Elasticsearch and the 11
+# role hosts are NOT, so the surface the defender investigates cannot see the
+# SOAR. Shuffle reaches Elastic data through Kibana's API on :5601, the same
+# transport ../scripts/install_detection_rules.py uses.
+#
+# Deviations from upstream (https://github.com/Shuffle/Shuffle/blob/main/docker-compose.yml)
+# are commented at the point they occur — do not "fix" them back toward upstream
+# without reading the reason. Several upstream code defaults are actively wrong
+# for an isolated lab (an unset BASE_URL makes Orborus poll uk.shuffler.io);
+# every variable below that looks redundant is load-bearing.
+
+services:
+  shuffle-frontend:
+    image: ghcr.io/shuffle/shuffle-frontend:${SHUFFLE_VERSION}
+    container_name: shuffle-frontend
+    hostname: shuffle-frontend
+    depends_on:
+      - shuffle-backend
+    environment:
+      - BACKEND_HOSTNAME=shuffle-backend
+    # Upstream publishes ${FRONTEND_PORT}:80 on all interfaces. Loopback-only
+    # here, matching every other UI in this stack; reach it with
+    #   ssh -L 8006:localhost:8006 soc-playground
+    # 8006 is the next free port after the stubs' 8001-8005.
+    ports:
+      - "127.0.0.1:8006:80"
+    networks:
+      - soar
+    mem_limit: 256m
+    restart: unless-stopped
+
+  shuffle-backend:
+    image: ghcr.io/shuffle/shuffle-backend:${SHUFFLE_VERSION}
+    container_name: shuffle-backend
+    hostname: shuffle-backend
+    volumes:
+      # Shuffle manages app containers through the engine directly. This is the
+      # same engine that runs the investigated hosts — accepted deliberately;
+      # the SOAR is trusted lab infrastructure. Note Orborus also bind-mounts
+      # the socket into every ephemeral worker, so any workflow is
+      # root-equivalent on this engine. See ../docs/runbook.md § Shuffle SOAR.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Upstream binds ${SHUFFLE_APP_HOTLOAD_LOCATION} / ${SHUFFLE_FILE_LOCATION}
+      # from the host. Bind sources resolve on the DAEMON side and /workspace
+      # does not exist on the VPS (see ../falco/Dockerfile:3-6), so these are
+      # named volumes instead.
+      - shuffle_apps:/shuffle-apps
+      - shuffle_files:/shuffle-files
+    # Upstream uses `env_file: .env`. Explicit entries here instead: the upstream
+    # orborus block reads bare HTTP_PROXY/HTTPS_PROXY, and /workspace/.env is
+    # auto-sourced into every shell, so unprefixed names get silently shadowed.
+    # Dropping env_file means every setting whose *code* default is wrong has to
+    # be named here — that is what the annotated entries below are.
+    environment:
+      - SHUFFLE_APP_HOTLOAD_FOLDER=/shuffle-apps
+      - SHUFFLE_FILE_LOCATION=/shuffle-files
+      - ORG_ID=Shuffle
+      # Must match orborus's ENVIRONMENT_NAME. The backend creates the org's
+      # default execution environment from this string; a mismatch leaves every
+      # execution queued forever with no error.
+      - ENVIRONMENT_NAME=Shuffle
+      - BASE_URL=http://shuffle-backend:5001
+      - SHUFFLE_OPENSEARCH_URL=https://shuffle-opensearch:9200
+      - SHUFFLE_OPENSEARCH_USERNAME=admin
+      - SHUFFLE_OPENSEARCH_PASSWORD=${V2_SHUFFLE_OPENSEARCH_PASSWORD}
+      # Defaults to FALSE in code. OpenSearch 3.2.0 ships self-signed demo
+      # certs, so without this the backend never connects — and the symptom is a
+      # silent retry loop, not a crash.
+      - SHUFFLE_OPENSEARCH_SKIPSSL_VERIFY=true
+      # Salt for stored app credentials. Changing it later orphans every
+      # credential already saved.
+      - SHUFFLE_ENCRYPTION_MODIFIER=${V2_SHUFFLE_ENCRYPTION_MODIFIER}
+      # First-boot-only admin bootstrap (gated on there being zero users), so no
+      # click-through setup and the API key is one we chose. Verified present in
+      # the shipped 2.2.1 backend binary.
+      - SHUFFLE_DEFAULT_USERNAME=${V2_SHUFFLE_ADMIN_USERNAME}
+      - SHUFFLE_DEFAULT_PASSWORD=${V2_SHUFFLE_ADMIN_PASSWORD}
+      - SHUFFLE_DEFAULT_APIKEY=${V2_SHUFFLE_API_KEY}
+      - SHUFFLE_STATS_DISABLED=true
+    # Published so the workflow installer and API pokes work over an SSH tunnel.
+    # Kibana reaches it in-cluster on `soar` instead.
+    ports:
+      - "127.0.0.1:5001:5001"
+    networks:
+      - soar
+    # 2g, not 512m: on first boot, when fewer than 10 apps exist, the backend
+    # clones the whole shuffle/python-apps repo into an in-memory filesystem AND
+    # an in-memory git object store. A tight limit gets it OOM-killed and the
+    # retry loop looks like a network fault. One-time — apps live in OpenSearch
+    # afterwards.
+    mem_limit: 2g
+    restart: unless-stopped
+
+  shuffle-orborus:
+    image: ghcr.io/shuffle/shuffle-orborus:${SHUFFLE_VERSION}
+    # container_name is load-bearing, not cosmetic — see ORBORUS_CONTAINER_NAME.
+    container_name: shuffle-orborus
+    hostname: shuffle-orborus
+    depends_on:
+      - shuffle-backend
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - ORG_ID=Shuffle
+      # Must equal the backend's ENVIRONMENT_NAME.
+      - ENVIRONMENT_NAME=Shuffle
+      # If empty, Orborus falls back to https://uk.shuffler.io — i.e. an unset
+      # BASE_URL makes this lab poll Shuffle's cloud.
+      - BASE_URL=http://shuffle-backend:5001
+      # Orborus identifies its own container by grepping /proc/self/cgroup for a
+      # `memory` controller line. The VPS runs Ubuntu 24.04 with cgroup v2
+      # unified, where no such line exists, so detection returns empty and it
+      # falls back to this name. It then starts each worker with
+      # NetworkMode=container:<that name>. Get the name wrong and the worker
+      # lands on docker0, where shuffle-backend does not resolve, and executions
+      # hang with no useful error.
+      - ORBORUS_CONTAINER_NAME=shuffle-orborus
+      - SHUFFLE_WORKER_IMAGE=ghcr.io/shuffle/shuffle-worker:${SHUFFLE_VERSION}
+      - SHUFFLE_APP_SDK_TIMEOUT=300
+      # Upstream sets SHUFFLE_SWARM_CONFIG=run, which puts the VPS Docker engine
+      # into Swarm mode — a global engine-state change affecting every container
+      # in this stack, not just Shuffle's. Left unset: Orborus spawns a plain
+      # container per execution and shares its own network namespace with it,
+      # which is also what makes the `soar` isolation below actually hold.
+      #
+      # Upstream also sets CLEANUP=false, which never sets AutoRemove — every
+      # execution would leave a dead worker plus one container per action, for
+      # ever.
+      - CLEANUP=true
+      # Unset means "enabled": Orborus would download Sigma rules ~15s after
+      # boot and try to launch an unmanaged Tenzir container with host bind
+      # mounts that do not exist on the VPS.
+      - SHUFFLE_SKIP_PIPELINES=true
+      - SHUFFLE_STATS_DISABLED=true
+      - SHUFFLE_LOGS_DISABLED=true
+      # Bounds the blast radius of worker churn: Orborus sets no memory limit on
+      # anything it spawns, so concurrency is the only ceiling available.
+      - SHUFFLE_ORBORUS_EXECUTION_CONCURRENCY=5
+    security_opt:
+      - seccomp:unconfined
+    # Exactly one network, deliberately. Orborus puts each worker in its own
+    # network namespace, and the worker does the same for app containers — so
+    # whatever Orborus can reach, every Shuffle app can reach, and nothing more.
+    # Multi-homing it would also make the worker's self-advertised callback IP
+    # (first non-loopback IPv4 in the shared namespace) nondeterministic.
+    networks:
+      - soar
+    mem_limit: 256m
+    restart: unless-stopped
+
+  shuffle-opensearch:
+    image: opensearchproject/opensearch:3.2.0
+    container_name: shuffle-opensearch
+    hostname: shuffle-opensearch
+    environment:
+      # Upstream defaults to -Xms3072m -Xmx3072m. This cluster stores workflow
+      # and execution metadata only; 1g is ample. Kept at 50% of mem_limit, the
+      # same rule ../.env.example applies to ES_HEAP — and with memory_lock on,
+      # mem_limit must stay >= 2x the heap or the JVM fails to lock and dies.
+      - "OPENSEARCH_JAVA_OPTS=-Xms${SHUFFLE_OPENSEARCH_HEAP} -Xmx${SHUFFLE_OPENSEARCH_HEAP}"
+      - bootstrap.memory_lock=true
+      - DISABLE_PERFORMANCE_ANALYZER_AGENT_CLI=true
+      - cluster.name=shuffle-cluster
+      - node.name=shuffle-opensearch
+      - discovery.seed_hosts=shuffle-opensearch
+      - cluster.initial_master_nodes=shuffle-opensearch
+      - cluster.routing.allocation.disk.threshold_enabled=false
+      # Keep: this is what makes vm.max_map_count on the VPS irrelevant.
+      - node.store.allow_mmap=false
+      # Must satisfy OpenSearch's strength check or the container refuses to boot.
+      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=${V2_SHUFFLE_OPENSEARCH_PASSWORD}
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      # Upstream uses driver_opts type=none/o=bind against ${DB_LOCATION}, a
+      # host path that must pre-exist on the VPS. Plain named volume instead,
+      # matching every other volume in this repo.
+      - shuffle_opensearch_data:/usr/share/opensearch/data
+    # No host port. 9200 belongs to the playground's Elasticsearch, and a second
+    # ES-looking listener in `ss -ltnp` is a debugging trap for no benefit —
+    # reach it with `docker --context soc-playground exec shuffle-opensearch`.
+    networks:
+      - soar
+    mem_limit: 2g
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "curl -fsS -k -u admin:$$OPENSEARCH_INITIAL_ADMIN_PASSWORD https://localhost:9200/_cluster/health | grep -qE '\"status\":\"(yellow|green)\"'"
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 60s
+    restart: unless-stopped
+
+volumes:
+  shuffle_apps:
+    driver: local
+  shuffle_files:
+    driver: local
+  shuffle_opensearch_data:
+    driver: local
