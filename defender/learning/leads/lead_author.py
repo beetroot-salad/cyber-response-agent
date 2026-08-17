@@ -479,6 +479,52 @@ def _template_at_head(repo_root: Path, path: str) -> _corpus.QueryTemplate | Non
     return template
 
 
+def _covered_by_established(repo_root: Path) -> set[str]:
+    """Every identity an ESTABLISHED template in the tree accounts for once this batch lands.
+
+    Read off the working tree, so it already includes whatever the agent just wrote. The
+    transfer rule below is about one question — "will this identity be re-minted next run?" —
+    and `synthesize_drafts` answers it from the whole catalog, not from one batch's diff. Scored
+    against the batch alone, a draft whose identity a template took over in an EARLIER tick is
+    refused for a delete that costs nothing, and the refusal discards the tick's whole batch.
+    """
+    covered: set[str] = set()
+    for path in sorted((repo_root / CATALOG_REL).glob("*/*.md")):
+        template = _corpus.read_query_template(path)[0]
+        if template is not None:
+            covered.update(template.covers)
+    return covered
+
+
+def _refuse_half_promote(repo_root: Path, taken_over: set[str]) -> None:
+    """The other side of transfer: an identity may not land on an established template while the
+    draft that recorded it is still on disk.
+
+    This is `_skills_content_rule`'s half-promote probe, re-aimed at `covers:` for the same
+    reason the transfer rule exists at all. That probe derives the twin from the BASENAME
+    (`_draft_twin`), and a promote stopped sharing one the moment the draft's name became a
+    digest and the established file's name became the author's — so it can no longer see the
+    failure it was written for: established + draft both landing because the promote's `rm`
+    never happened. The surviving draft is unchanged, so no `git status` record carries it;
+    only a filesystem probe can.
+    """
+    if not taken_over:
+        return
+    for path in sorted((repo_root / CATALOG_REL).glob("*/_draft/*.md")):
+        template = _corpus.read_query_template(path)[0]
+        if template is None:
+            continue
+        if stranded := sorted(set(template.covers) & taken_over):
+            rel = path.relative_to(repo_root).as_posix()
+            raise LeadAuthorError(
+                f"half-promote: draft {rel} still exists, but the identities it records "
+                f"({stranded}) were taken over by an established template in this batch; "
+                "refusing to commit (the promote's / widen's `rm` didn't happen — established "
+                "+ draft would both land, and the draft is handed back as work every tick "
+                "until it is removed)"
+            )
+
+
 def _covers_rule(repo_root: Path, records: list[tuple[str, str]]) -> None:
     """The two whole-batch invariants on `covers:` — the identities a template accounts for.
 
@@ -495,7 +541,11 @@ def _covers_rule(repo_root: Path, records: list[tuple[str, str]]) -> None:
     discard, and the refusal names the alternative: a draft you cannot attribute to any
     template is one to SKIP, not to delete. Unenforced, the omission is silent and self-
     repeating — the identity is re-minted the next time a run coins it, the author discards it
-    again, and nothing in the loop ever reports that it is going in circles.
+    again, and nothing in the loop ever reports that it is going in circles. Scored against the
+    whole tree (`_covered_by_established`) rather than against this batch's edits, because the
+    question is the one `synthesize_drafts` will ask next run and it reads the whole catalog.
+    Its mirror is `_refuse_half_promote`: an identity that lands on a template while its draft
+    is still on disk is the takeover half-done.
 
     **Monotonicity.** An established template may gain identities and may never lose them, and
     its `id:` may not change under an edit. This is the collision detector: the write lane
@@ -510,15 +560,20 @@ def _covers_rule(repo_root: Path, records: list[tuple[str, str]]) -> None:
     # construction — no second `_under_draft` test, which would read as though it were adding a
     # condition the predicate does not already carry.
     established = [p for xy, p in records if "D" not in xy and _is_catalog_template(p)]
-    gained: set[str] = set()
+    # The identities this batch moved ONTO an established template — `after` minus `before`, not
+    # `after`, so the half-promote probe below fires on a takeover and never on a template that
+    # already accounted for the identity before the agent was spawned.
+    taken_over: set[str] = set()
     for path in established:
         after = _corpus.read_query_template(repo_root / path)[0]
         if after is None:
             # Its own refusal already, from `_check_promoted_template` on the per-path pass.
             continue
-        gained.update(after.covers)
-        _refuse_lost_provenance(repo_root, path, after)
+        before = _template_at_head(repo_root, path)
+        _refuse_lost_provenance(path, before, after)
+        taken_over.update(set(after.covers) - set(before.covers if before is not None else ()))
 
+    covered = _covered_by_established(repo_root)
     for xy, path in records:
         # The draft half, spelled with `_under_draft` rather than `_is_catalog_template`:
         # that predicate EXCLUDES drafts, so the two together admit nothing. The catalog's own
@@ -531,26 +586,29 @@ def _covers_rule(repo_root: Path, records: list[tuple[str, str]]) -> None:
         draft = _template_at_head(repo_root, path)
         if draft is None:
             continue
-        if orphaned := sorted(set(draft.covers) - gained):
+        if orphaned := sorted(set(draft.covers) - covered):
             raise LeadAuthorError(
                 f"agent deleted draft {path} without attributing it: {orphaned} is covered by "
-                "no established template in this batch; refusing to commit (a promote carries "
+                "no established template; refusing to commit (a promote carries "
                 "`covers:` onto the new file and a discard-into-widen adds it to the template "
                 "it widened — a draft that fits neither is one to leave alone and SKIP, "
                 "because deleting it here only means minting it again next run)"
             )
 
+    _refuse_half_promote(repo_root, taken_over)
+
 
 def _refuse_lost_provenance(
-    repo_root: Path, path: str, after: _corpus.QueryTemplate,
+    path: str, before: _corpus.QueryTemplate | None, after: _corpus.QueryTemplate,
 ) -> None:
     """The monotonicity half of `_covers_rule`, on ONE established template.
 
     Split out for its own sake as much as for the complexity budget: this is the only part of
     the rule that compares a file against its own pre-image, and reading it beside the
-    batch-wide accumulation above made two different questions look like one loop.
+    batch-wide accumulation above made two different questions look like one loop. The
+    pre-image is passed IN rather than read here, because the caller needs it too — reading it
+    twice is a second `git show` per changed template for an answer that cannot have moved.
     """
-    before = _template_at_head(repo_root, path)
     if before is None:
         return
     if before.id != after.id:

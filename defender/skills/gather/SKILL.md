@@ -68,7 +68,9 @@ index omits), for the concept terms an analyst would type (`sshd`, `sudo`, `/etc
 
 **Read the template body with `read_file` before you pass its id as `query_id`.** The index
 gives you an id and a path — and, on your own tier, the Goal — never the query, so an id you
-take from the index is an id you have not yet opened. Adapt the `## Query` body you actually read. A bound id is recorded
+take from the index is an id you have not yet opened. Adapt the `## Query` body you actually read — an uncurated
+`_draft/` hit from `template_search` carries no `## Query`, only a verbatim `## Executed query` recording of one
+past call, so adapt that instead. A bound id is recorded
 as a *reuse* of that template, so naming one you never read files a query you coined under a
 query you did not run, and silently corrupts the `(query_id, params)` join the offline
 lead-author builds the catalog from.

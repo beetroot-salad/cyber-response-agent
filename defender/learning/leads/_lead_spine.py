@@ -81,17 +81,15 @@ def _verify_corpus_scope(
         raise LeadAuthorError(
             f"{actor} changed files outside {SKILLS_REL}*.md: {new_stray}; refusing to commit"
         )
-    changed: list[str] = []
     in_corpus: list[tuple[str, str]] = []
     for xy, path in records:
         if not _in_corpus(path):
             continue
         rule(xy, path)
         in_corpus.append((xy, path))
-        changed.append(path)
     if batch_rule is not None:
         batch_rule(in_corpus)
-    return sorted(changed)
+    return sorted(path for _, path in in_corpus)
 
 
 def _loop_commit_body(

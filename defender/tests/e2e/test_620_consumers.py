@@ -534,7 +534,7 @@ def test_canonical_record_value_cannot_forge_a_draft_section(tmp_path):
     text = drafts[0].read_text(encoding="utf-8")
     bodies = _corpus.section_bodies(text)
 
-    assert set(bodies) <= {"Goal", "Executed query", "Pitfalls"}, \
+    assert set(bodies) <= {"Goal", "Curation notes", "Executed query", "Pitfalls"}, \
         f"the body value forged a sibling section: {sorted(bodies)}"
     assert "InjectedSection" not in bodies, "the body value forged a sibling ## section"
     assert "OWNED" in bodies.get("Executed query", ""), \
@@ -555,7 +555,7 @@ def test_benign_body_renders_in_one_intact_fence_positive_control(tmp_path):
         systems=frozenset({"elastic"}))
     text = drafts[0].read_text(encoding="utf-8")
     bodies = _corpus.section_bodies(text)
-    assert set(bodies) == {"Goal", "Executed query", "Pitfalls"}
+    assert set(bodies) == {"Goal", "Curation notes", "Executed query", "Pitfalls"}
     assert pipe in bodies["Executed query"]
     assert text.count("```") == 2, "the benign body did not render inside exactly one fence"
 

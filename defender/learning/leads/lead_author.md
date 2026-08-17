@@ -66,7 +66,7 @@ The `neighbors` scores are your narrowing detector. A coined draft (or an establ
 
 ## Decision procedure
 
-Process the handoffs **in order**. For each, read `executed_template_path` plus each neighbor file (compare their `## Query` bodies against this run's `executed_query`). Then inspect `invocations[]` as a population:
+Process the handoffs **in order**. For each, read `executed_template_path` plus each neighbor file (compare their `## Query` bodies against this run's `executed_query`). An established template's query sits under `## Query`; a **draft** has no `## Query` at all — its recording sits under `## Executed query`, and its `## Curation notes` say what promoting it costs you. Then inspect `invocations[]` as a population:
 
 - **Union of `goal_text` + `executed_query`** — does `## Goal` cover the keywords a future analyst would type for the measurement this run actually ran?
 - **Narrowing check (the load-bearing one)** — is `executed_query` a *subset* of a high-scoring neighbor's `## Query` (same index, same core aggregation, fewer filters / `BY` keys)? If so this is a narrowing, not a new capability — fold toward the wide neighbor (see below), don't keep a sibling.

@@ -151,6 +151,14 @@ def _draft_skeleton(
         "## Goal\n\n"
         f"`{query_id}` — auto-drafted from a coined gather query with no matching\n"
         f'catalog template. The defender\'s lead goal was: "{goal_line}".\n\n'
+        # The curation guidance gets its OWN section, and does not sit under `## Goal`.
+        # `## Goal` is the template's index entry on a dispatch to its own system and the body
+        # `template_search` matches (`SCHEMA.md`), and it is the one section the author is told
+        # to carry onto the promoted file for keyword recall — so prose about promoting is text
+        # that ends up in every gather dispatch prompt, describing the curation loop rather
+        # than the measurement. Beside the recording rather than inside it, for the reason the
+        # comment below `## Executed query` gives.
+        "## Curation notes\n\n"
         "**This file is named by a digest, and naming it is your job.** The id above "
         "is\nderived from the coined `query_id` in `covers:`, which gather wrote "
         "mid-investigation\nfor one lead — a description of *this query*, not a name "
@@ -285,7 +293,7 @@ def synthesize_drafts(
     # longer echoes the coined `query_id`, so `covers:` is the only thing left tying the two
     # together. Without this half, every promoted or discarded draft is re-minted the next time
     # a run coins its id, and the author spends a tick discarding it again.
-    by_id = {t.id for t in catalog} | {c for t in catalog for c in getattr(t, "covers", ())}
+    by_id = {t.id for t in catalog} | {c for t in catalog for c in t.covers}
     created: list[Path] = []
     for lead in _mint_order(executed):
         # `is_sentinel` explicitly, not by the id alphabet. A `∅.`-prefixed row is a writer-only

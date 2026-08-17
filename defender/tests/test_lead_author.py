@@ -563,6 +563,49 @@ def test_a_bare_discard_of_a_covered_draft_is_refused(tmp_git_repo: Path):
         lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED)
 
 
+def test_a_promote_that_leaves_the_draft_behind_is_refused(tmp_git_repo: Path):
+    """The half-promote, now that no basename links the two files.
+
+    `_skills_content_rule`'s twin probe derives `_draft/{name}.md` from the established file's
+    own name, which was the link while a promote was `_draft/{id}.md` -> `{id}.md`. A digest
+    basename and an author-chosen name share nothing, so that probe cannot fire on any real
+    promote — and the surviving draft is UNCHANGED, so no `git status` record carries it
+    either. `covers:` is the link that is left: the identity landed on an established template
+    while the draft that records it is still on disk."""
+    repo = tmp_git_repo
+    _stage_covered_draft(repo, "wazuh.hunt-failed-logins")
+    (repo / _CATALOG / "wazuh" / "auth-failure-rate.md").write_text(
+        query_template("wazuh.auth-failure-rate", "established",
+                       covers=["wazuh.hunt-failed-logins"])
+    )
+    # …and no `rm` of the draft.
+    with pytest.raises(lead_author.LeadAuthorError, match="half-promote"):
+        lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED)
+
+
+def test_a_discard_is_accepted_when_an_untouched_template_already_covers_it(
+    tmp_git_repo: Path,
+):
+    """Transfer is a question about the TREE, not about this batch's diff.
+
+    An identity a template took over in an earlier tick is one `synthesize_drafts` will not
+    re-mint, so deleting its leftover draft costs nothing — and scoring the rule against the
+    batch alone would refuse that delete and discard every other edit in the tick with it."""
+    repo = tmp_git_repo
+    draft = _stage_covered_draft(repo, "wazuh.hunt-failed-logins")
+    established = repo / _CATALOG / "wazuh" / "auth-events.md"
+    established.write_text(
+        query_template("wazuh.auth-events", "established", covers=["wazuh.hunt-failed-logins"])
+    )
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "widened last tick"], cwd=repo, check=True)
+
+    draft.unlink()
+    changed = lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED)
+    assert changed == ["defender/skills/gather/queries/wazuh/_draft/"
+                       f"{lead_author._draft_basename('wazuh.hunt-failed-logins')}.md"]
+
+
 def test_a_draft_with_no_covers_is_still_freely_discardable(tmp_git_repo: Path):
     """The control. A hand-authored draft carries no minted identity, so there is nothing to
     orphan and the transfer rule must not invent an obligation — the seeded tree's own
