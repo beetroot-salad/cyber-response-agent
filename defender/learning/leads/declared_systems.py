@@ -1,22 +1,20 @@
 #!/usr/bin/env python3
-"""#869 M1/M2/NF1/NF2 — the declared-systems resolver.
+"""The declared-systems resolver — the authoritative "is this name a system?" answer.
 
-The authoritative "what system does this name?" answer, replacing the deleted
-`pitfalls_curator._is_real_system` (`has a SKILL.md`) probe. Two sources, unioned:
+Two sources, unioned:
 
 * the ADAPTER glob (`defender/scripts/adapters/*_adapter.py`), read from the WORKING tree —
   the same set `runtime.verbs.ModuleVerbRegistry.systems()` reads;
 * the `execution.md` MARKER, read from the COMMITTED tree, at exactly depth 1 under
   `defender/skills/`.
 
-The union is deliberately ASYMMETRIC (NF1, the §7 human seam): an uncommitted marker
-declares nothing, however it got onto disk, while an uncommitted adapter still counts. Either
-source unresolvable RAISES `LeadAuthorError` — the disjunctive reading O4 forces, because a
-conjunctive resolver that silently fell back to one source would retire every system the
-absent source alone declared.
+The union is deliberately ASYMMETRIC: an uncommitted marker declares nothing, however it got
+onto disk, while an uncommitted adapter still counts. Either source unresolvable RAISES
+`LeadAuthorError`, because a resolver that silently fell back to the other source would
+retire every system the absent one alone declared.
 
-`adapter_declared_systems` is NF2's second resolution point: the pitfalls lane's own value,
-the adapter half alone, never consulting the marker source.
+`adapter_declared_systems` is the second resolution point: the pitfalls lane's own value, the
+adapter half alone, never consulting the marker source.
 """
 from __future__ import annotations
 
@@ -33,10 +31,9 @@ from defender.learning.core import config as _loop_config
 from defender.learning.leads.lead_extraction import LeadAuthorError
 from defender.runtime.verbs import ADAPTER_SUFFIX, _adapter_path, _system_of, is_system_name
 
-#: Both re-exported from `DefenderPaths` rather than re-spelled: this module is one of the
-#: four that owned its own copy of the adapters path (#772 review), and a resolver whose
-#: idea of where adapters live can drift from the gate that reads its answer is the whole
-#: class of defect it exists to close.
+#: Both re-exported from `DefenderPaths` rather than re-spelled: a resolver whose idea of
+#: where adapters live can drift from the gate that reads its answer is the whole class of
+#: defect it exists to close.
 ADAPTERS_REL = DefenderPaths.adapters_rel
 SKILLS_REL = DefenderPaths.skills_rel
 
@@ -44,10 +41,9 @@ _log = _loop_config.make_logger("lead-author", flush=True)
 
 
 def _adapter_names(adapters_dir: Path) -> frozenset[str]:
-    """The adapter half: a COLD glob over filenames, never a load (C2/G1) — an adapter whose
-    import raises is still named. Explicitly tests the source rather than trusting
-    `Path.glob`'s silent `[]` for an absent path, a regular file, or an unreadable directory
-    (P1/P2)."""
+    """The adapter half: a COLD glob over filenames, never a load — an adapter whose import
+    raises is still named. Explicitly tests the source rather than trusting `Path.glob`'s
+    silent `[]` for an absent path, a regular file, or an unreadable directory."""
     if not adapters_dir.is_dir():
         raise LeadAuthorError(
             f"declared_systems: {adapters_dir} is not a directory this process can read"
@@ -85,17 +81,16 @@ def _skills_tree_exists_at_head(repo_root: Path) -> bool:
 
 
 def _marker_names(repo_root: Path) -> frozenset[str]:
-    """The marker half: a COMMITTED-tree read (NF1), never the working tree, and never
-    deeper than one directory segment (the depth rule phase F closes — a nested
-    `execution.md` whose parent directory name is model-chosen must declare nothing)."""
+    """The marker half: a COMMITTED-tree read, never the working tree, and never deeper than
+    one directory segment — a nested `execution.md` whose parent directory name is
+    model-chosen must declare nothing."""
     skills_dir = repo_root / SKILLS_REL
     if not _skills_tree_exists_at_head(repo_root):
         raise LeadAuthorError(
             f"declared_systems: {skills_dir} is not resolvable at HEAD "
             "(no commits, detached from a real repo, or the path is absent there)"
         )
-    # `-z` and `--full-name` are LOAD-BEARING, not tidiness (#908 probe over the alphabet
-    # `_marker_names` actually admits):
+    # `-z` and `--full-name` are LOAD-BEARING, not tidiness:
     #
     #   * without `-z`, `--name-only` C-QUOTES any path holding a non-ASCII byte — the entry
     #     comes back double-quoted with the byte escaped, so it no longer ends in
@@ -104,9 +99,8 @@ def _marker_names(repo_root: Path) -> frozenset[str]:
     #   * without `--full-name`, output is CWD-relative, and `count("/") == 3` is a statement
     #     about a ROOT-relative path.
     #
-    # Each of those silently un-declared a real system — the precise failure this resolver
-    # exists to prevent, and worse than a loud refusal because the name never even reaches
-    # the `is_system_name` shape check below to be logged as anomalous.
+    # Each of those silently un-declares a real system — worse than a loud refusal, because
+    # the name never even reaches the `is_system_name` check below to be logged as anomalous.
     try:
         listing = _git.git(
             ["ls-tree", "-r", "-z", "--full-name", "--name-only", "HEAD", "--", SKILLS_REL],
@@ -147,23 +141,20 @@ def declared_systems(repo_root: Path) -> frozenset[str]:
 
 
 def adapter_declared_systems(repo_root: Path) -> frozenset[str]:
-    """NF2's second resolution point: the ADAPTER HALF ALONE, the value the pitfalls lane
-    resolves. Never consults the marker source — an unresolvable marker is not its fault to
-    raise, and emptiness is measured on the adapter half alone."""
+    """The ADAPTER HALF ALONE, the value the pitfalls lane resolves. Never consults the marker
+    source — an unresolvable marker is not its fault to raise, and emptiness is measured on
+    the adapter half alone."""
     return adapter_systems_under(repo_root / ADAPTERS_REL)
 
 
 def adapter_systems_under(adapters_dir: Path) -> frozenset[str]:
     """The adapter half rooted at the ADAPTERS DIRECTORY itself, for a caller that holds the
-    tree rather than the repo (#772).
+    tree rather than the repo.
 
-    `adapter_declared_systems` derives that directory from `repo_root`, which is the right
-    entry point for the lanes that start from a `LoopPaths`. The permission gate does not: it
-    is handed a `defender_dir` by `bind`, and reconstructing a repo root from it by taking
-    `.parent` is a guess that silently reads a SIBLING tree's adapters the moment the bound
-    tree is not literally named `defender` — while the grant it compiles claims, and
-    `test_h4_grants_anchor_on_the_threaded_tree_not_module_paths` asserts, that every grant
-    anchors on the tree it was threaded. Same answer, asked about the directory the caller
-    actually has.
+    `adapter_declared_systems` derives that directory from `repo_root`, right for the lanes
+    that start from a `LoopPaths`. The permission gate does not: it is handed a `defender_dir`
+    by `bind`, and reconstructing a repo root by taking `.parent` silently reads a SIBLING
+    tree's adapters the moment the bound tree is not literally named `defender` — while every
+    grant it compiles must anchor on the tree it was threaded.
     """
     return _adapter_names(adapters_dir)

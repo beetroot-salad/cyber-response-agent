@@ -75,16 +75,11 @@ def _defender_dir() -> Path:
 
 
 def check_registry(report: Report, defender: Path, system: str):
-    """Resolve `system`'s verbs through `VerbResolver` — THE resolution rule, not a second
-    copy of it (#901).
-
-    This used to spell the same three verdicts inline (`KeyError` -> missing, any other
-    `BaseException` -> failed to import, empty -> declares no verbs), and it carried the same
-    two defects the resolver has since had fixed: a `KeyError` raised by the ADAPTER'S OWN
-    import is indistinguishable from the registry's "no such adapter" one at that `except`, so
-    a file that exists was reported as missing; and the blanket clause swallowed an interrupt
-    or a cancellation into "broken adapter", making a scaffold sweep un-interruptible. Both
-    now live in one place, with one caller here and one at the loop's commit gate.
+    """Resolve `system`'s verbs through `VerbResolver` — THE resolution rule, not a second copy
+    of it. Spelling the verdicts inline invites two defects the resolver already handles: a
+    `KeyError` raised by the ADAPTER'S OWN import is indistinguishable from the registry's "no
+    such adapter" one, and a blanket `except BaseException` swallows an interrupt into "broken
+    adapter", making a scaffold sweep un-interruptible.
     """
     adapter = defender / "scripts" / "adapters" / f"{system.replace('-', '_')}{ADAPTER_SUFFIX}"
     try:
@@ -105,18 +100,16 @@ def check_signatures(report: Report, verbs) -> None:
     """Every verb must be dispatchable as ``fn(ctx, **params)`` — the ONE call shape
     `query_tool` makes (`fn(vctx, **params)`), with the model's params bound by keyword.
 
-    A verb that takes its params positionally is not merely non-idiomatic, it is
-    unusable: `declared_params` collects KEYWORD_ONLY parameters only, so a
-    positional-or-keyword param is invisible to `validate_params` and the model can
-    never bind it. Every call is then refused at the boundary as an unknown param, and
-    the one shape that survives (`params={}`) raises TypeError on the missing positional
-    inside the tool. The checklist advertised this check from the day `check_registry`
-    was written and it was never here (#885).
+    A verb that takes its params positionally is not merely non-idiomatic, it is unusable:
+    `declared_params` collects KEYWORD_ONLY parameters only, so a positional-or-keyword param
+    is invisible to `validate_params` and the model can never bind it. Every call is then
+    refused at the boundary as an unknown param, and the one shape that survives (`params={}`)
+    raises TypeError on the missing positional inside the tool.
 
-    The four sub-checks are the four ways that call shape breaks, and they are the SAME
-    four `test_verbs_registry_declares_surface` pins over the shipped adapters — a gate a
-    scaffold author is told to clear before going further must not be weaker than the CI
-    test that greets them afterwards."""
+    The four sub-checks are the four ways that call shape breaks, and they are the SAME four
+    `test_verbs_registry_declares_surface` pins over the shipped adapters — a gate a scaffold
+    author clears before going further must not be weaker than the CI test that greets them
+    afterwards."""
     broken: list[str] = []
     for name in sorted(verbs):
         fn = verbs[name]
@@ -212,9 +205,9 @@ def check_skill(report: Report, defender: Path, system: str) -> None:
     if execution.exists():
         report.add(PASS, f"skills/{system}/execution.md exists")
     elif has_inline:
-        # Was a PASS. The inline shape is what the four stubs used, and it put each one's
-        # `docker exec … curl` transport in the file the orchestrator reads to route (#261) —
-        # while leaving gather to discover the missing sibling with a Read that 404s.
+        # Not a PASS: the inline shape puts the system's `docker exec … curl` transport in the
+        # file the orchestrator reads to route, and leaves gather to discover the missing
+        # sibling with a Read that 404s.
         report.add(WARN, "SKILL.md embeds ## Execution inline — split it into execution.md "
                          "(docs/system-skill-shape.md)")
     else:
@@ -224,11 +217,10 @@ def check_skill(report: Report, defender: Path, system: str) -> None:
 def check_templates(report: Report, defender: Path, system: str, verbs) -> None:
     """Every template of `system`, DRAFTS INCLUDED.
 
-    The `_draft/` exclusion that used to sit here is the whole of #901: it excluded exactly the
-    directory the lead-authoring lane mints into, so the one lane that writes this tree
-    continuously was the one lane no content check could reach. The rule itself now lives in
-    `_scaffold_rules`, which the loop's commit gate calls too — the checker and the writer meet
-    because they read the same function, not because two copies were kept in step.
+    Drafts are NOT excluded: `_draft/` is exactly the directory the lead-authoring lane mints
+    into, so excluding it leaves the one lane that writes this tree continuously unchecked. The
+    rule lives in `_scaffold_rules`, which the loop's commit gate calls too — the checker and
+    the writer meet because they read the same function.
     """
     qdir = defender / "skills" / "gather" / "queries" / system
     templates = [t for t in iter_query_templates(qdir.parent) if t.system == system]

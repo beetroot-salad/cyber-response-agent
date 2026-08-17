@@ -12,8 +12,7 @@ from collections.abc import Callable
 
 import yaml
 
-# Imported as `_lockfile`: this module keeps `_flock` as the deliberate pre-#719 alias
-# for `queue_lock`, which in-module callers and the lock suites both reach for.
+# Aliased to `_lockfile` so this module can keep `_flock` as its own name for `queue_lock`.
 from defender import _flock as _lockfile
 from defender._clock import now_iso
 from defender._text import is_content_less
@@ -44,15 +43,13 @@ def queue_lock(lock_path: Path, *, timeout_seconds: int | None = None):
     """Exclusive hold of a queue's append-role lock.
 
     APPENDERS pass no deadline and wait forever: an append that gave up would lose the row
-    it is carrying, and an appender waits on nothing but other appenders and the short
-    rewrite window.
+    it is carrying, and it waits on nothing but other appenders and the short rewrite window.
 
-    THE DRAIN passes one, and must. It reaches this while holding the repo lock, which
-    globally serialises all four corpus channels — so a wedged appender on one channel's
-    lock would otherwise stall every sibling channel's tick with no bound at all, which is
-    the failure the drain's own deadline-bounded read exists to prevent. Expiry raises
-    `TimeoutError`, deliberately NOT a member of the drain's retire set: the batch is stuck
-    and recorded, never bumped, because a busy lock is not the batch's fault."""
+    THE DRAIN must pass one. It reaches this holding the repo lock, which serialises all four
+    corpus channels — so a wedged appender on one channel would otherwise stall every sibling
+    channel's tick unboundedly. Expiry raises `TimeoutError`, deliberately NOT in the drain's
+    retire set: the batch is recorded stuck, never bumped, since a busy lock is not its fault.
+    """
     fh = _lockfile.open_lock(lock_path)
     try:
         taken = _lockfile.take(fh, timeout_seconds=timeout_seconds)
@@ -70,8 +67,7 @@ def queue_lock(lock_path: Path, *, timeout_seconds: int | None = None):
         _lockfile.release(fh)
 
 
-#: The pre-#719 spelling, kept so in-module callers and the suites that drive the real
-#: primitive keep one name to reach for.
+#: In-module callers and the lock suites reach for this spelling.
 _flock = queue_lock
 
 
@@ -92,12 +88,9 @@ def _rewrite_queue(
     consumed: list[dict],
     commit_sha: str | None,
 ) -> None:
-    # ALWAYS merges (#719). The `merge=False` fast path dropped any row appended between
-    # the batch's read and its rewrite; the knob is gone rather than defaulted, because a
-    # boolean would have preserved the row-loss in a less visible place.
-    #
-    # `.get`, not `[...]`: a row carrying no value under `id_key` cannot be matched, and
-    # the drain routes such rows here deliberately so they leave the queue.
+    # ALWAYS merges: a non-merging rewrite would drop any row appended between the batch's
+    # read and its rewrite. `.get`, not `[...]`: a row carrying no value under `id_key`
+    # cannot be matched, and the drain routes such rows here deliberately so they leave.
     processed = {e.get(id_key) for e in held} | {e.get(id_key) for e in consumed}
     current = read_jsonl_rows(pending_file)
     survivors = list(held) + [r for r in current if r.get(id_key) not in processed]
@@ -173,9 +166,8 @@ _persist_log = make_logger("persist")
 
 
 def _refused(run_dir: Path, entries: list[Path]) -> None:
-    """A staging refusal is loud. It means the run's tree holds something the box's exit scrub
-    would have tainted the run for, so it is evidence about the run, not a copy detail — and
-    silence here would read downstream as a case that simply gathered nothing."""
+    """A staging refusal is loud: it is evidence about the run, not a copy detail, and silence
+    here would read downstream as a case that simply gathered nothing."""
     for entry in entries:
         _persist_log(
             f"REFUSED to stage {entry} from {run_dir}: not a regular file or a real directory "
@@ -191,23 +183,17 @@ def _copy_shared_inputs(run_dir: Path, learning_run_dir: Path) -> None:
             src = getattr(src_paths, name)
             if not artifact_file(src):
                 # `is_file()` would answer about a link's TARGET and copy those bytes in under
-                # the artifact's name (#648) — the three named here are the ones the actor and
-                # the judge read as the case itself, so a link at one is fatal, not skippable.
+                # the artifact's name — these three are what the actor and judge read as the
+                # case itself, so a link at one is fatal, not skippable.
                 raise RunUnprocessable(
                     f"source artifact for persist is missing or is not a regular file: {src}")
             dst = getattr(dst_paths, name)
             if name == "investigation":
-                # DECIDED, not overlooked: closing the disposition vocabulary in invlang's
-                # `conclude` block made this staging check retroactive, and runs enqueued
-                # before it — written while that slot was free text — now dead-letter here
-                # instead of being learned from. No grandfather clause, on purpose.
-                #
-                # The disposition is not decoration on a case, it SELECTS the direction the
-                # loop then spends actor + oracle + judge calls on. A headline outside the
-                # three keywords has no direction, so grandfathering would mean guessing one
-                # and authoring lessons off the guess. Refusing costs a queued run that a
-                # human can hand-edit and re-drive out of `queue/failed/`; guessing costs
-                # lessons nobody can trace back to a case that meant them.
+                # No grandfather clause, on purpose: the disposition SELECTS the direction the
+                # loop spends actor + oracle + judge calls on, so a headline outside the known
+                # keywords has no direction and grandfathering would mean guessing one and
+                # authoring lessons off the guess. Refusing costs a queued run a human can
+                # hand-edit and re-drive out of `queue/failed/`.
                 from defender.skills.invlang.validate import validate_companion
 
                 errors = validate_companion(src.read_text(encoding="utf-8"), None)
@@ -347,43 +333,33 @@ def is_reducer_row(row: dict) -> bool:
 
 
 def pitfall_key(row: dict) -> tuple[str, str]:
-    """The identity of a MISTAKE, which is not the identity of a failing row (#840).
+    """The identity of a MISTAKE, which is not the identity of a failing row.
 
     `(owner, stderr_digest)`, where the OWNER is the surface the lesson would be taught on:
-    the reducer sentinel for a reducer row (#870), the stripped system name otherwise. It was
-    `system` alone, and that spelling split and merged the wrong rows in both directions once
-    the reducer surface became a second target. A pre-M5′ reducer row still attributed to the
-    system it reduced and a post-M5′ one carrying `""` are ONE diagnosis of ONE `defender-sql`
-    mistake and were
-    two records — handing the curator the same bullet twice on the entry whose whole purpose
-    is that it collects them. Converse, and worse: a system row and a reducer row that happen
-    to share a digest were ONE record, whose fate was then decided by whichever of the two the
-    merge kept as exemplar — so a reducer lesson could be taught onto that system's
-    `execution.md` while its own queue row was held. The sentinel is collision-free as an
-    owner name because
-    `is_system_name` admits no `∅`, so no declared system can ever spell it.
+    the reducer sentinel for a reducer row, the stripped system name otherwise. Keying on
+    `system` alone splits and merges the wrong rows in both directions once the reducer
+    surface is a second target — two reducer rows spelling their attributed system
+    differently become two records of ONE `defender-sql` mistake, and a system row sharing a
+    digest with a reducer row becomes one record whose fate falls to whichever the merge kept
+    as exemplar. The sentinel is collision-free as an owner name because `is_system_name`
+    admits no `∅`.
 
-    The digest is the adapter's own diagnosis of what went wrong
-    and is what `lead_pitfalls.md` step 2 reads to name the mistake and its fix, so two rows
-    carrying the same one under the same owner are the same lesson however differently the
-    agent phrased the query that provoked it — which is exactly the l-003 shape: eight turns
-    varying the SQL against one unchanging `Binder Error`. `query_id` is deliberately out of
-    the key as an IDENTITY: two coined queries that earn the identical rejection teach one
-    bullet. It is read only to answer WHICH SURFACE owns the lesson, which is a different
-    question and the one `is_reducer_row` exists for.
+    The digest is the adapter's own diagnosis and is what `lead_pitfalls.md` step 2 reads to
+    name the mistake and its fix, so two rows carrying the same one under the same owner are
+    one lesson however differently the query was phrased. `query_id` is deliberately out of
+    the key as an IDENTITY: two coined queries earning the identical rejection teach one
+    bullet. It is read only to answer WHICH SURFACE owns the lesson — the question
+    `is_reducer_row` exists for.
 
-    The system name is STRIPPED, because `_build_pitfalls_handoffs` groups on the stripped
-    value: keys coarser than the grouping would hand the curator two entries it then reads as
-    two bullets, which is the one thing the collapse exists to prevent. The reducer half needs
-    no such agreement — the builder collects every reducer record into ONE entry.
+    The system name is STRIPPED to match `_build_pitfalls_handoffs`' grouping; a coarser key
+    would hand the curator two entries it reads as two bullets. The reducer half needs no
+    such agreement — the builder collects every reducer record into ONE entry.
 
     A row whose digest carries NO diagnosis — absent, blank, or nothing but the adapter's
-    `exit=N;` envelope, which an adapter that fails with an empty stderr writes on every
-    call — keys to ITSELF. Merging on the absence of a verdict is not merging on a shared
-    verdict: it would fold unrelated mistakes behind one exemplar, hand the curator only
-    that exemplar's query, and then rotate the rest into `consumed` as though they had been
-    curated. `is_content_less`, not `.strip()`, so a digest of zero-width filler cannot
-    read as a diagnosis either (#722's rule, same reason).
+    `exit=N;` envelope — keys to ITSELF. Merging on the absence of a verdict would fold
+    unrelated mistakes behind one exemplar, hand the curator only that exemplar's query, and
+    rotate the rest into `consumed` as though curated. `is_content_less`, not `.strip()`, so
+    a digest of zero-width filler cannot read as a diagnosis either.
     """
     owner = (
         BASH_SHIM_QUERY_ID if is_reducer_row(row)
@@ -403,15 +379,13 @@ def _occurrences(row: dict) -> int:
 
 
 def merge_pitfalls(rows: list[dict]) -> list[dict]:
-    """Collapse repeats of one mistake into one record carrying `occurrences: N` (#840).
+    """Collapse repeats of one mistake into one record carrying `occurrences: N`.
 
-    N identical failures are evidence of SEVERITY as well as noise, so the count survives
-    the collapse — it is what tells the curator which bullet is worth the context tax. The
-    FIRST row of a key is the exemplar and keeps every other field: its `pitfall_id` (so the
-    record still names a real row), its `source_run`, and any queue bookkeeping the drain has
-    stamped on it. Later rows contribute their count and nothing else. Order is first-seen,
-    and the result re-merges to itself, so the two consuming seams can each merge without
-    caring whether the other already did.
+    The count survives the collapse: it tells the curator which bullet is worth the context
+    tax. The FIRST row of a key is the exemplar and keeps every other field (`pitfall_id`,
+    `source_run`, any queue bookkeeping the drain stamped on it); later rows contribute their
+    count and nothing else. Order is first-seen, and the result re-merges to itself, so either
+    consuming seam can merge without caring whether the other already did.
     """
     out: list[dict] = []
     by_key: dict[tuple[str, str], dict] = {}
@@ -461,19 +435,16 @@ def pitfalls_lane_is_open(records: list[dict], threshold: int) -> bool:
 
 
 def append_pitfalls(rows: list[dict], *, paths: LoopPaths = DEFAULT_PATHS) -> int:
-    """Append the failing rows verbatim. The COLLAPSE happens on the way out (#840).
+    """Append the failing rows verbatim. The COLLAPSE happens on the way out.
 
-    Deliberately still an append, and deliberately not deduplicating here. #719 D9 leaves
-    exactly one function in `learning/` that rewrites a queue file wholesale — the merging
-    rotation — so an appender that bumped a count on a row already on disk would be the
-    second, racing the drain's read-modify-write window for no gain. The queue therefore
-    stays what it is: the evidence, one line per failure, matching the row-level duplication
-    #823 N3 pins in the queries table.
+    Deliberately not deduplicating here: exactly one function in `learning/` rewrites a queue
+    file wholesale — the merging rotation — so an appender that bumped a count on a row
+    already on disk would be the second, racing the drain's read-modify-write window for no
+    gain. The queue stays the evidence, one line per failure.
 
-    What #840 fixes is the RECORD set the queue is read as: `merge_pitfalls` collapses it at
-    both seams that consume it — the curation threshold (`pitfalls_curator.run_pitfalls`,
-    `drains._has_lead_author_work`) and the curator's handoff. A reader that counts these
-    rows is counting failures, never lessons.
+    `merge_pitfalls` collapses it at both consuming seams — the curation threshold
+    (`pitfalls_curator.run_pitfalls`, `drains._has_lead_author_work`) and the curator's
+    handoff. A reader that counts these rows is counting failures, never lessons.
     """
     if not rows:
         return 0
@@ -571,7 +542,7 @@ def append_actor_observations(
 def _anchor_with_case_key(judge_rule_ids: Any, alert_rule_key: str) -> list[str]:
     ids = judge_rule_ids if isinstance(judge_rule_ids, list) else [judge_rule_ids]
     # is_content_less, not `.strip()`: an id that renders as nothing must not survive
-    # into the stored anchor, and `.strip()` cannot see the zero-width ones (#722).
+    # into the stored anchor, and `.strip()` cannot see the zero-width ones.
     ids = [str(r) for r in ids if not is_content_less(str(r))]
     if alert_rule_key and alert_rule_key not in ids:
         ids = [alert_rule_key, *ids]

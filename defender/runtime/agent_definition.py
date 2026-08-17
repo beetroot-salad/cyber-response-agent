@@ -30,10 +30,9 @@ class ToolSet:
     #: The general write lane: `write_file` + `edit_file`, anchored replace over a whole
     #: document. What a corpus author needs.
     write: bool = False
-    #: The append lane: `append_block`, no anchor and no position. What an append-only
-    #: artifact needs, and all `investigation.md` has ever legitimately admitted (#810).
-    #: Disjoint from `write` in practice but not enforced so — both are writer grants and
-    #: both require `write_shapes`.
+    #: The append lane: `append_block`, no anchor and no position — what an append-only
+    #: artifact (`investigation.md`) needs. Disjoint from `write` in practice but not
+    #: enforced so; both are writer grants and both require `write_shapes`.
     append: bool = False
     forward_check: bool = False
     lesson_read: bool = False
@@ -41,8 +40,8 @@ class ToolSet:
     query: bool = False
     #: The verb-surface read lane: `list_verbs`, the grant-filtered discovery tool that
     #: answers "what does this system declare, and what params does each verb bind" from the
-    #: live signatures (#900). Verb-bearing like `query` — it reads the role's grant to filter
-    #: — so it counts toward the R7 agreement below.
+    #: live signatures. Verb-bearing like `query` — it reads the role's grant to filter — so
+    #: it counts toward the R7 agreement below.
     list_verbs: bool = False
     closed_tickets: bool = False
     close: bool = False
@@ -129,7 +128,7 @@ def _require_write_co_constraint(
     tools: ToolSet, write_shapes: tuple[Callable[[ResolvedRoots], tuple[Any, ...]], ...],
 ) -> None:
     # Either grant makes the agent a writer: `append_block` faces the same allowlist and the
-    # same content schema `write_file`/`edit_file` do, so it needs the same scope (#810).
+    # same content schema `write_file`/`edit_file` do, so it needs the same scope.
     writes = tools.write or tools.append
     if writes and not write_shapes:
         raise ValueError(
@@ -148,36 +147,32 @@ def read_allow_of(bash_allow: tuple[Grant, ...]) -> PathShapes:
 
 
 def effective_tools_for(defn: AgentDefinition) -> ToolSet:
-    """The ToolSet a generic, out-of-band consumer — the operator policy CLI, a permission-gate
-    probe — should compile this role's policy against, for a role whose static `defn.tools`
-    does not already show its real capability.
+    """The ToolSet a generic, out-of-band consumer (the operator policy CLI, a permission-gate
+    probe) should compile a role's policy against when the static `defn.tools` does not show
+    its real capability.
 
-    The judge is the one role today whose `closed_tickets` bit is switched per LEG by a
-    runtime `replace()` well past `AGENTS` (`_run_judge_pydantic`, d73), so `defn.tools` alone
-    always reads as the benign-off, grant-on disagreement `bind()`/`compile_policy` would
-    refuse to build (§7 R7, #632). A generic consumer that just wants "what may this role do"
-    gets the richer (benign) leg's shape — the same one the real per-leg builder uses when the
-    capability is on. This is the ONE place that knows any role's typed-capability switching;
-    a consumer asks for the effective tools and never names a bit itself (N4 — the operator
-    surface must not carry a map of typed capabilities to attack)."""
+    The judge is the one such role: its `closed_tickets` bit is switched per LEG by a runtime
+    `replace()` well past `AGENTS`, so `defn.tools` alone reads as the benign-off, grant-on
+    disagreement `bind()`/`compile_policy` would refuse to build (§7 R7). A generic consumer
+    gets the richer (benign) leg's shape. The ONE place that knows any role's typed-capability
+    switching; a consumer never names a bit itself (N4 — the operator surface must not carry a
+    map of typed capabilities to attack)."""
     if defn.role is AgentRole.JUDGE:
         return replace(defn.tools, closed_tickets=True)
     return defn.tools
 
 
 def _require_verb_grant_agreement(defn: AgentDefinition, tools: ToolSet) -> None:
-    """§7 R7: a role's verb_grant and the bit that reaches a verb-bearing tool agree, in
-    EITHER direction. A grant naming verbs while every verb-bearing bit (`query`,
-    `list_verbs`, `closed_tickets`) is off is a stale grant behind a switched-off capability; a
-    verb-bearing bit on with an empty grant is a capability with nothing behind it. Checked
-    against `tools` — the EFFECTIVE ToolSet a build actually has, not only the one `defn`
-    declares — because a stage can switch its capability on with a runtime `replace()` after
-    `bind` compiled its policy from the static definition (g16).
+    """§7 R7: a role's verb_grant and the bit that reaches a verb-bearing tool agree, in EITHER
+    direction. A grant naming verbs while every verb-bearing bit (`query`, `list_verbs`,
+    `closed_tickets`) is off is a stale grant behind a switched-off capability; a verb-bearing
+    bit on with an empty grant is a capability with nothing behind it. Checked against the
+    EFFECTIVE `tools`, not only what `defn` declares, because a stage can switch its capability
+    on with a runtime `replace()` after `bind` compiled its policy.
 
-    `list_verbs` joins the disjunction rather than sitting outside it (#900): it does not
-    DISPATCH a verb, but it reads the grant to decide what to name, so a role holding it over
-    an empty grant is a discovery tool that can only ever answer "nothing" — the same
-    capability-with-nothing-behind-it this refuses for `query`."""
+    `list_verbs` joins the disjunction rather than sitting outside it: it does not DISPATCH a
+    verb, but it reads the grant to decide what to name, so a role holding it over an empty
+    grant is a discovery tool that can only ever answer "nothing"."""
     has_verb_tool = bool(tools.query or tools.list_verbs or tools.closed_tickets)
     has_grant = bool(defn.verb_grant.entries)
     if has_verb_tool != has_grant:
@@ -251,12 +246,10 @@ def _build_roots(
     )
     if defn.requires_corpus:
         assert roots.corpus_dir is not None
-        # Compare RESOLVED to RESOLVED, the same collapse `decide_write`'s containment half applies
-        # at runtime (`_resolved_read_roots` resolves the confine; `build_scoped_write_allow` roots
-        # the write scope at `corpus_dir.resolve()`). A lexical `is_relative_to` on the UNresolved
-        # corpus_dir would spuriously reject every bind whenever the tree path carries a symlink
-        # component (a symlinked worktree base, macOS `/tmp`→`/private/tmp`) — the resolved confine
-        # and the unresolved corpus would never share a prefix.
+        # Compare RESOLVED to RESOLVED, the same collapse `decide_write`'s containment half
+        # applies at runtime. A lexical `is_relative_to` on the UNresolved corpus_dir would
+        # spuriously reject every bind whenever the tree path carries a symlink component (a
+        # symlinked worktree base, macOS `/tmp`→`/private/tmp`).
         resolved_corpus = roots.corpus_dir.resolve()
         if not any(resolved_corpus.is_relative_to(c.resolve()) for c in roots.read_confine):
             raise ValueError(

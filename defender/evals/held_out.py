@@ -51,8 +51,8 @@ def predicted_disposition(run_dir: Path) -> str | None:
     """This run's predicted disposition, or `None` when the report yields no usable headline.
 
     Scoring must survive one broken report — a metric that raises tells you nothing about the
-    other 40 fixtures — so this is the DEGRADE side of the shared accessor (#785), and an
-    unscoreable run lands in the eval's own failure column rather than as an exception.
+    other 40 fixtures — so this is the DEGRADE side of the shared accessor, and an unscoreable
+    run lands in the eval's own failure column rather than as an exception.
     """
     return read_report(RunPaths(run_dir).report).disposition
 

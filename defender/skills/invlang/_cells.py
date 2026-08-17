@@ -14,15 +14,13 @@ def _split_quoted(
     while i < len(s):
         ch = s[i]
         if ch == "\\" and i + 1 < len(s):
-            # ONE branch decides what an escape pair means, and it is the delimiter or
-            # nothing: `\<sep>` unescapes when asked, every OTHER pair is consumed
-            # verbatim, 2 bytes at a time. The alternative — falling through on the pairs
-            # this branch does not claim — let the `"` of a `\"` reach the quote toggle
-            # below, so a row carrying an odd number of `\"` before its last cell flipped
-            # into "inside a quote", swallowed the remaining `|`s, and `_row_cells` padded
-            # the short record with empty strings: cells silently merged, no RowError, no
-            # warning (#853/F-14). `_has_unbalanced_quote` already skips the pair the same
-            # way; this is the tokenizer agreeing with it.
+            # ONE branch decides what an escape pair means: `\<sep>` unescapes when asked,
+            # every OTHER pair is consumed verbatim, 2 bytes at a time. Falling through on
+            # unclaimed pairs would let the `"` of a `\"` reach the quote toggle below, so a
+            # row with an odd number of `\"` before its last cell flips into "inside a quote",
+            # swallows the remaining `|`s, and `_row_cells` pads the short record with empty
+            # strings — cells silently merged, no RowError. `_has_unbalanced_quote` skips the
+            # pair the same way.
             if unescape_delim and s[i + 1] == sep:
                 cur.append(sep)
                 i += 2
@@ -69,8 +67,8 @@ def _unquote(s: str) -> str:
 #: holding it projects as absence, so a reader tests `conclude.get("ceiling_test")` rather than
 #: filtering a sentinel back out.
 #:
-#: Lives at this layer rather than beside the conclude projection because `_row_cells` is now
-#: a SECOND reader: `none` is also how an empty TABLE is written (`:T conclude.surviving`
+#: Lives at this layer rather than beside the conclude projection because `_row_cells` is a
+#: SECOND reader: `none` is also how an empty TABLE is written (`:T conclude.surviving`
 #: carrying one `none` row), and a one-cell row under a two-column header is exactly the shape
 #: the required-cell check refuses. One owner, so the two readings cannot drift apart.
 _CONCLUDE_EMPTY_MARKERS: frozenset[str] = frozenset({"none", "n/a"})
@@ -124,11 +122,11 @@ def _strip_quote_wrapper(s: str) -> str:
 def _quotes_wrap_whole_values(cell: str) -> bool:
     """Does every `"` in this cell WRAP a value, rather than open mid-token?
 
-    Row parity is not enough, and the gap is not academic: `bastion"/internal|bastion"-01`
-    carries an EVEN number of quotes, so `_has_unbalanced_quote` stays silent, and yet the
-    first one opens a quoted span that swallows the `|` between them. Every cell after it
-    shifts left and the optional trailing column absorbs the shift, so the count check cannot
-    see it either — an `attrs` value slides into `ident`, where nothing gates it (#853/F-14).
+    Row parity is not enough: `bastion"/internal|bastion"-01` carries an EVEN number of quotes,
+    so `_has_unbalanced_quote` stays silent, yet the first one opens a quoted span that
+    swallows the `|` between them. Every cell after it shifts left and the optional trailing
+    column absorbs the shift, so the count check cannot see it either — an `attrs` value slides
+    into `ident`, where nothing gates it.
 
     A quote is legal wrapping the whole cell (`"free text with a | in it"`), a whole
     `;`-subcell, or the whole right-hand side of a `k=v` (`flags="EXE_WRITABLE|EXE_LOWER"`).

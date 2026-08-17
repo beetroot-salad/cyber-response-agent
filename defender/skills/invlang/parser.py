@@ -48,15 +48,11 @@ HEADER_RE = re.compile(
 )
 _STORY_HEADER_RE = re.compile(r"^###\s+story\s+(h-[\w\-]+)\s*$")
 #: A line the author MEANT as a block header — the `:<TAG>` opening of `HEADER_RE`, whether or
-#: not the rest of the line is one `HEADER_RE` accepts. Not a second grammar: it is the FIRST
-#: TOKEN of the same one, which is what makes "the author was opening a block here" decidable
-#: on a line the header rule rejects.
-#:
-#: Two arms of `_tokenize_fence` read it, both about bounding a silent drop. Prose inside a
-#: `### story h-NNN` section is discarded without a warning — correct for narrative, and it
-#: reopened F-2 in full for a rejected header sitting under one. And a run of orphan lines is
-#: otherwise bounded only by the next ACCEPTED header, so a fence with two rejected headers
-#: folded both into one warning that named only the first.
+#: not the rest of the line is one `HEADER_RE` accepts. The FIRST TOKEN of the same grammar,
+#: which is what makes "the author was opening a block here" decidable on a line the header
+#: rule rejects. Two arms of `_tokenize_fence` read it, both to bound a silent drop: prose in a
+#: `### story h-NNN` section is discarded without a warning, and a run of orphan lines would
+#: otherwise be bounded only by the next ACCEPTED header.
 _HEADER_ATTEMPT_RE = re.compile(r"^:[A-Z]")
 _LEAD_PREFIX_RE = re.compile(r"^l-(?P<id>[A-Za-z0-9]+)\.(?P<sub>.+)$")
 
@@ -69,11 +65,9 @@ class ParseWarning:
     reason: str
     file_path: str = ""
     #: The ids this warning DELETED from the companion, when it deleted any and the rows
-    #: were still readable enough to name them. Structure carried alongside the prose, the
-    #: same way `Diagnostic` carries a `Locus`: the message is unchanged, and a consumer
-    #: that needs to know *which* ids went missing no longer has to re-parse it back out.
-    #: The whole-block rejections populate it — a row-level failure already carries its
-    #: row, and the id is that row's first cell.
+    #: were still readable enough to name them — so a consumer need not re-parse the prose.
+    #: Populated by whole-block rejections; a row-level failure already carries its row,
+    #: and the id is that row's first cell.
     dropped_ids: tuple[str, ...] = ()
 
     def format(self) -> str:
@@ -93,10 +87,10 @@ def _parse_auth(cell: str) -> AuthorityRef:
 
 
 
-#: `ParseWarning.block` for a line the tokenizer could file under no block at all. There is no
-#: `Block` to name — that absence IS the defect being reported — so the sentinel stands in for
-#: one. Deliberately not header-shaped: `deferred_hypothesis_ids` matches declaration blocks by
-#: name, and a warning that dropped no declaration must not be mistaken for one that did.
+#: `ParseWarning.block` for a line the tokenizer could file under no block at all — the absence
+#: of a `Block` IS the defect. Deliberately not header-shaped: `deferred_hypothesis_ids`
+#: matches declaration blocks by name, and a warning that dropped no declaration must not be
+#: mistaken for one that did.
 NO_OPEN_BLOCK = "(no open block)"
 
 
@@ -105,30 +99,23 @@ def _orphan_warning(lines: list[str]) -> ParseWarning:
 
     `HEADER_RE` anchors `\\s*$` immediately after the optional `[cols]`, so ANYTHING trailing a
     header makes the match fail — a `# loop 2 wrap-up` comment, a `(loop 3)` note, a dropped
-    `]`, a missing space after the tag. The line then reads as a row, and with no block open
-    it used to be discarded together with every row beneath it in silence: the tokenizer's
-    only unbounded drop, in a module whose stated design is that every drop earns a
-    `ParseWarning` (#876/F-2). A fence headed `:T conclude   # loop 2 wrap-up` parsed to an
-    EMPTY companion with `warnings == []`, so `_check_disposition_gating` dispatched on
-    nothing and the benign write gate never ran at all.
+    `]`, a missing space after the tag. The line then reads as a row, and with no block open it
+    would be discarded together with every row beneath it in silence, against this module's
+    rule that every drop earns a `ParseWarning`. (A fence headed `:T conclude   # loop 2` then
+    parses to an EMPTY companion with `warnings == []`, so the benign write gate never runs.)
 
-    Reached whenever no block is OPEN — which is the first header of a fence (`append_block`
-    carries one block per fence, so that is the ordinary authoring path), a header under a
-    `### story h-NNN` section, and every rejected header after the first. With a block still
-    open the same line lands as a ROW of that block and draws a cell-count error — loud, and
-    already refused.
+    Reached whenever no block is OPEN: the first header of a fence (the ordinary authoring
+    path — `append_block` carries one block per fence), a header under a `### story h-NNN`
+    section, and every rejected header after the first. With a block still open the same line
+    lands as a ROW and draws a cell-count error instead.
 
-    ONE warning per RUN of orphan lines, not one per line. The first line is the rejected
-    header and repairing it repairs the ROWS under it, so a seven-row `:T conclude` would
-    otherwise cost eight errors for one trailing comment; the count of what followed it is
-    carried in the message instead, so nothing vanishes unnamed.
+    ONE warning per RUN of orphan lines: repairing the rejected header repairs the rows under
+    it, so a seven-row `:T conclude` would otherwise cost eight errors for one trailing
+    comment. The count of what followed is carried in the message, so nothing vanishes unnamed.
 
-    A run ends at the next header ATTEMPT, not only at the next ACCEPTED header, which is what
-    keeps "repairing the first line repairs the run" true. A fence carrying two rejected
-    headers otherwise folded both into one warning naming only the first — and repairing that
-    one does not repair the second: it opens a block, and the second rejected header then
-    lands in it as a bad ROW, for a second round trip over a defect the document had already
-    stated.
+    A run ends at the next header ATTEMPT, not only at the next ACCEPTED header — otherwise two
+    rejected headers fold into one warning naming only the first, and repairing that one does
+    not repair the second (it opens a block, and the second lands in it as a bad ROW).
     """
     head, rest = lines[0], lines[1:]
     tail = (
@@ -151,11 +138,8 @@ def _orphan_warning(lines: list[str]) -> ParseWarning:
 
 def _header_block(m: re.Match[str]) -> Block:
     """The empty `Block` a matched header opens — its declared columns, and how many of them a
-    row has to carry.
-
-    Split out of `_tokenize_fence` so that function reads as the state machine it is: this is
-    the only arm of it that is pure column arithmetic, and it is where a `?` stops being a
-    character and becomes `required_cells`."""
+    row has to carry. This is where a trailing `?` stops being a character and becomes
+    `required_cells`."""
     cols_raw = m.group("cols")
     declared = (
         [c.strip() for c in cols_raw.split("|")] if cols_raw is not None else None
@@ -178,10 +162,8 @@ def _header_block(m: re.Match[str]) -> Block:
 def _flush_orphans(orphans: list[str], warnings: list[ParseWarning]) -> None:
     """Discharge the run of orphan lines in hand as ONE warning, and reset the run.
 
-    Module-level rather than a closure over `_tokenize_fence`'s locals: the two lists are the
-    only state it touches, and taking them as arguments is what lets the four call sites be
-    read for WHERE a run ends — a story heading, an accepted header, the next rejected one,
-    end of fence — instead of for what a captured name is currently holding."""
+    Module-level rather than a closure so the four call sites can be read for WHERE a run ends:
+    a story heading, an accepted header, the next rejected one, end of fence."""
     if orphans:
         warnings.append(_orphan_warning(orphans))
         orphans.clear()
@@ -193,7 +175,7 @@ def _tokenize_fence(body: str) -> tuple[list[Block], list[ParseWarning]]:
     cur: Block | None = None
     in_story = False
     # Lines reached with no block open. They LAND here rather than being dropped, and
-    # `_flush_orphans` turns each run of them into one warning (#876/F-2).
+    # `_flush_orphans` turns each run of them into one warning.
     orphans: list[str] = []
 
     for raw in body.splitlines():
@@ -207,8 +189,7 @@ def _tokenize_fence(body: str) -> tuple[list[Block], list[ParseWarning]]:
             cur = None
             # A state transition, not a row: the line consumed IS the heading, so there is
             # nothing here to land and nothing a warning could name. (The flush above
-            # discharges the run that ENDED here; it says nothing about this line, so the
-            # suppression is stated rather than inferred from the call.)
+            # discharges the run that ENDED here; it says nothing about this line.)
             continue  # lint-row-drop: ok — the story heading itself, not a row
 
         m = HEADER_RE.match(stripped)
@@ -226,13 +207,11 @@ def _tokenize_fence(body: str) -> tuple[list[Block], list[ParseWarning]]:
 
         if in_story or cur is None:
             if _HEADER_ATTEMPT_RE.match(stripped):
-                # A header the header RULE rejected, and the two things it has to do. It ENDS
-                # any story section above it: a story only ever ended at an ACCEPTED header,
-                # so `### story h-001` over a `:T conclude  # loop 2` swallowed the header and
-                # every row beneath it in silence — F-2's failure mode whole, an empty
-                # companion with `warnings == []` and the benign gate never dispatched. And it
-                # opens its OWN orphan run, because repairing the PREVIOUS run's header does
-                # not repair this one; see `_orphan_warning`.
+                # A header the header RULE rejected does two things. It ENDS any story section
+                # above it — otherwise `### story h-001` over a `:T conclude  # loop 2`
+                # swallows the header and every row beneath it in silence. And it opens its OWN
+                # orphan run, because repairing the PREVIOUS run's header does not repair this
+                # one; see `_orphan_warning`.
                 _flush_orphans(orphans, warnings)
                 in_story = False
             orphans.append(stripped)
@@ -253,15 +232,13 @@ def iter_blocks(text: str) -> Iterator[Block]:
     """Every invlang `Block` in `text`, in document order, with its DECLARED header and its
     rows as the author wrote them.
 
-    The projection that `parse_dense_companion` builds is lossy on purpose — it folds rows
-    into records and drops the header — which is right for every consumer that asks "what
-    does this investigation say". A check that has to quote a row back, or substitute one
-    cell of it, needs the layer underneath, and rebuilding a row from the folded record
-    means assuming a column order the grammar does not enforce (#825).
+    The projection `parse_dense_companion` builds is lossy on purpose — it folds rows into
+    records and drops the header. A check that has to quote a row back, or substitute one cell
+    of it, needs this layer underneath: rebuilding a row from the folded record means assuming
+    a column order the grammar does not enforce.
 
-    Kept out of the companion deliberately: carrying per-row provenance on the records
-    inflated the parsed body by up to 25%, and that body is projected into the review lens
-    prompts."""
+    Kept out of the companion deliberately: carrying per-row provenance on the records inflated
+    the parsed body by up to 25%, and that body is projected into the review lens prompts."""
     for fence in INVLANG_FENCE_RE.finditer(text):
         # Blocks only. A caller at this layer is quoting a ROW back under its block, and a
         # line that reached no block has no block to quote it under; `parse_dense_companion`
@@ -310,20 +287,18 @@ _HYP_HEADER_COLS = {
 }
 
 
-#: The two block names that DECLARE a hypothesis, spelled as `ParseWarning.block`
-#: renders them (`:H <name>`). One owner: `_project_block`'s dispatch, the
-#: validator's "did a declaration get dropped?" test, and the SKILL/parser
-#: grammar pin all read which names are declaration sites from here, so they
-#: cannot drift into disagreeing about it.
+#: The two block names that DECLARE a hypothesis, spelled as `ParseWarning.block` renders them
+#: (`:H <name>`). One owner: `_project_block`'s dispatch, the validator's "did a declaration get
+#: dropped?" test, and the SKILL/parser grammar pin all read the declaration sites from here.
 HYP_DECLARATION_BLOCK_RE = re.compile(
     r"^:H (?:hypothesize\.hypotheses|l-[A-Za-z0-9]+\.new_hypotheses)$"
 )
 
 #: An `h-*` id, including the hierarchical child form: when a lean hypothesis refines into
-#: sub-cases the language allocates `h-{parent}-{ordinal}` (`h-001` → `h-001-001`) and
-#: writes the children into the lead's `new_hypotheses` with the parent shelved in the same
-#: block (`docs/investigation-language.md` §Refinement via hierarchical IDs). One owner:
-#: the validator reads which tokens are hypothesis references from here, and
+#: sub-cases the language allocates `h-{parent}-{ordinal}` (`h-001` → `h-001-001`) and writes
+#: the children into the lead's `new_hypotheses` with the parent shelved in the same block
+#: (`docs/investigation-language.md` §Refinement via hierarchical IDs). One owner: the
+#: validator reads which tokens are hypothesis references from here, and
 #: `deferred_hypothesis_ids` reads which dropped rows it can map back to one.
 HYPOTHESIS_ID_RE = re.compile(r"h-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*")
 
@@ -340,35 +315,30 @@ def deferred_hypothesis_ids(
     """Which `h-*` ids a parse warning DELETED — the set the undeclared-hypothesis rule
     must stay quiet about, because the parse error already names the cause.
 
-    A rejected header or a bad row on a hypothesis DECLARATION block deletes ids the
-    document goes on referring to, so every reference to them looks phantom — the one case
-    where the undeclared-hypothesis error would point away from the defect. A warning from
-    anywhere ELSE (an unknown block, an unattributed `:R` row, a malformed vertex) drops no
-    declaration and must not stand the rule down.
+    A rejected header or a bad row on a hypothesis DECLARATION block deletes ids the document
+    goes on referring to, so every reference to them looks phantom — the one case where the
+    undeclared-hypothesis error would point away from the defect. A warning from anywhere ELSE
+    (an unknown block, an unattributed `:R` row, a malformed vertex) drops no declaration and
+    must not stand the rule down.
 
-    Per ID, not per DOCUMENT. The predecessor answered only "did any declaration get
-    dropped?", so one malformed `:H` row anywhere silenced the rule for the whole file and
-    an unrelated typo three leads away went unreported behind it. The id is recoverable in
-    both failure modes: a whole-block rejection carries `dropped_ids`, and a row-level
-    failure carries its row, whose first cell IS the id.
+    Per ID, not per DOCUMENT, so one malformed `:H` row does not silence the rule for the whole
+    file. The id is recoverable in both failure modes: a whole-block rejection carries
+    `dropped_ids`, and a row-level failure carries its row, whose first cell IS the id.
 
-    `None` means "stand down everywhere" and is the honest answer when a dropped
-    declaration cannot be mapped to an id at all — a row so malformed its first cell is not
-    id-shaped. Reporting references then would give two errors for one defect, which is the
-    whole reason this deference exists; the caller treats `None` exactly as the predecessor
-    treated `True`.
+    `None` means "stand down everywhere" — the honest answer when a dropped declaration cannot
+    be mapped to an id at all (a row so malformed its first cell is not id-shaped). Reporting
+    references then would give two errors for one defect.
 
     `dropped_ids` is the authoritative channel and is consulted whatever block carries it,
-    because a declaration is deleted from more than the two DECLARING names: the singular
-    typo `:H l-NNN.new_hypothesis` drops its rows too, and matching on the name alone left
-    that one warning to be followed by one error per reference site.
+    because a declaration is deleted from more than the two DECLARING names: the singular typo
+    `:H l-NNN.new_hypothesis` drops its rows too.
 
     A warning that names NO id is skipped rather than deferred: a header rejected on a block
-    with no rows deleted nothing, so standing the rule down for the document would hide
-    every unrelated phantom behind a warning that dropped no declaration at all. It is also
-    why the catch-all `:H l-NNN.<sub>` warning filters its `dropped_ids` down to `h-*` cells
-    before they get here (#876/F-27): a stray `:H l-001.preds` contributes `p9`, which is
-    neither usable as a hypothesis id nor evidence that a declaration went missing.
+    with no rows deleted nothing, so standing the rule down for the document would hide every
+    unrelated phantom. It is also why the catch-all `:H l-NNN.<sub>` warning filters its
+    `dropped_ids` down to `h-*` cells before they get here: a stray `:H l-001.preds`
+    contributes `p9`, which is neither usable as a hypothesis id nor evidence that a
+    declaration went missing.
     """
     deferred: set[str] = set()
     for w in warnings:
@@ -433,14 +403,13 @@ def _build_proposed_edge(rec: dict[str, str]) -> ProposedEdge:
 
 
 
-#: The DECLARING side of `HYPOTHESIS_ID_RE`, built from it rather than restating it. The
-#: restatement was narrower — single-segment only — so a hierarchical child that the four
-#: reference sites accept (#821/#828) could not declare `:H h-001-001.preds`: the block fell
-#: through to the generic "unknown block" warning and the write was denied, leaving a
-#: committed child unable to declare the prediction `_check_strong_move_provenance` then
-#: demands before it can be moved `++`/`--` (#853/F-27). One owner means the two cannot
-#: drift again, and a typoed child id now lands on `_project_hyp_subblock`'s "sub-block
-#: references unknown hypothesis" warning, which names the actual cause.
+#: The DECLARING side of `HYPOTHESIS_ID_RE`, built from it rather than restating it, so the
+#: hierarchical child form the reference sites accept can also declare `:H h-001-001.preds`.
+#: (A narrower restatement here sends that block to the generic "unknown block" warning and
+#: denies the write, leaving a committed child unable to declare the prediction
+#: `_check_strong_move_provenance` demands before a `++`/`--` move.) With one owner, a typoed
+#: child id lands on `_project_hyp_subblock`'s "sub-block references unknown hypothesis"
+#: warning, which names the actual cause.
 _HYP_PREFIX_RE = re.compile(
     rf"^(?P<hyp>{HYPOTHESIS_ID_RE.pattern})"
     rf"\.(?P<sub>preds|attr_preds|refuts|authz|parent_attrs)$"
@@ -506,10 +475,9 @@ def _lead_header_record(
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     """Split a `:L findings` row into (identity, outcome, query_details).
 
-    The outcome fields are returned separately rather than nested inside
-    `identity` so the caller cannot merge them with a plain `dict.update` —
-    that overwrote the lead's whole outcome, discarding resolution buckets
-    already projected onto it by an earlier `:R` block.
+    The outcome fields are returned separately rather than nested inside `identity` so the
+    caller cannot merge them with a plain `dict.update`, which would overwrite the lead's whole
+    outcome and discard resolution buckets an earlier `:R` block already projected onto it.
     """
     identity: dict[str, Any] = {
         "id": rec["id"], "name": rec["name"], "target": rec.get("target", ""),
@@ -550,19 +518,17 @@ _RESOLUTION_LINE_RE = re.compile(
 )
 
 
-# What a prediction / refutation citation looks like, on either side of the row.
-# One owner: the head tokenizer `fullmatch`es it, the `⟺` scanner searches for it
-# word-bounded. A `startswith` test here instead let any head word beginning `p`,
-# `ap` or `r` (`partial`, `approved`, `refuted`) parse as a cited id — harmless
-# while nothing joined the list back to the declaring `:H` block, a blocked write
-# once `_check_prediction_refs` did.
+# What a prediction / refutation citation looks like, on either side of the row. One owner:
+# the head tokenizer `fullmatch`es it, the `⟺` scanner searches for it word-bounded. A
+# `startswith` test instead would let any head word beginning `p`, `ap` or `r` (`partial`,
+# `approved`, `refuted`) parse as a cited id, which `_check_prediction_refs` then blocks on.
 _REF_ID_RE = re.compile(r"ap\d+|p\d+|r\d+")
 _IFF_LITERAL_RE = re.compile(rf"\b(?:{_REF_ID_RE.pattern})\b")
 
 #: A COMMITMENT id in any of the four namespaces a hypothesis declares — `_REF_ID_RE`'s three
 #: plus `ac*` authorization contracts, which no resolution head ever cites and which only
-#: `:L findings`' `tests` column can name. Composed from `_REF_ID_RE` rather than restating
-#: it, the same way `_IFF_LITERAL_RE` is, so the namespaces keep one owner.
+#: `:L findings`' `tests` column can name. Composed from `_REF_ID_RE` so the namespaces keep
+#: one owner.
 COMMITMENT_ID_RE = re.compile(rf"(?:{_REF_ID_RE.pattern})|ac\d+")
 
 
@@ -614,10 +580,8 @@ def _resolution_record(row: str) -> tuple[str | None, ResolutionRecord]:
         head_refs.extend(t.strip() for t in tok.split(",") if t.strip())
     supp_text = supp.strip()
     iff_pred_ids, iff_refut_ids = _extract_iff_literals(annotation)
-    # Same split as the `⟺` side: an id-shaped token that is not `r*` is a
-    # prediction, so `ap*` files under predictions in both spellings. A bare
-    # `startswith("p")` dropped `ap1` on the floor — the head spelling the
-    # validator's own error message asks for parsed as citing nothing at all.
+    # Same split as the `⟺` side: an id-shaped token that is not `r*` is a prediction, so
+    # `ap*` files under predictions in both spellings. A bare `startswith("p")` drops `ap1`.
     head_ids = [t for t in head_refs if _REF_ID_RE.fullmatch(t)]
     matched_pred_ids = iff_pred_ids or [t for t in head_ids if not t.startswith("r")]
     matched_refut_ids = iff_refut_ids or [t for t in head_ids if t.startswith("r")]
@@ -655,10 +619,9 @@ _RESOLUTION_LIST_KEYS = {"conditioning_context", "concerns", "cites_leads"}
 
 
 def _canonicalize_resolution_row(rec: dict[str, str]) -> ResolutionRow:
-    # Built as a plain dict and cast: the header names the keys at runtime, so
-    # there is no literal-key form for mypy to check the writes against. The
-    # return type is the shared base — each bucket narrows it on the read side;
-    # see the `:R` note in schema.py.
+    # Built as a plain dict and cast: the header names the keys at runtime, so there is no
+    # literal-key form for mypy to check the writes against. The return type is the shared
+    # base — each bucket narrows it on the read side; see the `:R` note in schema.py.
     out: dict[str, Any] = {}
     for k, v in rec.items():
         if not v:
@@ -677,11 +640,10 @@ def _canonicalize_resolution_row(rec: dict[str, str]) -> ResolutionRow:
 _CONCLUDE_LISTS: frozenset[str] = frozenset({"ceiling_test"})
 
 #: `Conclude` fields that are their OWN `:T conclude.*` sub-table, never a flat
-#: `<key> <value>` row. They must be subtracted for the same reason `termination` always was:
-#: `_CONCLUDE_SCALARS` is read off `Conclude.__annotations__`, so a field added to carry a
-#: sub-table is otherwise advertised in `_CONCLUDE_KEYS_HINT` as a legal flat key AND
-#: projected as a STRING over the list the sub-table built — which then makes
-#: `_project_surviving_block`'s `setdefault(...).append(...)` raise on a str (#821).
+#: `<key> <value>` row. They must be subtracted because `_CONCLUDE_SCALARS` is read off
+#: `Conclude.__annotations__`: a sub-table field left in is otherwise advertised in
+#: `_CONCLUDE_KEYS_HINT` as a legal flat key AND projected as a STRING over the list the
+#: sub-table built, making `_project_surviving_block`'s `setdefault(...).append(...)` raise.
 _CONCLUDE_SUBTABLES: frozenset[str] = frozenset({"termination", "surviving_hypotheses"})
 
 #: The scalar rows `:T conclude` projects, and the CLOSED set an unrecognized row is judged
@@ -729,16 +691,14 @@ def _two_site_reason(hid: str) -> str:
 def _extend_by_id(dest: list[Any], rows: list[Any]) -> None:
     """Append the rows whose id the destination does not already carry.
 
-    Accumulation has to be by id, not blind: re-emitting a whole `:H
-    hypothesize.hypotheses` table with one new row appended is the natural
-    reading of a table block, and it was CORRECT under the old replace
-    semantics. Blind `extend` turned that pattern into duplicate rows, and
-    `runtime/review/projector.py` maps the raw list straight to the review
-    lenses without the dedup `_walkers.all_hypotheses` applies — so every lens
-    would have seen the same hypothesis twice.
+    Accumulation has to be by id, not blind: re-emitting a whole `:H hypothesize.hypotheses`
+    table with one new row appended is the natural reading of a table block, and a blind
+    `extend` turns that into duplicate rows. `runtime/review/projector.py` maps the raw list
+    straight to the review lenses without the dedup `_walkers.all_hypotheses` applies, so every
+    lens would see the same hypothesis twice.
 
-    First declaration wins, so the raw list holds exactly what the walkers
-    dedup to. A row with no id is always appended; nothing can key it.
+    First declaration wins, so the raw list holds exactly what the walkers dedup to. A row with
+    no id is always appended; nothing can key it.
     """
     seen = {r["id"] for r in dest if isinstance(r, dict) and r.get("id")}
     for r in rows:
@@ -756,17 +716,15 @@ class _Projector:
     out: dict[str, Any] = field(default_factory=dict)
     warnings: list[ParseWarning] = field(default_factory=list)
     hypotheses_by_id: dict[str, HypothesisRecord] = field(default_factory=dict)
-    #: Ids the `:H hypothesize.hypotheses` table declares. The table outranks a
-    #: lead's `new_hypotheses` in `hypotheses_by_id` regardless of document
-    #: order, because that is the precedence `_walkers.all_hypotheses` applies
-    #: on the read side.
+    #: Ids the `:H hypothesize.hypotheses` table declares. The table outranks a lead's
+    #: `new_hypotheses` in `hypotheses_by_id` regardless of document order, because that is
+    #: the precedence `_walkers.all_hypotheses` applies on the read side.
     prologue_hypothesis_ids: set[str] = field(default_factory=set)
     findings: dict[str, dict[str, Any]] = field(default_factory=dict)
 
-    # No "current lead" state, deliberately. Attribution used to fall back to
-    # whichever lead a preceding block happened to mention last, which silently
-    # filed one lead's grounding evidence under another. Every row that lands on
-    # a lead now names it.
+    # No "current lead" state, deliberately: a fallback to whichever lead a preceding block
+    # mentioned last silently files one lead's grounding evidence under another. Every row
+    # that lands on a lead names it.
 
     def lead_bucket(self, lead_id: str) -> dict[str, Any]:
         lead = self.findings.setdefault(lead_id, {"id": lead_id})
@@ -817,11 +775,10 @@ class _Projector:
 
         `_tokenize_fence` makes a row per line, so a value written across two lines keeps line
         one with its quote dangling and reparses the rest as fresh rows — dropped, or worse,
-        landing on whatever key the continuation's first word happens to name. That used to be
-        silent, which is how #806's refuted-correlation finding could be authored and lost.
-        The guard is here rather than inside one block's projector because the truncation is a
-        property of the line-oriented surface, not of `:T conclude`: a two-line `:L findings`
-        name loses the lead's target, loop and system just as quietly.
+        landing on whatever key the continuation's first word happens to name. The guard is
+        here rather than inside one block's projector because the truncation is a property of
+        the line-oriented surface, not of `:T conclude`: a two-line `:L findings` name loses
+        the lead's target, loop and system just as quietly.
         """
         for idx, row in enumerate(block.rows):
             if _has_unbalanced_quote(row):
@@ -837,10 +794,9 @@ class _Projector:
         tag, name = block.tag, block.name
         self._check_one_line_rows(block)
 
-        # Extend, never assign — same reason as `:H` (#816). Append-only forbids
-        # rewriting a committed block, so a second `:V prologue.vertices` is the
-        # only legal way to add one, and assignment deleted every vertex the
-        # first block declared.
+        # Extend, never assign — same reason as `:H`. Append-only forbids rewriting a
+        # committed block, so a second `:V prologue.vertices` is the only legal way to add
+        # one, and assignment would delete every vertex the first block declared.
         if tag == "V" and name == "prologue.vertices":
             vertices = self._project_rows(block, _vertex_record)
             self._warn_repeated_ids(block, vertices)
@@ -907,9 +863,8 @@ class _Projector:
             value: Any = None if raw == "null" else _unquote(raw)
             if key in seen and key not in _CONCLUDE_LISTS:
                 # The continuation of a two-line value lands on whatever key its first word
-                # names, so this fires on the row that silently overwrote a real conclusion —
-                # `summary` clobbered by the tail of a `termination.rationale`, say. A list key
-                # is exempt: repetition is how it carries more than one item.
+                # names, so this fires on the row that silently overwrote a real conclusion.
+                # A list key is exempt: repetition is how it carries more than one item.
                 self._warn(
                     block, index, row,
                     f"conclude: {key!r} is set twice in this block; the later row wins and "
@@ -935,11 +890,10 @@ class _Projector:
             # lessons corpus can instruct conclude rows this projection does not carry, and
             # `learning/core/persist.py` dead-letters a run whose investigation.md fails
             # validation rather than learning from it — so a warning here turns "the model
-            # obeyed a lesson" into a discarded run. `ceiling_test` was exactly that case until
-            # this commit recorded it. The truncation this block guards against is caught
-            # upstream by `_check_one_line_rows` on quote parity, which fires on both halves of
-            # a spilled quoted value without needing to know which keys are real. An unquoted
-            # spill stays undetected; that is the price of not denying instructed content.
+            # obeyed a lesson" into a discarded run. The truncation is caught upstream by
+            # `_check_one_line_rows` on quote parity, which fires on both halves of a spilled
+            # quoted value without needing to know which keys are real. An unquoted spill
+            # stays undetected; that is the price of not denying instructed content.
         if termination:
             conclude["termination"] = termination
 
@@ -974,11 +928,9 @@ class _Projector:
     def _stale_hyp_header(self, block: Block) -> bool:
         """True (and warned) when a `:H` DECLARATION block's header is off-schema.
 
-        One owner for both declaration sites. `:H l-NNN.new_hypotheses` used to
-        skip the check that `:H hypothesize.hypotheses` enforces, so a lead could
-        project a hypothesis off a stale header — and since a lead-born record is
-        now indexed for sub-block attachment, that record reaches every consumer
-        of `_walkers.all_hypotheses`.
+        One owner for both declaration sites: a lead-born record is indexed for sub-block
+        attachment, so a hypothesis projected off a stale header would reach every consumer of
+        `_walkers.all_hypotheses`.
         """
         if _is_current_hyp_header(block.columns):
             return False
@@ -1002,12 +954,11 @@ class _Projector:
             return
         hyps = self._project_rows(block, _hypothesis_record)
         self._warn_repeated_ids(block, hyps)
-        # Extend, never assign. Append-only forbids rewriting the loop-1 block, so
-        # a loop that forks a hypothesis writes a SECOND `:H
-        # hypothesize.hypotheses` — which used to REPLACE the list, deleting every
-        # earlier loop's hypothesis from the companion with no parse warning, and
-        # with them the `:H h-NNN.preds` a later resolution resolves against and
-        # the `:H h-NNN.authz` contracts benign-gating has to find (#816).
+        # Extend, never assign. Append-only forbids rewriting the loop-1 block, so a loop that
+        # forks a hypothesis writes a SECOND `:H hypothesize.hypotheses`; assignment would
+        # delete every earlier loop's hypothesis with no parse warning, and with them the
+        # `:H h-NNN.preds` a later resolution resolves against and the `:H h-NNN.authz`
+        # contracts benign-gating has to find.
         _extend_by_id(
             self.out.setdefault("hypothesize", {}).setdefault("hypotheses", []), hyps
         )
@@ -1018,30 +969,26 @@ class _Projector:
     ) -> None:
         """Index the records a `:H h-NNN.<sub>` sub-block attaches to.
 
-        Re-declaring an id at the SAME site is a re-emission: the first
-        declaration stands, silently, because that is what `_extend_by_id` does
-        to the list and what `_walkers.all_hypotheses` does on the read side.
-        Re-declaring it at the OTHER site is not recoverable and is warned.
+        Re-declaring an id at the SAME site is a re-emission: the first declaration stands,
+        silently, matching `_extend_by_id` and `_walkers.all_hypotheses`. Re-declaring it at
+        the OTHER site is not recoverable and is warned.
 
         The two sites disagree on order — `_walkers.all_hypotheses` walks the
-        `:H hypothesize.hypotheses` table before any lead's `new_hypotheses`,
-        not the document — so an id declared in a lead and then promoted into
-        the table indexed the LEAD record here and the TABLE record there. A
-        `:H h-NNN.authz` between the two landed on a record no consumer reads,
-        and `disposition: benign` passed on an unfulfilled contract. `prologue`
-        realigns the precedence; the warning covers what precedence cannot,
-        since a sub-block already attached to the loser cannot be moved.
+        `:H hypothesize.hypotheses` table before any lead's `new_hypotheses`, not the
+        document — so an id declared in a lead and then promoted into the table would index the
+        LEAD record here and the TABLE record there, landing a `:H h-NNN.authz` between the two
+        on a record no consumer reads (and passing `disposition: benign` on an unfulfilled
+        contract). `prologue` realigns the precedence; the warning covers what precedence
+        cannot, since a sub-block already attached to the loser cannot be moved.
         """
         for h in hyps:
             hid = h.get("id")
             if not isinstance(hid, str):
-                # NOT a dropped row, which is why this one warns nothing: `_hypothesis_record`
-                # `_require`s `id` and `name`, so a `:H` row with an empty id cell raises
-                # `RowError` and is warned by `_project_rows` ("hypothesis missing id/name")
-                # before any record exists. Nothing that reaches here can fail this test; it
-                # narrows the type for the reader and for mypy, and a warning would be a
-                # second diagnostic for a defect already named — the exact double-reporting
-                # `deferred_hypothesis_ids` exists to prevent.
+                # NOT a dropped row, which is why this warns nothing: `_hypothesis_record`
+                # `_require`s `id`, so a `:H` row with an empty id cell raises `RowError` and
+                # is warned by `_project_rows` before any record exists. Nothing reaching here
+                # can fail this test; it narrows the type, and a warning would double-report a
+                # defect already named.
                 continue  # lint-row-drop: ok — no row here; a bad id was refused upstream
             if prologue:
                 if hid in self.prologue_hypothesis_ids:
@@ -1084,18 +1031,16 @@ class _Projector:
     ) -> None:
         """Project a `:H h-NNN.<sub>` block onto the field it declares.
 
-        The destination is named at each branch rather than looked up in a
-        `{sub: field_name}` table: a TypedDict write needs a LITERAL key, so the
-        table form can only type-check by widening the record back to
-        `dict[str, Any]` — which is how a hypothesis record stopped being a
-        `HypothesisRecord` to everything downstream of the projector. Same reason
-        `_walkers._iter_outcome_rows` takes a selector instead of a field name.
+        The destination is named at each branch rather than looked up in a `{sub: field_name}`
+        table: a TypedDict write needs a LITERAL key, so the table form can only type-check by
+        widening the record back to `dict[str, Any]`, which loses `HypothesisRecord` for
+        everything downstream of the projector. Same reason `_walkers._iter_outcome_rows` takes
+        a selector instead of a field name.
 
-        Each branch EXTENDS, for the same reason `:H hypothesize.hypotheses`
-        does (#816): append-only forbids rewriting a committed sub-block, so a
-        loop that adds a prediction — or, worse, an authz contract the benign
-        gate has to find — writes a SECOND `:H h-NNN.<sub>`, and assignment
-        dropped everything the first one declared with no parse warning.
+        Each branch EXTENDS, for the same reason `:H hypothesize.hypotheses` does: append-only
+        forbids rewriting a committed sub-block, so a loop that adds a prediction — or an authz
+        contract the benign gate has to find — writes a SECOND `:H h-NNN.<sub>`, and assignment
+        would drop everything the first one declared with no parse warning.
         """
         if sub == "preds":
             if preds := self._project_rows(block, _hyp_sub_pred_row):
@@ -1122,39 +1067,36 @@ class _Projector:
         """An id written twice in ONE sub-block DELETES the second row, so say so.
 
         `_extend_by_id` keeps the first record per id — correct against the re-emission it
-        exists for, which is a whole block sent again as a SECOND block — but WITHIN one
-        block a repeated id is never a re-emission, and the row it drops carries content
-        nothing else does. A second `ac1` with a different predicate simply vanished, and
-        `_check_benign_authz` then discharged the surviving contract and closed benign over
-        a legitimacy question no lead ever asked. Same shape for a second `p1`/`r1`: the
+        exists for, which is a whole block sent again as a SECOND block — but WITHIN one block
+        a repeated id is never a re-emission, and the row it drops carries content nothing else
+        does. A second `ac1` with a different predicate simply vanishes, and
+        `_check_benign_authz` then discharges the surviving contract and closes benign over a
+        legitimacy question no lead ever asked. Same shape for a second `p1`/`r1`: the
         prediction is gone while `:T resolutions` goes on citing the id.
 
-        The four GRAPH-row sites are here for the same reason (#876/F-12), and they are the
-        ones the benign open-slot gate reads: a second `:V prologue.vertices` row repeating
-        `v-001` by an ordinal typo deleted the row carrying `integrity=??`, and the document
-        then closed benign over an open slot still on the page. Append-only makes that
-        unrecoverable — the committed row cannot be rewritten, and a second block with the
-        corrected id declares a DIFFERENT vertex — so the drop has to be loud at write time.
+        The four GRAPH-row sites are here for the same reason, and the benign open-slot gate
+        reads them: a second `:V prologue.vertices` row repeating `v-001` by an ordinal typo
+        deletes the row carrying `integrity=??`, and the document then closes benign over an
+        open slot still on the page. Append-only makes that unrecoverable — the committed row
+        cannot be rewritten, and a second block with the corrected id declares a DIFFERENT
+        vertex — so the drop has to be loud at write time.
 
-        The two `:H` DECLARATION sites are here on the same argument, and leaving them out
-        left the sharpest case of it uncovered: a repeated `h-001` in one
-        `:H hypothesize.hypotheses` block deletes a whole hypothesis — its story, its anchor,
-        its status — and every `:H h-001.authz` contract in the document then attaches to the
-        SURVIVING row, so the benign gate discharges a contract the deleted hypothesis never
-        got to state. `_register_hypotheses` cannot see it: it is written against the
-        cross-BLOCK re-emission, where the first declaration standing silently is the
-        sanctioned append-only shape.
+        The two `:H` DECLARATION sites carry the sharpest case: a repeated `h-001` in one
+        `:H hypothesize.hypotheses` block deletes a whole hypothesis, and every
+        `:H h-001.authz` contract then attaches to the SURVIVING row, so the benign gate
+        discharges a contract the deleted hypothesis never got to state. `_register_hypotheses`
+        cannot see it — it is written against the cross-BLOCK re-emission, where the first
+        declaration standing silently is the sanctioned append-only shape.
 
-        Only the rows of the block in hand are compared, which is what keeps that legal
-        cross-block repeat silent.
+        Only the rows of the block in hand are compared, which keeps that legal cross-block
+        repeat silent.
         """
         seen: set[str] = set()
         for r in rows:
             rid = r.get("id") if isinstance(r, dict) else None
             if not isinstance(rid, str) or not rid:
-                # The loop inside the drop-REPORTER. A row with no readable id cannot be
-                # checked for a repeated one, and it is still projected by the caller — the
-                # loop that owns it — so nothing is dropped here.
+                # A row with no readable id cannot be checked for a repeated one, and the
+                # caller still projects it — so nothing is dropped here.
                 continue  # lint-row-drop: ok — no id to compare; the caller still lands it
             if rid in seen:
                 self._warn(
@@ -1168,9 +1110,9 @@ class _Projector:
     def _project_lead_subblock(
         self, tag: str, sub: str, block: Block, lead: dict[str, Any]
     ) -> None:
-        # Extend, never assign — a lead whose results arrive as two `:V
-        # l-NNN.observations.vertices` blocks kept only the last one, and
-        # append-only leaves no way to write them as one (#816).
+        # Extend, never assign — a lead whose results arrive as two
+        # `:V l-NNN.observations.vertices` blocks would keep only the last one, and
+        # append-only leaves no way to write them as one.
         if tag == "V" and sub == "observations.vertices":
             vertices = self._project_rows(block, _vertex_record)
             self._warn_repeated_ids(block, vertices)
@@ -1197,38 +1139,32 @@ class _Projector:
             hyps = self._project_rows(block, _hypothesis_record)
             self._warn_repeated_ids(block, hyps)
             _extend_by_id(lead.setdefault("new_hypotheses", []), hyps)
-            # A hypothesis born inside a lead declares its predictions the way a
-            # prologue one does — in a `:H h-NNN.preds` sub-block. Unregistered,
-            # that sub-block was rejected as "unknown hypothesis", so a mid-run
-            # hypothesis could never carry a prediction for a resolution to cite.
+            # A hypothesis born inside a lead declares its predictions the way a prologue one
+            # does — in a `:H h-NNN.preds` sub-block. Unregistered, that sub-block is rejected
+            # as "unknown hypothesis" and a mid-run hypothesis can carry no prediction for a
+            # resolution to cite.
             self._register_hypotheses(block, hyps, prologue=False)
             return
         if tag == "H":
-            # `new_hypotheses` is the ONLY `:H` sub-block a lead carries, and it
-            # is now a documented authoring surface — so the singular typo is
-            # reachable. Silently dropping it left the fork vanished with zero
-            # warnings, and `_check_prediction_refs` then blamed the (correct)
-            # resolution row for moving an undeclared hypothesis. The other tags
-            # stay silent: `:L l-NNN.lead_preds` and friends are documented but
-            # unprojected, and warning on them needs the allowlist (#820).
+            # `new_hypotheses` is the ONLY `:H` sub-block a lead carries, so the singular typo
+            # is reachable. Dropping it silently vanishes the fork with zero warnings, and
+            # `_check_prediction_refs` then blames the (correct) resolution row for moving an
+            # undeclared hypothesis. The other tags stay silent: `:L l-NNN.lead_preds` and
+            # friends are documented but unprojected, and warning on them needs the allowlist.
             self._warn(
                 block, -1, "",
                 f"unknown lead sub-block `:H l-NNN.{sub}` — the only `:H` block "
                 f"a lead carries is `:H l-NNN.new_hypotheses`; its rows were "
                 f"dropped",
-                # Same reason as the stale-header rejection: the rows are readable and
-                # their first cell is the id, so `deferred_hypothesis_ids` can defer for
-                # exactly these instead of letting one typo here raise one undeclared-`h-*`
-                # error at every site that then references them.
-                # Filtered to `h-*` cells, because "these cells are hypothesis ids" is true
-                # only of the singular `new_hypothesis` typo this branch was written for.
-                # Any OTHER sub-name contributes its own row ids — `:H l-001.preds`
-                # contributes `p9` — and `deferred_hypothesis_ids` then finds no id-shaped
-                # name among them, returns `None`, and stands the undeclared-hypothesis rule
-                # down for the WHOLE DOCUMENT (#876/F-27): the author is shown the stray
-                # block and not the phantom `h-*` it hid, and pays a round trip to learn
-                # about it. The typo case is unaffected — its ids ARE `h-*`, so they survive
-                # the filter, and it is their only channel.
+                # Same reason as the stale-header rejection: the rows are readable and their
+                # first cell is the id, so `deferred_hypothesis_ids` can defer for exactly
+                # these instead of raising one undeclared-`h-*` error at every reference site.
+                # Filtered to `h-*` cells, because "these cells are hypothesis ids" holds only
+                # for the singular `new_hypothesis` typo this branch was written for. Any
+                # OTHER sub-name contributes its own row ids — `:H l-001.preds` contributes
+                # `p9` — and `deferred_hypothesis_ids` would then find no id-shaped name,
+                # return `None`, and stand the undeclared-hypothesis rule down for the WHOLE
+                # DOCUMENT. The typo case is unaffected: its ids ARE `h-*`.
                 dropped_ids=tuple(
                     cell
                     for cell in (_row_first_cell(r) for r in block.rows)
@@ -1280,9 +1216,8 @@ class _Projector:
             if entry.get("target") == tgt and isinstance(entry.get("updates"), dict):
                 entry["updates"][key] = val
                 return
-        # Literally constructed so the type gate actually checks both keys —
-        # this is the only writer, and `AttributeUpdate` is total on the strength
-        # of it.
+        # Literally constructed so the type gate actually checks both keys — this is the only
+        # writer, and `AttributeUpdate` is total on the strength of it.
         entry_new: AttributeUpdate = {"target": tgt, "updates": {key: val}}
         au.append(entry_new)
 
@@ -1302,16 +1237,14 @@ class _Projector:
         """`:T conclude.surviving [hyp_id|final_weight]` — the run's own list of what it
         thinks is still standing.
 
-        Projected, where every other `conclude.*` sub-block is still discarded, for one
-        reason: it is the FOURTH site that names an `h-*`, and the only one of the four the
-        parser threw away. A conclude naming a hypothesis nothing declares passed the
-        parser and the validator in silence, while the rule against exactly that was
-        written three sites over (#821).
+        Projected, where every other `conclude.*` sub-block is discarded, for one reason: it is
+        the FOURTH site that names an `h-*`, so discarding it lets a conclude naming an
+        undeclared hypothesis pass parser and validator in silence.
 
         Deliberately NOT wired into benign-gating. Survival there is computed from the
         resolution record precisely because this table is omittable and self-reported
-        (enforcement ramp rule 5); projecting it makes the claim checkable, and must not
-        make it authoritative.
+        (enforcement ramp rule 5); projecting it makes the claim checkable, and must not make
+        it authoritative.
         """
         conclude: dict[str, Any] = self.out.setdefault("conclude", {})
         rows: list[dict[str, str]] = conclude.setdefault("surviving_hypotheses", [])
@@ -1319,14 +1252,13 @@ class _Projector:
             hid = rec.get("hyp_id")
             # `none` / `n/a` is how an EMPTY array is written here, not a hypothesis id
             # (`docs/dense-investigation-format.md`: "Empty arrays render as a single `none`
-            # row", `surviving_hypotheses` named among them). Projecting the marker made the
-            # undeclared-`h-*` rule refuse a run whose hypotheses were all refuted.
+            # row"). Projecting the marker makes the undeclared-`h-*` rule refuse a run whose
+            # hypotheses were all refuted.
             if is_conclude_empty_marker(hid):
                 continue  # lint-row-drop: ok — the empty-TABLE marker, not a row
-            # One guard used to carry both cases, and the other one is a DROP: a row whose
-            # `hyp_id` cell is simply empty vanished from `conclude.surviving_hypotheses`
-            # with nothing raised, and the close then reasoned over a shortened survivor set
-            # that no reader could tell from an honestly shorter one.
+            # An empty `hyp_id` cell is a different case, and a DROP: the row would vanish
+            # from `conclude.surviving_hypotheses` with nothing raised, and the close would
+            # reason over a shortened survivor set no reader could tell from an honest one.
             if not hid:
                 self._warn(
                     block, idx, row,
@@ -1345,16 +1277,14 @@ class _Projector:
     def _project_shelved_block(self, block: Block) -> None:
         """`:T shelved [hyp_id|by_lead|rationale]` — which hypotheses a lead set aside.
 
-        Both empty-cell cases warn, and they did not use to. The missing `by_lead` half
-        always has; the missing `hyp_id` half was the silent one, three lines above a
-        warning for the very same shape — a shelved hypothesis simply never reached any
-        lead's `shelved` list, and #34's prediction-closure rule reads that list to decide
-        which hypotheses still owe their predictions.
+        Both empty-cell cases warn. A missing `hyp_id` would leave the shelved hypothesis out
+        of every lead's `shelved` list, and the prediction-closure rule reads that list to
+        decide which hypotheses still owe their predictions.
 
-        The empty-TABLE marker is honoured here the way `:T conclude.surviving` honours it.
-        `_row_cells` already pads a lone `none` row to the block's width, so the marker
-        arrived as `hyp_id="none"` with an empty `by_lead` and earned the lead-attribution
-        warning — a run that shelved nothing was told it had written a bad row.
+        The empty-TABLE marker is honoured here the way `:T conclude.surviving` honours it:
+        `_row_cells` pads a lone `none` row to the block's width, so the marker arrives as
+        `hyp_id="none"` with an empty `by_lead` and would otherwise earn the lead-attribution
+        warning.
         """
         for idx, row, rec in self._for_each_row(block):
             hyp = rec.get("hyp_id")
@@ -1399,9 +1329,8 @@ def parse_dense_companion(
         fence_blocks, fence_warnings = _tokenize_fence(match.group(1))
         blocks.extend(fence_blocks)
         warnings.extend(fence_warnings)
-    # Not `[]`. A fence whose FIRST header was rejected opens no block at all, so returning
-    # early on the empty block list is exactly what let that document parse to a clean, empty
-    # companion — the shape #876/F-2 rode in on.
+    # Return the warnings, not `[]`. A fence whose FIRST header was rejected opens no block at
+    # all, and dropping them here would let that document parse to a clean, empty companion.
     if not blocks:
         return cast(CompanionBody, {}), warnings
     companion, projected = companion_from_blocks(blocks)

@@ -37,12 +37,10 @@ POINTER_FILENAME = "session_store_pointer.json"
 #: caller through `append` at all: `fork()` writes its own entry directly.
 HEAD_MOVE_REASONS = ("fork", "fold")
 
-#: THE `truncated_by` vocabulary — every value any writer of that column may put in it, owned
-#: here because the column is. `set_truncated_by` has two callers now (the driver's run-end
-#: flush, on the MAIN session; the gather dispatch's terminator stamp, on a lead's), and a
-#: reader joining `session` rows asks "was this cut off, and by what" ONCE, across both kinds.
-#: Two writers spelling the same shape differently would make that a per-session-kind question
-#: — which is why the strings live here rather than one set at each writer. `dead-end` is the
+#: THE `truncated_by` vocabulary — every value any writer of that column may put in it. Two
+#: writers (the driver's run-end flush on the MAIN session, the gather dispatch's terminator
+#: stamp on a lead's) spelling the same shape differently would make "was this cut off, and by
+#: what" a per-session-kind question for every reader joining `session` rows. `dead-end` is the
 #: only value with no main-session analogue: only a lead can be stopped by the repeat guard.
 TRUNCATED_BY_REQUEST_LIMIT = "request-limit"
 TRUNCATED_BY_RETRY_EXHAUSTED = "retry-exhausted"
@@ -64,9 +62,8 @@ class StoreError(Exception):
     """Base for every failure this store raises on its own behalf.
 
     The driver catches THIS (alongside `sqlite3.Error`) to end a run through the handled
-    `truncated_by` exit. A new store exception that does not inherit from it propagates
-    out of the `ProcessHistory` hook and takes the whole `run.py` process down instead —
-    which is what a `PayloadNotRepresentable` from one NaN in a tool result used to do.
+    `truncated_by` exit. A new store exception that does not inherit from it propagates out
+    of the `ProcessHistory` hook and takes the whole `run.py` process down instead.
     """
 
 
@@ -275,11 +272,10 @@ def _extract_lead_id(payload_text: str) -> str | None:
         return None
 
 
-#: How long an append blocks on a lock another connection holds before the real `sqlite3`
-#: gives up. ONE anchor for both halves of that wait: `sqlite3.connect(timeout=)` sets the
-#: busy handler in SECONDS and the pragma resets it in MILLISECONDS, so the two were the
-#: same number spelled twice, in two units, three lines apart — and the survivor of any
-#: disagreement is whichever runs last, silently.
+#: How long an append blocks on a lock another connection holds before `sqlite3` gives up.
+#: ONE anchor for both halves of that wait: `sqlite3.connect(timeout=)` sets the busy handler
+#: in SECONDS and the pragma resets it in MILLISECONDS, so spelled separately they are the
+#: same number in two units, and the survivor of any disagreement is whichever runs last.
 STORE_BUSY_TIMEOUT_MS = 30_000
 
 
@@ -306,11 +302,11 @@ class StoreHandle:
     """One handle, ONE `sqlite3.Connection`, shared by the main agent's session and every
     concurrently-dispatched gather sub-agent's session.
 
-    That is safe only because `append()`'s `BEGIN IMMEDIATE … COMMIT` block contains no
-    `await`: pydantic_ai dispatches parallel `gather` calls as asyncio tasks on one
-    thread, so without a suspension point inside the transaction two tasks cannot
-    interleave halfway through one. **Adding any `await` inside that block reintroduces
-    interleaved-transaction corruption** — give each session its own connection first.
+    Safe only because `append()`'s `BEGIN IMMEDIATE … COMMIT` block contains no `await`:
+    pydantic_ai dispatches parallel `gather` calls as asyncio tasks on one thread, so without
+    a suspension point two tasks cannot interleave halfway through one transaction. **Adding
+    any `await` inside that block reintroduces interleaved-transaction corruption** — give
+    each session its own connection first.
     """
 
     path: Path
@@ -331,17 +327,14 @@ class StoreHandle:
     def fork(self, session_id: str, at_message_id: int) -> str:
         """Open a session branching from `session_id` at `at_message_id`.
 
-        The branch point becomes the new session's `head_message_id` directly — no
-        separate fallback column left to consult — and its own `session_head_log` entry,
-        both inside one `BEGIN IMMEDIATE`: a fault between the two writes would leave a
-        session with a head and no branch-point record, exactly the unreachable-lineage-
-        without-a-record state the design forbids. `last_render_len` is seeded to the
-        SEND-role length of the inherited prefix (the same length `render()` would compute
-        via `hydrate(..., role="send")`), not the raw row count: if `at_message_id` is
-        itself a response with an unresolved tool call — the natural boundary for a
-        dispatched sub-agent — the raw count over-counts by one against what `ingest`'s
-        `last_render_len` bookkeeping treats as already-rendered, which would misclassify
-        the fork's own first live tail (or raise `IngestTailUnderflow` outright)."""
+        The branch point becomes the new session's `head_message_id` and its own
+        `session_head_log` entry, both inside one `BEGIN IMMEDIATE`: a fault between the two
+        writes would leave a session with a head and no branch-point record.
+
+        `last_render_len` is seeded to the SEND-role length of the inherited prefix, not the
+        raw row count: if `at_message_id` is a response with an unresolved tool call — the
+        natural boundary for a dispatched sub-agent — the raw count over-counts by one against
+        what `ingest` treats as already-rendered."""
         new_id = uuid.uuid4().hex
         conn = self.connection
         conn.execute("BEGIN IMMEDIATE")
@@ -414,10 +407,9 @@ class StoreHandle:
             conn.execute("SELECT 1")
         except BaseException:
             # Only roll back a transaction that is still open. Past COMMIT there is none,
-            # and `ROLLBACK` with no active transaction itself raises
-            # (sqlite3.OperationalError) — which would replace whatever actually brought
-            # us here with an unrelated error, and get the run classified as a routine
-            # "store" truncation even though the rows are already durable.
+            # and `ROLLBACK` with no active transaction itself raises — which would replace
+            # whatever brought us here with an unrelated error, and get the run classified
+            # as a routine "store" truncation even though the rows are already durable.
             if not committed:
                 with contextlib.suppress(sqlite3.Error):
                     conn.execute("ROLLBACK")
@@ -455,16 +447,13 @@ class StoreHandle:
 
 def _walk_parents(conn: sqlite3.Connection, tip: int) -> list[int]:
     """Tip-to-root row ids, refusing a cyclic chain. The one PYTHON walk both the reader
-    (`path_row_ids`) and the writer (`append`'s write-time cycle guard) go through, so a
-    corrupted chain cannot stay invisible at write time and surface only later, at read
-    time. Terminates cleanly (and returns a phantom id as the path's oldest element,
-    rather than raising) when an id along the chain resolves no `message` row — the
-    read-side callers (`hydrate`, `synthesized_flags`) are what fail closed on that.
+    (`path_row_ids`) and the writer (`append`'s cycle guard) go through, so a corrupted chain
+    cannot stay invisible at write time. Terminates cleanly on a phantom id (returning it as
+    the path's oldest element) — `hydrate`/`synthesized_flags` fail closed on that.
 
-    `gather_boundary`'s `WITH RECURSIVE` (in `DDL`) is a SECOND implementation of this
-    same walk, in SQL, and it is deliberately weaker on both corruption shapes: a cycle
-    degrades instead of raising, and a phantom id truncates the path silently. Any change
-    to the traversal rule here has to be made there too — they are not one walk."""
+    `gather_boundary`'s `WITH RECURSIVE` (in `DDL`) is a SECOND implementation of this walk,
+    deliberately weaker on both corruption shapes. A change to the traversal rule here has to
+    be made there too — they are not one walk."""
     ids: list[int] = []
     seen: set[int] = set()
     current: int | None = tip
@@ -529,10 +518,9 @@ def _validate_seq(seq: Any) -> None:
 
 def _validate_duration_ms(duration_ms: Any) -> None:
     """`duration_ms` is bound straight into the INSERT, so it never meets
-    `_find_nonrepresentable` — the isfinite discipline every other float in the row is
-    held to. Without this check SQLite silently stores a NaN as SQL NULL (defeating the
-    discipline two lines away) and an inf round-trips verbatim, later serializing to the
-    bare token `Infinity`, which is not valid JSON for any strict downstream consumer."""
+    `_find_nonrepresentable` — the isfinite discipline every other float in the row is held
+    to. Unchecked, SQLite silently stores a NaN as SQL NULL and an inf round-trips verbatim,
+    later serializing to the bare token `Infinity`, which is not valid JSON."""
     if duration_ms is None:
         return
     if isinstance(duration_ms, bool) or not isinstance(duration_ms, (int, float)):
@@ -543,10 +531,8 @@ def _validate_duration_ms(duration_ms: Any) -> None:
 
 
 def _validate_reason(reason: str | None) -> None:
-    """Membership by exact match, whenever `reason` is not `None` — before the
-    empty-batch short-circuit and before the move's linearity is classified (FK-C).
-    `fork` is a member of the closed set but has no legitimate caller through `append`
-    at all: `fork()` writes its own entry directly."""
+    """Membership by exact match, whenever `reason` is not `None` — before the empty-batch
+    short-circuit and before the move's linearity is classified."""
     if reason is None:
         return
     if reason not in HEAD_MOVE_REASONS:
@@ -628,13 +614,10 @@ def _next_seq(conn: sqlite3.Connection, session_id: str, agent_id: str, synthesi
 
 
 def _tool_name(message: Any) -> str | None:
-    """Every distinct tool named by the message, comma-joined in first-seen order.
-
-    One response legitimately carries several tool calls — the `gather` tool's own
-    docstring tells the model to "issue multiple gather calls in one turn to dispatch
-    sibling leads in parallel". Returning only the first would make the `actor`
-    projection disagree with `observe.write_trace`, which re-derives the same fact from
-    `message.parts` and lists all of them. Single-tool messages are unaffected."""
+    """Every distinct tool named by the message, comma-joined in first-seen order. One response
+    legitimately carries several tool calls (the `gather` tool dispatches sibling leads in
+    parallel from one turn), and returning only the first would make the `actor` projection
+    disagree with `observe.write_trace`, which re-derives the same fact and lists all."""
     names: list[str] = []
     for part in getattr(message, "parts", []):
         if isinstance(part, (ToolCallPart, ToolReturnPart)) and part.tool_name not in names:
@@ -658,23 +641,18 @@ def _children(obj: Any) -> Any:
     return ()
 
 
-#: Below the installed `ModelMessagesTypeAdapter.dump_python`'s own ceiling (bisected
-#: empirically at ~250 levels of dict nesting for a `ToolCallPart.args` payload — well
-#: under SQLite's ~1000-level JSON ceiling and under Python's default recursion limit),
-#: so the append-time refusal fires before pydantic-core's own uncaught
-#: `ValueError: Circular reference detected (depth exceeded)` would.
+#: Below the installed `ModelMessagesTypeAdapter.dump_python`'s own ceiling (bisected at
+#: ~250 levels of dict nesting for a `ToolCallPart.args` payload), so the append-time refusal
+#: fires before pydantic-core's uncaught `ValueError: Circular reference detected`.
 _MAX_PAYLOAD_DEPTH = 200
 
 _TOO_DEEP = object()
 
 
 def _find_nonrepresentable(obj: Any) -> Any:
-    """Iterative, not recursive, and depth-capped: a deeply-nested tool-call `args` dict
-    is attacker-influenced by construction (the model chooses its own tool-call shape),
-    and both a Python-recursion-depth scan AND `dump_python` itself crash on one well
-    before SQLite's own ~1000-level JSON ceiling — the same failure mode `extract_lead_id`
-    (this module's SQL scalar function) was built to sidestep, re-found here in the
-    append-time validator by re-probing PR5/adv:PO2 against the real implementation."""
+    """Iterative, not recursive, and depth-capped: a tool-call `args` dict is
+    attacker-influenced by construction, and both a recursive scan AND `dump_python` crash on a
+    deep one well before SQLite's ~1000-level JSON ceiling."""
     stack: list[tuple[Any, int]] = [(obj, 0)]
     while stack:
         current, depth = stack.pop()
@@ -698,10 +676,9 @@ def store_path_for(case_id: str, *, runs_base: Path) -> Path:
 
 
 def _refuse_stale_version(conn: sqlite3.Connection) -> None:
-    """Read `PRAGMA user_version` and refuse anything but `SCHEMA_VERSION`, before any
-    DDL and before the WAL pragma — so a refused file is left byte-identical and no
-    `-wal`/`-shm` sidecar is ever written beside it (FK-G). No migration path is offered:
-    D3 deletes the ALTER shim that used to silently re-shape a pre-existing store."""
+    """Read `PRAGMA user_version` and refuse anything but `SCHEMA_VERSION`, before any DDL
+    and before the WAL pragma — so a refused file is left byte-identical and no `-wal`/`-shm`
+    sidecar is written beside it. No migration path is offered, deliberately."""
     version = conn.execute("PRAGMA user_version").fetchone()[0]
     if version != SCHEMA_VERSION:
         raise UnknownSchemaVersion(f"store reports schema version {version}")
@@ -710,10 +687,9 @@ def _refuse_stale_version(conn: sqlite3.Connection) -> None:
 def open_store(*, case_id: str, runs_base: Path) -> StoreHandle:
     path = store_path_for(case_id, runs_base=runs_base)
     # The store sits in a `sessions/` dir BESIDE the runs base, so the trust root is their
-    # shared parent — the host-chosen location both hang off, and the highest point no box
-    # ever gets a writable mount on. Anchoring any higher would refuse on a symlinked runs
-    # base (`/tmp` is one on macOS, and the default runs base lives there) and no run could
-    # open its store at all.
+    # shared parent — the highest point no box ever gets a writable mount on. Anchoring any
+    # higher would refuse on a symlinked runs base (`/tmp` is one on macOS, and the default
+    # runs base lives there) and no run could open its store at all.
     guarded_mkdir(path.parent, base=Path(runs_base).parent)
     fresh = not path.exists()
     conn = _bare_connect(path)
@@ -733,18 +709,14 @@ def open_store(*, case_id: str, runs_base: Path) -> StoreHandle:
 def open_store_for_read(store_path: Path) -> StoreHandle:
     """Open an EXISTING store file for reading only — never creates one.
 
-    `open_store` deliberately creates-if-missing (its table DDL is `IF NOT EXISTS`); a
-    reader (the visualizer, run after the fact from just a `run_dir`) must fail closed
-    instead of silently conjuring an empty database where a real one used to be. It is
-    also the only opener that ever meets a file it did not create, so it refuses a stale
-    version exactly as `open_store` does, at the same pre-DDL, pre-WAL point.
+    `open_store` deliberately creates-if-missing; a reader (the visualizer, run after the fact
+    from just a `run_dir`) must fail closed instead of conjuring an empty database where a real
+    one used to be. It is also the only opener that meets a file it did not create, so it
+    refuses a stale version at the same pre-DDL, pre-WAL point.
 
-    RESIDUE (#753): this opener issues NO DDL at all, and `SCHEMA_VERSION` did not move
-    when `gather_boundary` was rescoped — so a file whose last WRITER was pre-#753 still
-    carries the old, unscoped view definition, and this path will serve it with no signal
-    that its `session_id` column means the owning session rather than the session whose
-    path the row is on. Nothing reads the view through here today; #696 goes through
-    `open_store`, which rebuilds it. A reader added here must rebuild it first."""
+    RESIDUE: it issues NO DDL, and `SCHEMA_VERSION` did not move when `gather_boundary` was
+    rescoped — so an old file still carries the old, unscoped view definition and this path
+    serves it with no signal. A reader added here must rebuild it first."""
     store_path = Path(store_path)
     if not store_path.is_file():
         raise FileNotFoundError(f"session store not found: {store_path}")
@@ -774,10 +746,9 @@ def resolve_store_path(run_dir: Path) -> Path:
 # --------------------------------------------------------------------------
 
 def path_row_ids(store: Any, session_id: str) -> list[int]:
-    """The parent walk from the session's RECORDED head — never from the highest-id row
-    it happens to own. A NULL head (no entry, or a session with rows but no head) reads
-    as an empty path: there is no fallback left that re-derives a tip from insertion
-    order."""
+    """The parent walk from the session's RECORDED head — never from the highest-id row it
+    happens to own. A NULL head reads as an empty path; nothing re-derives a tip from
+    insertion order."""
     conn = store.connection
     head = _read_head(conn, session_id)
     if head is None:
@@ -802,9 +773,8 @@ def displaced_tip(store: Any, session_id: str) -> int | None:
 
 
 def fold_history(store: Any, session_id: str) -> list[int | None]:
-    """Every fold's displaced tip, in head-move order — `displaced_tip` is its last
-    element. The ordered accessor a single "most recent" reader cannot provide: it is
-    what makes the first fold's displaced tip reachable at all."""
+    """Every fold's displaced tip, in head-move order — `displaced_tip` is its last element.
+    The ordered accessor is what makes the FIRST fold's displaced tip reachable at all."""
     rows = store.connection.execute(
         "SELECT from_message_id FROM session_head_log WHERE session_id = ? "
         "AND reason = 'fold' AND from_message_id IS NOT NULL ORDER BY id", (session_id,),
@@ -814,9 +784,9 @@ def fold_history(store: Any, session_id: str) -> list[int | None]:
 
 def branch_point(store: Any, session_id: str) -> int | None:
     """The session's branch point — a log row that is BOTH origin-less and fork-reasoned.
-    Neither condition alone is sufficient: an origin-less row can be a fold of an empty
-    path, and a fork-reasoned row can be smuggled in with a non-NULL origin by a caller
-    that bypasses `append`'s own refusal."""
+    Neither alone suffices: an origin-less row can be a fold of an empty path, and a
+    fork-reasoned row can be smuggled in with a non-NULL origin by a caller that bypasses
+    `append`'s own refusal."""
     row = store.connection.execute(
         "SELECT to_message_id FROM session_head_log WHERE session_id = ? "
         "AND reason = 'fork' AND from_message_id IS NULL ORDER BY id DESC LIMIT 1",
@@ -828,11 +798,10 @@ def branch_point(store: Any, session_id: str) -> int | None:
 def main_session_id(store: Any, *, agent_id: str = "main") -> str:
     """The ROOT-OF-LINEAGE session for `agent_id` in this store: never an ordering pick.
 
-    A forked session inherits its parent's `agent_id`, so it can carry `agent_id='main'`
-    too and sort ahead of the session it forked from — an ORDER-BY-anything fallback would
-    silently resolve the wrong lineage. Raises on zero or more than one match: failing
-    loudly is the one failure a caller of this can afford, since picking one would render
-    (or otherwise act on) the wrong session's history without any signal that it did."""
+    A forked session inherits its parent's `agent_id`, so it can carry `agent_id='main'` too
+    and sort ahead of the session it forked from — an ORDER-BY-anything fallback would
+    silently resolve the wrong lineage. Raises on zero or more than one match, because picking
+    one would act on the wrong session's history with no signal that it did."""
     rows = store.connection.execute(
         "SELECT session_id FROM session WHERE agent_id = ? AND parent_session_id IS NULL",
         (agent_id,),
@@ -848,8 +817,8 @@ def main_session_id(store: Any, *, agent_id: str = "main") -> str:
 # --------------------------------------------------------------------------
 
 def _check_schema_version(store: Any) -> None:
-    """Same refusal `_refuse_stale_version` makes at open time, re-checked at read time
-    against the handle actually in hand — one comparison, not two copies of it."""
+    """`_refuse_stale_version`'s refusal, re-checked at read time against the handle actually
+    in hand — one comparison, not two copies of it."""
     _refuse_stale_version(store.connection)
 
 
@@ -972,10 +941,10 @@ def _has_extra_keys(raw: Any, redumped: Any) -> bool:
                 return True
         return False
     if isinstance(raw, list):
-        # Same verdict as the dict branch above: a type change or a dropped element IS
-        # skew. Returning False here would report "no skew" for exactly the case
-        # PayloadSchemaSkew exists to catch — an adapter that reshapes a list-typed
-        # field (`parts`) on the round-trip instead of raising.
+        # Same verdict as the dict branch: a type change or a dropped element IS skew.
+        # Returning False here would report "no skew" for exactly the case
+        # PayloadSchemaSkew exists to catch — an adapter that reshapes a list-typed field
+        # (`parts`) on the round-trip instead of raising.
         if not isinstance(redumped, list) or len(raw) != len(redumped):
             return True
         return any(_has_extra_keys(a, b) for a, b in zip(raw, redumped, strict=True))

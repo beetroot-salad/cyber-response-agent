@@ -127,9 +127,8 @@ _FRONTIER_HEAD = (
 #: to resume from it.
 RESUME_FROM_TAIL = "Resume the CURRENT loop from the messages after this one."
 
-#: The store-backed fold is restart-shaped — the frontier is the LAST row on the path
-#: (`test_folds_are_restart_shaped_with_an_empty_tail`), so there are no messages after
-#: it to resume from and saying otherwise points the model at an empty tail.
+#: The store-backed fold is restart-shaped — the frontier is the LAST row on the path, so
+#: there are no messages after it and pointing the model at a tail would point it at nothing.
 RESUME_RESTART_SHAPED = (
     "The turns that produced this record are no longer in the history — it is all "
     "that remains of them. Work the CURRENT loop from it and from investigation.md "
@@ -154,11 +153,9 @@ def render_frontier_message(frontier_md: str) -> Message:
 
 
 def frontier_text(investigation_md: str, fold_through: int) -> str:
-    """The frontier body for a STORE-BACKED fold through loop `fold_through`.
-
-    The public composition `selection.render(fold=True, text=…)` takes, so the driver
-    never reaches into `_frontier_through` — that private reach-through is what #705
-    removed along with the rest of the in-driver compaction glue."""
+    """The frontier body for a STORE-BACKED fold through loop `fold_through` — the public
+    composition `selection.render(fold=True, text=…)` takes, so the driver never has to
+    reach into `_frontier_through` itself."""
     return frontier_body(
         _frontier_through(investigation_md, fold_through), resume=RESUME_RESTART_SHAPED)
 
@@ -260,8 +257,8 @@ def apply_writes(current: str, response: Message) -> str:
                 continue
         name = part.get("tool_name")
         # `append_block` carries no path — the run has one transcript and the verb is bound
-        # to it (#810) — so it is targeted by name and must be tested BEFORE the path filter,
-        # which would otherwise drop every call as "not investigation.md".
+        # to it — so it is targeted by name and must be tested BEFORE the path filter, which
+        # would otherwise drop every call as "not investigation.md".
         if name == "append_block":
             text = args.get("text", "")
             if not isinstance(text, str):

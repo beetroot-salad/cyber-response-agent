@@ -27,9 +27,8 @@ from defender._io import use_utf8_stdio
 def _json_safe(obj):
     if isinstance(obj, dict):
         # KEYS too: YAML types a bare `2026-01-01:` as a `datetime.date` and `!!binary` as
-        # `bytes`, either of which json.dumps rejects — and one such key in one lesson's
-        # frontmatter aborted the whole build rather than degrading that lesson (#854 F-20).
-        # Routing the key through _json_safe first turns a date into its ISO string.
+        # `bytes`, either of which json.dumps rejects — so one such key in one lesson's
+        # frontmatter would abort the whole build instead of degrading that lesson.
         return {(k if isinstance(k, str) else str(_json_safe(k))): _json_safe(v)
                 for k, v in obj.items()}
     if isinstance(obj, (set, frozenset)):
@@ -39,9 +38,9 @@ def _json_safe(obj):
     if isinstance(obj, (_dt.date, _dt.datetime)):
         return obj.isoformat()
     if isinstance(obj, float) and not math.isfinite(obj):
-        # `json.dumps` ACCEPTS these and emits bare `NaN`/`Infinity`, which is not JSON — so a
-        # YAML `.nan` in one lesson's frontmatter poisons `lessons.json` for every strict reader
-        # of it. Same degrade-this-lesson rule as the exotic types above (#854 F-20).
+        # `json.dumps` ACCEPTS these and emits bare `NaN`/`Infinity`, which is not JSON — a
+        # YAML `.nan` in one lesson's frontmatter would poison `lessons.json` for every strict
+        # reader. Same degrade-this-lesson rule as the exotic types above.
         return None
     if obj is None or isinstance(obj, (str, bool, int, float)):
         return obj
@@ -120,14 +119,10 @@ GROUPS: dict[str, GroupSpec] = {
         "fields": [
             {"label": "Alert rules", "key": "alert_rule_ids", "kind": "chips"},
             # The display label for an environment lesson's own `entities` frontmatter key
-            # (learning/core/validate.py's `environment_observations[].entities` selectors),
-            # not a reference to the `Entities` dataclass #867 retired from
-            # runtime/lead_zero.py. Same word, unrelated domain: renaming it would change a
-            # user-visible chip label and a corpus schema key. The suppression marker sits on
-            # the REFERENCING line because that is where lint_stale_refs reads it
-            # (`_batch_grep`: `if SUPPRESS in content`, content being the matched line) — above
-            # it, the gate is silent only for as long as this file stays in the PR's own
-            # changed-file set.
+            # (validate.py's `environment_observations[].entities` selectors), not the retired
+            # `Entities` dataclass — same word, unrelated domain. Renaming it would change a
+            # user-visible chip label and a corpus schema key. The suppression marker must sit
+            # on the REFERENCING line: lint_stale_refs reads it off the matched line only.
             {"label": "Entities", "key": "entities", "kind": "chips"},  # lint-stale-ref: ok — display label, not the retired dataclass
             {"label": "Recorded", "key": "recorded_at", "kind": "text"},
         ],

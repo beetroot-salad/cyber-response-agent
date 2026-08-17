@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Append a held-out result to the ledger (#711 AC 2).
+"""Append a held-out result to the ledger.
 
 A held-out score is recorded **once per (case, tag)**. This appends the entry;
 it will not replace one. That refusal is the mechanism: re-running a held-out
@@ -49,10 +49,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"!! no {score_path}", file=sys.stderr)
         return 1
 
-    # The judge runs at score time, so the tag names it (#711 §6). `judge_model()` reads
-    # an env var with a fallback, which means two machines can mint identically-named
-    # tags from different judges. Refuse the one thing that would make the ledger lie:
-    # a result filed under a tag that does not name the judge recorded inside it.
+    # The judge runs at score time, so the tag names it. `judge_model()` reads an env var
+    # with a fallback, so two machines can mint identically-named tags from different
+    # judges. Refuse the one thing that would make the ledger lie: a result filed under a
+    # tag that does not name the judge recorded inside it.
     score = json.loads(score_path.read_bytes())
     recorded = score.get("judge") or {}
     if not ns.tag.endswith(judge.tag_suffix(recorded.get("model", ""),

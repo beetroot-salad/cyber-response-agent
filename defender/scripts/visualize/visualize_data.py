@@ -164,8 +164,8 @@ class _PhaseTagger:
         if tu_id and tu_id in self.consumed_tool_use_ids:
             return
         inp = blk.get("input", {}) or {}
-        # `append_block` (#810) and `fix_row` (#836) are bound to investigation.md and carry
-        # no path, so the path filter below cannot speak for them — the name already did.
+        # `append_block` and `fix_row` are bound to investigation.md and carry no path, so the
+        # path filter below cannot speak for them — the name already did.
         if name not in ("append_block", "fix_row"):
             fp = str(inp.get("file_path") or inp.get("path") or "")
             if not fp.endswith("investigation.md"):

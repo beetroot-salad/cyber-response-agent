@@ -17,32 +17,28 @@ from pathlib import Path
 #: `<root>/wire_logs/<stage>.trace.jsonl` for the actor, oracle, judge, curators and
 #: forward-check verifier. One component means one rule can name them all, which is what
 #: `names_wire_log_dir` is. The class is "carries a wire body verbatim", NOT "is a
-#: `RequestLogger`": `runtime.observe.denial_logger` builds one of those too and stays at
-#: `<run_dir>/policy_denials.jsonl`, for the reason the root-level census below gives.
+#: `RequestLogger`": `runtime.observe.denial_logger` builds one too and stays at
+#: `<run_dir>/policy_denials.jsonl`, per the root-level census below.
 #:
 #: THE SUBDIRECTORY IS THE GATE, not tidiness. MAIN's and GATHER's run-dir read shape is
-#: `under(run, SEG)` (`runtime/permission/policies/_common.read_shapes`, the builder those two
-#: and only those two share) and `SEG` spells ONE path segment — so a run-root file is
-#: admitted by that shape and a file one level down is not, on the read tool and the bash
-#: `cat` lane alike (they share the shape OBJECT). At the run root this log was readable by
-#: MAIN, which is a boundary crossing: every gather subagent logs through the SAME
-#: `RequestLogger` (`driver.build_gather_agent`), so gather's tool
-#: returns — the raw payload bytes `decide_read` refuses MAIN one call earlier with
-#: `RAW_DENY_REASON` — sat verbatim in a file MAIN could `read_file`/`cat`, and
-#: `is_untrusted_read` did not fire on it, so neither lane salt-framed the read. GATHER's
-#: shape is the same, so the mirror held too: an injected subagent could read MAIN's whole
-#: transcript. One subdirectory takes both away without touching a shape.
+#: `under(run, SEG)` (`runtime/permission/policies/_common.read_shapes`, the builder only
+#: those two share) and `SEG` spells ONE path segment — so a run-root file is admitted by that
+#: shape and a file one level down is not, on the read tool and the bash `cat` lane alike
+#: (they share the shape OBJECT). At the run root this log was readable by MAIN, which is a
+#: boundary crossing: every gather subagent logs through the SAME `RequestLogger`
+#: (`driver.build_gather_agent`), so gather's raw payload bytes — which `decide_read` refuses
+#: MAIN one call earlier with `RAW_DENY_REASON` — sat verbatim in a file MAIN could
+#: `read_file`/`cat`, unframed (`is_untrusted_read` did not fire). GATHER's shape is the same,
+#: so the mirror held too: an injected subagent could read MAIN's whole transcript.
 #:
-#: THE SUBDIRECTORY ARGUMENT DOES NOT GENERALIZE PAST THOSE TWO ROLES, which is why they are
-#: named above rather than written as "every reader". The JUDGE's `cat` scope is built from
-#: `under(run, TREE)` (`judge/engine_pydantic._judge_bash_shapes`) — multi-segment, so a
-#: subdirectory hides nothing from it — and the ACTOR carries no `cat` grant at all, so
-#: `read_allow_of` yields an EMPTY shape tuple and `decide_read` applies no shape filter to it
-#: whatsoever, leaving that role gated by root containment alone. Those two share the LEARNING
-#: run dir, where the same `RequestLogger` writes every stage's trace, so the identical defect
-#: lived there: the judge's trace carries the payload exemplars its prompt is given UNREDACTED
-#: (`judge/compare.unredacted_exemplar`) and the gray-box actor could read it straight back,
-#: around the `gather_raw` deny that exists to keep exactly those bytes from it.
+#: THE SUBDIRECTORY ARGUMENT DOES NOT GENERALIZE PAST THOSE TWO ROLES. The JUDGE's `cat` scope
+#: is `under(run, TREE)` (`judge/engine_pydantic._judge_bash_shapes`) — multi-segment, so a
+#: subdirectory hides nothing from it — and the ACTOR carries no `cat` grant, so
+#: `read_allow_of` yields an EMPTY shape tuple and `decide_read` applies no shape filter at
+#: all, leaving it gated by root containment alone. Those two share the LEARNING run dir,
+#: where the same defect lived: the judge's trace carries its prompt's payload exemplars
+#: UNREDACTED (`judge/compare.unredacted_exemplar`) and the gray-box actor could read them
+#: back, around the `gather_raw` deny.
 #:
 #: Which is why the component ALSO carries an outright deny (`permission.files.names_wire_log_dir`,
 #: both read surfaces, every role) rather than resting on the shapes. The directory is what
@@ -52,53 +48,43 @@ from pathlib import Path
 #: The run's OTHER root-level streams stay at the root deliberately: `tool_trace.jsonl` is a
 #: projection carrying tool NAMES (`observe._user_event`), `policy_denials.jsonl` carries a
 #: parameter DIGEST rather than the blob (`RequestLogger.log_policy_denial`), and
-#: `budget.json`/`circuit_breaker.json` are counters. None of them replays another agent's
-#: context, which is the property that made this one a leak; this dir is for streams that
-#: carry wire bodies verbatim.
+#: `budget.json`/`circuit_breaker.json` are counters. None replays another agent's context,
+#: which is the property that made this one a leak.
 #:
-#: `review_{role}_trace.jsonl` IS in the class and MOVED WITH THEM. `_write_trace_row` appends
-#: each review stage's RAW wrapped reply, so at the run root it sat one segment deep inside
-#: MAIN's and GATHER's shape — while MAIN is handed only the composer's `target: ask` lines
-#: (`close_tool._render_challenged_message`) and never the two blind lenses' replies, which is
-#: the blindness the gate is built on. `challenge_gate.review_trace_path` still owns the
-#: filename and the visualizer's § Review gate still reads through it; only the component
-#: moved.
+#: `review_{role}_trace.jsonl` IS in the class and lives here too. `_write_trace_row` appends
+#: each review stage's RAW wrapped reply, while MAIN is handed only the composer's
+#: `target: ask` lines (`close_tool._render_challenged_message`) and never the two blind
+#: lenses' replies — the blindness the gate is built on. `challenge_gate.review_trace_path`
+#: owns the filename.
 #:
-#: `transcript.html`/`runtime.html` are the ONE exception and are named here so the exception
-#: is recorded rather than inferred: they DO inline MAIN's transcript verbatim (rendered from
-#: this very log — `visualize_messages`, which keeps only `agent_id == "main"`), and they sit
-#: at the run root inside GATHER's shape. They are out of reach on TIMING, not on content —
-#: `run.py` renders them after `run_investigation` has returned, so no agent of the run they
-#: describe is still alive to read them. That is a thinner guarantee than a directory, and
-#: anything that moves the render INTO the run (a mid-flight `--visualize`, a live page) has
-#: to move these two under `wire_logs/` in the same change.
+#: `transcript.html`/`runtime.html` are the ONE exception, recorded so it is not inferred:
+#: they DO inline MAIN's transcript verbatim (rendered from this log by `visualize_messages`)
+#: and sit at the run root inside GATHER's shape. They are out of reach on TIMING, not on
+#: content — `run.py` renders them after `run_investigation` returns, so no agent of that run
+#: is still alive. That is a thinner guarantee than a directory, and anything that moves the
+#: render INTO the run (a mid-flight `--visualize`, a live page) must move these two under
+#: `wire_logs/` in the same change.
 WIRE_LOG_DIR = "wire_logs"
 WIRE_LOG = "llm_requests.jsonl"
 
-#: #872 O5 — the reserved key on a `tool-return` part's `metadata` that the TOON view gate
-#: parks the tool's ORIGINAL JSON under when it substitutes a smaller view. Spelled HERE for
-#: the reason the wire log's own location is: the WRITER is `runtime.toon_gate` (which imports
-#: pydantic-ai, a `runtime`-extra-only dependency) and the READER is `scripts/visualize/
-#: visualize_messages`, which a learning-loop or CI install renders transcripts with and must
-#: not pay a pydantic-ai edge to learn a field name. `runtime.toon_gate` re-exports it under
-#: its own name, which is where §7 r1 pins the literal.
+#: The reserved key on a `tool-return` part's `metadata` that the TOON view gate parks the
+#: tool's ORIGINAL JSON under when it substitutes a smaller view. Spelled HERE for the reason
+#: the wire log's location is: the WRITER is `runtime.toon_gate` (which imports pydantic-ai, a
+#: `runtime`-extra-only dependency) and the READER is `scripts/visualize/visualize_messages`,
+#: which a learning-loop or CI install must not pay a pydantic-ai edge to learn a field name.
+#: `runtime.toon_gate` re-exports it under its own name, where §7 r1 pins the literal.
 GATE_METADATA_KEY = "json"
 
 
 @dataclass(frozen=True)
 class RunPaths:
-    """One run's directories and named artifacts.
+    """One run's directories and its six artifact accessors: the alert, the report, the
+    investigation log, the executed-queries table, the raw-payload dir and the wire log.
 
-    ``run_dir`` is the source root (the finished investigation, read); the six
-    artifact accessors (``alert``/``report``/``investigation``/``executed_queries``/
-    ``gather_raw``/``wire_log``) resolve relative to it. Construct ``RunPaths(some_dir)``
-    on whichever root you hold — the accessors are root-relative by design.
-
-    ONE root, deliberately. This used to carry an optional second (the per-case leg-output
-    dir) so that "the two roots travel together", but exactly one consumer ever read the
-    pair and it destructured and asserted on it immediately — a 2-tuple wearing a
-    dataclass's clothes, which made all ~48 single-root constructions carry an `Optional`
-    that was always `None`. That consumer takes its two roots as two arguments now.
+    Every artifact accessor resolves relative to ``run_dir``, so construct
+    ``RunPaths(some_dir)`` on whichever root you hold. ONE root, deliberately: a caller
+    needing a second (the per-case leg-output dir) takes it as its own argument rather than
+    making every single-root construction carry an always-`None` `Optional`.
     """
 
     run_dir: Path
@@ -140,26 +126,21 @@ _NAMELESS = {"", ".", ".."}
 #: opinion about a lead id, because they are not independent facts. A validator that admits an
 #: id a path shape refuses does not fail loose, it fails ABSURD: `claim_lead` mints the payload
 #: at `gather_raw/l-auth1/0.json`, the query tool hands gather that exact path and tells it to
-#: `cat` it, and gather's own read gate then refuses its own payload (#850 F-09 — the gate said
-#: `l-\d+` while all four validators said `l-[A-Za-z0-9]+`, so a lettered id was latently
-#: unreadable by the only agent entitled to it).
+#: `cat` it, and gather's own read gate then refuses its own payload.
 #:
 #: The three id validators (`hooks.record_lead.LEAD_ID_RE`, `scripts.gather_tools.record_query.
 #: LEAD_ID_RE`, `learning.lead_repository._LEAD_ID_RE`) and the two path shapes
 #: (`_PAYLOAD_SHAPES` below, `permission.policies._common.read_shapes`) all compose off this.
-#: BOUNDED, and generously (#855 F-12): every id is spent as a FILENAME COMPONENT —
+#: BOUNDED, and generously: every id is spent as a FILENAME COMPONENT —
 #: `gather_raw/{lead_id}.lead.json`, `gather_summaries/{lead_id}.md` — so an unbounded body
-#: let a model-coined id fail the claim's `os.open` with ENAMETOOLONG rather than at a seam,
-#: and the claim's "could not write" is the answer a caller has the least to say about. 64 is
-#: far above anything the `:L` set spells (`l-001`, `l-00c`, `l-auth1`) and far below the 255
-#: a filename component gets, so no real id is near it and no path this composes can reach it.
+#: lets a model-coined id fail the claim's `os.open` with ENAMETOOLONG rather than at a seam,
+#: and "could not write" is the answer a caller has the least to say about. 64 is far above
+#: anything the `:L` set spells (`l-001`, `l-auth1`) and far below a filename component's 255.
 LEAD_ID_BODY = r"[A-Za-z0-9]{1,64}"
 
-#: `\Z`, not `$`: `$` also matches BEFORE a trailing newline, so `l-abc\n` passes `.match()` and
-#: composes a lead dir whose name ends in a newline — the one known hole adv:PO7 recorded against
-#: this validator (`tests/test_store_boundary_705.py`, where `CASE_ID_RE` closed it and this one
-#: did not). The path shapes never admitted it, so the anchor is what keeps validator and gate
-#: agreeing at BOTH ends rather than only the loose one.
+#: `\Z`, not `$`: `$` also matches BEFORE a trailing newline, so `l-abc\n` would pass
+#: `.match()` and compose a lead dir whose name ends in a newline. The path shapes never
+#: admitted that, so the anchor is what keeps validator and gate agreeing at BOTH ends.
 LEAD_ID_RE = re.compile(rf"^l-{LEAD_ID_BODY}\Z")
 
 #: The gather payload family, relative to a run dir. Shared with the runtime read gate rather
@@ -167,13 +148,13 @@ LEAD_ID_RE = re.compile(rf"^l-{LEAD_ID_BODY}\Z")
 GATHER_RAW_SHAPE = rf"gather_raw/l-{LEAD_ID_BODY}/[0-9]+\.json"
 
 # The two by-ref payload families a run writes, as literal shapes: the gather lane's
-# `gather_raw/{lead_id}/{seq}.json` (lead ids are claim-gated to the same alphabet, above) and
-# the judge's ticket-read capture `ticket_reads/{seq}.json`. Anything else recorded in the
-# queries table is not an artifact this system produces.
+# `gather_raw/{lead_id}/{seq}.json` and the judge's ticket-read capture
+# `ticket_reads/{seq}.json`. Anything else recorded in the queries table is not an artifact
+# this system produces.
 #
-# `[0-9]`, not `\d`: a str pattern's `\d` matches every Unicode decimal (`٣.json` passes), which
-# would widen the whitelist past anything a writer produces and past the ASCII-only lead-id
-# alphabet standing next to it. Both seqs are `f"{int}"`, so ASCII is the exact shape.
+# `[0-9]`, not `\d`: a str pattern's `\d` matches every Unicode decimal (`٣.json` passes),
+# widening the whitelist past anything a writer produces and past the ASCII-only lead-id
+# alphabet beside it. Both seqs are `f"{int}"`, so ASCII is the exact shape.
 _PAYLOAD_SHAPES = (
     re.compile(GATHER_RAW_SHAPE),
     re.compile(r"ticket_reads/[0-9]+\.json"),
@@ -181,11 +162,10 @@ _PAYLOAD_SHAPES = (
 
 #: The case's ANSWER KEY: the finished investigation's own reasoning, its disposition, and the
 #: query record behind them. Named as a set because the learning loop STAGES all four into
-#: `<learning_run_dir>/` (`learning.core.persist._copy_shared_inputs` writes the first two and
-#: `source_refs.yaml`; `lead_repository.stage_tables` writes `executed_queries.jsonl`) — and that
-#: dir IS the gray-box actor's own run root, whose whole purpose is to withhold them (#850 F-19).
-#: `alert.json` is deliberately NOT here: it is the case INPUT, handed to the actor in its own
-#: user message, so denying it would withhold nothing and break the one artifact it is given.
+#: `<learning_run_dir>/` (`learning.core.persist._copy_shared_inputs`,
+#: `lead_repository.stage_tables`) — and that dir IS the gray-box actor's own run root, whose
+#: whole purpose is to withhold them. `alert.json` is deliberately NOT here: it is the case
+#: INPUT, handed to the actor in its own user message, so denying it would withhold nothing.
 #:
 #: The read gate spends this at `permission.files.names_case_answer_key`; the names live here
 #: because this module already owns what a run dir is called.
@@ -209,12 +189,11 @@ def _lstat_is(path: Path, kind) -> bool:
 def artifact_file(path: Path) -> bool:
     """True when ``path`` is a REGULAR FILE, not a link (or FIFO, or device) wearing its name.
 
-    Nothing this system writes into a run dir is ever a link: a boxed run's exit scrub taints
-    any tree holding a non-regular entry (#747), and the run dir is the box's rw bind, so a
-    link at an artifact's name is something the model planted. The distinction matters at the
-    COPY, not at the read — ``is_file()`` answers about the link's target, so a `copy2` of it
-    writes the TARGET's bytes into learning state under an artifact's name, where the actor and
-    the judge then read them as a legitimate in-run file and no later gate can tell.
+    Nothing this system writes into a run dir is ever a link, and the run dir is the box's rw
+    bind — so a link at an artifact's name is something the model planted. The distinction
+    matters at the COPY, not at the read: ``is_file()`` answers about the link's target, so a
+    `copy2` of it writes the TARGET's bytes into learning state under an artifact's name, where
+    the actor and judge read them as a legitimate in-run file and no later gate can tell.
     """
     return _lstat_is(path, stat.S_ISREG)
 
@@ -252,11 +231,9 @@ def contained_payload(run_dir: Path, payload_path: object) -> Path | None:
        This is what makes the read an artifact lookup rather than an open of a path an
        attacker chose: `..`, an absolute path and a stray filename all fail it outright.
     2. **containment after resolution** — a well-formed name can still be a symlink, and
-       model-written bash writes into the run dir (it is the box's rw bind), so the shape
-       gate alone would happily open a link planted at exactly the expected name. The
-       resolved target must land inside the resolved ``run_dir``, which is the rule on
-       whichever root the caller holds — the SOURCE run dir, where a planted link is still
-       sitting, and the learning copy, which ``stage_tables`` refuses to carry one into.
+       model-written bash writes into the run dir (it is the box's rw bind), so the shape gate
+       alone would happily open a link planted at exactly the expected name. The resolved
+       target must land inside the resolved ``run_dir``, on whichever root the caller holds.
 
     A `resolve()` fault FAILS CLOSED, the same posture the runtime read gate takes."""
     if not isinstance(payload_path, str) or not any(

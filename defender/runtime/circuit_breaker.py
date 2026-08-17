@@ -15,11 +15,10 @@ RUN_FAIL_KILL_LIMIT = 5
 
 INFRA_EXIT_CODES = frozenset({2, 124})
 
-#: The two values `error_class_for_exit` writes into every queries-table row, named because
-#: readers now BRANCH on them rather than only displaying them: the companion repeat guard's
-#: counted domain is the `agent-fixable` half of the above-guard rows, and the `infra` half is
-#: this module's own to own (#826 item 4). A reader that spelled the value itself would be one
-#: rename away from silently counting nothing.
+#: The two values `error_class_for_exit` writes into every queries-table row. Named because
+#: readers BRANCH on them: the companion repeat guard's counted domain is the `agent-fixable`
+#: half of the above-guard rows, and the `infra` half is this module's own. A reader that
+#: spelled the value itself would be one rename away from silently counting nothing.
 INFRA_ERROR_CLASS = "infra"
 AGENT_FIXABLE_ERROR_CLASS = "agent-fixable"
 
@@ -56,25 +55,22 @@ def _blank() -> dict:
 
 def _load(run_dir: Path) -> dict:
     """§7 D3's second rider: an unreadable state must NOT read as a healthy, freshly
-    initialised breaker (`is_tripped`/`down_message` below both fail closed on `_unreadable`).
-    Absence is the ordinary "no breaker file yet" case and stays healthy; existing-but-unreadable
-    (a directory squatting the name, a corrupted file, a symlink aliasing state this run does
-    not own) is a distinct, observable state.
+    initialised breaker (`is_tripped`/`down_message` both fail closed on `_unreadable`).
+    Absence stays healthy; existing-but-unreadable (a directory squatting the name, a
+    corrupted file, a symlink aliasing state this run does not own) is a distinct state.
 
-    Existence is `lexists`, not `exists`: `exists()` DEREFERENCES, so a planted DANGLING symlink
-    at the breaker's name reads as "no file yet" and the rider fails open on the one shape the
-    write side spends the whole of M3 refusing. A live symlink is refused for the mirror reason
-    — following it reads whatever the planter aimed it at as this run's breaker state."""
+    Existence is `lexists`, not `exists`: `exists()` DEREFERENCES, so a planted DANGLING
+    symlink would read as "no file yet" and fail open. A live symlink is refused for the
+    mirror reason — following it reads whatever the planter aimed it at."""
     p = _path(run_dir)
     if not os.path.lexists(p):
         return _blank()
     if p.is_symlink():
         return {**_blank(), "_unreadable": True}
-    # `TEXT_READ_ERRORS`, not a bare `OSError`: reading a text file can also fail UNDECODABLE
-    # (`UnicodeDecodeError`, a `ValueError`), and a run root the box bind-mounts rw is a place
-    # non-UTF-8 bytes land for free. With only `OSError` named here that decode error came back
-    # out of `is_tripped`/`down_message` — outside every `try` at both call sites — which is
-    # exactly the F-25 harm one line below this, reached through the read instead of the parse.
+    # `TEXT_READ_ERRORS`, not a bare `OSError`: a text read can also fail UNDECODABLE
+    # (`UnicodeDecodeError`, a `ValueError`), and a run root the box bind-mounts rw is where
+    # non-UTF-8 bytes land for free. That decode error escapes `is_tripped`/`down_message` —
+    # outside every `try` at both call sites.
     try:
         text = p.read_text(encoding="utf-8")
     except TEXT_READ_ERRORS:
@@ -83,26 +79,16 @@ def _load(run_dir: Path) -> dict:
         doc = json.loads(text or "{}")
     except json.JSONDecodeError:
         return {**_blank(), "_unreadable": True}
-    # `3`, `"x"` and `[…]` are all valid JSON and none of them is a breaker state. Without
-    # this they came back as the state itself and every reader's `.get(...)` raised
-    # AttributeError — the rider above fails CLOSED on a corrupted file only if "corrupted"
-    # includes "parsed fine, wrong shape", which is the shape a box writing into its own run
-    # dir can produce for free.
+    # `3`, `"x"` and `[…]` are all valid JSON and none of them is a breaker state; returned as
+    # the state itself, every reader's `.get(...)` raises. "Corrupted" has to include "parsed
+    # fine, wrong shape" — the shape a box writing into its own run dir produces for free.
     if not isinstance(doc, dict):
         return {**_blank(), "_unreadable": True}
-    # ...and NEITHER is a dict whose `systems` is `5`, whose per-system record is `7`, or whose
-    # `failures`/`total_failures` is `"x"` (#878 F-25). Below the top level every reader
-    # dereferenced bare: `is_tripped` raised `AttributeError` on the first two and `TypeError`
-    # on the third, from a call site outside every `try` — `query_tool`'s breaker check and the
-    # judge's — and killed the process. The check belongs HERE, with the top level's, because
-    # the rider is one rule: a state this module cannot read must not read as a healthy,
-    # freshly initialised breaker.
-    #
-    # UNREADABLE, not coerced. Coercing `{"systems": 5}` to `{}` would answer "no system is
-    # down", which is the fail-OPEN the rider spends this whole function refusing, and the
-    # writer that produced the shape is the one an out-of-band write into the rw-bound run root
-    # comes from. `lead_zero._breaker_failures` coerces instead because its reader answers a
-    # COUNT for a resolution step, where zero is the safe answer; here the answer is a gate.
+    # ...and so is a dict whose `systems` is `5`, whose per-system record is `7`, or whose
+    # `failures`/`total_failures` is `"x"`: every reader below the top level dereferences bare,
+    # from call sites outside every `try`. UNREADABLE, not coerced — coercing `{"systems": 5}`
+    # to `{}` would answer "no system is down", the fail-OPEN this function refuses.
+    # (`lead_zero._breaker_failures` coerces because its answer is a COUNT, not a gate.)
     if not _shape_ok(doc):
         return {**_blank(), "_unreadable": True}
     return doc or _blank()
@@ -113,10 +99,9 @@ def _is_count(value: object) -> bool:
 
 
 def _shape_ok(doc: dict) -> bool:
-    """Every level below the top, in the shape `is_tripped`/`down_message` dereference it.
-
-    An ABSENT counter is spelled as the `0` those readers already default it to, so the
-    membership test and the type test are one expression rather than two that could disagree."""
+    """Every level below the top, in the shape `is_tripped`/`down_message` dereference it. An
+    ABSENT counter is spelled as the `0` those readers already default it to, so the
+    membership and type tests are one expression rather than two that could disagree."""
     if not _is_count(doc.get("total_failures", 0)):
         return False
     systems = doc.get("systems", {})
@@ -133,12 +118,9 @@ def record_outcome(run_dir: Path, system: str, exit_code: int) -> dict:
         return {}
 
     def _mutate(state: dict) -> None:
-        # The writer coerces where `_load` refuses (#878 F-25). It cannot fail closed — it has
-        # to leave a countable document behind — so a level it cannot read as a counter it
-        # starts that counter over from, which is what `default=_blank` already does for the
-        # document as a whole. `state["systems"].setdefault(...)`, `sysrec["failures"] += 1`
-        # and `state.get("total_failures", 0) + 1` each raised on a shape the run dir's other
-        # writer can produce for free.
+        # The writer coerces where `_load` refuses. It cannot fail closed — it has to leave a
+        # countable document behind — so a level it cannot read as a counter it starts over
+        # from, which is what `default=_blank` already does for the document as a whole.
         if not isinstance(state.get("systems"), dict):
             state["systems"] = {}
         sysrec = state["systems"].get(system)
@@ -154,21 +136,14 @@ def record_outcome(run_dir: Path, system: str, exit_code: int) -> dict:
     try:
         state = update_json_locked(_path(run_dir), _mutate, default=_blank)
     except (OSError, TypeError, AttributeError, ValueError) as e:
-        # A robustness fix regardless of §7 D3's exemption (rider #1): today this propagates
-        # uncaught PAST `_drive_agent`'s four-type catch and crashes the process harder than
-        # `BudgetKill` would. A refused write here is contained at the writer, same as every
-        # other alias refusal — it does not get to also be the reason the run crashes.
+        # §7 D3 rider #1: a refused write is contained at the writer — uncaught it propagates
+        # PAST `_drive_agent`'s four-type catch and crashes the process. Shape faults join
+        # `OSError` for when a level neither `_mutate`'s coercions nor `_shape_ok` anticipated
+        # turns up; failing the write closed is safe, since `_load` reads an unparseable
+        # document as `_unreadable`, i.e. DOWN.
         #
-        # Shape faults join `OSError` for exactly that reason (#878 F-25): the coercions in
-        # `_mutate` above are what SHOULD keep them from arising, and this arm is what honours
-        # the rule when a level neither it nor `_shape_ok` anticipated turns up. Failing the
-        # write closed is safe on both sides — `_load` reads a document it cannot parse as
-        # `_unreadable`, which is DOWN.
-        #
-        # NEVER SILENTLY, though: a refused write here means infra failures stop being counted
-        # for the rest of the run — no trip, no `RUN_FAIL_KILL_LIMIT` — and the whole point of
-        # containing the fault at the writer is that it is observable somewhere. Same channel
-        # `_decide_guarded` and `flagged_diagnostics` use for their own fail-safe arms.
+        # NEVER SILENTLY, though: a refused write means infra failures stop being counted for
+        # the rest of the run — no trip, no `RUN_FAIL_KILL_LIMIT`.
         print(f"[circuit-breaker] outcome for {system!r} not recorded "
               f"({type(e).__name__}: {e}); this run's failure count no longer advances",
               file=sys.stderr)

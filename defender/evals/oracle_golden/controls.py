@@ -1,13 +1,10 @@
 #!/usr/bin/env python3
-"""Control-window measurement for oracle-calibration cases (#711).
+"""Control-window measurement for oracle-calibration cases.
 
 A control answers one question: *would this row be here anyway?* Get it wrong and
 the lead's result class is wrong, silently. The procedure doc's first rule is
 **measure a control with the lead's own query predicate** — a control taken on a
 broader filter describes a different envelope, and the mismatch is invisible.
-Case-003 broke exactly that rule (its control counted *all* dev-ws-1 auth docs
-while the lead filters `event.outcome IS NOT NULL`), and the `-noise` label it
-justified did not survive re-measurement.
 
 This module makes that rule true **by construction** rather than by discipline: a
 control IS the lead's own ES|QL string with nothing changed but the two
@@ -68,13 +65,10 @@ _COMMAND_SEP = "|"
 DEFAULT_OFFSETS_DAYS = (7, 14, 21)
 
 #: A control window must be long enough to have a chance of SEEING the baseline.
-#: Duration-matching is the wrong instinct here: case-004's operation lasted 21
-#: seconds, and 21-second control windows observed almost nothing, so a routine
-#: `sre.alice -> db-1` login graded `+event` — a manufactured catch. The
-#: hand-written seed controls already used an hour for a three-minute attack
-#: (case-001: 07:30-08:30 controlling 07:45-07:48); this makes that practice the
-#: default. Widening can only move a class toward `+noise`, which is the safe
-#: direction: it costs recall, never a false detection.
+#: Duration-matching is the wrong instinct: a 21-second operation gets 21-second control
+#: windows that observe almost nothing, so a routine login grades `+event` — a manufactured
+#: catch. Widening can only move a class toward `+noise`, which is the safe direction: it
+#: costs recall, never a false detection.
 MIN_CONTROL_SECONDS = 3600
 
 ISO_FORMATS = ("%Y-%m-%dT%H:%M:%S.%f%z", "%Y-%m-%dT%H:%M:%S%z")
@@ -137,10 +131,10 @@ def bounds_name_a_window(query: str) -> bool:
 def esql_window(query: str) -> tuple[datetime, datetime] | None:
     """The (start, end) window a query filters on, or `None` if it has no bounds.
 
-    `None` is a real and common answer, not an error: case-001's zeek leads carry
-    no `@timestamp` predicate at all, so their payload mixes historical baseline
-    with the attack. Those cannot be controlled by shifting — there is no bound to
-    shift — and the caller must say so rather than inventing a window.
+    `None` is a real and common answer, not an error: some leads carry no `@timestamp`
+    predicate at all, so their payload mixes historical baseline with the attack. Those
+    cannot be controlled by shifting — there is no bound to shift — and the caller must
+    say so rather than inventing a window.
 
     A pair that is not one lower and one upper bound is `None` for the same reason:
     it names no window, and `measure_controls` must refuse it the way it refuses an
@@ -226,22 +220,21 @@ def split_commands(query: str) -> list[str]:
 def add_esql_window(query: str, start: datetime, end: datetime) -> str:
     """Add a `@timestamp` restriction to a query that carries none.
 
-    Case-001's six zeek queries filter on host and IP but not on time, so their
-    stored payload mixes the attack with months of history and there is no bound
-    to shift. The control for such a query is the same predicate restricted to a
-    baseline window — and its *attack contribution* is the same predicate
-    restricted to the attack window. Comparing those two is the only way the
-    activity's delta is visible at all; comparing the unbounded payload against a
-    bounded control would compare two different questions.
+    A query that filters on host and IP but not on time has a payload mixing the attack
+    with months of history and no bound to shift. The control for such a query is the
+    same predicate restricted to a baseline window — and its *attack contribution* is
+    the same predicate restricted to the attack window. Comparing those two is the only
+    way the activity's delta is visible at all; comparing the unbounded payload against
+    a bounded control would compare two different questions.
 
-    Inserted as its own `WHERE` immediately after the source command, which
-    narrows the row set and cannot widen it — the property that matters. "After the
-    source command" is found by splitting on `|`, the separator ES|QL actually uses,
-    NOT on newlines: a query is free to write its whole pipeline on one line, and
-    this used to splice after `lines[0]`, so `FROM logs-zeek.ssh-* | LIMIT 1` had
-    the clause appended after `LIMIT`. That takes one arbitrary row and *then*
-    filters it by timestamp — not a narrower row set but an empty one, which reads
-    downstream as an empty baseline and grades every observed row `present`.
+    Inserted as its own `WHERE` immediately after the source command, which narrows the
+    row set and cannot widen it — the property that matters. "After the source command"
+    is found by splitting on `|`, the separator ES|QL actually uses, NOT on newlines: a
+    query is free to write its whole pipeline on one line, and splicing after `lines[0]`
+    would append the clause after `LIMIT` in `FROM logs-zeek.ssh-* | LIMIT 1`. That takes
+    one arbitrary row and *then* filters it by timestamp — not a narrower row set but an
+    empty one, which reads downstream as an empty baseline and grades every observed row
+    `present`.
     """
     if esql_bounds(query):
         raise ValueError("query already carries @timestamp bounds — shift, do not add")
@@ -288,10 +281,10 @@ _LIVENESS: dict[tuple[str, str], bool] = {}
 def named_cell(payload: dict, name: str, default: Any = None) -> Any:
     """The named cell of a columnar ES|QL payload's FIRST row, or `default`.
 
-    `values` is the wire's own positional form since #834 — cell `i` binds to `columns[i]` —
-    so a read resolves the index off `columns` instead of hardcoding one. Pure, and named,
-    so the reader a caller runs is the reader a test can pin; a test that re-derives the
-    index inline pins its own copy and stays green when the caller regresses to `row[0]`.
+    `values` is the wire's own positional form — cell `i` binds to `columns[i]` — so a read
+    resolves the index off `columns` instead of hardcoding one. Pure and named, so the reader
+    a caller runs is the reader a test can pin; a test that re-derives the index inline pins
+    its own copy and stays green when the caller regresses to `row[0]`.
 
     `default` covers both "no rows" and "no such column": a probe whose projection does not
     carry the name has measured nothing, which is not the same fact as a zero.
@@ -308,25 +301,22 @@ def named_cell(payload: dict, name: str, default: Any = None) -> Any:
 def window_is_live(start: datetime, end: datetime) -> bool:
     """Was the environment RUNNING during this window?
 
-    The stack is levered up and down between snapshots, so a control window can
-    land in a gap when the server did not exist. A dead window returns zero rows
-    for every query, which is indistinguishable from "this stream has no
-    baseline" — and reading it that way suppresses real `-noise`: case-003's
-    `l-002` control at 2026-07-18 is empty only because the environment was
-    levered down between 07-17 and 07-25, while the same query a week earlier
-    returns 444 auth documents.
+    The stack is levered up and down between snapshots, so a control window can land in a
+    gap when the server did not exist. A dead window returns zero rows for every query,
+    which is indistinguishable from "this stream has no baseline" — and reading it that way
+    suppresses real `-noise`.
 
-    The probe is total ingest across `logs-*` for the window. Zero documents from
-    ANY host means the environment was not running; no live playground-v2 hour is
-    silent, because the agents alone emit metricbeat continuously.
+    The probe is total ingest across `logs-*` for the window. Zero documents from ANY host
+    means the environment was not running; no live playground-v2 hour is silent, because the
+    agents alone emit metricbeat continuously.
     """
     key = (format_iso(start), format_iso(end))
     if key not in _LIVENESS:
         probe = (f'FROM logs-*\n| WHERE @timestamp >= "{key[0]}" AND @timestamp < "{key[1]}"\n'
                  f"| STATS total = COUNT(*)")
-        # Positional, because `values` is now the wire's own columnar form (#834). The index
-        # is resolved from `columns` rather than hardcoded to 0: this probe projects a single
-        # column today, and a name lookup does not rot if it ever projects two.
+        # `values` is the wire's own columnar form, so the index is resolved from `columns`
+        # rather than hardcoded to 0: this probe projects a single column today, and a name
+        # lookup does not rot if it ever projects two.
         total = named_cell(run_esql(probe), "total", default=0)
         _LIVENESS[key] = bool(total)
     return _LIVENESS[key]
@@ -346,11 +336,9 @@ def run_esql(query: str, *, timeout: int = 180) -> dict:
     resp = json.loads(proc.stdout)
     if "error" in resp:
         raise RuntimeError(f"ES|QL error: {json.dumps(resp['error'])[:400]}")
-    # Through the ADAPTER's own shaper, not a second copy of it. This module used to
-    # re-implement the zip under a docstring promising "the production `esql` verb's payload
-    # shape" — two producers, one promise, and nothing keeping them equal. #834 changed that
-    # shape; had the copy stayed, `label.py` would have gone on comparing an attack window
-    # in one encoding against its controls in the other.
+    # Through the ADAPTER's own shaper, not a second copy of it: two producers of one
+    # promised shape drift, and `label.py` would then compare an attack window in one
+    # encoding against its controls in the other.
     return esql_payload(query, resp)
 
 
@@ -363,12 +351,11 @@ def measure_controls(query: str, offsets_days: tuple[int, ...] = DEFAULT_OFFSETS
 
     - the query **carries bounds** — shift them; the stored observed payload is
       already the attack-window measurement, so nothing extra is needed.
-    - the query **carries none** (case-001's zeek leads) — its stored payload
-      mixes the attack with all history. Restrict it to `operation_window` to get
-      the activity's actual contribution, and to the shifted windows for the
-      baseline. Without an `operation_window` there is nothing to compare and the
-      honest answer is no controls at all, which the labeler reads as
-      `needs-label`.
+    - the query **carries none** — its stored payload mixes the attack with all
+      history. Restrict it to `operation_window` to get the activity's actual
+      contribution, and to the shifted windows for the baseline. Without an
+      `operation_window` there is nothing to compare and the honest answer is no
+      controls at all, which the labeler reads as `needs-label`.
 
     Returns `(controls, attack_contribution)`, the latter `None` when the stored
     payload already is the attack-window measurement.
@@ -435,19 +422,16 @@ def _operation_window(case_dir: Path) -> tuple[datetime, datetime] | None:
 def lead_queries(case_dir: Path) -> list[tuple[str, int, dict]]:
     """(lead_id, seq, params) for every query, in the order build_case.py stored them.
 
-    `seq` is the QUERIES TABLE's seq, not this list's position, because that is what
-    the observed payload beside it is named for (`build_case.py` copies `raw_ref`,
-    whose name is `{seq}.json`). The two were the same number until #841 split the
-    `∅.`-prefixed sentinel rows out of `JoinedLead.queries`: `record_query._next_seq`
-    still counts every row including sentinels, so one refused query ahead of a real
-    one makes the position trail the seq for the rest of the lead. Keying the control
-    record by position then pairs query A's baseline with query B's envelope, and
-    `judge._control` drops the query string, so nothing downstream can see it.
+    `seq` is the QUERIES TABLE's seq, not this list's position, because that is what the
+    observed payload beside it is named for (`build_case.py` copies `raw_ref`, whose name
+    is `{seq}.json`). They differ once `∅.`-prefixed sentinel rows are split out of
+    `JoinedLead.queries` while `record_query._next_seq` still counts them: one refused
+    query ahead of a real one makes the position trail the seq for the rest of the lead.
+    Keying the control record by position then pairs query A's baseline with query B's
+    envelope, and `judge._control` drops the query string, so nothing downstream sees it.
 
-    Cases built before that field existed fall back to the position, which is exact
-    for them and not a guess: they all predate #841, so no sentinel was ever split
-    out of their `queries` and position IS seq. Re-swept against the tree — all 17
-    committed cases have every observed filename inside their lead's index range.
+    Cases built before the `seq` field existed fall back to the position, which is exact
+    for them and not a guess: no sentinel was ever split out of their `queries`.
     """
     text = (case_dir / "oracle_visible" / "leads.jsonl").read_text(encoding="utf-8")
     out = []

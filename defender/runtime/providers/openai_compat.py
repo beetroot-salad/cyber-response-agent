@@ -83,15 +83,14 @@ class OpenAICompatProvider:
     def cache_affinity(self, settings: ModelSettings | None, key: str) -> ModelSettings | None:
         """Attach `key` as the request's `prompt_cache_key`.
 
-        Fireworks prompt caching is ON BY DEFAULT and needs no opt-in — it finds the longest
-        cached prefix of every request by itself. What it cannot do by itself is ROUTING:
-        cached prefixes are local to a replica, so a conversation whose turns land on
-        different replicas re-pays for a prefix that is already warm somewhere else. The key
-        is the documented affinity hint for that, and Fireworks reads the OpenAI spelling.
+        Fireworks prompt caching is on by default and needs no opt-in. What it cannot do by
+        itself is ROUTING: cached prefixes are local to a replica, so a conversation whose
+        turns land on different replicas re-pays for a prefix already warm elsewhere. The key
+        is the documented affinity hint for that, in the OpenAI spelling Fireworks reads.
 
-        A `None` settings object is the common case here (the review lenses and any role at
-        `default` effort resolve to no settings at all), so the key has to be able to CREATE
-        the settings rather than only merge into them.
+        A `None` settings object is the common case (the review lenses and any role at
+        `default` effort resolve to no settings), so the key must be able to CREATE the
+        settings rather than only merge into them.
         """
         from pydantic_ai.models.openai import OpenAIChatModelSettings
 

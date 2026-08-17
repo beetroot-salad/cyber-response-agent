@@ -26,10 +26,10 @@ def enqueue_for_authoring(run_dir: Path, paths: LoopPaths) -> None:
 
 
 def enqueue_case_for_curation(case_id: str, run_dir: Path, paths: LoopPaths) -> None:
-    """The curation trigger's own marker (#791) — keyed on the CASE rather than the run id,
-    so two investigations of the same case coalesce onto one request (an atomic replace of
-    the same path) instead of leaving one per retry. The later run always wins: whichever
-    call lands last is the one the curator serves."""
+    """The curation trigger's own marker — keyed on the CASE rather than the run id, so two
+    investigations of the same case coalesce onto one request (an atomic replace of the same
+    path) instead of leaving one per retry. The later run always wins: whichever call lands
+    last is the one the curator serves."""
     queue_dir = paths.author_queue_dir
     queue_dir.mkdir(parents=True, exist_ok=True)
     marker = queue_dir / f"{case_id}.json"
@@ -52,14 +52,13 @@ def requeue_marker(marker: Path, spec: dict) -> bool:
     """Put a claimed request BACK on the queue, and report whether the slot was still free.
 
     The claim frees the top-level path on purpose, so a re-ask for the same case that lands
-    mid-serve has somewhere to go (#791 P2). A re-queue written with `rewrite_marker`'s
-    atomic REPLACE therefore destroys exactly that request and puts the older run's spec in
-    its place, and the case is re-served off the stale run dir — the newer investigation's
-    leads, drafts and pitfalls never curated (#852 F-04).
+    mid-serve has somewhere to go. A re-queue written with `rewrite_marker`'s atomic REPLACE
+    would destroy exactly that request, putting the older run's spec in its place and
+    re-serving the case off the stale run dir.
 
     Create-if-absent instead: `False` means a fresher request for this case is already in the
-    slot, and under the queue's documented "the later run always wins" contract that request
-    SUPERSEDES this one — the caller drops its own re-queue rather than winning the race.
+    slot, and under the queue's "the later run always wins" contract that request SUPERSEDES
+    this one — the caller drops its own re-queue rather than winning the race.
 
     Written through a hard link from a staged temp file rather than `O_CREAT|O_EXCL` on the
     target itself, so the slot goes from absent to fully-written in one step: a reader never
@@ -82,11 +81,10 @@ def requeue_marker(marker: Path, spec: dict) -> bool:
 def marker_identity(spec: dict, marker: Path) -> str:
     """The id an operator greps for when a queued request is dropped or deferred.
 
-    The queue carries TWO row shapes — the run-keyed marker (`run_id`) and #791's case-keyed
+    The queue carries TWO row shapes — the run-keyed marker (`run_id`) and the case-keyed
     curation request (`case_id`) — and a log line that names one key reads `None` for every
-    row of the other shape, which is exactly the case a dead-letter line exists to surface.
-    The marker's own filename is the identity under both shapes, so it is the last resort for
-    a row too damaged to carry either key."""
+    row of the other shape. The marker's own filename is the identity under both shapes, so it
+    is the last resort for a row too damaged to carry either key."""
     for key in ("case_id", "run_id"):
         value = spec.get(key)
         if isinstance(value, str) and value:
@@ -114,25 +112,21 @@ def claim_markers(
 ) -> Iterator[ClaimedMarker]:
     """Claim every queued request and yield the servable ones, in orphans-first order.
 
-    This is the claim-and-serve protocol both drains run, and it had been written twice.
-    That cost was not hypothetical: the poison-marker fix (#795) had to be applied to both
-    copies, and its follow-up — the row that PARSES but is not a mapping — had to be applied
-    to both copies again, four hand-carries for one defect.
+    The claim-and-serve protocol both drains run, in one place.
 
     Claiming is an ``os.replace`` OUT of the queue before the request is served. Two things
     depend on it. A re-ask that lands while this pass is serving needs the top-level path
-    free, or it would be destroyed by an unlink-after-read (case-keyed identity, #791 P2).
-    And an orphan left in ``inflight/`` by a pass that died mid-serve is a request LOST, not
-    deferred — nothing globbing the top level can see it — so this reclaims unconditionally.
-    That is only sound under the drainer flock: a claim is evidence of a DEAD pass only if no
-    live pass can be holding one. Both callers hold it.
+    free, or it would be destroyed by an unlink-after-read. And an orphan left in
+    ``inflight/`` by a pass that died mid-serve is a request LOST, not deferred — nothing
+    globbing the top level can see it — so this reclaims unconditionally. That is only sound
+    under the drainer flock: a claim is evidence of a DEAD pass only if no live pass can be
+    holding one. Both callers hold it.
 
     A marker that cannot be read is QUARANTINED here rather than skipped. Skipping leaves it
     in ``inflight/`` for the next tick's reclaim to hand back, fail on, and log again,
     forever — while the queue's has-work predicate stays true on its presence. `identity_key`
     is the key its dead letter is written under (`run_id` for the run-keyed queue, `case_id`
-    for #791's case-keyed one), because the row's own keys are exactly what could not be read
-    and the filename is the identity under both shapes.
+    for the case-keyed one), because the row's own keys are exactly what could not be read.
     """
     markers = sorted(queue_dir.glob("*.json")) if queue_dir.is_dir() else []
     inflight_dir = queue_dir / "inflight"
@@ -160,19 +154,14 @@ def claim_markers(
             continue
         raw_run_dir = spec.get("run_dir")
         if not isinstance(raw_run_dir, str) or not Path(raw_run_dir).is_absolute():
-            # #852 F-18. The unguarded `Path(spec.get("run_dir", ""))` had two failure
-            # shapes, and one check closes both. A non-string value (`null`, a number, a
-            # list) raised TypeError OUT of this generator — past every dead-letter path
-            # below, wedging the drain on a file only a human could remove. And the `""`
-            # default resolved to `Path(".")`, so a row with NO `run_dir` — exactly the
-            # shape `quarantine_marker`'s own dead letter writes — was SERVED, against the
-            # process CWD, and quarantined later under whatever the serve then failed on.
-            # ABSOLUTE, not merely non-empty: `""` is only the loudest of the paths that
-            # resolve against the CWD, and the drain's CWD is a worktree it is about to
-            # `reset --hard`. Both writers of these queues store `str(run_dir.resolve())`,
-            # so a relative value is by construction a row nothing this loop wrote.
-            # The type belongs here rather than in `_read_spec`, whose contract is the
-            # row's top-level shape, not the meaning of any one field.
+            # One check closes two failure shapes. A non-string value (`null`, a number, a
+            # list) would raise TypeError OUT of this generator, past every dead-letter path
+            # below, wedging the drain on a file only a human could remove. And a missing
+            # `run_dir` defaulting to `Path(".")` would be SERVED against the process CWD —
+            # a worktree the drain is about to `reset --hard`. Hence ABSOLUTE, not merely
+            # non-empty: both writers store `str(run_dir.resolve())`, so a relative value is
+            # by construction a row nothing this loop wrote. The type check belongs here
+            # rather than in `_read_spec`, whose contract is the row's top-level shape.
             quarantine_marker(
                 spec, claimed, queue_dir, "unreadable: run_dir is not an absolute path"
             )

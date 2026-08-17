@@ -106,11 +106,9 @@ def alert_event_time(alert: dict[str, Any]) -> str | None:
 
 
 def read_case_record(run_dir: Path) -> CaseRecord:
-    # The bridge opens a real ticket in a real system off this record, so it cannot proceed on
-    # a headline it cannot read: the shared accessor's refusal (#785) becomes this lane's own
-    # error type, unchanged in text. That also closes the missing `isinstance(str)` guard this
-    # lane carried — a YAML list as the disposition used to raise `TypeError` out of the
-    # membership test against a set, where the write gate denied it cleanly.
+    # The bridge writes to a real ticket system off this record, so an unreadable headline must
+    # stop it. Re-raise the shared accessor's refusal (text unchanged) as this lane's error
+    # type, which is what every caller here catches.
     try:
         report = require_report(RunPaths(run_dir).report)
     except ReportUnreadable as e:
@@ -118,20 +116,15 @@ def read_case_record(run_dir: Path) -> CaseRecord:
     fm, body, disposition = report.frontmatter, report.body, report.disposition
     case_id = run_dir.name
     confidence = str(fm.get("confidence") or "")
-    # THE REASON IS THE CAUSE WHEN THE REPORT CARRIES ONE, AND THE BODY OTHERWISE.
+    # The reason is `cause` when the report carries one, and the body otherwise.
     #
-    # Since the close gate became report.md's only writer, the body is host-rendered from a
-    # closed vocabulary and is the SAME sentence on every close ("Disposition recorded by the
-    # close gate. outcome=…"). Reading it as the reason left three consumers with a constant:
-    # the judge's prompt, the ticket bridge's outbound comment, and — the one that bites — the
-    # closed-ticket pool the challenge gate itself samples for base-rate context, which is now
-    # this same close's own output fed back as evidence about prior closes.
-    #
-    # `cause` is the host's own typed sentence explaining the disposition and already has
-    # exactly ONE home in the frontmatter; this reads that home rather than writing the
-    # sentence a second time into the body. A report with no `cause` key — anything not
-    # written by the close gate — keeps the body verbatim, which is also what leaves #629's
-    # body-to-ticket egress path intact for every artifact that still takes it.
+    # The close gate host-renders the body from a closed vocabulary, so it is the SAME sentence
+    # on every close ("Disposition recorded by the close gate. outcome=…"). Using it as the
+    # reason hands a constant to three consumers: the judge's prompt, the outbound ticket
+    # comment, and — worst — the closed-ticket pool the challenge gate samples for base rates,
+    # where this close's own boilerplate comes back as evidence about prior closes. `cause` is
+    # the host's typed sentence for the disposition and has exactly one home, the frontmatter.
+    # Reports with no `cause` (anything the close gate did not write) keep the body verbatim.
     cause = str(fm.get("cause") or "")
 
     mapping = _load_mapping()
@@ -242,10 +235,8 @@ def parse_disposition_from_resolution(resolution: str | None) -> str | None:
     if not sep:
         return None
     head = resolution.split(sep, 1)[0].strip()
-    # The eighth interpreter of the same vocabulary, one container over: this reads a
-    # disposition back out of a ticket's resolution line, which an analyst can edit and the
-    # benign judge reads back in. Same question, same answer as the report and the
-    # investigation now give.
+    # The resolution line is analyst-editable and read back by the benign judge, so decode it
+    # through the shared vocabulary — same answer the report and the investigation give.
     return normalized_disposition(head)
 
 

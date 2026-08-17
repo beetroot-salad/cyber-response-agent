@@ -40,9 +40,9 @@ class ExecutedLead:
     payload_status: str
     payload_digest: str
     error_class: str | None
-    #: `QueryRow.is_sentinel`, carried through so the collectors downstream partition on the
-    #: SAME predicate the projection did (#841) rather than each re-deriving it from the
-    #: `query_id` string. Defaults `False` so a hand-built row in a test is an ordinary query.
+    #: `QueryRow.is_sentinel`, carried through so downstream collectors partition on the SAME
+    #: predicate the projection did rather than each re-deriving it from the `query_id`
+    #: string. Defaults `False` so a hand-built row in a test is an ordinary query.
     is_sentinel: bool = False
 
 
@@ -62,10 +62,9 @@ def extract_from_joined(joined_leads: list) -> list[ExecutedLead]:
         goal = jl.goal or ""
         wtc = tuple(str(x) for x in jl.what_to_summarize if isinstance(x, (str, int)))
         # `.rows` — the WHOLE table for this lead, sentinels included, in the table's own seq
-        # order. This is the one reader that must not take #841's split: `query_index` keys
-        # `pitfall_id`, and `collect_general_failures` below is exactly the collector the
-        # `∅.bash-shim` row was minted for (#823). The agent-facing projections are the ones
-        # that read `.queries`.
+        # order. This is the one reader that must not take the sentinel split: `query_index`
+        # keys `pitfall_id`, and `collect_general_failures` below is exactly the collector the
+        # `∅.bash-shim` row was minted for. Agent-facing projections read `.queries` instead.
         rows = jl.rows
         is_multi = len(rows) > 1
         for q_idx, q in enumerate(rows):
@@ -119,12 +118,10 @@ def collect_general_failures(
     if catalog is None:
         catalog = lead_neighbors.load_catalog(catalog_dir)
     # The SAME "is this identity already answered" set `synthesize_drafts` mints against
-    # (`answered_identities`: ids UNION `covers:`), not a second copy keyed on ids alone. The
-    # two verdicts happen to coincide today — a covered id that this function reads as a draft
-    # candidate is skipped here, which is what a covered id should be — but that is arithmetic,
-    # not agreement: this is the ONE partition that decides whether an `agent-fixable` failure
-    # becomes a draft or pitfalls residue, and a row the mint calls answered while this calls it
-    # draftable is a row that lands in neither. Two spellings of one rule is how that starts.
+    # (`answered_identities`: ids UNION `covers:`), not a second copy keyed on ids alone. This
+    # is the ONE partition deciding whether an `agent-fixable` failure becomes a draft or
+    # pitfalls residue, and a row the mint calls answered while this calls it draftable lands
+    # in neither.
     by_id = answered_identities(catalog)
     out: list[dict] = []
     for lead in executed:

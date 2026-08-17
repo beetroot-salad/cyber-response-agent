@@ -93,15 +93,15 @@ def _failures_of(records: list[dict], *, keep_goal: bool = True) -> list[dict]:
 
 
 def _build_pitfalls_handoffs(rows: list[dict], *, systems: frozenset[str]) -> list[dict]:
-    """One entry per SURFACE, one failure per distinct MISTAKE (#840).
+    """One entry per SURFACE, one failure per distinct MISTAKE.
 
-    Two shapes, told apart by `surface` (#870 M6):
+    Two shapes, told apart by `surface`:
 
         {"surface": "system",  "system": "<name>", "path": "…/<name>/execution.md", "failures": […]}
         {"surface": "reducer",                     "path": "…/gather/defender-sql.md", "failures": […]}
 
-    `system` is OMITTED from the reducer shape rather than emptied (N7): the attributed system
-    is declined at this seam and survives in the run's `executed_queries` table anyway, so a
+    `system` is OMITTED from the reducer shape rather than emptied: the attributed system is
+    declined at this seam and survives in the run's `executed_queries` table anyway, so a
     `defender-sql` lesson provoked by one system's envelope is written without naming it.
     AT MOST ONE reducer entry per tick — one surface, one entry, however many mistakes it
     collects — and it sorts LAST, after the system entries' by-name order, because
@@ -110,15 +110,13 @@ def _build_pitfalls_handoffs(rows: list[dict], *, systems: frozenset[str]) -> li
     Merges the rows itself rather than trusting its caller to have merged them — the merge
     is idempotent, and this is the last seam before the prompt, so no reader of the queue
     can hand the curator N copies of one bullet. `occurrences` rides along and orders the
-    list, so the mistake a lead made eight times is the first failure the curator weighs,
-    not the eighth copy it has to notice is a copy.
+    list, so the mistake a lead made eight times is the first failure the curator weighs.
 
-    `systems` is the threaded membership value (NF2's adapter half alone) — a queued row
-    naming a system nothing declares yields no handoff, which is the M6 gate #869 exists for.
-    The shape check (`is_system_name`) runs regardless of what `systems` contains, so a
-    traversal-shaped name is never a set lookup (FK-5). It is asked only of the SYSTEM half:
-    a reducer row is routed by its `query_id`, so no membership question is put to it and
-    `gather` never has to be a declared system for its surface to be reachable (C11).
+    `systems` is the threaded membership value (the adapter half alone) — a queued row naming
+    a system nothing declares yields no handoff. The shape check (`is_system_name`) runs
+    regardless of what `systems` contains, so a traversal-shaped name is never a set lookup.
+    Membership is asked only of the SYSTEM half: a reducer row is routed by its `query_id`, so
+    `gather` never has to be a declared system for its surface to be reachable.
     """
     by_system: dict[str, list[dict]] = {}
     reducer: list[dict] = []
@@ -129,7 +127,7 @@ def _build_pitfalls_handoffs(rows: list[dict], *, systems: frozenset[str]) -> li
         system = str(r.get("system") or "").strip()
         # No `not system` arm: `is_system_name("")` is already False (the pattern needs one
         # `[a-z0-9]`), and a second spelling of "the empty string is not a name" is one more
-        # place for the two to disagree — which is the whole of what #914 was about.
+        # place for the two to disagree.
         if not is_system_name(system) or system not in systems:
             continue
         by_system.setdefault(system, []).append(r)
@@ -175,12 +173,11 @@ def _invoke_pitfalls_agent(
 
 
 def _pitfalls_path_rule(xy: str, path: str, *, systems: frozenset[str]) -> None:
-    # #870 M7 — ONE literal allowance, compared as a literal and matched BEFORE both branches
-    # below. `gather` is not in the adapter set (C11) and the reducer surface is not an
-    # `execution.md` (C7), so either branch would refuse the one path this round exists to
-    # open. It FALLS THROUGH to the delete branch rather than returning: that branch is this
-    # rule's LAST, so an early return would exempt the new path from U4 — the one negative
-    # universal the doc assumed it would inherit for free.
+    # ONE literal allowance, compared as a literal and matched BEFORE both branches below:
+    # `gather` is not in the adapter set and the reducer surface is not an `execution.md`, so
+    # either branch would refuse the one path this rule exists to open. It FALLS THROUGH to
+    # the delete branch rather than returning — that branch is this rule's last, and an early
+    # return would exempt the new path from it.
     if path != REDUCER_REL:
         if not _is_system_execution_md(path):
             raise LeadAuthorError(
@@ -188,7 +185,7 @@ def _pitfalls_path_rule(xy: str, path: str, *, systems: frozenset[str]) -> None:
                 "refusing to commit (its scope is execution.md and the reducer surface "
                 f"{REDUCER_REL})"
             )
-        # The LAST gate on the same phantom-system class the handoff filters (#855 F-06): an
+        # The LAST gate on the same phantom-system class the handoff filters: an
         # `execution.md` under an UNDECLARED directory is not a system's execution surface, it
         # is a new system directory being minted one file at a time. Creating the FILE stays
         # legal — a declared system may have no `execution.md` yet and the curator's job is to
@@ -546,9 +543,8 @@ def _pitfalls_commit_message(changed: list[str]) -> str:
 
 
 def _require_adapter_declared_systems(repo_root: Path) -> frozenset[str]:
-    """NF2's second resolution point, resolved once at the pitfalls lane's own boundary
-    (adapter half alone), refusing loudly rather than spending an empty set as an ordinary
-    per-row membership "no" (RF6)."""
+    """The adapter half alone, resolved once at the pitfalls lane's own boundary — refusing
+    loudly rather than spending an empty set as an ordinary per-row membership "no"."""
     systems = adapter_declared_systems(repo_root)
     if not systems:
         message = (
@@ -633,9 +629,9 @@ def _deadletter_reason(row: dict) -> str:
 
 
 def _graveyard_dropped_rows(paths, rows: list[dict], dropped_ids: list[str]) -> None:
-    """FK-2: a dropped row is TERMINAL and leaves a durable record for human review — the
-    queue's own bump-and-retire ceiling (`drain.retire`) does not apply, since an undeclared
-    name is refused on the FIRST tick, never retried."""
+    """A dropped row is TERMINAL and leaves a durable record for human review — the queue's
+    own bump-and-retire ceiling (`drain.retire`) does not apply, since an undeclared name is
+    refused on the FIRST tick, never retried."""
     if not dropped_ids:
         return
     ids = set(dropped_ids)
@@ -721,10 +717,9 @@ def run_pitfalls(
     box=None,
 ) -> int:
     rows = _loop_persist.read_pitfalls(paths)
-    # The gate counts DISTINCT MISTAKES, not rows (#840). The queue keeps one row per
-    # failure, so a looping lead used to clear a threshold of 3 on a single lesson — and the
-    # threshold is #823 O3's evidence that the channel learned N things, which a count of
-    # failures is not.
+    # The gate counts DISTINCT MISTAKES, not rows. The queue keeps one row per failure, so a
+    # looping lead would otherwise clear a threshold of 3 on a single lesson — the threshold
+    # is evidence that the channel learned N things, which a count of failures is not.
     records = _loop_persist.merge_pitfalls(rows)
     threshold = _loop_config.pitfalls_threshold()
     if not _loop_persist.pitfalls_lane_is_open(records, threshold):
@@ -739,8 +734,8 @@ def run_pitfalls(
     batch_ids = [str(r["pitfall_id"]) for r in rows if r.get("pitfall_id")]
     repo_root = paths.repo_root
     # The WORKTREE's own sources, not the process's own checkout: this run commits into
-    # `repo_root`, so this is the tree a handoff path may name. NF2's second resolution
-    # point — the ADAPTER HALF ALONE — resolved ONCE here, before the agent is ever spawned.
+    # `repo_root`, so this is the tree a handoff path may name. The ADAPTER HALF ALONE,
+    # resolved ONCE here, before the agent is ever spawned.
     systems = _require_adapter_declared_systems(repo_root)
     handoffs = _build_pitfalls_handoffs(records, systems=systems)
     # ONE derivation of "was the reducer surface opened on this tick", at the tick's own scope,
@@ -763,8 +758,8 @@ def run_pitfalls(
     })
     if dropped:
         # Named, never dropped quietly: a batch that silently loses a system reads exactly
-        # like one that had nothing to teach it. Names the ONE source this lane consulted
-        # (NF2) — never the marker source, which this lane never reads.
+        # like one that had nothing to teach it. Names the ONE source this lane consulted —
+        # never the marker source, which this lane never reads.
         _log(
             f"pitfalls: dropped {len(dropped)} queued system(s) not in the declared adapter "
             f"set ({repo_root / ADAPTERS_REL}): {dropped}"
@@ -798,10 +793,9 @@ def run_pitfalls(
 
     rc = (invoke or _invoke_pitfalls_agent)(handoffs, repo_root=repo_root, box=box)
     if rc != 0:
-        # RAISED, not returned (#719). The rc was the pitfalls channel's dominant failure
-        # and nothing ever inspected it, so a repeatedly failing batch was discarded
-        # silently and forever. `AuthorError` is a member of the drain's retire set, so
-        # the fault now reaches the same bounded retirement every other queue has.
+        # RAISED, not returned: a returned rc goes uninspected, so a repeatedly failing batch
+        # is discarded silently and forever. `AuthorError` is a member of the drain's retire
+        # set, so the fault reaches the same bounded retirement every other queue has.
         raise _author_shared.AuthorError(
             f"pitfalls curator exited rc={rc}; leaving queue intact"
         )

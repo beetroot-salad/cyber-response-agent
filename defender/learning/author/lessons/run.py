@@ -38,28 +38,24 @@ from defender.learning.core.config import (
 
 AuthorError = _shared.AuthorError
 
-# The ONE spelling of this drain's log prefix. `build_author_config` puts it on
-# `cfg.log_prefix` (the field the shared corpus-author base requires) and `_log` below is
-# built from it, so the envelope, the curator stage and every message in this module cannot
-# drift onto two prefixes.
+# The ONE spelling of this drain's log prefix: `cfg.log_prefix` and `_log` below both come
+# from it, so the envelope, the curator stage and this module cannot drift onto two.
 _LOG_PREFIX = "author"
 
 
 @dataclass(frozen=True, kw_only=True)
 class AuthorConfig(CorpusAuthorConfig):
-    """The lessons curator's drain config: the shared corpus-author core (#713) plus the
-    three fields only this drain has.
+    """The lessons curator's drain config: the shared corpus-author core plus the three
+    fields only this drain has — the held report, the manifest seed the lessons prompt
+    takes, and the env-backed model knobs.
 
-    REVERSED BY #719, which is why this docstring no longer names two locks as a reason
-    NOT to fold: the read-side lock and the drain-wide lock are now `channel.append_lock`
-    and `channel.drain_lock`, declared on the channel and taken by the shared drain body.
-    What is left here is genuinely findings-only — the held report, and the manifest seed
-    the lessons prompt takes."""
+    A prohibition against carrying lock topology as config once stood here; #719 reversed
+    it — the roles are fields on `QueueChannel`."""
 
     held_report: Path
     manifest_seed: str | None = None
-    # default_factory, not a plain default: these are env-backed knobs and a plain
-    # default would freeze at import (#717). A caller that overrides them still wins.
+    # default_factory, not a plain default: these are env-backed knobs and a plain default
+    # would freeze at import. A caller that overrides them still wins.
     author_model: str = field(default_factory=_author_model)
     author_timeout: int = field(default_factory=_author_timeout)
     author_effort: str | None = field(default_factory=_author_effort)
@@ -77,9 +73,9 @@ def build_author_config(
         channel=paths.findings,
         repo_lock_file=paths.author_lock_file,
         repo_lock_wait_seconds=repo_lock_wait_seconds(),
-        # Channel-scoped, like the graveyard and the stuck-row record beside it: D7
-        # keeps this report lessons-local, so it must not sit on a name an
-        # observation channel would look like it shares (#719).
+        # Channel-scoped, like the graveyard and the stuck-row record beside it: this
+        # report is lessons-local, so it must not sit on a name an observation channel
+        # would look like it shares.
         held_report=paths.pending_dir / "findings.held_report.log",
         log_prefix=_LOG_PREFIX,
         author_prompt=paths.learning_dir / "author" / "lessons" / "prompt.md",
@@ -113,8 +109,8 @@ def disposition_for(cfg: AuthorConfig, run_id: str) -> str | None:
 
 def existing_finding_ids(cfg: AuthorConfig) -> set[str]:
     ids: set[str] = set()
-    # The same spelling the drain's attribution gate reads (#852 F-02): a file attributable
-    # there but invisible here is authored again on every following tick.
+    # The same spelling the drain's attribution gate reads: a file attributable there but
+    # invisible here is authored again on every following tick.
     field = provenance_field(cfg.channel.id_key)
     for lesson in iter_lessons(
         cfg.corpus_dir, warn_label=lambda p: f"finding-id pre-flight: {p.name}"
@@ -222,18 +218,14 @@ _log = make_logger(_LOG_PREFIX)
 
 
 def _write_held_report_after_rotate(outcome, cfg: AuthorConfig) -> None:
-    """D7's hook, run after BOTH the corpus commit and the queue rotation.
+    """Run after BOTH the corpus commit and the queue rotation — the only seam that
+    observes the tick's closing edge, which is why it is shared config rather than
+    lessons-local decoration, even though only this direction populates it.
 
-    It is the only seam that observes the tick's closing edge, which is what makes it
-    shared config rather than lessons-local decoration — even though only this direction
-    populates it.
-
-    UNCONDITIONAL AS OF #852 (F-02). It used to return early on a batch that committed,
-    which silenced the report on exactly the batch shape a forward-check hold is most
-    interesting in: a MIXED batch, where the held lesson's file sits in a corpus that is
-    being committed for its batch-mates. The rows a tick held or skipped are the same rows
-    whether or not other rows committed, and the operator's one written trace of a
-    `forward_bad` verdict should not depend on how the tick's other rows went."""
+    UNCONDITIONAL: the rows a tick held or skipped are the same rows whether or not other
+    rows committed, and the operator's one written trace of a `forward_bad` verdict must
+    not depend on how the tick's other rows went — least of all in a MIXED batch, the shape
+    a forward-check hold is most interesting in."""
     write_held_report(
         cfg,
         batch_id=outcome.batch_id,
@@ -249,7 +241,7 @@ def run_batch(
     cfg: AuthorConfig | None = None,
     box: Any = None,
 ) -> int:
-    """The findings direction's entry point. The batch body is `drain.run_batch` (#719)."""
+    """The findings direction's entry point. The batch body is `drain.run_batch`."""
     if cfg is None:
         cfg = build_author_config(paths, box=box)
     return drain.run_batch(cfg=cfg, hold_committed=hold_committed, box=box)
@@ -267,9 +259,8 @@ def _gate_findings(
     """The findings direction's pre-author policy: idempotency against the corpus, then
     the `source_refs.yaml` ground truth a finding needs before it can become a lesson.
 
-    `to_author` is derived HERE, by subtraction, rather than by the caller (#719) — the
-    shape is now the same 3-tuple both directions return, even though the policies are
-    not the same policy parameterised."""
+    `to_author` is derived HERE by subtraction, so both directions return the same 3-tuple
+    even though the policies are not one policy parameterised."""
     existing_ids = existing_finding_ids(cfg)
     held: list[dict] = []
     consumed_idempotent: list[dict] = []

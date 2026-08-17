@@ -122,23 +122,20 @@ def final_weights(companion: CompanionBody) -> dict[str, Any]:
     """Where every DECLARED hypothesis ended up: its `:H` weight, moved by each
     resolution against it, last move winning.
 
-    NOT document order, and the difference is observable: `iter_resolutions` walks the
-    LEADS in declaration order and each lead's rows within that, so two leads moving one
-    hypothesis in a single `:T resolutions` block settle on the row belonging to the
-    later-DECLARED lead, not the later-written row. A block whose rows follow their leads
-    — every shipped document — is the case where the two orders coincide.
+    NOT document order, and the difference is observable: `iter_resolutions` walks the LEADS in
+    declaration order and each lead's rows within that, so two leads moving one hypothesis in a
+    single `:T resolutions` block settle on the row belonging to the later-DECLARED lead, not
+    the later-written row. A block whose rows follow their leads is where the orders coincide.
 
-    A resolution MOVES a weight; it does not declare one. Seeding an entry from
-    the resolution row instead minted a hypothesis no `:H` row carries, and the
-    keys are what `live_hypothesis_ids` reports — so an `h-*` that existed only
-    as a typo in `:T resolutions` was counted live (#821). `validate_companion`
-    denies that document, but this walker is read on documents that never went
-    through it: one carrying a parse warning, or one read back after the fact.
-    The gate is a second line here, not the first.
+    A resolution MOVES a weight; it does not declare one. Seeding an entry from the resolution
+    row would mint a hypothesis no `:H` row carries, and these keys are what
+    `live_hypothesis_ids` reports — so an `h-*` existing only as a typo in `:T resolutions`
+    would count as live. `validate_companion` denies that document, but this walker also reads
+    documents that never went through it (one carrying a parse warning, or one read back after
+    the fact).
 
-    So the declared set is the whole key set, and an unknown `h-*` is dropped
-    rather than added — silently, because naming it is the validator's job and
-    this is the read side.
+    So the declared set is the whole key set, and an unknown `h-*` is dropped rather than
+    added — silently, because naming it is the validator's job and this is the read side.
     """
     declared = all_hypotheses(companion)
     final: dict[str, Any] = {

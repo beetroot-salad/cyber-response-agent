@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Mechanize capture of one oracle-calibration golden case from a defender run.
 
-A case binds four things (#693):
+A case binds four things:
   - the ground-truth STORY (what actually happened — the oracle's story input),
   - the ORACLE-VISIBLE input per lead (what_to_summarize + queries + the redacted
     sample skeleton the production oracle would see),
@@ -81,32 +81,29 @@ def main(argv: list[str] | None = None) -> int:
     leads_rows = []
     for jl in leads:
         if jl.provenance == HARNESS_PROVENANCE:
-            # #808 — the harness-authored leads (l-000/l-00c) are excluded from the frozen
-            # case: they are not part of what a MODEL projection is scored against, and
-            # freezing them would fail every future projection's lead-set integrity gate.
+            # The harness-authored leads (l-000/l-00c) are excluded from the frozen case:
+            # they are not part of what a MODEL projection is scored against, and freezing
+            # them would fail every future projection's lead-set integrity gate.
             continue
         # ORACLE-VISIBLE: exactly the fields build_lead_user_prompt consumes.
         leads_rows.append({
             "lead_id": jl.lead_id,
             "goal": jl.goal,
             "what_to_summarize": jl.what_to_summarize,
-            # `seq` is the QUERIES TABLE's own seq, carried through so `controls.py`
-            # can key its record by the same number the observed payload is named
-            # for (`raw_ref.name` is `{seq}.json`). Not the list position: #841 split
-            # the `∅.`-prefixed sentinels out of `JoinedLead.queries` while the
-            # table's seq still counts them, so one refusal ahead of a real query
-            # makes the position trail the seq for the rest of the lead — and a
-            # control keyed by position is then a different query's baseline.
-            # Reaches NO model prompt, and that is enforced at each reader rather than
-            # asserted here. The oracle renders only `id` and `params`
-            # (oracle/sample.py::_query_lines) and `replay.py` rebuilds its `_Query`
-            # from the same two. The judge would have carried it — `label_user_prompt`
-            # yaml-dumps this whole row into its `<lead>` block — so `judge` projects
-            # through `lead_for_model` (an allowlist) before either pass sees it. That
-            # matters because a prompt that gains a line is a different measurement
-            # taken under an unchanged `prompts_sha8` and an unchanged
-            # `labels/<judge-suffix>.json` cache key: a rebuilt case would be labelled
-            # from a different shape than its siblings and nothing would say so.
+            # `seq` is the QUERIES TABLE's own seq, carried through so `controls.py` can key
+            # its record by the same number the observed payload is named for
+            # (`raw_ref.name` is `{seq}.json`). Not the list position: the `∅.`-prefixed
+            # sentinels are split out of `JoinedLead.queries` while the table's seq still
+            # counts them, so one refusal ahead of a real query makes the position trail the
+            # seq for the rest of the lead — and a control keyed by position is then a
+            # different query's baseline.
+            # Reaches NO model prompt, enforced at each reader rather than asserted here: the
+            # oracle renders only `id` and `params` (oracle/sample.py::_query_lines),
+            # `replay.py` rebuilds its `_Query` from the same two, and `judge` projects
+            # through `lead_for_model` (an allowlist) before either pass sees it — otherwise
+            # `label_user_prompt` would yaml-dump this whole row into its `<lead>` block. A
+            # prompt that gains a line is a different measurement taken under an unchanged
+            # `prompts_sha8` and an unchanged `labels/<judge-suffix>.json` cache key.
             "queries": [{"query_id": q.query_id, "params": q.params or {}, "seq": q.seq}
                         for q in jl.queries],
         })

@@ -11,12 +11,10 @@ from defender.runtime.agent_role import AgentRole
 from defender.runtime.driver import GATHER_DEF, MAIN_DEF
 from defender.runtime.review_roles import COMPOSER_DEF, SUPPORT_DEF
 
-# #797 retired CHALLENGER_DEF, COHERENCE_CHECKER_DEF and PROJECTION_DEF here with the three
-# review stages themselves — a definition in this registry is what compiles a role's policy,
-# so a registered role with no caller is a compiled grant nothing claims. DISCRIMINATION_DEF
-# left the same way once the lens it defined was retired for adding nothing the composer could
-# route. What remains is ONE lens role and the composer: SUPPORT is claimed by two calls (the
-# support lens and its ablation), so there are two definitions and three calls.
+# A definition in this registry is what compiles a role's policy, so a registered role with no
+# caller is a compiled grant nothing claims — retire the definition with the stage. The review
+# side is ONE lens role plus the composer: SUPPORT is claimed by two calls (the support lens
+# and its ablation), so there are two definitions and three calls.
 AGENTS: dict[AgentRole, AgentDefinition] = build_registry(
     (MAIN_DEF, GATHER_DEF, JUDGE_DEF, ACTOR_DEF, ORACLE_DEF, VERIFY_DEF, LEAD_AUTHOR_DEF,
      CORPUS_AUTHOR_DEF, SUPPORT_DEF, COMPOSER_DEF)

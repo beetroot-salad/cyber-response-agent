@@ -156,18 +156,16 @@ class Observations(TypedDict, total=False):
 
 
 
-# The `:R` resolution buckets. Their rows are column-header driven — the author's
-# `[a|b|c]` header names the keys, and `_canonicalize_resolution_row` renames the
-# ones it knows and passes the rest through. So EVERY key is optional twice over:
-# the header decides whether a column exists at all, and an empty cell is dropped
-# rather than stored as "". These types name the keys the canonicalizer emits;
-# they do not close the grammar.
+# The `:R` resolution buckets. Their rows are column-header driven — the author's `[a|b|c]`
+# header names the keys, and `_canonicalize_resolution_row` renames the ones it knows and
+# passes the rest through. So EVERY key is optional twice over: the header decides whether a
+# column exists at all, and an empty cell is dropped rather than stored as "". These types
+# name the keys the canonicalizer emits; they do not close the grammar.
 #
-# Key sets are derived from the `:R` headers in docs/dense-investigation-format.md
-# §`:R`, defender/skills/invlang/SKILL.md, and the provenance tuple rules #11 and
-# #30 of docs/investigation-language.md make required. `ResolutionRow` holds the
-# grounding/provenance keys all three anchor-resolving buckets carry; each subtype
-# adds only what its own header adds.
+# Key sets derive from the `:R` headers in docs/dense-investigation-format.md §`:R` and
+# defender/skills/invlang/SKILL.md, plus the provenance tuple rules of
+# docs/investigation-language.md. `ResolutionRow` holds the grounding/provenance keys all
+# three anchor-resolving buckets carry; each subtype adds only what its own header adds.
 
 
 class ResolutionRow(TypedDict, total=False):
@@ -277,47 +275,38 @@ class Conclude(TypedDict, total=False):
     matched_archetype: str | None
     ceiling_rationale: str | None
     summary: str | None
-    # #806 — what the DETECTOR got wrong, kept out of `summary` on purpose. A run can find two
-    # independent things (the alert's own claim does not hold; the host is compromised anyway) and
-    # `disposition` has room for one. Free text, ONE line like every other row here. It reaches the
-    # judge because `render_synthesis` dumps this whole dict; it is deliberately NOT mirrored into
-    # `report.md`, which is host-rendered from typed values and carries no model prose (#774).
+    # What the DETECTOR got wrong, kept out of `summary` on purpose: a run can find two
+    # independent things (the alert's claim does not hold; the host is compromised anyway) and
+    # `disposition` has room for one. Free text, ONE line like every other row here. It reaches
+    # the judge because `render_synthesis` dumps this whole dict; deliberately NOT mirrored into
+    # `report.md`, which is host-rendered from typed values and carries no model prose.
     detection_notes: str | None
     # The checks the run could NOT make — one entry per gap, which is why it is a list where its
-    # neighbours are scalars: a run names each unreachable source separately ("authorized_keys FIM
-    # on web-1 (auditd write events) not retrieved"), and golden-case-018 writes three.
+    # neighbours are scalars: a run names each unreachable source separately ("authorized_keys
+    # FIM on web-1 (auditd write events) not retrieved").
     #
-    # It is recorded here because it was already being written and thrown away. Eleven checked-in
-    # lessons instruct it — the corpus is the ONLY place the model could learn the name, since
-    # `skills/invlang/SKILL.md` (the file ORIENT inlines) never mentioned it and
-    # `docs/dense-investigation-format.md` is a design doc no prompt loads. So the loop taught
-    # itself the field through lesson retrieval — it appears across 49 run files, 41 of them
-    # transcripts and llm_requests where the model is reasoning about it — and every one of the
-    # 6 conclude rows it actually authored was dropped here, leaving the judge unable to tell a
-    # benign close that checked everything from one that named a load-bearing gap. Which is the
-    # distinction those eleven lessons exist to force, from outside, where they cannot reach it.
+    # Without it the judge cannot tell a benign close that checked everything from one that
+    # named a load-bearing gap.
     #
     # A bare `none` is the format's way of saying "no ceiling" and projects as absence, so
     # `conclude.get("ceiling_test")` answers "did this run name a gap" without a sentinel.
     ceiling_test: list[str]
-    # #806 — the lead id that tested the ALERTED entity for suspicion independent of the alert's
-    # own claim. It is what makes `disposition false-positive` reachable: refuting the detector
-    # says nothing about the host, so the exit is gated on having looked at the host anyway.
+    # The lead id that tested the ALERTED entity for suspicion independent of the alert's own
+    # claim. It is what makes `disposition false-positive` reachable: refuting the detector says
+    # nothing about the host, so the exit is gated on having looked at the host anyway.
     #
     # A lead id and not prose, because prose cannot be checked. `_check_false_positive_gating`
     # resolves it against `:L findings` and requires the lead to have COMMITTED a result and to
     # target a vertex the PROLOGUE already carried. The prologue clause is the load-bearing one:
-    # in `pr815-rerun-0808` every lead after the refutation but one chased vertices the
-    # refutation itself introduced (v-006 the failing source, v-010 its workstation), which is
-    # how a run spends 124 of 131 queries and still never asks about the host it was paged for.
+    # a run whose post-refutation leads all chase vertices the refutation itself introduced
+    # never asks about the host it was paged for.
     entity_check: str | None
-    # #821 — the run's own list of what it thinks survived, from
-    # `:T conclude.surviving [hyp_id|final_weight]`. Projected so its `h-*` is checkable
-    # like the other three sites that name one; the parser accepted the block and discarded
-    # its rows, so a conclude naming a hypothesis nothing declares passed in silence.
+    # The run's own list of what it thinks survived, from
+    # `:T conclude.surviving [hyp_id|final_weight]`. Projected so its `h-*` is checkable like
+    # the other three sites that name one.
     #
-    # Self-reported and omittable, which is exactly why benign-gating computes survival from
-    # the resolution record instead (enforcement ramp rule 5). Checkable, not authoritative.
+    # Self-reported and omittable, which is why benign-gating computes survival from the
+    # resolution record instead (enforcement ramp rule 5). Checkable, not authoritative.
     surviving_hypotheses: list[SurvivingHypothesis]
     termination: Termination
 

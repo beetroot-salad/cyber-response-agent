@@ -1,21 +1,15 @@
 #!/usr/bin/env python3
-"""Recruit one oracle-calibration case against the live stack (#711 M9, rebuilt §7).
+"""Recruit one oracle-calibration case against the live stack.
 
-Rebuilt thin. The previous recruiter polled 20 x 30s for a detection rule and then
-`return 2` — discarding telemetry the activity had ALREADY produced. That threw away
-two of the pilot campaign's six cells (`persistence-authorized-keys`,
-`living-off-the-land`), which raise no rule.
-
-The rule was never load-bearing. **The oracle does not see the alert** — `oracle/prompt.md`
-opens by saying so — and the alert exists only to make `defender/run.py` emit a realistic
-lead set. So a cell whose activity trips no rule is not an unrecruitable cell; it is a
-cell whose alert has to come from somewhere else.
+A detection rule firing is NOT load-bearing. **The oracle does not see the alert** —
+`oracle/prompt.md` opens by saying so — and the alert exists only to make `defender/run.py`
+emit a realistic lead set. So a cell whose activity trips no rule is not an unrecruitable
+cell; it is a cell whose alert has to come from somewhere else (`synthesise_alert`).
 
 **A `--target` the scenario cannot honour is refused before the stack is touched**
-(`retarget_problem`). Those same two cells are LOCAL — they act on canary-1 itself and
-never read `${target}` — but `runner.py` records the override regardless, so recruiting
-them "at db-1" produced two cases whose every lead investigated a host the activity had
-not run on. See `retarget_problem` for the full account; it cost case-006 and case-007.
+(`retarget_problem`). A LOCAL scenario acts on its own host and never reads `${target}`,
+but `runner.py` records the override regardless — so recruiting one "at db-1" builds a
+case whose every lead investigates a host the activity never ran on.
 
   fire       playground-v2/attacks/runner.py run <scenario> --seed --user --target
   alert      the rule's own alert if one fired, else synthesised from the runner record
@@ -73,12 +67,11 @@ ENVIRONMENT_TEMPLATE = HERE / "environment_template.yaml"
 #: silently-wrong case, so it needs to be testable.
 Runner = Callable[..., subprocess.CompletedProcess]
 
-#: How long to give a real rule before synthesising. The old recruiter waited ten
-#: minutes and then threw the run away; the wait is now short because its outcome no
-#: longer decides whether the case exists. Both are env-overridable because the right
-#: wait is the rule's own interval: a 5m-interval detection rule (the Falco ones) cannot
-#: fire inside the 2m default, so capturing it — rather than synthesising — needs
-#: ORACLE_ALERT_ATTEMPTS raised past one rule tick.
+#: How long to give a real rule before synthesising. Short, because the outcome no longer
+#: decides whether the case exists. Both are env-overridable because the right wait is the
+#: rule's own interval: a 5m-interval detection rule (the Falco ones) cannot fire inside the
+#: 2m default, so capturing it rather than synthesising needs ORACLE_ALERT_ATTEMPTS raised
+#: past one rule tick.
 ALERT_ATTEMPTS = int(os.environ.get("ORACLE_ALERT_ATTEMPTS", "4"))
 ALERT_INTERVAL = int(os.environ.get("ORACLE_ALERT_INTERVAL", "30"))
 
@@ -118,25 +111,21 @@ def retarget_problem(scenario: str, target: str | None, source: str | None = Non
                      catalog_path: Path) -> str | None:
     """Why this scenario cannot be pointed at `target`, or `None` if it can.
 
-    This check exists because its absence cost two cases. `persistence-authorized-keys`
-    and `living-off-the-land` are LOCAL scenarios — the first appends to canary-1's own
-    `/root/.ssh/authorized_keys`, the second curls a URL and runs the result on canary-1.
-    Neither reads `${target}`. Recruited with `--target db-1` / `--target web-1`, the
-    override reached only the runner's record, the story's "directed at" header and the
-    synthesised alert — so `defender/run.py` investigated a host the activity never ran
-    on, and every lead in the resulting case queries an envelope that cannot contain it.
-    case-006's capture proves it: db-1's `/root/.ssh/authorized_keys` is empty and Falco
-    has zero rows for db-1.
+    A LOCAL scenario acts on its own host and never reads `${target}` — appending to
+    canary-1's `/root/.ssh/authorized_keys`, say. Recruited with `--target db-1`, the
+    override reaches only the runner's record, the story's "directed at" header and the
+    synthesised alert, so `defender/run.py` investigates a host the activity never ran on
+    and every lead queries an envelope that cannot contain it.
 
-    The runner now has a `--source` knob, which is what actually relocates a local
-    scenario: it moves where the commands run. So the defect is no longer "you cannot
-    retarget a local scenario" — it is "you moved the label without moving the
-    execution". A local scenario is coherent exactly when the host the commands run on
-    (effective source) is the host the story, alert and leads name (effective target).
+    The runner's `--source` knob is what actually relocates a local scenario: it moves
+    where the commands run. So the defect is not "you cannot retarget a local scenario",
+    it is "you moved the label without moving the execution". A local scenario is coherent
+    exactly when the host the commands run on (effective source) is the host the story,
+    alert and leads name (effective target).
 
-    A case built the incoherent way is not merely mislabelled. Its leads are unusable,
-    and no manifest edit recovers them — the envelope has to be re-gathered against an
-    alert on the host the activity actually touched.
+    A case built the incoherent way is not merely mislabelled. Its leads are unusable and
+    no manifest edit recovers them — the envelope has to be re-gathered against an alert
+    on the host the activity actually touched.
     """
     entry = scenario_entry(scenario, catalog_path)
     if honours_target(entry):
@@ -166,15 +155,13 @@ def occupancy_problem(case_dir: Path) -> str | None:
     """Why this case id cannot be recruited into, or `None` if it is free.
 
     Two recruitments of one case id do not collide loudly — they interleave. The second
-    overwrites `.generate/alert.json` while the first is still investigating, and what
-    lands is a case assembled from both: `case-013`'s first attempt produced a story
-    describing the 10:28 run against web-1, leads from an investigation of a web-2 alert,
-    and a manifest window from a 10:16 run that had already been killed. Story and
-    envelope disagreed, which is exactly the defect that retired case-009 — and nothing
-    downstream detects it, because every individual file is well-formed.
+    overwrites `.generate/alert.json` while the first is still investigating, and what lands
+    is a case assembled from both: a story describing one run, leads from an investigation of
+    another host's alert, a manifest window from a third. Story and envelope disagree, and
+    nothing downstream detects it because every individual file is well-formed.
 
-    Refusing an occupied id is not about protecting committed work; it is about making
-    the collision loud at the only moment it is cheap.
+    Refusing an occupied id is not about protecting committed work; it is about making the
+    collision loud at the only moment it is cheap.
     """
     if not case_dir.exists():
         return None
@@ -349,11 +336,10 @@ def investigate(alert: Path, run_id: str) -> Path:
 def write_environment(path: Path, capture_environment: str) -> None:
     """Emit the case's `environment.yaml` — a REQUIRED judge input, not a nicety.
 
-    Both judge passes read it, and it is what carries the facts that decide whether a
-    cross-window difference is real at all: which columns rotate across lever-ups, how
-    the controls were built, what `window_live: false` means. A case without it is a
-    case the judge cannot read. Rendered from one template so the seven hand-written
-    ones and every recruited one say the same thing.
+    Both judge passes read it, and it carries the facts that decide whether a cross-window
+    difference is real at all: which columns rotate across lever-ups, how the controls were
+    built, what `window_live: false` means. Rendered from one template so the hand-written
+    cases and every recruited one say the same thing.
     """
     body = ENVIRONMENT_TEMPLATE.read_text(encoding="utf-8")
     path.write_text(body.format(capture_environment=capture_environment), encoding="utf-8")

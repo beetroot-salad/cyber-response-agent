@@ -3,8 +3,8 @@ review record, stage invocation with a real wall-clock deadline, and the trace r
 
 `challenge_gate(deps, disposition, *, stages, bounds) -> GateVerdict` is the seam the close
 tool drives for a CONFIDENT disposition. It never writes report.md or the review record
-itself — the close tool (`close_tool.py`) owns both writes, in the record-first order RS19
-pins, and is the one place a fault is held until both are attempted.
+itself — the close tool (`close_tool.py`) owns both writes, in record-first order, and is the
+one place a fault is held until both are attempted.
 
 The reviewer is BLIND LENSES plus a COMPOSER. Each lens reads a projection of the
 investigation that withholds the belief movement it is asked to reconstruct, and they run
@@ -13,20 +13,13 @@ that sees both the readings and the investigation's own account — it may be an
 account precisely because the independent work is already banked.
 
 The lens set is SUPPORT and its ABLATION: one reading of what the observed evidence carries,
-and the same reading again with one load-bearing edge withheld. #796 shipped a third,
-DISCRIMINATION, which asked instead what each lead's possible outcomes could have separated —
-a question about lead DESIGN. It is retired: the gate routes on whether the disposition
-holds, and a lead that discriminated nothing is a fact about a measurement already taken, so
-the finding has nowhere to go. The first measured live run showed exactly that — the composer
-discarded both of its findings, one of them in as many words, for 52% of the review's cost and
-90% of its wall clock. What is left is a soundness check plus a sensitivity check, which is
-what the two-member `holds`/`gap` finding can actually carry.
+and the same reading again with one load-bearing edge withheld — a soundness check plus a
+sensitivity check, which is what the two-member `holds`/`gap` finding can carry.
 
-FAIL CLOSED (RS9): a stage raising, timing out, or otherwise not completing overrides the
-confident finding to inconclusive — never a silently-committed close. It commits the SAME
-outcome as an override the evidence produced; what separates the two is the typed
-`failure_kind`, set only when the machinery is what failed. Having no reviewer at all is the
-machinery failing, so it is `error` and not a finding about the case.
+FAIL CLOSED: a stage raising, timing out, or otherwise not completing overrides the confident
+finding to inconclusive — never a silently-committed close. It commits the SAME outcome as an
+override the evidence produced; what separates the two is the typed `failure_kind`, set only
+when the machinery is what failed.
 """
 
 from __future__ import annotations
@@ -45,11 +38,9 @@ EXTRA_TURN_BOUND = 2
 
 REVIEW_TIMEOUT_ENV = "DEFENDER_REVIEW_STAGE_TIMEOUT_SECONDS"
 
-#: The review roles this gate dispatches, in the order it reports faults for. It is the ONE
-#: home for that list: the trace-marking walk reads it rather than restating the names, so a
-#: role added to the gate cannot arrive with a trace file the incomplete-marker never touches
-#: (the shipped shape restated all three inline, and a stage renamed in one place stayed
-#: spelled the old way in the other).
+#: The review roles this gate dispatches, in the order it reports faults for. The ONE home for
+#: that list: the trace-marking walk reads it rather than restating the names, so a role added
+#: to the gate cannot arrive with a trace file the incomplete-marker never touches.
 REVIEW_ROLES: tuple[str, ...] = ("support", "ablation", "composer")
 
 
@@ -78,18 +69,14 @@ def _shipped_base_request_limit() -> int:
 
 @dataclass(frozen=True)
 class Bounds:
-    """RS14. Every bound is INJECTED, never hardcoded at a call site — `EXTRA_TURN_BOUND` is
-    the shipped DEFAULT, not a literal restated elsewhere.
+    """Every bound is INJECTED, never hardcoded at a call site — `EXTRA_TURN_BOUND` is the
+    shipped DEFAULT, not a literal restated elsewhere. There is one review pass per close
+    attempt and no second ask, so there is no round budget here.
 
-    `grace_rounds` is gone with the refinement loop it bounded (#797). There is one review
-    pass per close attempt and no second ask, so there is no round budget to spend.
-
-    `base_request_limit` is here for the same reason the cap is: the raised ceiling is
-    base-plus-cap, and while the base was a module constant with no path through the entry
-    point, "read FROM the cap rather than restated as a literal" could not be told apart from
-    a hardcoded copy — the shipped base and a copy of it are the same number. It is also what
-    lets the ceiling's THIRD reader (the message store's withhold check) be handed the same
-    value the run was, rather than mirroring a stale one."""
+    `base_request_limit` rides along because the raised ceiling is base-plus-cap: with the base
+    a module constant reachable only by import, "read FROM the bounds" could not be told apart
+    from a hardcoded copy. It is also what lets the ceiling's third reader (the message store's
+    withhold check) be handed the same value the run was, rather than mirroring a stale one."""
 
     extra_turns: int = EXTRA_TURN_BOUND
     stage_timeout: float = field(default_factory=stage_timeout)
@@ -111,31 +98,24 @@ class Bounds:
 
 
 def default_bounds() -> Bounds:
-    """The shipped bounds. Kept as a FUNCTION though its body is now empty of arguments:
-    every call site is a `# lint-default: ok` default-resolution site, and a named
-    zero-argument constructor is what makes "the caller passed nothing, so use the shipped
-    default" a readable line there rather than a bare `Bounds()` that looks like a literal.
-    (Two are the gate's own DI boundaries — `close_investigation` and `run_investigation`;
-    the third, `driver._main_extra_capabilities`, resolves the request ceiling FROM the
-    shipped bounds because the honest default is derived from them.)
-
-    It used to restate `extra_turns` and `stage_timeout`, which are exactly the dataclass's
-    own defaults — so the shipped value lived in two places and only the dataclass's was
-    reachable by anything else."""
+    """The shipped bounds. Kept as a FUNCTION though it passes no arguments: every call site is
+    a `# lint-default: ok` default-resolution site, and a named zero-argument constructor is
+    what makes "the caller passed nothing, so use the shipped default" readable there rather
+    than a bare `Bounds()` that looks like a literal. It deliberately restates none of the
+    dataclass's own defaults, so the shipped value lives in one place."""
     return Bounds()
 
 
 def raised_request_limit(bounds: Bounds) -> int:
-    """RS7. Read FROM the bounds the run was handed — both terms — never restated as a
-    literal, and never half-read from a module constant the caller cannot move."""
+    """Read FROM the bounds the run was handed — both terms — never restated as a literal, and
+    never half-read from a module constant the caller cannot move."""
     return bounds.base_request_limit + bounds.extra_turns
 
 
 @dataclass
 class ReviewState:
-    """K9. The run's per-run mutable review state — lives in exactly ONE mutable container
-    field on the frozen `AgentDeps` (`deps.review_state`, following the `authored_paths`
-    precedent)."""
+    """The run's per-run mutable review state — lives in exactly ONE mutable container field
+    on the frozen `AgentDeps` (`deps.review_state`)."""
 
     turns: int = 0
     #: target -> how much of the record mentioned it when the ask was raised.
@@ -154,7 +134,7 @@ class ReviewState:
 
 
 # --------------------------------------------------------------------------------------
-# The review record — RS11: beside the run, temp-plus-rename, keyed by run + turn.
+# The review record — beside the run, temp-plus-rename, keyed by run + turn.
 # --------------------------------------------------------------------------------------
 
 
@@ -171,7 +151,7 @@ def write_review_record(run_dir, turn: int, record: dict) -> None:
 
 
 # --------------------------------------------------------------------------------------
-# Stage invocation: real wall-clock bound (PS1's gap closed), distinguishable timeout/error.
+# Stage invocation: real wall-clock bound, distinguishable timeout/error.
 # --------------------------------------------------------------------------------------
 
 
@@ -185,9 +165,8 @@ class StageRequest:
 @dataclass
 class StageOutcome:
     text: str | None
-    #: `None` when the call completed, otherwise a member of `close_tool.FAILURE_KINDS`.
-    #: Deliberately NOT re-listed here: a comment enumerating a subset goes stale the next
-    #: time one of them moves — which is the shape that already produced three bugs.
+    #: `None` when the call completed, otherwise a member of `close_tool.FAILURE_KINDS`
+    #: (deliberately not re-listed here — an enumerated subset goes stale).
     failure_kind: str | None
     detail: str | None = None
 
@@ -197,10 +176,9 @@ class StageOutcome:
 
 
 async def _call_stage(role: str, stage_fn, request: StageRequest) -> StageOutcome:
-    # Deferred import, same reason and same shape as every other close_tool reference in this
-    # module: close_tool imports this one at module scope. The two kinds are READ from the
-    # published vocabulary rather than spelled here, so the fleet's counting key has exactly
-    # one definition site.
+    # Deferred import, same reason as every other close_tool reference here: close_tool imports
+    # this module at module scope. The two kinds are READ from the published vocabulary rather
+    # than spelled here, so the fleet's counting key has exactly one definition site.
     from .close_tool import STAGE_ERROR, TIMEOUT
 
     try:
@@ -215,29 +193,27 @@ async def _call_stage(role: str, stage_fn, request: StageRequest) -> StageOutcom
 def _fresh_stage_request(render: Callable[[str], str], bounds: Bounds) -> StageRequest:
     """One stage call's request: its own fresh salt, and the prompt RENDERED against it.
 
-    PR7/PR8: every stage call carries its OWN fresh salt (never the investigation's session
-    salt) — the review roles never hold the delimiter of the frame their own output returns
-    inside. The salt is minted BEFORE the prompt and handed to the renderer, because the frame
-    the payload-derived record is inlined inside is keyed on it. Minting it after (or beside)
-    the prompt left the salt with no reader at all: the review's inbound half went unframed
-    while the field went on saying what it was for."""
+    Every stage call carries its OWN fresh salt (never the investigation's session salt) — the
+    review roles never hold the delimiter of the frame their own output returns inside. The
+    salt is minted BEFORE the prompt and handed to the renderer, because the frame the
+    payload-derived record is inlined inside is keyed on it; minting it afterwards leaves the
+    review's inbound half unframed."""
     salt = uuid.uuid4().hex
     return StageRequest(prompt=render(salt), salt=salt, timeout=bounds.stage_timeout)
 
 
 def review_trace_path(run_dir, role: str):
     """One review role's trace file, under the run's wire-log component. PUBLIC for the same
-    reason `review_record_path` is: the run dir's readers (the runtime visualizer's § Review
-    gate) need the shape, and a second site spelling `review_{role}_trace.jsonl` is a filename
-    with two owners.
+    reason `review_record_path` is: the run dir's readers (the runtime visualizer) need the
+    shape, and a second site spelling `review_{role}_trace.jsonl` is a filename with two owners.
 
     UNDER `WIRE_LOG_DIR` because this file holds each stage's RAW wrapped reply, which makes it
-    the same stream class as the wire log and the learning-stage traces — and at the run root
-    it was inside MAIN's `under(run, SEG)` shape on both lanes. MAIN is handed only the
+    the same stream class as the wire log and the learning-stage traces — at the run root it
+    would sit inside MAIN's `under(run, SEG)` shape on both lanes. MAIN is handed only the
     composer's `target: ask` lines (`close_tool._render_challenged_message`); the two blind
     lenses' replies are exactly what it must not see, and reading them is how a close is
-    tailored to a gate it is supposed to pass blind. `permission.files.names_wire_log_dir` refuses
-    the component for every role, so the roster of who can read this is now empty.
+    tailored to a gate it is supposed to pass blind. `permission.files.names_wire_log_dir`
+    refuses the component for every role.
 
     PURE — it joins and returns, and the mkdir belongs to the one WRITER (`_write_trace_row`).
     A reader that materialised the directory just by asking where the file is would leave an
@@ -255,14 +231,11 @@ def _is_row_shaped(raw_reply: str) -> bool:
     `read_jsonl_rows` — every other trace consumer — skips a line it cannot parse, which is
     what makes the raw-line path below safe for a reply of PROSE. The composer's reply is a
     JSON object by contract, and its framed form puts that object on a line of its own: a
-    round-less row carrying the review's prose that every trace reader counts as gate
-    metadata.
+    round-less row carrying the review's prose that every trace reader counts as gate metadata.
 
-    The question is ASKED of `_io.parse_jsonl_row` — the same predicate the reader applies —
-    rather than re-derived here. The two must agree exactly, because this side decides what
-    goes out as a raw line on the strength of the other side skipping it; a reader that
-    loosened to accept another JSON type would otherwise reintroduce the corruption from its
-    own end, silently, with nothing linking the two definitions."""
+    ASKED of `_io.parse_jsonl_row` — the same predicate the reader applies — rather than
+    re-derived here. The two must agree exactly, because this side decides what goes out as a
+    raw line on the strength of the other side skipping it."""
     from defender._io import parse_jsonl_row
 
     return any(parse_jsonl_row(line) is not None for line in raw_reply.splitlines())
@@ -275,14 +248,12 @@ def _write_trace_row(
     reply — as its own literal text line when it cannot be mistaken for a row, and inside the
     row's own JSON value when it can.
 
-    A `wrap(...)`-framed reply carries real newline characters; folding it into a JSON
-    string field would have `json.dumps` escape them to `\\n`, so the exact framed substring
-    a containment test looks for would never appear literally in the file, even though the
-    payload-derived text inside it would (JSON only escapes the control characters, not the
-    words, so the frame's own tags survive either way). Keeping the frame as a separate raw
-    line is what makes "wrapped, never bare" a checkable property of the bytes on disk — but
-    only for a reply no reader can parse. A reply that IS a JSON object goes inside the value
-    instead; on its own line it would corrupt the trace's row structure."""
+    A `wrap(...)`-framed reply carries real newline characters; folded into a JSON string field
+    `json.dumps` escapes them to `\\n`, so the exact framed substring a containment test looks
+    for would never appear literally in the file. Keeping the frame as a separate raw line is
+    what makes "wrapped, never bare" a checkable property of the bytes on disk — but only for a
+    reply no reader can parse. A reply that IS a JSON object goes inside the value instead; on
+    its own line it would corrupt the trace's row structure."""
     from pathlib import Path
 
     from defender._io import guarded_mkdir, write_guarded
@@ -295,11 +266,10 @@ def _write_trace_row(
     if raw_reply is not None and not inline:
         line += raw_reply if raw_reply.endswith("\n") else raw_reply + "\n"
     # ONE guarded append per row, not one per physical line: the two lines are a single trace
-    # record, and splitting them across two `write_guarded` calls both doubled the syscalls and
-    # left a window in which the metadata row was on disk without the reply it describes.
-    # The component is created HERE, at the sole writer, rather than in `review_trace_path`
-    # — see that function on why the path resolver stays pure. Anchored on the run dir, the
-    # box's rw bind and so the first component it could have planted a link at.
+    # record, and splitting them across two `write_guarded` calls leaves a window in which the
+    # metadata row is on disk without the reply it describes. The component is created HERE, at
+    # the sole writer (see `review_trace_path` on why the path resolver stays pure), anchored on
+    # the run dir — the box's rw bind, and so the first component it could plant a link at.
     path = review_trace_path(run_dir, role)
     guarded_mkdir(path.parent, base=Path(run_dir))
     write_guarded(path, line, mode="append")
@@ -311,11 +281,11 @@ def _mark_traces_incomplete(deps: Any, round_no: int, reason: str) -> None:
     restated here — with no roles bound this writes nothing, which is the honest record of a
     gate that dispatched nothing.
 
-    The reason rides FRAMED, on a wrap-time salt (#875) exactly as the stage replies on the
-    same files do. Half of what can land here is stage-derived — a reply the reader refused
-    quotes the model's own `finding`/`target`, and a stage error carries the provider's
-    message — so an unframed reason puts payload-influenced text into the one artifact whose
-    every other untrusted line is wrapped."""
+    The reason rides FRAMED, on a wrap-time salt, exactly as the stage replies on the same
+    files do. Half of what can land here is stage-derived — a refused reply quotes the model's
+    own `finding`/`target`, a stage error carries the provider's message — so an unframed
+    reason puts payload-influenced text into the one artifact whose every other untrusted line
+    is wrapped."""
     for role in REVIEW_ROLES:
         _write_trace_row(
             deps.run_dir, role, round_no,
@@ -325,17 +295,13 @@ def _mark_traces_incomplete(deps: Any, round_no: int, reason: str) -> None:
 
 @dataclass
 class GateVerdict:
-    """One gate attempt's classification, in the three fields that replaced the single
-    overloaded `reason`.
+    """One gate attempt's classification.
 
     `outcome` says what happened to the disposition (three values). `cause` is the HOST'S own
     sentence for the human reading the case — one of `close_tool.REPORT_CAUSES`, chosen here
     and never composed from a stage's reply. `detail` is the diagnostic and is the ONLY one of
     the three that may quote a stage: it names which stage broke and what it said, so it goes
-    to the numbered review record and never to report.md.
-
-    #797 dropped `counter_story`, `direction`, `requirement_list`, `projection_rows` and
-    `rounds_used` with the machinery that filled them."""
+    to the numbered review record and never to report.md."""
 
     outcome: str
     disposition: str
@@ -352,10 +318,9 @@ def _fail(role: str, outcome: StageOutcome, *, turns_used: int) -> GateVerdict:
     timeout and a raise stay apart without a branch here to keep in step with the one in
     `_call_stage`.
 
-    `turns_used` is the run's OWN count, passed in rather than written as zero. A challenged
-    close comes back and reviews again, so a fault on the second pass reported a run that had
-    spent no forced turn — rule 13 of `docs/review-gate-retirement.md` ("the round is a
-    parameter, not a hardcoded zero"), one field over from where the round itself was fixed."""
+    `turns_used` is the run's OWN count, passed in rather than written as zero: a challenged
+    close comes back and reviews again, so a hardcoded zero reports a second-pass fault as a run
+    that had spent no forced turn."""
     from .close_tool import CAUSE_REVIEW_INCOMPLETE, FORCED_INCONCLUSIVE
 
     return GateVerdict(
@@ -370,16 +335,13 @@ async def _dispatch(
 ) -> StageOutcome:
     """Look the stage up, BUILD ITS REQUEST, and call it — all three inside the fault arm.
 
-    The lookup used to sit outside `_call_stage`'s `try`, so a bundle missing an attribute
-    raised past the gate, past the close tool, and into a driver that classifies five
-    exception kinds and not that one. A partial bundle is a review that cannot run, which is
-    the same fact as a stage that raised.
+    A lookup outside the fault arm lets a bundle missing an attribute raise past the gate, past
+    the close tool, and into a driver that classifies five exception kinds and not that one. A
+    partial bundle is a review that cannot run — the same fact as a stage that raised.
 
-    The RENDER is here for exactly that reason too. It walks the parsed companion and
-    serialises it, and it runs on a document the investigator authored out of
-    attacker-influenced payloads — so it is a step that can raise, and outside this `try` it
-    raised past the same three frames. A projection that cannot be built is a review that
-    cannot run."""
+    The RENDER is inside for the same reason: it walks and serialises the parsed companion, a
+    document the investigator authored out of attacker-influenced payloads, so it can raise. A
+    projection that cannot be built is a review that cannot run."""
     from .close_tool import STAGE_ERROR
 
     try:
@@ -393,13 +355,11 @@ async def _dispatch(
 def _mentions(companion: Any, target: str) -> int:
     """How much of the record touches `target`, coarsely.
 
-    The overlap rule's measure. Keying purely on "was this target raised before" refuses a
-    second ask on the alert's own subject vertex, which most asks name — a run has three to
-    eight vertices where it has many leads, so the retired lead-keyed rule collided an order
-    of magnitude less often than a target-keyed one would. What the rule actually means is
-    that a repeat is wasteful only when the turn it already spent bought nothing about that
-    target, so that is what is measured: if the investigation recorded anything new naming it,
-    the ask is fresh again.
+    The overlap rule's measure. Keying purely on "was this target raised before" would refuse a
+    second ask on the alert's own subject vertex, which most asks name (a run has three to eight
+    vertices where it has many leads). What the rule means is that a repeat is wasteful only
+    when the turn already spent bought nothing about that target, so that is what is measured:
+    if the investigation recorded anything new naming it, the ask is fresh again.
 
     Deliberately a count of occurrences rather than a typed walk. A target may be a vertex, an
     edge, a lead or a hypothesis, and the shapes that can mention each differ; a typed measure
@@ -495,19 +455,17 @@ async def challenge_gate(deps: Any, disposition: str, *, stages: Any, bounds: Bo
     round_no = state.turns
 
     # A read AND a parse under one `try`, so the guard is the composed tuple `_io` publishes —
-    # a `UnicodeDecodeError` is a `ValueError`, NOT an `OSError` (#589), and an `except OSError`
-    # here let an undecodable investigation.md raise past the gate, past the close tool and
+    # a `UnicodeDecodeError` is a `ValueError`, NOT an `OSError`, and an `except OSError` here
+    # would let an undecodable investigation.md raise past the gate, past the close tool and
     # into a driver that classifies five exception kinds and not that one.
     unreadable_document: tuple[type[BaseException], ...] = (EmptyInvestigation, *TEXT_READ_ERRORS)
-    # The ablation target is chosen under the SAME guard: it is another walk over the same
-    # model-authored document, so it is another step that can raise past the gate, the close
-    # tool and the driver rather than failing the review closed.
+    # The ablation target is chosen under the SAME guard: another walk over the same
+    # model-authored document, so another step that can raise past all three frames.
     #
     # The ablation is the SUPPORT lens again under one withheld edge — same role, same model,
     # same effort, same prompt — so its reading is a difference against the support reading
     # and not a difference between two configurations. A record with no strong belief movement
-    # has nothing load-bearing to withhold; that is recorded rather than passed over, so the
-    # trace says the lens did not run and why.
+    # has nothing load-bearing to withhold; that is recorded rather than passed over.
     try:
         companion = parse_investigation(read_text_utf8(deps.run_dir / "investigation.md"))
         ablated = ablation_target(companion)
@@ -542,9 +500,8 @@ async def challenge_gate(deps: Any, disposition: str, *, stages: Any, bounds: Bo
     ))
 
     # EVERY dispatched lens gets its row before any of them is judged. The calls ran
-    # concurrently and all of them completed; returning on the first fault mid-walk threw away
-    # the replies the other lenses had already produced, so a run dir recorded a subset of the
-    # calls that were made.
+    # concurrently and all completed; returning on the first fault mid-walk would throw away the
+    # replies the other lenses already produced, recording a subset of the calls made.
     for lens, outcome in zip(lenses, outcomes, strict=True):
         _write_trace_row(
             deps.run_dir, lens, round_no, {"ok": outcome.ok},

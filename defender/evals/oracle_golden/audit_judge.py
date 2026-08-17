@@ -1,10 +1,9 @@
 """Calibrate the LABEL pass against the hand-derived labels, and measure its own noise.
 
-Replaces `audit_labels.py`, which audited a labelling program that no longer exists.
-The question is unchanged: when a measurement comes from something other than a human
-reading the telemetry, that something is calibrated against hand-derived truth before
-its output is trusted. A systematic bias biases every case the same way, and no amount
-of `n` detects it — unlike human error, which is at least uncorrelated across cases.
+When a measurement comes from something other than a human reading the telemetry, that
+something is calibrated against hand-derived truth before its output is trusted. A
+systematic bias biases every case the same way, and no amount of `n` detects it — unlike
+human error, which is at least uncorrelated across cases.
 
 Two numbers come out:
 
@@ -48,10 +47,9 @@ from defender.evals.oracle_golden import judge, score  # noqa: E402
 GOLDEN_DIR = Path(__file__).resolve().parent
 CASES_DIR = GOLDEN_DIR / "cases"
 
-#: The audit set: the four observed seed cases, whose labels were derived by hand
-#: before any labelling program existed. Deliberately NOT case-005 (labelled by the
-#: program this judge replaces — auditing against it would be auditing a copy) and not
-#: the derived cases (no telemetry, so the label pass has nothing to measure).
+#: The audit set: the four observed seed cases, whose labels were derived by hand. Excludes
+#: any case labelled by a program (auditing against it would be auditing a copy) and the
+#: derived cases (no telemetry, so the label pass has nothing to measure).
 AUDIT_CASES = (
     "case-001-ssh-bruteforce-canary",
     "case-002-authorized-keys-falco",
@@ -146,12 +144,9 @@ def _mean_agreement(rounds: list[_Agreement]) -> float | None:
 def _sweep(entries: list[tuple], repeats: int, jobs: int, ask) -> dict[tuple[str, str], list[dict]]:
     """Ask `ask` about every entry `repeats` times, grouped back by (case, lead).
 
-    THE sweep. Both audits are the same experiment on different questions — fan one
-    question across a thread pool, then collapse the repeats per lead to a modal answer and
-    a self-agreement — and both wrote that fan-out and regroup by hand. The stakes are that
-    the two numbers are compared to each other: the label pass's self-agreement and the
-    verdict pass's are read side by side to say which pass a prompt change moved, and that
-    reading assumes both were measured the same way.
+    THE sweep, shared because the two audits' numbers are compared to each other: the label
+    pass's self-agreement and the verdict pass's are read side by side to say which pass a
+    prompt change moved, and that reading assumes both were measured the same way.
 
     Every entry is a tuple whose first two elements are `(case_dir, lead_id)`; the rest is
     the caller's, and reaches `ask` untouched.
@@ -207,8 +202,8 @@ def run_audit(case_names: tuple[str, ...], repeats: int, jobs: int, *,
     decided = [r for r in rows if not r["abstained"]]
     return {
         "pass": "label",
-        # The resolved judge, read back from every call rather than echoed from the request.
-        # A run that fell back mid-sweep produced two judges' answers under one tag.
+        # The resolved judge, read back from every call rather than echoed from the request:
+        # a run that fell back mid-sweep would file two judges' answers under one tag.
         "judge_model": judge.sole_judge(replies, what="the label sweep"),
         "judge_effort": effort,
         "tag_suffix": judge.tag_suffix(model, effort),

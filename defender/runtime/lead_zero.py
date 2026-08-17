@@ -1,12 +1,11 @@
-"""Harness-executed lead-0 (#808).
+"""Harness-executed lead-0.
 
-Before MAIN's first ORIENT turn, the runtime (item 1) resolves the alert's ancestor
-documents and (item 2 -- SKIPPED, an explicit non-obligation, #808) and (item 3) dispatches
-one tightly-bounded correlation gather lead, both writing into the run's leads/queries
-tables under the reserved ids ``l-000``/``l-00c`` so the learning loop and the review gate
-cite them like any model-dispatched lead.
+Before MAIN's first ORIENT turn, the runtime resolves the alert's ancestor documents (item 1)
+and dispatches one tightly-bounded correlation gather lead (item 3), both writing into the
+run's leads/queries tables under the reserved ids ``l-000``/``l-00c`` so the learning loop and
+the review gate cite them like any model-dispatched lead.
 
-This module owns every backend call, run-dir write and dispatch item 1/item 3 add;
+This module owns every backend call, run-dir write and dispatch those two items add;
 ``orient.py`` stays a pure text-assembler that calls ``resolve_lead_zero`` and formats the
 returned block as one more ORIENT section.
 """
@@ -42,23 +41,20 @@ L3 = "l-00c"
 RESERVED_LEAD_IDS = (L0, L3)
 CORRELATION_REQUEST_LIMIT = 8
 
-#: Item 3's grant, hoisted to module scope so it is the SINGLE authored home for the vendor
-#: name on the correlation path (#808 follow-up). `dispatch_correlation` used to build this
-#: inline and then hardcode `"elastic"` a second and third time — in `GatherRequest` and in
-#: the `:L findings` row — which made the dispatched system a literal that could drift away
-#: from the grant that actually confines the lead. `CORRELATION_SYSTEM` derives from the
-#: grant instead, so the two cannot disagree: the grant is already the authority (it is what
-#: `decide` consults), and `system` is only ever a rendering/routing key.
+#: Item 3's grant, at module scope so it is the SINGLE authored home for the vendor name on the
+#: correlation path. `CORRELATION_SYSTEM` derives from it rather than being spelled again in
+#: `GatherRequest` and the `:L findings` row, so the dispatched system cannot drift away from
+#: the grant that actually confines the lead: the grant is the authority (it is what `decide`
+#: consults), and `system` is only ever a rendering/routing key.
 CORRELATION_GRANT = VerbGrant(
     role="lead-zero-correlation",
     entries=(("elastic", "alerts", "r"), ("elastic", "health-check", "r")),
 )
 
-#: The catalog template item 3's contract names outright. It exists because the grant admits
-#: exactly one query verb (`alerts`) and, before it was authored, the catalog held ZERO
-#: templates binding that verb — every elastic template is `esql` or `query`, so grant ∩
-#: catalog was empty by construction and the dispatch rendered `_INDEX_NONE_GRANTED`. A lead
-#: told only that nothing is runnable spends its whole budget discovering why.
+#: The catalog template item 3's contract names outright. The grant admits exactly one query
+#: verb (`alerts`), and every other elastic template binds `esql` or `query` — so without this
+#: template grant ∩ catalog is empty and the dispatch renders `_INDEX_NONE_GRANTED`, leaving a
+#: lead to spend its whole budget discovering why nothing is runnable.
 CORRELATION_TEMPLATE = "elastic.correlate-alerts-by-entity"
 
 
@@ -82,10 +78,9 @@ CORRELATION_SYSTEM = _sole_system(CORRELATION_GRANT)
 #: Item 1's OWN system, and deliberately not `CORRELATION_SYSTEM`. Every backend call item 1
 #: issues names this string directly — `_capture_issue`'s `args`, `_record_manual_row`'s row +
 #: `query_id` + `raw_command`, `_breaker_failures`' per-system state read, `_CallLedger.call`'s
-#: registry lookup — so its `:L findings` row must be labelled from the SAME anchor those calls
-#: use. Labelling it from the correlation grant's derived system reads as a dedup while the two
-#: are the same string, and mislabels item 1's row the moment `CORRELATION_GRANT` names a
-#: different vendor: the row would say one system while the queries it joins say another.
+#: registry lookup — so its `:L findings` row must be labelled from the SAME anchor. Labelling
+#: it from the correlation grant's derived system looks like a dedup while the two are the same
+#: string, and mislabels item 1's row the moment `CORRELATION_GRANT` names a different vendor.
 ITEM1_SYSTEM = "elastic"
 
 PROVENANCE_KEY = "provenance"
@@ -96,21 +91,16 @@ LEAD_ZERO_HEADING = "## Alert ancestors"
 STATUS_FAILED = "failed"
 STATUS_EMPTY = "succeeded-empty"
 STATUS_TRUNCATED = "succeeded-truncated"
-#: Every requested ancestor document resolved. Named `STATUS_WITH_ENTITIES` until #867, which
-#: is the name lying about its own arm: the status block below derives this value from
-#: `saw_success` / `docs` / `requested` and has never consulted an extracted entity at all. The
-#: gate in `prepare_correlation_lead` reads it as "item 1 resolved documents" and always did —
-#: #867 deletes the extraction without touching that gate, because the predicate was already
-#: the right one.
+#: Every requested ancestor document resolved. Derived from `saw_success` / `docs` /
+#: `requested`; `prepare_correlation_lead`'s gate reads it as "item 1 resolved documents".
 STATUS_RESOLVED = "succeeded-resolved"
 
 UNAVAILABLE = "_(unavailable:"
 SHORTFALL = "_(incomplete:"
 ELIDED = "_(elided:"
 
-#: The per-document `message` rendering budget (K17). Any value that keeps the block
-#: materially smaller than a large payload satisfies the demand; no magic number is
-#: mandated by the spec.
+#: The per-document `message` rendering budget. Any value that keeps the block materially
+#: smaller than a large payload will do; the exact number is not load-bearing.
 MESSAGE_CHAR_BUDGET = 4000
 
 ALERT_ID_FIELD = "kibana.alert.uuid"
@@ -127,12 +117,11 @@ ITEM1_WHAT_TO_SUMMARIZE = [
 ]
 
 _ANY_RUN_TAG = re.compile(r"</?run-[0-9a-zA-Z]*-[a-z-]+>")
-#: A markdown code-fence run. Neutralized for the same reason as the wrap delimiter, and
-#: since #867 for a second one: item 1's rendered block is interpolated into item 3's goal,
-#: which `tools_gather._gather_prompt` emits INSIDE a fenced block. A fence run in an
-#: attacker-authored `message` (a captured command line, a shell transcript) closes that fence
-#: early, so the harness's own `what_to_summarize` block renders as free prose the lead reads
-#: as document content.
+#: A markdown code-fence run. Neutralized because item 1's rendered block is interpolated into
+#: item 3's goal, which `tools_gather._gather_prompt` emits INSIDE a fenced block: a fence run
+#: in an attacker-authored `message` (a captured command line, a shell transcript) closes that
+#: fence early, so the harness's own `what_to_summarize` block renders as free prose the lead
+#: reads as document content.
 _FENCE_RUN = re.compile(r"`{3,}")
 
 
@@ -140,20 +129,17 @@ _FENCE_RUN = re.compile(r"`{3,}")
 
 @dataclass(frozen=True)
 class LeadZeroResult:
-    """#867 retired the third field. It was `entities: Entities` — a `host.name`/`user.name`/
-    `source.ip` triple extracted from the resolved documents by the harness and interpolated
-    into item 3's contract. A fixed field list is the right shape for exactly one class of
-    alert source (host-level auth logs, where those three fields are the activity) and produces
-    noise on any source that carries its entities elsewhere: a container-runtime source names
-    every alert with the shared host the runtime itself runs on, nests the real actor under a
-    vendor-specific field namespace the extractor never reads, and has no source address at
-    all. Which entities matter is a property of the alert, not of a schema.
+    """Item 1's result: `text` is its rendered block — already sanitized, elided and wrapped —
+    and it is also what item 3's contract carries, so the correlation lead reads the same bytes
+    MAIN reads at ORIENT and picks its own correlation axes off them.
 
-    Nothing typed replaced it. `text` — item 1's rendered block, already sanitized, elided and
-    wrapped — IS what item 3's contract now carries, so the correlation lead reads the same
-    bytes MAIN reads at ORIENT and picks its own correlation axes off them. Choosing what to
-    filter on is what every other gather lead already does; `l-00c` was the only lead in this
-    tree handed a predicate it could not inspect."""
+    Deliberately NO extracted-entity field. A fixed `host.name`/`user.name`/`source.ip` triple
+    fits exactly one class of alert source (host-level auth logs) and produces noise on any
+    source that carries its entities elsewhere: a container-runtime source names every alert
+    with the shared host the runtime runs on, nests the real actor under a vendor-specific
+    namespace, and has no source address at all. Which entities matter is a property of the
+    alert, not of a schema — and choosing what to filter on is what every other gather lead
+    already does."""
 
     text: str
     status: str
@@ -163,11 +149,10 @@ class LeadZeroResult:
 
 def _run_sync(coro: Any) -> Any:
     """Run an async coroutine from a SYNCHRONOUS caller, whether or not an event loop is
-    already running on this thread. `resolve_lead_zero` is a synchronous entry point
-    (r9/r10) called both from bare pytest functions (no loop) and from inside
-    `run_investigation` (already inside a running loop) — the latter cannot call
-    `asyncio.run()` directly, so it hands the coroutine to a fresh thread with its own loop
-    instead."""
+    already running on this thread. `resolve_lead_zero` is a synchronous entry point called
+    both from bare pytest functions (no loop) and from inside `run_investigation` (already
+    inside one) — the latter cannot call `asyncio.run()` directly, so the coroutine goes to a
+    fresh thread with its own loop."""
     try:
         asyncio.get_running_loop()
     except RuntimeError:
@@ -185,21 +170,17 @@ def _sanitize(text: Any) -> str:
     externally-sourced content before it is INTERPOLATED into text that crosses an agent
     boundary unframed.
 
-    The fence half is unconditional: a ``` run ends the fenced block whichever consumer put
-    the text inside one, and nothing about how a frame is delimited changes that.
+    The fence half is unconditional: a ``` run ends the fenced block whichever consumer put the
+    text inside one.
 
-    The DELIMITER half was NARROWED BY #875. Its original reason was the untrusted frame —
-    `wrap()` escapes nothing of its own delimiter shape, so a byte-exact close tag in an
-    attacker-authored `message`/`user.name`/`source.ip` would end the frame early. That reason
-    is gone: `wrap_fresh` mints this section's delimiter AFTER the body is assembled and
-    re-mints while it collides, so no content can close the frame that wraps it, sanitized or
-    not. What survives is item 3's contract (`_correlation_goal`): the correlation lead's GOAL
-    is free prose built from those same attacker-derived values and handed to the gather
-    subagent as a dispatch argument, inside no frame at all, so no re-mint covers it.
+    The DELIMITER half is NOT about the untrusted frame — `wrap_fresh` mints this section's
+    delimiter after the body is assembled and re-mints on collision, so no content can close
+    the frame that wraps it. It is about item 3's contract: the correlation lead's GOAL is free
+    prose built from those same attacker-derived values and handed to the gather subagent as a
+    dispatch argument, inside no frame at all, so no re-mint covers it.
 
-    DEFANGED, NEVER DELETED — the same rule both surfaces' tests assert: the evidence has to
-    survive in a form the reader can still see, or the sanitizer passes by destroying what it
-    was protecting."""
+    DEFANGED, NEVER DELETED: the evidence has to survive in a form the reader can still see, or
+    the sanitizer passes by destroying what it was protecting."""
     if not isinstance(text, str):
         text = str(text)
     text = _ANY_RUN_TAG.sub(lambda m: m.group(0).replace("<", "‹").replace(">", "›"), text)
@@ -225,13 +206,12 @@ def _rows_for(run_dir: Path, lead_id: str) -> list[dict]:
 
 def _last_row_seq(run_dir: Path, lead_id: str) -> int:
     """The queries-table `seq` the LAST call under `lead_id` wrote — the payload sidecar a
-    document resolved by that call is elided against (#867 review fix).
+    document resolved by that call is elided against.
 
     Item 1 issues several calls and one batched call returns many documents, so a document's
-    position in the rendered block is not its payload's seq. The block used to print the
-    position: with four documents off one fetch, the first pointed at the SHELL fetch's payload
-    and the last two at `gather_raw/l-000/{2,3}.json`, files no writer ever produced. `-1` when
-    no row exists (a screened call, or a table write that could not land)."""
+    POSITION in the rendered block is not its payload's seq: printing the position points four
+    documents off one fetch at `gather_raw/l-000/{0..3}.json`, files no writer produced. `-1`
+    when no row exists (a screened call, or a table write that could not land)."""
     rows = _rows_for(run_dir, lead_id)
     seq = rows[-1].get("seq") if rows else None
     return seq if isinstance(seq, int) else -1
@@ -241,19 +221,18 @@ async def _capture_issue(
     capture: Any, deps: _CaptureDeps, verb: str, params: dict, env: dict,
 ) -> tuple[dict | None, str]:
     """Issue ONE call through the REAL `QueryCapture.wrap_tool_execute` — the model's own
-    routing (K7/d10): all eight screens (grant, breaker, repeat-guard, traversal, param
-    validation, self-ticket, confine_index, guard_outbound) run exactly as they do for a
-    model-dispatched query.
+    routing, so all eight screens (grant, breaker, repeat-guard, traversal, param validation,
+    self-ticket, confine_index, guard_outbound) run as they do for a model-dispatched query.
 
-    Returns `(envelope_or_None, raw_result_text)`. `None` covers both "screened" (breaker
-    trip, repeat trip, grant denial — no row written at all) and "attempted but failed"
-    (a row IS written, with a nonzero exit code)."""
+    Returns `(envelope_or_None, raw_result_text)`. `None` covers both "screened" (breaker trip,
+    repeat trip, grant denial — no row written at all) and "attempted but failed" (a row IS
+    written, with a nonzero exit code)."""
     before = len(_rows_for(deps.run_dir, deps.lead_id))
     call = SimpleNamespace(tool_name="query")
     args = {"system": ITEM1_SYSTEM, "verb": verb, "params": params}
-    # #808 review fix — stash the in-memory result as `handler` produces it, so a later
-    # write failure (below) can recover it WITHOUT re-issuing the same backend call a
-    # second time. `wrap_tool_execute` runs `handler` at most once per call.
+    # Stash the in-memory result as `handler` produces it, so a later write failure (below) can
+    # recover it WITHOUT re-issuing the same backend call. `wrap_tool_execute` runs `handler`
+    # at most once per call.
     captured: list[Any] = []
 
     async def handler(_args: dict) -> Any:
@@ -267,11 +246,10 @@ async def _capture_issue(
     try:
         text = await capture.wrap_tool_execute(ctx, call=call, args=args, handler=handler)
     except (OSError, ValueError):
-        # K8(iii)/d62 — RENDER FROM THE IN-MEMORY RESULT: a queries-table write that cannot
-        # land (a directory squatting the table's own name) must cost the run its evidence
-        # ROW, never its evidence — and (review fix) never a second real backend call for
-        # the same logical fetch: `captured` already holds whatever `handler` returned
-        # before `QueryCapture._record`'s write raised.
+        # RENDER FROM THE IN-MEMORY RESULT: a queries-table write that cannot land (a directory
+        # squatting the table's own name) must cost the run its evidence ROW, never its
+        # evidence, and never a second real backend call for the same logical fetch —
+        # `captured` holds whatever `handler` returned before `_record`'s write raised.
         envelope = captured[0] if captured else None
         return (envelope if isinstance(envelope, dict) else None), ""
     after = _rows_for(deps.run_dir, deps.lead_id)
@@ -282,11 +260,9 @@ async def _capture_issue(
         return None, text
     payload_path = row.get("payload_path")
     if not isinstance(payload_path, str):
-        # #808 review fix — a successful call (exit_code == 0) whose sidecar payload
-        # failed to PERSIST (a disk-full/permission fault on the write, distinct from the
-        # write-failure branch above) leaves `payload_path` None; falling back to the
-        # in-memory result this same call already produced beats crashing on
-        # `Path(...) / None`.
+        # A successful call (exit_code == 0) whose sidecar payload failed to PERSIST leaves
+        # `payload_path` None; fall back to the in-memory result this call already produced
+        # rather than crashing on `Path(...) / None`.
         envelope = captured[0] if captured else None
         return (envelope if isinstance(envelope, dict) else None), text
     try:
@@ -298,24 +274,25 @@ async def _capture_issue(
     return data, text
 
 
-#: The capped path's own default exit code for an UNMAPPED fault — mirrors
-#: `query_tool.DEFAULT_FAULT_EXIT` (not imported directly: that module's constant is an
-#: internal implementation detail of the model-facing capture, not a shared contract).
+#: The capped path's default exit code for an UNMAPPED fault. Mirrors
+#: `query_tool.DEFAULT_FAULT_EXIT` rather than importing it: that constant is an internal
+#: detail of the model-facing capture, not a shared contract.
 _UNMAPPED_FAULT_EXIT = 2
 
 
 def _record_manual_row(
     deps: _CaptureDeps, verb: str, params: dict, payload: Any, *, exit_code: int,
 ) -> None:
-    """Write a queries-table row with the SAME thirteen-key shape `QueryCapture._record`
-    writes — including `error_class`/`payload_status` derived the SAME way
-    (`circuit_breaker.error_class_for_exit`, `query_tool._payload_status`'s own rule), not
-    hardcoded (#808 review fix: a hardcoded `error_class="infra"` mis-filed a genuinely
-    agent-fixable capped-path fault out of `lead_extraction.collect_general_failures`'
-    pitfalls curation) — WITHOUT feeding `circuit_breaker.record_outcome` — the mechanism
-    that lets item 1's own calls PAST its first recorded failure keep running (`d63`)
-    without letting the breaker's per-system counter cross the trip boundary on lead-0's
-    behalf (`d61`, K8(ii)/R2-F1: the cap bounds RECORDED failures, not calls)."""
+    """Write a queries-table row with the SAME thirteen-key shape `QueryCapture._record` writes
+    — including `error_class`/`payload_status` DERIVED the same way
+    (`circuit_breaker.error_class_for_exit`, `query_tool._payload_status`'s rule) rather than
+    hardcoded, since a hardcoded `error_class="infra"` mis-files an agent-fixable capped-path
+    fault out of `collect_general_failures`' pitfalls curation.
+
+    Deliberately WITHOUT feeding `circuit_breaker.record_outcome`: that is what lets item 1's
+    calls past its first recorded failure keep running without pushing the breaker's per-system
+    counter over the trip boundary on lead-0's behalf. The cap bounds RECORDED failures, not
+    calls."""
     import shlex
 
     from defender._io import guarded_mkdir, write_guarded
@@ -355,9 +332,9 @@ def _record_manual_row(
         "payload_digest": (
             payload_digest(text, "", 0) if exit_code == 0 else f"exit={exit_code}; capped"
         ),
-        # Over the SAME text the sidecar above holds — the content identity `repeat_note`
-        # keys byte-identity on (#877 F-9), derived here rather than defaulted so this second
-        # writer's rows can never read as "no payload evidence" beside `_record`'s.
+        # Over the SAME text the sidecar above holds — the content identity `repeat_note` keys
+        # byte-identity on. Derived rather than defaulted, so this second writer's rows can
+        # never read as "no payload evidence" beside `_record`'s.
         "payload_sha256": payload_sha256(text),
     }
     write_guarded(RunPaths(deps.run_dir).executed_queries, json.dumps(row) + "\n", mode="append")
@@ -371,11 +348,10 @@ def _breaker_failures(run_dir: Path) -> int:
         state = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return 0
-    # #808 review fix — `3`, `"x"` and `[…]` are all valid JSON and none of them is a
-    # breaker state (the same "parsed fine, wrong shape" case `circuit_breaker._load`
-    # guards explicitly); without these isinstance checks a corrupted or adversarially
-    # planted `circuit_breaker.json` raises `AttributeError`/`ValueError` here, uncaught,
-    # degrading item 1's WHOLE resolution instead of just this one state read.
+    # `3`, `"x"` and `[…]` are all valid JSON and none is a breaker state (the "parsed fine,
+    # wrong shape" case `circuit_breaker._load` guards too). Without these isinstance checks a
+    # corrupted or planted `circuit_breaker.json` raises `AttributeError`/`ValueError` here,
+    # uncaught, degrading item 1's WHOLE resolution instead of just this one state read.
     if not isinstance(state, dict):
         return 0
     systems = state.get("systems")
@@ -391,9 +367,9 @@ def _breaker_failures(run_dir: Path) -> int:
 
 
 class _CallLedger:
-    """Tracks item 1's OWN contribution to the elastic per-system breaker across a
-    resolution, so a second (and later) infra failure can still be ISSUED (`d63`,
-    fall-through on every fault class) without being RECORDED past the cap (`d61`)."""
+    """Tracks item 1's OWN contribution to the elastic per-system breaker across a resolution,
+    so a second (and later) infra failure can still be ISSUED without being RECORDED past the
+    cap."""
 
     def __init__(self, run_dir: Path):
         self.run_dir = run_dir
@@ -414,16 +390,15 @@ class _CallLedger:
                 return envelope, ""
             except (circuit_breaker.RunAborted, asyncio.CancelledError,
                     KeyboardInterrupt, GeneratorExit):
-                # #808 review fix — cancellation/control-flow signals must propagate, not be
-                # absorbed as "a capped call's own fault": swallowing `CancelledError` here
-                # breaks task cancellation (the caller's `task.cancel()` would silently do
-                # nothing) and `KeyboardInterrupt`/`GeneratorExit` are never a query's own
+                # Cancellation/control-flow signals must propagate, not be absorbed as "a
+                # capped call's own fault": swallowing `CancelledError` breaks task
+                # cancellation, and `KeyboardInterrupt`/`GeneratorExit` are never a query's
                 # fault to begin with.
                 raise
             except AdapterFault as e:
-                # #808 review fix — a MAPPED fault keeps its own exit code/class (matching
-                # `QueryCapture._record`'s own `except AdapterFault` arm) instead of always
-                # being filed as `error_class="infra"`.
+                # A MAPPED fault keeps its own exit code/class (matching
+                # `QueryCapture._record`'s `except AdapterFault` arm) instead of being filed
+                # as `error_class="infra"`.
                 _record_manual_row(deps, verb, params, None, exit_code=e.exit_code)
                 return None, ""
             except BaseException:  # noqa: BLE001 — an unmapped capped-call fault must not raise
@@ -445,9 +420,9 @@ def _build_deps(run_dir: Path, defender_dir: Path, run_id: str, lead_id: str) ->
 # ─── budget chaining (K23) ────────────────────────────────────────────────────────────
 
 def _budget_gate(run_dir: Path, limits: dict) -> None:
-    """Unconditional (not gated on `DEFENDER_BUDGET_ENFORCE`): lead-0 is harness pre-turn
-    work, and its own wall-clock discipline is not a product toggle the way the model's own
-    tool refusals are."""
+    """Unconditional, not gated on `DEFENDER_BUDGET_ENFORCE`: lead-0 is harness pre-turn work,
+    and its wall-clock discipline is not a product toggle the way the model's tool refusals
+    are."""
     state = read_budget(run_dir)
     if tail_exhausted(state, limits):
         raise BudgetKill("lead-0's own call refused: the run's budget tail is exhausted")
@@ -466,10 +441,9 @@ def _elide(value: Any, lead_id: str, seq: int) -> str:
     """Bound ONE rendered leaf, with a pointer to the payload that holds it whole.
 
     `seq` is the QUERIES-TABLE seq of the call that returned the document (`_last_row_seq`),
-    never the document's position in the block — those are different numbers and the block
-    used to print the second (#867 review fix). A negative `seq` means the call wrote no row
-    at all (screened, or the table write failed), and the note then says so rather than naming
-    a payload that was never persisted."""
+    never the document's position in the block — those are different numbers. A negative `seq`
+    means the call wrote no row at all (screened, or the table write failed), and the note then
+    says so rather than naming a payload that was never persisted."""
     if not isinstance(value, str) or len(value) <= MESSAGE_CHAR_BUDGET:
         return value if isinstance(value, str) else str(value)
     where = (
@@ -482,18 +456,13 @@ def _elide(value: Any, lead_id: str, seq: int) -> str:
 def _flatten_doc(doc: dict) -> dict[str, Any]:
     """A document's leaves, keyed by their DOTTED ECS path.
 
-    #867 review fix. The adapter hands `_source` back UNMODIFIED, and real ECS `_source` is
-    NESTED (`{"host": {"name": …}}`, and a per-source namespace nests its own actor two or
-    three levels deeper) while the alerting namespace and this suite's test doubles arrive as
-    flat dotted keys. Rendering the top level alone printed a nested document as one line per
-    top-level object holding a PYTHON DICT REPR — `host: {'name': 'ws-1'}` — which is not a
-    field name anything can be queried on.
-
-    That was survivable while the harness extracted the entities itself (the retired
-    `_ecs_field` read both shapes). It stopped being survivable when #867 made this block
-    the correlation lead's whole entity evidence and asked it to name "the field each came
-    from": on production-shaped documents the lead had to reverse-engineer a dotted path out
-    of a repr, and the very source class the change exists for is the one that nests."""
+    The adapter hands `_source` back UNMODIFIED, and real ECS `_source` is NESTED
+    (`{"host": {"name": …}}`, with per-source namespaces two or three levels deeper) while the
+    alerting namespace arrives as flat dotted keys. Rendering the top level alone prints a
+    nested document as one line per top-level object holding a PYTHON DICT REPR — `host:
+    {'name': 'ws-1'}` — which is not a field name anything can be queried on. This block is
+    the correlation lead's whole entity evidence and it is asked to name the field each entity
+    came from, so a repr is not good enough."""
     out: dict[str, Any] = {}
 
     def walk(node: Any, prefix: str) -> None:
@@ -502,13 +471,11 @@ def _flatten_doc(doc: dict) -> dict[str, Any]:
                 key = f"{prefix}.{k}" if prefix else str(k)
                 walk(v, key)
         elif isinstance(node, list) and any(isinstance(x, dict) for x in node):
-            # An ARRAY OF OBJECTS is the same defect one level down, and it is not exotic:
-            # every Kibana alert document carries `kibana.alert.ancestors`, and on the group-id
-            # path the documents this block renders ARE alert documents. Rendering the array
-            # whole prints `[{'id': …, 'index': …}]` — a Python repr, not a field name anything
-            # can be queried on. Indexed (`…ancestors.0.id`) so two elements' same-named leaves
-            # stay distinguishable; an array of SCALARS stays whole, since `['a', 'b']` already
-            # reads as the multi-valued field it is.
+            # An ARRAY OF OBJECTS is the same defect one level down, and not exotic: every
+            # Kibana alert document carries `kibana.alert.ancestors`, and on the group-id path
+            # the documents this block renders ARE alert documents. Indexed (`…ancestors.0.id`)
+            # so two elements' same-named leaves stay distinguishable; an array of SCALARS
+            # stays whole, since `['a', 'b']` already reads as the multi-valued field it is.
             for i, item in enumerate(node):
                 walk(item, f"{prefix}.{i}" if prefix else str(i))
         elif prefix:
@@ -527,22 +494,19 @@ def _render_doc(doc: dict, lead_id: str, seq: int) -> str:
     for key in sorted(flat):
         if key in ("@timestamp", "message"):
             continue
-        # A null leaf is DROPPED, not rendered (#867 review fix). `_sanitize(None)` is the
-        # literal string `"None"`, and this block is now what the correlation lead picks its
-        # correlation axes off — `host.name: None` reads as a bindable value and invites
-        # `host.name:"None"`, a predicate that matches nothing and reports as a real zero.
-        # An absent field and a null one are the same thing to the index anyway.
+        # A null leaf is DROPPED, not rendered: `_sanitize(None)` is the literal string
+        # `"None"`, and this block is what the correlation lead picks its axes off —
+        # `host.name: None` reads as a bindable value and invites `host.name:"None"`, a
+        # predicate that matches nothing and reports as a real zero. An absent field and a null
+        # one are the same thing to the index anyway.
         if flat[key] is None:
             continue
-        # #808 review fix — the field NAME, not just its value, must be neutralized: an
-        # attacker-influenced document whose key itself carries a `<run-…-…>`-shaped
-        # delimiter would otherwise end the untrusted frame early, exactly the class of
-        # forgery this module's value-side `_sanitize` calls already exist to close.
+        # The field NAME as well as its value: an attacker-influenced document whose KEY
+        # carries a `<run-…-…>`-shaped delimiter would otherwise end the untrusted frame early.
         #
-        # EVERY leaf is elided, not just `message` (#867 review fix). The rendering budget was
-        # written when a nested object rendered as ONE line, so `message` was the only leaf that
-        # could be large; flattening makes every leaf of every namespace its own line, and a
-        # captured command line or a rule's stored query is exactly as unbounded as a message.
+        # EVERY leaf is elided, not just `message`: flattening makes every leaf of every
+        # namespace its own line, and a captured command line or a rule's stored query is
+        # exactly as unbounded as a message.
         lines.append(f"  {_sanitize(key)}: {_sanitize(_elide(flat[key], lead_id, seq))}")
     if flat.get("message") is not None:
         lines.append(f"  message: {_sanitize(_elide(flat['message'], lead_id, seq))}")
@@ -558,11 +522,9 @@ def _sort_chrono(docs: list[tuple[dict, int]]) -> list[tuple[dict, int]]:
 
 
 def _unavailable(reason: str) -> str:
-    """#867 review fix — the reason is SANITIZED. `_unavailable(f"{e!r}")` interpolates the repr
-    of an exception whose message can carry attacker-influenced text (this suite's own `d13`
-    docstring says exactly that), and the note lands INSIDE `wrap()`'s frame with everything
-    else — the one text path into item 1's frame the module's threat model covers and its code
-    did not."""
+    """The reason is SANITIZED: `_unavailable(f"{e!r}")` interpolates the repr of an exception
+    whose message can carry attacker-influenced text, and the note lands INSIDE the untrusted
+    frame with everything else."""
     return f"{UNAVAILABLE} {_sanitize(reason)})"
 
 
@@ -572,10 +534,9 @@ _DS_RE = re.compile(r"^\.ds-(?P<name>.+)-[^-]+-\d{4}\.\d{2}\.\d{2}-\d+$")
 
 
 def _map_backing_index(index: str) -> str:
-    """K2 — an open, bounded rewrite from a concrete `.ds-<name>-<namespace>-<date>-
-    <generation>` backing index to the datastream pattern it belongs to, never a hardcoded
-    substring table. A no-match passes the string through UNCHANGED so `confine_index`'s own
-    gate refuses it."""
+    """An open, bounded rewrite from a concrete `.ds-<name>-<namespace>-<date>-<generation>`
+    backing index to the datastream pattern it belongs to, never a hardcoded substring table.
+    A no-match passes the string through UNCHANGED so `confine_index`'s gate refuses it."""
     if not isinstance(index, str):
         return index
     m = _DS_RE.match(index)
@@ -585,12 +546,11 @@ def _map_backing_index(index: str) -> str:
 
 
 async def _fetch_batched(ancestors: list[dict], issue) -> tuple[list[tuple[dict, int]], int, bool]:
-    """Batch ancestor ids by MAPPED backing index — one call per distinct index, never one
-    per ancestor (d5). Returns `(docs, requested_count, truncated_any)` where each doc is
-    paired with the queries-table `seq` of the call that returned it (#867 review fix — the
-    elision pointer's target); `issue` is the caller's own budget-gated, success-tracking call
-    wrapper, which returns `(envelope, seq)` and is told whether this call could produce an
-    ancestor at all (#880 F-14)."""
+    """Batch ancestor ids by MAPPED backing index — one call per distinct index, never one per
+    ancestor. Returns `(docs, requested_count, truncated_any)` where each doc is paired with
+    the queries-table `seq` of the call that returned it (the elision pointer's target).
+    `issue` is the caller's budget-gated, success-tracking call wrapper: it returns
+    `(envelope, seq)` and is told whether this call could produce an ancestor at all."""
     by_index: dict[str, list[str]] = {}
     for a in ancestors:
         aid = a.get("id")
@@ -631,16 +591,13 @@ async def _resolve_item1(  # noqa: C901, PLR0912, PLR0915 — item 1's own branc
         "what_to_summarize": ITEM1_WHAT_TO_SUMMARIZE, "provenance": HARNESS_PROVENANCE,
     })
     if claimed != CLAIMED:
-        # #808 review fix — someone else already owns L0 (a planted collision, the exact
-        # shape `test_a_harness_side_reclaim_takes_claim_leads_return_two_arm` exercises
-        # for L3): degrade rather than issue backend calls or append a second, inconsistent
-        # `:L findings` row under an id this call does not own. Mirrors
-        # `prepare_correlation_lead`'s own L3 collision arm — previously item 1 discarded
-        # `claim_lead`'s return value entirely and proceeded regardless.
+        # Someone else already owns L0 (a planted collision): degrade rather than issue backend
+        # calls or append a second, inconsistent `:L findings` row under an id this call does
+        # not own. Mirrors `prepare_correlation_lead`'s L3 collision arm.
         #
-        # `!= CLAIMED` and not `== ALREADY_CLAIMED` (#855 F-12): a claim that could not be
-        # WRITTEN leaves this frame owning exactly as little as a collision does, and the
-        # harness has no more right than the model to run a lead with no leads row.
+        # `!= CLAIMED` and not `== ALREADY_CLAIMED`: a claim that could not be WRITTEN leaves
+        # this frame owning exactly as little as a collision does, and the harness has no more
+        # right than the model to run a lead with no leads row.
         return (_unavailable(
             f"{L0} is already claimed by something else on this run dir"
             if claimed == ALREADY_CLAIMED else f"{L0}'s leads row could not be claimed"
@@ -664,32 +621,28 @@ async def _resolve_item1(  # noqa: C901, PLR0912, PLR0915 — item 1's own branc
     ledger = _CallLedger(run_dir)
     issued_any = False
     answered_any = False
-    # COUNTS, not booleans (#880 F-14 residue). One batched call per distinct backing index
-    # means "an ancestor call answered" and "the ancestor calls answered" are different facts,
-    # and the block used to render only the first — see `_ancestor_shortfall` below.
+    # COUNTS, not booleans: one batched call per distinct backing index means "an ancestor call
+    # answered" and "the ancestor calls answered" are different facts, and the rendering arms
+    # below need both.
     ancestor_issued = 0
     ancestor_answered = 0
 
     async def _issue(verb: str, params: dict, *, ancestor: bool) -> tuple[dict | None, int]:
         """`ancestor=False` marks a call that CANNOT produce an ancestor document — item 1's
-        opening by-`alert_id` fetch of the alert's own shell, which resolves the alert and no
-        ancestor.
+        opening by-`alert_id` fetch of the alert's own shell.
 
-        #880 F-14: one `saw_success` flag used to be set from every call, and both its readers
-        spend it as "a call that could have resolved an ancestor reached the backend". The
-        shell fetch answers on every alert with a resolvable `alert_id`, so it alone kept the
-        flag true — `STATUS_FAILED` was unreachable however the ancestor calls ended, and an
-        outage on them rendered as `_(unavailable: … found nothing)`: an absence of ancestors,
+        The discriminator matters because the shell fetch answers on every alert with a
+        resolvable `alert_id`: a single success flag set from every call is therefore always
+        true, `STATUS_FAILED` becomes unreachable however the ancestor calls ended, and an
+        outage on them renders as `_(unavailable: … found nothing)` — an absence of ancestors,
         which is triage evidence, asserted over a backend that never answered.
 
-        `ancestor` has no default deliberately: the omitted discriminator is exactly what was
-        wrong, and a call site added later that forgets it must not silently read as an
-        ancestor call.
+        `ancestor` has NO DEFAULT deliberately: a call site added later that forgets it must
+        not silently read as an ancestor call.
 
-        `answered_any` is tracked beside it because "no ancestor call was made" is NOT by
+        `answered_any` is tracked beside it because "no ancestor call was made" is not by
         itself a resolved absence: when the shell fetch is the ONLY call and it failed, the
-        group-id branch was never even reachable, so nothing was established — least of all
-        that this alert has no ancestors."""
+        group-id branch was never reachable, so nothing was established."""
         nonlocal issued_any, answered_any, ancestor_issued, ancestor_answered
         issued_any = True
         if ancestor:
@@ -701,9 +654,8 @@ async def _resolve_item1(  # noqa: C901, PLR0912, PLR0915 — item 1's own branc
             answered_any = True
             if ancestor:
                 ancestor_answered += 1
-        # The seq is read AFTER the call, off the row that call just wrote: a document's
-        # elision pointer has to name the payload of the fetch that returned it, not its own
-        # position in the block (#867 review fix).
+        # The seq is read AFTER the call, off the row it just wrote: a document's elision
+        # pointer must name the payload of the fetch that returned it, not its own position.
         return envelope, _last_row_seq(run_dir, L0)
 
     shell: dict | None = None
@@ -732,7 +684,7 @@ async def _resolve_item1(  # noqa: C901, PLR0912, PLR0915 — item 1's own branc
             requested = max(requested, len(hits))
             truncated = bool((envelope or {}).get("truncated"))
         else:
-            # F10 — no group, or a group resolving to zero building blocks: fall back.
+            # No group, or a group resolving to zero building blocks: fall back.
             docs, requested2, truncated = await _fetch_batched(ancestor_events, _issue)
             requested = max(requested, requested2)
     else:
@@ -745,13 +697,11 @@ async def _resolve_item1(  # noqa: C901, PLR0912, PLR0915 — item 1's own branc
 
     docs = _sort_chrono(docs)
 
-    # #880 F-14 residue. One call per DISTINCT MAPPED BACKING INDEX (d5) means a resolution
-    # can have both an ancestor call that answered and one that faulted, and "at least one
-    # answered" is what the absence sentence below used to be gated on. An alert whose
-    # ancestors span two backing indices, where the first matches nothing and the second
-    # faults, then rendered "the resolution reached the backend and found nothing": a resolved
-    # absence claimed over an index that never answered. Same over-claim as F-14 itself, one
-    # level down.
+    # One call per DISTINCT MAPPED BACKING INDEX means a resolution can have both an ancestor
+    # call that answered and one that faulted. Gating the absence sentence below on "at least
+    # one answered" makes an alert whose ancestors span two indices — the first matching
+    # nothing, the second faulting — render "the resolution reached the backend and found
+    # nothing": a resolved absence claimed over an index that never answered.
     ancestor_failed = ancestor_issued - ancestor_answered
 
     body_lines = []
@@ -759,23 +709,20 @@ async def _resolve_item1(  # noqa: C901, PLR0912, PLR0915 — item 1's own branc
         for doc, seq in docs:
             body_lines.append(_render_doc(doc, L0, seq))
     elif ancestor_issued and not ancestor_answered:
-        # Reworded with the flag it now reads (#880 F-14). "every backend call this
-        # resolution attempted failed" is itself false in the newly reachable case: the shell
-        # fetch answered, and only the calls that could have produced an ancestor did not.
+        # Not "every backend call this resolution attempted failed": the shell fetch answered,
+        # and only the calls that could have produced an ancestor did not.
         body_lines.append(_unavailable(
             "every backend call that could have resolved an ancestor failed"))
     elif not answered_any:
-        # No ancestor call was ISSUED and the only call this resolution made — the shell
-        # fetch whose group id decides whether an ancestor branch exists at all — failed. The
-        # original sentence, and it is the true one here: nothing answered, so the group
-        # branch was never reachable and no absence was established. Splitting the flag
-        # without this arm turns exactly this run into `_(unavailable: … found nothing)`, the
-        # false claim over a silent backend F-14 exists to remove.
+        # No ancestor call was ISSUED and the only call this resolution made — the shell fetch
+        # whose group id decides whether an ancestor branch exists at all — failed. Nothing
+        # answered, so the group branch was never reachable and no absence was established;
+        # without this arm the run renders `_(unavailable: … found nothing)`, a false claim
+        # over a silent backend.
         body_lines.append(_unavailable("every backend call this resolution attempted failed"))
     elif ancestor_failed:
-        # SOME answered and some did not, and nothing came back from the ones that did. The
-        # absence holds only over the indices that were actually reached, and the sentence now
-        # says exactly that instead of generalizing it to the alert.
+        # SOME answered and some did not, and nothing came back from the ones that did: the
+        # absence holds only over the indices actually reached, never over the alert.
         body_lines.append(_unavailable(
             f"{ancestor_failed} of {ancestor_issued} ancestor fetches failed; the rest "
             "reached the backend and found nothing"))
@@ -786,10 +733,9 @@ async def _resolve_item1(  # noqa: C901, PLR0912, PLR0915 — item 1's own branc
         body_lines.append(_unavailable("the resolution reached the backend and found nothing"))
 
     if docs and ancestor_failed:
-        # The docs-present half of the same residue. The count note below says how many
-        # documents came back against how many were asked for, which reads as "the backend
-        # did not have them"; this one says the other thing that can be true at the same time,
-        # and the two compose.
+        # The docs-present half of the same distinction. The count note below reads as "the
+        # backend did not have them"; this one says the other thing that can be true at the
+        # same time, and the two compose.
         body_lines.append(
             f"{SHORTFALL} {ancestor_failed} of {ancestor_issued} ancestor fetches failed — "
             "the documents above are what the rest returned)"
@@ -804,18 +750,16 @@ async def _resolve_item1(  # noqa: C901, PLR0912, PLR0915 — item 1's own branc
     text = "\n\n".join(body_lines)
 
     # FAILED when no call that could have contributed answered. `ancestor_issued` guards the
-    # ancestor half so an alert with nothing to ask for stays EMPTY (#880 F-14): a resolution
-    # that issued no ancestor call has no failed call to report. The `answered_any` half is
-    # what keeps a resolution whose SHELL FETCH was its only call, and failed, out of EMPTY —
-    # it asked nothing further because the answer that would have told it what to ask never
-    # came, which is a failure and not an absence.
+    # ancestor half so an alert with nothing to ask for stays EMPTY: a resolution that issued
+    # no ancestor call has no failed call to report. The `answered_any` half keeps a resolution
+    # whose SHELL FETCH was its only call, and failed, out of EMPTY — it asked nothing further
+    # because the answer that would have told it what to ask never came.
     #
-    # A PARTIAL ancestor failure stays EMPTY/TRUNCATED rather than earning a fifth status. The
-    # over-claim it produces is in what MAIN is TOLD — which is what #880 is about throughout,
-    # and the arms above now say it — while the status has exactly two consumers: the dispatch
-    # gate, which refuses FAILED and EMPTY alike, and `_user_prompt`, which forwards it. A new
-    # status would be a distinction nothing acts on, and moving a partial failure to FAILED
-    # would discard the documents the calls that DID answer returned.
+    # A PARTIAL ancestor failure stays EMPTY/TRUNCATED rather than earning a fifth status: the
+    # over-claim it could produce is in what MAIN is TOLD, which the arms above now say, while
+    # the status has exactly two consumers — the dispatch gate, which refuses FAILED and EMPTY
+    # alike, and `_user_prompt`, which forwards it. Moving a partial failure to FAILED would
+    # discard the documents the calls that DID answer returned.
     if not ancestor_answered and (ancestor_issued or not answered_any):
         status = STATUS_FAILED
     elif not docs:
@@ -831,16 +775,13 @@ async def _resolve_item1(  # noqa: C901, PLR0912, PLR0915 — item 1's own branc
 # ─── item 3: the correlation lead's harness-authored contract ───────────────────────────
 
 def _correlation_contract(alert: dict, ancestor_block: str) -> tuple[str, list[str]] | None:
-    """#867 — the contract carries item 1's RESOLVED DOCUMENTS and the lead chooses the
-    correlation axes off them.
+    """The contract carries item 1's RESOLVED DOCUMENTS and the lead chooses the correlation
+    axes off them.
 
-    It used to carry a `host.name`/`user.name`/`source.ip` triple the harness extracted, and
-    the entity-emptiness arm that used to live here (return `None` when the triple came back
-    empty) went with the extraction: what gates the dispatch is item 1 resolving documents,
-    which `prepare_correlation_lead`'s status check already decides. `GatherRequest` carries
-    `goal` and `what_to_summarize` and nothing else, so before this change the lead was asked
-    to correlate on entities it had never seen — the only lead in this tree whose predicate was
-    handed to it rather than written by it."""
+    What gates the dispatch is item 1 resolving documents, which `prepare_correlation_lead`'s
+    status check already decides — there is no entity-emptiness arm here. `GatherRequest`
+    carries `goal` and `what_to_summarize` and nothing else, so handing over a harness-extracted
+    entity triple instead would ask the lead to correlate on entities it had never seen."""
     ts = alert.get("alert_timestamp")
     if not isinstance(ts, str) or not ts.strip():
         return None
@@ -874,39 +815,28 @@ def _correlation_contract(alert: dict, ancestor_block: str) -> tuple[str, list[s
         "contract needs. Each count is the result envelope's `total`, which the `hits` cap does "
         "not bound — a `truncated` result still carries a complete count."
     )
-    # Two COUNT dimensions, both answerable by ONE `alerts` call each (#867 adds a third line
-    # that is not a count — see below). A different third — "whether any correlated alert is
-    # already benign-explained" — was struck: `kibana.alert.workflow_status`
-    # is `"open"` on every alert this environment produces (nothing in the environment's own
-    # provisioning ever writes it), and the systems that could carry a benign explanation
-    # (`ticket`, `change-mgmt`) are outside this lead's grant. It had exactly one possible
-    # answer, so it bought no information and cost the lead a dimension it had to spend calls
-    # failing to meet.
+    # Two COUNT dimensions, each answerable by ONE `alerts` call, plus a third line that is not
+    # a count. A fourth — "whether any correlated alert is already benign-explained" — is
+    # deliberately absent: `kibana.alert.workflow_status` is `"open"` on every alert this
+    # environment produces, and the systems that could carry a benign explanation (`ticket`,
+    # `change-mgmt`) are outside this lead's grant, so it has exactly one possible answer.
     #
-    # "across any rule", not "same-signature": the goal above says do NOT narrow to this
-    # alert's own rule, and the dimensions used to say "same-signature" — read literally, a
-    # per-rule breakdown over the 8 installed rules is 8-16 `alerts` calls against a request
-    # limit of 8, and the one verb that could group-by in a single call (`esql`) is exactly
-    # what this lead's grant withholds for index confinement (g6/r19). The contract now asks
-    # for what the granted verb can actually return.
+    # "across any rule", not "same-signature": the goal says do NOT narrow to this alert's own
+    # rule, and a per-rule breakdown over the 8 installed rules is 8-16 `alerts` calls against a
+    # request limit of 8 — the one verb that could group-by in a single call (`esql`) is exactly
+    # what this lead's grant withholds for index confinement.
     #
-    # Each dimension names its ENTITY SCOPE. "on-host"/"fleet-wide" alone do not: read
-    # literally, "the count of alerts fleet-wide" is every alert the environment emitted in
-    # the window — a number about the SOC, not about this alert — while the narrowing it meant
-    # counts THESE entities anywhere. Two different numbers, and the lead's prose summary is
-    # the only thing MAIN sees, so the contract has to say which one it wants.
+    # Each dimension names its ENTITY SCOPE, and as SCOPED/UNSCOPED rather than
+    # "on-host"/"fleet-wide". Read literally, "alerts fleet-wide" counts every alert the
+    # environment emitted — a number about the SOC, not this alert — and the host-centric
+    # spelling collapses on any source whose alerts all report the same shared host: the
+    # on-host count degenerates to "every alert this source emitted" and the fleet-wide one has
+    # nothing left to bind. Scoped/unscoped asks for the same two measurements without naming
+    # which field carries them.
     #
-    # #867 re-spelled the pair from "on-host"/"fleet-wide" to SCOPED/UNSCOPED. The old spelling
-    # was host-centric — it presumed the resolved host was the thing worth scoping to, which
-    # holds for host-level auth sources and collapses on any source whose alerts all report the
-    # same shared host: there the on-host count degenerates to "every alert this source
-    # emitted" and the fleet-wide one, defined as "drop the host predicate and keep the rest",
-    # has nothing left to bind at all. Scoped/unscoped asks for the same two measurements
-    # without naming which field carries them.
-    #
-    # The third line is not a count. It exists because the lead now CHOOSES what the first two
-    # are counted over: a number whose predicate MAIN cannot see is not a measurement MAIN can
-    # weigh, and the prose summary is the only thing that reaches it.
+    # The third line exists because the lead CHOOSES what the first two are counted over: a
+    # number whose predicate MAIN cannot see is not a measurement MAIN can weigh, and the prose
+    # summary is the only thing that reaches it.
     what = [
         "the count of alerts in the window scoped to the entities you judged central — one "
         "call, across any rule (the envelope's `total`)",
@@ -925,18 +855,17 @@ async def dispatch_correlation(  # noqa: C901, PLR0913 — item 3's own dispatch
     budget_started_monotonic: float = 0.0,
 ) -> str | None:
     """The ASYNC half of item 3: dispatch the real gather subagent for `l-00c`, reusing the
-    shared terminator/bookkeeping seam (`tools_gather._run_gather`, K15) with
-    `pre_claimed=True` (F5/F3 — the leads row was already claimed synchronously, before
-    MAIN's first turn, by `resolve_lead_zero`/`prepare_correlation_lead`)."""
+    shared terminator/bookkeeping seam (`tools_gather._run_gather`) with `pre_claimed=True` —
+    `prepare_correlation_lead` already claimed the leads row synchronously, before MAIN's first
+    turn."""
     from .agent_definition import bind
     from .agent_role import GATHER_AGENT_ID_PREFIX
     from .driver import GATHER_DEF, build_gather_agent
     from .tools import GatherDeps
     from .tools_gather import GatherRequest, _run_gather
 
-    # A thin re-grant wrapper: same verb resolution, a narrower grant object — so `esql`
-    # (never `confine_index`'d, g6/r19) is denied at the grant check rather than reaching a
-    # transport (F3/K7/d19).
+    # A thin re-grant wrapper: same verb resolution, a narrower grant object — so `esql` (never
+    # `confine_index`'d) is denied at the grant check rather than reaching a transport.
     from .verbs import VerbRegistry
 
     class _Narrowed(VerbRegistry):
@@ -956,9 +885,9 @@ async def dispatch_correlation(  # noqa: C901, PLR0913 — item 3's own dispatch
     registry = _Narrowed(verbs)
 
     # The SAME spelling `_run_gather` derives for the agent id it hands `gather_factory` and
-    # `stamp_terminator` (`f"{GATHER_AGENT_ID_PREFIX}{lead_id}"`). Spelled literally here, the
-    # session this frame opens and the session those two callbacks key would drift apart the
-    # moment the prefix moved, with nothing to catch it — the store would carry an orphan row.
+    # `stamp_terminator`. Spelled as a literal here, the session this frame opens and the one
+    # those two callbacks key would drift apart the moment the prefix moved, with nothing to
+    # catch it — the store would carry an orphan row.
     agent_id = f"{GATHER_AGENT_ID_PREFIX}{L3}"
     gather_session_id: str | None = None
     if store is not None:
@@ -970,26 +899,23 @@ async def dispatch_correlation(  # noqa: C901, PLR0913 — item 3's own dispatch
         extra: list = []
         if store is not None and gather_session_id is not None:
             # `request_limit` arrives from `_run_gather` — the value it is about to enforce —
-            # rather than being read again from `CORRELATION_REQUEST_LIMIT` here (#880 F-19
-            # residue). The recorder withholds the doomed round by comparing against it, and
-            # measuring a ceiling this dispatch did not receive is the whole of that finding.
+            # rather than being read again from `CORRELATION_REQUEST_LIMIT` here: the recorder
+            # withholds the doomed round by comparing against it, so it must not measure a
+            # ceiling this dispatch did not receive.
             extra = _gather_extra_capabilities(
                 store, gather_session_id, _agent_id, request_limit=request_limit,
             )
         return build_gather_agent(
             defender_dir, logger, _agent_id, make_model, registry, limits,
             extra_capabilities=extra, session_id=gather_session_id,
-            # #835 — same per-system cache-key convention as the model-dispatched path
-            # (`driver.py::_build_gather`): item 3 is bound to the alerts index only, so its
-            # own template-catalog prefix stays the grant's system regardless of what
-            # `request.system` says (they are now the same value — `CORRELATION_SYSTEM` is
-            # derived from the grant — but the key does not depend on that).
+            # Same per-system cache-key convention as the model-dispatched path
+            # (`driver.py::_build_gather`).
             #
             # KNOWN MISMATCH, not fixed here: this key is shared with MAIN's own gather leads
             # on the same system, and the prefix behind it is NOT the same text — the template
             # index is grant-filtered, so this role renders one template where role `gather`
             # renders fourteen. One lane, two prefixes. The fix is to key on role as well as
-            # system; it is a change to `driver.py`'s convention too, so it is not made here.
+            # system; that changes `driver.py`'s convention too, so it is not made here.
             cache_key=f"{GATHER_AGENT_ID_PREFIX}{system}",
         )
 
@@ -1003,13 +929,11 @@ async def dispatch_correlation(  # noqa: C901, PLR0913 — item 3's own dispatch
 
     gbase = bind(GATHER_DEF, run_dir, defender_dir=defender_dir, box=box)
     assert isinstance(gbase, GatherDeps)
-    # #808 review fix — thread the RUN's own budget-clock origin through, the same way
-    # `_run_gather`'s own model-dispatched path does (`gdeps = replace(gbase, ...,
-    # budget_started_monotonic=deps.budget_started_monotonic)`, tools_gather.py). Without
-    # this, `bind`'s own `AgentDeps` default (`default_factory=time.monotonic`) stamps a
-    # FRESH origin at whenever this coroutine happens to start, so under
-    # `DEFENDER_BUDGET_ENFORCE` the correlation lead's wall-clock enforcement measures
-    # elapsed time from its own start rather than sharing the run's true remaining budget.
+    # Thread the RUN's own budget-clock origin through, the way `_run_gather`'s model-dispatched
+    # path does. Otherwise `bind`'s `AgentDeps` default (`default_factory=time.monotonic`)
+    # stamps a FRESH origin whenever this coroutine happens to start, and under
+    # `DEFENDER_BUDGET_ENFORCE` the correlation lead's wall-clock enforcement measures elapsed
+    # time from its own start rather than the run's true remaining budget.
     gdeps = replace(
         gbase, run_id=run_id, lead_id=L3, budget_started_monotonic=budget_started_monotonic,
     )
@@ -1029,15 +953,15 @@ async def dispatch_correlation(  # noqa: C901, PLR0913 — item 3's own dispatch
 
 
 def _declare_l_finding(run_dir: Path, lead_id: str, name: str, system: str) -> None:
-    """K11/N6 — the HARNESS writes lead-0's declaring `:L findings` row into
-    `investigation.md`, before MAIN's first turn: with no such row, `invlang_validate`
-    refuses any citation of the reserved id as an "undeclared lead" (P6, executed).
+    """The HARNESS writes lead-0's declaring `:L findings` row into `investigation.md` before
+    MAIN's first turn: with no such row, `invlang_validate` refuses any citation of the
+    reserved id as an "undeclared lead".
 
     `system` is the CALLER's, not a module constant: this frame serves both reserved ids and
     they do not share an authority for it — item 1's is the literal its own backend calls name
-    (`ITEM1_SYSTEM`), item 3's is derived from the grant that confines it (`CORRELATION_SYSTEM`).
-    The two are the same string today; a shared constant would silently mislabel one of the two
-    rows the moment they stop being."""
+    (`ITEM1_SYSTEM`), item 3's is derived from the grant that confines it
+    (`CORRELATION_SYSTEM`). They are the same string today; a shared constant would silently
+    mislabel one of the two rows the moment they stop being."""
     from defender._io import write_guarded
 
     path = RunPaths(run_dir).investigation
@@ -1058,19 +982,14 @@ def _declare_l_finding(run_dir: Path, lead_id: str, name: str, system: str) -> N
 def prepare_correlation_lead(
     run_dir: Path, alert: dict, ancestor_block: str, status: str,
 ) -> tuple[str, list[str]] | None:
-    """The SYNCHRONOUS half of item 3: gate on the resolution status (d22 — dispatches on
-    RESOLVED and TRUNCATED, not on FAILED/EMPTY), build the harness-authored contract, and
-    claim `l-00c`'s leads row BEFORE MAIN's first turn (F5). Returns `(goal,
-    what_to_summarize)` when item 3 should actually dispatch, else `None`.
+    """The SYNCHRONOUS half of item 3: gate on the resolution status (dispatches on RESOLVED
+    and TRUNCATED, never on FAILED/EMPTY), build the harness-authored contract, and claim
+    `l-00c`'s leads row BEFORE MAIN's first turn. Returns `(goal, what_to_summarize)` when item
+    3 should actually dispatch, else `None`.
 
-    #867 CHANGED THE OBLIGATION THIS GATE DISCHARGES, and deliberately. `d22` used to read
-    "dispatches only when item 1 resolved at least one non-empty ENTITY SET"; it now reads "at
-    least one ancestor DOCUMENT". The line below is untouched by that change — it always
-    tested the status, and the status was always about documents — but a resolution whose
-    documents yielded no host/user/source-ip used to be turned away downstream, inside
-    `_correlation_contract`, and no longer is. That arm was not a degenerate case: it was every
-    alert source that carries its entities outside those three fields — real documents, nothing
-    the triple could see. `STATUS_EMPTY` and `STATUS_FAILED` still dispatch nothing.
+    The gate is "item 1 resolved at least one ancestor DOCUMENT" — nothing downstream turns a
+    dispatch away for yielding no host/user/source-ip, which would exclude every alert source
+    carrying its entities outside those three fields.
 
     `ancestor_block` is item 1's rendered block as `LeadZeroResult.text` carries it — already
     sanitized, elided and wrapped — so the lead reads the same bytes MAIN reads at ORIENT."""
@@ -1086,8 +1005,8 @@ def prepare_correlation_lead(
     })
     if claimed != CLAIMED:
         # Someone else already owns this id (a planted collision), or the row could not be
-        # written at all (#855 F-12) — either way this frame owns nothing, so it dispatches
-        # nothing and touches the id no further.
+        # written at all — either way this frame owns nothing, so it dispatches nothing and
+        # touches the id no further.
         return None
     _declare_l_finding(run_dir, L3, "correlation lead", CORRELATION_SYSTEM)
     return goal, what
@@ -1096,17 +1015,16 @@ def prepare_correlation_lead(
 # ─── the wrap + section assembly ─────────────────────────────────────────────────────
 
 def _render_section(body: str) -> str:
-    """`LeadZeroResult.text` (d0): item 1's rendered block IN ITS ENTIRETY inside ONE
+    """`LeadZeroResult.text`: item 1's rendered block IN ITS ENTIRETY inside ONE
     `wrap_fresh(text, "untrusted")` frame — nothing outside it. The ORIENT heading is a
-    separate, TRUSTED line `render_orient_section` prepends when assembling the section
-    text `orient.py` appends; it is not part of the entry point's own return value."""
+    separate, TRUSTED line `render_orient_section` prepends; it is not part of the entry
+    point's own return value."""
     return wrap_fresh(body, "untrusted")
 
 
 def render_orient_section(result: LeadZeroResult) -> str:
-    """The ORIENT-time section text: the trusted heading (naming the reserved ids MAIN must
-    not reuse — R7 `interacts(main_agent->lead_id)`) followed by item 1's whole untrusted
-    frame, unmodified."""
+    """The ORIENT-time section text: the trusted heading (naming the reserved ids MAIN must not
+    reuse) followed by item 1's whole untrusted frame, unmodified."""
     return (
         f"{LEAD_ZERO_HEADING} (resolved by the harness before your first turn — reserved "
         f"lead ids {L0} (this resolution) and {L3} (a correlation lead dispatched off it, "
@@ -1160,9 +1078,9 @@ def resolve_lead_zero(
             )
         except (BudgetKill, circuit_breaker.RunAborted, asyncio.CancelledError,
                 KeyboardInterrupt, GeneratorExit):
-            # #808 review fix — cancellation/control-flow signals must propagate rather than
-            # degrade into a plain "item 1 failed" result: swallowing `CancelledError` here
-            # breaks task cancellation semantics for whatever is running this coroutine.
+            # Cancellation/control-flow signals must propagate rather than degrade into a plain
+            # "item 1 failed" result: swallowing `CancelledError` here breaks task cancellation
+            # semantics for whatever is running this coroutine.
             raise
         except BaseException as e:  # noqa: BLE001 — item 1's own faults degrade, never raise
             return _unavailable(f"{e!r}"), STATUS_FAILED

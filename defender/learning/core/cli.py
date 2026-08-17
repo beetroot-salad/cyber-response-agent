@@ -76,11 +76,10 @@ def _run_stage(stage: Callable[[], int], *, allow_run_error: bool = False) -> in
         return stage()
     except SYSTEMIC_FAULTS as e:
         print(f"[loop] FATAL: {e}", file=sys.stderr)
-        # Mapping a fault to a terse exit-2 line costs the traceback an UNHANDLED one would
-        # have printed — and with it the exception this one displaced on its way out. That
-        # matters most for the newest member of the tuple: a `RunTainted` deliberately
-        # outranks the work's own failure (box.py's exception preference), so `__context__` is
-        # the reason the batch was already dying, and nothing else on this path says it.
+        # A terse exit-2 line costs the traceback an unhandled fault would have printed, and
+        # with it the exception this one displaced. That matters for `RunTainted`, which
+        # deliberately outranks the work's own failure — `__context__` is the reason the batch
+        # was already dying, and nothing else on this path says it.
         if e.__context__ is not None:
             print(f"[loop] FATAL: ...it displaced: {e.__context__!r}", file=sys.stderr)
         return 2

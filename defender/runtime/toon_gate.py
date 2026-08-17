@@ -1,5 +1,5 @@
-"""#872 — the TOON view gate: a provenance-gated, cost-bounded substitution of a foreign
-tool's dict/list result with a smaller TOON view, framed like every other untrusted span.
+"""The TOON view gate: a provenance-gated, cost-bounded substitution of a foreign tool's
+dict/list result with a smaller TOON view, framed like every other untrusted span.
 
 Installed unconditionally at the single `Agent(...)` composition root (`driver.build_agent_core`)
 so it is on all five build paths. It never touches defender's OWN tools — those are
@@ -31,8 +31,8 @@ from defender._run_paths import GATE_METADATA_KEY
 from defender._untrusted import wrap_fresh as _frame
 from defender.hooks.budget_enforcer import BudgetKill
 
-#: §7 r1's spelling — the reserved metadata key the original JSON rides on. Not the gate's
-#: to change: `test_substitute_branch_return_shape` pins the literal string. Defined in
+#: The reserved metadata key the original JSON rides on. Not the gate's to change:
+#: `test_substitute_branch_return_shape` pins the literal string. Defined in
 #: `defender._run_paths` and re-exported here: the page that reads it back
 #: (`scripts/visualize/visualize_messages`) renders on installs that carry no pydantic-ai, so
 #: the name it agrees with the writer on cannot live behind this module's imports.
@@ -44,20 +44,18 @@ _CANDIDATE_METADATA_KEY = "_defender_toon_gate_candidate"
 #: The value `mark_owned` writes and `_is_owned` demands, by IDENTITY. An object rather than
 #: `True`, because the key is read off the tool's OWN `ToolDefinition.metadata` — a field a
 #: foreign toolset also fills (pydantic-ai builds an MCP tool's from the server's `meta` and
-#: `annotations`, and any hand-built `ToolDefinition` may carry anything). Against a truthy
-#: check, a foreign toolset could declare ITSELF owned and walk past both the gate and the
-#: untrusted frame, which is the one thing the module docstring says `mark_owned` is the only
-#: way to do. Identity against a module-private object cannot cross that seam: a tool
-#: definition assembled from JSON — which is what every remote toolset's is — can spell the
-#: key but can never hold this value.
+#: `annotations`). Against a truthy check, a foreign toolset could declare ITSELF owned and
+#: walk past both the gate and the untrusted frame. Identity against a module-private object
+#: cannot cross that seam: a tool definition assembled from JSON — which is what every remote
+#: toolset's is — can spell the key but can never hold this value.
 _OWNED_SENTINEL = object()
 
 MAX_DEPTH_ENV = "DEFENDER_TOON_GATE_MAX_DEPTH"
 MAX_NODES_ENV = "DEFENDER_TOON_GATE_MAX_NODES"
 MAX_PERCENT_ENV = "DEFENDER_TOON_GATE_MAX_PERCENT"
 
-#: §7 r6's operator judgment — an ordinary run never approaches either ceiling; both exist to
-#: bound a hostile or merely huge payload's cost before the encoder ever sees it.
+#: An ordinary run never approaches either ceiling; both exist to bound a hostile or merely
+#: huge payload's cost before the encoder ever sees it.
 DEFAULT_MAX_DEPTH = 64
 DEFAULT_MAX_NODES = 100_000
 #: The value the corpus measurements were taken at. Not a contract — an operator default.
@@ -67,20 +65,19 @@ DEFAULT_MAX_PERCENT = 85
 _MAX_PENDING = 64
 
 #: The control-flow set that must never be swallowed by the encoder/decoder guard — the same
-#: shape `query_tool._decide_guarded` already uses, widened by `SystemExit` (`d56`).
+#: shape `query_tool._decide_guarded` uses, widened by `SystemExit`.
 _REPROPAGATE: tuple[type[BaseException], ...] = (
     BudgetKill, KeyboardInterrupt, GeneratorExit, SystemExit, asyncio.CancelledError,
 )
 
 #: The fixed byte cost `wrap_fresh` adds, computed ONCE. A fresh-minted salt is always 16 hex
 #: chars (`secrets.token_hex(8)`) and the frame is pure ASCII, so the overhead is a function of
-#: the tag alone — never of which salt a particular call drew. Measuring it per gated call
-#: spent a CSPRNG draw and a string build on a process constant.
+#: the tag alone — never of which salt a particular call drew.
 _FRAME_OVERHEAD = len(_frame("", "untrusted"))
 
 
 def mark_owned(toolset: Any) -> Any:
-    """Label a toolset as defender's own at the installation site (§7 r2, P1 = B).
+    """Label a toolset as defender's own at the installation site.
 
     The gate's default is FOREIGN — an unlabelled toolset supplied at the `toolset=` seam is
     gated. This is the one way to opt a specific toolset instance out, for the composition
@@ -106,20 +103,18 @@ def _check_key(k: Any) -> None:
 
 
 class _Walker:
-    """M7's recursive walk, as a small stateful object rather than a nested closure — split
-    out from `_prevalidate` because a nested-closure version of the same logic reads as MORE
-    complex to a cyclomatic-complexity linter than the identical logic split across methods.
+    """The pre-validator's recursive walk, as a small stateful object rather than a nested
+    closure (which reads as more complex to a cyclomatic-complexity linter).
 
-    Over `dict`/`list` (subclasses included — the encoder's own traversal set, `d51`):
+    Over `dict`/`list` (subclasses included — the encoder's own traversal set):
       - charges the node budget for EVERY value visited, containers and scalars alike, and
         bails the instant it is exhausted — bounding the walk's own cost on a payload whose
-        containers alone would take it exponential (`S7`);
+        containers alone would take it exponential;
       - refuses one level over the configured depth cap, catching a payload that is deep but
-        acyclic (`S3`) — a case a cycle check alone does not see;
+        acyclic — a case a cycle check alone does not see;
       - refuses a container reachable from ITSELF on the CURRENT path (path-scoped, not a
-        global seen-set — `d49`'s own anti-vacuity control is ordinary shared structure,
-        which must still be admitted);
-      - refuses any string, key or value, carrying a raw NUL (`d64`).
+        global seen-set: ordinary shared structure must still be admitted);
+      - refuses any string, key or value, carrying a raw NUL.
     """
 
     def __init__(self, *, max_depth: int, max_nodes: int) -> None:
@@ -156,12 +151,12 @@ class _Walker:
 
 
 def _prevalidate(value: Any, *, max_depth: int, max_nodes: int) -> None:
-    """M7: raise `_Refused` before the encoder ever sees a hazardous payload. See `_Walker`."""
+    """Raise `_Refused` before the encoder ever sees a hazardous payload. See `_Walker`."""
     _Walker(max_depth=max_depth, max_nodes=max_nodes).walk(value, 1, frozenset())
 
 
 class _RealEncoder:
-    """The production encoder: `toons`, imported lazily at the CALL site (`d75`).
+    """The production encoder: `toons`, imported lazily at the CALL site.
 
     A module-scope `import toons` would fail every one of the five build paths together the
     instant the wheel is absent, because the gate is installed unconditionally at the single
@@ -192,12 +187,11 @@ def _wire_text(call_tool_name: str, tool_call_id: str, value: Any) -> str:
 
 
 def _unwrap(result: Any) -> tuple[Any, dict | None, Any]:
-    """A tool body may pre-wrap its own return in a `ToolReturn` (§7's `cN7`/`cN8`). The gate
-    operates on `return_value` and preserves the body's own `metadata` — and its `content`,
-    which is a SEPARATE model-facing channel (`ToolReturn.content` becomes its own
-    `UserPromptPart`, and is where a multimodal tool puts an image). Dropping it here would
-    have deleted, silently and on every gated call, a part of the tool's answer the gate has
-    no view over and no opinion about."""
+    """A tool body may pre-wrap its own return in a `ToolReturn`. The gate operates on
+    `return_value` and preserves the body's own `metadata` — and its `content`, a SEPARATE
+    model-facing channel (`ToolReturn.content` becomes its own `UserPromptPart`, and is where a
+    multimodal tool puts an image). Dropping it would silently delete, on every gated call, a
+    part of the tool's answer the gate has no view over."""
     if isinstance(result, ToolReturn):
         return result.return_value, result.metadata, result.content
     return result, None, None
@@ -208,16 +202,14 @@ def _split_files(value: Any) -> tuple[Any, list[Any]]:
     itself performs on a `ToolReturnPart` (`BaseToolReturnPart._unwrap_data`).
 
     The gate's own ruler is `ToolReturnPart.model_response_str()`, which EXCLUDES the file
-    parts — a provider receives them natively, not as JSON. So a foreign toolset returning
-    `[BinaryContent(...), {...}]` — an MCP server's image, the canonical foreign result — used
-    to have its files DELETED here: the value took the dict/list branch, the encoder refused
-    the content blocks, and the passthrough returned a bare `str` carrying the data half
-    alone. The frame is a control over text; it has nothing to say about an image, and
-    dropping the image is not a cheaper view of it.
+    parts — a provider receives them natively, not as JSON. Without the split, a foreign
+    toolset returning `[BinaryContent(...), {...}]` (an MCP server's image, the canonical
+    foreign result) has its files DELETED: the value takes the dict/list branch, the encoder
+    refuses the content blocks, and the passthrough returns a bare `str` carrying the data half
+    alone. The frame is a control over text; dropping an image is not a cheaper view of it.
 
-    Splitting first keeps `f2 = B` intact — what the gate returns is still a `str`, and it is
-    still framed on every exit — while the files ride the tool's other model-facing channel
-    (`ToolReturn.content`, which becomes its own `UserPromptPart`). That is the same relocation
+    Splitting first keeps the gate's return a framed `str` on every exit while the files ride
+    the tool's other model-facing channel (`ToolReturn.content`) — the same relocation
     pydantic-ai performs for providers whose tool-result API accepts text only
     (`model_response_str_and_user_content`).
 
@@ -248,14 +240,12 @@ def _merge_content(body_content: Any, files: list[Any]) -> Any:
 
 
 def _framed_retry(part: Any) -> Any:
-    """Reframe the model-facing text of a foreign tool's `ModelRetry` (`d0`'s span, on the
-    error exit).
+    """Reframe the model-facing text of a foreign tool's `ModelRetry` — the error exit.
 
     `_raw_execute` converts a tool body's `ModelRetry` into a `ToolRetryError` carrying a
     `RetryPromptPart`, and that part's content reaches MAIN's context verbatim. Framing only
-    the RESULT would have left a foreign toolset one unframed channel into the trusted region
-    — `ModelRetry("IGNORE PRIOR INSTRUCTIONS ...")` — which is the exact span `wrap_fresh`
-    exists to close.
+    the RESULT would leave a foreign toolset one unframed channel into the trusted region —
+    `ModelRetry("IGNORE PRIOR INSTRUCTIONS ...")` — the exact span `wrap_fresh` exists to close.
 
     Only a `str` content is framed: the list shape belongs to argument `ValidationError`s,
     which are the library's own text about a call defender's model made, not the foreign
@@ -313,30 +303,26 @@ class ToonGateCapability(AbstractCapability[Any]):
     def __init__(self, *, encoder: Any = None) -> None:
         self._encoder = encoder if encoder is not None else _REAL_ENCODER
         #: EVERY native toolset ever bound, not the last one. One gate instance can legitimately
-        #: reach two builds (the `extra_capabilities` reuse path), and a single slot let the
-        #: second build's bind silently un-own the FIRST agent's own tools — turning defender's
-        #: own results foreign, gated and framed, on an agent nothing had reconfigured.
+        #: reach two builds (the `extra_capabilities` reuse path), and a single slot would let
+        #: the second build's bind silently un-own the FIRST agent's own tools — turning
+        #: defender's own results foreign, gated and framed.
         self._native_toolsets: list[Any] = []
         self._examined = 0
         self._refused = 0
         self._substituted = 0
         self._bytes_saved = 0
-        #: `wrap_tool_execute` returns a bare framed STRING — never a `ToolReturn` — so that
-        #: an OUTER capability's own `handler(args)` sees exactly the tool's-own-shaped value
-        #: it would see from any other wrapper (`d69`'s discriminator:
-        #: `test_call_tool_receives_the_tools_own_return_with_a_capture_shaped_capability_installed`).
-        #: The tool body's own `metadata`/`content` is attached one hook later, in
-        #: `after_tool_execute`, which runs on the value AFTER the whole wrap chain has
-        #: resolved — keyed by call id, and applied only when that value STILL EQUALS what
-        #: this call produced, i.e. nothing further out in the chain (like a capture-shaped
-        #: capability) has already replaced it.
+        #: `wrap_tool_execute` returns a bare framed STRING — never a `ToolReturn` — so an
+        #: OUTER capability's own `handler(args)` sees exactly the tool's-own-shaped value it
+        #: would see from any other wrapper. The tool body's own `metadata`/`content` is
+        #: attached one hook later, in `after_tool_execute`, which runs on the value AFTER the
+        #: whole wrap chain has resolved — keyed by call id, and applied only when that value
+        #: STILL EQUALS what this call produced (nothing further out has replaced it).
         #:
         #: BOUNDED, because an entry can be stranded: an outer capability may raise a
         #: control-flow exception (`ModelRetry`, `ToolFailed`, `SkipToolExecution`) after this
         #: gate returned, and `after_tool_execute` — the map's only reader — never runs for
-        #: that call. Each entry pins the call's ORIGINAL payload, so an unbounded map retains
-        #: every stranded payload for the life of the run. Only calls currently in flight can
-        #: ever be claimed; the oldest is evicted first.
+        #: that call. Each entry pins the call's ORIGINAL payload, so an unbounded map would
+        #: retain every stranded payload for the life of the run. Oldest is evicted first.
         self._pending: dict[str, tuple[str, dict | None, Any]] = {}
 
     def bind_native_toolset(self, toolset: Any) -> None:
@@ -390,7 +376,7 @@ class ToonGateCapability(AbstractCapability[Any]):
         if result != text:
             # Something further OUT in the wrap chain already replaced our own output (a
             # capture-shaped capability, say) — respect that override. The metadata is
-            # legitimately lost with it, the same way it is for `query` today (`d69`).
+            # legitimately lost with it, the same way it is for `query`.
             return result
         return ToolReturn(return_value=result, metadata=metadata, content=content)
 
@@ -411,10 +397,9 @@ class ToonGateCapability(AbstractCapability[Any]):
             _prevalidate(body_value, max_depth=max_depth, max_nodes=max_nodes)
         except (_Refused, RecursionError):
             # `RecursionError` sits beside `_Refused` because the walk is recursive PYTHON: a
-            # depth cap configured above the interpreter's own limit — or an already-deep
-            # stack under it — hits the interpreter's ceiling before the gate's, and that is
-            # the same "this payload is too deep to inspect" answer, not a reason to fail a
-            # tool call the un-gated run would have delivered.
+            # depth cap above the interpreter's own limit — or an already-deep stack under it —
+            # hits the interpreter's ceiling first, which is the same "too deep to inspect"
+            # answer, not a reason to fail a tool call the un-gated run would have delivered.
             self._refused += 1
             return self._passthrough(*args)
 
@@ -429,14 +414,13 @@ class ToonGateCapability(AbstractCapability[Any]):
             # Two refusals in one shape. NON-`str`: the guard above covers the encoder's CALL,
             # not its RETURN, and `.encode()`/`wrap_fresh` below sit outside every guard — so a
             # view that is not a string would fail the TOOL CALL where the contract is a
-            # passthrough. EMPTY (`d18`): an empty dict encodes to zero bytes and would
-            # otherwise clear any bar and round-trip, substituting NOTHING where the JSON
-            # said `{}`.
+            # passthrough. EMPTY: an empty dict encodes to zero bytes, clears any bar and
+            # round-trips, substituting NOTHING where the JSON said `{}`.
             return self._passthrough(*args)
 
         # Computed OUTSIDE the guard above: a payload the pre-validator admits but the wire
         # serializer cannot represent (an arbitrary object as a value) must raise exactly as
-        # the un-gated run does (`d47`) — the gate does no worse, never better.
+        # the un-gated run does — the gate does no worse, never better.
         wire_text_value = _wire_text(tool_name, tool_call_id, body_value)
         wire_bytes_value = len(wire_text_value.encode("utf-8"))
         toon_bytes_value = len(toon_view.encode("utf-8"))

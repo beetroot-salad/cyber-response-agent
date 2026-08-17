@@ -1,17 +1,13 @@
-"""One `fcntl.flock` primitive, and the one deadline loop three callers had each written.
+"""One `fcntl.flock` primitive, and the one deadline loop its callers share.
 
-Eight names across three modules resolved to two behaviours: take an exclusive lock on a
-file (immediately, or retried until a deadline, or waiting forever), and release it. The
-release halves were byte-identical; the deadline loop was written three times, differing
-only in what it does when the deadline expires — two raise `TimeoutError` with differently
-worded messages, one answers `None`. Those differences are real and are parameters here,
-because callers depend on them: `author/drain.py`'s retire decision keys on the raise, and
-the drain's channel wait must NOT raise, because an appender's ordinary hold is not a
-fault.
+Two behaviours: take an exclusive lock on a file (immediately, retried until a deadline, or
+waiting forever), and release it. What a caller does when the deadline expires differs and is
+therefore a parameter — `author/drain.py`'s retire decision keys on a raise, while the drain's
+channel wait must NOT raise, because an appender's ordinary hold is not a fault.
 
-This lives at `defender/` level rather than in either caller. `learning/core/persist.py`
-and `learning/author/shared.py` both need it, and `core` importing `author` would invert
-the dependency and drag the pipeline prompt machinery into the persistence layer.
+This lives at `defender/` level rather than in either caller: `learning/core/persist.py` and
+`learning/author/shared.py` both need it, and `core` importing `author` would invert the
+dependency and drag the pipeline prompt machinery into the persistence layer.
 """
 from __future__ import annotations
 

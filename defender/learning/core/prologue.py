@@ -23,11 +23,10 @@ def extract_case_entities(investigation_path: Path) -> str:
                 # every consumer parses these tokens as `type:class`, so qualify here.
                 #
                 # A cell holding a `,` is dropped with the half-filled rows: `,` is the
-                # DELIMITER of the string this builds, and an unresolved class carrying an
-                # enumerated candidate set (`class={a/b/c, d/e/f}` — skills/invlang/SKILL.md
-                # §Open questions) would split across it, truncating the real entity AND
-                # fabricating a second one out of the tail. An unresolved slot cannot satisfy
-                # a selector anyway, so nothing is lost by emitting no token for it.
+                # DELIMITER of the string this builds, so an unresolved class carrying an
+                # enumerated candidate set (`class={a/b/c, d/e/f}`) would split across it,
+                # truncating the real entity and fabricating a second from the tail. An
+                # unresolved slot cannot satisfy a selector anyway.
                 if not typ or not cls or "," in typ or "," in cls:
                     continue
                 tok = f"{typ}:{cls}"

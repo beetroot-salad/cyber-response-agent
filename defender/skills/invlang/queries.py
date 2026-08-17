@@ -15,10 +15,9 @@ from .schema import Conclude, FindingRecord, HypothesisRecord
 def _disposition(c: Companion) -> str | None:
     """This case's conclude disposition as it RENDERS, or `None`.
 
-    Every corpus surface below reads the headline through here (#785/#790). It is
-    model-authored text: read raw, a zero-width character clinging to the keyword silently
-    drops the case out of a `--disposition benign` precedent lookup, which is the same
-    fail-open the benign gate in `validate.py` used to have — one function over."""
+    Every corpus surface below reads the headline through here. It is model-authored text:
+    read raw, a zero-width character clinging to the keyword silently drops the case out of a
+    `--disposition benign` precedent lookup."""
     return normalized_disposition(c.conclude.get("disposition"))
 
 
@@ -42,9 +41,9 @@ def _vertex_types(c: Companion) -> dict[str, str]:
 
     An investigation declares vertices in two places: the prologue's opening graph, and each
     lead's own `outcome.observations`. Indexing the prologue alone while filtering against the
-    full hypothesis set (`case_hypotheses`, which walks both) silently drops any hypothesis
-    anchored to a vertex the run discovered mid-investigation: the anchor resolves to no type,
-    so an `attached_to_type` filter refuses it as a non-match rather than as a missing id.
+    full hypothesis set (`case_hypotheses` walks both) silently drops any hypothesis anchored
+    to a vertex the run discovered mid-investigation: the anchor resolves to no type, so an
+    `attached_to_type` filter refuses it as a non-match rather than as a missing id.
 
     First declaration wins, matching `_walkers.all_hypotheses`: the prologue is the declaring
     site for anything it names, and a later re-observation adds ids rather than re-typing them.

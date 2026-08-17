@@ -15,30 +15,23 @@ from typing import Any, Union, get_args, get_origin
 
 from .verb_grant import GrantError, VerbGrant
 
-#: THE shape of a system name. PRIVATE, and it stays private: the shape is only half the
-#: answer, and `is_system_name` below is the whole of it. A public pattern is an invitation to
-#: match it and forget the bound — which is precisely the bug #914 closed at `_adapter_path`,
-#: so re-exporting the pattern would re-open the class of defect that motivated the merge.
-#: Cross-module callers reach the PREDICATE (`query_tool`, `tools_gather`, `declared_systems`,
-#: `pitfalls_curator`); nothing outside this module needs the raw object.
-#:
-#: Anchored at BOTH ends. `\Z` alone is only half a shape: every caller today reaches it
-#: through `.match`, which anchors the start for them, but a `.search("BAD name")` matches the
-#: trailing `name` SUFFIX and reads as well-formed. `\A` makes the object itself carry the
-#: anchor rather than each caller's choice of method.
-#: The alphabet itself, UNANCHORED, so a scanner that must recognise a name INSIDE
+#: The alphabet of a system name, UNANCHORED, so a scanner that must recognise a name INSIDE
 #: surrounding text embeds this rather than respelling it (`verb_roster`'s `query(system="…"`
 #: matcher does exactly that). A fragment, deliberately not a compiled pattern: there is
 #: nothing here to `.match()` with, so it cannot become the shape-without-the-bound shortcut
 #: `is_system_name` exists to prevent. Verb names share this alphabet — the tree declares no
 #: verb outside it and has no separate verb pattern — so the same fragment spells both.
 SYSTEM_PATTERN = r"[a-z0-9][a-z0-9-]*"
+#: The compiled shape stays PRIVATE: shape is only half the answer, and `is_system_name` below
+#: is the whole of it — a public pattern invites matching it and forgetting the bound.
+#: Anchored at BOTH ends, so the object carries the anchor rather than each caller's choice of
+#: method: with `\Z` alone, `.search("BAD name")` matches the trailing suffix and reads as
+#: well-formed.
 _SYSTEM_RE = re.compile(rf"\A{SYSTEM_PATTERN}\Z")
-#: The name is unbounded model text at three of the readers below (#835's prompt-cache key, the
-#: `query` tool's echo, the gather tool's retry message), so the shape needs a ceiling to go
-#: with it. One number rather than one per downstream reason: the reasons differ, but the FACT
-#: they each bound — how long a system name may be — is the same fact, and two copies of it
-#: drift. Split them again if a reader ever genuinely needs a different bound.
+#: The name is unbounded model text at three of the readers below (the prompt-cache key, the
+#: `query` tool's echo, the gather tool's retry message), so the shape needs a ceiling. ONE
+#: number rather than one per downstream reason: the reasons differ, but the fact they bound —
+#: how long a system name may be — is the same, and two copies of it drift.
 SYSTEM_MAX_LEN = 64
 
 
@@ -46,13 +39,9 @@ def is_system_name(name: str) -> bool:
     """Is `name` a well-formed system name — lowercase letters, digits and hyphens, bounded?
 
     THE one answer, for every channel a system name arrives on: an adapter filename, a
-    committed `execution.md` marker, a queued pitfall row, a model-supplied tool argument.
-    Before #914 there were four spellings of this question — this pattern, a verbatim copy of
-    it in `tools_gather`, two separately-named 64s, and `declared_systems._is_system_name`,
-    which refused only the empty string, a leading dot, `/`, `\\` and NUL while its docstring
-    claimed to be holding names to THIS pattern. That last one was the outlier that mattered:
-    it admitted names the dispatch seam would later reject, so a name could be declared a
-    system and then fail to resolve as one.
+    committed `execution.md` marker, a queued pitfall row, a model-supplied tool argument. Do
+    not respell it — a looser second spelling admits names the dispatch seam later rejects, so
+    a name can be declared a system and then fail to resolve as one.
 
     Shape only, never membership. `gather` and `fakesys` are well-formed names that no source
     declares; keeping the two questions apart is what lets a drop be attributed to membership
@@ -96,25 +85,23 @@ def verb(
     *, engine: str = "none", body_param: str | None = None, verb_class: str = "r",
     wrapper_only: tuple[str, ...] = (),
 ) -> Callable[[Verb], Verb]:
-    """`wrapper_only` names params a first-party WRAPPER binds and no model may (#900).
+    """`wrapper_only` names params a first-party WRAPPER binds and no model may.
 
     The case it exists for is `ticket`'s `require_closed`: the benign judge's closed-ticket
-    tool hard-codes it on the wire (`closed_ticket_tool.py:490,532`) and deliberately keeps it
-    off its own model-facing schema, while gather — which shares the verb — has no business
-    setting it at all. It only ever NARROWS (it pins `status=closed`), so this is not a
-    privilege boundary; it is a correctness one. A gather lead that bound it would silently
-    drop the open and in-progress siblings it was dispatched to correlate, and could then
-    report "no open work touching this host" from a read it had quietly narrowed itself.
+    tool hard-codes it on the wire and keeps it off its own model-facing schema, while gather —
+    which shares the verb — has no business setting it. It only ever NARROWS (pins
+    `status=closed`), so this is a correctness boundary, not a privilege one: a gather lead
+    that bound it would silently drop the open and in-progress siblings it was dispatched to
+    correlate, then report "no open work touching this host" from a read it narrowed itself.
 
     A marked param is refused by `validate_params` and omitted from `model_facing_params`, so
     the surface a model is shown and the surface the boundary accepts stay the same set. The
     wrapper is unaffected: it calls `fn(ctx, **params)` directly and never crosses this check.
     """
-    # CHECKED AT DECORATION, because both ways of getting it wrong are SILENT and both undo
-    # the one property this feature buys. A bare string iterates into its characters
-    # (`frozenset("require_closed")` reserves 13 letters and no param), and a misspelt name
-    # reserves nothing at all — after either, `list_verbs` publishes the param and
-    # `validate_params` accepts it, which is exactly the publication/enforcement disagreement
+    # CHECKED AT DECORATION, because both ways of getting it wrong are SILENT. A bare string
+    # iterates into its characters (`frozenset("require_closed")` reserves 13 letters and no
+    # param), and a misspelt name reserves nothing — after either, `list_verbs` publishes the
+    # param and `validate_params` accepts it, the publication/enforcement disagreement
     # `model_facing_params` exists to make impossible.
     if isinstance(wrapper_only, str):
         raise TypeError(
@@ -132,13 +119,12 @@ def verb(
                 f"{undeclared}, which the signature does not declare as keyword-only param(s) "
                 f"— a reserved name that matches nothing is silently no reservation at all"
             )
-        # AND it must carry a DEFAULT, checked here for the same reason the two above are:
-        # the failure is silent and lands at the wrong layer. `validate_params` computes its
-        # required set from `model_facing_params`, which a reserved param is by definition not
-        # in — so a default-less one is never reported missing, and a model call that omits it
-        # (the only call it can make) reaches `fn(vctx, **params)` and raises TypeError inside
-        # the query tool: an infra-class row and a circuit-breaker contribution for what is
-        # really a declaration defect.
+        # AND it must carry a DEFAULT, for the same reason: the failure is silent and lands at
+        # the wrong layer. `validate_params` computes its required set from
+        # `model_facing_params`, which a reserved param is not in — so a default-less one is
+        # never reported missing, and the only call a model can make reaches `fn(vctx,
+        # **params)` and raises TypeError inside the query tool: an infra-class row and a
+        # circuit-breaker contribution for what is really a declaration defect.
         undefaulted = sorted(
             n for n in reserved if declared[n].default is inspect.Parameter.empty
         )
@@ -199,11 +185,9 @@ def wrapper_only_params(fn: Verb) -> frozenset[str]:
 def model_facing_params(fn: Verb) -> dict[str, inspect.Parameter]:
     """The declared params a MODEL may bind — `declared_params` minus the wrapper-only set.
 
-    THE surface for anything model-facing: what `validate_params` accepts and what
-    `list_verbs` publishes are both this, so the two cannot disagree. `declared_params` stays
-    the raw signature read, which is what a binding call and the scaffold's placeholder
-    invariant want.
-    """
+    THE surface for anything model-facing: what `validate_params` accepts and what `list_verbs`
+    publishes are both this, so the two cannot disagree. `declared_params` stays the raw
+    signature read, for a binding call and the scaffold's placeholder invariant."""
     hidden = wrapper_only_params(fn)
     return {n: p for n, p in declared_params(fn).items() if n not in hidden}
 
@@ -287,13 +271,12 @@ def _system_of(path: Path) -> str:
 
 _MODULES: dict[str, Any] = {}
 
-#: Serializes the check-then-exec below. `list_verbs` (#900) is the first reader that resolves
-#: an adapter off the EVENT LOOP — `asyncio.to_thread(_tool_list_verbs, …)` — and the main
-#: agent dispatches sibling gather leads in parallel, so two leads naming the same system can
-#: both miss `_MODULES` and both `exec_module` the adapter: its module-scope side effects run
-#: twice and the two halves of the run hold different function objects for one verb. `RLock`,
-#: not `Lock`: an adapter whose import reaches back into the registry would deadlock a plain
-#: one on its own thread.
+#: Serializes the check-then-exec below. `list_verbs` resolves an adapter off the EVENT LOOP
+#: (`asyncio.to_thread`) and the main agent dispatches sibling gather leads in parallel, so two
+#: leads naming the same system can both miss `_MODULES` and both `exec_module` the adapter:
+#: its module-scope side effects run twice and the two halves of the run hold different
+#: function objects for one verb. `RLock`, not `Lock`: an adapter whose import reaches back
+#: into the registry would deadlock a plain one on its own thread.
 _MODULES_LOCK = threading.RLock()
 
 
@@ -329,7 +312,7 @@ def declared_verb_names(adapters_dir: Path, system: str) -> frozenset[str]:
     declares. Only string-literal keys of a top-level dict LITERAL assignment are seen; a
     table assembled any other way (a loop, a comprehension) declares nothing to this reader,
     which is deliberate — the load check that consumes this must fail rather than treat an
-    unreadable table as a blank cheque (§7 R10)."""
+    unreadable table as a blank cheque."""
     path = _adapter_path(adapters_dir, system)
     if path is None:
         return frozenset()
@@ -364,11 +347,10 @@ class VerbDecision:
 
 
 class VerbRegistry:
-    """The nominally-typed verb-registry seam (§7 R15): every construction route requires a
-    real `VerbGrant`, so an unscoped registry is unconstructable rather than merely un-passed,
-    and every entry point that takes a registry checks the TYPE — a registry-shaped stand-in
-    that never went through this constructor is refused, because a structural check ("does it
-    answer verbs()/decide()?") cannot tell a real grant apart from a duck-typed one that
+    """The nominally-typed verb-registry seam: every construction route requires a real
+    `VerbGrant`, so an unscoped registry is unconstructable rather than merely un-passed, and
+    every entry point that takes a registry checks the TYPE — a structural check ("does it
+    answer verbs()/decide()?") cannot tell a real grant apart from a duck-typed stand-in that
     answers GRANTED to everything."""
 
     def __init__(self, grant: VerbGrant):
@@ -394,11 +376,10 @@ class VerbRegistry:
 
     def decide(self, system: str, verb: str) -> VerbDecision:
         """THE grant decision point. Decided from the grant ALONE first — no adapter is
-        resolved (no import) unless the grant admits the call — so a denial or an
-        unresolvable verdict on a system whose adapter cannot even be imported is still
-        reached, and reached without importing it (§7 R11's UNDECLARED/DENIED split, read
-        literally). A verb name outside what the system REALLY declares (a case or whitespace
-        near-miss) is UNDECLARED even when the grant otherwise reaches the system — DENIED is
+        resolved (no import) unless the grant admits the call — so a denial or an unresolvable
+        verdict on a system whose adapter cannot even be imported is still reached, without
+        importing it. A verb name outside what the system REALLY declares (a case or whitespace
+        near-miss) is UNDECLARED even when the grant otherwise reaches the system; DENIED is
         reserved for a real, withheld verb."""
         if not self.grant.allows(system, verb):
             if system in self.grant.systems:
@@ -455,24 +436,18 @@ class ModuleVerbRegistry(VerbRegistry):
             )
 
     def systems(self) -> tuple[str, ...]:
-        """The systems this adapters directory declares — every one of them resolved through
-        `_adapter_path`, the SAME call `verbs()` dispatches with (#914).
+        """The systems this adapters directory declares — every one resolved through
+        `_adapter_path`, the SAME call `verbs()` dispatches with. A name this roster carries is
+        a name that dispatches; without the filter, `verbs()` raises `KeyError` for a system the
+        registry just said it had.
 
-        Without the filter this roster and `verbs()` disagree over one directory: a
-        `MySys_adapter.py` lands in `systems()` while `_adapter_path` refuses the name, so
-        `verbs("MySys")` raises `KeyError` for a system the registry just said it had — and
-        `learning.leads.declared_systems._adapter_names`, whose docstring calls this "the same
-        set", refuses it too. A name this roster carries is a name that dispatches.
-
-        `_adapter_path`, not `is_system_name` alone: the shape is only half of what makes a
-        name dispatchable. `_system_of` maps `_`->`-`, and the inverse `_adapter_path` applies
-        is NOT onto — a `change-mgmt_adapter.py` (hyphen in the FILENAME) derives the
-        well-formed name `change-mgmt`, which `_adapter_path` then looks for at
-        `change_mgmt_adapter.py` and does not find. So does a DIRECTORY named
-        `foo_adapter.py`, which the glob yields and `is_file()` refuses. Both are names a
-        shape-only filter carries and `verbs()` raises `KeyError` for — the very disagreement
-        this filter exists to remove. Deduplicated for the same reason: two filenames can
-        derive one system, and a roster naming it twice is not a set."""
+        `_adapter_path`, not `is_system_name` alone: shape is only half of what makes a name
+        dispatchable. `_system_of` maps `_`->`-` and the inverse is NOT onto — a
+        `change-mgmt_adapter.py` (hyphen in the FILENAME) derives the well-formed name
+        `change-mgmt`, which `_adapter_path` looks for at `change_mgmt_adapter.py` and does not
+        find; so does a DIRECTORY named `foo_adapter.py`, which the glob yields and `is_file()`
+        refuses. Deduplicated for the same reason: two filenames can derive one system, and a
+        roster naming it twice is not a set."""
         named = {_system_of(p) for p in self.adapters_dir.glob("*" + ADAPTER_SUFFIX)}
         return tuple(sorted(
             n for n in named if _adapter_path(self.adapters_dir, n) is not None

@@ -120,9 +120,8 @@ def render_judge_headline(
 ) -> str:
     disposition = report.disposition_or_unknown
     confidence = str(report.frontmatter.get("confidence", "?"))
-    # First rendered direction that produced a doc supplies the outcome tile — the page
-    # order, so adversarial still wins when both ran. The tile names its direction either
-    # way; it used to say so for the benign direction only.
+    # First rendered direction that produced a doc supplies the outcome tile — page order, so
+    # adversarial still wins when both ran. The tile names its direction either way.
     graded = next(((v, d) for v, d in docs if d), None)
     if graded is not None:
         view, doc = graded
@@ -159,15 +158,14 @@ def _gate_badge_html(report: ReportRead) -> str:
     Read from report.md's own frontmatter — the gate WRITES `outcome`/`cause`/`failure_kind`
     there — rather than re-derived from the review records, so the headline cannot disagree
     with the file the learning loop and the judge both read. A `forced-inconclusive` says the
-    headline disposition is the gate's and not the investigator's, which is the one thing a
-    reader skimming this card would otherwise get wrong; § Review gate carries the rest.
+    headline disposition is the gate's and not the investigator's; § Review gate carries the
+    rest.
 
     THE OUTCOME ALONE IS NOT THE BADGE. The gate's BYPASS arm writes `outcome: stands` too —
-    `stands` is the close tool's word for "committed unchanged", not for "a review agreed" —
-    so keying only on it painted a green "the review held" badge on every `inconclusive`
-    close, contradicting § Review gate below, which reads the records and says "not reviewed".
-    The CAUSE is what tells the two apart, and it is read from its owner rather than spelled
-    here — see `visualize_runtime.close_vocabulary`.
+    `stands` means "committed unchanged", not "a review agreed" — so keying only on it paints
+    a green "the review held" badge on every `inconclusive` close, contradicting § Review gate
+    below. The CAUSE tells the two apart, read from its owner rather than spelled here (see
+    `visualize_runtime.close_vocabulary`).
     """
     outcome = str(report.frontmatter.get("outcome", "") or "")
     if not outcome:
@@ -192,9 +190,8 @@ def render_runtime_headline(
 ) -> str:
     disposition = report.disposition_or_unknown
     # `close_tool.render_report` renders the frontmatter from typed arguments and does NOT
-    # write `confidence` — only pre-close-tool runs carry the key. Defaulting it to "?" put a
-    # permanently-empty `confidence: ?` on every current run, beside the gate badge that
-    # actually says something.
+    # write `confidence`. Defaulting it to "?" would put a permanently-empty `confidence: ?`
+    # on every current run, beside the gate badge that actually says something.
     confidence = report.frontmatter.get("confidence")
     conf_html = (
         f'<span class="an-conf">confidence: {esc(str(confidence))}</span>' if confidence else ""
@@ -313,7 +310,7 @@ def _lead_summary(leads: list) -> str:
         return '<span class="empty">no leads</span>'
     rows: list[str] = []
     for jl in leads:
-        dead = jl.orphan or not jl.rows  # "reached the table at all" (#841)
+        dead = jl.orphan or not jl.rows  # "reached the table at all"
         goal = (jl.goal or ("orphan" if jl.orphan else "")).strip()
         mark = ' <span class="lead-dead">∅</span>' if dead else ""
         goal_html = f'<span class="lead-mini-goal">{esc(goal)}</span>' if goal else ""
@@ -349,20 +346,17 @@ def _stats(events: list[dict]) -> tuple[int, int, float]:
 
 
 def _main_session_analysis(run_dir: Path) -> list[tuple[Any, str]]:
-    """The store's own `analysis`-role read of this run's MAIN session, paired with each
-    row's `actor`-role coordinate — resolved fresh from just `run_dir` (R4: the render
-    path opens the store itself, it does not trust a stale on-disk projection), so a run
-    dir whose store cannot be resolved fails this call rather than rendering
-    silently-stale or empty pages."""
+    """The store's own `analysis`-role read of this run's MAIN session, paired with each row's
+    `actor`-role coordinate — resolved fresh from `run_dir` rather than from an on-disk
+    projection, so an unresolvable store raises here instead of rendering a stale or empty
+    page."""
     from defender.runtime import session_store as ss
 
     store_path = ss.resolve_store_path(run_dir)
     store = ss.open_store_for_read(store_path)
     try:
-        # The ROOT-OF-LINEAGE main session (FK-F) — `session_store.main_session_id` owns
-        # the schema knowledge (`agent_id`/`parent_session_id`) this used to duplicate here
-        # as inline SQL, alongside this same PR's other lineage readers (`branch_point`,
-        # `displaced_tip`, `fold_history`).
+        # The ROOT-OF-LINEAGE main session — `session_store.main_session_id` owns the schema
+        # knowledge (`agent_id`/`parent_session_id`), so it is never restated as inline SQL.
         session_id = ss.main_session_id(store)
         messages = ss.hydrate(store, session_id, role="analysis")
         coords = ss.hydrate(store, session_id, role="actor")
@@ -401,16 +395,16 @@ def render_judge_page(run_dir: Path) -> str:
     events = read_jsonl_rows(run_dir / "tool_trace.jsonl")
     n_events, n_tool_calls, cost = _stats(events)
 
-    # One pass over the directions this run selected or left artifacts for — the page no
-    # longer enumerates them, so a third `Direction` lands here for free (#716).
+    # One pass over the directions this run selected or left artifacts for — the page never
+    # enumerates them, so a third `Direction` lands here for free.
     report = parse_report(run_dir)
     docs = [
         (v, load_judge_doc(case_id, v.direction))
         for v in active_views(case_id, report.disposition_or_unknown)
     ]
     toc_sections = [(v, judge_finding_count(d) if d else None) for v, d in docs]
-    # Rendered once and handed to both the TOC and the page body: the bundle is empty when the
-    # run left no raw artifacts, and the TOC linked it regardless (#748).
+    # Rendered once and handed to both the TOC and the page body, so a run with no raw
+    # artifacts cannot carry a TOC link to a section it never emits.
     raw_bundle = render_judge_raw_bundle(case_id)
 
     byline = _byline([
@@ -445,10 +439,9 @@ def render_judge_page(run_dir: Path) -> str:
 
 def _render_policy_denials_section(run_dir: Path) -> str:
     """A denial is durable on disk (`observe.POLICY_DENIALS`) and unrelated to every other
-    record kind this page already filters on — folding it into an existing filtered stream is
-    exactly how a denial goes silently unrendered (#632, g9/g23). Rendered as its own section
-    inside the document element, never a comment, so it survives `_visible_html`-shaped
-    scraping as well as a human's eyes."""
+    record kind this page filters on — folding it into an existing filtered stream is exactly
+    how a denial goes silently unrendered. Its own section inside the document element, never
+    an HTML comment, so it survives `_visible_html`-shaped scraping as well as human eyes."""
     from defender.runtime import observe
 
     path = run_dir / observe.POLICY_DENIALS
@@ -489,10 +482,9 @@ def render_runtime_page(run_dir: Path) -> str:
     for ph in phase_order:
         attribution[ph]["gather_cost"] = gather_by_phase.get(ph, 0.0)
         attribution[ph]["cost"] += gather_by_phase.get(ph, 0.0)
-    # The review's spend is totalled but deliberately NOT attributed to a phase. The gate is
-    # a gate and not a loop phase — the investigator is never "in" it — so a per-phase share
-    # would put its cost inside a bar that says where the agent was, which is the one thing
-    # that is not true of it (`visualize_runtime.render_review_gate`).
+    # The review's spend is totalled but deliberately NOT attributed to a phase: the
+    # investigator is never "in" the gate, so a per-phase share would put its cost inside a
+    # bar that says where the agent was (`visualize_runtime.render_review_gate`).
     review_by_lens = review_cost_by_lens(run_dir, messages)
     review_total = sum(review_by_lens.values())
     wall_times = phase_wall_times(events, tags, phase_order)
@@ -506,8 +498,8 @@ def render_runtime_page(run_dir: Path) -> str:
         d["duration_sec"] = base - moved + g_wall_to.get(ph, 0.0)
         wall_times[ph] = d
 
-    # `transcript_phase_map`, not `msg_phase_map`: this reader walks the WIRE LOG, whose
-    # ids are a different space from the trace coords `msg_phase_map` keys on (#883 F-22).
+    # `transcript_phase_map`, not `msg_phase_map`: this reader walks the WIRE LOG, whose ids
+    # are a different space from the trace coords `msg_phase_map` keys on.
     entries = build_transcript(
         messages, transcript_phase_map(events, tags, messages), phase_order)
     tools = tool_usage(events, messages)
@@ -522,10 +514,9 @@ def render_runtime_page(run_dir: Path) -> str:
     ):
         for model, cost in by_model_costs.items():
             by_model[model] = by_model.get(model, 0.0) + cost
-    # `result_total` is the fallback for a run with no phases to attribute against, and it is
-    # the MAIN SESSION's figure (`observe.write_trace` hydrates that session alone). The
-    # subagent terms are added to it for the same reason they are added to the attributed
-    # sum: they are calls this run made, and this is the run's total.
+    # `result_total` is the fallback for a run with no phases to attribute against, and covers
+    # the MAIN SESSION alone (`observe.write_trace` hydrates only that one). The subagent terms
+    # are added on top either way: they are calls this run made, and this is the run's total.
     totals = {
         "cost": (main_total + gather_total if phase_order else result_total) + review_total,
         "review_cost": review_total,
@@ -545,8 +536,8 @@ def render_runtime_page(run_dir: Path) -> str:
     review_html, n_reviewed = render_review_gate(run_dir, report, review_by_lens)
 
     # The review rides as a NAMED term inside the total, the way gather does on a phase's own
-    # line. Folded silently it would be a number an operator cannot separate from the
-    # investigation's; left out of the total it would be the defect #787 reported.
+    # line: folded silently it would be a number an operator cannot separate from the
+    # investigation's, and left out entirely the total would understate the run.
     review_note = (
         f'<span class="ts-review">(incl review ${totals["review_cost"]:.4f})</span>'
         if totals["review_cost"] else ""

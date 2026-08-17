@@ -85,17 +85,15 @@ def run_stage(
     verbs: Any = None,
 ) -> str:
     """Drive one in-process stage. `wiring` is how the stage is configured, `ctx` is what
-    this spawn is about — the two objects that replaced the ten parameters every engine
-    used to re-declare and forward unchanged (#713)."""
+    this spawn is about."""
     label = wiring.label
     # `<root>/wire_logs/<trace>`, never the root itself: this stream is the stage's whole
-    # context verbatim, and the roots here are SHARED — both legs of an `inconclusive`
-    # case run concurrently against one learning run dir, and a re-LEARN reopens it with
-    # the previous pass's traces still in place. The gray-box actor reads that root with
-    # no shape filter at all, so the judge's trace (which carries the UNREDACTED payload
-    # exemplars — `judge/compare.unredacted_exemplar`) handed it back exactly what
-    # `decide_read`'s gather_raw deny exists to keep from it. `files.names_wire_log_dir` is what
-    # refuses the read; this is what puts the file where that test can find it.
+    # context verbatim, and learning run dirs are SHARED — both legs of an `inconclusive` case
+    # run concurrently against one dir, and a re-LEARN reopens it. The gray-box actor reads
+    # that root with NO shape filter, so a judge trace at the root would hand it the
+    # UNREDACTED payload exemplars (`judge/compare.unredacted_exemplar`) that `decide_read`'s
+    # gather_raw deny withholds. `files.names_wire_log_dir` refuses the read; this puts the
+    # file where it can.
     logger = observe.RequestLogger(
         observe.stage_trace_path(ctx.learning_run_dir, wiring.trace_name)
     )

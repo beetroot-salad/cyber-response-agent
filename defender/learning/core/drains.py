@@ -47,11 +47,10 @@ class _LeadAuthorRetry(Exception):
 class _LeadAuthorSkipped(Exception):
     """The serve did not happen: another lead-author tick holds the per-author queue lock.
 
-    Distinct from `_LeadAuthorRetry` because the disposition is different (#852 F-03). A
-    retry is a FAILED attempt — it bumps `spec["attempts"]` and dead-letters the request
-    after `LEAD_AUTHOR_MAX_RETRIES`, which is right for work that keeps breaking and wrong
-    for work nothing has tried yet: one manual `lead_author.py` run held across three ticks
-    would quarantine three healthy batches. A skip costs the request nothing at all."""
+    Distinct from `_LeadAuthorRetry`, which is a FAILED attempt — it bumps `spec["attempts"]`
+    and dead-letters after `LEAD_AUTHOR_MAX_RETRIES`. That is wrong for work nothing has tried
+    yet: one manual `lead_author.py` run held across three ticks would quarantine three healthy
+    batches. A skip costs the request nothing at all."""
 
 
 def _invoke_lead_author(paths: LoopPaths, run_dir: Path, *, box: Any = None) -> None:
@@ -60,10 +59,9 @@ def _invoke_lead_author(paths: LoopPaths, run_dir: Path, *, box: Any = None) -> 
 
     _log("step=lead-author")
     rc = _run_curator_module("lead_author", lambda mod: mod.run(run_dir, paths=paths, box=box))
-    # BEFORE the rc-is-a-fault test below, and before the success path: a lock skip used to
-    # arrive as rc=0 and was indistinguishable from a completed serve, so the drain unlinked
-    # every marker it had claimed in the pass — the whole batch deleted, no work done, no
-    # dead letter, no retry (#852 F-03).
+    # BEFORE the rc-is-a-fault test and before the success path: a lock skip indistinguishable
+    # from a completed serve makes the drain unlink every marker it claimed in the pass — the
+    # whole batch deleted, no work done, no dead letter, no retry.
     if rc == QUEUE_LOCK_SKIP_RC:
         raise _LeadAuthorSkipped(
             f"lead-author for {run_dir.name} skipped: another tick holds the queue lock"
@@ -146,10 +144,10 @@ def _has_lead_author_work(paths: LoopPaths) -> bool:
     inflight = qdir / "inflight"
     if inflight.is_dir() and any(inflight.glob("*.json")):
         return True
-    # The same arrival condition `run_pitfalls` gates on, asked through the same function
-    # (#840 + #870 FK-3) — a wake gate that counted rows, or that answered a different
-    # question from the tick's, would spin the drain up for a curation that then declines to
-    # run, or (worse) never wake for work the tick would have taken.
+    # The same arrival condition `run_pitfalls` gates on, asked through the same function: a
+    # wake gate that counted rows, or answered a different question from the tick's, would
+    # spin the drain up for a curation that then declines to run — or never wake for work the
+    # tick would have taken.
     return pitfalls_lane_is_open(merge_pitfalls(read_pitfalls(paths)), threshold)
 
 
@@ -189,8 +187,8 @@ def _requeue_or_drop(claim: ClaimedMarker, *, note: str) -> None:
     The re-queue lands at the TOP level — never at `claim.path`, the slot a reclaimed orphan
     was read from and this pass is about to unlink — and it is CREATE-IF-ABSENT. A fresher
     request for the same case that arrived while this one was claimed already occupies that
-    slot, and the queue's contract is that the later run wins (#791), so the older spec is
-    dropped rather than atomically written over it (#852 F-04).
+    slot, and the queue's contract is that the later run wins, so the older spec is dropped
+    rather than written over it.
 
     The spec comes off the CLAIM rather than as its own argument: what goes back on the
     queue and what is unlinked from `inflight/` are two halves of one hand-back, and a
@@ -221,9 +219,6 @@ def _drain_lead_author_markers(
     )
     for claim in claims:
         claimed, spec, run_dir = claim.path, claim.spec, claim.run_dir
-        # Where a request that is NOT served goes back — the top level, create-if-absent, and
-        # never the claim slot this pass is about to unlink — is `_requeue_or_drop`'s, in one
-        # place for both the skip and the retry.
         try:
             drained = run_or_dead_letter(
                 functools.partial(run_lead_author, paths, run_dir, box=box),
@@ -233,10 +228,10 @@ def _drain_lead_author_markers(
                 propagate=(_LeadAuthorRetry, _LeadAuthorSkipped),
             )
         except _LeadAuthorSkipped as e:
-            # NOTHING was tried for this request, so it costs nothing: the spec goes back
-            # untouched — no `attempts` bump, no dead letter — and the pass stops. Every
-            # marker still queued would meet the same held lock, and claiming them only to
-            # hand them straight back is churn against a queue another process is reading.
+            # Nothing was tried, so the spec goes back untouched — no `attempts` bump, no dead
+            # letter — and the pass stops: every marker still queued would meet the same held
+            # lock, and claiming them only to hand them back is churn against a queue another
+            # process is reading.
             _requeue_or_drop(
                 claim, note=f"{marker_identity(spec, claimed)} not served: {e}",
             )
@@ -344,11 +339,10 @@ _CORPUS_ATTR_FOR_TRIGGER_MODULE = {
 
 
 def _drain_triggered_corpora(paths: LoopPaths) -> tuple[Path, ...]:
-    """R6 — decide-all-triggered before the box is created: the base lessons corpus is the
-    one `author_drain`'s has_work gate always answers for (`_has_curator_work`'s primary
-    check); the actor/environment siblings join only when THEIR own threshold independently
-    fires. Evaluated once, before `_run_worktree_batch` composes the drain box's mount set —
-    never a static union of all three (M1).
+    """Which corpora this batch may write: the base lessons corpus always (it is what
+    `author_drain`'s has_work gate answers for), plus each actor/environment sibling whose own
+    threshold independently fires. Evaluated once, before `_run_worktree_batch` composes the
+    drain box's mount set — never a static union of all three.
 
     Corpus dirs come off `paths`, so pass the WORKTREE-rooted LoopPaths: `with_repo_root`
     preserves `state_root`, so the queue counts are the same files either way."""
@@ -369,10 +363,10 @@ def _drain_triggered_corpora(paths: LoopPaths) -> tuple[Path, ...]:
 def _drain_box_request(
     wt: Path, batch_id: str, label: str, paths: LoopPaths,
 ) -> box_mod.BoxRequest:
-    """The drain box's geography (M1/S3/S4): infra ro over the whole worktree leaf (it carries
-    `<wt>/defender` and is both drain roles' cwd_anchor), rw ONLY over what this batch actually
-    needs — the triggered lesson corpora for `author_drain`, `<wt>/defender/skills` for
-    `lead_author_drain` — never a static union (M1), never anything outside the leaf (S3)."""
+    """The drain box's geography: ro over the whole worktree leaf (it carries `<wt>/defender`
+    and is both drain roles' cwd_anchor), rw ONLY over what this batch actually needs — the
+    triggered lesson corpora for `author_drain`, `<wt>/defender/skills` for
+    `lead_author_drain` — never a static union, never anything outside the leaf."""
     wt_paths = paths.with_repo_root(wt)
     mounts = [box_mod.Mount(source=wt, target=wt, writable=False)]
     if label == "lead_author_drain":
@@ -411,9 +405,9 @@ def _run_worktree_batch(
         _log(f"{label}: cannot start batch worktree: {e} — skipping")
         return 0
 
-    # M1: the box is created after the worktree exists AND after the threshold checks that
-    # decide which curators wake, over exactly this batch's needs — never a static union. A
-    # startup fault here unwinds the worktree/branch resources already minted (M1 consequence).
+    # The box is created after the worktree exists AND after the threshold checks that decide
+    # which curators wake, over exactly this batch's needs. A startup fault here must unwind
+    # the worktree/branch resources already minted.
     try:
         box = start_box(_drain_box_request(wt, batch_id, label, paths))
     except BaseException:
@@ -424,13 +418,12 @@ def _run_worktree_batch(
     wt_paths = paths.with_repo_root(wt)
     pr = None
     try:
-        # O7/S7 (#741): the box is torn down and the written tree scanned on ANY exit from
-        # do_work, ordinary or exceptional. Both halves live in `stop_and_scrub`, which owns
-        # the ordering (teardown first — the rw bind must be released before the walk, or the
-        # scan races a live writer), the only-scrub-a-provably-dead-box rule, and the
-        # exception preference. The scan lands BEFORE finish_batch's commit+push+PR
-        # supply-chain step ever reads the tree (decision 8); a failed teardown blocks both
-        # the scan and finish_batch (R2).
+        # The box is torn down and the written tree scanned on ANY exit from do_work. Both
+        # halves live in `stop_and_scrub`, which owns the ordering (teardown first — the rw
+        # bind must be released before the walk, or the scan races a live writer), the
+        # only-scrub-a-provably-dead-box rule, and the exception preference. The scan lands
+        # BEFORE finish_batch's commit+push+PR step ever reads the tree; a failed teardown
+        # blocks both the scan and finish_batch.
         work_ok = False
         try:
             do_work(wt_paths, box=box)
@@ -444,18 +437,14 @@ def _run_worktree_batch(
         except BranchError as e:
             _log(f"{label}: finish_batch failed: {e} — work stays queued, retry next tick")
     except box_mod.RunTainted as taint:
-        # #747: the `finally` below destroys this tree, and on the taint path it is the ONLY
-        # copy — the scrub raises before finish_batch, so nothing was ever committed or
-        # pushed (decision 8), and the curator's edits plus whatever the box planted exist
-        # nowhere else. `box.py` lets a taint outrank the work's own failure on the grounds
-        # that the crash-path tree "is the one a human then opens by hand"; without this
-        # handler that justification was false here, because the tree was gone before anyone
-        # read the traceback.
+        # The `finally` below destroys this tree, and on the taint path it is the ONLY copy:
+        # the scrub raises before finish_batch, so nothing was committed or pushed, and the
+        # curator's edits plus whatever the box planted exist nowhere else — so preserve it
+        # for the human who opens it by hand.
         #
-        # An except clause rather than a check inside the `finally`: handlers run BEFORE the
-        # finally, which is exactly the ordering needed, and the intent reads off the
-        # structure. The re-raise is load-bearing — preserving the tree must not swallow the
-        # signal that it is tainted.
+        # An except clause rather than a check inside the `finally`, because handlers run
+        # BEFORE the finally, which is the ordering needed. The re-raise is load-bearing —
+        # preserving the tree must not swallow the signal that it is tainted.
         preserve_tainted_tree(
             wt, branch.quarantine_dir,
             batch_id=batch_id, branch=branch.branch_name(batch_id), label=label, taint=taint,
@@ -464,10 +453,9 @@ def _run_worktree_batch(
     finally:
         # A cleanup failure leaves a worktree that is both possibly-tainted and, if do_work
         # raised before the scan could clear it, never walked. Suppressed so it cannot mask
-        # the real failure, but never silent — that silence was the whole residue #741 named.
-        # The git-level failure is logged where it is SWALLOWED (`AuthorBranch.cleanup` runs
-        # `git worktree remove` under its own suppression, so it never reaches this handler);
-        # this catch is the backstop for everything else a cleanup implementation can raise.
+        # the real failure, but never silent. The git-level failure is logged where it is
+        # SWALLOWED (`AuthorBranch.cleanup` suppresses its own `git worktree remove`, so it
+        # never reaches here); this catch is the backstop for everything else.
         try:
             branch.cleanup(wt)
         except Exception as e:  # noqa: BLE001 — best-effort cleanup; the real fault outranks it
@@ -500,8 +488,7 @@ def _lead_author_pr_body(branch: str) -> str:
 def author_drain(
     paths: LoopPaths = DEFAULT_PATHS,
     *,
-    # `(paths, pending_file, threshold_env, module_name, pending_label, *, box)` — `box=` is
-    # threaded per call (R1), so the seam is not the old fixed 5-positional signature.
+    # `(paths, pending_file, threshold_env, module_name, pending_label, *, box)`.
     trigger_author: Callable[..., None] | None = None,
     branch: AuthorBranch | None = None,
     start_box: Callable[..., Any] = box_mod.start_box,

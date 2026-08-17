@@ -26,8 +26,8 @@ _CAT_BOOL_BUNDLE = re.compile(gnu_flags.bundle(gnu_flags.CAT_BOOL))
 def rm_target_files(argv: list[str]) -> list[str] | None:
     """The operand(s) a claimed `rm` grant names — the grant's own `pattern` already restricts
     the shape to a single bare path (no flags), so this is a plain tail slice, resolved+scoped
-    like any other opener (#691 MD-3): a symlink INSIDE the corpus pointing OUTSIDE it must be
-    caught by resolving the operand, not merely by the pattern matching the pre-resolution text."""
+    like any other opener: a symlink INSIDE the corpus pointing OUTSIDE it must be caught by
+    resolving the operand, not merely by the pattern matching the pre-resolution text."""
     return argv[1:]
 
 

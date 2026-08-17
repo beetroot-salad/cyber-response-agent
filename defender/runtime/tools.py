@@ -28,8 +28,8 @@ from .agent_role import AgentRole
 from .permission.files import RESOLVE_ERRORS
 
 from defender._untrusted import wrap_fresh
-# The SAME byte ruler the #629 bounds are measured with — a write tool that reports "bytes"
-# has to report the number the gate will judge, not a codepoint count that under-reads it.
+# The SAME byte ruler the artifact bounds are measured with — a write tool that reports
+# "bytes" must report the number the gate will judge, not a codepoint count that under-reads it.
 from defender._artifact_schema import _utf8_len
 from defender._env import FatalConfigError, env_int
 from defender.scripts.adapters.faults import USAGE_EXIT_CODE
@@ -43,16 +43,16 @@ from defender.hooks.record_lesson_load import (
     lesson_name as _lesson_name,
 )
 
-#: The queries table's own infra code — `circuit_breaker.INFRA_EXIT_CODES`' member for a
-#: fault that is the environment's, not the caller's. Named rather than spelled `2` at the
-#: use site, so a reader of `_shim_exit_code` sees WHICH taxonomy the number belongs to.
+#: The queries table's infra code — `circuit_breaker.INFRA_EXIT_CODES`' member for a fault
+#: that is the environment's, not the caller's. Named so a reader of `_shim_exit_code` sees
+#: WHICH taxonomy the number belongs to.
 _INFRA_EXIT_CODE = 2
 
 _BASH_TIMEOUT_S = 120
 
-#: The `verb` a bash-lane row carries. Not a registry verb and deliberately unlike one: it keeps
-#: a shim row outside `repeat_trip`'s `(system, verb, params)` key by construction, so an
-#: observational row can never be mistaken for a dispatch attempt and trip the guard (#823 N3).
+#: The `verb` a bash-lane row carries. Deliberately not a registry verb: it keeps a shim row
+#: outside `repeat_trip`'s `(system, verb, params)` key by construction, so an observational
+#: row can never be mistaken for a dispatch attempt and trip the guard.
 _BASH_VERB = "bash"
 
 
@@ -79,13 +79,11 @@ def _overflow_filter_hint(
 def _read_char_cap() -> int:
     """The cap on reading an AUTHORED file — a SKILL, a lesson, a design doc.
 
-    Its own number since #832, where the capture ceiling dropped to 8 KB. The two used to be one
-    constant, and the sharing was load-bearing in one direction only: a lead must not be able to
-    `read_file` a persisted payload and recover what the capture view withheld. But equality
-    over-served that property — `defender/SKILL.md` is 33,590 bytes and 16 of 20 files under
-    `docs/` clear 8 KB, so lowering the shared value would have truncated the runtime agent's own
-    spec to serve a bound on payload reads. `_cap_for` keeps the property and drops the equality:
-    the capture ceiling applies where a capture is being re-read, and nowhere else."""
+    Deliberately its OWN number, not the 8 KB capture ceiling. The property that matters is
+    one-directional: a lead must not `read_file` a persisted payload and recover what the
+    capture view withheld. Sharing one constant over-serves it — `defender/SKILL.md` is 33 KB
+    and most of `docs/` clears 8 KB — so `_cap_for` applies the capture ceiling only where a
+    capture is being re-read."""
     return env_int("DEFENDER_AUTHORED_READ_MAX_CHARS", 65536)
 
 
@@ -132,11 +130,10 @@ class AgentDeps:
     authored_paths: set[Path] = field(
         kw_only=True, default_factory=set, compare=False, repr=False
     )
-    #: #774 K9. The gate's per-run mutable state (turn count, raised-lead ids, the
-    #: terminal-close flag) — ONE mutable container, following the `authored_paths`
-    #: precedent, since `AgentDeps` is frozen and cannot carry a plain int counter.
-    #: `defender.runtime.challenge_gate.ReviewState.of(deps)` owns what lives inside it;
-    #: this field is just the box.
+    #: The gate's per-run mutable state (turn count, raised-lead ids, the terminal-close
+    #: flag) — ONE mutable container, following the `authored_paths` precedent, since
+    #: `AgentDeps` is frozen and cannot carry a plain int counter.
+    #: `defender.runtime.challenge_gate.ReviewState.of(deps)` owns what lives inside it.
     review_state: dict = field(
         kw_only=True, default_factory=dict, compare=False, repr=False
     )
@@ -194,26 +191,22 @@ def _shim_exit_code(rc: int) -> int:
     """Translate `defender-sql`'s exit codes into the dialect the queries table speaks.
 
     Two dialects meet here and they disagree on the number 2. The shim spends
-    `EXIT_INPUT_ERROR` (2) on the AGENT's mistakes — an empty pipe, a payload that is not JSON,
-    a malformed argv — while 2 in this table means INFRA (`circuit_breaker.INFRA_EXIT_CODES`,
-    where it is the adapter-load fault), and `collect_general_failures` drops every infra row.
-    Left untranslated, the commonest reduce mistakes were recorded and then silently discarded
-    — the exact failure M1 exists to end.
+    `EXIT_INPUT_ERROR` (2) on the AGENT's mistakes — an empty pipe, a non-JSON payload, a
+    malformed argv — while 2 in this table means INFRA (`circuit_breaker.INFRA_EXIT_CODES`),
+    and `collect_general_failures` drops every infra row: untranslated, the commonest reduce
+    mistakes are recorded and then silently discarded.
 
-    So the two genuinely different meanings are separated at the boundary rather than averaged:
-    an input error becomes `USAGE_EXIT_CODE`, this table's own "the caller's request was
-    refused"; a missing runtime (`EXIT_NO_RUNTIME`, which #823 split out of the shim's exit-2
-    bucket precisely so this mapping could be exact) becomes the table's infra code, because a
-    broken deployment is not a lesson any `execution.md` should carry. A query error (1) is
-    already agent-fixable and passes through. The shim's real status stays legible either way —
-    `payload_digest` records the raw `exit=N` and its stderr.
+    So an input error becomes `USAGE_EXIT_CODE` ("the caller's request was refused"), a missing
+    runtime (`EXIT_NO_RUNTIME`) becomes the table's infra code — a broken deployment is not a
+    lesson any `execution.md` should carry — and a query error (1) is already agent-fixable and
+    passes through. `payload_digest` still records the raw `exit=N` and its stderr.
 
-    A code the shim does not spend is the THIRD meaning and it is infra too (#870 FK-15). The
-    shim's own failure vocabulary is exactly {1, 2, 69}; anything else — 137 from a SIGKILL,
-    127 from a missing binary — was produced by the kernel or the shell, not by the reducer
-    judging its input, and `error_class_for_exit` calls every unlisted non-zero code
-    agent-fixable. Left untranslated, a reduce the box killed reached the queue as a lesson
-    about SQL the agent should have written differently, which it is not.
+    A code the shim does not spend is a THIRD meaning, and it is infra too. The shim's own
+    failure vocabulary is exactly {1, 2, 69}; anything else — 137 from a SIGKILL, 127 from a
+    missing binary — came from the kernel or the shell, not from the reducer judging its input,
+    and `error_class_for_exit` calls every unlisted non-zero code agent-fixable. Untranslated,
+    a reduce the box killed reaches the queue as a lesson about SQL the agent should have
+    written differently, which it is not.
     """
     if rc == defender_sql.EXIT_INPUT_ERROR:
         return USAGE_EXIT_CODE
@@ -227,34 +220,27 @@ def _shim_exit_code(rc: int) -> int:
 def _record_shim_failure(
     deps: AgentDeps, decision: permission.BashDecision, command: str, result: Any,
 ) -> None:
-    """#823 M1 — a FAILED reducer shim writes its own queries-table row.
+    """A FAILED reducer shim writes its own queries-table row, so the reduce step gather's
+    prompt tells the subagent to run (`cat <payload> | defender-sql …`) leaves a trace the
+    pitfalls curator can fold into `skills/{system}/execution.md`.
 
-    `executed_queries.jsonl` was the query tool's alone, so the reduce step gather's own prompt
-    tells the subagent to run (`cat <payload> | defender-sql …`) left no trace anywhere the
-    offline loop reads. One measured lead spent its whole session brute-forcing DuckDB `unnest`
-    against a nested-envelope payload, and the pitfalls curator — whose entire job is folding
-    exactly that lesson into `skills/{system}/execution.md` — saw nothing.
+    FOUR conditions, none incidental:
 
-    FOUR conditions, each of them a demand of the spec and none of them incidental:
-
-    * `lead_id` — GATHER ONLY. `lead_id` lives on `GatherDeps`, not `AgentDeps`, so main's bash
-      lane structurally cannot produce one; the record is per-lead and joins on that key, and
-      main's bash is investigation authoring, not gathering. Narrowed with `isinstance` rather
-      than `getattr(deps, "lead_id", None)`: the getattr returns `Any`, which silently erased
-      the type of the value feeding `append_query_row(lead_id: str)` — and that value becomes a
-      `gather_raw/{lead_id}/` path component.
+    * `lead_id` — GATHER ONLY. It lives on `GatherDeps`, not `AgentDeps`, so main's bash lane
+      structurally cannot produce one; the record is per-lead and joins on that key, and main's
+      bash is investigation authoring, not gathering. Narrowed with `isinstance` rather than
+      `getattr(deps, "lead_id", None)`, whose `Any` erases the type of a value that feeds
+      `append_query_row(lead_id: str)` and becomes a `gather_raw/{lead_id}/` path component.
     * a non-zero exit — the trigger is a FAILURE, not a shim call. Recording the sanctioned
       happy path would make the pitfalls queue a transcript.
-    * a REDUCER stage — not bash in general. `_tool_bash` serves `grep`, `cat` and `wc` too, and
-      a failing `wc` teaches a system nothing. `bin/` carries exactly one reducer. And it must
-      be the TERMINAL stage (`command_shape.terminal_reducer`): the box reports one exit code,
-      the last stage's, so a reducer piped into `head` has its failure hidden behind that
-      stage's 0 and a healthy reducer piped into a non-matching `grep` is handed its 1. Only
-      when the reducer IS the reported stage can the rc be attributed to it, and a record no
-      one can attribute is worse than no record — it reaches the curator as a lesson.
-    * best-effort — this is an observation channel bolted beside the bash lane's real job, so a
-      broken table must not turn a working command into a `ModelRetry`. The same posture
-      `lead_rows` takes on its own read.
+    * a TERMINAL REDUCER stage (`command_shape.terminal_reducer`), not bash in general:
+      `_tool_bash` serves `grep`, `cat` and `wc` too, and a failing `wc` teaches nothing. The
+      box reports one exit code, the last stage's, so a reducer piped into `head` has its
+      failure hidden behind that stage's 0 and a healthy reducer piped into a non-matching
+      `grep` is handed its 1. Only when the reducer IS the reported stage can the rc be
+      attributed to it, and an unattributable record reaches the curator as a false lesson.
+    * best-effort — an observation channel bolted beside the bash lane's real job must not turn
+      a working command into a `ModelRetry`.
     """
     if not isinstance(deps, GatherDeps) or deps.lead_id is None or result.rc == 0:
         return
@@ -267,12 +253,12 @@ def _record_shim_failure(
         record_query.append_query_row(
             deps.run_dir,
             lead_id=lead_id,
-            # The system of the PAYLOAD the reducer read, never one parsed out of the argv —
-            # the argv names `defender-sql`, and a row saying `system: "sql"` would send the
-            # curator at a `skills/sql/execution.md` that must never exist. `""` when the
-            # command opened no run payload; since #870 M5′ the attribution no longer decides
-            # the row's fate either way — `collect_general_failures` routes it by its sentinel
-            # `query_id` onto the reducer surface and normalizes this field to `""` there.
+            # The system of the PAYLOAD the reducer read, never one parsed out of the argv:
+            # the argv names `defender-sql`, and `system: "sql"` would send the curator at a
+            # `skills/sql/execution.md` that must never exist. `""` when the command opened no
+            # run payload; the attribution does not decide the row's fate either way —
+            # `collect_general_failures` routes it by its sentinel `query_id` onto the reducer
+            # surface and normalizes this field to `""` there.
             system=record_query.system_for_payload_operands(
                 deps.run_dir, _opened_operands(deps, decision),
             ),
@@ -288,9 +274,9 @@ def _record_shim_failure(
             payload_status="error",
             payload_digest=f"exit={result.rc}; {stderr.strip()[:160]}",
         )
-    # `Exception`, not `OSError`: the fourth condition above is the whole point of this call,
-    # and the write is not the only thing that can raise inside it. Narrower than the posture
-    # it claims is how an observation channel starts failing the command it observes.
+    # `Exception`, not `OSError`: the write is not the only thing that can raise in here, and
+    # catching narrower than the best-effort posture claimed above is how an observation
+    # channel starts failing the command it observes.
     except Exception:  # noqa: BLE001 — best-effort observability
         return
 
@@ -319,19 +305,16 @@ def _tool_bash(deps: AgentDeps, command: str) -> str:
         raise ModelRetry(f"command timed out after {_BASH_TIMEOUT_S}s: {command}") from e
     except box_mod.BoxFault as e:
         raise ModelRetry(f"the sandbox could not run this command: {e}") from e
-    # #851 F-07/F-10, belt-and-braces behind the gate's NUL deny. `encode_request` sits ABOVE
-    # `run_parsed`'s own try (box.py) and raises a bare `ValueError` for a frame it cannot
-    # encode; nothing between here and `run.py::main` catches that type — not this handler
-    # stack, not `_drive_agent`'s five named arms, not the gather lane's — so an unencodable
-    # argv took the whole investigation down with a traceback and no disposition. It becomes a
-    # refusal the model can act on instead. The encoder's exception TYPE is left alone
-    # deliberately: `test_540_exec_seam.py` pins `pytest.raises(ValueError)` on `run_parsed`.
+    # Belt-and-braces behind the gate's NUL deny. `encode_request` sits ABOVE `run_parsed`'s own
+    # try (box.py) and raises a bare `ValueError` for a frame it cannot encode; nothing between
+    # here and `run.py::main` catches that type, so an unencodable argv would take the whole
+    # investigation down with a traceback and no disposition. The encoder's exception TYPE is
+    # left alone: `test_540_exec_seam.py` pins `pytest.raises(ValueError)` on `run_parsed`.
     #
     # `FatalConfigError` is re-raised AHEAD of it: it subclasses `ValueError` while meaning the
-    # opposite of a correctable command fault — a misconfigured run that must stop, not retry —
-    # and every other broad `except ValueError` in the tree already lets it through
-    # (`author/verify_forward/tool.py`). A blanket arm that swallowed it would hand the model
-    # "the command cannot cross the box wire" for an operator's bad env var, forever.
+    # opposite of a correctable command fault — a misconfigured run that must stop, not retry.
+    # A blanket arm that swallowed it would hand the model "the command cannot cross the box
+    # wire" for an operator's bad env var, forever.
     except FatalConfigError:
         raise
     except ValueError as e:
@@ -340,9 +323,8 @@ def _tool_bash(deps: AgentDeps, command: str) -> str:
     capping = min(operands, key=_cap_for, default=None)
     formatted = _format_bash_result(
         result.rc,
-        # Bounded BEFORE the frame below, matching the ordering
-        # `test_oversized_untrusted_read_caps_before_wrapping` pins for the read lane: the head
-        # and its notice land inside the delimiters, never a dump whose closing tag was cut off.
+        # Bounded BEFORE the frame below, matching the read lane: the head and its notice land
+        # inside the delimiters, never a dump whose closing tag was cut off.
         _bounded_bash_stream(
             deps, decision, capping,
             result.out.decode("utf-8", "replace"), subject="This output",
@@ -372,25 +354,24 @@ def _resolve_operand(deps: AgentDeps, path: str) -> Path:
 def _tree_root_for(deps: AgentDeps, p: Path) -> Path:
     """Which shared tree `p` sits in — the anchor `guarded_mkdir` walks down from.
 
-    The write gate has already confined `p` to the run dir or the defender dir (its `write ⊆
-    read roots` invariant), so one of the two contains it; this only has to say WHICH, because
-    the component guard needs to know where the box's reach begins. The run dir is tried first:
-    it is the narrower of the two and, in the drain lane, sits inside a checkout of the
-    defender dir, so root order is what keeps the anchor at the tighter tree.
+    The write gate has already confined `p` to the run dir or the defender dir (`write ⊆ read
+    roots`), so this only has to say WHICH, because the component guard needs to know where the
+    box's reach begins. The run dir is tried first: it is the narrower of the two and, in the
+    drain lane, sits inside a checkout of the defender dir, so root order keeps the anchor at
+    the tighter tree.
 
     Each root is tried in BOTH its raw and its resolved spelling, because the gate above
-    matched on `resolve()`d paths and this check does not: with a symlinked runs base (the
-    macOS `/tmp` case the anchor decision was made for) the model can legitimately name the
-    already-resolved spelling, `decide_write` resolves both sides and allows it, and a
-    raw-spelling-only comparison here would then refuse what the gate just admitted. `p`
-    itself is never resolved — `resolve()` would collapse the very component symlink the
-    guard exists to refuse — and the spelling RETURNED is whichever one actually prefixes
-    `p`, since `guarded_mkdir` needs the anchor to be a lexical prefix of the target.
+    matched on `resolve()`d paths and this check does not: with a symlinked runs base the model
+    can legitimately name the already-resolved spelling, `decide_write` resolves both sides and
+    allows it, and a raw-spelling-only comparison here would refuse what the gate just
+    admitted. `p` itself is never resolved — that would collapse the very component symlink the
+    guard exists to refuse — and the spelling RETURNED is whichever prefixes `p`, since
+    `guarded_mkdir` needs the anchor to be a lexical prefix of the target.
 
-    Failing to classify means the gate admitted a path that is not lexically under either
-    root under either spelling — a path reached THROUGH a symlink, which is the hazard the
-    guard exists for. `ModelRetry` rather than a bare raise: the operand is model-supplied,
-    so a refusal it can read and correct beats an exception that ends the run."""
+    Failing to classify means the gate admitted a path not lexically under either root under
+    either spelling — a path reached THROUGH a symlink, the hazard the guard exists for.
+    `ModelRetry` rather than a bare raise: the operand is model-supplied, so a correctable
+    refusal beats an exception that ends the run."""
     for root in (deps.run_dir, deps.defender_dir):
         for spelling in (root, _resolved(root)):
             if p == spelling or spelling in p.parents:
@@ -441,20 +422,15 @@ def _opened_operands(deps: AgentDeps, decision: permission.BashDecision) -> Iter
 def _opens_untrusted_read(operands: Iterable[Path]) -> bool:
     """Does this command open a file the read tool would have salt-tag wrapped?
 
-    The trust boundary is a property of the DATA, not of who is reading it — but until
-    #776 the bash lane keyed its frame on the ROLE instead, and the two roles it excluded
-    (main and gather) were the two that read attacker-influenced payloads through it.
+    The trust boundary is a property of the DATA, not of who is reading it. Keying the bash
+    lane's frame on the ROLE instead excluded main and gather — the two roles that read
+    attacker-influenced payloads through it. Gather is the bulk of the exposure: the reduce
+    step its prompt tells it to use (`cat <payload> | defender-sql`) is the single channel
+    delivering full attacker-chosen field values, and it arrived bare while the same bytes read
+    through `read_file` or the `query` tool arrived framed.
 
-    Gather was the whole exposure: the reduce step its own prompt tells it to use
-    (`cat <payload> | defender-sql`) is the single channel delivering full attacker-chosen
-    field values, and it arrived bare while the same bytes read through `read_file`, or
-    returned by the `query` tool, arrived framed. Main's exposure is narrower — bound
-    `raw=False` it cannot reach a payload at all — but not empty: `cat alert.json` was
-    unframed on this lane while `read_file('alert.json')` was framed, for the same bytes.
-
-    Keying on `is_untrusted_read` — the one predicate that already decides this for every
-    other read surface — makes the frame a property of the channel rather than of the
-    caller, so the three routes to the same file now agree."""
+    `is_untrusted_read` is the predicate that already decides this for every other read
+    surface, so the three routes to the same file agree."""
     return any(permission.is_untrusted_read(p) for p in operands)
 
 
@@ -469,11 +445,10 @@ _BASH_NO_OPERAND_HINT = (
     "smaller slice of."
 )
 
-#: …and when the command ALREADY reduced. `_overflow_filter_hint` answers "how do I shrink a
-#: file I just read whole", and its answer is the reduce pipe — which is the command that just
-#: overflowed. Handing that back is an instruction loop, and the loop is reachable: a payload
-#: sets the 8 KB capture ceiling for the WHOLE pipeline, including a legitimately larger
-#: aggregate the reducer computed from it.
+#: …and when the command ALREADY reduced. `_overflow_filter_hint`'s answer is the reduce pipe
+#: — which is the command that just overflowed, so handing it back is an instruction loop. The
+#: loop is reachable: a payload sets the 8 KB capture ceiling for the WHOLE pipeline, including
+#: a legitimately larger aggregate the reducer computed from it.
 _BASH_REDUCED_HINT = (
     "This return is already a reduction, so re-running the same pipe returns the same "
     "oversized result. Narrow the reduction itself — aggregate further, select fewer columns, "
@@ -486,14 +461,12 @@ def _bash_overflow_hint(
 ) -> str:
     """The reduction the caller can run when the bash return overflowed its ceiling.
 
-    Three cases, because one answer does not serve them. No operand: nothing to re-read.
-    A TERMINAL reducer (`command_shape.terminal_reducer` — the same predicate
-    `_record_shim_failure` attributes an rc with): the reduce pipe IS the command, so the
-    generic hint would name it back. Otherwise the file the ceiling came from, through the read
-    lane's own hint — which keeps `read_tool` at its default on purpose: that argument names the
-    tool whose SUBSTRING SEARCH the no-reducer branch falls back to (`read_file(p, pattern=…)`),
-    not the tool that overflowed, and `read_tool="bash"` there spelled a `bash(p, pattern=…)`
-    call no agent has."""
+    Three cases. No operand: nothing to re-read. A TERMINAL reducer: the reduce pipe IS the
+    command, so the generic hint would name it back. Otherwise the file the ceiling came from,
+    through the read lane's hint — whose `read_tool` stays at its DEFAULT on purpose: that
+    argument names the tool whose substring search the no-reducer branch falls back to
+    (`read_file(p, pattern=…)`), not the tool that overflowed, and `read_tool="bash"` there
+    spells a `bash(p, pattern=…)` call no agent has."""
     if capping is None:
         return _BASH_NO_OPERAND_HINT
     if permission.command_shape.terminal_reducer(list(decision.pipelines or ())):
@@ -507,19 +480,16 @@ def _bounded_bash_stream(
 ) -> str:
     """One bash output stream, held to the ceiling its DATA chose.
 
-    Keyed on the DATA, the way #776 keyed the untrusted wrap. `read_file` bounds a captured
-    payload at the capture ceiling precisely so a later read cannot recover what the capture view
-    withheld (#832 O7) — but until #849 the same file read through `cat` had no ceiling at all,
-    which made the bound a `read_file`-LANE property rather than a per-file one, and left the
-    uncapped lane the one gather's own prompt tells it to use. `_opened_operands` + `_cap_for`
-    already answer the per-path question; this only has to ask it of the right path.
+    `read_file` bounds a captured payload at the capture ceiling precisely so a later read
+    cannot recover what the capture view withheld; the same file read through `cat` must share
+    that bound, or it is a `read_file`-LANE property and the uncapped lane is the one gather's
+    own prompt tells it to use.
 
     `capping` is the operand with the SMALLEST cap: a pipeline may open several files, and a
     ceiling any one operand can raise is not a ceiling. A command that opens no file still gets
-    the authored cap — a bound on the return, just not one a file chose. The hint is built only
-    when the stream actually overflows, because building it probes the policy
-    (`_overflow_filter_hint` → `_lane_admits` → a full `decide_bash`) and the overwhelming
-    majority of returns fit."""
+    the authored cap. The hint is built only when the stream actually overflows, because
+    building it probes the policy (`_overflow_filter_hint` → `_lane_admits` → a full
+    `decide_bash`) and the overwhelming majority of returns fit."""
     cap = _read_char_cap() if capping is None else _cap_for(capping)
     if len(text) <= cap:
         return text
@@ -546,15 +516,13 @@ def _under(path: Path, root: Path) -> bool:
 
 def _is_cross_agent_read(deps: AgentDeps, path: Path) -> bool:
     """Whether a learning stage is reading text some OTHER agent produced — the predicate that
-    decides the salt frame for reads that `is_untrusted_read` does not already claim.
+    decides the salt frame for reads `is_untrusted_read` does not already claim.
 
-    The agent's own run dir is in the root set (#849). For a runtime agent the run dir is its
-    own workspace, but for a learning stage it is the SHARED cross-stage directory: the host
-    writes `past_tickets.txt` into it, the sibling leg leaves its `actor_*_story.md` there, and
-    the judge's own closed-ticket capture lands at `ticket_reads/{seq}.json` — all of it produced
-    by someone else, and all of it bare here while `_tool_bash` framed the same file. MAIN and
-    GATHER are unaffected: `_bound_and_wrap` consults this only under `_is_learning_role`, so
-    their same-agent run-dir reads stay unframed."""
+    The agent's own run dir is in the root set: for a runtime agent it is its own workspace,
+    but for a learning stage it is the SHARED cross-stage directory (the host's
+    `past_tickets.txt`, the sibling leg's `actor_*_story.md`, the judge's
+    `ticket_reads/{seq}.json`) — all produced by someone else. MAIN and GATHER are unaffected:
+    `_bound_and_wrap` consults this only under `_is_learning_role`."""
     resolved = _resolved(path)
     roots = (deps.run_dir, *deps.policy.read_roots, *deps.policy.read_confine)
     corpus_dir = getattr(deps, "corpus_dir", None)
@@ -567,21 +535,18 @@ def _is_cross_agent_read(deps: AgentDeps, path: Path) -> bool:
 
 
 def _probe_is_file(p: Path, path: str) -> bool:
-    """`p.is_file()` over a MODEL-AUTHORED path, as a refusal rather than a traceback (#878
-    F-15).
+    """`p.is_file()` over a MODEL-AUTHORED path, as a refusal rather than a traceback.
 
     `pathlib` swallows only `_IGNORED_ERRNOS` — ENOENT/ENOTDIR/EBADF/ELOOP — and every other
-    `os.stat` error comes back out. The reachable one is ENAMETOOLONG (errno 36): the read gate
-    ALLOWS a basename over `NAME_MAX`, because MAIN's and GATHER's run-root read shape is
+    `os.stat` error comes back out. The reachable one is ENAMETOOLONG: the read gate ALLOWS a
+    basename over `NAME_MAX`, because MAIN's and GATHER's run-root read shape is
     `under(run, SEG)` with `SEG = [\\w.@=+-]+`, which places no length bound, and
-    `Path.resolve()` does not stat. So an allowed path reached the probe and raised — outside
-    every `try`, past `on_tool_execute_error`, past all five of `_drive_agent`'s handlers and
-    out of `asyncio.run` — ending the run with no disposition and no `report.md`.
+    `Path.resolve()` does not stat. So an allowed path reaches the probe and raises — outside
+    every `try`, past `on_tool_execute_error`, past `_drive_agent`'s handlers and out of
+    `asyncio.run` — ending the run with no disposition and no `report.md`.
 
     Bounding `SEG` is deliberately NOT the fix: the probe has to survive an allowed path
-    whatever its shape. This is the read-side twin of the bound `_run_paths.LEAD_ID_BODY` that
-    #855 F-12 gave the write side for the same reason — a model-minted string spent as a
-    filename component."""
+    whatever its shape."""
     try:
         return p.is_file()
     except OSError as e:
@@ -591,9 +556,9 @@ def _probe_is_file(p: Path, path: str) -> bool:
 def _probe_read_text(p: Path, path: str) -> str:
     """`read_text_utf8(p)` over a MODEL-AUTHORED path, as a refusal rather than a traceback.
 
-    The other half of `_probe_is_file`, and ONE copy of it: `_gated_read` and `_tool_edit_file`
-    both read the same operand under the same two fault classes (undecodable, unreadable) and
-    owe the model the same two refusals, which they had been spelling separately."""
+    The other half of `_probe_is_file`, and ONE copy: `_gated_read` and `_tool_edit_file` both
+    read the same operand under the same two fault classes (undecodable, unreadable) and owe
+    the model the same two refusals."""
     try:
         return read_text_utf8(p)
     except UnicodeDecodeError:
@@ -637,13 +602,12 @@ def _bound_and_wrap(
 
 def _tail_chars(text: str, n: int) -> str:
     """The last `n` characters, trimmed FORWARD to the next line start so a `|`-delimited
-    invlang row never arrives cut in half and gets read as truncated data. `n` is therefore
-    a ceiling, not a target: the result is at most `n` characters, which is what a caller
-    asking for a bounded read wants. `n <= 0` yields nothing; a file shorter than `n` is
-    returned whole; text with no newline in the window is cut at `n`.
+    invlang row never arrives cut in half and reads as truncated data. `n` is a ceiling, not a
+    target. `n <= 0` yields nothing; a file shorter than `n` is returned whole; text with no
+    newline in the window is cut at `n`.
 
-    Its own fold rather than a reuse of `_bounded_read`, whose overflow path keeps the
-    HEAD — the wrong end of an append-only log (#810)."""
+    Its own fold rather than a reuse of `_bounded_read`, whose overflow path keeps the HEAD —
+    the wrong end of an append-only log."""
     if n <= 0:
         return ""
     if len(text) <= n:
@@ -665,18 +629,16 @@ def _tool_read_file(
 
 
 def _closed_for_investigation_write(deps: AgentDeps, p: Path) -> bool:
-    """RS15. `investigation.md` becomes review-state-aware AFTER a close commits — no
-    post-close write can silently move the recorded disposition. The working document
-    itself stays otherwise model-writable throughout the investigation (untouched by
-    this change up to the close); this is the ONE new gate on it.
+    """RS15. `investigation.md` becomes review-state-aware AFTER a close commits, so no
+    post-close write can silently move the recorded disposition. Up to the close the document
+    stays model-writable; this is the ONE gate on it.
 
-    #851 F-25: the `resolve()` here runs one line AHEAD of `decide_write`/`decide_read`, so an
-    operand it cannot resolve (an embedded NUL — `ValueError`; a symlink cycle — `RuntimeError`)
-    escaped the write/edit tool as an unhandled exception and quarantined the whole authoring
-    spawn, routing around the fail-closed `Decision(False)` the gate's `RESOLVE_ERRORS` rule
-    exists to produce. An unresolvable operand is certainly not `<run_dir>/investigation.md`, so
-    answering False is honest — and it hands the operand straight to the gate, which denies it
-    with the correctable "could not be resolved (failing closed)" reason."""
+    The `resolve()` here runs one line AHEAD of `decide_write`/`decide_read`, so an operand it
+    cannot resolve (an embedded NUL — `ValueError`; a symlink cycle — `RuntimeError`) would
+    escape the write/edit tool as an unhandled exception, routing around the fail-closed
+    `Decision(False)` the gate's `RESOLVE_ERRORS` rule produces. An unresolvable operand is
+    certainly not `<run_dir>/investigation.md`, so answering False is honest — and it hands the
+    operand to the gate, which denies it with a correctable reason."""
     try:
         if p.resolve() != (deps.run_dir / "investigation.md").resolve():
             return False
@@ -719,9 +681,8 @@ def _tool_edit_file(deps: AgentDeps, path: str, old_string: str, new_string: str
     )
     if not read_decision.allow:
         raise ModelRetry(read_decision.reason)
-    # ONE probe, not the two this read (#878 F-15: each was its own unguarded `os.stat`) and
-    # the empty-`old_string` check below used to make: they are asking the same question about
-    # the same path, and a second stat could answer it differently.
+    # ONE probe, not one here and another in the empty-`old_string` check below: they ask the
+    # same question about the same path, and a second stat could answer it differently.
     exists = _probe_is_file(p, path)
     current = _probe_read_text(p, path) if exists else ""
     if not old_string and exists:
@@ -750,12 +711,12 @@ def _tool_edit_file(deps: AgentDeps, path: str, old_string: str, new_string: str
 
 
 # --------------------------------------------------------------------------------------
-# #836 — the repair window. A warn-family `:R attr_updates` row LANDS instead of costing a
-# whole re-emitted block, and then gates the next write until it is repaired.
+# The repair window. A warn-family `:R attr_updates` row LANDS instead of costing a whole
+# re-emitted block, and then gates the next write until it is repaired.
 #
 # The window is DERIVED, never stored: `warn_diagnostics` over whatever `investigation.md`
-# holds right now IS the state. Nothing here caches it, and no `AgentDeps` field carries it,
-# so it cannot go stale and cannot disagree with the file.
+# holds right now IS the state. Nothing caches it and no `AgentDeps` field carries it, so it
+# cannot go stale or disagree with the file.
 # --------------------------------------------------------------------------------------
 
 def _investigation_path(deps: AgentDeps) -> Path:
@@ -765,22 +726,20 @@ def _investigation_path(deps: AgentDeps) -> Path:
 def flagged_diagnostics(deps: AgentDeps) -> tuple[Diagnostic, ...]:
     """The run's currently-open repair window, re-derived from disk on every call.
 
-    FAILS OPEN, deliberately and on all three paths that read it (`prepare=`, the write gate,
-    the close gate). An unreadable or undecodable `investigation.md` is an unrelated fault;
-    converting it into "every write and the close are refused" would manufacture exactly the
-    unclosable run this mechanism exists to avoid. `append_block` still refuses an undecodable
-    document for its own pre-existing reason — that refusal is not this gate.
+    FAILS OPEN on all three paths that read it (`prepare=`, the write gate, the close gate).
+    An unreadable or undecodable `investigation.md` is an unrelated fault; converting it into
+    "every write and the close are refused" would manufacture the unclosable run this mechanism
+    exists to avoid. `append_block` still refuses an undecodable document for its own reason.
 
-    A warn diagnostic carrying NO `locus` is not in the window. The window is the set of rows
-    `fix_row` can address, and a locus-less finding names none — counting it would refuse the
-    append AND the close with no row the repair verb could ever clear, which is precisely the
-    unclosable run above. No family emits one today; this keeps that from being load-bearing."""
+    A warn diagnostic carrying NO `locus` is not in the window: the window is the set of rows
+    `fix_row` can address, so counting a locus-less finding would refuse the append AND the
+    close with no row the repair verb could ever clear. No family emits one today; this keeps
+    that from being load-bearing."""
     from defender.skills.invlang.validate import warn_diagnostics
 
     p = _investigation_path(deps)
     # ABSENCE is the ordinary "no window open" case, not a fault: `prepare=` runs on EVERY
-    # model request, including turn 1 before any write verb has created the file. Logging it
-    # would put a line on stderr for every request of every run.
+    # model request, including turn 1 before any write verb has created the file.
     if not p.is_file():
         return ()
     try:
@@ -806,15 +765,14 @@ def flagged_write_refusal(
 ) -> str:
     """The gate's refusal, naming EVERY currently-flagged row and its `use:` alternatives.
 
-    Re-derived rather than remembered: after a frontier fold the model is handed a truncated
-    PREFIX of the document (`driver._fold_decision`), so a flagged row below the cut is simply
-    absent from its view. The refusal is the recovery channel, which is why it carries the
-    whole set rather than the most recent row.
+    It carries the whole set rather than the most recent row because after a frontier fold the
+    model holds only a truncated PREFIX of the document (`driver._fold_decision`), so a flagged
+    row below the cut is absent from its view and this refusal is the recovery channel.
 
     `offered_text=False` for the CLOSE, which proposed no `investigation.md` bytes of its own:
     the full notice's "does not contain your text" would be a claim about nothing. Both
-    spellings LEAD with the same fragment, so the model still tells a refusal from an accept
-    by the first sentence."""
+    spellings LEAD with the same fragment, so the model still tells a refusal from an accept by
+    the first sentence."""
     from defender._artifact_schema import UNCHANGED_LEAD, UNCHANGED_NOTICE, render_diagnostic
 
     # The close's opening states what the CLOSE did not do — no disposition recorded — never
@@ -835,9 +793,9 @@ def flagged_write_refusal(
 
 
 def _warning_return(lead: str, diags: tuple[Diagnostic, ...]) -> str:
-    """An ACCEPT that carries a warning. It LEADS with the bytes and says the block landed —
-    a model that reads "warning" as "refusal" re-emits the whole block, which is the cost
-    #836 exists to remove — and it never carries the unchanged-notice wording."""
+    """An ACCEPT that carries a warning. It LEADS with the bytes and says the block landed, and
+    never carries the unchanged-notice wording: a model that reads "warning" as "refusal"
+    re-emits the whole block, which is the cost the repair window exists to remove."""
     from defender._artifact_schema import render_diagnostic
 
     if not diags:
@@ -852,17 +810,16 @@ def _warning_return(lead: str, diags: tuple[Diagnostic, ...]) -> str:
 
 
 def _tool_append_block(deps: AgentDeps, text: str) -> str:
-    """Append to `investigation.md` — main's only write (#810).
+    """Append to `investigation.md` — main's only write.
 
     No path: the run has one model-authored transcript and this is its writer, the way
-    `close_investigation` is `report.md`'s (#774). No anchor and no position either: the
-    document is validator-enforced append-only (`_check_append_only` refuses a dropped
-    fence, a dropped record, or an in-place mutation), so the anchored replace that
-    `edit_file` offers is a capability the artifact never had. Measured over three runs,
-    seven of the eight non-append `edit_file` calls failed.
+    `close_investigation` is `report.md`'s. No anchor and no position either: the document is
+    validator-enforced append-only (`_check_append_only` refuses a dropped fence, a dropped
+    record, or an in-place mutation), so the anchored replace `edit_file` offers is a capability
+    the artifact never had.
 
-    Faces the identical gate the other two verbs do — same `decide_write`, same content
-    schema, same RS15 post-close refusal — on the resulting full document."""
+    Faces the identical gate the other two verbs do — same `decide_write`, same content schema,
+    same RS15 post-close refusal — on the resulting full document."""
     p = _investigation_path(deps)
     if _closed_for_investigation_write(deps, p):
         raise ModelRetry(
@@ -870,10 +827,9 @@ def _tool_append_block(deps: AgentDeps, text: str) -> str:
             "recorded disposition for this run, and a further append could silently "
             "move it. The case is closed."
         )
-    # #836/M5. The gate is FORCED, not chosen: `_check_closed_vocab` walks the FULL proposed
-    # document, so a landed warn row re-fires on every subsequent append anyway. Without the
-    # gate the choices are grandfathering — which dead-letters the run at persist — or a
-    # wedged document.
+    # The gate is FORCED, not chosen: `_check_closed_vocab` walks the FULL proposed document,
+    # so a landed warn row re-fires on every subsequent append anyway. Without the gate the
+    # choices are grandfathering — which dead-letters the run at persist — or a wedged document.
     flagged = flagged_diagnostics(deps)
     if flagged:
         raise ModelRetry(flagged_write_refusal("append_block", flagged))
@@ -888,11 +844,10 @@ def _tool_append_block(deps: AgentDeps, text: str) -> str:
         raise ModelRetry(
             "investigation.md is not valid UTF-8 text (binary or corrupt)"
         ) from None
-    # Separate with a newline when the document does not already end in one. Existing
-    # bytes are never rewritten — not even trailing whitespace — so an append cannot
-    # itself trip the append-only check it is about to face. An EMPTY append gets no
-    # separator either: appending nothing must not mutate the document (the separator
-    # alone would be a byte the model never sent, on a call reporting zero bytes).
+    # Separate with a newline only when the document does not already end in one. Existing
+    # bytes are never rewritten — not even trailing whitespace — so an append cannot itself
+    # trip the append-only check it is about to face. An EMPTY append gets no separator: the
+    # separator alone would be a byte the model never sent, on a call reporting zero bytes.
     sep = "\n" if current and text and not current.endswith("\n") else ""
     new_text = current + sep + text
     decision = permission.decide_write(
@@ -903,17 +858,16 @@ def _tool_append_block(deps: AgentDeps, text: str) -> str:
     _guarded_parents(deps, p)
     write_guarded(p, new_text)
     deps.authored_paths.add(_resolved(p))
-    # UTF-8 BYTES, not characters: the SKILL tells the model this return IS a byte count and
-    # the 65536-byte cap it has to stay under is measured the same way. invlang rows carry
+    # UTF-8 BYTES, not characters: the SKILL tells the model this return IS a byte count, and
+    # the 65536-byte cap it must stay under is measured the same way. invlang rows carry
     # `⟂ → ⟺` freely, so `len(str)` under-reports against the bound the gate applies.
     lead = (
         f"appended {_utf8_len(text)} bytes to investigation.md "
         f"({_utf8_len(new_text)} total)"
     )
-    # The gate ACCEPTED a warn-only document, which means it returned no text to reuse — so
-    # the warning can only come from a SECOND derivation here, over the bytes just written.
-    # Two `diagnose` passes per accepted append is the expected cost of the accept channel,
-    # and deriving in memory keeps it deterministic without a re-read.
+    # The gate ACCEPTED a warn-only document and returned no text to reuse, so the warning can
+    # only come from a SECOND derivation here, over the bytes just written. Deriving in memory
+    # keeps it deterministic without a re-read.
     warn = _warn_over(new_text)
     if warn:
         return _warning_return(f"{lead} — the block LANDED.", warn)
@@ -923,8 +877,8 @@ def _tool_append_block(deps: AgentDeps, text: str) -> str:
 def _warn_over(text: str) -> tuple[Diagnostic, ...]:
     """The window over text held in memory. FAILS OPEN for the same reason
     `flagged_diagnostics` does, and for one more: both call sites derive AFTER the bytes have
-    already landed, so a validator error raised here would surface as a failed tool call on a
-    write that succeeded — the one wrong answer #810 measured the cost of."""
+    landed, so a validator error raised here would surface as a failed tool call on a write
+    that succeeded."""
     from defender.skills.invlang.validate import warn_diagnostics
 
     try:
@@ -938,14 +892,14 @@ def _warn_over(text: str) -> tuple[Diagnostic, ...]:
 
 
 #: EVERY separator `str.splitlines()` honours, which is what `_tokenize_fence` splits a fence
-#: body on — so it is what decides where a ROW ends, and therefore what `Locus.row_text` holds.
+#: body on — so it decides where a ROW ends, and therefore what `Locus.row_text` holds.
 #: `split("\n")` alone left a row sitting after a `\v` `\f` `\x1c` `\x1d` `\x1e` `\x85`
 #: `\u2028` or `\u2029` FLAGGED but UNADDRESSABLE: `old_row` matched no whole line, so the
 #: repair refused while `append_block` and the close both refused for that same flagged row —
 #: a permanently wedged run, reachable from one `append_block` carrying one of those bytes.
 #: `\r\n` / `\r` never reach here: `read_text_utf8` translates them on read.
-#: Spelled as ESCAPES, never as the literal codepoints: two of them are invisible line breaks
-#: and would split THIS file for anything that reads it the way the tokenizer reads a fence.
+#: Spelled as ESCAPES, never literal codepoints: two of them are invisible line breaks and
+#: would split THIS file for anything that reads it the way the tokenizer reads a fence.
 #: Captured, not consumed, so every untouched line keeps the separator the model wrote.
 _LINE_SEP_RE = re.compile("([\n\v\f\x1c\x1d\x1e\x85\u2028\u2029])")
 
@@ -970,24 +924,23 @@ def _attr_block_columns(text: str, row: str) -> int | None:
 
 
 def _new_row_shape_reason(new_row: str, cells: int | None) -> str | None:
-    """H3's guard: `new_row` is ONE row of the SAME block, or it is refused.
+    """`new_row` is ONE row of the SAME block, or it is refused.
 
-    `fix_row` is the first verb that rewrites a line INSIDE an already-open fence, and every
-    other guard M4 states is on `old_row` — so without this, `new_row` is the whole write
-    surface. It is not a belt-and-braces check: `_check_append_only` never inspects `:R` rows,
-    so a `:V` declaration substituted for a flagged row draws ZERO diagnostics; an embedded
-    newline forges a well-formed second row; a fence delimiter makes the injected row vanish
-    by closing the block early; and one cell too FEW is silently padded. Only "too many cells"
-    is caught by anything today, and by the parser rather than by a guard. This is what makes
-    "no verb mutates or removes a committed :V/:E record" true by construction."""
+    `fix_row` is the only verb that rewrites a line INSIDE an already-open fence, and every
+    other guard on it is on `old_row` — so without this, `new_row` is the whole write surface.
+    Not belt-and-braces: `_check_append_only` never inspects `:R` rows, so a `:V` declaration
+    substituted for a flagged row draws ZERO diagnostics; an embedded newline forges a
+    well-formed second row; a fence delimiter makes the injected row vanish by closing the
+    block early; and one cell too FEW is silently padded. Only "too many cells" is caught
+    anywhere else, and by the parser rather than a guard. This is what makes "no verb mutates
+    or removes a committed :V/:E record" true by construction."""
     from defender.skills.invlang._cells import _split_cells
     from defender.skills.invlang.parser import HEADER_RE
 
-    # EVERY line break `str.splitlines()` honours, not just `\n`. `_tokenize_fence` splits the
-    # fence body with `splitlines()`, which breaks on \v \f \x1c \x1d \x1e \x85
-    # as well — so a `new_row` carrying one of those is a SECOND row (or a whole second block)
-    # to the parser while looking like one line to a `"\n" in ...` check, and its pipe count is
-    # unchanged so the cell-count arm never fires either.
+    # EVERY line break `str.splitlines()` honours, not just `\n`: a `new_row` carrying a \v \f
+    # \x1c \x1d \x1e or \x85 is a SECOND row (or a whole second block) to the parser while
+    # looking like one line to a `"\n" in ...` check, and its pipe count is unchanged so the
+    # cell-count arm never fires either.
     lines = new_row.splitlines()
     if len(lines) != 1 or lines[0] != new_row:
         return "it spans more than one line"
@@ -996,8 +949,8 @@ def _new_row_shape_reason(new_row: str, cells: int | None) -> str | None:
     if HEADER_RE.match(new_row.strip()):
         return "it is a block header, not a row"
     # `cells is None` means the declaring block could not be located. Only the CELL-COUNT arm
-    # needs it — the three arms above are unconditional, so an unlocatable block narrows the
-    # guard by one check instead of switching the whole write surface off.
+    # needs it, so an unlocatable block narrows the guard by one check instead of switching
+    # the whole write surface off.
     if cells is None:
         return None
     got = len(_split_cells(new_row))
@@ -1007,18 +960,18 @@ def _new_row_shape_reason(new_row: str, cells: int | None) -> str | None:
 
 
 def _tool_fix_row(deps: AgentDeps, old_row: str, new_row: str) -> str:
-    """#836/M4 — repair ONE flagged row of `investigation.md` in place.
+    """Repair ONE flagged row of `investigation.md` in place.
 
     No path and no free-form anchor: `old_row` must be one of the rows the repair window is
-    currently open on, which is what puts every committed `:V`/`:E` record out of reach (the
-    warn family walks `:R attr_updates` blocks and nothing else). `new_row` empty DELETES the
-    line — the always-available escape that keeps the window closable, and the only move that
-    is still available when the document is at its size bound.
+    currently open on, which puts every committed `:V`/`:E` record out of reach (the warn
+    family walks `:R attr_updates` blocks and nothing else). An empty `new_row` DELETES the
+    line — the always-available escape that keeps the window closable, and the only move left
+    when the document is at its size bound.
 
     The window is re-derived here at call time. Being OFFERED the verb is never evidence the
     window is still open: `prepare=` filters per-request offers and is ergonomics, so the body
-    is the guard. And the resulting full document faces the same `decide_write` chain every
-    other write on this artifact faces — the verb sits behind the validator, not beside it."""
+    is the guard. The resulting full document faces the same `decide_write` chain every other
+    write on this artifact faces."""
     from defender._artifact_schema import UNCHANGED_LEAD, UNCHANGED_NOTICE
 
     p = _investigation_path(deps)
@@ -1033,7 +986,7 @@ def _tool_fix_row(deps: AgentDeps, old_row: str, new_row: str) -> str:
     if not flagged:
         # Deliberately the SAME refusal a never-flagged `old_row` earns once the window has
         # emptied: a repeated identical repair is idempotent-safe by construction, and a
-        # "you already did this" branch would need the stored state M3 exists to avoid.
+        # "you already did this" branch would need stored state this design avoids.
         raise ModelRetry(
             f"{UNCHANGED_NOTICE} Nothing is currently flagged in investigation.md, so there "
             f"is no row to repair."
@@ -1056,19 +1009,17 @@ def _tool_fix_row(deps: AgentDeps, old_row: str, new_row: str) -> str:
         raise ModelRetry(
             f"{UNCHANGED_NOTICE} `old_row` matches no line in investigation.md."
         )
-    # H4: the repair applies to EVERY flagged occurrence — a flagged row whose text is not
-    # unique would otherwise be neither repairable nor deletable, and with the M5 gate the run
-    # would be unclosable. The rider is what keeps that safe: if the text also stands as a
-    # WHOLE LINE the window did not flag, the repair refuses rather than rewriting that too.
+    # The repair applies to EVERY flagged occurrence — a flagged row whose text is not unique
+    # would otherwise be neither repairable nor deletable, and with the write gate the run
+    # would be unclosable. The rider keeps that safe: if the text also stands as a WHOLE LINE
+    # the window did not flag, the repair refuses rather than rewriting that too.
     #
-    # WHOLE-LINE, not substring. The rebuild below only ever touches lines where
-    # `line.strip() == old_row`, so a line that merely CONTAINS the row is already out of
-    # reach and a substring count guards nothing — while refusing on one wedged the window
-    # shut: a `:T conclude` summary quoting its own flagged row made both `fix_row(row, new)`
-    # and `fix_row(row, "")` refuse, and with the M5 gate the run could not close. It also
-    # fired when one flagged row's text was a PREFIX of another (`…|owner|svc` inside
-    # `…|owner|svc2`), where the refusal's own claim — that a match lay somewhere unflagged —
-    # was simply false.
+    # WHOLE-LINE, not substring. The rebuild below only touches lines where
+    # `line.strip() == old_row`, so a line that merely CONTAINS the row is already out of reach
+    # and a substring count guards nothing — while refusing on one wedges the window shut (a
+    # `:T conclude` summary quoting its own flagged row makes both `fix_row(row, new)` and
+    # `fix_row(row, "")` refuse) and fires falsely when one flagged row's text is a PREFIX of
+    # another (`…|owner|svc` inside `…|owner|svc2`).
     occurrences = flagged.count(old_row)
     if len(whole) != occurrences:
         raise ModelRetry(
@@ -1170,16 +1121,16 @@ def register_tools(agent, tools: ToolSet, verbs: Any = None) -> None:
 
 
 def _register_investigation_verbs(agent) -> None:
-    """The two verbs bound to `investigation.md` — the append and, since #836, the repair.
+    """The two verbs bound to `investigation.md` — the append and the repair.
 
     One grant, one registration site: `fix_row` rides `append=True` rather than minting a
     capability bit, so an agent that may grow the transcript may also repair a row it landed
     in it. Split out of `register_tools` to keep that function under the complexity gate."""
-    # `sequential=True` (#836/H6): two `ToolCallPart`s in ONE model response otherwise run
-    # concurrently, and against the real write primitive that is a genuine LOST UPDATE —
-    # both calls read the same pre-image, exactly one change reaches disk, and both report
-    # success. A `fix_row` paired with an `append_block` could discard the repair while
-    # telling the model it landed, leaving a window that looks shut and is not.
+    # `sequential=True`: two `ToolCallPart`s in ONE model response otherwise run concurrently,
+    # and against the real write primitive that is a genuine LOST UPDATE — both calls read the
+    # same pre-image, one change reaches disk, and both report success. A `fix_row` paired with
+    # an `append_block` could discard the repair while telling the model it landed, leaving a
+    # window that looks shut and is not.
     @agent.tool(sequential=True)
     async def append_block(ctx: RunContext[AgentDeps], text: str) -> str:
         """Append to investigation.md, the invlang work log — no path and no anchor,
@@ -1205,10 +1156,9 @@ def _register_investigation_verbs(agent) -> None:
 async def _prepare_fix_row(ctx: RunContext[AgentDeps], tool_def: Any) -> Any:
     """Offer `fix_row` only while the repair window is open.
 
-    ERGONOMICS, not a control — the model is not shown a verb it has nothing to use it on,
-    and is shown it the moment it does. The offer is computed once per model REQUEST, so a
-    model that saw the definition on an earlier turn can still emit the call after the window
-    closed; `_tool_fix_row` re-derives and refuses. SEC3 rests on that body, never on this."""
+    ERGONOMICS, not a control. The offer is computed once per model REQUEST, so a model that
+    saw the definition on an earlier turn can still emit the call after the window closed;
+    `_tool_fix_row` re-derives and refuses. The security property rests on that body."""
     return tool_def if flagged_diagnostics(ctx.deps) else None
 
 

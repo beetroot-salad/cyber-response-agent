@@ -73,8 +73,8 @@ def git_status(cwd: Path, *, pathspec: Path | str | None = None) -> list[tuple[s
         records.append((xy, path))
         if xy[0] in "RC" or xy[1] in "RC":
             # A rename/copy record is FOLLOWED by its `<origPath>` as a field of its own.
-            # Consuming it here is what stops it being read as a record whose status is the
-            # first two characters of a path and whose path is that path minus two (#854 F-17).
+            # Consuming it here stops it being read as a record whose status is the first two
+            # characters of a path.
             i += 1
     return records
 
@@ -83,10 +83,10 @@ def git_show_head(cwd: Path, path: str) -> str | None:
     """`path`'s content at HEAD, or `None` when HEAD does not carry it.
 
     `check=False` and a `None` return rather than a `GitError`, because "the file is new in this
-    batch" is an ORDINARY answer to this question and the caller has to branch on it either way
-    — a promoted template and a deleted draft are read through the same call, and only one of
-    them is expected to exist at HEAD. Unstripped: the caller parses frontmatter out of this,
-    and `strip()` would eat the leading `---` delimiter's line structure.
+    batch" is an ORDINARY answer here — a promoted template and a deleted draft are read through
+    the same call, and only one is expected to exist at HEAD. Unstripped: the caller parses
+    frontmatter out of this, and `strip()` would eat the leading `---` delimiter's line
+    structure.
     """
     proc = _run(["show", f"HEAD:{path}"], cwd=cwd, check=False)
     return proc.stdout if proc.returncode == 0 else None

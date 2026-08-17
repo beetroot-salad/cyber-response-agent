@@ -1,17 +1,13 @@
 """Shared transport for the v2 stub adapters (cmdb, identity, change-mgmt,
 threat-intel, ticket).
 
-All five stubs are auth-less FastAPI services on the compose network. The
-defender reaches them by shelling out to `docker --context soc-playground
-exec <bastion> curl ...` — same transport elastic_adapter.py uses for Kibana
-detection-rule installs. One transport here for all five keeps the
-adapters thin (just verb-to-endpoint mapping).
+All five stubs are auth-less FastAPI services on the compose network, reached by
+shelling out to `docker --context soc-playground exec <bastion> curl ...` — the same
+transport elastic_adapter.py uses for Kibana detection-rule installs. Host-state has
+a different shape (docker exec → command output, no HTTP) and keeps its own transport
+in host_state_adapter.py.
 
-Host-state has a different shape (docker exec → command output, no HTTP)
-and uses host_state_adapter.py's own transport, not this module.
-
-Two rules the whole family obeys since #611, when the adapters stopped being
-subprocesses and became in-process VERBS:
+Two rules the whole family obeys:
 
   - **A transport RAISES, it never exits.** `SystemExit` is a `BaseException`, so it
     unwinds straight out of `agent.iter()` and takes the run with it, writing no row
@@ -23,10 +19,8 @@ subprocesses and became in-process VERBS:
     the MAIN checkout's `config.env`; and a child forked with no `env=` inherits the
     driver's `os.environ`, provider keys included.
 
-This is the established shared module for the tree: `/connect` conforms a
-new adapter to it rather than installing its own seed. The house
-conventions (transport, auth posture, config keys, exit codes) are written
-up in `README.md` in this directory.
+House conventions (transport, auth posture, config keys, exit codes) are in
+`README.md` in this directory.
 """
 
 from __future__ import annotations
@@ -76,15 +70,14 @@ class AdapterArgumentParser(argparse.ArgumentParser):
     """ArgumentParser whose usage errors exit ``USAGE_EXIT_CODE`` (64) instead of
     argparse's default 2.
 
-    Only `ticket_cli` still has a CLI (two subprocess callers — ``ticket_seeds`` and
-    ``verify_forward`` — pin its exit codes; #672 moved the benign judge's closed-ticket read
-    off the CLI onto a typed in-process tool). It keeps this parser so a bad flag / unknown
-    subcommand the agent passed is
-    *structurally* distinct from a connectivity failure (exit 2). The circuit breaker then
-    keys on the exit code alone — no fragile stderr-phrase sniffing to tell the two apart.
-    Subparsers built via ``add_subparsers()`` inherit this class automatically
-    (``parser_class=type(self)``), so subcommand usage errors and explicit
+    A bad flag / unknown subcommand is then *structurally* distinct from a connectivity
+    failure (exit 2), so the circuit breaker keys on the exit code alone — no fragile
+    stderr-phrase sniffing. Subparsers built via ``add_subparsers()`` inherit this class
+    automatically (``parser_class=type(self)``), so subcommand usage errors and explicit
     ``parser.error(...)`` calls exit 64 too.
+
+    Only `ticket_cli` still has a CLI; its two subprocess callers (``ticket_seeds``,
+    ``verify_forward``) pin these exit codes.
     """
 
     def error(self, message: str):  # noqa: D102 — overrides argparse's exit(2)
@@ -96,8 +89,8 @@ def docker_context(ctx: VerbContext) -> str:
     """The docker context every adapter's transport runs against, read from the RUN's env.
 
     Single source of truth across the family, so overriding it points the whole stack —
-    not half of it — at a different environment. Read from `ctx.env` and not at import:
-    the module object outlives any one run.
+    not half of it — at another environment. Read from `ctx.env`, not at import: the
+    module object outlives any one run.
     """
     return ctx.env.get("SOC_PLAYGROUND_DOCKER_CONTEXT", DEFAULT_DOCKER_CONTEXT)
 
@@ -130,23 +123,19 @@ def load_config(
     """Load `{ctx.defender_dir}/knowledge/environment/systems/{system}/config.env`.
 
     The tree comes from the RUN (`ctx.defender_dir`), not a module constant: a run anchored
-    on a worktree or an eval's tmp tree must read THAT tree's config, and an import-time
-    constant would hand every later run the first tree the process saw.
+    on a worktree or an eval's tmp tree must read THAT tree's config.
 
     The prefix namespaces the env-file keys (e.g. CMDB_URL_BASE, IDENTITY_BASTION_HOST);
     caller-friendly stripped keys come back as URL_BASE / BASTION_HOST / TIMEOUT_SEC. A
     missing file or a missing key is a `ConfigFault` — infra (exit 2), because a system with
-    no config is definitionally down. (It used to be a bare `sys.exit("error: …")`, i.e.
-    exit 1: a dead system filed as an agent-fixable query error, which never tripped the
-    breaker.)
+    no config is definitionally down, and only exit 2 trips the breaker.
 
     `required` is the key set THIS system needs — the three-key transport template by
-    default, which is what the five stubs sharing the docker-exec-curl transport declare.
-    A system needing more passes its own tuple (`ticket_adapter.REQUIRED_CONFIG_KEYS` adds
-    KEY_PATTERN, its key grammar); `elastic_adapter` keeps a whole separate loader for the
-    same reason. There is deliberately no optional-with-default lane: every value read here
-    is required, absent means down, and a caller that wants a fallback must say so in its
-    own code rather than have a missing environment fact resolve silently.
+    default, which is what the five docker-exec-curl stubs declare. A system needing more
+    passes its own tuple (`ticket_adapter.REQUIRED_CONFIG_KEYS` adds KEY_PATTERN, its key
+    grammar). There is deliberately no optional-with-default lane: every value read here is
+    required, absent means down, and a caller wanting a fallback must say so in its own
+    code rather than have a missing environment fact resolve silently.
     """
     path = _config_path(ctx, system)
     if not path.exists():
@@ -173,7 +162,7 @@ def load_config(
     return cfg
 
 
-def docker_exec_curl(  # noqa: PLR0913 — one curl request's per-call state; the ctx is the 9th because the tree/env stopped being module constants
+def docker_exec_curl(  # noqa: PLR0913 — one curl request's per-call state
     ctx: VerbContext,
     container: str,
     url: str,
@@ -203,7 +192,7 @@ def docker_exec_curl(  # noqa: PLR0913 — one curl request's per-call state; th
         args += ["-H", f"{key}: {val}"]
     if body is not None:
         args += ["-H", "Content-Type: application/json", "-d", json.dumps(body)]
-    # Write HTTP status on its own trailing line so we can recover it from stdout.
+    # Status on its own trailing line so `split_status` can recover it from stdout.
     args += ["-w", "\n%{http_code}", url]
 
     context = docker_context(ctx)
@@ -220,8 +209,8 @@ def docker_exec_curl(  # noqa: PLR0913 — one curl request's per-call state; th
         # utf-8 and LOSSY: the far side is vendor data (indexed log lines), so a stray
         # non-UTF-8 byte must cost one character, not raise a UnicodeDecodeError that sails
         # past the guards below (it is a ValueError) and out of the adapter.
-        # `timeout` is MANDATORY on every fork: the outer wall-clock budget died with the
-        # capture subprocess, so this inner timeout is the only real kill left.
+        # `timeout` is MANDATORY on every fork: it is the only kill left, there being no
+        # outer wall-clock budget.
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_sec + 10,
                               encoding="utf-8", errors="replace", env=_child_env(ctx))
     except FileNotFoundError as e:
@@ -256,10 +245,9 @@ def http_get(
     Raises `TransportFault` (infra) on docker/unreachable/5xx and `UpstreamFault` (a query
     error, carrying the vendor's own `detail`) on a 4xx — a 404 included.
 
-    `system` is REQUIRED, not defaulted: it is the target-fidelity confinement's own key
-    (`confine_read_endpoint`, #632 D4) — every one of this family's six systems funnels
-    through this one function, so a caller that forgot to name itself would confine against
-    the wrong system's allowlist rather than its own, silently.
+    `system` is REQUIRED, not defaulted: it keys the confinement allowlist
+    (`confine_read_endpoint`), and every system funnels through this one function — a
+    caller that forgot to name itself would silently confine against the wrong allowlist.
     """
     qs = ("?" + urllib.parse.urlencode(params)) if params else ""
     url = f"{config['URL_BASE'].rstrip('/')}{path}{qs}"
@@ -278,11 +266,9 @@ def http_get_obj(
     params: dict | None = None,
 ) -> dict[str, Any]:
     """`http_get` for endpoints whose contract is a JSON *object*. Narrows the
-    `dict | list` parse to `dict[str, Any]` so callers get typed `.get()`/indexing,
-    and fails fast if the upstream ever returns a non-object where one is expected —
-    instead of crashing later on `list.get`. List endpoints keep raw `http_get` + their
-    `isinstance(payload, list)` guard. Per-endpoint response schemas are the next step —
-    see #409."""
+    `dict | list` parse to `dict[str, Any]` so callers get typed `.get()`/indexing, and
+    fails fast on a non-object rather than crashing later on `list.get`. List endpoints
+    keep raw `http_get` + their own `isinstance(payload, list)` guard."""
     payload = http_get(ctx, config, path, system=system, params=params)
     if not isinstance(payload, dict):
         raise TransportFault(
@@ -296,24 +282,16 @@ def _raise_on_transport_failure(
 ) -> None:
     """curl never completed a request → transport-level failure. `TransportFault` (exit 2) so
     the queries row and the circuit breaker both see a down system, not a query error. No-op
-    when curl exited clean.
+    when curl exited clean. Covers both a missing/stopped bastion (`docker exec` fails before
+    curl runs) and curl's own failures.
 
-    THE RETURN CODE ALONE DECIDES. The `and not stdout` conjunct this used to carry was
-    structurally unsatisfiable for a curl-level fault (#877 F-5): `docker_exec_curl` appends
-    `-w "\\n%{http_code}"`, so curl writes a status line to stdout on EVERY exit — stdout is
-    `"\\n000"`, never empty, when no request completed. A DNS failure, a refused connection and
-    a `--max-time` timeout all walked past this guard, parsed as HTTP 0, matched neither the 5xx
-    nor the 4xx arm of `_raise_on_http_error`, and returned `{}` from `_request` as a SUCCESS:
-    an outage of any of the five stub systems reached the lead as "the system answered, and it
-    holds nothing", with the breaker counting nothing (exit 0 is not in `INFRA_EXIT_CODES`), so
-    no down-message was ever shown and the silent zero repeated for the rest of the run.
-
-    The bastion case the guard was originally written for is unchanged: a missing or stopped
-    container makes `docker exec` itself fail before curl runs, and its rc is non-zero too.
-
-    `stdout` is deliberately NOT a parameter: it was one only to serve the `and not stdout`
-    conjunct above, and a guard that still accepted it would read as though the body could
-    still change the verdict."""
+    THE RETURN CODE ALONE DECIDES, and `stdout` is deliberately not a parameter: because
+    `docker_exec_curl` appends `-w "\\n%{http_code}"`, curl writes a status line on EVERY exit,
+    so stdout is `"\\n000"` — never empty — when no request completed. Any guard conditioned on
+    empty stdout is unsatisfiable, and lets a DNS failure / refused connection / `--max-time`
+    timeout parse as HTTP 0, match neither arm of `_raise_on_http_error`, and return `{}` from
+    `_request` as a SUCCESS — an outage reaching the lead as "the system holds nothing", with
+    exit 0 counting nothing towards the breaker."""
     if rc == 0:
         return
     hint = stderr.strip() or "no stderr"
@@ -330,17 +308,15 @@ def _parse_status_code(stdout: str, stderr: str, url: str, rc: int) -> tuple[str
     non-numeric, or `000` response is a `TransportFault`: curl never completed a request, so
     there is no upstream verdict to file as a query error. Returns (body_text, code).
 
-    `000` is curl's own "no response" status, and the second half of #877 F-5's fix — the
-    sibling transport has raised on it all along (`elastic_adapter._http_json`), while this one
-    parsed it to `0`, walked past both arms of `_raise_on_http_error` (`0` is neither `>= 500`
-    nor `>= 400`) and returned an empty SUCCESS. Kept as its own guard rather than folded into
-    the rc check: the two are independent readings of the same fault, and a curl that reported
-    `000` while exiting 0 would otherwise still be filed as a system that answered."""
+    `000` is curl's own "no response" status, and is checked separately from the rc rather
+    than folded into it: the two are independent readings of the same fault, and a curl that
+    reported `000` while exiting 0 would otherwise parse to `0`, match neither arm of
+    `_raise_on_http_error`, and be filed as a system that answered."""
     body_text, status = split_status(stdout)
     if not status:
-        # Reached only with rc == 0 now (`_raise_on_transport_failure` owns every non-zero
-        # exit): curl claims it succeeded while emitting no `-w` status line at all. Show the
-        # bytes it did emit — the shape of that stdout is the whole diagnosis.
+        # Reached only with rc == 0 (`_raise_on_transport_failure` owns every non-zero exit):
+        # curl claims success while emitting no `-w` status line. Show the bytes it did emit —
+        # the shape of that stdout is the whole diagnosis.
         raise TransportFault(
             f"malformed curl response from {url}: "
             f"stdout={stdout!r} stderr={stderr.strip()!r}"
@@ -378,11 +354,9 @@ def _request(
     ctx: VerbContext, config: dict[str, str], url: str, *, system: str, method: str,
     body: dict | None = None,
 ) -> dict | list:
-    # Target-fidelity confinement (#632 D4), BEFORE any transport is attempted: every one of
-    # the five HTTP stub systems funnels through this one function (g26's own measurement —
-    # "one transport function carries every outbound request in the tree"), so wiring the
-    # read-endpoint allowlist here, not in each adapter, is what makes the seam actually cover
-    # all six systems rather than just elastic's own private transport helper.
+    # Target-fidelity confinement, BEFORE any transport is attempted. Every HTTP stub system
+    # funnels through this one function, so wiring the read-endpoint allowlist here rather
+    # than in each adapter is what makes the seam cover all of them.
     guard_outbound(ctx, system, url, method=method)
 
     bastion = config["BASTION_HOST"]
@@ -406,9 +380,8 @@ def _request(
 def health_check(ctx: VerbContext, config: dict[str, str], system_label: str) -> dict[str, Any]:
     """Standard health-check: GET <URL_BASE>/health and RETURN the payload.
 
-    Returns data, like every other verb — prose printed to stdout has no answer under
-    "a verb returns its payload", and the queries table would record an empty payload for
-    the one call whose whole point is to say whether the system is up."""
+    Returns data rather than printing: prose on stdout would leave the queries table
+    recording an empty payload for the one call whose point is to say the system is up."""
     payload = http_get_obj(ctx, config, "/health", system=system_label)
     return {"system": system_label, "connected": True, **payload}
 
@@ -429,9 +402,9 @@ def docker_exec_raw(
     cmd = ["docker", "--context", docker_context(ctx), "exec", bastion, *argv]
     try:
         # utf-8 and LOSSY: this runs arbitrary host verbs (`ps`, `ls`, file reads) inside the
-        # bastion, so its stdout carries filenames and process cmdlines — a strict decode would
-        # turn one odd byte in one filename into a UnicodeDecodeError that escapes every guard
-        # downstream (a ValueError is neither a rc check nor a fault) and takes the run with it.
+        # bastion, so stdout carries filenames and process cmdlines — a strict decode would turn
+        # one odd byte into a UnicodeDecodeError that escapes every guard downstream (a
+        # ValueError is neither a rc check nor a fault) and takes the run with it.
         proc = subprocess.run(
             cmd, capture_output=True, text=True, timeout=timeout_sec + 5,
             encoding="utf-8", errors="replace", env=_child_env(ctx),

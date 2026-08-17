@@ -1,11 +1,10 @@
-"""The one corpus-author drain body, and the one retire seam (#719).
+"""The one corpus-author drain body, and the one retire seam.
 
 Every corpus-author channel — findings and the three observation channels — reaches its
-batch through `run_batch` here. What used to vary per direction (the pre-author gate, the
-AUTHOR_RESULT buckets, the row key, the queue's two locks, the commit's provenance
-trailers, the lessons-only held report) is a field on the config; what used to be copied
-per direction (read, partition, author, verify, commit, project, rotate, log) is this
-module.
+batch through `run_batch` here. What varies per direction (pre-author gate, AUTHOR_RESULT
+buckets, row key, the queue's two locks, commit trailers, the lessons-only held report)
+is a field on the config; the batch body (read, partition, author, verify, commit,
+project, rotate, log) is this module.
 
 **Retirement is reachable only from `RETIRE_SET`.** A fault whose class is not in that
 tuple never reaches the retire seam: it leaves its row queued — stuck, recoverable, and
@@ -13,9 +12,9 @@ recorded in the channel's stuck-row file. The accepted trade is that a novel exc
 class returns to unbounded retry rather than being counted toward a ceiling and
 permanently deleted.
 
-The one class-blind clause in this module is the authoring region's CLEANUP, which puts
-the worktree back and then either retires (member) or re-raises unchanged (everything
-else). It decides nothing about disposition; membership still does, in one `isinstance`.
+The one class-blind clause is the authoring region's CLEANUP, which puts the worktree back
+and then either retires (member) or re-raises unchanged. Disposition is still decided by
+one `isinstance`.
 
 `GitError` and `ModelRetry` are the two members the obvious `except AuthorError` spelling
 would silently drop, reverting a commit-time git failure and an externally killed boxed
@@ -25,14 +24,14 @@ command back to "wedges the channel" and "reports success".
 repo state — the worktree status either side of the agent call, and HEAD — and a git
 failure there is contention on a busy repo, not a defect in the batch. Those reads go
 through `_git_read`, which re-raises as `GitProbeError`: not a member, so the batch keeps
-its attempt count and the tick is recorded as stuck instead. Without that split an index
--lock collision during a read-only probe burned an attempt against work that was fine, and
-three collisions over a queue's life deleted it.
+its attempt count and the tick is recorded as stuck instead. Otherwise an index-lock
+collision during a read-only probe burns an attempt against work that was fine, and three
+collisions over a queue's life delete it.
 
 SCOPE: the set governs the four AUTHOR channels. The pitfalls and lead-author legs keep
-`core/faults.run_or_dead_letter`'s own re-raise set, which this change does not touch and
-which CONTAINS `GitError` — so a commit-time `GitError` retires here and kills the drain
-there. One class, two classifications, by channel: deliberate, and left for a follow-up.
+`core/faults.run_or_dead_letter`'s own re-raise set, which CONTAINS `GitError` — so a
+commit-time `GitError` retires here and kills the drain there. One class, two
+classifications, by channel: deliberate, and left for a follow-up.
 """
 from __future__ import annotations
 
@@ -62,10 +61,10 @@ from defender.learning.core.config import QueueChannel, make_logger, provenance_
 
 AuthorError = author_shared.AuthorError
 
-#: Decision 8's ENUMERATED retire set. Spelled as a literal enumeration on purpose: it is
-#: NOT `faults.SYSTEMIC_FAULTS` (which exists to keep `GitError` OUT of retirement, the
-#: opposite of what a commit-time git failure must now do here), and it is not narrowable
-#: to `AuthorError` alone (which drops the two members below it).
+#: Spelled as a literal enumeration on purpose: it is NOT `faults.SYSTEMIC_FAULTS` (which
+#: exists to keep `GitError` OUT of retirement, the opposite of what a commit-time git
+#: failure must do here), and it is not narrowable to `AuthorError` alone (which drops the
+#: other two members).
 RETIRE_SET: tuple[type[BaseException], ...] = (AuthorError, GitError, ModelRetry)
 
 _T = TypeVar("_T")
@@ -74,11 +73,10 @@ _T = TypeVar("_T")
 class GitProbeError(RuntimeError):
     """A git command the drain used to READ repo state failed.
 
-    Deliberately not a `GitError` subclass and deliberately absent from `RETIRE_SET`. The
-    ceiling exists to bound work that keeps failing; a `git status` that lost a race for
-    the index lock says nothing about the work, so it must not spend one of its three
-    lives. The tick is stuck and loud instead — which is the same disposition every other
-    non-member gets."""
+    Deliberately not a `GitError` subclass and deliberately absent from `RETIRE_SET`: the
+    ceiling bounds work that keeps failing, and a `git status` that lost a race for the
+    index lock says nothing about the work, so it must not spend one of its three lives.
+    The tick is stuck and loud instead."""
 
 
 def _git_read(what: str, fn: Callable[..., _T], *args: Any) -> _T:
@@ -110,8 +108,7 @@ def stuck_report_file(channel: QueueChannel) -> Path:
     """The channel's stuck-row record — the only externally visible trace of a fault whose
     class is NOT in `RETIRE_SET`, since such a row stays queued and never reaches the
     graveyard. One record per non-retiring tick, naming the fault class, the stalled rows
-    and how many consecutive ticks they have been stuck. A retiring fault writes nothing
-    here; it is already visible in the graveyard."""
+    and how many consecutive ticks they have been stuck."""
     return channel.file.with_suffix(".stuck.jsonl")
 
 
@@ -150,21 +147,20 @@ def retire(
     failure. A row that arrives already over the ceiling rides through a clean tick
     untouched.
 
-    `counter_key` NAMES WHAT IS BEING COUNTED, and it exists because one channel came to have
-    two independent reasons to bump a row and no way to tell them apart. `attempts` — the
-    default, and every caller's answer but one — counts FAULTS: ticks that raised. The pitfalls
-    lane also bounds a row that the curator was OFFERED and declined, which is not a fault at
-    all (#870's review), and folding both into `attempts` made each ceiling arrive early in the
-    other's traffic: two infra-faulting ticks would spend a freshly-queued row's whole offer
-    budget, so its FIRST decline retired it terminally with its lesson never taught — verbatim
-    the loss FK-7's hold was resolved to close. Two counters, two ceilings, one primitive; the
-    graveyard's own `attempts` slot still reports whichever count drove the retirement, so the
-    record keeps its ONE shape and the other counter rides along inside `row`.
+    `counter_key` NAMES WHAT IS BEING COUNTED, because one channel has two independent
+    reasons to bump a row. `attempts` — the default, and every caller's answer but one —
+    counts FAULTS: ticks that raised. The pitfalls lane also bounds a row the curator was
+    OFFERED and declined, which is no fault at all, and folding both into `attempts` makes
+    each ceiling arrive early in the other's traffic: two infra-faulting ticks spend a
+    freshly-queued row's whole offer budget, so its FIRST decline retires it terminally with
+    its lesson never taught. Two counters, two ceilings, one primitive; the graveyard's own
+    `attempts` slot reports whichever count drove the retirement, so the record keeps its ONE
+    shape and the other counter rides along inside `row`.
 
-    Ordering is decision 3's: the graveyard entry lands FIRST, then the row is written into
-    the consumed ledger by the same locked rotation that rewrites the queue. The ledger
-    write is what makes retirement terminal — the observation append path reads it to dedup
-    — so a crash between the two costs one duplicate advisory record and nothing else.
+    The graveyard entry lands FIRST, then the row is written into the consumed ledger by
+    the same locked rotation that rewrites the queue. The ledger write is what makes
+    retirement terminal — the observation append path reads it to dedup — so a crash
+    between the two costs one duplicate advisory record and nothing else.
 
     `timeout_seconds` bounds BOTH append-lock windows below and is required of any caller
     that holds the repo lock — i.e. the corpus drain, which passes its configured wait.
@@ -199,9 +195,8 @@ def retire(
                         # that one inside `row`, where it is provenance rather than the verdict.
                         "attempts": rec[counter_key],
                         "deadletter_reason": reason,
-                        # The retired work itself, nested rather than spread: a graveyard
-                        # entry has ONE shape on every channel, so the record is readable
-                        # without knowing which queue produced it.
+                        # Nested rather than spread, so a graveyard entry has ONE shape on
+                        # every channel and is readable without knowing its queue.
                         "row": {k: v for k, v in rec.items() if k != counter_key},
                     }
                     for rec in retired
@@ -289,10 +284,9 @@ def _tick(*, cfg: CorpusAuthorConfig, hold_committed: bool, log) -> int:
         (keyed if isinstance(rid, str) and rid else unkeyable).append(row)
     _retire_unkeyable(channel, unkeyable, log, cfg.repo_lock_wait_seconds)
 
-    # The gate is INSIDE the stuck-recording guard. It reads per-row fields the queue's
-    # own key check cannot vouch for (`run_id`, `direction`), so it is a live source of
-    # non-retiring faults — and a fault raised here used to escape with no graveyard entry
-    # and no stuck record either, which is the one outcome the module claims cannot happen.
+    # The gate is INSIDE the stuck-recording guard: it reads per-row fields the queue's own
+    # key check cannot vouch for (`run_id`, `direction`), so it is a live source of
+    # non-retiring faults, which must not escape with neither a graveyard nor a stuck record.
     try:
         held, consumed_pre, to_author = cfg.gate(keyed, cfg)
     except BaseException as e:
@@ -341,9 +335,9 @@ def _author_and_rotate(  # noqa: PLR0913 — one tick's whole state, threaded ra
 
     if to_author:
         # All three taken BEFORE the agent runs, so a fault after it can put the worktree
-        # back the way the agent found it. Without that the agent's edits stay
-        # uncommitted, the next tick's cleanliness gate aborts before it reaches any
-        # queue at all, and the channel wedges instead of retrying.
+        # back the way the agent found it. Otherwise the agent's edits stay uncommitted,
+        # the next tick's cleanliness gate aborts before reaching any queue, and the
+        # channel wedges instead of retrying.
         snapshot = _snapshot_corpus(cfg.corpus_dir)
         baseline_stray = _git_read(
             "worktree status", author_shared.changes_outside, cfg.repo_root, cfg.corpus_dir_rel
@@ -367,10 +361,9 @@ def _author_and_rotate(  # noqa: PLR0913 — one tick's whole state, threaded ra
                     author_shared.commit_message(result, cfg.noun), cfg
                 )
         except BaseException as e:
-            # The cleanup runs for EVERY fault, member or not: a stuck tick leaves the
-            # same edits behind a retiring one does, and leaving them wedges the channel
-            # the bump exists to keep retrying. Disposition is still decided by the one
-            # membership test below, and this clause never retires anything on its own.
+            # Cleanup runs for EVERY fault, member or not: a stuck tick leaves the same
+            # edits behind a retiring one does, and leaving them wedges the channel. The
+            # membership test below still decides disposition.
             _undo_agent_edits(cfg, snapshot, baseline_stray, head_before)
             if not isinstance(e, RETIRE_SET):
                 raise
@@ -430,10 +423,10 @@ def _project(
     for bucket in cfg.buckets:
         if bucket.disposition == "committed":
             for rid in author_shared.result_list(result, bucket.name):
-                # The partition validator vouches for the entry's SHAPE by bucket NAME,
-                # this projection by DISPOSITION. Name a committed-disposition bucket
-                # anything but "committed" and the two stop agreeing — an unhashable dict
-                # would reach `all_rows.get` as a TypeError instead of an AuthorError.
+                # The partition validator vouches for entry SHAPE by bucket NAME, this
+                # projection by DISPOSITION. Name a committed-disposition bucket anything
+                # but "committed" and the two stop agreeing — an unhashable dict would
+                # reach `all_rows.get` as a TypeError instead of an AuthorError.
                 if not isinstance(rid, str):
                     raise AuthorError(
                         f"AUTHOR_RESULT {bucket.name} entries must be {key} strings"
@@ -467,15 +460,12 @@ def _assert_corpus_attributable(cfg: CorpusAuthorConfig, committed: list[dict]) 
     committed id, or it was already in history and claims exactly the provenance it claimed
     there — the second being what keeps an ordinary supersede flip out of this gate's way.
 
-    The other post-flight cross-check, `verify_agent_state`, is AGGREGATE — committed
-    non-empty ⇔ corpus dirty — which is one bit for a whole batch. So the homogeneous case
-    was caught (nothing committed, a file left behind: it raises, the file is restored away
-    and the rows are re-queued) and the MIXED case was not: with at least one lesson
-    legitimately committed — the normal shape, since a batch is >= LEARNING_AUTHOR_THRESHOLD
-    rows — a lesson the curator wrote and then itself reported as `held_forward_bad` was
-    swept into the pathspec-wide corpus commit by its passing batch-mates. The forward check
-    said that lesson would flip a correctly-resolved case; the corpus committed it anyway
-    (#852 F-02).
+    The other post-flight cross-check, `verify_agent_state`, is AGGREGATE (committed
+    non-empty ⇔ corpus dirty), one bit for a whole batch, so it misses the MIXED case: with
+    at least one lesson legitimately committed — the normal shape — a lesson the curator
+    wrote and then itself reported as `held_forward_bad` rode into the pathspec-wide commit
+    on its passing batch-mates, even though the forward check said it would flip a
+    correctly-resolved case.
 
     Attribution is per FILE and by the channel's OWN provenance key — `source_finding_ids`
     on the lessons corpus, `source_observation_ids` on the observation corpora, the same
@@ -484,9 +474,8 @@ def _assert_corpus_attributable(cfg: CorpusAuthorConfig, committed: list[dict]) 
     visible to that gate: a lessons file citing observation ids would be attributable here
     and invisible there, i.e. authored again on every following tick.
 
-    Raising `AuthorError` routes through the path the aggregate check already established:
-    `_undo_agent_edits` -> `_restore_corpus` deletes the unvouched-for file, the batch is
-    bumped and stays queued, and the tick returns 2."""
+    Raising `AuthorError` routes through `_undo_agent_edits` -> `_restore_corpus`: the
+    unvouched-for file is deleted, the batch is bumped and stays queued, the tick returns 2."""
     key = cfg.channel.id_key
     field = provenance_field(key)
     ids = {row[key] for row in committed if isinstance(row.get(key), str)}
@@ -529,7 +518,7 @@ def _vouched_for(
     """Does this changed corpus file need a voucher from this batch, and does it have one?
 
     Citing a committed id is the voucher, and for a file the agent CREATED (`??`) it is the
-    only one — that is F-02's own case, a rejected lesson citing nothing at all.
+    only one.
 
     An already-committed file gets a second way to pass, and without it this gate faults on
     ordinary curation. The actor/environment curators retire a contradicted lesson by
@@ -537,10 +526,9 @@ def _vouched_for(
     the file that cites the new observation (`benign_actor/prompt.md`, `malicious_actor/
     prompt.md`, "Supersede"), and the lessons curator reverts a forward-BAD fold by
     re-editing the target back to its pre-batch body. Neither edit claims new provenance —
-    the file cites exactly what it cited at HEAD — so it is not a lesson authored for a row
-    of this batch, vouches for nothing, and needs no voucher. Requiring one anyway reverted
-    the whole tick, deleted the legitimately-authored replacement with it, and bumped the
-    batch toward the ceiling that retires it into the graveyard."""
+    the file cites exactly what it cited at HEAD — so it vouches for nothing and needs no
+    voucher. Requiring one reverts the whole tick, deletes the legitimately-authored
+    replacement with it, and bumps the batch toward the graveyard ceiling."""
     cited = _cited_ids(repo_root / rel, field)
     if cited & ids:
         return True
@@ -585,17 +573,15 @@ def _retire_unkeyable(
     are authored on the same tick.
 
     IMMEDIATELY means on its own rotation, not on the tick's closing one. A keyless row
-    cannot be matched by id, so the closing rotation removes it by putting `None` in the
-    processed set — which also swallows any keyless row appended while the agent ran, with
-    no graveyard entry for it. Worse, that rotation never runs on a retiring or a stuck
-    tick, so the row stayed queued and was graveyarded again on every following tick.
-    Recording and removing under one short window costs one extra rewrite on a queue that
-    should never carry such a row at all.
+    cannot be matched by id, so the closing rotation would remove it by putting `None` in
+    the processed set — swallowing any keyless row appended while the agent ran, with no
+    graveyard entry — and that rotation never runs on a retiring or stuck tick, leaving the
+    row queued to be graveyarded again every following tick.
 
     The record is FLAT — the row's whole content spread at the top level, not nested under
     `row` the way `retire` writes it. There is no id to reference such a row by, so the
-    content IS the record; a consumer of this file must therefore branch on the presence of
-    `row` rather than assume one shape (spec #719, E1)."""
+    content IS the record; a consumer of this file must branch on the presence of `row`
+    rather than assume one shape."""
     if not rows:
         return
     reason = f"row carries no value under {channel.id_key!r}"
@@ -618,9 +604,9 @@ def _retire_unkeyable(
 
 
 def _record_stuck(channel: QueueChannel, exc: BaseException, rows: list[dict]) -> None:
-    """Decision 10's operator signal. The count is per TICK, not per row — a non-retiring
-    row must stay byte-identical, so the counter cannot live on it the way `attempts`
-    does — which is why the drain reads its own last record back before appending."""
+    """The operator signal for a stuck tick. The count is per TICK, not per row — a
+    non-retiring row must stay byte-identical, so the counter cannot live on it the way
+    `attempts` does, which is why the last record is read back before appending."""
     fault_class = type(exc).__name__
     ids = sorted(str(r[channel.id_key]) for r in rows if r.get(channel.id_key))
     path = stuck_report_file(channel)
@@ -663,16 +649,15 @@ def _undo_agent_edits(
     THE CORPUS HALF IS SKIPPED ONCE THE COMMIT HAS LANDED. `git_commit` reads HEAD after
     committing, so a git failure at that last step arrives with the lessons already in
     history — and an unconditional restore would delete exactly those files, leave the
-    next tick staring at a corpus full of deletions, and wedge the channel the restore
-    exists to keep unwedged. When git cannot say whether HEAD moved, nothing is deleted:
-    the only thing this test gates is a deletion, so it fails toward keeping files.
+    next tick staring at a corpus full of deletions, and wedge the channel. When git cannot
+    say whether HEAD moved, nothing is deleted: the only thing this test gates is a
+    deletion, so it fails toward keeping files.
 
     THE STRAY HALF IS UNCONDITIONAL, because the commit is pathspec-limited to the corpus
-    and can never have captured a file outside it. It is also the half whose absence was
-    invisible: a file the agent wrote outside the corpus survived the fault and was folded
-    into the NEXT tick's baseline, so the out-of-scope-write guard treated it as
-    pre-existing dirt. The guard fired once and was then disarmed for the life of the
-    worktree."""
+    and can never have captured a file outside it. Without it a file the agent wrote
+    outside the corpus survives the fault and is folded into the NEXT tick's baseline, so
+    the out-of-scope-write guard treats it as pre-existing dirt — fires once, then stays
+    disarmed for the life of the worktree."""
     if not _commit_landed(cfg.repo_root, head_before):
         _restore_corpus(cfg.repo_root, cfg.corpus_dir, snapshot)
     _revert_strays(cfg.repo_root, cfg.corpus_dir_rel, baseline_stray)

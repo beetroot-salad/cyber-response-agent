@@ -25,13 +25,10 @@ from defender.learning.core.config import (
 def normalize_disposition(report_path: Path) -> str:
     """The run's disposition, or `RunUnprocessable`.
 
-    What the value MEANS — including #722's zero-width strip — is `_report.read_report`'s
-    single decision (#785). What stays here is the loop's REACTION: a case whose headline it
-    cannot read is refused with a typed error the drain can dead-letter, never guessed at.
-
-    The head-of-file dump is the operator's only view of what the model actually wrote, and it
-    now accompanies every refusal rather than only the unparseable ones — the diagnostic a
-    human needs is the same whichever way the headline failed.
+    What the value MEANS is `_report.read_report`'s single decision. What stays here is the
+    loop's REACTION: a case whose headline it cannot read is refused with a typed error the
+    drain can dead-letter, never guessed at. The head-of-file dump accompanies every refusal —
+    it is the operator's only view of what the model actually wrote.
     """
     read = read_report(report_path)
     if read.disposition is None:
@@ -96,10 +93,9 @@ def normalize_judge_yaml(text: str) -> str:
 def _outcome_keyword_in(outcome_value: Any, enum: set[str]) -> str:
     if not isinstance(outcome_value, str):
         raise RunUnprocessable(f"judge `outcome` is not a string: {type(outcome_value)}")
-    # strip_zero_width before the split, not after: the zero-width characters are the
-    # ones `.strip()` cannot see, and one of them clinging to `caught` must not turn a
-    # judged case unprocessable (#722). Whitespace survives it, so the split still cuts
-    # the keyword off the rationale that follows.
+    # strip_zero_width before the split, not after: `.strip()` cannot see those characters,
+    # and one clinging to `caught` must not turn a judged case unprocessable. Whitespace
+    # survives it, so the split still cuts the keyword off the rationale that follows.
     first = re.split(r"[\s.,;:]", strip_zero_width(outcome_value).strip(), maxsplit=1)[0]
     if first not in enum:
         raise RunUnprocessable(f"judge outcome keyword {first!r} not in {sorted(enum)}")
@@ -133,14 +129,12 @@ def dump_oracle_doc(doc: dict) -> str:
 
 def _validate_judge_optional_keys(doc: dict[str, Any], keys: frozenset[str]) -> None:
     """Validate the optional top-level keys THIS doc's direction may carry — a key outside
-    `keys` is left alone rather than rejected, which is what the per-direction validators
-    already did key by key.
+    `keys` is left alone rather than rejected.
 
     The declared set is the one home for "which optional keys does this direction's judge
     emit": the transcript view reads the same sets off `Direction.judge_optional_keys` to
-    decide which sections to render, so a fourth optional key cannot be accepted here and
-    stay invisible on the page the way `actor_observations` and `resolution_method` did
-    (#748)."""
+    decide which sections to render, so a new optional key cannot be accepted here and stay
+    invisible on the page."""
     for key in sorted(keys):
         _JUDGE_OPTIONAL_VALIDATORS[key](doc)
 
@@ -180,8 +174,8 @@ _JUDGE_OPTIONAL_VALIDATORS = {
 }
 
 # The optional top-level keys each direction's judge doc may carry. Enforced by the
-# validators below and read by the transcript view through `Direction.judge_optional_keys`
-# — ONE declaration, so accepted-but-unrendered cannot happen again (#748).
+# validators above and read by the transcript view through `Direction.judge_optional_keys`
+# — ONE declaration, so accepted-but-unrendered cannot happen.
 ADVERSARIAL_JUDGE_OPTIONAL_KEYS = frozenset(_JUDGE_OPTIONAL_VALIDATORS)
 BENIGN_JUDGE_OPTIONAL_KEYS = frozenset({"environment_observations"})
 
@@ -268,7 +262,7 @@ def _validate_environment_observation(i: int, o: Any) -> None:
             "list (the retrieval anchor)"
         )
     # A list of ids that render as nothing is as anchorless as an empty list, and
-    # `persist.py` stores these as THE retrieval anchor for the fact (#722).
+    # `persist.py` stores these as THE retrieval anchor for the fact.
     if any(not isinstance(r, str) or is_content_less(r) for r in rule_ids):
         raise RunUnprocessable(
             f"environment_observations[{i}].alert_rule_ids entries must be "
@@ -293,8 +287,7 @@ class Verdict:
 
     Kept here rather than in an eval harness: the two production-judge suites
     (`test_judge_pydantic_engine.py`, `test_judge_yaml_preamble.py`) assert on it as the
-    end-to-end shape a raw model return normalizes into, and #492's E3 demand is stated
-    against this parser. The A/B harness it was originally written for is retired.
+    end-to-end shape a raw model return normalizes into.
     """
 
     case_id: str
@@ -315,10 +308,8 @@ def parse_judge_verdict(text: str, *, case_id: str, direction: str) -> Verdict:
     """
     benign = direction == "benign"
     try:
-        # `_yaml.safe_load`, not `yaml.safe_load`: the hardened wrapper this module already
-        # parses through one function up (`normalize_judge_yaml`), which turns a recursion
-        # bomb and an unconstructable scalar into `YAMLError` instead of letting them out
-        # under their own types.
+        # `_yaml.safe_load`, not `yaml.safe_load`: the hardened wrapper turns a recursion bomb
+        # and an unconstructable scalar into `YAMLError` instead of their own types.
         doc = safe_load(normalize_judge_yaml(text))
         validated = (validate_judge_benign_doc if benign else validate_judge_doc)(doc)
     except Exception:  # noqa: BLE001 — an unparseable/invalid verdict is a data point, not a crash

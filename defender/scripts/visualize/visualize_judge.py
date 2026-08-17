@@ -27,8 +27,8 @@ from defender.scripts.visualize.visualize_primitives import (
 #: The actor stage's trace, named once for the two locations this page looks in.
 ACTOR_TRACE = "actor_trace.jsonl"
 
-# The leg's own terminal status (#791 R2/R15) — the one place a run dir written before the
-# field existed reads as its stated default rather than as a leg that never ran.
+# The leg's own terminal status. `LEG_UNRECORDED` is the stated default for a run dir written
+# before the status file existed — distinct from a leg that never ran.
 LEG_COMPLETED = "completed"
 LEG_NEVER_SELECTED = "never-selected"
 LEG_STARTED_AND_DIED = "started-and-died"
@@ -36,11 +36,10 @@ LEG_UNRECORDED = "unrecorded"
 
 
 def leg_status(run_id: str, direction: Direction) -> str:
-    """The status FILE is authoritative when it exists — it is written before the leg's
-    first call, so a leg that dies before its own story write still reads as
-    started-and-died rather than never-selected. Only a run dir with no status file at all
-    falls back to story presence: never-selected (no story either) or unrecorded (a story
-    from before the field existed, R15's stated default)."""
+    """The status FILE is authoritative when it exists — it is written before the leg's first
+    call, so a leg that dies before its own story write still reads as started-and-died rather
+    than never-selected. Only a run dir with no status file falls back to story presence:
+    never-selected (no story either) or unrecorded (a story from before the file existed)."""
     learn_dir = _learning_run_dir(run_id)
     status_file = learn_dir / direction.status_name
     if status_file.is_file():
@@ -53,19 +52,17 @@ def leg_status(run_id: str, direction: Direction) -> str:
     return LEG_UNRECORDED if story.is_file() else LEG_NEVER_SELECTED
 
 
-# The direction that owns the page's unsuffixed ids — `#sec-judge`, `#finding-0`. It is the
-# one that predates the second direction, so it kept the anchors the page already emitted;
-# every other direction namespaces its ids by name.
+# The direction that owns the page's unsuffixed ids — `#sec-judge`, `#finding-0`. Every other
+# direction namespaces its ids by name.
 UNSUFFIXED_DIRECTION = ADVERSARIAL.name
 
 
 @dataclass(frozen=True)
 class DirectionView:
     """How one `Direction` presents on the judge page. Neither the artifact NAMES nor the
-    anchor ids are written out here — the names come off `direction`, the ids off `anchor()`
-    — so the loop's declaration and the view cannot drift (#716) and a third direction
-    cannot typo its way into an id collision. What lives here is prose: titles and
-    subtitles."""
+    anchor ids are written out here — the names come off `direction`, the ids off `anchor()` —
+    so the loop's declaration and the view cannot drift and a third direction cannot typo its
+    way into an id collision. What lives here is prose: titles and subtitles."""
 
     direction: Direction
     actor_subtitle: str
@@ -83,9 +80,8 @@ class DirectionView:
 
     def anchor(self, base: str) -> str:
         """ONE mechanism for every per-direction id on the page — section ids, finding cards
-        and env-obs cards alike are `{base}{suffix}`. Findings used to prefix the direction
-        name while env observations suffixed it, which put `benign-finding-0` next to
-        `env-obs-benign-0` on the same page (#716)."""
+        and env-obs cards alike are `{base}{suffix}`, so the page cannot mix a prefixed and a
+        suffixed spelling of the same direction."""
         return f"{base}{self.suffix}"
 
 
@@ -93,7 +89,7 @@ class DirectionView:
 class CardGroup:
     """One `<h3>` + card grid inside the Judge section, driven off the judge-doc key it
     renders. The section, the heading count and the TOC all read this table, so a group
-    cannot appear on the page without its TOC link or vice versa (#748)."""
+    cannot appear on the page without its TOC link or vice versa."""
 
     key: str
     # `#sec-judge{suffix}-{sub}` — the sub-anchor the TOC links; `anchor_base` is the per-card
@@ -134,11 +130,10 @@ def active_views(run_id: str, disposition: str) -> tuple[DirectionView, ...]:
     """The direction sections this page renders: the ones this run's disposition selected,
     PLUS any that left artifacts on disk.
 
-    Selection runs through the same `directions_for` the loop dispatches on, so the two
-    cannot disagree (including on a disposition carrying a zero-width character, #722). A
-    direction the disposition never selected is OMITTED rather than rendered as "the loop did
-    not run or aborted", which is what the page used to claim of the adversarial direction on
-    every `malicious` run (#716).
+    Selection runs through the same `directions_for` the loop dispatches on, so the two cannot
+    disagree (including on a disposition carrying a zero-width character). A direction the
+    disposition never selected is OMITTED rather than rendered as "the loop did not run or
+    aborted".
 
     Presence is the other half of the rule, because `report.md` is mutable while the learning
     run dir accumulates: a run learned under `inconclusive` (both legs ran) whose disposition
@@ -146,9 +141,9 @@ def active_views(run_id: str, disposition: str) -> tuple[DirectionView, ...]:
     findings. Selection alone would drop them from the page while the Raw bundle's `*.raw.txt`
     glob went on showing that leg — the page contradicting itself. Present beats selected.
 
-    An unreadable or unrecognized disposition (no `report.md`, bad frontmatter) selects
-    ALL directions: with nothing to gate on, showing every section with its
-    missing-artifact placeholder is the honest fallback."""
+    An unreadable or unrecognized disposition (no `report.md`, bad frontmatter) selects ALL
+    directions: with nothing to gate on, showing every section with its missing-artifact
+    placeholder is the honest fallback."""
     if normalized_disposition(disposition) is None:
         return VIEWS
     selected = {d.name for d in directions_for(disposition)}
@@ -159,10 +154,9 @@ def active_views(run_id: str, disposition: str) -> tuple[DirectionView, ...]:
 
 
 def _card_items(judge: dict, key: str) -> list[dict]:
-    """The mappings a card group under `key` will render, and nothing else — the ONE place
-    the is-it-a-list-of-mappings guard lives for findings and both observation groups. A
-    heading count, a TOC link and a card all read this, so none of them can claim an anchor
-    the section does not emit (or blow up on a scalar)."""
+    """The mappings a card group under `key` will render, and nothing else — the ONE place the
+    is-it-a-list-of-mappings guard lives. A heading count, a TOC link and a card all read this,
+    so none of them can claim an anchor the section does not emit (or blow up on a scalar)."""
     value = judge.get(key) or []
     if not isinstance(value, list):
         return []
@@ -182,10 +176,8 @@ def _render_subject_card(
 ) -> str:
     """The card shape shared by judge findings and actor observations: the same
     `type` / `subject_topic` / `subject_anchor` head over one prose body, plus the citation
-    rows when the mapping carries any — only findings do, so no flag is needed to tell the
-    two apart. Written ONCE because `actor_observations` would otherwise have arrived as a
-    third near-twin of this markup (#748); environment observations are the second and stay
-    separate, their head and body genuinely differ."""
+    rows when the mapping carries any — only findings do, so no flag is needed to tell the two
+    apart. Environment observations stay separate: their head and body genuinely differ."""
     otype = str(o.get("type", "?"))
     topic = str(o.get("subject_topic", ""))
     anchor = str(o.get("subject_anchor", ""))
@@ -230,9 +222,7 @@ def render_judge_finding(idx: int, f: dict, anchor_prefix: str) -> str:
 def render_actor_observation(idx: int, o: dict, anchor_prefix: str) -> str:
     """One `actor_observations` entry — what the judge learned about the ACTOR's own story
     (`misprediction` / `framing-choice` / `discarded-class`, `config.ACTOR_OBSERVATION_TYPES`)
-    rather than about the defender. `validate_judge_doc` has accepted these on the
-    adversarial doc all along and `judge/malicious.md` asks for them; the page dropped them
-    silently until #748."""
+    rather than about the defender."""
     return _render_subject_card(
         idx, o, anchor_prefix, body_key="observation", type_prefix="actor-obs",
     )
@@ -347,9 +337,9 @@ def _render_card_group(judge: dict, view: DirectionView, group: CardGroup) -> st
 def _render_resolution_method(judge: dict, view: DirectionView) -> str:
     """`resolution_method` renders as the one plain line the judge emitted, not a card: it is
     the compact citable form a future benign judge reads back when this case is cited as a
-    covering policy (#338), and it reaches the case-history ticket through
+    covering policy, and it reaches the case-history ticket through
     `tickets/ticket_enrichment.py` whether or not the page shows it — here it is an auditing
-    convenience (#748).
+    convenience.
 
     Absence is the NORMAL case even for the direction that declares the key: the adversarial
     judge emits it on `benign` dispositions only, so the placeholder says which case it is
@@ -404,10 +394,10 @@ FINDINGS_GROUP = CardGroup(
     render=render_judge_finding,
 )
 
-# The card groups only some directions carry, in page order. Membership is NOT decided here
-# — `Direction.judge_optional_keys` declares which keys a direction's judge doc may hold and
+# The card groups only some directions carry, in page order. Membership is NOT decided here —
+# `Direction.judge_optional_keys` declares which keys a direction's judge doc may hold and
 # `validate.py` enforces the same sets, so a key cannot be accepted by the schema and stay
-# invisible on the page (#748).
+# invisible on the page.
 OPTIONAL_CARD_GROUPS: tuple[CardGroup, ...] = (
     CardGroup(
         key="actor_observations",
@@ -454,14 +444,14 @@ def render_judge_raw_bundle(run_id: str) -> str:
             panels.append(block("artifact", fname, pre_text(p.read_text(encoding="utf-8"))))
     for raw in sorted(learn_dir.glob("*.raw.txt")):
         panels.append(block("artifact raw", raw.name, pre_text(raw.read_text(encoding="utf-8"))))
-    # `wire_logs/actor_trace.jsonl`, with the pre-move root path as a fallback so an older
-    # learning run dir still renders its bundle. Host code, outside the gate: the directory is
-    # where `permission.files.names_wire_log_dir` refuses AGENTS, and this page is for an operator.
+    # `wire_logs/actor_trace.jsonl`, with the run-root path as a fallback so an older learning
+    # run dir still renders its bundle. Host code, outside the gate: `wire_logs/` is where
+    # `permission.files.names_wire_log_dir` refuses AGENTS, and this page is for an operator.
     for trace in (learn_dir / WIRE_LOG_DIR / ACTOR_TRACE, learn_dir / ACTOR_TRACE):
         if trace.is_file():
             # Labelled with the path RELATIVE TO THE LEARNING RUN DIR, not the bare name: the
             # two candidates differ only in their directory, so a shared label would leave an
-            # operator unable to tell a current bundle from a pre-`wire_logs/` one.
+            # operator unable to tell the two bundles apart.
             panels.append(block(
                 "artifact", str(trace.relative_to(learn_dir)),
                 pre_text(trace.read_text(encoding="utf-8")),
@@ -484,9 +474,9 @@ def _toc_judge_links(view: DirectionView, n_findings: int | None) -> str:
     )
     if n_findings == 0:
         finding_links = '<li class="item muted">(none)</li>'
-    # Every group but findings links its heading only — the per-card links below findings are
-    # the one place the count is known here. The groups come off `active_card_groups`, so a
-    # direction that carries no `actor_observations` gets no link to a section it never emits.
+    # Every group but findings links its heading only — findings is the one group whose count
+    # is known here. The groups come off `active_card_groups`, so a direction that carries no
+    # `actor_observations` gets no link to a section it never emits.
     group_links = "".join(
         f'<li class="item"><a href="#{judge_anchor}-{g.sub}">{g.toc_label()}</a></li>\n    '
         for g in active_card_groups(view) if g is not FINDINGS_GROUP
@@ -515,14 +505,13 @@ def _toc_direction_block(view: DirectionView, n_findings: int | None) -> str:
 def render_judge_toc(
     sections: list[tuple[DirectionView, int | None]], *, raw_bundle: bool,
 ) -> str:
-    """`sections` is one (view, finding count) per direction the page actually rendered —
-    so the TOC never links a section the disposition did not select. A `None` count means
-    the direction was selected but produced no judge doc (#716).
+    """`sections` is one (view, finding count) per direction the page actually rendered — so
+    the TOC never links a section the disposition did not select. A `None` count means the
+    direction was selected but produced no judge doc.
 
-    `raw_bundle` is whether `render_judge_raw_bundle` produced a section for this run. It is
-    passed rather than recomputed so the caller's ONE render decides both the link and the
-    section: a run with no raw-bundle artifacts used to carry a dead `#sec-raw-bundle` entry
-    (noted in #716, fixed in #748)."""
+    `raw_bundle` is whether `render_judge_raw_bundle` produced a section for this run. Passed
+    rather than recomputed so the caller's ONE render decides both the link and the section,
+    which is what keeps a run with no raw artifacts from carrying a dead `#sec-raw-bundle`."""
     direction_blocks = "".join(_toc_direction_block(v, n) for v, n in sections)
     raw_block = """<li class="section">Raw bundle</li>
     <li class="item"><a href="#sec-raw-bundle">inputs &amp; fallbacks</a></li>""" if raw_bundle else ""

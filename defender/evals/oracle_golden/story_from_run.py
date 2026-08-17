@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""Render a case's `story.md` from the attack runner's own record (#711 M9).
+"""Render a case's `story.md` from the attack runner's own record.
 
 `story.md` is the one oracle-visible file the hidden/visible split cannot
-protect: it is deliberately an oracle INPUT, and the seed negative control
-managed to tell the oracle in its own story that it was a negative control and
-"must therefore return `0` for every lead". A hand-written story is exposed to
-that leak on every capture.
+protect: it is deliberately an oracle INPUT, so a hand-written story can tell the
+oracle its own answer (a negative control's story once said it "must therefore
+return `0` for every lead").
 
 A renderer is not merely cheaper than hand-authoring — it is **safer**, because
 it structurally cannot leak the evaluation into an oracle input. It has no access
@@ -15,10 +14,8 @@ actually did. And it cannot invent a step, which is the other way a story makes
 the oracle "wrong" for a reason that is not the oracle's fault.
 
 The rendered story states only: the resolved identity and host pair, each command
-as the runner issued it, its return code, when it ran, and what it printed. That
-is what the procedure doc asks a human for ("state only what happened"), and it
-is exactly what `playground-v2/attacks/runs/<id>/meta.json` holds. (That record is
-the attack runner's own, unrelated to the defender run metadata #647 retired.)
+as the runner issued it, its return code, when it ran, and what it printed — what
+the procedure doc asks a human for ("state only what happened").
 
 Belt and braces: the renderer lints its OWN output against the evaluation
 vocabulary and refuses to write a story that trips it, so a scenario whose
@@ -35,13 +32,9 @@ import sys
 from pathlib import Path
 
 #: Vocabulary only an eval author writes — the scoring frame, never the operation.
+#: THE owner: `validate_cases.check_case` reads it from here through `eval_tells_in`.
 #:
-#: THE owner. `validate_cases.check_case` reads it from here through `eval_tells_in`; it used
-#: to declare its own copy, under a keep-in-sync note that named `_EVAL_TELLS` — a symbol that
-#: exists in neither module, being the *test's* private name for its own third restatement.
-#: A note pointing at a symbol nobody can grep is how the copies stayed in step by luck.
-#:
-#: `tests/test_oracle_golden_693.py` keeps its restatement deliberately: it sweeps the
+#: `tests/test_oracle_golden_693.py` keeps its own restatement deliberately: it sweeps the
 #: COMMITTED corpus, so a leak that arrived by hand-editing a case is a thing it can catch
 #: and this list cannot.
 EVAL_TELLS = (
@@ -72,17 +65,11 @@ def render_story(meta: dict) -> str:
         f"It began at {meta.get('started_at', 'an unrecorded time')} and finished at "
         f"{meta.get('finished_at', 'an unrecorded time')}.",
     ]
-    # The catalog `description` is NOT rendered, and that is load-bearing. It
-    # describes the scenario's DEFAULT configuration, so a retargeted run gets a
-    # story that contradicts itself: `ssh-brute-force-canary --target db-1`
-    # produced a story whose header said db-1 and whose description said
-    # "hammers canary-1's SSH ... failed auth events on canary-1's sshd". The
-    # oracle then has two different targets in one input, and any projection it
-    # makes is a measurement of the contradiction rather than of the oracle.
-    # Two #711 pilot cases were retired for exactly this.
-    #
-    # Only the runner's RESOLVED facts are rendered. A renderer that cannot
-    # reach static catalog prose cannot leak a default into a story.
+    # The catalog `description` is NOT rendered, and that is load-bearing: it describes the
+    # scenario's DEFAULT configuration, so a retargeted run gets a story whose header names
+    # one host and whose description names another. The oracle then has two targets in one
+    # input, and any projection it makes measures the contradiction rather than the oracle.
+    # Only the runner's RESOLVED facts are rendered.
     if meta.get("aborted"):
         out += ["", "The run was aborted before completing every step."]
 

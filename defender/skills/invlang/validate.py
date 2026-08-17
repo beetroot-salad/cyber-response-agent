@@ -35,7 +35,7 @@ _STRONG_AUTH_KINDS_STR = " / ".join(sorted(STRONG_AUTH_KINDS))
 
 _YAML_FENCE_RE = re.compile(r"```ya?ml\b")
 
-#: `Diagnostic.severity`'s closed set (#836). Declared once, beside the type that carries it.
+#: `Diagnostic.severity`'s closed set. Declared once, beside the type that carries it.
 Severity = Literal["error", "warning"]
 
 
@@ -46,8 +46,7 @@ class Locus:
     `row_text` is the row as the author WROTE it — never a reconstruction. Both families that
     populate a locus read it from the document: a parse warning carries its row, and the
     `:R attr_updates` check walks blocks rather than folded records. `row_index` is the ordinal
-    WITHIN the block, not a file line number — nothing in the validator computes one — and only
-    the parse warnings have it."""
+    WITHIN the block, not a file line number, and only the parse warnings have it."""
 
     block: str
     row_text: str
@@ -56,24 +55,21 @@ class Locus:
 
 @dataclass(frozen=True)
 class Diagnostic:
-    """One validation failure. `message` is the prose the model has always seen and is
-    unchanged; `locus` and `fix` are additive.
+    """One validation failure. `message` is the prose the model sees; `locus` and `fix` are
+    optional structure alongside it.
 
-    Only the families that can name a single offending row populate `locus` — parse
-    warnings and `:R attr_updates`. The document-global checks (append-only, lead and
-    prediction refs, strong-move provenance, benign gating, loop close, surface) have no
-    row to point at and leave it `None`; so do the vocab sub-checks over `:V`/`:E`/`:H`,
-    whose rows cannot be rebuilt without the block's declared column list. Those degrade
-    to exactly today's behaviour, which is the whole point of the field being optional."""
+    Only the families that can name a single offending row populate `locus` — parse warnings
+    and `:R attr_updates`. The document-global checks (append-only, lead and prediction refs,
+    strong-move provenance, benign gating, loop close, surface) have no row to point at and
+    leave it `None`; so do the vocab sub-checks over `:V`/`:E`/`:H`, whose rows cannot be
+    rebuilt without the block's declared column list."""
 
     message: str
     locus: Locus | None = None
     fix: tuple[str, ...] = field(default_factory=tuple)
-    #: `"error"` (the write is refused and nothing is written) or `"warning"` (#836: the write
-    #: LANDS and the row gates the NEXT one until it is repaired). Additive and defaulted, so
-    #: every family that does not opt in keeps exactly today's refusing behaviour — the
-    #: partition is assigned per check family at diagnose time and is never document content,
-    #: which is why no migration mechanism exists for bytes written before the field did.
+    #: `"error"` (the write is refused and nothing is written) or `"warning"` (the write LANDS
+    #: and the row gates the NEXT one until it is repaired). Assigned per check family at
+    #: diagnose time, never document content — so no migration exists for older bytes.
     #: A closed `Literal`, not a bare `str`: the partition is read THREE ways across three
     #: modules (`== "warning"` here, `!= "warning"` in `validate_companion` and in
     #: `_artifact_schema.validate_investigation`), so a mistyped value would not fail — it
@@ -82,16 +78,14 @@ class Diagnostic:
 
 
 def _plain(messages: list[str]) -> list[Diagnostic]:
-    """Lift the checks that carry no row into `Diagnostic`s. Keeping those checks on
-    `list[str]` is deliberate: they gain nothing from the type, and rewriting all seven
-    would be churn with no consumer."""
+    """Lift the checks that carry no row into `Diagnostic`s. Those checks stay on `list[str]`
+    deliberately: they gain nothing from the type."""
     return [Diagnostic(m) for m in messages]
 
 
 def _parse_diagnostic(w: ParseWarning) -> Diagnostic:
-    """A parse warning already knows its block, ordinal and raw row — `w.format()` folds
-    them into prose and then nobody can get at them again. Keep the prose byte-identical
-    and carry the structure alongside it."""
+    """A parse warning already knows its block, ordinal and raw row — `w.format()` folds them
+    into prose. Keep the prose and carry the structure alongside it."""
     return Diagnostic(
         message=f"parse error: {w.format()}",
         locus=Locus(block=w.block, row_text=w.row, row_index=w.row_index),
@@ -117,14 +111,12 @@ def _check_surface(proposed_text: str) -> list[str]:
 
 
 def _check_lead_refs(companion: CompanionBody) -> list[str]:
-    """`:L findings` is the sole site that declares a lead; every other mention
-    must resolve to one.
+    """`:L findings` is the sole site that declares a lead; every other mention must resolve
+    to one.
 
-    The projector opens a bucket for any lead id it meets, so a typo, a forward
-    reference, and a comma-joined pair of real ids are all indistinguishable
-    from a declaration at projection time — which is how a phantom lead named
-    `l-004,l-005` reached the corpus. Only a declared lead carries a name, so
-    that is what separates the two here.
+    The projector opens a bucket for any lead id it meets, so a typo, a forward reference, and
+    a comma-joined pair of real ids (`l-004,l-005`) are indistinguishable from a declaration at
+    projection time. Only a declared lead carries a name, so that is what separates the two.
     """
     findings = [f for f in (companion.get("findings") or []) if isinstance(f, dict)]
     declared = {
@@ -171,8 +163,8 @@ def _declared_prediction_ids(hyp: HypothesisRecord) -> set[str]:
 
 
 def _unresolved(cited: list[str], declared: set[str]) -> list[str]:
-    # Deduped: `[l-001 p1 + l-003 p1,p2 …]` cites p1 twice, and one undeclared id
-    # is one defect however many times the head names it.
+    # Deduped: `[l-001 p1 + l-003 p1,p2 …]` cites p1 twice, and one undeclared id is one
+    # defect however many times the head names it.
     return [c for c in dict.fromkeys(cited) if c not in declared]
 
 
@@ -209,17 +201,16 @@ def _cited_hypothesis_ids(lead: FindingRecord) -> Iterator[tuple[str, list[str]]
     `:L findings`' `tests` column projects to `tests_hypotheses` through `_split_csv`, and
     `:T shelved`'s first cell appends to `shelved`.
 
-    The shape gate applies at `tests` ONLY, because only `tests` is mixed. It is the list of
-    COMMITMENTS the lead was run for, and the shipped golden proves that is three id kinds, not
-    one: `golden-sshpivot-ab3` tests `ac1` on l-002 and `p2` on l-003 alongside its `h-*`. A `p2`
-    resolves against `:H h-NNN.preds` and an `ac1` against `:H h-NNN.authz` — separate rules
-    against separate declaring blocks — so reading the column as hypotheses-only denied a correct
-    document.
+    The shape gate applies at `tests` ONLY, because only `tests` is mixed: it lists the
+    COMMITMENTS the lead was run for, which is three id kinds (`ac1` and `p2` alongside `h-*`).
+    A `p2` resolves against `:H h-NNN.preds` and an `ac1` against `:H h-NNN.authz` — separate
+    rules against separate declaring blocks — so reading the column as hypotheses-only would
+    deny a correct document.
 
-    `:T shelved`'s column is `hyp_id`: every value in it IS a hypothesis reference. Gating it on
-    shape would exempt exactly the typo the rule exists to catch — `h_888`, `H-888`, `hyp-888`
-    all shelve nothing and would pass in silence — so the gate is withheld there and an
-    unrecognizable id is reported like any other undeclared one.
+    `:T shelved`'s column is `hyp_id`: every value in it IS a hypothesis reference. Gating it
+    on shape would exempt exactly the typo the rule exists to catch — `h_888`, `H-888`,
+    `hyp-888` all shelve nothing and would pass in silence — so the gate is withheld there and
+    an unrecognizable id is reported like any other undeclared one.
     """
     for site, ids, shaped in (
         ("`:L findings` tests", lead.get("tests_hypotheses"), True),
@@ -240,8 +231,7 @@ def _hypothesis_references(
     """Every site that names an `h-*`, as `(where, site-phrase, ids-in-row-order)`.
 
     The census in one place, so "which sites reference a hypothesis" is a list to extend
-    rather than a branch to remember to add — the fourth site went unchecked for exactly as
-    long as that answer lived in three separate loops.
+    rather than a branch to remember to add.
     """
     for lid, res in _walkers.iter_resolutions(companion):
         hid = res.get("hypothesis")
@@ -268,31 +258,22 @@ def _check_hypothesis_refs(
     """`:H hypothesize.hypotheses` and `:H l-NNN.new_hypotheses` are the sole sites that
     declare a hypothesis; every other mention of an `h-*` must resolve to one.
 
-    `_check_lead_refs`'s analogue for the other id the projector opens no bucket for. A
-    typo, a forward reference and a genuinely absent hypothesis are indistinguishable at
-    projection time, so a phantom moved to `++` in silence and `_walkers.final_weights`
-    reported it live.
+    `_check_lead_refs`'s analogue for the other id the projector opens no bucket for. A typo,
+    a forward reference and a genuinely absent hypothesis are indistinguishable at projection
+    time, so a phantom would move to `++` in silence and `_walkers.final_weights` would report
+    it live.
 
-    FOUR sites reference an `h-*` and this owns all four (#821). Closing only the
-    resolution left the other three open, and two of them are the ones a run reaches first:
-    a lead can claim to TEST a hypothesis nobody declared, and a `:T shelved` row can retire
-    one that never existed — both silently, both upstream of the resolution the rule did
-    catch. The fourth is `:T conclude.surviving`, which the parser used to accept and
-    discard: the run's closing claim about what is still standing could name a phantom and
-    nothing looked, which is the last place in a document that should go unchecked.
+    FOUR sites reference an `h-*` and this owns all four: a resolution, a lead's `tests`, a
+    `:T shelved` row, and `:T conclude.surviving`. The middle two are the ones a run reaches
+    first — a lead can claim to TEST a hypothesis nobody declared, and a shelve can retire one
+    that never existed.
 
-    It could not be enforced until `:H` blocks accumulated (#817) — before that, a
-    legitimate mid-run fork's earlier hypotheses were dropped by the parser and this error
-    would have fired on a correct document.
-
-    `deferred` is what keeps that deference honest now: a `:H` DECLARATION block the parser
-    rejected (a stale header, an `attached_to` naming an edge) leaves every reference to it
-    looking phantom, and the parse warning already names the cause. One defect, one error.
-    It is keyed to the dropped IDS, not to the document — one malformed `:H` row used to
-    silence the rule everywhere, so an unrelated typo three leads away went unreported
-    behind a warning that had nothing to do with it. `None` is the parser's "a dropped
-    declaration could not be mapped to an id at all", and only that stands the rule down
-    wholesale.
+    `deferred` keeps the deference honest: a `:H` DECLARATION block the parser rejected (a
+    stale header, an `attached_to` naming an edge) leaves every reference to it looking
+    phantom, and the parse warning already names the cause. One defect, one error. It is keyed
+    to the dropped IDS, not to the document, so an unrelated typo three leads away is still
+    reported. `None` is the parser's "a dropped declaration could not be mapped to an id at
+    all", and only that stands the rule down wholesale.
     """
     if deferred is None:
         return []
@@ -326,21 +307,19 @@ def _check_tested_commitment_refs(companion: CompanionBody) -> list[str]:
     """A `p*`/`ap*`/`r*`/`ac*` in `:L findings`' `tests` column resolves against a
     hypothesis that same row says it is testing.
 
-    The other half of the mixed column (#821). `tests` is the commitments a lead was run
-    for, and only its `h-*` was being resolved — so `tests=h-001,p9,ac9` named two
-    commitments that do not exist and validated clean, which is the same hole the `h-*` half
-    had, one namespace over.
+    The other half of the mixed column: without it `tests=h-001,p9,ac9` names two commitments
+    that do not exist and validates clean.
 
     Scoped to the hypotheses the SAME row names, not to the document. A `p2` means "h-001's
     p2" when the row tests h-001; resolving it against every hypothesis in the run would
     accept a sibling's `p2`, which is exactly the cross-citation `_check_prediction_refs`
-    exists to refuse one level down. A row naming no hypothesis at all has nothing to scope
-    to, so it falls back to every declared hypothesis rather than inventing a stricter rule
-    than the format states.
+    refuses one level down. A row naming no hypothesis at all has nothing to scope to, so it
+    falls back to every declared hypothesis rather than inventing a stricter rule than the
+    format states.
 
-    NOT checked: an id in no recognized namespace. `:L l-NNN.lead_preds` is a documented
-    block the parser does not project (#820), so its `lp*` would resolve against nothing —
-    reporting those would deny a document the format permits.
+    NOT checked: an id in no recognized namespace. `:L l-NNN.lead_preds` is a documented block
+    the parser does not project, so its `lp*` would resolve against nothing — reporting those
+    would deny a document the format permits.
     """
     by_hyp = {
         hid: _declared_commitments(hyp)
@@ -382,12 +361,11 @@ def _check_prediction_refs(companion: CompanionBody) -> list[str]:
     """A resolution matches only the predictions and refutations its own hypothesis
     declared.
 
-    The reference the parser derives by heuristic instead of by lookup:
-    `matched_prediction_ids` is the id-shaped head tokens, and nothing joined the result
-    back to the declaring `:H h-NNN.preds` block. So a typo, a forward reference, and a
-    *sibling's* `p1` all parsed clean and validated clean — a `++` could rest on a
-    prediction that does not exist, or on one belonging to the hypothesis it is being
-    weighed against.
+    The parser derives this reference by heuristic, not by lookup: `matched_prediction_ids` is
+    just the id-shaped head tokens, never joined back to the declaring `:H h-NNN.preds` block.
+    Unchecked, a typo, a forward reference and a *sibling's* `p1` all parse clean — a `++`
+    could rest on a prediction that does not exist, or on one belonging to the hypothesis it is
+    being weighed against.
     """
     errors: list[str] = []
     declared_by_hyp = {
@@ -426,38 +404,33 @@ def _check_authz_contract_ids(companion: CompanionBody) -> list[str]:
     """An `ac*` id is declared by AT MOST ONE LIVE hypothesis.
 
     `:R authz` has no hypothesis column — the row names the contract it fulfills and nothing
-    else — so the id is what carries the binding, and every reader resolves it document-wide.
-    `_check_benign_authz` is the one that matters: it discharges a contract by bare id, so two
-    live hypotheses that each numbered their first contract `ac1` were BOTH discharged by one
-    row and a `disposition: benign` write gate failed open with no diagnostic (#853/F-16).
+    else — so the id carries the binding and every reader resolves it document-wide.
+    `_check_benign_authz` discharges a contract by bare id, so two live hypotheses that each
+    numbered their first contract `ac1` would BOTH be discharged by one row, failing a
+    `disposition: benign` write gate open with no diagnostic.
 
-    The rule is on the DECLARING side rather than a scoping rule on the resolving side,
-    because scoping cannot be recovered from a row that never carried the hypothesis: the
-    honest fix for an ambiguous id is to refuse it. Per-hypothesis numbering is the natural
-    mistake here — `p*` and `r*` DO restart per hypothesis in every shipped example — so the
-    error says which ids collide and that `ac*` numbers across the document.
+    The rule is on the DECLARING side rather than a scoping rule on the resolving side, because
+    scoping cannot be recovered from a row that never carried the hypothesis: the honest fix
+    for an ambiguous id is to refuse it. Per-hypothesis numbering is the natural mistake here —
+    `p*` and `r*` DO restart per hypothesis — so the error says which ids collide and that
+    `ac*` numbers across the document.
 
-    LIVE, not declared, and the scope is what makes the rule repairable. `investigation.md`
-    is append-only and `:H` rows are immutable, so a collision already on disk cannot be
-    edited away — under a declared-set reading, every later write to that document would be
-    denied for a row the author is no longer allowed to touch, and `learning/core/persist.py`
-    dead-letters the run. Refuting one of the two is an in-grammar, append-only move that
-    ends the ambiguity honestly. Two hypotheses that are both still live is the case with no
-    honest reading, and it stays refused.
+    LIVE, not declared, and the scope is what makes the rule repairable. `investigation.md` is
+    append-only and `:H` rows are immutable, so a collision already on disk cannot be edited
+    away: under a declared-set reading every later write would be denied for a row the author
+    may no longer touch, and `learning/core/persist.py` dead-letters the run. Refuting one of
+    the two is an in-grammar, append-only move that ends the ambiguity honestly. Two live
+    hypotheses is the case with no honest reading, and stays refused.
 
-    What refuting does NOT do is make the id unambiguous, and this docstring used to claim it
-    did — "a contract on a refuted hypothesis discharges nothing, so a collision there costs
-    nothing" was true of the CONTRACT and false of the ROW that fulfills it (#876/F-3). The
-    `:R authz` row carries no hypothesis column, so the refuted declarer's row discharged the
-    live declarer's same-numbered contract too. `_check_benign_authz` is what closes that, by
-    scoping a shared id to the ANCHOR KIND both sides carry; the exemption here is what leaves
-    the author a repair, and it is not on its own sufficient.
+    Refuting does NOT make the id unambiguous — the `:R authz` row carries no hypothesis
+    column, so the refuted declarer's row discharges the live declarer's same-numbered contract
+    too. `_check_benign_authz` closes that by scoping a shared id to the ANCHOR KIND both sides
+    carry; the exemption here leaves the author a repair and is not on its own sufficient.
 
     Only the cross-hypothesis collision reaches here: `_extend_by_id` keeps the first row per
-    id when ONE `:H <h>.authz` block repeats an id, so the folded record this walks carries
-    one contract either way. That repeat is not silent — the projector warns on it, because
-    keeping the first row DISCARDS the second contract's predicate and the benign gate would
-    then never have to satisfy it.
+    id when ONE `:H <h>.authz` block repeats an id, so the folded record carries one contract
+    either way. That repeat is not silent — the projector warns on it, because keeping the
+    first row DISCARDS the second contract's predicate.
     """
     live = set(_walkers.live_hypothesis_ids(companion))
     declared_by: dict[str, set[str]] = {}
@@ -556,21 +529,14 @@ def _check_append_only(
 
 
 def _check_strong_move_provenance(companion: CompanionBody) -> list[str]:
-    """Both halves of a strong move's provenance tuple, in one walk: WHICH
-    observation it rests on, and WHICH pre-committed claim that observation
-    settled.
+    """Both halves of a strong move's provenance tuple, in one walk: WHICH observation it
+    rests on, and WHICH pre-committed claim that observation settled. One walk so a row
+    missing both reports both together.
 
-    The citation half is new (#798) and lives here rather than in a walk of its
-    own: it shares this one's `++`/`--` filter and answers the other half of the
-    same question, so a row missing both reports both together instead of once
-    here and once eighty lines away.
-
-    The citation half also catches how the ids go missing in practice. The head
-    is `[<lead> <ids…> <severity> ⟂ <edges>]` and severity is positional-last, so
-    a row that omits severity has its ids read as the severity and parses as
-    citing nothing — which is how `golden-v2sshd`'s
-    `h-002 null → ++ [l-001 p1,p2,p3 ⟂ e-002]` sat in the corpus with three
-    predictions written down and none of them bound (#798).
+    The citation half catches how the ids go missing in practice: the head is
+    `[<lead> <ids…> <severity> ⟂ <edges>]` with severity positional-last, so a row that omits
+    severity has its ids read as the severity and parses as citing nothing —
+    `h-002 null → ++ [l-001 p1,p2,p3 ⟂ e-002]` writes three predictions and binds none.
     """
     auth_by_edge: dict[str, str] = {}
     for e in _walkers.all_edges(companion):
@@ -698,11 +664,10 @@ def _swap_cell(cells: list[str], at: int, replacement: str) -> str:
 
 
 #: The refinement keys `:R attr_updates` accepts. `class` sharpens the classification,
-#: `attrs.<name>` an attribute, and `ident` (#836) the vertex's effective IDENTIFIER — the
-#: operation every measured bad-key refusal was reaching for, and which had no legal spelling
-#: before. `ident` lands in a distinct top-level `identifier` slot, never in `attributes`:
-#: `_check_benign_open_slots` refuses a benign close on any `??`-valued ATTRIBUTE, so routing
-#: it there would make `ident=??` newly block a benign disposition.
+#: `attrs.<name>` an attribute, and `ident` the vertex's effective IDENTIFIER. `ident` lands in
+#: a distinct top-level `identifier` slot, never in `attributes`: `_check_benign_open_slots`
+#: refuses a benign close on any `??`-valued ATTRIBUTE, so routing it there would make
+#: `ident=??` block a benign disposition.
 IDENT_REFINEMENT_KEY = "ident"
 
 
@@ -718,21 +683,20 @@ def _check_attr_update_keys(proposed_text: str) -> list[Diagnostic]:
     back and offers a corrected one. The fold keeps `{key: value}` per target and drops the
     header, so rebuilding a row from it means assuming the conventional
     `resolved_by|target|key|value` order — a convention `_row_dict` does not enforce, since it
-    zips whatever header the block declares. Against `[…|value|key]` that produced a
-    correction with its columns transposed: a "fix" that earns a second refusal (#825).
+    zips whatever header the block declares. Against `[…|value|key]` that yields a correction
+    with its columns transposed: a "fix" that earns a second refusal.
 
     Here the `key` CELL is replaced in place and every other cell stays where the author put
     it. A block whose header names no `key` column has no cell to substitute and no row this
     can honestly point at, so it yields nothing — the row is not a refinement at all.
 
-    The VALUE cell is the second family and it is a REFUSAL, not a warning (#876/F-6). A
-    present-but-blank value is not inert: `_apply_attr_updates` assigned it unconditionally,
-    and since neither `_has_open_slot("")` nor `_is_unresolved("")` reads `""` as open, the
-    empty cell was not taken as a downgrade but as a RESOLUTION — `l-001|v-001|class|` and
-    `l-001|v-001|attrs.knowledge|` made two benign-blocking errors vanish and the document
-    close. The truncated 3-cell row is the control: it is already refused by the cell-count
-    rule, so the hole is exactly the cell that is present and says nothing. No `fix` is
-    offered, because the missing value is the one thing this check cannot supply."""
+    The VALUE cell is the second family, and a REFUSAL rather than a warning. A present-but-
+    blank value is not inert: `_apply_attr_updates` would assign it, and since neither
+    `_has_open_slot("")` nor `_is_unresolved("")` reads `""` as open, the empty cell reads as a
+    RESOLUTION — `l-001|v-001|class|` makes a benign-blocking error vanish. The truncated
+    3-cell row is already refused by the cell-count rule, so the hole is exactly the cell that
+    is present and says nothing. No `fix` is offered: the missing value is the one thing this
+    check cannot supply."""
     out: list[Diagnostic] = []
     for block in iter_blocks(proposed_text):
         cols = block.columns or []
@@ -776,30 +740,26 @@ def _check_attr_update_keys(proposed_text: str) -> list[Diagnostic]:
                     _swap_cell(cells, at, "class"),
                     _swap_cell(cells, at, f"attrs.{key}"),
                 ),
-                # #836: THE one warn-severity family. The row is INERT — it changes no
-                # effective vertex state — so the block it rides in is worth keeping, and
-                # the model repairs the row with `fix_row` instead of re-emitting the whole
-                # block. Every other family stays a refusal: nothing is written and the
-                # model re-sends.
+                # THE one warn-severity family. The row is INERT — it changes no effective
+                # vertex state — so the block it rides in is worth keeping, and the model
+                # repairs the row with `fix_row` instead of re-emitting the whole block.
+                # Every other family stays a refusal: nothing is written and the model
+                # re-sends.
                 severity="warning",
             ))
     return out
 
 
 def _check_attr_update_targets(companion: CompanionBody) -> list[str]:
-    """#836/H8 — a `:R attr_updates` row must name a graph object the document DECLARES.
+    """A `:R attr_updates` row must name a graph object the document DECLARES.
 
-    Before this check an undeclared target landed with zero diagnostics and
-    `_effective_vertex_state` fabricated the object out of the refinement alone. That was
-    tolerable while nothing read the effective identifier; `ident` becoming writable is
-    exactly what invalidates that argument, because the fabricated vertex's identifier now
-    carries a value that flows from alert content.
+    Otherwise an undeclared target lands with zero diagnostics and `_effective_vertex_state`
+    fabricates the object out of the refinement alone — and since `ident` is writable, the
+    fabricated vertex's identifier carries a value that flows from alert content.
 
     EDGES count as declared targets, not only vertices. `:R attr_updates` is the surface for
     recording facts learned about ANY existing graph object, and refining an edge is ordinary
-    practice — `l-001|e-001|attrs.auth_method|password` appears in the checked-in goldens. A
-    vertex-only reading would refuse a real recorded investigation, which is a different (and
-    much larger) change than closing the fabrication gap."""
+    practice (`l-001|e-001|attrs.auth_method|password` appears in the checked-in goldens)."""
     declared = {
         r.get("id")
         for records in (_walkers.all_vertices(companion), _walkers.all_edges(companion))
@@ -835,27 +795,22 @@ def _is_unresolved(value: Any) -> bool:
     """Does this cell say "not settled yet" — the WHOLE of it, not a substring.
 
     The two markers SKILL.md §Open questions defines, and the three-state progression it
-    documents (`??` → `{a, b, c}` → concrete) is the reason both count: a candidate set is
-    an upgrade from `??`, not a resolution of it. No comma is required — `{internal}` is a
-    one-member set that still has not picked, and demanding the comma made the narrowest
-    open state the one spelling the gate let through (#853/F-15).
+    documents (`??` → `{a, b, c}` → concrete) is why both count: a candidate set is an upgrade
+    from `??`, not a resolution of it. No comma is required — `{internal}` is a one-member set
+    that still has not picked.
 
-    Anchored to the whole value on purpose. A "contains braces" test would refuse a benign
-    close over a legitimate `attrs.cmdline` that happens to carry `{...}`, which is a
-    different and much larger change than closing the gap.
+    Anchored to the whole value on purpose: a "contains braces" test would refuse a benign
+    close over a legitimate `attrs.cmdline` that happens to carry `{...}`.
 
-    An OPENING brace with no close counts as open (#876/F-26). `_has_open_slot` has carried an
-    unterminated-brace guard since a single dropped `}` read as CONCRETE and closed benign over
-    the class it was still enumerating; the ATTRIBUTE arm calls this predicate directly, where
-    `role={internal, dmz` satisfied neither test and read as a settled fact.
+    An OPENING brace with no close counts as open — otherwise a single dropped `}` reads as
+    CONCRETE and closes benign over the class it was still enumerating (`role={internal, dmz`
+    satisfies neither of the other two tests).
 
-    "With no close" is the SAME `count("{") > count("}")` test `_has_open_slot` states one
-    function down, and it is load-bearing on top of the whole-value anchor rather than replaced
-    by it. The anchor alone reads any value that merely BEGINS with a brace as open, closed or
-    not — `attrs.cmdline={ cd /x && ls; } >out` and a JSON-shaped attribute both start with `{`
-    and both carry their close — so it newly refused a benign close over concrete facts. The
-    anchor still does the narrowing the fix needs: a shell command carrying an unclosed `{`
-    does not START with one, so it stays clean.
+    That `count("{") > count("}")` test is load-bearing ON TOP of the whole-value anchor, not a
+    replacement for it. The anchor alone reads any value that merely BEGINS with a brace as
+    open, closed or not — `attrs.cmdline={ cd /x && ls; } >out` and a JSON-shaped attribute
+    both start with `{` and carry their close. The anchor still narrows: a shell command
+    carrying an unclosed `{` does not START with one, so it stays clean.
     """
     if not isinstance(value, str):
         return False
@@ -875,8 +830,8 @@ def _class_slots(classification: str) -> list[str]:
     per-slot form (`role/{internal, dmz}/prov`) as three.
 
     The type prefix is stripped rather than tolerated: SKILL.md says the class cell carries
-    the slash-tuple only, but `compute:{...}` is a spelling models reach for, and under the
-    old whole-cell test the prefix alone was enough to hide the set behind it.
+    the slash-tuple only, but `compute:{...}` is a spelling models reach for, and the prefix
+    alone would otherwise hide the candidate set behind it.
     """
     c = classification.strip()
     head, sep, rest = c.partition(":")
@@ -903,11 +858,10 @@ def _has_open_slot(classification: Any) -> bool:
     if not isinstance(classification, str):
         return False
     slots = _class_slots(classification)
-    # A `{` the author never closed is an UNTERMINATED candidate set, and it has to count as
-    # open: the depth-aware split above folds every slot after it into one cell that is
-    # neither `??` nor a closed `{...}`, so a single dropped `}` read as CONCRETE and closed
-    # benign over the open class it was still enumerating. A stray `}` with no `{` is left
-    # alone — it splits like any other character and hides nothing.
+    # A `{` the author never closed is an UNTERMINATED candidate set and counts as open: the
+    # depth-aware split above folds every slot after it into one cell that is neither `??` nor
+    # a closed `{...}`, so a single dropped `}` would read as CONCRETE. A stray `}` with no
+    # `{` is left alone — it splits like any other character and hides nothing.
     if any(s.count("{") > s.count("}") for s in slots):
         return True
     return any(_is_unresolved(slot) for slot in slots)
@@ -925,9 +879,9 @@ def _seed_vertex_state(
             vid,
             {
                 "classification": cls,
-                # #836: seeded from the DECLARED `:V` identifier. Both construction sites
-                # carry the slot — a slot present at only one of them is a KeyError for the
-                # consumer on every document that does not happen to exercise the other.
+                # Seeded from the DECLARED `:V` identifier. Both construction sites carry the
+                # slot — one present at only one of them is a KeyError for the consumer on
+                # every document that does not happen to exercise the other.
                 "identifier": v.get("identifier", ""),
                 "attributes": dict(v.get("attributes") or {}),
             },
@@ -950,12 +904,10 @@ def _apply_attr_updates(
             tgt, {"classification": "", "identifier": "", "attributes": {}}
         )
         for key, val in updates.items():
-            # A refinement with nothing in its value cell resolves nothing. The parser
-            # defaults an absent value to `""`, and `_has_open_slot("")` / `_is_unresolved("")`
-            # are both False — so assigning it did not read as a downgrade, it read as a
-            # RESOLUTION, and `l-001|v-001|class|` cleared the very `??` the row was meant to
-            # settle (#876/F-6). The no-downgrade guard `_seed_vertex_state` carries two
-            # functions up, on the path whose whole job is to CLEAR an open slot.
+            # A refinement with nothing in its value cell resolves nothing. The parser defaults
+            # an absent value to `""`, and `_has_open_slot("")` / `_is_unresolved("")` are both
+            # False — so assigning it would read not as a downgrade but as a RESOLUTION, and
+            # `l-001|v-001|class|` would clear the very `??` the row was meant to settle.
             # `_check_attr_update_keys` refuses the row outright; this keeps the read side
             # honest on a document that never went through the gate.
             if not isinstance(val, str) or not val.strip():
@@ -1009,10 +961,9 @@ def _declarers_by_contract_id(
     """Every `(hypothesis, anchor kind)` that declares each `ac*` id — LIVE OR NOT.
 
     A different question from the one `_check_authz_contract_ids` indexes, which is why the
-    live filter is not shared. That check asks "is this collision still repairable", and
-    refuting one side is the append-only repair it accepts. This one asks "which contract
-    does a `:R authz` row naming this id answer", and a refuted declarer competes for the row
-    exactly as a live one does: the row carries no hypothesis column either way.
+    live filter is not shared. That check asks "is this collision still repairable"; this one
+    asks "which contract does a `:R authz` row naming this id answer", and a refuted declarer
+    competes for the row exactly as a live one does — the row carries no hypothesis column.
     """
     declared_by: dict[str, list[tuple[str, str]]] = {}
     for hid, hyp in _walkers.all_hypotheses(companion).items():
@@ -1031,21 +982,16 @@ def _authz_contract_error(
     declarers: dict[str, list[tuple[str, str]]],
     verdicts: dict[str, list[tuple[str, str]]],
 ) -> str | None:
-    """Why this ONE contract on this LIVE hypothesis does not close benign — or `None`.
-
-    Split out of `_check_benign_authz` so the shared-id arm can be read on its own; the
-    caller is the walk over live hypotheses and holds no rule of its own.
-    """
+    """Why this ONE contract on this LIVE hypothesis does not close benign — or `None`."""
     cid = contract.get("id", "?")
     anchor = _anchor_kind(contract)
     competing = [(h, a) for h, a in declarers.get(cid, []) if h != hid]
     candidates = verdicts.get(cid) or []
 
     if competing:
-        # Not "if the kinds are both blank": a contract cannot have one. `_hyp_sub_authz_row`
-        # `_require`s `anchor_kind`, so a `:H <h>.authz` row without it is a parse error and
-        # the contract never reaches the companion — which is what makes the kind a usable
-        # discriminator here rather than one more cell that might say nothing.
+        # The anchor kind is always present: `_hyp_sub_authz_row` `_require`s it, so a
+        # `:H <h>.authz` row without one is a parse error and the contract never reaches the
+        # companion. That is what makes the kind a usable discriminator here.
         twins = sorted(h for h, a in competing if a == anchor)
         if twins:
             return (
@@ -1089,30 +1035,26 @@ def _authz_contract_error(
 def _check_benign_authz(companion: CompanionBody) -> list[str]:
     """Every authz contract on a LIVE hypothesis is discharged by an `authorized` row.
 
-    The row that discharges it has to be attributable to it, and a bare `fulfills_contract`
-    id is not always enough. `_check_authz_contract_ids` deliberately exempts a collision
-    whose other side is REFUTED, because on an append-only document refuting is the only
-    repair left once the rows are on disk. That exemption is sound about the CONTRACT — a
-    refuted hypothesis's contract discharges nothing — and was false about the ROW: a
-    `:R authz` row written against the refuted declarer's `ac1`, a different anchor kind
-    asking a different question, discharged the LIVE declarer's `ac1` too, and a benign close
-    landed over a change-management question nobody ever asked (#876/F-3).
+    The row that discharges it has to be attributable to it, and a bare `fulfills_contract` id
+    is not always enough. `_check_authz_contract_ids` exempts a collision whose other side is
+    REFUTED, because on an append-only document refuting is the only repair left once the rows
+    are on disk. That exemption is sound about the CONTRACT and false about the ROW: a
+    `:R authz` row written against the refuted declarer's `ac1` would discharge the LIVE
+    declarer's `ac1` too, landing a benign close over a question nobody ever asked.
 
-    So a shared id is scoped by ANCHOR KIND, which is the one column both sides carry and the
-    one that says which question the row answers. Scoping rather than refusing outright is
-    what keeps the rule repairable: `:H` rows are immutable, so a live contract holding a
-    shared `ac1` could never be renumbered, and "an ambiguous id discharges nothing" would
-    make `disposition: benign` unreachable for the rest of that document's life — over a
-    question the author may well have gone on to answer. Writing the `:R authz` row that
-    carries THIS contract's anchor kind is an ordinary append, and it discharges it.
+    So a shared id is scoped by ANCHOR KIND — the one column both sides carry, and the one that
+    says which question the row answers. Scoping rather than refusing outright keeps the rule
+    repairable: `:H` rows are immutable, so a live contract holding a shared `ac1` can never be
+    renumbered, and "an ambiguous id discharges nothing" would make `disposition: benign`
+    unreachable for the rest of that document's life. Writing the `:R authz` row that carries
+    THIS contract's anchor kind is an ordinary append, and it discharges it.
 
-    Two declarers sharing an id AND an anchor kind is the case with no honest reading left,
-    and that one is refused: no row can be attributed, so none discharges.
+    Two declarers sharing an id AND an anchor kind has no honest reading left and is refused:
+    no row can be attributed, so none discharges.
 
     The scoping applies only where the id is shared. A contract nobody competes for is
-    discharged by its id alone, as it always was — the `:R authz` rows in the shipped corpus
-    do carry an anchor kind, but making it load-bearing document-wide would newly refuse
-    every document that left the cell empty, which is a far larger change than this gap.
+    discharged by its id alone; making the anchor kind load-bearing document-wide would refuse
+    every document that left the cell empty.
     """
     live = set(_walkers.live_hypothesis_ids(companion))
     hyps = _walkers.all_hypotheses(companion)
@@ -1141,10 +1083,9 @@ def _check_benign_authz(companion: CompanionBody) -> list[str]:
 
 
 def _check_conclude_vocab(companion: CompanionBody) -> list[str]:
-    """`conclude`'s disposition is the run's headline, and until now invlang accepted any
-    string there — the one conclude field carrying a project-general vocabulary was the one
-    field with no vocabulary check. An out-of-enum value silently skipped the benign gating
-    below, so a typo bought a document past the checks a `benign` conclusion has to pass."""
+    """`conclude`'s disposition is the run's headline, so it carries a vocabulary check like
+    every other conclude field: an out-of-enum value silently skips the benign gating below,
+    and a typo would buy a document past the checks a `benign` conclusion has to pass."""
     disposition = (companion.get("conclude") or {}).get("disposition")
     return _check_vocab(
         disposition, vocab.DISPOSITION,
@@ -1169,9 +1110,8 @@ def _lead_returned_a_result(lead: FindingRecord) -> bool:
     Deliberately stricter than `_check_loop_close`'s committed test, which counts ANY outcome:
     `:L findings`' `fail_reason` column projects into `outcome` as `failure_reason`, so a lead
     whose only recorded outcome is "the query errored" reads as committed there. For closing a
-    loop that is right — the loop was worked. Here it is the exact shape the gate exists to
-    reject: a failed query tested the alerted entity for nothing, and is one column away from
-    being the cheapest possible `entity_check`.
+    loop that is right — the loop was worked. Here it is the shape the gate exists to reject:
+    a failed query tested the alerted entity for nothing.
     """
     if lead.get("resolutions"):
         return True
@@ -1183,35 +1123,25 @@ def _lead_returned_a_result(lead: FindingRecord) -> bool:
 
 def _check_false_positive_gating(companion: CompanionBody) -> list[str]:
     """`false-positive` is the one disposition that closes a case on a claim about the RULE, so
-    it is the one that has to prove it also looked at the entity (#806).
+    it is the one that has to prove it also looked at the entity.
 
-    The exit exists because a mis-keyed rule fires forever and investigating each firing costs
-    what the investigation costs — `pr815-rerun-0808` settled the refutation in 7 queries and
-    then spent 124 more attributing the failing source. What it never did was ask whether db-1
-    itself was compromised, which it was. So the gate is not "did you conclude carefully", it is
-    "name the lead that looked at the alerted entity, and let me check it ran".
-
-    Three things are checked and each one is a way the exit could otherwise be faked:
+    Three things are checked, each a way the exit could otherwise be faked:
 
       * `detection_notes` — an FP close with no stated defect is a close with no reason, and
         `none` is not a defect: the format's empty marker is rejected here, not read as prose;
       * `entity_check` names a lead that EXISTS and RETURNED A RESULT — a planned-but-never-
         dispatched lead is the shape of an investigation that stopped at the plan, and a lead
         carrying only a `fail_reason` is the shape of one whose query never landed;
-      * that lead targets a vertex the PROLOGUE carried — an entity the ALERT named, not one the
-        refutation introduced. Without this clause `pr815-rerun-0808` passes on l-011 or l-015,
-        both committed, both about the workstation the rule wrongly implicated.
+      * that lead targets a vertex the PROLOGUE carried — an entity the ALERT named, not one
+        the refutation introduced.
 
     TWO things it does NOT check, both about the QUESTION the named lead asked:
 
-      * whether it was a good one. In that run l-007 targeted db-1 and committed, so this gate
-        would have passed it — it read `authorized_keys` for `svc.config-mgmt` and never for
-        `root`, three rows below. Distinguishing those two is a question about query parameters,
-        which do not reach this layer and are not in the companion at all;
+      * whether it was a good one. Distinguishing "read authorized_keys for the service account"
+        from "…for root" is a question about query parameters, which never reach this layer;
       * whether it was INDEPENDENT of the alert's claim. Nothing here separates the lead that
-        tested the host for its own suspicion from the lead that refuted the correlation — the
-        refutation's own leads target the alerted host too, and commit. A run can therefore
-        satisfy this gate with work it had already done before the refutation landed.
+        tested the host for its own suspicion from the lead that refuted the correlation, so a
+        run can satisfy this gate with work it had already done before the refutation landed.
 
     Closing either gap means a fixed indicator set the runtime executes rather than the model
     choosing; this gate is the structural half, and its limits are recorded here so the next
@@ -1271,24 +1201,21 @@ def _check_benign_grounding(companion: CompanionBody) -> list[str]:
     """`benign` needs a log that recorded WHAT THE ALERT WAS ABOUT.
 
     The other two benign checks refuse CONTRADICTIONS — an unresolved slot, an unfulfilled
-    contract — which is exactly the right shape for a log that did the work, and vacuous for
-    one that did not: a document with no vertices has no slot to be open and no hypothesis to
-    carry a contract, so it clears a price it never paid. Absent, empty, whitespace-only and
-    fence-less `investigation.md` files all reach the close that way, and `benign` is the
-    disposition that asserts the alerted activity was accounted for. Nothing accounts for
-    anything in a log that never says what was alerted on.
+    contract — which is the right shape for a log that did the work, and vacuous for one that
+    did not: a document with no vertices has no slot to be open and no hypothesis to carry a
+    contract, so it clears a price it never paid. Absent, empty, whitespace-only and fence-less
+    `investigation.md` files all reach the close that way.
 
-    So the prologue has to carry a vertex, and the point is less the clause itself than what
-    it does to the two beside it: once a vertex is guaranteed, `_check_benign_open_slots` has
-    something to check on every benign close, and "the classification is resolved" stops being
-    a claim a document can satisfy by staying silent. ORIENT writes this block before PLAN
-    runs, so every real run has cleared it long before it can conclude anything — what it
-    refuses is a close over a work log that was never written.
+    So the prologue has to carry a vertex, and the point is what that does to the two checks
+    beside it: once a vertex is guaranteed, `_check_benign_open_slots` has something to check
+    on every benign close, and "the classification is resolved" stops being a claim a document
+    can satisfy by staying silent. ORIENT writes this block before PLAN runs, so every real run
+    clears it long before it can conclude anything.
 
     Deliberately NOT a demand for leads, committed or declared. How much measurement a
     disposition needs is a judgment about the case, which the review gate makes; this is the
-    structural floor beneath it, and a trivially-benign alert closed off the payload alone is
-    a run this must not refuse.
+    structural floor beneath it, and a trivially-benign alert closed off the payload alone is a
+    run this must not refuse.
     """
     if not (companion.get("prologue") or {}).get("vertices"):
         return [
@@ -1312,12 +1239,12 @@ def _check_benign_gating(companion: CompanionBody) -> list[str]:
 class _Price:
     """What a keyword costs, and why it costs it.
 
-    Two columns because the price has two audiences. `check` answers whether THIS document
-    has paid, and its strings name the blocking vertex, contract or row. `rationale` answers
-    why the price exists at all, which is what a model that has just been refused needs in
-    order to choose between paying it and concluding in another vocabulary — and it is a
-    property of the KEYWORD, equally true at either boundary, so it belongs beside the check
-    rather than in a second keyword-keyed table at whichever boundary happens to print it.
+    Two columns because the price has two audiences. `check` answers whether THIS document has
+    paid, and its strings name the blocking vertex, contract or row. `rationale` answers why
+    the price exists at all — what a refused model needs in order to choose between paying it
+    and concluding in another vocabulary. The rationale is a property of the KEYWORD, equally
+    true at either boundary, so it belongs beside the check rather than in a second
+    keyword-keyed table at whichever boundary happens to print it.
     """
 
     check: Callable[[CompanionBody], list[str]]
@@ -1325,25 +1252,22 @@ class _Price:
 
 
 #: The structural price of a keyword, keyed by the keyword. Two dispositions carry one; the
-#: rest carry none. Declared as a table rather than as a guard clause inside each gate so a
-#: third priced keyword is a row here, not a third copy of the "is this my disposition"
-#: preamble — which is the line that has to get #722 right every time it is written.
+#: rest carry none. A table rather than a guard clause inside each gate, so a third priced
+#: keyword is a row here and not a third copy of the "is this my disposition" preamble that
+#: has to get the keyword normalization right every time.
 #:
-#: Two readers dispatch on it and both must, because a price owed by the document alone is
-#: not owed at all: `_check_disposition_gating` on what `:T conclude` says, and
+#: Two readers dispatch on it and both must, because a price owed by the document alone is not
+#: owed at all: `_check_disposition_gating` on what `:T conclude` says, and
 #: `disposition_entry_price` on what the close is about to commit. Adding a row arms both.
 #:
-#: The rationale rides in the row for the same reason (#879). The close briefly kept its own
-#: `{keyword: prose}` table, which is the owner/consumer split this issue was about wearing a
-#: different hat: a third row here would have been collected but not explained, and
-#: `lint_half_read_table` cannot see that shape — a consumer enumerating EVERY key is its
-#: documented blind spot, so the ratchet that just cleaned this site would not notice it
-#: regrowing. One row, both readers, nothing to keep in sync.
-#: Each row is BOUND TO A NAME rather than built inline in the table, and that is load-bearing
-#: rather than style: `lint_half_read_table` recognizes a keyed gate table only when every
-#: value is a `Name`/`Attribute`/`Lambda` — "each key has its own ANSWER" — so writing these as
-#: `_Price(...)` calls in the literal makes the table invisible to the one gate that watches
-#: it, disarming it for every consumer at once and silently dropping its other findings too.
+#: The rationale rides in the row so a new keyword cannot be collected but left unexplained —
+#: `lint_half_read_table`'s documented blind spot is a consumer that enumerates EVERY key, so
+#: a second `{keyword: prose}` table elsewhere would not be caught drifting.
+#:
+#: Each row is BOUND TO A NAME rather than built inline, and that is load-bearing:
+#: `lint_half_read_table` recognizes a keyed gate table only when every value is a
+#: `Name`/`Attribute`/`Lambda`, so writing these as `_Price(...)` calls in the literal makes
+#: the table invisible to the gate that watches it and drops its other findings too.
 _BENIGN_PRICE = _Price(
     check=_check_benign_gating,
     rationale=(
@@ -1374,8 +1298,8 @@ class EntryPrice:
     """What a close still owes for its keyword, and why that keyword owes anything.
 
     Both halves come back from ONE dispatch so a caller cannot look the second up on a
-    differently-normalized value than the first — which is how the refusal would lose its
-    explanation on exactly the zero-width-laced keyword #722 exists for.
+    differently-normalized value than the first — which would lose the refusal's explanation on
+    exactly the zero-width-laced keyword normalization exists for.
     """
 
     owed: tuple[str, ...]
@@ -1396,29 +1320,26 @@ def disposition_entry_price(disposition: str, companion_text: str) -> EntryPrice
     `investigation.md` write; `report.md` is written by `close_investigation`, which takes its
     disposition as a tool argument and never reads the companion. Without a second reader an
     entry price is bypassable by writing `:T conclude` with a cheaper keyword — or none — and
-    passing the priced one to the close, which is the artifact the learning loop, the evals
-    and the ticket lane all actually read.
+    passing the priced one to the close, which is the artifact the learning loop, the evals and
+    the ticket lane all actually read.
 
     The mirror of `_check_disposition_gating`, and deliberately the same table read: that one
-    dispatches on the disposition the DOCUMENT wrote, this one on the disposition the CALLER
-    is about to commit, and a row added to `_DISPOSITION_GATES` is collected at both the day
-    it lands. #806 shipped this half as a `false-positive`-only reader, which left `benign`
-    priced at the write gate and collected nowhere at the close (#879) — the half-read table
-    the two-sided phrasing here exists to prevent.
+    dispatches on the disposition the DOCUMENT wrote, this one on the disposition the CALLER is
+    about to commit, so a row added to `_DISPOSITION_GATES` is collected at both.
 
-    `disposition` is normalized through `normalized_disposition` for the same #722 reason the
+    `disposition` is normalized through `normalized_disposition` for the same reason the
     write-side dispatch is: a keyword is judged on what it RENDERS as, so a zero-width
     character cannot turn a gate off. Typed `str` rather than `object` even though the
     normalizer accepts anything: an unrecognized value takes the unpriced branch, so this
     dispatch fails OPEN on a wrong one, and `object` would let the type checker pass a caller
-    that swapped these two arguments — both are `str` — and silently waive the price. The
-    write-side dispatch reads a value off a parsed DOCUMENT and keeps the wider type honestly;
-    a caller of this one always holds a keyword. What each price means about an ABSENT
-    companion is the gate's own business, and both priced ones answer it the same way for
-    different reasons: `false-positive` demands stated content, so nothing written owes
-    everything, and `benign` demands a prologue vertex beneath its contradiction checks
-    (`_check_benign_grounding`), because those checks are vacuous over a document with no
-    vertices and a close on an empty log is the case they exist to refuse.
+    that swapped these two arguments — both are `str` — and silently waive the price. (The
+    write-side dispatch reads a value off a parsed DOCUMENT and keeps the wider type honestly.)
+
+    What each price means about an ABSENT companion is the gate's own business, and both priced
+    ones answer it the same way for different reasons: `false-positive` demands stated content,
+    so nothing written owes everything, and `benign` demands a prologue vertex beneath its
+    contradiction checks (`_check_benign_grounding`), which are vacuous over a document with no
+    vertices.
     """
     priced = normalized_disposition(disposition)
     price = _DISPOSITION_GATES.get(priced) if priced else None
@@ -1431,11 +1352,11 @@ def disposition_entry_price(disposition: str, companion_text: str) -> EntryPrice
 def _check_disposition_gating(companion: CompanionBody) -> list[str]:
     """Run the structural checks this run's disposition is priced at, and only those.
 
-    Dispatched on what the value RENDERS as (#722). This is the ONE branch that decides
-    whether a disposition's structural checks run at all, so a zero-width character clinging
-    to the keyword used to turn them all off — a gate failing open on an invisible character
-    in model-authored text. `_check_conclude_vocab` denies the laced spelling separately, and
-    the two rules stay independent on purpose: either alone would leave a hole.
+    Dispatched on what the value RENDERS as. This is the ONE branch that decides whether a
+    disposition's structural checks run at all, so a zero-width character clinging to the
+    keyword would turn them all off — a gate failing open on an invisible character in
+    model-authored text. `_check_conclude_vocab` denies the laced spelling separately, and the
+    two rules stay independent on purpose: either alone would leave a hole.
     """
     disposition = normalized_disposition(
         (companion.get("conclude") or {}).get("disposition")
@@ -1475,12 +1396,9 @@ def _check_loop_close(companion: CompanionBody) -> list[str]:
 def diagnose(
     proposed_text: str, current_text: str | None = None
 ) -> list[Diagnostic]:
-    """The validator proper. Same checks in the same order as before; the only change is
-    that a failure now arrives as a `Diagnostic` rather than a bare string, so a caller
-    that wants to point at the offending row can.
-
-    `validate_companion` remains the string surface and is what nearly everything calls —
-    see its docstring."""
+    """The validator proper. Failures arrive as `Diagnostic`s so a caller that wants to point
+    at the offending row can. `validate_companion` is the string surface over this and is what
+    nearly everything calls."""
     proposed_text = _normalize_newlines(proposed_text)
     if current_text is not None:
         current_text = _normalize_newlines(current_text)
@@ -1518,35 +1436,29 @@ def diagnose(
 
 
 def warn_diagnostics(text: str) -> tuple[Diagnostic, ...]:
-    """#836/M3 — the REPAIR WINDOW, derived from a document's current bytes and stored nowhere.
+    """The REPAIR WINDOW, derived from a document's current bytes and stored nowhere.
 
-    The window is not state anything records: it is `diagnose`'s warn-severity findings over
-    whatever is on disk right now. That is why it cannot go stale, cannot disagree with the
-    file, needs no `AgentDeps` field, and survives a freshly constructed deps object. Each
-    finding's `locus.row_text` is how `fix_row` addresses the row — the row as PARSED (the
-    tokenizer strips it), which is also the text the warning prints, so the model's copy-paste
-    round trip closes.
+    Not state anything records: it is `diagnose`'s warn-severity findings over whatever is on
+    disk right now, so it cannot go stale, cannot disagree with the file, and survives a
+    freshly constructed deps object. Each finding's `locus.row_text` is how `fix_row` addresses
+    the row — the row as PARSED (the tokenizer strips it), which is also the text the warning
+    prints, so the model's copy-paste round trip closes.
 
     No baseline: append-only is judged against history, but a warning is a property of the
-    document as it stands, and the callers derive over one text.
-
-    Lives here rather than beside its callers because this module already owns `Diagnostic`
-    and `diagnose`, and giving the type a second importer would buy nothing."""
+    document as it stands."""
     return tuple(d for d in diagnose(text) if d.severity == "warning")
 
 
 def validate_companion(
     proposed_text: str, current_text: str | None = None
 ) -> list[str]:
-    """The string surface over `diagnose`, kept because it is what the validator's callers
-    are written against: `learning/core/persist.py`, and thirteen assertion sites across
-    five suites that do substring work on the elements. `_artifact_schema` is the one
-    caller that wants the structure and calls `diagnose` directly.
+    """The string surface over `diagnose`, which is what the validator's callers are written
+    against. `_artifact_schema` is the one caller that wants the structure and calls `diagnose`
+    directly.
 
-    ERROR severity only (#836). Its one production caller reads this list as "reasons to
-    refuse the document" — persist dead-letters a run on any element — and a warn-family row
-    is explicitly not that: the run reaches the learning loop with it. Returning warnings here
-    would make a warn-only document unprocessable, which is the exact failure O2 removes."""
+    ERROR severity only. Its production caller reads this list as "reasons to refuse the
+    document" — persist dead-letters a run on any element — and a warn-family row is explicitly
+    not that: the run reaches the learning loop with it."""
     return [
         d.message for d in diagnose(proposed_text, current_text) if d.severity != "warning"
     ]

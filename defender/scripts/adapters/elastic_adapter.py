@@ -142,15 +142,12 @@ DEFAULT_SORT = SORT_NEWEST_FIRST
 
 
 def resolve_sort(sort: str) -> str:
-    """THE membership test for this adapter's sort vocabulary — the owner's answer, so no
-    caller re-derives what a value in `SORT_ORDERS` means.
+    """THE membership test for this adapter's sort vocabulary, so no caller re-derives what a
+    value in `SORT_ORDERS` means.
 
-    The order used to be hardcoded `desc` (#826 item 2): every capped result was the 20 most
-    RECENT matching docs, and a lead asking what happened FIRST in a window was answered with
-    what happened last — with no parameter that could ask otherwise. `desc` remains the
-    default, so every existing call keeps its exact behaviour; what is added is the ability to
-    ask for the OTHER end of the same window. That is deliberately not pagination: `asc` and
-    `desc` are the two ENDS a bounded window has, and reaching a middle slice is still the
+    Because results are capped, the order decides WHICH end of the window comes back — `desc`
+    (the default) the newest matching docs, `asc` the oldest. Deliberately not pagination:
+    those are the only two ends a bounded window has, and reaching a middle slice is the
     window's job, not a cursor's.
     """
     if sort not in SORT_ORDERS:
@@ -229,13 +226,10 @@ def search_envelope(index: str, docs: list, total: int, truncated: bool, sort: s
         "index": index,
         "total": total,
         "returned": len(docs),
-        # WHICH end of the window these docs came from. `truncated` says a slice was taken;
-        # without the order it was taken in, a reader of the envelope (or of the payload on
-        # disk, long after the call) cannot tell whether the 20 it holds are the window's
-        # first or its last — the same ambiguity the hardcoded order left in the call itself.
-        # Echoed, not re-resolved: `_build_search_body` is the one membership test on this
-        # path and it runs BEFORE the request, so a second one here could only ever refuse a
-        # value Elasticsearch has already sorted by.
+        # WHICH end of the window these docs came from: `truncated` says a slice was taken,
+        # and without the order a later reader of the payload on disk cannot tell whether the
+        # 20 it holds are the window's first or its last. Echoed, not re-resolved —
+        # `_build_search_body` already ran the one membership test, before the request.
         "sort": sort,
         "truncated": truncated,
         "hits": docs,
@@ -311,19 +305,14 @@ def esql_payload(query: str, resp: dict) -> dict:
     """The `esql` verb's payload, shaped from the raw ES|QL response.
 
     `values` is left AS THE WIRE SENT IT: rows are bare arrays, cell `i` binding to
-    `columns[i]`. The adapter used to re-zip them into per-row dicts, which restated every
-    field name on every row — 1,778 KB of recorded payloads where 1,196 KB says the same
-    thing, on the payload class gather reads most (#834). The binding is not lost, it is
-    DERIVED at read time from `columns`, which the wire already states once.
-
-    Two things had documented the positional form all along, and both were wrong about
-    production for five weeks because the zip contradicted them: `sql.py`'s ES|QL hint (the
-    one printed on every failed reducer query) and `defender-sql.md`'s ES|QL idiom. Nothing
-    downstream had to change to make this land; they became true.
+    `columns[i]`. Do not re-zip them into per-row dicts — that restates every field name on
+    every row, and on the payload class gather reads most it roughly doubles what is recorded
+    to disk. The binding is not lost, it is DERIVED at read time from `columns`, which the
+    wire states once. `sql.py`'s ES|QL hint and `defender-sql.md`'s idiom both document this
+    positional form.
 
     Pure, and separate from the verb, so `evals/oracle_golden/controls.py` can produce the
-    same shape through the same code instead of its own second copy of the zip — and so the
-    shape is testable without an HTTP seam.
+    same shape through the same code, and so the shape is testable without an HTTP seam.
     """
     values = resp.get("values", [])
     return {

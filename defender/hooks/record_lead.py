@@ -11,15 +11,12 @@ from pathlib import Path
 from defender._io import guarded_mkdir
 from defender._run_paths import LEAD_ID_RE, RunPaths  # noqa: F401 — re-export: this module is the claim gate's import surface
 
-#: `claim_lead`'s three answers, and they are three because a caller has to be able to tell
-#: "the row is on disk and this dispatch owns the id" from "nothing was written" (#855 F-12).
-#: SUCCESS and every silent skip used to share 0 — a falsy goal, a malformed or over-long id,
-#: a failed mkdir, a failed write all returned what a claim returned — and the one live caller
-#: read "not `ALREADY_CLAIMED`" as success. So a `goal=""` the tool schema admits (it is a
-#: bare `str`) dispatched gather under an id with NO leads row: nothing then bounded how many
-#: sessions ran under that id, because the reuse gate is the sidecar's own `O_EXCL` create and
-#: there was no sidecar, and each of them overwrote the last one's `gather_summaries/{id}.md`.
-#: A code that says "did not happen" is what makes the fail-open unwritable at the caller.
+#: `claim_lead`'s three answers. Three, because a caller has to tell "the row is on disk and
+#: this dispatch owns the id" from "nothing was written". If success and every silent skip
+#: shared one code, a `goal=""` (the tool schema admits a bare `str`) would dispatch gather
+#: under an id with NO leads row — and nothing then bounds how many sessions run under that id,
+#: since the reuse gate IS the sidecar's `O_EXCL` create, so each would overwrite the last one's
+#: `gather_summaries/{id}.md`.
 CLAIMED = 1
 NOT_CLAIMED = 0
 ALREADY_CLAIMED = 2
@@ -36,8 +33,8 @@ def claim_lead(dispatch: dict) -> int:
     wtc = dispatch.get("what_to_summarize") or []
 
     # `.strip()` as well as truthiness: the body below records the STRIPPED goal, so a
-    # whitespace-only goal claimed the id and wrote a leads row whose goal is `""` — the same
-    # empty row the falsy arm exists to refuse, reached by a string that is merely not falsy.
+    # whitespace-only goal would claim the id and write a leads row whose goal is `""` — the
+    # same empty row the falsy arm refuses.
     if not run_dir or not lead_id or not goal or not str(goal).strip():
         return NOT_CLAIMED
     if not isinstance(wtc, list):
@@ -57,9 +54,8 @@ def claim_lead(dispatch: dict) -> int:
     body: dict = {"goal": str(goal).strip(), "what_to_summarize": list(wtc)}
     provenance = dispatch.get("provenance")
     if provenance:
-        # K11: the leads table gains a PROVENANCE field. Written only when the caller
-        # names one (the harness's own reserved-id claims) — an absent field reads as
-        # model-authored, since every row already on disk predates this addition.
+        # Written only when the caller names one (the harness's own reserved-id claims) — an
+        # absent field reads as model-authored.
         body["provenance"] = str(provenance)
     payload = json.dumps(body, indent=2) + "\n"
 
@@ -79,10 +75,8 @@ def claim_lead(dispatch: dict) -> int:
         fh = os.fdopen(fd, "w", encoding="utf-8")
     except OSError:
         # THE ONLY branch where this hook still owns `fd`: `fdopen` takes ownership when it
-        # succeeds, and from then on the fd is the file object's to close. `fd` here comes from
-        # `os.open` on a freshly created regular file, so this arm is close to unreachable —
-        # it is kept scoped to the one case rather than deleted so the never-took-ownership
-        # path stays covered without covering anything else.
+        # succeeds. Close to unreachable (`fd` is a freshly created regular file), but kept so
+        # the never-took-ownership path stays covered.
         with contextlib.suppress(OSError):
             os.close(fd)
         with contextlib.suppress(OSError):
@@ -92,15 +86,13 @@ def claim_lead(dispatch: dict) -> int:
         with fh:
             fh.write(payload)
     except OSError:
-        # No `os.close(fd)` (#878 F-36). The `with` closes the fd on the way out INCLUDING when
-        # the failure is the implicit flush inside `close()` — the ENOSPC/EDQUOT/EIO case this
-        # arm exists for — so a second `os.close(fd)` here hit either EBADF or, in the window
-        # before it, whatever unrelated descriptor the OS had since handed that same number.
-        # `contextlib.suppress(OSError)` made both outcomes silent. That race is real rather
-        # than theoretical: `claim_lead` runs on the event-loop thread while lead-0's
-        # fire-and-forget correlation task issues adapter calls through `asyncio.to_thread`
-        # into `subprocess.run`, which opens pipes. `_io.write_guarded`'s replace-mode rollback
-        # is this shape written correctly — it removes the staged file and does not close.
+        # No `os.close(fd)`. The `with` closes the fd on the way out INCLUDING when the failure
+        # is the implicit flush inside `close()` — the ENOSPC/EDQUOT/EIO case this arm exists
+        # for — so a second `os.close(fd)` would hit EBADF or, worse, whatever unrelated
+        # descriptor the OS had since handed that same number, silently. The race is real:
+        # `claim_lead` runs on the event-loop thread while lead-0's fire-and-forget correlation
+        # task issues adapter calls through `asyncio.to_thread` into `subprocess.run`, which
+        # opens pipes.
         with contextlib.suppress(OSError):
             os.unlink(sidecar_path)
         return NOT_CLAIMED

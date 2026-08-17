@@ -8,11 +8,7 @@ Two subcommands:
 `<agent>` is a role name, except that the actor role is bound by two legs with different
 scopes and is therefore named per leg: `actor` (adversarial) and `actor_benign`.
 
-The reason "how did this resolve?" took effort before is that there was NO tool: everyone
-hand-rolled a `bind(MAIN_DEF, …)` probe in a REPL, which is both tedious and a second model of
-the gate waiting to drift from it.
-
-So the one rule this module lives by: **it is a second CONSUMER of the gate, never a second
+The one rule this module lives by: **it is a second CONSUMER of the gate, never a second
 implementation.** `explain` calls `permission.decide_bash` — the same function the driver calls
 — and prints what it returns. An audit tool that models the gate separately is worse than no
 audit tool, because it certifies a policy nobody runs.
@@ -46,10 +42,8 @@ _ROLES = {r.name.lower(): r for r in AgentRole}
 
 # `actor` is ONE role bound by TWO legs with different scopes: the adversarial leg runs both
 # lesson scripts and reads both corpora, the FP-hunting benign leg binds strictly less. A bare
-# `actor` therefore names no single answer — it used to print the adversarial leg's grants
-# under the shared name, so an operator auditing the benign leg was shown a wider scope than it
-# has and the narrower one could not be asked for at all. Each leg gets its own CLI name, and
-# each leg module owns the scope it actually binds (there is no copy here to drift).
+# `actor` therefore names no single answer, so each leg gets its own CLI name and each leg
+# module owns the scope it actually binds (there is no copy here to drift).
 _ACTOR_LEGS = {
     "actor": "defender.learning.pipeline.malicious_actor.run",
     "actor_benign": "defender.learning.pipeline.benign_actor.run",
@@ -66,11 +60,10 @@ def _scope_for(
     role: AgentRole, defender_dir: Path, corpus_name: str | None = None,
     *, agent: str | None = None,
 ) -> RunScope:
-    # `agent` is the CLI NAME, and it defaults to nothing anywhere on this path. A default
-    # would have to be one of the two legs, and would then answer every caller that did not
-    # name one with the ADVERSARIAL leg's wider grants under a name covering both — the exact
-    # defect the per-leg split exists to remove. `None` means "no leg was named", which for
-    # the actor role is a question with no answer rather than a question with a default one.
+    # `agent` is the CLI NAME and has no default anywhere on this path: a default would have to
+    # be one of the two legs, answering every caller that named none with the ADVERSARIAL leg's
+    # wider grants. `None` means "no leg was named" — for the actor role, a question with no
+    # answer rather than one with a default.
     if role is AgentRole.ACTOR:
         from importlib import import_module
 
@@ -96,9 +89,9 @@ def _policy(
     defn: AgentDefinition, run_dir: Path, defender_dir: Path, corpus_name: str | None = None,
     *, agent: str | None = None,
 ) -> AgentPolicy:
-    # effective_tools_for is the one place that knows any role's typed-capability switching
-    # (#632) — this audit tool asks for "the effective tools for this role" and never names a
-    # bit itself, so its own source carries no map of typed capabilities to attack (N4).
+    # effective_tools_for is the one place that knows any role's typed-capability switching.
+    # This tool asks it for "the effective tools for this role" and never names a bit itself, so
+    # its own source carries no map of typed capabilities to attack (N4).
     return compile_policy_for(
         defn, run_dir, scope=_scope_for(defn.role, defender_dir, corpus_name, agent=agent),
         defender_dir=defender_dir, tools=effective_tools_for(defn),
@@ -106,12 +99,12 @@ def _policy(
 
 
 def _read_roots(policy: AgentPolicy, run_dir: Path, defender_dir: Path) -> list[str]:
-    """The roots a read must land within, straight off the gate's own resolver (N1: this tool
-    is a second CONSUMER of the gate, never a second model of it).
+    """The roots a read must land within, straight off the gate's own resolver (N1: a second
+    CONSUMER of the gate, never a second model of it).
 
-    The resolver may raise on a hostile operand (symlink cycle, embedded NUL) — where the gate
-    fails CLOSED, the audit tool reports the fault, because "this cannot be resolved" is the
-    honest answer to "what may this agent read?" and a traceback is not."""
+    The resolver may raise on a hostile operand (symlink cycle, embedded NUL); where the gate
+    fails CLOSED, the audit tool reports the fault rather than raising — "this cannot be
+    resolved" is an honest answer, a traceback is not."""
     from defender.runtime.permission.files import _resolved_read_roots
 
     try:
@@ -128,8 +121,8 @@ def _containment(g: Grant) -> str:
     if g.pins_path:
         base = f"scope: the pattern pins the path (pins_path) — {g.pattern.pattern}"
         # A pins_path grant that ALSO opted into a resolve()+scope recheck on its operand (the
-        # curator's `rm`, #691 MD-3) is not pattern-pinned alone: surface the recheck so the audit
-        # does not hide a real containment the gate applies.
+        # curator's `rm`) is not pattern-pinned alone: surface the recheck so the audit does not
+        # hide a real containment the gate applies.
         if g.resolve_operand:
             base += f"; operand resolve()d + rechecked against {_shapes(g)}"
         return base
@@ -153,11 +146,10 @@ def _show(policy: AgentPolicy, name: str, run_dir: Path, defender_dir: Path) -> 
         print(f"  {s.pattern}")
     if not policy.read_allow:
         print("  (no shape filter — reads are bounded by the roots alone)")
-    # The ROOTS are the containment every read is checked against, and for most roles they
-    # are the whole answer (`read_allow` is empty). Printing only the shape filter answered
-    # "what may this agent read?" with nothing at all — and hid the one thing that differs
-    # between the two actor legs, since the adversarial leg confines to both lesson corpora
-    # and the benign leg to one. Read off the gate's OWN resolver, never re-derived here.
+    # The ROOTS are the containment every read is checked against, and for most roles they are
+    # the whole answer (`read_allow` is empty) — they are also the one thing that differs
+    # between the two actor legs (the adversarial leg confines to both lesson corpora, the
+    # benign leg to one). Read off the gate's OWN resolver, never re-derived here.
     print("  roots:")
     for root in _read_roots(policy, run_dir, defender_dir):
         print(f"    {root}")

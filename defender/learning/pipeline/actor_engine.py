@@ -73,10 +73,9 @@ ACTOR_DEF = AgentDefinition(
     bash_shapes=(_actor_bash_shapes,),
     deps_cls=ActorDeps,
     requires_confine=True,
-    # #665 decision 1: the actor's cwd_anchor moves to repo_root (defender_dir.parent) — the
-    # box's `--workdir`, per DC2, is the auto-created ro PARENT of the defender infra mount, so
-    # a relative `python3 defender/...` operand resolves there instead of at learning_run_dir
-    # (where no `defender/` exists — the issue's own M3a failure mode).
+    # cwd_anchor is repo_root (defender_dir.parent): the box's `--workdir` is the auto-created
+    # ro PARENT of the defender infra mount, so a relative `python3 defender/...` operand
+    # resolves there instead of at learning_run_dir, where no `defender/` exists.
     anchors_on_tree=True,
     deny_reason=_ACTOR_DENY_REASON,
 )
@@ -93,13 +92,12 @@ def _run_actor_pydantic(
     make_model: MakeModel = providers.build_for_effort,
 ) -> str:
     """The actor's limits are stage-fixed, so the context is built HERE rather than taken
-    from the caller — `subagent_timeout()` is read at spawn, never frozen at import (#717).
+    from the caller — `subagent_timeout()` is read at spawn, never frozen at import.
 
-    The context is built FIRST and `bind` reads the transport off it. Binding off the flat
-    parameters instead would leave `ctx.box` a second copy that nothing reads (`run_stage`
-    consumes only the run dir, user, limit and timeout) and that can silently diverge from
-    what the agent was actually bound with. `ctx.salt` is NOT bound (#875): it scopes this
-    stage's PROMPT frames, and a tool return is framed by `wrap_fresh`, which mints its own."""
+    The context is built FIRST and `bind` reads the transport off it; binding off the flat
+    parameters would leave `ctx.box` a second copy nothing reads, free to diverge from what the
+    agent was actually bound with. `ctx.salt` is NOT bound: it scopes this stage's PROMPT
+    frames, while a tool return is framed by `wrap_fresh`, which mints its own."""
     ctx = StageContext(
         learning_run_dir=learning_run_dir, user=user,
         request_limit=ACTOR_REQUEST_LIMIT,

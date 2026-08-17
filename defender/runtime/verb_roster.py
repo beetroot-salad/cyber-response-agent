@@ -1,15 +1,14 @@
 """The grant-derived model-facing verb roster, and the build-time audit over every artifact
-the model reads (#632, 05-early-resolutions R-A2, §7 R8/R9).
+the model reads.
 
 `generate_roster` builds the roster from a `VerbGrant` as DATA — no adapter code executed —
 and writes it to the role's committed path, failing closed (no roster at all) rather than
 falling back to any authored text. `load_roster` reads it back and refuses a hand-edited
 (drifted) file rather than silently trusting it. `audit_read_surfaces` scans every committed
 build-time artifact the model reads for a verb name the relevant role's grant withholds, under
-three attribution rules for how a verb name appears in prose, plus a fourth rule scoring each
-generated roster against its OWN role's grant (never a single role's grant for every surface —
-see the module docstring in `defender/tests/_verb_authorization_632.py` for why that collapses
-two roles' correct rosters into a false offense).
+three attribution rules for how a verb name appears in prose, plus a fourth scoring each
+generated roster against its OWN role's grant — never a single role's grant for every surface,
+which collapses two roles' correct rosters into a false offense.
 """
 from __future__ import annotations
 
@@ -39,19 +38,17 @@ _HEADER_RE = re.compile(r"\A<!-- GENERATED verb-roster role=(\S+) digest=([0-9a-
 #: so it can afford every name the tree can carry, digit-leading ones included; verb names share
 #: the alphabet, so the same fragment spells that group too.
 #:
-#: `_CALL_ID_RE` is the exception and cannot. It is UNANCHORED — it hunts a bare `system.verb`
-#: anywhere in prose — so a digit-leading first character would make it read `1.2`, `0.7` and
-#: every other version string in a markdown surface as a `system.verb` pair. It therefore keeps
-#: an `[a-z]` head over the shared tail: strictly narrower than the real alphabet, which costs
-#: it a digit-leading system that `_QUALIFIED_CALL_RE` still sees, and buys back every false
-#: pair a version number would otherwise mint.
+#: `_CALL_ID_RE` cannot. It is UNANCHORED — it hunts a bare `system.verb` anywhere in prose —
+#: so a digit-leading first character would make it read `1.2`, `0.7` and every other version
+#: string as a `system.verb` pair. It therefore keeps an `[a-z]` head over the shared tail:
+#: narrower than the real alphabet, costing it a digit-leading system, buying back every false
+#: pair a version number would mint.
 #:
-#: NEITHER alphabet is free on its own, and the reason is `audit_read_surfaces`' span
-#: exclusion: a match here suppresses `_bare_offenders` over the text it covers. A match whose
-#: (system, verb) is NOT a real declared pair therefore has to be dropped from the exclusion
-#: set — otherwise `query(system="7", verb="esql")` in a committed surface both fails to
-#: attribute (`7` declares nothing) and hides the bare `esql` the fallback rule would have
-#: caught, which is a withheld verb advertised past the audit.
+#: Either alphabet interacts with `audit_read_surfaces`' span exclusion: a match here
+#: suppresses `_bare_offenders` over the text it covers, so a match whose (system, verb) is NOT
+#: a real declared pair must be dropped from the exclusion set — otherwise
+#: `query(system="7", verb="esql")` both fails to attribute (`7` declares nothing) and hides
+#: the bare `esql` the fallback rule would have caught.
 _QUALIFIED_CALL_RE = re.compile(
     rf"""query\(\s*system\s*=\s*['"]({SYSTEM_PATTERN})['"]\s*,\s*verb\s*=\s*['"]({SYSTEM_PATTERN})['"]"""
 )
@@ -106,7 +103,7 @@ def generate_roster(grant: VerbGrant, *, defender_dir: Path) -> str:
 
 def load_roster(defender_dir: Path, role: str) -> str:
     """The committed roster, refusing a load whose body no longer matches the digest its own
-    header carries — a hand-edit is a load failure, not a silent divergence (§7 R9)."""
+    header carries — a hand-edit is a load failure, not a silent divergence."""
     path = roster_path(defender_dir, role)
     try:
         text = path.read_text(encoding="utf-8")
@@ -123,10 +120,10 @@ def load_roster(defender_dir: Path, role: str) -> str:
 
 
 def model_read_surfaces(defender_dir: Path) -> tuple[Path, ...]:
-    """The enumerated set §7 R8 scopes the correspondence demand to: every system's
-    `SKILL.md`/`execution.md`, every committed query template (including a `_draft` search
-    reaches), and every generated roster on disk — read off the tree fresh on every call, so
-    the scope cannot go stale the way a hand-recalled list would."""
+    """The set the correspondence demand is scoped to: every system's `SKILL.md`/`execution.md`,
+    every committed query template (including a `_draft` search reaches), and every generated
+    roster on disk — read off the tree fresh on every call, so the scope cannot go stale the way
+    a hand-recalled list would."""
     root = Path(defender_dir)
     skills = root / "skills"
     out: list[Path] = []
@@ -208,9 +205,9 @@ def audit_read_surfaces(defender_dir: Path, grants: Mapping[str, VerbGrant]) -> 
     root = Path(defender_dir)
     skills_dir = root / "skills"
     adapters_dir = root / "scripts" / "adapters"
-    # `_system_of` + `is_system_name` rather than a second spelling of either (#914): the
-    # audit's notion of "a system this tree declares" must be the dispatch seam's, or a name
-    # only one of them recognises is a pair the other cannot score.
+    # `_system_of` + `is_system_name` rather than a second spelling of either: the audit's
+    # notion of "a system this tree declares" must be the dispatch seam's, or a name only one of
+    # them recognises is a pair the other cannot score.
     systems = sorted({
         _system_of(p) for p in adapters_dir.glob("*" + ADAPTER_SUFFIX)
         if is_system_name(_system_of(p))
@@ -225,10 +222,9 @@ def audit_read_surfaces(defender_dir: Path, grants: Mapping[str, VerbGrant]) -> 
             continue
         grant = _grant_for_surface(path, grants)
         qualified = _qualified_mentions(text)
-        # A qualified match is only a REAL (system, verb) mention — filtering out incidental
-        # "word.word" prose (`e.g.`, `execution.md`) that the dotted call-id pattern also
-        # matches, which cannot be an offense against a role's grant because it never named an
-        # actual verb.
+        # Keep only REAL (system, verb) mentions, filtering out incidental "word.word" prose
+        # (`e.g.`, `execution.md`) the dotted call-id pattern also matches — it never named an
+        # actual verb, so it cannot be an offense against a role's grant.
         pairs = {
             pair for pair, _ in qualified
             if pair[1] in declared_by_system.get(pair[0], ())

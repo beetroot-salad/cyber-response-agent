@@ -67,10 +67,9 @@ def _judge_bash_shapes(roots: ResolvedRoots) -> tuple[Grant, ...]:
     )
 
 
-#: The benign judge's read-only ticket grant (#632, c18) — the two verbs the runtime's own
-#: `query` tool never uses (`get-ticket`, `key-pattern`), plus `list-tickets`. The adversarial
-#: stage never reads the closed-ticket store; see `_run_judge_pydantic`'s scoping for how the
-#: same definition builds with this grant EMPTIED when that stage switches its capability off.
+#: The benign judge's read-only ticket grant. The adversarial stage never reads the
+#: closed-ticket store; see `_run_judge_pydantic` for how the same definition builds with this
+#: grant EMPTIED when that stage switches its capability off.
 JUDGE_TICKET_PAIRS: tuple[tuple[str, str], ...] = (
     ("ticket", "get-ticket"), ("ticket", "key-pattern"), ("ticket", "list-tickets"),
 )
@@ -79,11 +78,10 @@ JUDGE_DEF = AgentDefinition(
     role=AgentRole.JUDGE,
     model=judge_model,
     effort=judge_effort(),
-    # closed_tickets stays False here — every ToolSet bit on JUDGE_DEF defaults False, so a
-    # generic build (build_judge_agent with no verbs=, a permission-gate probe) never demands
-    # a registry it wasn't handed. `_run_judge_pydantic` is the ONLY site that turns this bit
-    # on, via a runtime replace() that scopes the verb_grant beside it in the SAME step (d73) —
-    # so the real per-leg build never sees this static default at all, agreeing or not.
+    # closed_tickets stays False here, so a generic build (build_judge_agent with no verbs=, a
+    # permission-gate probe) never demands a registry it wasn't handed. `_run_judge_pydantic`
+    # is the ONLY site that turns the bit on, via a replace() that scopes the verb_grant beside
+    # it in the SAME step.
     tools=ToolSet(read=True, bash=True),
     bash_shapes=(_judge_bash_shapes,),
     deps_cls=JudgeDeps,
@@ -114,12 +112,12 @@ def _run_judge_pydantic(
     verbs: Any = None,
 ) -> str:
     """The judge's limits are stage-fixed, so the context is built HERE rather than taken
-    from the caller — `subagent_timeout()` is read at spawn, never frozen at import (#717).
+    from the caller — `subagent_timeout()` is read at spawn, never frozen at import.
 
     The context is built FIRST and `bind` reads the transport off it, so `ctx.box` is what the
     agent was actually bound with rather than a second copy nothing reads. `ctx.salt` is NOT
-    bound (#875): it scopes this stage's PROMPT frames — the set `stage_user_message` announces
-    as one message — and a tool return is framed by `wrap_fresh`, which mints its own."""
+    bound: it scopes this stage's PROMPT frames — the set `stage_user_message` announces as one
+    message — and a tool return is framed by `wrap_fresh`, which mints its own."""
     read_roots = tuple(scope.add_dir) if isinstance(scope.add_dir, list) else ()
     ctx = StageContext(
         learning_run_dir=learning_run_dir, user=user,
@@ -128,10 +126,10 @@ def _run_judge_pydantic(
         box=box, salt=salt,
     )
     tools = replace(JUDGE_DEF.tools, closed_tickets=scope.closed_ticket_read)
-    # d73: the SAME runtime replace() that sets the capability bit scopes the grant beside
-    # it — a build with the tool off is handed the empty deny-all, so the disagreement §7 R7
-    # forbids cannot arise at a stage whose grant lives on a definition it shares with a
-    # capability-ON sibling (the adversarial judge shares JUDGE_DEF with the benign one).
+    # The SAME replace() that sets the capability bit scopes the grant beside it — a build with
+    # the tool off is handed the empty deny-all, so bit and grant cannot disagree at a stage
+    # whose definition it shares with a capability-ON sibling (adversarial shares JUDGE_DEF
+    # with benign).
     effective_grant = JUDGE_DEF.verb_grant if tools.closed_tickets else DENY_ALL
     scoped_def = replace(JUDGE_DEF, tools=tools, verb_grant=effective_grant)
     deps = bind(

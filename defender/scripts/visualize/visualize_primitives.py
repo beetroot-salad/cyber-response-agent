@@ -24,15 +24,13 @@ def esc(s) -> str:
     return html.escape(s if isinstance(s, str) else json.dumps(s, indent=2))
 
 
-#: An `on<word>=`-shaped event-handler attribute pattern, e.g. `onerror=`. `esc()` already
-#: makes this inert HTML (the enclosing `<tag ...>` is neutralized into text), but the
-#: pattern still reads as a live handler to a downstream non-HTML-aware consumer (a plain
-#: text viewer, a naive markdown renderer someone pastes this into) — split it with a
-#: zero-width space, invisible in any HTML rendering.
+#: An `on<word>=`-shaped event-handler attribute, e.g. `onerror=`. `esc()` already makes this
+#: inert HTML, but the pattern still reads as a live handler to a downstream non-HTML-aware
+#: consumer (a plain text viewer, a naive markdown renderer) — split it with a zero-width
+#: space, invisible in any HTML rendering.
 #:
-#: IGNORECASE is load-bearing, not tidiness (#883 F-35): HTML attribute names are
-#: case-insensitive, so `ONERROR=` and `OnError=` ARE the attribute this covers, and a
-#: case-sensitive pattern covers one spelling of the grammar the comment above claims.
+#: IGNORECASE is load-bearing: HTML attribute names are case-insensitive, so `ONERROR=` and
+#: `OnError=` ARE the attribute this covers.
 _EVENT_HANDLER_RE = re.compile(r"\bon(?=[a-zA-Z]\w*\s*=)", re.IGNORECASE)
 
 
@@ -40,9 +38,9 @@ def esc_untrusted(s) -> str:
     """`esc()`, plus the event-handler split above — for text whose source is
     attacker-influenced by construction (a model-authored session store payload, per
     `session_store`'s own access table), as opposed to internal/structural strings."""
-    # The replacement is a CALLABLE, not the literal `"on\u200b"`: under IGNORECASE the
-    # literal rewrites `ONERROR=` to `on\u200bERROR=`, silently case-folding text this
-    # page exists to show verbatim. `m.group(0)` splits the match, casing preserved.
+    # The replacement is a CALLABLE, not the literal `"on\u200b"`: under IGNORECASE that
+    # literal rewrites `ONERROR=` to `on\u200bERROR=`, silently case-folding text this page
+    # exists to show verbatim. `m.group(0)` splits the match, casing preserved.
     return _EVENT_HANDLER_RE.sub(lambda m: m.group(0) + "\u200b", esc(s))
 
 
@@ -131,8 +129,8 @@ def fmt_duration(ms: float | int) -> str:
 
 
 def parse_report(run_dir: Path) -> ReportRead:
-    """This run's report, read through the one accessor every consumer shares (#785). Typed
-    rather than a merged `{**frontmatter, "body": ...}` dict: that shape let the model's own
+    """This run's report, read through the one accessor every consumer shares. Typed rather
+    than a merged `{**frontmatter, "body": ...}` dict: that shape let the model's own
     frontmatter keys collide with the view's, and left each page free to invent its own
     reading of a disposition it could not validate."""
     return read_report(RunPaths(run_dir).report)

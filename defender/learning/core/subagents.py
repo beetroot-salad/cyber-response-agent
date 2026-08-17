@@ -44,8 +44,8 @@ class InProcessSubagents:
 
     def oracle(self, run_dir: Path, actor_story_path: Path,
                learning_run_dir: Path) -> str:
-        # #791: a learning run must never reach the retired stage, so this import stays lazy
-        # — importing this module (as run_cycle.py does) must not pull in the oracle package.
+        # Lazy on purpose: a learning run must never reach this stage, so importing this
+        # module (as run_cycle.py does) must not pull in the oracle package.
         from defender.learning.pipeline.oracle_engine import _run_oracle_pydantic
         from defender.learning.pipeline.oracle.run import invoke_oracle
         return invoke_oracle(run_dir, actor_story_path, learning_run_dir,

@@ -40,20 +40,17 @@ def _is_catalog_template(path: str) -> bool:
     dir), so pointing it at one of those refuses the file for a reason that is not its defect.
 
     `README.md` is excluded by NAME, not by depth: it sits at `{system}/README.md`, exactly
-    where a template sits, so the depth test alone let the content rule refuse a system's
-    catalog notes for "no `id:`" — the very failure this predicate was split out to stop, on
-    the one example of it the docstring above already named.
+    where a template sits, so a depth test alone lets the content rule refuse a system's
+    catalog notes for "no `id:`".
 
     What is NOT excluded is EXTRA depth. A `{system}/sub/x.md` is nobody's catalog note: the
-    shape the catalog documents is two segments, so a third one is a file the content rule
-    should still read and refuse (its parent dir names no system, so the resolver raises and
-    the commit is refused). Keying on `len(parts) == 2` instead would have handed that shape a
-    silent pass — a guard dropped, not a false refusal removed.
+    documented shape is two segments, so a third is a file the content rule should still read
+    and refuse (its parent dir names no system, so the resolver raises). Keying on
+    `len(parts) == 2` would hand that shape a silent pass.
 
     The draft exclusion is `_under_draft`, the DOCUMENTED depth, not "`_draft` appears anywhere
-    in the path": a `{system}/sub/_draft/x.md` is the extra-depth shape the paragraph above
-    keeps in, and a membership test over every segment quietly took it back out — the same
-    dropped guard, reached by the other spelling.
+    in the path": a membership test over every segment would take `{system}/sub/_draft/x.md`
+    back out — the same dropped guard by the other spelling.
     """
     if not path.startswith(CATALOG_REL) or not path.endswith(".md"):
         return False

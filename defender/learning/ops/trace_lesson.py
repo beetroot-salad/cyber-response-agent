@@ -16,13 +16,11 @@ Runs scanned: the durable learning runs dir (``DEFAULT_PATHS.runs_dir`` —
 ``$DEFENDER_LEARNING_STATE_DIR/runs`` or in-repo ``defender/learning/runs/``),
 where the learn worker persists each case's ``report.md`` + ``lessons_loaded.jsonl``.
 Override with ``--runs-dir`` (e.g. the ephemeral ``$DEFENDER_RUNS_BASE`` for
-``--no-learn`` dev runs that are never persisted). Lessons: ``defender/lessons/``, overridable with
-``--lessons-dir``; ``--all`` walks it through the shared ``iter_lessons``, so it inherits the
-corpus discovery rules (underscore-skip, warn on a malformed or unreadable lesson). A lesson the
-walk skips still gets a marker row — the audit index must not silently lose a lesson that has
-in-context cases (#590), so ``--all`` collects the skipped paths through ``iter_lessons``'
-``on_skip`` seam (the same single walk — no second glob to race) and prints them with an
-unwindowed count.
+``--no-learn`` dev runs that are never persisted). Lessons: ``defender/lessons/``,
+overridable with ``--lessons-dir``; ``--all`` walks it through the shared ``iter_lessons``
+and so inherits the corpus discovery rules (underscore-skip, warn on a malformed lesson).
+A lesson the walk skips still gets a marker row with an unwindowed count — the audit index
+must not silently lose a lesson that has in-context cases.
 """
 from __future__ import annotations
 
@@ -90,20 +88,18 @@ def _report_disposition(run_dir: Path) -> str:
     """This case's disposition for the trace table, or the unknown placeholder.
 
     Degrades rather than raises: one unreadable historical report must cost its own row, not
-    the whole walk. It now reports the row it dropped for ANY unreadable headline, not only an
-    undecodable file — a report present but malformed is exactly the case where a silent `?`
-    reads as "this case never resolved". A report that was never written stays silent; that is
-    an ordinary in-progress run, not a defect.
+    the whole walk. It warns for ANY unreadable headline, since a present-but-malformed report
+    is where a silent `?` reads as "this case never resolved". A report that was never written
+    stays silent — an ordinary in-progress run, not a defect.
     """
     report = RunPaths(run_dir).report
     if not report.is_file():
         return UNKNOWN_DISPOSITION
     read = read_report(report)
     if read.reason is not None:
-        # Flattened like every other value this module prints (#596/#609). The reason quotes
-        # model-authored bytes back — a YAML fence error carries the offending frontmatter
-        # line verbatim — so unflattened it is one more LLM-authored value forging rows on a
-        # line-oriented stream, which is the bug class this tool was hardened against.
+        # Flattened like every other value this module prints: the reason quotes
+        # model-authored bytes back (a YAML fence error carries the offending frontmatter line
+        # verbatim), which unflattened could forge rows on this line-oriented stream.
         print(f"warn: {_flatten(run_dir.name)}/{_flatten(read.reason)} — disposition unknown",
               file=sys.stderr)
     return read.disposition_or_unknown

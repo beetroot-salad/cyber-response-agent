@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Score an oracle projection against the telemetry it was projecting (#711 §4).
+"""Score an oracle projection against the telemetry it was projecting.
 
 `y'` vs `y`: the oracle emits telemetry, so this grades telemetry against telemetry
-rather than projecting both sides down to a four-way class. Two things run first, in
+rather than projecting both sides down to a four-way class. Three things run first, in
 code, and never reach the model:
 
 1. **Lead-set integrity.** A projection missing leads, carrying leads the case does not
@@ -67,12 +67,10 @@ from defender.evals.oracle_golden import judge  # noqa: E402
 _SUPPRESSED_PREFIX = "<suppressed"
 _NOISE_MARKER = "<standard environment noise>"
 
-#: Kinds whose story was never fired, so nothing was ever measured for it. They are
-#: graded against `expectation:` in the manifest instead — see `expectation_failures`.
-#:
-#: THE owner. `validate_cases` reads the same fact from the other side — no capture of its
-#: own, so a missing `hidden/` is by design, not a gap — and used to say so with its own
-#: copy of the tuple.
+#: Kinds whose story was never fired, so nothing was ever measured for it. They are graded
+#: against `expectation:` in the manifest instead — see `expectation_failures`.
+#: THE owner: `validate_cases` reads the same fact from the other side (no capture of its own,
+#: so a missing `hidden/` is by design, not a gap).
 DERIVED_KINDS = ("mutation", "negative-control", "spec-probe", "contradiction",
                  "corrupted")
 
@@ -82,10 +80,9 @@ def is_derived(kind: object) -> bool:
 
     The question, beside the vocabulary — for the reason `defender/_vocab.py` states: a
     vocabulary and the answer to "is this value in it" drift apart the moment they live in
-    different files. Four sites spelled `kind in DERIVED_KINDS` themselves, and importing a
-    closed vocabulary only to re-derive what belonging to it MEANS is what
-    `lint_borrowed_vocabulary` exists to stop. It is also how a later kind that is
-    derived-but-graded-differently gets the old answer at three sites out of four.
+    different files. Importing a closed vocabulary only to re-derive what belonging to it MEANS
+    is what `lint_borrowed_vocabulary` exists to stop, and it is how a later kind that is
+    derived-but-graded-differently gets the old answer at some sites and not others.
     """
     return kind in DERIVED_KINDS
 
@@ -97,10 +94,10 @@ C_MALFORMED = "C-MALFORMED"
 C_NOT_PROJECTED = "C-NOT-PROJECTED"
 MECHANICAL_CAUSES = frozenset({C_MALFORMED, C_NOT_PROJECTED})
 
-#: Punctuation trimmed off a token before a leak comparison — `<`/`>` included, so the
-#: closing bracket of a marker ("…on office-ws-1>") does not hide a real leak. A whole
-#: `<placeholder>` is exempt (see `_tokens`): trimming those would turn the placeholder
-#: vocabulary into bare words and let `<port>` collide with `port`.
+#: Punctuation trimmed off a token before a leak comparison — `<`/`>` included, so a marker's
+#: closing bracket ("…on office-ws-1>") does not hide a real leak. A whole `<placeholder>` is
+#: exempt (see `_tokens`): trimming those turns the placeholder vocabulary into bare words and
+#: lets `<port>` collide with `port`.
 _TOKEN_TRIM = "\"'`,;:()[]{}<>"
 
 _PLACEHOLDER = re.compile(r"<[^<>]+>")
@@ -228,17 +225,14 @@ def expectation_failures(expectation: dict, preds: dict[str, list],
                          lead_ids: list[str]) -> list[str]:
     """Rules the story settles by itself, and the projection broke anyway.
 
-    A derived case has no telemetry, so the judge cannot grade it — and until this
-    existed, NOTHING did. A forged `neg-001` projection copying the brute-force burst
-    into all nine leads (exactly the window-copying the negative control exists to
-    catch) scored clean and exited 0: its ground truth sat inert in `expected.yaml`
-    after the redesign moved the contract to "the judge's measurement of the telemetry".
-    A case with no telemetry has no such measurement, so derived cases fell through.
+    A derived case has no telemetry, so the judge cannot grade it and NOTHING else would: a
+    forged `neg-001` projection copying the brute-force burst into every lead — exactly the
+    window-copying the negative control exists to catch — would score clean and exit 0.
 
-    These need no `y`. `oracle/prompt.md` is a specification and much of it is decidable
-    from the story alone — an unrelated story touches nothing, suppression is earned by
-    an explicit blinding action, a value the story never states must stay a placeholder.
-    Each failure names the rule, so it reads as a spec violation and not as a diff.
+    These need no `y`. `oracle/prompt.md` is a specification and much of it is decidable from
+    the story alone — an unrelated story touches nothing, suppression is earned by an explicit
+    blinding action, a value the story never states must stay a placeholder. Each failure names
+    the rule, so it reads as a spec violation and not as a diff.
     """
     out: list[str] = []
     for lead_id in _requested(expectation.get("empty_leads"), lead_ids):
@@ -274,12 +268,10 @@ def expectation_failures(expectation: dict, preds: dict[str, list],
 def system_of(lead: dict) -> str:
     """The stratification axis, derived from the lead's own `query_id` prefixes.
 
-    `query_id` is `{system}.{kebab-name}` (defender/CLAUDE.md), so this is a property of
-    the envelope rather than an attribution someone made. A lead spanning systems keeps
-    both, `+`-joined: it really is a mixed lead, and flattening it to the majority system
-    would file a cross-system result under a single-system slice. Checked against the 47
-    hand-assigned systems in the seed `expected.yaml` files — 46 agree, and the one that
-    does not (case-005 l-005) is a cmdb+elastic lead the hand label had flattened.
+    `query_id` is `{system}.{kebab-name}` (defender/CLAUDE.md), so this is a property of the
+    envelope rather than an attribution someone made. A lead spanning systems keeps both,
+    `+`-joined: it really is a mixed lead, and flattening it to the majority system would file
+    a cross-system result under a single-system slice.
     """
     systems = sorted(judge.lead_systems(lead) - {""})
     return "+".join(systems) if systems else "?"
@@ -384,9 +376,8 @@ def _measured(case_dir: Path, proj_path: Path, *, model: str, effort: str) -> _M
     """Load one case-and-projection pair and run every check that needs no model.
 
     THE definition of the mechanical half. `--dry-run` is exactly this and stops here;
-    `score_case` is exactly this and then decides whether to pay for judging. Both used to
-    derive it separately, which had already produced two orderings of one dict and gave the
-    dry run its own opportunity to disagree with the thing it exists to preview — a
+    `score_case` is exactly this and then decides whether to pay for judging. Deriving it
+    twice would let the dry run disagree with the thing it exists to preview — and a
     `--dry-run` that reports clean for a projection the real score refuses is worse than no
     dry run, because it is consulted precisely when a model call is expensive.
     """
@@ -521,9 +512,9 @@ def measurement(label: dict) -> dict:
     ours, not the judge's business, and feeding them back would put the label pass's
     price tag inside the grading prompt.
 
-    Public because `audit_judge.verdict_set` must show the verdict pass the SAME reading a
-    real score would — it had spelled the key list out again, so an audit's answer to "how
-    stable is the verdict pass" was only as good as two lists staying equal."""
+    Public because `audit_judge.verdict_set` must show the verdict pass the SAME reading a real
+    score would; a second copy of the key list makes an audit's "how stable is the verdict
+    pass" only as good as two lists staying equal."""
     return {k: label[k] for k in ("delta_kind", "heterogeneous", "evidence") if k in label}
 
 
@@ -557,10 +548,10 @@ def _by_system(rows: list[dict]) -> dict[str, str]:
 
 
 def score_tag(projection_stem: str, model: str, effort: str) -> str:
-    """`<oracle-model>_<oracle-prompt>__judge-<model>-<effort>_<prompts-sha8>` (#711 §6).
+    """`<oracle-model>_<oracle-prompt>__judge-<model>-<effort>_<prompts-sha8>`.
 
-    The judge runs at score time, so it is part of the tag: editing either prompt is a
-    new tag requiring a full re-score, exactly like an oracle change.
+    The judge runs at score time, so it is part of the tag: editing either prompt is a new tag
+    requiring a full re-score, exactly like an oracle change.
     """
     return f"{projection_stem}__{judge.tag_suffix(model, effort)}"
 
@@ -624,15 +615,11 @@ def main(argv: list[str] | None = None) -> int:
     print_report(summary)
 
     # `expectation_failures` and `forbidden_emitted` join the lead-set checks rather than
-    # merely reporting. A derived case IS its contract, so a violated one is a failed
-    # score and not a note — and `forbidden_emitted` was the same hole one layer down: a
-    # mutation case that leaked a pre-mutation entity printed the leak and still exited 0,
-    # so a script driving the suite read it as a pass.
+    # merely reporting: a derived case IS its contract, so a violated one is a failed score,
+    # and a mutation case that leaked a pre-mutation entity must not exit 0.
     #
-    # Four committed scores DO leak and so exit 1 here: corrupt-004's injection landed on
-    # three of its four repeats, and contra-001 r1 emitted a forbidden outcome. That is
-    # the measurement those cases exist to take, not a broken artifact — the non-zero exit
-    # is the alarm working. A caller sweeping the tree must therefore not read exit 1 as
+    # Some committed scores DO leak and so exit 1 here — that is the measurement those cases
+    # exist to take, not a broken artifact. A caller sweeping the tree must not read exit 1 as
     # "re-score me"; read `mechanical.forbidden_emitted` and decide.
     broken = any(summary["mechanical"][k] for k in
                  ("missing_leads", "unscored_leads", "duplicate_leads",

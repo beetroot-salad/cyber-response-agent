@@ -10,12 +10,10 @@ from defender.learning.core.config import QueueChannel
 
 @dataclass(frozen=True)
 class BucketSpec:
-    """One bucket of an AUTHOR_RESULT, as data (#719).
+    """One bucket of an AUTHOR_RESULT, as data.
 
-    The agent partitions the batch it was handed into named buckets. Before the fold each
-    drain carried the bucket names twice — once in the tuple handed to
-    `validate_agent_result_partition`, once in a hand-written projection loop — and the
-    two could drift. One list now drives both.
+    The agent partitions the batch it was handed into named buckets; one list drives both
+    `validate_agent_result_partition` and the projection.
 
     `formatter` is why a bare field name was not enough: the reason a bucket writes onto a
     row is not uniform (`forward_bad: <reason>` on the lessons hold, a bare `<reason>` on a
@@ -31,29 +29,24 @@ class BucketSpec:
 
 @dataclass(frozen=True, kw_only=True)
 class CorpusAuthorConfig:
-    """What every corpus-authoring drain needs, in one shape (#713, extended by #719).
+    """What every corpus-authoring drain needs, in one shape.
 
-    The two drains — `author/curator.py` (the actor/environment curators) and
-    `author/lessons/run.py` (the lessons curator) — used to carry the same fields under
-    divergent names: `corpus_dir` vs `lessons_dir`, `channel.file` vs `pending_file`. Both
-    fed the SAME batch envelope, so the divergence bought nothing and cost a
-    20-parameter adapter at `curator_engine.run_curator_stage` to normalize between them.
+    Both drains — `author/curator.py` (the actor/environment curators) and
+    `author/lessons/run.py` (the lessons curator) — feed the same batch envelope. Where
+    they differ (pre-author gate, buckets, id field, append lock, commit trailers, the
+    lessons-only held report) is a FIELD here rather than a second copy of the batch driver.
 
     Subclassed rather than composed, for the reason `LoopPaths(DefenderPaths)` gives: an
     attribute read (`cfg.repo_root`) keeps answering for the whole set, so the shared fields
     did not have to be re-spelled at ~80 call sites to gain the base.
 
-    `kw_only` because the subclasses add their own required fields, and the base ends in one
-    that has a default — without it every extension field would have to carry a default too,
-    purely to satisfy dataclass field ordering.
+    `kw_only` because the subclasses add their own required fields and the base ends in one
+    that has a default — otherwise every extension field would need a default too, purely
+    for dataclass field ordering.
 
-    UNIFIED HERE AS OF #719: the drains themselves. This used to say they were NOT, because
-    the two pre-author gates differ in argument order, return arity AND predicate, and the
-    two rotations differ in lock and id field. All of that is still true — the answer is
-    that each varying piece became a FIELD (`gate`, `buckets`, `channel.id_key`,
-    `channel.append_lock`, `commit_fn`, `post_rotate`) rather than a reason to keep two
-    copies of the batch driver. The gates stay two separate functions; what they no longer
-    do is each carry a loop around themselves."""
+    A prohibition against unifying the two drains once stood here; #719 reversed it. Their
+    gates, rotations, locks and id fields really do differ — each difference became a field
+    rather than a reason to keep two copies of the batch driver."""
 
     repo_root: Path
     runs_dir: Path
@@ -67,13 +60,11 @@ class CorpusAuthorConfig:
     author_prompt: Path
     author_model: str
     author_timeout: int
-    # `str | None` is the wider of the two the drains carried, and matches what
-    # `run_curator_stage` already accepted for `effort`.
     author_effort: str | None
     invoke_agent: Callable[..., dict]
     #: The direction's pre-author policy: `(batch, cfg) -> (held, consumed_pre, to_author)`.
     gate: Callable[..., tuple[list[dict], list[dict], list[dict]]]
-    #: The AUTHOR_RESULT buckets this direction declares, in one list (D4).
+    #: The AUTHOR_RESULT buckets this direction declares, in one list.
     buckets: tuple[BucketSpec, ...]
     #: `(message, cfg) -> commit sha | None`. Per-direction because the provenance trailers
     #: are.

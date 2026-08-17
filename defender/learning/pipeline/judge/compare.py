@@ -38,9 +38,8 @@ def unredacted_exemplar(text: str) -> str:
 
 
 def real_sample_text(lead) -> str:
-    """The judge's own evidence column. Moved out of the retired oracle package (#791): a
-    learning run must import nothing from `defender.learning.pipeline.oracle`, and this is
-    the one producer the surviving three-to-two cut still calls on every executed lead.
+    """The judge's own evidence column. Lives here, not in the oracle package: a learning run
+    must import nothing from `defender.learning.pipeline.oracle`.
 
     The payload walk itself is `lead_repository`'s, shared with the oracle's scrubbed
     skeleton — the two differ only in the renderer and the two fallback strings."""
@@ -117,8 +116,7 @@ def build_comparison(
     *,
     companion: dict | None = None,
 ) -> list[LeadComparison]:
-    """The judge's input set — the two surviving columns, exactly the leads the defender
-    EXECUTED (#791: a lead the retired oracle merely projected no longer gets a row)."""
+    """The judge's input set — one row per lead the defender actually EXECUTED."""
     run_dir = Path(run_dir)
     if companion is None:
         companion = parse_investigation_companion(run_dir)
@@ -156,24 +154,22 @@ _LEAD_FS_UNSAFE = re.compile(r"[^A-Za-z0-9_-]")
 
 
 def _safe_lead_filename(lead_id: str) -> str:
-    """The comparison file's own name, chosen by the run's executed-queries table rather
-    than by the actor or an author (#791) — the canonical raw-frame-escape chooser. Every
-    character outside a plain filename alphabet is neutralized, so a `../`-shaped lead id
-    cannot walk the write out of the comparison directory."""
+    """The comparison file's own name. Every character outside a plain filename alphabet is
+    neutralized, so a `../`-shaped lead id cannot walk the write out of the comparison dir."""
     slug = _LEAD_FS_UNSAFE.sub("_", lead_id).strip("_.")
     return f"{slug or 'lead'}.md"
 
 
 class _LeadFilenamer:
-    """The ONE owner of the per-lead file names: the writer names the files through this and
-    the manifest that tells the judge what to open names them through this too, so the two
-    cannot disagree. Two independent spellings could — neutralizing `l-002.a` to `l-002_a.md`
-    on disk while the manifest still advertised `l-002.a.md` pointed the judge at a file that
-    does not exist, and two ids that neutralize alike silently overwrote one another.
+    """The ONE owner of the per-lead file names — both the writer and the manifest that tells
+    the judge what to open name files through this, so they cannot disagree. Two independent
+    spellings could: `l-002.a` neutralized to `l-002_a.md` on disk while the manifest still
+    advertised `l-002.a.md` points the judge at a nonexistent file, and two ids that neutralize
+    alike silently overwrite one another.
 
     Stateful and consumed ONE lead at a time, never over a materialized list: the writer
-    publishes each comparison file as it is produced, and pre-walking the sequence to
-    allocate names would drain a lazily-produced one before the first file was written."""
+    publishes each comparison file as it is produced, and pre-walking the sequence to allocate
+    names would drain a lazily-produced one before the first file was written."""
 
     def __init__(self) -> None:
         self._used: set[str] = set()
@@ -198,22 +194,16 @@ def _md_safe(text: str) -> str:
     that legitimately contains `#` loses it — which is why the one span that legitimately does,
     `params`, does not come through here at all (see `_Encoded`).
 
-    Call `_md_line` rather than this, and no span can be forgotten. #875 F-8:
-    the docstring here USED to claim it "applies to EVERY interpolated span" while three of the
-    seven were raw — `query_id` above all, which is the gather model's own string
-    (`query_tool.resolve_query_id` returns it verbatim). A per-span opt-in is a claim about
-    every future edit, and this one was already false when it was written."""
+    Call `_md_line` rather than this, and no span can be forgotten. A per-span opt-in is a
+    claim about every future edit, and it goes silently false the moment a span is added."""
     return text.replace("\n", " ").replace("\r", " ").replace("#", "")
 
 
-#: Every `{placeholder}` on a line that a `#` could turn into — or add to — a heading: a span
+#: The risky `{placeholder}`s are those a `#` could turn into — or add to — a heading: a span
 #: that OPENS a line (its `#` would land at column 0), and a span anywhere on a line the
 #: template already begins with `#` (its `#` extends a heading's own text, which is how a
-#: hostile lead id reads as a second section even though the document still has one).
-#:
-#: Derived from the TEMPLATE, which is host text — so this is a structural fact about the
-#: renderer, not a per-span opinion. That distinction is the point: the per-span opt-in is what
-#: drifted and made `_md_safe`'s "EVERY interpolated span" docstring false (#875 F-8).
+#: hostile lead id reads as a second section). Derived from the TEMPLATE, which is host text —
+#: a structural fact about the renderer, not a per-span opinion.
 class _Encoded(str):
     """A span its OWN encoder already made structurally safe, passed through unneutralized.
 
@@ -222,15 +212,12 @@ class _Encoded(str):
     structural threat — and a `#` inside a JSON string cannot begin a line when no line break
     can precede it.
 
-    This is NOT the per-span opt-in that #875 F-8 was caused by. That opt-in was a human
-    judgement per call site ("this one looks fine"), invisible at the seam and silently false
-    once a span was added. This is a claim about an ENCODER, made once, and `_md_line` VERIFIES
+    Not a per-span opt-in: this is a claim about an ENCODER, made once, and `_md_line` VERIFIES
     it on every render — a value that turns out to hold a newline raises rather than passing.
 
     It exists because neutralizing `params` was itself a corruption: `{"host": "web#2"}` reached
     the judge as `{"host": "web2"}` — a value the run never bound, in the document the judge
-    grades the run on, with nothing marking that a character was dropped. That is F-8's own harm
-    (the judge shown a document that misdescribes the run) arriving from the other direction."""
+    grades the run on, with nothing marking that a character was dropped."""
 
 
 def _verified_encoded(name: str, value: _Encoded) -> str:
@@ -245,10 +232,8 @@ def _verified_encoded(name: str, value: _Encoded) -> str:
 def _md_line(template: str, **spans: object) -> str:
     """One rendered markdown line whose EVERY interpolated span is neutralized.
 
-    The unit of the guarantee is the LINE, not the value: a caller cannot interpolate through
-    this and forget one, because there is no way to pass a span that skips `_md_safe`. That is
-    the whole reason it exists — the opt-in it replaces drifted the moment a span was added
-    (#875 F-8), and the next span added here inherits the neutralization without anyone
+    The unit of the guarantee is the LINE, not the value: there is no way to pass a span that
+    skips `_md_safe`, so the next span added here inherits the neutralization without anyone
     remembering to ask for it.
 
     `template` is HOST text, never run-chosen — it carries the markdown structure, and the
@@ -264,17 +249,16 @@ def _payload_paths(c: LeadComparison, gather_raw: Path) -> list[str]:
     if paths:
         return paths
     if not c.queries:
-        # #841 — a lead whose only rows are sentinels ran NO query, so it holds no payload.
-        # The `0.json` fallback below is for a lead that ran queries whose rows carry no
-        # payload path; firing it here would name the sentinel's OWN sidecar (written empty
-        # by `runtime/tools.py` for `∅.bash-shim`) and put the refusal record back in front
-        # of the judge by another door — under an absence instruction it cannot satisfy.
+        # A lead whose only rows are sentinels ran NO query, so it holds no payload. The
+        # `0.json` fallback below is for a lead that ran queries whose rows carry no payload
+        # path; firing it here would name the sentinel's OWN sidecar (written empty by
+        # `runtime/tools.py` for `∅.bash-shim`) and put the refusal record back in front of
+        # the judge under an absence instruction it cannot satisfy.
         return []
     # NOT `_md_safe`d here: this function answers "which files does this lead hold", and a
-    # neutralized path is a path that no longer names the file (`len(paths)` and the `cat`
-    # the judge is told to run both mean the real one). The neutralization belongs at the
-    # RENDER, where the value becomes a markdown span — and there it covers this fallback and
-    # the `raw_ref` branch above alike, which the per-span opt-in did not (#875 F-8).
+    # neutralized path no longer names the file (`len(paths)` and the `cat` the judge is told
+    # to run both mean the real one). The neutralization belongs at the RENDER, where the
+    # value becomes a markdown span.
     return [str(gather_raw / c.lead_id / "0.json")]
 
 
@@ -289,7 +273,7 @@ def _render_lead_file(c: LeadComparison, gather_raw: Path) -> str:
         head = _md_line("# Lead {id}", id=c.lead_id)
 
     # `params` rides `json.dumps` (which escapes its own newlines) and STILL goes through the
-    # line builder: the point of #875 F-8 is that no span here is exempt by argument.
+    # line builder: no span here is exempt by argument.
     q_lines = "\n".join(
         _md_line(
             "- {qid}  verb={verb}  params={params}  status={status}",
@@ -305,8 +289,7 @@ def _render_lead_file(c: LeadComparison, gather_raw: Path) -> str:
     payloads = _payload_paths(c, gather_raw)
     if payloads:
         # Every payload path is a span like any other — `raw_ref`'s shape gate makes today's
-        # values tame, but that is a constraint one door over rather than a property of this
-        # render, and #875 F-8's whole point is that no span here is exempt by argument.
+        # values tame, but that is a constraint one door over, not a property of this render.
         safe_payloads = [_md_safe(p) for p in payloads]
         payload_lines = "".join(f">   {p}\n" for p in safe_payloads)
         example = safe_payloads[0]
@@ -348,9 +331,8 @@ def write_comparison_files(
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     if not comparisons:
-        # #791 R5: the empty comparison set is itself an observable state — an absence is
-        # indistinguishable from a comparison step that never ran, so it is RECORDED rather
-        # than left as a directory with nothing in it.
+        # The empty comparison set is itself an observable state: an empty directory is
+        # indistinguishable from a comparison step that never ran, so it is RECORDED.
         (out_dir / "_empty.md").write_text(
             "(no leads were executed — the comparison set is empty)\n", encoding="utf-8"
         )

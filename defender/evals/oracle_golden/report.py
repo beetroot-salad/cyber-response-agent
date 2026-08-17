@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Roll the per-case scores up into a report that states what it cannot certify (#711).
+"""Roll the per-case scores up into a report that states what it cannot certify.
 
-`score.py` is per-case. Nothing aggregated it: every headline in #711's issue body was
-computed by hand, and each one was weaker than it looked.
+`score.py` is per-case; this aggregates, and every rate it prints is qualified by what
+the sample can actually support.
 
 **The headline is the ACTIVE band.** `delta_kind` groups into two:
 
@@ -10,10 +10,10 @@ computed by hand, and each one was weaker than it looked.
     envelope, and the oracle had to represent something;
   - **quiet** — `absent`, `state-only`: the oracle correctly said nothing.
 
-Reporting one pooled number lets the quiet band carry the score. On the seed data 27 of
-36 dev leads were quiet, so a 0.92 headline was three-quarters correctly-said-nothing.
-Both bands are printed; the active one leads, because it is the one that measures
-whether the oracle can synthesize telemetry.
+Reporting one pooled number lets the quiet band carry the score — most leads are quiet,
+so a 0.92 headline is mostly correctly-said-nothing. Both bands are printed; the active
+one leads, because it is the one that measures whether the oracle can synthesize
+telemetry.
 
 A third band, **unmeasured**, holds the leads the label pass could not settle. They are
 excluded from every rate and counted beside it — a judge abstention is a statement about
@@ -21,13 +21,11 @@ the instrument and must not be charged to the oracle.
 
 Four more things this reports that a hand-rolled percentage did not:
 
-**`n_units`, not `n_leads`.** 27 of the suite's 36 leads are case-001's nine
-envelopes shown three times (case-001, mut-001, neg-001). Reading that as n=36 is
-the mistake the whole issue is about. The independent unit is
-(activity family x host pair); seeds and re-runs POOL within a unit, because ten
-seeds of one scenario against one host pair are ten runs of one story shape, not
-ten trials. Automation raises the capture count cheaply and does **not** raise the
-unit count — which is why the unit had to be fixed before recruitment started.
+**`n_units`, not `n_leads`.** A derived case reshows its base's envelopes, so a lead
+count double-counts. The independent unit is (activity family x host pair); seeds and
+re-runs POOL within a unit, because ten seeds of one scenario against one host pair are
+ten runs of one story shape, not ten trials. Automation raises the capture count cheaply
+and does **not** raise the unit count.
 
 **An interval, computed at `n = n_units`.** The observed rate is the lead-level
 one, but the interval is taken at the unit count with `k = round(rate x n_units)`
@@ -74,9 +72,8 @@ from defender.evals.oracle_golden import stats as STATS  # noqa: E402 — after 
 #: alongside a point estimate invites the point estimate to be read.
 MIN_UNITS = 3
 
-#: A cause is treated as real only at this many instances across this many
-#: distinct UNITS (#711 M6). Units, not cases: mut-001 and neg-001 are not
-#: independent evidence of anything case-001 already shows.
+#: A cause is treated as real only at this many instances across this many distinct UNITS.
+#: Units, not cases: a derived case is not independent evidence of anything its base shows.
 CAUSE_MIN_INSTANCES = 5
 CAUSE_MIN_UNITS = 3
 
@@ -95,12 +92,7 @@ def band_of(delta_kind: str) -> str:
 
 
 def load_golden_cases(cases_dir: Path) -> list[dict]:
-    """Every case with its manifest and recorded scores.
-
-    `scores/<tag>.causes.yaml` is gone: the cause of a failure is now the judge's
-    `cause` field on the row itself, so a hand-authored sidecar could only disagree
-    with the artifact it annotates.
-    """
+    """Every case with its manifest and recorded scores."""
     out = []
     for case_dir in sorted(d for d in cases_dir.iterdir() if d.is_dir()):
         manifest_path = case_dir / "manifest.yaml"
@@ -159,9 +151,8 @@ def summarize(rows: list[dict], units: set[str], environments: set[str]) -> dict
         return out
     interval = STATS.wilson_interval(round(rate * n_units), n_units)
     # `wilson_interval` answers `None` only for `n == 0`, and the floor check above already
-    # returned for anything under MIN_UNITS (3). Asserted rather than assumed: the guard and
-    # the call are twenty lines apart, and lowering MIN_UNITS to 0 would otherwise turn a
-    # never-measured slice into a `TypeError` here rather than the "no interval" it means.
+    # returned for anything under MIN_UNITS. Asserted rather than assumed: lowering
+    # MIN_UNITS to 0 would otherwise turn a never-measured slice into a `TypeError` here.
     assert interval is not None, f"n_units={n_units} cleared the floor but has no interval"
     out["interval"] = [round(interval[0], 3), round(interval[1], 3)]
     return out
@@ -224,11 +215,10 @@ def build_report(cases: list[dict], tag: str, target_lower_bound: float) -> dict
             mechanical["malformed_leads"] += len(mech.get("malformed_leads") or {})
             mechanical["leaked_values"] += [f"{case['id']}: {v}"
                                             for v in mech.get("forbidden_emitted") or []]
-            # The manifest's `expectation:` clauses, which are the WHOLE result of a
-            # derived case: it contributes no judged rows by construction, so dropping
-            # this left the roll-up printing such a case's name and not its verdict.
-            # `leaked_values` above is one of the five clauses (`must_not_emit`); the
-            # other four arrived with #762, after #711 had written this aggregation.
+            # The manifest's `expectation:` clauses, which are the WHOLE result of a derived
+            # case: it contributes no judged rows by construction, so dropping this would
+            # print such a case's name and not its verdict. `leaked_values` above is one of
+            # the five clauses (`must_not_emit`).
             mechanical["expectation_failures"] += [
                 f"{case['id']}: {f}" for f in mech.get("expectation_failures") or []]
             if not score.get("judged"):

@@ -76,12 +76,10 @@ def load_catalog(catalog_dir: Path | None = None) -> list[Template]:
             system=t.system,
             path=t.path,
             goal=t.goal,
-            # `query` for an established template, `recording` for a draft — a draft has no
-            # `## Query`, because what it carries is a transcript rather than an interface
-            # (`QueryTemplate.recording`). Neighbor scoring is how the AUTHOR decides whether a
-            # draft is a narrowing of a template that already exists, so reading only `query`
-            # here would score every draft against an empty token set and report no neighbors
-            # for precisely the files the neighbors exist to judge.
+            # `query` for an established template, `recording` for a draft — a draft carries a
+            # transcript rather than an interface, so it has no `## Query`. Neighbor scoring is
+            # how the AUTHOR decides whether a draft narrows an existing template, so reading
+            # only `query` would score every draft against an empty token set.
             query_variants=_query_variants(t.query or t.recording),
             cli=_resolve_cli(t.id),
             status=t.status,

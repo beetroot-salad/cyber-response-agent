@@ -18,10 +18,10 @@ REPO_ROOT = DEFENDER_DIR.parent
 #: Run-dir children the map does not name. This listing is inlined into MAIN's message 0 under
 #: "use this in place of `ls`/`find`/`grep`", and MAIN has no `ls` — so the map IS the model's
 #: directory view, and naming a path the gate then refuses only teaches it to ask for one
-#: (`test_gather_raw_suppressed`, #264). `wire_logs/` joins `gather_raw/` on exactly that
-#: ground: it holds the run's wire log, one level down and so outside MAIN's `under(run, SEG)`
-#: read shape by construction — see `_run_paths.WIRE_LOG_DIR` for why it sits there.
-#: `budget.json` predates both and is listed here to keep the suppression in one place.
+#: (`test_gather_raw_suppressed`). `wire_logs/` joins `gather_raw/` on exactly that ground: it
+#: holds the run's wire log, one level down and so outside MAIN's `under(run, SEG)` read shape
+#: by construction — see `_run_paths.WIRE_LOG_DIR`. `budget.json` is listed here too, to keep
+#: the suppression in one place.
 _UNLISTED = frozenset({"gather_raw", WIRE_LOG_DIR, "budget.json"})
 
 

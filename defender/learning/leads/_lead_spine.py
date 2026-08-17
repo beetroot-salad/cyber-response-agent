@@ -32,7 +32,7 @@ def _spawn_author_agent(
     PENDING_DIR.mkdir(parents=True, exist_ok=True)
     from defender.learning.leads import lead_author_engine
     # Every knob below is read HERE, at spawn — each is env-backed and a module-level or
-    # signature default would freeze it at import (#717).
+    # signature default would freeze it at import.
     return lead_author_engine.run_author_stage(
         wiring=_loop_config.StageWiring.for_batch(
             system_prompt_file,

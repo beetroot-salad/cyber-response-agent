@@ -1,11 +1,10 @@
-"""The per-role verb grant: an enumerated `(system, verb, verb_class)` allowance (#632).
+"""The per-role verb grant: an enumerated `(system, verb, verb_class)` allowance.
 
-A `VerbGrant` is authored data, not a filter derived from the registry — see the design's
-census (c18) for why. It is frozen and hashable so it can live on `AgentDefinition` beside
-`bash_shapes`, and it validates its own contents at construction (a bad class token, or one
-`(system, verb)` declared twice with conflicting classes) rather than at first use — the
-grant's authoring-integrity guarantee, matched by the read-endpoint allowlist's own
-constructor (`scripts/adapters/confinement.py`).
+A `VerbGrant` is authored data, not a filter derived from the registry. It is frozen and
+hashable so it can live on `AgentDefinition` beside `bash_shapes`, and it validates its own
+contents at construction (a bad class token, or one `(system, verb)` declared twice with
+conflicting classes) rather than at first use — the grant's authoring-integrity guarantee,
+matched by the read-endpoint allowlist's own constructor (`scripts/adapters/confinement.py`).
 """
 from __future__ import annotations
 
