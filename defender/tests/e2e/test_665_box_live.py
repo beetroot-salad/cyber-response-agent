@@ -173,41 +173,41 @@ def test_legs_sharing_one_box_tmpfs_see_each_others_writes_cross_exec(tmp_path):
 # --------------------------------------------------------------------------- #
 # interpreter coupling + the behavioral startup probe (c12 / decision 7)
 # --------------------------------------------------------------------------- #
-def test_box_start_runs_granted_programs_and_refuses_on_failure(tmp_path):
-    """box_start_probes_interpreter (decision 7) — the startup probe RUNS the granted programs
-    when the box comes up and refuses the start if they do not exit clean (behavioral, not an
-    interpreter-identity comparison); a broken repertoire fails the box (c12)."""
+# box_start_probes_interpreter (decision 7 / c12) — the startup probe is BEHAVIORAL: it RUNS
+# the granted programs when the box comes up and refuses the start if they do not exit clean,
+# rather than comparing interpreter identities. Each row is one granted program the probe has
+# to be able to run, and the way that program fails when the box is wrong.
+@pytest.mark.parametrize(("case", "cmd", "rc_why", "contains", "contains_why"), [
+    # the granted repertoire itself imports — a broken repertoire fails the box (c12)
+    ("granted-repertoire-runs-clean",
+     "python3 -c 'import defender.runtime.bash_exec'",
+     "the granted interpreter/repertoire did not run clean at startup", None, None),
+
+    # the .venv python3 must resolve to the IMAGE interpreter (c12: .venv python3 resolves to
+    # image /usr/local/bin python3, minor matched)
+    ("venv-interpreter-matches-the-image",
+     "python3 --version", "the interpreter probe exec failed",
+     b"3.11", "the box interpreter did not match the image minor"),
+
+    # the probe also catches a broken NATIVE dependency inside the venv — a non-clean exit of a
+    # granted program, not only an interpreter-minor mismatch (c12: duckdb imports)
+    ("native-dependency-inside-the-venv-imports",
+     "python3 -c 'import duckdb'",
+     "a native dependency the granted repertoire needs did not import", None, None),
+], ids=lambda v: v if isinstance(v, str) and len(v) < 60 and " " not in v else "")
+def test_box_start_probes_the_granted_repertoire_by_running_it(
+    tmp_path, case, cmd, rc_why, contains, contains_why
+):
+    """A box that comes up but cannot run what it granted is a box that fails later, inside an
+    investigation. The startup probe runs each granted program and refuses the start on a
+    non-clean exit."""
     run_dir = make_run_dir(tmp_path)
     box = box_mod.start_box(run_dir, DEFENDER, docker=box_mod._docker)
     try:
-        res = _run(box, "python3 -c 'import defender.runtime.bash_exec'", cwd=REPO_ROOT)
-        assert res.rc == 0, "the granted interpreter/repertoire did not run clean at startup"
-    finally:
-        box_mod.stop_box(box)
-
-
-def test_venv_interpreter_does_not_match_the_image(tmp_path):
-    """The startup probe-by-execution refuses the box start when the .venv interpreter does not
-    resolve to the image interpreter (c12: .venv python3 resolves to image /usr/local/bin
-    python3, minor matched)."""
-    run_dir = make_run_dir(tmp_path)
-    box = box_mod.start_box(run_dir, DEFENDER, docker=box_mod._docker)
-    try:
-        res = _run(box, "python3 --version", cwd=REPO_ROOT)
-        assert res.rc == 0, "the interpreter probe exec failed"
-        assert b"3.11" in res.out, "the box interpreter did not match the image minor"
-    finally:
-        box_mod.stop_box(box)
-
-
-def test_interpreter_matches_but_a_native_dependency_inside_the_venv_is_broken(tmp_path):
-    """The behavioral probe catches a broken native dependency inside the venv (a non-clean
-    exit of a granted program), not only an interpreter-minor mismatch (c12: duckdb imports)."""
-    run_dir = make_run_dir(tmp_path)
-    box = box_mod.start_box(run_dir, DEFENDER, docker=box_mod._docker)
-    try:
-        res = _run(box, "python3 -c 'import duckdb'", cwd=REPO_ROOT)
-        assert res.rc == 0, "a native dependency the granted repertoire needs did not import"
+        res = _run(box, cmd, cwd=REPO_ROOT)
+        assert res.rc == 0, rc_why
+        if contains is not None:
+            assert contains in res.out, contains_why
     finally:
         box_mod.stop_box(box)
 

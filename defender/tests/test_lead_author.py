@@ -475,10 +475,57 @@ def test_verify_skills_state_rejects_stray_outside_skills(tmp_git_repo: Path):
         lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[], systems=DECLARED)
 
 
-def test_verify_skills_state_rejects_non_md_under_skills(tmp_git_repo: Path):
-    """A non-*.md file under defender/skills/ is a stray (corpus is *.md)."""
-    (tmp_git_repo / "defender" / "skills" / "junk.json").write_text("{}")
-    with pytest.raises(lead_author.LeadAuthorError, match="outside"):
+def _append(path: Path, text: str) -> None:
+    path.write_text(path.read_text() + text)
+
+
+# Every row mutates the seeded worktree ONE way the write lane admits, then asserts the
+# post-flight refuses it and says why. The `match` is load-bearing: these refusals land in a
+# batch's stderr, and "which rule" is the only thing that tells the loop what to revert.
+@pytest.mark.parametrize(("case", "mutate", "match"), [
+    # a non-*.md file under defender/skills/ is a stray — the corpus is *.md
+    ("non-md-under-skills",
+     lambda r: (r / "defender" / "skills" / "junk.json").write_text("{}"), "outside"),
+
+    # deleting an ESTABLISHED template, and deleting a system's SKILL.md, are both the
+    # delete-prohibition: a promote writes, it never removes what another run relies on
+    ("established-template-deletion",
+     lambda r: (r / _CATALOG / "wazuh" / "auth-events.md").unlink(), "delete-prohibition"),
+    ("skill-md-deletion",
+     lambda r: (r / "defender" / "skills" / "elastic" / "SKILL.md").unlink(),
+     "delete-prohibition"),
+
+    # the `_draft/README.md` is scaffold the lane may not author over
+    ("draft-readme-mutation",
+     lambda r: _append(r / "defender" / "skills" / "elastic" / "_draft" / "README.md",
+                       "\nstomped\n"),
+     "protected surface"),
+
+    # A promote that writes the established template but never ``rm``s its ``_draft/`` twin
+    # leaves both on disk. The surviving draft is UNCHANGED ⇒ not in ``git status`` ⇒ the
+    # records-only checks cannot see it; the filesystem twin probe must catch the half-promote
+    # rather than letting the loop commit established + draft together.
+    ("half-promote",
+     lambda r: (r / _CATALOG / "wazuh" / "newthing.md").write_text(
+         query_template("wazuh.newthing", "established")), "half-promote"),
+
+    # The lift writes `skills/{system}/SKILL.md`, so the frontmatter identity `connect` checks
+    # at scaffold time is an invariant this lane can break — `read_description` and the roster
+    # audit both key on the DIRECTORY, so a SKILL.md that calls itself another system is a
+    # per-system prompt injected under the wrong system's name.
+    ("skill-md-naming-another-system",
+     lambda r: (r / "defender" / "skills" / "elastic" / "SKILL.md").write_text(
+         "---\nname: defender-cmdb\n---\n# elastic\n"), "defender-elastic"),
+], ids=lambda v: v if isinstance(v, str) and len(v) < 50 and " " not in v else "")
+def test_verify_skills_state_rejects_a_tree_the_write_lane_could_produce(
+    tmp_git_repo: Path, case, mutate, match
+):
+    """The write lane admits any `{system}/{name}.md`, so the post-flight is the only thing
+    standing between a well-formed but illegitimate edit and a commit. Each row is one such
+    edit — a stray, a deletion, a protected surface, a half-finished promote, a misnamed
+    identity — and each is refused by the rule that owns it."""
+    mutate(tmp_git_repo)
+    with pytest.raises(lead_author.LeadAuthorError, match=match):
         lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[], systems=DECLARED)
 
 
@@ -691,19 +738,6 @@ def test_repairing_an_id_that_disagrees_with_its_directory_is_not_a_clobber(
     assert "defender/skills/gather/queries/wazuh/auth-events.md" in changed
 
 
-def test_swapping_one_well_formed_id_for_another_is_still_a_clobber(tmp_git_repo: Path):
-    """The narrowness of the repair exemption above — its own repo, because the gate imports
-    the seeded adapter and the `__pycache__` it leaves is a stray to a second call in the same
-    tree. The id must have been WRONG before and right after; a change between two well-formed
-    ids is the name collision the monotonicity rule exists to catch."""
-    repo = tmp_git_repo
-    (repo / _CATALOG / "wazuh" / "auth-events.md").write_text(
-        query_template("wazuh.something-else", "established")
-    )
-    with pytest.raises(lead_author.LeadAuthorError, match="rewrote the identity"):
-        lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED)
-
-
 def test_a_draft_folded_into_another_draft_is_attributed(tmp_git_repo: Path):
     """A draft is a legal home for a transferred identity, because the MINT thinks so.
 
@@ -769,32 +803,17 @@ def test_an_established_template_may_not_have_its_id_rewritten(tmp_git_repo: Pat
     """The other half of the clobber: a promote writes a NEW file, so an edit that replaces an
     existing template's `id:` is a name collision that has already overwritten a different
     measurement. Refused by identity rather than by content, because the content of a clobber
-    is perfectly well-formed — it is a valid template, just not the one that was there."""
+    is perfectly well-formed — it is a valid template, just not the one that was there.
+
+    This is also the bound on the repair exemption above: that exemption only forgives an id
+    that was WRONG before and right after, so a swap between two WELL-FORMED ids gets no
+    relief from it — it is exactly the name collision the monotonicity rule exists to catch."""
     repo = tmp_git_repo
     (repo / _CATALOG / "wazuh" / "auth-events.md").write_text(
         query_template("wazuh.something-else", "established")
     )
     with pytest.raises(lead_author.LeadAuthorError, match="rewrote the identity"):
         lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED)
-
-
-def test_verify_skills_state_rejects_established_deletion(tmp_git_repo: Path):
-    (tmp_git_repo / _CATALOG / "wazuh" / "auth-events.md").unlink()
-    with pytest.raises(lead_author.LeadAuthorError, match="delete-prohibition"):
-        lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[], systems=DECLARED)
-
-
-def test_verify_skills_state_rejects_skill_md_deletion(tmp_git_repo: Path):
-    (tmp_git_repo / "defender" / "skills" / "elastic" / "SKILL.md").unlink()
-    with pytest.raises(lead_author.LeadAuthorError, match="delete-prohibition"):
-        lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[], systems=DECLARED)
-
-
-def test_verify_skills_state_rejects_draft_readme_mutation(tmp_git_repo: Path):
-    readme = tmp_git_repo / "defender" / "skills" / "elastic" / "_draft" / "README.md"
-    readme.write_text(readme.read_text() + "\nstomped\n")
-    with pytest.raises(lead_author.LeadAuthorError, match="protected surface"):
-        lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[], systems=DECLARED)
 
 
 def test_verify_skills_state_rejects_schema_mutation(tmp_git_repo: Path):
@@ -808,18 +827,6 @@ def test_verify_skills_state_accepts_draft_discard(tmp_git_repo: Path):
     (tmp_git_repo / _CATALOG / "wazuh" / "_draft" / "newthing.md").unlink()
     changed = lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[], systems=DECLARED)
     assert changed == ["defender/skills/gather/queries/wazuh/_draft/newthing.md"]
-
-
-def test_verify_skills_state_rejects_half_promote(tmp_git_repo: Path):
-    """A promote that writes the established template but never ``rm``s its ``_draft/`` twin
-    leaves both on disk. The surviving draft is unchanged ⇒ not in ``git status`` ⇒ the
-    records-only checks can't see it; the filesystem twin probe must catch the half-promote
-    rather than letting the loop commit established + draft together."""
-    (tmp_git_repo / _CATALOG / "wazuh" / "newthing.md").write_text(
-        query_template("wazuh.newthing", "established")
-    )
-    with pytest.raises(lead_author.LeadAuthorError, match="half-promote"):
-        lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[], systems=DECLARED)
 
 
 def test_verify_skills_state_rejects_a_promotion_whose_placeholder_is_not_a_param(
@@ -862,17 +869,6 @@ def test_verify_skills_state_accepts_a_malformed_draft(tmp_git_repo: Path):
     )
     changed = lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED)
     assert "defender/skills/gather/queries/wazuh/_draft/rough.md" in changed
-
-
-def test_verify_skills_state_rejects_a_skill_md_naming_another_system(tmp_git_repo: Path):
-    """The lift writes `skills/{system}/SKILL.md`, so the frontmatter identity `connect` checks
-    at scaffold time is an invariant this lane can break — `read_description` and the roster
-    audit both key on the directory, so a SKILL.md that calls itself another system is a
-    per-system prompt injected under the wrong system's name."""
-    skill = tmp_git_repo / "defender" / "skills" / "elastic" / "SKILL.md"
-    skill.write_text("---\nname: defender-cmdb\n---\n# elastic\n")
-    with pytest.raises(lead_author.LeadAuthorError, match="defender-elastic"):
-        lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[], systems=DECLARED)
 
 
 def test_is_catalog_template_excludes_what_is_not_a_template(tmp_git_repo: Path):
@@ -1500,43 +1496,39 @@ def test_invoke_agent_passes_through_engine_rc(run_dir: Path, tmp_path: Path, mo
 
 
 
-def test_loop_commit_message_catalog_only_scope():
-    """Only catalog paths changed → scope 'gather catalog' (never 'system skills')."""
-    msg = lead_author._loop_commit_message(
-        Path("run-123"), ["defender/skills/gather/queries/wazuh/auth-events.md"]
-    )
-    assert "gather catalog for run-123" in msg
-    assert "system skills" not in msg
+# `_loop_commit_message` derives the commit SCOPE from the changed paths alone. Each row is
+# one path shape and the scope it must produce — and, where it matters, the scope it must NOT
+# produce: a message that named both scopes for a catalog-only batch would read as a wider
+# edit than the one that happened.
+@pytest.mark.parametrize(("case", "changed", "present", "absent"), [
+    ("catalog-only", ["defender/skills/gather/queries/wazuh/auth-events.md"],
+     ["gather catalog for run-123"], ["system skills"]),
 
+    ("skill-md-only", ["defender/skills/elastic/SKILL.md"],
+     ["learning(lead-author): system skills for run-123"], ["gather catalog"]),
 
-def test_loop_commit_message_skill_md_only_scope():
-    """Only a system SKILL.md changed → scope 'system skills' (never 'gather catalog')."""
-    msg = lead_author._loop_commit_message(
-        Path("run-123"), ["defender/skills/elastic/SKILL.md"]
-    )
-    assert "learning(lead-author): system skills for run-123" in msg
-    assert "gather catalog" not in msg
+    # a system-skill _draft is NOT a catalog path, so it counts as system-skills scope
+    ("system-draft-counts-as-skill", ["defender/skills/elastic/_draft/falco-na.md"],
+     ["system skills"], ["gather catalog"]),
 
+    ("catalog-and-skill-together",
+     ["defender/skills/gather/queries/wazuh/auth-events.md",
+      "defender/skills/elastic/SKILL.md"],
+     ["gather catalog + system skills"], []),
 
-def test_loop_commit_message_system_draft_counts_as_skill():
-    """A system-skill _draft (not a catalog path) counts as 'system skills' scope."""
-    msg = lead_author._loop_commit_message(
-        Path("run-123"), ["defender/skills/elastic/_draft/falco-na.md"]
-    )
-    assert "system skills" in msg
-    assert "gather catalog" not in msg
-
-
-def test_loop_commit_message_mixed_scope():
-    """Catalog + skill together → scope 'gather catalog + system skills'."""
-    msg = lead_author._loop_commit_message(
-        Path("run-123"),
-        [
-            "defender/skills/gather/queries/wazuh/auth-events.md",
-            "defender/skills/elastic/SKILL.md",
-        ],
-    )
-    assert "gather catalog + system skills" in msg
+    # The loop message is built UNCONDITIONALLY, even for an empty change set, so it has to
+    # render (no catalog/skill ⇒ 'gather catalog') rather than crash.
+    ("empty-change-set", [],
+     ["gather catalog for run-123", "\n\nsource-run: run-123\n"], []),
+], ids=lambda v: v if isinstance(v, str) and len(v) < 40 and "/" not in v else "")
+def test_loop_commit_message_scope_follows_the_changed_paths(case, changed, present, absent):
+    """The subject line names the scope the batch actually touched — catalog, system skills,
+    or both — and never a scope nothing in `changed` supports."""
+    msg = lead_author._loop_commit_message(Path("run-123"), changed)
+    for fragment in present:
+        assert fragment in msg
+    for fragment in absent:
+        assert fragment not in msg
 
 
 def test_loop_commit_message_lists_paths_and_source_run_trailer():
@@ -1552,13 +1544,5 @@ def test_loop_commit_message_lists_paths_and_source_run_trailer():
         "- defender/skills/gather/queries/wazuh/b.md\n"
         "\nsource-run: run-123\n"
     ) in msg
-
-
-def test_loop_commit_message_empty_changed_renders():
-    """The loop message is built unconditionally (even for an empty change set) —
-    it must render (no catalog/skill ⇒ 'gather catalog') rather than crash."""
-    msg = lead_author._loop_commit_message(Path("run-123"), [])
-    assert "gather catalog for run-123" in msg
-    assert "\n\nsource-run: run-123\n" in msg
 
 

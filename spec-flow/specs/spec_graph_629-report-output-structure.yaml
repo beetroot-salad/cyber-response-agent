@@ -102,7 +102,8 @@ demands:
   - {id: fb6, kind: domain-outcome, form: test, discharged_by: test_report_md_disposition_outside_enum,
      binds: ["decide_write", "disposition.domain.distinguished[outside-enum]"]}
      # discharges D1. seed: disposition value outside {benign,inconclusive,malicious} -> Decision(False, reason).
-  - {id: fb7, kind: behavior, form: test, discharged_by: test_report_md_valid_disposition_no_case_id_no_confidence,
+  # same assertion as D1b (the test was a byte-identical copy) — folded onto D1b's test.
+  - {id: fb7, kind: behavior, form: test, discharged_by: test_report_case_id_confidence_not_required,
      binds: ["decide_write", "report_md", "disposition.domain"]}
      # discharges D1b. seed: valid disposition, NEITHER case_id NOR confidence -> Decision(True); only disposition required (matches test_540_scrub_lifecycle.py:108).
   - {id: fb8, kind: domain-outcome, form: test, discharged_by: test_report_md_empty_proposed_text,
@@ -235,7 +236,7 @@ demands:
   - {id: ak2, kind: negative, form: test, discharged_by: test_report_md_in_subdir_not_gated,
      binds: ["decide_write", "artifact_key.domain.distinguished[subdir]", "report_md"]}
      # §7 Fork 6b -> RUN-DIR ROOT only. seed: `<run_dir>/sub/report.md` resolves to a non-root path -> branch does not fire -> over-bound content commits. positive control: root report.md over-bound denies.
-  - {id: ak3, kind: negative, form: test, discharged_by: test_symlink_operand_resolves_before_keying,
+  - {id: ak3, kind: negative, form: test, discharged_by: test_a_symlink_operand_resolves_before_keying,
      binds: ["decide_write", "artifact_key.domain.distinguished[symlink]", "report_md"]}
      # §7 Fork 6c -> RESOLVE SYMLINKS. seed: the branch keys on the RESOLVED path — a `decoy.md` symlinked to `<run_dir>/report.md` resolves in and IS gated (over-bound -> deny), while a `report.md` symlinked ELSEWHERE resolves away and is NOT gated. Closes the disguise bypass.
   - {id: ak4, kind: negative, form: test, discharged_by: test_forward_check_lesson_named_report_md_not_gated,
@@ -250,7 +251,7 @@ demands:
   - {id: ak6, kind: negative, form: test, discharged_by: test_investigation_md_in_subdir_not_gated,
      binds: ["decide_write", "artifact_key.domain.distinguished[subdir]", "investigation_md"]}
      # §7 Fork 6b -> RUN-DIR ROOT only (investigation half). seed: `<run_dir>/sub/investigation.md` resolves to a non-root path -> branch does not fire -> over-bound content commits. positive control: root investigation.md over-bound denies.
-  - {id: ak7, kind: negative, form: test, discharged_by: test_investigation_symlink_operand_resolves_before_keying,
+  - {id: ak7, kind: negative, form: test, discharged_by: test_a_symlink_operand_resolves_before_keying,
      binds: ["decide_write", "artifact_key.domain.distinguished[symlink]", "investigation_md"]}
      # §7 Fork 6c -> RESOLVE SYMLINKS (investigation half, THE critical leg). seed: the branch keys on the RESOLVED path — a `decoy2.md` symlinked to `<run_dir>/investigation.md` resolves in and IS gated (over-bound -> deny), while an `investigation.md` symlinked ELSEWHERE resolves away and is NOT gated. Closes the disguise size-bypass for investigation.md exactly as ak3 does for report.md; FAILS if the branch is left name-only.
   - {id: dn1, kind: negative, form: test, discharged_by: test_report_disposition_case_variant_denied,

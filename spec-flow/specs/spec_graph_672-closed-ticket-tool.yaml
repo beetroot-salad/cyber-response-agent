@@ -27,7 +27,7 @@ tests: defender/tests   # the suite this graph is the derivation of
 # ROUND 3 (76-verify-r2-resolutions.md — round-2 cold findings, all auto-repairs of
 # decided intent, none re-decided):
 #   C5  Fork E applied to BOTH read tools: the LIST path gets its own open-breaker honor
-#       test (test_store_breaker_open_blocks_list_path — immediate failed result, no
+#       test (test_an_open_breaker_is_honored_on_every_read_path[list] — immediate failed result, no
 #       transport attempt), and the malformed-list breaker trip is driven ALONE so the
 #       contribution is per-verb attributable (closes C6b too).
 #   C6a d16 pins the teaching INSTRUCTION (cached surface coupled to "context, never
@@ -142,15 +142,15 @@ demands:
     kind: behavior
     form: test
     binds: ["interacts(get_closed_ticket->ticket_store)", "interacts(benign_judge->get_closed_ticket).response"]
-    discharged_by: test_unreachable_store_is_failed_result
+    discharged_by: test_a_transport_fault_is_a_failed_result_and_is_recorded
     # rejected: scale-dive tradeoff — no outer wall-clock budget; the transport's mandatory
     # inner timeout (x4, TICKET_TIMEOUT_SEC+10) is the only kill, as the query tool accepted.
     # Fork E RESOLVED (§7, departing from the isolation recommendation): FULL breaker
     # participation. An infra fault here is RECORDED against the breaker, and an already-open
     # breaker yields an immediate failed result with NO transport attempt
-    # (test_store_breaker_open_when_judge_reads pins the honor direction on this demand).
+    # (test_an_open_breaker_is_honored_on_every_read_path[get] pins the honor direction on this demand).
     # ROUND 3 (C5): the honor arm is pinned on BOTH read tools — Fork E's wording is
-    # unqualified over the tool — test_store_breaker_open_blocks_list_path drives the
+    # unqualified over the tool — test_an_open_breaker_is_honored_on_every_read_path[list] drives the
     # LIST path against the open breaker (immediate failed result, zero transport
     # attempts), and the malformed-list contribute arm (on d7's test) is driven with no
     # sibling get, so list→breaker holds in both directions, per-verb attributable.
@@ -159,7 +159,7 @@ demands:
     kind: behavior
     form: test
     binds: ["interacts(benign_judge->get_closed_ticket).response"]
-    discharged_by: test_unmapped_fault_returns_envelope
+    discharged_by: test_a_transport_fault_is_a_failed_result_and_is_recorded
 
   - id: d8_single_attempt_no_retry
     kind: negative      # positive control: the attempt observed in d5/d6; minted from O4

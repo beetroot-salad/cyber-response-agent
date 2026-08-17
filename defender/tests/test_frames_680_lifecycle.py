@@ -280,44 +280,31 @@ def test_stage_retries_after_a_tool_call_has_returned_framed_text(tmp_path):
     assert retry[2].salt not in failed_salts
 
 
-def test_stage_attempt_returns_empty_output_then_is_retried(tmp_path):
-    """A real empty model final is rejected by run_stage; the actual caller retry uses a fresh framed contract and succeeds."""
-    empty_seen = {}
-    with pytest.raises(RunUnprocessable, match="empty output"):
+# A stage attempt that run_stage REJECTS must be replaced by a drive under a FRESH framed
+# contract — a new salt, and every frame in the replacement prompt carrying only that salt.
+# Reusing the rejected attempt's salt would let a body authored against the failed contract
+# address the replacement's frames.
+@pytest.mark.parametrize(("case", "slug", "reply", "match", "kwargs"), [
+    # a real empty model final
+    ("empty-output", "empty", "", "empty output", {}),
+    # a real wall-clock timeout, rejected while the model request is still in flight
+    ("wall-clock-timeout", "timeout", "late", "did not complete", {"wall_clock_timeout": 0}),
+], ids=lambda v: v if isinstance(v, str) and len(v) < 30 else "")
+def test_a_rejected_stage_attempt_is_retried_under_a_fresh_contract(
+    tmp_path, case, slug, reply, match, kwargs
+):
+    """The rejection raises, the caller's retry succeeds, and the two attempts share no salt —
+    each prompt's frames are sealed by its own."""
+    seen = {}
+    with pytest.raises(RunUnprocessable, match=match):
         _stage_attempt(
-            tmp_path,
-            "empty.trace.jsonl",
-            replay_once(""),
-            observed=empty_seen,
+            tmp_path, f"{slug}.trace.jsonl", replay_once(reply), observed=seen, **kwargs
         )
-    retry = _stage_attempt(tmp_path, "empty-retry.trace.jsonl", replay_once("done"))
+    retry = _stage_attempt(tmp_path, f"{slug}-retry.trace.jsonl", replay_once("done"))
     assert retry[0] == "done"
     assert retry[3].is_file()
-    assert empty_seen["salt"] != retry[2].salt
-    assert {m.group(1) for m in _frames(empty_seen["observation"].prompt)} == {
-        empty_seen["salt"]
-    }
-    assert {m.group(1) for m in _frames(retry[2].prompt)} == {retry[2].salt}
-
-
-def test_stage_attempt_times_out_while_a_model_request_is_in_flight(tmp_path):
-    """A real run_stage wall-clock timeout rejects the in-flight attempt; the replacement drive uses a fresh framed contract."""
-    timed_out_seen = {}
-    with pytest.raises(RunUnprocessable, match="did not complete"):
-        _stage_attempt(
-            tmp_path,
-            "timeout.trace.jsonl",
-            replay_once("late"),
-            wall_clock_timeout=0,
-            observed=timed_out_seen,
-        )
-    retry = _stage_attempt(tmp_path, "timeout-retry.trace.jsonl", replay_once("done"))
-    assert retry[0] == "done"
-    assert retry[3].is_file()
-    assert timed_out_seen["salt"] != retry[2].salt
-    assert {m.group(1) for m in _frames(timed_out_seen["observation"].prompt)} == {
-        timed_out_seen["salt"]
-    }
+    assert seen["salt"] != retry[2].salt
+    assert {m.group(1) for m in _frames(seen["observation"].prompt)} == {seen["salt"]}
     assert {m.group(1) for m in _frames(retry[2].prompt)} == {retry[2].salt}
 
 

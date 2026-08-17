@@ -245,38 +245,35 @@ def test_missing_source_bundle_is_held_not_authored(tmp_path: Path):
 
 
 
-def test_result_partition_rejects_unknown_observation():
-    to_author = [_row("a/0", "caught")]
-    result = {
-        "committed": ["a/0", "bogus/9"],
-        "consumed_skip": [],
-        "commit_message": "m",
-    }
-    with pytest.raises(shared.AuthorError, match="unknown observations"):
-        shared.validate_agent_result_partition(
-            result, to_author, id_key="observation_id",
-            buckets=("committed", "consumed_skip"), noun="observations",
-        )
+# The partition validator's whole job is that the buckets the agent returns account for the
+# rows it was handed EXACTLY ONCE each. Each row here breaks that accounting one way; the
+# `match` is the half of the contract that tells the operator which way.
+@pytest.mark.parametrize(("case", "to_author", "result", "match"), [
+    # a bucket names a row that was never handed to the agent
+    ("unknown-observation",
+     [_row("a/0", "caught")],
+     {"committed": ["a/0", "bogus/9"], "consumed_skip": [], "commit_message": "m"},
+     "unknown observations"),
 
+    # the same row lands in TWO buckets — committed and skipped at once
+    ("duplicate-across-buckets",
+     [_row("a/0", "caught")],
+     {"committed": ["a/0"],
+      "consumed_skip": [{"observation_id": "a/0", "reason": "x"}],
+      "commit_message": "m"},
+     "more than once"),
 
-def test_result_partition_rejects_duplicate_across_buckets():
-    to_author = [_row("a/0", "caught")]
-    result = {
-        "committed": ["a/0"],
-        "consumed_skip": [{"observation_id": "a/0", "reason": "x"}],
-        "commit_message": "m",
-    }
-    with pytest.raises(shared.AuthorError, match="more than once"):
-        shared.validate_agent_result_partition(
-            result, to_author, id_key="observation_id",
-            buckets=("committed", "consumed_skip"), noun="observations",
-        )
-
-
-def test_result_partition_rejects_missing_observation():
-    to_author = [_row("a/0", "caught"), _row("b/0", "caught")]
-    result = {"committed": ["a/0"], "consumed_skip": [], "commit_message": "m"}
-    with pytest.raises(shared.AuthorError, match="missing observations"):
+    # a row that was handed over appears in NO bucket, so it would silently vanish
+    ("missing-observation",
+     [_row("a/0", "caught"), _row("b/0", "caught")],
+     {"committed": ["a/0"], "consumed_skip": [], "commit_message": "m"},
+     "missing observations"),
+], ids=lambda v: v if isinstance(v, str) and len(v) < 40 and " " not in v else "")
+def test_result_partition_rejects_an_unbalanced_accounting(case, to_author, result, match):
+    """Every row handed to the agent must come back in exactly one bucket. An id that was
+    never handed over, one claimed twice, and one that never comes back are the three ways
+    that can fail — and each raises naming which one it was."""
+    with pytest.raises(shared.AuthorError, match=match):
         shared.validate_agent_result_partition(
             result, to_author, id_key="observation_id",
             buckets=("committed", "consumed_skip"), noun="observations",

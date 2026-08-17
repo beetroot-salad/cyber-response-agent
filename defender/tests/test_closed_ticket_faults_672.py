@@ -95,47 +95,41 @@ def test_nonclosed_refusal_is_one_business_fault_class(tmp_path, detail):
     assert not run.breaker().get("systems", {}).get("ticket", {}).get("failures")
 
 
-def test_unreachable_store_is_failed_result(tmp_path):
-    """[d6_unreachable_store_fault] An unreachable/misconfigured ticket store surfaces as a
-    failed tool result carrying the infra fault class (exit-2) detail — the judge run
-    CONTINUES to its verdict — and (Fork E, amending this fixture) the fault is RECORDED
-    against the breaker: one infra failure on `ticket`. Fault content cites c4/g8 (executed:
-    ConfigFault/TransportFault → exit-2 class with stderr detail).
-
+# [d6_unreachable_store_fault / d7_unmapped_fault_enveloped] Both a fault the transport MAPS
+# and a bare exception nobody mapped have to land the same way: a failed tool RESULT rather
+# than an unwind, with the detail preserved, a capture row written, and one infra failure filed
+# against the breaker. An unmapped fault must write a row, never delete one.
+@pytest.mark.parametrize(("case", "exc", "fragments", "exit_code"), [
+    # c4/g8 (executed): ConfigFault/TransportFault → the exit-2 infra class, stderr detail kept.
     # rejected: scale-dive tradeoff — no outer wall-clock budget; the transport's mandatory
     # inner timeout (x4) is the only kill, the same tradeoff the query tool accepted.
-    """
+    ("mapped-config-fault", ConfigFault("config file not found: ticket/config.env"),
+     ["exit=2", "config file not found"], 2),
+
+    # Fork B/E: a bare exception out of the transport thread comes back as the fault-class
+    # envelope in a NORMAL tool result — nothing unwinds out of the agent loop.
+    ("unmapped-bare-exception", RuntimeError("connection reset by peer mid-body"),
+     ["connection reset by peer"], None),
+], ids=lambda v: v if isinstance(v, str) and len(v) < 40 and " " not in v else "")
+def test_a_transport_fault_is_a_failed_result_and_is_recorded(
+    tmp_path, case, exc, fragments, exit_code
+):
+    """The judge run CONTINUES to its verdict: the fault surfaces as a failed tool result
+    carrying its detail, the attempt still writes its capture row, and the failure is filed
+    against the `ticket` breaker."""
     rec = VerbRecorder()
     run = _drive(
         tmp_path, [_get(OTHER_KEY), DONE],
-        registry=_ticket_registry(
-            rec, get=[("raise", ConfigFault("config file not found: ticket/config.env"))]),
-    )
-    assert run.out.strip()
-    assert "exit=2" in run.all_text
-    assert "config file not found" in run.all_text
-    (row,) = run.rows()
-    assert row["exit_code"] == 2
-    assert row["error_class"] == "infra"
-    assert run.breaker().get("systems", {}).get("ticket", {}).get("failures") == 1
-
-
-def test_unmapped_fault_returns_envelope(tmp_path):
-    """[d7_unmapped_fault_enveloped] A fault nobody mapped — a bare exception out of the
-    transport thread — comes back as the fault-class envelope in a NORMAL tool result:
-    nothing unwinds out of the agent loop, the judge reaches its verdict, and (Fork B/E,
-    revising this entry) the attempt still writes its capture row and files as infra
-    against the breaker — an unmapped fault must write a row, never delete one."""
-    rec = VerbRecorder()
-    run = _drive(
-        tmp_path, [_get(OTHER_KEY), DONE],
-        registry=_ticket_registry(
-            rec, get=[("raise", RuntimeError("connection reset by peer mid-body"))]),
+        registry=_ticket_registry(rec, get=[("raise", exc)]),
     )
     assert run.out.strip()                          # no unwind
-    assert "connection reset by peer" in run.all_text
+    for fragment in fragments:
+        assert fragment in run.all_text
     (row,) = run.rows()
-    assert row["exit_code"] != 0
+    if exit_code is None:
+        assert row["exit_code"] != 0
+    else:
+        assert row["exit_code"] == exit_code
     assert row["error_class"] == "infra"
     assert run.breaker().get("systems", {}).get("ticket", {}).get("failures") == 1
 
@@ -272,26 +266,38 @@ def test_control_flow_exceptions_propagate(tmp_path):
     assert "TKT-RETRY" in run.all_text
 
 
-def test_store_breaker_open_when_judge_reads(tmp_path):
-    """[d6_unreachable_store_fault — Fork E, §7: the isolation recommendation was REJECTED]
-    An ALREADY-OPEN ticket breaker (tripped before the judge's first read) yields an
-    immediate FAILED result with NO transport attempt — not a bypass, not a full-price
-    call: the judge honors the same breaker the query tool's machinery keys on `ticket`.
-    The breaker is seeded through the real primitive (circuit_breaker.record_outcome), so
-    the test re-probes the trip threshold on every run. The observable is Fork E's honor
-    arm itself (F-round rewrite of the blind reader's two near-vacuous greps — `"ticket"`
-    and `"down"` were satisfiable by the ambient prompt and pinned wording, not behavior):
-    the refusal REACHED the model on the post-prompt feedback channel, it is not a success
-    view, and no ticket content crossed."""
-    case = _case(tmp_path)
-    lrd = case[3]
+# [d6_unreachable_store_fault — Fork E, §7: the isolation recommendation was REJECTED]
+# Fork E's resolved wording is UNQUALIFIED over the tool — "an open breaker gives an immediate
+# failed result with no transport attempt" — so the honor arm binds EVERY read verb, not just
+# the one it was first written against. Before the list row existed, honor was pinned on `get`
+# only, and an implementation wiring breaker honor into the get body rather than the shared
+# seam greened the suite against Fork E's own wording; the list row is the discriminator that
+# fails it.
+@pytest.mark.parametrize(("case", "verb"), [
+    ("get", _get(OTHER_KEY)),
+    ("list", _list(q="precedent")),
+], ids=lambda v: v if isinstance(v, str) and len(v) < 20 else "")
+def test_an_open_breaker_is_honored_on_every_read_path(tmp_path, case, verb):
+    """An ALREADY-OPEN ticket breaker (tripped before the judge's first read) yields an
+    immediate FAILED result with NO transport attempt — not a bypass, not a full-price call:
+    the judge honors the same breaker the query tool's machinery keys on `ticket`.
+
+    The breaker is seeded through the real primitive (circuit_breaker.record_outcome), so the
+    test re-probes the trip threshold on every run. The observables are Fork E's honor arm
+    itself (an F-round rewrite of the blind reader's two near-vacuous greps — `"ticket"` and
+    `"down"` were satisfiable by the ambient prompt and pinned wording, not by behavior): the
+    refusal REACHED the model on the post-prompt feedback channel, it is not a success view,
+    it names the tripped system IN the result content, and no ticket content crossed."""
+    case_ = _case(tmp_path)
+    lrd = case_[3]
     for _ in range(circuit_breaker.PER_SYSTEM_FAIL_LIMIT):
         circuit_breaker.record_outcome(lrd, "ticket", 2)
     assert circuit_breaker.is_tripped(lrd, "ticket")
 
     rec = VerbRecorder()
-    run = _drive(tmp_path, [_get(OTHER_KEY), DONE], registry=_ticket_registry(rec), case=case)
+    run = _drive(tmp_path, [verb, DONE], registry=_ticket_registry(rec), case=case_)
     assert run.out.strip()                       # a failed result, not an unwind
+    assert not _list_calls(rec), "an open breaker must mean NO list transport attempt"
     assert not rec.calls, "an open breaker must mean NO transport attempt"
     feedback = _feedback(run)
     assert feedback.strip(), "the breaker-open refusal never reached the model"
@@ -300,40 +306,8 @@ def test_store_breaker_open_when_judge_reads(tmp_path):
         "the refusal must name the tripped system IN the result content — the old grep was "
         "satisfied by the tool names in the ambient prompt"
     )
-    assert "TKT-CONTENT-777" not in run.all_text
-
-
-def test_store_breaker_open_blocks_list_path(tmp_path):
-    """[d6_unreachable_store_fault — Fork E on the LIST path; ROUND 3, C5] Fork E's
-    resolved wording is UNQUALIFIED over the tool — "an open breaker gives an immediate
-    failed result with no transport attempt" — so the honor arm binds list_closed_tickets
-    exactly as it binds get_closed_ticket: with the `ticket` breaker already tripped
-    (seeded through the real primitive, circuit_breaker.record_outcome), a list call
-    yields an immediate FAILED result with NO transport attempt — the injected registry
-    records zero list-tickets calls — the refusal reaches the model on the post-prompt
-    feedback channel, names the tripped system, is not a success envelope, and no ticket
-    content crosses interacts(benign_judge->list_closed_tickets).response. Before this
-    test, honor was pinned on get only, so an implementation wiring breaker honor into
-    the get body rather than the shared seam greened the suite against Fork E's own
-    wording — this test is the discriminator that fails it."""
-    case = _case(tmp_path)
-    lrd = case[3]
-    for _ in range(circuit_breaker.PER_SYSTEM_FAIL_LIMIT):
-        circuit_breaker.record_outcome(lrd, "ticket", 2)
-    assert circuit_breaker.is_tripped(lrd, "ticket")
-
-    rec = VerbRecorder()
-    run = _drive(tmp_path, [_list(q="precedent"), DONE],
-                 registry=_ticket_registry(rec), case=case)
-    assert run.out.strip()                       # a failed result, not an unwind
-    assert not _list_calls(rec), "an open breaker must mean NO list transport attempt"
-    assert not rec.calls                         # no other verb was reached either
-    feedback = _feedback(run)
-    assert feedback.strip(), "the breaker-open refusal never reached the model"
-    assert "exit=0" not in feedback, "the breaker-open list path returned a SUCCESS envelope"
-    assert "ticket" in feedback, "the refusal must name the tripped system IN the result"
     assert "TKT-CONTENT-777" not in run.all_text, (
-        "the registry's default listing crossed the envelope despite the open breaker"
+        "ticket content crossed the envelope despite the open breaker"
     )
 
 

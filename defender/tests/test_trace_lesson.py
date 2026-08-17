@@ -5,6 +5,8 @@ import json
 from datetime import date, datetime, UTC
 from pathlib import Path
 
+import pytest
+
 from defender.tests._by_path import load_trace_lesson
 
 
@@ -109,79 +111,63 @@ def _case_ids(out: str) -> list[str]:
     return [ln.split("\t")[0] for ln in out.splitlines() if ln.strip() and not ln.startswith("#")]
 
 
-def test_naive_created_at_does_not_crash_trace(tmp_path, capsys):
-    """A tz-less created_at (LLM-authored, no offset → PyYAML naive datetime) must not
-    raise TypeError against the always-aware hook timestamps.
+# #584 SUPERSEDES the ``lesson_meta()`` call site all three of these used to drive: the fold
+# deletes that helper (``--all`` walks ``iter_lessons``; the single-lesson path keeps its own
+# guarded read), so each property is re-pinned END TO END through ``main()`` — the seam a user
+# actually drives — via the new ``--lessons-dir``. The properties themselves are unchanged.
+@pytest.mark.parametrize(
+    ("case", "stem", "frontmatter", "runs", "expected", "expect"), [
+        # A tz-less created_at (LLM-authored, no offset → PyYAML naive datetime) must not raise
+        # TypeError against the always-aware hook timestamps.
+        ("naive-created-at-does-not-crash",
+         "L", "name: L\ndescription: d\ncreated_at: 2026-06-04T00:00:00",
+         [("caseA", "benign", "2026-06-05T00:00:00+00:00")],
+         ["caseA"], (None, "caseA\tbenign")),
 
-    #584 SUPERSEDES the ``lesson_meta()`` call this used to make: the fold deletes that helper
-    (``--all`` walks ``iter_lessons``; the single-lesson path keeps its own guarded read), so the
-    property is re-pinned END TO END through ``main()`` — the seam a user actually drives — via the
-    new ``--lessons-dir``. The windowing behavior is unchanged."""
+        # `created_at: 2026-06-04` (PyYAML → date) is promoted to UTC midnight, not silently
+        # dropped — so a load BEFORE it stays excluded and one after it is kept.
+        ("bare-date-created-at-windows-correctly",
+         "L", "name: L\ndescription: d\ncreated_at: 2026-06-04",
+         [("before", "benign", "2026-06-01T00:00:00+00:00"),
+          ("after", "benign", "2026-06-05T00:00:00+00:00")],
+         ["after"], (None, None)),
+
+        # The hook records the FILE STEM, so matching must key on the stem even when the
+        # frontmatter name differs. The fold makes this more load-bearing, not less: a
+        # ``Lesson(path, fm, raw, body)`` carries no ``.name``, so the obvious reach at the new
+        # loop header is ``lesson.fm.get("name")`` — which returns ``foo_bar`` here, misses
+        # every recorded load, and silently reports zero cases forever. Pinned cross-module
+        # against ``record_lesson_load.lesson_name`` (the co-writer of the key) in
+        # ``test_corpus_fold_584.py::test_d23``.
+        ("identity-is-the-stem-not-the-frontmatter-name",
+         "foo-bar", "name: foo_bar\ndescription: d",
+         [("caseA", "malicious", "2026-06-05T00:00:00+00:00")],
+         ["caseA"], ("# foo-bar", None)),
+    ], ids=lambda v: v if isinstance(v, str) and len(v) < 60 and "\n" not in v else "")
+def test_trace_reports_the_cases_a_lesson_was_loaded_into(
+    tmp_path, capsys, case, stem, frontmatter, runs, expected, expect
+):
+    """``trace_lesson <name>`` resolves the lesson, windows the recorded loads against its
+    ``created_at``, and prints one TSV row per surviving case. Each row here is one way the
+    resolution or the windowing could silently report nothing."""
     tl = _load()
-    _mk_lesson(
-        tmp_path / "lessons", "L",
-        body_frontmatter="name: L\ndescription: d\ncreated_at: 2026-06-04T00:00:00",
-    )
-    runs = tmp_path / "runs"
-    runs.mkdir()
-    _mk_run(runs, "caseA", disposition="benign",
-            loads=[{"lesson_name": "L", "ts": "2026-06-05T00:00:00+00:00"}])
+    _mk_lesson(tmp_path / "lessons", stem, body_frontmatter=frontmatter)
+    runs_dir = tmp_path / "runs"
+    runs_dir.mkdir()
+    for name, disposition, ts in runs:
+        _mk_run(runs_dir, name, disposition=disposition,
+                loads=[{"lesson_name": stem, "ts": ts}])
 
-    rc = tl.main(["L", "--lessons-dir", str(tmp_path / "lessons"), "--runs-dir", str(runs)])
+    rc = tl.main([stem, "--lessons-dir", str(tmp_path / "lessons"),
+                  "--runs-dir", str(runs_dir)])
     out = capsys.readouterr().out
     assert rc == 0
-    assert _case_ids(out) == ["caseA"]
-    assert "caseA\tbenign" in out
-
-
-def test_bare_date_created_at_windows_correctly(tmp_path, capsys):
-    """`created_at: 2026-06-04` (PyYAML → date) is promoted to UTC midnight, not
-    silently dropped — loads before it stay excluded.
-
-    #584 SUPERSEDES the ``lesson_meta()`` call site (see the note on
-    ``test_naive_created_at_does_not_crash_trace``); the windowing property is unchanged."""
-    tl = _load()
-    _mk_lesson(
-        tmp_path / "lessons", "L",
-        body_frontmatter="name: L\ndescription: d\ncreated_at: 2026-06-04",
-    )
-    runs = tmp_path / "runs"
-    runs.mkdir()
-    _mk_run(runs, "before", disposition="benign",
-            loads=[{"lesson_name": "L", "ts": "2026-06-01T00:00:00+00:00"}])
-    _mk_run(runs, "after", disposition="benign",
-            loads=[{"lesson_name": "L", "ts": "2026-06-05T00:00:00+00:00"}])
-
-    rc = tl.main(["L", "--lessons-dir", str(tmp_path / "lessons"), "--runs-dir", str(runs)])
-    assert rc == 0
-    assert _case_ids(capsys.readouterr().out) == ["after"]
-
-
-def test_lesson_identity_is_stem_not_frontmatter_name(tmp_path, capsys):
-    """The hook records the file stem; matching must key on the stem even when the
-    frontmatter name differs, else every recorded load is silently missed.
-
-    #584 SUPERSEDES the ``lesson_meta()`` call site. The fold makes this test MORE load-bearing, not
-    less: a ``Lesson(path, fm, raw, body)`` carries no ``.name``, so the obvious reach at the new
-    loop header is ``lesson.fm.get("name")`` — which returns ``foo_bar`` here and misses every
-    recorded load, silently reporting zero cases forever. Re-pinned through ``main()``, and pinned
-    cross-module against ``record_lesson_load.lesson_name`` (the co-writer of the key) in
-    ``test_corpus_fold_584.py::test_d23``."""
-    tl = _load()
-    _mk_lesson(
-        tmp_path / "lessons", "foo-bar",
-        body_frontmatter="name: foo_bar\ndescription: d",
-    )
-    runs = tmp_path / "runs"
-    runs.mkdir()
-    _mk_run(runs, "caseA", disposition="malicious",
-            loads=[{"lesson_name": "foo-bar", "ts": "2026-06-05T00:00:00+00:00"}])
-
-    rc = tl.main(["foo-bar", "--lessons-dir", str(tmp_path / "lessons"), "--runs-dir", str(runs)])
-    out = capsys.readouterr().out
-    assert rc == 0
-    assert out.startswith("# foo-bar")
-    assert _case_ids(out) == ["caseA"]
+    assert _case_ids(out) == expected
+    expect_header, expect_row = expect
+    if expect_header is not None:
+        assert out.startswith(expect_header)
+    if expect_row is not None:
+        assert expect_row in out
 
 
 

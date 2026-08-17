@@ -574,113 +574,71 @@ def test_a_parameter_named_like_the_removed_ident_is_a_declaration(tmp_path):
     assert _run_gate(work, tmp_path) == 0
 
 
-def test_a_default_VALUE_in_a_signature_is_still_a_real_reference(tmp_path):
-    """The boundary of the rule above. `def f(x=some_removed_helper())` CALLS the dead
-    symbol — it sits in a value slot, not a parameter slot, and must still go red."""
-    up = _upstream(
-        tmp_path,
-        main_files={"sig.py": "def f(x=some_removed_helper()):\n    return x\n"},
-        pr_files={"caller.py": None},
-    )
+# --- declaration vs reference: what only the AST can separate ---------------
+# Every row plants ONE shape in a file `main` owns (the PR does not touch it, so
+# the reference is visible to the scan — see `_upstream`'s docstring) and pins
+# the gate's WHOLE verdict: the exit code and the exact fingerprint set. Only
+# the planted shape varies, so the shapes are a list rather than a test apiece.
+@pytest.mark.parametrize(("case", "main_files", "pr_files", "rc", "fingerprints"), [
+    # The boundary of the parameter-declaration carve-out. `def f(x=some_removed_helper())`
+    # CALLS the dead symbol — it sits in a VALUE slot, not a parameter slot — so it must
+    # still go red.
+    ("default-value-calls-the-dead-symbol",
+     {"sig.py": "def f(x=some_removed_helper()):\n    return x\n"},
+     {"caller.py": None}, 1, {"sig.py:some_removed_helper"}),
+
+    # The same parameter reflowed onto its own line stays a line-scoped DECLARATION.
+    # Textually it is now a bare `some_removed_helper,` — character-for-character what a
+    # multi-line import member looks like — so a text rule that reads one as a binding reads
+    # the other as one too, and the ident drops out of the whole scan: every surviving
+    # reference to it, anywhere in the tree, goes quiet. That is the ident-scoped whitelist
+    # the gate must never have, and the notes.md hit is what proves it did not happen.
+    ("multiline-signature-parameter-does-not-whitelist-the-ident",
+     {"sig.py": "def cmd(\n    cfg: dict,\n    some_removed_helper,\n) -> int:\n    return 0\n",
+      "notes.md": "Run some_removed_helper() to fix things.\n"},
+     {"caller.py": None}, 1, {"notes.md:some_removed_helper"}),
+
+    # `HANDLERS = [\n    some_removed_helper,\n]` is a dead symbol in a list — a NameError
+    # waiting to happen — not a definition of one. Same bare-`name,` text as the import
+    # member below; only the AST separates them.
+    ("bare-name-on-its-own-line-is-a-reference",
+     {"reg.py": "HANDLERS = [\n    some_removed_helper,\n]\n"},
+     {"caller.py": None}, 1, {"reg.py:some_removed_helper"}),
+
+    # The control for the two above, and the reason the bare-`name,` rule existed at all: a
+    # surviving IMPORT of the symbol means it was moved or re-exported, not removed. Green,
+    # and the scan must be empty rather than merely under the exit-code threshold.
+    ("reflowed-multiline-import-still-counts-as-defined",
+     {"reexport.py": "from mod import (\n    some_removed_helper,\n)\n"},
+     None, 0, set()),
+
+    # The default-value boundary one level deeper: the dead symbol is an ARGUMENT inside the
+    # default, not the callee. `def f(x=compute(<ident>))` sits after a `(` exactly like a
+    # parameter does, so the position of the nearest bracket cannot decide this.
+    ("reference-inside-a-default-value-expression",
+     {"sig.py": "def f(x=compute(some_removed_helper)):\n    return x\n"},
+     {"caller.py": None}, 1, {"sig.py:some_removed_helper"}),
+
+    # One line can DECLARE one dead name and CALL another. Attribution stops at the first
+    # ident the line references — a declaration is skipped, not treated as the line's answer,
+    # or the second name (which really is stale) is never looked for.
+    ("declaration-does-not-mask-another-dead-ident-on-the-same-line",
+     {"mod2.py": "def a_removed_helper():\n    return 2\n",
+      "sig.py": "def f(a_removed_helper, x=some_removed_helper()):\n    return x\n"},
+     {"mod2.py": None, "caller.py": None}, 1, {"sig.py:some_removed_helper"}),
+], ids=lambda v: v if isinstance(v, str) else "")
+def test_the_gate_tells_a_declaration_from_a_reference(
+    tmp_path, case, main_files, pr_files, rc, fingerprints
+):
+    """A bare `name,` on its own line is an import member, a function parameter, or a list
+    element depending only on the syntax around it. The gate must read each for what it is:
+    a declaration binds the ident and is skipped, a reference to a removed symbol is stale
+    and goes red — and skipping a declaration must never whitelist the ident tree-wide."""
+    up = _upstream(tmp_path, main_files=main_files, pr_files=pr_files)
     work = _clone(tmp_path, up)
 
-    assert _run_gate(work, tmp_path) == 1
-    assert {f.fingerprint for f in GATE._scan(work, "origin/main")} == {
-        "sig.py:some_removed_helper"
-    }
-
-
-def test_a_MULTILINE_signature_parameter_does_not_whitelist_the_IDENT(tmp_path):
-    """The same parameter, reflowed onto its own line, must stay a line-scoped declaration.
-
-    Textually it is now a bare `some_removed_helper,` — character-for-character what a
-    multi-line import member looks like — so a text rule that reads one as a BINDING reads
-    the other as one too, and the ident drops out of the whole scan: every surviving
-    reference to it, anywhere in the tree, goes quiet. That is the ident-scoped whitelist
-    the gate must never have. The AST knows a parameter from an import."""
-    up = _upstream(
-        tmp_path,
-        main_files={
-            "sig.py": "def cmd(\n    cfg: dict,\n    some_removed_helper,\n) -> int:\n"
-                      "    return 0\n",
-            "notes.md": "Run some_removed_helper() to fix things.\n",
-        },
-        pr_files={"caller.py": None},
-    )
-    work = _clone(tmp_path, up)
-
-    assert _run_gate(work, tmp_path) == 1
-    assert {f.fingerprint for f in GATE._scan(work, "origin/main")} == {
-        "notes.md:some_removed_helper"
-    }
-
-
-def test_a_bare_name_on_its_own_line_is_a_REFERENCE_not_a_binding(tmp_path):
-    """`HANDLERS = [\\n    some_removed_helper,\\n]` reads as a dead symbol in a list — a
-    NameError waiting to happen — not as a definition of one. Same bare-`name,` text as the
-    import member above; only the AST separates them."""
-    up = _upstream(
-        tmp_path,
-        main_files={"reg.py": "HANDLERS = [\n    some_removed_helper,\n]\n"},
-        pr_files={"caller.py": None},
-    )
-    work = _clone(tmp_path, up)
-
-    assert _run_gate(work, tmp_path) == 1
-    assert {f.fingerprint for f in GATE._scan(work, "origin/main")} == {
-        "reg.py:some_removed_helper"
-    }
-
-
-def test_a_reflowed_multiline_IMPORT_still_counts_as_defined(tmp_path):
-    """The control for the two above, and the reason the bare-`name,` rule existed: a
-    surviving import of the symbol means it was moved or re-exported, not removed. Still
-    ident-scoped, still green."""
-    up = _upstream(
-        tmp_path,
-        main_files={"reexport.py": "from mod import (\n    some_removed_helper,\n)\n"},
-    )
-    work = _clone(tmp_path, up)
-
-    assert _run_gate(work, tmp_path) == 0
-    assert GATE._scan(work, "origin/main") == []
-
-
-def test_a_reference_inside_a_default_VALUE_expression_is_flagged(tmp_path):
-    """The default-value boundary again, one level deeper: the dead symbol is an ARGUMENT
-    inside the default, not the callee. `def f(x=compute(<ident>))` sits after a `(` exactly
-    like a parameter does, so the position of the nearest bracket cannot decide this."""
-    up = _upstream(
-        tmp_path,
-        main_files={"sig.py": "def f(x=compute(some_removed_helper)):\n    return x\n"},
-        pr_files={"caller.py": None},
-    )
-    work = _clone(tmp_path, up)
-
-    assert _run_gate(work, tmp_path) == 1
-    assert {f.fingerprint for f in GATE._scan(work, "origin/main")} == {
-        "sig.py:some_removed_helper"
-    }
-
-
-def test_a_declaration_does_not_mask_another_dead_ident_on_the_SAME_line(tmp_path):
-    """One line can declare one dead name and CALL another. Attribution stops at the first
-    ident the line references — a declaration is skipped, not treated as the line's answer,
-    or the second name (which really is stale) is never looked for."""
-    up = _upstream(
-        tmp_path,
-        main_files={
-            "mod2.py": "def a_removed_helper():\n    return 2\n",
-            "sig.py": "def f(a_removed_helper, x=some_removed_helper()):\n    return x\n",
-        },
-        pr_files={"mod2.py": None, "caller.py": None},
-    )
-    work = _clone(tmp_path, up)
-
-    assert _run_gate(work, tmp_path) == 1
-    assert {f.fingerprint for f in GATE._scan(work, "origin/main")} == {
-        "sig.py:some_removed_helper"
-    }
+    assert _run_gate(work, tmp_path) == rc
+    assert {f.fingerprint for f in GATE._scan(work, "origin/main")} == fingerprints
 
 
 def test_inline_marker_suppresses_a_deliberate_dead_name_reference(tmp_path):

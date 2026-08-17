@@ -44,97 +44,92 @@ _CLEAN_BENIGN = "outcome: refuted\ndefender_findings: []"
 
 
 
-def test_clean_mapping_is_passthrough_noop():
-    """E1: input that already parses to a mapping is returned unchanged (the common
-    case must not be perturbed). strip_yaml_preamble(_CLEAN_ADV) == _CLEAN_ADV."""
-    assert strip_yaml_preamble(_CLEAN_ADV) == _CLEAN_ADV
+# --- E1: what the walk TRIMS ------------------------------------------------
+# Every case feeds one raw model return and asserts the trimmed text parses to the intended
+# verdict. Only the preamble shape varies; the primitive under test never does.
+@pytest.mark.parametrize(("case", "raw", "outcome"), [
+    # The headline bug: plain prose before the verdict is dropped.
+    ("unfenced-prose-preamble", "Let me analyze the findings.\n\n" + _CLEAN_ADV, "caught"),
+
+    # A multi-paragraph preamble (several bare-scalar lines, no blank before the last) is
+    # dropped in full, not just down to the last blank line.
+    ("multiline-prose-preamble",
+     "Paragraph one.\nStill paragraph one.\n\nSecond paragraph.\n\n"
+     "outcome: survived\ndefender_findings: []", "survived"),
+
+    # #492 core, mechanism A: a PREAMBLE line begins `outcome:` at col 0, then parse-breaking
+    # prose, then the real verdict. The preamble anchor's suffix fails to parse, so the walk
+    # falls through to the real verdict — NOT the preamble's 'survived'. The incumbent
+    # `_extract_yaml_doc` (first col-0 anchor) got exactly this wrong.
+    ("preamble-outcome-line-then-parsebreak-then-real-verdict",
+     "outcome: this looks survived-ish to me\n"
+     "Let me write the real verdict now.\n\n"
+     "outcome: caught\ndefender_findings: []", "caught"),
+
+    # #492 core, mechanism B: when the preamble `outcome:` line and the real verdict merge
+    # into ONE mapping (no parse-breaking prose between them), YAML duplicate-key last-wins
+    # makes the real (later) outcome win regardless of anchor.
+    ("preamble-outcome-line-merges-last-wins",
+     "outcome: survived\nnote: on second thought\n\n"
+     "outcome: caught\ndefender_findings: []", "caught"),
+
+    # A doc whose ONLY top-level mapping is the verdict, with an indented `outcome:` inside a
+    # citation quote, already parses whole — the indented one is data, never anchored on.
+    ("indented-citation-outcome-is-not-anchored",
+     "outcome: survived\n"
+     "defender_findings:\n"
+     "  - type: disposition-confirmed\n"
+     "    subject_anchor: l-001\n"
+     "    citations:\n"
+     "      - source: comparison\n"
+     "        quote: 'inner outcome: success'\n", "survived"),
+
+    # Regression: when the verdict the walk accepts is uniformly INDENTED (the model emitted
+    # it inside a list/quote context), the trimmed result must STILL parse to the same
+    # mapping. A plain `.strip()` on the accepted suffix would dedent only the first line and
+    # desync the block into invalid YAML — corrupting a verdict the walk had proven parses.
+    ("indented-verdict-after-preamble-survives-the-trim",
+     "Let me analyze.\n\n  outcome: caught\n  defender_findings: []", "caught"),
+
+    # Duplicate top-level `outcome:` keys are a plain YAML last-wins parse; the primitive does
+    # not intercede.
+    ("duplicate-outcome-keys-last-wins-not-special-cased",
+     "outcome: caught\noutcome: survived\ndefender_findings: []", "survived"),
+
+    # Edge: two `---`-separated verdicts. `yaml.safe_load` RAISES on a multi-doc stream (it is
+    # single-doc), so every prefix containing the separator fails and the walk stops at the
+    # trailing single doc. Pathological input, pinned so the behavior is defined rather than
+    # accidental.
+    ("multidoc-separator-yields-the-trailing-doc",
+     "outcome: caught\ndefender_findings: []\n---\n"
+     "outcome: survived\ndefender_findings: []", "survived"),
+], ids=lambda v: v if isinstance(v, str) and len(v) < 60 and "\n" not in v else "")
+def test_the_walk_trims_a_preamble_down_to_the_real_verdict(case, raw, outcome):
+    """E1: whatever the model wrote before the verdict, the trimmed text parses to the
+    verdict the model actually reached — and when two candidate anchors compete, the one
+    that PARSES wins rather than the one that comes first."""
+    assert yaml.safe_load(strip_yaml_preamble(raw))["outcome"] == outcome
 
 
-def test_unfenced_prose_preamble_is_trimmed():
-    """E1: the headline bug. 'Let me analyze.\\n\\n<verdict>' -> the leading prose is
-    dropped and the result parses to outcome 'caught'."""
-    raw = "Let me analyze the findings.\n\n" + _CLEAN_ADV
-    out = strip_yaml_preamble(raw)
-    assert yaml.safe_load(out)["outcome"] == "caught"
-
-
-def test_multiline_prose_preamble_is_trimmed():
-    """E1: a multi-paragraph preamble (several bare-scalar lines, no blank before the
-    last) is fully dropped down to the verdict -> outcome 'survived'."""
-    raw = "Paragraph one.\nStill paragraph one.\n\nSecond paragraph.\n\noutcome: survived\ndefender_findings: []"
-    assert yaml.safe_load(strip_yaml_preamble(raw))["outcome"] == "survived"
-
-
-def test_preamble_line_beginning_outcome_then_real_verdict_parsebreak():
-    """E1 (#492 core, mechanism A): a PREAMBLE line begins `outcome:` at col 0, then
-    parse-breaking prose, then the real verdict. The preamble anchor's suffix fails to
-    parse, so the walk falls through to the real verdict -> outcome 'caught', NOT the
-    preamble's 'survived'. The incumbent _extract_yaml_doc (first col-0 anchor) got this
-    wrong."""
-    raw = (
-        "outcome: this looks survived-ish to me\n"
-        "Let me write the real verdict now.\n\n"
-        "outcome: caught\ndefender_findings: []"
-    )
-    assert yaml.safe_load(strip_yaml_preamble(raw))["outcome"] == "caught"
-
-
-def test_preamble_line_beginning_outcome_merges_last_wins():
-    """E1 (#492 core, mechanism B): when a preamble `outcome:` line and the real verdict
-    merge into ONE mapping (no parse-breaking prose between them), YAML duplicate-key
-    last-wins makes the real (later) outcome win regardless of anchor -> 'caught'."""
-    raw = "outcome: survived\nnote: on second thought\n\noutcome: caught\ndefender_findings: []"
-    assert yaml.safe_load(strip_yaml_preamble(raw))["outcome"] == "caught"
-
-
-def test_indented_citation_outcome_is_not_anchored():
-    """E1: a doc whose ONLY top-level mapping is the verdict, with an indented `outcome:`
-    inside a citation quote, already parses whole -> passthrough, top-level outcome
-    'survived' (the indented one is data, never chosen)."""
-    raw = (
-        "outcome: survived\n"
-        "defender_findings:\n"
-        "  - type: disposition-confirmed\n"
-        "    subject_anchor: l-001\n"
-        "    citations:\n"
-        "      - source: comparison\n"
-        "        quote: 'inner outcome: success'\n"
-    )
-    assert yaml.safe_load(strip_yaml_preamble(raw))["outcome"] == "survived"
-
-
-def test_no_mapping_anywhere_is_returned_unchanged():
-    """E1 (fail-closed): text with no parseable mapping ('just prose, no verdict') is
-    returned unchanged, so downstream validation dead-letters it exactly as today."""
-    raw = "just prose, no verdict here at all"
-    assert strip_yaml_preamble(raw) == raw
-
-
-def test_col0_key_present_but_no_suffix_parses_is_fail_closed():
-    """E1 (fail-closed, FORK-B): a col-0 mapping-looking line whose suffix never parses to
-    a mapping (a tab in the indentation makes every suffix invalid YAML) returns the input
-    unchanged — NOT a best-effort truncated slice."""
-    raw = "outcome:\n\tbroken\ttab\tindent"
-    assert strip_yaml_preamble(raw) == raw
-
-
-def test_indented_verdict_after_preamble_survives_the_trim():
-    """E1 (regression): when the verdict the walk accepts is uniformly INDENTED (e.g. the
-    model emitted it inside a list/quote context), the trimmed result must STILL parse to
-    the same mapping. A plain ``.strip()`` on the accepted suffix would dedent only the
-    first line and desync the block into invalid YAML — corrupting a verdict the walk had
-    already proven parses. Here the accepted suffix is '  outcome: caught\\n  ...'."""
-    raw = "Let me analyze.\n\n  outcome: caught\n  defender_findings: []"
-    out = strip_yaml_preamble(raw)
-    assert yaml.safe_load(out)["outcome"] == "caught"
-
-
-def test_recursion_bomb_is_fail_closed_not_raised():
-    """E1 (fail-closed): a deeply nested flow collection makes ``yaml.safe_load`` raise
-    ``RecursionError`` — NOT a ``yaml.YAMLError`` — on every suffix. The walk must swallow
-    it like any other parse failure and return the input unchanged (so it dead-letters
-    downstream), rather than letting the RecursionError escape and crash the caller."""
-    raw = "outcome: " + "[" * 6000
+# --- E1: what the walk must LEAVE ALONE -------------------------------------
+# Fail-closed. Nothing here is a best-effort truncated slice: the input comes back
+# byte-identical so downstream validation dead-letters it exactly as it does today.
+@pytest.mark.parametrize(("case", "raw"), [
+    # The common case must not be perturbed: input that already parses to a mapping.
+    ("clean-mapping-is-a-passthrough-noop", _CLEAN_ADV),
+    # No parseable mapping anywhere.
+    ("no-mapping-anywhere", "just prose, no verdict here at all"),
+    # FORK-B: a col-0 mapping-looking line whose suffix NEVER parses to a mapping (a tab in
+    # the indentation makes every suffix invalid YAML).
+    ("col0-key-present-but-no-suffix-parses", "outcome:\n\tbroken\ttab\tindent"),
+    # A deeply nested flow collection makes `yaml.safe_load` raise `RecursionError` — NOT a
+    # `yaml.YAMLError` — on every suffix. The walk must swallow it like any other parse
+    # failure rather than letting it escape and crash the caller.
+    ("recursion-bomb-is-swallowed-not-raised", "outcome: " + "[" * 6000),
+], ids=lambda v: v if isinstance(v, str) and len(v) < 60 and "\n" not in v else "")
+def test_the_walk_returns_the_input_unchanged_when_it_cannot_find_a_verdict(case, raw):
+    """E1 (fail-closed): with no parseable mapping to trim down to, the primitive returns its
+    input byte-for-byte — never a partial slice it could not prove parses."""
     assert strip_yaml_preamble(raw) == raw
 
 
@@ -153,22 +148,6 @@ def test_generalizes_to_non_outcome_schema():
     raw = "Some narration first.\n\nleads:\n  - id: l-001\nsummary: done"
     out = strip_yaml_preamble(raw)
     assert yaml.safe_load(out) == {"leads": [{"id": "l-001"}], "summary": "done"}
-
-
-def test_duplicate_outcome_keys_last_wins_is_not_special_cased():
-    """E1: duplicate top-level `outcome:` keys are a plain YAML last-wins parse; the
-    primitive does not intercede. 'outcome: caught\\noutcome: survived\\n...' -> 'survived'."""
-    raw = "outcome: caught\noutcome: survived\ndefender_findings: []"
-    assert yaml.safe_load(strip_yaml_preamble(raw))["outcome"] == "survived"
-
-
-def test_multidoc_separator_yields_the_trailing_single_doc():
-    """E1 (edge): two `---`-separated verdicts. yaml.safe_load RAISES on a multi-doc stream
-    (it is single-doc), so every prefix containing the separator fails; the walk stops at
-    the trailing single doc -> outcome 'survived'. A pathological input; pinned so the
-    behavior is defined rather than accidental."""
-    raw = "outcome: caught\ndefender_findings: []\n---\noutcome: survived\ndefender_findings: []"
-    assert yaml.safe_load(strip_yaml_preamble(raw))["outcome"] == "survived"
 
 
 def test_composes_after_strip_yaml_fence_for_preamble_plus_fence():

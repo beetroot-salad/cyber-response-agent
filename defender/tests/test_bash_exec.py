@@ -55,16 +55,24 @@ def test_two_stage_pipe(tmp_path):
     assert out == "alpha\nalpha\n"
 
 
-def test_three_stage_pipe():
-    rc, out, err = _run("echo hello | cat | cat")
-    assert rc == 0
-    assert out == "hello\n"
-
-
-def test_quoted_pipe_is_not_a_split():
-    rc, out, err = _run("echo 'a | b'")
-    assert rc == 0
-    assert out == "a | b\n"
+# The executor reproduces bash's own composition rules without a shell. Each row is one
+# spelling and the exact stdout bash itself would produce for it — exact, because "close
+# enough" output is how a silently dropped stage looks.
+@pytest.mark.parametrize(("cmd", "rc", "out"), [
+    ("echo hello | cat | cat", 0, "hello\n"),        # pipes chain past two stages
+    ("echo 'a | b'", 0, "a | b\n"),                  # a QUOTED pipe is data, not a split
+    ("bash -c 'echo wrapped'", 0, "wrapped\n"),      # the inline -c payload is unwrapped and run
+    ("timeout 5 echo hi", 0, "hi\n"),                # a timeout prefix is stripped, the tail runs
+    ("true && echo yes", 0, "yes\n"),                # && runs the tail on success ...
+    ("false || echo fallback", 0, "fallback\n"),     # ... and || runs it on failure
+    ("echo a ; echo b", 0, "a\nb\n"),                # `;` runs both, in order
+    ("echo a\necho b", 0, "a\nb\n"),                 # a bare NEWLINE separates commands too
+], ids=lambda v: v if isinstance(v, str) and "\n" not in v else "")
+def test_a_composed_command_runs_and_returns_exactly_bashs_output(cmd, rc, out):
+    """Pipes, quoting, the `bash -c`/`timeout` wrappers, and the `&&`/`||`/`;`/newline
+    separators each compose the way bash composes them — and stdout matches byte-for-byte,
+    which is what makes a dropped stage visible rather than plausible."""
+    assert _run(cmd)[:2] == (rc, out)
 
 
 def test_pipe_exit_code_is_last_stage(tmp_path):
@@ -75,47 +83,10 @@ def test_pipe_exit_code_is_last_stage(tmp_path):
     assert out == ""
 
 
-def test_bash_c_is_unwrapped_and_run():
-    rc, out, err = _run("bash -c 'echo wrapped'")
-    assert rc == 0
-    assert out == "wrapped\n"
-
-
-def test_timeout_prefix_is_stripped_and_runs():
-    rc, out, err = _run("timeout 5 echo hi")
-    assert rc == 0
-    assert out == "hi\n"
-
-
-
 def test_and_short_circuits_on_failure():
     rc, out, err = _run("false && echo nope")
     assert rc == 1
     assert "nope" not in out
-
-
-def test_and_runs_tail_on_success():
-    rc, out, err = _run("true && echo yes")
-    assert rc == 0
-    assert out == "yes\n"
-
-
-def test_or_runs_tail_on_failure():
-    rc, out, err = _run("false || echo fallback")
-    assert rc == 0
-    assert out == "fallback\n"
-
-
-def test_semicolon_runs_both():
-    rc, out, err = _run("echo a ; echo b")
-    assert rc == 0
-    assert out == "a\nb\n"
-
-
-def test_newline_separates_commands():
-    rc, out, err = _run("echo a\necho b")
-    assert rc == 0
-    assert out == "a\nb\n"
 
 
 
