@@ -38,6 +38,7 @@ from defender.tests._declared870 import (  # noqa: E402
     commit_all,
     consumed_by_id,
     curate_reducer_surface,
+    git,
     head_files,
     queue_ids,
     seed_tree,
@@ -112,6 +113,7 @@ def test_e2e_a_failed_reducer_pipe_becomes_a_reducer_handoff(tmp_path: Path, mon
 
     # --- the curation tick: the handoff names the surface, and the commit carries it ------
     spawn = Spawn(curate_reducer_surface("keep the unnest argument a LIST"))
+    head_before = git(repo, "rev-parse", "HEAD").stdout.strip()
     assert pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn) == 0
 
     reducer = by_surface(spawn.handoffs)["reducer"]
@@ -120,7 +122,13 @@ def test_e2e_a_failed_reducer_pipe_becomes_a_reducer_handoff(tmp_path: Path, mon
     assert reducer[0]["failures"][0]["stderr_digest"] == BINDER
     assert "defender-sql" in reducer[0]["failures"][0]["executed_query"]
 
-    assert REDUCER_REL in head_files(repo)
+    # THIS TICK's commit, not HEAD's file list: the fixture seeds the reducer surface in its
+    # own commit, so the literal is in `head_files` from the seed whenever the tick commits
+    # nothing — which is exactly the build this demand exists to catch.
+    assert git(repo, "rev-parse", "HEAD").stdout.strip() != head_before, (
+        "the taught lesson never reached a commit of its own"
+    )
+    assert REDUCER_REL in head_files(repo), "the tick committed, but not the reducer surface"
     assert "keep the unnest argument a LIST" in (
         (repo / REDUCER_REL).read_text(encoding="utf-8")
     )

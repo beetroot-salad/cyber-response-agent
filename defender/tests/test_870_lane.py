@@ -197,6 +197,15 @@ def test_no_model_supplied_query_id_reaches_the_reducer_surface():
     `is_sentinel` test alone: `'elastic.bash-shim'` passes `resolve_query_id` VERBATIM (C15,
     executed), is one substring away from the sentinel, and is entirely model-chosen.
 
+    THE NEAR MISS IS ASKED AT THE SEAM THAT OWNS THE ROUTING KEY, not at the collector.
+    `_draft_candidate_segments('elastic.bash-shim', 'bash', …)` splits it into
+    `('elastic', 'bash-shim')`, so `collect_general_failures`' fourth guard diverts the row to
+    DRAFT SYNTHESIS before the lane question is reached — a correct build and an
+    `endswith`-buggy one both collect nothing there, which is no test at all. So the collector
+    arm asserts the diversion it really produces, and the routing question is put to
+    `_build_pitfalls_handoffs` over a queued row carrying the near miss: it is a system
+    pitfall under elastic's `execution.md`, and no reducer entry exists for it.
+
     `reducer_handoff_names_the_surface` is this negative's positive control: the genuine
     sentinel DOES reach the reducer surface, so a router that refused everything would not
     pass the pair.
@@ -209,12 +218,13 @@ def test_no_model_supplied_query_id_reaches_the_reducer_surface():
     assert near_miss == "elastic.bash-shim", "C15's near miss no longer passes through"
 
     rows = _collect(shim_lead(system="elastic", query_id=near_miss))
-    assert [r["system"] for r in rows] == ["elastic"], (
-        "a model-spelled near miss was normalized as though it were the sentinel"
+    assert rows == [], (
+        "the near miss is a DRAFT candidate — diverted before the lane question is asked"
     )
-    surfaces = by_surface(
-        pitfalls_curator._build_pitfalls_handoffs(rows, systems=DECLARED)
-    )
+    surfaces = by_surface(pitfalls_curator._build_pitfalls_handoffs(
+        [shim_row("r:l-009:0", system="elastic") | {"query_id": near_miss}],
+        systems=DECLARED,
+    ))
     assert surfaces["reducer"] == []
     assert [e["path"] for e in surfaces["system"]] == [
         "defender/skills/elastic/execution.md"

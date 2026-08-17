@@ -95,10 +95,17 @@ def test_a_taught_reducer_row_is_consumed_not_retired(scene):
     repo, paths = scene
     ids = _shim_batch(paths)
     spawn = Spawn(curate_reducer_surface())
+    head_before = git(repo, "rev-parse", "HEAD").stdout.strip()
 
     assert pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn) == 0
     assert by_surface(spawn.handoffs)["reducer"], "no reducer handoff, so the arm is vacuous"
-    assert REDUCER_REL in head_files(repo), "the curator's edit never reached a commit"
+    # THIS TICK's commit, not HEAD's file list: the fixture seeds the reducer surface in its
+    # own commit, so `REDUCER_REL in head_files(repo)` is true from the seed whenever the tick
+    # commits nothing at all — the assertion would hold on a build that never wrote the file.
+    assert git(repo, "rev-parse", "HEAD").stdout.strip() != head_before, (
+        "the curator's edit never reached a commit"
+    )
+    assert REDUCER_REL in head_files(repo), "the tick committed, but not the reducer surface"
 
     consumed = consumed_by_id(paths)
     assert set(consumed) == set(ids)
@@ -151,8 +158,9 @@ def test_a_no_edit_reducer_tick_holds_its_rows(scene):
     assert queue_ids(paths) == ids, "the rows were consumed on a tick that taught nothing"
     assert consumed_by_id(paths) == {}
     assert graveyard_by_id(paths) == {}
-    assert git(repo, "rev-parse", "HEAD").stdout.strip() == head_before
-    assert REDUCER_REL not in head_files(repo)
+    assert git(repo, "rev-parse", "HEAD").stdout.strip() == head_before, (
+        "the tick committed something on a tick whose curator declined to edit"
+    )
 
     # The second conjunct alone: a handoff WAS emitted, a commit DID land, and the reducer
     # literal is absent from its changed set.
@@ -324,6 +332,7 @@ def test_a_reducer_only_tick_reports_what_it_taught(scene, capsys):
     """
     repo, paths = scene
     _shim_batch(paths)
+    head_before = git(repo, "rev-parse", "HEAD").stdout.strip()
     capsys.readouterr()
 
     assert pitfalls_curator.run_pitfalls(paths=paths, invoke=Spawn(curate_reducer_surface())) == 0
@@ -337,6 +346,9 @@ def test_a_reducer_only_tick_reports_what_it_taught(scene, capsys):
         f"the commit misdescribes a tick that touched no execution.md: {summary!r}"
     )
     assert "pitfalls" in summary
+    assert git(repo, "rev-parse", "HEAD").stdout.strip() != head_before, (
+        "nothing was committed, so the message asserted above is the seed's"
+    )
     assert REDUCER_REL in head_files(repo)
 
 
