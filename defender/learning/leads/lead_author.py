@@ -4,9 +4,10 @@ from __future__ import annotations
 import argparse
 import functools
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 from uuid import uuid4
 
@@ -15,6 +16,7 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
 
 from defender.learning.author import shared as _author_shared
 from defender import _corpus
+from defender import _git
 from defender import _scaffold_rules
 from defender._untrusted import wrap
 from defender.learning.core import config as _loop_config
@@ -44,9 +46,11 @@ from defender.learning.leads.path_validation import (  # noqa: F401  (re-exporte
 )
 from defender.learning.leads.draft_synthesis import (  # noqa: F401  (re-exported)
     _SAFE_ID_SEGMENT,
+    _draft_basename,
     _draft_candidate_segments,
     _draft_skeleton,
     _executed_query,
+    answered_identities,
     synthesize_drafts,
 )
 from defender.learning.leads.lead_extraction import (  # noqa: F401  (re-exported)
@@ -102,6 +106,25 @@ def release_queue_lock(fh: Any) -> None:
 
 
 
+def _templates_by_identity(catalog: list) -> dict:
+    """`{identity -> template}` over both the ids templates HAVE and the ids they COVER.
+
+    A queries-table row carries the coined `query_id` gather dispatched under, and that stopped
+    being any template's `id:` when the mint began deriving a draft's name from it. Indexed on
+    `id` alone, the draft this tick just minted does not resolve, `build_handoff` drops the row
+    as an unresolved contract violation, and the author is handed nothing about the one file
+    the tick was spawned to curate.
+
+    `setdefault` so a real `id:` always beats an alias, and so the first template in catalog
+    order wins if two ever claim the same identity.
+    """
+    by_id = {t.id: t for t in catalog}
+    for template in catalog:
+        for covered in template.covers:
+            by_id.setdefault(covered, template)
+    return by_id
+
+
 def build_handoff(
     run_dir: Path, executed: list[ExecutedLead], joined_leads: list | None = None,
     *, repo_root: Path = REPO_ROOT, catalog_dir: Path | None = None,
@@ -109,7 +132,7 @@ def build_handoff(
 ) -> list[dict]:
     if catalog is None:
         catalog = lead_neighbors.load_catalog(catalog_dir)
-    by_id = {t.id: t for t in catalog}
+    by_id = _templates_by_identity(catalog)
     idf = lead_neighbors.build_idf(lead_neighbors._all_query_variants(catalog))
 
     grouped: dict[Path, list[ExecutedLead]] = {}
@@ -444,8 +467,266 @@ def _skills_rule(
     _skills_content_rule(repo_root, resolver, xy, path)
 
 
+def _template_at_head(repo_root: Path, path: str) -> _corpus.QueryTemplate | None:
+    """The template `path` was at HEAD, or `None` if HEAD did not carry it or it did not parse.
+
+    A `None` for an unparseable pre-image is deliberate and it fails OPEN. Everything this
+    answers is a question about what the agent's edit DID to a file, and a pre-image the corpus
+    reader cannot parse is one no invariant was holding before this batch either — refusing the
+    commit over it would punish the author for the state of the tree they were handed."""
+    text = _git.git_show_head(repo_root, path)
+    if text is None:
+        return None
+    template, _reason = _corpus.parse_query_template(text, repo_root / path)
+    return template
+
+
+#: The mint wrote nothing this tick — the default for every caller of the gate that is not
+#: `_run_locked` (the tests that drive it directly, and any future one). A frozen mapping
+#: rather than a `None` the body re-coalesces, and rather than a `{}` literal default.
+_NO_MINTED: Mapping[Path, tuple[str, ...]] = MappingProxyType({})
+
+
+def _minted_identities(created: list[Path]) -> Mapping[Path, tuple[str, ...]]:
+    """`{draft path -> the identities it records}` for the drafts THIS tick's mint wrote.
+
+    Read HERE, between the mint and the agent, because after the agent runs the answer may no
+    longer be on disk — and for a freshly minted draft there is nowhere else to get it. A draft
+    an EARLIER tick committed departs as a `D` porcelain record whose identities come out of
+    `git show HEAD:…`; a draft this tick minted is untracked, so deleting it before the commit
+    leaves git no record and no pre-image at all. That is not the corner case: `_run_locked`
+    mints and then hands the same draft to the author in the same tick (the catalog is reloaded
+    after the mint precisely so it resolves), so a bare discard of a just-minted draft is the
+    common shape of the failure `_covers_rule`'s transfer half exists to refuse.
+    """
+    out: dict[Path, tuple[str, ...]] = {}
+    for path in created:
+        template = _corpus.read_query_template(path)[0]
+        if template is not None and template.covers:
+            out[path] = template.covers
+    return out
+
+
+def _answered_after_batch(repo_root: Path) -> set[str]:
+    """Every identity the catalog answers once this batch lands, through the mint's OWN reader.
+
+    Read off the working tree, so it already includes whatever the agent just wrote. The transfer
+    rule below asks exactly one question — "will this identity be re-minted next run?" — and the
+    only thing entitled to answer it is the function the mint asks: `answered_identities`, ids
+    UNION `covers:`, over the whole catalog.
+
+    It used to be a private walk over `{system}/*.md` reading `covers:` alone, which answered a
+    NARROWER question in two ways and refused legitimate work for both. Established-only: a draft
+    can be the wide neighbor (`top_k_neighbors` iterates the whole catalog, and `lead_author.md`
+    says "a coined draft (or an established template)"), so folding one draft into another and
+    attributing it there was refused for a delete that could never cause a re-mint. And
+    covers-only: an identity answered by a template's `id:` is answered, which is the ordinary
+    case for anything not yet renamed. Scored against a set the mint does not use, this gate
+    discards a whole tick's batch over a delete that costs nothing — the exact false-refusal
+    class its own docstring claimed to be avoiding.
+    """
+    return answered_identities(lead_neighbors.load_catalog(repo_root / CATALOG_REL))
+
+
+def _refuse_half_promote(repo_root: Path, taken_over: set[str]) -> None:
+    """The other side of transfer: an identity may not land on an established template while the
+    draft that recorded it is still on disk.
+
+    This is `_skills_content_rule`'s half-promote probe, re-aimed at `covers:` for the same
+    reason the transfer rule exists at all. That probe derives the twin from the BASENAME
+    (`_draft_twin`), and a promote stopped sharing one the moment the draft's name became a
+    digest and the established file's name became the author's — so it can no longer see the
+    failure it was written for: established + draft both landing because the promote's `rm`
+    never happened. The surviving draft is unchanged, so no `git status` record carries it;
+    only a filesystem probe can.
+    """
+    if not taken_over:
+        return
+    for path in sorted((repo_root / CATALOG_REL).glob("*/_draft/*.md")):
+        template = _corpus.read_query_template(path)[0]
+        if template is None:
+            continue
+        if stranded := sorted(set(template.covers) & taken_over):
+            rel = path.relative_to(repo_root).as_posix()
+            raise LeadAuthorError(
+                f"half-promote: draft {rel} still exists, but the identities it records "
+                f"({stranded}) were taken over by an established template in this batch; "
+                "refusing to commit (the promote's / widen's `rm` didn't happen — established "
+                "+ draft would both land, and the draft is handed back as work every tick "
+                "until it is removed)"
+            )
+
+
+def _departed_drafts(
+    repo_root: Path,
+    minted: Mapping[Path, tuple[str, ...]],
+    records: list[tuple[str, str]],
+) -> list[tuple[str, tuple[str, ...]]]:
+    """`(path, identities)` for every draft that is no longer in the tree — from the TWO places
+    a departure can be read, because a draft has two provenances.
+
+    A draft an earlier tick committed departs as a `D` porcelain record, and its identities come
+    out of its HEAD pre-image. A draft this tick minted has neither: the mint writes it
+    untracked, so removing it before the commit leaves `git status` nothing to report and `git
+    show HEAD:` nothing to parse. Those identities are captured at mint time instead
+    (`_minted_identities`) and carried in — without this half the transfer rule is inert for
+    exactly the batch it was written for, since the tick that mints a draft is the tick that
+    hands it to the author.
+    """
+    out: list[tuple[str, tuple[str, ...]]] = []
+    for xy, path in records:
+        # The draft half, spelled with `_under_draft` rather than `_is_catalog_template`:
+        # that predicate EXCLUDES drafts, so the two together admit nothing. The catalog's own
+        # non-template surfaces are still screened off — a `_draft/README.md` and a `SCHEMA.md`
+        # are protected files the path rule has already refused, and neither carries `covers:`.
+        if "D" not in xy or not _under_draft(path):
+            continue
+        if _is_draft_readme(path) or _is_schema_md(path):
+            continue
+        draft = _template_at_head(repo_root, path)
+        if draft is not None and draft.covers:
+            out.append((path, draft.covers))
+    # A distinct name, not a rebinding of `path` above: that one is the repo-relative `str` git
+    # reports, this one is the absolute `Path` the mint returned, and reusing the name made the
+    # two look interchangeable when the whole point of the loop below is that they are not.
+    for draft_path, identities in minted.items():
+        if draft_path.exists():
+            continue
+        rel = (
+            draft_path.relative_to(repo_root).as_posix()
+            if draft_path.is_relative_to(repo_root) else str(draft_path)
+        )
+        out.append((rel, identities))
+    return out
+
+
+def _covers_rule(
+    repo_root: Path,
+    minted: Mapping[Path, tuple[str, ...]],
+    records: list[tuple[str, str]],
+) -> None:
+    """The two whole-batch invariants on `covers:` — the identities a template accounts for.
+
+    Both exist because the draft's basename stopped being derivable from its content. While a
+    promote was `_draft/{id}.md` -> `{id}.md`, the shared basename WAS the link: `_draft_twin`
+    derived one from the other, and `synthesize_drafts` suppressed a re-mint because the
+    promoted template's `id` still echoed the coined `query_id`. Now the author names the
+    established file for what it measures, so `covers:` is the only thing tying the two
+    together, and it has to be carried rather than merely encouraged.
+
+    **Transfer.** A draft that leaves the tree must have its identities land somewhere. Both
+    dispositions `lead_author.md` gives satisfy this — a promote writes them onto the new file,
+    a discard-into-widen adds them to the template it widened. What it refuses is the bare
+    discard, and the refusal names the alternative: a draft you cannot attribute to any
+    template is one to SKIP, not to delete. Unenforced, the omission is silent and self-
+    repeating — the identity is re-minted the next time a run coins it, the author discards it
+    again, and nothing in the loop ever reports that it is going in circles. Scored against the
+    whole tree (`_answered_after_batch`) rather than against this batch's edits, because the
+    question is the one `synthesize_drafts` will ask next run and it reads the whole catalog.
+    Both provenances of a departed draft are read — the committed one out of git, the one this
+    tick minted out of `minted`, which git cannot see (`_departed_drafts`). Its mirror is
+    `_refuse_half_promote`: an identity that lands on a template while its draft is still on
+    disk is the takeover half-done.
+
+    **Monotonicity.** An established template may gain identities and may never lose them, and
+    its `id:` may not change under an edit. This is the collision detector: the write lane
+    admits any `{system}/{name}.md`, and overwriting an established template is a legal FOLD, so
+    an author who picks a name that already exists does not get an error today — it silently
+    replaces a different measurement, taking that template's own `covers:` down with it. Losing
+    provenance is the observable that separates a clobber from a widen, and it is the one the
+    clobbered template's future re-mints depend on.
+    """
+    # `_is_catalog_template` is already draft-excluding (it is the predicate the content rule
+    # uses to decide what may be READ as a template), so this is the established half by
+    # construction — no second `_under_draft` test, which would read as though it were adding a
+    # condition the predicate does not already carry.
+    established = [p for xy, p in records if "D" not in xy and _is_catalog_template(p)]
+    # The identities this batch moved ONTO an established template — `after` minus `before`, not
+    # `after`, so the half-promote probe below fires on a takeover and never on a template that
+    # already accounted for the identity before the agent was spawned.
+    taken_over: set[str] = set()
+    for path in established:
+        after = _corpus.read_query_template(repo_root / path)[0]
+        if after is None:
+            # Its own refusal already, from `_check_promoted_template` on the per-path pass.
+            continue
+        before = _template_at_head(repo_root, path)
+        _refuse_lost_provenance(path, before, after)
+        taken_over.update(set(after.covers) - set(before.covers if before is not None else ()))
+
+    # The tree walk is behind the `if`: `_answered_after_batch` parses the whole catalog, and
+    # the question it answers is only ever asked about a draft that left. A batch that
+    # deleted none pays nothing.
+    if departed := _departed_drafts(repo_root, minted, records):
+        covered = _answered_after_batch(repo_root)
+        for path, identities in departed:
+            if orphaned := sorted(set(identities) - covered):
+                raise LeadAuthorError(
+                    f"agent deleted draft {path} without attributing it: {orphaned} is covered "
+                    "by no established template; refusing to commit (a promote carries "
+                    "`covers:` onto the new file and a discard-into-widen adds it to the "
+                    "template it widened — a draft that fits neither is one to leave alone and "
+                    "SKIP, because deleting it here only means minting it again next run)"
+                )
+
+    _refuse_half_promote(repo_root, taken_over)
+
+
+def _repairs_the_id(
+    before: _corpus.QueryTemplate, after: _corpus.QueryTemplate,
+) -> bool:
+    """Is this `id:` change the REPAIR of an id that disagreed with its directory?
+
+    Without this the two rules deadlock, and the deadlock has no exit. A template filed at
+    `queries/{system}/{name}.md` while calling itself `{other}.{name}` is refused by
+    `check_template`'s `id-system-mismatch` on every edit — with a message telling the author
+    the id must start with `{system}`. The author does exactly that, and the monotonicity rule
+    refuses the batch for "rewriting the identity of an established template". Moving the file
+    instead is refused by the delete-prohibition. Every tick that touches the file discards its
+    whole batch, following two instructions that contradict each other.
+
+    Narrow on purpose: the id must have been wrong BEFORE and right AFTER. A change between two
+    well-formed ids is still the clobber the rule is here to catch, and a change that swaps one
+    mismatch for another is not a repair.
+    """
+    def _prefix(t: _corpus.QueryTemplate) -> str:
+        return t.id.split(".", 1)[0] if "." in t.id else ""
+
+    return _prefix(before) != before.system and _prefix(after) == after.system
+
+
+def _refuse_lost_provenance(
+    path: str, before: _corpus.QueryTemplate | None, after: _corpus.QueryTemplate,
+) -> None:
+    """The monotonicity half of `_covers_rule`, on ONE established template.
+
+    Split out for its own sake as much as for the complexity budget: this is the only part of
+    the rule that compares a file against its own pre-image, and reading it beside the
+    batch-wide accumulation above made two different questions look like one loop. The
+    pre-image is passed IN rather than read here, because the caller needs it too — reading it
+    twice is a second `git show` per changed template for an answer that cannot have moved.
+    """
+    if before is None:
+        return
+    if before.id != after.id and not _repairs_the_id(before, after):
+        raise LeadAuthorError(
+            f"agent rewrote the identity of an established template ({path}): it was "
+            f"{before.id!r} at HEAD and is {after.id!r} now; refusing to commit (a promote "
+            "writes a NEW file — an edit that replaces an existing template's `id:` is a "
+            "name collision that has silently overwritten a different measurement)"
+        )
+    if lost := sorted(set(before.covers) - set(after.covers)):
+        raise LeadAuthorError(
+            f"agent dropped `covers:` entries from an established template ({path}): "
+            f"{lost}; refusing to commit (a template may gain the identities it accounts "
+            "for and may never lose them — every dropped entry is a query_id that will be "
+            "re-drafted on the next run that coins it)"
+        )
+
+
 def _verify_skills_state(
     repo_root: Path, baseline_stray: list[str], *, systems: frozenset[str],
+    minted: Mapping[Path, tuple[str, ...]] = _NO_MINTED,
 ) -> list[str]:
     # ONE resolver for the whole batch, built on the tree being committed rather than on the
     # process's own: the drain runs this from the main checkout against a `lead-author/<id>`
@@ -455,6 +736,7 @@ def _verify_skills_state(
     return _verify_corpus_scope(
         repo_root, baseline_stray, actor="agent",
         rule=functools.partial(_skills_rule, repo_root, resolver, systems=systems),
+        batch_rule=functools.partial(_covers_rule, repo_root, minted),
     )
 
 
@@ -598,6 +880,10 @@ def _run_locked(run_dir: Path, deps: LeadAuthorDeps, *, box: Any = None) -> int:
             f"synthesized {len(synth)} draft(s) for uncatalogued verbs: "
             + ", ".join(p.name for p in synth)
         )
+    # Captured between the mint and the agent: these drafts are UNTRACKED, so if the agent
+    # removes one the commit gate has neither a `git status` record nor a HEAD pre-image to
+    # recover the identities it recorded (`_departed_drafts`).
+    minted = _minted_identities(synth)
 
     collected_marker = _state_dir(run_dir) / "pitfalls_collected"
     if not collected_marker.is_file():
@@ -637,7 +923,9 @@ def _run_locked(run_dir: Path, deps: LeadAuthorDeps, *, box: Any = None) -> int:
         _log(f"FATAL: lead-author spawn exited rc={rc}; see the trace under {run_dir} (drain will quarantine)")
         return 2
 
-    changed = _verify_skills_state(repo_root, baseline_stray, systems=deps.systems)
+    changed = _verify_skills_state(
+        repo_root, baseline_stray, systems=deps.systems, minted=minted
+    )
     sha = _author_shared.commit_corpus(
         repo_root, repo_root / "defender" / "skills",
         _loop_commit_message(run_dir, changed),

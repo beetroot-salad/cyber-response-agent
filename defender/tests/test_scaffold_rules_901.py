@@ -201,6 +201,59 @@ def test_a_bare_scalar_declaration_is_the_one_entry_spelling_not_nothing(tmp_pat
     assert _codes(scalar, "cmdb", tmp_path, resolver) == []
 
 
+def test_covers_reads_every_spelling_and_is_not_a_placeholder_declaration(tmp_path, resolver):
+    """`covers:` rides `_declared_names` for its SHAPE tolerance, not its name semantics.
+
+    What it carries are `query_id`s, so the tolerance is what matters and the classification is
+    not: it must never join `params:`/`body_substitutions:` in excusing a `${name}`. A template
+    that covered `cmdb.probe` and left `${probe}` undeclared would otherwise pass — a
+    frontmatter key that quietly widened the placeholder rule.
+    """
+    from defender._corpus import parse_query_template
+
+    def _covers(line: str):
+        text = f"---\nid: cmdb.probe\nstatus: established\nverb: get-host\n{line}---\n"
+        template, reason = parse_query_template(text, tmp_path / "cmdb" / "probe.md")
+        assert template is not None, reason
+        return template.covers
+
+    assert _covers("covers: [cmdb.a, cmdb.b]\n") == ("cmdb.a", "cmdb.b")
+    # The one-entry spelling a hand-editing author reaches for — and a `str` is iterable, so
+    # read as a sequence it would yield one entry per character.
+    assert _covers("covers: cmdb.a\n") == ("cmdb.a",)
+    assert _covers("") == ()
+
+    # …and the half the docstring promises: covering an identity does not declare a name. The
+    # entry is well-formed (`cmdb.probe`), so the ONLY finding is the placeholder one — a bare
+    # `probe` would be refused by the shape rule and would not test this.
+    smuggled = (
+        "---\nid: cmdb.probe\nstatus: established\nverb: get-host\nparams: [host]\n"
+        "covers: [cmdb.probe]\n---\n\n"
+        "## Query\n\n```query\nverb: get-host\nparams:\n  host: ${host}-${probe}\n```\n"
+    )
+    assert _codes(smuggled, "cmdb", tmp_path, resolver) == ["undeclared-placeholder"]
+
+
+def test_a_covers_entry_must_be_an_identity_of_the_system_it_is_filed_under(tmp_path, resolver):
+    """`covers:` is believed by the mint, so a wrong entry is a silent, permanent loss.
+
+    `synthesize_drafts` reads ids UNION `covers:` to decide whether an identity is already
+    answered. A `cmdb` template claiming `elastic.hunt-creds` — one copy-paste from a
+    cross-system neighbor — means `elastic` never gets that draft minted again, with nothing
+    reporting it. The shape half matters for the same reason: `_declared_names` is deliberately
+    tolerant, so an unquoted `covers: on` arrives as the string `True`, which no row can ever
+    match and which still reads as provenance to a human.
+    """
+    body = "## Query\n\n```query\nverb: get-host\nparams:\n  host: ${host}\n```\n"
+    head = "---\nid: cmdb.probe\nstatus: established\nverb: get-host\nparams: [host]\n"
+
+    assert _codes(head + "covers: [cmdb.other]\n---\n\n" + body, "cmdb", tmp_path, resolver) == []
+    for spelling in ("covers: [elastic.hunt-creds]", "covers: [probe]", "covers: on"):
+        assert _codes(
+            head + spelling + "\n---\n\n" + body, "cmdb", tmp_path, resolver
+        ) == ["covers-system-mismatch"], spelling
+
+
 def test_every_shipped_template_including_drafts_satisfies_the_rule(resolver):
     """The scope half. `validate_scaffold` excluded `_draft/`; this does not, which is the only
     reason the lead lane's output is inside any check at all."""

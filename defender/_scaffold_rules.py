@@ -58,11 +58,11 @@ _PLACEHOLDER_RE = re.compile(r"\$\{(\w+)\}")
 def placeholders(text: str) -> set[str]:
     """Every `${name}` the CHECKED grammar finds in `text`.
 
-    THE reader of `_PLACEHOLDER_RE`, exported so a writer classifies against the same grammar
-    the checker will apply rather than a second copy of it — the lead lane's minter has to
-    decide, at mint time, which `${name}`s of a body it must declare as `body_substitutions:`,
-    and a near-miss of this pattern there mints drafts the corpus-wide sweep then refuses
-    (#901: one rule, three callers, not three copies).
+    THE reader of `_PLACEHOLDER_RE`, exported so any writer that has to decide which `${name}`s
+    of a body it must declare classifies against the same grammar the checker will apply rather
+    than a second copy of it (#901: one rule, one reader, not a copy per caller). The lead
+    lane's minter was that writer until #917 made a draft a recording — a transcript declares
+    nothing, so it has no classification to get wrong — and the export stands for the next one.
     """
     return set(_PLACEHOLDER_RE.findall(text))
 
@@ -111,9 +111,39 @@ def _id_findings(t: QueryTemplate) -> list[Finding]:
     ]
 
 
+def _covers_findings(t: QueryTemplate) -> list[Finding]:
+    """`covers:` entries must be `{system}.{segment}` for the system the file sits under.
+
+    Checked for the same reason `id:` is, and with more at stake. A `covers:` entry is an
+    assertion that this file ANSWERS that identity, and `synthesize_drafts` believes it: an
+    entry naming another system's identity means that system never gets that draft again —
+    permanently, silently, from one copy-pasted line. It also weakens the lead lane's transfer
+    rule from the other side, since any entry on any established template can discharge a
+    departed draft's attribution.
+
+    The shape matters as much as the prefix. `covers:` rides `_declared_names`, whose scalar and
+    numeric branches are deliberately tolerant (a YAML `on` becomes the string `True`), so
+    without this an unquoted `covers: on` claims the identity `"True"` and a bare `covers: probe`
+    claims one no `resolve_query_id` could ever emit — neither of which any row will match, and
+    both of which read as provenance.
+    """
+    bad = [c for c in t.covers if c.split(".", 1)[0] != t.system or "." not in c]
+    if not bad:
+        return []
+    return [
+        Finding(
+            "covers-system-mismatch",
+            f"`covers:` names {sorted(bad)}, which are not identities of {t.system!r} — an "
+            f"entry is a `query_id` this file answers, so it is spelled "
+            f"`{t.system}.{{name}}`; an entry naming another system silently stops that "
+            "system's drafts from ever being minted again",
+        )
+    ]
+
+
 def check_template(t: QueryTemplate, verbs: Mapping[str, Verb]) -> list[Finding]:
     """Every well-formedness finding against one template, given its system's declared verbs."""
-    out = _id_findings(t)
+    out = _id_findings(t) + _covers_findings(t)
     if not t.verb:
         return out + [
             Finding(
@@ -156,6 +186,23 @@ def check_template(t: QueryTemplate, verbs: Mapping[str, Verb]) -> list[Finding]
         )
         for name in sorted(set(t.body_substitutions) & reserved)
     )
+
+    # A template that is not a draft must carry a `## Query`, and the rule is here rather than
+    # left to a consumer because every consumer degrades SILENTLY without one: `lead_render`
+    # renders the empty string, `lead_neighbors` scores an empty token set, and the placeholder
+    # rule below is vacuous — so an established template with no interface passes every check
+    # and then measures nothing. The reachable way to write one is a promote that copies a
+    # draft and keeps its `## Executed query` heading (#917: a draft records, it does not
+    # declare), which is exactly the edit the lane's gate has to catch.
+    if t.status != "draft" and not t.query.strip():
+        out.append(
+            Finding(
+                "empty-query",
+                "carries no `## Query` — a template's query is its INTERFACE, and a file "
+                "without one binds to a dispatch that renders nothing (a draft records under "
+                "`## Executed query`; promoting it means writing the wide `## Query` yourself)",
+            )
+        )
 
     if engine_of(fn) != "none":
         # An engine verb's body IS the query language, so its `${…}` are body text, not params —

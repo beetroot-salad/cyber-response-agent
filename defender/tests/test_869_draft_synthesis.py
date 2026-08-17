@@ -16,7 +16,11 @@ import dataclasses
 from pathlib import Path
 
 from defender.learning.leads import lead_author
-from defender.learning.leads.draft_synthesis import _draft_candidate_segments, synthesize_drafts
+from defender.learning.leads.draft_synthesis import (
+    _draft_basename,
+    _draft_candidate_segments,
+    synthesize_drafts,
+)
 from defender.learning.leads.lead_extraction import ExecutedLead, extract
 from defender.learning.core.config import LoopPaths
 from defender.tests._declared869 import (
@@ -70,7 +74,11 @@ def test_synthesize_drafts_refuses_an_undeclared_system(tmp_path):
     assert created == []
     assert not (cat / "fakesys").exists()
     assert list(cat.rglob("*fakesys*")) == []
-    assert list(cat.rglob("hunt-creds.md")) == []
+    # Nothing at ALL was written, rather than nothing under one expected name: since #917's
+    # review the basename is a digest, so an assertion spelling `hunt-creds.md` would pass
+    # against a draft that had been minted under its derived name and would be checking
+    # nothing. `rglob("*.md")` is what the catalog fixture seeded and no more.
+    assert sorted(p.name for p in cat.rglob("*.md")) == ["proc-tree.md"]
 
 
 def test_synthesize_drafts_still_mints_for_a_declared_system(tmp_path):
@@ -91,9 +99,12 @@ def test_synthesize_drafts_still_mints_for_a_declared_system(tmp_path):
     created = synthesize_drafts(
         [_lead("elastic.hunt-creds")], catalog_dir=cat, catalog=[], systems=DECLARED,
     )
-    draft = cat / "elastic" / "_draft" / "hunt-creds.md"
+    draft = cat / "elastic" / "_draft" / f"{_draft_basename('elastic.hunt-creds')}.md"
     assert created == [draft]
-    assert "id: elastic.hunt-creds" in draft.read_text()
+    assert f"id: elastic.{_draft_basename('elastic.hunt-creds')}" in draft.read_text()
+    # …and the coined name it was minted for is kept, as the dedup key and as provenance.
+    assert "covers:" in draft.read_text()
+    assert "elastic.hunt-creds" in draft.read_text()
 
     for undeclared in ("stub-cmdb.network-map", "custom.tagged"):
         system = undeclared.split(".", 1)[0]
@@ -134,7 +145,7 @@ def test_synthesize_drafts_screens_a_row_recorded_before_the_writer_rule(tmp_pat
     # what stands between the row and a `queries/fakesys/` directory.
     assert _draft_candidate_segments(
         "fakesys.hunt-creds", "esql", set(), row_system="fakesys") == (
-        "fakesys", "hunt-creds",
+        "fakesys", _draft_basename("fakesys.hunt-creds"),
     )
 
     cat = _catalog(tmp_path)

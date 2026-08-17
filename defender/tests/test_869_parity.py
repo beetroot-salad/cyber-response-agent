@@ -18,7 +18,7 @@ import pytest
 from defender import _git
 from defender.learning.core.config import LoopPaths
 from defender.learning.leads import lead_author, lead_neighbors, pitfalls_curator
-from defender.learning.leads.draft_synthesis import synthesize_drafts
+from defender.learning.leads.draft_synthesis import _draft_basename, synthesize_drafts
 from defender.learning.leads.lead_extraction import ExecutedLead, LeadAuthorError
 from defender.runtime.query_tool import QueryCapture
 from defender.runtime.verb_grant import DENY_ALL
@@ -149,7 +149,7 @@ def test_every_path_composition_site_refuses_an_undeclared_name(tmp_path, monkey
     assert synthesize_drafts(
         [_lead("elastic.hunt-creds", system="elastic")],
         catalog_dir=catalog, catalog=[], systems=DECLARED,
-    ) == [catalog / "elastic" / "_draft" / "hunt-creds.md"]
+    ) == [catalog / "elastic" / "_draft" / f"{_draft_basename('elastic.hunt-creds')}.md"]
 
     # site 4 — the draft discovery that hands the agent its work
     found = lead_author.discover_system_drafts(skills_dir=skills, systems=DECLARED)

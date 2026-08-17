@@ -23,7 +23,7 @@ from defender._paths import PATHS, DefenderPaths
 from defender.learning.core import drains, persist
 from defender.learning.core.config import LoopPaths
 from defender.learning.leads import lead_author, pitfalls_curator
-from defender.learning.leads.draft_synthesis import synthesize_drafts
+from defender.learning.leads.draft_synthesis import _draft_basename, synthesize_drafts
 from defender.learning.leads.lead_extraction import ExecutedLead, LeadAuthorError
 from defender.tests._declared869 import (
     SKILLS_REL,
@@ -232,7 +232,7 @@ def test_no_membership_consumer_reprobes_the_tree(tmp_path):
     assert synthesize_drafts(
         [_lead("mcpsys.new-verb", system="mcpsys")], catalog_dir=cat, catalog=[],
         systems=contradicts,
-    ) == [cat / "mcpsys" / "_draft" / "new-verb.md"]
+    ) == [cat / "mcpsys" / "_draft" / f"{_draft_basename('mcpsys.new-verb')}.md"]
 
     # --- handed nothing, over a tree that carries elastic in both sources: every one refuses ---
     assert marker_file(repo, "elastic").is_file()
@@ -454,4 +454,4 @@ def test_the_pitfalls_lane_is_handed_the_adapter_half_and_the_gates_the_union(
     assert synthesize_drafts(
         [_lead("mcpsys.new-verb", system="mcpsys")], catalog_dir=cat, catalog=[],
         systems=deps.systems,
-    ) == [cat / "mcpsys" / "_draft" / "new-verb.md"]
+    ) == [cat / "mcpsys" / "_draft" / f"{_draft_basename('mcpsys.new-verb')}.md"]

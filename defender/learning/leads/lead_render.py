@@ -17,7 +17,13 @@ _PLACEHOLDER_RE = re.compile(r"\$\{(\w+)\}|\{(\w+)\}")
 
 
 def _extract_query_body(template_text: str) -> str:
-    body = _corpus.section_bodies(template_text).get("Query", "")
+    # `## Query` for an established template, `## Executed query` for a draft — the same
+    # fallback `lead_neighbors.load_catalog` reads templates through. A draft carries a
+    # recording rather than an interface (`QueryTemplate.recording`), so keying on `## Query`
+    # alone renders the empty string for every draft, which is precisely the file the
+    # lead-author handoff was built to show (`build_handoff`'s `rendered_query`).
+    sections = _corpus.section_bodies(template_text)
+    body = sections.get("Query") or sections.get("Executed query", "")
     if not body:
         return ""
     fenced = _FENCE_RE.search(body)

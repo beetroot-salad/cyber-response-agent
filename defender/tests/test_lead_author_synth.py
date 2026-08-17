@@ -47,16 +47,31 @@ def _catalog(tmp_path) -> Path:
     return cat
 
 
+def _draft_path(cat, system: str, query_id: str):
+    """Where the mint puts the draft for `query_id` — the derived name, recomputed.
+
+    Through `lead_author._draft_basename` rather than against a literal digest, so these tests
+    bind to the RULE (the basename is a function of the coined id) and not to the output of one
+    hash at one length. A test carrying `3b4b25fa1be8` would have to be re-typed to change
+    `_DIGEST_LEN`, which is the kind of edit that gets made by pasting whatever the code now
+    prints — the opposite of a test."""
+    return cat / system / "_draft" / f"{lead_author._draft_basename(query_id)}.md"
+
+
 def test_unresolved_verb_is_drafted(tmp_path):
     cat = _catalog(tmp_path)
     created = lead_author.synthesize_drafts(
         [_lead("stub-cmdb.network-map", {"name": "web-1"}, verb="map")], catalog_dir=cat,
         systems=frozenset({"stub-cmdb"}))
-    draft = cat / "stub-cmdb" / "_draft" / "network-map.md"
+    draft = _draft_path(cat, "stub-cmdb", "stub-cmdb.network-map")
     assert created == [draft]
     text = draft.read_text()
-    assert "id: stub-cmdb.network-map" in text
+    assert f"id: stub-cmdb.{lead_author._draft_basename('stub-cmdb.network-map')}" in text
     assert "status: draft" in text
+    # The coined name is not discarded by the digest — it is kept where the dedup, the commit
+    # gate and the author all read it.
+    assert "covers:" in text
+    assert "stub-cmdb.network-map" in text
 
 
 def test_resolved_verb_not_drafted(tmp_path):
@@ -102,7 +117,7 @@ def test_esql_draft_carries_literal_query_not_placeholder(tmp_path):
         _lead("elastic.sshd-failed-by-srcip", {"query": _ESQL_PIPE}, verb="esql",
               system="elastic"),
     ], catalog_dir=cat, systems=frozenset({"elastic"}))
-    text = (cat / "elastic" / "_draft" / "sshd-failed-by-srcip.md").read_text()
+    text = _draft_path(cat, "elastic", "elastic.sshd-failed-by-srcip").read_text()
     assert "engine: esql" in text
     assert "```esql" in text
     assert "STATS failed = COUNT(*) BY source.ip" in text
@@ -160,7 +175,7 @@ def test_grok_braces_in_query_do_not_crash_skeleton(tmp_path):
         _lead("elastic.grok-probe", {"query": grok_pipe}, verb="esql", system="elastic"),
     ], catalog_dir=cat, systems=frozenset({"elastic"}))
     assert created
-    assert "%{IP:src}" in (cat / "elastic" / "_draft" / "grok-probe.md").read_text()
+    assert "%{IP:src}" in _draft_path(cat, "elastic", "elastic.grok-probe").read_text()
 
 
 def test_traversal_query_id_does_not_escape_catalog(tmp_path):
@@ -228,10 +243,10 @@ def _stub_verbs():
     return {"esql": esql, "map": map_}
 
 
-def _minted(cat, system: str, name: str):
+def _minted(cat, system: str, query_id: str):
     from defender._corpus import read_query_template
 
-    template, reason = read_query_template(cat / system / "_draft" / f"{name}.md")
+    template, reason = read_query_template(_draft_path(cat, system, query_id))
     assert template is not None, reason
     return template
 
@@ -250,7 +265,7 @@ def test_a_minted_draft_declares_the_verb_it_was_minted_from(tmp_path):
     lead_author.synthesize_drafts(
         [_lead("stub-cmdb.network-map", {"name": "web-1"}, verb="map")],
         catalog_dir=cat, systems=frozenset({"stub-cmdb"}))
-    template = _minted(cat, "stub-cmdb", "network-map")
+    template = _minted(cat, "stub-cmdb", "stub-cmdb.network-map")
     assert template.verb == "map"
     assert template.params == ("name",)
     assert _scaffold_rules.check_template(template, _stub_verbs()) == []
@@ -267,7 +282,7 @@ def test_a_minted_engine_draft_does_not_declare_the_body_param_it_spent(tmp_path
         _lead("elastic.sshd-failed-by-srcip", {"query": _ESQL_PIPE}, verb="esql",
               system="elastic"),
     ], catalog_dir=cat, systems=frozenset({"elastic"}))
-    template = _minted(cat, "elastic", "sshd-failed-by-srcip")
+    template = _minted(cat, "elastic", "elastic.sshd-failed-by-srcip")
     assert template.verb == "esql"
     assert template.params == ()
     assert _scaffold_rules.check_template(template, _stub_verbs()) == []
@@ -308,82 +323,136 @@ def test_a_coined_id_naming_another_system_mints_nothing(tmp_path):
 
 def test_a_coined_id_cannot_mint_a_basename_the_commit_gate_discards_the_batch_for(tmp_path):
     """The three basenames the write gate stopped admitting (#772) are the three the HOST-side
-    minter could still write.
+    minter could still write — and the derived name is what retires the question.
 
     `resolve_query_id`'s kebab segment (`[A-Za-z0-9][A-Za-z0-9_-]*`) admits `SCHEMA`, `README`
     and `execution` like any other name, so a model-coined `{system}.SCHEMA` minted
     `queries/{system}/_draft/SCHEMA.md` before the agent was ever spawned — and
     `_skills_path_rule` then refuses that file as a protected surface (`_is_schema_md` reads the
     basename at ANY depth under the catalog), which discards the WHOLE tick's batch rather than
-    denying one call. `README.md` (`_is_draft_readme`) and `execution.md` (the basename clause
-    at the top of the rule) are the same failure on the other two names.
+    denying one call.
 
-    The controls matter here: an ordinary kebab name still mints, and a name that merely
-    CONTAINS one of the three is not refused — the gate's predicates key on the whole basename,
-    so a stricter reading here would drop real drafts."""
+    #917 review: the mint no longer takes its basename from the coined id, so these rows are no
+    longer REFUSED — they are minted, under a digest, and the protected-surface question cannot
+    arise. That is the stronger property and it is what this now pins: the coined name survives
+    in `covers:` (it is the author's evidence), and NO minted path is one the gate refuses. The
+    old shape held the same line by enumerating three names, which is a list that has to be
+    maintained against `_skills_path_rule` forever."""
+    from defender.learning.leads.path_validation import (
+        CATALOG_REL,
+        _is_draft_readme,
+        _is_schema_md,
+    )
+
     cat = _catalog(tmp_path)
     hostile = [
         _lead(f"stub-cmdb.{seg}", {"name": "web-1"}, verb="map")
         for seg in ("SCHEMA", "README", "execution")
     ]
-    assert lead_author.synthesize_drafts(
-        hostile, catalog_dir=cat, systems=frozenset({"stub-cmdb"})) == []
-    assert not (cat / "stub-cmdb" / "_draft").exists()
-
-    ok = [
-        _lead("stub-cmdb.network-map", {"name": "web-1"}, verb="map"),
-        _lead("stub-cmdb.SCHEMA-drift", {"name": "web-1"}, verb="map"),
-    ]
     created = lead_author.synthesize_drafts(
-        ok, catalog_dir=cat, systems=frozenset({"stub-cmdb"}))
-    assert [p.name for p in created] == ["network-map.md", "SCHEMA-drift.md"]
+        hostile, catalog_dir=cat, systems=frozenset({"stub-cmdb"}))
+    assert len(created) == 3
+    for path in created:
+        rel = f"{CATALOG_REL}stub-cmdb/_draft/{path.name}"
+        assert not _is_schema_md(rel)
+        assert not _is_draft_readme(rel)
+        assert path.name != "execution.md"
+    # Each one still records which coined id it came from, so the author can see that gather
+    # called this measurement `SCHEMA` and name it something a catalog can carry.
+    for seg in ("SCHEMA", "README", "execution"):
+        template = _minted(cat, "stub-cmdb", f"stub-cmdb.{seg}")
+        # Both identities the file answers: its own derived id (dispatchable, because
+        # `template_search` publishes drafts) and the coined id the row carried.
+        assert template.covers == (template.id, f"stub-cmdb.{seg}")
 
 
 def test_a_goal_carrying_a_line_separator_cannot_forge_a_section(tmp_path):
     """`goal_text` is model-authored, and `_corpus.section_bodies` walks `splitlines()` — which
     breaks on `\\r`, `\\x1c`-`\\x1e`, `\\x85` and `\\u2028` as well as on `\\n`. Stripping only
     `\\n` let a goal open a new LINE in the minted draft, so a `## ` heading or a ``` fence
-    smuggled into one re-partitioned the template and could swallow `## Query` — the same
+    smuggled into one re-partitioned the template and could swallow the recording — the same
     control-character class `_SAFE_ID_SEGMENT`'s `\\Z` anchor closes on the id (#852 F-21).
 
     Asserted through the CORPUS READER, not on the raw text: what has to survive is the section
-    walk, and the `## Query` body it returns is what the placeholder rule reads."""
+    walk, and the `## Executed query` body it returns is the draft's whole evidence."""
     import dataclasses
 
     cat = _catalog(tmp_path)
     lead = dataclasses.replace(
         _lead("stub-cmdb.network-map", {"name": "web-1"}, verb="map"),
-        goal_text="probe\r## Query\r```query\rverb: evil\r```",
+        goal_text="probe\r## Executed query\r```query\rverb: evil\r```",
     )
     lead_author.synthesize_drafts(
         [lead], catalog_dir=cat, systems=frozenset({"stub-cmdb"}))
-    template = _minted(cat, "stub-cmdb", "network-map")
-    assert "evil" not in template.query
-    assert "name: web-1" in template.query
+    template = _minted(cat, "stub-cmdb", "stub-cmdb.network-map")
+    assert "evil" not in template.recording
+    assert "name: web-1" in template.recording
     # The goal still CARRIES the model's characters — they are just no longer at a line start,
     # which is the only position `section_bodies` and the fence walker give meaning to.
-    assert "## Query" in template.goal
+    assert "## Executed query" in template.goal
     assert not any(
         ln.lstrip().startswith(("## ", "```", "~~~")) for ln in template.goal.splitlines()
     )
 
 
-def test_a_placeholder_inside_a_bound_value_is_declared_body_text(tmp_path):
-    """A param-only verb's minted `## Query` holds literal VALUES, so any `${…}` reaching the
-    file came out of the DATA (`host: web-${env}-1`) — and the placeholder rule reads the
-    rendered body, not the intent. Undeclared, that one value mints a draft the corpus-wide
-    sweep refuses; and the lane's commit gate deliberately does not check `_draft/`, so the
-    refusal lands in CI on everyone rather than on the batch that wrote it."""
+def test_a_placeholder_inside_a_bound_value_is_not_declared_as_an_interface(tmp_path):
+    """A `${…}` that came out of the DATA declares nothing about the template. INVERTS the
+    #901 test of the same shape, which asserted `body_substitutions == ("env",)`.
+
+    That test pinned a model this one rejects. `body_substitutions:` says a `${name}` in the
+    template's `## Query` is body text a dispatch fills — an INTERFACE claim. A draft is a
+    transcript of a call that already ran, so it has no holes: `host: web-${env}-1` is a value
+    that went to the system with those eight characters in it, most likely because the model
+    failed to substitute. Declaring it asserted a hole where the recording shows a literal.
+
+    The old model was also self-contradictory, which is what surfaced it. #900's
+    `reserved-body-substitution` rule refuses a `body_substitutions:` entry naming a
+    `@verb(wrapper_only=…)` param, so a bound value carrying `${require_closed}` minted a draft
+    that the corpus-wide sweep refused on TWO codes — and the lane's commit gate deliberately
+    does not read `_draft/`, so that refusal landed in CI on everyone. Deriving the declaration
+    from data is what made those two rules disagree; there is no declaration to disagree now.
+
+    The recording still carries the value verbatim: it is evidence, and mangling it would lose
+    a query that legitimately hunted a literal `${…}` string."""
     from defender import _scaffold_rules
 
     cat = _catalog(tmp_path)
     lead_author.synthesize_drafts(
         [_lead("stub-cmdb.network-map", {"name": "web-${env}-1"}, verb="map")],
         catalog_dir=cat, systems=frozenset({"stub-cmdb"}))
-    template = _minted(cat, "stub-cmdb", "network-map")
+    template = _minted(cat, "stub-cmdb", "stub-cmdb.network-map")
     assert template.params == ("name",)
-    assert template.body_substitutions == ("env",)
+    assert template.body_substitutions == ()
+    assert "web-${env}-1" in template.recording
+    # Vacuous rather than satisfied: there is no `## Query`, so the placeholder rule has no
+    # text to classify and cannot refuse the draft for the shape of the data it recorded.
+    assert template.query == ""
     assert _scaffold_rules.check_template(template, _stub_verbs()) == []
+
+
+def test_a_wrapper_only_name_in_a_bound_value_no_longer_mints_a_refused_draft(tmp_path):
+    """The #917 review finding, end to end.
+
+    A gather lead against a verb with a `@verb(wrapper_only=…)` param, binding a VALUE that
+    contains that param's name in `${…}` form, used to mint a draft declaring
+    `body_substitutions: [require_closed]` — which `check_template` refuses twice, as
+    `reserved-body-substitution` AND `undeclared-placeholder`. Neither refusal reaches the
+    batch that wrote it (the commit gate skips `_draft/`), so it landed in CI on everyone,
+    from model-supplied telemetry text."""
+    from defender import _scaffold_rules
+    from defender.runtime.verbs import VerbContext, verb
+
+    @verb(wrapper_only=("require_closed",))
+    def get_ticket(ctx: VerbContext, *, key: str = "", require_closed: bool = False) -> dict:
+        return {}
+
+    cat = _catalog(tmp_path)
+    lead_author.synthesize_drafts(
+        [_lead("stub-cmdb.case-lookup", {"key": "ABC-${require_closed}"}, verb="get-ticket")],
+        catalog_dir=cat, systems=frozenset({"stub-cmdb"}))
+    template = _minted(cat, "stub-cmdb", "stub-cmdb.case-lookup")
+    assert template.body_substitutions == ()
+    assert _scaffold_rules.check_template(template, {"get-ticket": get_ticket}) == []
 
 
 def test_untagged_verb_not_drafted(tmp_path):
@@ -393,4 +462,113 @@ def test_untagged_verb_not_drafted(tmp_path):
     assert lead_author.synthesize_drafts([
         _lead("elastic.esql", {"query": _ESQL_PIPE}, verb="esql", system="elastic"),
     ], catalog_dir=cat, systems=frozenset({"elastic"})) == []
-    assert not (cat / "elastic" / "_draft" / "esql.md").exists()
+    assert not (cat / "elastic" / "_draft").exists()
+
+
+def test_an_identity_a_template_already_covers_is_not_re_minted(tmp_path):
+    """The point of `covers:`, and the regression the derived name would otherwise open.
+
+    While a promote was `_draft/{id}.md` -> `{id}.md`, the promoted template's `id:` still
+    echoed the coined `query_id`, so `by_id` suppressed the re-mint for free. Once the author
+    names the file for what it MEASURES that echo is gone, and a `by_id` built from ids alone
+    would mint the draft again on the next run that coins the id — and the author, following
+    the same prompt, would discard it again. `covers:` is the only thing left tying the row to
+    the template that answered it."""
+    cat = _catalog(tmp_path)
+    (cat / "stub-cmdb").mkdir(parents=True)
+    (cat / "stub-cmdb" / "auth-failure-rate.md").write_text(
+        "---\nid: stub-cmdb.auth-failure-rate\nstatus: established\n"
+        "covers: [stub-cmdb.network-map]\n---\n\n## Goal\nx\n"
+    )
+    assert lead_author.synthesize_drafts(
+        [_lead("stub-cmdb.network-map", {"name": "web-1"}, verb="map")],
+        catalog_dir=cat, systems=frozenset({"stub-cmdb"})) == []
+    assert not (cat / "stub-cmdb" / "_draft").exists()
+
+
+def test_the_recorded_instance_is_one_that_succeeded(tmp_path):
+    """WHICH execution becomes the draft's evidence.
+
+    `query_id` is the identity a call asserts and the bound values are instances under it, so a
+    tick routinely carries several rows for one identity — and the mint takes the first and
+    dedups the rest. In document order that could be a row whose payload came back `error`
+    while a later row under the same id returned data, recording a failed call as the exemplar
+    for the measurement and dropping the successful one. A failed call is evidence about the
+    call, not about what the template measures."""
+    import dataclasses
+
+    cat = _catalog(tmp_path)
+    failed = dataclasses.replace(
+        _lead("stub-cmdb.network-map", {"name": "BROKEN"}, verb="map"),
+        payload_status="error",
+    )
+    worked = _lead("stub-cmdb.network-map", {"name": "web-1"}, verb="map")
+    lead_author.synthesize_drafts(
+        [failed, worked], catalog_dir=cat, systems=frozenset({"stub-cmdb"}))
+    template = _minted(cat, "stub-cmdb", "stub-cmdb.network-map")
+    assert "web-1" in template.recording
+    assert "BROKEN" not in template.recording
+
+
+def test_the_first_successful_instance_wins_not_the_last(tmp_path):
+    """The partition is STABLE — among rows that succeeded, document order still decides.
+
+    Bound separately from the test above because that one is satisfied by ANY reordering that
+    floats a successful row to the front, including one that also shuffles the successful rows
+    among themselves — which would make the recorded instance depend on how the ordering is
+    spelled rather than on the order the defender ran them in."""
+    cat = _catalog(tmp_path)
+    lead_author.synthesize_drafts([
+        _lead("stub-cmdb.network-map", {"name": "first"}, verb="map"),
+        _lead("stub-cmdb.network-map", {"name": "second"}, verb="map"),
+    ], catalog_dir=cat, systems=frozenset({"stub-cmdb"}))
+    template = _minted(cat, "stub-cmdb", "stub-cmdb.network-map")
+    assert "first" in template.recording
+    assert "second" not in template.recording
+
+
+def test_a_sentinel_row_mints_nothing(tmp_path):
+    """A `∅.`-prefixed row records something that never reached a system (a refused repeat, a
+    failed shim), so there is no measurement to draft.
+
+    Asked as `is_sentinel` — the predicate the projection already partitioned on (#841) —
+    rather than left to fall out of `_SAFE_ID_SEGMENT` rejecting `∅`. That alphabet accident
+    answers correctly today and is not a decision about sentinels: it would stop answering the
+    moment the sentinel prefix or the guard's character class changed."""
+    import dataclasses
+
+    cat = _catalog(tmp_path)
+    sentinel = dataclasses.replace(
+        _lead("stub-cmdb.network-map", {"name": "web-1"}, verb="map"), is_sentinel=True,
+    )
+    assert lead_author.synthesize_drafts(
+        [sentinel], catalog_dir=cat, systems=frozenset({"stub-cmdb"})) == []
+    assert not (cat / "stub-cmdb" / "_draft").exists()
+
+
+def test_a_minted_draft_leaves_no_partial_file_behind(tmp_path):
+    """The write is atomic, so a reader sees the whole draft or no draft.
+
+    `write_text` into the live catalog path left a window in which a crash lands a truncated
+    file — and a truncated draft is one whose frontmatter no longer parses, which every reader
+    reports as "the minter wrote a bad file" rather than as a partial write. `_io.write_atomic`
+    stages under `{name}.staged-{hex}` and `os.replace`s, so a leftover from a failed run does
+    not end in `.md` and matches neither corpus glob — asserted here, because a staged name
+    that DID match would have the next sweep report it as a malformed template."""
+    from defender._corpus import iter_query_templates
+
+    cat = _catalog(tmp_path)
+    created = lead_author.synthesize_drafts(
+        [_lead("stub-cmdb.network-map", {"name": "web-1"}, verb="map")],
+        catalog_dir=cat, systems=frozenset({"stub-cmdb"}))
+    assert created
+    draft_dir = cat / "stub-cmdb" / "_draft"
+    assert [p.name for p in draft_dir.iterdir()] == [created[0].name]
+    # The shape a failed write would leave, spelled as `_io.stage_name` spells it: present on
+    # disk, invisible to the corpus walk.
+    from defender._io import stage_name
+
+    stage_name(draft_dir / "leftover.md").write_text("truncated\n---\nnot: frontmatter\n")
+    assert [t.path for t in iter_query_templates(cat)] == sorted(
+        p for p in (cat / "host-query" / "proc-tree.md", created[0])
+    )
