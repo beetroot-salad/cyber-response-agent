@@ -46,7 +46,12 @@ if __name__ == "__main__":
 
 import argparse
 
-from defender.skills.invlang.frontier import Frontier, OpenContract, OpenSlot
+from defender.skills.invlang.frontier import (
+    Frontier,
+    HeldFact,
+    OpenContract,
+    OpenSlot,
+)
 from defender.skills.invlang.validate import class_slots, is_unresolved
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -56,7 +61,7 @@ CORPUS_NAME = DEFAULT_CORPUS.name
 #: The selectors are the QUERY, not the answer. Echoing a lesson's own matching key back to
 #: the model costs six lines per hit and tells it nothing the `matched` line does not already
 #: say more precisely — that one names the vertex and value that actually hit.
-SELECTOR_KEYS = frozenset({"frontier_nodes", "frontier_edges"})
+SELECTOR_KEYS = frozenset({"frontier_nodes", "frontier_edges", "observed_nodes"})
 
 #: Everything the injected block leaves out: bookkeeping plus mechanism.
 HIDDEN_KEYS = PROVENANCE_KEYS | SELECTOR_KEYS
@@ -112,6 +117,7 @@ class _EdgeSelector:
 class _Selectors:
     nodes: list[_NodeSelector] = field(default_factory=list)
     edges: list[_EdgeSelector] = field(default_factory=list)
+    observed: list[_NodeSelector] = field(default_factory=list)
 
 
 def _is_open(slot_value: str) -> bool:
@@ -179,17 +185,23 @@ def _class_pins(selector_class: str, case_class: str) -> int | None:
     return pinned if anchored else 0
 
 
-def _node_match_score(sel: _NodeSelector, slot: OpenSlot) -> int | None:
-    """How precisely this selector speaks to this open slot — `None` when it does not match.
+def _node_match_score(sel: _NodeSelector, item: OpenSlot | HeldFact) -> int | None:
+    """How precisely this selector speaks to this node cell — `None` when it does not match.
+
+    Serves BOTH node lanes. `OpenSlot` and `HeldFact` carry the same five fields, and the one
+    rule that distinguishes them lives in `_class_pins`: its open-case-slot wildcard cannot
+    fire on a held fact, whose class is settled by definition, so the same call degrades to
+    ordinary equality there. The caller decides which half of the state a selector is matched
+    against; this decides how well it matched.
 
     Scored on the MATCH rather than on the selector, so a component that constrained nothing
     (an omitted `type`, a class slot that landed on a `??`) earns nothing. See `_class_pins`.
     """
-    if sel.type and sel.type != slot.type:
+    if sel.type and sel.type != item.type:
         return None
-    if sel.slot and sel.slot != slot.slot:
+    if sel.slot and sel.slot != item.slot:
         return None
-    pinned = _class_pins(sel.class_pattern, slot.class_tuple)
+    pinned = _class_pins(sel.class_pattern, item.class_tuple)
     if pinned is None:
         return None
     return sel.fixed_specificity + pinned
@@ -210,6 +222,21 @@ def _edge_matches(sel: _EdgeSelector, contract: OpenContract) -> bool:
     return all(want == got for want, got in declared if want)
 
 
+def _node_selector(raw: object) -> _NodeSelector | None:
+    """One node selector, or `None` if it omits a field the prompt declares mandatory.
+
+    Shared by `frontier_nodes` and `observed_nodes`: the two differ in WHICH half of the
+    state they are matched against, never in how they are spelled or validated."""
+    if not isinstance(raw, dict):
+        return None
+    sel = _NodeSelector(
+        type=str(raw.get("type") or "").strip(),
+        class_pattern=str(raw.get("class") or WILDCARD).strip(),
+        slot=str(raw.get("slot") or "").strip(),
+    )
+    return sel if sel.type and sel.slot else None
+
+
 def _parse_selectors(fm: dict) -> _Selectors:
     """The lesson's declared selectors, DROPPING any entry that omits a required field.
 
@@ -226,15 +253,11 @@ def _parse_selectors(fm: dict) -> _Selectors:
     """
     out = _Selectors()
     for raw in as_list(fm.get("frontier_nodes")):
-        if not isinstance(raw, dict):
-            continue
-        node = _NodeSelector(
-            type=str(raw.get("type") or "").strip(),
-            class_pattern=str(raw.get("class") or WILDCARD).strip(),
-            slot=str(raw.get("slot") or "").strip(),
-        )
-        if node.type and node.slot:
+        if (node := _node_selector(raw)) is not None:
             out.nodes.append(node)
+    for raw in as_list(fm.get("observed_nodes")):
+        if (node := _node_selector(raw)) is not None:
+            out.observed.append(node)
     for raw in as_list(fm.get("frontier_edges")):
         if not isinstance(raw, dict):
             continue
@@ -253,13 +276,23 @@ def _best_match(selectors: _Selectors, frontier: Frontier) -> tuple[int, str] | 
 
     BEST, not sum: a lesson declaring five loose selectors should not outrank one that
     declares the exact slot in play. Scoring the winner makes the rank mean "how precisely
-    does this lesson speak to something open", which is the question the ordering is for.
+    does this lesson speak to something the run is dealing with", which is the question the
+    ordering is for.
+
+    The two node lanes share one scale on purpose. An open question is not inherently more
+    lesson-worthy than a settled fact — the corpus's most valuable lesson is about what a
+    KNOWN `loginuid` licenses — so tilting toward either half would bury one kind of advice
+    behind the other rather than ranking by how precisely each speaks to this document.
     """
     scored: list[tuple[int, str]] = [
-        (score, f"{slot.vertex_id} {slot.type} {slot.slot}={slot.value}")
-        for node_sel in selectors.nodes
-        for slot in frontier.slots
-        if (score := _node_match_score(node_sel, slot)) is not None
+        (score, f"{item.vertex_id} {item.type} {item.slot}={item.value}")
+        for sels, items in (
+            (selectors.nodes, frontier.slots),
+            (selectors.observed, frontier.held),
+        )
+        for node_sel in sels
+        for item in items
+        if (score := _node_match_score(node_sel, item)) is not None
     ]
     scored += [
         (

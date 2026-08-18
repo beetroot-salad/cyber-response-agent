@@ -4,7 +4,7 @@ description: On bastion logins, check PTY allocation and session duration from s
 telemetry_source: [sshd, auditd]
 attack_phase: [lateral-movement]
 source_signature: [v2-cross-tier-ssh-pivot]
-frontier_nodes:
+observed_nodes:
   - {type: session, slot: class}
   - {type: compute, class: bastion, slot: class}
 source_finding_ids:

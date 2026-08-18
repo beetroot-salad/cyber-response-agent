@@ -240,14 +240,20 @@ retrieval dimensions (inline lists):
 - `attack_phase` — the MITRE ATT&CK tactic(s) where the pitfall bites
   (tactic slugs, e.g. `lateral-movement`, `persistence`).
 
-Most also carry **frontier selectors** — the open question the lesson speaks to,
-rather than the alert it was born under. A lesson whose trigger is a procedure
-rather than an open slot carries none, and is reached the other two ways below:
+Most also carry **state selectors** — what the lesson speaks to in your
+investigation, rather than the alert it was born under. A lesson whose trigger
+is a procedure rather than a fact carries none, and is reached the other two
+ways below:
 
-- `frontier_nodes` — `{type, class?, slot}` over a `:V` vertex, where `slot` is
-  `class`, `ident`, or `attrs.<name>`. For lessons about what a field licenses.
-- `frontier_edges` — `{rel?, auth_kind?, anchor_kind}` over an `ac<n>`
-  authorization contract. For lessons about what an authz check can conclude.
+- `observed_nodes` — `{type, class?, slot}` over a `:V` cell you have SETTLED.
+  For lessons about what a value you are holding does and does not license.
+- `frontier_nodes` — same shape, over a cell still `??`. For lessons about how
+  to close an open question.
+- `frontier_edges` — `{rel?, auth_kind?, anchor_kind}` over an undischarged
+  `ac<n>` authorization contract. For lessons about what an authz check can
+  conclude.
+
+`slot` is `class`, `ident`, or `attrs.<name>` in both node lanes.
 
 **Lessons come to you; you do not have to go and ask.** Two pushes, keyed
 differently because they fire at different moments:
@@ -293,15 +299,15 @@ Widen by dropping a pattern if a narrow query returns nothing; a bare
 the default.
 
 (The three grep dimensions remain unproven retrieval keys — grep-only, no index.
-The frontier selectors are the #919 answer to the case that motivated them: a
+The state selectors are the #919 answer to the case that motivated them: a
 lesson about what `loginuid` licenses did not load, because it was keyed to the
-rule it was born under rather than to the question the run had open. Note the
-consequence, and use the shim accordingly: a selector fires while its slot is
-**unresolved**, so a field you record straight to a concrete value never opens
-the slot the lesson about that field keys on. That is one more reason to hold
-the `?? → {a, b} → concrete` progression honestly rather than skipping to the
-end — but only where the value really is unsettled; a `??` you did not mean
-blocks a benign close for nothing.)
+rule it was born under rather than to anything the run had in front of it. Both
+node lanes exist because both halves of your record carry advice — an open `??`
+is a question someone has written about how to close it, and a settled value is
+a claim someone has written about what it does and does not support. Recording
+`attrs.loginuid=-1` is what SUMMONS that second kind, so write what you observe
+into the record rather than keeping it in prose: a fact that never lands in a
+`:V` or `:R` row reaches no lane at all.)
 
 **Pick a lead that discriminates.** When the frontier carries two or
 more hypotheses that look equally plausible, the right next lead is

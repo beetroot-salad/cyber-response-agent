@@ -4,7 +4,7 @@ description: Anchor uid/identity resolution to the alert's container_id before a
 telemetry_source: [falco, host-state]
 attack_phase: [execution]
 source_signature: [v2-falco-suspicious-network-tool]
-frontier_nodes:
+observed_nodes:
   - {type: identity, slot: ident}
   - {type: process, slot: attrs.user}
 source_finding_ids:

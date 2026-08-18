@@ -15,8 +15,11 @@ description: {one short line, ~12-18 words}  # loaded into the defender's PLAN-t
 source_signature: [{rule.id}, ...]    # alert rule.id(s) this lesson came from / bites — the source case's signature
 telemetry_source: [{sensor}, ...]     # sensor(s) the check keys on, INCLUDING any absent source the lesson tells the agent to name
 attack_phase: [{tactic}, ...]         # MITRE ATT&CK tactic(s) where the pitfall bites
-frontier_nodes:                       # OPTIONAL — the open `:V` slot this lesson speaks to
+observed_nodes:                       # OPTIONAL — a SETTLED `:V` cell this lesson speaks to
   - type: {vertex-type}               #   `class:` is optional; `slot:` and `type:` are not
+    slot: {class|ident|attrs.<name>}
+frontier_nodes:                       # OPTIONAL — the still-open `:V` slot it speaks to
+  - type: {vertex-type}               #   same shape; the difference is settled vs `??`
     slot: {class|ident|attrs.<name>}
 frontier_edges:                       # OPTIONAL — the open `ac<n>` contract it speaks to
   - anchor_kind: {anchor-kind}        #   `rel:` / `auth_kind:` optional; `anchor_kind:` is not
@@ -68,11 +71,24 @@ OPEN. Omit both keys when the lesson's trigger is a procedure rather than an
 open slot (`always run a FIM check before closing`) — an empty selector is
 truthful there, and this lane is not the one that lesson is reached on.
 
-- `frontier_nodes` — `{type, class?, slot}` over a `:V` vertex. `type` is an
+- **Which node lane** is the first question, and it turns on what the lesson
+  is FOR. A lesson about what an observation licenses — "`loginuid=-1` means
+  non-interactive automated context and nothing more" — is advice about a value
+  the agent is HOLDING, and belongs in `observed_nodes`; it is worthless while
+  the field is unknown, and keying it on the open lane is why #919's own
+  motivating lesson was unreachable. A lesson about how to CLOSE a question —
+  "the CMDB indexes by hostname, so an IP lookup returning nothing means
+  unsupported, not absent" — belongs in `frontier_nodes`. Most pitfall lessons
+  are the first kind.
+- Both node lanes are `{type, class?, slot}` over a `:V` vertex. `type` is an
   invlang vertex type (`compute`, `process`, `identity`, `credential`,
   `session`, `file`); `slot` is `class`, `ident`, or `attrs.<name>` spelled
-  exactly as the closing `:R attr_updates` row would spell it; `class` is an
+  exactly as the `:V` row or `:R attr_updates` row would spell it; `class` is an
   optional slash-tuple pattern (`ip-only`, `ip-only/internet`, `*`).
+- **Spell the slot the way the investigation actually writes it**, not the way
+  the sensor names the field. `loginuid` lands as `attrs.loginuid` on an
+  `identity` vertex and inside `attrs.anomaly` on a `process` one; a selector
+  naming a slot no `:V` row ever carries matches nothing, forever, silently.
 - `frontier_edges` — `{rel?, auth_kind?, anchor_kind}` over an `ac<n>`
   contract. `anchor_kind` is the question the contract asks (`iam-policy`,
   `approved-source-list`, …).
@@ -181,6 +197,6 @@ Observability gaps:
 - One file per lesson. Flat layout. No subdirectories.
 - Bodies are short — half a screen is the target, one screen is the ceiling. If a lesson wants to be three sections, it's probably two lessons. Strip preamble; lead with the pitfall.
 - Don't reference the finding text verbatim in the body; rewrite for the future agent who'll consult the lesson without seeing the source case.
-- The retrieval surface is `description` + the three dimension lists (`source_signature` / `telemetry_source` / `attack_phase`) + the frontier selectors — populate all three dimension lists on every lesson, from the controlled vocab, as inline `[a, b]` lists kept on one physical line so a single `grep` matches. Add the frontier selectors when the lesson has one (below). Don't add *further* frontmatter fields beyond these; everything else is bookkeeping.
-- **Never DROP a `frontier_nodes` / `frontier_edges` block when you fold or rewrite a lesson.** Union them the way you union the dimension lists. They are not bookkeeping — they are the only key the `append_block` retrieval lane has, and a lesson that loses them stops being reachable from the investigation itself.
+- The retrieval surface is `description` + the three dimension lists (`source_signature` / `telemetry_source` / `attack_phase`) + the state selectors — populate all three dimension lists on every lesson, from the controlled vocab, as inline `[a, b]` lists kept on one physical line so a single `grep` matches. Add the state selectors when the lesson has one (below). Don't add *further* frontmatter fields beyond these; everything else is bookkeeping.
+- **Never DROP an `observed_nodes` / `frontier_nodes` / `frontier_edges` block when you fold or rewrite a lesson.** Union them the way you union the dimension lists. They are not bookkeeping — they are the only key the `append_block` retrieval lane has, and a lesson that loses them stops being reachable from the investigation itself.
 - If a finding is `type: observability` (system gap, no covering data source), still write a pitfall lesson teaching the agent to stop planning gather steps that need the missing system. Add the finding to the `Observability gaps:` block in the commit message and to `observability_gaps` in the result JSON.

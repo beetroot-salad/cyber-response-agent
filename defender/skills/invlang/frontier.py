@@ -85,6 +85,33 @@ class OpenSlot:
 
 
 @dataclass(frozen=True)
+class HeldFact:
+    """One cell on one vertex that the document has SETTLED — the mirror of `OpenSlot`.
+
+    Why the retrieval needs both halves. An open slot is a question the run has not answered;
+    a held fact is one it has. Lessons divide the same way, and the corpus is mostly the
+    second kind: "`loginuid=-1` licenses non-interactive automated context and nothing more"
+    is advice about a value you are HOLDING, and it is worthless while the field is unknown.
+    Keying only on open slots made #919's own motivating lesson unreachable — the alert
+    carries `loginuid=-1` concretely, so the slot it keys on never opens.
+
+    Same shape as `OpenSlot` so one matcher serves both: `_class_pins`' open-slot wildcard
+    simply never fires on these, and degrades to ordinary equality, which is what a settled
+    class wants anyway.
+
+    Held facts ACCUMULATE where open slots close, so this half of the state only ever grows.
+    That is why emission is gated on the rendered recall CHANGING rather than on the state
+    being non-empty — see `runtime/tools._frontier_recall`.
+    """
+
+    vertex_id: str
+    type: str
+    class_tuple: str
+    slot: str
+    value: str
+
+
+@dataclass(frozen=True)
 class OpenContract:
     """One declared authorization contract with no discharging `:R authz` row.
 
@@ -105,11 +132,14 @@ class OpenContract:
 
 @dataclass(frozen=True)
 class Frontier:
+    """The investigation's retrieval state: what is still open, and what it now holds."""
+
     slots: tuple[OpenSlot, ...]
     contracts: tuple[OpenContract, ...]
+    held: tuple[HeldFact, ...] = ()
 
     def is_empty(self) -> bool:
-        return not self.slots and not self.contracts
+        return not self.slots and not self.contracts and not self.held
 
 
 def _edge_index(companion: CompanionBody) -> dict[str, tuple[str | None, str | None]]:
@@ -132,9 +162,24 @@ def _edge_index(companion: CompanionBody) -> dict[str, tuple[str | None, str | N
     return index
 
 
-def _open_slots(companion: CompanionBody) -> list[OpenSlot]:
+def _held(value: str) -> bool:
+    """Settled ENOUGH to be advice-worthy: a value that is present and not still open.
+
+    An empty cell is not a held fact — `is_unresolved("")` is False by design (see
+    `_apply_attr_updates`), so testing openness alone would read every absent attribute as
+    something the run knows."""
+    return bool(value.strip()) and not is_unresolved(value)
+
+
+def _node_state(companion: CompanionBody) -> tuple[list[OpenSlot], list[HeldFact]]:
+    """Both halves of the node axis, from ONE walk.
+
+    Split into two functions they would each re-derive `effective_vertex_state` and could
+    drift on the open/held boundary; here every cell is classified exactly once and the two
+    lists are complements by construction."""
     types = _walkers.vertex_types(companion)
-    out: list[OpenSlot] = []
+    open_out: list[OpenSlot] = []
+    held_out: list[HeldFact] = []
     for vid, st in effective_vertex_state(companion).items():
         # `effective_vertex_state` fabricates an entry for any `:R attr_updates` TARGET,
         # and the validator admits an `e-*` there — so an id with no `:V` row is an edge or
@@ -144,14 +189,21 @@ def _open_slots(companion: CompanionBody) -> list[OpenSlot]:
         typ = types[vid]
         cls = st.get("classification") or ""
         if has_open_slot(cls):
-            out.append(OpenSlot(vid, typ, cls, SLOT_CLASS, cls))
+            open_out.append(OpenSlot(vid, typ, cls, SLOT_CLASS, cls))
+        elif _held(cls):
+            held_out.append(HeldFact(vid, typ, cls, SLOT_CLASS, cls))
         ident = st.get("identifier") or ""
         if is_unresolved(ident):
-            out.append(OpenSlot(vid, typ, cls, SLOT_IDENT, ident))
+            open_out.append(OpenSlot(vid, typ, cls, SLOT_IDENT, ident))
+        elif _held(ident):
+            held_out.append(HeldFact(vid, typ, cls, SLOT_IDENT, ident))
         for name, val in (st.get("attributes") or {}).items():
+            slot = f"{ATTR_PREFIX}{name}"
             if is_unresolved(val):
-                out.append(OpenSlot(vid, typ, cls, f"{ATTR_PREFIX}{name}", val))
-    return out
+                open_out.append(OpenSlot(vid, typ, cls, slot, val))
+            elif _held(val):
+                held_out.append(HeldFact(vid, typ, cls, slot, val))
+    return open_out, held_out
 
 
 def _open_contracts(companion: CompanionBody) -> list[OpenContract]:
@@ -190,9 +242,11 @@ def _open_contracts(companion: CompanionBody) -> list[OpenContract]:
 
 def derive_frontier(companion: CompanionBody) -> Frontier:
     """The open set for an already-parsed document."""
+    slots, held = _node_state(companion)
     return Frontier(
-        slots=tuple(_open_slots(companion)),
+        slots=tuple(slots),
         contracts=tuple(_open_contracts(companion)),
+        held=tuple(held),
     )
 
 
@@ -222,4 +276,4 @@ def frontier_from_text(text: str) -> Frontier:
             f"[invlang] frontier derivation failed, treating it as empty: {e!r}",
             file=sys.stderr,
         )
-        return Frontier(slots=(), contracts=())
+        return Frontier(slots=(), contracts=(), held=())

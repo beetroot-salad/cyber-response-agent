@@ -293,6 +293,7 @@ def _write_lesson(
     *,
     nodes: tuple[str, ...] = (),
     edges: tuple[str, ...] = (),
+    observed: tuple[str, ...] = (),
     signature: str = "v2-cross-tier-ssh-pivot",
     filename: str | None = None,
     raw_nodes: str | None = None,
@@ -305,6 +306,9 @@ def _write_lesson(
         f"description: {name} description",
         f"source_signature: [{signature}]",
     ]
+    if observed:
+        lines.append("observed_nodes:")
+        lines += [f"  - {{{sel}}}" for sel in observed]
     if raw_nodes is not None:
         lines.append(f"frontier_nodes: {raw_nodes}")
     elif nodes:
@@ -404,9 +408,14 @@ def test_an_open_class_slot_matches_until_a_refinement_closes_it(tmp_path):
     assert _slot_tuples(open_doc) == [("v-006", "process", "??", "class", "??")]
     assert _names(match_lessons(_frontier(open_doc), corpus)) == ["process-class-open"]
 
-    assert _frontier(closed_doc).is_empty(), (
-        "a `:R attr_updates` row closed the slot and it is still in the frontier"
+    assert _frontier(closed_doc).slots == (), (
+        "a `:R attr_updates` row closed the slot and it is still on the OPEN half"
     )
+    # ...and it moved to the held half rather than vanishing, which is what makes the
+    # complement claim in `test_a_settled_value_is_a_held_fact_and_not_an_open_slot` real
+    # from this direction too.
+    assert any(h.vertex_id == "v-006" and h.slot == "class"
+               for h in _frontier(closed_doc).held), "the closed slot went nowhere"
     assert match_lessons(_frontier(closed_doc), corpus) == []
 
     # ...and `frontier_from_text` is parse-then-derive and nothing else, so a caller holding a
@@ -713,16 +722,21 @@ def test_a_malformed_block_yields_an_empty_frontier_rather_than_raising(tmp_path
     implementation that scanned the raw document instead of the companion would report an
     open slot on a vertex that does not exist — worse than reporting nothing, because the
     recall would then be keyed on a row the author never committed."""
-    for label, doc in (
-        ("unterminated fence", PROLOGUE + HALF_WRITTEN_BLOCK),
-        ("short row", TRUNCATED_ROW_DOC),
-        ("not invlang at all", "```yaml\nfoo: ??\n```\n"),
-        ("empty", ""),
+    # Each shape is paired with the SAME document minus the malformed block, so the claim is
+    # "the broken block contributed nothing" rather than "the document was empty" — the two
+    # differ now that a settled `:V` cell is a held fact and `PROLOGUE` carries several.
+    for label, doc, intact in (
+        ("unterminated fence", PROLOGUE + HALF_WRITTEN_BLOCK, PROLOGUE),
+        ("short row", TRUNCATED_ROW_DOC, ""),
+        ("not invlang at all", "```yaml\nfoo: ??\n```\n", ""),
+        ("empty", "", ""),
     ):
         frontier = _frontier(doc)
-        assert frontier.is_empty(), f"{label} produced a frontier: {frontier}"
-        assert frontier.slots == ()
-        assert frontier.contracts == ()
+        baseline = _frontier(intact)
+        assert frontier.slots == baseline.slots, f"{label} invented an open slot"
+        assert frontier.contracts == baseline.contracts, f"{label} invented a contract"
+        assert frontier.held == baseline.held, f"{label} invented a held fact"
+        assert frontier.slots == (), f"{label} put something on the open half"
 
 
 def test_an_append_landing_a_half_written_block_still_leads_with_its_byte_count(tmp_path):
@@ -1089,8 +1103,12 @@ def test_a_refinement_closes_an_ident_or_an_attribute_too(tmp_path):
     )
     closed_ident = PROLOGUE + OPEN_IDENT_BLOCK + attr_block("l-001|v-005|ident|svc.monitoring")
 
-    assert _frontier(closed_attr).is_empty(), "an `attrs.` refinement did not close the slot"
-    assert _frontier(closed_ident).is_empty(), "an `ident` refinement did not close the slot"
+    assert _frontier(closed_attr).slots == (), "an `attrs.` refinement did not close the slot"
+    assert _frontier(closed_ident).slots == (), "an `ident` refinement did not close the slot"
+    assert any(h.slot == "attrs.loginuid" and h.value == "1000"
+               for h in _frontier(closed_attr).held), "the resolved value is not held"
+    assert any(h.slot == "ident" and h.value == "svc.monitoring"
+               for h in _frontier(closed_ident).held), "the resolved identifier is not held"
 
 
 def test_a_document_with_only_an_open_contract_is_not_empty(tmp_path):
@@ -1293,4 +1311,111 @@ def test_a_pushed_lesson_is_recorded_the_way_a_read_one_is(tmp_path):
     ]
     assert [r["lesson_name"] for r in rows] == ["recorded-on-push"], (
         f"the push left no trace row: {rows}"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# the in-hand axis — `observed_nodes`
+#
+# Keying only on OPEN slots made #919's own motivating lesson unreachable: the alert carries
+# `loginuid=-1` concretely, so the slot it keyed on never opened. These pin the second half.
+# --------------------------------------------------------------------------- #
+
+#: A `process` whose class and attributes are all SETTLED. Nothing here is open, so the whole
+#: document is invisible to `frontier_nodes` and visible only to `observed_nodes`.
+SETTLED_BLOCK = """
+```invlang
+:V prologue.vertices [id|type|class|ident|attrs?]
+v-008|identity|user/anonymous|root|uid=0;loginuid=-1
+```
+"""
+
+
+def test_a_settled_value_is_a_held_fact_and_not_an_open_slot(tmp_path):
+    """CLAIM: the two node halves are complements — a cell is open XOR held, never both.
+
+    Without this the `observed_nodes` lane could be implemented as "every cell", which would
+    make `frontier_nodes`' negative half (case 1) unenforceable from the other side."""
+    doc = PROLOGUE + SETTLED_BLOCK
+    f = _frontier(doc)
+    assert f.slots == (), "a fully settled vertex put something on the OPEN half"
+    held = {(h.vertex_id, h.slot, h.value) for h in f.held}
+    assert ("v-008", "attrs.loginuid", "-1") in held
+    assert ("v-008", "ident", "root") in held
+    assert ("v-008", "class", "user/anonymous") in held
+    assert not f.is_empty(), "a document with held facts and no open slot reported empty"
+
+    # ...and the mirror, over ALL THREE slot kinds rather than just `class`: an unresolved
+    # cell must be absent from the held half. Checking one kind let a mutation that
+    # double-counted ATTRIBUTES pass, which is the kind the motivating lesson keys on.
+    for label, fixture in (
+        ("class", _FIXTURE_DOCS["open class"]),
+        ("attrs", _FIXTURE_DOCS["open loginuid"]),
+        ("ident", _FIXTURE_DOCS["open ident"]),
+    ):
+        of = _frontier(fixture)
+        assert of.slots, f"{label}: positive control — nothing was open"
+        open_cells = {(s.vertex_id, s.slot) for s in of.slots}
+        held_cells = {(h.vertex_id, h.slot) for h in of.held}
+        assert not (open_cells & held_cells), (
+            f"{label}: a cell is on BOTH halves {open_cells & held_cells} — an open slot "
+            "counted as a held fact would make every lesson match every document"
+        )
+
+
+def test_observed_nodes_retrieves_on_a_value_the_document_settled(tmp_path):
+    """CLAIM: `observed_nodes` fires on a concrete value, and `frontier_nodes` does not.
+
+    The regression for #919's real motivating shape. A lesson about what `loginuid=-1`
+    licenses must reach a document that RECORDED `loginuid=-1` — which is the only shape the
+    alert ever produces."""
+    corpus = _corpus(tmp_path)
+    _write_lesson(corpus, "licenses-a-known-loginuid",
+                  observed=("type: identity, slot: attrs.loginuid",))
+    _write_lesson(corpus, "closes-an-open-loginuid",
+                  nodes=("type: identity, slot: attrs.loginuid",))
+    doc = PROLOGUE + SETTLED_BLOCK
+
+    hits = _names(_lessons_frontier().match_lessons(_frontier(doc), corpus))
+    assert hits == ["licenses-a-known-loginuid"], (
+        "the settled value reached the wrong lane — `observed_nodes` must match a concrete "
+        "cell and `frontier_nodes` must not"
+    )
+
+
+def test_the_two_node_lanes_share_one_ranking_scale(tmp_path):
+    """CLAIM: neither lane is systematically preferred; specificity alone orders them.
+
+    A tilt toward either half would bury one kind of advice behind the other regardless of
+    how precisely it speaks to the document."""
+    corpus = _corpus(tmp_path)
+    _write_lesson(corpus, "aaa-held-loose", observed=("type: identity, slot: attrs.loginuid",))
+    _write_lesson(corpus, "zzz-open-loose", nodes=("type: process, slot: class",))
+    doc = PROLOGUE + SETTLED_BLOCK + OPEN_CLASS_BLOCK
+    hits = _lessons_frontier().match_lessons(_frontier(doc), corpus)
+
+    assert {h.name for h in hits} == {"aaa-held-loose", "zzz-open-loose"}
+    assert hits[0].score == hits[1].score, (
+        "an open-slot match and a held-fact match of equal specificity scored differently"
+    )
+
+
+def test_the_shipped_corpus_reaches_the_motivating_investigation(tmp_path):
+    """CLAIM: against the repo's own committed investigation, the lesson #919 exists for is
+    retrieved.
+
+    Every other test in this file drives a fixture. This one drives the artefact the issue
+    was filed about — `learning/runs/turnN-A/investigation.md`, the Falco authorized_keys
+    case whose report asserted an attack chain that did not happen — against the REAL 16-file
+    corpus. It is the only test here that can tell "the mechanism works" from "the mechanism
+    works on documents written to suit it"."""
+    real = Path(__file__).resolve().parents[1] / "learning" / "runs" / "turnN-A" / "investigation.md"
+    if not real.is_file():
+        pytest.skip(f"the motivating investigation is not in this tree ({real})")
+    corpus = Path(__file__).resolve().parents[1] / "lessons"
+
+    hits = _names(_lessons_frontier().match_lessons(
+        _frontier(real.read_text(encoding="utf-8")), corpus))
+    assert "falco-loginuid-tty-non-interactive-not-docker-exec" in hits, (
+        f"#919's motivating lesson is still not retrieved on its own case; got {hits}"
     )

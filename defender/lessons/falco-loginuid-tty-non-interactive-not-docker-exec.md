@@ -4,9 +4,9 @@ description: loginuid=-1 + tty=0 means non-interactive automated context only; b
 telemetry_source: [falco]
 attack_phase: [execution]
 source_signature: [v2-falco-suspicious-network-tool]
-frontier_nodes:
-  - {type: process, slot: attrs.loginuid}
-  - {type: process, slot: attrs.tty}
+observed_nodes:
+  - {type: identity, slot: attrs.loginuid}
+  - {type: process, slot: attrs.anomaly}
 source_finding_ids:
   - lotl-oracle-test-1/benign/1
 created_at: 2026-06-07T00:00:00Z
