@@ -6,7 +6,6 @@ attack_phase: [execution]
 source_signature: [v2-falco-suspicious-network-tool]
 frontier_nodes:
   - {type: compute, slot: ident}
-  - {type: process, slot: attrs.image}
 source_finding_ids:
   - 20260527T150928Z-v2-noise-alert-suspicious-network-tool/benign/0
 created_at: 2026-05-30T00:00:00Z

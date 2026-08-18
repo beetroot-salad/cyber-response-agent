@@ -47,7 +47,7 @@ if __name__ == "__main__":
 import argparse
 
 from defender.skills.invlang.frontier import Frontier, OpenContract, OpenSlot
-from defender.skills.invlang.validate import class_slots, has_open_slot
+from defender.skills.invlang.validate import class_slots, is_unresolved
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_CORPUS = REPO_ROOT / "defender" / "lessons"
@@ -66,13 +66,16 @@ DEFAULT_TOP_K = 3
 WILDCARD = "*"
 
 
-@dataclass(frozen=True, eq=False)
+@dataclass(frozen=True)
 class Hit:
-    #: `eq=False` (so no `__hash__` either): `frontmatter` is a dict, so the frozen default
-    #: would advertise a `__hash__` that raises the moment anyone puts a `Hit` in a set.
+    #: `frontmatter` is `compare=False` because it is a dict: the frozen default would
+    #: advertise a `__hash__` over it that raises the moment anyone puts a `Hit` in a set.
+    #: Excluding it from BOTH `__eq__` and `__hash__` keeps the value comparison the rest of
+    #: the tuple already supports — `eq=False` would silently leave identity semantics, so a
+    #: `set(hits)` dedupe would keep duplicates rather than raise.
     path: Path
     name: str
-    frontmatter: dict
+    frontmatter: dict = field(compare=False)
     score: int
     matched: str
 
@@ -111,26 +114,18 @@ class _Selectors:
     edges: list[_EdgeSelector] = field(default_factory=list)
 
 
-def _slots(class_pattern: str) -> list[str]:
-    """THE class split, borrowed from the validator rather than re-spelled.
-
-    `validate.has_open_slot` uses `class_slots` to decide a class cell is open, and this
-    module re-splits the same cell to decide which selector matches it. A plainer
-    `split("/")` here made the two halves of one join disagree: the primary candidate-set
-    form `{a/b/c, d/e/f}` is ONE unresolved slot to the validator and five fragments to a
-    naive split (of which `b` reads as CONCRETE), and a `compute:` type prefix — a spelling
-    `class_slots`'s own docstring says models reach for — survived to be compared against a
-    selector that never carries one.
-    """
-    return class_slots(class_pattern)
-
-
 def _is_open(slot_value: str) -> bool:
-    """Is this ONE already-split slot unresolved — the same predicate that put it on the
-    frontier. `has_open_slot` rather than a local `startswith("{")`: the local spelling read
-    `{a} b` as open and missed nothing the anchored test misses, so the cell that decided the
-    slot was open and the cell that wildcards it can no longer disagree."""
-    return has_open_slot(slot_value)
+    """Is this ONE already-split slot unresolved — the PER-SLOT half of
+    `validate.has_open_slot`, applied to a cell `class_slots` has already split.
+
+    Not `has_open_slot` itself: that one re-runs `class_slots`, which re-splits on `/` and
+    strips a leading `<head>:` prefix. On an already-split slot the prefix strip is the bug —
+    `has_open_slot("linux/role:??")` is False (the cell is CONCRETE to the validator) while
+    `has_open_slot("role:??")` on the slot alone is True, so the cell that decided the slot was
+    open and the cell that wildcards it disagreed on exactly the values this predicate exists
+    to agree about. The two clauses below are `has_open_slot`'s own, minus the re-split.
+    """
+    return is_unresolved(slot_value) or slot_value.count("{") > slot_value.count("}")
 
 
 def _class_pins(selector_class: str, case_class: str) -> int | None:
@@ -158,14 +153,17 @@ def _class_pins(selector_class: str, case_class: str) -> int | None:
     (`ip-only/internet` over `ip-only` against `ip-only/??/??`). A pattern with no equality
     anywhere pins nothing, exactly as a bare `*` does.
     """
-    sel = _slots(selector_class)
-    case = _slots(case_class)
+    sel = class_slots(selector_class)
+    case = class_slots(case_class)
     if len(sel) > len(case):
-        # A case class that is ONE wholly-open cell says nothing about its own arity either,
-        # so refusing an explicit triple against it would make the MOST open cell match the
-        # FEWEST selectors — the inverse of what the inversion exists for.
-        if len(case) == 1 and _is_open(case[0]):
-            case = case * len(sel)
+        # A WHOLLY-open case class says nothing about its own arity either, so refusing an
+        # explicit triple against it would make the MOST open cell match the FEWEST selectors
+        # — the inverse of what the inversion exists for. Keyed on "every slot is open"
+        # rather than on "exactly one slot": `??/??` is as silent about its arity as `??` is,
+        # and gating on the length made the match NON-MONOTONIC — a document refined from
+        # `??` to `??/??` lost a three-slot selector that the less-informative `??` matched.
+        if all(_is_open(c) for c in case):
+            case = list(case) + ["??"] * (len(sel) - len(case))
         else:
             return None
     pinned = 0
@@ -213,23 +211,40 @@ def _edge_matches(sel: _EdgeSelector, contract: OpenContract) -> bool:
 
 
 def _parse_selectors(fm: dict) -> _Selectors:
+    """The lesson's declared selectors, DROPPING any entry that omits a required field.
+
+    `learning/author/lessons/prompt.md` calls `type`/`slot` mandatory on a node selector and
+    `anchor_kind` mandatory on an edge one, and nothing validates the frontmatter at authoring
+    time — so the drop is the only thing standing between a one-character key typo and a
+    match-everything selector. An omitted field CONSTRAINS NOTHING here: `_node_match_score`
+    skips an empty comparison and `_edge_matches`' `all(... if want)` over no declared field is
+    vacuously True, so `frontier_edges: [{}]` — or `- {anchor: iam-policy}`, or a key the LLM
+    curator emitted with an empty value — would hit every open contract in every document,
+    forever, at score 0, and take a `top_k` slot from a lesson that actually speaks to the
+    case. A dropped entry is a lesson off THIS lane, which is the failure the schema already
+    admits for an unselectored lesson; a kept one is a permanent false positive.
+    """
     out = _Selectors()
     for raw in as_list(fm.get("frontier_nodes")):
         if not isinstance(raw, dict):
             continue
-        out.nodes.append(_NodeSelector(
+        node = _NodeSelector(
             type=str(raw.get("type") or "").strip(),
             class_pattern=str(raw.get("class") or WILDCARD).strip(),
             slot=str(raw.get("slot") or "").strip(),
-        ))
+        )
+        if node.type and node.slot:
+            out.nodes.append(node)
     for raw in as_list(fm.get("frontier_edges")):
         if not isinstance(raw, dict):
             continue
-        out.edges.append(_EdgeSelector(
+        edge = _EdgeSelector(
             rel=str(raw.get("rel") or "").strip(),
             auth_kind=str(raw.get("auth_kind") or "").strip(),
             anchor_kind=str(raw.get("anchor_kind") or "").strip(),
-        ))
+        )
+        if edge.anchor_kind:
+            out.edges.append(edge)
     return out
 
 
@@ -267,11 +282,28 @@ def match_lessons(
     """The `top_k` lessons that speak most precisely to something still open."""
     # A NEGATIVE `top_k` would reach `hits[:top_k]` as a negative slice and return everything
     # BUT the last few — the opposite of a cap, on the one surface whose whole job is to bound
-    # what the model is handed.
+    # what the model is handed. Checked here as well as in `match_loaded` so an empty answer
+    # costs no corpus walk.
+    if frontier.is_empty() or top_k <= 0:
+        return []
+    return match_loaded(frontier, list(iter_lessons(corpus)), top_k=top_k)
+
+
+def match_loaded(
+    frontier: Frontier, lessons: list, *, top_k: int = DEFAULT_TOP_K
+) -> list[Hit]:
+    """`match_lessons` over an ALREADY-DRAINED corpus.
+
+    Split out for the one caller that scores TWO frontiers — `runtime/tools._frontier_recall`
+    asks the question again for the pre-write document to decide whether the block changed.
+    `iter_lessons` re-opens and re-YAML-parses every file on every call, and it is the
+    dominant cost of the whole lane, so the second score reads the first walk's bytes rather
+    than re-reading files that cannot have changed in between.
+    """
     if frontier.is_empty() or top_k <= 0:
         return []
     hits: list[Hit] = []
-    for lesson in iter_lessons(corpus):
+    for lesson in lessons:
         fm = lesson.fm
         match = _best_match(_parse_selectors(fm), frontier)
         if match is None:
@@ -302,6 +334,11 @@ def _render_frontmatter(fm: dict) -> str:
     import yaml
 
     kept = {k: v for k, v in fm.items() if k not in HIDDEN_KEYS}
+    # `yaml.safe_dump({})` is the literal `{}`, so a lesson carrying only selectors and
+    # bookkeeping would render one line of pure noise under its path. The `matched` line above
+    # already says everything that lesson has to say here.
+    if not kept:
+        return ""
     dumped = yaml.safe_dump(
         kept, sort_keys=True, default_flow_style=False, allow_unicode=True
     )
@@ -331,7 +368,8 @@ def render(hits: list[Hit]) -> str:
         # `matched` is the model's ONLY account of why this lesson was pushed: `HIDDEN_KEYS`
         # strips the selectors, so without this line the block is an unexplained list.
         lines.append(f"- {hit.path.resolve()} — matched {hit.matched}")
-        lines.append(_render_frontmatter(hit.frontmatter))
+        if body := _render_frontmatter(hit.frontmatter):
+            lines.append(body)
     return "\n".join(lines)
 
 

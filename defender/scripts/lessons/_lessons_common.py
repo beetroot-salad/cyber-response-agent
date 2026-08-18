@@ -57,10 +57,16 @@ def resolve_corpus(raw: str | None, default: Path, ap) -> Path:
     so both would resolve to the process CWD and be tested against whatever that directory
     happens to be named — a containment check on a path the caller never named. Every
     legitimate relocation (a forward-check worktree, a test fixture) names a real directory.
+
+    The operand is stripped ONCE, before both tests. `Path` does not strip, so testing
+    `raw.strip()` and then building `Path(raw)` blamed a padded operand on the corpus name:
+    `--corpus "  .../lessons "` resolved to a leaf spelled `lessons ` and earned the
+    containment refusal rather than the whitespace one.
     """
     if raw is None:
         return default
-    if not raw.strip() or Path(raw) == Path("."):
+    raw = raw.strip()
+    if not raw or Path(raw) == Path("."):
         ap.error(f"--corpus needs a path to a {default.name!r} directory, not {raw!r}")
     corpus = Path(raw).resolve()
     if corpus.name != default.name:

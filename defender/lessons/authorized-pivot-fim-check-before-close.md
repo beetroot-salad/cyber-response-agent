@@ -4,11 +4,6 @@ description: Before closing an authorized SSH pivot benign, run a FIM or auditd 
 telemetry_source: [fim, auditd]
 attack_phase: [persistence]
 source_signature: [v2-cross-tier-ssh-pivot]
-frontier_nodes:
-  - {type: file, slot: class}
-frontier_edges:
-  - {anchor_kind: iam-policy}
-  - {anchor_kind: approved-source-list}
 source_finding_ids:
   - live-cross-tier-pivot-2/0
 created_at: 2026-06-04T00:00:00Z

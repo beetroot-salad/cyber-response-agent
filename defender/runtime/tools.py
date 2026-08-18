@@ -909,14 +909,21 @@ def _frontier_recall(deps: AgentDeps, before: str, after: str) -> str:
     exact lie `_warn_over` fails open to avoid.
     """
     try:
+        from defender._corpus import iter_lessons
         from defender.scripts.lessons.lessons_frontier import (
-            match_lessons,
+            match_loaded,
             render,
         )
         from defender.skills.invlang.frontier import frontier_from_text
 
         corpus = deps.defender_dir / "lessons"
         if not corpus.is_dir():
+            # LOUD, on the same terms `frontier_from_text` states: a corpus that is not there
+            # produces the same silence as a corpus that matched nothing, and SKILL.md tells
+            # the model to read that silence as "nothing NEW matched". A mis-resolved
+            # `defender_dir` would otherwise disable the lane for the whole run with no
+            # exception, no test red, and no operator signal.
+            print(f"[tools] no lessons corpus at {corpus}; omitting recall", file=sys.stderr)
             return ""
         # THE FRONTIER is the cheap gate, and it is also the one SKILL.md states ("appears
         # only when your append *changed* what is open"). `Frontier` is a frozen dataclass of
@@ -928,12 +935,18 @@ def _frontier_recall(deps: AgentDeps, before: str, after: str) -> str:
         was_frontier = frontier_from_text(before)
         if now_frontier == was_frontier:
             return ""
-        hits = match_lessons(now_frontier, corpus)
+        if now_frontier.is_empty():
+            return ""
+        # ONE walk for the two frontiers below. `iter_lessons` re-opens and re-YAML-parses
+        # every file in the corpus per call, and it is the dominant cost here — the two scores
+        # are pure functions of the same bytes, which cannot change between them.
+        lessons = list(iter_lessons(corpus))
+        hits = match_loaded(now_frontier, lessons)
         now = render(hits)
         # The second gate is what keeps a MOVE that changed no lesson quiet — the frontier can
         # open a slot no selector speaks to, and re-stapling the same three lines then teaches
         # the model to stop reading them.
-        if not now or now == render(match_lessons(was_frontier, corpus)):
+        if not now or now == render(match_loaded(was_frontier, lessons)):
             return ""
         # RECORDED, on the same terms a Read is. `lessons_loaded.jsonl` is the loop's only
         # "was this lesson in context" signal and the post-merge control `learning/ops/

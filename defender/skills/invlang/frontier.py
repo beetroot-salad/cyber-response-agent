@@ -171,7 +171,11 @@ def _open_contracts(companion: CompanionBody) -> list[OpenContract]:
         cid = c.get("id")
         if not isinstance(cid, str) or not cid:
             continue
-        edge_ref = c.get("edge_ref") or vocab.UNOBSERVED_EDGE_REF
+        # `edge_ref` is anchored at the PARSE boundary — `parser._hyp_sub_authz_row` writes
+        # `vocab.UNOBSERVED_EDGE_REF` for a row that names no edge, and `AuthorizationContract`
+        # types the key non-optional. Re-coalescing it here would be the second copy of that
+        # default, free to drift from the first.
+        edge_ref = c.get("edge_ref", vocab.UNOBSERVED_EDGE_REF)
         rel, auth_kind = edges.get(edge_ref, (None, None))
         out.append(OpenContract(
             contract_id=cid,
