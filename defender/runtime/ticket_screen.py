@@ -10,11 +10,10 @@ breaker) and a malformed envelope (an INFRA fault, which does). Only the *predic
   - gather excludes its own case by RECORD IDENTITY and keeps every other lifecycle state —
     open and in-progress siblings are correlation evidence it is entitled to read;
   - the judge additionally keeps only genuinely-closed records, withholds a record that merely
-    NAMES the case under judgment (Fork H, on both its surfaces since #683), and withholds any
-    record not provably written BEFORE the case opened (Fork J) — for the judge, the case's own
-    ticket is the answer key it is scoring against, and so is anything written about the case
-    while it was live. Gather has no recency arm and must not grow one: it reads in-flight
-    siblings deliberately.
+    NAMES the case under judgment, and withholds any record not provably written BEFORE the
+    case opened — for the judge, the case's own ticket is the answer key it is scoring against,
+    and so is anything written about the case while it was live. Gather has no recency arm and
+    must not grow one: it reads in-flight siblings deliberately.
 
 Holding the protocol here means an envelope change — a renamed ``tickets``/``key``, a different
 malformed classification — is made ONCE, rather than in two places that must be kept in step.
@@ -43,12 +42,12 @@ TICKET_LIST = "list-tickets"
 MALFORMED_EXIT = 2
 
 #: A policy withhold is a BUSINESS refusal, never infra: the store answered correctly and this
-#: boundary chose not to pass the answer on. Two properties are load-bearing, and both are
-#: pinned by tests. It must stay OUTSIDE ``circuit_breaker.INFRA_EXIT_CODES``, so a run that
-#: legitimately brushes its own case never trips the ticket breaker for the rest of the run.
-#: And it is deliberately DISTINCT from the adapter's generic business code (1, carried by a
-#: 404 or a non-closed refusal), so a reader of ``executed_queries`` can tell a withheld
-#: self-read from a ticket that simply is not there — without parsing the free-text detail.
+#: boundary chose not to pass the answer on. Two load-bearing properties, both pinned by tests.
+#: It must stay OUTSIDE ``circuit_breaker.INFRA_EXIT_CODES``, so a run that legitimately brushes
+#: its own case never trips the ticket breaker for the rest of the run. And it is DISTINCT from
+#: the adapter's generic business code (1, carried by a 404 or a non-closed refusal), so a
+#: reader of ``executed_queries`` can tell a withheld self-read from a ticket that simply is not
+#: there — without parsing the free-text detail.
 POLICY_REFUSAL_EXIT = 3
 
 def self_case_key(deps: AgentDeps) -> str:
@@ -57,8 +56,8 @@ def self_case_key(deps: AgentDeps) -> str:
     The identity is ``deps.run_id``, carried explicitly on deps, and is deliberately NOT
     re-derived from ``run_dir.name``. The two coincide today only because ``AgentDeps._for_run``
     seeds ``run_id=run_dir.name``; pinning both screens to the deps field means a later
-    decoupling of run-dir naming from the run id (the area #697/#698 already churned) cannot
-    silently split gather's self-exclusion from the judge's.
+    decoupling of run-dir naming from the run id cannot silently split gather's self-exclusion
+    from the judge's.
     """
     return deps.run_id
 
@@ -99,11 +98,9 @@ def screen_list(
 
     The store's list endpoint answers with a JSON OBJECT envelope — ``{"total", "tickets"}`` —
     never a bare array. ``transport.http_get`` is typed ``dict | list`` because it also serves
-    endpoints that genuinely ARE arrays, and ``list_tickets`` calls it rather than
-    ``http_get_obj`` to get query-string urlencoding, so the object shape is a CONTRACT this
-    screen enforces rather than a guarantee the type system already supplies. Anything else is
-    malformed: reading a bare array as the ticket list would invent a shape the store does not
-    document, and inventing one on the answer-key path is the wrong trade.
+    endpoints that genuinely ARE arrays, so the object shape is a CONTRACT this screen enforces
+    rather than one the type system supplies. Anything else is malformed: reading a bare array
+    as the ticket list would invent a shape the store does not document, on the answer-key path.
 
     Every surviving item is a dict the caller's ``keep`` predicate admitted — a non-dict item is
     dropped as unreadable rather than passed through — and ``total`` is restated to what the

@@ -30,27 +30,20 @@ def wrap_fresh(content: str, tag: str) -> str:
 
     The salt is minted after the content is in hand and re-minted while it occurs in that
     content, so THIS frame's body cannot contain THIS frame's delimiter — by construction, not
-    by improbability. That is the exact scope of the guarantee, and it is worth stating
-    precisely, because one thing sits outside it: the loop compares a candidate salt against
-    its own content only, never against a SIBLING frame's. Two frames assembled into one
-    message stay distinct on entropy alone.
+    by improbability. One thing sits outside that guarantee: the loop compares a candidate salt
+    against its own content only, never against a SIBLING frame's, so two frames assembled into
+    one message stay distinct on entropy alone.
 
-    Hence 64 bits rather than the 32 an earlier cut of #875 used. Within a frame the length
-    buys nothing the loop has not already bought outright; across frames it is the only thing
-    doing the work, and "improbable" is the standard this design exists to stop relying on.
-    The exploit it forecloses is narrow — a planted closer for a sibling's salt lands before
-    that sibling opens, so a reader pairing open to close is unaffected — but the margin is
-    eight characters, which is not a price worth arguing about.
+    Hence 64 bits. Within a frame the length buys nothing the loop has not bought outright;
+    across frames it is the only thing doing the work, and "improbable" is the standard this
+    design exists to stop relying on.
 
-    #875 F-1: the old shape threaded ONE salt through a run's deps and framed each tool return
-    in it, so the gather subagent — which reads that token in plaintext on every payload view it
-    is handed — could close the frame its own summary arrived in and keep writing in MAIN's
-    host-text region. Minting here means no token outlives the string it delimits: nothing to
-    hand to a subagent, nothing to leave in an artifact, nothing to recover from a sibling
-    lead's summary.
+    Minting per frame means no token outlives the string it delimits (#875 F-1): threading ONE
+    run salt through every tool return let the gather subagent — which reads that token in
+    plaintext on every payload view — close the frame its own summary arrived in and keep
+    writing in MAIN's host-text region.
 
-    No escaping: the body is preserved verbatim (pinned by `tests/test_untrusted_frames_849.py`),
-    which the re-mint makes safe.
+    No escaping: the body is preserved verbatim, which the re-mint makes safe.
     """
     if not isinstance(content, str):
         raise TypeError("content must be a string")

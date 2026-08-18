@@ -19,16 +19,13 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 
 @dataclass(frozen=True)
 class QueueChannel:
-    """One file-backed queue, with its LOCK TOPOLOGY and its row key as data (#719).
+    """One file-backed queue, with its LOCK TOPOLOGY and its row key as data.
 
-    The two lock roles are separate fields because they serialise different things:
-    `append_lock` excludes concurrent appenders (and the drain's own read/rotate/retire
-    window) from each other, while `drain_lock` is the non-blocking "one drainer per
-    channel" gate. A channel no drain holds exclusively — `pitfalls`, drained inside the
-    lead-author tick — carries `None` for the drain role and takes no exclusive lock.
-
-    `id_key` is the field a row is identified by; it used to be a literal hard-coded at
-    each read, rotate and dedup site."""
+    The two lock roles serialise different things: `append_lock` excludes concurrent
+    appenders (and the drain's own read/rotate/retire window) from each other, while
+    `drain_lock` is the non-blocking "one drainer per channel" gate. A channel no drain
+    holds exclusively — `pitfalls`, drained inside the lead-author tick — carries `None`
+    for the drain role and takes no exclusive lock."""
 
     file: Path
     consumed: Path
@@ -40,26 +37,18 @@ class QueueChannel:
 def provenance_field(id_key: str) -> str:
     """The corpus frontmatter list a lesson cites its source queue rows under.
 
-    ONE spelling, because two gates that must agree read it: the pre-author idempotency
-    gate (`existing_finding_ids` / `existing_observation_ids`), which decides a row was
-    already authored, and the drain's attribution gate (#852 F-02), which decides a corpus
-    file is vouched for by this batch. A file attributable under one spelling and invisible
-    to the other is authored again on every following tick, so the two are derived from the
-    channel's `id_key` here rather than hand-spelled at each site."""
+    ONE spelling, because two gates that must agree read it: the pre-author idempotency gate
+    (`existing_finding_ids` / `existing_observation_ids`), which decides a row was already
+    authored, and the drain's attribution gate, which decides a corpus file is vouched for by
+    this batch. A file attributable under one spelling and invisible to the other is authored
+    again on every following tick — hence derived here, not hand-spelled at each site."""
     return f"source_{id_key}s"
 
 
 @dataclass(frozen=True)
 class LegDirs:
     """The two roots one direction leg writes across: the finished investigation it READS,
-    and the per-case leg-output dir it WRITES.
-
-    Both required. This pair used to ride on `RunPaths` as an optional second field, which
-    put an `Optional[Path]` that is always `None` on all ~48 single-root constructions of a
-    type whose job is resolving artifact names — and every consumer of the pair destructured
-    and asserted it non-`None` on the first line anyway. The pair is real and does travel
-    together; it just needed its own name rather than a lodger's.
-    """
+    and the per-case leg-output dir it WRITES. Both required."""
 
     run_dir: Path
     learning_run_dir: Path
@@ -70,11 +59,9 @@ class LoopPaths(DefenderPaths):
     """The loop's paths: every checked-in tree `DefenderPaths` locates, PLUS the mutable
     learning state (queues, locks, run artifacts) rooted at `state_root`.
 
-    It INHERITS the repo-tree paths rather than forwarding them — eleven one-line
-    pass-throughs used to shadow `DefenderPaths`, so every path added to `_paths.py` had
-    to be declared twice or it was invisible here. Inheriting keeps `getattr(paths, name)`
-    (drains.py resolves each curator's corpus dir that way) answering for the whole set,
-    and keeps the directory NAMES owned by `_paths.py` alone."""
+    It INHERITS the repo-tree paths rather than forwarding them, so `getattr(paths, name)`
+    (drains.py resolves each curator's corpus dir that way) answers for the whole set and the
+    directory NAMES stay owned by `_paths.py` alone."""
 
     state_dir: Path | None = None
 
@@ -107,9 +94,8 @@ class LoopPaths(DefenderPaths):
             file=self.pitfalls_pending_dir / "pitfalls.jsonl",
             consumed=self.pitfalls_pending_dir / "pitfalls.consumed.jsonl",
             append_lock=self.pitfalls_pending_dir / ".pitfalls.lock",
-            # No drain-role lock: the pitfalls queue is drained inside the lead-author
-            # tick, which nothing else contends for, so one file serves the append role
-            # alone (#719).
+            # No drain-role lock: the pitfalls queue is drained inside the lead-author tick,
+            # which nothing else contends for, so one file serves the append role alone.
             drain_lock=None,
             id_key="pitfall_id",
         )
@@ -151,13 +137,9 @@ class LoopPaths(DefenderPaths):
         name, kept because the live-run appender (`persist.append_findings`) reaches it
         off `paths` rather than off a channel.
 
-        REVERSED BY #719. What stood here was a prohibition: the read-side lock and the
-        drain-wide lock do different jobs, therefore keep them out of the channel. The
-        premise held and the conclusion did not. They are still two roles — they are now
-        two FIELDS on `QueueChannel`, so a channel's lock topology is readable off one
-        object instead of reconstructed from which lock each call site happened to pass.
-        The findings channel already had the split; the three observation channels gained
-        it here."""
+        A prohibition against folding the two lock roles into the channel once stood here;
+        #719 reversed it. The roles are still distinct — they are now two FIELDS on
+        `QueueChannel`, so a channel's lock topology reads off one object."""
         return self.pending_dir / ".findings.lock"
 
     @property
@@ -175,8 +157,8 @@ class LoopPaths(DefenderPaths):
         return QueueChannel(
             file=self.pending_dir / "actor_observations.jsonl",
             consumed=self.pending_dir / "actor_observations.consumed.jsonl",
-            # The append-lock identity does not move (#719): an appender running older
-            # code keeps taking the same file, so the rollover needs no coordination.
+            # The append-lock identity must not move: an appender running older code keeps
+            # taking the same file, so a rollover needs no coordination.
             append_lock=self.pending_dir / ".actor.lock",
             drain_lock=self.pending_dir / ".actor.drain.lock",
             id_key="observation_id",
@@ -238,9 +220,8 @@ LESSONS_ACTOR_INDEX_SCRIPT = _LESSONS_SCRIPTS_DIR / "lessons_actor_index.py"
 
 
 # Which dispositions select which direction is NOT declared here — it is a field on
-# `Direction` (`core/directions.py`), so the mapping has one home (#716). The enum ITSELF
-# moved to `defender/_artifact_schema.py` (#714), where the report.md schema that mints it
-# lives; core.config stays the loop's import surface for it.
+# `Direction` (`core/directions.py`). The enum itself lives in `defender/_artifact_schema.py`
+# beside the report.md schema that mints it; core.config stays the loop's import surface.
 
 OUTCOME_ENUM = {"caught", "survived", "undecidable", "incoherent", "skip-passthrough"}
 BENIGN_OUTCOME_ENUM = {
@@ -263,14 +244,11 @@ BENIGN_AUDIT_ONLY_FINDING_TYPES = {"disposition-confirmed"}
 BENIGN_ALL_FINDING_TYPES = QUEUEABLE_FINDING_TYPES | BENIGN_AUDIT_ONLY_FINDING_TYPES
 ACTOR_OBSERVATION_TYPES = {"misprediction", "framing-choice", "discarded-class"}
 
-# Every env-backed knob is read HERE, at call time — one idiom for the whole file (#717).
-# The import-time `X = os.environ.get(...)` half froze its value at first import, so a test
-# could only move it by reloading the module; these read the live environment, so
-# `monkeypatch.setenv` reaches the code under test.
-#
-# A module-level constant BUILT from one of these still freezes at ITS import (the six
-# `AgentDefinition`s' `effort=`, directions.py's `JudgeWiring`s, a signature default) — the
-# freeze is now visible at that construction site instead of hidden here.
+# Every env-backed knob is read at CALL time, never as `X = os.environ.get(...)` at import:
+# an import-time read freezes at first import and `monkeypatch.setenv` can no longer reach
+# the code under test. A module-level constant BUILT from one of these still freezes at ITS
+# import (the `AgentDefinition`s' `effort=`, directions.py's `JudgeWiring`s, a signature
+# default) — visible at that construction site rather than hidden here.
 
 
 def actor_model() -> str:
@@ -301,13 +279,12 @@ def oracle_max_concurrency() -> int:
     return env_int("ORACLE_MAX_CONCURRENCY", 8)
 
 
-# The judge moved off glm-5.2 on STABILITY, not on per-verdict quality. Over the frozen
-# pair in experiments/judge-glm52-vs-kimik3, GLM at this effort returned a different outcome
-# on both cases across two identical reps — both times on the caught<->survived /
-# refuted<->survived axis, which is the axis that decides FN/FP accounting and therefore
-# which findings become lessons. K3 returned the same outcome on 4 of 4 reps. A judge that
-# relabels the same frozen input is injecting noise into every lesson the author trains on,
-# and the forward-check gate cannot catch it because that gate re-runs the same judge.
+# The judge is on k3 for STABILITY, not per-verdict quality: on a frozen pair, GLM at this
+# effort relabelled both cases across identical reps on the caught<->survived /
+# refuted<->survived axis — the axis that decides FN/FP accounting and therefore which
+# findings become lessons. A judge that relabels the same frozen input injects noise into
+# every lesson the author trains on, and the forward-check gate re-runs the same judge so it
+# cannot catch it.
 def judge_model() -> str:
     return env_str("JUDGE_MODEL", "kimi-k3")
 
@@ -326,26 +303,24 @@ def benign_judge_effort() -> str:
 
 @dataclass(frozen=True)
 class StageWiring:
-    """How one in-process stage is wired: the five fields every stage engine used to
-    re-declare and hand down to `run_stage` unchanged (#713).
+    """How one in-process stage is wired, handed down to `run_stage` unchanged.
 
     Deliberately carries NO limits. `request_limit` and `wall_clock_timeout` live on
     `StageContext` instead, because a wiring is allowed to be a module constant (the two
-    `JudgeWiring`s in `directions.py` are) and `subagent_timeout()` is env-backed — freezing
-    it into an import-time constant is the exact regression #717 closed. Anything env-backed
-    belongs on the per-call context, not here."""
+    `JudgeWiring`s in `directions.py` are) and freezing an env-backed value like
+    `subagent_timeout()` at import is the regression the call-time knobs above exist to
+    prevent. Anything env-backed belongs on the per-call context, not here."""
 
     prompt_path: Path
     model: str
     effort: str | None
     trace_name: str
     label: str
-    # The batch this spawn is for, RETAINED by `for_batch` rather than derived twice. Both
-    # `trace_name` and `label` already encode it, so a stage that also wants to name the batch
-    # (`run_curator_stage` logs it and puts it in every AuthorError) would otherwise take it a
-    # second time as its own parameter — two sources of truth for one identity, with nothing
-    # reconciling them. `None` on the wirings that are not per-batch (the two `JudgeWiring`s,
-    # the actor/oracle/forward-check spawns, which name a direction or a lead instead).
+    # The batch this spawn is for, retained rather than re-derived: `trace_name` and `label`
+    # both encode it, so a stage that also names the batch (`run_curator_stage` logs it and
+    # puts it in every AuthorError) would otherwise take it a second time with nothing
+    # reconciling the two. `None` on wirings that are not per-batch (the `JudgeWiring`s, the
+    # actor/oracle/forward-check spawns, which name a direction or a lead instead).
     #
     # `kw_only` so it stays off the positional tail: `JudgeWiring` extends this class with two
     # more fields and `directions.py` passes the base five positionally.
@@ -356,11 +331,10 @@ class StageWiring:
         cls, prompt_path: Path, model: str, effort: str | None,
         *, batch_id: str, label: str,
     ) -> StageWiring:
-        """The per-spawn wiring both drain entry points build (#713).
+        """The per-spawn wiring both drain entry points build.
 
         The trace name is unique on (batch_id, pid): `batch_id` separates concurrent spawns
-        for DIFFERENT runs, `pid` separates concurrent drain PROCESSES sharing one run dir.
-        Both curators derived this identically and separately before; it lives here now."""
+        for DIFFERENT runs, `pid` separates concurrent drain PROCESSES sharing one run dir."""
         return cls(
             prompt_path=prompt_path, model=model, effort=effort,
             trace_name=f"{batch_id}.{os.getpid()}.trace.jsonl",
@@ -371,9 +345,8 @@ class StageWiring:
 
 @dataclass(frozen=True)
 class JudgeWiring(StageWiring):
-    """The judge's wiring: the shared five plus its two per-leg knobs. Field order is
-    base-then-own, which is the order `directions.py` and the test builders already pass
-    positionally."""
+    """The judge's wiring: the shared fields plus its two per-leg knobs. Field order is
+    base-then-own, the order `directions.py` and the test builders pass positionally."""
 
     comparison_dirname: str
     closed_ticket_read: bool = False
@@ -385,7 +358,7 @@ class StageContext:
 
     Built per call, never a module constant — `wall_clock_timeout` reaches
     `subagent_timeout()` and `request_limit` its own env knob, and an import-time
-    construction would freeze both (#717). `tests/test_loop_config_env.py` enforces this
+    construction would freeze both. `tests/test_loop_config_env.py` enforces this
     structurally.
 
     `repo_root` is optional because only the stages that bind a corpus or a skills tree
@@ -396,10 +369,10 @@ class StageContext:
     rather than off a parallel local. Set one here and pass another to `bind` and the two
     silently diverge, with the context reading as the authority it would no longer be.
 
-    `salt` is NOT a bind input since #875 — `bind` takes none, because a tool return is framed
-    by `_untrusted.wrap_fresh`, which mints its delimiter after the content is in hand. It
-    survives here for the one reader left: `curator_engine.run_curator_stage` uses it to tell
-    whether `ctx.user` is already the salted message its own prompt builder assembled."""
+    `salt` is NOT a bind input: `bind` takes none, because a tool return is framed by
+    `_untrusted.wrap_fresh`, which mints its delimiter after the content is in hand. Its one
+    reader left is `curator_engine.run_curator_stage`, which uses it to tell whether
+    `ctx.user` is already the salted message its own prompt builder assembled."""
 
     learning_run_dir: Path
     user: str
@@ -521,12 +494,9 @@ class RunUnprocessable(Exception):
 
 
 def pitfalls_threshold() -> int:
-    # 3, not 5 (#823 M4). At 5 the queue never filled: three archived runs — 227 rows, 33 of
-    # them agent-fixable — put exactly 2 records in front of the curator, so it has never run
-    # once and no `execution.md` has the `## Common pitfalls` section its prompt writes into.
-    # The number is a reasoned floor rather than a measured one: #823's yield oracle is
-    # explicitly deferred, because the bash-shim rows that should dominate the queue could not
-    # be counted from an archive recorded before they were written.
+    # 3, not 5: at 5 the queue never filled — three archived runs (227 rows, 33 agent-fixable)
+    # put only 2 records in front of the curator, so it never ran. A reasoned floor, not a
+    # measured one; the yield oracle is deferred.
     return env_int("LEARNING_PITFALLS_THRESHOLD", 3)
 
 

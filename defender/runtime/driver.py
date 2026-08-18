@@ -80,13 +80,12 @@ DEFAULT_TOOL_RETRIES = 10
 
 
 def _main_instructions(defender_dir: Path) -> str:
-    """MAIN's system prompt: the SKILL's BODY, without its frontmatter (#810).
+    """MAIN's system prompt: the SKILL's BODY, without its frontmatter.
 
-    The frontmatter is file metadata — `name`, `description` — that nothing in this runtime
-    parses; it used to ride into the prompt verbatim, and with it an `allowed-tools:` line
-    naming verbs the `ToolSet` does not register. The roster has exactly one enforced owner
-    (`MAIN_DEF.tools` → `register_tools`), so a second copy in prose could only ever drift,
-    and drifting it teaches the model to call a tool it does not have."""
+    The frontmatter is file metadata nothing here parses, and it can carry an `allowed-tools:`
+    line naming verbs the `ToolSet` does not register. The roster has exactly one enforced
+    owner (`MAIN_DEF.tools` → `register_tools`); a second copy in prose can only drift, and
+    drifting it teaches the model to call a tool it does not have."""
     return strip_frontmatter((defender_dir / "SKILL.md").read_text(encoding="utf-8"))
 
 
@@ -94,16 +93,12 @@ def _user_prompt(  # noqa: PLR0913 — the harness's own pre-turn seams (#808)
     run_dir: Path, alert_path: Path, defender_dir: Path,
     *, verbs: Any = None, limits: dict = DEFAULT_LIMITS, run_id: str | None = None,
 ) -> tuple[str, str, str]:
-    """#808 — lead-0's own call site. It takes its OWN exception handler (K8/N3): a
-    `BudgetKill` or `circuit_breaker.RunAborted` raised inside `resolve_lead_zero` (its
-    QueryCapture path inherits both) is caught HERE, so it never escapes `_user_prompt` and
-    ends the run before MAIN's first prompt — the run degrades the section instead.
+    """Lead-0's call site, with its OWN exception handler: a `BudgetKill` or
+    `circuit_breaker.RunAborted` raised inside `resolve_lead_zero` is caught HERE so it cannot
+    end the run before MAIN's first prompt — the section degrades instead.
 
-    Returns `(prompt, ancestor_block, status)`: the block/status feed item 3's dispatch gate
-    (`d22`), computed once here rather than re-resolved by a second lead_zero call. The middle
-    element was `entities` until #867 — a harness-extracted host/user/source-ip triple. Item 3
-    now hands the lead item 1's rendered block itself and lets it choose its own correlation
-    axes, so what threads through here is that block, verbatim."""
+    Returns `(prompt, ancestor_block, status)`; the block/status feed item 3's dispatch gate,
+    computed once here rather than re-resolved by a second lead_zero call."""
     from . import lead_zero as lead_zero_mod
     from .circuit_breaker import RunAborted
 
@@ -147,12 +142,10 @@ def _budget_short_circuit(
     deps: AgentDeps, tool_name: str, limits: dict,
     logger: observe.RequestLogger, agent_id: str,
 ) -> str | None:
-    # RS16: the exemption has to sit AHEAD of the tail kill, not only inside `should_refuse`.
-    # The tail kill is unconditional, so an exemption expressed only in the refusal check
-    # still ends the run at the close — and the gate's own forced turns (extra tool calls,
-    # up to four stage deadlines of wall clock inside ONE close) are what push a run past the
-    # tail to begin with. Closing must remain possible under exactly the pressure the gate
-    # creates, which is also what the budget refusal message now tells the model to do.
+    # RS16: the exemption sits AHEAD of the tail kill, not only inside `should_refuse` — the
+    # tail kill is unconditional, so an exemption expressed only in the refusal check still
+    # ends the run at the close. The gate's own forced turns are what push a run past the tail
+    # to begin with, so closing must stay possible under exactly that pressure.
     if tool_name in BUDGET_EXEMPT_TOOLS:
         return None
     state = _budget_state_for_enforcement(read_budget(deps.run_dir), deps)
@@ -183,11 +176,10 @@ def _account_executed_call(deps: AgentDeps, tool_name: str, *, active: bool, lim
 def _stamp_duration(store: Any, session_id: str | None, duration_ms: float) -> None:
     """Write the MEASURED latency into the render's pending stamp.
 
-    `selection.render` opens the stamp for the request it is preparing, but that
-    request's duration only exists once the model has answered — here. The stamp is
-    consumed by the next round's `ingest`, which runs after this hook, so patching it
-    in place is what puts a real number in `message.duration_ms` instead of the
-    placeholder the renderer had to leave."""
+    `selection.render` opens the stamp for the request it is preparing, but that request's
+    duration only exists once the model has answered — here. The next round's `ingest`
+    consumes the stamp, so patching it in place is what puts a real number in
+    `message.duration_ms` instead of the renderer's placeholder."""
     if store is None or session_id is None:
         return
     pending = getattr(store, "pending_stamps", None)
@@ -250,23 +242,21 @@ MakeModel = Callable[[str, str | None], BuiltModel]
 def _affinity_key(agent_id: str, session_id: str | None, cache_key: str | None) -> str:
     """THE prompt-cache affinity key, for every role — the whole policy, in one place.
 
-    A named function and not three nested conditionals at the call site because there are three
-    arms now, each answering "what prefix does this agent share, and with whom":
+    Three arms, each answering "what prefix does this agent share, and with whom":
 
-    1. An explicit `cache_key` wins. Gather is its whole population (#835): a gather session HAS
-       a conversation, but its `agent_id` is `gather:{lead_id}`, so arm 2 would route every
-       sibling lead to a different replica and none of them could share the prefix they have in
-       common — gather's SKILL.md and the dispatched system's catalog, byte-identical across
-       leads AND across runs. Only the caller knows what that prefix is keyed on, so it says.
-    2. WITH a session, the key is that conversation's: one growing prefix, and every turn of it
-       wants the replica already holding the previous turn.
-    3. WITHOUT one the agent is a one-shot (the review lenses are the whole of this class), so
-       there is no within-run prefix to keep warm and the bare `agent_id` is better: it is
-       stable ACROSS runs, the only reuse a single-call role can have — its role instructions,
-       identical every run, warm on the replica this key routes to.
+    1. An explicit `cache_key` wins. Gather is its whole population: a gather session HAS a
+       conversation, but its `agent_id` is `gather:{lead_id}`, so arm 2 would route every
+       sibling lead to a different replica and none could share the prefix they have in common
+       — gather's SKILL.md and the dispatched system's catalog, byte-identical across leads AND
+       across runs. Only the caller knows what that prefix is keyed on.
+    2. WITH a session, the key is that conversation's: one growing prefix, every turn wanting
+       the replica that already holds the previous one.
+    3. WITHOUT one the agent is a one-shot (the review lenses), so there is no within-run
+       prefix to keep warm; the bare `agent_id` is stable ACROSS runs, which is the only reuse
+       a single-call role can have — its role instructions, identical every run.
 
-    `defender/CLAUDE.md`'s anchor-a-default rule is satisfied by this being the ONE site that
-    knows the policy; threading a resolved key inward would make all four callers compute one.
+    Threading a resolved key inward would make all four callers compute one; this is the ONE
+    site that knows the policy.
     """
     if cache_key is not None:
         return cache_key
@@ -298,12 +288,10 @@ def build_agent_core(  # noqa: PLR0913 — the single build site's config + 3 DI
     settings = providers.cache_affinity(
         model_name, built.settings, _affinity_key(agent_id, session_id, cache_key),
     )
-    # #872 §7 r5 (P2 = A) — the TOON view gate is installed UNCONDITIONALLY, at the single
-    # `Agent(...)` every one of the five build paths reaches, so no build path can miss it.
-    # A capability already present in `extra_capabilities` (the "install it twice" case —
-    # `test_a_foreign_result_is_framed_once_however_many_times_the_gate_is_installed`) is
-    # reused rather than shadowed by a second one, which is what keeps a foreign result framed
-    # exactly once no matter how many times the gate is handed to a build.
+    # The TOON view gate is installed UNCONDITIONALLY, at the single `Agent(...)` every one of
+    # the five build paths reaches, so no build path can miss it. A gate already present in
+    # `extra_capabilities` is REUSED rather than shadowed by a second one, which is what keeps
+    # a foreign result framed exactly once however many times the gate is handed to a build.
     reused_gate = next(
         (c for c in extra_capabilities if isinstance(c, toon_gate_mod.ToonGateCapability)), None,
     )
@@ -318,11 +306,11 @@ def build_agent_core(  # noqa: PLR0913 — the single build site's config + 3 DI
     ]
     if reused_gate is None:
         capabilities.append(toon_gate)
-    # EVERY verb-bearing bit this builder registers, not `query` alone (#900): `list_verbs`
-    # reads the grant to decide what it may name, so it needs the same production registry
-    # default AND the same nominal type check (§7 R15) — a registry-shaped stand-in that
-    # answers GRANTED to everything would otherwise publish the whole verb surface through it.
-    # `QueryCapture` stays behind `query`: it wraps the dispatch tool, which `list_verbs` is not.
+    # EVERY verb-bearing bit this builder registers, not `query` alone: `list_verbs` reads the
+    # grant to decide what it may name, so it needs the same production registry default AND
+    # the same nominal type check — a registry-shaped stand-in that answers GRANTED to
+    # everything would otherwise publish the whole verb surface through it. `QueryCapture`
+    # stays behind `query`: it wraps the dispatch tool, which `list_verbs` is not.
     if defn.tools.query or defn.tools.list_verbs:
         from defender._paths import PATHS
 
@@ -348,10 +336,9 @@ def build_agent_core(  # noqa: PLR0913 — the single build site's config + 3 DI
         retries={"tools": DEFAULT_TOOL_RETRIES, "output": 0},
         toolsets=[toolset] if toolset is not None else [],
     )
-    # The gate's identity check for "is this an owned tool" — every `agent.tool`/
-    # `agent.tool_plain` registration (this call's own `register_tools`, plus the gather tool
-    # and the close tool registered onto this same agent by `build_agent`) shares this ONE
-    # object, so binding it once here covers all of them regardless of registration order.
+    # The gate's identity check for "is this an owned tool". Every registration onto this agent
+    # (this call's `register_tools`, plus `build_agent`'s gather and close tools) shares this
+    # ONE toolset object, so binding once here covers all of them whatever the order.
     toon_gate.bind_native_toolset(agent._function_toolset)  # noqa: SLF001 — the identity IS the contract; see toon_gate.py
     register_tools(agent, defn.tools, verbs)
     return agent
@@ -373,9 +360,8 @@ def _gather_bash_shapes(roots: ResolvedRoots) -> tuple[Any, ...]:
 
 
 def _main_write_shape(roots: ResolvedRoots) -> tuple[Any, ...]:
-    # R1 (#774): report.md leaves the model's own write allow-list entirely — the close
-    # tool is now its ONLY writer, rendering it host-side through validate_artifact rather
-    # than accepting a model-supplied write/edit of it.
+    # report.md is not on the model's write allow-list at all — the close tool is its ONLY
+    # writer, rendering it host-side through validate_artifact.
     return permission.build_named_write_allow(roots.run_dir, ("investigation.md",))
 
 
@@ -383,10 +369,9 @@ MAIN_DEF = AgentDefinition(
     role=AgentRole.MAIN,
     model=resolve_main_model,
     effort="low",
-    # `append`, not `write` (#810): main's write allowlist is exactly investigation.md, and
-    # that document is append-only by construction. The general verbs offered an anchored
-    # replace the artifact never admitted — seven of the eight non-append edit_file calls
-    # measured across three runs failed. Same move #774 made for report.md, one artifact later.
+    # `append`, not `write`: main's write allowlist is exactly investigation.md, and that
+    # document is append-only by construction — the general verbs offered an anchored replace
+    # the artifact never admitted.
     tools=ToolSet(read=True, bash=True, append=True, close=True),
     corpus_dirs=_CORPUS_DIRS,
     bash_shapes=(_main_bash_shapes,),
@@ -396,11 +381,10 @@ MAIN_DEF = AgentDefinition(
     budget_enforced=True,
 )
 
-#: The gather grant (#632, c18): the census over the 14 committed query templates plus 20
-#: past runs' history — 21 read verbs across 7 systems, plus `health-check` granted uniformly
-#: per system rather than per verb (the split carries no security content). `cmdb.list-roles`
-#: and `identity.list-authorized-hosts` are granted to nobody: in the registry, exercised by
-#: no template and no run.
+#: The gather grant: 21 read verbs across 7 systems, plus `health-check` granted uniformly per
+#: system rather than per verb (the split carries no security content). `cmdb.list-roles` and
+#: `identity.list-authorized-hosts` are granted to nobody: in the registry, exercised by no
+#: template and no run.
 GATHER_PAIRS: tuple[tuple[str, str], ...] = (
     ("change-mgmt", "active-changes"), ("change-mgmt", "get-change"),
     ("change-mgmt", "list-changes"),
@@ -439,9 +423,8 @@ GATHER_DEF = AgentDefinition(
 
 def _gather_instructions(defender_dir: Path) -> str:
     """Gather's system prompt, frontmatter stripped for the same reason MAIN's is. Gather's
-    carries no `allowed-tools`, so nothing was being mis-taught here — but a prompt loader
-    that keeps metadata for one role and drops it for the other is the asymmetry the next
-    `allowed-tools` line slips through."""
+    carries no `allowed-tools` today, but a loader that keeps metadata for one role and drops
+    it for the other is the asymmetry the next such line slips through."""
     return strip_frontmatter(
         (defender_dir / "skills" / "gather" / "SKILL.md").read_text(encoding="utf-8")
     )
@@ -492,18 +475,14 @@ def _summary_pointers(run_dir: Path) -> dict[str, str]:
 def _fold_decision(run_dir: Path) -> tuple[int, str] | None:
     """WHEN to fold, and what the frontier carries — `None` for "not yet".
 
-    `compaction.fold_boundary` is the same trigger the retired in-driver glue used: the
-    highest CONTIGUOUS closed investigation loop that produced a resolved lead, and `0`
-    until one closes. That gate is the whole policy — without it a fold fires on every
-    round, and since the boundary it keys on advances every round too, each one mints a
-    FRESH frontier and orphans the turns before it. The model would then re-enter every
-    round having lost its own tool results (#705's port dropped this trigger and nothing
-    replaced it; `fold_boundary` is FK10's open decision, settled here on the loop
-    number so one closed loop maps to exactly one frontier row).
+    `compaction.fold_boundary` is the highest CONTIGUOUS closed investigation loop that
+    produced a resolved lead, and `0` until one closes. That gate is the whole policy —
+    without it a fold fires on every round, and each one mints a FRESH frontier and orphans
+    the turns before it, so the model re-enters every round having lost its own tool results.
 
-    The loop number, not a row count, is the boundary: it is stable across the rounds
-    WITHIN a loop, so `_fold_impl`'s reuse lookup hits and the same frontier is reused
-    until the next loop closes.
+    The loop number, not a row count, is the boundary: it is stable across the rounds WITHIN
+    a loop, so `_fold_impl`'s reuse lookup hits and the same frontier is reused until the next
+    loop closes.
     """
     inv = RunPaths(run_dir).investigation
     inv_text = inv.read_text(encoding="utf-8") if inv.is_file() else ""
@@ -520,12 +499,11 @@ def _make_store_render_processor(  # noqa: PLR0913 — #808's correlation inject
     injected = [False]
 
     async def _inject_correlation() -> None:
-        """#808/K10/F2 — item 3's async frame, awaited HERE: right before MAIN's SECOND
-        request is prepared (`requests == 1`, i.e. round 1 already completed), never before
-        the first (the marker must not be in message 0). Writes the summary DIRECTLY into
-        MAIN's own session so the store-hydrated list the next render produces carries it —
-        `ProcessHistory` returns `hydrate(...)`, a list rebuilt FROM the store, so a plain
-        append to `messages` would be discarded."""
+        """Item 3's async frame, awaited right before MAIN's SECOND request is prepared
+        (`requests == 1`), never before the first — the marker must not be in message 0.
+        Writes the summary DIRECTLY into MAIN's session so the store-hydrated list the next
+        render produces carries it: `ProcessHistory` returns a list rebuilt FROM the store,
+        so a plain append to `messages` would be discarded."""
         if correlation_task is None or injected[0]:
             return
         injected[0] = True
@@ -558,17 +536,16 @@ def _make_store_render_processor(  # noqa: PLR0913 — #808's correlation inject
         store.append(session_id, [row], agent_id="main", parent_id=parent, synthesized=True)
 
     async def process(ctx: RunContext[AgentDeps], messages: list) -> list:
-        # The framework appends this round's own request to state history and only
-        # THEN checks the request limit (pydantic_ai's `_prepare_request`), so by the
-        # time this processor runs the doomed round's continuation is already in
-        # `messages`. Mirror the same check here and withhold it from the store —
-        # otherwise a round that never actually happens gets committed anyway, and the
-        # run-end flush can never recover the true terminal response.
+        # The framework appends this round's own request to state history and only THEN
+        # checks the request limit (pydantic_ai's `_prepare_request`), so by the time this
+        # processor runs the doomed round's continuation is already in `messages`. Mirror the
+        # check and withhold it from the store — otherwise a round that never happens gets
+        # committed anyway, and the run-end flush can never recover the true terminal response.
         #
-        # RS7: the ceiling is the one the RUN was handed, not the un-raised base. Pinned to
-        # the base, this mirror withheld the extra rounds the raise exists to buy — rounds
-        # that genuinely execute — so they skipped the history-compaction path entirely and
-        # the model was handed raw, unrendered history for them.
+        # RS7: the ceiling is the one the RUN was handed, not the un-raised base. Pinned to the
+        # base, this mirror withheld the extra rounds the raise exists to buy — rounds that
+        # genuinely execute — so they skipped history compaction and the model was handed raw,
+        # unrendered history for them.
         usage = getattr(ctx, "usage", None)
         requests = int(getattr(usage, "requests", 0) or 0)
         if requests >= request_limit:
@@ -594,19 +571,17 @@ def _make_store_render_processor(  # noqa: PLR0913 — #808's correlation inject
 
 
 def _make_gather_recorder(store: Any, session_id: str, agent_id: str, *, request_limit: int):
-    """`request_limit` is the ceiling THIS dispatch will hand `_run_gather`, and it is
-    required rather than defaulted to the module constant (#880 F-19): the constant is only
-    MAIN's own leads' ceiling, and the correlation lead runs the same recorder under
-    `CORRELATION_REQUEST_LIMIT`. Measured against the constant, the check below was `8 >= 40`
-    on every correlation round — never true, so the doomed round was committed after all and
-    the session ended on an unanswered request, the one state
-    `_stamp_gather_terminator`'s docstring rests on being impossible."""
+    """`request_limit` is the ceiling THIS dispatch will hand `_run_gather`, required rather
+    than defaulted to the module constant: the constant is only MAIN's own leads' ceiling, and
+    the correlation lead runs the same recorder under `CORRELATION_REQUEST_LIMIT`. Measured
+    against the constant, the check below was `8 >= 40` on every correlation round — never
+    true, so the doomed round was committed and the session ended on an unanswered request."""
     async def process(ctx: RunContext[GatherDeps], messages: list) -> list:
         # Same withholding rule as the main processor: pydantic_ai appends the round's own
-        # continuation to history BEFORE it checks the request limit, so on the doomed
-        # round `messages` already ends with a request that will never be sent. Committing
-        # it would leave a phantom, never-executed round in this gather's session — and
-        # unlike main there is no run-end flush on this side to reconcile it afterwards.
+        # continuation to history BEFORE checking the request limit, so on the doomed round
+        # `messages` already ends with a request that will never be sent. Committing it would
+        # leave a phantom round in this gather's session — and unlike main there is no run-end
+        # flush on this side to reconcile it afterwards.
         usage = getattr(ctx, "usage", None)
         requests = int(getattr(usage, "requests", 0) or 0)
         if requests >= request_limit:
@@ -624,14 +599,10 @@ def _main_extra_capabilities(
 ) -> list[ProcessHistory[Any]]:
     """`request_limit` is the ceiling the RUN was handed — base plus the gate's forced-turn
     bound — and the default is the RAISED ceiling of the shipped bounds, never the un-raised
-    base.
-
-    The base was the default here, mirroring at one call frame's remove the exact staleness
-    RS7 exists to prevent: the composition root honoured the raised ceiling while an omitted
-    argument would have had this reader withhold from the compaction path the very rounds the
-    raise buys. Sole production caller passes the run's own value; the default exists because
-    the assembly seam is constructed directly by tests that pin the capability COUNT and have
-    no ceiling to hand it."""
+    base: defaulting to the base would have this reader withhold from the compaction path the
+    very rounds the raise buys (the staleness RS7 exists to prevent). The sole production
+    caller passes the run's own value; the default serves tests that pin the capability COUNT
+    and have no ceiling to hand it."""
     # lint-default: ok — resolved once into a fresh name; the honest default is derived from
     # the bounds object and cannot be a signature default without an import-time read of it.
     limit = (
@@ -647,8 +618,7 @@ def _gather_extra_capabilities(
     store: Any, session_id: str, agent_id: str, *, request_limit: int,
 ) -> list[ProcessHistory[Any]]:
     """`request_limit` has no default for the reason `_make_gather_recorder`'s docstring
-    gives: this factory serves two dispatches with two different ceilings, and the one that
-    omitted it is the one that was wrong."""
+    gives: this factory serves two dispatches with two different ceilings."""
     return [ProcessHistory(
         _make_gather_recorder(store, session_id, agent_id, request_limit=request_limit)
     )]
@@ -663,11 +633,9 @@ def build_agent(  # noqa: PLR0913 — composition root: config + DI seams + the 
     correlation_task: Any = None,
     toolset: Any = None,
 ) -> Agent[AgentDeps, str]:
-    # The bounds arrive RESOLVED, non-`Optional`, and are used under their own name. They
-    # used to be re-coalesced here, which gave the gate's ONE bounds object a default at four
-    # depths — against the anchor-a-default-in-one-place convention, and with that
-    # convention's usual cost: the entry point could resolve one value while a direct build
-    # resolved another from its own environment read.
+    # The bounds arrive RESOLVED, non-`Optional`. Re-coalescing here would give the gate's ONE
+    # bounds object a default at four depths, and the entry point could then resolve one value
+    # while a direct build resolved another from its own environment read.
     extra: list[ProcessHistory[Any]] = []
     if store is not None:
         assert session_id is not None, "a store requires its session_id (build_agent's own contract)"
@@ -678,9 +646,9 @@ def build_agent(  # noqa: PLR0913 — composition root: config + DI seams + the 
     _override = " (DEFENDER_GATHER_MODEL override)" if os.environ.get("DEFENDER_GATHER_MODEL") else ""
     print(f"[run.py] gather model: {gather_model()}{_override}", file=sys.stderr)
     name = resolve_main_model(main_model)
-    # Named rather than inlined into the build call because the EFFECTIVE definition — not
-    # `MAIN_DEF` — is what decides below whether this root registers the close tool, the same
-    # way `register_tools` reads the effective ToolSet for every other capability bit.
+    # Named rather than inlined into the build call: the EFFECTIVE definition — not `MAIN_DEF`
+    # — is what decides below whether this root registers the close tool, the same way
+    # `register_tools` reads the effective ToolSet for every other capability bit.
     main_defn = replace(
         MAIN_DEF, model=lambda: name,
         effort=providers.effort_for_role(name, AgentRole.MAIN),
@@ -701,10 +669,9 @@ def build_agent(  # noqa: PLR0913 — composition root: config + DI seams + the 
     )
 
     # agent_id → the gather session opened for it. Keyed by agent_id and not "the last one
-    # built" because sibling leads are dispatched CONCURRENTLY (one `gather` tool call per
-    # lead in a single main turn), so "the current gather session" is not a thing that
-    # exists. `agent_id` is `gather:{lead_id}` and `_run_gather`'s `claim_lead` refuses a
-    # reused `lead_id`, so it is unique within a run.
+    # built" because sibling leads are dispatched CONCURRENTLY (one `gather` call per lead in a
+    # single main turn), so "the current gather session" does not exist. `agent_id` is
+    # `gather:{lead_id}` and `claim_lead` refuses a reused `lead_id`, so it is unique per run.
     gather_sessions: dict[str, str] = {}
 
     def _build_gather(agent_id: str, system: str, request_limit: int) -> Agent[GatherDeps, str]:
@@ -714,32 +681,28 @@ def build_agent(  # noqa: PLR0913 — composition root: config + DI seams + the 
             gather_session_id = store.new_session(agent_id=agent_id)
             gather_sessions[agent_id] = gather_session_id
             # `request_limit` is THE DISPATCH'S OWN, handed down by `_run_gather` — not
-            # `GATHER_REQUEST_LIMIT` read again here (#880 F-19 residue). The recorder's
-            # withholding check and the `UsageLimits` that actually stops the loop are now the
-            # same number by construction rather than by two literals matching.
+            # `GATHER_REQUEST_LIMIT` read again here. The recorder's withholding check and the
+            # `UsageLimits` that stops the loop are the same number by construction.
             gather_extra = _gather_extra_capabilities(
                 store, gather_session_id, agent_id, request_limit=request_limit,
             )
         return build_gather_agent(
             defender_dir, logger, agent_id, make_model, verbs, limits,
             extra_capabilities=gather_extra, session_id=gather_session_id,
-            # Keyed on the SYSTEM, not this lead and not this run (#835). What the dispatch
-            # prompt puts in front of the lead's question — gather's SKILL.md, the descriptor
-            # index, this system's catalog — is identical for every lead dispatched here, in
-            # this run and the next; the key is the only thing that routes them to one replica
-            # so the second lead reads that prefix instead of re-paying it. `agent_id` stays
-            # `gather:{lead_id}`: the wire log, the session store and the terminator stamp all
-            # key on it, and none of them wants a system.
+            # Keyed on the SYSTEM, not this lead and not this run. What the dispatch prompt
+            # puts in front of the lead's question — gather's SKILL.md, the descriptor index,
+            # this system's catalog — is identical for every lead dispatched here, in this run
+            # and the next, and the key is what routes them to one replica. `agent_id` stays
+            # `gather:{lead_id}`: the wire log, session store and terminator stamp key on it.
             cache_key=f"{GATHER_AGENT_ID_PREFIX}{system}",
         )
 
     def _stamp_gather_terminator(agent_id: str, reason: str) -> None:
-        """`_flush_run_end`'s stamp, for a GATHER session (#826 item 1). Best-effort for the
-        same reason: the store may be exactly what ended this lead, and losing the terminator
-        must not also lose the lead's summary. There is no flush of a terminal exchange to
-        pair with it — gather's recorder commits every round as it goes and deliberately
-        withholds the doomed round's own continuation, so there is nothing left to reconcile
-        at the end; only the stamp is missing, and only the stamp is added."""
+        """`_flush_run_end`'s stamp, for a GATHER session. Best-effort for the same reason:
+        the store may be exactly what ended this lead, and losing the terminator must not also
+        lose the lead's summary. No terminal-exchange flush pairs with it — gather's recorder
+        commits every round as it goes and withholds the doomed round's continuation, so only
+        the stamp is missing."""
         gather_session_id = gather_sessions.get(agent_id)
         if store is None or gather_session_id is None:
             return
@@ -749,26 +712,22 @@ def build_agent(  # noqa: PLR0913 — composition root: config + DI seams + the 
             print(f"[run.py] gather truncated_by write skipped for {agent_id}: {e!r}",
                   file=sys.stderr)
 
-    # ALWAYS the role's own committed grant (#632) — never the per-call `verbs=` registry's
-    # own grant. The dispatch catalog/template index is a ROLE-LEVEL surface (the same one
-    # the generated roster and its audit are scored against, verb_roster.py), not a per-run
-    # one; a test injecting a registry scoped narrower (or differently) than GATHER_DEF's
-    # real grant, for reasons that have nothing to do with catalog content, must not narrow
-    # what the catalog advertises.
+    # ALWAYS the role's own committed grant — never the per-call `verbs=` registry's. The
+    # dispatch catalog/template index is a ROLE-LEVEL surface (the one verb_roster.py scores
+    # against), not a per-run one; a test injecting a registry scoped narrower than
+    # GATHER_DEF's real grant must not narrow what the catalog advertises.
     register_gather_tool(
         agent, _build_gather, GATHER_REQUEST_LIMIT, GATHER_DEF.verb_grant,
         _stamp_gather_terminator,
     )
-    # `build_agent` has no `run_dir` of its own, so it cannot BUILD a live bundle — a bundle
-    # carrying live stages is assembled by `run_investigation`, the entry point that holds the
-    # real run dir, and arrives here already bound to it. The fallback below must never
-    # substitute the SOURCE TREE for the missing run dir: doing that anchored each review
-    # role's compiled policy on the repo checkout and had every stage call append its trace
-    # to a file inside it. An empty bundle fails the review closed at call time, through the
-    # gate's own fault arm, instead of quietly acting on the wrong tree.
+    # `build_agent` has no `run_dir` of its own, so it cannot BUILD a live bundle — one
+    # carrying live stages is assembled by `run_investigation` and arrives here already bound.
+    # The fallback must never substitute the SOURCE TREE for the missing run dir: that anchors
+    # each review role's compiled policy on the repo checkout and has every stage append its
+    # trace inside it. An empty bundle fails the review closed at call time instead.
     stages = (
         review_stages if review_stages is not None
-        else review_roles.ReviewStages()  # lint-default: ok — DI seam owning its default (the UNBOUND bundle: this root holds no run dir, so `stage()` raises UnboundReviewStage and the gate fails the close closed)
+        else review_roles.ReviewStages()  # lint-default: ok — DI seam owning its default (the UNBOUND bundle: no run dir here, so `stage()` raises UnboundReviewStage and the gate fails the close closed)
     )
     if main_defn.tools.close:
         register_close_tool(agent, stages=stages, bounds=bounds)
@@ -805,26 +764,23 @@ def _run_summary(  # noqa: PLR0913 — one dict literal's full field set, named 
 
 
 def _flush_run_end(run: Any, store: Any, session_id: str, truncated_by: str | None) -> None:
-    """R11's true `finally`: capture the terminal exchange (whatever `run` actually holds
-    on ANY exit, clean or not) and stamp `truncated_by`, both best-effort so a broken
-    store cannot mask the exit that got us here."""
+    """Capture the terminal exchange (whatever `run` holds on ANY exit, clean or not) and
+    stamp `truncated_by`, both best-effort so a broken store cannot mask the exit that got us
+    here."""
     if run is not None:
         try:
             live = run.ctx.state.message_history
             confirmed_len = store.last_render_len(session_id) or 0
             if len(live) <= confirmed_len:
-                # A prior round's processor already committed everything `live` holds
-                # (or more — `_make_store_render_processor`'s request-limit check
-                # withholds a doomed round's own continuation, so `live` can be one
-                # message SHORTER than what is already confirmed). Either way there is
-                # nothing new to add, and truncating `live` here would try to re-add
-                # content the store has already, correctly, chosen not to hold.
+                # A prior round's processor already committed everything `live` holds, or more
+                # — the request-limit check withholds a doomed round's continuation, so `live`
+                # can be SHORTER than what is confirmed. Either way there is nothing to add,
+                # and truncating here would re-add content the store correctly declined.
                 pass
             else:
                 # New content past the last confirmed round: drop a trailing incomplete
-                # continuation (one built but never itself confirmed by a processor
-                # call — the request-limit / uncaught-mid-round shapes) so the tail
-                # ends on the response that IS confirmed, never on an unconfirmed one.
+                # continuation (built but never confirmed by a processor call) so the tail
+                # ends on a confirmed response.
                 for i in range(len(live) - 1, -1, -1):
                     if isinstance(live[i], ModelResponse):
                         live = live[: i + 1]
@@ -841,17 +797,14 @@ def _flush_run_end(run: Any, store: Any, session_id: str, truncated_by: str | No
 
 
 async def _reap_correlation_task(task: Any) -> None:
-    """#808 review fix — `correlation_task` (item 3's fire-and-forget dispatch, scheduled via
-    `asyncio.ensure_future` in `run_investigation`) is only ever awaited by
-    `_inject_correlation`, itself only reached when MAIN prepares a SECOND model request. A
-    run that closes after exactly one request — or that exits `_drive_agent` through any of
-    its OTHER handled exceptions before a second request is ever prepared — would otherwise
-    leave this task running, unawaited and uncancelled, past `run_investigation`'s own
-    return: it keeps issuing real backend/model calls and writing to the run dir (queries
-    table, `gather_raw/l-00c/*`, `budget.json`, the session store) concurrently with
-    `run.py`'s post-run steps on that same tree, and any exception it raises is never
-    retrieved. Called unconditionally right after `_drive_agent` returns: a no-op if
-    `_inject_correlation` already consumed it."""
+    """`correlation_task` (item 3's fire-and-forget dispatch) is only ever awaited by
+    `_inject_correlation`, itself only reached when MAIN prepares a SECOND model request. A run
+    that closes after one request — or exits `_drive_agent` through any other handled exception
+    first — would otherwise leave the task running past `run_investigation`'s return: still
+    issuing backend/model calls and writing the run dir (queries table, `gather_raw/l-00c/*`,
+    `budget.json`, the session store) concurrently with `run.py`'s post-run steps on that same
+    tree, with any exception it raises never retrieved. Called unconditionally after
+    `_drive_agent` returns; a no-op if `_inject_correlation` already consumed it."""
     if task is None:
         return
     if not task.done():
@@ -869,19 +822,18 @@ async def _drive_agent(  # noqa: PLR0913 — the loop's own inputs: agent, promp
     agent: Agent[AgentDeps, str], prompt: str, deps: AgentDeps, store: Any, session_id: str,
     bounds: challenge_gate.Bounds,
 ) -> tuple[Any, str | None, str | None]:
-    """Runs the bare `async for node in run` loop and classifies the four caught exits
-    into `(truncated_by, exit_reason)`; returns the (possibly unfinished) `run` alongside
-    them so the caller can still read `run.result`/`run.ctx` on a clean exit."""
+    """Runs the `async for node in run` loop and classifies its caught exits into
+    `(truncated_by, exit_reason)`; returns the (possibly unfinished) `run` alongside them so
+    the caller can still read `run.result`/`run.ctx` on a clean exit."""
     truncated_by: str | None = None
     exit_reason: str | None = None
     run: Any = None
     try:
         async with agent.iter(
             prompt, deps=deps,
-            # RS7 (#774): the ceiling that terminates a run is raised by the gate's own
-            # forced-turn cap, read FROM the bound rather than restated as a literal —
-            # every run pays it whether or not the gate ever fires (a property of the
-            # run, not of a review that happened).
+            # RS7: the ceiling that terminates a run is raised by the gate's own forced-turn
+            # cap, read FROM the bound rather than restated as a literal. Every run pays it
+            # whether or not the gate ever fires — a property of the run, not of a review.
             usage_limits=UsageLimits(request_limit=challenge_gate.raised_request_limit(bounds)),
         ) as run:
             async for node in run:
@@ -892,23 +844,19 @@ async def _drive_agent(  # noqa: PLR0913 — the loop's own inputs: agent, promp
         truncated_by = session_store.TRUNCATED_BY_REQUEST_LIMIT
         exit_reason = "UsageLimitExceeded"
     except UnexpectedModelBehavior as e:
-        # RS6 (#774): a stubborn model that keeps retrying a call the gate refuses (e.g. a
-        # write of report.md, narrowed off the allow-list by R1) exhausts the framework's
-        # shared tool-retry budget (`DEFAULT_TOOL_RETRIES`) and pydantic_ai raises this —
-        # none of the OTHER handlers here catch it, so uncaught it takes the whole process
-        # down. Force the unresolved close directly (bypassing the model, which is exactly
-        # what got stuck) rather than let the run end with no disposition at all.
+        # RS6: a stubborn model that keeps retrying a call the gate refuses (e.g. a write of
+        # report.md) exhausts the framework's shared tool-retry budget (`DEFAULT_TOOL_RETRIES`)
+        # and pydantic_ai raises this; no other handler here catches it, so uncaught it takes
+        # the process down. Force the unresolved close directly, bypassing the model — which
+        # is exactly what got stuck — rather than end with no disposition at all.
         print(f"[run.py] {e}; forcing an unresolved close (retry budget exhausted)",
               file=sys.stderr)
         truncated_by = session_store.TRUNCATED_BY_RETRY_EXHAUSTED
         exit_reason = "UnexpectedModelBehavior"
-        # R4, the limb terminality has to answer separately: this handler bypasses the gate
-        # and commits through the same path, so on a run whose disposition ALREADY committed
-        # it silently replaced a confident finding with the unresolved one it forces — and
-        # destroyed that close's review record with it. The handler is not withdrawn (it is
-        # the only thing between a stuck model and no disposition at all); it is made aware
-        # of the close it is about to overwrite. A run that errors AFTER closing keeps what
-        # it decided, and the error survives in the logs above rather than in the case record.
+        # R4: this handler bypasses the gate and commits through the same path, so on a run
+        # whose disposition ALREADY committed it would replace a confident finding with the
+        # unresolved one it forces and destroy that close's review record. A run that errors
+        # AFTER closing keeps what it decided; the error survives in the logs above.
         if challenge_gate.ReviewState.of(deps).closed:
             print("[run.py] the investigation already closed; keeping its disposition",
                   file=sys.stderr)
@@ -920,20 +868,18 @@ async def _drive_agent(  # noqa: PLR0913 — the loop's own inputs: agent, promp
                 # is ever consumed here; the run's own bounds are threaded anyway rather
                 # than re-resolved, so this limb cannot end up acting on a different value
                 # from the one the rest of the run was built with.
-                #: `forced=True` (#836/H1): the framework's own close is exempt from the
-                #: flagged-row gate. There is no model left to repair the row with, and
-                #: refusing here would end the run with NO report.md at all — which
-                #: dead-letters it at persist before investigation.md is ever validated,
-                #: for the wrong reason. Every close the MODEL invokes is still gated.
+                #: `forced=True`: the framework's own close is exempt from the flagged-row
+                #: gate. No model is left to repair the row, and refusing here would end the
+                #: run with NO report.md — dead-lettering it at persist for the wrong reason.
+                #: Every close the MODEL invokes is still gated.
                 await _close_investigation_async(
                     deps, "inconclusive", stages=None, bounds=bounds, forced=True,
                 )
             except Exception as close_err:  # noqa: BLE001 — this exit must not itself raise
-                # ...but it must not SWALLOW it either. Until #836 this handler only logged,
-                # so a forced close that failed and one that committed were indistinguishable
-                # downstream — same truncated_by, same exit_reason, and the only difference a
-                # report.md nobody checks. The run then dead-lettered at persist for a missing
-                # artifact, invisibly. The exit reason now carries the failure.
+                # ...but it must not SWALLOW it either: logging alone left a forced close that
+                # failed indistinguishable downstream from one that committed (same
+                # truncated_by, same exit_reason), and the run dead-lettered at persist for a
+                # missing artifact, invisibly. The exit reason carries the failure.
                 print(f"[run.py] forced close after retry exhaustion also failed "
                       f"({close_err!r})", file=sys.stderr)
                 exit_reason = "ForcedCloseFailed"
@@ -946,10 +892,10 @@ async def _drive_agent(  # noqa: PLR0913 — the loop's own inputs: agent, promp
         truncated_by = session_store.TRUNCATED_BY_BUDGET
         exit_reason = "BudgetKill"
     except (sqlite3.Error, session_store.StoreError) as e:
-        # StoreError, not StoreAppendError: PayloadNotRepresentable / IngestTailUnderflow
-        # / CyclicParentChain / UnknownSchemaVersion all reach here from inside the
-        # ProcessHistory hook, and any one of them escaping takes the whole run.py
-        # process down instead of writing the partial trace this handler exists for.
+        # StoreError, not StoreAppendError: PayloadNotRepresentable / IngestTailUnderflow /
+        # CyclicParentChain / UnknownSchemaVersion all reach here from inside the
+        # ProcessHistory hook, and any one escaping takes the whole run.py process down
+        # instead of writing the partial trace this handler exists for.
         print(f"[run.py] store append failed ({e!r}); stopping the run", file=sys.stderr)
         truncated_by = session_store.TRUNCATED_BY_STORE
         exit_reason = "StoreAppendError"
@@ -976,13 +922,11 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     toolset: Any = None,
 ) -> dict:
     model_name = resolve_main_model(model_name)
-    # #808/K12/d49 — lead-0's OWN registry seam: a scenario that injected no `verbs=` at all
-    # must not have lead-0 acquire one by way of the ordinary MAIN-gather default resolved
-    # a few lines below. Captured before that default is applied.
+    # Lead-0's OWN registry seam: a scenario that injected no `verbs=` at all must not have
+    # lead-0 acquire one via the MAIN-gather default resolved below. Captured before it.
     lead_zero_verbs = verbs
-    # lint-default: ok — DI seam owning its default (the #774 repair's seventh seam: the
-    # gate's bounds, carrying the request ceiling's own BASE), resolved once at the entry
-    # point and threaded inward as a concrete value.
+    # lint-default: ok — DI seam owning its default (the gate's bounds, carrying the request
+    # ceiling's BASE), resolved once at the entry point and threaded inward as a concrete value.
     gate_bounds = bounds if bounds is not None else challenge_gate.default_bounds()
     make_model = make_model or providers.build_for_effort
     adapters = defender_dir / "scripts" / "adapters"
@@ -992,33 +936,27 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     open_budget(run_dir, run_id)
     # `<run_dir>/wire_logs/llm_requests.jsonl`, one level down and NOT at the run root: the
     # subdirectory is what keeps this log out of every reader agent's `under(run, SEG)` read
-    # shape, MAIN's and GATHER's alike. See `observe.wire_log_path`, which owns the location.
+    # shape, MAIN's and GATHER's alike. `observe.wire_log_path` owns the location.
     logger = observe.RequestLogger(observe.wire_log_path(run_dir))
 
-    # THE one place a live review bundle can honestly be built, and it sits HERE — below the
-    # logger, not above it. The entry point is the only frame holding all three things a live
-    # stage needs: the run dir it anchors its policies on, the operator's model choice, and
-    # the run's own `RequestLogger`. It used to be resolved ten lines further up, where the
-    # logger did not yet exist, so every stage minted a private one and wrote to a file no
-    # reader ever opened — the review's model calls charged a provider and landed in no
-    # accounted total (#787). `build_agent`, which sees none of the three, used to substitute
-    # the source tree for the run dir here.
+    # THE one place a live review bundle can honestly be built, and it sits BELOW the logger:
+    # the entry point is the only frame holding all three things a live stage needs — the run
+    # dir it anchors its policies on, the operator's model choice, and the run's own
+    # `RequestLogger`. Built above the logger, every stage mints a private one and writes to a
+    # file no reader opens, so the review's model calls charge a provider and land in no
+    # accounted total.
     #
-    # `model_override` is the operator's RAW `--model` and is deliberately a different value
-    # from `model_name` above, which has already been resolved against the investigator's
-    # default. Handing the resolved one to the review would give it a non-`None` explicit
-    # model on every run, and the review's own pinned default would be unreachable in
-    # production while a unit test calling the resolver with `None` still proved it was the
-    # default.
+    # `model_override` is the operator's RAW `--model`, deliberately not `model_name` above,
+    # which is already resolved against the investigator's default. Handing the resolved one
+    # over would give the review a non-`None` explicit model on every run, making its own
+    # pinned default unreachable in production.
     #
-    # Guarded, because this resolution now happens BELOW the open: `live_review_stages` reads
-    # three prompt assets off the tree and `role_prompt` raises `FileNotFoundError` on a
-    # missing one. Above the logger that raise cost nothing; here it would leave
-    # `llm_requests.jsonl` open AND permanently registered in `observe._ACTIVE_PATHS`, so a
-    # second `run_investigation` in the same process could never reopen that path. The
-    # store-setup handler below closes the logger for exactly this reason; this window needs
-    # its own because a missing prompt asset is not a store fault and must not be reported
-    # as one.
+    # Guarded, because this sits BELOW the open: `live_review_stages` reads three prompt assets
+    # off the tree and `role_prompt` raises `FileNotFoundError` on a missing one, which would
+    # leave `llm_requests.jsonl` open AND permanently registered in `observe._ACTIVE_PATHS`, so
+    # a second `run_investigation` in the same process could never reopen that path. Its own
+    # handler rather than the store-setup one below: a missing prompt asset is not a store
+    # fault and must not be reported as one.
     try:
         stages = (
             review_stages if review_stages is not None
@@ -1038,11 +976,11 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
         session_store.write_case_pointer(run_dir, case_id=case_id, store_path=store.path)
         session_id = store.new_session(agent_id="main")
     except (sqlite3.Error, session_store.StoreError, OSError) as e:
-        # FK-G: the store is opened during SETUP, outside `_drive_agent`'s own handler —
-        # so without this, a stale-version file (or a plain filesystem fault: an unwritable
+        # The store is opened during SETUP, outside `_drive_agent`'s handler — so without
+        # this, a stale-version file (or a plain filesystem fault: an unwritable
         # run_dir/runs_base for the pointer write or the store's own mkdir) takes the whole
-        # process down instead of ending the run through the same handled
-        # `truncated_by="store"` exit. Not one model turn is driven.
+        # process down instead of ending the run through the handled `truncated_by="store"`
+        # exit. Not one model turn is driven.
         print(f"[run.py] store setup failed ({e!r}); ending the run", file=sys.stderr)
         if store is not None:
             # `factory()` can succeed — a live connection, DDL already run — and a LATER
@@ -1065,10 +1003,9 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
         verbs=lead_zero_verbs, limits=limits, run_id=run_id,
     )
 
-    # #808/F2 — item 3's async frame: scheduled here (right after `_user_prompt` returns,
-    # i.e. after item 1 has resolved synchronously) and awaited later, inside the store's
-    # own render processor, right before MAIN's SECOND request. A scenario with no injected
-    # registry (`lead_zero_verbs is None`) dispatches nothing (K12).
+    # Item 3's async frame: scheduled here (after item 1 has resolved synchronously) and
+    # awaited later, inside the store's render processor, right before MAIN's SECOND request.
+    # A scenario with no injected registry dispatches nothing.
     correlation_task: Any = None
     if lead_zero_verbs is not None:
         from . import lead_zero as lead_zero_mod
@@ -1082,19 +1019,17 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
         )
         if contract is not None:
             goal, what_to_summarize = contract
-            # K23 — chain the budget hooks around lead-0's OWN dispatch: routing through
-            # QueryCapture/the gather machinery does not, by itself, move `budget.json`
-            # (P7, executed) — `subagent_spawns` is gated on the literal tool name "gather",
-            # which a harness dispatch never emits.
+            # Chain the budget hooks around lead-0's OWN dispatch: routing through
+            # QueryCapture/the gather machinery does not by itself move `budget.json` —
+            # `subagent_spawns` is gated on the literal tool name "gather", which a harness
+            # dispatch never emits.
             lead_zero_mod._budget_account(run_dir, run_id, "gather", limits)
             correlation_task = asyncio.ensure_future(lead_zero_mod.dispatch_correlation(
                 run_dir=run_dir, defender_dir=defender_dir, run_id=run_id,
                 goal=goal, what_to_summarize=what_to_summarize, verbs=lead_zero_verbs,
                 limits=limits, make_model=make_model, logger=logger, box=box, store=store,
-                # #808 review fix — share the RUN's own budget-clock origin (see
-                # lead_zero.dispatch_correlation's docstring note) rather than letting it
-                # default to a fresh `time.monotonic()` stamp taken whenever this task
-                # happens to start.
+                # Share the RUN's own budget-clock origin rather than letting it default to a
+                # fresh `time.monotonic()` stamp taken whenever this task happens to start.
                 budget_started_monotonic=budget_started_monotonic,
             ))
 
@@ -1125,10 +1060,10 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
             write_guarded(run_dir / "tool_trace.jsonl", "")
         except OSError as fallback_err:
             # The fallback runs while an exception is already being handled, and its target is
-            # a name the box can plant an alias at — so an unguarded call here lets one planted
-            # entry convert "the trace could not be built" into an uncaught OSError that ends
-            # the run at its last step, discarding the summary and every artifact already
-            # written. The trace is observability; the run's result is not.
+            # a name the box can plant an alias at — unguarded, one planted entry converts "the
+            # trace could not be built" into an uncaught OSError that ends the run at its last
+            # step, discarding the summary and every artifact already written. The trace is
+            # observability; the run's result is not.
             print(f"[run.py] the empty-trace fallback also failed ({fallback_err!r}); "
                   f"{run_dir} has no tool_trace.jsonl", file=sys.stderr)
     logger.close()

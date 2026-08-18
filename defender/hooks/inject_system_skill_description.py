@@ -40,13 +40,11 @@ def read_description(system: str, skills_dir: Path = SKILLS_DIR) -> str | None:
 def descriptor_catalog(
     skills_dir: Path, adapters_dir: Path, grant: VerbGrant,
 ) -> str | None:
-    # DENY_ALL, not `grant`: this registry exists only to enumerate real systems and probe
-    # whether each one's adapter actually IMPORTS (the `except` below) — narrowing to the
-    # caller's grant happens after, against `grant.systems` directly. Constructing with
-    # `grant` would run ModuleVerbRegistry's load check against these REAL adapters, which a
-    # caller-supplied grant naming a system/verb this tree doesn't declare (a test's fake
-    # registry's own auto-derived grant, #632) would fail for a reason that has nothing to do
-    # with which systems this catalog should describe.
+    # DENY_ALL, not `grant`: this registry only enumerates real systems and probes whether each
+    # adapter IMPORTS (the `except` below); narrowing to the caller's grant happens after,
+    # against `grant.systems`. Constructing with `grant` would run ModuleVerbRegistry's load
+    # check against these REAL adapters, which a grant naming a system/verb this tree doesn't
+    # declare would fail for a reason unrelated to which systems the catalog describes.
     registry = ModuleVerbRegistry(adapters_dir, DENY_ALL)
     lines = []
     for system in registry.systems():

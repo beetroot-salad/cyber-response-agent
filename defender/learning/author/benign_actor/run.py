@@ -9,9 +9,8 @@ if (_root := str(Path(__file__).resolve().parents[4])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender.learning.author import curator as _curator
-# Imported by name, not reached as `_curator._gate_observations`: a private
-# ATTRIBUTE read across modules is the reach #719 removes; a private import is
-# the repo's ordinary convention.
+# Imported by name rather than reached as `_curator._gate_observations`: a private import
+# is the repo's convention, a cross-module private ATTRIBUTE read is not.
 from defender.learning.author.curator import _gate_observations
 from defender.learning.author import shared as _shared
 from defender.learning.core.config import (

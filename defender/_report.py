@@ -1,14 +1,12 @@
-"""The READ side of the `report.md` contract — one typed accessor for six consumers (#785).
+"""The READ side of the `report.md` contract — one typed accessor for every consumer.
 
 `_artifact_schema.py` owns what a well-formed report IS and enforces it on WRITE, through the
 permission gate. This module is its mirror: the single place a COMPLETED run's report becomes
-a typed value. Before it, six consumers each re-implemented disposition extraction on top of
-the shared frontmatter parse and disagreed on the same bytes — three different reactions to a
-missing or invalid disposition, and only ONE of the six still applied #722's zero-width strip,
-on data an attacker influences by construction.
+a typed value, so no consumer re-implements disposition extraction (and drops the zero-width
+strip on data an attacker influences by construction).
 
-INTERPRETATION is centralized here; REACTION deliberately is not. They are different
-questions, and the consumers split cleanly into two kinds:
+INTERPRETATION is centralized here; REACTION deliberately is not. The consumers split into
+two kinds:
 
   * gates that must REFUSE — the learning loop's run cycle and the ticket bridge cannot act on
     a run whose headline they cannot read. They call `require_report` and re-wrap
@@ -34,12 +32,10 @@ from typing import Any
 from defender._artifact_schema import REPORT_NAME
 from defender._frontmatter import FrontmatterError, parse_frontmatter
 from defender._io import read_text_soft
-# The vocabulary, its normalizer and the placeholder a degrading view shows all come straight
-# from the owner. They used to arrive via `_artifact_schema` — the report's SCHEMA is not the
-# report's VOCABULARY, and routing through it meant a reader of one had to know about the
-# other. The placeholder in particular cannot live here: the invlang corpus surfaces need the
-# same one and cannot import this module (`_artifact_schema` imports invlang's validator, so
-# the edge back would close a cycle).
+# Straight from the owner, not via `_artifact_schema`: the report's SCHEMA is not its
+# VOCABULARY. The placeholder in particular cannot live here — the invlang corpus surfaces
+# need the same one and cannot import this module (`_artifact_schema` imports invlang's
+# validator, so the edge back would close a cycle).
 from defender._vocab import DISPOSITION_ENUM, UNKNOWN_DISPOSITION, normalized_disposition
 
 
@@ -51,8 +47,8 @@ class ReportUnreadable(ValueError):
 @dataclass(frozen=True)
 class Report:
     """A report that HAS a headline. `disposition` is a `DISPOSITION_ENUM` member, already
-    stripped of the zero-width characters #722 is about — the type carries that guarantee, so
-    a consumer holding one never re-validates."""
+    zero-width-stripped — the type carries that guarantee, so a consumer holding one never
+    re-validates."""
 
     disposition: str
     frontmatter: Mapping[str, Any]
@@ -65,7 +61,7 @@ class ReportRead:
 
     Partial results survive on purpose: a report whose frontmatter will not parse still hands
     back its bytes as `body`, because the transcript's job is to show an operator what the
-    model actually wrote — refusing to render is the worse failure there.
+    model actually wrote.
     """
 
     disposition: str | None
@@ -95,11 +91,8 @@ def _no_headline(reason: str, *, text: str = "", body: str = "") -> ReportRead:
 
 def read_report(path: Path) -> ReportRead:
     """Read and interpret a completed run's `report.md`. Never raises: a missing, unreadable,
-    undecodable or malformed report comes back as a `reason` and whatever was recoverable.
-
-    The `read_text_soft` lane matters — `report.md` is model-authored and read once per case in
-    whole-corpus walks, so one undecodable byte in one historical report must cost that row and
-    not the walk.
+    undecodable or malformed report comes back as a `reason` and whatever was recoverable — in
+    a whole-corpus walk, one undecodable byte must cost that row and not the walk.
     """
     if not path.is_file():
         return _no_headline(f"{REPORT_NAME} not found: {path}")

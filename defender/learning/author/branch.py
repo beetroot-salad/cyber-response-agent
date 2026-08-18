@@ -62,13 +62,12 @@ class AuthorBranch:
 
     @property
     def quarantine_dir(self) -> Path:
-        """Where a tainted worktree is preserved before cleanup destroys it (#747).
+        """Where a tainted worktree is preserved before cleanup destroys it.
 
         A sibling of the live worktrees so it follows `worktree_base` wherever a caller
-        redirects it, rather than being a second way to compute the same location. Inside
-        the repo checkout is fine BECAUSE the artifact is an inert archive: the reason to
-        push it out of tree would have been a preserved worktree's live symlinks, and a
-        `.tar.gz` has none. `.worktrees/` is already gitignored.
+        redirects it. Inside the repo checkout is fine BECAUSE the artifact is an inert
+        archive — the reason to push it out of tree would have been a preserved worktree's
+        live symlinks, and a `.tar.gz` has none. `.worktrees/` is already gitignored.
         """
         return self._worktree_base / "quarantine"
 
@@ -143,11 +142,10 @@ class AuthorBranch:
             _git.git_worktree_remove(self.repo_root, wt, force=True)
         except GitError as e:
             _log(f"worktree cleanup failed: {e} — {wt} leaked")
-        # §7 D8's verdict sidecar sits BESIDE `wt`, deliberately outside the tree the git
-        # remove above just destroyed — so removing the tree never removes it. By now
-        # anything that needed the verdict (`preserve_tainted_tree`'s manifest, on the taint
-        # path) has already read it; left behind it is orphaned, host-side, disk that
-        # accumulates one sidecar per drain tick forever.
+        # The verdict sidecar sits BESIDE `wt`, outside the tree the git remove above just
+        # destroyed, so removing the tree never removes it. By now anything that needed the
+        # verdict (`preserve_tainted_tree`'s manifest, on the taint path) has read it; left
+        # behind it accumulates one orphaned sidecar per drain tick forever.
         with contextlib.suppress(OSError):
             verdict_path(wt).unlink()
 

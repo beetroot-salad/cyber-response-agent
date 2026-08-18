@@ -10,31 +10,26 @@ from defender._run_paths import GATE_METADATA_KEY, WIRE_LOG, RunPaths
 # `agent_role` and NOT `review_roles`, though the latter re-exports the same constant:
 # `review_roles` pulls `runtime.tools` and with it the whole in-process runtime (pydantic-ai
 # included), and `learning/frontend/build.py` imports this package at module scope for the
-# page CSS alone. Same rule `visualize_runtime.close_vocabulary` states for `close_tool` —
-# the edge must not be paid by anything that only wants the stylesheet.
+# page CSS alone. Same rule `visualize_runtime.close_vocabulary` states for `close_tool`.
 from defender.runtime.agent_role import GATHER_AGENT_ID_PREFIX, REVIEW_AGENT_ID_PREFIX
 from defender.scripts.pricing import usage_cost
 from defender.scripts.visualize.visualize_data import phase_verb
 from defender.scripts.visualize.visualize_primitives import parse_report
 
 
-#: The wire log's PRE-`wire_logs/` run-root location, and named for that rather than for the file:
-#: its one live use is `load_messages`' fallback below, and `visualize_data` re-exports it. Under
-#: the old spelling (`LLM_REQUESTS`) this constant read as "the wire log", so the one thing it
-#: invites — `run_dir / LLM_REQUESTS` — silently resolved to a path no current run writes, which
-#: is exactly the drift the move exists to prevent. A consumer that wants the wire log asks
-#: `RunPaths.wire_log`; a consumer that wants the legacy location asks for it by that name.
+#: The wire log's PRE-`wire_logs/` run-root location, named for that rather than for the file:
+#: its one live use is `load_messages`' fallback below. Named this way because `run_dir / X` on
+#: a constant that reads as "the wire log" silently resolves to a path no current run writes —
+#: a consumer that wants the live wire log asks `RunPaths.wire_log`.
 LEGACY_WIRE_LOG = WIRE_LOG
 
 
 def load_messages(run_dir: Path) -> list[dict]:
     """The run's wire-log records, or `[]` when the run has none.
 
-    Falls back to the pre-`wire_logs/` run-root path so a run dir written before the wire log
-    moved still renders a transcript. A READER fallback only: the move is a read-GATE fact
-    (`_run_paths.WIRE_LOG_DIR`) and this code is the host's, outside the gate entirely — the
-    empty state the runtime page prints already says "older run", and this is what keeps that
-    true rather than silently blank."""
+    Falls back to the pre-`wire_logs/` run-root path so an older run dir still renders a
+    transcript. A READER fallback only: the `wire_logs/` location is a read-GATE fact
+    (`_run_paths.WIRE_LOG_DIR`) and this is host code, outside the gate entirely."""
     current = RunPaths(run_dir).wire_log
     return read_jsonl_rows(current if current.is_file() else run_dir / LEGACY_WIRE_LOG)
 
@@ -73,9 +68,7 @@ def run_metadata(
 def _iter_tool_uses(events: list[dict], tags: list[str | None]):
     """Every `tool_use` block an assistant trace event carries, as `(phase, block)`.
 
-    The module's one "walk the trace's assistant turns alongside their phase tags" loop —
-    `_iter_gather_tool_uses` narrows it to the `gather` calls, `transcript_phase_map` reads
-    the call ids out of it."""
+    The module's one "walk the trace's assistant turns alongside their phase tags" loop."""
     for ev, ph in zip(events, tags, strict=False):
         if ev.get("type") != "assistant":
             continue
@@ -105,36 +98,31 @@ def transcript_phase_map(
 ) -> dict[str, str]:
     """Phase by WIRE-LOG record id — the key space `build_transcript` actually holds.
 
-    #883 F-22: `tool_trace.jsonl` and the wire log name the same assistant turn in two id
-    spaces that cannot be compared. The trace carries the session-store coord
+    `tool_trace.jsonl` and the wire log name the same assistant turn in two id spaces that
+    cannot be compared. The trace carries the session-store coord
     (`{session_id}/{agent_id}#{seq}`, seq counting store ROWS — `session_store._actor_row`),
     the wire log its own `{agent_id}#{seq}` (seq counting every emitted RECORD, requests
-    included — `observe.RequestLogger._emit`). Handing `build_transcript` the coord-keyed
-    map made its `.get` miss on every turn, so `cur_phase` never left its `phase_order[0]`
-    seed and the whole transcript rendered as ORIENT.
+    included — `observe.RequestLogger._emit`). Hand `build_transcript` the coord-keyed map and
+    its `.get` misses on every turn, so `cur_phase` never leaves its `phase_order[0]` seed and
+    the whole transcript renders as ORIENT.
 
-    Neither WRITER can mint the other's key: the store row for a response is appended a
-    round later by `selection.ingest`, so the coord does not exist when the logger runs —
-    and making the trace carry a wire id would break #705's invariant that the projection
-    is built from the store alone (see
-    `test_projections_are_built_from_the_store_not_from_logger_messages`). The visualizer
-    is the first frame that holds BOTH files, so the translation belongs here.
+    Neither WRITER can mint the other's key: the store row for a response is appended a round
+    later by `selection.ingest`, so the coord does not exist when the logger runs — and making
+    the trace carry a wire id would break the invariant that the projection is built from the
+    store alone. The visualizer is the first frame holding BOTH files.
 
     The join key is the TOOL-CALL ID, which is neither side's invention: both files copy it
-    off the same `ModelResponse.parts[].tool_call_id` — the trace as a `tool_use` block's
-    `id` (`observe._assistant_event`), the wire log as a `tool-call` part's `tool_call_id`
-    (`RequestLogger.log`'s `dump_python`). A POSITIONAL pairing of the two sequences cannot
-    stand in for it, because they are not the same length whenever a fold has fired: a fold
-    re-parents the frontier onto the LINEAGE ROOT, so the store's path — and with it the
-    trace — holds only the turns SINCE the last fold, while the append-only wire log still
-    holds every turn from the first. Zipping those two from the front hands the first wire
-    turn the LAST phase and gets every entry wrong; keying on the id leaves the folded-away
-    turns unmapped instead, and `build_transcript` carries the previous phase forward
-    exactly as it already does for an untagged turn.
+    off the same `ModelResponse.parts[].tool_call_id` — the trace as a `tool_use` block's `id`
+    (`observe._assistant_event`), the wire log as a `tool-call` part's `tool_call_id`. A
+    POSITIONAL pairing cannot stand in for it, because the two sequences differ in length once
+    a fold has fired: a fold re-parents the frontier onto the LINEAGE ROOT, so the trace holds
+    only the turns SINCE the last fold while the append-only wire log still holds every turn
+    from the first. Keying on the id leaves the folded-away turns unmapped instead, and
+    `build_transcript` carries the previous phase forward as it does for any untagged turn.
 
     A response with no tool call at all is likewise unmapped. That is only ever the run's
-    terminal turn — a text-only `ModelResponse` ends the agent run — so it inherits the
-    phase of the turn before it, which is the phase it is in.
+    terminal turn — a text-only `ModelResponse` ends the agent run — so it inherits the phase
+    of the turn before it, which is the phase it is in.
     """
     by_call: dict[str, str] = {}
     for ph, blk in _iter_tool_uses(events, tags):
@@ -185,9 +173,8 @@ def _iter_agent_responses(run_dir: Path, messages: list[dict] | None, prefix: st
     """Every wire response a subagent namespace wrote, as `(suffix, record)`.
 
     Parameterised on the prefix rather than copied per namespace: the main agent, the gather
-    subagents and the review stages all write through ONE `RequestLogger` into
-    `llm_requests.jsonl` and are told apart only by `agent_id`, so "which of them is this
-    record" has exactly one shape and belongs in one function."""
+    subagents and the review stages all write through ONE `RequestLogger` into one wire log
+    and are told apart only by `agent_id`."""
     for rec in (load_messages(run_dir) if messages is None else messages):
         if rec.get("kind") != "response":
             continue
@@ -300,18 +287,16 @@ def review_cost_by_lens(
     is keyed on: the wire record carries no round, and the ordinal cannot stand in for one
     because the ablation lens is skipped on a pass with no load-bearing edge to withhold, so
     its n-th call is not its n-th round. The lens is also the decomposition this gate has
-    actually made a decision on — the measurement that retired the DISCRIMINATION role was
-    "52% of the review's cost" for one lens (`runtime/challenge_gate.py`)."""
+    actually made roster decisions on (`runtime/challenge_gate.py`)."""
     return _cost_by(_iter_review_responses(run_dir, messages), lambda lens, _raw: lens)
 
 
 def review_cost_by_model(
     run_dir: Path, messages: list[dict] | None = None
 ) -> dict[str, float]:
-    """The same spend keyed by MODEL, for the run's by-model breakdown. The review runs on
-    its own pinned default (`review_roles.DEFAULT_REVIEW_MODEL`), separate from the
-    investigator's, so this is usually a row of its own — and correctly merges with main's
-    when an operator points both at one model."""
+    """The same spend keyed by MODEL, for the run's by-model breakdown. The review runs on its
+    own pinned default (`review_roles.DEFAULT_REVIEW_MODEL`), so this is usually a row of its
+    own — and correctly merges with main's when an operator points both at one model."""
     return _cost_by(_iter_review_responses(run_dir, messages), lambda _s, raw: _pretty_model(raw))
 
 
@@ -349,7 +334,7 @@ def _count_retries(messages: list[dict]) -> int:
 
 
 def _is_dead_end(jl) -> bool:
-    return jl.orphan or not jl.rows  # "reached the table at all" (#841)
+    return jl.orphan or not jl.rows  # "reached the table at all"
 
 
 def _safe_joined(run_dir: Path) -> list:
@@ -385,9 +370,9 @@ def run_health(
     loops = sum(1 for p in phase_order if phase_verb(p) == "PLAN")
     turns = _turn_count(events)
     # "Completed" asks whether the run reached REPORT at all, so it keys off the frontmatter
-    # having a `disposition` key — NOT off that value being a valid one. A run that closed on
-    # a disposition the enum rejects still ran to the end; the health badge saying otherwise
-    # would send an operator hunting a truncated run instead of a malformed headline.
+    # HAVING a `disposition` key, not off that value being valid. A run that closed on a
+    # disposition the enum rejects still ran to the end; saying otherwise would send an
+    # operator hunting a truncated run instead of a malformed headline.
     read = parse_report(run_dir) if report is None else report
     completed = bool(read.frontmatter.get("disposition"))
 
@@ -452,19 +437,15 @@ def _response_entry(rec: dict, phase: str | None, turn: int) -> dict:
 
 
 def _gate_original_json(part: dict) -> str | None:
-    """#872 O5 — the TOON gate's substituted view carries the tool's own JSON alongside it,
-    under `GATE_METADATA_KEY` on the part's `metadata`. `load_messages` returns `metadata`
-    verbatim (it is a tolerant JSONL reader), so the ONLY place this field can be lost
-    between the wire log and the page is here, in the entry this function builds — which used
-    to construct a fixed-key entry with no `metadata` key at all, dropping it silently.
+    """The tool's own JSON, carried alongside a TOON-gate-substituted view under
+    `GATE_METADATA_KEY` on the part's `metadata`. `load_messages` returns `metadata` verbatim,
+    so the entry built here is the only place the field can be lost between wire log and page.
 
-    The key is read from `defender._run_paths`, NOT from `defender.runtime.toon_gate` that
-    writes it: the gate module imports pydantic-ai, which is a `runtime`-extra-only dependency
-    (see `defender/pyproject.toml` — "kept out of the core deps so learning-loop / CI installs
-    don't pull the Anthropic + MCP stack"). An import of it here would raise
-    `ModuleNotFoundError` while rendering the first tool return of any transcript on such an
-    install — the same edge this module's `agent_role`-not-`review_roles` import already
-    refuses to pay."""
+    The key is read from `defender._run_paths`, NOT from the `defender.runtime.toon_gate` that
+    writes it: that module imports pydantic-ai, a `runtime`-extra-only dependency, so an
+    import here would raise `ModuleNotFoundError` while rendering the first tool return of any
+    transcript on a learning-loop/CI install — the same edge this module's
+    `agent_role`-not-`review_roles` import already refuses to pay."""
     meta = part.get("metadata")
     if not isinstance(meta, dict) or GATE_METADATA_KEY not in meta:
         return None
@@ -506,17 +487,16 @@ def _new_suffix(prev: list[str], current: list[str]) -> int:
 def deduped_main_records(messages: list[dict]) -> list[dict]:
     """Main-agent wire records with the verbatim log's repeated history removed.
 
-    `RequestLogger.log` records the FULL request list on every call — #705 deleted the
-    write-time delta encoding deliberately, because the old cursor never logged a rewrite
-    that failed to shrink the list below it. The cost is that the log is no longer a
-    stream of distinct messages, so every consumer that treats it as one has to
-    de-duplicate at READ time or count each turn's history again on the next turn.
+    `RequestLogger.log` records the FULL request list on every call — there is deliberately no
+    write-time delta encoding, since a cursor never logs a rewrite that fails to shrink the
+    list below it. The cost is that every consumer must de-duplicate at READ time or count
+    each turn's history again on the next turn.
 
-    The key is wire POSITION, not content identity: each turn's request records are
-    matched against the previous turn's and only the suffix past their longest common
-    prefix is new. Two genuinely identical tool results therefore both survive (they sit
-    at different positions), while a fold — which rewrites the list from the front —
-    correctly re-emits the frontier and everything after it.
+    The key is wire POSITION, not content identity: each turn's request records are matched
+    against the previous turn's and only the suffix past their longest common prefix is new.
+    Two genuinely identical tool results therefore both survive (different positions), while a
+    fold — which rewrites the list from the front — correctly re-emits the frontier and
+    everything after it.
     """
     out: list[dict] = []
     prev: list[str] = []

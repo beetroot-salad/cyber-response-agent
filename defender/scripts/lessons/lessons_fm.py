@@ -2,19 +2,17 @@
 """Grep defender lesson FRONTMATTER (only) + enumerate viable tags.
 
 Plan-time discovery primitive for the defender orchestrator (SKILL §Lessons)
-and the lessons author. It does two things, both scoped to frontmatter so the
-freeform body can never false-match a tag query:
+and the lessons author. Both modes are scoped to frontmatter so the freeform
+body can never false-match a tag query:
 
-  1. Pattern mode — match one or more regexes (grep syntax) against each
-     lesson's YAML frontmatter block, ANDing the patterns, and print one
-     ``<path>\\t<description>`` line per match. That line is the cheap scan
-     surface: read the descriptions, then Read the bodies of the ones that fit.
-  2. ``--tags`` — enumerate the distinct values already in use per retrieval
-     dimension (the *viable tags*), so a caller greps only tokens that exist
-     and the author reuses a spelling instead of coining a near-synonym.
+  1. Pattern mode — AND one or more regexes against each lesson's YAML
+     frontmatter block; print ``<path>\\t<description>`` per match as the cheap
+     scan surface, then Read the bodies that fit.
+  2. ``--tags`` — enumerate the values already in use per retrieval dimension,
+     so callers grep only tokens that exist and authors reuse a spelling
+     instead of coining a near-synonym.
 
-There is deliberately NO index — a per-call directory scan, fine at this
-scale (mirrors ``lessons_env_retrieve.py``); revisit if it ever hurts.
+There is deliberately NO index — a per-call directory scan, fine at this scale.
 
 Retrieval dimensions (frontmatter list fields):
   source_signature   alert rule.id(s) the lesson came from / bites

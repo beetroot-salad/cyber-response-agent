@@ -13,14 +13,13 @@ def adapters_under(defender_dir: Path) -> Path:
     `DefenderPaths.adapters_dir` answers for the tree an instance is rooted at, which is the
     main checkout for the `PATHS` singleton. The callers that matter here are not in the tree
     they ask about: the loop's commit gate and the lead author's permission gate are both
-    handed a WORKTREE's `defender_dir` and must resolve its adapters, not the running process's
-    (#772). Each of them spelled this join for itself, so the directory had four independent
-    owners and moving it would have left them disagreeing silently — the write gate compiling
-    lanes off a path that no longer exists while the commit gate read the real one.
+    handed a WORKTREE's `defender_dir` and must resolve its adapters, not the running
+    process's — and each spelling the join for itself gave the directory several owners that
+    could disagree silently.
 
     A function, not a second `ClassVar`: `adapters_rel` is the REPO-relative spelling git
-    pathspecs and porcelain paths use, and this is the absolute join off a tree. Both exist
-    because both questions are asked; neither is derivable from the other without a repo root.
+    pathspecs and porcelain paths use, and this is the absolute join off a tree. Neither is
+    derivable from the other without a repo root.
     """
     return defender_dir / "scripts" / "adapters"
 

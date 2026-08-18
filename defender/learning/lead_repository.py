@@ -56,14 +56,14 @@ class QueryRow:
     def is_sentinel(self) -> bool:
         """Is this row a WRITER-ONLY record rather than a query the defender ran?
 
-        The `∅.`-prefixed sentinels (`record_query.RESERVED_QUERY_ID_PREFIX`) all share one
+        The `∅.`-prefixed sentinels (`record_query.RESERVED_QUERY_ID_PREFIX`) share one
         property: nothing they describe reached a system of record. A repeat the guard refused,
-        a call the argument schema turned back, a reducer shim that failed — each is an
-        RECORD about the lead's conduct, written into the queries table because that is
-        the only append-only surface the run has, not because a query was issued.
+        a call the argument schema turned back, a failed reducer shim — each records the lead's
+        conduct in the queries table because that is the run's only append-only surface, not
+        because a query was issued.
 
-        The predicate is the writer's own (`is_reserved_query_id`, #823) rather than a second
-        list of literals here: a fourth sentinel must partition on the day it is defined."""
+        The predicate is the writer's own (`is_reserved_query_id`) rather than a second list of
+        literals here, so a new sentinel partitions on the day it is defined."""
         return is_reserved_query_id(self.query_id)
 
 
@@ -74,24 +74,23 @@ class JoinedLead:
     goal: str | None
     what_to_summarize: list
     #: The queries the defender ACTUALLY RAN, seq-ordered — every consumer that means
-    #: "what did this lead ask" reads this, and gets no sentinel row by construction (#841).
+    #: "what did this lead ask" reads this, and gets no sentinel row by construction.
     queries: list
     orphan: bool = False
-    #: K11 — absent (`None`) reads as model-authored; every row on disk before this field
-    #: existed predates the schema addition and must join the same way.
+    #: Absent (`None`) reads as model-authored: rows written before this field existed must
+    #: join the same way.
     provenance: str | None = None
     #: The lead's `∅.`-prefixed rows, seq-ordered. Split OUT of `queries` rather than filtered
-    #: at each consumer (#841): a filter is a thing a future reader forgets, whereas a field
-    #: named `queries` that holds only queries makes the safe reading the default one. The rows
-    #: are still HERE, not dropped, because `collect_general_failures` reaches them through
-    #: `extract_from_joined` — the pitfalls residue is the whole point of #823.
+    #: at each consumer — a filter is a thing a future reader forgets, whereas a field named
+    #: `queries` holding only queries makes the safe reading the default. The rows are kept,
+    #: not dropped, because `collect_general_failures` reaches them via `extract_from_joined`.
     sentinels: list = field(default_factory=list)
 
     @property
     def rows(self) -> list:
         """Every row this lead has in the queries table, in seq order — `queries` and
-        `sentinels` remerged. For the readers that mean "the table", not "the queries":
-        the offline extraction (whose `pitfall_id` keys on position, so the order must be the
+        `sentinels` remerged. For the readers that mean "the table", not "the queries": the
+        offline extraction (whose `pitfall_id` keys on position, so the order must be the
         table's own) and the run-inspection HTML (where hiding a refusal row from a human
         debugging the run is the opposite of the help)."""
         return sorted([*self.queries, *self.sentinels], key=lambda r: r.seq)
@@ -121,9 +120,8 @@ def load_leads(run_dir: Path) -> dict[str, dict]:
             "what_to_summarize": list(wts) if isinstance(wts, list) else [],
         }
         if provenance:
-            # Only set when present — pre-#808 callers that build the exact dict literal
-            # `{"goal": ..., "what_to_summarize": ...}` (no provenance key at all) must keep
-            # matching a row this schema addition did not touch.
+            # Only set when present: callers comparing against the exact two-key dict literal
+            # `{"goal": ..., "what_to_summarize": ...}` must keep matching untouched rows.
             entry["provenance"] = str(provenance)
         leads[lead_id] = entry
     return leads
@@ -224,10 +222,10 @@ def joined(run_dir: Path) -> list[JoinedLead]:
 def _partition(rows: list[QueryRow]) -> tuple[list[QueryRow], list[QueryRow]]:
     """`(queries, sentinels)`, each seq-ordered.
 
-    A lead is bucketed on ALL its rows before this split, and the split is what decides which
-    of the two lists each row lands in — never whether the LEAD appears at all. A lead whose
-    only rows are sentinels still joins (with an empty `queries`), because it is a lead the
-    run really did open and the pitfalls residue really does read."""
+    A lead is bucketed on ALL its rows before this split; the split decides which list each row
+    lands in, never whether the LEAD appears at all. A lead whose only rows are sentinels still
+    joins with an empty `queries` — the run really did open it, and the pitfalls residue reads
+    it."""
     ordered = sorted(rows, key=lambda r: r.seq)
     return (
         [r for r in ordered if not r.is_sentinel],
@@ -244,14 +242,13 @@ def first_rendered_payload(
     (`pipeline/judge/compare.real_sample_text`, values kept) and the oracle's schema skeleton
     (`pipeline/oracle/sample.lead_sample_text`, values scrubbed) — differ ONLY in the renderer
     and the two fallback strings, so the walk lives here, on the surface that owns
-    `QueryRow.raw_ref` in the first place.
+    `QueryRow.raw_ref`.
 
-    `render` signals "nothing usable here" by returning a parenthesized string, its own
-    convention for every empty case; the walk therefore keeps going. One unreadable payload
-    likewise does not blind the lead — a by-ref payload is bytes an adapter wrote, so neither
-    its encoding nor its readability is guaranteed, and raising took a whole stage down over a
-    single bad file. `unreadable` is a template taking `{error}`, reported only when NO
-    payload rendered.
+    `render` signals "nothing usable here" by returning a parenthesized string, its convention
+    for every empty case, and the walk keeps going. One unreadable payload likewise does not
+    blind the lead: a by-ref payload is bytes an adapter wrote, so neither its encoding nor its
+    readability is guaranteed, and raising took a whole stage down over one bad file.
+    `unreadable` is a template taking `{error}`, reported only when NO payload rendered.
     """
     failure: Exception | None = None
     for q in lead.queries:
@@ -273,12 +270,12 @@ def first_rendered_payload(
 def actor_view(run_dir: Path) -> dict:
     """The actor's gray-box view: the queries the defender ran, and nothing else about it.
 
-    Sentinel rows are dropped and the lead is KEPT (#841). The two halves are one decision: a
-    lead that only ever tripped the repeat guard is still a lead the defender opened, and the
-    actor's whole job is to write a story around what the defender did and did not look at —
-    but `∅.repeat-trip` is a refusal record, and `∅.bash-shim` carries up to
-    `SHIM_COMMAND_MAX_CHARS` of model-authored shell text. Shown as queries, they tell the
-    actor the defender ran something it never ran, in words a prior turn chose."""
+    Sentinel rows are dropped and the lead is KEPT — one decision: a lead that only tripped the
+    repeat guard is still a lead the defender opened, and the actor's job is to write a story
+    around what the defender did and did not look at. But `∅.repeat-trip` is a refusal record
+    and `∅.bash-shim` carries up to `SHIM_COMMAND_MAX_CHARS` of model-authored shell text;
+    shown as queries they tell the actor the defender ran something it never ran, in words a
+    prior turn chose."""
     run_dir = Path(run_dir)
     grouped: dict[str, list[dict]] = {}
     for q in load_queries(run_dir):
@@ -303,14 +300,14 @@ def stage_tables(src_run_dir: Path, dst_dir: Path) -> list[Path]:
     """Copy the two tables into the learning run dir, refusing anything that is not a regular
     file or a real directory. Returns what it refused, so the caller can say so out loud.
 
-    Only real artifacts cross this boundary (#648). The run dir is the box's rw bind, so a link
+    Only real artifacts cross this boundary. The run dir is the box's rw bind, so a link
     planted at an artifact's name would otherwise have its TARGET copied in — the escape
-    happens here, at the copy, and after it the planted bytes are an ordinary in-run file that
-    no read-time gate can distinguish. A boxed run whose tree holds a link never reaches this
+    happens here, at the copy, and afterwards the planted bytes are an ordinary in-run file no
+    read-time gate can distinguish. A boxed run whose tree holds a link never reaches this
     point (the exit scrub taints it), so a refusal here means the tree skipped that scrub.
 
-    Refusing rather than aborting: a dangling link left in the gather tree must not cost the
-    run its whole learning pass (#705), and every consumer already tolerates a missing payload.
+    Refusing rather than aborting: a dangling link in the gather tree must not cost the run its
+    whole learning pass, and every consumer already tolerates a missing payload.
     """
     src_run_dir = Path(src_run_dir)
     dst_dir = Path(dst_dir)

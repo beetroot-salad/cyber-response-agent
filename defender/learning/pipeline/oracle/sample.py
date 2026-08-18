@@ -43,13 +43,11 @@ def _is_esql_columns(value) -> bool:
 
 def _scrub_skeleton(value, key=None):
     if isinstance(value, dict):
-        # ES|QL states its field names ONCE, in `columns`, and its rows are bare arrays
-        # (#834). A pure type-walk scrubs the names as string VALUES — `{"name": "<name>"}` —
-        # so the skeleton arrives with no field names anywhere, where the pre-#834 per-row
-        # dicts kept them as keys. `columns` is passed through instead: it is the same schema
-        # this walk used to preserve, reaching the same prompt it always reached, so nothing
-        # newly untrusted is exposed — and `columns[].type` states the ES type, which is more
-        # than the JSON type a scrubbed value could ever carry.
+        # ES|QL states its field names ONCE, in `columns`, and its rows are bare arrays. A
+        # pure type-walk would scrub those names as string VALUES — `{"name": "<name>"}` —
+        # leaving the skeleton with no field names anywhere. `columns` is passed through
+        # instead: it is schema, not payload, so nothing untrusted is exposed, and
+        # `columns[].type` states the ES type, more than a scrubbed value could carry.
         if _is_esql_columns(value.get("columns")) and isinstance(value.get("values"), list):
             return {k: (v if k == "columns" else _scrub_skeleton(v, k))
                     for k, v in value.items()}
@@ -97,11 +95,6 @@ def lead_sample_text(lead) -> str:
         unreadable="(schema sample unreadable — {error}; skeleton unavailable for this lead)",
         missing="(no schema sample available for this lead)",
     )
-
-
-# #791: `unredacted_exemplar` / `real_sample_text` MOVED to
-# `defender/learning/pipeline/judge/compare.py` — the judge's surviving evidence column is
-# the one caller left, and it must import nothing from this retired package.
 
 
 def _query_lines(lead) -> str:

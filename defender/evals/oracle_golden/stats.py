@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
-"""Binomial interval arithmetic for the calibration reporter (#711).
+"""Binomial interval arithmetic for the calibration reporter.
 
-Every headline the suite has published so far was a point estimate, and each one
-was weaker than it looked: 33/36 reads as 0.92, but its 95% Wilson interval is
-[0.78, 0.97] — a width of 0.19 on the number that is supposed to certify a slice.
-So the reporter never publishes a rate without an interval, and the trust
-threshold `N` is *derived* from the interval width the policy needs rather than
-picked (#711 AC 4).
+A point estimate is weaker than it looks: 33/36 reads as 0.92, but its 95% Wilson
+interval is [0.78, 0.97] — a width of 0.19 on the number that is supposed to
+certify a slice. So the reporter never publishes a rate without an interval, and
+the trust threshold `N` is *derived* from the interval width the policy needs
+rather than picked.
 
 Wilson rather than Wald: at the rates that matter here (0.9–1.0) and the n we
 actually have (single digits), the Wald interval runs past 1.0 and its lower
@@ -56,10 +55,8 @@ def required_n(lower_bound: float, rate: float = 1.0, z: float = Z_95,
                max_n: int = 100_000) -> int | None:
     """Smallest `n` whose Wilson lower bound reaches `lower_bound` at `rate`.
 
-    This is the function that turns the resolver's "≥ N (currently a stub
-    threshold)" into a derived number. At a *perfect* observed rate a ≥0.90
-    lower bound needs n≈35; at 0.97 it needs ≈69; at 0.95, ≈126. Those are the
-    numbers that make the current suite one to two orders of magnitude short.
+    Turns the trust threshold into a derived number. At a *perfect* observed rate
+    a ≥0.90 lower bound needs n≈35; at 0.97 it needs ≈69; at 0.95, ≈126.
 
     `None` when the rate cannot reach the bound at any n — the lower bound
     converges to `rate`, so asking for 0.90 at an observed 0.85 is unsatisfiable

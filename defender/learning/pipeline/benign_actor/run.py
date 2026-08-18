@@ -18,7 +18,7 @@ from defender.learning.tickets import ticket_seeds
 
 #: THIS leg's gate scope — strictly less than the adversarial leg's (one script, one corpus):
 #: the FP hunter has no business in the actor lessons. See the sibling declaration in
-#: `malicious_actor/run.py` for why the audit CLI needs each leg to own its own.
+#: `malicious_actor/run.py` for why each leg must own its own.
 ACTOR_SCRIPTS = (LESSONS_ENV_RETRIEVE_SCRIPT,)
 ACTOR_READ_CONFINE = (LESSONS_ENVIRONMENT_DIR,)
 

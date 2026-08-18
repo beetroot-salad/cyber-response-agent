@@ -31,8 +31,8 @@ AuthorError = _shared.AuthorError
 
 @dataclass(frozen=True, kw_only=True)
 class CuratorConfig(CorpusAuthorConfig):
-    """The actor/environment curators' drain config: the shared corpus-author core (#713)
-    plus the five fields only an observation-queue curator has."""
+    """The actor/environment curators' drain config: the shared corpus-author core plus the
+    fields only an observation-queue curator has."""
 
     outcome_author: frozenset[str]
     outcome_skip: frozenset[str]
@@ -62,9 +62,9 @@ def existing_observation_ids(corpus_dir: Path) -> set[str]:
     if cached is not None:
         return set(cached)
     ids: set[str] = set()
-    # The same spelling the drain's attribution gate reads (#852 F-02). Spelled from the
-    # observation channels' `id_key` rather than as a literal, so the two cannot drift: a
-    # file attributable there but invisible here is authored again on every following tick.
+    # The same spelling the drain's attribution gate reads, derived from the observation
+    # channels' `id_key` rather than written as a literal so the two cannot drift: a file
+    # attributable there but invisible here is authored again on every following tick.
     field = provenance_field("observation_id")
     for lesson in iter_lessons(
         corpus_dir, warn_label=lambda p: f"observation-id pre-flight: {p.name}"
@@ -149,8 +149,7 @@ def commit_observations(message: str, cfg: CuratorConfig) -> str | None:
 
 
 def run_batch(*, hold_committed: bool = False, cfg: CuratorConfig, box: Any = None) -> int:
-    """The observation directions' entry point — a config builder's counterpart, not a
-    driver: the batch body lives in `drain.run_batch` (#719)."""
+    """The observation directions' entry point; the batch body lives in `drain.run_batch`."""
     return drain.run_batch(cfg=cfg, hold_committed=hold_committed, box=box)
 
 
@@ -160,9 +159,8 @@ def _gate_observations(
     """The observation directions' pre-author policy: idempotency against the corpus,
     then the direction's outcome policy, then source-bundle existence.
 
-    Direction-specific by NAME as well as by body (#719): the findings direction runs a
-    different policy of the same shape, and the two sharing one name was a collision that
-    read as duplication."""
+    Direction-specific by NAME as well as by body: the findings direction runs a different
+    policy of the same shape."""
     existing = existing_observation_ids(cfg.corpus_dir)
     log = make_logger(cfg.log_prefix)
     held: list[dict] = []

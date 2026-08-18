@@ -31,11 +31,8 @@ PROVIDERS: tuple[Provider, ...] = (ANTHROPIC, FIREWORKS)
 def selectable_aliases() -> tuple[str, ...]:
     """One spelling per distinct model behind the Fireworks alias map, in declaration order.
 
-    DERIVED rather than written out. The literal this replaced named the two models that
-    happened to exist when it was typed, and nothing makes adding an alias update it — an
-    operator who typos a model added later is then handed a list that omits it, and goes off
-    to check whether it is supported at all. A list that cannot drift from the map it
-    describes cannot do that.
+    DERIVED, not written out: a hand-kept literal silently omits models added later, and an
+    operator who typos one is then told it looks unsupported.
     """
     seen: set[str] = set()
     names: list[str] = []
@@ -78,11 +75,9 @@ def cache_affinity(
 ) -> ModelSettings | None:
     """`settings` plus `name`'s provider's prompt-cache affinity hint for `key`.
 
-    An UNROUTABLE name returns `settings` untouched instead of raising. The hint is an
-    optimization — refusing to build an agent because a routing nicety could not be attached
-    would turn a cache miss into a dead run — and every name a real run reaches has already
-    been through `provider_for` in `run.py`'s all-roles preflight, which is where an unknown
-    model is supposed to fail and does.
+    An UNROUTABLE name returns `settings` untouched instead of raising: the hint is an
+    optimization, and every name a real run reaches has already been through `provider_for`
+    in `run.py`'s all-roles preflight, which is where an unknown model fails.
     """
     try:
         provider = provider_for(name)

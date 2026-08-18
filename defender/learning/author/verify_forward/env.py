@@ -14,8 +14,8 @@ RETRIEVE = LESSONS_ENV_RETRIEVE_SCRIPT
 # checkout THE SCRIPT lives in — never the caller's, and never the corpus's. The two differ on
 # every real batch: the curator authors inside `<repo>/.worktrees/<batch>`, which sits UNDER the
 # main checkout, so the script's `relative_to` SUCCEEDS and emits a `.worktrees/…`-prefixed
-# spelling that resolves only against the main root. Anchored ONCE here, beside the script
-# constant it belongs to, so `lesson_returned` never has to guess which root a line came from.
+# spelling that resolves only against the main root. Anchored ONCE here so `lesson_returned`
+# never has to guess which root a line came from.
 RETRIEVE_REPO_ROOT = RETRIEVE.resolve().parents[3]
 
 
@@ -35,12 +35,9 @@ def rule_ids_arg(rule_ids: object) -> str:
 def absolute_hit(printed: str) -> str:
     """One printed retrieval hit, made absolute against the root the SCRIPT spelled it against.
 
-    `rel_to_repo` inside the script prints repo-relative when the hit sits under the script's
-    own checkout and absolute when it does not — and the batch worktree sits UNDER it
-    (`<repo>/.worktrees/<batch>`), so the interesting case is the relative one, and the ONLY
-    root it is relative to is `RETRIEVE_REPO_ROOT`. Anchoring it against anything else (the
-    curator's worktree root, say) yields a path that does not exist and a BAD verdict for a
-    lesson retrieval actually returned."""
+    Anchoring a relative hit against anything but `RETRIEVE_REPO_ROOT` (the curator's
+    worktree root, say) yields a path that does not exist and a BAD verdict for a lesson
+    retrieval actually returned."""
     hit = Path(printed)
     return str(hit if hit.is_absolute() else RETRIEVE_REPO_ROOT / hit)
 
@@ -78,15 +75,11 @@ def lesson_returned(
 ) -> bool:
     """Did the retrieval that grounds this lesson's forward-check actually return THIS file?
 
-    Answered on RESOLVED IDENTITY, never on the basename. A basename match certified a
-    lesson as retrievability-verified whenever some unrelated top-level file happened to
-    share its name — and the case that made that unsound is a lesson written one directory
-    down: the curator's write allow admitted nested paths while the corpus walk is flat
-    (`glob('*.md')`), so `<corpus>/sub/x.md` was invisible to retrieval, to the corpus
-    manifest and to the idempotency scan forever, and a pre-existing `<corpus>/x.md` still
-    voted it GOOD. The write allow is now one level deep to match the walk; this rejects
-    the same shape independently, because a check must never pass a file the walk cannot
-    see.
+    Answered on RESOLVED IDENTITY, never on the basename, and the parent must be the corpus
+    root itself: the corpus walk is flat (`glob('*.md')`), so a nested `<corpus>/sub/x.md`
+    is invisible to retrieval, the manifest and the idempotency scan — yet a basename match
+    against a pre-existing `<corpus>/x.md` would still vote it GOOD. A check must never pass
+    a file the walk cannot see.
 
     `returned` arrives ABSOLUTE — `run_retrieval` anchors the script's repo-relative spelling
     at that script's OWN checkout root, the only root it can have meant. So this compares

@@ -4,21 +4,14 @@
 Wraps the v2 ticket-server (the v1 FastAPI app reused under playground-v2's compose),
 read-only.
 
-Two surfaces over ONE implementation. The six other adapters lost their CLI with #611
-(nothing invokes them any more); ticket keeps its argparse entry point because two
-NON-gather consumers still run it as a subprocess and pin its exit codes:
+Two surfaces over ONE implementation. Alone among the adapters, ticket keeps an argparse
+entry point, because two non-gather consumers run it as a subprocess and pin its exit codes:
 
   - `learning/tickets/ticket_seeds.py`
   - `learning/author/verify_forward/forward.py`
 
-(The benign judge's closed-ticket read was a THIRD subprocess consumer — its pinned bash
-grant, whose MANDATORY `--require-closed` lookahead was its answer-key defense. #672 moved
-that read off bash into two typed host-side tools that call the verb bodies IN-PROCESS with
-`require_closed=True` hard-coded, so closed-only is now unreachable-to-loosen by construction
-rather than mandatory in the argv grammar.)
-
 Both surfaces call `list_tickets` / `get_ticket` — the verbs. `main()` is the sole place
-in this package still allowed to exit: it maps a raised fault back to the exit code its
+in this package allowed to exit: it maps a raised fault back to the exit code its
 subprocess callers contract on.
 
 Usage (the CLI surface):
@@ -41,8 +34,8 @@ import sys
 import urllib.parse
 from pathlib import Path
 
-# Put the workspace root on sys.path so `defender.*` namespace imports resolve when the
-# verb registry loads this module BY PATH (see cmdb_adapter.py) or the CLI runs it directly.
+# Workspace root on sys.path so `defender.*` namespace imports resolve when the verb registry
+# loads this module BY PATH, or the CLI runs it directly.
 import sys as _sys
 from pathlib import Path as _Path
 
@@ -56,20 +49,16 @@ from defender.scripts.adapters.faults import AdapterFault, TransportFault, Upstr
 SYSTEM = "ticket"
 PREFIX = "TICKET"
 
-#: This system's required config keys: the shared transport template PLUS the store's KEY
-#: GRAMMAR. The grammar is an ENVIRONMENT fact — what a ticket key looks like in the deployed
-#: store — so it is declared where the environment is described (`TICKET_KEY_PATTERN` in
-#: `knowledge/environment/systems/ticket/config.env`), not hardcoded in a consumer. It is
-#: REQUIRED, on the same rule as every other value here: absent means the system is down
-#: (`ConfigFault`, exit 2), never a silent built-in default that would let a consumer screen
-#: keys against a grammar this environment never agreed to. `elastic_adapter` declares its own
-#: key set for the same reason.
+#: The shared transport template PLUS the store's KEY GRAMMAR. The grammar is an ENVIRONMENT
+#: fact — what a ticket key looks like in the deployed store — so it is declared in
+#: `knowledge/environment/systems/ticket/config.env` (`TICKET_KEY_PATTERN`), not hardcoded in
+#: a consumer, and it is REQUIRED: absent means the system is down (`ConfigFault`, exit 2),
+#: never a built-in default screening keys against a grammar this environment never agreed to.
 REQUIRED_CONFIG_KEYS = (*transport.REQUIRED_CONFIG_KEYS_TEMPLATE, "KEY_PATTERN")
 
 
-# Same name in each stub adapter, closing over that module's SYSTEM/PREFIX: the shared
-# body already lives once in `transport.load_config`, so this is a zero-argument alias,
-# not a copy of any logic.
+# Same name in each stub adapter, closing over that module's SYSTEM/PREFIX: a zero-argument
+# alias over `transport.load_config`, not a copy of its logic.
 def _config(ctx: VerbContext) -> dict[str, str]:  # lint-dup: ok — per-module alias over the shared transport.load_config
     return transport.load_config(ctx, SYSTEM, PREFIX, REQUIRED_CONFIG_KEYS)
 
@@ -78,13 +67,13 @@ def key_pattern(ctx: VerbContext) -> str:
     """This environment's ticket-key grammar, as an unanchored regex source string.
 
     A verb rather than an import so every consumer reaches it through the ONE registry seam
-    the store is reached through (`verbs=`), and so a screen built on it can be driven with a
-    fake registry instead of a real config file. Consumers anchor it themselves — the config
-    declares the key SHAPE, not where the match starts and ends.
+    (`verbs=`), and so a screen built on it can be driven with a fake registry instead of a
+    real config file. Consumers anchor it themselves — the config declares the key SHAPE, not
+    where the match starts and ends.
 
-    The screen that uses it lives at the consumer (the benign judge's `get_closed_ticket`,
-    #672 Fork A) rather than here, because that screen owes a RETRY-class response with zero
-    store attempts, and a fault raised from this module is by contract an exit-code envelope.
+    The screen that uses it lives at the consumer (the benign judge's `get_closed_ticket`)
+    rather than here, because that screen owes a RETRY-class response with zero store
+    attempts, and a fault raised from this module is by contract an exit-code envelope.
     """
     return _config(ctx)["KEY_PATTERN"]
 
@@ -95,20 +84,16 @@ def case_opened_at(ctx: VerbContext, *, key: str) -> str:
 
     This is the one verb that reaches a ticket without `require_closed`, because the case
     under judgment is by definition still in flight. The answer-key defense is the RETURN
-    TYPE, not a status filter: a `str` cannot carry a summary, a resolution, or a comment,
-    so no caller of this verb — however it is wired — can read the in-flight ticket through
-    it. The record exists only as a local here, exactly as it does inside the judge's own
-    free-text screen, and is discarded unreturned.
+    TYPE, not a status filter: a `str` cannot carry a summary, a resolution, or a comment, so
+    no caller — however wired — can read the in-flight ticket through it. The record is a
+    local here, discarded unreturned.
 
-    It exists so the judge can date its recency screen against the ticket store's OWN clock.
-    Comparing the store's timestamps to a clock the judge carries would make the screen's
-    boundary depend on skew between two machines; comparing them to a timestamp the store
-    itself minted cannot.
+    It lets the judge date its recency screen against the ticket store's OWN clock, so the
+    boundary does not depend on skew between two machines.
 
     A 404 is an `UpstreamFault` (exit 1) like any other missing ticket: the case was never
-    filed, which is a real answer, not a failure. A store whose ticket carries no string
-    `created` is malformed, and fails as INFRA — the recency screen must never quietly
-    stand down because a field went missing.
+    filed, which is a real answer. A ticket carrying no string `created` is malformed and
+    fails as INFRA — the recency screen must never quietly stand down on a missing field.
     """
     payload = transport.http_get_obj(
         ctx, _config(ctx), f"/tickets/{urllib.parse.quote(key, safe='')}", system=SYSTEM,
@@ -138,14 +123,14 @@ def list_tickets(
     """Tickets, filterable.
 
     `require_closed` is the structural closed-only guard for the offline benign judge's
-    scoped list (#338): it pins status=closed regardless of any `status` value, so a
-    stray/duplicate `--status open` (argparse keeps the last, and the grant's shape would
-    otherwise admit it) cannot widen the read to the in-flight OPEN ticket.
+    scoped list: it pins status=closed regardless of any `status` value, so a stray or
+    duplicate `--status open` (argparse keeps the last) cannot widen the read to the
+    in-flight OPEN ticket.
 
-    It is `wrapper_only` (#900): the judge's closed-ticket tool hard-codes it and keeps it off
-    its own model-facing schema, so NO model in either role is meant to bind it. Gather shares
-    this verb and must not — the pin only narrows, and a lead that set it would silently drop
-    the open and in-progress siblings it is dispatched to correlate.
+    It is `wrapper_only`: the judge's closed-ticket tool hard-codes it and keeps it off its
+    model-facing schema, so NO model in either role binds it. Gather shares this verb and must
+    not — the pin only narrows, and a lead that set it would silently drop the open and
+    in-progress siblings it is dispatched to correlate.
     """
     params: dict[str, str] = {}
     if status:
@@ -163,20 +148,16 @@ def list_tickets(
 def get_ticket(ctx: VerbContext, *, key: str, require_closed: bool = False) -> dict:
     """One ticket by key, incl. comments.
 
-    `require_closed` confirms a *cited* closed case, never the in-flight (open) ticket for
-    the alert under judgment (#338). Refusing a non-closed ticket HERE means the read scope
-    can't reach the in-flight ticket even by key — the refusal is a query error (exit 1),
-    the same code the CLI callers already pin.
+    `require_closed` confirms a *cited* closed case, never the in-flight (open) ticket for the
+    alert under judgment. Refusing HERE means the read scope can't reach the in-flight ticket
+    even by key — a query error (exit 1), the same code the CLI callers pin.
 
-    The key is PERCENT-ENCODED into the path (#684), as `ticket_writer` has always encoded
-    the keys it mints (`urllib.parse.quote(case_id, safe="")`). It used to be interpolated
-    raw, which was wrong in both directions: a key the writer can legitimately mint but this
-    reader cannot fetch (anything needing encoding round-tripped to a different URL), and a
-    key carrying `?`/`#`/CR-LF reshaping the REQUEST — a query string, a fragment, or a
-    header break where a path segment was meant. Not a shell surface: the transport passes
-    the URL as one argv element (`docker_exec_curl`, no `shell=True`), so this is an
-    HTTP-semantics fix. `list_tickets` has always urlencoded its filters via `http_get`'s
-    `params=`; encoding here makes the two paths symmetric.
+    The key is PERCENT-ENCODED into the path, matching how `ticket_writer` encodes the keys it
+    mints. Raw interpolation is wrong in both directions: a legitimately-minted key needing
+    encoding round-trips to a different URL, and a key carrying `?`/`#`/CR-LF reshapes the
+    REQUEST — a query string, a fragment, or a header break where a path segment was meant.
+    Not a shell surface (the transport passes the URL as one argv element, no `shell=True`);
+    this is HTTP semantics.
     """
     payload = transport.http_get_obj(
         ctx, _config(ctx), f"/tickets/{urllib.parse.quote(key, safe='')}", system=SYSTEM,
@@ -253,9 +234,9 @@ def main():
         else:
             payload = get_ticket(ctx, key=args.key, require_closed=args.require_closed)
     except AdapterFault as e:
-        # The fault's exit code IS the CLI's exit code: the three subprocess callers (and the
-        # circuit breaker behind them) key on it, so the taxonomy is mapped back here rather
-        # than re-decided.
+        # The fault's exit code IS the CLI's exit code: the subprocess callers (and the
+        # circuit breaker behind them) key on it, so the taxonomy is mapped back, not
+        # re-decided.
         print(f"error: {e.detail}", file=sys.stderr)
         sys.exit(e.exit_code)
     print(json.dumps(payload))

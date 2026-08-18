@@ -30,9 +30,8 @@ from defender.scripts.visualize.visualize_primitives import (
 
 
 #: The wire log AS AN OPERATOR READS IT — run-dir-relative, so the two strings below name a
-#: path someone can actually go and look at. Derived, not typed: the log moved under
-#: `wire_logs/` (`_run_paths.WIRE_LOG_DIR`) and a hand-spelled `llm_requests.jsonl` here would
-#: have sent a reader to a run-root file that no current run writes.
+#: path someone can actually go and look at. Derived from `_run_paths`, never hand-spelled:
+#: a literal here would send a reader to a file no current run writes.
 _WIRE_LOG_REL = f"{WIRE_LOG_DIR}/{WIRE_LOG}"
 
 
@@ -190,18 +189,16 @@ def _render_tx_groups(
 #: `<script` and `<!--` drive it into the escaped/double-escaped states, where the island's
 #: OWN closing tag stops ending it and the rest of the page is swallowed as script data.
 #:
-#: IGNORECASE is load-bearing, not tidiness — the same correction #883 F-35 made to
-#: `_EVENT_HANDLER_RE`: HTML tag names are case-insensitive, so `</SCRIPT>` and `</Script >`
-#: ARE the terminator, and a case-sensitive `.replace("</script>", ...)` covers exactly one
-#: spelling of a grammar with dozens. The content here is a FOREIGN TOOL's own payload, so
+#: IGNORECASE is load-bearing: HTML tag names are case-insensitive, so `</SCRIPT>` and
+#: `</Script >` ARE the terminator. The content here is a FOREIGN TOOL's own payload, so
 #: every spelling is reachable by whatever wrote it.
 _SCRIPT_BREAKOUT_RE = re.compile(r"<(?=/?script|!--)", re.IGNORECASE)
 
 
 def _render_original_json(original_json: str | None) -> str:
-    """#872 O5 — the TOON gate substituted this result; the original JSON it replaced rides
-    beside the view rather than merely surviving unrendered. A
-    `<script type="application/json">` data island, not another `esc()`'d `<pre>`:
+    """The original JSON a TOON-gate-substituted result replaced, rendered beside the view.
+
+    A `<script type="application/json">` data island, not another `esc()`'d `<pre>`:
     HTML-entity-escaping would encode every `"` in the JSON, so a reader (or a test)
     searching the page for the tool's own JSON bytes would never find them.
 
@@ -294,11 +291,10 @@ def _render_tx_entry(e: dict, anchor_attr: str = "") -> str:
 class _CloseVocabulary(NamedTuple):
     """The close tool's OWN published members, read once rather than restated as literals.
 
-    Two viewer modules key on these — the per-attempt verdict badge here and the headline
-    badge in `visualize_run` — and a member renamed at its home would otherwise fall through
-    to the neutral grey on both with no test failing. Same reason this panel reads
-    `REVIEW_ROLES` instead of listing the roles, and `review_trace_path` instead of spelling
-    the filename."""
+    Two viewer modules key on these — the per-attempt verdict badge here and `visualize_run`'s
+    headline badge — and a member renamed at its home would otherwise fall through to the
+    neutral grey on both with no test failing. Same reason this panel reads `REVIEW_ROLES` and
+    `review_trace_path` instead of spelling the roles and the filename."""
 
     stands: str
     challenged: str
@@ -325,9 +321,8 @@ def close_vocabulary() -> _CloseVocabulary:
 
 #: The one disposition `close_tool` commits WITHOUT a review (its bypass arm). Asked in ONE
 #: place because two questions on this page turn on it — "is any attempt worth counting?" and
-#: "does THIS attempt's verdict mean a review agreed?" — and the shipped shape asked only the
-#: first, so a run challenged once and then closed `inconclusive` rendered its unreviewed
-#: second attempt as `stands`, which reads as "a review ran and the disposition held".
+#: "does THIS attempt's verdict mean a review agreed?" — and an unreviewed attempt rendered
+#: as `stands` reads as "a review ran and the disposition held".
 UNREVIEWED_DISPOSITION = "inconclusive"
 
 _BYPASS_NOTE = (
@@ -343,10 +338,9 @@ def _was_reviewed(rec: dict) -> bool:
 def _review_records(run_dir: Path) -> list[tuple[int, dict]]:
     """Every close ATTEMPT's numbered review record, in attempt order.
 
-    Numbered, not globbed-and-listed: a challenged close writes its record and commits
-    nothing, so a run that was challenged once leaves `review_record.1.json` beside
-    `review_record.2.json` and the two are different attempts at the same close — sorting
-    them lexically would put attempt 10 before attempt 2 the first time a bound moves."""
+    Sorted NUMERICALLY: a challenged close writes its record and commits nothing, so attempts
+    at one close accumulate as `review_record.{n}.json`, and a lexical sort would put attempt
+    10 before attempt 2 the first time a bound moves."""
     from defender._io import read_text_soft
 
     out: list[tuple[int, dict]] = []
@@ -355,8 +349,8 @@ def _review_records(run_dir: Path) -> list[tuple[int, dict]]:
         if m is None:
             continue
         # `read_text_soft` rather than a locally restated `(OSError, UnicodeDecodeError)`:
-        # `_io` publishes that tuple as `TEXT_READ_ERRORS` precisely so a grep for the name
-        # audits who guards a read correctly, and the degrading reader is what a view wants.
+        # `_io` publishes that tuple as `TEXT_READ_ERRORS` so a grep for the name audits who
+        # guards a read correctly, and the degrading reader is what a view wants.
         text, _ = read_text_soft(p)
         if text is None:
             continue
@@ -372,16 +366,14 @@ def _review_records(run_dir: Path) -> list[tuple[int, dict]]:
 def _review_trace(path: Path) -> list[dict]:
     """One review role's trace: each metadata row, with the framed reply that follows it.
 
-    Walked line by line rather than through `read_jsonl_rows`, and the split is decided by
+    Walked line by line rather than through `read_jsonl_rows`, with the split decided by
     `parse_jsonl_row` — the WRITER's own predicate. `_write_trace_row` puts a stage's framed
     reply on its own physical line exactly when no reader could mistake it for a row, so the
-    ordinary row reader skips it by design; using that reader here would silently drop the
-    model's words this panel exists to show, and re-deriving the rule locally would drift
-    from the writer the moment either side moved.
+    ordinary row reader skips it by design and would silently drop the model's words this
+    panel exists to show; re-deriving the rule locally would drift from the writer.
 
     A BLANK line inside a framed reply is part of the reply, not a separator: skipping it
-    here (as the shipped shape did) silently reflowed every multi-paragraph reading into one
-    run-on block, on the one surface whose whole job is to show the model's words."""
+    reflows every multi-paragraph reading into one run-on block."""
     from defender._io import parse_jsonl_row, read_text_soft
 
     entries: list[dict] = []
@@ -421,8 +413,7 @@ def _review_row_status(row: dict) -> tuple[str, str]:
 
     `skipped` and `ok: false` are kept apart, and a `skipped` row is never read as an answer:
     the gate writes NO `ok` key for a lens it did not dispatch, precisely because every trace
-    reader takes `ok: true` as "this stage answered". Collapsing the two here would reinstate
-    that conflation one layer up, on the surface a human actually looks at."""
+    reader takes `ok: true` as "this stage answered"."""
     if row.get("incomplete"):
         return "incomplete", "rr-bad"
     if "skipped" in row:
@@ -436,8 +427,7 @@ def _review_row_status(row: dict) -> tuple[str, str]:
 
 def _read_role_traces(run_dir: Path) -> list[tuple[str, list[dict]]]:
     """Every review role's trace, read ONCE per run rather than once per close attempt. The
-    roster comes from `REVIEW_ROLES` rather than being restated here — the same reason the
-    gate's own incomplete-marker walk reads it."""
+    roster comes from `REVIEW_ROLES` rather than being restated here."""
     from defender.runtime.challenge_gate import REVIEW_ROLES, review_trace_path
 
     return [(role, _review_trace(review_trace_path(run_dir, role))) for role in REVIEW_ROLES]
@@ -448,10 +438,8 @@ def _review_role_html(traces: list[tuple[str, list[dict]]], attempt: int) -> str
 
     ATTEMPT N IS TRACE ROUND N-1, and the offset is real rather than a typo to tidy away.
     The gate stamps its trace rows with `state.turns` as it ENTERS the review (0 on the first
-    close), while the record is numbered by the attempt it belongs to (`state.turns + 1` on a
-    committing arm, and the already-incremented `state.turns` on a challenged one — which
-    land on the same number). Filtering the traces on the record's own number is therefore an
-    off-by-one that renders every role panel empty, with nothing to say it did."""
+    close), while the record is numbered by the attempt it belongs to. Filtering the traces on
+    the record's own number renders every role panel empty, with nothing to say it did."""
     round_no = attempt - 1
 
     cards: list[str] = []
@@ -461,10 +449,9 @@ def _review_role_html(traces: list[tuple[str, list[dict]]], attempt: int) -> str
             if row.get("round") != round_no:
                 continue
             status, cls = _review_row_status(row)
-            # `reason` (incomplete) and `skipped` are gate-authored or stage-derived text and
-            # the reply is a model's own — all of it goes out through the untrusted escape.
-            # `reason` rides FRAMED (real newlines), so it needs the pre-formatted lane too:
-            # in a bare div the frame tags and the message collapse onto one line.
+            # All of this is gate-authored, stage-derived or model-authored, so it goes out
+            # through the untrusted escape. `reason` rides FRAMED (real newlines) and needs
+            # the pre-formatted lane too — in a bare div the frame collapses onto one line.
             note = row.get("reason") or row.get("skipped") or ""
             reply = _review_reply_text(e)
             inner = ""
@@ -488,9 +475,8 @@ def _review_role_html(traces: list[tuple[str, list[dict]]], attempt: int) -> str
 def _review_cost_html(costs: dict[str, float] | None) -> str:
     """The gate's spend, totalled and split by lens.
 
-    Empty when nothing priced — which is the honest render for a replay (its injected stages
-    call no provider) and for a run whose wire log predates the review sharing it. A `$0.0000`
-    there would read as "the gate was free", which is a different claim."""
+    Empty when nothing priced — the honest render for a replay, whose injected stages call no
+    provider. A `$0.0000` there would read as "the gate was free", a different claim."""
     total = sum((costs or {}).values())
     if not total:
         return ""
@@ -511,12 +497,12 @@ def render_review_gate(
     Rendered as a gate and deliberately NOT as a phase: it has no `##` header in
     `investigation.md`, the investigator never occupies it, and it is kept out of
     `visualize_data`'s phase machinery (`_LOOP_VERBS`, `phase_color`) so no cost bar, wall
-    bar or transcript group can imply the agent was ever "in" it. What it gets instead is
-    its own section, keyed on the close ATTEMPT — which is the unit it actually has.
+    bar or transcript group can imply the agent was ever "in" it. Its unit is the close
+    ATTEMPT instead.
 
-    `costs` is the gate's spend per LENS (`visualize_messages.review_cost_by_lens`). It is
-    rendered HERE and nowhere in the phase machinery for the reason above: the money is real
-    and belongs on the page, but the gate is not a place the investigator was."""
+    `costs` is the gate's spend per LENS (`visualize_messages.review_cost_by_lens`), rendered
+    here and nowhere in the phase machinery for the same reason: the money is real, but the
+    gate is not a place the investigator was."""
     subtitle = "— the write-time gate on a confident close (not a phase)"
     records = _review_records(run_dir)
     if not records:
@@ -568,8 +554,8 @@ def render_review_gate(
         verdict = str(rec.get("verdict", "—"))
         drafted = str(rec.get("reviewed_disposition", "—"))
         # An attempt that BYPASSED the gate carries `verdict: stands` — the close tool's word
-        # for "committed unchanged", which on this page would read as "the review ran and the
-        # disposition survived". It is labelled by what happened to it instead. The guard
+        # for "committed unchanged", which here would read as "the review ran and the
+        # disposition survived", so it is labelled by what happened to it instead. The guard
         # above only covers a run whose EVERY attempt bypassed; a run challenged once and then
         # closed `inconclusive` reaches here with one of each.
         bypassed = not _was_reviewed(rec)
@@ -611,9 +597,9 @@ def render_runtime_leads_queries(run_dir: Path, leads: list | None = None) -> tu
     rows: list[str] = []
     for jl in leads:
         goal = jl.goal or ("(orphan — query with no lead sidecar)" if jl.orphan else "")
-        # `.rows` — this table IS the run-inspection view (#841): a human debugging the
-        # run needs the refusal and shim rows most of all, so the split the agent-facing
-        # projections take is exactly wrong here.
+        # `.rows` — this table IS the run-inspection view: a human debugging the run needs the
+        # refusal and shim rows most of all, so the split the agent-facing projections take is
+        # exactly wrong here.
         qs = jl.rows
         lead_cell = (
             f'<td class="lq-lead" id="lead-{esc(jl.lead_id)}" rowspan="{max(1, len(qs))}">'
@@ -701,9 +687,8 @@ def render_runtime_toc(  # noqa: PLR0913 — one argument per section the nav li
     )
 
     investigation_item = _toc_dropdown("sec-investigation", "investigation", inv_links)
-    # A flat link, never a phase entry in the dropdown above: the gate is not one of the
-    # phases that nav enumerates, and giving it a `pn-tag` beside ORIENT/PLAN/… is exactly
-    # the "sixth phase" reading the section exists to avoid.
+    # A flat link, never a phase entry in the dropdown above: a `pn-tag` beside ORIENT/PLAN/…
+    # is exactly the "sixth phase" reading the section exists to avoid.
     review_label = "review gate" + (f" ({n_reviewed})" if n_reviewed else "")
     review_item = f'<li class="item"><a href="#sec-review">{review_label}</a></li>'
     leads_item = _toc_dropdown("sec-leads", f"leads &amp; queries ({n_leads})", lead_links, open_=False)

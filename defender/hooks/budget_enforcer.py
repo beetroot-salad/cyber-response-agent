@@ -24,12 +24,11 @@ WARNING_THRESHOLD = 0.75
 
 TAIL_ALLOWANCE = 10
 
-#: RS16. The close tool's budget exemption — an explicit, recorded roster rather than a side
-#: effect of which tier a tool happens to land in. `close_tool.py` imports and re-exports this
-#: name (`from defender.hooks.budget_enforcer import BUDGET_EXEMPT_TOOLS`) so `#774`'s spec
-#: surface (`defender.runtime.close_tool.BUDGET_EXEMPT_TOOLS`) resolves to the SAME object —
-#: one roster, not two that could drift. Closing must always be possible even under budget
-#: pressure, since the gate's own forced turns are what push a run into that pressure.
+#: The close tool's budget exemption — an explicit roster rather than a side effect of which
+#: tier a tool lands in. `close_tool.py` re-exports this name so
+#: `defender.runtime.close_tool.BUDGET_EXEMPT_TOOLS` resolves to the SAME object. Closing must
+#: always be possible even under budget pressure, since the gate's own forced turns are what
+#: push a run into that pressure.
 BUDGET_EXEMPT_TOOLS = frozenset({"close_investigation"})
 
 BUDGET_REFUSAL_MESSAGE = (
@@ -41,9 +40,8 @@ BUDGET_REFUSAL_MESSAGE = (
     "the evidence you already have."
 )
 # `fix_row` is named because the survivor set would otherwise be WRONG whenever a repair
-# window is open (#836): both `append_block` and the close are refused while a row is
-# flagged, so a message offering only those two sends the model to a close it will be
-# refused — a dead end manufactured by the message itself.
+# window is open: both `append_block` and the close are refused while a row is flagged, so a
+# message offering only those two sends the model to a close it will be refused.
 
 
 class BudgetKill(Exception):
@@ -78,24 +76,20 @@ def read_budget(run_dir: Path) -> dict:
     """The budget state, `{}` when there is none — including when `budget.json` holds valid
     JSON that is not a state at all.
 
-    That last case is #878 F-17(a), and the narrowing for it lives at
-    `read_json_locked`, not here: `[]`, `3`, `"x"` and `null` came back as the state itself, and
-    `_budget_state_for_enforcement`'s `{**state, …}` then raised `TypeError: 'list' object is
-    not a mapping` out of `_budget_short_circuit` — and out of `lead_zero._budget_gate`, on the
-    path that is NOT gated on `DEFENDER_BUDGET_ENFORCE`, before MAIN's first prompt was ever
-    built. The asymmetry it exposed is one line wide: `_account_executed_call` wraps the
-    identical state in `except Exception` and logs "budget accounting skipped", so the same
-    corruption was swallowed immediately after it was fatal.
+    The narrowing for that last case lives at `read_json_locked`, not here. Without it `[]`,
+    `3`, `"x"` and `null` come back as the state itself, and `_budget_state_for_enforcement`'s
+    `{**state, …}` raises `TypeError: 'list' object is not a mapping` out of
+    `lead_zero._budget_gate` — a path NOT gated on `DEFENDER_BUDGET_ENFORCE`, before MAIN's
+    first prompt is built.
 
     `{}` rather than `make_budget_state(...)`: this reader has no run id, and every caller
     already treats a missing state as "no budget recorded yet" (`account_call` coalesces with
     `or make_budget_state`, `tail_exhausted` and `should_refuse` read absent counters as
     unspent). Inventing a fresh `created_at` here would restart the wall clock on every read.
 
-    The named writer is the boxed adapter subprocess: `box.py:561` bind-mounts the run root rw
-    while the defender tree is mounted readonly, and it is the process that handles
-    attacker-influenced payloads. This is the DoS lever `docs/runtime-sandbox-design.md` §7 D3
-    exists to deny."""
+    The named writer is the boxed adapter subprocess: it bind-mounts the run root rw while the
+    defender tree is readonly, and it handles attacker-influenced payloads. This is the DoS
+    lever `docs/runtime-sandbox-design.md` §7 D3 exists to deny."""
     return read_json_locked(run_dir / "budget.json")
 
 
@@ -143,10 +137,9 @@ def account_call(
         try:
             _write_budget_atomic(run_dir, state)
         except OSError as e:
-            # §7 D3: a write refused because an alias was planted counts toward nothing — it
-            # can never end a run (F1's rationale, "do not hand the box a DoS lever", would
-            # otherwise be false HERE, three times over). An ORDINARY write failure (no alias
-            # anywhere — a squatted directory, a full disk) still escalates exactly as before.
+            # §7 D3: a write refused because an alias was planted counts toward nothing and can
+            # never end a run — otherwise the box holds a DoS lever. An ORDINARY write failure
+            # (a squatted directory, a full disk) still escalates.
             if getattr(e, "write_guarded_alias", False):
                 _record_alias_refusal(run_dir, run_dir / "budget.json")
                 return read_budget(run_dir) or state
@@ -167,12 +160,10 @@ def accounting_failure_state(run_dir: Path) -> dict:
     failures yet", never as a value the callers then arithmetic on.
 
     `read_json_locked` narrows the DOCUMENT to a dict; it says nothing about the values inside
-    it, and both readers of this state do arithmetic: `int(state.get(...))` raised `ValueError`
+    it, and both readers of this state do arithmetic: `int(state.get(...))` raises `ValueError`
     on a string count, and `_record_accounting_failure`'s `time.monotonic() - first_failure_at`
-    raised `TypeError` on a non-number stamp — from inside `account_call`'s `except OSError`
-    arm, which has no handler for either. The seam narrowing #878 landed does not reach here,
-    which is the half `lint_unnarrowed_parse`'s own docstring says it deliberately does not
-    mechanize."""
+    raises `TypeError` on a non-number stamp — from inside `account_call`'s `except OSError`
+    arm, which has no handler for either."""
     state = read_json_locked(_accounting_failure_path(run_dir))
     stamp = state.get("first_failure_at")
     return {
@@ -230,16 +221,13 @@ def _record_alias_refusal(run_dir: Path, path: Path) -> None:
 def _wall_origin(state: dict) -> datetime | None:
     """The run's wall-clock origin as an AWARE UTC datetime, never a naive one.
 
-    `datetime.fromisoformat` was called bare here, so an offset-less stamp — `"2026-08-13T00:
-    00:00"`, which `open_budget`'s `setdefault` PRESERVES rather than replaces — parsed fine
-    and came back naive, and `_elapsed`'s `datetime.now(UTC) - origin` raised `TypeError: can't
-    subtract offset-naive and offset-aware datetimes` (#878 F-17b). The `except ValueError` was
-    the whole guard and this shape never raises `ValueError`.
+    A bare `datetime.fromisoformat` parses an offset-less stamp — which `open_budget`'s
+    `setdefault` PRESERVES rather than replaces — into a naive datetime, and `_elapsed`'s
+    `datetime.now(UTC) - origin` then raises `TypeError: can't subtract offset-naive and
+    offset-aware datetimes`, which no `except ValueError` catches.
 
-    `_clock.parse_iso_utc` is the in-repo answer: it reads a naive stamp AS UTC, accepts the
-    trailing `Z` this file's own writers do not mint but hand-written seeds do, and names this
-    exact `TypeError` in its docstring. `payload_view.py:211` made the same swap for the same
-    reason."""
+    `_clock.parse_iso_utc` reads a naive stamp AS UTC and accepts the trailing `Z` that
+    hand-written seeds carry."""
     for key in ("created_at", "started_at"):
         parsed = parse_iso_utc(state.get(key))
         if parsed is not None:
@@ -268,12 +256,12 @@ def tail_exhausted(state: dict, limits: dict) -> bool:
 
 #: Main's own bookkeeping verbs: reading and recording cost budget but are never REFUSED for
 #: it, or a run that hits the cap could no longer write down what it already found.
-#: `append_block` joined when it became main's only writer (#810) — omitting it would have
-#: left the transcript budget-refusable mid-investigation. `write_file`/`edit_file` stay listed
-#: because the tier is keyed on a name, not on a grant, and a stale name here is inert.
-#: `fix_row` joined for the same reason `append_block` did (#836): while a row is flagged BOTH
-#: the append and the close are refused, so a repair verb left at `core` tier would be
-#: permanently withdrawn at the cap and leave the run with nothing that can reopen either.
+#: `append_block` is main's only writer, so omitting it would leave the transcript
+#: budget-refusable mid-investigation. `write_file`/`edit_file` stay listed because the tier is
+#: keyed on a name, not a grant, and a stale name here is inert. `fix_row` is here for the same
+#: reason as `append_block`: while a row is flagged BOTH the append and the close are refused,
+#: so a repair verb at `core` tier would be permanently withdrawn at the cap and leave the run
+#: with nothing that can reopen either.
 #: METERED, not exempt — a model looping on repairs is still stoppable at `tail_exhausted`.
 _MAIN_TAIL_TOOLS = ("read_file", "append_block", "fix_row", "write_file", "edit_file")
 

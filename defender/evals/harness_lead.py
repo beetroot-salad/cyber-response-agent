@@ -51,10 +51,10 @@ def materialize(scenario: Path, tmp: Path) -> Path:
         dst = tmp / "defender" / "skills" / skill.parent.name / "SKILL.md"
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(skill, dst)
-        # #869: the materialized tree carries no `defender/scripts/adapters/`, so the
+        # The materialized tree carries no `defender/scripts/adapters/`, so the
         # declared-systems resolver would refuse the whole lane. A stub adapter per copied
-        # SKILL.md declares the same systems this harness has always driven the lead author
-        # against — cold (never imported), matching the resolver's own contract.
+        # SKILL.md declares the systems this harness drives the lead author against — cold
+        # (never imported), matching the resolver's contract.
         (adapters_dst / f"{skill.parent.name.replace('-', '_')}_adapter.py").write_text(
             "VERBS = {}\n", encoding="utf-8",
         )

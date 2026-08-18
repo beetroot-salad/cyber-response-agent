@@ -56,9 +56,8 @@ def _leg_status_path(learning_run_dir: Path, spec: Direction) -> Path:
 
 
 def _write_leg_status(learning_run_dir: Path, spec: Direction, status: str) -> None:
-    """The leg's own terminal status (#791 R2/R15) — the ONE place `visualize_judge.leg_status`
-    reads to tell a leg that never ran from one that started and died, now that the retired
-    stage's declared-but-unwritten artifact can no longer stand in for that signal."""
+    """The leg's own terminal status — the ONE place `visualize_judge.leg_status` reads to
+    tell a leg that never ran from one that started and died."""
     _leg_status_path(learning_run_dir, spec).write_text(status, encoding="utf-8")
 
 
@@ -88,9 +87,8 @@ def run_direction(
     box: Any,
 ) -> bool:
     run_dir, learning_run_dir = dirs.run_dir, dirs.learning_run_dir
-    # The leg is marked STARTED before the actor call, not after: a leg the actor call itself
-    # raises out of (never reaching the story write) must still read as started-and-died, not
-    # as never-selected — the same confusion the status field exists to remove.
+    # STARTED before the actor call, not after: a leg the actor call itself raises out of
+    # (never reaching the story write) must still read as started-and-died, not never-selected.
     _write_leg_status(learning_run_dir, spec, LEG_STATUS_STARTED)
     _log(f"step=actor ({spec.name})")
     actor_story = spec.invoke_actor(agents, run_dir, learning_run_dir, alert_rule_key, box=box)
@@ -110,8 +108,8 @@ def run_direction(
         _write_leg_status(learning_run_dir, spec, LEG_STATUS_COMPLETED)
         return False
 
-    # #791: the retired oracle stage leaves the leg's own call chain entirely — the judge is
-    # driven straight off the actor's story and the run's own executed evidence.
+    # No oracle stage: the judge is driven straight off the actor's story and the run's own
+    # executed evidence.
     judge_raw = agents.judge(
         spec.judge_wiring, run_dir, actor_story_path, learning_run_dir,
         box=box,
@@ -155,10 +153,6 @@ def _directions_for(disposition: str) -> list[str]:
 
 
 def _prepare_engines_for(directions: list[str], *, include_actor: bool = True) -> None:
-    # #791 FK4/R13 gave this an `include_oracle` knob so the run cycle could opt OUT of
-    # sourcing the retired stage's key while the secondary-metric eval — the one caller that
-    # still drove that stage — kept opting in. That harness is retired, so every surviving
-    # caller wants the exclusion and the knob selected nothing.
     models: set[str] = set()
     for name in directions:
         d = BY_NAME[name]
@@ -175,11 +169,10 @@ _RUN_CYCLE_NAME_PREFIX = "defender-runcycle-"
 def _run_cycle_box_request(
     run_dir: Path, learning_run_dir: Path, defender_dir: Path,
 ) -> box_mod.BoxRequest:
-    """The run-cycle box's geography (M2/M3/DC2): mounts the UNION of the actor's and the
-    judge's gate scopes — learning_run_dir (R4: ro, no in-box writer) + the defender infra
-    tree (also a judge gate root, M3b overlap) + the judged run's gather_raw (ro, S1),
-    snapshotted at box-creation time (R10, decision 9's absent-vs-empty split) — plus the
-    actor's cwd_anchor, covered as the ro parent of the defender mount (DC2)."""
+    """The run-cycle box's geography: the UNION of the actor's and the judge's gate scopes —
+    learning_run_dir (ro, no in-box writer) + the defender infra tree + the judged run's
+    gather_raw (ro), snapshotted at box-creation time — plus the actor's cwd_anchor, covered
+    as the ro parent of the defender mount."""
     gather_raw = RunPaths(run_dir).gather_raw
     mounts = [
         box_mod.Mount(source=learning_run_dir, target=learning_run_dir, writable=False),
@@ -191,8 +184,8 @@ def _run_cycle_box_request(
         name=f"{_RUN_CYCLE_NAME_PREFIX}{learning_run_dir.name}",
         mounts=tuple(mounts),
         workdir=defender_dir.parent,
-        # M2/RF1: the shared infra helper, so the box carries DEFENDER_RUN_DIR/RUNS_BASE too —
-        # box.py re-derives DEFENDER_DIR/PATH/PYTHONPATH off the workdir to the same values.
+        # The shared infra helper, so the box carries DEFENDER_RUN_DIR/RUNS_BASE too — box.py
+        # re-derives DEFENDER_DIR/PATH/PYTHONPATH off the workdir to the same values.
         env=box_mod.infra_env(defender_dir, learning_run_dir),
     )
 
@@ -227,9 +220,9 @@ def _dispatch_directions(
 
 
 def _stop_and_hold(stop_box: Callable[..., None], box: Any) -> BaseException | None:
-    """Tear the run-cycle box down and HOLD any fault instead of raising it here (O7): the
-    fault still propagates, but only after the run has reached the author queue — a box fault
-    must not silently drop the case from authoring, the same invariant a failed LEG keeps."""
+    """Tear the run-cycle box down and HOLD any fault instead of raising it here: the fault
+    still propagates, but only after the run has reached the author queue — a box fault must
+    not silently drop the case from authoring, the same invariant a failed LEG keeps."""
     if box is None:
         return None
     try:
@@ -274,9 +267,9 @@ def run_one(
 
     box: Any = None
     if directions:
-        # O1/M1: one run-cycle box, created before the legs dispatch (decision 2 — actor and
-        # judge share it), torn down exactly once at run end (O7) — including on an
-        # exceptional exit, since neither leg's own error handling may leak it.
+        # One run-cycle box, created before the legs dispatch (actor and judge share it), torn
+        # down exactly once at run end — including on an exceptional exit, since neither leg's
+        # own error handling may leak it.
         box = start_box(_run_cycle_box_request(
             run_dir, learning_run_dir, PATHS.defender_dir,
         ))
@@ -295,9 +288,9 @@ def run_one(
     if disposition == "benign" and adversarial_ok:
         enrich_case_ticket(run_dir, learning_run_dir)
 
-    # #791: the run cycle no longer enqueues for authoring — catalog curation gets its own
-    # trigger at the investigation boundary (run.py's tail), so this leaves the author queue
-    # untouched regardless of how the legs came out.
+    # The run cycle deliberately does not enqueue for authoring — catalog curation has its own
+    # trigger at the investigation boundary (run.py's tail), so the author queue is untouched
+    # regardless of how the legs came out.
 
     if teardown_fault is not None:
         _log(f"run-cycle box teardown failed: {teardown_fault!r}")
@@ -336,9 +329,9 @@ def _serve_marker(
         _log(f"learn_drain: render failed for {claim.run_dir.name}: {e!r} (continuing)")
     with contextlib.suppress(OSError):
         claim.path.unlink()
-    # #791 P2: the claim moved this identity OUT of the top level, which frees the slot for a
-    # retry to land unobstructed while the claim was held. That retry is a re-request of the
-    # run just learned, under the same name — absorb it here rather than relearn it.
+    # The claim moved this identity OUT of the top level, freeing the slot for a retry to land
+    # while the claim was held. That retry re-requests the run just learned, under the same
+    # name — absorb it here rather than relearn it.
     with contextlib.suppress(OSError):
         claim.queued_path.unlink()
     return True
@@ -350,10 +343,9 @@ def learn_drain(
     run_one_fn: Callable[[Path], int] | None = None,
     render: Callable[[Path], None] | None = None,
 ) -> int:
-    # The single-drainer lease its two sibling drains already hold. It became load-bearing
-    # when this drain started RECLAIMING `inflight/`: a claim is only evidence of a DEAD pass
-    # if no live pass can be holding one, and without the lease a second drainer reads a live
-    # drainer's claim as an orphan and learns the same run a second time.
+    # The single-drainer lease, load-bearing because this drain RECLAIMS `inflight/`: a claim
+    # is only evidence of a DEAD pass if no live pass can be holding one. Without the lease a
+    # second drainer reads a live drainer's claim as an orphan and learns the run twice.
     from defender.learning.author import shared as _author_shared
 
     with _author_shared.flock_or_skip(paths.learn_drain_lock_file) as locked:
@@ -377,8 +369,8 @@ def _learn_drain_locked(
 
     qdir = paths.learn_queue_dir
     if not qdir.is_dir():
-        # #791 H1c: the learn queue has no writer at all anymore, hand or automatic — the
-        # absent/empty distinction is the one instrument left, so it says which this is.
+        # The learn queue has no writer at all, hand or automatic — the absent/empty
+        # distinction is the one instrument left, so the log says which this is.
         _log(
             f"learn_drain: queue root {qdir} does not exist — no automatic feed writes it "
             "anymore (#791 removed the investigation's own enqueue); nothing queued"

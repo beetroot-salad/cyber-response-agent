@@ -55,14 +55,13 @@ def acquire_flock(path: Path) -> Any | None:
 
 
 def acquire_flock_within(path: Path, *, timeout_seconds: int) -> Any | None:
-    """Retried until a deadline; `None` once it expires (#719).
+    """Retried until a deadline; `None` once it expires.
 
-    The drain's wait on a channel's APPEND lock. `acquire_flock` gives up instantly, which
-    would make an appender's ordinary hold look like a permanent one; a plain blocking
-    acquisition would let one channel's stuck appender hold the repo lock — and therefore
-    every sibling channel's tick — indefinitely. The deadline is the caller's configured
-    repo-lock wait, so the two bounds cannot drift apart. It answers `None` rather than
-    raising, deliberately: a busy channel is not a fault."""
+    The drain's wait on a channel's APPEND lock. `acquire_flock` gives up instantly, making
+    an appender's ordinary hold look permanent; a plain blocking acquisition would let one
+    channel's stuck appender hold the repo lock — and therefore every sibling channel's
+    tick — indefinitely. The deadline is the caller's configured repo-lock wait, so the two
+    bounds cannot drift. `None` rather than raising: a busy channel is not a fault."""
     fh = _flock.open_lock(path)
     try:
         taken = _flock.take(fh, timeout_seconds=timeout_seconds)
@@ -76,8 +75,8 @@ def acquire_flock_within(path: Path, *, timeout_seconds: int) -> Any | None:
 
 
 #: The repo lock and the channel locks release identically — one `flock(LOCK_UN)` and a
-#: close. Two names for it is what the module had; the second is kept as an alias because
-#: `acquire_repo_lock`'s callers read better paired with a matching verb.
+#: close. The second name is an alias, so `acquire_repo_lock`'s callers read with a
+#: matching verb.
 release_flock = _flock.release
 release_repo_lock = _flock.release
 
@@ -163,8 +162,8 @@ def result_list(result: dict, key: str) -> list[Any]:
 
 def commit_message(result: dict, noun: str) -> str:
     msg = result.get("commit_message")
-    # A commit message that renders as nothing is no message at all -- and this gate is
-    # what stands between the loop and committing a lesson edit unexplained (#722).
+    # A commit message that renders as nothing is no message at all — this gate is what
+    # stands between the loop and committing a lesson edit unexplained.
     if not isinstance(msg, str) or is_content_less(msg):
         raise AuthorError(
             f"AUTHOR_RESULT reported committed {noun} without a non-empty "

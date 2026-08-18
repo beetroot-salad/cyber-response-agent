@@ -45,11 +45,11 @@ def parse_frontmatter_or_none(text: str) -> dict[str, Any] | None:
 def strip_frontmatter(text: str) -> str:
     """The body alone — for the callers that splice a SKILL into a PROMPT.
 
-    Frontmatter is file metadata for humans and for the scaffold validator; a model reading
-    it as prose is reading YAML that describes the file rather than instructions. It is also
-    where a stale tool roster does the most damage: `allowed-tools` is a reader hint nothing
-    enforces, so a model told it has a verb the `ToolSet` never registered spends turns
-    calling it (#810).
+    Frontmatter is file metadata for humans and for the scaffold validator; a model reading it
+    as prose is reading YAML that describes the file rather than instructions. It is also where
+    a stale tool roster does the most damage: `allowed-tools` is a reader hint nothing
+    enforces, so a model told it has a verb the `ToolSet` never registered spends turns calling
+    it.
 
     Malformed frontmatter returns the text unchanged — a prompt loader must not lose a whole
     SKILL to a YAML slip."""

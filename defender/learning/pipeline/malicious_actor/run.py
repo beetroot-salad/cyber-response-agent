@@ -25,10 +25,9 @@ from defender.learning.pipeline.malicious_actor import mitre_corpus
 _SKIP_SCAN_LINES = 8
 
 #: THIS leg's gate scope — the adversarial actor runs both pinned lesson scripts and reads
-#: both lesson corpora. Declared here rather than at the call site because the audit CLI
-#: (`scripts/policy_cli.py`) must report the scope this leg actually binds: the benign leg
-#: below shares `AgentRole.ACTOR` and binds strictly less, so a CLI that transcribed one leg's
-#: grants answered `defender-policy show actor` with the other leg's answer half the time.
+#: both lesson corpora. Declared per leg rather than at the call site because the benign leg
+#: shares `AgentRole.ACTOR` and binds strictly less, so the audit CLI (`scripts/policy_cli.py`)
+#: must read each leg's own scope to answer `defender-policy show actor` correctly.
 #: Plain tuples, not a `RunScope`: this module is imported eagerly by `core.subagents`, and
 #: reaching for the runtime's scope types here would drag the gate into that import.
 ACTOR_SCRIPTS = (LESSONS_ENV_RETRIEVE_SCRIPT, LESSONS_ACTOR_INDEX_SCRIPT)

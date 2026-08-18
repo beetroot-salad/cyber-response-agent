@@ -30,24 +30,20 @@ CORPUS_NAME = DEFAULT_CORPUS.name
 
 
 def _resolve_corpus(raw: str | None, ap: argparse.ArgumentParser) -> Path:
-    """`--corpus` is a RELOCATION seam, not a corpus selector — it exists so the
-    forward-check can point this walk at a worktree's copy of the environment corpus and
-    so tests can drive it over a fixture. It is not a route to a *different* corpus.
+    """`--corpus` is a RELOCATION seam (worktree copy for the forward-check, fixture for
+    tests), never a selector for a *different* corpus.
 
-    That distinction is load-bearing because this script is a PINNED grant for the actor
-    (`learning/pipeline/actor_engine.py`), and a pinned grant is argv-blind by design
-    (`docs/runtime-gates.md`): the gate admits `python3 <this script> <anything>` and never
-    inspects the operands, so containment is entirely this function's job. Without it the
-    malicious actor — the one agent the gray-box design deliberately blinds to the
-    defender's playbook — could pass `--corpus defender/lessons` and enumerate the corpus
-    `decide_read` denies it. The sibling `defender-lessons --show` already holds this line
-    with a post-`resolve()` containment check; this is the same control.
+    Containment is entirely this function's job: the script is a PINNED grant for the actor
+    (`learning/pipeline/actor_engine.py`), and pinned grants are argv-blind by design
+    (`docs/runtime-gates.md`) — the gate admits `python3 <this script> <anything>` without
+    inspecting operands. Unguarded, the malicious actor could pass `--corpus defender/lessons`
+    and enumerate the corpus `decide_read` denies it. (`defender-lessons --show` holds the
+    same line with its own post-`resolve()` check.)
 
-    The rule is the LEAF NAME rather than one absolute path, because the legitimate
-    relocations (worktree, fixture) change the root but never the corpus. The actor cannot
-    write, so within its reachable tree a directory named `lessons-environment` IS the
-    environment corpus; resolving first means a symlink or `..` cannot dress another corpus
-    up in that name."""
+    The rule is the LEAF NAME, not one absolute path, because legitimate relocations change
+    the root but never the corpus. The actor cannot write, so a directory named
+    `lessons-environment` in its reachable tree IS the environment corpus; resolving first
+    stops a symlink or `..` from dressing another corpus up in that name."""
     if raw is None:
         return DEFAULT_CORPUS
     corpus = Path(raw).resolve()

@@ -67,12 +67,11 @@ class GrammarError(ValueError):
     """The model's output did not parse as the closed grammar its prompt mandates."""
 
 
-# lint-dup: ok — same names as learning/core/config.py, deliberately NOT shared. That
-# judge is the learning loop's outcome classifier; this one is the calibration judge, and
-# the suite picks it to be off the oracle's own lineage. Worse, this pair feeds
-# `prompts_sha8` into the score tag: importing the learning config would let a change
-# there silently re-tag every committed score, which is the one thing the tag exists to
-# prevent. Two readers of two different env vars that happen to rhyme.
+# lint-dup: ok — same names as learning/core/config.py, deliberately NOT shared. That judge is
+# the learning loop's outcome classifier; this one is the calibration judge, picked to be off
+# the oracle's own lineage. This pair also feeds `prompts_sha8` into the score tag, so
+# importing the learning config would let a change there silently re-tag every committed
+# score. Two readers of two different env vars that happen to rhyme.
 def judge_model() -> str:  # lint-dup: ok — see the note above
     return os.environ.get("JUDGE_MODEL") or DEFAULT_JUDGE_MODEL
 
@@ -118,11 +117,11 @@ class LeadInputs:
 def _bounded(payload: Any) -> tuple[Any, bool]:
     """Bound an ES|QL payload's rows; return `(payload, was_cut)`.
 
-    Only the ES|QL `{query, columns, row_count, values}` shape has a row array to bound —
-    50 of the tree's 135 payloads are a lookup system's own response instead (a cmdb host
-    record, an identity user, a threat-intel verdict, a bare list), and one carries its
-    own `truncated` flag from the source. Those pass through untouched: they are small,
-    and rewriting a shape we do not model is how a judge ends up grading our edit.
+    Only the ES|QL `{query, columns, row_count, values}` shape has a row array to bound — many
+    payloads are a lookup system's own response instead (a cmdb host record, an identity user,
+    a threat-intel verdict, a bare list), and one carries its own `truncated` flag from the
+    source. Those pass through untouched: they are small, and rewriting a shape we do not model
+    is how a judge ends up grading our edit.
     """
     if not isinstance(payload, dict):
         return payload, False
@@ -138,11 +137,10 @@ def _bounded(payload: Any) -> tuple[Any, bool]:
     }, True
 
 
-#: What a payload file that was never written looks like to the judge. `build_case.py`
-#: copies the run's raw payloads verbatim, so a zero-byte file means the capture never
-#: recorded that query's result — 12 of them are in the tree. Rendering it as an empty
-#: result set would ask the judge to infer absence from a missing measurement, which is
-#: the error class this whole suite exists to catch.
+#: What a payload file that was never written looks like to the judge. `build_case.py` copies
+#: the run's raw payloads verbatim, so a zero-byte file means the capture never recorded that
+#: query's result. Rendering it as an empty result set would ask the judge to infer absence
+#: from a missing measurement, which is the error class this suite exists to catch.
 UNREADABLE_NOTE = (
     "this query's payload was never recorded by the capture. It is NOT an empty result "
     "set and carries no evidence either way"
@@ -202,15 +200,12 @@ def load_case_leads(case_dir: Path) -> list[dict]:
 
 
 #: The lead fields a judge pass may reason about. An ALLOWLIST, so a field added to
-#: `leads.jsonl` for plumbing cannot reach a model prompt by default — the failure this
-#: exists to prevent is silent, because a prompt that gains a line is a different
-#: measurement taken under an unchanged `prompts_sha8` and an unchanged
-#: `labels/<judge-suffix>.json` cache key, so a rebuilt case would be labelled from a
-#: different input shape than its siblings under one tag and nothing would say so.
-#: `seq` (#882) is exactly such a field: it is the queries-table key that pairs a control
-#: with its observed payload, and the judge has no use for it. Adding this projection is a
-#: no-op on every committed case — all 267 lead rows carry exactly these keys and all 1436
-#: queries exactly these two — so no recorded label is invalidated by it.
+#: `leads.jsonl` for plumbing cannot reach a model prompt by default. The failure it prevents
+#: is silent: a prompt that gains a line is a different measurement taken under an unchanged
+#: `prompts_sha8` and an unchanged `labels/<judge-suffix>.json` cache key, so a rebuilt case
+#: would be labelled from a different input shape than its siblings under one tag. `seq` is
+#: exactly such a field — the queries-table key pairing a control with its observed payload,
+#: of no use to the judge.
 MODEL_LEAD_FIELDS = ("lead_id", "goal", "what_to_summarize", "queries")
 MODEL_QUERY_FIELDS = ("query_id", "params")
 
@@ -458,18 +453,14 @@ GRAMMAR_ATTEMPTS = 3
 
 
 def _reparse_note(error: Exception) -> str:
-    """The only thing a retry adds: a complaint about the ENVELOPE, never the judgement.
+    """The only thing a retry adds: a complaint about the ENVELOPE, never the judgement. A
+    retry is for a malformed envelope around a real judgement, not for a verdict we dislike, so
+    nothing here describes the telemetry, the projection, or what a good answer looks like — it
+    names the parse failure and the YAML rule that avoids it.
 
-    The first version of the retry re-sent a byte-identical payload, on the reasoning
-    that a retry is for a malformed envelope around a real judgement and not for a
-    verdict we dislike. That reasoning is right and this preserves it — nothing here
-    describes the telemetry, the projection, or what a good answer looks like. It names
-    the parse failure and the YAML rule that avoids it.
-
-    It was needed: a real case-005 verdict wrote its `rationale` as a plain scalar
-    containing `pam_unix(sshd:auth): authentication failure`, and a plain YAML scalar
-    cannot carry `: `. Two identical attempts both produced it, because nothing told the
-    model its output had not parsed.
+    A byte-identical re-send is not enough: a `rationale` written as a plain scalar containing
+    `pam_unix(sshd:auth): authentication failure` cannot parse (a plain YAML scalar cannot
+    carry `: `), and identical attempts reproduce it.
     """
     return (
         "\n\n<retry>\n"
@@ -510,18 +501,16 @@ def sole_judge(answers: Iterable[dict], *, what: str) -> str:
     """The one judge that answered all of `answers`, or a `RuntimeError` naming the set.
 
     The counterpart to the provenance `_pass` stamps: reading `judge_model` back off every
-    reply is what catches a run that silently fell back mid-sweep and filed two judges'
-    answers under one tag. Three callers wrote this out by hand — the label cache and both
-    audit sweeps — and the check is only worth anything if it is applied everywhere a batch
-    of replies gets summarized under one name, which is exactly the property a hand-copied
-    guard does not have.
+    reply catches a run that silently fell back mid-sweep and filed two judges' answers under
+    one tag. Shared by all three callers (the label cache and both audit sweeps), because the
+    check is only worth anything applied everywhere a batch is summarized under one name.
 
     `what` names the batch in the message, because "more than one judge" is not actionable
     without knowing which sweep produced it.
 
-    An EMPTY batch is its own message. It is reachable — a sweep whose entry set came out
-    empty (every case defective or derived) asks this of nothing — and "ran on more than one
-    judge: []" is the one reading of that state a reader cannot act on.
+    An EMPTY batch is its own message. It is reachable — a sweep whose entry set came out empty
+    (every case defective or derived) asks this of nothing — and "ran on more than one judge:
+    []" is the one reading of that state a reader cannot act on.
     """
     resolved = {answer["judge_model"] for answer in answers}
     if not resolved:

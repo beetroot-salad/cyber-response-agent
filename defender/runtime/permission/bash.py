@@ -51,34 +51,27 @@ EMBEDDED_NUL_REASON = (
     "cannot cross the box wire, and it makes an operand unresolvable. Re-send the command "
     "without it."
 )
-"""#851 F-07/F-10. Denied on the WHOLE command string, ahead of the parse, because the two
-places that would otherwise catch a NUL each miss half the surface. `_in_scope`'s
-`RESOLVE_ERRORS` arm only runs for a program whose extractor OPENS something — every
-`OPENS_NOTHING` grant (grep/echo/wc/python3/rm/the `defender-*` shims) was ALLOWED with a NUL
-in its argv, and `encode_request` then raised a bare `ValueError` out of `BoxExecutor.run_parsed`
-that no handler between there and `run.py::main` catches, killing the whole investigation instead
-of refusing one command. And `_claim` cannot tell a NUL a token really carries from the
-`_TOKEN_SPACE` sentinel it substitutes for an intra-token space — the two collapse in the very
-string every grant pattern is `fullmatch`ed against. Refusing the whole command outright closes
-both, and is free: no legitimate command carries one."""
+"""Denied on the WHOLE command string, ahead of the parse, because the two places that would
+otherwise catch a NUL each miss half the surface. `_in_scope`'s `RESOLVE_ERRORS` arm only runs
+for a program whose extractor OPENS something, so every `OPENS_NOTHING` grant (grep/echo/wc/
+python3/rm/the `defender-*` shims) passes with a NUL in its argv — and `encode_request` then
+raises a bare `ValueError` out of `BoxExecutor.run_parsed` that nothing up to `run.py::main`
+catches, killing the investigation instead of refusing one command. `_claim`, meanwhile, cannot
+tell a NUL a token really carries from the `_TOKEN_SPACE` sentinel it substitutes for an
+intra-token space; the two collapse in the very string every grant pattern is `fullmatch`ed
+against. Refusing outright closes both, and is free: no legitimate command carries one."""
 
 
-#: The whole of what the agent is told about this refusal once it has already happened, and the
-#: only place the full list lives. `defender/SKILL.md` used to carry a "One physical line"
-#: paragraph saying part of it; that file IS the always-on system prompt (`driver.py`
-#: `_instructions`), so it charged every run and every turn for a failure that is rare — and it
-#: sat in MAIN's prompt while every observed instance came from GATHER, which never had it.
-#: Paid once, on the failure, is the right trade there, so this string has to be complete on
-#: its own.
+#: The whole of what the agent is told about this refusal, and the only place the full list
+#: lives — deliberately paid once on the (rare) failure rather than standing in `SKILL.md`, the
+#: always-on system prompt, so this string has to be complete on its own.
 #:
-#: `skills/advisory/SKILL.md` deliberately still carries a one-line "send it as ONE physical
-#: line" note. That file is loaded ON DEMAND, at the moment its own very long invocation is
-#: composed, so it costs no standing context and preempts the round-trip rather than explaining
-#: it afterwards. On-demand placement is not what the deletion above was about.
+#: `skills/advisory/SKILL.md` still carries a one-line "send it as ONE physical line" note: it
+#: is loaded ON DEMAND while its own very long invocation is composed, so it costs no standing
+#: context and preempts the round-trip rather than explaining it afterwards.
 #:
 #: Every cause below is pinned by `test_the_lexing_reason_names_every_way_a_command_can_fail_
-#: to_parse`, which drives one command per cause through the real gate and asserts the reason
-#: NAMES it — the guard against this list drifting from what `parse`/`unwrap` actually refuse.
+#: to_parse` — the guard against this list drifting from what `parse`/`unwrap` actually refuse.
 UNTOKENIZABLE_REASON = (
     "Blocked: the command could not be parsed. There is no shell here, so each PHYSICAL LINE "
     "is lexed on its own and every stage runs as a bare argv. The causes, all of which fail "
@@ -107,13 +100,10 @@ def _parse(cmd: str) -> list[bash_exec.Pipeline] | None:
         # A LEXING failure, not a capability one: `unwrap` returns None on an unbalanced quote
         # (shlex raises), on a `bash`/`sh` wrapper that is not exactly one command string, and
         # on a `timeout` prefix it cannot strip back off the raw text (its words were quoted).
-        # Returning None here sent all of them to the caller's generic "not permitted for this
-        # agent" reason — a CAPABILITY message for a QUOTING mistake, which tells the model to
-        # reach for another tool when what it needed was to close its quote. The sibling quote
-        # failure (a newline inside a quoted argument, which `tokenize` catches instead) has
-        # always answered `UNTOKENIZABLE_REASON`; these now answer the same way, and
-        # UNTOKENIZABLE_REASON's cause (5) names every one of them rather than the `bash -c`
-        # spelling alone.
+        # Raising here keeps them on `UNTOKENIZABLE_REASON` (whose cause (5) names them all)
+        # rather than the caller's generic "not permitted for this agent" — a CAPABILITY message
+        # for a QUOTING mistake tells the model to reach for another tool when what it needed was
+        # to close its quote.
         raise bash_exec.UntokenizableCommand(
             "command could not be unwrapped to a single command string"
         )
@@ -164,10 +154,10 @@ def _in_scope(argv: list[str], grant: Grant, *, run_dir: Path | None) -> bool:
     if extract is OPENS_NOTHING and not grant.resolve_operand:
         return True
     if extract is OPENS_NOTHING and grant.resolve_operand:
-        # #691 MD-3: this grant opted IN to a resolve()+scope recheck on its own operand (e.g.
-        # the curator's `rm`, whose PROGRAM-level extractor stays OPENS_NOTHING for every other
-        # rm grant) — a symlink inside the corpus pointing outside it must be caught by resolving
-        # the operand, not merely by the pattern matching the pre-resolution text.
+        # This grant opted IN to a resolve()+scope recheck on its own operand (e.g. the curator's
+        # `rm`, whose PROGRAM-level extractor stays OPENS_NOTHING for every other rm grant) — a
+        # symlink inside the corpus pointing outside it must be caught by resolving the operand,
+        # not merely by the pattern matching the pre-resolution text.
         extract = rm_target_files
     files = extract(argv)
     if files is None:

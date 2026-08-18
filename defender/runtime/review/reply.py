@@ -1,17 +1,14 @@
 """Reading what the lenses and the composer return.
 
-Every refusal here lands on ONE failure kind — `unreadable`. A reply the gate never read
-says nothing about the reasoning behind it, so folding "would not parse" together with
-"answered inside its contract and the content was unusable" inflates the apparent
-quality-failure rate; the retired gate spent a whole vocabulary member on keeping those
-apart. Nothing in this module mints a quality signal, so nothing here needs a second kind.
+Every refusal here lands on ONE failure kind — `unreadable`. A reply the gate never read says
+nothing about the reasoning behind it, so folding "would not parse" together with "answered
+inside its contract and the content was unusable" would inflate the apparent quality-failure
+rate. Nothing in this module mints a quality signal, so nothing here needs a second kind.
 
-The other rule the retired gate paid for: **no fail-open read**. Its coherence check asked
-whether a reply contained one word and treated everything else — an empty string, a refusal,
-a stray blob, a timeout's leftover detail — as the permissive value, and a confident
-disposition then committed on a counter-story nothing had judged. A reply that answers
-neither way has not completed, and that applies to a lens reading the composer cannot use
-exactly as it applied there.
+**No fail-open read.** A check that asks whether a reply contains one word treats everything
+else — an empty string, a refusal, a stray blob, a timeout's leftover detail — as the
+permissive value, and a confident disposition then commits on a counter-story nothing judged.
+A reply that answers neither way has not completed, lens readings included.
 """
 
 from __future__ import annotations
@@ -36,9 +33,9 @@ __all__ = [
     "read_lens_reading",
 ]
 
-#: The ask is model-authored text on the channel that returns to the LIVE session, so it
-#: carries the bound the retired requirement text carried on that same channel. Not a limit
-#: on how much a reviewer may think — a limit on how much of it is handed to another agent.
+#: The ask is model-authored text on the channel that returns to the LIVE session, so it is
+#: bounded. Not a limit on how much a reviewer may think — a limit on how much of it is handed
+#: to another agent.
 ASK_PROSE_MAX = 500
 
 
@@ -58,12 +55,9 @@ class Ask:
 #:
 #: It exists because the host cannot derive it. "The close holds" and "there is a gap, and
 #: nothing measurable would settle it" both carry no ask, and they route to opposite outcomes
-#: — one commits the confident disposition, the other overrides it. One bit, and it is the
-#: only thing in this contract that is not prose.
-#:
-#: Two members, each earning its place by a DIFFERENT consequence rather than by naming a
-#: different condition, which is the bar the retired ten-member outcome vocabulary could not
-#: clear.
+#: — one commits the confident disposition, the other overrides it. One bit, and the only
+#: thing in this contract that is not prose. Two members, each earning its place by a DIFFERENT
+#: consequence rather than by naming a different condition.
 HOLDS = "holds"
 GAP = "gap"
 FINDINGS: frozenset[str] = frozenset({HOLDS, GAP})
@@ -85,12 +79,10 @@ class Review:
 def citable_refs(companion: CompanionBody) -> frozenset[str]:
     """Every invlang id a review may name.
 
-    The invented-identifier guard, generalised. The retired gate refused a projection row
-    naming a lead the host never sent out, because unbounded a hallucinated — or
-    foreign-run — id flowed into the discriminating set and was handed back to the
-    investigator as work to go do: the forced turn's economy inverted, with the gate charging
-    the investigation for a hallucination. An ask's target is the same hazard on a wider
-    surface, because it may name an entity or a hypothesis rather than only a lead."""
+    The invented-identifier guard: unbounded, a hallucinated — or foreign-run — id flows back
+    to the investigator as work to go do, charging the investigation for a hallucination. An
+    ask's target is that hazard on a wide surface, since it may name an entity or a hypothesis
+    rather than only a lead."""
     refs = {v["id"] for v in _walkers.all_vertices(companion) if v.get("id")}
     refs |= {e["id"] for e in _walkers.all_edges(companion) if e.get("id")}
     refs |= set(_walkers.all_hypotheses(companion))
@@ -105,9 +97,8 @@ def read_lens_reading(text: str | None) -> str:
     """A lens's reading, or `Unreadable`.
 
     A lens answers in prose, so there is no shape to check — which leaves exactly one way to
-    fail, and it is the one the fail-open read used to swallow: a reply with nothing in it.
-    A lens that reached no reading has not completed, and a composer handed an empty reading
-    would weigh silence as agreement."""
+    fail: a reply with nothing in it. A lens that reached no reading has not completed, and a
+    composer handed an empty reading would weigh silence as agreement."""
     reading = (text or "").strip()
     if not reading:
         raise Unreadable("a lens returned no reading")
@@ -146,10 +137,9 @@ def read_composer_reply(text: str | None, *, refs: frozenset[str]) -> Review:
     if not isinstance(review, str) or not review.strip():
         raise Unreadable("the composer's reply carries no review")
 
-    # A closed vocabulary is CHECKED, not assumed. The retired projection stage dispatched on
-    # an unchecked tag, so a misspelt one was invisible to every classifier bucket, fell
-    # through to the permissive arm and committed an override with no failure kind — the
-    # review's own breakage recorded as a finding about the evidence.
+    # A closed vocabulary is CHECKED, not assumed: an unchecked tag lets a misspelling fall
+    # through to the permissive arm and commit an override with no failure kind — the review's
+    # own breakage recorded as a finding about the evidence.
     finding = obj.get("finding")
     if finding not in FINDINGS:
         raise Unreadable(

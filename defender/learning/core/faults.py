@@ -7,14 +7,12 @@ from defender.learning.core.config import FatalConfigError, StageAbort
 from defender.runtime import box as box_mod
 
 
-# #747: `RunTainted` belongs here for TWO readers, not one. `_run_stage` gives it
-# `[loop] FATAL:` + exit 2 instead of the bare traceback and exit 1 an unhandled Exception
-# got — a taint is as systemic as a fault gets, and the operator-facing failure mode should
-# not depend on which drain lane found it. And `run_or_dead_letter` below re-raises it
-# rather than dead-lettering it: today the taint is raised from `stop_and_scrub`, outside
-# `do_work`, so it never meets that guard — but a tainted tree quietly filed as one item's
-# ordinary failure is exactly the silence this tuple exists to prevent, and leaving it out
-# left that one refactor away.
+# `RunTainted` is here for TWO readers. `_run_stage` gives it `[loop] FATAL:` + exit 2
+# instead of a bare traceback, so the operator-facing failure mode does not depend on which
+# drain lane found it. And `run_or_dead_letter` re-raises rather than dead-letters it: the
+# taint is raised from `stop_and_scrub`, outside `do_work`, so it never meets that guard
+# today — but a tainted tree filed as one item's ordinary failure is exactly the silence this
+# tuple prevents.
 SYSTEMIC_FAULTS: tuple[type[BaseException], ...] = (
     StageAbort, FatalConfigError, GitError, box_mod.BoxFault, box_mod.RunTainted,
 )

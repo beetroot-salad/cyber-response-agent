@@ -1,9 +1,8 @@
 """The renderer + ingest + fold primitives built on `session_store`'s reader.
 
-`render` always returns the store's own `send`-role render (never its `live` input);
-`ingest` appends the length-sliced tail of a live message list with no position or
-payload-hash diffing; `fold` mints (or reuses) one synthesized frontier row per fold
-boundary, keyed by a store query rather than an in-process cache.
+`render` always returns the store's own `send`-role render, never its `live` input; `ingest`
+appends the length-sliced tail of a live message list; `fold` mints (or reuses) one
+synthesized frontier row per boundary, keyed by a store query rather than an in-process cache.
 """
 from __future__ import annotations
 
@@ -39,12 +38,11 @@ def _fold_impl(  # noqa: PLR0913 — mint-time stamping needs the run's identity
     text: str | None = None,
 ) -> int:
     if boundary is None:
-        # correction R2/FE-2 (binding): `_default_boundary` no longer stands in as this
-        # fold's placeholder default — it counts the session's non-synthesized ROWS, which
-        # over-counts once a fold has displaced some off the path — so a caller with no
-        # boundary of its own fails closed rather than silently taking that count. (#753
-        # gave `gather_boundary` a path predicate; this count still has none, by design:
-        # a frontier's seq is keyed to rows written, not to rows still reachable.)
+        # `_default_boundary` must NOT stand in here: it counts the session's non-synthesized
+        # ROWS, which over-counts once a fold has displaced some off the path, so a caller
+        # with no boundary of its own fails closed rather than silently taking that count.
+        # (The count has no path predicate by design — a frontier's seq is keyed to rows
+        # written, not to rows still reachable.)
         raise ValueError(
             "boundary is required; selection.fold no longer defaults it from the "
             "session's own row count")
@@ -68,9 +66,8 @@ def _fold_impl(  # noqa: PLR0913 — mint-time stamping needs the run's identity
             "a fold refuses to parent its frontier onto a row belonging to another "
             "session — the folding session's own lineage root must be its own row")
     # The caller owns the frontier's CONTENT (the driver passes the invlang record of the
-    # loops being folded); the placeholder is a shape-only default for callers that have
-    # no record to carry — a fold whose frontier says only "boundary N" discards the
-    # folded turns without replacing them, so no production path should take it.
+    # loops being folded). The placeholder is shape-only: a frontier saying just "boundary N"
+    # discards the folded turns without replacing them, so no production path should take it.
     text = text if text is not None else f"FRONTIER: fold boundary {boundary}"
     frontier = ModelRequest(
         parts=[UserPromptPart(content=text)], run_id=run_id, conversation_id=conversation_id,

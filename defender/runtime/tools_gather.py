@@ -45,18 +45,15 @@ class GatherRequest:
     what_to_summarize: tuple[str, ...]
 
 
-#: `(agent_id, system, request_limit) -> the built gather agent`. Named and ANNOTATED because
-#: #835 widened it from one argument to two: the seam is untyped at both call sites otherwise,
-#: so a stale factory surfaces as a `TypeError` raised where no terminator arm catches it —
-#: outside the try in `_run_gather` — and unwinds through main's tool call mid-lead.
+#: `(agent_id, system, request_limit) -> the built gather agent`. ANNOTATED because the seam is
+#: untyped at both call sites otherwise, so a stale factory surfaces as a `TypeError` raised
+#: where no terminator arm catches it — outside the try in `_run_gather` — and unwinds through
+#: main's tool call mid-lead.
 #:
-#: `request_limit` is the third argument for #880 F-19's residue. The factory builds this
+#: `request_limit` is passed rather than re-read from a module constant: the factory builds this
 #: lead's history recorder, and that recorder must withhold the doomed round against the SAME
-#: ceiling `_run_gather` is about to enforce with `UsageLimits`. It used to be told nothing, so
-#: each factory named a ceiling of its own from a module constant — and the correlation
-#: dispatch, whose ceiling is 8 rather than 40, named the wrong one and committed a round that
-#: was never sent. Passing the run's own value leaves the two unable to disagree; naming it
-#: twice in two modules only left them agreeing by inspection.
+#: ceiling `_run_gather` enforces with `UsageLimits`. The correlation dispatch's ceiling is 8
+#: rather than 40, so a constant read here commits a round that was never sent.
 GatherFactory = Callable[[str, str, int], Any]
 
 
@@ -85,9 +82,9 @@ def _repo_rel(defender_dir: Path, path: Path) -> str:
 
 
 def _locator(defender_dir: Path, t: QueryTemplate) -> str:
-    """The one `id — path` line. ONE spelling because both surfaces that emit it teach the
-    model the same shape: the dispatch index (where an off-target entry is nothing BUT this
-    line) and `template_search`'s hit header. Two copies drift the moment either is edited."""
+    """The one `id — path` line, in ONE spelling: both surfaces that emit it — the dispatch
+    index (where an off-target entry is nothing BUT this line) and `template_search`'s hit
+    header — teach the model the same shape."""
     return f"- `{t.id}` — `{_repo_rel(defender_dir, t.path)}`"
 
 
@@ -95,11 +92,10 @@ def _locator(defender_dir: Path, t: QueryTemplate) -> str:
 class TemplateIndex:
     """The rendered index, and — when it is empty — WHICH of the two emptinesses it is.
 
-    `text` alone cannot say. A corpus that could not be read and a corpus read in full whose
-    every template the role's verb grant refuses both render `""`, and they call for opposite
-    things to be said to the lead: the first is "templates may well exist, go look", the second
-    is "they exist and you may not run them". `established_seen` counts what the walk found
-    BEFORE the grant filter, which is exactly the bit that separates them.
+    A corpus that could not be read and a corpus read in full whose every template the role's
+    verb grant refuses both render `""`, and they call for opposite things to be said to the
+    lead: "templates may well exist, go look" versus "they exist and you may not run them".
+    `established_seen` counts what the walk found BEFORE the grant filter, which separates them.
     """
 
     text: str
@@ -109,17 +105,15 @@ class TemplateIndex:
 def _template_index(
     defender_dir: Path, dispatched: str, verb_grant: VerbGrant | None = None,
 ) -> TemplateIndex:
-    """Two tiers (#835). The dispatched system's templates carry their `## Goal`; every other
-    system's shrink to an id and a path.
+    """Two tiers: the dispatched system's templates carry their `## Goal`; every other system's
+    shrink to an id and a path.
 
-    Not a per-system FILTER, which is what the measurement invites and what would break the
-    thing it measured: leads cross systems in practice (l-004, dispatched host-state, queried
-    cmdb; l-005, dispatched identity, queried four). Every established id stays in every
-    dispatch. What the off-target tier drops is the PROSE — which is the whole cost: 27 Goals
-    render 14.8k chars, 86% of a gather lead's user message, re-sent on all 22 of its turns,
-    for a catalog the lead will mostly never open.
+    Deliberately not a per-system FILTER — leads cross systems in practice, so every
+    established id stays in every dispatch. What the off-target tier drops is the PROSE, which
+    is the whole cost: 27 Goals render 14.8k chars, 86% of a gather lead's user message,
+    re-sent on all 22 of its turns, for a catalog it will mostly never open.
 
-    The off-target tier keeps the PATH. There is no fetch-by-id tool, so the path is what makes
+    The off-target tier keeps the PATH: there is no fetch-by-id tool, so the path is what makes
     a cross-system reuse one `read_file` instead of a `template_search` round-trip first — and
     `template_search` matches `body`, which excludes the frontmatter, so searching for the id
     itself is not reliably even a hit.
@@ -141,15 +135,15 @@ def _template_index(
 
     # Before the tier headers, not after: an index with no entries at all is a degradation
     # `_gather_prompt` renders its own block for, and a header over two empty lists would make
-    # that check pass on a truthy string that says nothing (test d19).
+    # that check pass on a truthy string that says nothing.
     if not on_target and not elsewhere:
         return TemplateIndex("", established_seen)
 
     # No positional word ("above"/"below") in this arm: the descriptor index is absent whenever
-    # `_descriptor_catalog` returns None, and the other tier is absent on a one-system corpus, so
-    # a pointer at either is a dangling reference in exactly the degradation this block exists to
-    # make legible. `_run_gather` holds `system` to `is_system_name` before the prompt is built,
-    # so reaching here means a well-formed system the catalog simply has no template for.
+    # `_descriptor_catalog` returns None and the other tier is absent on a one-system corpus, so
+    # a pointer at either is a dangling reference in exactly the degradation this block exists
+    # to make legible. `_run_gather` holds `system` to `is_system_name` before the prompt is
+    # built, so reaching here means a well-formed system the catalog has no template for.
     on_target_block = "\n".join(on_target) if on_target else (
         f"(none — the catalog has no established `{dispatched}` template. Nothing is on-target: "
         "`template_search` for a near neighbour, or read an off-tier path, before you coin.)"
@@ -180,11 +174,10 @@ _INDEX_UNAVAILABLE = (
     "for one before you coin a fresh query id.\n\n"
 )
 
-# The OTHER emptiness, and it is not the one above. The walk read the corpus in full and the
-# role's verb grant refused every template in it. Saying "the corpus could not be read" there
-# would be false, and "templates may well exist — go look" actively misleads: `template_search`
-# is NOT grant-filtered (it greps bodies, the grant gates verbs), so it will happily return a
-# template this role cannot run, and the lead would burn a turn binding it to find out.
+# The OTHER emptiness: the walk read the corpus in full and the role's verb grant refused every
+# template in it. "The corpus could not be read" would be false here, and "templates may well
+# exist — go look" misleads: `template_search` is NOT grant-filtered (it greps bodies, the grant
+# gates verbs), so it returns templates this role cannot run and the lead burns a turn on one.
 _INDEX_NONE_GRANTED = (
     "\n## Query templates\n\n"
     "The catalog was read in full, and NONE of its templates is runnable on your grant — every "
@@ -202,11 +195,8 @@ def _execution_surface(defender_dir: Path, system: str) -> str:
 
     All seven systems split it today, so this resolves to the path on every live dispatch. The
     absent arm is not dead: `connect` scaffolds a new system's `SKILL.md` before its
-    `execution.md` exists (`validate_scaffold.py` warns rather than fails), and until this was
-    named at dispatch, gather spent a turn per lead finding that out — a Read that 404s, 20 of
-    them across the 30 recorded runs, on the four systems that had no file. The check is what
-    keeps the promise honest for the next system, rather than resting on a convention that has
-    already been broken once.
+    `execution.md` exists (`validate_scaffold.py` warns rather than fails), and unnamed at
+    dispatch that costs gather a turn per lead on a Read that 404s.
     """
     execution = Path(defender_dir) / "skills" / system / "execution.md"
     if execution.is_file():
@@ -219,33 +209,28 @@ def _execution_surface(defender_dir: Path, system: str) -> str:
 
 def _yaml_scalar(value: str, indent: str, parent_indent: int = 0) -> str:
     """One Dispatch field, as a YAML LITERAL BLOCK SCALAR whenever it spans more than one line
-    and as a plain inline scalar when it does not (#867 review fix).
+    and as a plain inline scalar when it does not.
 
-    The model-dispatched path's goals are one sentence, but `goal` and every
-    `what_to_summarize` entry are model-authored free text, and lead-0's item 3 now carries
-    item 1's rendered ancestor block inside its goal. Emitted after a bare `goal:`, every line
-    but the first reads as a sibling key of the Dispatch mapping — the `what_to_summarize` list
-    the lead is supposed to satisfy lands in the middle of document text, or a forged one lands
-    beside it.
+    `goal` and every `what_to_summarize` entry are model-authored free text, and lead-0's item 3
+    carries item 1's rendered ancestor block inside its goal. Emitted after a bare `goal:`,
+    every line but the first reads as a sibling key of the Dispatch mapping — so the
+    `what_to_summarize` list the lead must satisfy lands in the middle of document text, or a
+    forged one lands beside it.
 
     Keyed on `splitlines()`, NOT on `"\\n" in value`: a lone `\\r`, `\\x85` or `\\u2028` renders
     as a line break in the fenced block the model reads while carrying no `\\n` at all, so a
-    newline test leaves open exactly the injection the block scalar exists to close. Applied to
-    BOTH fields at the one place that renders them, rather than to the one lead that motivated
-    it.
+    newline test leaves exactly this injection open.
 
     The header carries an EXPLICIT indentation indicator (`|2-`, not `|-`). YAML infers a bare
     block scalar's indentation from its first non-empty line, so a value whose first line opens
-    with a space infers one level deeper than the lines under it and the block ends at line
-    two — the remainder reparsing as mapping content, which is the same injection by a
-    different door. Both fields are model-authored free text, so a leading space is reachable
-    input, and with the indicator the space is content rather than structure.
+    with a space infers one level deeper than the lines under it and the block ends at line two,
+    the remainder reparsing as mapping content — the same injection by a different door. A
+    leading space is reachable input; with the indicator it is content rather than structure.
 
-    The indicator is RELATIVE TO THE PARENT NODE, which is why `parent_indent` exists rather
-    than the indicator being read off `indent` alone: `goal` is a top-level mapping value
-    (parent 0, content at 2 → `|2-`), while a `what_to_summarize` entry hangs off a `-` at
-    column 2 (parent 2, content at 6 → `|4-`). Passing the absolute width for the sequence case
-    makes the block unparseable, so the two are not interchangeable."""
+    The indicator is RELATIVE TO THE PARENT NODE, which is why `parent_indent` exists: `goal` is
+    a top-level mapping value (parent 0, content at 2 → `|2-`), while a `what_to_summarize`
+    entry hangs off a `-` at column 2 (parent 2, content at 6 → `|4-`). Passing the absolute
+    width for the sequence case makes the block unparseable."""
     lines = value.splitlines() or [""]
     if len(lines) == 1:
         return lines[0]
@@ -262,12 +247,11 @@ def _gather_prompt(
     deps: AgentDeps, request: GatherRequest, catalog: str | None,
     verb_grant: VerbGrant | None = None,
 ) -> str:
-    # SECTION ORDER IS THE CACHE PREFIX (#835). The two indexes vary only with the dispatched
-    # system and the tree; the Dispatch block varies with every lead. Emitting the indexes FIRST
-    # is what lets two leads on the same system share a prefix — behind the per-lead YAML they
-    # were re-paid in full on every dispatch, because a content-keyed prefix cache misses at
-    # `lead_id` and never reaches them. The lead's own question landing last is the same trade
-    # read the other way: it is what this message is FOR, and it sits in the recency slot.
+    # SECTION ORDER IS THE CACHE PREFIX. The two indexes vary only with the dispatched system
+    # and the tree; the Dispatch block varies with every lead. Emitting the indexes FIRST is
+    # what lets two leads on the same system share a prefix — behind the per-lead YAML a
+    # content-keyed prefix cache misses at `lead_id` and never reaches them. The lead's own
+    # question landing last also puts what this message is FOR in the recency slot.
     block = "Begin gathering this lead.\n\n"
     if catalog:
         block += (
@@ -417,18 +401,16 @@ _LEAD_REUSE_RETRY = (
     "reuse an id)."
 )
 
-#: The OTHER unclaimed outcome (#855 F-12). `ALREADY_CLAIMED` says the id is taken; this says
-#: no row was written at all — the claim's shape checks refused the dispatch, or the write
-#: failed. Both are "this dispatch owns nothing", and neither may proceed: a gather session
-#: run under an unclaimed id is invisible to the reuse gate (which IS the sidecar's exclusive
-#: create), so the id admits an unbounded number of further sessions, each overwriting the
-#: last one's `gather_summaries/{lead_id}.md` — the file main re-reads as its own memory.
-#: The id is NOT burnt, and the correction says so. Every shape a model can get wrong — a
-#: malformed id, an empty goal — is refused at the seam ABOVE the claim, so the only outcome
-#: that still reaches here is a run-dir write that failed, and the claim unlinks whatever it
-#: had started. Telling the model to spend a fresh `:L` row would burn one id per attempt
-#: against a fault that is not about the id, so this is the retry-THIS-lead wording its two
-#: siblings above already use.
+#: The OTHER unclaimed outcome. `ALREADY_CLAIMED` says the id is taken; this says no row was
+#: written at all — the claim's shape checks refused the dispatch, or the write failed. Both
+#: mean "this dispatch owns nothing", and neither may proceed: a gather session run under an
+#: unclaimed id is invisible to the reuse gate (which IS the sidecar's exclusive create), so the
+#: id admits unbounded further sessions, each overwriting the last one's
+#: `gather_summaries/{lead_id}.md` — the file main re-reads as its own memory.
+#: The id is NOT burnt, and the correction says so: every shape a model can get wrong (a
+#: malformed id, an empty goal) is refused at the seam ABOVE the claim, so the only outcome
+#: reaching here is a failed run-dir write, which is not about the id — hence the
+#: retry-THIS-lead wording rather than "spend a fresh `:L` row".
 _LEAD_UNCLAIMED_RETRY = (
     "lead_id {lead_id!r} could not be claimed: the leads-table row could not be WRITTEN, so "
     "this dispatch was not run and the id is still free. Re-dispatch this same lead_id. If it "
@@ -455,15 +437,13 @@ async def _run_gather(  # noqa: C901 — the branch count IS the terminator cens
     """`stamp_terminator(agent_id, reason)` records how a gather session ENDED, and is the
     composition root's (`driver.build_agent`) to supply: the gather session is opened inside
     the factory, so this frame knows the `agent_id` that keys it but never the store or the
-    session id. `None` — every test double that builds a bare factory — leaves every arm
-    below behaving exactly as it did, which is what makes the seam optional rather than a
-    second thing a caller must get right.
+    session id. `None` (every test double that builds a bare factory) leaves every arm below
+    behaving as it does now, which is what makes the seam optional.
 
-    The `except` arms below ARE this frame's complexity, and they are one per way a gather
-    session can end: four that degrade the lead into a summary main can still reason from, and
-    two that end the whole run and only pass through. Folding two of them together to clear a
-    complexity threshold would cost exactly what item 1 cost — a session ending with nothing
-    said about why."""
+    The `except` arms below ARE this frame's complexity, one per way a gather session can end:
+    four that degrade the lead into a summary main can still reason from, and two that end the
+    whole run and only pass through. Folding two together to clear a complexity threshold costs
+    a session ending with nothing said about why."""
     lead_id, system = request.lead_id, request.system
     if not _LEAD_ID_RE.match(lead_id):
         raise ModelRetry(
@@ -471,15 +451,14 @@ async def _run_gather(  # noqa: C901 — the branch count IS the terminator cens
             "verbatim — it is the FK joining the leads and queries tables."
         )
     # SHAPE, not membership, and BEFORE `_claim_lead` so a correction is a retry of THIS lead
-    # rather than a burnt id. #835 made `system` load-bearing twice over — it selects the
-    # template index's on-target tier, and it is the prompt-cache lane key the composition root
-    # hands the provider — so the one key component that WAS validated (`lead_id`) got replaced
-    # by one that was not. Both new uses fail silently on a mis-cased or whitespace-bearing name:
-    # the catalog collapses to bare ids with every `## Goal` stripped, and the string goes out
-    # verbatim as `openai_prompt_cache_key`. `is_system_name` is the same predicate `template_search`
-    # already holds this param to. NOT `verb_grant.systems`: the role grant is deliberately
-    # decoupled from the per-run registry (see `register_gather_tool`'s call site in driver.py),
-    # so a system an injected registry declares must still dispatch.
+    # rather than a burnt id. `system` is load-bearing twice over — it selects the template
+    # index's on-target tier, and it is the prompt-cache lane key the composition root hands the
+    # provider — and both uses fail SILENTLY on a mis-cased or whitespace-bearing name: the
+    # catalog collapses to bare ids with every `## Goal` stripped, and the string goes out
+    # verbatim as `openai_prompt_cache_key`. `is_system_name` is the same predicate
+    # `template_search` holds this param to. NOT `verb_grant.systems`: the role grant is
+    # deliberately decoupled from the per-run registry (see `register_gather_tool`'s call site
+    # in driver.py), so a system an injected registry declares must still dispatch.
     if not is_system_name(system):
         raise ModelRetry(
             f"malformed system {system!r}: a system name is lowercase letters, digits and "
@@ -487,26 +466,25 @@ async def _run_gather(  # noqa: C901 — the branch count IS the terminator cens
             "`:L` row's system, spelled as the descriptor index spells it. Re-dispatch this "
             "same lead_id with the corrected name."
         )
-    # Same placement and same reason as `system` (#855 F-12): `goal` is a bare `str` on the
-    # tool signature, so the schema admits `""` and nothing below here has an opinion about it
-    # — the claim refuses an empty goal (a leads row with no question is not a lead) and used
-    # to refuse it with the code it also returned on success. Named at the seam, the model gets
-    # the correction that fits: the goal is missing, not the id.
+    # Same placement and same reason as `system`: `goal` is a bare `str` on the tool signature,
+    # so the schema admits `""`. The claim refuses an empty goal (a leads row with no question
+    # is not a lead), but named here the model gets the correction that fits — the goal is
+    # missing, not the id.
     if not request.goal.strip():
         raise ModelRetry(
             f"empty goal for lead_id {lead_id!r}: name the question this lead answers — it is "
             "the leads-table row's own text and the whole of what gather is dispatched to "
             "measure. Re-dispatch this same lead_id with the goal spelled out."
         )
-    # K15/F3 (#808): a lead the HARNESS already claimed (the reserved ids, claimed at run
-    # start before MAIN's first turn) must not be re-claimed here — `claim_lead`'s reuse arm
-    # returns `ALREADY_CLAIMED` harmlessly on its own, but `_run_gather`'s ordinary path turns
-    # that into a `ModelRetry` with no model in the loop to retry it, which would end the run
-    # inside `_user_prompt` for every harness dispatch rather than only a pathological one.
+    # A lead the HARNESS already claimed (the reserved ids, claimed at run start before MAIN's
+    # first turn) must not be re-claimed here: `claim_lead`'s reuse arm returns
+    # `ALREADY_CLAIMED` harmlessly, but the ordinary path below turns that into a `ModelRetry`
+    # with no model in the loop to retry it, ending the run inside `_user_prompt` for every
+    # harness dispatch.
     if not pre_claimed:
-        # `== CLAIMED`, never "not the reuse code" (#855 F-12). The claim has three answers and
-        # only one of them means a leads row is on disk; reading the other two as success is
-        # what let an unclaimed dispatch run.
+        # `== CLAIMED`, never "not the reuse code". The claim has three answers and only one
+        # means a leads row is on disk; reading the other two as success lets an unclaimed
+        # dispatch run.
         claimed = _claim_lead({
             "run_dir": str(deps.run_dir), "lead_id": lead_id,
             "goal": request.goal, "what_to_summarize": list(request.what_to_summarize),
@@ -528,14 +506,14 @@ async def _run_gather(  # noqa: C901 — the branch count IS the terminator cens
     )
 
     agent_id = f"{GATHER_AGENT_ID_PREFIX}{lead_id}"
-    # `system` as well as `agent_id`: the two name different things now (#835). `agent_id` keys
-    # this lead's session and its wire-log lines; `system` is what the composition root keys the
-    # prompt-cache lane on, because the prefix this dispatch shares with its siblings is the
-    # system's, not the lead's. The factory owns that policy — this frame only knows both facts.
+    # `system` as well as `agent_id`: `agent_id` keys this lead's session and its wire-log
+    # lines; `system` is what the composition root keys the prompt-cache lane on, because the
+    # prefix this dispatch shares with its siblings is the system's, not the lead's. The factory
+    # owns that policy — this frame only knows both facts.
     #
-    # `request_limit` is handed over for the same reason and is THIS frame's own (#880 F-19
-    # residue): it is the value the `UsageLimits` below enforces, so a recorder the factory
-    # builds to mirror that ceiling cannot be measuring a different one.
+    # `request_limit` is handed over for the same reason: it is the value the `UsageLimits`
+    # below enforces, so a recorder the factory builds to mirror that ceiling cannot be
+    # measuring a different one.
     gagent = gather_factory(agent_id, system, request_limit)
     gbase = bind(
         GATHER_DEF, deps.run_dir, defender_dir=deps.defender_dir, box=deps.box,
@@ -548,14 +526,12 @@ async def _run_gather(  # noqa: C901 — the branch count IS the terminator cens
         budget_started_monotonic=deps.budget_started_monotonic,
     )
     prompt = _gather_prompt(deps, request, catalog, verb_grant)
-    # `None` is the CLEAN end. Every arm below sets one, and the stamp happens once, in the
+    # `None` is the CLEAN end. Every arm below sets one, and the stamp happens once in the
     # try's `finally` — so a terminator arm added later without a stamp is a visibly missing
-    # assignment rather than a silently unstamped session (the shape #826 item 1 reported:
-    # three arms and `GatherDeadEnd` all ending on an unanswered tool call with `truncated_by`
-    # unset, which left no reader able to tell a lead that was CUT OFF from one that finished).
-    # `finally` and not "after the try" because the last two arms RE-RAISE: a run-level kill
-    # ends this session just as surely as a lead-level one, and the stamp is the only record
-    # either leaves behind on the gather side.
+    # assignment rather than a silently unstamped session, which leaves no reader able to tell
+    # a lead that was CUT OFF from one that finished. `finally` and not "after the try" because
+    # the last two arms RE-RAISE: a run-level kill ends this session just as surely as a
+    # lead-level one, and the stamp is the only record either leaves on the gather side.
     terminator: str | None = None
     try:
         result = await gagent.run(
@@ -584,18 +560,17 @@ async def _run_gather(  # noqa: C901 — the branch count IS the terminator cens
             "captured."
         )
     except session_store.StoreError as e:
-        # The gather recorder is observational — `_make_gather_recorder` returns the live
-        # list unchanged, so gather never sends a store-sourced history and a recording
-        # failure here cannot put an unrecorded list on the wire. Degrade this lead like
-        # the two above rather than letting the exception unwind through the main agent's
-        # tool call and kill the whole process; if the store is genuinely broken, main's
-        # own next append stops the run through the handled exit.
+        # The gather recorder is observational — `_make_gather_recorder` returns the live list
+        # unchanged, so gather never sends a store-sourced history and a recording failure here
+        # cannot put an unrecorded list on the wire. Degrade this lead like the two above rather
+        # than letting the exception unwind through the main agent's tool call and kill the
+        # process; if the store is genuinely broken, main's own next append stops the run
+        # through the handled exit.
         #
-        # The stamp below goes through the store that just failed, so this arm's own record is
-        # the one most likely to be lost. It is still attempted (and swallowed by the stamp's
-        # own best-effort arm): a store broken for APPEND is not necessarily broken for this
-        # one UPDATE, and the alternative — skipping it — guarantees the gap for the exact
-        # terminator a reader most needs to see.
+        # The stamp below goes through the store that just failed, so this arm's record is the
+        # most likely to be lost. It is still attempted (and swallowed by the stamp's own
+        # best-effort arm): a store broken for APPEND may not be broken for this one UPDATE,
+        # and skipping it guarantees the gap for the terminator a reader most needs to see.
         terminator = session_store.TRUNCATED_BY_STORE
         output = (
             f"gather for {lead_id} could not be recorded ({e}); any queries it ran are "
@@ -603,10 +578,9 @@ async def _run_gather(  # noqa: C901 — the branch count IS the terminator cens
             "was captured."
         )
     except BudgetKill:
-        # NOT degraded into a summary, and deliberately so (`test_budget_kill_is_not_control_
-        # flow`): the budget kill ends the RUN, and converting it into a measurement string
-        # here would hide it from `run_investigation`'s own catch. Named on the way past so
-        # the session it ended is still distinguishable from one that finished.
+        # NOT degraded into a summary: the budget kill ends the RUN, and converting it into a
+        # measurement string here would hide it from `run_investigation`'s own catch. Named on
+        # the way past so the session it ended stays distinguishable from one that finished.
         terminator = session_store.TRUNCATED_BY_BUDGET
         raise
     except circuit_breaker.RunAborted:

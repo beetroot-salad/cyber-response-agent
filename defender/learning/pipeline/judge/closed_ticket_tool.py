@@ -1,85 +1,49 @@
-"""The benign judge's two closed-ticket tools — the typed, host-side replacement for the
-removed bash ticket lane (#672, superseding #338's ``python3 ticket_adapter … --require-closed``
-grant).
+"""The benign judge's two closed-ticket tools — the typed, host-side ticket lane.
 
     list_closed_tickets(label, q)   — the precedent search
     get_closed_ticket(key)          — confirm one cited closed case
 
-Both drive the SAME ``ticket`` verb bodies the surviving CLI callers use
+Both drive the SAME ``ticket`` verb bodies the CLI callers use
 (``scripts/adapters/ticket_adapter.py``), in-process off the event loop with
-``require_closed=True`` HARD-CODED — so *closed-only* moves from *mandatory in the argv
-grammar* (a flag a mechanical migration could drop) to *unreachable by construction*: no
-``status`` / ``require_closed`` slot exists on either model-facing schema.
+``require_closed=True`` HARD-CODED — no ``status`` / ``require_closed`` slot exists on either
+model-facing schema, so *closed-only* is unreachable by construction rather than a flag.
 
-The security property is the answer-key defense (O2/O3): the benign judge must never read the
-*open in-flight ticket* for the case it is scoring, nor anything written about that case while
-it was live. This module realizes it five ways, none of which is a runtime direction check (the
-adversarial leg simply never registers these tools — absence by registration, N3):
+The security property is the answer-key defense: the benign judge must never read the *open
+in-flight ticket* for the case it is scoring, nor anything written about that case while it was
+live. Five arms realize it, none a runtime direction check — the adversarial leg simply never
+registers these tools (absence by registration):
 
   - **Closed-pin** — ``require_closed=True`` on the wire; the verb body pins the outgoing
     ``status=closed`` and refuses a non-closed body as a business fault (exit 1).
-  - **Key schema** (Fork A, tightened by #684) — ``get`` screens ``key`` against a defined
-    grammar before any store attempt: anything outside it — empty, whitespace-only,
-    path/URL-significant characters, whitespace and CR/LF — draws a retry-class response with
-    ZERO store attempts. The grammar is an ENVIRONMENT fact, not a constant here: it is the
-    ticket system's REQUIRED ``TICKET_KEY_PATTERN`` config value, reached through the same
-    ``verbs=`` registry seam as the store itself, and a store that declares none FAILS CLOSED
-    AND LOUD (no read, a recorded infra fault, a breaker contribution) rather than falling
-    back to a built-in guess.
-
-    This screen is DEFENSE IN DEPTH, not the only control: #684's follow-up percent-encodes
-    the key into ``/tickets/{key}`` at the adapter (as the ticket WRITER always has), so no
-    key value can reshape the request even unscreened. What the screen still buys is
-    retry-class feedback the model can act on, a store never asked for a key this environment
-    says cannot exist, and an audit trail without garbage in it. ``label``/``q`` need no
-    screen for the same reason they never did — ``list_tickets`` urlencodes them — so the two
-    paths are now symmetric rather than the deliberate asymmetry #672 recorded.
+  - **Key schema** (Fork A) — ``get`` screens ``key`` against a defined grammar before any
+    store attempt; anything outside it draws a retry-class response with ZERO store attempts.
+    The grammar is an ENVIRONMENT fact, not a constant here: the ticket system's REQUIRED
+    ``TICKET_KEY_PATTERN`` config value, reached through the same ``verbs=`` registry seam as
+    the store itself. A store that declares none FAILS CLOSED AND LOUD (no read, a recorded
+    infra fault, a breaker contribution) rather than falling back to a built-in guess. This is
+    DEFENSE IN DEPTH — the adapter percent-encodes the key into ``/tickets/{key}``, so no key
+    value can reshape the request even unscreened; the screen buys retry-class feedback and a
+    clean audit trail. ``label``/``q`` need no screen — ``list_tickets`` urlencodes them.
   - **Self-key exclusion** (Fork C/H) — the case-under-judgment's own key (``deps.run_id``, via
     the shared ``runtime.ticket_screen.self_case_key`` — the SAME definition gather screens on,
     so the two answer-key defenses cannot drift apart) is refused pre-store on ``get``, filtered
     per-item by identity on ``list``, and screened out of a genuinely-closed ticket whose free
-    text NAMES it on BOTH surfaces. #683 extended that last screen off ``get``-only: ``list`` is
-    the judge's higher-traffic surface, so scoping it to ``get`` left the asymmetry sitting on
-    the protected asset itself — a sibling ticket could deliver through the precedent search
-    exactly the content the identical payload would have been withheld for on a confirm.
+    text NAMES it on BOTH surfaces. The surfaces differ only in HOW they withhold (see
+    ``_screen_fetched_ticket`` / ``_screen_listing``).
 
-    The two surfaces still differ in HOW they withhold, because #684 (F2) resolved list's arm to
-    be per ITEM: ``get`` fails the whole read under the dedicated non-infra
-    ``POLICY_REFUSAL_EXIT`` — not the adapter's generic business code, so the audit trail tells a
-    withheld self-read apart from a genuine 404 — while ``list`` drops the naming item and serves
-    its siblings, since faulting a whole listing over one sibling's wording would gut the
-    precedent search (O1). The cost of the per-item arm is that a list drop is invisible in the
-    capture row, which records the post-screen payload at exit 0; that is Fork G's pre-existing
-    property, not new here.
-
-    What stays accepted (the graph's N-note) is the TRANSITIVE path, on both surfaces: a closed
-    ticket quoting some OTHER non-closed ticket rides the salted untrusted envelope unredacted.
-    Only the self-case's identifier is an identifier this seam knows.
+    What stays accepted is the TRANSITIVE path, on both surfaces: a closed ticket quoting some
+    OTHER non-closed ticket rides the salted untrusted envelope unredacted. Only the self-case's
+    identifier is an identifier this seam knows.
   - **Item re-check** (Fork G) — ``list`` re-checks each returned item's status client-side and
-    drops non-closed records before the envelope, alongside the two self-case arms above: the
-    identity filter (the item's own key IS the case) and, since #683, the free-text screen (the
-    item NAMES the case). All three are conjuncts of one per-item predicate; none replaced
-    another.
-  - **Recency** (Fork J) — every arm above screens on what a record SAYS, so all three are
-    defeated by a sibling that describes the live case without spelling its key: the service
-    and the date, in prose. This arm screens on WHEN the record was last written instead, and
-    withholds anything not provably older than the case. Precedent is by definition older, so
-    the arm costs the search nothing it was entitled to; contamination is by definition newer,
-    so no wording evades it.
-
-    The boundary is the ticket store's OWN ``created`` for the in-flight ticket, reached
-    through a verb (``case-opened-at``) whose return type is a bare timestamp — the record is
-    unreachable through it by construction, the same way ``require_closed`` makes the in-flight
-    ticket unreachable through the two reading verbs. Dating the screen by a clock the judge
-    carried instead would make the boundary depend on skew against the store's clock.
-
-    Two ways it can find no boundary, resolved oppositely: a case that never filed a ticket
-    (a 404 — a real answer) leaves the other conjuncts to stand alone and the read proceeds,
-    because failing there would make the precedent search unusable for most cases; anything
-    else — a broken store, a missing ``created``, an adapter declaring no such verb — FAILS
-    THE READ loud, because an arm that stands down when the environment breaks protects
-    nothing. An undated record is withheld for the same reason gather refuses a ticket it
-    cannot prove distinct: unprovable is not the same as safe.
+    drops non-closed records before the envelope, alongside the two self-case arms above. All
+    are conjuncts of one per-item predicate; none replaced another.
+  - **Recency** (Fork J) — every arm above screens on what a record SAYS, so all are defeated by
+    a sibling describing the live case in prose without spelling its key. This arm screens on
+    WHEN the record was last written, withholding anything not provably older than the case.
+    Precedent is by definition older, contamination by definition newer. The boundary comes from
+    the store's OWN ``created`` for the in-flight ticket via the ``case-opened-at`` verb, whose
+    return type is a bare timestamp — the record is unreachable through it by construction, and
+    a judge-carried clock would make the boundary depend on skew (see ``_case_opened_at``).
 
 Capture + breaker mirror the ``query`` tool FULLY (Fork B/E): every store attempt writes one
 capture row to the JUDGE's ``executed_queries.jsonl`` with its payload persisted by-ref, an
@@ -145,20 +109,14 @@ def _predates_case(record: Any, opened_at: _dt.datetime) -> bool:
     """Fork J's predicate: is EVERY word of this record provably older than the case?
 
     Screened on ``updated``, falling back to ``created`` — the LAST write, not the first,
-    because the leak this arm exists to close rides in content APPENDED to an old ticket
-    after the case opened: a comment on a three-year-old record naming the live incident.
-    Dating such a record by its creation would admit it. The free-text screen catches this
-    only when the appended text spells the case key; a paraphrase — the incident by service
-    and date — defeats that screen and not this one.
+    because the leak this arm closes rides in content APPENDED to an old ticket after the case
+    opened (a comment on a three-year-old record naming the live incident). Dating such a
+    record by its creation would admit it.
 
-    A record whose timestamp is missing or unparseable is NOT older, it is UNDATED, and is
-    dropped: gather already refuses a ticket it cannot prove distinct from its own case, and
-    a ticket that cannot be proved to predate the case is the same shape of unknown on the
-    surface where the answer key is at stake.
-
-    The cost is accepted and one-directional: a ticket the investigating agent itself touched
-    during the run goes invisible to the judge. That content is the agent's own writing, not
-    independent precedent, so withholding it is not a loss of evidence.
+    A record whose timestamp is missing or unparseable is not older, it is UNDATED, and is
+    dropped: unprovable is not the same as safe. The accepted, one-directional cost is that a
+    ticket the investigating agent itself touched during the run goes invisible to the judge —
+    that content is the agent's own writing, not independent precedent.
     """
     if not isinstance(record, dict):
         return False
@@ -176,13 +134,12 @@ async def _case_opened_at(
 
       - a usable timestamp → the recency arm runs;
       - the store answers that no such ticket exists (a business fault — a 404 for a case the
-        agent never filed) → ``(None, 0, "")``: there is no boundary to screen against, the
-        other conjuncts stand alone, and the read PROCEEDS. Failing here would make the
-        precedent search unusable for every case that never opened a ticket;
+        agent never filed) → ``(None, 0, "")``: no boundary to screen against, the other
+        conjuncts stand alone, and the read PROCEEDS. Failing here would make the precedent
+        search unusable for every case that never opened a ticket;
       - anything else — an unreachable store, a malformed ``created``, an adapter declaring no
-        such verb → the fault is returned and the caller FAILS THE READ, loud, in the three
-        channels this module already owns. The screen cannot silently stand down: an arm that
-        stops running when the environment breaks is an arm that protects nothing.
+        such verb → the fault is returned and the caller FAILS THE READ, loud. An arm that
+        stops running when the environment breaks protects nothing.
 
     Mirroring ``_key_grammar``, a SUCCESSFUL resolution writes no capture row — it is a
     boundary lookup, not a precedent read — while every non-success is recorded by the caller.
@@ -211,9 +168,8 @@ def _key_reject_reason(key: str, grammar: re.Pattern[str]) -> str | None:
     the caller: the environment declares the key SHAPE, this module decides that a key must
     match it WHOLE. Rejecting an off-grammar key costs no readable ticket — a key this store
     cannot mint is a key it cannot hold — and the model gets a retry it can act on rather than
-    a 404 it must interpret. Length is an explicit non-clause; #684 dropped #672's separate
-    "clean non-ASCII flows opaquely" carve-out — whether non-ASCII keys exist is now the
-    environment's statement to make, in its pattern.
+    a 404 it must interpret. Length and non-ASCII are explicit non-clauses: whether such keys
+    exist is the environment's statement to make, in its pattern.
     """
     if not key.strip():
         return (
@@ -235,14 +191,13 @@ async def _key_grammar(
     """This environment's ticket-key grammar, compiled and ANCHORED, or the fault that stands
     in for it — ``(None, exit_code, detail)``.
 
-    FAIL CLOSED AND LOUD is the whole contract here. The grammar is a required config key, so
-    an absent one (``ConfigFault``), an adapter that declares no such verb (``KeyError``), or
-    a value that will not compile all resolve to a fault the caller turns into a FAILED tool
-    result with ZERO store attempts — the read stops rather than proceeding on a built-in
-    guess about what this store's keys look like. Loud, in the three channels the tool already
-    owns: the model sees the failure, the capture row records it, and the infra class
-    contributes to the ``ticket`` breaker, so a persistently misconfigured store trips it
-    instead of paying full price on every judgment.
+    FAIL CLOSED AND LOUD is the whole contract. An absent config key (``ConfigFault``), an
+    adapter declaring no such verb (``KeyError``), or a value that will not compile all resolve
+    to a fault the caller turns into a FAILED tool result with ZERO store attempts — the read
+    stops rather than guessing at this store's key shape. Loud in three channels: the model
+    sees the failure, the capture row records it, and the infra class contributes to the
+    ``ticket`` breaker, so a persistently misconfigured store trips it instead of paying full
+    price on every judgment.
     """
     pattern, exit_code, detail = await _run_verb(deps, verbs, _KEY_PATTERN_VERB, {})
     if exit_code != 0:
@@ -256,10 +211,9 @@ async def _key_grammar(
         return re.compile(rf"\A(?:{pattern})\Z"), 0, ""
     except (re.error, RecursionError, OverflowError) as e:
         # ``re.error`` is NOT the whole of "will not compile": a repeat count the compiler
-        # cannot hold (``a{99999999999}``) raises ``OverflowError``, and a deeply nested
-        # pattern raises ``RecursionError``. Both escape a bare ``except re.error`` — and
-        # this compile sits OUTSIDE ``_run_verb``'s seam, so one escaping would unwind the
-        # whole judge stage and write NO row: the exact hole this module documents closing.
+        # cannot hold (``a{99999999999}``) raises ``OverflowError``, a deeply nested pattern
+        # raises ``RecursionError``. This compile sits OUTSIDE ``_run_verb``'s seam, so one
+        # escaping would unwind the whole judge stage and write NO row.
         return None, DEFAULT_FAULT_EXIT, (
             f"ticket key grammar unusable: TICKET_KEY_PATTERN {pattern!r} does not "
             f"compile ({type(e).__name__}: {e})"
@@ -275,9 +229,7 @@ async def _run_verb(deps: AgentDeps, verbs: Any, verb: str, params: dict) -> tup
     The registry lookup is INSIDE the seam too: ``verbs.verbs(SYSTEM)[verb]`` lazily imports the
     real adapter on first use (``ModuleVerbRegistry``), so a broken adapter — an import-time fault,
     a malformed/absent ``VERBS`` mapping (→ ``KeyError``) — faults-and-continues like any other
-    infra fault (a row is written, the breaker records it) rather than unwinding the stage. A
-    resolution fault escaping here was the one hole in the 'write a row, never delete one'
-    invariant this module documents; keeping it inside the try closes it."""
+    infra fault rather than unwinding the stage and breaking 'write a row, never delete one'."""
     vctx = VerbContext(
         defender_dir=deps.defender_dir, run_dir=deps.run_dir, env=_bash_env(deps),
     )
@@ -372,19 +324,16 @@ def _names_self_case(record: Any, self_key: str) -> bool:
     """Fork H's predicate: does this record NAME the case under judgment anywhere in its content?
 
     Serialized WHOLE rather than field-by-field, because the self-key may ride in a resolution, a
-    nested comment, or the key itself. That is strictly wider than gather's identity-only screen,
-    and deliberately so — gather correlates, the judge scores.
+    nested comment, or the key itself. Strictly wider than gather's identity-only screen, and
+    deliberately so — gather correlates, the judge scores. Shared by both surfaces so the ``get``
+    withhold and the ``list`` drop cannot answer differently about the same payload.
 
-    Shared by both surfaces since #683, so the ``get`` withhold and the ``list`` drop cannot come
-    to different answers about the same payload — the whole defect #683 recorded was two screens
-    disagreeing about one record.
-
-    ``ensure_ascii=False`` is load-bearing, not cosmetic. Under the default the encoder rewrites
-    every non-ASCII character as ``\\uXXXX``, so a self-key carrying one would never appear
-    literally in the serialization and a sibling naming it in free text would slip the test
-    silently — the exact leak this predicate exists to close. Today ``self_case_key`` is a run id
-    that ``_run_id.is_valid_run_id`` forces ASCII, so the two spellings coincide; pinning the
-    encoder here means a later widening of what a case id may contain cannot quietly reopen it.
+    ``ensure_ascii=False`` is load-bearing. Under the default the encoder rewrites every
+    non-ASCII character as ``\\uXXXX``, so a self-key carrying one would never appear literally
+    in the serialization and a sibling naming it in free text would slip the test silently.
+    Today ``self_case_key`` is a run id ``_run_id.is_valid_run_id`` forces ASCII, so the two
+    spellings coincide; pinning the encoder means a later widening of what a case id may
+    contain cannot quietly reopen the leak.
     """
     return self_key in json.dumps(record, default=str, ensure_ascii=False)
 
@@ -402,18 +351,12 @@ def _screen_listing(
     correlating, not scoring. Duplicates survive (the screen is status + self-reference, never a
     dedup); a non-dict item is dropped as unreadable.
 
-    The identity conjunct is kept as the arm that owes nothing to a serializer: it compares the
-    record's own key value directly, so however ``_names_self_case`` renders a record, the
-    self-case's OWN listing entry is still excluded. The free-text arm is the wider one and the
-    only one that catches a SIBLING naming the case; neither substitutes for the other's failure
-    mode.
-
-    The recency arm is wider still, and is the only one that does not depend on the case being
-    NAMED at all: it screens on WHEN the words were written rather than on what they say, so a
-    sibling that describes the live incident by service and date — never spelling the key —
-    is dropped by it and by nothing else here. ``opened_at`` is ``None`` only when the store
-    says the case has no ticket, in which case there is no boundary and the other three
-    conjuncts stand alone."""
+    The four conjuncts do not substitute for one another. Identity owes nothing to a
+    serializer — it compares the record's own key value, so however ``_names_self_case`` renders
+    a record the self-case's OWN entry is excluded. Free text is wider and is what catches a
+    SIBLING naming the case. Recency is wider still and the only arm not depending on the case
+    being NAMED at all. ``opened_at`` is ``None`` only when the store says the case has no
+    ticket, in which case there is no boundary and the other three stand alone."""
     self_key = self_case_key(deps)
     return screen_list(
         payload,
@@ -427,10 +370,10 @@ def _screen_listing(
 
 
 def _log_denial(run_dir: Path, *, verb: str, params: dict) -> None:
-    """The fixed `POLICY_DENIALS` stream under the JUDGE's own run dir (§7 R1), opened lazily
-    (a run with nothing denied must leave no such file) and owned per RUN DIR rather than per
-    built stage — `RequestLogger` refuses a second open of a path it already holds, so a
-    per-stage writer turns a second stage's first denial into an uncaught `FileExistsError`."""
+    """The fixed `POLICY_DENIALS` stream under the JUDGE's own run dir, opened lazily (a run
+    with nothing denied must leave no such file) and owned per RUN DIR rather than per built
+    stage — `RequestLogger` refuses a second open of a path it already holds, so a per-stage
+    writer turns a second stage's first denial into an uncaught `FileExistsError`."""
     observe.denial_logger(run_dir).log_policy_denial(
         role="judge", system=SYSTEM, verb=verb, call_id=f"{SYSTEM}.{verb}", params=params,
     )
@@ -440,13 +383,12 @@ async def _grant_gate(
     deps: AgentDeps, verbs: Any, lock: asyncio.Lock, verb: str,
 ) -> str | None:
     """THE grant decision, ahead of every one of the judge site's own screens (key grammar,
-    key schema, self-case-key) — exactly the runtime's ordering, mirrored at the second
-    model-facing site so it does not carry an audit hole the first one closed.
+    key schema, self-case-key) — the runtime's own ordering, mirrored at this second
+    model-facing site.
 
-    A fault RESOLVING the verb (``decide()`` importing a broken adapter to check its
-    declared class, mirroring the runtime's own load-error treatment) faults-and-continues
-    like any other resolution fault — a row, an infra breaker contribution, no unwind out of
-    ``agent.iter()`` — rather than propagating out of this gate uncaught."""
+    A fault RESOLVING the verb (``decide()`` importing a broken adapter to check its declared
+    class) faults-and-continues like any other resolution fault — a row, an infra breaker
+    contribution, no unwind out of ``agent.iter()`` — rather than propagating out uncaught."""
     try:
         decision = verbs.decide(SYSTEM, verb)
     except CONTROL_FLOW_EXCEPTIONS:
@@ -480,9 +422,8 @@ async def _list_body(deps: AgentDeps, lock: asyncio.Lock, verbs: Any,
     opened_at, boundary_exit, boundary_detail = await _case_opened_at(deps, verbs)
     if boundary_exit != 0:
         # No boundary, no listing — and the row is filed under the verb that actually ran and
-        # FAILED, for the reason `_key_grammar`'s failure is: the store was never asked for
-        # precedent, and a row naming `list-tickets` would put an attempt that never happened
-        # into the trail that evidences what was attempted.
+        # FAILED: the store was never asked for precedent, so a row naming `list-tickets`
+        # would put an attempt that never happened into the trail evidencing what was.
         return await _capture_and_view(
             deps, lock, _CASE_OPENED_VERB, {}, None, boundary_exit, boundary_detail,
         )
@@ -506,12 +447,11 @@ async def _get_body(deps: AgentDeps, lock: asyncio.Lock, verbs: Any, key: str) -
         return circuit_breaker.down_message(deps.run_dir, SYSTEM)
     grammar, cfg_exit, cfg_detail = await _key_grammar(deps, verbs)
     if grammar is None:
-        # No grammar, no read: the screen cannot run, so the store is never asked. The row
-        # and the breaker contribution are what make that refusal loud — and the row is
-        # filed under the verb that actually ran and FAILED (`key-pattern`, no params).
-        # Filing it as a `get-ticket` carrying the model's key would put a store attempt
-        # that never happened into the very audit trail that EVIDENCES zero store attempts,
-        # and would land an unscreened model-chosen key in the queries table besides.
+        # No grammar, no read: the screen cannot run, so the store is never asked. The row and
+        # the breaker contribution make that refusal loud — filed under the verb that actually
+        # ran and FAILED (`key-pattern`, no params). Filing it as a `get-ticket` carrying the
+        # model's key would put a store attempt that never happened into the audit trail that
+        # EVIDENCES zero store attempts, and land an unscreened key in the queries table.
         return await _capture_and_view(
             deps, lock, _KEY_PATTERN_VERB, {}, None, cfg_exit, cfg_detail,
         )
@@ -548,11 +488,8 @@ def _screen_fetched_ticket(
 
     Where ``list`` drops such an item and serves the rest, ``get`` has a single record to answer
     with, so the whole read fails — under the distinguishable policy code, which is what buys the
-    audit trail its withhold-vs-404 split.
-
-    The recency arm (Fork J) rides the SAME withhold, so a confirm and a listing cannot come to
-    different answers about one record — the asymmetry #683 recorded, kept closed as the screen
-    grows a third reason to withhold."""
+    audit trail its withhold-vs-404 split. The recency arm (Fork J) rides the SAME withhold, so a
+    confirm and a listing cannot answer differently about one record."""
     self_key = self_case_key(deps)
 
     def _withhold(ticket: dict[str, Any]) -> str | None:
@@ -574,9 +511,8 @@ def _screen_fetched_ticket(
 
 def register_closed_ticket_tools(agent: Any, verbs: Any) -> None:
     """Register the two closed-ticket tools on ``agent``, in the fixed tail order the e2e suite
-    pins — ``list_closed_tickets`` then ``get_closed_ticket`` (d28). ``verbs`` is the ticket
-    verb registry (the real ``ModuleVerbRegistry`` in production, a ``FakeVerbs`` in tests) —
-    required, so a def declaring the bit with no registry fails LOUD at build like ``query``."""
+    pins — ``list_closed_tickets`` then ``get_closed_ticket``. ``verbs`` (the ticket verb
+    registry) is required, so a def declaring the bit with no registry fails LOUD at build."""
     if verbs is None:
         raise ValueError(
             "ToolSet(closed_tickets=True) needs a verb registry — thread one from "

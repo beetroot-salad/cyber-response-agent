@@ -248,14 +248,12 @@ def _handle_hypothesis_shape_cmd(args, corpus) -> int:
 def _hypothesis_vocabulary(corpus, signature_id: str, top_k: int) -> dict:
     """Name → how many cases raised it, over BOTH declaration sites.
 
-    The two-site walk is `queries.case_hypotheses`, not a third hand-rolled copy of it. This
-    used to iterate `c.hypotheses` and then each lead's `new_hypotheses` itself — the same
-    traversal `_walkers.all_hypotheses` owns, and the same one whose prologue-only sibling
-    was a live defect in `queries._vertex_types`.
+    The two-site walk is `queries.case_hypotheses`, not a hand-rolled copy — `_walkers`
+    owns that traversal.
 
-    The per-case name dedup stays here: it is this command's question (how many CASES raised
-    a name, not how many rows), and it strips, because a vocabulary key with trailing space
-    is a second entry for one word.
+    The per-case name dedup stays here: it is this command's question (how many CASES raised a
+    name, not how many rows), and it strips, because a vocabulary key with trailing space is a
+    second entry for one word.
     """
     from collections import Counter
 

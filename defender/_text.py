@@ -8,8 +8,7 @@ that renders as *nothing at all* non-empty, and text that is only spacing empty.
 
 Every caller here decides something on model-produced text, and that text is
 steerable by the attacker-influenced alert/gather content the model was asked to
-analyze — which made both arms of the split steerable with it (#722). Decisions
-key off what RENDERS instead.
+analyze. Decisions key off what RENDERS instead.
 """
 from __future__ import annotations
 

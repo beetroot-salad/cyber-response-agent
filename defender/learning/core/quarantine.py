@@ -10,10 +10,10 @@ from defender.learning.core.config import _log
 from defender.runtime.scrub import RunTainted, verdict_path
 
 
-# How many tainted trees may accumulate before the lane stops preserving them (#747, M4).
-# A CAP, never a TTL: past it we refuse to write and say so, and nothing already written is
-# evicted. A timer that deleted the only forensic record of a suspected in-box RCE would be
-# the very bug this module exists to fix, just on a schedule.
+# How many tainted trees may accumulate before the lane stops preserving them. A CAP, never
+# a TTL: past it we refuse to write and say so, and nothing already written is evicted — a
+# timer that deleted the only forensic record of a suspected in-box RCE would be the very bug
+# this module exists to fix, just on a schedule.
 _MAX_ENV = "LEARNING_TAINT_QUARANTINE_MAX"
 _MAX_DEFAULT = 10
 
@@ -21,24 +21,22 @@ _MAX_DEFAULT = 10
 def _archive_tree(wt: Path, dest: Path) -> None:
     """Write `wt` to `dest` as a gzipped tar.
 
-    `tarfile` at its default `dereference=False` is what makes the artifact INERT, and that
-    is the whole reason this is an archive rather than a `mv` (#747): a symlink is stored as
-    METADATA — the type flag plus the target string — and never followed. Nothing that walks
-    the host afterwards (a `grep -r`, an editor indexer, a backup job) can deref a link that
-    exists only as a tar member, so unpacking becomes a deliberate operator act. Relocating
-    the worktree would have preserved a live, dereferenceable link on the host permanently,
-    which moves the hazard rather than containing it.
+    `tarfile` at its default `dereference=False` is what makes the artifact INERT, and is the
+    whole reason this is an archive rather than a `mv`: a symlink is stored as METADATA — type
+    flag plus target string — and never followed. Nothing that later walks the host (a
+    `grep -r`, an editor indexer, a backup job) can deref a link that exists only as a tar
+    member, so unpacking becomes a deliberate operator act. Relocating the worktree would
+    preserve a live, dereferenceable link on the host permanently.
     """
     with tarfile.open(dest, "w:gz") as tar:
         tar.add(wt, arcname=wt.name)
 
 
 def _tree_verdict(wt: Path) -> dict:
-    """§7 D8's accepted cost, made mechanism: the verdict lives OUTSIDE the tree, so an archive
-    (or any other move/copy) carries nothing about it unless the mover reads it explicitly and
-    writes it down separately. `{}` for a tree with no verdict — an absent key here would be
-    indistinguishable from a manifest written before this field existed, which is how a skipped
-    scan reads as a clean one to a human triaging the quarantine directory."""
+    """The verdict lives OUTSIDE the tree, so an archive (or any move/copy) carries nothing
+    about it unless the mover reads it explicitly and writes it down separately. `{}` — never
+    an absent key — for a tree with no verdict, so a skipped scan cannot read as a clean one
+    to a human triaging the quarantine directory."""
     p = verdict_path(wt)
     if not p.is_file():
         return {}
@@ -51,10 +49,9 @@ def _tree_verdict(wt: Path) -> dict:
 def _manifest(
     wt: Path, archive: Path, *, batch_id: str, branch: str, label: str, taint: RunTainted,
 ) -> dict:
-    # `__context__` is the work's own failure, which the taint outranked on its way out
-    # (box.py's exception preference). It is the reason the batch was dying BEFORE the tree
-    # was found tainted, and reading it off the traceback is exactly what the operator can
-    # no longer do once the tree is gone — so it is recorded, not left to implicit chaining.
+    # `__context__` is the work's own failure, which the taint outranked on its way out: the
+    # reason the batch was dying BEFORE the tree was found tainted. Recorded rather than left
+    # to implicit chaining, since the traceback is gone once the tree is.
     cause = taint.__context__
     return {
         "batch_id": batch_id,
@@ -110,8 +107,7 @@ def preserve_tainted_tree(
             _archive_tree(wt, archive)
         except BaseException:
             # A half-written tarball is not evidence, and leaving one behind spends the cap on
-            # failures: the count bound would eventually refuse every real archive because ten
-            # truncated ones sit in the way.
+            # failures until it refuses every real archive.
             archive.unlink(missing_ok=True)
             raise
         archived = archive
@@ -130,10 +126,8 @@ def preserve_tainted_tree(
         )
         return archive
     except Exception as e:  # noqa: BLE001 — the taint outranks any failure to preserve it
-        # What survived decides what the operator is told: an archive with no manifest beside
-        # it is a very different residue from nothing at all, and saying "the evidence is
-        # being lost" over a tarball that is sitting right there would send triage the wrong
-        # way.
+        # What survived decides what the operator is told: saying "the evidence is being lost"
+        # over a tarball that is sitting right there would send triage the wrong way.
         residue = (
             f"the archive at {archived} survives, but WITHOUT its manifest"
             if archived is not None

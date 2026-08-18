@@ -82,13 +82,11 @@ _CORPUS_AUTHOR_DENY_REASON = (
 )
 
 
-# The three lesson corpora ever shipped — the curator's fixed R4 read confine AND, by
-# construction, its MD-6 exact-match corpus-name membership set: a name that does not resolve
-# INTO this confine can never bind (the generic MD-1 confine-containment check in `bind`
-# refuses it), so no separate membership list is needed. DERIVED from the one canonical set
-# (`hooks/record_lesson_load.LESSON_CORPORA`, the author-side superset of RUNTIME_LESSON_CORPORA)
-# so the shipped-corpus roster has a single source of truth; sorted for a deterministic order
-# (containment is order-independent).
+# The shipped lesson corpora — the curator's read confine AND, by construction, its
+# corpus-name membership set: a name that does not resolve INTO this confine can never bind
+# (the confine-containment check in `bind` refuses it), so no separate membership list is
+# needed. Derived from the canonical set (`hooks/record_lesson_load.LESSON_CORPORA`, the
+# author-side superset of RUNTIME_LESSON_CORPORA); sorted for determinism.
 SHIPPED_LESSON_CORPORA: tuple[str, ...] = tuple(sorted(_LESSON_CORPORA))
 
 
@@ -127,10 +125,9 @@ def _corpus_author_write_shapes(roots: ResolvedRoots) -> tuple[re.Pattern[str], 
 
 @dataclass(frozen=True)
 class ForwardCheckConfig:
-    """The curator's tool-config slot payload (#691 M4): the five per-spawn forward-check
-    inputs, collapsed off `CuratorDeps`' bare fields and onto the base `AgentDeps.tool_config`
-    slot. Carries NO corpus (F51) — `corpus_dir` stays derived off the retained `roots` (M6),
-    read directly off `deps`, never duplicated into this config."""
+    """The curator's per-spawn forward-check inputs, carried in the base
+    `AgentDeps.tool_config` slot. Carries NO corpus — `corpus_dir` stays derived off `roots`
+    and read directly off `deps`, never duplicated here."""
 
     check: ForwardCheck
     runs_dir: Path
@@ -183,15 +180,11 @@ class CuratorDeps(AgentDeps):
         cls, run_dir: Path, repo_root: Path, corpus_dir: Path,
         *, cfg: ForwardCheckConfig, box: Any,
     ) -> CuratorDeps:
-        """A thin wrapper over `bind` (M9): resolves the corpus NAME off `corpus_dir`'s own
-        basename and binds through the one seam, then attaches the forward-check config into
-        the base `tool_config` slot. `corpus_dir` stays the caller's contract (unchanged from
-        before #691) — only its *derivation* moved onto `bind`. `box` is REQUIRED (R1): a
-        loud TypeError at construction beats a silent inert default that re-deads the curator's
-        bash lane (#665 F1).
-
-        Since #713 the `ForwardCheckConfig` arrives already built: `run_curator_stage` owns
-        its construction, so the five forward-check fields stop being re-declared here."""
+        """A thin wrapper over `bind`: resolves the corpus NAME off `corpus_dir`'s basename,
+        binds through the one seam, then attaches the forward-check config (built by
+        `run_curator_stage`) into the base `tool_config` slot. `box` is REQUIRED — a loud
+        TypeError at construction beats a silent inert default that deadens the curator's
+        bash lane."""
         defender_dir = repo_root / "defender"
         scope = RunScope(
             corpus_name=corpus_dir.name,
@@ -219,9 +212,9 @@ CORPUS_AUTHOR_DEF = AgentDefinition(
     requires_explicit_tree=True,
     anchors_on_tree=True,
     requires_corpus=True,
-    # R4/O6: the read VIEW spans the three-corpus confine while the shell (cat) VIEW stays at one
-    # corpus — a deliberate divergence, so read_allow is forced empty rather than derived from the
-    # cat grant's own-corpus scope (the read↔bash parity every OTHER role keeps).
+    # The read VIEW spans the multi-corpus confine while the shell (cat) VIEW stays at one
+    # corpus — a deliberate divergence, so read_allow is forced empty rather than derived from
+    # the cat grant's own-corpus scope (the read↔bash parity every OTHER role keeps).
     read_allow_override=PathShapes(),
     deny_reason=_CORPUS_AUTHOR_DENY_REASON,
 )
@@ -235,8 +228,7 @@ def _run_curator_pydantic(
     cfg: ForwardCheckConfig,
     make_model: MakeModel = providers.build_for_effort,
 ) -> str:
-    """Both limits vary per spawn here, so the caller owns the whole context — this is one
-    of the two stages where the transport really was threaded through three layers (#713)."""
+    """Both limits vary per spawn here, so the caller owns the whole context."""
     # `repo_root` is optional on the SHARED context (the pure-prediction stages bind off the
     # run dir alone) but required here: the corpus confine is resolved off the repo tree.
     # A raise, not an assert — `python -O` strips asserts, and the fallout would be a
@@ -248,8 +240,8 @@ def _run_curator_pydantic(
         )
     deps = CuratorDeps.for_run(
         ctx.learning_run_dir, repo_root, corpus_dir,
-        # No `salt=`: #875 took it off `bind`, so passing one here bound nothing and silently
-        # read as if it had. The stage salt's one live reader is `run_curator_stage` below.
+        # No `salt=`: `bind` does not take one. The stage salt's one live reader is
+        # `run_curator_stage` below.
         cfg=cfg, box=ctx.box,
     )
     return run_stage(
@@ -270,18 +262,15 @@ def run_curator_stage(
     run_author: Callable[..., str] = _run_curator_pydantic,
 ) -> dict:
     """`wiring` is the spawn's prompt/model/effort/trace/label/batch, `ctx` its roots, user
-    prompt and two env-backed limits; `cfg` is the forward-check group, built by the caller
-    since #713 rather than five parameters re-declared all the way down to
-    `CuratorDeps.for_run`.
+    prompt and two env-backed limits; `cfg` is the forward-check group, built by the caller.
 
     Every model/effort/limit/timeout knob is caller-supplied with no default here: each is
-    env-backed and differs per corpus, so a default evaluated at import would freeze it
-    (#717)."""
+    env-backed and differs per corpus, so a default evaluated at import would freeze it."""
     # ONE batch identity, read off the wiring that already derived `trace_name` and `label`
-    # from it. Taking it a second time as a parameter let a caller log `spawn curator B`,
-    # raise `AuthorError("curator (B) ...")` and write `A.<pid>.trace.jsonl` — three artifacts
-    # naming two batches, with nothing asserting they agree. A raise, not an assert: `python
-    # -O` strips asserts, and `for_batch` is the only builder that sets the field.
+    # from it. Taking it a second time as a parameter would let the log line, the AuthorError
+    # and the trace filename name different batches with nothing asserting they agree. A
+    # raise, not an assert: `python -O` strips asserts, and `for_batch` is the only builder
+    # that sets the field.
     batch_id = wiring.batch_id
     if batch_id is None:
         raise ValueError(

@@ -38,7 +38,7 @@ from defender.scripts.gather_tools.record_query import (
     lead_rows,
     payload_digest,
     # Re-exported under its old private name: `_spec771` measures the site
-    # `query_tool._persist_payload` by that name (its X5 return-none MeasuredSite).
+    # `query_tool._persist_payload` by that name.
     persist_payload as _persist_payload,  # noqa: F401
     rejection_dead_end_reason,
     rejection_trip,
@@ -83,41 +83,36 @@ CONTROL_FLOW_EXCEPTIONS: tuple[type[BaseException], ...] = (
 DEFAULT_FAULT_EXIT = 2
 
 #: Characters a `query_id` may not carry. The first four are PATH shapes — a traversal that
-#: would walk the id out of the directory it names a file in. The last two are RENDER shapes
-#: (#875 F-8): a catalog id is interpolated into markdown three offline collectors read, and a
+#: would walk the id out of the directory it names a file in. The last three are RENDER
+#: shapes: a catalog id is interpolated into markdown three offline collectors read, and a
 #: newline or a heading marker in it forges document structure inside the judge's per-lead
-#: comparison — which lead a section describes, which sample event is the run's real one. Both
-#: families are here for one reason, so they screen as one rule: a `query_id` is a catalog
-#: IDENTIFIER the collectors partition on, not free text, and neither shape belongs in one.
+#: comparison. Both families screen as one rule: a `query_id` is a catalog IDENTIFIER the
+#: collectors partition on, not free text.
 _QID_FORBIDDEN = ("/", "\\", "..", "\x00", "\n", "\r", "#")
 
-#: M3/FK-7's kebab half: the remainder after the first `.` in a coined `query_id`. No dot —
-#: a second dot lets `'system.foo.bar'` slip past a prefix-only check and become a SECOND
-#: unvalidated model-supplied path component at the host-side draft writer
+#: The kebab half: the remainder after the first `.` in a coined `query_id`. No dot — a second
+#: dot lets `'system.foo.bar'` slip past a prefix-only check and become a SECOND unvalidated
+#: model-supplied path component at the host-side draft writer
 #: (`draft_synthesis._draft_candidate_segments`'s `split('.', 1)`).
 _KEBAB_SEGMENT = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9_-]*\Z")
 
 
 def resolve_query_id(system: str, verb: str, model_query_id: str | None) -> str:
     # The `∅.` sentinels are reserved for the writer sites that pass them directly (never
-    # through here) to mark a row whose ROUTING the offline collectors take on trust — the
-    # rows the repeat guard must never count, the guard's own trip record, the bash lane's
-    # shim record. A model-supplied `query_id` spelling one of them — or carrying a traversal
-    # character the below-guard `_screen` would otherwise reject — must not reach a real row
-    # through this path: on the repeat-trip's own record (which sits ABOVE `_screen`), nothing
-    # else screens it, and letting it through would either forge a sentinel or persist an
-    # unscreened id. The screen is on the whole PREFIX, not on each literal, so it cannot fall
-    # behind the set (`record_query.is_reserved_query_id`).
+    # through here) to mark a row whose ROUTING the offline collectors take on trust. A
+    # model-supplied `query_id` spelling one — or carrying a character `_screen` would reject —
+    # must not reach a real row through this path: the repeat-trip's own record sits ABOVE
+    # `_screen`, so nothing else screens it. Keyed on the whole PREFIX, not on each literal, so
+    # it cannot fall behind the set.
     if (
         model_query_id
         and not is_reserved_query_id(model_query_id)
         and not any(t in model_query_id for t in _QID_FORBIDDEN)
     ):
-        # FK-7 (§7): the WHOLE `{system}.{kebab-name}` shape, not only the prefix. The prefix
-        # must EXACTLY equal the dispatched system (no case folding, no NFC — FK-6), and the
-        # remainder must be a single well-formed segment. A foreign prefix, a missing
-        # separator, an empty remainder, or a remainder carrying a second `.` all fall back to
-        # the untagged value — the same one an ordinary call already records.
+        # The WHOLE `{system}.{kebab-name}` shape, not only the prefix: the prefix must
+        # EXACTLY equal the dispatched system (no case folding, no NFC) and the remainder must
+        # be a single well-formed segment. A foreign prefix, a missing separator, an empty
+        # remainder, or a second `.` all fall back to the untagged value.
         prefix, sep, remainder = model_query_id.partition(".")
         if sep and prefix == system and remainder and _KEBAB_SEGMENT.match(remainder):
             return model_query_id
@@ -168,12 +163,10 @@ def _screen_ticket_payload(
 ) -> tuple[Any, int, str]:
     """Apply gather's current-case exclusion before capture and model display.
 
-    The shape checks and the ``(payload, exit_code, detail)`` contract are the shared ticket
-    screen (``ticket_screen``); what is bound here is gather's own predicate, which is
-    intentionally IDENTITY-ONLY. Another ticket may mention ``self_key`` in its free text and
-    remains useful correlation evidence — unlike the judge, gather is not scoring the case, so
-    a mention is not an answer key. Lifecycle state is likewise untouched. A record whose key
-    cannot be established is withheld, because it cannot be proved distinct from this case.
+    Bound here is gather's own predicate, intentionally IDENTITY-ONLY: another ticket may
+    mention ``self_key`` in its free text and remains useful correlation evidence — unlike the
+    judge, gather is not scoring the case, so a mention is not an answer key. A record whose
+    key cannot be established is withheld, being unprovably distinct from this case.
     """
     if system != TICKET_SYSTEM:
         return payload, 0, ""
@@ -208,19 +201,16 @@ class QueryCapture(AbstractCapability[Any]):
         self._seq_lock = asyncio.Lock()
 
     def _denial_logger_for(self, run_dir: Any) -> Any:
-        # Process-wide per run dir, NOT per capability: one QueryCapture is built per gather
-        # lead against one shared run dir, and RequestLogger refuses a second open of a path
-        # it already holds — a per-capability logger makes the run's SECOND denial raise
-        # FileExistsError out of the tool wrapper instead of returning the refusal.
+        # Process-wide per run dir, NOT per capability (see `observe._DENIAL_LOGGERS`): one
+        # QueryCapture is built per gather lead against one shared run dir.
         from . import observe
 
         return observe.denial_logger(run_dir)
 
     def _decide_guarded(self, system: str, verb: str) -> tuple[Any, str | None]:
-        """THE grant decision, guarded against a broken adapter import — mirroring the old
-        `_reject_guarded`'s load-error treatment (§7 R2's O3 timing: the agreement check is
-        deferred to first resolution, not policy compile, so a broken sibling adapter must
-        not unwind the stage)."""
+        """THE grant decision, guarded against a broken adapter import: the agreement check is
+        deferred to first resolution, not policy compile, so a broken sibling adapter must not
+        unwind the stage (§7 R2)."""
         try:
             return self._registry.decide(system, verb), None
         except CONTROL_FLOW_EXCEPTIONS:
@@ -232,38 +222,22 @@ class QueryCapture(AbstractCapability[Any]):
 
     def _system_of_record(self, system: str) -> str:
         """The `system` an ABOVE-GUARD row is allowed to carry: the model's own string when the
-        registry declares that system, `""` when it does not (#855 F-06).
+        registry declares that system, `""` when it does not.
 
-        The two writers up here — the argument schema's rejection and the grant check's
-        unresolvable branch — record what the MODEL named, and nothing between there and the
-        offline collectors re-checks it: the call never reached the grant, so no other party on
-        the path ever formed an opinion about the string. It is not inert. An exit-64
-        `agent-fixable` row IS the pitfalls channel's input, and `_build_pitfalls_handoffs`
-        spends its `system` verbatim as `defender/skills/<system>/execution.md` and points the
-        curator at that path — so a schema the model can fail on purpose (any extra or mistyped
-        argument does it, no grant required) was a route to naming a corpus write.
+        The two writers up here record what the MODEL named, and nothing between them and the
+        offline collectors re-checks it. That is not inert: an exit-64 `agent-fixable` row is
+        the pitfalls channel's input, and `_build_pitfalls_handoffs` spends its `system`
+        verbatim as `defender/skills/<system>/execution.md`, so a schema the model can fail on
+        purpose was a route to naming a corpus write. `""` needs no new branch downstream —
+        `collect_general_failures` already skips a systemless row.
 
-        `""` rather than a drop, and it needs no new branch downstream: `collect_general_
-        failures` already skips a systemless row, exactly as `record_query.system_for_payload_
-        operands` returning `""` does for the bash shim's writer — the sibling this closes for
-        the same reason, that a bad `system` "would send the curator at a `skills/sql/
-        execution.md` that must never exist".
+        Spent on the rejection guard's identity as well as on the row, never one without the
+        other: the guard recovers its count from the rows it wrote.
 
-        Spent on the rejection guard's identity as well as on the row, never on one and not the
-        other: the guard recovers its count from the rows it wrote, so a live identity keyed on
-        the raw string over a table holding `""` would match nothing and the repeat class this
-        guard exists to bound would stop being bounded.
-
-        THE IDENTITY CONSEQUENCE, stated because it is a real behaviour change and not an
-        oversight: every undeclared system now keys the SAME, so three rejections naming
-        `ghostone`, `ghosttwo` and `ghostthree` under one verb and params are one repeat group
-        and the third ends the lead. That is the reading this coarsening commits to — the
-        request identity below the grant is "a call to no system this run declares", and a
-        model that issues three of those in a row has repeated one mistake, not made three. It
-        is also the only reading available: the guard's identity is recovered from the frozen
-        frozen row keys, so a `system` the row does not carry cannot separate them. What must
-        NOT follow is a dead-end that tells main those calls named one system —
-        `_undeclared_target` is why the message says an undeclared system instead."""
+        THE IDENTITY CONSEQUENCE: every undeclared system keys the SAME, so three rejections
+        naming three ghost systems under one verb and params are one repeat group and the third
+        ends the lead. `_undeclared_target` is why the dead-end message says "an undeclared
+        system" rather than naming one."""
         try:
             declared = self._registry.systems()
         except CONTROL_FLOW_EXCEPTIONS:
@@ -273,8 +247,7 @@ class QueryCapture(AbstractCapability[Any]):
         except BaseException as e:  # noqa: BLE001 — a registry that cannot list declares nothing
             # Fail closed, but never SILENTLY: a registry that cannot answer coarsens every
             # above-guard row in the run, real systems included, and `collect_general_failures`
-            # then drops the lot. `_decide_guarded` turns its own load failure into a visible
-            # row; this path has no row of its own to carry one, so it says so on stderr.
+            # then drops the lot. This path has no row of its own to carry the fact.
             print(f"[query_tool] system registry could not list its systems "
                   f"({type(e).__name__}: {e}); above-guard rows will carry no system",
                   file=sys.stderr)
@@ -283,20 +256,16 @@ class QueryCapture(AbstractCapability[Any]):
 
     @staticmethod
     def _undeclared_target(recorded: str, raw: str) -> str:
-        """What the dead-end message calls the request's target.
-
-        The coarsened value is what the row and the guard agree on, but rendering `""` there
-        makes `rejection_dead_end_reason` say "system/verb unreadable in the call's own
-        arguments" — which is false for a call that named a system perfectly readably, just not
-        one that exists. And the raw string cannot be echoed: it is unbounded model text on a
-        path that crosses into MAIN's context. So neither, and a third thing that is true of
-        every member of this repeat group."""
+        """What the dead-end message calls the request's target. The coarsened `""` makes
+        `rejection_dead_end_reason` say "system/verb unreadable in the call's own arguments",
+        false for a call that named a system readably but not one that exists; and the raw
+        string cannot be echoed, being unbounded model text on a path into MAIN's context."""
         return recorded or ("an undeclared system" if raw.strip() else "")
 
     def _forbidden_reject(self, model_query_id: Any) -> str | None:
-        # The message names the WHOLE screen, not the path half of it: a refusal that lists
-        # four characters the caller did not use is one the caller cannot act on, and #875 F-8
-        # widened `_QID_FORBIDDEN` past the traversal set.
+        # The message names the WHOLE screen, not just its path half: `_QID_FORBIDDEN` reaches
+        # past the traversal set, and a refusal listing four characters the caller did not use
+        # is one the caller cannot act on.
         if model_query_id and any(t in str(model_query_id) for t in _QID_FORBIDDEN):
             return (
                 f"invalid query_id {model_query_id!r}: no '/', '\\', '..', NUL, newline or '#' "
@@ -306,16 +275,12 @@ class QueryCapture(AbstractCapability[Any]):
         return None
 
     def _rejection_guard(self, deps, system: str, verb: str, params: dict) -> RepeatTrip | None:
-        """The companion repeat guard (#826 item 4), shared by the two placements that reject a
-        call ABOVE `wrap_tool_execute`'s guard: the argument schema, and the grant check's
-        unresolvable-verb branch. Returns the `RepeatTrip` when this call is the `threshold`th
-        identical rejection, else `None`.
-
-        Its counted domain (`rejection_trip`) is the complement of the first guard's, so the
-        two can never both own one call. The identity is extracted at the CALLER, because the
-        two placements read different argument surfaces — raw pre-validation arguments up at
-        the schema, validated ones at the grant check — which is exactly why one guard could
-        not serve both."""
+        """The companion repeat guard, shared by the two placements that reject a call ABOVE
+        `wrap_tool_execute`'s guard: the argument schema, and the grant check's
+        unresolvable-verb branch. Its counted domain (`rejection_trip`) is the complement of
+        the first guard's, so the two can never both own one call. The identity is extracted at
+        the CALLER, because the two placements read different argument surfaces — raw
+        pre-validation arguments at the schema, validated ones at the grant check."""
         if deps.lead_id is None:
             return None
         return rejection_trip(
@@ -330,14 +295,12 @@ class QueryCapture(AbstractCapability[Any]):
             return await handler(args)
         except (ValidationError, ModelRetry) as e:
             raw = _raw_args(args)
-            # THE SECOND IDENTITY EXTRACTION (P-a). These are the RAW arguments: this frame
-            # runs precisely because the schema refused to produce validated ones, so there is
-            # nothing else to key on. A `params` that is not a dict at all coarsens to `{}`
-            # here — that is what the row already stores, so the live count and a replay over
-            # the recorded table read the same identity, which is the property that matters.
-            # `system` coarsens the same way when the registry does not declare it, and for a
-            # stronger reason: this row's `system` steers an offline corpus write
-            # (`_system_of_record`).
+            # THE SECOND IDENTITY EXTRACTION. These are the RAW arguments: this frame runs
+            # precisely because the schema refused to produce validated ones. A non-dict
+            # `params` coarsens to `{}` here — what the row already stores, so the live count
+            # and a replay over the recorded table read the same identity. `system` coarsens
+            # the same way when the registry does not declare it, and for a stronger reason:
+            # this row's `system` steers an offline corpus write (`_system_of_record`).
             raw_system = _as_str(raw.get("system"))
             system = self._system_of_record(raw_system)
             verb = _as_str(raw.get("verb"))
@@ -369,21 +332,14 @@ class QueryCapture(AbstractCapability[Any]):
         caller must return without ever reaching execution."""
         decision, load_error = self._decide_guarded(system, verb)
         if load_error is not None:
-            # THE BREAKER CHECK, consulted HERE rather than only at `wrap_tool_execute:429`
-            # (#878 F-07). Two modules promise this class's repeat is owned end to end by
-            # `circuit_breaker` — `rejection_trip`'s docstring excludes these `infra` rows from
-            # the companion guard on exactly that promise, and the comment at the unresolvable
-            # branch below repeats it. The promise was false for as long as the check sat
-            # BELOW this return: `verbs._load_adapter_module` caches only on success, so the
-            # same import re-failed on every call, `_record`'s tail fed each one to
-            # `record_outcome`, and no call of this class was ever answered by the
-            # down-message. The second failure marked the system down and nothing read it; the
-            # fifth crossed `RUN_FAIL_KILL_LIMIT` and `RunAborted` ended the run with no
-            # disposition. Ahead of `_record`, so the down-answer neither writes a third row
-            # nor counts a third failure — the point of a tripped breaker is that the call did
-            # not happen. NOT hoisted above `_grant_check` entirely: the DENIED branch below
-            # owes its denial record whatever else is wrong with the call (§7 R3/R23), and a
-            # breaker answer ahead of the grant would swallow it.
+            # THE BREAKER CHECK, consulted HERE and not only in `wrap_tool_execute`. These
+            # `infra` rows are excluded from `rejection_trip` on the promise that
+            # `circuit_breaker` owns this repeat end to end, which is false unless the check
+            # sits above this return: `verbs._load_adapter_module` caches only on success, so
+            # the same import re-fails on every call and the fifth failure crosses
+            # `RUN_FAIL_KILL_LIMIT`. Ahead of `_record`, so the down-answer neither writes a
+            # row nor counts a failure. NOT hoisted above `_grant_check` entirely — the DENIED
+            # branch below owes its denial record whatever else is wrong (§7 R3/R23).
             tripped = _tripped_message(deps, system)
             if tripped is not None:
                 return None, tripped
@@ -404,17 +360,13 @@ class QueryCapture(AbstractCapability[Any]):
             )
 
         if decision.outcome != GRANTED:
-            # The unresolvable-verb repeat class — the same shape as the schema class at a
-            # different placement (#826 item 4), and the reason the companion guard is reached
-            # from both. The load-error branch above is deliberately NOT guarded by THIS
-            # guard: its rows are `infra`, outside `rejection_trip`'s domain, and
-            # `circuit_breaker` owns that repeat end to end — which since #878 F-07 it
-            # actually does, by consulting the breaker in the branch itself.
-            # The same coarsening the schema placement applies, for the same reason (#855
-            # F-06) and with the same domain: an unresolvable call is unresolvable precisely
-            # because the grant reached no system by that name, so the string it names is the
-            # one least entitled to become a `skills/<system>/` path. A REAL system with an
-            # unknown verb — the ordinary shape here — is untouched and still records itself.
+            # The unresolvable-verb repeat class — the schema class's shape at a different
+            # placement, which is why the companion guard is reached from both. The load-error
+            # branch above is deliberately NOT guarded by it: those rows are `infra`, outside
+            # `rejection_trip`'s domain. Same coarsening as the schema placement, since an
+            # unresolvable call reached no system by that name and its string is the one least
+            # entitled to become a `skills/<system>/` path; a REAL system with an unknown verb
+            # still records itself.
             recorded_system = self._system_of_record(system)
             trip = self._rejection_guard(deps, recorded_system, verb, params)
             refusal = decision.refusal or "unresolvable"
@@ -481,19 +433,15 @@ class QueryCapture(AbstractCapability[Any]):
 
         # The repeat guard sits ABOVE `_screen`, so it owns every repeat it can see —
         # including a call the verb's own parameter check would refuse — rather than earning a
-        # third identical corrective `ModelRetry` the model already ignored twice. Its read is
-        # the count itself is derived from: no new persisted state.
+        # third identical corrective `ModelRetry` the model already ignored twice.
         rows = lead_rows(deps.run_dir, deps.lead_id)
         trip = repeat_trip(rows, deps.lead_id, system=system, verb=verb, params=params)
         if trip is not None:
-            # REPEAT_TRIP_QUERY_ID, not `resolve_query_id(...)` (#823 M3). The refusal is
-            # recorded under its own identity rather than under whatever the model called the
-            # request it was refused, because three offline collectors partition this table on
-            # `query_id` and the model's id sent the trip row to the wrong two: a coined id was
-            # minted as a `_draft/` template proposing the refused query, and a catalog id was
-            # handed to the lead-author as a failure of that template. The guard's own counted
-            # domain is untouched — it keys on ABOVE_GUARD_QUERY_ID alone, and #807 pins that
-            # this row still counts on replay.
+            # REPEAT_TRIP_QUERY_ID, not `resolve_query_id(...)`: three offline collectors
+            # partition this table on `query_id`, and the model's id sends the trip row to the
+            # wrong two — a coined id is minted as a `_draft/` template proposing the refused
+            # query, a catalog id is handed to the lead-author as a failure of that template.
+            # The guard's own counted domain keys on ABOVE_GUARD_QUERY_ID alone, so untouched.
             await self._record(
                 deps, system=system, verb=verb, query_id=REPEAT_TRIP_QUERY_ID, params=params,
                 payload=None, exit_code=USAGE_EXIT_CODE, detail=repeat_trip_detail(trip),
@@ -543,9 +491,9 @@ class QueryCapture(AbstractCapability[Any]):
         run_dir = deps.run_dir
 
         async with self._seq_lock:
-            # The thirteen keys are assembled by `append_query_row` (#823 F1), which the gather
-            # bash lane's shim recorder also calls. The lock stays: it is this path's, and it
-            # is cheaper to keep than to argue that nothing will ever add an `await` here.
+            # The row's keys are assembled by `append_query_row`, which the gather bash lane's
+            # shim recorder also calls. The lock stays: cheaper to keep than to argue that
+            # nothing will ever add an `await` here.
             row = append_query_row(
                 run_dir,
                 lead_id=deps.lead_id,
@@ -568,12 +516,10 @@ class QueryCapture(AbstractCapability[Any]):
 
     def _model_view(self, deps, row: dict, text: str, exit_code: int, detail: str) -> str:
         note = _payload_note(deps, row)
-        # ABOVE the exit-code split, not inside the success arm (#826 item 3). The early
-        # return used to sit here, so a lead repeating a request whose calls keep FAILING was
-        # the one population that never got the "you are repeating yourself" signal — the
-        # exact population most likely to loop, since a failure gives it nothing new to reason
-        # from either. Ahead of the view for the same reason it is on the success path: the
-        # repeat is what the caller most needs to read first.
+        # ABOVE the exit-code split, not inside the success arm: a lead repeating a request
+        # whose calls keep FAILING is the population most likely to loop — a failure gives it
+        # nothing new to reason from — so it needs the "you are repeating yourself" signal
+        # most. Ahead of the view, because the repeat is what the caller must read first.
         repeat = repeat_note(
             deps.run_dir, deps.lead_id, seq=row["seq"], system=row["system"],
             verb=row["verb"], params=row["params"],
@@ -588,9 +534,8 @@ class QueryCapture(AbstractCapability[Any]):
             body = detail if repeat is None else f"{repeat}\n{detail}"
             return _format_bash_result(exit_code, "", wrap_fresh(body, "untrusted"), note)
         # ONE call, no condition: `render` returns the payload verbatim when it fits and a
-        # bounded view when it does not (#832). The condition used to live here AND at the
-        # judge's mirror of this method, so "what counts as too big" was stated twice and could
-        # drift; the size test that replaced it belongs to the renderer, not to its callers.
+        # bounded view when it does not. "What counts as too big" belongs to the renderer, not
+        # to its callers — stated here as well as at the judge's mirror it could drift.
         view = _render_payload(text, row["payload_path"], deps.run_dir)
         if repeat is not None:
             view = f"{repeat}\n{view}"
@@ -599,31 +544,21 @@ class QueryCapture(AbstractCapability[Any]):
 
 
 #: What a param renders as when its declared annotation could not be resolved. NOT cosmetic:
-#: `_resolved_hints` swallows an unresolvable annotation and returns `{}` (verbs.py:166-170),
-#: after which `validate_params` type-checks NOTHING and accepts any value. A surface that
-#: printed the annotation there would promise a check the boundary does not make — the one way
-#: this tool could lie about the thing it exists to report (#900 O3).
-#:
-#: The blast radius is the whole VERB, not the one bad param: `typing.get_type_hints` resolves
-#: a signature as a unit and raises on the first name it cannot see, so `_resolved_hints`
-#: returns `{}` for ALL of them. A verb with one unresolvable annotation therefore has every
-#: param unenforced, and every one of them must say so — which is why this marker is applied
-#: from the absence of a hint rather than from the presence of a bad one.
+#: `_resolved_hints` swallows an unresolvable annotation and returns `{}`, after which
+#: `validate_params` type-checks NOTHING — printing the annotation would promise a check the
+#: boundary does not make. The blast radius is the whole VERB (`typing.get_type_hints` resolves
+#: a signature as a unit), which is why the marker is applied from the ABSENCE of a hint rather
+#: than the presence of a bad one.
 UNENFORCED_TYPE = "type unenforced"
 
 #: The GRANT-FIRST answer, and the one branch that deliberately refuses to distinguish two
-#: conditions (#900 review R2). `VerbRegistry.decide` decides "from the grant ALONE first — no
-#: adapter is resolved (no import) unless the grant admits the call" (§7 R11); a discovery tool
-#: that resolved first would both execute an ungranted adapter's import-time code and turn its
-#: own four degradations into an oracle over the on-disk roster — "no such adapter" vs "present
-#: but broken" vs "present and healthy", read across the grant boundary. So a system the grant
-#: does not reach is answered here, before any import, and absent is spelled exactly like
-#: withheld.
-#:
-#: Naming the reachable systems costs nothing: the dispatch prompt's descriptor index already
-#: lists every system in this role's grant, so this discloses nothing the lead was not handed
-#: on turn one — and it is a BETTER correction than the "no adapter by that name" it replaces
-#: for the overwhelmingly common cause, a mistyped name.
+#: conditions. `VerbRegistry.decide` decides from the grant ALONE first — no adapter imported
+#: unless the grant admits the call (§7 R11); a discovery tool that resolved first would both
+#: execute an ungranted adapter's import-time code and turn its own degradations into an
+#: oracle over the on-disk roster, read across the grant boundary. So absent is spelled exactly
+#: like withheld. Naming the reachable systems discloses nothing — the dispatch prompt's
+#: descriptor index already lists every system in this role's grant — and is a better
+#: correction for the common cause, a mistyped name.
 _LIST_VERBS_UNREACHABLE = (
     "`{system}` — your grant reaches no verb on any system by that name, so there is nothing "
     "here you may run and no surface to show you.{roster} Measure this lead against a system "
@@ -637,16 +572,13 @@ _LIST_VERBS_UNKNOWN_SYSTEM = (
     "to; confirm it there and call this again with that name."
 )
 
-#: Reached only for a name that already passed `_adapter_path`'s `is_system_name` check AND its
-#: containment check under the adapters dir — an unmatched name raises `KeyError` into the
-#: branch above — so interpolating it into a path here cannot mint an arbitrary model-named
-#: one (the #855 F-06 concern, which is about a model string reaching a corpus WRITE).
+#: Reached only for a name that already passed `_adapter_path`'s `is_system_name` and
+#: containment checks — an unmatched name raises `KeyError` into the branch above — so
+#: interpolating it into a path here cannot mint an arbitrary model-named one.
 #:
-#: THE FALLBACK NAMES WHAT THAT FILE STILL HOLDS, and no more (#900): the same change that
-#: added this tool deleted the hand-authored verb/param blocks from every `execution.md`, so
-#: sending the lead there for "its documented surface" would send it to a file whose `## Verbs`
-#: section now says "call `list_verbs`" — the call that just failed. Value constraints and
-#: recorded pitfalls DO still live there, and those are what it is offered for.
+#: THE FALLBACK NAMES WHAT THAT FILE STILL HOLDS, and no more: `execution.md` carries no
+#: verb/param blocks (its `## Verbs` section says "call `list_verbs`" — the call that just
+#: failed), only value constraints and recorded pitfalls.
 _LIST_VERBS_UNLOADABLE = (
     "`{system}` — UNAVAILABLE: its adapter could not be loaded ({err}). No verb surface can be "
     "derived for it right now, and no file carries a copy — the verb roster and its params are "
@@ -681,9 +613,9 @@ _LIST_VERBS_NO_VERBS = (
     "param name."
 )
 
-#: The OTHER emptiness, and it is not the one above — the same split `_INDEX_NONE_GRANTED`
-#: draws for the template index. A system that will not load and a system whose every verb
-#: this role is refused both render "nothing to show", and they call for opposite responses.
+#: The OTHER emptiness, not the one above — the same split `_INDEX_NONE_GRANTED` draws for the
+#: template index. A system that will not load and a system whose every verb this role is
+#: refused both render "nothing to show", and they call for opposite responses.
 _LIST_VERBS_NONE_GRANTED = (
     "`{system}` — its adapter declares verbs, but your grant admits none of them. This is not "
     "an empty system and not a read failure: there is nothing here you may run. Measure this "
@@ -721,10 +653,8 @@ def _json_default(value: Any) -> str:
     """A param default in the JSON spelling the legend demands, never `repr`'s python one.
 
     `repr` renders `None`/`True`/`'desc'` where the call the model must emit needs
-    `null`/`true`/`"desc"` — and a lead that copies the descriptor verbatim then sends invalid
-    JSON, or (for a quoted `"false"`) the exact truthiness inversion the legend warns about.
-    This tool exists to stop param guesswork; publishing a default in a syntax the call cannot
-    carry reintroduces it at the last step.
+    `null`/`true`/`"desc"`, so a lead copying the descriptor verbatim sends invalid JSON — or,
+    for a quoted `"false"`, the exact truthiness inversion the legend warns about.
     """
     try:
         return json.dumps(value)
@@ -748,16 +678,11 @@ def _echoed_system(system: str) -> str:
     """The `system` string a degradation message may interpolate.
 
     A well-formed name goes back verbatim — that is what makes the correction actionable. Any
-    other string is a model-authored blob that would otherwise land unescaped inside a
-    backticked span of a markdown answer, where a newline or a `#` forges document structure
-    in the lead's own context (`_QID_FORBIDDEN`'s render half, and the reason
-    `_undeclared_target` refuses to echo one at all). `repr` on a bounded slice keeps the
-    string legible without letting it carry structure.
-
-    The BACKTICK is dropped rather than left to `repr`, which escapes newlines and quotes and
-    passes a backtick through untouched: every interpolation site wraps this value in a `` ` ``
-    span, so one backtick inside closes the span early and the rest of the model's string lands
-    as prose in the lead's context. Dropping it costs nothing a debug echo needs.
+    other string is a model-authored blob that would land unescaped inside a backticked span of
+    a markdown answer, where a newline or a `#` forges document structure in the lead's own
+    context; `repr` on a bounded slice keeps it legible without letting it carry structure. The
+    BACKTICK is dropped separately, since `repr` passes it through: one backtick closes the
+    span early and the rest of the model's string lands as prose.
     """
     if is_system_name(system):
         return system
@@ -765,9 +690,8 @@ def _echoed_system(system: str) -> str:
 
 
 #: What every guarded read below RE-RAISES rather than degrading: the framework's own control
-#: flow plus the kills that end the process. Named once because the four readers below repeated
-#: the same two `except` clauses verbatim, and a fifth reader added later must not be able to
-#: copy half of them.
+#: flow plus the kills that end the process. Named once so a reader added later cannot copy
+#: half of it.
 _RERAISE: tuple[type[BaseException], ...] = (
     *CONTROL_FLOW_EXCEPTIONS,
     BudgetKill, KeyboardInterrupt, GeneratorExit, asyncio.CancelledError,
@@ -775,11 +699,8 @@ _RERAISE: tuple[type[BaseException], ...] = (
 
 
 def _registry_declares(registry: Any, system: str) -> bool:
-    """Does the registry list `system` among the systems it knows? `False` when it cannot say.
-
-    Fails toward "unknown", which is the answer the caller already gave before this split
-    existed — a registry that cannot list its systems must not be read as evidence that a
-    system exists.
+    """Does the registry list `system` among the systems it knows? `False` when it cannot say —
+    a registry that cannot list its systems is not evidence that a system exists.
     """
     try:
         return system in registry.systems()
@@ -796,11 +717,10 @@ def _granted_systems(registry: Any) -> tuple[str, ...]:
     except _RERAISE:
         raise
     except BaseException as e:  # noqa: BLE001 — a registry that cannot name its grant reaches nothing
-        # LOUD on the operator channel, for the same reason `_system_of_record` is: this arm
-        # answers "your grant reaches nothing" for EVERY system in the run, which reads to the
-        # lead as a correctly-empty grant rather than as a broken registry. The tool's own
-        # answer cannot carry the distinction without turning a defender fault into a routing
-        # instruction, so the transcript is where it has to land.
+        # LOUD on the operator channel, as `_system_of_record` is: this arm answers "your grant
+        # reaches nothing" for EVERY system in the run, which reads to the lead as a
+        # correctly-empty grant rather than a broken registry. The tool's own answer cannot
+        # carry the distinction without turning a defender fault into a routing instruction.
         print(f"[query_tool] verb registry could not name its grant "
               f"({type(e).__name__}: {e}); list_verbs will answer 'no system reached'",
               file=sys.stderr)
@@ -815,16 +735,12 @@ def _list_verbs_declared(
     try:
         declared = registry.verbs(system)
     except KeyError as e:
-        # A bare `KeyError` is `ModuleVerbRegistry.verbs`' "no adapter under that name" — but it
-        # is ALSO whatever a broken adapter raises while importing (a module-scope
-        # `os.environ[...]`, a missing dict key). Answering the second with "confirm the name
-        # and call again" sends the lead to re-ask a question that will keep failing, so the
-        # registry's own system list decides which of the two this is.
-        #
-        # The KEY is carried into the message, exactly as the general arm below carries its
-        # exception's text: this arm is reached for the import-time `KeyError`, where the
-        # missing name (`TICKET_URL`, say) is the whole of the diagnosis, and a bare
-        # "(KeyError)" hands the operator reading the transcript nothing to act on.
+        # A bare `KeyError` is `ModuleVerbRegistry.verbs`' "no adapter under that name" — but
+        # ALSO whatever a broken adapter raises while importing (a module-scope
+        # `os.environ[...]`). Answering the second with "confirm the name and call again" sends
+        # the lead to re-ask a question that keeps failing, so the registry's own system list
+        # decides which this is. The KEY rides into the message: for an import-time `KeyError`
+        # the missing name (`TICKET_URL`, say) is the whole of the diagnosis.
         if _registry_declares(registry, system):
             return {}, _LIST_VERBS_UNLOADABLE.format(system=shown, err=f"KeyError: {e}")
         return {}, _LIST_VERBS_UNKNOWN_SYSTEM.format(system=shown)
@@ -846,14 +762,11 @@ def _list_verbs_line(
     """`((rendered_call, any_param_unenforced), degradation)` for one verb — `(None, None)`
     when the grant withholds it, which is a skip and not a failure.
 
-    GUARDED END TO END, exactly as `QueryCapture._decide_guarded` guards the dispatch path's
-    own call, and over the RENDER as much as over the decision: `decide` raises `GrantError` on
-    a grant/declaration class disagreement, and the render raises just as readily on a
-    malformed `VERBS` table — `ModuleVerbRegistry.verbs` checks only that the table is a
-    Mapping, so a non-callable body reaches `inspect.signature` inside `model_facing_params`
-    and comes back as `TypeError`. An exception out of a discovery tool ends the lead's turn,
-    the one thing O4 forbids of every branch here; deciding and rendering are one guarded unit
-    because a broken adapter can fail either half and the lead reads the same answer for both.
+    GUARDED END TO END, over the RENDER as much as the decision: `decide` raises `GrantError`
+    on a grant/declaration class disagreement, and the render raises just as readily on a
+    malformed `VERBS` table (a non-callable body reaches `inspect.signature` as a `TypeError`).
+    An exception out of a discovery tool ends the lead's turn, which O4 forbids of every branch
+    here, so deciding and rendering are one guarded unit.
     """
     try:
         decision = registry.decide(system, verb)
@@ -881,19 +794,15 @@ def _tool_list_verbs(registry: Any, system: str) -> str:
     """`system`'s granted verbs and their declared params, derived at call time.
 
     The two readers are `model_facing_params` and `_resolved_hints` — the SAME pair
-    `validate_params` enforces on (verbs.py:196-232) — so what this publishes and what the
-    boundary accepts cannot drift apart. The grant filter goes through `registry.decide`
-    rather than `grant.allows` for the same reason one layer up: `decide` is the dispatch
-    path's own decision point, so a verb this names is a verb `query` would admit.
+    `validate_params` enforces on — so what this publishes and what the boundary accepts
+    cannot drift apart. The grant filter goes through `registry.decide`, the dispatch path's
+    own decision point, so a verb this names is a verb `query` would admit. The SYSTEM-level
+    check runs first and separately, because reaching `decide` already costs the adapter
+    import that ordering exists to withhold.
 
-    The SYSTEM-level grant check runs first and separately, because `decide` is per-verb and
-    reaching it already costs the adapter import this ordering exists to withhold.
-
-    Nothing is persisted. This writes no queries-table row, touches no circuit breaker and no
-    repeat guard — it is a read of our own adapter signatures, not a measurement of a system
-    of record, and the offline loop's `.queries` must keep meaning "what the defender ran".
-    Its output is trusted for the same reason: the text is derived from first-party source, so
-    it carries no `wrap_fresh` untrusted frame the way a payload does.
+    Nothing is persisted: no queries-table row, no circuit breaker, no repeat guard — this is
+    a read of our own adapter signatures, so the offline loop's `.queries` keeps meaning "what
+    the defender ran", and the first-party output carries no `wrap_fresh` untrusted frame.
     """
     shown = _echoed_system(system)
     # GRANT FIRST, before anything resolves an adapter — `decide`'s own ordering (§7 R11).
@@ -909,10 +818,9 @@ def _tool_list_verbs(registry: Any, system: str) -> str:
     lines: list[str] = []
     any_unenforced = False
     # `key=str`, because the sort must not be the branch that raises: a broken adapter's
-    # `VERBS` may mix key types (`{"a": …, 7: …}`), and a bare `sorted` over that is the
-    # TypeError that ends the lead's turn before any degradation can be composed. A non-string
-    # key survives the sort and is then withheld by the grant filter below, where a name no
-    # grant can name belongs.
+    # `VERBS` may mix key types (`{"a": …, 7: …}`), and a bare `sorted` over that is a
+    # TypeError ending the lead's turn before any degradation can be composed. A non-string
+    # key survives the sort and is then withheld by the grant filter below.
     for verb in sorted(declared, key=str):
         rendered, failure = _list_verbs_line(registry, system, verb, shown)
         if failure is not None:
@@ -947,10 +855,10 @@ def register_list_verbs_tool(agent, registry) -> None:
         is the system you were dispatched to (the Dispatch block names it); call it again for
         another system if this lead crosses one. It runs nothing against the system of record
         and is not recorded as a query."""
-        # OFF THE EVENT LOOP, for the same reason the `query` tool's own dispatch is: this
-        # reads no system of record, but it does import the adapter MODULE on first use and
-        # re-read/re-parse its source per withheld verb (`declared_verb_names`) — synchronous
-        # filesystem work that would otherwise stall every sibling lead's turn in the process.
+        # OFF THE EVENT LOOP, as the `query` tool's own dispatch is: this reads no system of
+        # record, but it imports the adapter MODULE on first use and re-parses its source per
+        # withheld verb (`declared_verb_names`) — synchronous filesystem work that would
+        # otherwise stall every sibling lead's turn in the process.
         return await asyncio.to_thread(_tool_list_verbs, registry, system)
 
 

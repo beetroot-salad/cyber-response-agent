@@ -28,8 +28,7 @@ def flat_stages(pipelines: list[Pipeline]) -> list[list[str]]:
 
 def is_reducer_stage(argv: list[str]) -> bool:
     """Is this stage the SQL reducer? `bin/` carries exactly one, and it is a NON-adapter
-    (`NON_ADAPTER_SHIMS`), so this and `is_adapter_stage` partition rather than overlap. It
-    lives beside `SQL_SHIM` rather than at a call site so a second reducer is one edit."""
+    (`NON_ADAPTER_SHIMS`), so this and `is_adapter_stage` partition rather than overlap."""
     return bool(argv) and argv[0] == SQL_SHIM
 
 

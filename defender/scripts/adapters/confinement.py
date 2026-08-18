@@ -1,8 +1,8 @@
-"""Target fidelity (D3/D4, #632): a verb cannot be aimed outside the system it is declared
-under. Two rule forms — an HTTP read-endpoint allowlist for the URL-shaped adapters, and a
-program+container-target pair for host-state, which has no URL for the row-shaped rule to
-apply to — plus the transport capture seam the endpoint rule is checked through and the
-allowlist's own authoring-integrity constructor.
+"""Target fidelity (D3/D4): a verb cannot be aimed outside the system it is declared under.
+
+Two rule forms — an HTTP read-endpoint allowlist for the URL-shaped adapters, and a
+program+container-target pair for host-state, which has no URL — plus the transport capture
+seam the endpoint rule is checked through and the allowlist's authoring-integrity constructor.
 """
 from __future__ import annotations
 
@@ -35,10 +35,9 @@ class AllowlistError(Exception):
 
 
 class ReadEndpointAllowlist(Mapping):
-    """A validating `Mapping[system, tuple[(endpoint_pattern, method), ...]]`. Refuses an
-    entry naming no HTTP method at AUTHORING time (§7 F1) — the method is what separates the
-    ticket store's read from its write on the identical resolved path, so an entry authored
-    without one silently reopens that collision."""
+    """A validating `Mapping[system, tuple[(endpoint_pattern, method), ...]]`. Refuses at
+    AUTHORING time an entry naming no HTTP method (§7 F1) — the method is what separates the
+    ticket store's read from its write on the identical resolved path."""
 
     def __init__(self, table: Mapping[str, Iterable[Any]]):
         validated: dict[str, tuple[tuple[str, str], ...]] = {}
@@ -160,10 +159,9 @@ class TransportCapture:
 
 
 def guard_outbound(ctx: Any, system: str, url: str, *, method: str) -> None:
-    """Confine, then record — the ONE thing every outbound HTTP path in the tree does before
-    it opens a connection. The two transports that carry every request (the shared stub
-    transport and elastic's own helper) call this rather than each restating the pair, so a
-    third transport cannot half-adopt the seam."""
+    """Confine, then record — the ONE thing every outbound HTTP path does before opening a
+    connection. Both transports (the shared stub transport and elastic's own helper) call this
+    rather than restating the pair, so a third transport cannot half-adopt the seam."""
     confine_read_endpoint(system, url, method=method, verb_class="r")
     capture = getattr(ctx, "capture", None)
     if capture is not None:
@@ -228,9 +226,8 @@ def confine_host(host: str) -> str:
 
 def confine_host_state_call(program: str, host: str) -> None:
     """Both halves of D3's host-state rule: the PROGRAM against the per-system allowlist, and
-    the container TARGET against the declared inventory. Neither alone bounds reach — the
-    program alone does not bound reach (`cat` inside the ticket store is the disclosure), and
-    the target alone does not bound effect."""
+    the container TARGET against the declared inventory. Neither alone suffices — `cat` inside
+    the ticket store is a disclosure the program check alone would allow."""
     if program not in HOST_STATE_PROGRAMS:
         raise ConfinementFault(
             f"host-state program {program!r} is not in the declared allowlist "

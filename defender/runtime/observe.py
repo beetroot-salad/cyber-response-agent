@@ -29,12 +29,9 @@ from defender.scripts.pricing import usage_cost
 
 WIRE_LOG_ENSURE_ASCII = True
 
-#: The fixed policy-denial stream, ONE per site (§7 R1): the same filename, the same writer
-#: class (`RequestLogger`), at the runtime under the run dir and at the judge under its own
-#: run dir — mirroring the durable request stream's own discipline (appended and flushed per
-#: record, so it survives an abort) without folding denials into it, which would make "no
-#: denial happened" indistinguishable from "the file predates this change" for a reader that
-#: has to filter by record kind.
+#: The fixed policy-denial stream, ONE per site (§7 R1). Kept SEPARATE from the request stream
+#: (whose append-and-flush-per-record discipline it shares): folded in, "no denial happened"
+#: would be indistinguishable from "this file predates the denial record".
 POLICY_DENIALS = "policy_denials.jsonl"
 POLICY_DENIAL_EVENT_TYPE = "policy_denial"
 
@@ -98,11 +95,9 @@ def encode_wire_record(record: dict) -> str:
 
 _ACTIVE_PATHS: set[str] = set()
 #: Paths a RequestLogger has EVER opened in this process, never removed (unlike
-#: `_ACTIVE_PATHS`) — distinguishes "this path is a fresh log target" (truncate, mode="w";
-#: a file some OTHER writer left there is not this logger's history to preserve) from
-#: "this process already logged here and closed" (append, so the second construction
-#: doesn't silently clobber the first's lines — the discharge
-#: test_two_wire_log_constructions_under_one_key_do_not_silently_clobber_each_other allows).
+#: `_ACTIVE_PATHS`) — distinguishes "fresh log target" (truncate; a file some OTHER writer
+#: left there is not this logger's history to preserve) from "this process already logged here
+#: and closed" (append, so a second construction does not clobber the first's lines).
 _EVER_LOGGER_PATHS: set[str] = set()
 
 
@@ -114,11 +109,10 @@ class RequestLogger:
         if key is not None and key in _ACTIVE_PATHS:
             raise FileExistsError(f"a RequestLogger has already opened {path}")
         mode = "a" if key is not None and key in _EVER_LOGGER_PATHS else "w"
-        # The open happens BEFORE the registration, not after: `open_guarded` now refuses a
-        # planted alias (#771 M3), and a registration made ahead of a failed open is never
-        # undone — the path stays permanently in `_ACTIVE_PATHS` and every later attempt,
-        # including one made after the alias is cleared, reports "already opened" instead of
-        # opening. One refused open would otherwise disable that log for the whole process.
+        # The open happens BEFORE the registration: `open_guarded` refuses a planted alias,
+        # and a registration made ahead of a failed open is never undone — the path would stay
+        # in `_ACTIVE_PATHS` forever, disabling that log for the whole process even once the
+        # alias is cleared.
         fh = open_guarded(path, mode)
         if key is not None:
             _ACTIVE_PATHS.add(key)
@@ -147,12 +141,10 @@ class RequestLogger:
         }
         self.messages.append(rec)
         disk = {**rec, "message": _trim(message, cap)} if cap > 0 else rec
-        # encode_wire_record pins ensure_ascii=True (WIRE_LOG_ENSURE_ASCII, above) — load-
-        # bearing, not the default we happen to get: a lone UTF-16 surrogate (reachable
-        # from a provider response body via a `\udXXX` escape) survives dump_python and
-        # this encode, but raises UnicodeEncodeError at the point a raw str would be
-        # utf-8-encoded (issue #724). Pinned explicitly so a future edit can't flip it and
-        # reopen a content-triggered availability halt.
+        # `encode_wire_record` pins ensure_ascii=True deliberately: a lone UTF-16 surrogate
+        # (reachable from a provider response body via a `\udXXX` escape) survives this encode
+        # but raises UnicodeEncodeError where a raw str would be utf-8-encoded. Flipping it
+        # reopens a content-triggered availability halt.
         self._fh.write(encode_wire_record(disk) + "\n")
         self._fh.flush()
 
@@ -167,10 +159,9 @@ class RequestLogger:
         resp_dump = ModelMessagesTypeAdapter.dump_python([response], mode="json")[0]
         extra: dict[str, Any] = {}
         if toon_gate is not None:
-            # #872 O1 — the gate's own operator-facing record: how many foreign results it
-            # examined, refused, substituted, and how many bytes that saved. Rides the SAME
-            # wire-log record every other run-level observable does (§7 r1, P6 = B) — no new
-            # run-dir sink.
+            # The gate's operator-facing record: how many foreign results it examined,
+            # refused, substituted, and how many bytes that saved. Rides the SAME wire-log
+            # record every other run-level observable does — no new run-dir sink.
             extra["toon_gate"] = toon_gate
         self._emit(
             agent_id, "response", resp_dump, cap,
@@ -187,12 +178,10 @@ class RequestLogger:
     def log_policy_denial(
         self, *, role: str, system: str, verb: str, call_id: str, params: Any,
     ) -> dict:
-        """Append one policy-denial record — the bounded, normalized projection §7 R12
-        demands: role, system, verb, call id, and a digest of the parameter VALUES (never the
-        raw blob). A failed write is NOT swallowed (§7 R2): it propagates to the caller, after
-        the refusal it audits has already taken effect — deliberately not inheriting
-        `log_budget_refusal`'s blanket suppressor, whose record can vanish while the refusal
-        still happens."""
+        """Append one policy-denial record — the bounded projection §7 R12 demands: role,
+        system, verb, call id, and a digest of the parameter VALUES (never the raw blob). A
+        failed write is NOT swallowed (§7 R2): it propagates, after the refusal it audits has
+        already taken effect. Deliberately not `log_budget_refusal`'s blanket suppressor."""
         seq = self._denial_seq
         self._denial_seq += 1
         rec = {
@@ -224,30 +213,24 @@ class RequestLogger:
 
 
 #: The ONE policy-denial writer per run dir, shared by every denial site in this process.
-#: `RequestLogger` refuses a second open of a path it already holds (`_ACTIVE_PATHS`), and the
-#: runtime builds a separate `QueryCapture` for EVERY gather lead against one shared run dir —
-#: so a per-capability logger turns the second denied call of a run into an uncaught
-#: `FileExistsError` out of the tool wrapper instead of a refusal. Still lazy: nothing is
-#: opened until a denial actually happens, so a clean run leaves no such file.
+#: `RequestLogger` refuses a second open of a path it already holds, and the runtime builds a
+#: separate `QueryCapture` for EVERY gather lead against one shared run dir — so a
+#: per-capability logger turns the run's second denied call into an uncaught `FileExistsError`
+#: out of the tool wrapper instead of a refusal. Still lazy: a clean run leaves no such file.
 _DENIAL_LOGGERS: dict[str, RequestLogger] = {}
 
 
 def _denial_logger_or_null(path: Path) -> RequestLogger:
     """Open the denial stream, degrading to a null sink rather than letting one refused open
-    end the run (§7 D3, extended from the accounting exemption to the streaming lane).
+    end the run (§7 D3, extended to the streaming lane).
 
-    This logger is opened LAZILY, on the first denial — which is to say mid-run, after the box
-    has had every opportunity to plant a symlink at its name. `open_guarded` refuses that plant
-    (correctly), and before this the refusal escaped through the query tool and killed the run:
-    exactly the denial-of-service lever the exemption exists to take away, reachable with one
-    planted entry. The refusal it audits has ALREADY taken effect by the time we get here, so
-    the run survives and the model still sees its denial.
-
-    What is lost is the RECORD, and only the record. That is announced on stderr, and the plant
-    itself stays on disk — `write_guarded` deliberately never removes a refused entry — so the
-    reap scan reports it as taint, which is a louder signal than the denial row would have been.
-    `log_policy_denial`'s own write stays non-swallowing (§7 R2): a refused OPEN and a failed
-    WRITE are different events, and only the first is a lever the box can pull at will."""
+    This logger opens LAZILY, on the first denial — mid-run, after the box has had every
+    opportunity to plant a symlink at its name. `open_guarded` refuses that plant, and letting
+    the refusal escape would hand the box a denial-of-service lever costing one planted entry.
+    The refusal being audited has ALREADY taken effect, so the run survives and the model
+    still sees its denial; only the RECORD is lost, announced on stderr, with the plant left
+    on disk for the reap scan to report as taint. `log_policy_denial`'s own write stays
+    non-swallowing (§7 R2): only a refused OPEN is a lever the box can pull at will."""
     try:
         return RequestLogger(path)
     except OSError as e:
@@ -274,16 +257,11 @@ def denial_logger(run_dir: Path) -> RequestLogger:
 def wire_log_path(run_dir: Path) -> Path:
     """The run's wire log (`<run_dir>/wire_logs/llm_requests.jsonl`), creating the holding dir.
 
-    `denial_logger`'s sibling — the other "where does this run's stream live" resolver — and
-    the WRITER's half of a location `_run_paths` owns. The reason the wire log sits one level
-    down rather than at the run root is documented there, on `WIRE_LOG_DIR`: it is a read-gate
-    boundary, not a tidiness choice. Callers ask here instead of joining the name onto a run
-    dir, so the location cannot drift back up through an edit made somewhere that cannot see
-    that rationale. `guarded_mkdir` anchors on the run dir because that is the box's rw bind,
-    and so the first component the box could have planted a link at — which is `stage_trace_path`'s
-    anchor too, so this is that function under the run's own log name rather than a second
-    `guarded_mkdir` of the same component. The `RunPaths` assertion is what keeps the delegation
-    honest: the accessor every READER resolves through must name the file this WRITER opens."""
+    The WRITER's half of a location `_run_paths` owns; why the log sits one level down rather
+    than at the run root is documented there, on `WIRE_LOG_DIR` — it is a read-gate boundary,
+    not tidiness. Callers ask here instead of joining the name onto a run dir, so the location
+    cannot drift. The `RunPaths` assertion keeps the delegation honest: the accessor every
+    READER resolves through must name the file this WRITER opens."""
     path = stage_trace_path(run_dir, WIRE_LOG)
     assert path == RunPaths(Path(run_dir)).wire_log, (
         "the wire log's writer and its RunPaths accessor have drifted apart"
@@ -294,16 +272,11 @@ def wire_log_path(run_dir: Path) -> Path:
 def stage_trace_path(root: Path, trace_name: str) -> Path:
     """A learning stage's trace (`<root>/wire_logs/<trace_name>`), creating the holding dir.
 
-    `wire_log_path`'s twin for the OFFLINE lane — the actor's, the oracle's, the judge's, the
-    curators' and the forward-check verifier's traces, all opened by `_pydantic_stage.run_stage`
-    off a root that is the learning run dir, the curator's pending dir or the source run dir
-    depending on the stage. Same component, and it has to be: `permission.files.names_wire_log_dir`
-    is ONE path-component test, so every wire log in the tree lands where that test finds it.
-
-    Here the component is NOT what denies — the actor declares no read shape and the judge's is
-    multi-segment, so neither is excluded by depth (see `files.WIRE_LOG_DENY_REASON`). The
-    component is what makes the deny addressable: a rule keyed on a directory covers a trace
-    name nobody has invented yet, which a rule keyed on `*.trace.jsonl` would not."""
+    `wire_log_path`'s twin for the OFFLINE lane, off a root that varies by stage. Same
+    component, and it has to be: `permission.files.names_wire_log_dir` is ONE path-component
+    test, so every wire log in the tree must land where that test finds it. Here the component
+    is NOT what denies (see `files.WIRE_LOG_DENY_REASON`) — it is what makes the deny
+    addressable: a rule keyed on a directory covers a trace name nobody has invented yet."""
     root = Path(root)
     guarded_mkdir(root / WIRE_LOG_DIR, base=root)
     return root / WIRE_LOG_DIR / trace_name

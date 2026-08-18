@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 """List actor lessons by relevance_criteria.
 
-Cheap discovery primitive for the actor stage: prints one
-`<path>\\t<relevance_criteria>` line per lesson that passes the filters,
-so the actor scans descriptions before deciding which files to Read.
-
-v2 (schema-v2): one flat corpus at ``defender/lessons-actor/*.md``.
-No channel split. Filters compose AND across keys, OR within a key.
+Discovery primitive for the actor stage: one `<path>\\t<relevance_criteria>`
+line per lesson passing the filters, so the actor scans descriptions before
+deciding which files to Read. One flat corpus at ``defender/lessons-actor/*.md``;
+filters compose AND across keys, OR within a key.
 
 Usage:
     lessons_actor_index.py                                # whole corpus (live only)
@@ -17,10 +15,9 @@ Usage:
     lessons_actor_index.py --applies-to <env-fact-subject,...>
     lessons_actor_index.py --include-stale                # author-only
 
-Lessons missing a filtered field are skipped silently. Lessons with
-``status: stale`` (only meaningful when ``mutable: true``) are hidden
-by default; ``--include-stale`` surfaces them. The runtime actor must
-never see stale claims.
+Lessons missing a filtered field are skipped silently. ``status: stale``
+lessons (meaningful only when ``mutable: true``) are hidden unless
+``--include-stale``: the runtime actor must never see stale claims.
 """
 from __future__ import annotations
 
