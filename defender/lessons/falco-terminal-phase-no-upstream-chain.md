@@ -4,6 +4,8 @@ description: A Falco terminal-execution lead set needs upstream cron-write and s
 telemetry_source: [falco, zeek]
 attack_phase: [collection, persistence, exfiltration]
 source_signature: [v2-falco-suspicious-network-tool]
+frontier_nodes:
+  - {type: process, slot: class}
 source_finding_ids:
   - live-falco-nettool-e2e-1/2
 created_at: 2026-06-06T00:00:00Z

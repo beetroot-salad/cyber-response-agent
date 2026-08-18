@@ -4,6 +4,9 @@ description: Falco monitors container workloads only; crontab spool and home-dir
 telemetry_source: [falco, auditd, fim]
 attack_phase: [persistence]
 source_signature: [v2-cross-tier-ssh-pivot]
+frontier_nodes:
+  - {type: compute, slot: attrs.kind}
+  - {type: file, slot: class}
 source_finding_ids:
   - live-cross-tier-pivot-3/2
 created_at: 2026-06-04T00:00:00Z

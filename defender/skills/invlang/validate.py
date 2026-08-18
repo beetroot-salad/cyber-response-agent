@@ -692,7 +692,7 @@ def _check_attr_update_keys(proposed_text: str) -> list[Diagnostic]:
 
     The VALUE cell is the second family, and a REFUSAL rather than a warning. A present-but-
     blank value is not inert: `_apply_attr_updates` would assign it, and since neither
-    `_has_open_slot("")` nor `_is_unresolved("")` reads `""` as open, the empty cell reads as a
+    `has_open_slot("")` nor `is_unresolved("")` reads `""` as open, the empty cell reads as a
     RESOLUTION — `l-001|v-001|class|` makes a benign-blocking error vanish. The truncated
     3-cell row is already refused by the cell-count rule, so the hole is exactly the cell that
     is present and says nothing. No `fix` is offered: the missing value is the one thing this
@@ -753,7 +753,7 @@ def _check_attr_update_keys(proposed_text: str) -> list[Diagnostic]:
 def _check_attr_update_targets(companion: CompanionBody) -> list[str]:
     """A `:R attr_updates` row must name a graph object the document DECLARES.
 
-    Otherwise an undeclared target lands with zero diagnostics and `_effective_vertex_state`
+    Otherwise an undeclared target lands with zero diagnostics and `effective_vertex_state`
     fabricates the object out of the refinement alone — and since `ident` is writable, the
     fabricated vertex's identifier carries a value that flows from alert content.
 
@@ -791,7 +791,7 @@ def _check_closed_vocab(companion: CompanionBody, proposed_text: str) -> list[Di
 
 
 
-def _is_unresolved(value: Any) -> bool:
+def is_unresolved(value: Any) -> bool:
     """Does this cell say "not settled yet" — the WHOLE of it, not a substring.
 
     The two markers SKILL.md §Open questions defines, and the three-state progression it
@@ -854,7 +854,7 @@ def _class_slots(classification: str) -> list[str]:
     return [s.strip() for s in slots]
 
 
-def _has_open_slot(classification: Any) -> bool:
+def has_open_slot(classification: Any) -> bool:
     if not isinstance(classification, str):
         return False
     slots = _class_slots(classification)
@@ -864,7 +864,7 @@ def _has_open_slot(classification: Any) -> bool:
     # `{` is left alone — it splits like any other character and hides nothing.
     if any(s.count("{") > s.count("}") for s in slots):
         return True
-    return any(_is_unresolved(slot) for slot in slots)
+    return any(is_unresolved(slot) for slot in slots)
 
 
 def _seed_vertex_state(
@@ -886,7 +886,7 @@ def _seed_vertex_state(
                 "attributes": dict(v.get("attributes") or {}),
             },
         )
-        if cls and _has_open_slot(cur["classification"]) and not _has_open_slot(cls):
+        if cls and has_open_slot(cur["classification"]) and not has_open_slot(cls):
             cur["classification"] = cls
         if v.get("attributes"):
             cur["attributes"].update(v["attributes"])
@@ -905,7 +905,7 @@ def _apply_attr_updates(
         )
         for key, val in updates.items():
             # A refinement with nothing in its value cell resolves nothing. The parser defaults
-            # an absent value to `""`, and `_has_open_slot("")` / `_is_unresolved("")` are both
+            # an absent value to `""`, and `has_open_slot("")` / `is_unresolved("")` are both
             # False — so assigning it would read not as a downgrade but as a RESOLUTION, and
             # `l-001|v-001|class|` would clear the very `??` the row was meant to settle.
             # `_check_attr_update_keys` refuses the row outright; this keeps the read side
@@ -923,9 +923,17 @@ def _apply_attr_updates(
                 st["attributes"][key[len("attrs."):]] = val
 
 
-def _effective_vertex_state(
+def effective_vertex_state(
     companion: CompanionBody,
 ) -> dict[str, dict[str, Any]]:
+    """Every vertex as it stands NOW — declared `:V` state with every `:R attr_updates` row
+    applied, last row winning.
+
+    PUBLIC because it is the read-side answer to "what does the document currently say",
+    which two independent consumers need: the benign-disposition gate below, and the
+    frontier derivation `frontier.py` keys lesson retrieval on (#919). Both must see one
+    fold of the document, not two that can drift.
+    """
     state: dict[str, dict[str, Any]] = {}
     _seed_vertex_state(companion, state)
     _apply_attr_updates(companion, state)
@@ -934,15 +942,15 @@ def _effective_vertex_state(
 
 def _check_benign_open_slots(companion: CompanionBody) -> list[str]:
     errors: list[str] = []
-    for vid, st in _effective_vertex_state(companion).items():
-        if _has_open_slot(st["classification"]):
+    for vid, st in effective_vertex_state(companion).items():
+        if has_open_slot(st["classification"]):
             errors.append(
                 f"disposition benign blocked: vertex {vid} still has an "
                 f"unresolved class ({st['classification']!r}) — resolve via "
                 f":R attr_updates or escalate"
             )
         for name, val in st["attributes"].items():
-            if _is_unresolved(val):
+            if is_unresolved(val):
                 errors.append(
                     f"disposition benign blocked: vertex {vid} attribute "
                     f"{name!r} is still unresolved ({val!r}) — resolve via "

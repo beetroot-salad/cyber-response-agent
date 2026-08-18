@@ -36,6 +36,30 @@ def all_vertices(companion: CompanionBody) -> list[VertexRecord]:
     return out
 
 
+def vertex_types(companion: CompanionBody) -> dict[str, str]:
+    """Every vertex id in the document, mapped to its type — the WHOLE document, not the
+    prologue.
+
+    An investigation declares vertices in two places: the prologue's opening graph, and each
+    lead's own `outcome.observations`. Indexing the prologue alone while filtering against the
+    full hypothesis set (`all_hypotheses` walks both) silently drops any hypothesis anchored
+    to a vertex the run discovered mid-investigation: the anchor resolves to no type, so an
+    `attached_to_type` filter refuses it as a non-match rather than as a missing id.
+
+    First declaration wins, matching `all_hypotheses` and `_seed_vertex_state`: the prologue
+    is the declaring site for anything it names, and a later re-observation adds ids rather
+    than re-typing them. That agreement is load-bearing — `frontier.py` pairs the type from
+    here with the state from `effective_vertex_state`, and a different tie-break would let
+    the two come from different rows.
+    """
+    v_type: dict[str, str] = {}
+    for v in all_vertices(companion):
+        vid = v.get("id")
+        if isinstance(vid, str) and vid:
+            v_type.setdefault(vid, v.get("type", ""))
+    return v_type
+
+
 def all_edges(companion: CompanionBody) -> list[EdgeRecord]:
     out: list[EdgeRecord] = []
     pro = companion.get("prologue") or {}

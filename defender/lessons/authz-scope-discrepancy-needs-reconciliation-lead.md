@@ -4,6 +4,8 @@ description: When SIEM authz telemetry returns host scope wider than the provisi
 telemetry_source: [identity]
 attack_phase: [lateral-movement]
 source_signature: [v2-cross-tier-ssh-pivot]
+frontier_edges:
+  - {anchor_kind: iam-policy}
 source_finding_ids:
   - live-cross-tier-pivot-2/2
 created_at: 2026-06-04T00:00:00Z

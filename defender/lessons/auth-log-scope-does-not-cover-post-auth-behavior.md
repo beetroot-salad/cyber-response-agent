@@ -4,6 +4,8 @@ description: Auth-log leads expose login events only; claiming post-auth behavio
 telemetry_source: [sshd, auditd, zeek, fim]
 attack_phase: [execution, persistence]
 source_signature: [v2-cross-tier-ssh-pivot, v2-sshd-success-after-failures]
+frontier_nodes:
+  - {type: session, slot: class}
 source_finding_ids:
   - live-cross-tier-pivot-1/0
   - live-cross-tier-pivot-1/1

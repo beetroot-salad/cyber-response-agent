@@ -4,6 +4,11 @@ description: A source IP in a container exec or process alert needs an SSH auth-
 telemetry_source: [sshd, cmdb]
 attack_phase: [initial-access]
 source_signature: [v2-falco-suspicious-network-tool]
+frontier_nodes:
+  - {type: compute, class: ip-only, slot: ident}
+  - {type: compute, class: ip-only, slot: class}
+frontier_edges:
+  - {anchor_kind: approved-source-list}
 source_finding_ids:
   - live-falco-nettool-1/2
 created_at: 2026-06-04T00:00:00Z

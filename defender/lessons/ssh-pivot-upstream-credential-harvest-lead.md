@@ -4,6 +4,9 @@ description: Authorized SSH pivot cases need a pre-pivot source-host process lea
 telemetry_source: [host-state, auditd]
 attack_phase: [credential-access]
 source_signature: [v2-cross-tier-ssh-pivot]
+frontier_nodes:
+  - {type: credential, slot: class}
+  - {type: process, slot: class}
 source_finding_ids:
   - port259-smoke/1
 created_at: 2026-06-08T00:00:00Z

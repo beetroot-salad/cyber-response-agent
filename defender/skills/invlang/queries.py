@@ -37,23 +37,8 @@ def case_hypotheses(c: Companion) -> Iterable[HypothesisRecord]:
 
 
 def _vertex_types(c: Companion) -> dict[str, str]:
-    """Every vertex id in the case, mapped to its type — the WHOLE document, not the prologue.
-
-    An investigation declares vertices in two places: the prologue's opening graph, and each
-    lead's own `outcome.observations`. Indexing the prologue alone while filtering against the
-    full hypothesis set (`case_hypotheses` walks both) silently drops any hypothesis anchored
-    to a vertex the run discovered mid-investigation: the anchor resolves to no type, so an
-    `attached_to_type` filter refuses it as a non-match rather than as a missing id.
-
-    First declaration wins, matching `_walkers.all_hypotheses`: the prologue is the declaring
-    site for anything it names, and a later re-observation adds ids rather than re-typing them.
-    """
-    v_type: dict[str, str] = {}
-    for v in _walkers.all_vertices(c.body):
-        vid = v.get("id")
-        if isinstance(vid, str) and vid:
-            v_type.setdefault(vid, v.get("type", ""))
-    return v_type
+    """`Companion`-shaped adapter over the shared walker."""
+    return _walkers.vertex_types(c.body)
 
 
 def _lead_outcome_empty(lead: FindingRecord) -> bool:

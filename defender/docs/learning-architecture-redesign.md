@@ -305,12 +305,21 @@ and the motivating case's frontier item is slot-shaped. And the frontier is mode
 the prompt.
 
 **The specificity floor is not hypothetical.** An empty selector is an every-loop lesson, and
-one is live: `lessons-environment/authorized-keys-host-cr-baseline.md` carries `entities: []`
+one was live: `lessons-environment/authorized-keys-host-cr-baseline.md` carried `entities: []`
 with the comment `# migrated #298: entities best-effort, source prologue unrecoverable`, so a
-lesson born from one host now matches every authorized_keys alert on every host — while
+lesson born from one host matched every authorized_keys alert on every host — while
 asserting *"a missing CR is positive evidence of anomaly"* against `skills/change-mgmt/SKILL.md:39`,
-*"Absence of a CR is the realistic case, not the exception."* The floor should ship on its own,
-and the #298 migration audited for other survivors.
+*"Absence of a CR is the realistic case, not the exception."*
+
+**Resolved (#919): that lesson was DELETED, and the floor was not built.** The #298 audit
+found four `entities: []` survivors, not one, and they are three different defects rather
+than one — two are legitimately unscoped (a method lesson true rule-wide, and a
+deployment-wide fact about the CMDB), one is under-specific, and only the CR baseline was
+actually wrong. It was wrong in CONTENT, not scope: `playground-v2/change-mgmt/seed/standing.yaml`
+covers `db-1`/`web-1`/`web-2` and says ad-hoc activity stays CR-free by design, so absence of
+a CR is the base rate and the inference is invalid at any scope. A specificity floor would
+have forced fabricated selectors onto the two lessons where empty is the truthful answer;
+specificity RANKING sorts them last instead, with no gate.
 
 **The schema defect this fixes.** Lessons currently key on the alert signature they were born
 from. That is right for coverage lessons and wrong for observable-semantics lessons, whose

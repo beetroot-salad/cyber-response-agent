@@ -4,6 +4,8 @@ description: Parse sshd Accepted auth-method token on every session; when the ob
 telemetry_source: [sshd]
 attack_phase: [initial-access, credential-access]
 source_signature: [v2-cross-tier-ssh-pivot, v2-sshd-success-after-failures]
+frontier_nodes:
+  - {type: credential, slot: class}
 source_finding_ids:
   - live-xtier-pivot-3/1
   - live-cross-tier-pivot-3/1

@@ -4,6 +4,9 @@ description: Vault or IDP-issued SSH certificates leave no host-level artifact; 
 telemetry_source: [ssh-ca, identity, sshd]
 attack_phase: [initial-access, lateral-movement]
 source_signature: [v2-cross-tier-ssh-pivot]
+frontier_nodes:
+  - {type: credential, class: client-cert, slot: class}
+  - {type: credential, class: ssh-key, slot: class}
 source_finding_ids:
   - live-xtier-pivot-3/2
 created_at: 2026-06-03T00:00:00Z

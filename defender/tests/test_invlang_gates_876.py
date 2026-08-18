@@ -22,7 +22,7 @@ being "deny everything".
   F-6   `_apply_attr_updates` assigned a refinement value unconditionally, and `""` is read
         as neither open nor unresolved — so a present-but-blank value cell did not downgrade
         the slot, it RESOLVED it.
-  F-26  `_is_unresolved` required `{` AND `}`, so an unterminated candidate set in an
+  F-26  `is_unresolved` required `{` AND `}`, so an unterminated candidate set in an
         ATTRIBUTE value read as a settled fact. The class arm has carried a count guard for
         the same one-character typo since #853/F-15.
   F-27  The catch-all `:H l-NNN.<sub>` warning filled `dropped_ids` with every row's first
@@ -44,7 +44,7 @@ from defender.skills.invlang.parser import (
     parse_dense_companion,
 )
 from defender.skills.invlang.validate import (
-    _effective_vertex_state,
+    effective_vertex_state,
     validate_companion,
 )
 
@@ -460,7 +460,7 @@ def test_a_whitespace_only_refinement_value_reads_the_same_way():
 
 def test_a_blank_value_cannot_erase_a_value_the_document_settled():
     """The other direction of the same guard, and the one only the fold can show: erasing a
-    RESOLVED class or attribute to `""` moves no gate — `_has_open_slot("")` is False — so
+    RESOLVED class or attribute to `""` moves no gate — `has_open_slot("")` is False — so
     the damage is silent and lands on every reader of the effective state, the review lenses
     included. The row is refused either way; this is what the guard keeps true for a document
     that never went through the gate."""
@@ -473,7 +473,7 @@ def test_a_blank_value_cannot_erase_a_value_the_document_settled():
         "l-001|v-001|attrs.knowledge|",
     )
     companion, _warnings = parse_dense_companion(doc)
-    state = _effective_vertex_state(companion)["v-001"]
+    state = effective_vertex_state(companion)["v-001"]
     assert state["classification"] == "bastion/internal/known-corp"
     assert state["attributes"]["knowledge"] == "documented"
 

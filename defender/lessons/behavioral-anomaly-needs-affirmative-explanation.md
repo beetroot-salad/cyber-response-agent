@@ -4,6 +4,9 @@ description: Authorization confirms access rights, not automation pattern; anoma
 telemetry_source: [sshd, host-state]
 attack_phase: [initial-access, execution]
 source_signature: [v2-sshd-success-after-failures]
+frontier_edges:
+  - {anchor_kind: iam-policy}
+  - {anchor_kind: approved-source-list}
 source_finding_ids:
   - live-sshd-success-1/0
 created_at: 2026-06-03T00:00:00Z

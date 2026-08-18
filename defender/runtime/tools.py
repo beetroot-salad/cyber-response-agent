@@ -869,9 +869,57 @@ def _tool_append_block(deps: AgentDeps, text: str) -> str:
     # only come from a SECOND derivation here, over the bytes just written. Deriving in memory
     # keeps it deterministic without a re-read.
     warn = _warn_over(new_text)
+    recall = _frontier_recall(deps, current, new_text)
     if warn:
-        return _warning_return(f"{lead} — the block LANDED.", warn)
-    return lead
+        return _warning_return(f"{lead} — the block LANDED.", warn) + recall
+    return lead + recall
+
+
+def _frontier_recall(deps: AgentDeps, before: str, after: str) -> str:
+    """Lessons for what this append left OPEN — appended to the return, or "" (#919).
+
+    Keyed on the invlang FRONTIER (`skills/invlang/frontier.py`), not on the alert
+    signature. A lesson about what a field licenses is relevant once the field is in hand,
+    which is a fact about the document at loop N, not about which rule fired at loop 0 —
+    `runtime/orient.py` keys the cold-start block on the signature because at that point no
+    document exists yet, and that is the only place the signature is the best available key.
+
+    ON CHANGE, not on every write. The pre- and post-append documents are both already in
+    hand here, so the diff costs nothing and needs no state to remember what was said last:
+    the model gets a lessons block exactly when its own append moved the frontier, instead
+    of the same three lines re-stapled to every write until it stops reading them.
+
+    DERIVED, NEVER STORED, like the repair window above — nothing caches this, so it cannot
+    go stale or disagree with the file.
+
+    NOT gated by `permission.decide_read`, deliberately. The gate governs what the MODEL may
+    read; this is the runtime composing text to hand it, the same way `runtime/orient.py`
+    assembles the cold-start lessons block without one. The corpus is a fixed internal path
+    under `defender_dir`, never an operand the model supplies, so there is no path here for
+    it to steer — and the model receives rendered text, not a read capability it can reuse.
+
+    FAILS OPEN, and that is not optional: every caller reaches here AFTER the bytes have
+    landed, so an exception raised for a missing corpus or an unreadable frontier would
+    surface to the model as a failed tool call on a write that actually succeeded — the
+    exact lie `_warn_over` fails open to avoid.
+    """
+    try:
+        from defender.scripts.lessons.lessons_frontier import (
+            match_lessons,
+            render,
+        )
+        from defender.skills.invlang.frontier import frontier_from_text
+
+        corpus = deps.defender_dir / "lessons"
+        if not corpus.is_dir():
+            return ""
+        now = render(match_lessons(frontier_from_text(after), corpus))
+        if not now or now == render(match_lessons(frontier_from_text(before), corpus)):
+            return ""
+        return "\n\n" + now
+    except Exception as e:  # noqa: BLE001 — fail open; the write already landed
+        print(f"[tools] frontier recall failed, omitting it: {e!r}", file=sys.stderr)
+        return ""
 
 
 def _warn_over(text: str) -> tuple[Diagnostic, ...]:

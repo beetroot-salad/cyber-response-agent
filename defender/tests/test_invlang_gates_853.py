@@ -7,7 +7,7 @@ opposite directions:
         number of them before its last cell silently MERGED the remaining cells and `_row_cells`
         padded the record with empty strings — no RowError, no warning. The committed document
         still displays `signing=??` to a human while the benign gate reads nothing.
-  F-15  `_has_open_slot` implemented only the whole-cell `{a, b}` form of the documented rule,
+  F-15  `has_open_slot` implemented only the whole-cell `{a, b}` form of the documented rule,
         so the per-slot and type-prefixed spellings SKILL.md itself blesses closed benign over
         an unresolved class.
   F-16  `_check_benign_authz` resolves verdicts by bare contract id across the whole document

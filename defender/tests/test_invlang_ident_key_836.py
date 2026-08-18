@@ -51,10 +51,10 @@ def _diagnose(text, current=None):
 
 def _effective(text):
     from defender.skills.invlang.parser import parse_dense_companion
-    from defender.skills.invlang.validate import _effective_vertex_state
+    from defender.skills.invlang.validate import effective_vertex_state
 
     companion, _warnings = parse_dense_companion(text)
-    return _effective_vertex_state(companion)
+    return effective_vertex_state(companion)
 
 
 # --------------------------------------------------------------------------- #
@@ -188,7 +188,7 @@ def test_ident_refinement_reaches_effective_vertex_state(tmp_path):
 def test_both_effective_state_construction_sites_carry_the_identifier_slot(tmp_path):
     """H8's coherence half: BOTH construction sites carry the new slot.
 
-    `_effective_vertex_state` is built at two places — `_seed_vertex_state` from the `:V`
+    `effective_vertex_state` is built at two places — `_seed_vertex_state` from the `:V`
     declarations, then `_apply_attr_updates` over the `:R` refinements — and R2 pinned the
     slot without saying both carry it. A slot present at only one site is a `KeyError` for
     the consumer on every document that does not happen to exercise the other.
@@ -272,7 +272,7 @@ def test_refinement_targets_a_vertex_never_declared(tmp_path):
 
     Probe PR-11 executed the gap this closes. The literal `key=ident` case denies today only
     because `ident` is itself illegal (confounded); the ISOLATION CONTROL — a legal key, same
-    undeclared target — emits ZERO diagnostics, does not deny, and `_effective_vertex_state`
+    undeclared target — emits ZERO diagnostics, does not deny, and `effective_vertex_state`
     then FABRICATES the vertex out of nothing: `{'v-999': {'classification': '', 'attributes':
     {'ident': 'svc.config-mgmt'}}}`. No undeclared/unresolved-ref family covers attr_updates
     targets, and there is no existence check between `_seed_vertex_state` and

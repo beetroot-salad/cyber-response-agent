@@ -240,15 +240,37 @@ retrieval dimensions (inline lists):
 - `attack_phase` — the MITRE ATT&CK tactic(s) where the pitfall bites
   (tactic slugs, e.g. `lateral-movement`, `persistence`).
 
-**Discover at PLAN time, by dimension — do not eyeball the whole listing.**
-This signature's `source_signature` hits and the viable tags are already in the
-**Orientation → Lessons block** of your first message (`<path>\t<description>`) —
-scan those descriptions and Read the bodies that fit the lead you're about to
-write. You discover lessons against the lead once you know its telemetry source
-and the ATT&CK tactic your current hypothesis sits in. Use the `defender-lessons`
-shim to *widen* (by `telemetry_source` / `attack_phase`, or by dropping a
-pattern) beyond the signature hits already shown — it greps the **frontmatter
-only** (the body can't false-match a tag) and prints `<path>\t<description>`:
+Most also carry **frontier selectors** — the open question the lesson speaks to,
+rather than the alert it was born under. A lesson whose trigger is a procedure
+rather than an open slot carries none, and is reached the other two ways below:
+
+- `frontier_nodes` — `{type, class?, slot}` over a `:V` vertex, where `slot` is
+  `class`, `ident`, or `attrs.<name>`. For lessons about what a field licenses.
+- `frontier_edges` — `{rel?, auth_kind?, anchor_kind}` over an `ac<n>`
+  authorization contract. For lessons about what an authz check can conclude.
+
+**Lessons come to you; you do not have to go and ask.** Two pushes, keyed
+differently because they fire at different moments:
+
+1. **Orientation → Lessons block** (first message): this signature's
+   `source_signature` hits plus the viable tags. Keyed on the alert, because at
+   that point you have not written a document for anything else to key on.
+2. **The `append_block` return** (every loop): up to three lessons matched
+   against your investigation's **frontier** — the `??` slots and unfulfilled
+   `ac<n>` contracts your document currently carries. This block appears only
+   when your append *changed* what is open, so a repeat means something moved.
+   No block means nothing open matched, not that nothing was checked.
+
+Both print the lesson's frontmatter as the scan surface. Judge relevance from
+`description`, then **Read the full body of only the ones that fit** before
+writing your `:H` / `:L` blocks. Don't open a lesson to decide whether it's
+relevant — that's what the description is for. Bodies are short; they teach you
+what to *check next time*, not what conclusion to reach.
+
+**The `defender-lessons` shim is for WIDENING** past what was pushed — by
+`telemetry_source` / `attack_phase`, or by dropping a pattern. It greps the
+**frontmatter only** (the body can't false-match a tag) and prints
+`<path>\t<description>`:
 
 ```bash
 # 1. See the viable tags first — only these values are worth grepping:
@@ -262,16 +284,14 @@ defender-lessons 'source_signature:.*<alert-rule-id>' \
                  'attack_phase:.*<tactic-of-current-hypothesis>'
 ```
 
-The printed `description` line is the scan surface: judge relevance from it,
-then **Read the full body of only the ones that fit** before writing your
-`:H` / `:L` blocks. Don't open a lesson to decide whether it's relevant —
-that's what the description is for. Widen by dropping a pattern if a narrow
-query returns nothing; a bare `defender-lessons` (whole-corpus
-`<path>\t<description>`) is the fallback, not the default. Bodies are short;
-they teach you what to *check next time*, not what conclusion to reach.
+Widen by dropping a pattern if a narrow query returns nothing; a bare
+`defender-lessons` (whole-corpus `<path>\t<description>`) is the fallback, not
+the default.
 
-(These dimensions are unproven retrieval keys on the defender corpus — we're
-running them grep-only, no index, to see whether they earn one.)
+(The three grep dimensions remain unproven retrieval keys — grep-only, no index.
+The frontier selectors are the #919 answer to the case that motivated them: a
+lesson about what `loginuid` licenses did not load, because it was keyed to the
+rule it was born under rather than to the field being in hand.)
 
 **Pick a lead that discriminates.** When the frontier carries two or
 more hypotheses that look equally plausible, the right next lead is
