@@ -254,8 +254,8 @@ def match_lessons(
 def _render_frontmatter(fm: dict) -> str:
     """The lesson's frontmatter, minus bookkeeping, indented under its path.
 
-    YAML rather than `str(value)` because the values are lists and a Python repr renders
-    them as `[\'falco\']` — quotes and all — which is not the spelling the model reads
+    YAML rather than `str(value)` because the values are lists, and a Python repr keeps
+    the brackets and quotes intact — which is not the spelling the model reads
     everywhere else. `build_corpus_manifest` dumps the same frontmatter the same way for the
     curator; one rendering of a lesson's keys rather than two.
     """
