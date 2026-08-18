@@ -159,13 +159,18 @@ def _node_matches(sel: _NodeSelector, slot: OpenSlot) -> bool:
 
 
 def _edge_matches(sel: _EdgeSelector, contract: OpenContract) -> bool:
-    if sel.anchor_kind and sel.anchor_kind != contract.anchor_kind:
-        return False
-    if sel.rel and sel.rel != (contract.rel or ""):
-        return False
-    if sel.auth_kind and sel.auth_kind != (contract.auth_kind or ""):
-        return False
-    return True
+    """Conjunctive over the fields the selector DECLARES; an omitted field constrains nothing.
+
+    `rel` and `auth_kind` fall back to `""` because a contract on an unobserved edge carries
+    `None` for both — so a selector naming either cannot match a proposed-edge contract, which
+    is right: there is no relation there to match against.
+    """
+    declared = (
+        (sel.anchor_kind, contract.anchor_kind),
+        (sel.rel, contract.rel or ""),
+        (sel.auth_kind, contract.auth_kind or ""),
+    )
+    return all(want == got for want, got in declared if want)
 
 
 def _parse_selectors(fm: dict) -> _Selectors:
@@ -197,17 +202,20 @@ def _best_match(selectors: _Selectors, frontier: Frontier) -> tuple[int, str] | 
     does this lesson speak to something open", which is the question the ordering is for.
     """
     best: tuple[int, str] | None = None
-    for sel in selectors.nodes:
+    for node_sel in selectors.nodes:
         for slot in frontier.slots:
-            if _node_matches(sel, slot):
-                cand = (sel.specificity, f"{slot.vertex_id} {slot.type} {slot.slot}={slot.value}")
+            if _node_matches(node_sel, slot):
+                cand = (
+                    node_sel.specificity,
+                    f"{slot.vertex_id} {slot.type} {slot.slot}={slot.value}",
+                )
                 if best is None or cand[0] > best[0]:
                     best = cand
-    for sel in selectors.edges:
+    for edge_sel in selectors.edges:
         for contract in frontier.contracts:
-            if _edge_matches(sel, contract):
+            if _edge_matches(edge_sel, contract):
                 cand = (
-                    sel.specificity,
+                    edge_sel.specificity,
                     f"{contract.contract_id} on {contract.hypothesis_id} "
                     f"anchor={contract.anchor_kind}",
                 )

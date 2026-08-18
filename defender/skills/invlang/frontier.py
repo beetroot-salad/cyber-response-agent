@@ -31,7 +31,6 @@ not blocking a close on it. This module must never be wired into that gate.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
 from . import _walkers, vocab
 from .schema import CompanionBody

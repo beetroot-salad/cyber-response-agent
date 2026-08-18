@@ -978,7 +978,8 @@ def test_render_of_nothing_is_empty_and_the_cli_honours_top_k(tmp_path):
                                   "--corpus", str(corpus), "--top-k", "1"])
     out = buf.getvalue()
     assert rc == 0
-    assert "alpha" in out and "beta" not in out, "--top-k did not reach the retrieval"
+    assert "alpha" in out, "the higher-ranked lesson is missing from the output"
+    assert "beta" not in out, "--top-k did not reach the retrieval"
 
 
 # --------------------------------------------------------------------------- #
