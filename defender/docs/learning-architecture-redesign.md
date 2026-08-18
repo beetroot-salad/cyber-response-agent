@@ -318,8 +318,13 @@ deployment-wide fact about the CMDB), one is under-specific, and only the CR bas
 actually wrong. It was wrong in CONTENT, not scope: `playground-v2/change-mgmt/seed/standing.yaml`
 covers `db-1`/`web-1`/`web-2` and says ad-hoc activity stays CR-free by design, so absence of
 a CR is the base rate and the inference is invalid at any scope. A specificity floor would
-have forced fabricated selectors onto the two lessons where empty is the truthful answer;
-specificity RANKING sorts them last instead, with no gate.
+have forced fabricated selectors onto the two lessons where empty is the truthful answer, so
+no gate ships. Note the scope of what replaces it: the specificity RANKING #919 builds is on the
+DEFENDER corpus's new `frontier_nodes` / `frontier_edges` selectors, matched by
+`scripts/lessons/lessons_frontier.py`. The `entities: []` lessons live in the sibling
+ENVIRONMENT corpus, which `lessons_env_retrieve.py` still returns unranked and in filename
+order — the three surviving under-scoped lessons there are unchanged by this work, and remain
+open for the #298 follow-up.
 
 **The schema defect this fixes.** Lessons currently key on the alert signature they were born
 from. That is right for coverage lessons and wrong for observable-semantics lessons, whose
@@ -494,7 +499,8 @@ that authorship.
 Make the judge's likelihood-ratio check symmetric (it runs only on benign dispositions; on a
 malicious call it should ask whether the incriminating observables fit routine automation equally
 well). Re-key observable-semantics lessons off the alert signature, minding that the two corpora
-disagree on rule-id namespace (`v2-…` versus `rule-v2-…`). Ship the selector specificity floor.
+disagree on rule-id namespace (`v2-…` versus `rule-v2-…`) — done for the defender corpus in #919.
+(The selector specificity floor listed here was deliberately NOT built; see above.)
 The first fix inherits a caveat: an actor SKIP bypasses the judge entirely — the story is persisted
 with `judge_yaml=None` — and on this case SKIP is the outcome, so persist *and judge* the rationale.
 

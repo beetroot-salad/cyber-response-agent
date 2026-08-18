@@ -109,12 +109,19 @@ When the alert leaves a vertex partially classified, mark the open
 slots inline rather than guessing or authoring a hypothesis row whose
 lead choice is mechanical.
 
-- **`??`** — open class slot or attribute value. Marks "we don't know
-  yet, and it gates disposition." Use it on the whole triple
-  (`class=??/??/??` for a `compute` vertex), a single slot
-  (`class=monitoring-agent/??/known-corp`), or an attribute value
-  (`attrs.signing=??`). The `class` cell carries the slash-tuple
-  only — no type prefix.
+- **`??`** — open class slot, IDENT, or attribute value. Marks "we
+  don't know yet." Use it on the whole triple (`class=??/??/??` for a
+  `compute` vertex), a single slot
+  (`class=monitoring-agent/??/known-corp`), the `ident` cell
+  (`v-003|compute|ip-only/??/??|??|` — "which host is this IP"), or an
+  attribute value (`attrs.signing=??`). The `class` cell carries the
+  slash-tuple only — no type prefix.
+
+  Class and attribute slots also GATE DISPOSITION: an open one blocks
+  `disposition: benign` (§Close). An open `ident` does not — it is
+  honest bookkeeping about an entity you have not named yet, and it is
+  what lets a lesson about naming that entity reach you. Prefer it over
+  a guessed identifier.
 - **`{a, b, c}`** — enumerated candidate set. Optional upgrade from
   `??`. Primary form is full-triple enumeration
   (`class={monitoring-agent/internal/known-corp,

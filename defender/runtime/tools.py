@@ -871,7 +871,12 @@ def _tool_append_block(deps: AgentDeps, text: str) -> str:
     warn = _warn_over(new_text)
     recall = _frontier_recall(deps, current, new_text)
     if warn:
-        return _warning_return(f"{lead} — the block LANDED.", warn) + recall
+        # INSIDE the warning return, not stapled after it. `_warning_return` ends with the
+        # `fix_row` instruction, and on this path that is the only legal next call — the next
+        # `append_block` is hard-refused by `flagged_diagnostics`. Appending the lessons block
+        # after it would put ~30 lines of precedent between the model and the one action it
+        # can take.
+        return _warning_return(f"{lead} — the block LANDED.{recall}", warn)
     return lead + recall
 
 
@@ -913,9 +918,31 @@ def _frontier_recall(deps: AgentDeps, before: str, after: str) -> str:
         corpus = deps.defender_dir / "lessons"
         if not corpus.is_dir():
             return ""
-        now = render(match_lessons(frontier_from_text(after), corpus))
-        if not now or now == render(match_lessons(frontier_from_text(before), corpus)):
+        # THE FRONTIER is the cheap gate, and it is also the one SKILL.md states ("appears
+        # only when your append *changed* what is open"). `Frontier` is a frozen dataclass of
+        # tuples of frozen dataclasses, so `==` is exact, and `match_lessons`/`render` are
+        # pure functions of `(frontier, corpus)` — an unchanged frontier cannot change the
+        # block. Checking it first skips BOTH corpus walks on the overwhelming majority of
+        # appends: `iter_lessons` re-reads and re-YAML-parses every lesson file on every call.
+        now_frontier = frontier_from_text(after)
+        was_frontier = frontier_from_text(before)
+        if now_frontier == was_frontier:
             return ""
+        hits = match_lessons(now_frontier, corpus)
+        now = render(hits)
+        # The second gate is what keeps a MOVE that changed no lesson quiet — the frontier can
+        # open a slot no selector speaks to, and re-stapling the same three lines then teaches
+        # the model to stop reading them.
+        if not now or now == render(match_lessons(was_frontier, corpus)):
+            return ""
+        # RECORDED, on the same terms a Read is. `lessons_loaded.jsonl` is the loop's only
+        # "was this lesson in context" signal and the post-merge control `learning/ops/
+        # trace_lesson.py` reasons from — and this block puts a lesson's description and
+        # dimensions in front of MAIN with enough to act on, since SKILL.md tells it to judge
+        # relevance from `description` and NOT to open the file to decide. A push that left no
+        # row would make a merged lesson look inert to the human reviewing its impact.
+        for hit in hits:
+            _record_lesson_load(deps, hit.path)
         return "\n\n" + now
     except Exception as e:  # noqa: BLE001 — fail open; the write already landed
         print(f"[tools] frontier recall failed, omitting it: {e!r}", file=sys.stderr)
@@ -1116,7 +1143,14 @@ def _tool_fix_row(deps: AgentDeps, old_row: str, new_row: str) -> str:
         f"{verb} {len(whole)} flagged row(s) in investigation.md "
         f"({_utf8_len(new_text)} bytes total) — the change LANDED."
     )
-    return _warning_return(lead, _warn_over(new_text))
+    # `fix_row` is a first-class FRONTIER MUTATOR, not a cosmetic repair: the window is
+    # `:R attr_updates`-only, and those rows are exactly what closes an open slot — so a
+    # repair can close one and a delete re-opens it. Without this the move goes unannounced
+    # AND unannounceable: the next `append_block` reads the repair as part of its `before`,
+    # the two frontiers match, and the block is suppressed for good.
+    return _warning_return(
+        lead + _frontier_recall(deps, current, new_text), _warn_over(new_text)
+    )
 
 
 def register_tools(agent, tools: ToolSet, verbs: Any = None) -> None:

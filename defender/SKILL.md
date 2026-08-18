@@ -255,17 +255,21 @@ differently because they fire at different moments:
 1. **Orientation → Lessons block** (first message): this signature's
    `source_signature` hits plus the viable tags. Keyed on the alert, because at
    that point you have not written a document for anything else to key on.
-2. **The `append_block` return** (every loop): up to three lessons matched
-   against your investigation's **frontier** — the `??` slots and unfulfilled
-   `ac<n>` contracts your document currently carries. This block appears only
-   when your append *changed* what is open, so a repeat means something moved.
-   No block means nothing open matched, not that nothing was checked.
+2. **The `append_block` / `fix_row` return** (every loop): up to three lessons
+   matched against your investigation's **frontier** — the `??` slots and
+   unfulfilled `ac<n>` contracts your document currently carries. This block
+   appears only when your write *changed* what is open, so seeing it at all
+   means something moved. **No block means nothing NEW matched** — either your
+   write left the frontier where it was, or nothing open matched. It never
+   means the corpus is exhausted; widen with the shim below when a question
+   stays open.
 
-Both print the lesson's frontmatter as the scan surface. Judge relevance from
-`description`, then **Read the full body of only the ones that fit** before
-writing your `:H` / `:L` blocks. Don't open a lesson to decide whether it's
-relevant — that's what the description is for. Bodies are short; they teach you
-what to *check next time*, not what conclusion to reach.
+Orientation prints `<path>\t<description>`; the write return prints the
+lesson's frontmatter. Either way, judge relevance from `description`, then
+**Read the full body of only the ones that fit** before writing your `:H` /
+`:L` blocks. Don't open a lesson to decide whether it's relevant — that's what
+the description is for. Bodies are short; they teach you what to *check next
+time*, not what conclusion to reach.
 
 **The `defender-lessons` shim is for WIDENING** past what was pushed — by
 `telemetry_source` / `attack_phase`, or by dropping a pattern. It greps the
@@ -291,7 +295,13 @@ the default.
 (The three grep dimensions remain unproven retrieval keys — grep-only, no index.
 The frontier selectors are the #919 answer to the case that motivated them: a
 lesson about what `loginuid` licenses did not load, because it was keyed to the
-rule it was born under rather than to the field being in hand.)
+rule it was born under rather than to the question the run had open. Note the
+consequence, and use the shim accordingly: a selector fires while its slot is
+**unresolved**, so a field you record straight to a concrete value never opens
+the slot the lesson about that field keys on. That is one more reason to hold
+the `?? → {a, b} → concrete` progression honestly rather than skipping to the
+end — but only where the value really is unsettled; a `??` you did not mean
+blocks a benign close for nothing.)
 
 **Pick a lead that discriminates.** When the frontier carries two or
 more hypotheses that look equally plausible, the right next lead is

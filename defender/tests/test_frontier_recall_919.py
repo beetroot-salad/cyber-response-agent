@@ -94,6 +94,15 @@ v-004|process|nc|nc[pid=4242]|loginuid=??;image=/usr/bin/nc
 ```
 """
 
+#: A `process` vertex with NOTHING open — the base the `fix_row` case opens a slot on from
+#: inside the repair window.
+CLOSED_PROCESS_BLOCK = """
+```invlang
+:V prologue.vertices [id|type|class|ident|attrs?]
+v-006|process|nc|nc[pid=4242]|image=/usr/bin/nc
+```
+"""
+
 #: An `identity` vertex whose IDENT cell is open and whose class and attributes are not. The
 #: whole of case 3 rests on this document reading as open to the frontier and as CLEAN to
 #: `_check_benign_open_slots`.
@@ -325,7 +334,7 @@ def _names(hits) -> list[str]:
 def _exit_code(main, argv: list[str]) -> int:
     """`main`'s exit code, whether it RETURNS one or raises `SystemExit`.
 
-    `lessons_env_retrieve._resolve_corpus` refuses through `ap.error`, which raises
+    `_lessons_common.resolve_corpus` refuses through `ap.error`, which raises
     `SystemExit(2)`; the pinned signature here is `main(argv) -> int`. Both spellings are the
     same observable, so this test asserts the observable rather than the spelling."""
     try:
@@ -436,7 +445,9 @@ def test_the_loginuid_lesson_is_retrieved_though_its_signature_does_not_match(tm
     assert _names(hits) == ["loginuid-open-is-not-docker-exec"]
     hit = hits[0]
     assert hit.path == wanted
-    assert hit.description == "loginuid-open-is-not-docker-exec description"
+    # The `description` reaches the model through the rendered frontmatter, which is the only
+    # surface that carries it — `Hit` no longer keeps a second, unrendered copy.
+    assert "loginuid-open-is-not-docker-exec description" in _lessons_frontier().render(hits)
     assert hit.frontmatter["source_signature"] == ["v2-cross-tier-ssh-pivot"], (
         "the retrieved lesson's signature is not the disjoint one the fixture wrote"
     )
@@ -742,10 +753,12 @@ def test_the_relocated_corpus_must_still_be_named_lessons(tmp_path, capsys):
     """CLAIM: `--corpus` accepts a RELOCATED `lessons` directory and refuses anything else,
     exiting 2.
 
-    `lessons_env_retrieve.py:32` (`_resolve_corpus`) states the argument in full and this
-    mirrors it: the script is reachable as a pinned, argv-blind grant, so containment is the
-    resolver's whole job — the rule is the resolved LEAF NAME, because a legitimate relocation
-    (a worktree copy, a test fixture) changes the root and never the corpus name.
+    `_lessons_common.resolve_corpus` states the argument in full and this mirrors it: its
+    other caller IS reachable as a pinned, argv-blind grant, so containment is the resolver's
+    whole job — the rule is the resolved LEAF NAME, because a legitimate relocation (a
+    worktree copy, a test fixture) changes the root and never the corpus name. NOTE the rule
+    is weaker here than for the sibling: this script's own default corpus IS `defender/lessons`,
+    so the leaf-name test cannot keep an actor out of it. Do not grant-list this script.
 
     The two directories below hold the SAME lesson, so the refusal is demonstrably about the
     name rather than about an empty directory."""
@@ -834,7 +847,7 @@ def test_a_candidate_set_is_open_exactly_as_the_bare_marker_is(tmp_path):
 def test_a_node_selectors_type_must_equal_the_open_slots_type(tmp_path):
     """CLAIM: `type` is a constraint, not decoration.
 
-    Deleting the type comparison from `_node_matches` passed all thirteen: no corpus in the
+    Deleting the type comparison from `_node_match_score` passed all thirteen: no corpus in the
     suite held a selector whose type disagreed with the vertex it would otherwise hit."""
     corpus = _corpus(tmp_path)
     _write_lesson(corpus, "right-type", nodes=("type: process, slot: attrs.loginuid",))
@@ -1106,4 +1119,178 @@ def test_a_contract_on_a_refuted_hypothesis_is_not_on_the_frontier(tmp_path):
     assert _frontier(PROLOGUE + AUTHZ_DECL_BLOCK).contracts, "positive control"
     assert _frontier(refuted).contracts == (), (
         "a contract on a refuted hypothesis is still being reported as open"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# review follow-ups (#930): the two ways the shipped mechanism missed its own case
+# --------------------------------------------------------------------------- #
+
+def test_a_class_slot_matched_only_through_the_inversion_pins_nothing(tmp_path):
+    """CLAIM: specificity scores the MATCH, not the selector — a class component that landed
+    on an open case slot discriminated nothing and earns nothing.
+
+    This is the case #919 exists for, and the shipped scoring lost it. A vertex declared
+    `class=??` is matched by `{class: bastion}` and by `{class: client-cert}` alike, purely
+    through the inversion; crediting those literals scored them 3 against the 2 of a selector
+    naming the exact open ATTRIBUTE. With `top_k=3` the motivating loginuid lesson fell off a
+    list saturated by lessons the document says nothing about — and because `_frontier_recall`
+    diffs the RENDERED block, the append that opened `attrs.loginuid=??` then emitted nothing
+    at all.
+
+    `test_specificity_outranks_generality_and_top_k_bounds_the_list` is the other half and
+    still holds: once ONE class slot matches by equality the pattern is anchored to this cell
+    and the rest is real precision (`ip-only/internet` over `ip-only` on `ip-only/??/??`)."""
+    corpus = _corpus(tmp_path)
+    _write_lesson(corpus, "aaa-wholly-open-class",
+                  nodes=("type: process, class: nginx, slot: class",))
+    _write_lesson(corpus, "zzz-names-the-open-attribute",
+                  nodes=("type: process, slot: attrs.loginuid",))
+    match_lessons = _lessons_frontier().match_lessons
+
+    open_class = PROLOGUE + """
+```invlang
+:V prologue.vertices [id|type|class|ident|attrs?]
+v-008|process|??|nc[pid=4242]|loginuid=??
+```
+"""
+    hits = {h.name: h.score for h in match_lessons(_frontier(open_class), corpus, top_k=9)}
+    assert hits["aaa-wholly-open-class"] == 2, (
+        "`nginx` matched a `??` — it pinned nothing and must not outscore the attribute"
+    )
+    assert hits["zzz-names-the-open-attribute"] == 2
+    assert hits["aaa-wholly-open-class"] <= hits["zzz-names-the-open-attribute"], (
+        "a class literal the document never mentions outranked the exact open slot"
+    )
+
+
+def test_the_frontier_and_the_benign_gate_agree_on_a_shared_contract_id(tmp_path):
+    """CLAIM: `_open_contracts` calls `validate.outstanding_authz_contracts` rather than
+    restating "discharged", so the two cannot disagree.
+
+    A bare-id discharge set gets this wrong on the one document shape where it matters. Two
+    declarers may share `ac1` once one of them is REFUTED (`_check_authz_contract_ids` exempts
+    exactly that, because `:H` rows are immutable and refuting is the only repair left), and
+    `_check_benign_authz` then scopes the row to the contract whose ANCHOR KIND it carries. So
+    an `iam-policy` row does not answer an `approved-source-list` question wearing the same
+    number — and the frontier must not report settled what the close is still blocked on."""
+    from defender.skills.invlang.validate import _check_benign_authz
+
+    shared = (
+        PROLOGUE
+        + AUTHZ_DECL_BLOCK  # h-001 declares ac1, anchor iam-policy
+        + """
+```invlang
+:H l-001.new_hypotheses [id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]
+h-002|?unapproved-source|v-001|runs_on|process|unclassified-process||null|active
+
+:H h-002.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
+ac1|e-001|approved-source-list|"source host is on the approved list"|escalate|escalate
+```
+"""
+        + REFUTE_H001_BLOCK  # ...and h-001 is refuted, which makes the shared id legal
+        + authz_row("authorized")  # an `iam-policy` row for `ac1`
+    )
+    assert diagnose(shared, None) == [], "the fixture must be a document the gate accepts"
+    body, _w = parse_dense_companion(shared)
+
+    assert _check_benign_authz(body), "positive control: the gate is blocked on h-002's ac1"
+    assert [c.contract_id for c in _frontier(shared).contracts] == ["ac1"], (
+        "the frontier discharged a contract the disposition gate is still blocking on"
+    )
+
+
+def test_fix_row_carries_the_recall_because_it_moves_the_frontier_too(tmp_path):
+    """CLAIM: the repair verb pushes lessons on the same terms `append_block` does.
+
+    `fix_row`'s window is `:R attr_updates`-only, and those rows are precisely what CLOSES an
+    open slot — so a repair can close one and `fix_row(row, "")` REOPENS one. Wiring the recall
+    to `append_block` alone did not merely leave that move unannounced, it made it
+    unannounceable: the next append reads the repair as part of its own `before`, the two
+    frontiers match, and the block is suppressed for the rest of the run.
+
+    Here the flagged row carries a near-miss KEY, which warns and refines nothing; repairing it
+    to a legal `attrs.tty|??` is the append-only way to open a slot from inside the window."""
+    from defender.runtime.tools import _tool_append_block, _tool_fix_row
+
+    deps, run, dfn = _main_deps(tmp_path)
+    corpus = _corpus(dfn)
+    _write_lesson(corpus, "tty-open", nodes=("type: process, slot: attrs.tty",))
+
+    near_miss = "l-001|v-006|clas|nc"
+    landed = _tool_append_block(
+        deps, PROLOGUE + CLOSED_PROCESS_BLOCK + attr_block(near_miss)
+    )
+    assert "FLAGGED" in landed, "the fixture row must open the repair window"
+    assert "tty-open" not in landed, "nothing was open yet"
+
+    repaired = _tool_fix_row(deps, near_miss, "l-001|v-006|attrs.tty|??")
+
+    assert "tty-open" in repaired, (
+        "the repair opened `attrs.tty=??` and the repair verb said nothing about it"
+    )
+    assert repaired.startswith("repaired "), "the repair's own lead is still the first thing said"
+
+
+def test_the_block_hands_main_a_path_its_own_gate_will_read(tmp_path):
+    """CLAIM: the rendered path is ABSOLUTE, and the `matched` line is part of the block.
+
+    Both were unpinned, which is why the repo-relative spelling shipped green. MAIN's
+    `cwd_anchor` is the RUN DIR, so `_resolve_operand` rebases `defender/lessons/<name>.md`
+    onto the run dir and `decide_read` refuses it — `test_grant_gate_575.py::test_a11` pins
+    that spelling as DENY, on the grounds that "nothing hands MAIN that spelling any more".
+    A block that hands it one costs a refused tool call per lesson and degrades the whole
+    push to description-only, which is the one thing SKILL.md says not to decide on.
+
+    Asserted through the REAL gate rather than against a string shape, because the property
+    is "MAIN can read this", not "this starts with a slash". The `matched` half rides along:
+    `HIDDEN_KEYS` strips the selectors, so it is the model's only account of why a lesson was
+    pushed, and every other assertion in this file is satisfied by the `name:` key inside the
+    frontmatter dump."""
+    from defender.runtime.tools import _tool_read_file
+
+    deps, run, dfn = _main_deps(tmp_path)
+    corpus = _corpus(dfn)
+    _write_lesson(corpus, "readable-from-the-block", nodes=("type: process, slot: class",))
+    lf = _lessons_frontier()
+
+    hits = lf.match_lessons(_frontier(_FIXTURE_DOCS["open class"]), corpus)
+    rendered = lf.render(hits)
+
+    assert hits, "positive control: the fixture should match the lesson"
+    assert f"matched {hits[0].matched}" in rendered, (
+        f"the block dropped its account of WHY the lesson was pushed:\n{rendered}"
+    )
+    quoted = rendered.splitlines()[1].removeprefix("- ").split(" — matched ")[0]
+    body = _tool_read_file(deps, quoted)  # ModelRetry here IS the failure
+    assert "lesson body" in body, f"the path the block quoted ({quoted!r}) did not read back"
+
+
+def test_a_pushed_lesson_is_recorded_the_way_a_read_one_is(tmp_path):
+    """CLAIM: the recall lane writes `lessons_loaded.jsonl`, like `_gated_read` does.
+
+    That file is the only "was this lesson in context" signal the loop has, and
+    `learning/ops/trace_lesson.py` is the stated post-merge human control that reads it. A
+    push that left no row makes a merged lesson look inert to whoever is judging its impact
+    — the block already carries the description and the dimensions, which is what SKILL.md
+    tells the model to decide on."""
+    import json
+
+    from defender.runtime.tools import _tool_append_block
+
+    deps, run, dfn = _main_deps(tmp_path)
+    corpus = _corpus(dfn)
+    _write_lesson(corpus, "recorded-on-push", nodes=("type: process, slot: class",))
+
+    _tool_append_block(deps, PROLOGUE)
+    pushed = _tool_append_block(deps, OPEN_CLASS_BLOCK)
+
+    assert "recorded-on-push" in pushed, "positive control: the lesson was pushed"
+    rows = [
+        json.loads(line)
+        for line in (run / "lessons_loaded.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert [r["lesson_name"] for r in rows] == ["recorded-on-push"], (
+        f"the push left no trace row: {rows}"
     )

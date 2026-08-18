@@ -457,7 +457,9 @@ def _vertex_core(v: VertexRecord) -> tuple:
     return (v.get("type"), v.get("classification"), v.get("identifier"))
 
 
-def _auth_kind(e: EdgeRecord) -> str | None:
+def auth_kind_of(e: EdgeRecord) -> str | None:
+    """An `:E` row's authority kind, or `None`. PUBLIC because `frontier._edge_index` keys the
+    lesson EDGE axis on it and a second `e["authority"]["kind"]` spelling could drift."""
     auth = e.get("authority")
     return auth.get("kind") if auth else None
 
@@ -467,7 +469,7 @@ def _edge_core(e: EdgeRecord) -> tuple:
         e.get("relation"),
         e.get("source_vertex"),
         e.get("target_vertex"),
-        _auth_kind(e),
+        auth_kind_of(e),
     )
 
 
@@ -541,7 +543,7 @@ def _check_strong_move_provenance(companion: CompanionBody) -> list[str]:
     auth_by_edge: dict[str, str] = {}
     for e in _walkers.all_edges(companion):
         eid = e.get("id")
-        kind = _auth_kind(e)
+        kind = auth_kind_of(e)
         if isinstance(eid, str) and isinstance(kind, str):
             auth_by_edge[eid] = kind
 
@@ -605,7 +607,7 @@ def _check_vocab_edges(companion: CompanionBody) -> list[str]:
             f"edge {e.get('id', '?')}: rel {rel!r} is not a known relation "
             f"(`enum relations`)",
         )
-        kind = _auth_kind(e)
+        kind = auth_kind_of(e)
         errors += _check_vocab(
             kind, vocab.AUTH_KINDS,
             f"edge {e.get('id', '?')}: auth_kind {kind!r} is not a known "
@@ -820,7 +822,7 @@ def is_unresolved(value: Any) -> bool:
     return v.startswith("{") and (v.endswith("}") or v.count("{") > v.count("}"))
 
 
-def _class_slots(classification: str) -> list[str]:
+def class_slots(classification: str) -> list[str]:
     """A class cell's slots — the slash-tuple, minus an optional leading `<type>:` prefix.
 
     Brace-aware, because the primary candidate-set form enumerates whole triples
@@ -832,6 +834,12 @@ def _class_slots(classification: str) -> list[str]:
     The type prefix is stripped rather than tolerated: SKILL.md says the class cell carries
     the slash-tuple only, but `compute:{...}` is a spelling models reach for, and the prefix
     alone would otherwise hide the candidate set behind it.
+
+    PUBLIC for the same reason `effective_vertex_state` below is: `has_open_slot` uses this
+    split to decide a class cell is OPEN, and `scripts/lessons/lessons_frontier.py` re-splits
+    the same cell to decide which selector matches it. A second, plainer `split("/")` there
+    read the whole-triple candidate set as five fragments and kept the `compute:` prefix, so
+    the two halves of one join disagreed about what a slot even is (#919).
     """
     c = classification.strip()
     head, sep, rest = c.partition(":")
@@ -857,7 +865,7 @@ def _class_slots(classification: str) -> list[str]:
 def has_open_slot(classification: Any) -> bool:
     if not isinstance(classification, str):
         return False
-    slots = _class_slots(classification)
+    slots = class_slots(classification)
     # A `{` the author never closed is an UNTERMINATED candidate set and counts as open: the
     # depth-aware split above folds every slot after it into one cell that is neither `??` nor
     # a closed `{...}`, so a single dropped `}` would read as CONCRETE. A stray `}` with no
@@ -1040,6 +1048,48 @@ def _authz_contract_error(
     return None
 
 
+def outstanding_authz_contracts(
+    companion: CompanionBody,
+) -> list[tuple[str, AuthorizationContract, str]]:
+    """Every `(hypothesis, contract, why)` on a LIVE hypothesis that no `:R authz` row
+    discharges — THE definition of "this authorization question is still open".
+
+    PUBLIC, and published for the same reason `effective_vertex_state` is: two consumers need
+    one answer. `_check_benign_authz` below turns each `why` into a benign-close refusal, and
+    `frontier._open_contracts` puts each contract on the retrieval frontier (#919). A second
+    reading of "discharged" — a bare `fulfills_contract` id set, say — silently disagrees with
+    this one on every shared id, and disagrees in the harmful direction: the frontier drops
+    the contract that is actually wedging the close, so the lessons about what that anchor can
+    conclude are withheld exactly when the run is stuck on it.
+
+    See `_authz_contract_error` for why a shared id is scoped by anchor kind.
+    """
+    live = set(_walkers.live_hypothesis_ids(companion))
+    hyps = _walkers.all_hypotheses(companion)
+    declarers = _declarers_by_contract_id(companion)
+
+    verdicts: dict[str, list[tuple[str, str]]] = {}
+    for row in _walkers.iter_authz_resolutions(companion):
+        cid = row.get("fulfills_contract")
+        if isinstance(cid, str):
+            verdicts.setdefault(cid, []).append(
+                (row.get("verdict", "indeterminate"), _anchor_kind(row))
+            )
+
+    out: list[tuple[str, AuthorizationContract, str]] = []
+    for hid in sorted(live):
+        hyp = hyps.get(hid)
+        if hyp is None:
+            continue
+        for c in hyp.get("authorization_contract") or []:
+            if not isinstance(c, dict):
+                continue
+            found = _authz_contract_error(hid, c, declarers, verdicts)
+            if found is not None:
+                out.append((hid, c, found))
+    return out
+
+
 def _check_benign_authz(companion: CompanionBody) -> list[str]:
     """Every authz contract on a LIVE hypothesis is discharged by an `authorized` row.
 
@@ -1064,30 +1114,7 @@ def _check_benign_authz(companion: CompanionBody) -> list[str]:
     discharged by its id alone; making the anchor kind load-bearing document-wide would refuse
     every document that left the cell empty.
     """
-    live = set(_walkers.live_hypothesis_ids(companion))
-    hyps = _walkers.all_hypotheses(companion)
-    declarers = _declarers_by_contract_id(companion)
-
-    verdicts: dict[str, list[tuple[str, str]]] = {}
-    for row in _walkers.iter_authz_resolutions(companion):
-        cid = row.get("fulfills_contract")
-        if isinstance(cid, str):
-            verdicts.setdefault(cid, []).append(
-                (row.get("verdict", "indeterminate"), _anchor_kind(row))
-            )
-
-    errors: list[str] = []
-    for hid in sorted(live):
-        hyp = hyps.get(hid)
-        if hyp is None:
-            continue
-        for c in hyp.get("authorization_contract") or []:
-            if not isinstance(c, dict):
-                continue
-            found = _authz_contract_error(hid, c, declarers, verdicts)
-            if found is not None:
-                errors.append(found)
-    return errors
+    return [why for _hid, _c, why in outstanding_authz_contracts(companion)]
 
 
 def _check_conclude_vocab(companion: CompanionBody) -> list[str]:

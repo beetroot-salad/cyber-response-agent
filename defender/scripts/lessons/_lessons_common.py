@@ -52,9 +52,16 @@ def resolve_corpus(raw: str | None, default: Path, ap) -> Path:
 
     Resolving BEFORE the name test is what makes the leaf name sufficient: a symlink or a
     `..` cannot dress another corpus up in the expected name once the path is real.
+
+    An EMPTY or `.`-only operand is refused rather than resolved: `Path("")` is `Path(".")`,
+    so both would resolve to the process CWD and be tested against whatever that directory
+    happens to be named — a containment check on a path the caller never named. Every
+    legitimate relocation (a forward-check worktree, a test fixture) names a real directory.
     """
     if raw is None:
         return default
+    if not raw.strip() or Path(raw) == Path("."):
+        ap.error(f"--corpus needs a path to a {default.name!r} directory, not {raw!r}")
     corpus = Path(raw).resolve()
     if corpus.name != default.name:
         ap.error(

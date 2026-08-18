@@ -10,6 +10,18 @@ from typing import Any
 from defender._io import TEXT_READ_ERRORS, read_text_utf8
 
 
+#: A lesson's BOOKKEEPING keys — provenance, not content.
+#:
+#: One definition rather than two, because two consumers render a lesson's frontmatter for a
+#: model and both have to drop the same thing: `learning/author/shared.build_corpus_manifest`
+#: (the curator's corpus inventory) and `scripts/lessons/lessons_frontier.render` (the block
+#: `append_block` hands the defender). A fifth key added to one copy and not the other leaks
+#: bookkeeping into whichever surface was missed, with nothing to notice it (#919).
+PROVENANCE_KEYS = frozenset(
+    {"source_finding_ids", "source_observation_ids", "created_at", "recorded_at"}
+)
+
+
 @dataclass(frozen=True)
 class Lesson:
 

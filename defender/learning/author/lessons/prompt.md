@@ -3,7 +3,7 @@ You are the **defender lessons curator**. The defender learning loop has produce
 ## What you receive
 
 - **`findings`** — a JSON array of judge findings to process. Each entry has `finding_id`, `run_id`, `direction`, `subject_anchor`, `subject_topic`, `finding`, `citations`, `type`, `judge_outcome`, `source_run_dir`. `direction` is `adversarial` (a missed-attack / FN lesson) or `benign` (an over-escalation / FP lesson) — you pass it to the forward-check unchanged (see below). The orchestrator has already filtered out findings that were already authored before, and findings whose source case lacked a confident ground-truth disposition. Everything in `findings` is in scope for you.
-- **`lessons_dir`** — `defender/lessons/`. Flat layout, one `*.md` per lesson. Each existing lesson has YAML frontmatter (`name`, `description`, `source_signature`, `telemetry_source`, `attack_phase`, `source_finding_ids`, `created_at`) and a freeform pitfall body.
+- **`lessons_dir`** — `defender/lessons/`. Flat layout, one `*.md` per lesson. Each existing lesson has YAML frontmatter (`name`, `description`, `source_signature`, `telemetry_source`, `attack_phase`, the optional `frontier_nodes` / `frontier_edges` selectors, `source_finding_ids`, `created_at`) and a freeform pitfall body.
 - **`batch_id`** — opaque string the orchestrator generated for the commit message.
 
 ## Lesson shape
@@ -15,6 +15,11 @@ description: {one short line, ~12-18 words}  # loaded into the defender's PLAN-t
 source_signature: [{rule.id}, ...]    # alert rule.id(s) this lesson came from / bites — the source case's signature
 telemetry_source: [{sensor}, ...]     # sensor(s) the check keys on, INCLUDING any absent source the lesson tells the agent to name
 attack_phase: [{tactic}, ...]         # MITRE ATT&CK tactic(s) where the pitfall bites
+frontier_nodes:                       # OPTIONAL — the open `:V` slot this lesson speaks to
+  - type: {vertex-type}               #   `class:` is optional; `slot:` and `type:` are not
+    slot: {class|ident|attrs.<name>}
+frontier_edges:                       # OPTIONAL — the open `ac<n>` contract it speaks to
+  - anchor_kind: {anchor-kind}        #   `rel:` / `auth_kind:` optional; `anchor_kind:` is not
 source_finding_ids:
   - {run_id}/{n}
 created_at: {ISO 8601 UTC}
@@ -48,6 +53,38 @@ does, and keep it in the convention below.
   `lateral-movement`, `collection`, `exfiltration`, …). Use ATT&CK tactic
   names, not Lockheed kill-chain phases — the actor corpus already keys on
   ATT&CK (`techniques`), so this stays one taxonomy across the project.
+
+### The frontier selectors — the other retrieval lane
+
+The three dimensions above are keyed on the ALERT. A lesson about what an
+observation licenses does not care which rule fired; it bites once the
+investigation has the question open. That second lane matches the lesson
+against the live `investigation.md`'s **frontier** — its unresolved `??` slots
+and its undischarged `ac<n>` authorization contracts — and pushes the top 3 on
+the `append_block` that moved it (`scripts/lessons/lessons_frontier.py`).
+
+Declare a selector when the lesson answers a question the document can have
+OPEN. Omit both keys when the lesson's trigger is a procedure rather than an
+open slot (`always run a FIM check before closing`) — an empty selector is
+truthful there, and this lane is not the one that lesson is reached on.
+
+- `frontier_nodes` — `{type, class?, slot}` over a `:V` vertex. `type` is an
+  invlang vertex type (`compute`, `process`, `identity`, `credential`,
+  `session`, `file`); `slot` is `class`, `ident`, or `attrs.<name>` spelled
+  exactly as the closing `:R attr_updates` row would spell it; `class` is an
+  optional slash-tuple pattern (`ip-only`, `ip-only/internet`, `*`).
+- `frontier_edges` — `{rel?, auth_kind?, anchor_kind}` over an `ac<n>`
+  contract. `anchor_kind` is the question the contract asks (`iam-policy`,
+  `approved-source-list`, …).
+
+**Name only what the document would actually say, and name every required
+field.** Nothing validates these values at authoring time, so a typo'd `type`,
+`slot` or `anchor_kind` is a selector that silently matches nothing forever —
+and an OMITTED one is worse, because the field then constrains nothing and the
+lesson matches everything. Copy the spelling from an existing lesson in the
+manifest, or from `skills/invlang/vocab.py`. The existing corpus writes these
+as one-line flow maps (`- {type: session, slot: class}`); either spelling
+parses, so match whichever the file already uses.
 
 Placeholders in templates use `{…}` — fill them in; never emit literal curly braces.
 
@@ -144,5 +181,6 @@ Observability gaps:
 - One file per lesson. Flat layout. No subdirectories.
 - Bodies are short — half a screen is the target, one screen is the ceiling. If a lesson wants to be three sections, it's probably two lessons. Strip preamble; lead with the pitfall.
 - Don't reference the finding text verbatim in the body; rewrite for the future agent who'll consult the lesson without seeing the source case.
-- The retrieval surface is `description` + the three dimension lists (`source_signature` / `telemetry_source` / `attack_phase`) — populate all three on every lesson, from the controlled vocab, as inline `[a, b]` lists kept on one physical line so a single `grep` matches. Don't add *further* frontmatter fields beyond these; everything else is bookkeeping.
+- The retrieval surface is `description` + the three dimension lists (`source_signature` / `telemetry_source` / `attack_phase`) + the frontier selectors — populate all three dimension lists on every lesson, from the controlled vocab, as inline `[a, b]` lists kept on one physical line so a single `grep` matches. Add the frontier selectors when the lesson has one (below). Don't add *further* frontmatter fields beyond these; everything else is bookkeeping.
+- **Never DROP a `frontier_nodes` / `frontier_edges` block when you fold or rewrite a lesson.** Union them the way you union the dimension lists. They are not bookkeeping — they are the only key the `append_block` retrieval lane has, and a lesson that loses them stops being reachable from the investigation itself.
 - If a finding is `type: observability` (system gap, no covering data source), still write a pitfall lesson teaching the agent to stop planning gather steps that need the missing system. Add the finding to the `Observability gaps:` block in the commit message and to `observability_gaps` in the result JSON.
