@@ -19,7 +19,13 @@ Before adding a new var, check for collision: `grep -E "^VAR_NAME=" /workspace/.
 
 ### setup (one-shot)
 
-Runs before Elasticsearch. Generates a self-signed CA and node cert into the shared `certs` volume, fixes permissions for UID 1000. After ES is up, sets the `kibana_system` password via the ES security API, then exits. Idempotent: skips cert gen if `ca.zip` and `certs.zip` already exist in the volume.
+Runs before Elasticsearch. Generates a self-signed CA and the `elasticsearch` / `fleet-server` leaf certs into the shared `certs` volume, chains the CA onto each leaf, fixes permissions for UID 1000, then exits. Idempotent: reuses the pinned CA unless `ca/ca.crt` or `ca/ca.key` is missing, and re-issues leaves only if the CA was regenerated or a leaf is absent.
+
+**It makes no network calls, and must not be given any.** `elasticsearch` gates on `setup` completing, so ES-dependent work here is a cold-start deadlock: setup waits for ES to answer while ES waits for setup to exit, and neither `depends_on` condition escapes it (`service_healthy` merely relocates the hang to the case where setup's fast path exits before its 2s healthcheck fires). That work belongs in `es-init`.
+
+### es-init (one-shot)
+
+Runs after `elasticsearch` reports healthy. Waits for ES to answer, sets the `kibana_system` password via the ES security API, then exits. `kibana` gates on it completing, since that is the account Kibana authenticates with.
 
 ### elasticsearch (9.3.3)
 
@@ -123,7 +129,7 @@ Passive monitor producing JSON conn/dns/http/ssl/files logs to the `zeek_logs` n
 
 ### certs volume
 
-Shared between `setup` (writer), `elasticsearch` (ro), `kibana` (ro), and `fleet-server` (ro). The `setup` script invalidates-and-regenerates when `fleet-server/fleet-server.crt` is missing (batch 4d added fleet-server to the cert list). To force full cert regeneration: `docker --context soc-playground compose down -v` (destroys data too).
+Shared between `setup` (the only writer), `elasticsearch` (ro), `es-init` (ro), `kibana` (ro), `fleet-server` (ro), and `fleet-outputs-reconciler` (ro). The `setup` script invalidates-and-regenerates when `fleet-server/fleet-server.crt` is missing (batch 4d added fleet-server to the cert list). To force full cert regeneration: `docker --context soc-playground compose down -v` (destroys data too).
 
 ### fleet-init (one-shot)
 

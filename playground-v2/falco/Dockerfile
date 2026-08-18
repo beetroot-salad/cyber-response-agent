@@ -11,10 +11,34 @@ ARG FALCO_VERSION
 # 0.43.x; the driver-loader image still ships it, so we use it as a
 # build-only sidecar to fetch the rule YAMLs.
 FROM falcosecurity/falco-driver-loader:${FALCO_VERSION} AS rules-fetcher
-RUN mkdir -p /rules /plugins \
-    && falcoctl artifact install --rulesfiles-dir /rules falco-sandbox-rules \
-    && falcoctl artifact install --rulesfiles-dir /rules falco-incubating-rules \
-    && falcoctl artifact install --plugins-dir /plugins container
+# Pinned deliberately. `falcoctl artifact install container` (unpinned) resolves
+# to the plugin's `latest`, whose required plugin-API version marches ahead of
+# the framework API that the pinned FALCO_VERSION provides. An unpinned install
+# therefore turns a rebuild months later into a crash loop:
+#   cannot load plugin libcontainer.so: plugin required API version '3.10.0'
+#   not compatible with the framework's API version '3.7.0'. Exiting.
+# Bump this only together with FALCO_VERSION, and start the container once.
+ARG CONTAINER_PLUGIN_VERSION
+# The rule packs carry the same drift risk, for a sharper reason: the overrides
+# in falco_rules.local.yaml bind to upstream rules by exact name with
+# `override: condition: append`, which requires the parent rule to already
+# exist. A rename or removal in a later `latest` therefore makes Falco refuse
+# to load the file outright. Defaulted rather than sourced from .env so a
+# checkout without the var still builds the verified pairing; override at build
+# time to move them. These two are the versions `latest` resolved to for Falco
+# 0.43.0 (digest-identical, so pinning changed no rule content).
+ARG SANDBOX_RULES_VERSION=6.1.0
+ARG INCUBATING_RULES_VERSION=6.0.1
+# The var lives in .env, which is gitignored — an .env predating this pin
+# interpolates to the empty string and compose passes `--build-arg
+# CONTAINER_PLUGIN_VERSION=`, which reaches falcoctl as the ref `container:`.
+# Fail here with the fix instead of on an unrelated-looking registry error.
+RUN test -n "${CONTAINER_PLUGIN_VERSION}" \
+       || { echo "CONTAINER_PLUGIN_VERSION is empty - add it to playground-v2/.env (see .env.example)" >&2; exit 1; } \
+    && mkdir -p /rules /plugins \
+    && falcoctl artifact install --rulesfiles-dir /rules falco-sandbox-rules:${SANDBOX_RULES_VERSION} \
+    && falcoctl artifact install --rulesfiles-dir /rules falco-incubating-rules:${INCUBATING_RULES_VERSION} \
+    && falcoctl artifact install --plugins-dir /plugins container:${CONTAINER_PLUGIN_VERSION}
 
 # Stage 2: the runtime image. Sandbox adds breadth (write-below-root,
 # payload decode, drift detection); incubating adds attack-pattern
