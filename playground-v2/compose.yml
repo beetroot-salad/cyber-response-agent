@@ -19,7 +19,8 @@ include:
     env_file: .env
 
 # Services:
-#  setup         — one-shot: generates self-signed CA + ES cert, waits for ES, sets kibana_system password, exits
+#  setup         — one-shot: generates self-signed CA + ES/fleet-server certs, exits. Offline by design (see es-init)
+#  es-init       — one-shot: waits for ES, sets the kibana_system password, exits
 #  elasticsearch — single-node, TLS on (HTTP + transport), xpack.security.enabled
 #  kibana        — auth via kibana_system over TLS
 #  fleet-init    — one-shot: fleet setup + fleet-server-policy
@@ -89,9 +90,6 @@ services:
     image: *es-image
     container_name: soc-playground-setup
     user: "0"
-    environment:
-      - ELASTIC_PASSWORD=${V2_ELASTIC_PASSWORD}
-      - KIBANA_PASSWORD=${V2_KIBANA_PASSWORD}
     volumes:
       - certs:/usr/share/elasticsearch/config/certs
     command: >
@@ -134,10 +132,6 @@ services:
         chown -R 1000:0 config/certs;
         find config/certs -type d -exec chmod 750 {} \;;
         find config/certs -type f -exec chmod 640 {} \;;
-        echo "-> waiting for elasticsearch";
-        until curl -s --cacert config/certs/ca/ca.crt https://elasticsearch:9200 | grep -q "missing authentication credentials"; do sleep 5; done;
-        echo "-> setting kibana_system password";
-        until curl -s -X POST --cacert config/certs/ca/ca.crt -u "elastic:$${ELASTIC_PASSWORD}" -H "Content-Type: application/json" https://elasticsearch:9200/_security/user/kibana_system/_password -d "{\"password\":\"$${KIBANA_PASSWORD}\"}" | grep -q "^{}"; do sleep 5; done;
         echo "-> setup complete";
       '
     healthcheck:
@@ -149,13 +143,13 @@ services:
   elasticsearch:
     depends_on:
       setup:
-        # service_completed_successfully — setup is a one-shot. On first boot
-        # it runs for tens of seconds (cert gen + wait-for-ES + kibana_system
-        # password) and its healthcheck has time to fire. On recreate (certs
-        # already in the shared volume) setup's fast-path exits in <1s, often
-        # before the 2s healthcheck interval, leaving compose stuck on
-        # service_healthy forever. Kibana already uses service_completed_successfully
-        # for the same reason.
+        # Safe only because `setup` is now purely offline (cert generation, no
+        # network wait) and so always exits. It previously also waited for ES,
+        # which deadlocked every cold start: ES gated on setup exiting while
+        # setup gated on ES answering. Neither condition on this edge fixes
+        # that — service_healthy just moves the hang to the case where setup's
+        # fast path exits before the 2s healthcheck fires. The fix is the
+        # es-init one-shot below; keep ES-dependent work out of `setup`.
         condition: service_completed_successfully
     image: *es-image
     container_name: elasticsearch
@@ -196,11 +190,38 @@ services:
       start_period: 60s
     restart: unless-stopped
 
+  # The ES-dependent half of what `setup` used to do. It must live in its own
+  # one-shot gated on elasticsearch being healthy: folding it back into `setup`
+  # recreates the cold-start deadlock described above.
+  es-init:
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    image: *es-image
+    container_name: soc-playground-es-init
+    user: "0"
+    environment:
+      - ELASTIC_PASSWORD=${V2_ELASTIC_PASSWORD}
+      - KIBANA_PASSWORD=${V2_KIBANA_PASSWORD}
+    volumes:
+      - certs:/usr/share/elasticsearch/config/certs
+    command: >
+      bash -c '
+        echo "-> waiting for elasticsearch";
+        until curl -s --cacert config/certs/ca/ca.crt https://elasticsearch:9200 | grep -q "missing authentication credentials"; do sleep 5; done;
+        echo "-> setting kibana_system password";
+        until curl -s -X POST --cacert config/certs/ca/ca.crt -u "elastic:$${ELASTIC_PASSWORD}" -H "Content-Type: application/json" https://elasticsearch:9200/_security/user/kibana_system/_password -d "{\"password\":\"$${KIBANA_PASSWORD}\"}" | grep -q "^{}"; do sleep 5; done;
+        echo "-> es-init complete";
+      '
+
   kibana:
     depends_on:
       elasticsearch:
         condition: service_healthy
       setup:
+        condition: service_completed_successfully
+      # Kibana authenticates as kibana_system, whose password es-init sets.
+      es-init:
         condition: service_completed_successfully
     image: docker.elastic.co/kibana/kibana:${STACK_VERSION}
     container_name: kibana
@@ -574,6 +595,9 @@ services:
       context: ./falco
       args:
         FALCO_VERSION: ${FALCO_VERSION}
+        # Pinned together with FALCO_VERSION — an unpinned plugin install makes
+        # a later rebuild pull a plugin the pinned Falco cannot load.
+        CONTAINER_PLUGIN_VERSION: ${CONTAINER_PLUGIN_VERSION}
     image: soc-playground/falco:local
     container_name: falco
     restart: unless-stopped
