@@ -129,7 +129,7 @@ Passive monitor producing JSON conn/dns/http/ssl/files logs to the `zeek_logs` n
 
 ### certs volume
 
-Shared between `setup` (writer), `elasticsearch` (ro), `kibana` (ro), and `fleet-server` (ro). The `setup` script invalidates-and-regenerates when `fleet-server/fleet-server.crt` is missing (batch 4d added fleet-server to the cert list). To force full cert regeneration: `docker --context soc-playground compose down -v` (destroys data too).
+Shared between `setup` (the only writer), `elasticsearch` (ro), `es-init` (ro), `kibana` (ro), `fleet-server` (ro), and `fleet-outputs-reconciler` (ro). The `setup` script invalidates-and-regenerates when `fleet-server/fleet-server.crt` is missing (batch 4d added fleet-server to the cert list). To force full cert regeneration: `docker --context soc-playground compose down -v` (destroys data too).
 
 ### fleet-init (one-shot)
 

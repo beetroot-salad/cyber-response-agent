@@ -20,8 +20,8 @@ include:
 
 # Services:
 #  setup         — one-shot: generates self-signed CA + ES/fleet-server certs, exits. Offline by design (see es-init)
-#  es-init       — one-shot: waits for ES, sets the kibana_system password, exits
 #  elasticsearch — single-node, TLS on (HTTP + transport), xpack.security.enabled
+#  es-init       — one-shot: sets the kibana_system password once ES is healthy, exits
 #  kibana        — auth via kibana_system over TLS
 #  fleet-init    — one-shot: fleet setup + fleet-server-policy
 #  fleet-server  — Fleet Server + self-enrollment
@@ -134,11 +134,10 @@ services:
         find config/certs -type f -exec chmod 640 {} \;;
         echo "-> setup complete";
       '
-    healthcheck:
-      test: ["CMD-SHELL", "[ -f /usr/share/elasticsearch/config/certs/fleet-server/fleet-server.crt ]"]
-      interval: 2s
-      timeout: 5s
-      retries: 120
+    # Deliberately no healthcheck. Nothing gates on `setup: service_healthy`
+    # and nothing may: a probe on a one-shot that exits in under a second is a
+    # race the dependent loses (see the note on elasticsearch's depends_on).
+    restart: "no"
 
   elasticsearch:
     depends_on:
@@ -204,15 +203,28 @@ services:
       - ELASTIC_PASSWORD=${V2_ELASTIC_PASSWORD}
       - KIBANA_PASSWORD=${V2_KIBANA_PASSWORD}
     volumes:
-      - certs:/usr/share/elasticsearch/config/certs
+      # Read-only: this one-shot only reads ca.crt, and the volume also holds
+      # ca.key. `setup` is the sole writer.
+      - certs:/usr/share/elasticsearch/config/certs:ro
     command: >
       bash -c '
-        echo "-> waiting for elasticsearch";
-        until curl -s --cacert config/certs/ca/ca.crt https://elasticsearch:9200 | grep -q "missing authentication credentials"; do sleep 5; done;
+        set -eu;
+        # `elasticsearch: service_healthy` already proves ES answers over TLS
+        # with this CA, so the password POST is its own readiness probe — no
+        # separate wait loop. Bounded on purpose: kibana, fleet-init,
+        # fleet-server and all 11 role hosts sit behind this one-shot, so an
+        # unbounded retry stalls the whole `up` with nothing in the logs to
+        # say why. That is the failure shape this service was split out to end.
         echo "-> setting kibana_system password";
-        until curl -s -X POST --cacert config/certs/ca/ca.crt -u "elastic:$${ELASTIC_PASSWORD}" -H "Content-Type: application/json" https://elasticsearch:9200/_security/user/kibana_system/_password -d "{\"password\":\"$${KIBANA_PASSWORD}\"}" | grep -q "^{}"; do sleep 5; done;
+        ok=0;
+        for i in $$(seq 1 60); do
+          if curl -s -X POST --cacert config/certs/ca/ca.crt -u "elastic:$${ELASTIC_PASSWORD}" -H "Content-Type: application/json" https://elasticsearch:9200/_security/user/kibana_system/_password -d "{\"password\":\"$${KIBANA_PASSWORD}\"}" | grep -q "^{}"; then ok=1; break; fi;
+          sleep 5;
+        done;
+        [ "$$ok" = 1 ] || { echo "FAIL: kibana_system password not set after 5m - check V2_ELASTIC_PASSWORD against the elastic user stored in es_data"; exit 1; };
         echo "-> es-init complete";
       '
+    restart: "no"
 
   kibana:
     depends_on:
