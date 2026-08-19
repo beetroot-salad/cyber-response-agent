@@ -240,42 +240,28 @@ retrieval dimensions (inline lists):
 - `attack_phase` — the MITRE ATT&CK tactic(s) where the pitfall bites
   (tactic slugs, e.g. `lateral-movement`, `persistence`).
 
-Most also carry **state selectors** — what the lesson speaks to in your
-investigation, rather than the alert it was born under. A lesson whose trigger
-is a procedure rather than a fact carries none, and is reached the other two
-ways below:
+Most also carry **state selectors**, keyed on your record rather than on the
+alert: the cells your `:V` / `:R` rows have settled, the ones they left `??`,
+and undischarged `ac<n>` contracts. A lesson whose trigger is a procedure
+rather than a fact carries none and is reached by grep.
 
-- `observed_nodes` — `{type, class?, slot}` over a `:V` cell you have SETTLED.
-  For lessons about what a value you are holding does and does not license.
-- `frontier_nodes` — same shape, over a cell still `??`. For lessons about how
-  to close an open question.
-- `frontier_edges` — `{rel?, auth_kind?, anchor_kind}` over an undischarged
-  `ac<n>` authorization contract. For lessons about what an authz check can
-  conclude.
+**Lessons come to you; you do not have to go and ask.** Two pushes:
 
-`slot` is `class`, `ident`, or `attrs.<name>` in both node lanes.
+1. **Orientation → Lessons block** (first message) — this signature's
+   `source_signature` hits plus the viable tags, printed
+   `<path>\t<description>`. Keyed on the alert, because you have not written a
+   document yet for anything else to key on.
+2. **The `append_block` / `fix_row` return** (every loop) — up to three lessons
+   matched against your record, pushed when your write moved it. Each block
+   carries its own read instructions.
 
-**Lessons come to you; you do not have to go and ask.** Two pushes, keyed
-differently because they fire at different moments:
+**No block means nothing NEW matched**, never that the corpus is exhausted:
+your write left the state where it was, or nothing in it matched. Widen with
+the shim when a question stays open.
 
-1. **Orientation → Lessons block** (first message): this signature's
-   `source_signature` hits plus the viable tags. Keyed on the alert, because at
-   that point you have not written a document for anything else to key on.
-2. **The `append_block` / `fix_row` return** (every loop): up to three lessons
-   matched against your investigation's **state** — both halves of it, the
-   values your `:V` / `:R` rows have SETTLED and the `??` slots and unfulfilled
-   `ac<n>` contracts they have left open. This block appears only when your
-   write *changed* that state, so seeing it at all means something moved.
-   **No block means nothing NEW matched** — either your write left the state
-   where it was, or nothing in it matched. It never means the corpus is
-   exhausted; widen with the shim below when a question stays open.
-
-Orientation prints `<path>\t<description>`; the write return prints the
-lesson's frontmatter. Either way, judge relevance from `description`, then
-**Read the full body of only the ones that fit** before writing your `:H` /
-`:L` blocks. Don't open a lesson to decide whether it's relevant — that's what
-the description is for. Bodies are short; they teach you what to *check next
-time*, not what conclusion to reach.
+A fact you leave in prose reaches no lane at all — write what you observe into
+a `:V` / `:R` row. Recording `attrs.loginuid=-1` is what summons the lesson
+about what that value does and does not license.
 
 **The `defender-lessons` shim is for WIDENING** past what was pushed — by
 `telemetry_source` / `attack_phase`, or by dropping a pattern. It greps the
@@ -298,16 +284,8 @@ Widen by dropping a pattern if a narrow query returns nothing; a bare
 `defender-lessons` (whole-corpus `<path>\t<description>`) is the fallback, not
 the default.
 
-(The three grep dimensions remain unproven retrieval keys — grep-only, no index.
-The state selectors are the #919 answer to the case that motivated them: a
-lesson about what `loginuid` licenses did not load, because it was keyed to the
-rule it was born under rather than to anything the run had in front of it. Both
-node lanes exist because both halves of your record carry advice — an open `??`
-is a question someone has written about how to close it, and a settled value is
-a claim someone has written about what it does and does not support. Recording
-`attrs.loginuid=-1` is what SUMMONS that second kind, so write what you observe
-into the record rather than keeping it in prose: a fact that never lands in a
-`:V` or `:R` row reaches no lane at all.)
+(Both the grep dimensions and the state selectors are unproven retrieval keys —
+grep-only, no index, to see whether they earn one.)
 
 **Pick a lead that discriminates.** When the frontier carries two or
 more hypotheses that look equally plausible, the right next lead is

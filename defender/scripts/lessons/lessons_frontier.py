@@ -414,9 +414,17 @@ def render(hits: list[Hit]) -> str:
     """
     if not hits:
         return ""
+    # The read discipline lives HERE rather than in SKILL.md because it is about the block in
+    # front of the model: which of these to open, and what a hit does and does not license. The
+    # spec keeps only what is true when NO block arrives, which a return cannot say.
+    # "your record", not "the open frontier" — this fires on settled cells too.
+    # ONE line, and the hits start at index 1 — `test_the_block_hands_main_a_path_its_own_gate
+    # _will_read` reads the first hit positionally, and this block is re-injected on every
+    # frontier-moving write, so every line here is paid for many times per run.
     lines = [
-        "### Lessons for the open frontier "
-        "(precedent, not evidence — Read the body before you rely on one)",
+        "### Lessons matched against your record — pushed because this write moved it. "
+        "Precedent, not evidence: judge each from its `description`, "
+        "Read only the bodies that fit.",
     ]
     for hit in hits:
         # `matched` is the model's ONLY account of why this lesson was pushed: `HIDDEN_KEYS`
