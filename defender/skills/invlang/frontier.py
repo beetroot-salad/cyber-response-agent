@@ -21,20 +21,23 @@ DERIVED, NEVER STORED. Every entry point takes the document (or its parse) and r
 fresh answer, mirroring the discipline `runtime/tools.py` states for the repair window: a
 frontier that is recomputed cannot go stale or disagree with the file.
 
-TWO KNOWN DIVERGENCES from the benign-disposition gate (`validate._check_benign_open_slots`),
-both on the NODE axis. The contract axis has none — `_open_contracts` calls the gate's own
-`outstanding_authz_contracts` rather than restating it.
+BOTH AXES CALL THE GATE'S OWN WALK rather than restating it — `_open_contracts` calls
+`outstanding_authz_contracts`, `_node_state` calls `iter_vertex_cells` (PR-930). So the two
+KNOWN DIVERGENCES below are no longer two implementations that happen to differ; each is one
+explicit knob on a shared walk, and neither can drift.
 
-  1. `ident` is INCLUDED here and EXCLUDED there (`IDENT_REFINEMENT_KEY` notes why).
-     Deliberate: an unresolved identifier is the single most retrieval-worthy open slot there
-     is — "which host is this IP" is exactly the question a standing deployment fact answers —
-     while the disposition gate has its own reasons for not blocking a close on it.
+  1. `ident` is INCLUDED here and EXCLUDED there (`IDENT_REFINEMENT_KEY` notes why) — the
+     shared walk's `include_ident` flag. Deliberate: an unresolved identifier is the single
+     most retrieval-worthy open slot there is — "which host is this IP" is exactly the question
+     a standing deployment fact answers — while the disposition gate has its own reasons for
+     not blocking a close on it.
   2. A `:R attr_updates` row may legally target an EDGE (`l-001|e-001|attrs.auth_method|??`;
      see `_check_attr_update_targets`). The gate reads that as an open slot and blocks; this
      module DROPS it, because an `OpenSlot` carries a vertex `type` for a selector to match
      and an `:E` row has no such type. So an authz question opened on an edge attribute
-     recalls nothing. NOT deliberate — a limitation of the node axis's shape, recorded here
-     rather than hidden in `_open_slots`'s inline comment.
+     recalls nothing. NOT deliberate — a limitation of the node axis's shape, which is why it
+     is a filter in `_node_state` and not a flag on the shared walk: the gate must keep
+     blocking on those cells, so the walk has to keep reporting them.
 
 This module must never be wired into that gate.
 """
@@ -44,21 +47,35 @@ import sys
 from dataclasses import dataclass
 
 from . import _walkers, vocab
+from .parser import INVLANG_FENCE_RE
 from .schema import CompanionBody
 from .validate import (
+    ATTR_PREFIX,
+    SLOT_CLASS,
+    SLOT_IDENT,
     auth_kind_of,
-    effective_vertex_state,
-    has_open_slot,
-    is_unresolved,
+    iter_vertex_cells,
     outstanding_authz_contracts,
 )
 
-#: The three `slot` spellings an `OpenSlot` can carry. `class` and `ident` are whole-cell;
-#: an attribute is namespaced `attrs.<name>`, matching the `:R attr_updates` key grammar so
-#: a selector is written in the same spelling the resolving row would use.
-SLOT_CLASS = "class"
-SLOT_IDENT = "ident"
-ATTR_PREFIX = "attrs."
+#: The three `slot` spellings an `OpenSlot` can carry, RE-EXPORTED from `validate` rather than
+#: restated. `class` and `ident` are whole-cell; an attribute is namespaced `attrs.<name>`,
+#: matching the `:R attr_updates` key grammar so a selector is written in the same spelling the
+#: row that would resolve it uses. Owned there because that is where the grammar is enforced
+#: (`_is_legal_refinement_key`) and where the walk that reports these slots lives.
+__all__ = [
+    "ATTR_PREFIX",
+    "SLOT_CLASS",
+    "SLOT_IDENT",
+    "Frontier",
+    "FrontierAt",
+    "HeldFact",
+    "OpenContract",
+    "OpenSlot",
+    "derive_frontier",
+    "frontier_at",
+    "frontier_from_text",
+]
 
 # A contract counts as still-open unless a `:R authz` row DISCHARGES it, and only an
 # `authorized` verdict discharges.
@@ -162,47 +179,36 @@ def _edge_index(companion: CompanionBody) -> dict[str, tuple[str | None, str | N
     return index
 
 
-def _held(value: str) -> bool:
-    """Settled ENOUGH to be advice-worthy: a value that is present and not still open.
-
-    An empty cell is not a held fact — `is_unresolved("")` is False by design (see
-    `_apply_attr_updates`), so testing openness alone would read every absent attribute as
-    something the run knows."""
-    return bool(value.strip()) and not is_unresolved(value)
-
-
 def _node_state(companion: CompanionBody) -> tuple[list[OpenSlot], list[HeldFact]]:
-    """Both halves of the node axis, from ONE walk.
+    """Both halves of the node axis, over `validate.iter_vertex_cells` — the ONE node walk.
 
-    Split into two functions they would each re-derive `effective_vertex_state` and could
-    drift on the open/held boundary; here every cell is classified exactly once and the two
-    lists are complements by construction."""
+    CALLED, not restated, the way `_open_contracts` calls `outstanding_authz_contracts`: the
+    open/held boundary and the gate's blocking boundary are now the same code reading the same
+    fold, so they cannot drift. What stays here is only what this axis adds — the vertex `type`
+    a selector matches against, and the drop that needing one forces.
+
+    The two lists are complements over the POPULATED cells, not over every cell: a `VertexCell`
+    may be `CELL_EMPTY`, which is neither an open question nor a held fact."""
     types = _walkers.vertex_types(companion)
     open_out: list[OpenSlot] = []
     held_out: list[HeldFact] = []
-    for vid, st in effective_vertex_state(companion).items():
-        # `effective_vertex_state` fabricates an entry for any `:R attr_updates` TARGET,
-        # and the validator admits an `e-*` there — so an id with no `:V` row is an edge or
-        # a typo, and either way carries no vertex type to match a selector against.
-        if vid not in types:
+    for cell in iter_vertex_cells(companion, include_ident=True):
+        # `effective_vertex_state` fabricates an entry for any `:R attr_updates` TARGET, and
+        # the validator admits an `e-*` there — so an id with no `:V` row is an edge or a typo,
+        # and either way carries no vertex type to match a selector against. The shared walk
+        # still REPORTS those cells, because the benign gate blocks on them; dropping them is
+        # this axis's business, and the module docstring records what it costs.
+        typ = types.get(cell.vertex_id)
+        if typ is None:
             continue
-        typ = types[vid]
-        cls = st.get("classification") or ""
-        if has_open_slot(cls):
-            open_out.append(OpenSlot(vid, typ, cls, SLOT_CLASS, cls))
-        elif _held(cls):
-            held_out.append(HeldFact(vid, typ, cls, SLOT_CLASS, cls))
-        ident = st.get("identifier") or ""
-        if is_unresolved(ident):
-            open_out.append(OpenSlot(vid, typ, cls, SLOT_IDENT, ident))
-        elif _held(ident):
-            held_out.append(HeldFact(vid, typ, cls, SLOT_IDENT, ident))
-        for name, val in (st.get("attributes") or {}).items():
-            slot = f"{ATTR_PREFIX}{name}"
-            if is_unresolved(val):
-                open_out.append(OpenSlot(vid, typ, cls, slot, val))
-            elif _held(val):
-                held_out.append(HeldFact(vid, typ, cls, slot, val))
+        if cell.is_open:
+            open_out.append(
+                OpenSlot(cell.vertex_id, typ, cell.classification, cell.slot, cell.value)
+            )
+        elif cell.is_held:
+            held_out.append(
+                HeldFact(cell.vertex_id, typ, cell.classification, cell.slot, cell.value)
+            )
     return open_out, held_out
 
 
@@ -277,3 +283,63 @@ def frontier_from_text(text: str) -> Frontier:
             file=sys.stderr,
         )
         return Frontier(slots=(), contracts=(), held=())
+
+
+@dataclass(frozen=True)
+class FrontierAt:
+    """The frontier as of block `n`, and an honest account of which `n` that actually was."""
+
+    frontier: Frontier
+    #: The block count actually used, after snapping into range.
+    n: int
+    #: How many ````invlang` blocks the document has in total.
+    total: int
+    #: What the caller asked for, unclamped — `snapped` is the two disagreeing.
+    requested: int
+
+    @property
+    def snapped(self) -> bool:
+        return self.n != self.requested
+
+
+def frontier_at(text: str, n: int) -> FrontierAt:
+    """The frontier as the document stood after its first `n` ````invlang` blocks (PR-930).
+
+    WHY A PREFIX AT ALL. The key a lesson should carry is the frontier at the moment the
+    pitfall was live, not at the moment the run finished: by the close, the open slots the
+    lesson needs to fire on are closed, because closing them is what finishing means. Measured
+    on the runs in hand, a terminal document holds ~2 open slots against ~21 held facts, while
+    the same document three blocks earlier holds 6 open against 7 — the first is barely a key
+    and the second is one. Under the turn-N branch
+    (`docs/learning-architecture-redesign.md`) a finding is BORN at a branch point, where the
+    discriminator is open by construction, and this is how a curator reads that state back.
+
+    COARSE, AND IT SAYS SO. The frontier moves only when a block lands, so `n` counts invlang
+    FENCES — one per `append_block` on the ordinary authoring path — not messages. Many
+    message-level branch points therefore share one frontier (the turn-N experiment forked at
+    message 59; the document distinguishes a handful of states, not 59). A caller holding a
+    message index maps it to a fence itself, because only the run's trace can do that.
+
+    SNAPPED, NOT RAISED, and reported either way. An out-of-range `n` clamps into `[0, total]`
+    and the result carries both what was asked and what was answered, because the failure to
+    avoid is silent: a curator who asks for block 12 of a 4-block document and is handed the
+    terminal frontier has been handed the one state that keys nothing, and needs to see that
+    rather than infer it. `n=0` is the empty frontier — the document before anything landed —
+    which is also the honest answer for a fence-less document.
+
+    The prefix is REBUILT from the fence bodies rather than sliced out of `text`, so whatever
+    prose sits between two blocks cannot change the answer. `parse_dense_companion` reads
+    fences and ignores the rest, so this only makes that explicit.
+
+    NEVER RAISES, inheriting `frontier_from_text`'s guarantee.
+    """
+    bodies = INVLANG_FENCE_RE.findall(text)
+    total = len(bodies)
+    resolved = max(0, min(n, total))
+    prefix = "\n\n".join(f"```invlang\n{body}\n```" for body in bodies[:resolved])
+    return FrontierAt(
+        frontier=frontier_from_text(prefix),
+        n=resolved,
+        total=total,
+        requested=n,
+    )

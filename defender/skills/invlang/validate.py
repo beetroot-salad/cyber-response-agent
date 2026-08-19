@@ -670,11 +670,18 @@ def _swap_cell(cells: list[str], at: int, replacement: str) -> str:
 #: a distinct top-level `identifier` slot, never in `attributes`: `_check_benign_open_slots`
 #: refuses a benign close on any `??`-valued ATTRIBUTE, so routing it there would make
 #: `ident=??` block a benign disposition.
+#:
+#: These three ARE the slot vocabulary `iter_vertex_cells` reports and a lesson selector is
+#: written in, so the spelling a refinement row uses to CLOSE a slot and the spelling retrieval
+#: uses to NAME one cannot drift apart. `frontier.py` re-exports them under its own names.
+SLOT_CLASS = "class"
 IDENT_REFINEMENT_KEY = "ident"
+SLOT_IDENT = IDENT_REFINEMENT_KEY
+ATTR_PREFIX = "attrs."
 
 
 def _is_legal_refinement_key(key: str) -> bool:
-    return key == "class" or key == IDENT_REFINEMENT_KEY or key.startswith("attrs.")
+    return key in (SLOT_CLASS, SLOT_IDENT) or key.startswith(ATTR_PREFIX)
 
 
 def _check_attr_update_keys(proposed_text: str) -> list[Diagnostic]:
@@ -920,15 +927,15 @@ def _apply_attr_updates(
             # honest on a document that never went through the gate.
             if not isinstance(val, str) or not val.strip():
                 continue
-            if key == "class":
+            if key == SLOT_CLASS:
                 st["classification"] = val
             elif key == IDENT_REFINEMENT_KEY:
                 # A DISTINCT top-level slot, never `attributes["ident"]` — see
                 # IDENT_REFINEMENT_KEY. Last row in document order wins; the fold retains
                 # no history, so a superseded value survives only as the rows on disk.
                 st["identifier"] = val
-            elif isinstance(key, str) and key.startswith("attrs."):
-                st["attributes"][key[len("attrs."):]] = val
+            elif isinstance(key, str) and key.startswith(ATTR_PREFIX):
+                st["attributes"][key[len(ATTR_PREFIX):]] = val
 
 
 def effective_vertex_state(
@@ -948,22 +955,128 @@ def effective_vertex_state(
     return state
 
 
-def _check_benign_open_slots(companion: CompanionBody) -> list[str]:
-    errors: list[str] = []
+#: The three states a vertex cell can be in. NOT a bool: open and held are not complements —
+#: an absent cell is neither, and collapsing it into `held` would report every attribute a
+#: vertex never carried as something the run KNOWS (`frontier.HeldFact`).
+CELL_OPEN = "open"
+CELL_HELD = "held"
+CELL_EMPTY = "empty"
+
+
+@dataclass(frozen=True)
+class VertexCell:
+    """One `(vertex, slot)` cell of the folded document, classified open / held / empty.
+
+    THE node-axis walk. Two consumers read it, and they disagree about what to DO with a cell,
+    never about what the cell IS: the benign-disposition gate (`_check_benign_open_slots`)
+    blocks on the open ones, and `frontier._node_state` keys lesson retrieval on both populated
+    halves (#919, PR-930). Before this they were two walks that agreed by inspection.
+    """
+
+    vertex_id: str
+    #: The vertex's effective class tuple, carried on EVERY cell rather than only the `class`
+    #: one, because a lesson selector matches `{type, class, slot}` as a triple — an
+    #: `attrs.loginuid` cell still has to say what kind of vertex it sits on.
+    classification: str
+    slot: str
+    value: str
+    state: str
+
+    @property
+    def is_open(self) -> bool:
+        return self.state == CELL_OPEN
+
+    @property
+    def is_held(self) -> bool:
+        return self.state == CELL_HELD
+
+
+def _cell_text(value: Any) -> str:
+    """A cell as text. A non-`str` is read as ABSENT rather than crashing the walk.
+
+    Both open tests already guard their input and answer False for a non-`str`, so this only
+    restates their tolerance for the emptiness test below — which reaches for `.strip()` and
+    would otherwise take down a whole document's frontier over one malformed attribute."""
+    return value if isinstance(value, str) else ""
+
+
+def _cell_state(value: str, *, open_test: Callable[[Any], bool]) -> str:
+    """Classify one already-folded cell.
+
+    `open_test` varies by slot and the variation is load-bearing: a class cell is open when ANY
+    of its slash-slots is (`has_open_slot`), while `ident` and `attrs` cells are single values
+    that `is_unresolved` reads whole. Running `is_unresolved` across a class tuple would read
+    `linux/role:??` as concrete.
+
+    Emptiness is tested FIRST and independently, because neither predicate reads `""` as open —
+    see `_apply_attr_updates` on why a blank value must never read as a resolution."""
+    if not value.strip():
+        return CELL_EMPTY
+    return CELL_OPEN if open_test(value) else CELL_HELD
+
+
+def iter_vertex_cells(
+    companion: CompanionBody, *, include_ident: bool
+) -> Iterator[VertexCell]:
+    """Every vertex cell the folded document holds, in document order, class → ident → attrs.
+
+    `include_ident` is the first of the two divergences `frontier.py`'s module docstring
+    records, hoisted out of a comment and into the signature. The gate passes False — an
+    unresolved identifier must not block a benign close, which is the whole reason
+    `IDENT_REFINEMENT_KEY` routes `ident` to its own top-level slot instead of into
+    `attributes`. Retrieval passes True, because an unresolved identifier is the single most
+    retrieval-worthy open slot there is.
+
+    The second divergence is deliberately NOT a parameter. `effective_vertex_state` fabricates
+    an entry for any `:R attr_updates` TARGET and the validator admits an `e-*` there, so some
+    ids yielded here have no `:V` row at all. This walk reports them: the gate blocks on them
+    today and must keep doing so, and dropping them here would narrow it silently. It is the
+    CONSUMER that needs a vertex type to match a selector against, so that filter — and the
+    limitation it creates — belongs in `frontier._node_state`, where it is recorded.
+    """
     for vid, st in effective_vertex_state(companion).items():
-        if has_open_slot(st["classification"]):
+        cls = _cell_text(st.get("classification"))
+        yield VertexCell(
+            vid, cls, SLOT_CLASS, cls, _cell_state(cls, open_test=has_open_slot)
+        )
+        if include_ident:
+            ident = _cell_text(st.get("identifier"))
+            yield VertexCell(
+                vid, cls, SLOT_IDENT, ident, _cell_state(ident, open_test=is_unresolved)
+            )
+        for name, raw in (st.get("attributes") or {}).items():
+            val = _cell_text(raw)
+            yield VertexCell(
+                vid,
+                cls,
+                f"{ATTR_PREFIX}{name}",
+                val,
+                _cell_state(val, open_test=is_unresolved),
+            )
+
+
+def _check_benign_open_slots(companion: CompanionBody) -> list[str]:
+    """The open cells that block a benign close, over the one shared walk.
+
+    `include_ident=False`: see `IDENT_REFINEMENT_KEY`. An unresolved identifier does not block —
+    routing `ident` where this check can see it is the exact mistake that key exists to prevent.
+    """
+    errors: list[str] = []
+    for cell in iter_vertex_cells(companion, include_ident=False):
+        if not cell.is_open:
+            continue
+        if cell.slot == SLOT_CLASS:
             errors.append(
-                f"disposition benign blocked: vertex {vid} still has an "
-                f"unresolved class ({st['classification']!r}) — resolve via "
+                f"disposition benign blocked: vertex {cell.vertex_id} still has an "
+                f"unresolved class ({cell.value!r}) — resolve via "
                 f":R attr_updates or escalate"
             )
-        for name, val in st["attributes"].items():
-            if is_unresolved(val):
-                errors.append(
-                    f"disposition benign blocked: vertex {vid} attribute "
-                    f"{name!r} is still unresolved ({val!r}) — resolve via "
-                    f":R attr_updates or escalate"
-                )
+        else:
+            errors.append(
+                f"disposition benign blocked: vertex {cell.vertex_id} attribute "
+                f"{cell.slot[len(ATTR_PREFIX):]!r} is still unresolved ({cell.value!r}) — "
+                f"resolve via :R attr_updates or escalate"
+            )
     return errors
 
 
