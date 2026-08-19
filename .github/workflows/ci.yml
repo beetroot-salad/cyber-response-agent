@@ -66,7 +66,7 @@ jobs:
         # unresponsive gvisor apt repo hung box-dood for 15 minutes on run 32278695386 and
         # would have run to the 6-hour job default. It normally finishes in 12-31s.
         #
-        # The per-command bounds NEST inside this one: 60 + 90 + 90 + 30 = 270s against a
+        # The per-command bounds NEST inside this one: 60 + 60 + 120 + 30 = 270s against a
         # 300s step. The curl term is 60 and not 20, because --retry-max-time is the last
         # instant a new attempt may START and that attempt still gets a full --max-time. That ordering is the whole point of having both — whichever command
         # stalls, its own `timeout` exits 124 and names itself in the log, and the step bound
@@ -100,12 +100,25 @@ jobs:
           # unreachable often: on run 32294123321 the default 30s connect timeout x 4
           # attempts put a 120s floor under `update` and blew a 60s kill, with the gvisor
           # host itself answering in under a second. Capping the per-connection wait at 10s
-          # makes the worst case 10 + 2*10 = 30s of dead-mirror stall, which is what lets an
-          # OUTER bound be a real bound rather than a race against whichever mirror is down.
+          # makes the worst case 10 + 2*10 = 30s of dead-mirror stall.
           APT_BOUNDED=(-o Acquire::Retries=2 -o Acquire::http::Timeout=10
                        -o Acquire::https::Timeout=10)
-          sudo timeout 90 apt-get "${APT_BOUNDED[@]}" update
-          sudo timeout 90 apt-get "${APT_BOUNDED[@]}" install -y runsc
+          # ...and `update` is SCOPED to the one source this step added, which is what makes
+          # the bound honest rather than a guess that keeps losing. The default `update`
+          # refreshes every mirror on the runner to install a package that needs none of
+          # them: `runsc` resolves to "1 newly installed, 0 to remove". On run 32294715524
+          # the capped timeout worked — azure Ign'd at 10s intervals instead of 30 — and the
+          # step still died at 124, because apt then failed over to archive.ubuntu.com and
+          # spent 76s pulling indices for repositories nothing here installs from. Raising
+          # the number again would just move the next stall; not fetching what we do not use
+          # removes it. sourceparts=/dev/null suppresses the OTHER .list.d entries, and
+          # List-Cleanup=0 keeps the image's existing lists on disk for anything downstream.
+          GVISOR_ONLY=(-o Dir::Etc::sourcelist=/etc/apt/sources.list.d/gvisor.list
+                       -o Dir::Etc::sourceparts=/dev/null -o APT::Get::List-Cleanup=0)
+          sudo timeout 60 apt-get "${APT_BOUNDED[@]}" "${GVISOR_ONLY[@]}" update
+          # install keeps the full source list (it resolves against the image's lists) and a
+          # roomier bound: the runsc deb is 168 MB, ~20s on a healthy runner.
+          sudo timeout 120 apt-get "${APT_BOUNDED[@]}" install -y runsc
           sudo runsc install -- --oci-seccomp
           sudo timeout 30 systemctl restart docker
           docker info --format '{{.Runtimes}}'
@@ -207,7 +220,7 @@ jobs:
         # unresponsive gvisor apt repo hung box-dood for 15 minutes on run 32278695386 and
         # would have run to the 6-hour job default. It normally finishes in 12-31s.
         #
-        # The per-command bounds NEST inside this one: 60 + 90 + 90 + 30 = 270s against a
+        # The per-command bounds NEST inside this one: 60 + 60 + 120 + 30 = 270s against a
         # 300s step. The curl term is 60 and not 20, because --retry-max-time is the last
         # instant a new attempt may START and that attempt still gets a full --max-time. That ordering is the whole point of having both — whichever command
         # stalls, its own `timeout` exits 124 and names itself in the log, and the step bound
@@ -241,12 +254,25 @@ jobs:
           # unreachable often: on run 32294123321 the default 30s connect timeout x 4
           # attempts put a 120s floor under `update` and blew a 60s kill, with the gvisor
           # host itself answering in under a second. Capping the per-connection wait at 10s
-          # makes the worst case 10 + 2*10 = 30s of dead-mirror stall, which is what lets an
-          # OUTER bound be a real bound rather than a race against whichever mirror is down.
+          # makes the worst case 10 + 2*10 = 30s of dead-mirror stall.
           APT_BOUNDED=(-o Acquire::Retries=2 -o Acquire::http::Timeout=10
                        -o Acquire::https::Timeout=10)
-          sudo timeout 90 apt-get "${APT_BOUNDED[@]}" update
-          sudo timeout 90 apt-get "${APT_BOUNDED[@]}" install -y runsc
+          # ...and `update` is SCOPED to the one source this step added, which is what makes
+          # the bound honest rather than a guess that keeps losing. The default `update`
+          # refreshes every mirror on the runner to install a package that needs none of
+          # them: `runsc` resolves to "1 newly installed, 0 to remove". On run 32294715524
+          # the capped timeout worked — azure Ign'd at 10s intervals instead of 30 — and the
+          # step still died at 124, because apt then failed over to archive.ubuntu.com and
+          # spent 76s pulling indices for repositories nothing here installs from. Raising
+          # the number again would just move the next stall; not fetching what we do not use
+          # removes it. sourceparts=/dev/null suppresses the OTHER .list.d entries, and
+          # List-Cleanup=0 keeps the image's existing lists on disk for anything downstream.
+          GVISOR_ONLY=(-o Dir::Etc::sourcelist=/etc/apt/sources.list.d/gvisor.list
+                       -o Dir::Etc::sourceparts=/dev/null -o APT::Get::List-Cleanup=0)
+          sudo timeout 60 apt-get "${APT_BOUNDED[@]}" "${GVISOR_ONLY[@]}" update
+          # install keeps the full source list (it resolves against the image's lists) and a
+          # roomier bound: the runsc deb is 168 MB, ~20s on a healthy runner.
+          sudo timeout 120 apt-get "${APT_BOUNDED[@]}" install -y runsc
           sudo runsc install -- --oci-seccomp
           sudo timeout 30 systemctl restart docker
           docker info --format '{{.Runtimes}}'
@@ -291,7 +317,7 @@ jobs:
         # unresponsive gvisor apt repo hung box-dood for 15 minutes on run 32278695386 and
         # would have run to the 6-hour job default. It normally finishes in 12-31s.
         #
-        # The per-command bounds NEST inside this one: 60 + 90 + 90 + 30 = 270s against a
+        # The per-command bounds NEST inside this one: 60 + 60 + 120 + 30 = 270s against a
         # 300s step. The curl term is 60 and not 20, because --retry-max-time is the last
         # instant a new attempt may START and that attempt still gets a full --max-time. That ordering is the whole point of having both — whichever command
         # stalls, its own `timeout` exits 124 and names itself in the log, and the step bound
@@ -325,12 +351,25 @@ jobs:
           # unreachable often: on run 32294123321 the default 30s connect timeout x 4
           # attempts put a 120s floor under `update` and blew a 60s kill, with the gvisor
           # host itself answering in under a second. Capping the per-connection wait at 10s
-          # makes the worst case 10 + 2*10 = 30s of dead-mirror stall, which is what lets an
-          # OUTER bound be a real bound rather than a race against whichever mirror is down.
+          # makes the worst case 10 + 2*10 = 30s of dead-mirror stall.
           APT_BOUNDED=(-o Acquire::Retries=2 -o Acquire::http::Timeout=10
                        -o Acquire::https::Timeout=10)
-          sudo timeout 90 apt-get "${APT_BOUNDED[@]}" update
-          sudo timeout 90 apt-get "${APT_BOUNDED[@]}" install -y runsc
+          # ...and `update` is SCOPED to the one source this step added, which is what makes
+          # the bound honest rather than a guess that keeps losing. The default `update`
+          # refreshes every mirror on the runner to install a package that needs none of
+          # them: `runsc` resolves to "1 newly installed, 0 to remove". On run 32294715524
+          # the capped timeout worked — azure Ign'd at 10s intervals instead of 30 — and the
+          # step still died at 124, because apt then failed over to archive.ubuntu.com and
+          # spent 76s pulling indices for repositories nothing here installs from. Raising
+          # the number again would just move the next stall; not fetching what we do not use
+          # removes it. sourceparts=/dev/null suppresses the OTHER .list.d entries, and
+          # List-Cleanup=0 keeps the image's existing lists on disk for anything downstream.
+          GVISOR_ONLY=(-o Dir::Etc::sourcelist=/etc/apt/sources.list.d/gvisor.list
+                       -o Dir::Etc::sourceparts=/dev/null -o APT::Get::List-Cleanup=0)
+          sudo timeout 60 apt-get "${APT_BOUNDED[@]}" "${GVISOR_ONLY[@]}" update
+          # install keeps the full source list (it resolves against the image's lists) and a
+          # roomier bound: the runsc deb is 168 MB, ~20s on a healthy runner.
+          sudo timeout 120 apt-get "${APT_BOUNDED[@]}" install -y runsc
           sudo runsc install -- --oci-seccomp
           sudo timeout 30 systemctl restart docker
           docker info --format '{{range $k, $v := .Runtimes}}{{$k}} {{end}}' \

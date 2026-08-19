@@ -130,6 +130,21 @@ def test_apt_retries_come_with_a_bounded_per_connection_timeout() -> None:
             f"{step.get('name')!r} runs apt-get with no Acquire::Retries — the bound now "
             f"turns the transient #937 observed into a red build instead of a re-fetch"
         )
+        # `update` fetches ONLY the source this step added. Bounding a command that reaches
+        # every mirror on the runner is a bet on all of them; run 32294715524 lost it on the
+        # archive.ubuntu.com failover even with the connect timeout capped. runsc needs none
+        # of those repos ("1 newly installed, 0 to remove"), so the scoping is what makes the
+        # 60s bound a statement about one host we do need rather than about the internet.
+        update_line = next(
+            (ln for ln in run_text.splitlines() if "apt-get" in ln and ln.rstrip().endswith("update")),
+            None,
+        )
+        assert update_line, "the step no longer runs `apt-get ... update` — re-scope this demand"
+        assert "GVISOR_ONLY" in update_line or "Dir::Etc::sourcelist" in update_line, (
+            f"{step.get('name')!r} runs an unscoped `apt-get update` — it refreshes every "
+            f"mirror on the runner for a package that depends on none of them, so the bound "
+            f"becomes a bet on whichever Ubuntu mirror is down"
+        )
         for scheme in ("http", "https"):
             assert f"Acquire::{scheme}::Timeout" in run_text, (
                 f"{step.get('name')!r} sets Acquire::Retries with no Acquire::{scheme}::"
