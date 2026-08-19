@@ -1,12 +1,22 @@
 #!/usr/bin/env python3
 """Lesson → in-context-outcome traceability (platform-design §4.4 control loop).
 
-For a merged lesson, surface which subsequent cases had it **in context** (the
-``record_lesson_load`` hook captured the Read at PLAN) and what disposition each
-reached — the post-merge visibility half of "no pre-merge sign-off, but a human
-control loop after". This is **in context**, not demonstrably *influenced* — see
+For a merged lesson, surface which subsequent cases had it **in context** and what
+disposition each reached — the post-merge visibility half of "no pre-merge sign-off, but a
+human control loop after". This is **in context**, not demonstrably *influenced* — see
 ``defender/hooks/record_lesson_load.py``'s caveat; the green bar + one-click revert
 are the load-bearing safety controls, this is best-effort visibility.
+
+TWO KINDS OF ROW reach ``lessons_loaded.jsonl``, and the count does not distinguish them
+(#919). The original is a READ: ``runtime/tools._gated_read`` records a lesson the model
+chose to open. The second is a PUSH: ``runtime/tools._frontier_recall`` records each lesson
+whose ``description`` and dimensions it put in front of MAIN on a write that moved the
+investigation's frontier — the model saw enough to act on and was told not to open the file
+to decide relevance, so the row is honest, but it is weaker evidence than a Read. Neither
+covers ``runtime/orient.py``'s PLAN-time signature block, which pushes the same way and
+records nothing. So a lesson carrying ``frontier_nodes`` / ``frontier_edges`` selectors has
+more ways to earn a row than one that does not; read a difference in counts between two
+lessons with that in mind.
 
 Usage:
   trace_lesson.py --all                 # <name>\\t<description>\\t<in_context_cases>

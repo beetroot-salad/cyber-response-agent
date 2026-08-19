@@ -945,10 +945,14 @@ def _frontier_recall(deps: AgentDeps, before: str, after: str) -> str:
         # `after` EXTENDING `before` so it can only fire for `append_block` — `fix_row` rewrites
         # in place and is never a prefix extension.
         #
-        # The window reaches TWO BYTES BACK into `before`, because a delimiter can straddle the
-        # seam: an on-disk document ending in a truncated ``` and an append supplying the last
-        # backtick closes a fence while the appended slice alone holds no ``` at all, and the
-        # frontier moves behind a gate that said it could not.
+        # The window reaches TWO BYTES BACK into `before`, so a delimiter that straddled the
+        # seam — an on-disk document ending in a truncated ``` and an append supplying the last
+        # backtick — could not close a fence behind a gate that said it could not.
+        #
+        # BELT AND BRACES, not a live case: `_tool_append_block` inserts `sep = "\n"` whenever
+        # `current` does not already end in a newline, so today no ``` can span the join at
+        # all. The two bytes cost nothing and are what keeps this gate correct if that
+        # separator rule is ever relaxed; do not read them as evidence the straddle happens.
         if before and after.startswith(before) and "```" not in after[max(0, len(before) - 2):]:
             return ""
         now_frontier = frontier_from_text(after)
@@ -966,19 +970,26 @@ def _frontier_recall(deps: AgentDeps, before: str, after: str) -> str:
         # open a slot no selector speaks to, and re-stapling the same three lines then teaches
         # the model to stop reading them.
         #
-        # Compared on `(path, matched)` rather than on the RENDERED text. The two are the same
-        # decision — both fields appear verbatim in the block and the rest of a hit's render is
-        # a pure function of its path — but rendering the losing side means a `yaml.safe_dump`
-        # of three lessons' frontmatter plus three `Path.resolve()` realpath syscalls, built
-        # and thrown away one expression later, on every frontier-moving write.
-        shape = [(h.path, h.matched) for h in hits]
+        # Compared on `(path, score)` — WHICH lessons and in what order — rather than on the
+        # rendered text, which would cost a `yaml.safe_dump` of three lessons' frontmatter plus
+        # three `Path.resolve()` realpath syscalls built and thrown away one expression later,
+        # on every frontier-moving write.
+        #
+        # NOT on `matched`, which is the trap: it names whichever frontier item won
+        # `_best_match`'s `max`, and `max` returns the FIRST maximal element — so declaring a
+        # second, equally-scoring vertex flips the winner and re-emits a block whose lesson set,
+        # ranking and frontmatter are byte-identical. Executed against
+        # `learning/runs/fresh-01/investigation.md`, fences 3 and 7 differ in exactly one line
+        # (`matched v-003 compute class=ip-only/??/??` -> `matched v-004 compute
+        # class=ip-only/??/known-corp`) and re-staple ~1.5KB of precedent the model already
+        # holds — the churn this gate exists to prevent. `matched` still RENDERS, because it is
+        # the model's only account of why a lesson was pushed; it just does not decide.
+        shape = [(h.path, h.score) for h in hits]
         if not shape or shape == [
-            (h.path, h.matched) for h in match_loaded(was_frontier, lessons)
+            (h.path, h.score) for h in match_loaded(was_frontier, lessons)
         ]:
             return ""
         now = render(hits)
-        if not now:
-            return ""
         # RECORDED, on the same terms a Read is. `lessons_loaded.jsonl` is the loop's only
         # "was this lesson in context" signal and the post-merge control `learning/ops/
         # trace_lesson.py` reasons from — and this block puts a lesson's description and
@@ -986,7 +997,12 @@ def _frontier_recall(deps: AgentDeps, before: str, after: str) -> str:
         # relevance from `description` and NOT to open the file to decide. A push that left no
         # row would make a merged lesson look inert to the human reviewing its impact.
         for hit in hits:
-            _record_lesson_load(deps, hit.path)
+            # RESOLVED, the same spelling `render` hands the model and the same one
+            # `_gated_read` records (it passes the post-`_resolve_operand` path).
+            # `record_lesson_load.lesson_name` gates on `p.parent.parent.name == "defender"`,
+            # so an unresolved `defender_dir` carrying a symlink or a `..` shows the block and
+            # writes no row — the lesson then reads as never-in-context to `trace_lesson`.
+            _record_lesson_load(deps, hit.path.resolve())
         return "\n\n" + now
     except Exception as e:  # noqa: BLE001 — fail open; the write already landed
         print(f"[tools] frontier recall failed, omitting it: {e!r}", file=sys.stderr)

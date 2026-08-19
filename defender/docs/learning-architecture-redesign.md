@@ -323,8 +323,11 @@ no gate ships. Note the scope of what replaces it: the specificity RANKING #919 
 DEFENDER corpus's new `frontier_nodes` / `frontier_edges` selectors, matched by
 `scripts/lessons/lessons_frontier.py`. The `entities: []` lessons live in the sibling
 ENVIRONMENT corpus, which `lessons_env_retrieve.py` still returns unranked and in filename
-order — the three surviving under-scoped lessons there are unchanged by this work, and remain
-open for the #298 follow-up.
+order — the three survivors there (`cmdb-indexes-by-hostname-not-ip`,
+`authorized-keys-key-accumulation-detection`, `dev-workstation-to-jump-box`) are unchanged by
+this work. Only the third is UNDER-SCOPED and open for the #298 follow-up; the first two are
+the legitimately-unscoped pair above, and a follow-up that "fixes" them would be fabricating
+the selectors this section just argued against.
 
 **The schema defect this fixes.** Lessons currently key on the alert signature they were born
 from. That is right for coverage lessons and wrong for observable-semantics lessons, whose

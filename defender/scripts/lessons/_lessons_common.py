@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 
 from defender._corpus import iter_lessons
@@ -41,10 +42,13 @@ def resolve_corpus(
 ) -> Path:
     """`--corpus` RELOCATES a corpus walk; it never SELECTS a different corpus.
 
-    Shared by every lessons retrieval script because the containment argument is the same
-    one each time, and one of them getting it subtly wrong is the whole risk. The legitimate
-    relocations — a worktree copy for the forward-check, a fixture for a test — change the
-    root but never the corpus, so the rule is the LEAF NAME rather than one absolute path.
+    Shared by every script that takes a `--corpus` operand, because the containment argument is
+    the same one each time and one of them getting it subtly wrong is the whole risk. The
+    legitimate relocations — a worktree copy for the forward-check, a fixture for a test —
+    change the root but never the corpus, so the rule is the LEAF NAME rather than one absolute
+    path. (`defender-lessons --show` holds the same line for a different operand shape — a
+    LESSON path, contained by `relative_to` against a fixed corpus — so `lessons_fm.cmd_show`
+    keeps its own check rather than calling this one.)
 
     It has to live in the script rather than the permission gate: these scripts are PINNED
     grants, and a pinned grant is argv-blind by design (`docs/runtime-gates.md`) — the gate
@@ -56,10 +60,16 @@ def resolve_corpus(
     Resolving BEFORE the name test is what makes the leaf name sufficient: a symlink or a
     `..` cannot dress another corpus up in the expected name once the path is real.
 
-    An EMPTY or `.`-only operand is refused rather than resolved: `Path("")` is `Path(".")`,
-    so both would resolve to the process CWD and be tested against whatever that directory
-    happens to be named — a containment check on a path the caller never named. Every
-    legitimate relocation (a forward-check worktree, a test fixture) names a real directory.
+    An EMPTY or CWD-only operand is refused rather than resolved: `""`, `.`, `./` and
+    `some/..` all name the process CWD, which would then be tested against whatever that
+    directory happens to be called — a containment check on a path the caller never named.
+    Every legitimate relocation (a forward-check worktree, a test fixture) names a real
+    directory.
+
+    `os.path.normpath` rather than `Path(raw) == Path(".")`: `Path` collapses `.` and a
+    trailing slash but NOT `..`, so `--corpus 'x/..'` slipped past the equality test, resolved
+    to the CWD, and was admitted whenever the CWD happened to carry the expected leaf name.
+    `normpath` folds every spelling of "here" — including `""` — to `os.curdir`.
 
     The operand is stripped ONCE, before both tests. `Path` does not strip, so testing
     `raw.strip()` and then building `Path(raw)` blamed a padded operand on the corpus name:
@@ -69,7 +79,7 @@ def resolve_corpus(
     if raw is None:
         return default
     raw = raw.strip()
-    if not raw or Path(raw) == Path("."):
+    if os.path.normpath(raw) == os.curdir:
         ap.error(f"--corpus needs a path to a {default.name!r} directory, not {raw!r}")
     corpus = Path(raw).resolve()
     if corpus.name != default.name:

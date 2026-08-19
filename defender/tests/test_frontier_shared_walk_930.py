@@ -63,6 +63,8 @@ from defender.skills.invlang.validate import (  # noqa: E402
     CELL_OPEN,
     _check_benign_open_slots,
     diagnose,
+    effective_vertex_state,
+    is_ident_open,
     iter_vertex_cells,
 )
 from defender.tests._invlang_warn_836 import (  # noqa: E402
@@ -322,26 +324,46 @@ def test_prose_between_blocks_cannot_change_the_answer():
         assert frontier_at(prosed, n).frontier == frontier_at(REFINED_DOC, n).frontier
 
 
-def test_the_recall_fast_path_sees_a_delimiter_that_straddles_the_seam():
+def test_the_recall_fast_path_sees_a_delimiter_that_straddles_the_seam(tmp_path):
     """CLAIM: `_frontier_recall`'s no-new-fence fast path cannot skip an append that MOVED the
-    frontier.
+    frontier, when the closing delimiter STRADDLES the join.
 
-    The gate exists because `parse_dense_companion` reads only ```invlang fences, so an append
-    adding no delimiter cannot change the parse. That is true of the appended TEXT and false of
-    the appended SLICE: a document ending in a truncated ``` and an append supplying the last
-    backtick closes a fence whose slice holds no delimiter at all. Pinned with the real
-    predicate rather than by driving the tool, because the bug is the window, not the plumbing."""
+    The gate is sound because `parse_dense_companion` reads only ```invlang fences, so an
+    append adding no delimiter cannot change the parse. That holds for the appended TEXT and
+    not for the appended SLICE: a document ending in a truncated ``` plus an append supplying
+    the last backtick closes a fence whose slice contains no delimiter at all.
+
+    Driven through the REAL function rather than by restating its predicate. An earlier version
+    of this test recomputed the `"```" not in after[...]` expression and asserted on that, which
+    is a tautology — deleting the fast path outright left it green. The claim is about
+    `_frontier_recall`'s behaviour, so `_frontier_recall` is what is called.
+
+    `_tool_append_block` inserts a separator newline whenever the document does not already end
+    in one, so no straddle can reach this from the live append path today. That makes the
+    lookback belt-and-braces, and this test the thing that keeps it honest if the separator rule
+    is ever relaxed — which is exactly when a tautological test would have said nothing."""
+    from defender.runtime.tools import _frontier_recall
     from defender.skills.invlang.frontier import frontier_from_text
+    from defender.tests.test_frontier_recall_919 import _main_deps, _write_lesson
+
+    deps, _run, dfn = _main_deps(tmp_path)
+    corpus = dfn / "lessons"
+    corpus.mkdir(parents=True, exist_ok=True)
+    _write_lesson(corpus, "straddle-probe", nodes=("type: compute, slot: class",))
 
     before = ("```invlang\n"
               ":V prologue.vertices [id|type|class|ident|attrs?]\n"
               "v-001|compute|??|x|\n"
               "``")
     after = before + "`"
-    assert frontier_from_text(before) != frontier_from_text(after), "fixture stopped moving"
 
-    skips = bool(before) and after.startswith(before) and "```" not in after[max(0, len(before) - 2):]
-    assert not skips, "the fast path skipped an append that closed a fence"
+    # The fixture has to actually move, or a returned "" proves nothing about the gate.
+    assert frontier_from_text(before).is_empty(), "fixture: the truncated fence must parse to nothing"
+    assert frontier_from_text(after).slots, "fixture: the completed fence must open a slot"
+
+    assert _frontier_recall(deps, before, after), (
+        "the fast path skipped an append whose trailing backtick closed a fence"
+    )
 
 
 def test_frontier_at_never_raises():
@@ -351,3 +373,106 @@ def test_frontier_at_never_raises():
     for text in ("", "```invlang\n:V bogus [nope\n|||||\n```", "```invlang\n```"):
         result = frontier_at(text, 1)
         assert result.frontier.is_empty()
+
+
+# --------------------------------------------------------------------------- #
+# the re-observation fold — what a LATER `:V` row is allowed to supersede
+#
+# `_seed_vertex_state` is the half of `effective_vertex_state` that reads `:V` declarations,
+# and #919 gave two of its cells a reader for the first time (`iter_vertex_cells` reports the
+# ident cell, and stamps the class tuple onto EVERY cell). Both of its supersede rules were
+# written for the `??`-to-concrete case only, so the shapes below folded to a value the
+# document had already superseded — silently, on documents `diagnose` accepts.
+# --------------------------------------------------------------------------- #
+
+def _reobservation_doc(*rows: str) -> str:
+    """`v-001` declared in the prologue and re-declared once per lead — one `:V` row each.
+
+    Every lead a re-observation names is DECLARED (`:L findings`), because an undeclared one is
+    an error-severity diagnostic and a fixture that does not parse would let any implementation
+    pass. `_walkers.all_vertices` walks the prologue and every lead's `observations.vertices`,
+    which is the whole shape the fold's supersede rules exist for."""
+    leads = "\n".join(
+        f"l-{i:03d}|{i}|reobserve|v-001||cmdb|n/a" for i in range(1, len(rows))
+    )
+    blocks = [
+        "```invlang\n:V prologue.vertices [id|type|class|ident|attrs?]\n" + rows[0]
+        + ("\n\n:L findings [id|loop|name|target|tests|system|window]\n" + leads if leads else "")
+        + "\n```"
+    ]
+    blocks += [
+        f"```invlang\n:V l-{i:03d}.observations.vertices "
+        f"[id|type|class|ident|attrs?]\n{row}\n```"
+        for i, row in enumerate(rows[1:], start=1)
+    ]
+    return "\n\n".join(blocks) + "\n"
+
+
+def _reobserved(*rows: str) -> dict:
+    """The folded state of `v-001` over `_reobservation_doc`, fixture hygiene asserted."""
+    doc = _reobservation_doc(*rows)
+    assert diagnose(doc) == [], f"fixture carries a diagnostic:\n{doc}"
+    body, _warnings = parse_dense_companion(doc)
+    return effective_vertex_state(body)["v-001"]
+
+
+def test_a_candidate_set_ident_is_open_and_a_later_concrete_name_supersedes_it():
+    """CLAIM: `ident` reads the SAME two open markers every other cell does.
+
+    SKILL.md documents one progression, `??` -> `{a, b}` -> concrete, and `is_ident_open` widens
+    `is_unresolved` rather than replacing it — a substring test for `??` alone calls a candidate
+    set SETTLED, which is the exact inversion the predicate exists to prevent for `??`. The fold
+    is the second half: a value that reads settled is never superseded, so a candidate set that
+    slipped past the predicate LATCHED and the concrete name the run reached was discarded."""
+    assert is_ident_open("{dev-ws-1, dev-ws-2}"), "a candidate-set ident read as settled"
+    assert is_ident_open("{dev-ws-1"), "an unterminated candidate set read as settled"
+
+    row = "v-001|compute|ip-only/internet/novel|{ident}|"
+    assert _reobserved(
+        row.format(ident="??"), row.format(ident="{dev-ws-1, dev-ws-2}"),
+    )["identifier"] == "{dev-ws-1, dev-ws-2}", "the candidate set did not supersede `??`"
+    assert _reobserved(
+        row.format(ident="??"),
+        row.format(ident="{dev-ws-1, dev-ws-2}"),
+        row.format(ident="dev-ws-1"),
+    )["identifier"] == "dev-ws-1", "the run named the host and the fold kept the candidate set"
+
+
+def test_a_blank_cell_takes_a_later_value_that_is_itself_still_partly_open():
+    """CLAIM: the blank arm keys on what is HELD, not on what is arriving.
+
+    `''` is neither open nor held (`test_a_blank_cell_is_neither_open_nor_held`), so a blank
+    cell that only accepts a SETTLED value leaves the partly-named shape — `bash[pid=??]`, the
+    one the ident arm was written for — reaching no lane at all: not an `OpenSlot`, not a
+    `HeldFact`. The class arm had the mirror hole with no arm at all, and it is the more
+    expensive one: `iter_vertex_cells` stamps the class tuple onto every cell, so a latched `''`
+    makes `_class_pins` refuse every class-bearing selector against that vertex's ident and
+    attrs cells too."""
+    partly_open = _reobserved(
+        "v-001|process|bash||kind=child", "v-001|process|bash|bash[pid=??]|",
+    )
+    assert partly_open["identifier"] == "bash[pid=??]", "a blank ident refused a partial name"
+
+    blank_class = _reobserved(
+        "v-001|compute|||knowledge=partial",
+        "v-001|compute|bastion/internal/known-corp|jump-box-1|",
+    )
+    assert blank_class["classification"] == "bastion/internal/known-corp", (
+        "a blank class cell refused the class a later observation supplied"
+    )
+
+
+def test_a_blank_class_still_refuses_an_open_one_so_the_benign_gate_cannot_move():
+    """CLAIM: the class arm supersedes toward SETTLED only — the direction the gate cares about.
+
+    A blank class draws no `_check_benign_open_slots` refusal (`''` is `CELL_EMPTY`) while a
+    `??/??/??` one blocks the close. Taking the open value over the blank would therefore refuse
+    a benign disposition the gate accepts today, on nothing but a re-observation — a disposition
+    gate moved by a retrieval fix, which is the one thing #919 must not do."""
+    doc_rows = ("v-001|compute|||knowledge=partial", "v-001|compute|??/??/??|jump-box-1|")
+    assert _reobserved(*doc_rows)["classification"] == "", (
+        "an unresolved class superseded a blank one and can now block a benign close"
+    )
+
+    body, _warnings = parse_dense_companion(_reobservation_doc(*doc_rows))
+    assert _check_benign_open_slots(body) == []

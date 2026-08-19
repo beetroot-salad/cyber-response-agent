@@ -60,7 +60,9 @@ from .validate import (
 #: because that is where the `:R attr_updates` key grammar is enforced
 #: (`_is_legal_refinement_key`) and where the walk that reports these slots lives. A re-export
 #: with no importer is a second name for one constant, which is the drift it would claim to
-#: prevent; `scripts/lessons/lessons_frontier.py` reads them from `validate` directly.
+#: prevent. Nor does anything downstream import them: a lesson's `slot:` is authored YAML and
+#: `lessons_frontier` compares it to `cell.slot` with `!=`, so the join is held by the corpus
+#: matching the walk, not by a shared symbol.
 __all__ = [
     "Frontier",
     "FrontierAt",
@@ -111,9 +113,12 @@ class HeldFact:
     simply never fires on these, and degrades to ordinary equality, which is what a settled
     class wants anyway.
 
-    Held facts ACCUMULATE where open slots close, so this half of the state only ever grows.
-    That is why emission is gated on the rendered recall CHANGING rather than on the state
-    being non-empty — see `runtime/tools._frontier_recall`.
+    Held facts accumulate as open slots close, so in practice this half of the state grows on
+    almost every write. NOT a monotonicity guarantee: `_seed_vertex_state`'s attributes arm is
+    an unconditional last-wins `update`, so a re-observation carrying `attrs.kind=??` turns a
+    held fact back into an open slot (and re-blocks a benign close). Emission is gated on the
+    rendered recall CHANGING rather than on the state being non-empty or larger, which is
+    correct either way — see `runtime/tools._frontier_recall`.
     """
 
     vertex_id: str
@@ -178,9 +183,6 @@ def _edge_index(companion: CompanionBody) -> dict[str, tuple[str | None, str | N
         rel = e.get("relation")
         rel = rel if isinstance(rel, str) else None
         kind = kind if isinstance(kind, str) else None
-        if eid not in index:
-            index[eid] = (rel, kind)
-            continue
         # FIRST-WINS on the VALUE, not on the ROW. A re-observation is how an append-only
         # document SUPPLIES a field the declaring row left blank — an `:E` row whose authority
         # column was empty in the prologue and carries `authoritative-source:cmdb` in a lead's
@@ -189,8 +191,11 @@ def _edge_index(companion: CompanionBody) -> dict[str, tuple[str | None, str | N
         # `auth_kind=None` forever and make every `frontier_edges` selector naming `auth_kind`
         # miss on the documents that learned it. A field the first row already filled is still
         # immutable here.
-        first_rel, first_kind = index[eid]
-        index[eid] = (first_rel if first_rel else rel, first_kind if first_kind else kind)
+        #
+        # ONE expression for the rule, first row included: the seed is `(None, None)`, so a
+        # new id takes `(rel, kind)` by the same coalesce a later row does.
+        first_rel, first_kind = index.get(eid, (None, None))
+        index[eid] = (first_rel or rel, first_kind or kind)
     return index
 
 

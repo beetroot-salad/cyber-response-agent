@@ -275,10 +275,13 @@ def test_c2c_corpus_module_top_level_imports_are_import_safe():
         ("lessons_fm.py", ["--tags"]),
         ("lessons_actor_index.py", ["--techniques", "T1078"]),
         ("lessons_env_retrieve.py", ["--alert-rule-ids", "rule-x"]),
+        ("lessons_frontier.py", ["--investigation", str(
+            DEFENDER / "fixtures-e2e" / "golden-v2sshd" / "investigation.md"
+        )]),
     ],
 )
 def test_c3_each_lesson_cli_still_runs_as_a_real_subprocess(script, argv):
-    """demand: c3 (survival) — each of the three lesson CLIs still runs as a REAL subprocess and exits
+    """demand: c3 (survival) — each lesson CLI still runs as a REAL subprocess and exits
     0 after the relocation.
 
     A subprocess is the only shape that exercises the script's own ``sys.path`` bootstrap, its

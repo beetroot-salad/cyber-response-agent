@@ -671,9 +671,15 @@ def _swap_cell(cells: list[str], at: int, replacement: str) -> str:
 #: refuses a benign close on any `??`-valued ATTRIBUTE, so routing it there would make
 #: `ident=??` block a benign disposition.
 #:
-#: These three ARE the slot vocabulary `iter_vertex_cells` reports and a lesson selector is
-#: written in, so the spelling a refinement row uses to CLOSE a slot and the spelling retrieval
-#: uses to NAME one cannot drift apart. `frontier.py` re-exports them under its own names.
+#: These three ARE the slot vocabulary `iter_vertex_cells` reports, and the one this module
+#: uses to decide a refinement key is legal — one literal for both, so the spelling that CLOSES
+#: a slot and the spelling that NAMES one in a `VertexCell` cannot drift apart INSIDE this file.
+#:
+#: They stop there. A lesson's `slot:` selector is free-form YAML compared by `!=`
+#: (`lessons_frontier._node_match_score`), so nothing holds an AUTHOR to these spellings; the
+#: prompt says so and `learning/author/lessons/prompt.md` warns that a typo matches nothing
+#: forever. A corpus lint over `vocab` is what would close that, not another constant —
+#: `frontier.py` deliberately does not re-export these (see its `__all__` note).
 SLOT_CLASS = "class"
 IDENT_REFINEMENT_KEY = "ident"
 SLOT_IDENT = IDENT_REFINEMENT_KEY
@@ -800,6 +806,11 @@ def _check_closed_vocab(companion: CompanionBody, proposed_text: str) -> list[Di
 
 
 
+#: The whole-cell open marker, named once so the two predicates below and every reader of
+#: theirs look for the same token rather than for a literal each spells for itself.
+OPEN_MARKER = "??"
+
+
 def is_unresolved(value: Any) -> bool:
     """Does this cell say "not settled yet" — the WHOLE of it, not a substring.
 
@@ -824,14 +835,9 @@ def is_unresolved(value: Any) -> bool:
     if not isinstance(value, str):
         return False
     v = value.strip()
-    if v == "??":
+    if v == OPEN_MARKER:
         return True
     return v.startswith("{") and (v.endswith("}") or v.count("{") > v.count("}"))
-
-
-#: The whole-cell open marker `is_unresolved` tests for, named so the IDENT predicate below can
-#: look for the same token without a second literal.
-OPEN_MARKER = "??"
 
 
 def is_ident_open(value: Any) -> bool:
@@ -853,8 +859,14 @@ def is_ident_open(value: Any) -> bool:
     the document CHOSE, and `??` inside one is the marker rather than data. Scope is retrieval
     only — `_check_benign_open_slots` passes `include_ident=False`, so widening this cannot
     move a disposition gate.
+
+    A SUPERSET of `is_unresolved`, never a replacement for it. The embedded test alone loses
+    the OTHER marker: SKILL.md's progression is `??` → `{a, b}` → concrete, so an ident cell
+    reading `{dev-ws-1, dev-ws-2}` has not picked a name — and a substring test for `??` calls
+    it SETTLED, which is the exact inversion this predicate exists to prevent for `??`. The
+    class and attribute arms already read a candidate set as open; the ident arm has to agree.
     """
-    return isinstance(value, str) and OPEN_MARKER in value
+    return is_unresolved(value) or (isinstance(value, str) and OPEN_MARKER in value)
 
 
 def class_slots(classification: str) -> list[str]:
@@ -940,7 +952,20 @@ def _seed_vertex_state(
                 "attributes": dict(v.get("attributes") or {}),
             },
         )
-        if cls and has_open_slot(cur["classification"]) and not has_open_slot(cls):
+        # BLANK counts as unsettled here, exactly as it does on the ident arm below.
+        # `classification` is not a required `:V` column, so `v-001|compute|||attrs` is
+        # diagnostic-clean, and the pre-#919 test — `has_open_slot(cur["classification"])` —
+        # is False for `""`, so the concrete class a later `observations.vertices` row
+        # supplies was dropped. That only mattered once `iter_vertex_cells` stamped the class
+        # tuple onto EVERY cell: a latched `""` makes `_class_pins` refuse every class-bearing
+        # selector against the vertex's ident and attrs cells too, not just its class cell.
+        #
+        # Still one direction, and still never blank→OPEN: taking an unresolved class over an
+        # empty one would newly BLOCK a benign close on a document the gate accepts today.
+        held_cls = cur["classification"]
+        if cls and not has_open_slot(cls) and (
+            not (isinstance(held_cls, str) and held_cls.strip()) or has_open_slot(held_cls)
+        ):
             cur["classification"] = cls
         # The IDENT half of the same rule, and it only started mattering when
         # `iter_vertex_cells(include_ident=True)` gave the slot a reader (#919). Re-observing a
@@ -950,21 +975,26 @@ def _seed_vertex_state(
         # re-pushes the "name this entity" lesson forever, and withholds every
         # `observed_nodes: {slot: ident}` selector from the resolved value.
         #
-        # UNSETTLED, not just `??`, and the two arms are not the same test. `is_ident_open`
-        # covers the partly-named cell (`??[pid=??]` -> `bash[pid=4242]`); a BLANK cell needs
-        # its own arm, because it is neither open nor held and no open predicate reads `""`
-        # (see `_apply_attr_updates` on why none may). Without it a vertex declared with an
-        # empty ident column — the diagnostic-clean shape `test_frontier_shared_walk_930`
-        # pins — and later named in a lead's `observations.vertices` folds to `""`, so the
-        # run's answer to "which host is this IP" reaches NO lane at all.
+        # UNSETTLED, not just `??`, and BLANK is one of the unsettled states: an empty ident
+        # column is neither open nor held and no open predicate reads `""` (see
+        # `_apply_attr_updates` on why none may), so without this arm a vertex declared with
+        # an empty ident and later named in a lead's `observations.vertices` folds to `""`
+        # and the run's answer to "which host is this IP" reaches NO lane at all.
         #
-        # One direction only, like the class arm: a later row cannot blank or re-open a name
-        # the document already settled.
+        # The INCOMING value is not required to be settled, only non-blank. `bash[pid=??]` is
+        # the shape this arm was written for — a process whose binary the run has and whose
+        # pid it has not — and demanding a settled value dropped it, leaving the cell `""`:
+        # not an `OpenSlot` either, so the "pin the pid before you attribute the process"
+        # lesson could not fire on the document that needs it.
+        #
+        # One direction only, like the class arm: the guard is on what is HELD, so a later row
+        # can supersede a blank or still-open cell and can never re-open a settled name.
         ident = v.get("identifier", "")
-        if isinstance(ident, str) and ident.strip() and not is_ident_open(ident):
-            held = cur["identifier"]
-            if not (isinstance(held, str) and held.strip()) or is_ident_open(held):
-                cur["identifier"] = ident
+        held = cur["identifier"]
+        if isinstance(ident, str) and ident.strip() and (
+            not (isinstance(held, str) and held.strip()) or is_ident_open(held)
+        ):
+            cur["identifier"] = ident
         if v.get("attributes"):
             cur["attributes"].update(v["attributes"])
 

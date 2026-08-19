@@ -81,8 +81,12 @@ truthful there, and this lane is not the one that lesson is reached on.
   unsupported, not absent" — belongs in `frontier_nodes`. Most pitfall lessons
   are the first kind.
 - Both node lanes are `{type, class?, slot}` over a `:V` vertex. `type` is an
-  invlang vertex type (`compute`, `process`, `identity`, `credential`,
-  `session`, `file`); `slot` is `class`, `ident`, or `attrs.<name>` spelled
+  invlang vertex type — the WHOLE closed set (`skills/invlang/vocab.py:TYPES`),
+  because you cannot read it from here: `compute`, `process`, `thread`,
+  `memory-region`, `module`, `session`, `identity`, `storage`, `database`,
+  `network-device`, `file`, `socket`, `configuration`, `application`,
+  `app-object`, `credential`. A lesson whose subject is a secrets bucket keys on
+  `storage`, not on the nearest name in a short list; `slot` is `class`, `ident`, or `attrs.<name>` spelled
   exactly as the `:V` row or `:R attr_updates` row would spell it; `class` is an
   optional slash-tuple pattern (`ip-only`, `ip-only/internet`). Omit `class:` to match any
   class — do **not** write a bare `class: *`: `*` opens a YAML ALIAS, so PyYAML refuses the
@@ -101,7 +105,7 @@ field.** Nothing validates these values at authoring time, so a typo'd `type`,
 `slot` or `anchor_kind` is a selector that silently matches nothing forever —
 and an OMITTED one is worse, because the field then constrains nothing and the
 lesson matches everything. Copy the spelling from an existing lesson in the
-manifest, or from the vertex-type list two bullets up — your reads are confined to the
+manifest, or from the vertex-type list in the "Both node lanes" bullet above — your reads are confined to the
 lesson corpora, so a path under `skills/` is refused and costs you a denied call.
 The existing corpus writes these as one-line flow maps
 (`- {type: session, slot: class}`); either spelling parses, so match whichever the

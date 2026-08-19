@@ -255,9 +255,13 @@ rather than a fact carries none and is reached by grep.
    matched against your record, pushed when your write moved it. Each block
    carries its own read instructions.
 
-**No block means nothing NEW matched**, never that the corpus is exhausted:
-your write left the state where it was, or nothing in it matched. Widen with
-the shim when a question stays open.
+**No block means nothing new reached the TOP THREE**, never that the corpus is
+exhausted and never that nothing matched: your write left the state where it
+was, nothing in it matched, or what it opened ranked below the three lessons
+you were already shown. Settled cells accumulate, so the top three stabilise as
+a run goes on — a question you open late can match a lesson and still be cut.
+**Widen with the shim whenever a question stays open**, and especially for the
+one you just opened.
 
 A fact you leave in prose reaches no lane at all — write what you observe into
 a `:V` / `:R` row. Recording `attrs.loginuid=-1` is what summons the lesson
@@ -282,7 +286,10 @@ defender-lessons 'source_signature:.*<alert-rule-id>' \
 
 Widen by dropping a pattern if a narrow query returns nothing; a bare
 `defender-lessons` (whole-corpus `<path>\t<description>`) is the fallback, not
-the default.
+the default. The printed `description` is the scan surface here as it is in the
+pushed blocks: judge relevance from it and **Read the full body of only the
+ones that fit** — don't open a lesson to decide whether it is relevant. Bodies
+teach you what to *check next time*, not what conclusion to reach.
 
 (Both the grep dimensions and the state selectors are unproven retrieval keys —
 grep-only, no index, to see whether they earn one.)

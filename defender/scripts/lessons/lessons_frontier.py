@@ -246,10 +246,18 @@ def _node_selector(raw: object) -> _NodeSelector | None:
     state they are matched against, never in how they are spelled or validated."""
     if not isinstance(raw, dict):
         return None
+    # `str()` on a non-scalar is the SHAPE half of the same failure the drop covers for a
+    # missing field: `type: [process]` becomes the selector `"['process']"`, which passes the
+    # `sel.type and sel.slot` guard below and then matches nothing, forever, silently — the
+    # exact outcome `learning/author/lessons/prompt.md` warns a typo produces. A YAML list or
+    # int in one of these cells is a mis-authored selector, so it drops like a missing one.
+    fields = {k: raw.get(k) for k in ("type", "class", "slot")}
+    if any(v is not None and not isinstance(v, str) for v in fields.values()):
+        return None
     sel = _NodeSelector(
-        type=str(raw.get("type") or "").strip(),
-        class_pattern=str(raw.get("class") or WILDCARD).strip(),
-        slot=str(raw.get("slot") or "").strip(),
+        type=(fields["type"] or "").strip(),
+        class_pattern=(fields["class"] or WILDCARD).strip(),
+        slot=(fields["slot"] or "").strip(),
     )
     return sel if sel.type and sel.slot else None
 
@@ -278,10 +286,13 @@ def _parse_selectors(fm: dict) -> _Selectors:
     for raw in as_list(fm.get("frontier_edges")):
         if not isinstance(raw, dict):
             continue
+        cells = {k: raw.get(k) for k in ("rel", "auth_kind", "anchor_kind")}
+        if any(v is not None and not isinstance(v, str) for v in cells.values()):
+            continue  # see `_node_selector` — a non-scalar cell is a mis-authored selector
         edge = _EdgeSelector(
-            rel=str(raw.get("rel") or "").strip(),
-            auth_kind=str(raw.get("auth_kind") or "").strip(),
-            anchor_kind=str(raw.get("anchor_kind") or "").strip(),
+            rel=(cells["rel"] or "").strip(),
+            auth_kind=(cells["auth_kind"] or "").strip(),
+            anchor_kind=(cells["anchor_kind"] or "").strip(),
         )
         if edge.anchor_kind:
             out.edges.append(edge)
@@ -352,6 +363,12 @@ def match_loaded(
     """
     if frontier.is_empty() or top_k <= 0:
         return []
+    # MATERIALIZED, because `iter_lessons` is a GENERATOR and the caller that motivates this
+    # split scores two frontiers off one walk. A generator passed here drains on the first
+    # call and yields `[]` on the second, which makes `_frontier_recall`'s shape comparison
+    # never equal and re-emits the block on every frontier-moving write — the churn the
+    # second gate exists to prevent, with no error to notice it by.
+    lessons = list(lessons)
     hits: list[Hit] = []
     for lesson in lessons:
         fm = lesson.fm
@@ -393,8 +410,16 @@ def _render_frontmatter(fm: dict) -> str:
     # safe_dump's 80-column default folds it and the 2-space indent below then lands on the
     # continuation lines too, so the one field SKILL.md tells the model to judge relevance from
     # arrives looking like a nested YAML block under its own key.
+    #
+    # `default_flow_style=None` — INLINE for the leaf lists, block for the mapping. This is the
+    # one place this dump diverges from `build_corpus_manifest`'s `False`, and deliberately:
+    # the dimension lists are spelled `[a, b]` on one physical line in every lesson file, and
+    # both prompts REQUIRE that spelling (`SKILL.md` §Lessons, `learning/author/lessons/
+    # prompt.md`) so a single grep matches. Exploding them into block sequences showed the
+    # model a form it is told never to write, and cost ~12 of a 3-hit block's ~30 lines —
+    # on a surface this function's own comment calls out as paid for many times per run.
     dumped = yaml.safe_dump(
-        kept, sort_keys=True, default_flow_style=False, allow_unicode=True, width=10**9
+        kept, sort_keys=True, default_flow_style=None, allow_unicode=True, width=10**9
     )
     return "\n".join(f"  {line}" for line in dumped.strip().splitlines())
 
@@ -457,6 +482,14 @@ def main(argv: list[str]) -> int:
     ns = ap.parse_args(argv[1:])
 
     corpus = resolve_corpus(ns.corpus, DEFAULT_CORPUS, ap)
+    # The MISSING corpus is reported for the same reason the read error below is, and it is
+    # the arm that was silent: `resolve_corpus` validates the leaf NAME only, and
+    # `iter_lesson_paths` answers `[]` for a directory that is not there — so a mistyped
+    # relocation exited 0 with no output, which is this tool's spelling of "nothing matched".
+    # `runtime/tools._frontier_recall` already refuses to be quiet about the same fault.
+    if not corpus.is_dir():
+        print(f"error: no {CORPUS_NAME} corpus at {corpus}", file=sys.stderr)
+        return 2
     from defender._io import read_text_soft
     from defender.skills.invlang.frontier import frontier_from_text
 
