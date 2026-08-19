@@ -48,15 +48,25 @@ jobs:
       # microsoft/typescript-benchmarking and geomys/sandboxed-step. Without this step those
       # tests self-skip on a runner with no runsc, and the boundary would be pinned by nothing.
       - name: Install gVisor (runsc) for the box suite
+        # BOUNDED, every command (#937). This step talks to two hosts the runner does not
+        # control, and `set -eux` fails fast on an ERROR but not on a STALL — so an
+        # unresponsive gvisor apt repo hung box-dood for 15 minutes on run 32278695386 and
+        # would have run to the 6-hour job default. It normally finishes in 12-31s; every
+        # bound below is minutes, not seconds, so only a real hang can trip one.
+        timeout-minutes: 10
         run: |
           set -eux
-          curl -fsSL https://gvisor.dev/archive.key \
+          curl -fsSL --max-time 60 --retry 3 --retry-delay 2 --retry-connrefused \
+            https://gvisor.dev/archive.key \
             | sudo gpg --dearmor -o /usr/share/keyrings/gvisor-archive-keyring.gpg
           echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/gvisor-archive-keyring.gpg] https://storage.googleapis.com/gvisor/releases release main" \
             | sudo tee /etc/apt/sources.list.d/gvisor.list > /dev/null
-          sudo apt-get update && sudo apt-get install -y runsc
+          # Split rather than `&&`-chained: under `set -e` the chain adds nothing, and one
+          # `timeout` per command is what tells an update stall from an install stall.
+          sudo timeout 300 apt-get update
+          sudo timeout 300 apt-get install -y runsc
           sudo runsc install -- --oci-seccomp
-          sudo systemctl restart docker
+          sudo timeout 120 systemctl restart docker
           docker info --format '{{.Runtimes}}'
           # Hard-fail rather than print. Every box in the #540 suite starts at the runtime
           # BoxSpec anchors (runsc), and the parity test self-skips a runtime the daemon does
@@ -150,15 +160,25 @@ jobs:
       # EVERY `runsc install` step in this file, so this copy is covered by that census
       # rather than trusted.
       - name: Install gVisor (runsc) for the box suite
+        # BOUNDED, every command (#937). This step talks to two hosts the runner does not
+        # control, and `set -eux` fails fast on an ERROR but not on a STALL — so an
+        # unresponsive gvisor apt repo hung box-dood for 15 minutes on run 32278695386 and
+        # would have run to the 6-hour job default. It normally finishes in 12-31s; every
+        # bound below is minutes, not seconds, so only a real hang can trip one.
+        timeout-minutes: 10
         run: |
           set -eux
-          curl -fsSL https://gvisor.dev/archive.key \
+          curl -fsSL --max-time 60 --retry 3 --retry-delay 2 --retry-connrefused \
+            https://gvisor.dev/archive.key \
             | sudo gpg --dearmor -o /usr/share/keyrings/gvisor-archive-keyring.gpg
           echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/gvisor-archive-keyring.gpg] https://storage.googleapis.com/gvisor/releases release main" \
             | sudo tee /etc/apt/sources.list.d/gvisor.list > /dev/null
-          sudo apt-get update && sudo apt-get install -y runsc
+          # Split rather than `&&`-chained: under `set -e` the chain adds nothing, and one
+          # `timeout` per command is what tells an update stall from an install stall.
+          sudo timeout 300 apt-get update
+          sudo timeout 300 apt-get install -y runsc
           sudo runsc install -- --oci-seccomp
-          sudo systemctl restart docker
+          sudo timeout 120 systemctl restart docker
           docker info --format '{{.Runtimes}}'
           # Hard-fail rather than print — same reason as the `test` job: the suite self-skips
           # a runtime the daemon does not register, so a degraded install would leave this
@@ -195,15 +215,25 @@ jobs:
       # Same install as the `test` job: the boxes are created by the HOST daemon, so the
       # runtime has to be registered out here, not in the container running pytest.
       - name: Install gVisor (runsc) for the box suite
+        # BOUNDED, every command (#937). This step talks to two hosts the runner does not
+        # control, and `set -eux` fails fast on an ERROR but not on a STALL — so an
+        # unresponsive gvisor apt repo hung box-dood for 15 minutes on run 32278695386 and
+        # would have run to the 6-hour job default. It normally finishes in 12-31s; every
+        # bound below is minutes, not seconds, so only a real hang can trip one.
+        timeout-minutes: 10
         run: |
           set -eux
-          curl -fsSL https://gvisor.dev/archive.key \
+          curl -fsSL --max-time 60 --retry 3 --retry-delay 2 --retry-connrefused \
+            https://gvisor.dev/archive.key \
             | sudo gpg --dearmor -o /usr/share/keyrings/gvisor-archive-keyring.gpg
           echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/gvisor-archive-keyring.gpg] https://storage.googleapis.com/gvisor/releases release main" \
             | sudo tee /etc/apt/sources.list.d/gvisor.list > /dev/null
-          sudo apt-get update && sudo apt-get install -y runsc
+          # Split rather than `&&`-chained: under `set -e` the chain adds nothing, and one
+          # `timeout` per command is what tells an update stall from an install stall.
+          sudo timeout 300 apt-get update
+          sudo timeout 300 apt-get install -y runsc
           sudo runsc install -- --oci-seccomp
-          sudo systemctl restart docker
+          sudo timeout 120 systemctl restart docker
           docker info --format '{{range $k, $v := .Runtimes}}{{$k}} {{end}}' \
             | tr ' ' '\n' | grep -qx runsc
 
