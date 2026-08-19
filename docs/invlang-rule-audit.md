@@ -50,7 +50,7 @@ The audit is normative — it answers what each rule is *for*, not how often it 
 
 **#22 Attribute-update target shape.** Validates `attribute_updates.target` is exactly one of `v-{id}` or `e-{id}` and resolves. Prevents enrichments pointing at nothing. (Reference integrity.)
 
-**#23 Hypothesis fork distinctness.** Validates siblings don't share `parent_vertex.classification`. Prevents redundant forks — same upstream entity hypothesized twice with different lead requirements. Branch hygiene.
+**#23 Hypothesis fork distinctness.** Validates each sibling pair declares at least one prediction whose claimed value differs. Prevents redundant forks — the same story under two ids, which no lead can split. Classification is not the axis: siblings legitimately share an open `parent_class` (#934). Branch hygiene.
 
 **#24 Hypothesis persistence at CONCLUDE.** Validates every hypothesis whose final weight isn't `--` appears in `surviving_hypotheses`. Prevents silent drops at REPORT — agent declaring benign while quietly forgetting an unresolved hypothesis.
 

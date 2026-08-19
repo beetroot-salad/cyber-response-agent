@@ -1015,13 +1015,18 @@ The validator enforces **29 active rules** (rules 1–36 with seven gaps). Seven
 
 23. **Hypothesis fork distinctness.** Within a sibling group —
     hypotheses sharing `(parent_hypothesis_id, attached_to_vertex)` —
-    no two may share `proposed_edge.parent_vertex.classification`.
-    Duplicates propose the same causal upstream under two ids and
-    cannot be discriminated by any lead. The HYPOTHESIZE subagent
-    applies a story-diff self-check before emitting (each pair of
-    active hypotheses must have at least one observable whose
-    predicted value differs); this rule is the structural backstop
-    when the check is skipped.
+    each pair must declare at least one prediction whose claimed value
+    differs. That difference is what a lead splits them on; a pair
+    predicting the same observables proposes the same causal upstream
+    under two ids and can be discriminated by nothing.
+    `proposed_edge.parent_vertex.classification` is NOT the axis: a
+    shared one is legal, and an open one (`??` in any slot) is the
+    canonical spelling for a fork whose parent the alert has not
+    placed, so a check keyed on classification would refuse the shape
+    §Sibling-fork uniqueness asks for (#934). Mechanically the floor is
+    textual — a pair whose declared claims are identical after
+    whitespace/case normalization; semantic distinctness stays the
+    author's discipline, stated in `skills/invlang/SKILL.md`.
 
 24. **Hypothesis persistence — no orphaned hypotheses at CONCLUDE.**
     When a `conclude:` block is present, every hypothesis declared in

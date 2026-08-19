@@ -166,7 +166,8 @@ hooks). The gates:
 
 Still out of scope (port later if a case demands it): report-consistency
 judges, the phase state machine, class-slot grammar vocab, and sibling-fork
-topological uniqueness. Two further invlang spec rules (per-type class-slot
-grammar, sibling-fork uniqueness) are *not* yet enforced because the spec's
-own examples currently contradict them — see
+uniqueness. Per-type class-slot grammar is *not* yet enforced because the
+spec's own examples contradict it. Sibling-fork uniqueness no longer has
+that problem — #934 made prediction divergence the distinctness axis — and
+#933 owns implementing it. See
 `docs/decisions/defender-invlang-enforcement-ramp.md`.

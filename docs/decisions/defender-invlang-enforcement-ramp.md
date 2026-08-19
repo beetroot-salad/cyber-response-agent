@@ -138,9 +138,10 @@ blocks. The stale Example A (`type=endpoint`, `file:binary`, prose-cited
 resolutions, a bare `provenance` attr key) was fixed to current grammar
 as part of this work.
 
-**Open: two more current-spec rules are deferred because the spec
-contradicts its own worked examples.** Don't enforce them until the spec
-is reconciled, or they'll false-positive on valid current writes:
+**Open: two current-spec rules were deferred because the spec
+contradicted its own worked examples.** Don't enforce one until its spec
+is reconciled, or it'll false-positive on valid current writes. One is
+still open; the second is now decided and waiting on implementation:
 
 - **Per-type class-slot grammar.** `skills/invlang/SKILL.md` §Classification
   grammar defines slash-tuples per type with slot enums in `vocab.py`, but
@@ -150,15 +151,19 @@ is reconciled, or they'll false-positive on valid current writes:
   role enum vs the examples (add `monitoring-agent`, or correct the
   examples to `monitoring`), settle the `??` / `{a,b,c}` / `unclassified-*`
   / `ambiguous-*-or-*` escape grammar, then implement + enforce.
-- **Sibling-fork topological uniqueness.** §Sibling-fork uniqueness says
-  sibling hypotheses must differ on a topological axis
+- **Sibling-fork uniqueness.** ~~§Sibling-fork uniqueness says sibling
+  hypotheses must differ on a topological axis
   (`parent_type`/`parent_class`/`attached_to`/`rel`), but the
   §Discovery-hypotheses worked example forks `h-001`/`h-002` that are
-  identical on all four axes (both `v-001|runs_on|process|unclassified-process`),
-  differing only on `?name` + predictions — which that same section
-  explicitly endorses when `parent_class` is unknown. *Fix:* decide
-  whether name+prediction divergence counts as distinctness (and how to
-  detect it), update the spec, then enforce.
+  identical on all four axes.~~ **Decided (#934):** prediction divergence
+  IS the distinctness — siblings must differ on a predicted observable,
+  and slots the alert has not settled stay `??` in `parent_class` rather
+  than being minted into a fork axis. The spec is reconciled; what
+  remains is the implementation, which #933 owns. Detection floor:
+  textually identical claim sets across a pair. A check keyed on
+  `parent_class` uniqueness must NOT ship — siblings now legitimately
+  share `??/??/??`.
 
-Both are spec-owner decisions, not validator bugs. File-and-hold here
-until the canonical SKILL is internally consistent.
+Both were spec-owner decisions, not validator bugs. The class-slot one
+stays file-and-hold here until the canonical SKILL is internally
+consistent.
