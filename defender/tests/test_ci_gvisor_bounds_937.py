@@ -104,6 +104,40 @@ def test_every_external_command_in_the_step_is_individually_bounded() -> None:
                 )
 
 
+def test_apt_retries_come_with_a_bounded_per_connection_timeout() -> None:
+    """A retry count with no connect timeout under it multiplies the stall it was added for.
+
+    `Acquire::Retries` applies to EVERY source, not the one whose transient motivated it. On
+    run 32294123321 the runner's azure.archive.ubuntu.com mirror was unreachable and the
+    default 30s connect timeout x 4 attempts put a 120s floor under `apt-get update` — while
+    the gvisor host, the reason the retry was added, answered in under a second. The retry
+    turned a bounded command into one that could not finish inside its bound. Pinning them
+    together is what keeps the outer `timeout` a bound rather than a race with whichever
+    Ubuntu mirror is down that morning."""
+    for step in _install_steps():
+        # CODE lines only. The rationale comment above the options names both settings, so a
+        # substring test over the block text keeps passing on a step whose actual apt-get
+        # options were stripped out from under a comment that still explains them — the same
+        # vacuity the `pipefail` check above reads the `set` line to avoid.
+        run_text = "\n".join(
+            line for line in str(step["run"]).splitlines() if not line.strip().startswith("#")
+        )
+        # Unconditional: the retry is itself load-bearing. #937's stall was transient and
+        # cleared on a re-run in under 20s, so an apt with a kill and no retry converts that
+        # same transient into three red jobs — the treatment curl already had, against a host
+        # that had not even failed. Dropping the retry must fail here, not pass vacuously.
+        assert "Acquire::Retries" in run_text, (
+            f"{step.get('name')!r} runs apt-get with no Acquire::Retries — the bound now "
+            f"turns the transient #937 observed into a red build instead of a re-fetch"
+        )
+        for scheme in ("http", "https"):
+            assert f"Acquire::{scheme}::Timeout" in run_text, (
+                f"{step.get('name')!r} sets Acquire::Retries with no Acquire::{scheme}::"
+                f"Timeout — a retry against an unreachable mirror inherits the 30s default "
+                f"and multiplies it by the retry count, blowing the enclosing `timeout`"
+            )
+
+
 def test_the_per_command_bounds_nest_inside_the_step_bound() -> None:
     for step in _install_steps():
         run_text = str(step["run"])

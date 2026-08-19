@@ -66,7 +66,7 @@ jobs:
         # unresponsive gvisor apt repo hung box-dood for 15 minutes on run 32278695386 and
         # would have run to the 6-hour job default. It normally finishes in 12-31s.
         #
-        # The per-command bounds NEST inside this one: 60 + 60 + 90 + 60 = 270s against a
+        # The per-command bounds NEST inside this one: 60 + 90 + 90 + 30 = 270s against a
         # 300s step. The curl term is 60 and not 20, because --retry-max-time is the last
         # instant a new attempt may START and that attempt still gets a full --max-time. That ordering is the whole point of having both — whichever command
         # stalls, its own `timeout` exits 124 and names itself in the log, and the step bound
@@ -94,10 +94,20 @@ jobs:
           # stalling and the stall cleared on a re-run inside 20s: a bound with no retry
           # converts that transient into a red build across three jobs, where curl — a
           # different host, and not the one that failed — already retries.
-          sudo timeout 60 apt-get -o Acquire::Retries=3 update
-          sudo timeout 90 apt-get -o Acquire::Retries=3 install -y runsc
+          #
+          # http::Timeout is what makes that retry SAFE to have. Retries apply to every
+          # source, not just gvisor's, and the runner's azure.archive.ubuntu.com mirror goes
+          # unreachable often: on run 32294123321 the default 30s connect timeout x 4
+          # attempts put a 120s floor under `update` and blew a 60s kill, with the gvisor
+          # host itself answering in under a second. Capping the per-connection wait at 10s
+          # makes the worst case 10 + 2*10 = 30s of dead-mirror stall, which is what lets an
+          # OUTER bound be a real bound rather than a race against whichever mirror is down.
+          APT_BOUNDED=(-o Acquire::Retries=2 -o Acquire::http::Timeout=10
+                       -o Acquire::https::Timeout=10)
+          sudo timeout 90 apt-get "${APT_BOUNDED[@]}" update
+          sudo timeout 90 apt-get "${APT_BOUNDED[@]}" install -y runsc
           sudo runsc install -- --oci-seccomp
-          sudo timeout 60 systemctl restart docker
+          sudo timeout 30 systemctl restart docker
           docker info --format '{{.Runtimes}}'
           # Hard-fail rather than print. Every box in the #540 suite starts at the runtime
           # BoxSpec anchors (runsc), and the parity test self-skips a runtime the daemon does
@@ -197,7 +207,7 @@ jobs:
         # unresponsive gvisor apt repo hung box-dood for 15 minutes on run 32278695386 and
         # would have run to the 6-hour job default. It normally finishes in 12-31s.
         #
-        # The per-command bounds NEST inside this one: 60 + 60 + 90 + 60 = 270s against a
+        # The per-command bounds NEST inside this one: 60 + 90 + 90 + 30 = 270s against a
         # 300s step. The curl term is 60 and not 20, because --retry-max-time is the last
         # instant a new attempt may START and that attempt still gets a full --max-time. That ordering is the whole point of having both — whichever command
         # stalls, its own `timeout` exits 124 and names itself in the log, and the step bound
@@ -225,10 +235,20 @@ jobs:
           # stalling and the stall cleared on a re-run inside 20s: a bound with no retry
           # converts that transient into a red build across three jobs, where curl — a
           # different host, and not the one that failed — already retries.
-          sudo timeout 60 apt-get -o Acquire::Retries=3 update
-          sudo timeout 90 apt-get -o Acquire::Retries=3 install -y runsc
+          #
+          # http::Timeout is what makes that retry SAFE to have. Retries apply to every
+          # source, not just gvisor's, and the runner's azure.archive.ubuntu.com mirror goes
+          # unreachable often: on run 32294123321 the default 30s connect timeout x 4
+          # attempts put a 120s floor under `update` and blew a 60s kill, with the gvisor
+          # host itself answering in under a second. Capping the per-connection wait at 10s
+          # makes the worst case 10 + 2*10 = 30s of dead-mirror stall, which is what lets an
+          # OUTER bound be a real bound rather than a race against whichever mirror is down.
+          APT_BOUNDED=(-o Acquire::Retries=2 -o Acquire::http::Timeout=10
+                       -o Acquire::https::Timeout=10)
+          sudo timeout 90 apt-get "${APT_BOUNDED[@]}" update
+          sudo timeout 90 apt-get "${APT_BOUNDED[@]}" install -y runsc
           sudo runsc install -- --oci-seccomp
-          sudo timeout 60 systemctl restart docker
+          sudo timeout 30 systemctl restart docker
           docker info --format '{{.Runtimes}}'
           # Hard-fail rather than print — same reason as the `test` job: the suite self-skips
           # a runtime the daemon does not register, so a degraded install would leave this
@@ -271,7 +291,7 @@ jobs:
         # unresponsive gvisor apt repo hung box-dood for 15 minutes on run 32278695386 and
         # would have run to the 6-hour job default. It normally finishes in 12-31s.
         #
-        # The per-command bounds NEST inside this one: 60 + 60 + 90 + 60 = 270s against a
+        # The per-command bounds NEST inside this one: 60 + 90 + 90 + 30 = 270s against a
         # 300s step. The curl term is 60 and not 20, because --retry-max-time is the last
         # instant a new attempt may START and that attempt still gets a full --max-time. That ordering is the whole point of having both — whichever command
         # stalls, its own `timeout` exits 124 and names itself in the log, and the step bound
@@ -299,10 +319,20 @@ jobs:
           # stalling and the stall cleared on a re-run inside 20s: a bound with no retry
           # converts that transient into a red build across three jobs, where curl — a
           # different host, and not the one that failed — already retries.
-          sudo timeout 60 apt-get -o Acquire::Retries=3 update
-          sudo timeout 90 apt-get -o Acquire::Retries=3 install -y runsc
+          #
+          # http::Timeout is what makes that retry SAFE to have. Retries apply to every
+          # source, not just gvisor's, and the runner's azure.archive.ubuntu.com mirror goes
+          # unreachable often: on run 32294123321 the default 30s connect timeout x 4
+          # attempts put a 120s floor under `update` and blew a 60s kill, with the gvisor
+          # host itself answering in under a second. Capping the per-connection wait at 10s
+          # makes the worst case 10 + 2*10 = 30s of dead-mirror stall, which is what lets an
+          # OUTER bound be a real bound rather than a race against whichever mirror is down.
+          APT_BOUNDED=(-o Acquire::Retries=2 -o Acquire::http::Timeout=10
+                       -o Acquire::https::Timeout=10)
+          sudo timeout 90 apt-get "${APT_BOUNDED[@]}" update
+          sudo timeout 90 apt-get "${APT_BOUNDED[@]}" install -y runsc
           sudo runsc install -- --oci-seccomp
-          sudo timeout 60 systemctl restart docker
+          sudo timeout 30 systemctl restart docker
           docker info --format '{{range $k, $v := .Runtimes}}{{$k}} {{end}}' \
             | tr ' ' '\n' | grep -qx runsc
 
