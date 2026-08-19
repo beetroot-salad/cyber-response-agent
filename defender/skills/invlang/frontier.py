@@ -50,23 +50,18 @@ from . import _walkers, vocab
 from .parser import INVLANG_FENCE_RE
 from .schema import CompanionBody
 from .validate import (
-    ATTR_PREFIX,
-    SLOT_CLASS,
-    SLOT_IDENT,
     auth_kind_of,
     iter_vertex_cells,
     outstanding_authz_contracts,
 )
 
-#: The three `slot` spellings an `OpenSlot` can carry, RE-EXPORTED from `validate` rather than
-#: restated. `class` and `ident` are whole-cell; an attribute is namespaced `attrs.<name>`,
-#: matching the `:R attr_updates` key grammar so a selector is written in the same spelling the
-#: row that would resolve it uses. Owned there because that is where the grammar is enforced
-#: (`_is_legal_refinement_key`) and where the walk that reports these slots lives.
+#: The `slot` spellings an `OpenSlot` can carry — `class`, `ident`, `attrs.<name>` — are NOT
+#: re-exported here. They are `validate.SLOT_CLASS` / `SLOT_IDENT` / `ATTR_PREFIX`, owned there
+#: because that is where the `:R attr_updates` key grammar is enforced
+#: (`_is_legal_refinement_key`) and where the walk that reports these slots lives. A re-export
+#: with no importer is a second name for one constant, which is the drift it would claim to
+#: prevent; `scripts/lessons/lessons_frontier.py` reads them from `validate` directly.
 __all__ = [
-    "ATTR_PREFIX",
-    "SLOT_CLASS",
-    "SLOT_IDENT",
     "Frontier",
     "FrontierAt",
     "HeldFact",
@@ -160,22 +155,42 @@ class Frontier:
 
 
 def _edge_index(companion: CompanionBody) -> dict[str, tuple[str | None, str | None]]:
-    """Each `:E` id → `(relation, authority kind)`, FIRST declaration winning.
+    """Each `:E` id → `(relation, authority kind)`, first NON-EMPTY declaration winning.
 
-    First-wins matches `validate._by_id_first` and `_walkers.vertex_types`: the declaring site
-    is the immutable one, and a later re-observation adds ids rather than re-typing them.
-    (`_check_strong_move_provenance` builds its own last-wins `auth_by_edge`; that one is the
-    outlier, and reconciling it is out of scope here.)
+    Per-FIELD rather than per-ROW, which is the one place this departs from
+    `validate._by_id_first` and `_walkers.vertex_types`. Those index whole records, and a whole
+    record is the right unit when the question is "what did the declaring site say". Here the
+    question is "what does the document know about this edge", and an `:E` row may leave the
+    authority column empty and have a later `observations.edges` row supply it — legal,
+    diagnostic-free, and exactly the shape a lesson about anchor strength keys on. A value the
+    first row already filled is still immutable.
+
+    (`_check_strong_move_provenance` builds its own LAST-wins `auth_by_edge`; the two agree on
+    every document where a field is declared once, which is all of them today, and reconciling
+    the wins policy is out of scope here.)
     """
     index: dict[str, tuple[str | None, str | None]] = {}
     for e in _walkers.all_edges(companion):
         eid = e.get("id")
-        if not isinstance(eid, str) or eid in index:
+        if not isinstance(eid, str):
             continue
         kind = auth_kind_of(e)
         rel = e.get("relation")
-        index[eid] = (rel if isinstance(rel, str) else None,
-                      kind if isinstance(kind, str) else None)
+        rel = rel if isinstance(rel, str) else None
+        kind = kind if isinstance(kind, str) else None
+        if eid not in index:
+            index[eid] = (rel, kind)
+            continue
+        # FIRST-WINS on the VALUE, not on the ROW. A re-observation is how an append-only
+        # document SUPPLIES a field the declaring row left blank — an `:E` row whose authority
+        # column was empty in the prologue and carries `authoritative-source:cmdb` in a lead's
+        # `observations.edges` is legal, draws no diagnostic, and is exactly the shape where
+        # the authority is worth keying on. Refusing the whole later row would leave
+        # `auth_kind=None` forever and make every `frontier_edges` selector naming `auth_kind`
+        # miss on the documents that learned it. A field the first row already filled is still
+        # immutable here.
+        first_rel, first_kind = index[eid]
+        index[eid] = (first_rel if first_rel else rel, first_kind if first_kind else kind)
     return index
 
 
@@ -230,10 +245,13 @@ def _open_contracts(companion: CompanionBody) -> list[OpenContract]:
         if not isinstance(cid, str) or not cid:
             continue
         # `edge_ref` is anchored at the PARSE boundary — `parser._hyp_sub_authz_row` writes
-        # `vocab.UNOBSERVED_EDGE_REF` for a row that names no edge, and `AuthorizationContract`
-        # types the key non-optional. Re-coalescing it here would be the second copy of that
-        # default, free to drift from the first.
-        edge_ref = c.get("edge_ref", vocab.UNOBSERVED_EDGE_REF)
+        # `rec.get("edge_ref", UNOBSERVED_EDGE_REF) or UNOBSERVED_EDGE_REF`, and
+        # `AuthorizationContract` types the key non-optional. This read MIRRORS that expression
+        # rather than half of it: `.get(k, default)` alone does not fire when the key is present
+        # and falsy, and a `None`/`""` `edge_ref` reaching `edges.get(...)` misses every `:E`
+        # row, so a contract on a fully observed edge reports `rel=None, auth_kind=None` and
+        # reads as PROPOSED — silently withholding it from every selector naming either field.
+        edge_ref = c.get("edge_ref") or vocab.UNOBSERVED_EDGE_REF
         rel, auth_kind = edges.get(edge_ref, (None, None))
         out.append(OpenContract(
             contract_id=cid,

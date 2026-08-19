@@ -262,13 +262,13 @@ differently because they fire at different moments:
    `source_signature` hits plus the viable tags. Keyed on the alert, because at
    that point you have not written a document for anything else to key on.
 2. **The `append_block` / `fix_row` return** (every loop): up to three lessons
-   matched against your investigation's **frontier** — the `??` slots and
-   unfulfilled `ac<n>` contracts your document currently carries. This block
-   appears only when your write *changed* what is open, so seeing it at all
-   means something moved. **No block means nothing NEW matched** — either your
-   write left the frontier where it was, or nothing open matched. It never
-   means the corpus is exhausted; widen with the shim below when a question
-   stays open.
+   matched against your investigation's **state** — both halves of it, the
+   values your `:V` / `:R` rows have SETTLED and the `??` slots and unfulfilled
+   `ac<n>` contracts they have left open. This block appears only when your
+   write *changed* that state, so seeing it at all means something moved.
+   **No block means nothing NEW matched** — either your write left the state
+   where it was, or nothing in it matched. It never means the corpus is
+   exhausted; widen with the shim below when a question stays open.
 
 Orientation prints `<path>\t<description>`; the write return prints the
 lesson's frontmatter. Either way, judge relevance from `description`, then

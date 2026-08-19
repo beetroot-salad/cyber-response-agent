@@ -118,7 +118,7 @@ lead choice is mechanical.
   slash-tuple only — no type prefix.
 
   Class and attribute slots also GATE DISPOSITION: an open one blocks
-  `disposition: benign` (§Close). An open `ident` does not — it is
+  `disposition: benign` (§`:T conclude`). An open `ident` does not — it is
   honest bookkeeping about an entity you have not named yet, and it is
   what lets a lesson about naming that entity reach you. Prefer it over
   a guessed identifier.

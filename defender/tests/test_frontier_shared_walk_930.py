@@ -322,6 +322,28 @@ def test_prose_between_blocks_cannot_change_the_answer():
         assert frontier_at(prosed, n).frontier == frontier_at(REFINED_DOC, n).frontier
 
 
+def test_the_recall_fast_path_sees_a_delimiter_that_straddles_the_seam():
+    """CLAIM: `_frontier_recall`'s no-new-fence fast path cannot skip an append that MOVED the
+    frontier.
+
+    The gate exists because `parse_dense_companion` reads only ```invlang fences, so an append
+    adding no delimiter cannot change the parse. That is true of the appended TEXT and false of
+    the appended SLICE: a document ending in a truncated ``` and an append supplying the last
+    backtick closes a fence whose slice holds no delimiter at all. Pinned with the real
+    predicate rather than by driving the tool, because the bug is the window, not the plumbing."""
+    from defender.skills.invlang.frontier import frontier_from_text
+
+    before = ("```invlang\n"
+              ":V prologue.vertices [id|type|class|ident|attrs?]\n"
+              "v-001|compute|??|x|\n"
+              "``")
+    after = before + "`"
+    assert frontier_from_text(before) != frontier_from_text(after), "fixture stopped moving"
+
+    skips = bool(before) and after.startswith(before) and "```" not in after[max(0, len(before) - 2):]
+    assert not skips, "the fast path skipped an append that closed a fence"
+
+
 def test_frontier_at_never_raises():
     """CLAIM: it inherits `frontier_from_text`'s guarantee. Its callers run against documents a
     model is still writing, and a half-written block must not turn into a failed tool call on a

@@ -829,6 +829,34 @@ def is_unresolved(value: Any) -> bool:
     return v.startswith("{") and (v.endswith("}") or v.count("{") > v.count("}"))
 
 
+#: The whole-cell open marker `is_unresolved` tests for, named so the IDENT predicate below can
+#: look for the same token without a second literal.
+OPEN_MARKER = "??"
+
+
+def is_ident_open(value: Any) -> bool:
+    """Does this `ident` cell still carry an open question — WHOLE-cell or EMBEDDED.
+
+    Unlike a class slot or an attribute value, an identifier is routinely named IN PART, and
+    the committed investigations do exactly that: `bash[pid=??]` and `??[pid=??]` for a process
+    whose binary is known and whose pid is not, `dev-ws-??` for a host whose prefix is known
+    and whose index is not.
+
+    `is_unresolved` is anchored to the whole cell and calls every one of those SETTLED,
+    which is the wrong answer for BOTH halves of the retrieval key (#919): a
+    `frontier_nodes: {slot: ident}` lesson — "pin the pid before you attribute the process" —
+    could never fire on the document that needs it, and an `observed_nodes: {slot: ident}`
+    lesson fires instead, asserting the run HOLDS an identifier that literally reads `??`.
+
+    SUBSTRING, deliberately, and only here. `is_unresolved` stays whole-cell anchored because
+    an `attrs.cmdline` may legitimately carry braces or a literal `?`; an ident cell is a name
+    the document CHOSE, and `??` inside one is the marker rather than data. Scope is retrieval
+    only — `_check_benign_open_slots` passes `include_ident=False`, so widening this cannot
+    move a disposition gate.
+    """
+    return isinstance(value, str) and OPEN_MARKER in value
+
+
 def class_slots(classification: str) -> list[str]:
     """A class cell's slots — the slash-tuple, minus an optional leading `<type>:` prefix.
 
@@ -869,17 +897,28 @@ def class_slots(classification: str) -> list[str]:
     return [s.strip() for s in slots]
 
 
+def is_open_slot(slot: str) -> bool:
+    """Is this ONE ALREADY-SPLIT class slot unresolved.
+
+    PUBLIC and separate from `has_open_slot` because `scripts/lessons/lessons_frontier.py`
+    needs exactly this half: it has already run `class_slots` and holds the slots, and calling
+    `has_open_slot` on one of them re-splits it and strips a leading `<head>:` prefix — so the
+    cell that decided a slot was OPEN and the cell that wildcards it disagreed about the values
+    the two exist to agree on (#919). One definition, two readers, rather than a copy per
+    reader.
+
+    A `{` the author never closed is an UNTERMINATED candidate set and counts as open: the
+    depth-aware split in `class_slots` folds every slot after it into one cell that is neither
+    `??` nor a closed `{...}`, so a single dropped `}` would read as CONCRETE. A stray `}` with
+    no `{` is left alone — it splits like any other character and hides nothing.
+    """
+    return is_unresolved(slot) or slot.count("{") > slot.count("}")
+
+
 def has_open_slot(classification: Any) -> bool:
     if not isinstance(classification, str):
         return False
-    slots = class_slots(classification)
-    # A `{` the author never closed is an UNTERMINATED candidate set and counts as open: the
-    # depth-aware split above folds every slot after it into one cell that is neither `??` nor
-    # a closed `{...}`, so a single dropped `}` would read as CONCRETE. A stray `}` with no
-    # `{` is left alone — it splits like any other character and hides nothing.
-    if any(s.count("{") > s.count("}") for s in slots):
-        return True
-    return any(is_unresolved(slot) for slot in slots)
+    return any(is_open_slot(slot) for slot in class_slots(classification))
 
 
 def _seed_vertex_state(
@@ -903,6 +942,29 @@ def _seed_vertex_state(
         )
         if cls and has_open_slot(cur["classification"]) and not has_open_slot(cls):
             cur["classification"] = cls
+        # The IDENT half of the same rule, and it only started mattering when
+        # `iter_vertex_cells(include_ident=True)` gave the slot a reader (#919). Re-observing a
+        # vertex is how an append-only document NAMES the entity it opened with `ident=??`
+        # (SKILL.md §Open questions now recommends that spelling over a guessed identifier), so
+        # without this the frontier reports `ident=??` open on a vertex the run already named,
+        # re-pushes the "name this entity" lesson forever, and withholds every
+        # `observed_nodes: {slot: ident}` selector from the resolved value.
+        #
+        # UNSETTLED, not just `??`, and the two arms are not the same test. `is_ident_open`
+        # covers the partly-named cell (`??[pid=??]` -> `bash[pid=4242]`); a BLANK cell needs
+        # its own arm, because it is neither open nor held and no open predicate reads `""`
+        # (see `_apply_attr_updates` on why none may). Without it a vertex declared with an
+        # empty ident column — the diagnostic-clean shape `test_frontier_shared_walk_930`
+        # pins — and later named in a lead's `observations.vertices` folds to `""`, so the
+        # run's answer to "which host is this IP" reaches NO lane at all.
+        #
+        # One direction only, like the class arm: a later row cannot blank or re-open a name
+        # the document already settled.
+        ident = v.get("identifier", "")
+        if isinstance(ident, str) and ident.strip() and not is_ident_open(ident):
+            held = cur["identifier"]
+            if not (isinstance(held, str) and held.strip()) or is_ident_open(held):
+                cur["identifier"] = ident
         if v.get("attributes"):
             cur["attributes"].update(v["attributes"])
 
@@ -1006,7 +1068,7 @@ def _cell_state(value: str, *, open_test: Callable[[Any], bool]) -> str:
     `open_test` varies by slot and the variation is load-bearing: a class cell is open when ANY
     of its slash-slots is (`has_open_slot`), while `ident` and `attrs` cells are single values
     that `is_unresolved` reads whole. Running `is_unresolved` across a class tuple would read
-    `linux/role:??` as concrete.
+    `a/??/c` as concrete — it is the WHOLE cell that is neither `??` nor a candidate set.
 
     Emptiness is tested FIRST and independently, because neither predicate reads `""` as open —
     see `_apply_attr_updates` on why a blank value must never read as a resolution."""
@@ -1042,7 +1104,7 @@ def iter_vertex_cells(
         if include_ident:
             ident = _cell_text(st.get("identifier"))
             yield VertexCell(
-                vid, cls, SLOT_IDENT, ident, _cell_state(ident, open_test=is_unresolved)
+                vid, cls, SLOT_IDENT, ident, _cell_state(ident, open_test=is_ident_open)
             )
         for name, raw in (st.get("attributes") or {}).items():
             val = _cell_text(raw)
@@ -1071,12 +1133,18 @@ def _check_benign_open_slots(companion: CompanionBody) -> list[str]:
                 f"unresolved class ({cell.value!r}) — resolve via "
                 f":R attr_updates or escalate"
             )
-        else:
+        elif cell.slot.startswith(ATTR_PREFIX):
             errors.append(
                 f"disposition benign blocked: vertex {cell.vertex_id} attribute "
                 f"{cell.slot[len(ATTR_PREFIX):]!r} is still unresolved ({cell.value!r}) — "
                 f"resolve via :R attr_updates or escalate"
             )
+        # No `else`. The two arms above are the two slot kinds `include_ident=False` yields
+        # today, but the walk is SHARED and takes a knob — a bare `else` would render an
+        # `ident` cell as `attribute ''` (`"ident"[len("attrs."):]` is `""`), a nonsense refusal
+        # naming an attribute that does not exist, and one that contradicts the whole reason
+        # `IDENT_REFINEMENT_KEY` routes `ident` out of `attributes`. A fourth slot kind reaching
+        # here should be a visible gap, not a mislabelled attribute.
     return errors
 
 

@@ -52,7 +52,7 @@ from defender.skills.invlang.frontier import (
     OpenContract,
     OpenSlot,
 )
-from defender.skills.invlang.validate import class_slots, is_unresolved
+from defender.skills.invlang.validate import class_slots, is_open_slot
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_CORPUS = REPO_ROOT / "defender" / "lessons"
@@ -99,6 +99,17 @@ class _NodeSelector:
         # omitted `type` constrains nothing (`_node_match_score` skips the comparison), so
         # crediting it would rank a match-any-vertex selector level with one that named the
         # type. `_EdgeSelector` has always counted only declared fields; this is the same rule.
+        #
+        # KNOWN IMBALANCE, not a knob: `_node_selector` DROPS a selector missing `type` or
+        # `slot`, so in practice this is a constant 2 — the node lane's floor — while an
+        # `anchor_kind`-only edge selector (every shipped `frontier_edges` entry, and the only
+        # shape available for a contract on a proposed edge) floors at 1. `_best_match` pools
+        # both lanes into one `max` and `match_loaded` cuts at `top_k`, so an edge lesson is
+        # outranked by ANY node match, and held facts accumulate — the edge lane goes dark
+        # once three node selectors match. Raising the edge floor is not the fix on its own:
+        # at 2 it TIES with a bare node match and the `name` tiebreak then evicts whichever
+        # lesson sorts later. Both lanes need more resolution than "2", which is #919
+        # follow-up work rather than a knob to turn here.
         return (1 if self.type else 0) + (1 if self.slot else 0)
 
 
@@ -118,20 +129,6 @@ class _Selectors:
     nodes: list[_NodeSelector] = field(default_factory=list)
     edges: list[_EdgeSelector] = field(default_factory=list)
     observed: list[_NodeSelector] = field(default_factory=list)
-
-
-def _is_open(slot_value: str) -> bool:
-    """Is this ONE already-split slot unresolved — the PER-SLOT half of
-    `validate.has_open_slot`, applied to a cell `class_slots` has already split.
-
-    Not `has_open_slot` itself: that one re-runs `class_slots`, which re-splits on `/` and
-    strips a leading `<head>:` prefix. On an already-split slot the prefix strip is the bug —
-    `has_open_slot("linux/role:??")` is False (the cell is CONCRETE to the validator) while
-    `has_open_slot("role:??")` on the slot alone is True, so the cell that decided the slot was
-    open and the cell that wildcards it disagreed on exactly the values this predicate exists
-    to agree about. The two clauses below are `has_open_slot`'s own, minus the re-split.
-    """
-    return is_unresolved(slot_value) or slot_value.count("{") > slot_value.count("}")
 
 
 def _class_pins(selector_class: str, case_class: str) -> int | None:
@@ -154,10 +151,14 @@ def _class_pins(selector_class: str, case_class: str) -> int | None:
     cut, and (because `_frontier_recall` diffs the rendered block) no lessons block was
     emitted at all.
 
-    ANCHORED, not per-slot: once ONE slot matches by equality the pattern is tied to this
-    cell, and the further slots it names are the extra precision the ranking is for
-    (`ip-only/internet` over `ip-only` against `ip-only/??/??`). A pattern with no equality
-    anywhere pins nothing, exactly as a bare `*` does.
+    ANCHORED, not per-slot, and the distinction is the whole rule — read it before "fixing"
+    the `pinned += 1` below. The no-credit clause above applies to a pattern that matched
+    NOWHERE by equality; once ONE slot matches by equality the pattern is tied to this cell,
+    and the further slots it names ARE credited, because on an anchored cell they are the extra
+    precision the ranking is for (`ip-only/internet` over `ip-only` against `ip-only/??/??`).
+    A pattern with no equality anywhere pins nothing, exactly as a bare `*` does. The cost is
+    known and accepted: two mutually exclusive guesses at the same open slot tie, and the
+    `name` tiebreak picks between them.
     """
     sel = class_slots(selector_class)
     case = class_slots(case_class)
@@ -168,7 +169,16 @@ def _class_pins(selector_class: str, case_class: str) -> int | None:
         # rather than on "exactly one slot": `??/??` is as silent about its arity as `??` is,
         # and gating on the length made the match NON-MONOTONIC — a document refined from
         # `??` to `??/??` lost a three-slot selector that the less-informative `??` matched.
-        if all(_is_open(c) for c in case):
+        #
+        # STILL NON-MONOTONIC one arity over, and this branch cannot fix it: for
+        # `sel="ip-only/internet/novel"`, case `??/??` matches but `ip-only/??` falls to the
+        # `return None` below, so refining slot 0 of a SHORT tuple drops a selector the
+        # document matched one write earlier. The real answer is that class-tuple arity is a
+        # documented function of the vertex TYPE (SKILL.md §Classification grammar,
+        # `vocab.SLOTS`) and `_node_match_score` has already agreed on the type before it gets
+        # here — so both sides should be normalized to the type's arity in the frontier rather
+        # than guessed at from the cell. #919 follow-up.
+        if all(is_open_slot(c) for c in case):
             case = list(case) + ["??"] * (len(sel) - len(case))
         else:
             return None
@@ -180,7 +190,7 @@ def _class_pins(selector_class: str, case_class: str) -> int | None:
         pinned += 1
         if s == case[i]:
             anchored = True
-        elif not _is_open(case[i]):
+        elif not is_open_slot(case[i]):
             return None
     return pinned if anchored else 0
 
@@ -188,11 +198,18 @@ def _class_pins(selector_class: str, case_class: str) -> int | None:
 def _node_match_score(sel: _NodeSelector, item: OpenSlot | HeldFact) -> int | None:
     """How precisely this selector speaks to this node cell — `None` when it does not match.
 
-    Serves BOTH node lanes. `OpenSlot` and `HeldFact` carry the same five fields, and the one
-    rule that distinguishes them lives in `_class_pins`: its open-case-slot wildcard cannot
-    fire on a held fact, whose class is settled by definition, so the same call degrades to
-    ordinary equality there. The caller decides which half of the state a selector is matched
-    against; this decides how well it matched.
+    Serves BOTH node lanes. `OpenSlot` and `HeldFact` carry the same five fields, and the same
+    `_class_pins` call scores either.
+
+    Its open-case-slot wildcard DOES still fire on a held fact, and that is worth knowing
+    rather than assuming away: `frontier._node_state` copies the vertex's class tuple onto
+    EVERY cell, so a settled `attrs.<name>` or `ident` cell on an unclassified vertex carries
+    `class_tuple='??/??/??'`. A selector scoped `{type: compute, class: bastion,
+    slot: attrs.pty}` therefore matches a `pty` the run has settled on a host it has not
+    classified — the class half wildcards through, and only the `class` SLOT of a held fact is
+    settled by definition. Nothing in the shipped corpus pairs a class pattern with an attrs
+    slot yet, so this is latent; it is a limitation of carrying one class tuple per cell, not
+    of the scoring.
 
     Scored on the MATCH rather than on the selector, so a component that constrained nothing
     (an omitted `type`, a class slot that landed on a `??`) earns nothing. See `_class_pins`.
@@ -372,8 +389,12 @@ def _render_frontmatter(fm: dict) -> str:
     # already says everything that lesson has to say here.
     if not kept:
         return ""
+    # `width` is effectively unbounded so a long `description` stays on ONE physical line.
+    # safe_dump's 80-column default folds it and the 2-space indent below then lands on the
+    # continuation lines too, so the one field SKILL.md tells the model to judge relevance from
+    # arrives looking like a nested YAML block under its own key.
     dumped = yaml.safe_dump(
-        kept, sort_keys=True, default_flow_style=False, allow_unicode=True
+        kept, sort_keys=True, default_flow_style=False, allow_unicode=True, width=10**9
     )
     return "\n".join(f"  {line}" for line in dumped.strip().splitlines())
 

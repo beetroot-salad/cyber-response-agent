@@ -929,8 +929,28 @@ def _frontier_recall(deps: AgentDeps, before: str, after: str) -> str:
         # only when your append *changed* what is open"). `Frontier` is a frozen dataclass of
         # tuples of frozen dataclasses, so `==` is exact, and `match_lessons`/`render` are
         # pure functions of `(frontier, corpus)` — an unchanged frontier cannot change the
-        # block. Checking it first skips BOTH corpus walks on the overwhelming majority of
-        # appends: `iter_lessons` re-reads and re-YAML-parses every lesson file on every call.
+        # block. Checking it first skips the corpus walk, which is the dominant cost here:
+        # `iter_lessons` re-reads and re-YAML-parses every lesson file on every call. It skips
+        # it on a MINORITY of appends, though, not "most" — `held` accumulates, so any append
+        # declaring a `:V` row moves the frontier. Replaying the repo's own investigations
+        # fence-by-fence, it fires on roughly half.
+        #
+        # The fence test below is the gate that actually is cheap, and it is exact:
+        # `parse_dense_companion` reads ONLY ```invlang fences and ignores every other
+        # byte, so an append that adds no fence delimiter cannot add, close, or alter one —
+        # the parse, and therefore the frontier, is identical. Prose narration between blocks
+        # is an ordinary shape on this loop and an empty `text` is an explicitly supported
+        # one; both would otherwise pay two full parses of a document
+        # growing toward the 65536-byte cap to discover they changed nothing. Guarded on
+        # `after` EXTENDING `before` so it can only fire for `append_block` — `fix_row` rewrites
+        # in place and is never a prefix extension.
+        #
+        # The window reaches TWO BYTES BACK into `before`, because a delimiter can straddle the
+        # seam: an on-disk document ending in a truncated ``` and an append supplying the last
+        # backtick closes a fence while the appended slice alone holds no ``` at all, and the
+        # frontier moves behind a gate that said it could not.
+        if before and after.startswith(before) and "```" not in after[max(0, len(before) - 2):]:
+            return ""
         now_frontier = frontier_from_text(after)
         was_frontier = frontier_from_text(before)
         if now_frontier == was_frontier:
@@ -942,11 +962,22 @@ def _frontier_recall(deps: AgentDeps, before: str, after: str) -> str:
         # are pure functions of the same bytes, which cannot change between them.
         lessons = list(iter_lessons(corpus))
         hits = match_loaded(now_frontier, lessons)
-        now = render(hits)
         # The second gate is what keeps a MOVE that changed no lesson quiet — the frontier can
         # open a slot no selector speaks to, and re-stapling the same three lines then teaches
         # the model to stop reading them.
-        if not now or now == render(match_loaded(was_frontier, lessons)):
+        #
+        # Compared on `(path, matched)` rather than on the RENDERED text. The two are the same
+        # decision — both fields appear verbatim in the block and the rest of a hit's render is
+        # a pure function of its path — but rendering the losing side means a `yaml.safe_dump`
+        # of three lessons' frontmatter plus three `Path.resolve()` realpath syscalls, built
+        # and thrown away one expression later, on every frontier-moving write.
+        shape = [(h.path, h.matched) for h in hits]
+        if not shape or shape == [
+            (h.path, h.matched) for h in match_loaded(was_frontier, lessons)
+        ]:
+            return ""
+        now = render(hits)
+        if not now:
             return ""
         # RECORDED, on the same terms a Read is. `lessons_loaded.jsonl` is the loop's only
         # "was this lesson in context" signal and the post-merge control `learning/ops/

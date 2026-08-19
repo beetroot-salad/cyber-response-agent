@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
 from defender._corpus import iter_lessons
@@ -35,7 +36,9 @@ def rel_to_repo(path: Path, repo_root: Path) -> str:
         return str(path)
 
 
-def resolve_corpus(raw: str | None, default: Path, ap) -> Path:
+def resolve_corpus(
+    raw: str | None, default: Path, ap: argparse.ArgumentParser
+) -> Path:
     """`--corpus` RELOCATES a corpus walk; it never SELECTS a different corpus.
 
     Shared by every lessons retrieval script because the containment argument is the same

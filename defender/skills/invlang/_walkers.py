@@ -49,19 +49,19 @@ def vertex_types(companion: CompanionBody) -> dict[str, str]:
     First declaration wins, matching `all_hypotheses`: the prologue is the declaring site for
     anything it names, and a later re-observation adds ids rather than re-typing them.
 
-    That is NOT the same fold `effective_vertex_state` runs, and `frontier._open_slots` pairs
+    That is NOT the same fold `effective_vertex_state` runs, and `frontier._node_state` pairs
     the two: `_seed_vertex_state` unions `attributes` across every `:V` row for the id and
-    upgrades an open `classification` to a concrete one, so a document that re-declares an id
-    under a DIFFERENT `type` — which the validator accepts silently, since append-only only
-    compares across writes — yields an `OpenSlot` carrying the FIRST row's type beside a later
-    row's attribute. Reconciling the two folds is #919 follow-up work; do not read the
-    first-wins rule here as a guarantee that the pair agrees.
+    upgrades an open `classification` or `ident` to a concrete one, so a document that
+    re-declares an id under a DIFFERENT `type` — which the validator accepts silently, since
+    append-only only compares across writes — yields an `OpenSlot` carrying the FIRST row's
+    type beside a later row's attribute. Reconciling the two folds is #919 follow-up work;
+    do not read the first-wins rule here as a guarantee that the pair agrees.
     """
     v_type: dict[str, str] = {}
     for v in all_vertices(companion):
         vid = v.get("id")
         if isinstance(vid, str) and vid:
-            v_type.setdefault(vid, v.get("type", ""))
+            v_type.setdefault(vid, v.get("type") or "")
     return v_type
 
 

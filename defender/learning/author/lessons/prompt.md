@@ -84,7 +84,10 @@ truthful there, and this lane is not the one that lesson is reached on.
   invlang vertex type (`compute`, `process`, `identity`, `credential`,
   `session`, `file`); `slot` is `class`, `ident`, or `attrs.<name>` spelled
   exactly as the `:V` row or `:R attr_updates` row would spell it; `class` is an
-  optional slash-tuple pattern (`ip-only`, `ip-only/internet`, `*`).
+  optional slash-tuple pattern (`ip-only`, `ip-only/internet`). Omit `class:` to match any
+  class — do **not** write a bare `class: *`: `*` opens a YAML ALIAS, so PyYAML refuses the
+  whole frontmatter and the corpus walk drops the entire lesson file with only a stderr warn.
+  If you must spell it, quote it (`class: '*'`).
 - **Spell the slot the way the investigation actually writes it**, not the way
   the sensor names the field. `loginuid` lands as `attrs.loginuid` on an
   `identity` vertex and inside `attrs.anomaly` on a `process` one; a selector
@@ -98,9 +101,11 @@ field.** Nothing validates these values at authoring time, so a typo'd `type`,
 `slot` or `anchor_kind` is a selector that silently matches nothing forever —
 and an OMITTED one is worse, because the field then constrains nothing and the
 lesson matches everything. Copy the spelling from an existing lesson in the
-manifest, or from `skills/invlang/vocab.py`. The existing corpus writes these
-as one-line flow maps (`- {type: session, slot: class}`); either spelling
-parses, so match whichever the file already uses.
+manifest, or from the vertex-type list two bullets up — your reads are confined to the
+lesson corpora, so a path under `skills/` is refused and costs you a denied call.
+The existing corpus writes these as one-line flow maps
+(`- {type: session, slot: class}`); either spelling parses, so match whichever the
+file already uses.
 
 Placeholders in templates use `{…}` — fill them in; never emit literal curly braces.
 
