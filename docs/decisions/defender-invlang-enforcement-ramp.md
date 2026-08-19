@@ -130,17 +130,23 @@ error rather than letting the write through. Scope is anchored to
    claim the cited observation settled.
 
 Pre-MVP, historical runs on earlier invlang variants are expected to fail
-— intentional. `test_skill_worked_examples_all_pass` (per-fence grammar)
-plus `test_skill_example_a_accumulates_clean` (the flagship example
-validated as the hook sees it — fences applied in order with append-only
-re-checked) guard that the runtime SKILL never teaches invlang the hook
-blocks. The stale Example A (`type=endpoint`, `file:binary`, prose-cited
-resolutions, a bare `provenance` attr key) was fixed to current grammar
-as part of this work.
+— intentional. Two guards were named here for the claim that the runtime
+SKILL never teaches invlang the gate blocks, and NEITHER existed in this
+repo: `test_skill_worked_examples_all_pass` and
+`test_skill_example_a_accumulates_clean`. In their absence
+`examples/example-b` shipped anchoring both hypotheses on an edge id (7
+parse warnings, the whole `:H` block dropped) and `example-c` shipped two
+vocabulary renames behind the enum. `defender/tests/test_shipped_invlang
+_documents.py` is the guard those names promised — every shipped document
+parse-clean and gate-clean, plus Example A validated as the gate sees it,
+fences applied in order (#934). The stale Example A (`type=endpoint`,
+`file:binary`, prose-cited resolutions, a bare `provenance` attr key) was
+fixed to current grammar as part of the original work.
 
-**Open: two more current-spec rules are deferred because the spec
-contradicts its own worked examples.** Don't enforce them until the spec
-is reconciled, or they'll false-positive on valid current writes:
+**Open: two current-spec rules were deferred because the spec
+contradicted its own worked examples.** Don't enforce one until its spec
+is reconciled, or it'll false-positive on valid current writes. One is
+still open; the second is now decided and waiting on implementation:
 
 - **Per-type class-slot grammar.** `skills/invlang/SKILL.md` §Classification
   grammar defines slash-tuples per type with slot enums in `vocab.py`, but
@@ -150,15 +156,30 @@ is reconciled, or they'll false-positive on valid current writes:
   role enum vs the examples (add `monitoring-agent`, or correct the
   examples to `monitoring`), settle the `??` / `{a,b,c}` / `unclassified-*`
   / `ambiguous-*-or-*` escape grammar, then implement + enforce.
-- **Sibling-fork topological uniqueness.** §Sibling-fork uniqueness says
-  sibling hypotheses must differ on a topological axis
+- **Sibling-fork uniqueness.** ~~§Sibling-fork uniqueness says sibling
+  hypotheses must differ on a topological axis
   (`parent_type`/`parent_class`/`attached_to`/`rel`), but the
   §Discovery-hypotheses worked example forks `h-001`/`h-002` that are
-  identical on all four axes (both `v-001|runs_on|process|unclassified-process`),
-  differing only on `?name` + predictions — which that same section
-  explicitly endorses when `parent_class` is unknown. *Fix:* decide
-  whether name+prediction divergence counts as distinctness (and how to
-  detect it), update the spec, then enforce.
+  identical on all four axes.~~ **Decided and shipped (#934):** prediction
+  divergence IS the distinctness — siblings must differ on a predicted
+  observable, and slots the alert has not settled stay `??` in
+  `parent_class` rather than being minted into a fork axis.
+  `validate._check_fork_distinctness` enforces the floor: live siblings
+  sharing `(parent hypothesis, anchor)` whose declared claims are identical
+  after case/whitespace normalization. The classification-keyed spelling
+  the rule was specified under does NOT ship — it would refuse the
+  `??/??/??` siblings this makes canonical. Semantic distinctness is not
+  detectable and stays the author's discipline.
 
-Both are spec-owner decisions, not validator bugs. File-and-hold here
-until the canonical SKILL is internally consistent.
+  What that drops, deliberately: #933's reproduction — two siblings both
+  on a CONCRETE `unclassified-process`, from a real 2026-08-13 run — now
+  passes as long as their claims differ, which is the right answer under
+  the new axis but is NOT what #933's ask 2 described ("the rule needs an
+  open-slot exemption before it can ship", i.e. `??` exempt and concrete
+  duplicates still refused). Nothing covers concrete duplicate
+  classifications any more, and nothing should: a shared concrete parent
+  class with divergent predictions is a legal fork.
+
+Both were spec-owner decisions, not validator bugs. The class-slot one
+stays file-and-hold here until the canonical SKILL is internally
+consistent; the fork one is closed.

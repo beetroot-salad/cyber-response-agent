@@ -400,6 +400,111 @@ def _check_prediction_refs(companion: CompanionBody) -> list[str]:
     return errors
 
 
+def _parent_hypothesis_id(hid: str) -> str:
+    """The hypothesis `hid` hangs under, or `""` for a top-level one.
+
+    `HYPOTHESIS_ID_RE` admits `h-001` and the hierarchical child `h-001-002`; only the second
+    has a parent, and it is the id minus its last segment. Read off the id because that is
+    where the dense form carries the relation — no row names a parent hypothesis.
+    """
+    head, _, _tail = hid.rpartition("-")
+    return head if "-" in head else ""
+
+
+def _normalized_claim(claim: Any) -> str:
+    """One claim, stripped of the differences that are not differences: case, inner
+    whitespace, and the sentence punctuation the model varies freely."""
+    if not isinstance(claim, str):
+        return ""
+    return " ".join(claim.lower().split()).strip(" .\"'")
+
+
+def _predicted_observables(hyp: HypothesisRecord) -> frozenset[str]:
+    """A hypothesis's declared claims, normalized for comparison against a sibling's.
+
+    BOTH prediction blocks, the way `_declared_prediction_ids` reads both: an `:H h-NNN
+    .attr_preds` row is a predicted observable too — the most concrete kind — so a pair that
+    forks only there is distinct and must not be refused. Its `target` and `attribute` join
+    the key, since predicting a different attribute of a different vertex is a difference even
+    when the claim text coincides.
+
+    The `.preds` `subject` cell is deliberately NOT part of the identity: the same claim filed
+    once under `proposed_parent` and once under `proposed_edge` still leaves no lead able to
+    split the two rows.
+    """
+    out = set()
+    for pred in hyp.get("predictions") or []:
+        if isinstance(pred, dict) and (claim := _normalized_claim(pred.get("claim"))):
+            out.add(claim)
+    for ap in hyp.get("attribute_predictions") or []:
+        if not isinstance(ap, dict):
+            continue
+        target = str(ap.get("target", "")).strip().lower()
+        attribute = str(ap.get("attribute", "")).strip().lower()
+        out.add(f"{target}.{attribute}={_normalized_claim(ap.get('claim'))}")
+    return frozenset(out)
+
+
+def _check_fork_distinctness(companion: CompanionBody) -> list[str]:
+    """Rule #23, which absorbed #35. Siblings — hypotheses sharing a parent hypothesis and an
+    anchor — must not predict the same observables.
+
+    Two spec rules described this check and neither had an implementation: #23 keyed on the
+    parent classification, #35 ("sibling prediction divergence") on the prediction signature.
+    #934 moved #23 onto the observable, which is what #35 already said, so they are one rule
+    here and #23 is the number that ships (`docs/investigation-language.md`). #35's signature
+    included `predictions[].subject`; this drops it, for the reason `_predicted_observables`
+    records.
+
+    The predicted observable is the axis, NOT `proposed_edge.parent_vertex.classification`
+    (SKILL.md §Sibling-fork uniqueness). Keying on the classification is the natural spelling
+    and the wrong one: the shape the SKILL now asks for is siblings that leave the slots the
+    alert has not settled `??` and fork in their predictions, so a classification-keyed check
+    would refuse exactly the well-formed fork and pass the malformed one that mints a tuple to
+    carry a difference the predictions already carry.
+
+    TEXTUAL identity is the floor, and the whole of what this can honestly test. Two claims can
+    say the same thing in different words and no validator will know; that stays the author's
+    discipline, which is why the message carries the rule rather than only naming the ids.
+
+    A hypothesis declaring NO predictions is exempt rather than treated as an empty set that
+    collides with its sibling's. The document is written by append: `:H hypothesize.hypotheses`
+    and the `:H h-NNN.preds` blocks arrive as separate writes, so the group is legally
+    predictionless between the two — refusing it would deny the write that is on its way to
+    satisfying the rule.
+
+    LIVE only, for the reason `_check_authz_contract_ids` records: `:H` rows are immutable, so
+    a collision already on disk is unrepairable under a declared-set reading and every later
+    write would be denied for a row the author may no longer touch. Refuting one of the two is
+    the in-grammar repair.
+    """
+    live = set(_walkers.live_hypothesis_ids(companion))
+    groups: dict[tuple[str, str], dict[frozenset[str], list[str]]] = {}
+    for hid, hyp in _walkers.all_hypotheses(companion).items():
+        if hid not in live:
+            continue
+        claims = _predicted_observables(hyp)
+        if not claims:
+            continue
+        key = (_parent_hypothesis_id(hid), str(hyp.get("anchor") or ""))
+        groups.setdefault(key, {}).setdefault(claims, []).append(hid)
+    errors: list[str] = []
+    for (_parent, anchor), by_claims in groups.items():
+        for hids in by_claims.values():
+            if len(hids) < 2:
+                continue
+            errors.append(
+                f"hypotheses {', '.join(sorted(hids))} anchor on {anchor or '?'} and predict "
+                f"the same observables — siblings must differ on at least one predicted "
+                f"observable, the claim a lead splits them on. A different `?name` or "
+                f"`parent_class` is not that difference: leave the slots the alert has not "
+                f"settled `??` and write the difference as a prediction. If the two readings "
+                f"share a cause and differ only on whether it was authorized, they are ONE "
+                f"hypothesis with an `:H h-NNN.authz` contract"
+            )
+    return errors
+
+
 def _check_authz_contract_ids(companion: CompanionBody) -> list[str]:
     """An `ac*` id is declared by AT MOST ONE LIVE hypothesis.
 
@@ -1672,6 +1777,7 @@ def diagnose(
         companion, deferred=deferred_hypothesis_ids(warnings),
     )))
     found.extend(_plain(_check_prediction_refs(companion)))
+    found.extend(_plain(_check_fork_distinctness(companion)))
     found.extend(_plain(_check_authz_contract_ids(companion)))
     found.extend(_plain(_check_tested_commitment_refs(companion)))
     found.extend(_plain(_check_strong_move_provenance(companion)))

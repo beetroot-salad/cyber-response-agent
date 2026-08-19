@@ -50,7 +50,7 @@ The audit is normative — it answers what each rule is *for*, not how often it 
 
 **#22 Attribute-update target shape.** Validates `attribute_updates.target` is exactly one of `v-{id}` or `e-{id}` and resolves. Prevents enrichments pointing at nothing. (Reference integrity.)
 
-**#23 Hypothesis fork distinctness.** Validates siblings don't share `parent_vertex.classification`. Prevents redundant forks — same upstream entity hypothesized twice with different lead requirements. Branch hygiene.
+**#23 Hypothesis fork distinctness.** Validates each live sibling pair that has declared predictions differs on at least one — `.preds` claim or `.attr_preds` `(target, attribute, claim)`. Prevents redundant forks — the same story under two ids, which no lead can split. Classification is not the axis: siblings legitimately share an open `parent_class` (#934). Absorbs #35. Textual floor only; semantic equivalence is invisible to it. Branch hygiene.
 
 **#24 Hypothesis persistence at CONCLUDE.** Validates every hypothesis whose final weight isn't `--` appears in `surviving_hypotheses`. Prevents silent drops at REPORT — agent declaring benign while quietly forgetting an unresolved hypothesis.
 
@@ -74,7 +74,7 @@ The audit is normative — it answers what each rule is *for*, not how often it 
 
 **#34 Prediction closure at CONCLUDE.** Validates every `p*`/`ap*` on a non-refuted, non-shelved hypothesis is cited in some resolution OR deferred with rationale. Prevents predictions declared at PREDICT then walked past — closes the contract ANALYZE owes PREDICT (late gate; #6 is the early gate).
 
-**#35 Sibling prediction divergence.** Validates siblings don't share identical prediction signatures (`(subject, claim)` and `(target, attribute, claim)` tuples). Prevents degenerate forks where ANALYZE has no way to discriminate; forces predictions to be the discriminator they claim to be.
+**#35 Sibling prediction divergence.** *Merged into #23 (#934).* It validated siblings don't share identical prediction signatures (`(subject, claim)` and `(target, attribute, claim)` tuples) — which is what #23 checks once the distinctness axis moved off classification. One check, one number; #23 is the one that ships.
 
 ## Failure-mode clusters
 
@@ -89,7 +89,7 @@ Grouping rules by the *kind* of failure they prevent makes the structure visible
 | **E. Weight grounding (safety)** | 4, 5, 6, 14 | Vibes-driven weight movement; weak grounding laundering into strong weight |
 | **F. Authorization integrity (safety)** | 11, 21, 26, 27, 28 | Silent benign verdicts on unproven activity; precedent-loop laundering |
 | **G. Identity-of-use (safety)** | 32 | Impostor-with-stolen-credentials invisibility |
-| **H. Sibling / fork hygiene** | 23, 25, 35 | Redundant forks; cross-sibling citation; non-discriminating forks |
+| **H. Sibling / fork hygiene** | 23, 25 | Redundant forks; cross-sibling citation; non-discriminating forks |
 | **I. Closure at CONCLUDE** | 24, 26, 31, 34 | Silent drops at REPORT (hypotheses, contracts, impact-preds, predictions) |
 | **J. Impact axis structure** | 29, 30, 31 | Ungradeable thresholds; retroactive threshold shift; per-instance fields fed category-grounding |
 | **K. SCREEN safety** | 16, 17 | Misuse of fast-path; hybrid bogus companions |
@@ -114,7 +114,7 @@ Several rules appear in multiple clusters because they enforce more than one pro
 - #2, #3 (vocabulary)
 
 **Discipline rules (load-bearing for hypothesis dynamics, but more recoverable):**
-- #5, #6, #25, #35, #23, #18, #29, #33 — fork hygiene, prediction shape, citation discipline. If these failed, the agent could still produce dispositions; downstream queries and discriminative power would degrade.
+- #5, #6, #25, #23, #18, #29, #33 — fork hygiene, prediction shape, citation discipline. If these failed, the agent could still produce dispositions; downstream queries and discriminative power would degrade.
 
 **Perimeter rules (corner cases):**
 - #13 (severity-ceiling shape), #16, #17 (SCREEN), #27, #28 (past-case)
@@ -146,7 +146,7 @@ Rules that *prevent failures the current agent prompts already prevent* are dead
 - **#10** — review-enforced today; instrumenting requires writing the check.
 - **#16, #17** — depend on SCREEN usage rate; if SCREEN rarely matches, these guard rare paths.
 - **#28** — past-case-of-past-case is plausibly never written; rule may be aspirational.
-- **#23 vs #35** — likely co-fire; corpus would show whether one ever fires alone.
+- **#23** — one rule since #934 merged #35 into it; a corpus fire-rate would now say whether ANY fork is authored non-discriminating, not which of two numbers caught it.
 
 A rule with zero corpus fires is *not* automatically dead — it might be load-bearing as a guarantee that's never tested because the agent doesn't try. But it's the right starting point for empirical pruning.
 

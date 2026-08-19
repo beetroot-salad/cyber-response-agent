@@ -73,7 +73,11 @@ the type has one).
 
 Each slot enum is available via `enum {slot}` (e.g. `enum compute.role`,
 `enum identity.kind`, `enum application.vendor`). `:H parent_class`
-follows the same grammar as `:V class`, dispatched on `parent_type`.
+follows the same grammar as `:V class`, dispatched on `parent_type`, and
+takes `??` in the slots the alert has not settled (`ip-only/??/??`).
+`??` and `unclassified-{type}` are not interchangeable: only `??` reads
+as open (§Open questions), so a slot a lead is meant to close is `??`,
+while `unclassified-*` says the catalog has no fitting value.
 
 When the observation is just an IP with no role/zone context, use
 `role=ip-only`. Set `attrs.knowledge=partial`. Zone and provenance
@@ -168,6 +172,11 @@ slot of the class tuple or as an attribute value. Resolve via
 NO vertices is blocked too, for the same reason rather than a different
 one: with nothing declared there is no slot to resolve, and "every slot
 is resolved" would otherwise be satisfied by never declaring one.
+
+A `:H parent_class` slot is not a vertex cell and does not gate. The
+proposed parent is a claim the run has not observed, and no
+`:R attr_updates` row can target an `h-*` to close it — leaving it `??`
+costs the close nothing.
 
 ## Core blocks
 
@@ -441,8 +450,8 @@ v-002|socket|dns-name|beacon.example.com|protocol=dns;queried_subdomain=2obsn5wm
 e-001|connected_to|v-001|v-002|2026-04-18T08:04:42Z|siem-event:siem|subdomain=2obsn5wmcw6lyp;query_type=A
 
 :H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]
-h-001|?tracking-sdk-process|v-001|runs_on|process|unclassified-process||null|active
-h-002|?adversary-implant|v-001|runs_on|process|unclassified-process||null|active
+h-001|?tracking-sdk-process|v-001|runs_on|process|??||null|active
+h-002|?adversary-implant|v-001|runs_on|process|??||null|active
 
 :H h-001.preds [id|subject|claim]
 p1|proposed_parent|"subdomain is a stable device fingerprint, reused across all queries to this domain"
@@ -455,12 +464,10 @@ p2|proposed_parent|"queries cluster in rapid-fire bursts (multiple distinct subd
 
 Both rows anchor on `v-001` (a vertex), not `e-001` (the edge). The
 discovery question is "what process upstream of v-001" — the host
-is where the upstream process lives. `parent_class` is
-`unclassified-process` because the basename isn't known yet; the
+is where the upstream process lives. `parent_class` is `??` because
+the basename isn't known yet and a lead is what names it; the
 hypotheses fork on the *named story* (the `?name`) and its
-predictions, not on `parent_class`. (If predictions could be expressed
-as `parent_class` alternatives that fit the closed catalog, prefer
-that; otherwise carry the discriminator in the `?name` + predictions.)
+predictions, not on `parent_class`.
 
 Keep commitments lean: one proposed upstream vertex plus one edge.
 1–2 predictions per hypothesis. `refutes` is a comma-separated list of
@@ -474,7 +481,7 @@ whose results raised it:
 
 ```invlang
 :H l-002.new_hypotheses [id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]
-h-010|?stager-dropped-payload|v-001|runs_on|process|unclassified-process||null|active
+h-010|?stager-dropped-payload|v-001|runs_on|process|??||null|active
 
 :H h-010.preds [id|subject|claim]
 p1|proposed_parent|"the writing process is short-lived and not a package manager"
@@ -513,14 +520,30 @@ provenance rather than widening the authz predicate.
 
 ## Sibling-fork uniqueness
 
-Sibling hypotheses must differ on at least one **topological** axis:
-`parent_type`, `parent_class`, `attached_to`, or `rel`.
+Sibling hypotheses must differ on at least one **predicted observable**
+— the claim a lead splits them on. Topology may differ too, but it is
+not what makes the fork legal: a class tuple minted to carry a
+difference the predictions already carry is what makes it illegal.
+Leave the slots the alert has not settled `??` and let the predictions
+fork, the way §Discovery hypotheses forks two parents that share one
+`parent_class`; "what kind of entity is this?" is a refinement the same
+lead answers under either story (§Open questions). Write the
+discriminating claim on its own: packed in with where the parent sits
+("external source, failing at high rate"), it is half-matched by a
+lookup that says nothing about rate.
 
-**Legitimacy is not a topological axis.** When two candidates share
+**Legitimacy is not a competing cause.** When two candidates share
 topology but differ only on "was this action authorized?", collapse
 them into ONE hypothesis with an `:H h-NNN.authz` contract carrying
 the legitimacy question. Forks enumerate competing upstream **causes**,
 not competing interpretations of the same cause.
+
+Integrity is the one reading that IS a competing cause. "Was the
+claimed actor the actor?" is not answered by any authority, so it
+forks: a `?adversary-controlled-<entity>` peer beside the routine
+hypothesis, sharing its authz contract and differing on the
+predictions that test the premise. Collapsing that peer is what
+`integrity_waived` exists to make you say out loud.
 
 **Wrong:**
 
@@ -530,22 +553,29 @@ h-001|?legitimate-admin-gpo-edit|v-003|modified|identity|service-account/known-c
 h-002|?adversary-credential-abuse|v-003|modified|identity|service-account/known-corp||null|active
 ```
 
-Both rows share every topological column. Only intent varies —
-pointless enumeration.
+Both rows propose the same cause. Only intent varies — pointless
+enumeration.
 
 **Right:**
 
 ```invlang
 :H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]
 h-001|?gpo-edit-via-it-admin-svc|v-003|modified|identity|service-account/known-corp||null|active
+h-002|?adversary-controlled-it-admin-svc|v-003|modified|identity|service-account/known-corp||null|active
 
 :H h-001.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
 ac1|e-002|iam-policy|"IT-admin-svc permitted to modify Default Domain Policy at this time"|escalate|escalate
 ac2|e-002|change-mgmt|"approved change ticket exists for this GPO edit at this time"|escalate|escalate
+
+:H h-002.preds [id|subject|claim]
+p1|proposed_parent|"the edit runs from a host, and at an hour, this account has no baseline for"
 ```
 
-One hypothesis names the observed topology. Two authz contracts encode
-the legitimacy question. Resolution drives disposition.
+One hypothesis names the observed topology and two authz contracts
+encode the legitimacy question. The peer carries the premise no
+authority answers, on predictions rather than a contract — the two
+share every topological column and the contract, and fork on the
+observable. Resolution drives disposition.
 
 ## Authoring discipline
 

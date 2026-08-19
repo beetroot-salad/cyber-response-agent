@@ -165,8 +165,12 @@ hooks). The gates:
   and framing their own log would teach them to distrust themselves.
 
 Still out of scope (port later if a case demands it): report-consistency
-judges, the phase state machine, class-slot grammar vocab, and sibling-fork
-topological uniqueness. Two further invlang spec rules (per-type class-slot
-grammar, sibling-fork uniqueness) are *not* yet enforced because the spec's
-own examples currently contradict them — see
+judges, the phase state machine, and class-slot grammar vocab — the last
+because the spec's own examples contradict the per-type slot grammar. See
 `docs/decisions/defender-invlang-enforcement-ramp.md`.
+
+Sibling-fork uniqueness WAS on that list for the same reason and no longer
+is: #934 made the predicted observable the distinctness axis, and
+`validate._check_fork_distinctness` enforces the textual floor over the
+declared claims — live siblings, same anchor, identical claim sets. What
+two claims MEAN stays the author's discipline; no validator reads that.

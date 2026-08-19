@@ -69,16 +69,22 @@ def _build_parser() -> argparse.ArgumentParser:
     ps = sub.add_parser(
         "hypothesis-shape",
         help="Cross-case ?hypothesis-names used for a given discovery "
-             "topology (parent_type, parent_class, rel, attached_to_type). "
-             ":H is discovery-only: anchors are v-* ids. Class-refinement "
-             "questions use `??` / `{...}` on the prologue entry and don't "
-             "surface here. Cross-signature: same shape recurs across rules.",
+             "shape (parent_type, parent_class, rel, attached_to_type). "
+             ":H is discovery-only: anchors are v-* ids. Since #934 an "
+             "unsettled `:H parent_class` is written `??`, so a fork whose "
+             "parent the alert has not placed files under that key rather "
+             "than under a minted tuple — filter on --parent-type / --rel "
+             "for those. Cross-signature: same shape recurs across rules.",
     )
     ps.add_argument("--parent-type",
                     help="Exact match on :H parent_type (closed vocab).")
     ps.add_argument("--parent-class",
                     help="fnmatch pattern on :H parent_class "
-                         "(e.g. 'bastion/*', '*/internal/*').")
+                         "(e.g. 'bastion/*', '*/internal/*'). `?` is a "
+                         "single-character WILDCARD here, so '??' also "
+                         "matches any two-character class; to reach the "
+                         "open-parent rows and nothing else, write "
+                         "'[?][?]' (or '[?][?]/[?][?]/[?][?]').")
     ps.add_argument("--rel",
                     help="Exact match on :H rel.")
     ps.add_argument("--attached-to-type",

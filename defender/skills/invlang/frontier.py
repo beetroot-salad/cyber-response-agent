@@ -12,6 +12,13 @@ invlang closes open things two ways, and the frontier is typed to match (SKILL.m
   * an `ac<n>` authorization contract declared under `:H h-NNN.authz`, closed by a
     `:R authz` row carrying an `authorized` verdict. EDGE-anchored, via `edge_ref`.
 
+Two ways is still the whole census AFTER #934 put a third `??` on the page. That change
+makes `??` the canonical `:H parent_class` for a fork whose parent the alert has not
+placed — but a proposed parent is not a vertex the run observed, no `:R attr_updates` row
+may target an `h-*` to close it, and the benign gate does not read it. It is an open thing
+invlang never CLOSES, so it is absent here by the same rule that admits the two above,
+not by oversight.
+
 Impact contracts (`ip*`) are deliberately absent: SKILL.md:19 names them in prose, but
 there is no `ip` sub-block in the parser's `_HYP_PREFIX_RE`, no TypedDict, and
 `COMMITMENT_ID_RE` does not admit the id — only the `:R impact` RESOLUTION side exists.
