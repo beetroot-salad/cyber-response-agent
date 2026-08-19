@@ -576,8 +576,8 @@ e-001|modified|v-001|v-002|2026-05-05T02:14:01Z|siem-event:siem|checksum_before=
 
 ```invlang
 :H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]
-h-001|?managed-package-upgrade|v-002|modified|process|package-manager||null|active
-h-002|?adversary-controlled-write|v-002|modified|process|adversary-shell||null|active
+h-001|?managed-package-upgrade|v-002|modified|process|??||null|active
+h-002|?adversary-controlled-write|v-002|modified|process|??||null|active
 
 :H h-001.preds [id|subject|claim]
 p1|proposed_parent|"upgrade event in apt history at modification time"
@@ -666,10 +666,10 @@ read the YAML frontmatter `description:` of each file, and load the
 body only when the alert shape matches:
 
 - `defender/examples/example-b-parallel-iam-cmdb.md` — two parallel
-  registry leads (CMDB + IAM), `indeterminate`-authz forcing a Loop-2
-  host-state follow-up. Read when an alert involves a registry/identity
-  question or you're about to bundle multiple registry checks into one
-  composite lead.
+  registry leads (CMDB + IAM), an unanswered authz contract forcing a
+  Loop-2 host-state follow-up. Read when an alert involves a
+  registry/identity question or you're about to bundle multiple
+  registry checks into one composite lead.
 - `defender/examples/example-c-cumulative-escalation.md` — three
   parallel competing hypotheses where none reaches `++` but the
   cumulative circumstantial pattern justifies escalation. Read when

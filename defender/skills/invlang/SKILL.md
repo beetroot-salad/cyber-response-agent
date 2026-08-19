@@ -450,8 +450,8 @@ v-002|socket|dns-name|beacon.example.com|protocol=dns;queried_subdomain=2obsn5wm
 e-001|connected_to|v-001|v-002|2026-04-18T08:04:42Z|siem-event:siem|subdomain=2obsn5wmcw6lyp;query_type=A
 
 :H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]
-h-001|?tracking-sdk-process|v-001|runs_on|process|unclassified-process||null|active
-h-002|?adversary-implant|v-001|runs_on|process|unclassified-process||null|active
+h-001|?tracking-sdk-process|v-001|runs_on|process|??||null|active
+h-002|?adversary-implant|v-001|runs_on|process|??||null|active
 
 :H h-001.preds [id|subject|claim]
 p1|proposed_parent|"subdomain is a stable device fingerprint, reused across all queries to this domain"
@@ -464,8 +464,8 @@ p2|proposed_parent|"queries cluster in rapid-fire bursts (multiple distinct subd
 
 Both rows anchor on `v-001` (a vertex), not `e-001` (the edge). The
 discovery question is "what process upstream of v-001" — the host
-is where the upstream process lives. `parent_class` is
-`unclassified-process` because the basename isn't known yet; the
+is where the upstream process lives. `parent_class` is `??` because
+the basename isn't known yet and a lead is what names it; the
 hypotheses fork on the *named story* (the `?name`) and its
 predictions, not on `parent_class`.
 
@@ -481,7 +481,7 @@ whose results raised it:
 
 ```invlang
 :H l-002.new_hypotheses [id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]
-h-010|?stager-dropped-payload|v-001|runs_on|process|unclassified-process||null|active
+h-010|?stager-dropped-payload|v-001|runs_on|process|??||null|active
 
 :H h-010.preds [id|subject|claim]
 p1|proposed_parent|"the writing process is short-lived and not a package manager"

@@ -130,13 +130,18 @@ error rather than letting the write through. Scope is anchored to
    claim the cited observation settled.
 
 Pre-MVP, historical runs on earlier invlang variants are expected to fail
-— intentional. `test_skill_worked_examples_all_pass` (per-fence grammar)
-plus `test_skill_example_a_accumulates_clean` (the flagship example
-validated as the hook sees it — fences applied in order with append-only
-re-checked) guard that the runtime SKILL never teaches invlang the hook
-blocks. The stale Example A (`type=endpoint`, `file:binary`, prose-cited
-resolutions, a bare `provenance` attr key) was fixed to current grammar
-as part of this work.
+— intentional. Two guards were named here for the claim that the runtime
+SKILL never teaches invlang the gate blocks, and NEITHER existed in this
+repo: `test_skill_worked_examples_all_pass` and
+`test_skill_example_a_accumulates_clean`. In their absence
+`examples/example-b` shipped anchoring both hypotheses on an edge id (7
+parse warnings, the whole `:H` block dropped) and `example-c` shipped two
+vocabulary renames behind the enum. `defender/tests/test_shipped_invlang
+_documents.py` is the guard those names promised — every shipped document
+parse-clean and gate-clean, plus Example A validated as the gate sees it,
+fences applied in order (#934). The stale Example A (`type=endpoint`,
+`file:binary`, prose-cited resolutions, a bare `provenance` attr key) was
+fixed to current grammar as part of the original work.
 
 **Open: two current-spec rules were deferred because the spec
 contradicted its own worked examples.** Don't enforce one until its spec

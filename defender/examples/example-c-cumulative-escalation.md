@@ -9,23 +9,24 @@ Behavioral signature `egress-dns-query-to-rare-tld` fires on a domain (`telemetr
 
 ```invlang
 :V prologue.vertices [id|type|class|ident|attrs?]
-v-001|endpoint|endpoint:linux|build-runner-07.ci|role=stateless-ci-runner
-v-002|process|process:node|node[2188]|cmdline_via=npm-exec
-v-003|endpoint|endpoint:dns-name|telemetry-collect.live|first_seen_org=2026-05-04T22:11Z
-v-004|package|package:npm|@quickmetrics/runtime-collector@0.1.2|published=2026-05-04T20:50Z
+v-001|compute|build-runner/internal/known-corp|build-runner-07.ci|kind=vm;os=linux;role_note=stateless-ci-runner
+v-002|process|node|node[pid=2188]|cmdline="npm exec quickmetrics-collect"
+v-003|socket|dns-name|telemetry-collect.live|protocol=dns;first_seen_org=2026-05-04T22:11Z
+v-004|module|npm-package|@quickmetrics/runtime-collector@0.1.2|published=2026-05-04T20:50Z
 
 :E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]
-e-001|queried_dns|v-002|v-003|2026-05-05T...|siem-event:siem|cadence=~30min;count_24h=47
-e-002|loaded|v-002|v-004|2026-05-05T...|runtime-audit:github-runner|via=npm-install
+e-001|connected_to|v-002|v-003|2026-05-05T02:14:07Z|siem-event:siem|protocol=dns;cadence=~30min;count_24h=47
+e-002|loaded_by|v-002|v-004|2026-05-05T01:58:40Z|runtime-audit:github-runner|via=npm-install
+e-003|runs_on|v-002|v-001||inferred-structural:runtime|
 ```
 
-PLAN authors three competing causes under `v-002`'s `loaded`/`queried_dns` parents. What splits them is their predictions — each names an observable the other two do not; the `parent_class` cells differ because these parents ARE different kinds of entity, not to carry the fork (§Sibling-fork uniqueness):
+PLAN authors three competing causes for the egress: which module inside `node[2188]` issues the queries. All three propose the same kind of parent and leave its identity `??` — the alert has not named it, and naming it is what the leads are for. What splits them is their predictions, each naming an observable the other two do not (§Sibling-fork uniqueness):
 
 ```invlang
 :H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]
-h-001|?legitimate-dependency-telemetry|v-002|loaded|package|legitimate-published-library||null|active
-h-002|?developer-tooling-phone-home|v-002|queried_dns|process|build-tool||null|active
-h-003|?malicious-dependency-c2|v-002|loaded|package|adversary-published-library||null|active
+h-001|?declared-package-telemetry|v-002|loaded_by|module|??||null|active
+h-002|?ci-tooling-phone-home|v-002|loaded_by|module|??||null|active
+h-003|?post-install-implant|v-002|loaded_by|module|??||null|active
 
 :H h-001.preds [id|subject|claim]
 p1|proposed_parent|"package source repo declares telemetry endpoint and opt-out"
@@ -34,7 +35,7 @@ p1|proposed_parent|"package source repo declares telemetry endpoint and opt-out"
 r1|p1|"no documented telemetry, or endpoint not declared in source"
 
 :H h-001.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
-ac1|proposed|org-policy|"CI runner egress to package telemetry endpoints permitted"|escalate|escalate
+ac1|e-001|endpoint-policy|"CI runner egress to package telemetry endpoints permitted"|escalate|escalate
 
 :H h-002.preds [id|subject|claim]
 p1|proposed_parent|"node child of npm-exec under github-runner job, no other runtime in process tree"
@@ -58,7 +59,7 @@ l-003|1|destination-ip-reputation|v-003|h-001,h-003|siem|90d
 
 PLAN issued three leads in one turn — each discriminates a different pair on the observable that pair predicts differently, and together they triangulate the parent. Dispatched as three parallel `Task` calls. Gather mints whichever templates the catalog lacks.
 
-ANALYZE on returned summaries (`gather_raw/0..2.json`):
+ANALYZE on returned summaries (`gather_raw/{lead_id}/`):
 
 - `l-001`: maintainer profile shows zero other packages, account created 2026-04-19; package source repo (a single-commit GitHub repo) declares no telemetry mechanism and the binding to `telemetry-collect.live` is in a post-install script obfuscated via base64.
 - `l-002`: process tree confirms `node[2188]` is a child of the github-runner job, but the queries continue 17 minutes past job exit — the daemon does not terminate.
@@ -66,12 +67,12 @@ ANALYZE on returned summaries (`gather_raw/0..2.json`):
 
 ```invlang
 :T resolutions
-h-001  null → --   [l-001 r1 severe ⟂ source repo declares no telemetry; binding is in obfuscated post-install]
-h-002  null → -    [l-002 r1 weak ⟂ daemon outlives job, but a CI-tool phone-home that survives job exit is unusual rather than refuted outright]
-h-003  null → +    [l-001 p1 + l-003 p1,p2 moderate ⟂ recent maintainer with no other packages, IP registered just before publication, SNI/host mismatch — circumstantial pattern, no confirmed C2 channel observed]
+h-001  null → --   [l-001 r1 severe ⟂ e-002 :: source repo declares no telemetry; binding is in an obfuscated post-install script]
+h-002  null → -    [l-002 r1 mild ⟂ e-001 :: daemon outlives job, but a CI-tool phone-home that survives job exit is unusual rather than refuted outright]
+h-003  null → +    [l-001 p1 mild ⟂ e-002 :: recent maintainer with no other packages; l-003 p2 mild ⟂ e-001 :: IP registered just before publication, SNI/host mismatch — circumstantial, no C2 channel observed]
 ```
 
-No single lead reaches `++` on `?malicious-dependency-c2`: confirming
+No single lead reaches `++` on `?post-install-implant`: confirming
 C2 would require sandbox detonation or traffic-content inspection, and
 neither is in the runtime tool surface. The path of least resistance
 (stop at three `+`/`-`) underweights the integration. REPORT escalates
@@ -80,9 +81,10 @@ on the cumulative pattern.
 ```invlang
 :T conclude
 termination.category   exhaustion-escalation
-termination.rationale  "?malicious-dependency-c2 cannot be driven to -- with available tooling; circumstantial pattern is decision-relevant"
+termination.rationale  "?post-install-implant cannot be driven to ++ with available tooling; circumstantial pattern is decision-relevant"
 disposition            inconclusive
 confidence             medium
+impact_verdict         none-detected
 matched_archetype      novel-dependency-with-anomalous-egress
 summary                "build-runner-07.ci is making periodic queries to a recently-registered domain via a post-install daemon in a freshly-published npm package by a single-package maintainer. Legitimate-telemetry path is refuted; malicious-C2 path is supported circumstantially but cannot be confirmed in-loop. Hand off for sandbox detonation + maintainer review."
 ```
