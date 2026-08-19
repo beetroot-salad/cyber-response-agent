@@ -564,7 +564,7 @@ def test_index_cli_applies_to_filter(tmp_path: Path):
     ctx = _isolate(tmp_path)
     _write_lesson(ctx["lessons"], "cover-prereqs", {
         "techniques": ["T1036"], "mutable": False,
-        "applies_to": ["svc-monitoring-cadence-baseline", "authorized-keys-host-cr-baseline"],
+        "applies_to": ["svc-monitoring-cadence-baseline", "fixture-authkeys-cr-subject"],
         "relevance_criteria": "cover on pre-existing infra",
     })
     _write_lesson(ctx["lessons"], "unrelated", {
@@ -577,7 +577,7 @@ def test_index_cli_applies_to_filter(tmp_path: Path):
         "relevance_criteria": "no applies_to key at all",
     })
     _run = _index_cli_runner(ctx)
-    out = _run(["--applies-to", "authorized-keys-host-cr-baseline"])
+    out = _run(["--applies-to", "fixture-authkeys-cr-subject"])
     assert "cover-prereqs" in out
     assert "unrelated" not in out
     assert "no-applies" not in out

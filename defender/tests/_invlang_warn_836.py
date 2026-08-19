@@ -23,7 +23,7 @@ TWO FIXTURE FACTS ARE LOAD-BEARING AND EASY TO GET WRONG:
     CHECK, not the measured `ident` population") made into a fixture rule.
   * every `:R attr_updates` row targets a vertex the `:V` block DECLARES. H8 mints a refusal
     for a refinement naming an undeclared vertex (PR-11: today it lands with zero diagnostics
-    and `_effective_vertex_state` fabricates the vertex), so an undeclared target would add a
+    and `effective_vertex_state` fabricates the vertex), so an undeclared target would add a
     SECOND, error-severity diagnostic and turn a warn-only fixture into a refused one.
 
 Symbols this spec MINTS are imported inside function bodies, never at module scope: the suite

@@ -869,9 +869,144 @@ def _tool_append_block(deps: AgentDeps, text: str) -> str:
     # only come from a SECOND derivation here, over the bytes just written. Deriving in memory
     # keeps it deterministic without a re-read.
     warn = _warn_over(new_text)
+    recall = _frontier_recall(deps, current, new_text)
     if warn:
-        return _warning_return(f"{lead} — the block LANDED.", warn)
-    return lead
+        # INSIDE the warning return, not stapled after it. `_warning_return` ends with the
+        # `fix_row` instruction, and on this path that is the only legal next call — the next
+        # `append_block` is hard-refused by `flagged_diagnostics`. Appending the lessons block
+        # after it would put ~30 lines of precedent between the model and the one action it
+        # can take.
+        return _warning_return(f"{lead} — the block LANDED.{recall}", warn)
+    return lead + recall
+
+
+def _frontier_recall(deps: AgentDeps, before: str, after: str) -> str:
+    """Lessons for what this append left OPEN — appended to the return, or "" (#919).
+
+    Keyed on the invlang FRONTIER (`skills/invlang/frontier.py`), not on the alert
+    signature. A lesson about what a field licenses is relevant once the field is in hand,
+    which is a fact about the document at loop N, not about which rule fired at loop 0 —
+    `runtime/orient.py` keys the cold-start block on the signature because at that point no
+    document exists yet, and that is the only place the signature is the best available key.
+
+    ON CHANGE, not on every write. The pre- and post-append documents are both already in
+    hand here, so the diff costs nothing and needs no state to remember what was said last:
+    the model gets a lessons block exactly when its own append moved the frontier, instead
+    of the same three lines re-stapled to every write until it stops reading them.
+
+    DERIVED, NEVER STORED, like the repair window above — nothing caches this, so it cannot
+    go stale or disagree with the file.
+
+    NOT gated by `permission.decide_read`, deliberately. The gate governs what the MODEL may
+    read; this is the runtime composing text to hand it, the same way `runtime/orient.py`
+    assembles the cold-start lessons block without one. The corpus is a fixed internal path
+    under `defender_dir`, never an operand the model supplies, so there is no path here for
+    it to steer — and the model receives rendered text, not a read capability it can reuse.
+
+    FAILS OPEN, and that is not optional: every caller reaches here AFTER the bytes have
+    landed, so an exception raised for a missing corpus or an unreadable frontier would
+    surface to the model as a failed tool call on a write that actually succeeded — the
+    exact lie `_warn_over` fails open to avoid.
+    """
+    try:
+        from defender._corpus import iter_lessons
+        from defender.scripts.lessons.lessons_frontier import (
+            match_loaded,
+            render,
+        )
+        from defender.skills.invlang.frontier import frontier_from_text
+
+        corpus = deps.defender_dir / "lessons"
+        if not corpus.is_dir():
+            # LOUD, on the same terms `frontier_from_text` states: a corpus that is not there
+            # produces the same silence as a corpus that matched nothing, and SKILL.md tells
+            # the model to read that silence as "nothing NEW matched". A mis-resolved
+            # `defender_dir` would otherwise disable the lane for the whole run with no
+            # exception, no test red, and no operator signal.
+            print(f"[tools] no lessons corpus at {corpus}; omitting recall", file=sys.stderr)
+            return ""
+        # THE FRONTIER is the cheap gate, and it is also the one SKILL.md states ("appears
+        # only when your append *changed* what is open"). `Frontier` is a frozen dataclass of
+        # tuples of frozen dataclasses, so `==` is exact, and `match_lessons`/`render` are
+        # pure functions of `(frontier, corpus)` — an unchanged frontier cannot change the
+        # block. Checking it first skips the corpus walk, which is the dominant cost here:
+        # `iter_lessons` re-reads and re-YAML-parses every lesson file on every call. It skips
+        # it on a MINORITY of appends, though, not "most" — `held` accumulates, so any append
+        # declaring a `:V` row moves the frontier. Replaying the repo's own investigations
+        # fence-by-fence, it fires on roughly half.
+        #
+        # The fence test below is the gate that actually is cheap, and it is exact:
+        # `parse_dense_companion` reads ONLY ```invlang fences and ignores every other
+        # byte, so an append that adds no fence delimiter cannot add, close, or alter one —
+        # the parse, and therefore the frontier, is identical. Prose narration between blocks
+        # is an ordinary shape on this loop and an empty `text` is an explicitly supported
+        # one; both would otherwise pay two full parses of a document
+        # growing toward the 65536-byte cap to discover they changed nothing. Guarded on
+        # `after` EXTENDING `before` so it can only fire for `append_block` — `fix_row` rewrites
+        # in place and is never a prefix extension.
+        #
+        # The window reaches TWO BYTES BACK into `before`, so a delimiter that straddled the
+        # seam — an on-disk document ending in a truncated ``` and an append supplying the last
+        # backtick — could not close a fence behind a gate that said it could not.
+        #
+        # BELT AND BRACES, not a live case: `_tool_append_block` inserts `sep = "\n"` whenever
+        # `current` does not already end in a newline, so today no ``` can span the join at
+        # all. The two bytes cost nothing and are what keeps this gate correct if that
+        # separator rule is ever relaxed; do not read them as evidence the straddle happens.
+        if before and after.startswith(before) and "```" not in after[max(0, len(before) - 2):]:
+            return ""
+        now_frontier = frontier_from_text(after)
+        was_frontier = frontier_from_text(before)
+        if now_frontier == was_frontier:
+            return ""
+        if now_frontier.is_empty():
+            return ""
+        # ONE walk for the two frontiers below. `iter_lessons` re-opens and re-YAML-parses
+        # every file in the corpus per call, and it is the dominant cost here — the two scores
+        # are pure functions of the same bytes, which cannot change between them.
+        lessons = list(iter_lessons(corpus))
+        hits = match_loaded(now_frontier, lessons)
+        # The second gate is what keeps a MOVE that changed no lesson quiet — the frontier can
+        # open a slot no selector speaks to, and re-stapling the same three lines then teaches
+        # the model to stop reading them.
+        #
+        # Compared on `(path, score)` — WHICH lessons and in what order — rather than on the
+        # rendered text, which would cost a `yaml.safe_dump` of three lessons' frontmatter plus
+        # three `Path.resolve()` realpath syscalls built and thrown away one expression later,
+        # on every frontier-moving write.
+        #
+        # NOT on `matched`, which is the trap: it names whichever frontier item won
+        # `_best_match`'s `max`, and `max` returns the FIRST maximal element — so declaring a
+        # second, equally-scoring vertex flips the winner and re-emits a block whose lesson set,
+        # ranking and frontmatter are byte-identical. Executed against
+        # `learning/runs/fresh-01/investigation.md`, fences 3 and 7 differ in exactly one line
+        # (`matched v-003 compute class=ip-only/??/??` -> `matched v-004 compute
+        # class=ip-only/??/known-corp`) and re-staple ~1.5KB of precedent the model already
+        # holds — the churn this gate exists to prevent. `matched` still RENDERS, because it is
+        # the model's only account of why a lesson was pushed; it just does not decide.
+        shape = [(h.path, h.score) for h in hits]
+        if not shape or shape == [
+            (h.path, h.score) for h in match_loaded(was_frontier, lessons)
+        ]:
+            return ""
+        now = render(hits)
+        # RECORDED, on the same terms a Read is. `lessons_loaded.jsonl` is the loop's only
+        # "was this lesson in context" signal and the post-merge control `learning/ops/
+        # trace_lesson.py` reasons from — and this block puts a lesson's description and
+        # dimensions in front of MAIN with enough to act on, since SKILL.md tells it to judge
+        # relevance from `description` and NOT to open the file to decide. A push that left no
+        # row would make a merged lesson look inert to the human reviewing its impact.
+        for hit in hits:
+            # RESOLVED, the same spelling `render` hands the model and the same one
+            # `_gated_read` records (it passes the post-`_resolve_operand` path).
+            # `record_lesson_load.lesson_name` gates on `p.parent.parent.name == "defender"`,
+            # so an unresolved `defender_dir` carrying a symlink or a `..` shows the block and
+            # writes no row — the lesson then reads as never-in-context to `trace_lesson`.
+            _record_lesson_load(deps, hit.path.resolve())
+        return "\n\n" + now
+    except Exception as e:  # noqa: BLE001 — fail open; the write already landed
+        print(f"[tools] frontier recall failed, omitting it: {e!r}", file=sys.stderr)
+        return ""
 
 
 def _warn_over(text: str) -> tuple[Diagnostic, ...]:
@@ -1068,7 +1203,14 @@ def _tool_fix_row(deps: AgentDeps, old_row: str, new_row: str) -> str:
         f"{verb} {len(whole)} flagged row(s) in investigation.md "
         f"({_utf8_len(new_text)} bytes total) — the change LANDED."
     )
-    return _warning_return(lead, _warn_over(new_text))
+    # `fix_row` is a first-class FRONTIER MUTATOR, not a cosmetic repair: the window is
+    # `:R attr_updates`-only, and those rows are exactly what closes an open slot — so a
+    # repair can close one and a delete re-opens it. Without this the move goes unannounced
+    # AND unannounceable: the next `append_block` reads the repair as part of its `before`,
+    # the two frontiers match, and the block is suppressed for good.
+    return _warning_return(
+        lead + _frontier_recall(deps, current, new_text), _warn_over(new_text)
+    )
 
 
 def register_tools(agent, tools: ToolSet, verbs: Any = None) -> None:

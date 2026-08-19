@@ -240,15 +240,37 @@ retrieval dimensions (inline lists):
 - `attack_phase` — the MITRE ATT&CK tactic(s) where the pitfall bites
   (tactic slugs, e.g. `lateral-movement`, `persistence`).
 
-**Discover at PLAN time, by dimension — do not eyeball the whole listing.**
-This signature's `source_signature` hits and the viable tags are already in the
-**Orientation → Lessons block** of your first message (`<path>\t<description>`) —
-scan those descriptions and Read the bodies that fit the lead you're about to
-write. You discover lessons against the lead once you know its telemetry source
-and the ATT&CK tactic your current hypothesis sits in. Use the `defender-lessons`
-shim to *widen* (by `telemetry_source` / `attack_phase`, or by dropping a
-pattern) beyond the signature hits already shown — it greps the **frontmatter
-only** (the body can't false-match a tag) and prints `<path>\t<description>`:
+Most also carry **state selectors**, keyed on your record rather than on the
+alert: the cells your `:V` / `:R` rows have settled, the ones they left `??`,
+and undischarged `ac<n>` contracts. A lesson whose trigger is a procedure
+rather than a fact carries none and is reached by grep.
+
+**Lessons come to you; you do not have to go and ask.** Two pushes:
+
+1. **Orientation → Lessons block** (first message) — this signature's
+   `source_signature` hits plus the viable tags, printed
+   `<path>\t<description>`. Keyed on the alert, because you have not written a
+   document yet for anything else to key on.
+2. **The `append_block` / `fix_row` return** (every loop) — up to three lessons
+   matched against your record, pushed when your write moved it. Each block
+   carries its own read instructions.
+
+**No block means nothing new reached the TOP THREE**, never that the corpus is
+exhausted and never that nothing matched: your write left the state where it
+was, nothing in it matched, or what it opened ranked below the three lessons
+you were already shown. Settled cells accumulate, so the top three stabilise as
+a run goes on — a question you open late can match a lesson and still be cut.
+**Widen with the shim whenever a question stays open**, and especially for the
+one you just opened.
+
+A fact you leave in prose reaches no lane at all — write what you observe into
+a `:V` / `:R` row. Recording `attrs.loginuid=-1` is what summons the lesson
+about what that value does and does not license.
+
+**The `defender-lessons` shim is for WIDENING** past what was pushed — by
+`telemetry_source` / `attack_phase`, or by dropping a pattern. It greps the
+**frontmatter only** (the body can't false-match a tag) and prints
+`<path>\t<description>`:
 
 ```bash
 # 1. See the viable tags first — only these values are worth grepping:
@@ -262,16 +284,15 @@ defender-lessons 'source_signature:.*<alert-rule-id>' \
                  'attack_phase:.*<tactic-of-current-hypothesis>'
 ```
 
-The printed `description` line is the scan surface: judge relevance from it,
-then **Read the full body of only the ones that fit** before writing your
-`:H` / `:L` blocks. Don't open a lesson to decide whether it's relevant —
-that's what the description is for. Widen by dropping a pattern if a narrow
-query returns nothing; a bare `defender-lessons` (whole-corpus
-`<path>\t<description>`) is the fallback, not the default. Bodies are short;
-they teach you what to *check next time*, not what conclusion to reach.
+Widen by dropping a pattern if a narrow query returns nothing; a bare
+`defender-lessons` (whole-corpus `<path>\t<description>`) is the fallback, not
+the default. The printed `description` is the scan surface here as it is in the
+pushed blocks: judge relevance from it and **Read the full body of only the
+ones that fit** — don't open a lesson to decide whether it is relevant. Bodies
+teach you what to *check next time*, not what conclusion to reach.
 
-(These dimensions are unproven retrieval keys on the defender corpus — we're
-running them grep-only, no index, to see whether they earn one.)
+(Both the grep dimensions and the state selectors are unproven retrieval keys —
+grep-only, no index, to see whether they earn one.)
 
 **Pick a lead that discriminates.** When the frontier carries two or
 more hypotheses that look equally plausible, the right next lead is

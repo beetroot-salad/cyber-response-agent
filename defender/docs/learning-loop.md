@@ -140,9 +140,14 @@ future enhancements.
    `defender/lessons/*.md`, commits those edits, and rotates the queue
    atomically. PR review can wrap that flow later, but it is not in the
    current scripts.
-5. **No addendum library, no retrieval engine, no taxonomy.** The lesson
-   corpus is flat markdown. Runtime retrieval is the defender PLAN step:
-   enumerate frontmatter and read bodies whose descriptions look relevant.
+5. **No addendum library, no index, no service.** The lesson corpus is flat
+   markdown, and retrieval is grep over frontmatter — there is no index to
+   build and nothing to keep in sync. Two pushes read it: the PLAN-time
+   signature block (`runtime/orient.py`), and — since #919 — the FRONTIER
+   block on the write that moved the document's open set
+   (`scripts/lessons/lessons_frontier.py`, keyed on the optional
+   `frontier_nodes` / `frontier_edges` selectors). Both walk the same flat
+   corpus on demand.
 
 ## Loop Shape
 
@@ -371,8 +376,10 @@ audit-only. Queueable finding types are `lead-set`, `lead-quality`,
 - Git history is the audit trail. No separate `runs/_lessons/lessons.yaml` to
   maintain.
 - Lessons land in the same `defender/lessons/` corpus the runtime investigator
-  already reads at PLAN time. No retrieval service, no prompt projection, no
-  sidecar taxonomy.
+  already reads. No retrieval service and no index — the two pushes (PLAN-time
+  signature, and the #919 frontier block on a write that moved the open set)
+  are both a walk of that flat corpus, composed by the runtime at the moment
+  they fire.
 - A future PR wrapper can review the committed lesson diff and add CI replay
   before merge, but the current local transaction is intentionally smaller.
 

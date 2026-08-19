@@ -109,18 +109,27 @@ When the alert leaves a vertex partially classified, mark the open
 slots inline rather than guessing or authoring a hypothesis row whose
 lead choice is mechanical.
 
-- **`??`** — open class slot or attribute value. Marks "we don't know
-  yet, and it gates disposition." Use it on the whole triple
-  (`class=??/??/??` for a `compute` vertex), a single slot
-  (`class=monitoring-agent/??/known-corp`), or an attribute value
-  (`attrs.signing=??`). The `class` cell carries the slash-tuple
-  only — no type prefix.
+- **`??`** — open class slot, IDENT, or attribute value. Marks "we
+  don't know yet." Use it on the whole triple (`class=??/??/??` for a
+  `compute` vertex), a single slot
+  (`class=monitoring-agent/??/known-corp`), the `ident` cell
+  (`v-003|compute|ip-only/??/??|??|` — "which host is this IP"), or an
+  attribute value (`attrs.signing=??`). The `class` cell carries the
+  slash-tuple only — no type prefix.
+
+  Class and attribute slots also GATE DISPOSITION: an open one blocks
+  `disposition: benign` (§`:T conclude`). An open `ident` does not — it is
+  honest bookkeeping about an entity you have not named yet, and it is
+  what lets a lesson about naming that entity reach you. Prefer it over
+  a guessed identifier.
 - **`{a, b, c}`** — enumerated candidate set. Optional upgrade from
   `??`. Primary form is full-triple enumeration
   (`class={monitoring-agent/internal/known-corp,
   ip-only/internet/novel}`) because per-slot enumeration on multiple
   axes produces Cartesian-product nonsense. Per-slot enumeration is
-  fine when only one axis is open.
+  fine when only one axis is open. It applies to the `ident` cell too
+  (`ident={dev-ws-1, dev-ws-2}` — "one of these two hosts"), and reads
+  as OPEN there exactly as `??` does: still a question, not a name.
 - **Resolution.** A lead closes the slot by writing a `:R attr_updates`
   row with `key=class` (for class refinements), `key=ident` (to sharpen
   the vertex's identifier) or `key=attrs.<name>` (for attribute

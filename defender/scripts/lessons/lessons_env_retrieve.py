@@ -12,6 +12,7 @@ from defender.scripts.lessons._lessons_common import (
     as_list,
     as_str_set,
     csv_set,
+    resolve_corpus,
     iter_lessons,
     reexec_into_venv,
     rel_to_repo,
@@ -27,32 +28,6 @@ import argparse
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_CORPUS = REPO_ROOT / "defender" / "lessons-environment"
 CORPUS_NAME = DEFAULT_CORPUS.name
-
-
-def _resolve_corpus(raw: str | None, ap: argparse.ArgumentParser) -> Path:
-    """`--corpus` is a RELOCATION seam (worktree copy for the forward-check, fixture for
-    tests), never a selector for a *different* corpus.
-
-    Containment is entirely this function's job: the script is a PINNED grant for the actor
-    (`learning/pipeline/actor_engine.py`), and pinned grants are argv-blind by design
-    (`docs/runtime-gates.md`) — the gate admits `python3 <this script> <anything>` without
-    inspecting operands. Unguarded, the malicious actor could pass `--corpus defender/lessons`
-    and enumerate the corpus `decide_read` denies it. (`defender-lessons --show` holds the
-    same line with its own post-`resolve()` check.)
-
-    The rule is the LEAF NAME, not one absolute path, because legitimate relocations change
-    the root but never the corpus. The actor cannot write, so a directory named
-    `lessons-environment` in its reachable tree IS the environment corpus; resolving first
-    stops a symlink or `..` from dressing another corpus up in that name."""
-    if raw is None:
-        return DEFAULT_CORPUS
-    corpus = Path(raw).resolve()
-    if corpus.name != CORPUS_NAME:
-        ap.error(
-            f"--corpus must name a {CORPUS_NAME!r} directory (got {corpus.name!r}); this "
-            "script retrieves environment lessons only"
-        )
-    return corpus
 
 
 def _parse_case_entities(value: str | None) -> list[tuple[str, str]]:
@@ -164,7 +139,7 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--corpus", help=f"Relocated {CORPUS_NAME} directory (worktree or fixture); the leaf name must still be {CORPUS_NAME}. Default: defender/{CORPUS_NAME}")
     ns = ap.parse_args(argv[1:])
 
-    corpus = _resolve_corpus(ns.corpus, ap)
+    corpus = resolve_corpus(ns.corpus, DEFAULT_CORPUS, ap)
     case_entities = _parse_case_entities(ns.entities)
     entities_provided = ns.entities is not None
     want_rule_ids = csv_set(ns.alert_rule_ids)

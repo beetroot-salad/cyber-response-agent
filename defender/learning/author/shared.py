@@ -15,7 +15,7 @@ from defender import _flock, _git
 from defender.learning.pipeline._prompt import stage_user_message, structured_json_body
 from defender._text import is_content_less
 from defender._untrusted import wrap
-from defender._corpus import iter_lessons
+from defender._corpus import PROVENANCE_KEYS, iter_lessons
 
 
 
@@ -272,9 +272,6 @@ def verify_agent_state(
 
 
 
-_MANIFEST_PROVENANCE_DROP = frozenset(
-    {"source_finding_ids", "source_observation_ids", "created_at", "recorded_at"}
-)
 
 
 def build_corpus_manifest(corpus_dir: Path, *, seed: str | None = None) -> str:
@@ -283,7 +280,7 @@ def build_corpus_manifest(corpus_dir: Path, *, seed: str | None = None) -> str:
     for lesson in iter_lessons(
         corpus_dir, warn_label=lambda p: f"corpus manifest: {p.name}", on_skip=skipped.append
     ):
-        kept = {k: v for k, v in lesson.fm.items() if k not in _MANIFEST_PROVENANCE_DROP}
+        kept = {k: v for k, v in lesson.fm.items() if k not in PROVENANCE_KEYS}
         rendered = yaml.safe_dump(
             kept, sort_keys=True, default_flow_style=False, allow_unicode=True
         )

@@ -305,12 +305,29 @@ and the motivating case's frontier item is slot-shaped. And the frontier is mode
 the prompt.
 
 **The specificity floor is not hypothetical.** An empty selector is an every-loop lesson, and
-one is live: `lessons-environment/authorized-keys-host-cr-baseline.md` carries `entities: []`
+one was live: `lessons-environment/authorized-keys-host-cr-baseline.md` carried `entities: []`
 with the comment `# migrated #298: entities best-effort, source prologue unrecoverable`, so a
-lesson born from one host now matches every authorized_keys alert on every host — while
+lesson born from one host matched every authorized_keys alert on every host — while
 asserting *"a missing CR is positive evidence of anomaly"* against `skills/change-mgmt/SKILL.md:39`,
-*"Absence of a CR is the realistic case, not the exception."* The floor should ship on its own,
-and the #298 migration audited for other survivors.
+*"Absence of a CR is the realistic case, not the exception."*
+
+**Resolved (#919): that lesson was DELETED, and the floor was not built.** The #298 audit
+found four `entities: []` survivors, not one, and they are three different defects rather
+than one — two are legitimately unscoped (a method lesson true rule-wide, and a
+deployment-wide fact about the CMDB), one is under-specific, and only the CR baseline was
+actually wrong. It was wrong in CONTENT, not scope: `playground-v2/change-mgmt/seed/standing.yaml`
+covers `db-1`/`web-1`/`web-2` and says ad-hoc activity stays CR-free by design, so absence of
+a CR is the base rate and the inference is invalid at any scope. A specificity floor would
+have forced fabricated selectors onto the two lessons where empty is the truthful answer, so
+no gate ships. Note the scope of what replaces it: the specificity RANKING #919 builds is on the
+DEFENDER corpus's new `frontier_nodes` / `frontier_edges` selectors, matched by
+`scripts/lessons/lessons_frontier.py`. The `entities: []` lessons live in the sibling
+ENVIRONMENT corpus, which `lessons_env_retrieve.py` still returns unranked and in filename
+order — the three survivors there (`cmdb-indexes-by-hostname-not-ip`,
+`authorized-keys-key-accumulation-detection`, `dev-workstation-to-jump-box`) are unchanged by
+this work. Only the third is UNDER-SCOPED and open for the #298 follow-up; the first two are
+the legitimately-unscoped pair above, and a follow-up that "fixes" them would be fabricating
+the selectors this section just argued against.
 
 **The schema defect this fixes.** Lessons currently key on the alert signature they were born
 from. That is right for coverage lessons and wrong for observable-semantics lessons, whose
@@ -485,7 +502,8 @@ that authorship.
 Make the judge's likelihood-ratio check symmetric (it runs only on benign dispositions; on a
 malicious call it should ask whether the incriminating observables fit routine automation equally
 well). Re-key observable-semantics lessons off the alert signature, minding that the two corpora
-disagree on rule-id namespace (`v2-…` versus `rule-v2-…`). Ship the selector specificity floor.
+disagree on rule-id namespace (`v2-…` versus `rule-v2-…`) — done for the defender corpus in #919.
+(The selector specificity floor listed here was deliberately NOT built; see above.)
 The first fix inherits a caveat: an actor SKIP bypasses the judge entirely — the story is persisted
 with `judge_yaml=None` — and on this case SKIP is the outcome, so persist *and judge* the rationale.
 
