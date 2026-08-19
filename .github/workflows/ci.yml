@@ -23,12 +23,19 @@ concurrency:
 # Every job carries `timeout-minutes` (#937). The gVisor install is bounded command by
 # command below, but that is one step: `docker pull`, `uv sync`, `npm install -g jscpd` and
 # the DooD container's own apt/pip/curl all reach hosts this runner does not control, and a
-# stall in any of them still runs to GitHub's 6-hour job default. 30 minutes is ~3x the
-# slowest job ever observed here (the `test` job's 508s pre-xdist), so only a hang trips it.
+# stall in any of them still runs to GitHub's 6-hour job default.
+#
+# 10 minutes, and the bound NESTS over the step bound the same way the step bound nests over
+# its commands. `test` is the binding job: 250s at its slowest over the last 12 runs on main,
+# of which 222s is outside the gVisor step (199s of unit tests + ~23s of setup). A stall that
+# burns the step's full 5-minute bound lands at 222 + 300 = 522s, inside 600s — so the step's
+# own timeout fires first and names the command, and this bound stays what it is for: the
+# backstop under the steps that carry no bound of their own. Raising the step bound without
+# raising this one inverts that and hands every stall to GitHub's generic job cancel.
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 10
 
     steps:
       - uses: actions/checkout@v5
@@ -59,14 +66,15 @@ jobs:
         # unresponsive gvisor apt repo hung box-dood for 15 minutes on run 32278695386 and
         # would have run to the 6-hour job default. It normally finishes in 12-31s.
         #
-        # The per-command bounds NEST inside this one: 90 + 150 + 150 + 120 = 510s against a
-        # 600s step. The curl term is 90 and not 30, because --retry-max-time is the last
+        # The per-command bounds NEST inside this one: 60 + 60 + 90 + 60 = 270s against a
+        # 300s step. The curl term is 60 and not 20, because --retry-max-time is the last
         # instant a new attempt may START and that attempt still gets a full --max-time. That ordering is the whole point of having both — whichever command
         # stalls, its own `timeout` exits 124 and names itself in the log, and the step bound
         # stays a backstop for a stall no per-command bound covers. Bounds that summed ABOVE
-        # 600s would hand every multi-stall run back to GitHub's generic step cancel, which
-        # says only that the step was too slow.
-        timeout-minutes: 10
+        # 300s would hand every multi-stall run back to GitHub's generic step cancel, which
+        # says only that the step was too slow. The step normally finishes in 12-31s, so even
+        # the tightest bound here is an order of magnitude off the normal path.
+        timeout-minutes: 5
         run: |
           # `pipefail` on top of `set -eux`: curl feeds a pipe, so without it the pipeline
           # reports gpg's status and a curl that hit its own bound reads as "no valid
@@ -75,7 +83,7 @@ jobs:
           # --retry-max-time bounds the retry SERIES; --max-time bounds one attempt, and
           # curl resets it per retry, so without the series bound this line alone could
           # spend 4 * 60s + delays and blow past the step bound.
-          curl -fsSL --max-time 30 --retry 3 --retry-delay 2 --retry-max-time 60 \
+          curl -fsSL --max-time 20 --retry 3 --retry-delay 2 --retry-max-time 40 \
             --retry-connrefused https://gvisor.dev/archive.key \
             | sudo gpg --dearmor -o /usr/share/keyrings/gvisor-archive-keyring.gpg
           echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/gvisor-archive-keyring.gpg] https://storage.googleapis.com/gvisor/releases release main" \
@@ -86,10 +94,10 @@ jobs:
           # stalling and the stall cleared on a re-run inside 20s: a bound with no retry
           # converts that transient into a red build across three jobs, where curl — a
           # different host, and not the one that failed — already retries.
-          sudo timeout 150 apt-get -o Acquire::Retries=3 update
-          sudo timeout 150 apt-get -o Acquire::Retries=3 install -y runsc
+          sudo timeout 60 apt-get -o Acquire::Retries=3 update
+          sudo timeout 90 apt-get -o Acquire::Retries=3 install -y runsc
           sudo runsc install -- --oci-seccomp
-          sudo timeout 120 systemctl restart docker
+          sudo timeout 60 systemctl restart docker
           docker info --format '{{.Runtimes}}'
           # Hard-fail rather than print. Every box in the #540 suite starts at the runtime
           # BoxSpec anchors (runsc), and the parity test self-skips a runtime the daemon does
@@ -164,7 +172,7 @@ jobs:
   # this split — `test` natively and `box-dood` under DooD — so the pairing is unchanged.
   box-native:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
 
@@ -189,14 +197,15 @@ jobs:
         # unresponsive gvisor apt repo hung box-dood for 15 minutes on run 32278695386 and
         # would have run to the 6-hour job default. It normally finishes in 12-31s.
         #
-        # The per-command bounds NEST inside this one: 90 + 150 + 150 + 120 = 510s against a
-        # 600s step. The curl term is 90 and not 30, because --retry-max-time is the last
+        # The per-command bounds NEST inside this one: 60 + 60 + 90 + 60 = 270s against a
+        # 300s step. The curl term is 60 and not 20, because --retry-max-time is the last
         # instant a new attempt may START and that attempt still gets a full --max-time. That ordering is the whole point of having both — whichever command
         # stalls, its own `timeout` exits 124 and names itself in the log, and the step bound
         # stays a backstop for a stall no per-command bound covers. Bounds that summed ABOVE
-        # 600s would hand every multi-stall run back to GitHub's generic step cancel, which
-        # says only that the step was too slow.
-        timeout-minutes: 10
+        # 300s would hand every multi-stall run back to GitHub's generic step cancel, which
+        # says only that the step was too slow. The step normally finishes in 12-31s, so even
+        # the tightest bound here is an order of magnitude off the normal path.
+        timeout-minutes: 5
         run: |
           # `pipefail` on top of `set -eux`: curl feeds a pipe, so without it the pipeline
           # reports gpg's status and a curl that hit its own bound reads as "no valid
@@ -205,7 +214,7 @@ jobs:
           # --retry-max-time bounds the retry SERIES; --max-time bounds one attempt, and
           # curl resets it per retry, so without the series bound this line alone could
           # spend 4 * 60s + delays and blow past the step bound.
-          curl -fsSL --max-time 30 --retry 3 --retry-delay 2 --retry-max-time 60 \
+          curl -fsSL --max-time 20 --retry 3 --retry-delay 2 --retry-max-time 40 \
             --retry-connrefused https://gvisor.dev/archive.key \
             | sudo gpg --dearmor -o /usr/share/keyrings/gvisor-archive-keyring.gpg
           echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/gvisor-archive-keyring.gpg] https://storage.googleapis.com/gvisor/releases release main" \
@@ -216,10 +225,10 @@ jobs:
           # stalling and the stall cleared on a re-run inside 20s: a bound with no retry
           # converts that transient into a red build across three jobs, where curl — a
           # different host, and not the one that failed — already retries.
-          sudo timeout 150 apt-get -o Acquire::Retries=3 update
-          sudo timeout 150 apt-get -o Acquire::Retries=3 install -y runsc
+          sudo timeout 60 apt-get -o Acquire::Retries=3 update
+          sudo timeout 90 apt-get -o Acquire::Retries=3 install -y runsc
           sudo runsc install -- --oci-seccomp
-          sudo timeout 120 systemctl restart docker
+          sudo timeout 60 systemctl restart docker
           docker info --format '{{.Runtimes}}'
           # Hard-fail rather than print — same reason as the `test` job: the suite self-skips
           # a runtime the daemon does not register, so a degraded install would leave this
@@ -250,7 +259,7 @@ jobs:
   # exist"); on older daemons it silently binds an EMPTY dir and F8's sentinel fails closed.
   box-dood:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
 
@@ -262,14 +271,15 @@ jobs:
         # unresponsive gvisor apt repo hung box-dood for 15 minutes on run 32278695386 and
         # would have run to the 6-hour job default. It normally finishes in 12-31s.
         #
-        # The per-command bounds NEST inside this one: 90 + 150 + 150 + 120 = 510s against a
-        # 600s step. The curl term is 90 and not 30, because --retry-max-time is the last
+        # The per-command bounds NEST inside this one: 60 + 60 + 90 + 60 = 270s against a
+        # 300s step. The curl term is 60 and not 20, because --retry-max-time is the last
         # instant a new attempt may START and that attempt still gets a full --max-time. That ordering is the whole point of having both — whichever command
         # stalls, its own `timeout` exits 124 and names itself in the log, and the step bound
         # stays a backstop for a stall no per-command bound covers. Bounds that summed ABOVE
-        # 600s would hand every multi-stall run back to GitHub's generic step cancel, which
-        # says only that the step was too slow.
-        timeout-minutes: 10
+        # 300s would hand every multi-stall run back to GitHub's generic step cancel, which
+        # says only that the step was too slow. The step normally finishes in 12-31s, so even
+        # the tightest bound here is an order of magnitude off the normal path.
+        timeout-minutes: 5
         run: |
           # `pipefail` on top of `set -eux`: curl feeds a pipe, so without it the pipeline
           # reports gpg's status and a curl that hit its own bound reads as "no valid
@@ -278,7 +288,7 @@ jobs:
           # --retry-max-time bounds the retry SERIES; --max-time bounds one attempt, and
           # curl resets it per retry, so without the series bound this line alone could
           # spend 4 * 60s + delays and blow past the step bound.
-          curl -fsSL --max-time 30 --retry 3 --retry-delay 2 --retry-max-time 60 \
+          curl -fsSL --max-time 20 --retry 3 --retry-delay 2 --retry-max-time 40 \
             --retry-connrefused https://gvisor.dev/archive.key \
             | sudo gpg --dearmor -o /usr/share/keyrings/gvisor-archive-keyring.gpg
           echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/gvisor-archive-keyring.gpg] https://storage.googleapis.com/gvisor/releases release main" \
@@ -289,10 +299,10 @@ jobs:
           # stalling and the stall cleared on a re-run inside 20s: a bound with no retry
           # converts that transient into a red build across three jobs, where curl — a
           # different host, and not the one that failed — already retries.
-          sudo timeout 150 apt-get -o Acquire::Retries=3 update
-          sudo timeout 150 apt-get -o Acquire::Retries=3 install -y runsc
+          sudo timeout 60 apt-get -o Acquire::Retries=3 update
+          sudo timeout 90 apt-get -o Acquire::Retries=3 install -y runsc
           sudo runsc install -- --oci-seccomp
-          sudo timeout 120 systemctl restart docker
+          sudo timeout 60 systemctl restart docker
           docker info --format '{{range $k, $v := .Runtimes}}{{$k}} {{end}}' \
             | tr ' ' '\n' | grep -qx runsc
 
@@ -343,7 +353,7 @@ jobs:
 
   lint:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
 
@@ -418,7 +428,7 @@ jobs:
 
   code-smells:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 10
     steps:
       # fetch-depth: 0 — the stale-ref gate diffs `origin/main...HEAD`, and the three-dot
       # form needs a MERGE-BASE. The default depth-1 checkout grafts HEAD

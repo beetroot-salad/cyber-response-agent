@@ -118,6 +118,28 @@ def test_the_per_command_bounds_nest_inside_the_step_bound() -> None:
         )
 
 
+def test_the_step_bounds_nest_inside_the_job_bound() -> None:
+    """The third layer of the same argument, and the one a lowered job bound breaks first.
+
+    A job bound at or under its own step bound preempts the step: GitHub cancels the job with
+    a generic "exceeded the maximum execution time" before the step's `timeout-minutes` can
+    fire, and the per-command exit 124 underneath it never gets read out. That makes the job
+    bound and the step bound adversaries rather than layers, which is the #937 failure mode
+    one level up. The margin between them is what the un-bounded steps run in."""
+    for name, job in _workflow()["jobs"].items():
+        step_bounds = sum(
+            int(s["timeout-minutes"]) for s in job.get("steps", []) if s.get("timeout-minutes")
+        )
+        if not step_bounds:
+            continue
+        job_bound = int(job["timeout-minutes"])
+        assert step_bounds < job_bound, (
+            f"job {name!r} bounds its steps to {step_bounds}m against a {job_bound}m job "
+            f"bound — the job cancel preempts the step timeout, so a stall is reported as "
+            f"'the job was too slow' instead of naming the command that hung"
+        )
+
+
 def test_every_job_carries_a_job_timeout() -> None:
     """The backstop under the steps this file does not census.
 
