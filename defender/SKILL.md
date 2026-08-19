@@ -334,9 +334,10 @@ This is the discipline that makes cross-case retrieval pay off — fresh
 names compound the problem they were supposed to solve. Two reasons to
 call:
 
-- **(a) Survey** — when you've settled the `:H` topology
-  (`parent_type`, `parent_class`, `rel`, `attached_to`) but aren't
-  sure what `?names` the corpus has used for this kind of fork.
+- **(a) Survey** — when you've settled the `:H` shape
+  (`parent_type`, `rel`, `attached_to` — plus `parent_class` where the
+  alert has placed the parent; a discovery fork leaves it `??`) but
+  aren't sure what `?names` the corpus has used for this kind of fork.
 - **(b) Normalize** — when you have a `?name` in mind. Check the
   corpus for synonyms / canonical forms first; reuse the existing
   name where the semantics match.
@@ -353,8 +354,11 @@ defender-invlang hypothesis-vocabulary --signature <signature_id>
 
 Call both when normalizing — signature first (canonical for this
 rule), then shape (canonical for this topology). `--parent-class`
-accepts fnmatch globs (`bastion/*`, `*/internal/*`). At least one
-filter required for `hypothesis-shape`. Output is a markdown table of
+accepts fnmatch globs (`bastion/*`, `*/internal/*`), where `?` is a
+single-character wildcard — so filter a discovery fork on
+`--parent-type` / `--rel` rather than on the `??` its `parent_class`
+carries. At least one filter required for `hypothesis-shape`. Output is
+a markdown table of
 `?name` → count, final-weight distribution, dispositions, supporting
 cases.
 

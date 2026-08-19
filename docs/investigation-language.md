@@ -1,8 +1,18 @@
 # Investigation Language
 
-**Status:** Spec v2.15. Implemented.
+**Status:** Spec v2.17. Implemented.
 **Query tool:** `soc-agent/scripts/invlang/` — see `cli.py --help`
 **On-disk surface:** `​```invlang` fenced blocks. `​```yaml` fences in `investigation.md` are rejected by the validator. Block-tag grammar (`:V` / `:E` / `:H` / `:L` / `:R` / `:T` / `:G`), row shapes, and the surface-to-canonical-dict projection live in `docs/dense-investigation-format.md`. The canonical companion dict — what the validator and the corpus queries operate on — is what every block projects to via `soc-agent/scripts/handlers/_dense_parser.py`.
+
+**v2.17 delta:** rule #23 (hypothesis fork distinctness) re-keyed from
+`proposed_edge.parent_vertex.classification` onto the predicted observable, and
+rule #35 (sibling prediction divergence) merged into it — the two stated one check
+once the axis moved. `??` added to §Types escapes and rule #2 as the open-slot
+marker on a `parent_class` nothing closes. §Three shapes of adversariness and
+§Hypothesis reworded so the adversarial peer is distinguished by its predictions
+rather than by its classification. Active-rule count 29 → 28. Rationale and the
+prompt-side change: #934; validator implementation
+`defender/skills/invlang/validate.py:_check_fork_distinctness`.
 
 **v2.16 delta:** rule #36 simplified — `disposition: true_positive` now requires only `++` on a surviving hypothesis (weight-only). The v2.14 adversarial-classification token check is removed; the lexical token list desynced from playbook-canonical fork names (e.g. `?credentials-used-outside-registered-actor`) and produced false rejections of legitimately-graded `true_positive` routings. The affirmative-evidence signal is captured by the `++` requirement; the "wrong-named survivor" failure mode is caught by Tier-2 judges and rule #21. Validator implementation: `hooks/scripts/invlang_checks_authorization.py:_check_affirmative_true_positive`. Parser-side X5 (`scripts/handlers/_output_parser.py:_validate_cross_block_invariants`) similarly weight-only.
 
@@ -216,9 +226,11 @@ consumed by PREDICT/CONCLUDE prompts to contextualize disposition.
 **Three shapes of adversariness.** Not every adversarial question is
 an authorization question:
 
-- **Mechanism-level** — enumerate `adversary-controlled` alongside
-  benign classifications when they predict observationally distinct
-  world-states. Normal mechanism enumeration; no contract needed.
+- **Mechanism-level** — enumerate an `adversary-controlled` story
+  alongside the benign one when they predict observationally distinct
+  world-states. Normal mechanism enumeration; no contract needed. It
+  is the PREDICTIONS that must diverge, not the classifications
+  (rule #23) — the two peers may share a `parent_class`, open or not.
 - **Attribute-level (policy authorization)** — same mechanism, same
   observables, but an authority would answer "allowed" differently
   depending on the source identity. This is the authorization
@@ -541,7 +553,9 @@ against anchor data when the resolving lead fires. Declare contracts
 only when the mechanism is consistent with both benign and adversarial
 readings depending on authorization; when the adversarial reading IS
 the mechanism (e.g., `?adversary-controlled-process`), skip the
-contract — the classification already carries the claim.
+contract — the `?name` and its predictions already carry the claim.
+(The CLASSIFICATION does not: rule #23 forbids resting a fork on it,
+so the adversarial peer is distinguished by what it predicts.)
 
 **Behavioral-consistency prediction (optional).** A contract resolved
 `authorized` establishes policy compliance, not integrity. The
@@ -843,6 +857,13 @@ materialize it. Causal implication does not count as native naming.
 Use `unclassified-{type}` when classification is unknown.
 Use `ambiguous-{a}-or-{b}` when two classifications are genuinely
 indistinguishable.
+Use `??` (or `{a, b, c}` for a candidate set) when the slot is an OPEN
+QUESTION a lead is expected to close — the difference from the two
+above is openness, not ignorance: only `??` / `{a, b, c}` read as
+unresolved, so only they block `disposition: benign` and only they
+surface as frontier slots. `??` is the canonical spelling on a
+`proposed_edge.parent_vertex.classification`, which nothing closes
+(rule #23).
 
 ---
 
@@ -880,7 +901,7 @@ coverage.
 
 ## Validator rules
 
-The validator enforces **29 active rules** (rules 1–36 with seven gaps). Seven historical rule numbers (#10, #12, #15, #16, #19, #20, #22) are gaps — their content was either merged into a sibling rule or demoted to review-only discipline. Numbering is preserved for grep-stability of existing code, prompt, and test references; merged rules carry a redirect to their new home. Rule #36 is the most recent addition (v2.14, affirmative true_positive disposition) — included in the 29-active count.
+The validator enforces **28 active rules** (rules 1–36 with eight gaps). Eight historical rule numbers (#10, #12, #15, #16, #19, #20, #22, #35) are gaps — their content was either merged into a sibling rule or demoted to review-only discipline. Numbering is preserved for grep-stability of existing code, prompt, and test references; merged rules carry a redirect to their new home. Rule #36 is the most recent addition (v2.14, affirmative true_positive disposition) — included in the 28-active count. #35 is the eighth gap: #934 moved fork distinctness onto the predicted observable, which is what #35 already checked, so the two became one rule and #23 is the number that ships (the v2.15 delta below predates that merge and still counts 29).
 
 1. **Schema validity.** Required fields present, enums valid, IDs
    well-formed (including hierarchical patterns for hypotheses,
@@ -891,7 +912,9 @@ The validator enforces **29 active rules** (rules 1–36 with seven gaps). Seven
 
 2. **Classification vocabulary.** Every `classification` is from the
    seed vocabulary (§Types classification lists) or a
-   `{type}:{slug}` provisional.
+   `{type}:{slug}` provisional — or one of the two open markers `??`
+   and `{a, b, c}`, which name a slot the run has not settled rather
+   than a classification (§Types, escapes).
 
 3. **Relation catalog.** Every `edge.relation` appears in §Relations.
 
@@ -1015,18 +1038,28 @@ The validator enforces **29 active rules** (rules 1–36 with seven gaps). Seven
 
 23. **Hypothesis fork distinctness.** Within a sibling group —
     hypotheses sharing `(parent_hypothesis_id, attached_to_vertex)` —
-    each pair must declare at least one prediction whose claimed value
-    differs. That difference is what a lead splits them on; a pair
-    predicting the same observables proposes the same causal upstream
-    under two ids and can be discriminated by nothing.
+    no pair that has declared predictions may declare the same ones.
+    A difference is what a lead splits them on; a pair predicting the
+    same observables proposes the same causal upstream under two ids
+    and can be discriminated by nothing. (Absorbs former #35 sibling
+    prediction divergence, which stated this check on the
+    classification-agnostic axis #934 settled on.)
     `proposed_edge.parent_vertex.classification` is NOT the axis: a
     shared one is legal, and an open one (`??` in any slot) is the
     canonical spelling for a fork whose parent the alert has not
     placed, so a check keyed on classification would refuse the shape
-    §Sibling-fork uniqueness asks for (#934). Mechanically the floor is
-    textual — a pair whose declared claims are identical after
-    whitespace/case normalization; semantic distinctness stays the
-    author's discipline, stated in `skills/invlang/SKILL.md`.
+    §Sibling-fork uniqueness asks for (#934). Enforced by
+    `validate._check_fork_distinctness` at the textual floor — LIVE
+    siblings whose declared claims are identical after case/whitespace
+    normalization. The compared set is the union of `predictions[]`
+    `claim` and `attribute_predictions[]` `(target, attribute, claim)`;
+    `predictions[].subject` is NOT in it, since the same claim filed
+    under `proposed_parent` and under `proposed_edge` still splits
+    nothing. A hypothesis that has declared no predictions yet is
+    exempt (the `:H` row and its `.preds` block are separate appends),
+    and refuting one of two colliding rows is the append-only repair.
+    Whether two differently-worded claims say the same thing is not
+    detectable and stays the author's discipline.
 
 24. **Hypothesis persistence — no orphaned hypotheses at CONCLUDE.**
     When a `conclude:` block is present, every hypothesis declared in
@@ -1172,10 +1205,14 @@ The validator enforces **29 active rules** (rules 1–36 with seven gaps). Seven
     not mechanism. Generalises rule #32 (integrity-peer specific,
     requires shared `proposed_edge` structure and at least one
     `authorization_contract`) to all sibling forks regardless of
-    contract presence; complements rule #23 (which blocks shared
-    `parent_vertex.classification`) by blocking shared *prediction
-    text*. Empty-signature hypotheses are skipped — leanness and
-    refutation-link rules cover that shape.
+    contract presence. **Merged into rule #23 (#934).** #23 was the
+    classification-keyed rule this one complemented; once #934 moved
+    the distinctness axis onto the predicted observable, the two state
+    one check, and #23 is the one that ships. Read #23 for the live
+    text; two things stated here carry over — the signature spans
+    `attribute_predictions[]` as well as `predictions[]`, and
+    empty-signature hypotheses are skipped. One does not: #23 drops
+    `subject` from the `predictions[]` key.
 
 36. **Affirmative true_positive disposition.** When
     `conclude.disposition` is `true_positive`, at least one entry in

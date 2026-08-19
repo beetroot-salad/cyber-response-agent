@@ -19,7 +19,7 @@ e-001|queried_dns|v-002|v-003|2026-05-05T...|siem-event:siem|cadence=~30min;coun
 e-002|loaded|v-002|v-004|2026-05-05T...|runtime-audit:github-runner|via=npm-install
 ```
 
-PLAN authors three competing topologies under `v-002`'s `loaded`/`queried_dns` parents — they are mutually exclusive on parent class:
+PLAN authors three competing causes under `v-002`'s `loaded`/`queried_dns` parents. What splits them is their predictions — each names an observable the other two do not; the `parent_class` cells differ because these parents ARE different kinds of entity, not to carry the fork (§Sibling-fork uniqueness):
 
 ```invlang
 :H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]
@@ -56,7 +56,7 @@ l-002|1|process-tree-and-job-correlation|v-002|h-002,h-003|host-state|±2h
 l-003|1|destination-ip-reputation|v-003|h-001,h-003|siem|90d
 ```
 
-PLAN issued three leads in one turn — each discriminates a different pair, and together they triangulate the parent class. Dispatched as three parallel `Task` calls. Gather mints whichever templates the catalog lacks.
+PLAN issued three leads in one turn — each discriminates a different pair on the observable that pair predicts differently, and together they triangulate the parent. Dispatched as three parallel `Task` calls. Gather mints whichever templates the catalog lacks.
 
 ANALYZE on returned summaries (`gather_raw/0..2.json`):
 

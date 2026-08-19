@@ -155,15 +155,26 @@ still open; the second is now decided and waiting on implementation:
   hypotheses must differ on a topological axis
   (`parent_type`/`parent_class`/`attached_to`/`rel`), but the
   §Discovery-hypotheses worked example forks `h-001`/`h-002` that are
-  identical on all four axes.~~ **Decided (#934):** prediction divergence
-  IS the distinctness — siblings must differ on a predicted observable,
-  and slots the alert has not settled stay `??` in `parent_class` rather
-  than being minted into a fork axis. The spec is reconciled; what
-  remains is the implementation, which #933 owns. Detection floor:
-  textually identical claim sets across a pair. A check keyed on
-  `parent_class` uniqueness must NOT ship — siblings now legitimately
-  share `??/??/??`.
+  identical on all four axes.~~ **Decided and shipped (#934):** prediction
+  divergence IS the distinctness — siblings must differ on a predicted
+  observable, and slots the alert has not settled stay `??` in
+  `parent_class` rather than being minted into a fork axis.
+  `validate._check_fork_distinctness` enforces the floor: live siblings
+  sharing `(parent hypothesis, anchor)` whose declared claims are identical
+  after case/whitespace normalization. The classification-keyed spelling
+  the rule was specified under does NOT ship — it would refuse the
+  `??/??/??` siblings this makes canonical. Semantic distinctness is not
+  detectable and stays the author's discipline.
+
+  What that drops, deliberately: #933's reproduction — two siblings both
+  on a CONCRETE `unclassified-process`, from a real 2026-08-13 run — now
+  passes as long as their claims differ, which is the right answer under
+  the new axis but is NOT what #933's ask 2 described ("the rule needs an
+  open-slot exemption before it can ship", i.e. `??` exempt and concrete
+  duplicates still refused). Nothing covers concrete duplicate
+  classifications any more, and nothing should: a shared concrete parent
+  class with divergent predictions is a legal fork.
 
 Both were spec-owner decisions, not validator bugs. The class-slot one
 stays file-and-hold here until the canonical SKILL is internally
-consistent.
+consistent; the fork one is closed.

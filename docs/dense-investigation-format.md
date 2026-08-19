@@ -324,7 +324,7 @@ Each rule re-expressed against a line-shape parser. Examples:
 | #13 ceiling_test scope | `:T conclude.ceiling_test` row ≠ `none` *iff* `termination.category` = `severity-ceiling`; `ceiling_rationale` non-empty under the same condition. |
 | #14 partial-authority cap | a `:T resolutions` row whose every cited `:R` grounding entry has `authority=partial` is capped to after ∈ {+, -}. A row with at least one full-authority cited entry is *not* capped. |
 | #21 authz-gated benign | `:T conclude disposition: benign` ⇒ every `ac{n}` declared on a confirmed-weight hypothesis row appears as a `:R authz authorized` row |
-| #23 sibling fork distinctness | within a sibling group, no two `:H` rows whose `.preds` claims are all textually identical (`parent_class` may repeat, and repeats when open) |
+| #23 sibling fork distinctness | within a sibling group, no two LIVE `:H` rows whose declared claims are identical after case/whitespace normalization — the claim text of each `p{n}` in the `preds` cell, plus `(target, attribute, claim)` of each `ap{n}` in `attr_preds`; the `p{n}` subject is excluded. A row with both cells empty is exempt (in the sub-block spelling the `:H` row and its `.preds` are separate appends). `parent_class` may repeat, and repeats when open |
 | #25 same-level rollup | every `p{n}` cited on a resolution for `h-001` belongs to `h-001`'s preds, not a sibling's |
 | #34 prediction closure at CONCLUDE | for every hypothesis whose final status is neither `refuted` nor `shelved` (i.e. `active` or `confirmed`), every `p{n}` and `ap{n}` declared on `:H` either appears in a `:T resolutions` row's pred-tokens with non-null after, or as a row in `:T conclude.deferred_preds` |
 

@@ -73,9 +73,11 @@ the type has one).
 
 Each slot enum is available via `enum {slot}` (e.g. `enum compute.role`,
 `enum identity.kind`, `enum application.vendor`). `:H parent_class`
-follows the same grammar as `:V class`, dispatched on `parent_type`,
-and takes `??` in the slots the alert has not settled — `ip-only/??/??`
-where the grammar is a tuple, `??` alone where it is a single token.
+follows the same grammar as `:V class`, dispatched on `parent_type`, and
+takes `??` in the slots the alert has not settled (`ip-only/??/??`).
+`??` and `unclassified-{type}` are not interchangeable: only `??` reads
+as open (§Open questions), so a slot a lead is meant to close is `??`,
+while `unclassified-*` says the catalog has no fitting value.
 
 When the observation is just an IP with no role/zone context, use
 `role=ip-only`. Set `attrs.knowledge=partial`. Zone and provenance
@@ -172,8 +174,9 @@ one: with nothing declared there is no slot to resolve, and "every slot
 is resolved" would otherwise be satisfied by never declaring one.
 
 A `:H parent_class` slot is not a vertex cell and does not gate. The
-proposed parent is a question the fork's own weight settles, not an
-entity the run has observed.
+proposed parent is a claim the run has not observed, and no
+`:R attr_updates` row can target an `h-*` to close it — leaving it `??`
+costs the close nothing.
 
 ## Core blocks
 
@@ -517,23 +520,30 @@ provenance rather than widening the authz predicate.
 
 ## Sibling-fork uniqueness
 
-Sibling hypotheses must differ on at least one **predicted
-observable** — a claim under `.preds` whose observed value moves one
-sibling and not the other. That difference is what a lead splits.
-Topology often differs too, but topology is not what makes the fork
-legal, and a class tuple minted to carry a difference the predictions
-already carry is what makes it illegal.
-
-The discriminating claim carries its observable alone. Packed in with
-where the parent sits ("external source, failing at high rate"), it is
-half-matched by a lookup that places the source and says nothing about
-rate — and the mechanism loses weight it lost no evidence over.
+Sibling hypotheses must differ on at least one **predicted observable**
+— the claim a lead splits them on. Topology may differ too, but it is
+not what makes the fork legal: a class tuple minted to carry a
+difference the predictions already carry is what makes it illegal.
+Leave the slots the alert has not settled `??` and let the predictions
+fork, the way §Discovery hypotheses forks two parents that share one
+`parent_class`; "what kind of entity is this?" is a refinement the same
+lead answers under either story (§Open questions). Write the
+discriminating claim on its own: packed in with where the parent sits
+("external source, failing at high rate"), it is half-matched by a
+lookup that says nothing about rate.
 
 **Legitimacy is not a competing cause.** When two candidates share
 topology but differ only on "was this action authorized?", collapse
 them into ONE hypothesis with an `:H h-NNN.authz` contract carrying
 the legitimacy question. Forks enumerate competing upstream **causes**,
 not competing interpretations of the same cause.
+
+Integrity is the one reading that IS a competing cause. "Was the
+claimed actor the actor?" is not answered by any authority, so it
+forks: a `?adversary-controlled-<entity>` peer beside the routine
+hypothesis, sharing its authz contract and differing on the
+predictions that test the premise. Collapsing that peer is what
+`integrity_waived` exists to make you say out loud.
 
 **Wrong:**
 
@@ -551,58 +561,21 @@ enumeration.
 ```invlang
 :H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]
 h-001|?gpo-edit-via-it-admin-svc|v-003|modified|identity|service-account/known-corp||null|active
+h-002|?adversary-controlled-it-admin-svc|v-003|modified|identity|service-account/known-corp||null|active
 
 :H h-001.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
 ac1|e-002|iam-policy|"IT-admin-svc permitted to modify Default Domain Policy at this time"|escalate|escalate
 ac2|e-002|change-mgmt|"approved change ticket exists for this GPO edit at this time"|escalate|escalate
-```
-
-One hypothesis names the observed topology. Two authz contracts encode
-the legitimacy question. Resolution drives disposition.
-
-**An unsettled slot is not a discriminator.** When the fork is about
-mechanism, leave the slots the alert has not settled `??` instead of
-minting a tuple to fork on. "What kind of entity is this?" is a
-refinement the same lead answers under either story — it belongs in
-that vertex's own class cell (§Open questions), not in a hypothesis.
-
-**Wrong:**
-
-```invlang
-:H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]
-h-001|?external-brute-force|v-001|attempted_auth|compute|ip-only/internet/anonymous||null|active
-h-002|?authorized-internal-scanner|v-001|attempted_auth|compute|monitoring/internal/known-corp||null|active
-
-:H h-001.preds [id|subject|claim]
-p1|proposed_parent|"source is external and absent from CMDB, failing against one account at high rate"
-```
-
-Role, zone and provenance all fork, and `p1` makes the zone load-bearing
-for a story about rate. One CMDB row reading "internal monitoring host"
-refutes brute force on evidence about placement, and
-internal-and-brute-force is never a cell in the model. The names carry
-the same collapse — `?external-brute-force` binds a zone to a
-mechanism, `?authorized-internal-scanner` a verdict to a role. Name the
-mechanism; placement and verdict have their own cells.
-
-**Right:**
-
-```invlang
-:H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]
-h-001|?credential-guessing|v-001|runs_on|process|??||null|active
-h-002|?scheduled-service-retry|v-001|runs_on|process|??||null|active
-
-:H h-001.preds [id|subject|claim]
-p1|proposed_edge|"failures arrive in bursts, no fixed interval between them"
 
 :H h-002.preds [id|subject|claim]
-p1|proposed_edge|"failures repeat on a fixed interval"
+p1|proposed_parent|"the edit runs from a host, and at an hour, this account has no baseline for"
 ```
 
-The fork is the cadence, and one lead over the failure series splits
-it. Where v-001 sits stays open on its own class cell —
-`ip-only/??/??`, closed by a CMDB lookup that runs under either story
-and grades neither.
+One hypothesis names the observed topology and two authz contracts
+encode the legitimacy question. The peer carries the premise no
+authority answers, on predictions rather than a contract — the two
+share every topological column and the contract, and fork on the
+observable. Resolution drives disposition.
 
 ## Authoring discipline
 

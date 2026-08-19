@@ -3,9 +3,10 @@
 The structured surface the agent writes into `investigation.md`. This file
 is a reference overview; the authoring spec is
 `defender/skills/invlang/SKILL.md`, and the dense block-tag grammar is
-`docs/dense-investigation-format.md`. Note this is the **defender's** invlang
-(no enforcing validator — `content/design.md`); `soc-agent/` runs a stricter,
-hook-validated variant.
+`docs/dense-investigation-format.md`. This is the **defender's** invlang —
+the structural validator (`skills/invlang/validate.py`) runs on every
+`investigation.md` write, through `runtime/permission/files.py`; `soc-agent/`
+runs a stricter, hook-validated variant of the same language.
 
 ## What it is
 
@@ -62,19 +63,26 @@ A recurring decision the handbook gets asked about:
   non-obvious: competing stories that imply *different next leads*. Sibling
   `:H` rows must differ on a **predicted observable** — the claim a lead
   splits them on. Slots the alert has not settled stay `??` in
-  `parent_class`; a class tuple minted to carry the fork is the defect,
-  not the requirement.
+  `parent_class`; a class tuple minted to carry the fork is the defect, not
+  the requirement. Rule #23 enforces the textual floor of that
+  (`validate._check_fork_distinctness`): live siblings on one anchor whose
+  declared claims are identical are refused on write. The same claim in
+  different words is invisible to it.
 - **`??` (refinement)** — when the question is "what kind of entity is this
   vertex?" and the discriminating lead is **mechanical** (a CMDB lookup, an
   egress check — the same lead regardless of which candidate is right), mark
   the open slot inline with `??` (or `{a, b, c}` candidates) and let a lead
   close it via `:R attr_updates`. Refinement is not a hypothesis row.
 
-An unresolved slot on a *vertex* blocks `disposition: benign` — resolve it
-or escalate. A `{a, b, c}` candidate set is an unresolved slot too, in any
-slot of the class tuple or as an attribute value: it is an upgrade from
-`??`, not a resolution of it. An open `:H parent_class` slot is not a vertex
-cell and does not gate; the fork's own weight settles it.
+An unresolved slot on a *declared node* blocks `disposition: benign` —
+resolve it or escalate. The walk is `:V` vertices plus any `:E` edge a
+`:R attr_updates` row refines, so `l-001|e-001|attrs.direction|??` gates
+exactly as a vertex cell does. A `{a, b, c}` candidate set is an unresolved
+slot too, in any slot of the class tuple or as an attribute value: it is an
+upgrade from `??`, not a resolution of it. An open `:H parent_class` slot is
+not a declared node and does not gate — the proposed parent is a claim the
+run has not observed, and no `:R attr_updates` row can even target an `h-*`
+to close it.
 
 ## Legitimacy is edge-coupled, not a hypothesis fork
 
