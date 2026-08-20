@@ -1033,10 +1033,17 @@ The validator enforces **26 active rules** (rules 1–36 with ten gaps: 36 numbe
    `e-*` id. Authorization resolution `fulfills_contract` of shape
    `h-{id}.ac{n}` points to a hypothesis whose `authorization_contract`
    declares that `ac{n}`. Attribute-update `target` of shape
-   `v-{id}` or `e-{id}` points to a declared record.
+   `v-{id}` or `e-{id}` points to a declared record. Refutation-shape
+   `refutes_predictions` cites `p*` / `ap*` ids the SAME hypothesis
+   declares — a refutation overturns its own hypothesis's predictions,
+   and a `--` citing it inherits that scope.
    *(Absorbs former #12 hierarchical hypothesis IDs, #19 contract
    edge_ref, #20 fulfills_contract back-ref, and the resolution
    clause of former #22 attribute-update target.)*
+
+   Implemented as `_check_lead_refs`, `_check_hypothesis_refs`,
+   `_check_prediction_refs`, `_check_refutation_scope` and
+   `_check_attr_update_targets` (`defender/skills/invlang/validate.py`).
 
 8. **Append-only.** No existing record is mutated.
 

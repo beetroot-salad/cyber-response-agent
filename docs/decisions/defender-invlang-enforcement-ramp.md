@@ -505,6 +505,30 @@ fences applied in order (#934). The stale Example A (`type=endpoint`,
 `file:binary`, prose-cited resolutions, a bare `provenance` attr key) was
 fixed to current grammar as part of the original work.
 
+19. **Refutation scope (#933, spec rule #7's family).** A
+    `:H h-NNN.refuts` row's `refutes` column cites `p*` / `ap*` ids the
+    declaring hypothesis actually declares. `_check_refutation_scope`.
+
+    The third site naming a prediction, and the one nothing resolved.
+    Rule 6 walks the ids a MOVE matched and rule 5's half walks the `r*`
+    a `--` cited; neither asks what the refutation itself claims to
+    overturn, so `r1|p9,ap9|"…"` on a hypothesis declaring neither
+    validated clean. Not only bookkeeping: a hypothesis reaches
+    `refuted` through a `--`, and rule 18's prediction closure exempts a
+    refuted hypothesis — so a phantom-scoped refutation discharged every
+    prediction on it without settling any. The exemption is right; the
+    hole was upstream.
+
+    Scoped to the declaring hypothesis for the reason rule 6 is: a
+    sibling's `p2` is not this hypothesis's evidence in either
+    direction. Silent on a hypothesis declaring no predictions — the
+    lean shape spec rule #23 exempts, not a defect this owns.
+
+    Measured before arming: 17 documents carry a `.refuts` block, 31
+    hypotheses declare refutation shapes, 47 refutation rows, **0
+    unresolved ids**. Error severity costs nothing on the current
+    corpus.
+
 **Open: two current-spec rules were deferred because the spec
 contradicted its own worked examples.** Don't enforce one until its spec
 is reconciled, or it'll false-positive on valid current writes. One is

@@ -389,3 +389,77 @@ def test_the_uniqueness_clause_is_already_owned_by_the_parser() -> None:
         'ap2|proposed_parent|cmdline|"launched from a terminal"\n'
     ))
     assert across_two_blocks == []
+
+
+# --- refutation scope: the third `p*` site, which rule #7's family never reached ----------
+
+_REFUT_IN_SCOPE = _PROLOGUE + _HYP_HEADER + """\
+h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
+
+:H h-001.preds [id|subject|claim]
+p1|proposed_edge|"failures arrive in bursts"
+
+:H h-001.attr_preds [id|target|attribute|claim]
+ap1|proposed_parent|signing|"unsigned"
+
+:H h-001.refuts [id|refutes|claim]
+r1|p1,ap1|"the series is cadenced and the binary is signed"
+"""
+
+_REFUT_OUT_OF_SCOPE = _REFUT_IN_SCOPE.replace("r1|p1,ap1|", "r1|p1,ap9|")
+
+#: A sibling's `p1` is not this hypothesis's evidence in either direction. The id EXISTS in the
+#: document, so a document-wide lookup accepts this and only a hypothesis-scoped one refuses it.
+_REFUT_CITES_A_SIBLINGS_PREDICTION = _PROLOGUE + _HYP_HEADER + """\
+h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
+h-002|?scheduled-service-retry|v-001|runs_on|process|??/??/??||null|active
+
+:H h-001.preds [id|subject|claim]
+p1|proposed_edge|"failures arrive in bursts"
+
+:H h-002.preds [id|subject|claim]
+p2|proposed_edge|"failures repeat on a fixed interval"
+
+:H h-001.refuts [id|refutes|claim]
+r1|p2|"the series is cadenced"
+"""
+
+#: A refutation on a hypothesis that declared no predictions yet. Lean, legal, and nothing for
+#: the scope rule to resolve against — rule #23 exempts the same shape.
+_REFUT_ON_A_PREDICTIONLESS_HYPOTHESIS = _PROLOGUE + _HYP_HEADER + """\
+h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
+
+:H h-001.refuts [id|refutes|claim]
+r1|p1|"the series is cadenced"
+"""
+
+
+def test_a_refutation_naming_an_undeclared_prediction_is_refused() -> None:
+    """`:H h-NNN.refuts`'s `refutes` column is the third site naming a `p*`/`ap*`, and it
+    resolved against nothing: `_check_prediction_refs` walks which ids a MOVE matched, rule
+    #5's half walks the `r*` a `--` cited, and neither asks what the refutation itself claims
+    to overturn."""
+    errors = _errors(_REFUT_OUT_OF_SCOPE)
+    assert len(errors) == 1
+    assert "row 'r1' refutes prediction 'ap9'" in errors[0]
+    assert "h-001 does not declare" in errors[0]
+
+
+def test_a_refutation_naming_its_own_hypothesis_predictions_is_clean() -> None:
+    """The liveness control, across both PREDICT namespaces — the refused document above
+    differs only in `ap1` becoming `ap9`."""
+    assert _errors(_REFUT_IN_SCOPE) == []
+
+
+def test_a_refutation_may_not_reach_a_siblings_prediction() -> None:
+    """Scoped to the declaring hypothesis for the reason `_check_prediction_refs` is. `p2` is
+    declared in this document, just not by `h-001`, so a document-wide lookup passes it."""
+    errors = _errors(_REFUT_CITES_A_SIBLINGS_PREDICTION)
+    assert len(errors) == 1
+    assert "row 'r1' refutes prediction 'p2'" in errors[0]
+
+
+def test_a_refutation_on_a_hypothesis_with_no_predictions_is_left_alone() -> None:
+    """A predictionless hypothesis has nothing to resolve against; refusing here would deny
+    the lean shape rule #23 exempts rather than catch a defect this rule owns."""
+    assert _errors(_REFUT_ON_A_PREDICTIONLESS_HYPOTHESIS) == []

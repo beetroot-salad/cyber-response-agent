@@ -407,6 +407,47 @@ def _check_prediction_refs(companion: CompanionBody) -> list[str]:
     return errors
 
 
+def _check_refutation_scope(companion: CompanionBody) -> list[str]:
+    """A refutation shape overturns ITS OWN hypothesis's predictions, and only those.
+
+    `:H h-NNN.refuts`'s `refutes` column is the third place a `p*`/`ap*` is named, and it was
+    the one nothing resolved. `_check_prediction_refs` walks the resolution head — which ids a
+    MOVE matched — and rule #5's half of it walks the `r*` a `--` cited. Neither reaches the
+    other direction: what the refutation itself claims to overturn. So `r1|p9,ap9|"..."` on a
+    hypothesis declaring neither parsed and validated clean, and the `--` that later cited `r1`
+    rested on a scope nobody checked.
+
+    The consequence is not confined to bookkeeping. A hypothesis reaches `refuted` through a
+    `--`, and `_check_prediction_closure` exempts a refuted hypothesis from rule #34 — so a
+    refutation with a phantom scope is a way to discharge every prediction on a hypothesis
+    without settling any of them. The exemption is right; the hole was upstream of it.
+
+    Scoped to the DECLARING hypothesis for the reason `_check_prediction_refs` is: a sibling's
+    `p2` is not this hypothesis's evidence in either direction, and a document-wide lookup
+    would accept it. Silent when the hypothesis declares no predictions at all — a refutation
+    on a predictionless hypothesis has nothing to name, which is the lean shape rule #23
+    exempts rather than a defect this rule owns.
+    """
+    errors: list[str] = []
+    for hid, hyp in _walkers.all_hypotheses(companion).items():
+        shapes = hyp.get("refutation_shape") or []
+        if not shapes:
+            continue
+        declared = _declared_prediction_ids(hyp)
+        if not declared:
+            continue
+        for shape in shapes:
+            rid = shape.get("id", "?")
+            for pid in _unresolved(shape.get("refutes_predictions") or [], declared):
+                errors.append(
+                    f"`:H {hid}.refuts` row {rid!r} refutes prediction {pid!r}, which "
+                    f"{hid} does not declare (`:H {hid}.preds` / `.attr_preds` declare: "
+                    f"{_known_ids(declared)}) — a refutation overturns its own "
+                    f"hypothesis's predictions, and a `--` citing it inherits that scope"
+                )
+    return errors
+
+
 def _check_authz_contract_ids(companion: CompanionBody) -> list[str]:
     """An `ac*` id is declared by AT MOST ONE LIVE hypothesis.
 
@@ -2784,6 +2825,7 @@ def diagnose(
         companion, deferred=deferred_hypothesis_ids(warnings),
     )))
     found.extend(_plain(_check_prediction_refs(companion)))
+    found.extend(_plain(_check_refutation_scope(companion)))
     found.extend(_plain(_check_authz_contract_ids(companion)))
     found.extend(_plain(_check_tested_commitment_refs(companion)))
     found.extend(_plain(_check_strong_move_provenance(companion)))
