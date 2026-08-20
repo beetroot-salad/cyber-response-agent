@@ -252,7 +252,18 @@ l-001|1|auth-history-jsmith-bastion|v-001||h-001,h-002|siem|90d
 
 A lead is a procedure: what was run, against what target, for which
 commitments. Route plans go in `:L l-001.lead_preds` — routing rules,
-not world-state predictions.
+not world-state predictions:
+
+```invlang
+:L l-001.lead_preds [id|if|read_as|advance_to]
+lp1|"access matches the identity's prior 72h cadence within 1σ"|"periodic tooling"|CONCLUDE
+lp2|"burst concentrated in the last 10 min"|"anomalous spike"|HYPOTHESIZE
+```
+
+Route ids are `lp<n>`, and all four cells are required: the condition,
+what reading it licenses, and where that reading goes. `advance_to` is
+`CONCLUDE`, `HYPOTHESIZE`, or another lead's **`name`** — its `name`
+cell, never its `l-*` id.
 
 ### `:R` observations and learned facts
 
@@ -314,6 +325,37 @@ row with `verdict: authorized`. `unauthorized` or `indeterminate`
 forces escalation per the contract's `on_unauth` / `on_indet`. A
 declared contract with no fulfilling row is treated as
 `indeterminate`.
+
+### `:R impact` (the impact axis)
+
+*Does this edge's effect matter enough to escalate?* — a third axis,
+orthogonal to authorization. Register the predicate at PLAN, grade it at
+ANALYZE:
+
+```invlang
+:L l-002.impact_preds [id|dim|claim|on_match|on_mismatch|on_indeterminate|escalation_on]
+ip1|confidentiality|"session_total_bytes within the 30d baseline ± 2σ"|within|exceeds|indeterminate|exceeds
+
+:R impact [resolved_by|pred_ref|dim|observed|verdict|grounding|anchor_id|anchor_kind|authority|as_of|reasoning]
+l-002|ip1|confidentiality|"180GB (3σ above the 60GB μ)"|exceeds|telemetry-baseline|backup-30d-baseline|approved-source-list|partial|2026-04-23T14:32Z|"observed 3σ; threshold 2σ"
+```
+
+On the `impact_preds` row every cell is required: register the threshold
+AND every outcome before the measurement lands, because a blank
+`on_mismatch` lets you decide what exceeding meant after seeing the
+answer. On the `:R impact` row, `pred_ref`, `dim`, `verdict`,
+`grounding`, `authority`, `as_of` and `reasoning` are required —
+`observed` and the anchor columns are not checked here.
+
+`pred_ref` is a bare `ip<n>` when the predicate belongs to
+`resolved_by`'s own lead, or `l-NNN.ip<n>` across leads, and `dim` must
+match the predicate's. Three closed catalogs — `enum impact.dimension`,
+`enum impact.verdict`, `enum impact.grounding`. `past-case` is
+deliberately absent from the last: impact is per-instance reasoning about
+what THIS event did, and a past case only says what a category of event
+was permitted to do. Every `ip<n>` you register must be graded or
+deferred by CONCLUDE (below), so do not register one you have no lead
+for.
 
 ### `:T resolutions` (belief movement)
 
@@ -386,6 +428,41 @@ summary                "Login matched established bastion usage"
 Every row is ONE line. A value that opens a quote and does not close it on
 the same row is denied on write, because the lines below it record nothing —
 write long values as one long line, as `summary` already does.
+
+**Every commitment is accounted for at CONCLUDE.** A `:T conclude` block is
+denied on write while any of these is declared and neither settled nor
+deferred:
+
+| declared | settled by | deferred in |
+|---|---|---|
+| `ac<n>` on `:H h-NNN.authz` | a `:R authz` row whose `fulfills` names it | `:T conclude.deferred_authz [contract_ref\|rationale]` |
+| `p<n>`/`ap<n>` on a hypothesis that is neither `--` nor shelved | a `:T resolutions` head that cites it and moves the hypothesis | `:T conclude.deferred_preds [prediction_ref\|rationale]` |
+| `ip<n>` on `:L l-NNN.impact_preds` | a `:R impact` row whose `pred_ref` names it | `:T conclude.deferred_impact [prediction_ref\|rationale]` |
+
+```invlang
+:T conclude.deferred_authz [contract_ref|rationale]
+h-003.ac2|"authority anchor unavailable — CMDB read denied by the environment permission gate"
+
+:T conclude.deferred_preds [prediction_ref|rationale]
+none
+```
+
+Name the commitment in FULL where you can — `h-003.ac2`, `h-001.p2`,
+`l-002.ip1`. The bare `ac2` / `p2` / `ip1` is accepted too, and defers
+every owner's commitment of that number; the qualified form is what makes
+a deferral specific to one hypothesis or lead. (`:R authz`'s `fulfills`
+column is the other way round — it names the bare `ac<n>`.)
+
+The rationale is the point, and a blank one is denied: deferring says WHY the
+question could not be answered ("authority anchor unavailable", "superseded by
+mechanism refutation at l-007", "escalation forced before the measurement
+landed"), not merely that it was not. Write `none` as the single row when
+nothing was deferred, and send these tables in the SAME `append_block` as
+`:T conclude` — the whole document is validated on every write, so a
+`:T conclude` that lands without them is refused before they can follow.
+
+Deferring is not a discharge in the other direction: `disposition benign`
+still needs its authz contracts ANSWERED, not accounted for.
 
 ### `:T close` (loop boundary)
 

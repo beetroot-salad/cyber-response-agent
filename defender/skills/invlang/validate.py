@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Container, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -23,14 +23,18 @@ from .parser import (
 from .schema import (
     AuthorizationContract,
     CompanionBody,
+    DeferralRecord,
     EdgeRecord,
     FindingRecord,
     HypothesisRecord,
+    ImpactPrediction,
     VertexRecord,
 )
 
 STRONG_AUTH_KINDS = vocab.STRONG_AUTH_KINDS
 STRONG_WEIGHTS = vocab.STRONG_WEIGHTS
+CONFIRMED_WEIGHT = vocab.CONFIRMED_WEIGHT
+REFUTED_WEIGHT = vocab.REFUTED_WEIGHT
 _STRONG_AUTH_KINDS_STR = " / ".join(sorted(STRONG_AUTH_KINDS))
 
 _YAML_FENCE_RE = re.compile(r"```ya?ml\b")
@@ -317,9 +321,12 @@ def _check_tested_commitment_refs(companion: CompanionBody) -> list[str]:
     falls back to every declared hypothesis rather than inventing a stricter rule than the
     format states.
 
-    NOT checked: an id in no recognized namespace. `:L l-NNN.lead_preds` is a documented block
-    the parser does not project, so its `lp*` would resolve against nothing — reporting those
-    would deny a document the format permits.
+    NOT checked: an id in no recognized namespace. The one that reaches here is `lp*`, and it
+    stays exempt after #933 projected `:L l-NNN.lead_preds` — for a better reason than "nothing
+    declares it". An `lp*` is scoped to a LEAD and this column is scoped to a HYPOTHESIS, so
+    there is no hypothesis whose declarations could resolve it; `_check_lead_prediction_structure`
+    owns the `lp*` namespace where it lives. (`COMMITMENT_ID_RE` already excludes `lp1` — `p\\d+`
+    is `fullmatch`ed — so the exemption is structural rather than a filter here.)
     """
     by_hyp = {
         hid: _declared_commitments(hyp)
@@ -396,111 +403,6 @@ def _check_prediction_refs(companion: CompanionBody) -> list[str]:
                 f"lead {lid}: resolution of {hid} cites refutation {rid!r}, "
                 f"which {hid} does not declare (`:H {hid}.refuts` declares: "
                 f"{_known_ids(refuts)})"
-            )
-    return errors
-
-
-def _parent_hypothesis_id(hid: str) -> str:
-    """The hypothesis `hid` hangs under, or `""` for a top-level one.
-
-    `HYPOTHESIS_ID_RE` admits `h-001` and the hierarchical child `h-001-002`; only the second
-    has a parent, and it is the id minus its last segment. Read off the id because that is
-    where the dense form carries the relation — no row names a parent hypothesis.
-    """
-    head, _, _tail = hid.rpartition("-")
-    return head if "-" in head else ""
-
-
-def _normalized_claim(claim: Any) -> str:
-    """One claim, stripped of the differences that are not differences: case, inner
-    whitespace, and the sentence punctuation the model varies freely."""
-    if not isinstance(claim, str):
-        return ""
-    return " ".join(claim.lower().split()).strip(" .\"'")
-
-
-def _predicted_observables(hyp: HypothesisRecord) -> frozenset[str]:
-    """A hypothesis's declared claims, normalized for comparison against a sibling's.
-
-    BOTH prediction blocks, the way `_declared_prediction_ids` reads both: an `:H h-NNN
-    .attr_preds` row is a predicted observable too — the most concrete kind — so a pair that
-    forks only there is distinct and must not be refused. Its `target` and `attribute` join
-    the key, since predicting a different attribute of a different vertex is a difference even
-    when the claim text coincides.
-
-    The `.preds` `subject` cell is deliberately NOT part of the identity: the same claim filed
-    once under `proposed_parent` and once under `proposed_edge` still leaves no lead able to
-    split the two rows.
-    """
-    out = set()
-    for pred in hyp.get("predictions") or []:
-        if isinstance(pred, dict) and (claim := _normalized_claim(pred.get("claim"))):
-            out.add(claim)
-    for ap in hyp.get("attribute_predictions") or []:
-        if not isinstance(ap, dict):
-            continue
-        target = str(ap.get("target", "")).strip().lower()
-        attribute = str(ap.get("attribute", "")).strip().lower()
-        out.add(f"{target}.{attribute}={_normalized_claim(ap.get('claim'))}")
-    return frozenset(out)
-
-
-def _check_fork_distinctness(companion: CompanionBody) -> list[str]:
-    """Rule #23, which absorbed #35. Siblings — hypotheses sharing a parent hypothesis and an
-    anchor — must not predict the same observables.
-
-    Two spec rules described this check and neither had an implementation: #23 keyed on the
-    parent classification, #35 ("sibling prediction divergence") on the prediction signature.
-    #934 moved #23 onto the observable, which is what #35 already said, so they are one rule
-    here and #23 is the number that ships (`docs/investigation-language.md`). #35's signature
-    included `predictions[].subject`; this drops it, for the reason `_predicted_observables`
-    records.
-
-    The predicted observable is the axis, NOT `proposed_edge.parent_vertex.classification`
-    (SKILL.md §Sibling-fork uniqueness). Keying on the classification is the natural spelling
-    and the wrong one: the shape the SKILL now asks for is siblings that leave the slots the
-    alert has not settled `??` and fork in their predictions, so a classification-keyed check
-    would refuse exactly the well-formed fork and pass the malformed one that mints a tuple to
-    carry a difference the predictions already carry.
-
-    TEXTUAL identity is the floor, and the whole of what this can honestly test. Two claims can
-    say the same thing in different words and no validator will know; that stays the author's
-    discipline, which is why the message carries the rule rather than only naming the ids.
-
-    A hypothesis declaring NO predictions is exempt rather than treated as an empty set that
-    collides with its sibling's. The document is written by append: `:H hypothesize.hypotheses`
-    and the `:H h-NNN.preds` blocks arrive as separate writes, so the group is legally
-    predictionless between the two — refusing it would deny the write that is on its way to
-    satisfying the rule.
-
-    LIVE only, for the reason `_check_authz_contract_ids` records: `:H` rows are immutable, so
-    a collision already on disk is unrepairable under a declared-set reading and every later
-    write would be denied for a row the author may no longer touch. Refuting one of the two is
-    the in-grammar repair.
-    """
-    live = set(_walkers.live_hypothesis_ids(companion))
-    groups: dict[tuple[str, str], dict[frozenset[str], list[str]]] = {}
-    for hid, hyp in _walkers.all_hypotheses(companion).items():
-        if hid not in live:
-            continue
-        claims = _predicted_observables(hyp)
-        if not claims:
-            continue
-        key = (_parent_hypothesis_id(hid), str(hyp.get("anchor") or ""))
-        groups.setdefault(key, {}).setdefault(claims, []).append(hid)
-    errors: list[str] = []
-    for (_parent, anchor), by_claims in groups.items():
-        for hids in by_claims.values():
-            if len(hids) < 2:
-                continue
-            errors.append(
-                f"hypotheses {', '.join(sorted(hids))} anchor on {anchor or '?'} and predict "
-                f"the same observables — siblings must differ on at least one predicted "
-                f"observable, the claim a lead splits them on. A different `?name` or "
-                f"`parent_class` is not that difference: leave the slots the alert has not "
-                f"settled `??` and write the difference as a prediction. If the two readings "
-                f"share a cause and differ only on whether it was authorized, they are ONE "
-                f"hypothesis with an `:H h-NNN.authz` contract"
             )
     return errors
 
@@ -685,10 +587,568 @@ def _check_strong_move_provenance(companion: CompanionBody) -> list[str]:
 
 
 
+def _check_prediction_completeness(companion: CompanionBody) -> list[str]:
+    """A hypothesis graded `++` has settled every prediction it declared, not only the ones
+    the confirming lead happened to look at.
+
+    `_check_strong_move_provenance` stops one line short of this. It refuses a `++` that cites
+    NOTHING and accepts one that cites `p1` out of five — so a hypothesis reaches "confirmed"
+    on whichever fifth of its own pre-commitments the lead found convenient, and the four it
+    never looked at are never heard from again. Partial coverage is what `+` is for.
+
+    The union is taken over EVERY resolution on the hypothesis, not only the `++` row: a
+    prediction an earlier `+` move already settled is settled. That is also what keeps the rule
+    repairable on an append-only document — the union only grows, so a write that clears the
+    gate clears it for good, and a later downgrade cannot re-open a row nobody can now edit.
+
+    `ap*` counts toward the set. `_declared_prediction_ids` is this module's one answer to
+    "what did the hypothesis declare", and its other two readers take the union; rule #34 — the
+    late closure gate this is the early half of — enumerates `p*` and `ap*` alike. Reading only
+    `p*` here would let an author take an observable out of the gate by declaring it under
+    `.attr_preds`, which is a formatting choice and not an evidentiary one.
+
+    NOT the closure gate. Rule #34 asks the same question of every weight at CONCLUDE and
+    offers `conclude.deferred_predictions[]` as the answer to "that one could not be checked".
+    This fires at write time on `++` alone and offers nothing, because a `++` has no
+    outstanding prediction to defer — the grade IS the claim that there is none.
+    """
+    hyps = _walkers.all_hypotheses(companion)
+    matched: dict[str, set[str]] = {}
+    confirmed_at: dict[str, str] = {}
+    for lid, res in _walkers.iter_resolutions(companion):
+        hid = res.get("hypothesis")
+        if not isinstance(hid, str):
+            continue
+        matched.setdefault(hid, set()).update(
+            p for p in res.get("matched_prediction_ids") or [] if isinstance(p, str)
+        )
+        if res.get("after") == CONFIRMED_WEIGHT:
+            confirmed_at.setdefault(hid, lid)
+
+    errors: list[str] = []
+    for hid, lid in confirmed_at.items():
+        hyp = hyps.get(hid)
+        if hyp is None:
+            # `_check_hypothesis_refs` owns the undeclared-`h-*` defect. A phantom declares no
+            # predictions, so the coverage question is vacuous here and its answer misleading.
+            continue
+        declared = _declared_prediction_ids(hyp)
+        cited = matched.get(hid, set())
+        unmet = declared - cited
+        if unmet:
+            errors.append(
+                f"lead {lid}: resolution of {hid} to {CONFIRMED_WEIGHT!r} leaves "
+                f"{_known_ids(unmet)} unmatched — {CONFIRMED_WEIGHT!r} says every prediction "
+                f"the hypothesis declared came in, and the resolutions on {hid} cite "
+                f"{_known_ids(cited & declared)} of {_known_ids(declared)}; cite the rest, or "
+                f"grade '+' for partial coverage"
+            )
+    return errors
+
+
+#: `attribute_predictions[].target` names WHICH of the hypothesis's three objects carries the
+#: predicted attribute. A closed set rather than a `v-*`/`e-*` id: the proposed parent and the
+#: proposed edge do not exist yet, so there is no id to point at, and the attached vertex is
+#: already named by the hypothesis's own `attached_to`.
+_ATTR_PRED_TARGETS: tuple[str, ...] = (
+    "proposed_parent", "attached_vertex", "proposed_edge",
+)
+_ATTR_PRED_ID_RE = re.compile(r"ap\d+")
+
+
+def _check_attribute_prediction_structure(companion: CompanionBody) -> list[str]:
+    """`:H h-NNN.attr_preds` rows, checked for the three things the parser does not check.
+
+    `_hyp_sub_attr_pred_row` `_require`s `id`, `target` and `attribute` to be non-blank and
+    stops there — whatever those cells SAY, the row is projected. So `a1|the parent|colour|`
+    parses clean and lands an attribute prediction whose id is outside the namespace every
+    citation site resolves against, whose target names no object the hypothesis has, and whose
+    claim predicts nothing.
+
+    The id shape is the load-bearing one. `matched_prediction_ids` and
+    `refutation_shape[].refutes_predictions` both resolve against the union
+    `_declared_prediction_ids` builds, so an id spelled `a1` can be cited by nobody.
+
+    UNIQUENESS is not checked here, because it cannot be violated by the time this reads the
+    record. Rule #33's "unique within the hypothesis" is already enforced one level up in two
+    places: `_warn_repeated_ids` makes a repeat WITHIN one `.attr_preds` block a parse error,
+    and `_extend_by_id` keys accumulation by id, so a repeat ACROSS blocks never reaches the
+    projected list — and must not be refused either, since re-emitting a sub-block with one row
+    added is the documented append shape (`test_invlang_hypothesis_accumulation`). A check here
+    would be dead code that read as live.
+
+    NOT checked: the one-observable-per-entry clause. "Compound `AND` / `OR` predicates split
+    into separate entries" is a judgment about what a sentence asserts, not a property of the
+    row — a lexical `" and "` test would refuse "the process and its parent share a cgroup",
+    which is one observable. Rule #29 leaves the same clause to the author on
+    `impact_predictions[]`, for the same reason.
+    """
+    errors: list[str] = []
+    for hid, hyp in _walkers.all_hypotheses(companion).items():
+        for ap in hyp.get("attribute_predictions") or []:
+            if not isinstance(ap, dict):
+                continue
+            apid = ap.get("id") or "?"
+            if not _ATTR_PRED_ID_RE.fullmatch(apid):
+                errors.append(
+                    f"`:H {hid}.attr_preds` row {apid!r}: an attribute prediction is numbered "
+                    f"`ap<n>` — `matched_prediction_ids` and `.refuts` resolve ids in that "
+                    f"namespace, so one outside it can be cited by nothing"
+                )
+            target = ap.get("target")
+            if target not in _ATTR_PRED_TARGETS:
+                errors.append(
+                    f"`:H {hid}.attr_preds` row {apid!r}: target {target!r} is not one of "
+                    f"{', '.join(_ATTR_PRED_TARGETS)} — the cell says which of the "
+                    f"hypothesis's OWN objects carries the attribute, not which vertex id"
+                )
+            if not (ap.get("claim") or "").strip():
+                attribute = ap.get("attribute") or "?"
+                errors.append(
+                    f"`:H {hid}.attr_preds` row {apid!r}: empty `claim` — the row pre-commits "
+                    f"to what {attribute!r} will read as, and a blank cell commits to nothing "
+                    f"while still counting as a prediction rules #6 and #34 require settled"
+                )
+    return errors
+
+
+#: Rule #23's diagnostic identity — the opening of every message the sibling-fork check
+#: emits, and the only stable handle a test has for picking those messages out of
+#: `validate_companion`'s flat list. It is a NAMED CONSTANT rather than a phrase two files
+#: happen to spell the same way: the message is built from it, so a test filtering on it
+#: cannot silently stop matching when the prose around it is reworded. A filter that can
+#: silently stop matching turns every `== []` assertion downstream of it into a pass the
+#: suite earns by finding nothing, which is how a deleted rule looks from the outside.
+_SIBLING_FORK_TAG = "sibling hypotheses"
+
+
+def _sibling_key(hid: str, hyp: HypothesisRecord) -> tuple[str, str]:
+    """The fork a hypothesis sits in: `(parent hypothesis, anchored vertex)`.
+
+    There is no `parent_hypothesis_id` column. Hierarchy rides in the ID SHAPE —
+    `h-{parent}-{nonce}`, the form rule #7 resolves — so the parent is read off the id, and a
+    top-level `h-001` keys on the empty parent alongside every other top-level hypothesis on
+    its anchor. `attached_to` projects to `anchor`; two hypotheses hung on different vertices
+    are not competing for one cause and are not siblings.
+    """
+    parts = hid.split("-")
+    parent = "-".join(parts[:-1]) if len(parts) > 2 else ""
+    return parent, str(hyp.get("anchor") or "")
+
+
+def _normalized_claim(claim: Any) -> str:
+    """One claim, stripped of the differences that are not differences: case, inner
+    whitespace, and the sentence punctuation the model varies freely.
+
+    The trailing `.`/quote strip is load-bearing, not cosmetic: a full stop is the cheapest
+    edit that defeats a textual floor, and a pair that differs only by one would otherwise be
+    a fork the rule waves through.
+    """
+    if not isinstance(claim, str):
+        return ""
+    return " ".join(claim.lower().split()).strip(" .\"'")
+
+
+def _claim_signature(hyp: HypothesisRecord) -> frozenset[str]:
+    """Every observable a hypothesis pre-commits to, normalized for comparison with a sibling's.
+
+    Both PREDICT blocks, because both declare an observable a lead can come back on. A SET,
+    because order is not a fork axis and one claim written twice is one claim.
+
+    The two blocks contribute DIFFERENTLY SHAPED keys, because their `claim` cells are
+    different kinds of thing. A `.preds` claim is a sentence that carries its own subject
+    ("failures arrive in bursts"), so the `subject` cell is deliberately NOT in the key: the
+    same sentence filed once under `proposed_parent` and once under `proposed_edge` still
+    leaves no lead able to split the two rows. An `.attr_preds` claim is a VALUE — `"UNSIGNED"`,
+    `"none"`, `"partial"` — and means nothing without the `target` and `attribute` naming what
+    the value is a value OF, so those join the key. Dropping them would fuse
+    `proposed_parent.signing=UNSIGNED` with `attached_vertex.publisher=UNSIGNED` into one
+    observable and refuse a pair a single lead splits by measuring two different things.
+    """
+    out = set()
+    for pred in hyp.get("predictions") or []:
+        if isinstance(pred, dict) and (claim := _normalized_claim(pred.get("claim"))):
+            out.add(claim)
+    for ap in hyp.get("attribute_predictions") or []:
+        # A BLANK claim contributes nothing rather than an empty-valued key. Rule #33 already
+        # refuses the row; counting it here would turn two separately-defective hypotheses
+        # into a spurious third error saying they are one fork.
+        if not isinstance(ap, dict) or not (claim := _normalized_claim(ap.get("claim"))):
+            continue
+        target = str(ap.get("target", "")).strip().lower()
+        attribute = str(ap.get("attribute", "")).strip().lower()
+        out.add(f"{target}.{attribute}={claim}")
+    return frozenset(out)
+
+
+def _check_sibling_fork_distinctness(companion: CompanionBody) -> list[str]:
+    """Two siblings declaring the same claims are one hypothesis under two ids — no lead can
+    move one without moving the other, so both sit at `null` until the run gives up on them.
+
+    The sibling group is `(parent hypothesis, anchored vertex)` and the axis is the PREDICTED
+    OBSERVABLE (#934). Explicitly NOT `proposed_edge.parent_vertex.classification`: an open
+    tuple `??/??/??` is the canonical spelling for a fork whose parent the alert has not
+    placed, so siblings legitimately share one, and a classification-keyed check would refuse
+    exactly the shape SKILL §Sibling-fork uniqueness now asks for.
+    `test_invlang_sibling_fork_934.py` is the guard on that.
+
+    TEXTUAL, and only textual. The floor is a claim set identical after whitespace and case
+    normalization; two claims saying the same thing in different words pass, and stay the
+    author's discipline. Closing that is not this check's business — whether "failures arrive
+    in bursts" and "failures are not evenly spaced" are one prediction is the judgment PREDICT
+    exists to make. What is left is the pair that wrote the same sentence twice, which is
+    always the defect and never a paraphrase.
+
+    Empty-signature hypotheses are skipped: one declaring no prediction at all has no fork
+    axis to compare, and the leanness and refutation-link rules own that shape. The convention
+    was rule #35's while #35 was a rule; #934 merged #35 into #23 and this rule owns it now.
+    The document is also written by APPEND — `:H hypothesize.hypotheses` and the `.preds`
+    blocks arrive as separate writes — so a group is legally predictionless in between, and
+    refusing it would deny the write on its way to satisfying the rule.
+
+    LIVE only, for the reason `_check_authz_contract_ids` records: `:H` rows are immutable, so
+    a collision already on disk is unrepairable under a declared-set reading and every later
+    write would be denied for a row the author may no longer touch. Refuting one of the two is
+    the in-grammar repair, and it has to stay reachable.
+    """
+    live = set(_walkers.live_hypothesis_ids(companion))
+    groups: dict[tuple[str, str, frozenset[str]], list[str]] = {}
+    for hid, hyp in _walkers.all_hypotheses(companion).items():
+        if hid not in live:
+            continue
+        signature = _claim_signature(hyp)
+        if not signature:
+            continue
+        groups.setdefault((*_sibling_key(hid, hyp), signature), []).append(hid)
+    return [
+        f"{_SIBLING_FORK_TAG} {', '.join(sorted(hids))} declare the same claims "
+        f"({'; '.join(sorted(signature))}) on anchor {anchor or '?'} — a fork is a "
+        f"disagreement about what will be observed, and a pair predicting the same observables "
+        f"proposes one cause under two ids that no lead can split; give each a claim the "
+        f"other's evidence would leave standing, or collapse them into one hypothesis. A "
+        f"different `?name` or `parent_class` is not that difference: leave the slots the "
+        f"alert has not settled `??` and write the difference as a prediction"
+        for (_parent, anchor, signature), hids in groups.items()
+        if len(hids) > 1
+    ]
+
+
 def _check_vocab(value: Any, allowed: Any, errmsg: str) -> list[str]:
     if isinstance(value, str) and value and value not in allowed:
         return [errmsg]
     return []
+
+
+def _leads(companion: CompanionBody) -> list[FindingRecord]:
+    return [f for f in companion.get("findings") or [] if isinstance(f, dict)]
+
+
+def _cell(record: Mapping[str, object], key: str) -> str:
+    """One cell of a projected row as stripped TEXT, read by a column name held in a variable.
+
+    A TypedDict `.get()` with a non-literal key is typed `object`, so a loop over a tuple of
+    required columns cannot call `.strip()` on the result. Every projected cell is a `str`;
+    stating that once here beats a cast at each of the sites that walk a column list.
+    """
+    value = record.get(key)
+    return value.strip() if isinstance(value, str) else ""
+
+
+_LEAD_PRED_ID_RE = re.compile(r"lp\d+")
+
+#: The two destinations an `advance_to` may name that are not a lead. `CONCLUDE` ends the run;
+#: `HYPOTHESIZE` sends it back for a mechanism the plan did not have.
+#:
+#: `docs/dense-investigation-format.md` §`:L` wrote `PREDICT` for the second in one worked
+#: example. That is the PHASE name for the block `:H hypothesize.hypotheses` lives in, not a
+#: third sentinel — spec rule #18 names these two, so the doc's example was corrected rather
+#: than the enum widened. Widening it instead would have meant accepting two spellings of one
+#: destination and, with `REPORT` beside `CONCLUDE` by the same argument, four.
+_ROUTE_SENTINELS: tuple[str, ...] = ("CONCLUDE", "HYPOTHESIZE")
+
+#: `:L l-NNN.lead_preds`' three content cells, each with what a BLANK one costs. The `if`
+#: column projects as `condition` (`if` cannot be a TypedDict key); everything the author sees
+#: uses the column spelling.
+_LEAD_PRED_CELLS: tuple[tuple[str, str, str], ...] = (
+    (
+        "condition", "if",
+        "the row pre-commits to WHICH result sends the run down this branch, and a blank cell "
+        "branches on nothing",
+    ),
+    (
+        "read_as", "read_as",
+        "the row says what that result MEANS, and a blank cell commits to no reading — which "
+        "is the whole reason a route is registered before the data lands rather than chosen "
+        "after it",
+    ),
+    (
+        "advance_to", "advance_to",
+        "the row names WHERE that reading routes, and a blank cell routes nowhere",
+    ),
+)
+
+
+def _check_lead_prediction_structure(companion: CompanionBody) -> list[str]:
+    """`:L l-NNN.lead_preds` rows — a lead's pre-committed ROUTE, checked for the four things
+    that make a route followable.
+
+    A route is not a prediction about the world; it is a prediction about the RUN. Nothing
+    grades an `lp*`, no resolution head can cite one, and `_check_tested_commitment_refs`
+    leaves an `lp*` alone. What it buys is that the interpretation was fixed before the data
+    arrived — so the cells that matter are the ones that make it a commitment: a condition, the
+    reading that condition licenses, and where that reading goes next. `_lead_pred_row`
+    `_require`s only `id` and never looks at what any cell says, so `lp1|||` parses clean and
+    lands a route committing to nothing.
+
+    `advance_to` is a hard reference: a lead NAME some `:L findings` row declares, or a
+    sentinel. Resolved against every declared lead INCLUDING the declaring one. The spec says
+    "elsewhere in the companion", and the only ordering the dense surface carries is
+    `:L findings` DOCUMENT ORDER — under which "elsewhere" can only mean "not this row", so
+    enforcing it would refuse a self-route and nothing else. That is left alone deliberately:
+    two loops may declare same-named leads under different ids, and there is no cell that says
+    which one a name means, so a self-route test can be wrong where accepting one costs
+    nothing. A destination that does not exist YET is refused, the way `_check_lead_refs`
+    refuses a forward `l-*`: PLAN writes its `:L findings` rows before the routes that point
+    at them, so the ordering the rule demands is the ordering PLAN already has.
+
+    UNIQUENESS is not checked, for the reason `_check_attribute_prediction_structure` records
+    at length: `_warn_repeated_ids` makes a repeat within one block a parse error and
+    `_extend_by_id` keeps the first record per id across blocks, so a duplicate never reaches
+    this list — and refusing the cross-block case would refuse the documented append shape.
+
+    NOT checked: the ROUTE-COMPLIANCE clause. "Followed by another lead" would read as the
+    next `:L findings` row in DOCUMENT ORDER, the same ordering `_check_screen_structure`
+    already uses for "the final lead in a SCREEN sequence" — the reading is settled and it is
+    not what blocks this. The CHANNEL is. Spec rule #18 asks for a WARNING, and there is no
+    honest way to emit one here. A warn diagnostic without a `Locus` is dropped by
+    `runtime/tools._addressable` and does nothing at all; a warn diagnostic WITH one FLAGS that
+    row and blocks every later write until `fix_row` rewrites it — and both candidate rows must
+    not be rewritten. The follower's `:L findings` row is a committed lead declaration, which
+    the warn family has never been able to reach (`_tool_fix_row`: "the warn family walks
+    `:R attr_updates` blocks and nothing else"). The `lead_preds` row is worse: letting a run
+    edit its own pre-registration to match where it ended up destroys the only thing
+    pre-registration is for. See the enforcement ramp for the deferral.
+    """
+    names = {
+        f["name"] for f in _leads(companion)
+        if isinstance(f.get("name"), str) and f["name"]
+    }
+    destinations = names | set(_ROUTE_SENTINELS)
+    errors: list[str] = []
+    for lead in _leads(companion):
+        lid = lead.get("id", "?")
+        for lp in lead.get("predictions") or []:
+            if not isinstance(lp, dict):
+                continue
+            lpid = lp.get("id") or "?"
+            where = f"`:L {lid}.lead_preds` row {lpid!r}"
+            if not _LEAD_PRED_ID_RE.fullmatch(lpid):
+                errors.append(
+                    f"{where}: a lead-level route is numbered `lp<n>` — the namespace is what "
+                    f"keeps a route out of the `p*`/`ap*`/`r*` a resolution head and "
+                    f"`:L findings`' `tests` column resolve against, so a route spelled `p1` "
+                    f"collides with the hypothesis prediction of that name at both sites"
+                )
+            for key, column, cost in _LEAD_PRED_CELLS:
+                if not _cell(lp, key):
+                    errors.append(f"{where}: empty `{column}` — {cost}")
+            dest = (lp.get("advance_to") or "").strip()
+            if dest and dest not in destinations:
+                errors.append(
+                    f"{where}: `advance_to` names {dest!r}, which is neither a lead NAME this "
+                    f"document declares ({_known_ids(names)}) nor one of "
+                    f"{', '.join(_ROUTE_SENTINELS)} — the cell carries the lead's `name`, not "
+                    f"its `l-*` id, and a route nobody can follow is not a plan"
+                )
+    return errors
+
+
+_IMPACT_PRED_ID_RE = re.compile(r"ip\d+")
+
+#: `:L l-NNN.impact_preds`' five verdict-shaped cells. Grouped rather than spelled out one
+#: branch apiece because they fail the same way and for the same reason: the row is a
+#: PREDICATE, and a predicate missing one of its outcomes cannot be graded on that outcome.
+_IMPACT_PRED_CELLS: tuple[str, ...] = (
+    "claim", "on_match", "on_mismatch", "on_indeterminate", "escalation_on",
+)
+
+
+def _check_impact_prediction_structure(companion: CompanionBody) -> list[str]:
+    """`:L l-NNN.impact_preds` rows — the impact predicate a lead registers at PREDICT, checked
+    for the cells that make it gradeable.
+
+    Impact is the third axis: an authorized, uncompromised action can still be
+    escalation-worthy if its consequence exceeds a threshold. What makes that checkable rather
+    than a post-hoc judgment is that the threshold and BOTH of its outcomes are written down
+    before the measurement lands — so a row with a `claim` and no `on_mismatch` has registered
+    a number without registering what exceeding it means, and ANALYZE grades it whichever way
+    the answer came out.
+
+    `_impact_pred_row` `_require`s only `id`, so every cell below is present-and-empty rather
+    than missing: `ip1|confidentiality|||||` parses clean today.
+
+    `dimension` is closed (`vocab.IMPACT_DIMENSION`) because `:R impact` rows must MATCH it —
+    `_check_impact_resolution_refs` compares the two, and a free-text dimension makes that
+    comparison a string coincidence.
+
+    NOT checked: the one-observable-per-entry clause. "Compound `AND` / `OR` / semicolon
+    predicates must be split across entries" is a judgment about what a sentence asserts, not a
+    property of the row, and a lexical test would refuse "session bytes and connection count
+    stay within baseline" written about one measurement. Rule #33 leaves the identical clause
+    to the author on `attribute_predictions[]`, and
+    `_check_attribute_prediction_structure` records why.
+    """
+    errors: list[str] = []
+    for lead in _leads(companion):
+        lid = lead.get("id", "?")
+        for ip in lead.get("impact_predictions") or []:
+            if not isinstance(ip, dict):
+                continue
+            ipid = ip.get("id") or "?"
+            where = f"`:L {lid}.impact_preds` row {ipid!r}"
+            if not _IMPACT_PRED_ID_RE.fullmatch(ipid):
+                errors.append(
+                    f"{where}: an impact prediction is numbered `ip<n>` — a `:R impact` row's "
+                    f"`pred_ref` resolves in that namespace, both bare and as the "
+                    f"cross-lead `{lid}.ip<n>`, so an id outside it can be graded by nothing"
+                )
+            errors += _check_vocab(
+                ip.get("dimension"), vocab.IMPACT_DIMENSION,
+                f"{where}: dimension {ip.get('dimension')!r} is not one of "
+                f"{', '.join(vocab.IMPACT_DIMENSION)} — the cell says which axis the "
+                f"consequence is measured on, and `:R impact` grades against it",
+            )
+            if not (ip.get("dimension") or "").strip():
+                errors.append(
+                    f"{where}: empty `dim` — a predicate with no dimension names no axis, and "
+                    f"the `:R impact` row that grades it has nothing to match"
+                )
+            for cell in _IMPACT_PRED_CELLS:
+                if not _cell(ip, cell):
+                    errors.append(
+                        f"{where}: empty `{cell}` — an impact predicate registers its "
+                        f"threshold AND every outcome before the measurement lands; a blank "
+                        f"cell lets ANALYZE decide that outcome after seeing the answer"
+                    )
+    return errors
+
+
+#: The `:R impact` cells rule #30 requires, spelled as the CANONICAL key the projector emits
+#: beside the COLUMN an author writes (`_RESOLUTION_KEY_CANONICAL` renames four of them).
+_IMPACT_RESOLUTION_REQUIRED: tuple[tuple[str, str], ...] = (
+    ("prediction_ref", "pred_ref"),
+    ("dimension", "dim"),
+    ("verdict", "verdict"),
+    ("grounding_kind", "grounding"),
+    ("authority_for_question", "authority"),
+    ("as_of", "as_of"),
+    ("reasoning", "reasoning"),
+)
+
+
+def _declared_impact_predictions(
+    companion: CompanionBody,
+) -> dict[str, ImpactPrediction]:
+    """Every `ip*` in the document under its CROSS-LEAD identity `l-{id}.ip{n}` — the one
+    spelling both reference forms resolve to."""
+    out: dict[str, ImpactPrediction] = {}
+    for lead in _leads(companion):
+        lid = lead.get("id", "?")
+        for ip in lead.get("impact_predictions") or []:
+            if isinstance(ip, dict) and isinstance(ip.get("id"), str) and ip["id"]:
+                out.setdefault(f"{lid}.{ip['id']}", ip)
+    return out
+
+
+def _check_impact_resolution_refs(companion: CompanionBody) -> list[str]:
+    """`:R impact` rows — what each grades, how it graded it, and on what authority.
+
+    The impact analog of `_check_prediction_refs`, and it exists for the same reason: nothing
+    joins a `:R impact` row back to the `:L l-NNN.impact_preds` row it claims to grade. The
+    projector canonicalizes `pred_ref` into a string and stops, so a typo, a forward reference
+    and ANOTHER lead's `ip1` all land identically — and a verdict attached to no predicate is a
+    consequence claim with no pre-registered threshold behind it, which is the one thing the
+    impact axis exists to prevent.
+
+    `dimension` is compared against the predicate's, not merely checked for membership. A row
+    that grades an availability predicate under `confidentiality` has answered a question
+    nobody asked, and the roll-up into `conclude.impact_verdict` cannot tell that from a real
+    answer.
+
+    `past-case` is refused by name rather than left to the enum's silence, because the omission
+    is a judgment and not an oversight: impact is per-instance reasoning about what THIS event
+    did, and a past case establishes what a CATEGORY of event was permitted to do. Rule #11
+    excludes it from consultations for the neighbouring reason.
+
+    NOT checked: whether the observation supports the verdict. `observed` is free text — "180GB
+    (3σ above 60GB μ)" — and reading it against `claim` is the judgment ANALYZE is for. This
+    checks that the row is ANSWERABLE, not that the answer is right.
+    """
+    declared = _declared_impact_predictions(companion)
+    errors: list[str] = []
+    for lead in _leads(companion):
+        lid = lead.get("id", "?")
+        for row in (lead.get("outcome") or {}).get("impact_resolutions") or []:
+            if not isinstance(row, dict):
+                continue
+            raw_ref = (row.get("prediction_ref") or "").strip()
+            where = f"lead {lid}: `:R impact` row for {raw_ref or '<no pred_ref>'}"
+            # ONE error per ROW, not per column: an under-filled row is one defect, and seven
+            # near-identical refusals for one row would bury the six other checks below.
+            blank = [column for key, column in _IMPACT_RESOLUTION_REQUIRED if not _cell(row, key)]
+            if blank:
+                errors.append(
+                    f"{where}: empty {', '.join(f'`{c}`' for c in blank)} — an impact "
+                    f"resolution carries a consequence verdict AND the provenance that makes "
+                    f"it checkable, so all of "
+                    f"{', '.join(c for _k, c in _IMPACT_RESOLUTION_REQUIRED)} are required; a "
+                    f"blank cell records the verdict without what it rests on"
+                )
+            errors += _check_vocab(
+                row.get("verdict"), vocab.IMPACT_VERDICT,
+                f"{where}: verdict {row.get('verdict')!r} is not one of "
+                f"{', '.join(vocab.IMPACT_VERDICT)} — the cell says whether the measurement "
+                f"landed inside the registered threshold, not what was measured",
+            )
+            grounding = row.get("grounding_kind")
+            if grounding == "past-case":
+                errors.append(
+                    f"{where}: `grounding past-case` — impact is per-instance reasoning about "
+                    f"what THIS event did, and a past case establishes only what a CATEGORY "
+                    f"of event was permitted to do. Ground it on "
+                    f"{', '.join(vocab.IMPACT_GROUNDING)}, or defer the prediction in "
+                    f"`:T conclude.deferred_impact` with that as the rationale"
+                )
+            else:
+                errors += _check_vocab(
+                    grounding, vocab.IMPACT_GROUNDING,
+                    f"{where}: grounding {grounding!r} is not one of "
+                    f"{', '.join(vocab.IMPACT_GROUNDING)}",
+                )
+            if not raw_ref:
+                continue
+            # Bare `ip{n}` is scoped to the lead the row landed on — the one the `resolved_by`
+            # column named, which is the only lead that could have measured it.
+            ref = raw_ref if "." in raw_ref else f"{lid}.{raw_ref}"
+            pred = declared.get(ref)
+            if pred is None:
+                errors.append(
+                    f"{where}: `pred_ref` resolves to {ref!r}, which no "
+                    f"`:L l-NNN.impact_preds` row declares (declared: "
+                    f"{_known_ids(set(declared))}) — a bare `ip<n>` resolves within {lid} and "
+                    f"a qualified `l-NNN.ip<n>` across leads; register the predicate before "
+                    f"grading it"
+                )
+                continue
+            dim, pred_dim = row.get("dimension"), pred.get("dimension")
+            if dim and pred_dim and dim != pred_dim:
+                errors.append(
+                    f"{where}: `dim {dim}` but {ref} was registered on {pred_dim!r} — a "
+                    f"resolution grades the predicate it names, so the two axes have to be "
+                    f"the same one; fix the column, or point `pred_ref` at the predicate this "
+                    f"row actually measured"
+                )
+    return errors
 
 
 def _check_vocab_vertices(companion: CompanionBody) -> list[str]:
@@ -1718,6 +2178,553 @@ def _check_disposition_gating(companion: CompanionBody) -> list[str]:
 
 
 
+#: `:L findings`' `mode` cell for a fast-path screen lead, and the `screen_result` that says
+#: the screen HIT. The only two cell values the SCREEN rule turns on — every other mode and
+#: every other result passes through it untouched.
+SCREEN_MODE = "screen"
+SCREEN_MATCH = "match"
+
+
+def _check_screen_structure(companion: CompanionBody) -> list[str]:
+    """A `screen_result` is a SCREEN lead's verdict, and three ways a document can carry one
+    that decides nothing.
+
+    On a lead with no `mode: screen` it is a verdict about a screen that never ran, written in
+    the slot every reader takes for the run's fast-path answer. On an INTERMEDIATE screen lead
+    it is a partial answer in that same slot: a screen sequence narrows across leads and only
+    the last of them has seen every indicator, so an earlier `no_match` reads as the sequence's
+    result while the sequence is still running. A `match` beside a `hypothesize` block is the
+    third, and the only one with a disposition behind it — a matched screen ENDS the run on the
+    fast path, so a companion that then enumerates hypotheses claims both that no investigation
+    was needed and that one happened.
+
+    "Intermediate" is read as "the next lead in `:L findings` order also screens", which lets a
+    second screen phase later in the run be its own sequence rather than folding into the first.
+
+    Read off `findings[].screen_result`, which is where the `:L findings` column projects. The
+    spec spells the field `outcome.screen_result`, from the pre-dense envelope; the projection
+    has never nested it.
+
+    NOT checked: whether the verdict is the right one, or whether the indicators it claims to
+    rest on were retrieved. `screen_result` is a scalar the model writes and nothing beneath it
+    is projected — the same limit `_check_false_positive_gating` records for `entity_check`.
+    """
+    leads = [f for f in companion.get("findings") or [] if isinstance(f, dict)]
+    errors: list[str] = []
+    for i, lead in enumerate(leads):
+        result = lead.get("screen_result")
+        if not (isinstance(result, str) and result.strip()):
+            continue
+        lid = lead.get("id", "?")
+        mode = lead.get("mode") or ""
+        if mode != SCREEN_MODE:
+            errors.append(
+                f"lead {lid}: `screen_result: {result}` on a lead whose mode is {mode!r} — "
+                f"the column records a SCREEN's verdict; set `mode: screen` on the lead that "
+                f"ran the screen, or drop the cell"
+            )
+        elif i + 1 < len(leads) and leads[i + 1].get("mode") == SCREEN_MODE:
+            errors.append(
+                f"lead {lid}: `screen_result: {result}` on an intermediate screen lead — "
+                f"{leads[i + 1].get('id', '?')} screens after it, so the sequence has not "
+                f"answered yet; only its final lead carries the result"
+            )
+    matched = [
+        f.get("id", "?") for f in leads
+        if isinstance(f.get("screen_result"), str)
+        and f["screen_result"].strip() == SCREEN_MATCH
+    ]
+    if matched and (companion.get("hypothesize") or {}).get("hypotheses"):
+        errors.append(
+            f"lead {matched[0]}: `screen_result: {SCREEN_MATCH}` closes the run on the fast "
+            f"path, but `:H hypothesize.hypotheses` enumerates hypotheses — a matched screen "
+            f"and an investigation are two different runs; drop the block, or record the "
+            f"screen as `no_match` and keep investigating"
+        )
+    return errors
+
+
+def _check_hypothesis_persistence(companion: CompanionBody) -> list[str]:
+    """A close that ENUMERATES its survivors enumerates all of them. A hypothesis the run
+    neither refuted nor listed was dropped, and nothing else on disk says so.
+
+    The failure is grading blindness papered over by silence: a hypothesis declared in loop 1,
+    never moved off `null`, never shelved, and left out of the close reads exactly like one
+    that was never proposed. The document then concludes over a smaller mechanism set than it
+    opened with, and no reader can tell which one went missing.
+
+    Two discharges. Final effective weight `--` — the run refuted it — or a
+    `:T conclude.surviving` row naming it. What was not refuted is what the run is still
+    carrying, and naming it is the whole price.
+
+    A close that writes NO surviving table is out of scope, and that is a measured concession
+    rather than an oversight. The table is omittable by construction — `_project_surviving_block`
+    projects it "checkable, not authoritative" and benign gating computes survival from the
+    resolution record precisely so a run may leave it out — so an absent table is read as the
+    document deferring to that record, under which every non-refuted hypothesis IS surviving and
+    nothing is dropped. Reading an absent table as an empty one instead would refuse seven of
+    the eight ```invlang documents in the tree, both shipped goldens among them; making the
+    table mandatory is a spec decision about what ANALYZE must write, not a validator decision
+    about what this document says. The rule bites where the author made the claim: writing the
+    table and leaving a live hypothesis out of it.
+
+    NOT a claim that the table is TRUE. It is read as an ASSERTION the author made, never as
+    evidence — which is what lets this demand the row without the row buying anything, and what
+    keeps benign gating's independent computation of survival independent.
+
+    v2.17: the spec's other two discharge arms are excised. `termination.rationale` is free text
+    and `termination.category` an unchecked scalar, so "cited as the termination target" was
+    never a projected hypothesis reference; and `matched_archetype` — "the matched archetype's
+    mechanism" — is a `schema.Conclude` scalar no production code reads, resolved against an
+    archetype catalog that does not exist. Neither was checkable, and an escape hatch that
+    cannot be checked is one every document holds open.
+    """
+    conclude = companion.get("conclude") or {}
+    # KEY presence, not row count. `_project_surviving_block` opens the bucket before it reads
+    # a row, so an absent `:T conclude.surviving` block leaves the key off entirely while a
+    # table written as the empty-array marker (`none`) leaves it present and empty — and the
+    # second is a claim that NOTHING survived, which a live hypothesis contradicts.
+    if "surviving_hypotheses" not in conclude:
+        return []
+    surviving = {
+        row["hypothesis"] for row in conclude["surviving_hypotheses"]
+        if isinstance(row, dict) and isinstance(row.get("hypothesis"), str)
+    }
+    return [
+        f"conclude: hypothesis {hid} is neither refuted nor carried into the close — its "
+        f"final weight is {weight!r} and the `:T conclude.surviving` table, which names "
+        f"{_known_ids(surviving)}, omits it. Resolve it to {REFUTED_WEIGHT!r}, or add its "
+        f"row; a hypothesis declared and then dropped reads like one that was never proposed"
+        for hid, weight in _walkers.final_weights(companion).items()
+        if weight != REFUTED_WEIGHT and hid not in surviving
+    ]
+
+
+#: The `termination.category` that makes rule #13 engage. A free-text scalar with NO closed
+#: vocabulary anywhere in the system — `_check_vocab` has nothing to hand for it, and the
+#: four-value enum the spec states (`trust-root`, `adversarial-refuted`, `severity-ceiling`,
+#: `exhaustion-escalation`) is contradicted on disk by `data-ceiling` and
+#: `adversarial-confirmed` in the two shipped e2e goldens. See
+#: `_check_ceiling_test_scope` for what that costs the rule and why the vocabulary was not
+#: closed here.
+SEVERITY_CEILING = "severity-ceiling"
+
+
+def _check_ceiling_test_scope(companion: CompanionBody) -> list[str]:
+    """A run that terminates on a SEVERITY CEILING names the check it could not make.
+
+    `severity-ceiling` is the strongest termination the language has that is not a refutation:
+    live hypotheses remain and their critical edges cannot be tested with available tools. It
+    is the one category that ends a run by declaring the question unanswerable, so it is the
+    one that most needs a receipt — without `ceiling_test`, "severity ceiling" is a phrase, and
+    the reader cannot tell a run that hit a real tooling boundary from one that stopped.
+
+    The receipt is `ceiling_test`: one row per unreachable check, naming the host and the data
+    source (`skills/invlang/SKILL.md` §`:T conclude`). The empty marker `none` projects as
+    absence, so "wrote the row and said there was no ceiling" and "wrote no row" are the same
+    document here, which is right — both claim no gap while the termination claims one.
+
+    HALF the spec rule, deliberately. #13 also says `ceiling_test` is FORBIDDEN under any other
+    termination, and that half is not implemented and should not be:
+
+      * The field it forbids is not the field the spec was written about. The pilot spec's
+        `ceiling_test` was `{kind, subject}` — THE out-of-band step that would resolve the
+        ceiling, so "only under a ceiling" follows. The shipped field is the list of checks the
+        run could not make, and eleven checked-in lessons instruct writing it whenever a source
+        was out of reach ("name them by host and source type in `ceiling_test`"). Forbidding it
+        elsewhere would refuse a run for obeying a lesson, which is the one failure
+        `learning/core/persist.py` turns into a discarded run.
+      * Measured: it would fire on the runs that name a telemetry gap and terminate on
+        something else, which is the ordinary shape — `golden-v2sshd` names two such gaps in
+        its prose and terminates `data-ceiling`.
+
+    The TRIGGER is unbacked and this rule fails silent because of it. `termination.category` is
+    free text with no vocabulary, so `severity_ceiling` or `severity-celing` disables this
+    check with nothing said. That direction is the safe one — a typo costs a miss, never a
+    wrongful refusal — but it is a real limit and not a rounding error. Closing the vocabulary
+    would fix it and was NOT done here: the spec's four values are contradicted by both shipped
+    e2e goldens (`data-ceiling`, `adversarial-confirmed`) and by three test corpora
+    (`exhaustion`, `adversarial-confirmed`, `natural`), so closing it is a spec-owner decision
+    with its own measurement, filed in the enforcement ramp rather than taken here.
+    """
+    conclude = companion.get("conclude") or {}
+    category = (conclude.get("termination") or {}).get("category")
+    if category != SEVERITY_CEILING or conclude.get("ceiling_test"):
+        return []
+    return [
+        f"conclude: `termination.category {SEVERITY_CEILING}` with no `ceiling_test` — the "
+        f"category says live hypotheses remain and their critical edges cannot be tested, so "
+        f"the close owes the specific check it could not make. Add one "
+        f"`ceiling_test  \"<host> <data source> not retrieved\"` row per gap to `:T conclude` "
+        f"(repeat the key; the SKILL's §`:T conclude` has the shape), naming the source rather "
+        f"than the shape of the question. If nothing was actually out of reach, this run did "
+        f"not hit a ceiling — terminate on the category that describes what happened."
+    ]
+
+
+@dataclass(frozen=True)
+class _Commitment:
+    """One thing the document DECLARED, which a close therefore has to account for.
+
+    `owner` is the block that declared it — a hypothesis for a contract or a prediction, a lead
+    for an impact prediction — because the local id is only unique under that owner. `ref` is
+    the qualified spelling every deferral table and every error message uses.
+    """
+
+    owner: str
+    local_id: str
+
+    @property
+    def ref(self) -> str:
+        return f"{self.owner}.{self.local_id}"
+
+
+def _deferral_index(rows: Iterable[DeferralRecord]) -> dict[str, list[str]]:
+    """`:T conclude.deferred_*` rows keyed by the reference they name, EXACTLY as written.
+
+    Never by an expanded alias. A row that writes the qualified `h-001.ac1` is registered under
+    that alone, so it cannot also discharge `h-002.ac1`; a row that writes the bare `ac1`
+    registers under the bare form and discharges every owner's `ac1`, which is the same
+    document-wide reading `_check_benign_authz` gives a bare `fulfills_contract`. The
+    asymmetry is deliberate: over-refusing a deferral leaves an author with no legal repair,
+    while over-accepting one costs an orphan that a differently-spelled row would have
+    excused anyway.
+
+    A list per key, not one rationale: two rows may name the same commitment, and one of them
+    carrying a reason is enough.
+    """
+    out: dict[str, list[str]] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        ref = (row.get("ref") or "").strip()
+        if ref:
+            out.setdefault(ref, []).append(row.get("rationale") or "")
+    return out
+
+
+def _unclosed_commitments(
+    declared: Iterable[_Commitment],
+    *,
+    resolved: Container[str],
+    deferrals: Iterable[DeferralRecord],
+) -> Iterator[tuple[_Commitment, bool]]:
+    """Every declared commitment a close neither resolved nor deferred WITH A RATIONALE, paired
+    with which of the two it is — `True` when a deferral row names it and every rationale on it
+    is blank, `False` when nothing names it at all.
+
+    ONE walk for three rules. #26 (authorization contracts), #31 (impact predictions) and #34
+    (predictions) are the same sentence over three namespaces — *every declared X is resolved,
+    or deferred with a reason* — and #31's own text says it "mirrors rule #26's orphan gate".
+    Written out three times they drift: the bare-vs-qualified reference reading, whether a
+    blank rationale discharges, and whether a second deferral row can rescue the first are
+    three judgment calls each, and nine places to disagree.
+
+    What the callers keep is everything rule-specific: WHICH commitments are declared, what
+    counts as resolved (a `:R authz` row, a `:R impact` row, a resolution head), and the prose.
+    A blank rationale is a distinct outcome rather than "not deferred" because the two need
+    different repairs — one needs a row, the other needs a sentence.
+    """
+    index = _deferral_index(deferrals)
+    for c in declared:
+        if c.ref in resolved or c.local_id in resolved:
+            continue
+        rationales = index.get(c.ref, []) + index.get(c.local_id, [])
+        if not rationales:
+            yield c, False
+        elif not any(r.strip() for r in rationales):
+            yield c, True
+
+
+def _closure_refusal(
+    subject: str, table: str, ref: str, *, blank_rationale: bool, resolve: str
+) -> str:
+    """The two ways a closure rule refuses, worded once.
+
+    `subject` names the commitment as its own rule spells it, `resolve` is that rule's
+    non-deferral repair, and `table` is the sub-table that carries the deferral. The wording is
+    shared because the FAILURE is shared: a commitment made and then neither kept nor withdrawn
+    reads, from outside, exactly like one that was never made.
+    """
+    if blank_rationale:
+        return (
+            f"conclude: {subject} is deferred with an empty rationale — a "
+            f"`:T conclude.{table}` row records WHY the commitment could not be settled, and a "
+            f"blank cell records nothing while still discharging it. Write the reason, or "
+            f"{resolve}."
+        )
+    return (
+        f"conclude: {subject} is declared and then abandoned — nothing settles it and no "
+        f"`:T conclude.{table}` row defers it. Either {resolve}, or add a "
+        f"`:T conclude.{table}` row `{ref}|\"<why it could not be settled>\"`; a commitment "
+        f"made and then dropped reads like one that was never made."
+    )
+
+
+def _check_authz_contract_closure(companion: CompanionBody) -> list[str]:
+    """Every declared `:H h-NNN.authz` contract is fulfilled by a `:R authz` row, or deferred
+    in `:T conclude.deferred_authz` with a reason.
+
+    The orphan-contract gate. `_check_benign_authz` already refuses an unresolved contract, but
+    only on a LIVE hypothesis and only under `disposition: benign` — so every escalation path
+    accepted orphans in silence, and in the pre-v2.10 corpus 59% of declared contracts had no
+    resolution at all. A contract is a question the run committed to asking; dropping it
+    quietly is how a legitimacy question stops existing.
+
+    DELIBERATELY broader than `_check_benign_authz` in two directions, and both come from the
+    spec text. It runs under every disposition, and it covers contracts on REFUTED hypotheses
+    too — refutation is offered as a deferral RATIONALE ("superseded by mechanism refutation at
+    lead l-007"), not as an automatic discharge, because "the mechanism was refuted so its
+    authorization question is moot" is a claim about the case that a reader should be able to
+    see the run make.
+
+    DEFERS to the run's own disposition gate on any contract that gate is ALREADY refusing. The
+    two would otherwise report one missing `:R authz` row twice, and the second report would be
+    actively misleading: this rule offers "defer it with a rationale" as a repair, and on a
+    `disposition: benign` document that repair clears this rule and leaves benign blocked —
+    a fix that does not fix the document. The gate's refusal names the same contract with the
+    sharper consequence and the only repair that works, so it is the one that speaks.
+
+    Matched on the gate's OUTPUT, not on the disposition keyword. `outstanding_authz_contracts`
+    is the shared definition of "still open" and hands back the exact string the gate emits, so
+    a price added to `_DISPOSITION_GATES` that also refuses contracts is deferred to with no
+    edit here — where a `== "benign"` test would leave the next one double-reporting. It costs
+    a second `_check_disposition_gating` pass over an in-memory dict.
+
+    Fulfilment is read by id exactly as `_check_benign_authz` reads it, with no verdict
+    condition: an `unauthorized` row settles the question, and what that verdict then costs the
+    document is the benign gate's business.
+    """
+    conclude = companion.get("conclude")
+    if not conclude:
+        return []
+    gated = set(_check_disposition_gating(companion))
+    spoken_for = {
+        f"{hid}.{c.get('id')}"
+        for hid, c, why in outstanding_authz_contracts(companion)
+        if why in gated
+    }
+    resolved = {
+        row["fulfills_contract"]
+        for row in _walkers.iter_authz_resolutions(companion)
+        if isinstance(row.get("fulfills_contract"), str) and row["fulfills_contract"]
+    }
+    declared = [
+        _Commitment(hid, c["id"])
+        for hid, hyp in _walkers.all_hypotheses(companion).items()
+        for c in hyp.get("authorization_contract") or []
+        if isinstance(c, dict) and isinstance(c.get("id"), str) and c["id"]
+        and f"{hid}.{c['id']}" not in spoken_for
+    ]
+    return [
+        _closure_refusal(
+            f"authz contract {c.ref}", "deferred_authz", c.ref,
+            blank_rationale=blank,
+            # The BARE id in `fulfills`, the qualified one in the deferral row. That is not a
+            # cosmetic difference: `_check_benign_authz` matches `fulfills_contract` on the
+            # bare `ac<n>` alone, so advising `fulfills=h-001.ac1` here would name a row that
+            # clears THIS rule and leaves the benign gate blocked.
+            resolve=f"fulfil it with a `:R authz` row carrying `fulfills={c.local_id}`",
+        )
+        for c, blank in _unclosed_commitments(
+            declared,
+            resolved=resolved,
+            deferrals=conclude.get("deferred_authorizations") or [],
+        )
+    ]
+
+
+def _check_impact_closure(companion: CompanionBody) -> list[str]:
+    """Every declared `ip*` is graded by a `:R impact` row or deferred in
+    `:T conclude.deferred_impact` with a reason — and the roll-up over those grades is
+    internally consistent.
+
+    Rule #26's orphan gate on the impact axis, and #31's own text says so. The failure is the
+    same one: a predicate registered at PREDICT and never graded lets a run choose, after the
+    fact, which of its own consequence thresholds to be measured against.
+
+    ACROSS ALL LEADS, including a lead whose query failed. A predicate registered on a lead
+    that never came back is exactly what the deferral arm is for ("the query errored before the
+    measurement landed"), so the wider reading costs nothing and needs no concept the format
+    does not already have — where exempting failed leads would need a rule about which
+    `failure_reason` values excuse a predicate.
+
+    The second half is the ROLL-UP PAIR, and only its PRESENCE. `impact_severity` is required
+    exactly when the verdict is `exceeds` or `indeterminate` and forbidden otherwise, because
+    severity is the magnitude of a consequence the run is CLAIMING: a severity beside `within`
+    claims a magnitude for something that stayed inside its threshold, and a missing one beside
+    `exceeds` escalates without saying how far. That is structural — it holds whatever the two
+    cells say — which is why it ships while neither cell's VOCABULARY does.
+
+    NOT checked, three times over, and all three for reasons at their sites. Neither conclude
+    scalar's enum is enforced: `skills/invlang/SKILL.md` has never stated either vocabulary, so
+    refusing on one refuses a run for a rule the model was never given — the failure spec rule
+    #32 was struck for. And whether the roll-up is ARITHMETICALLY right — `exceeds` beside
+    three `within` rows — needs the rows, and no document in the tree carries any; computing an
+    aggregate from rows that do not exist yet is a check with no way to be wrong.
+    """
+    conclude = companion.get("conclude")
+    if not conclude:
+        return []
+    resolved: set[str] = set()
+    for lead in _leads(companion):
+        lid = lead.get("id", "?")
+        for row in (lead.get("outcome") or {}).get("impact_resolutions") or []:
+            ref = (row.get("prediction_ref") or "").strip() if isinstance(row, dict) else ""
+            if ref:
+                resolved.add(ref if "." in ref else f"{lid}.{ref}")
+    declared = [
+        _Commitment(lead.get("id", "?"), ip["id"])
+        for lead in _leads(companion)
+        for ip in lead.get("impact_predictions") or []
+        if isinstance(ip, dict) and isinstance(ip.get("id"), str) and ip["id"]
+    ]
+    errors = [
+        _closure_refusal(
+            f"impact prediction {c.ref}", "deferred_impact", c.ref,
+            blank_rationale=blank,
+            resolve=f"grade it with a `:R impact` row carrying `pred_ref={c.ref}`",
+        )
+        for c, blank in _unclosed_commitments(
+            declared,
+            resolved=resolved,
+            deferrals=conclude.get("deferred_impact_predictions") or [],
+        )
+    ]
+
+    # `conclude.impact_verdict`'s ENUM is measured and NOT armed. `vocab.CONCLUDE_IMPACT_VERDICT`
+    # exists so the SKILL and this comment can name it, and nothing refuses on it yet. It fires on
+    # BOTH shipped e2e goldens — `golden-v2sshd` writes `none-detected` and
+    # `golden-sshpivot-ab3` writes `attempted-lateral-movement`, where the spec's roll-up over
+    # zero `:R impact` rows is `none` in both cases. Those two are not authored fixtures whose
+    # cell can be corrected: they are RECORDED runs replayed through this very gate from
+    # `tool_trace.jsonl`, so arming this refuses the recorded write and takes seven e2e tests
+    # with it, and "repairing" them means rewriting a trace of what a model actually wrote.
+    #
+    # The cause is upstream of the fixtures. `skills/invlang/SKILL.md` writes `impact_verdict
+    # none` in one worked example and states no vocabulary, so both runs filled a
+    # free-text-looking slot with prose and neither disobeyed anything. The order this has to
+    # land in is teach, then re-record, then arm — and the first step ships here.
+    #
+    # `impact_severity`'s MEMBERSHIP is unenforced for the same reason and by the same rule:
+    # `vocab.IMPACT_SEVERITY` is registered so `enum conclude.impact_severity` can teach it,
+    # and no check refuses on it. It measures zero fires today — no document writes the cell at
+    # all — but enforcing a vocabulary the runtime prompt has never stated is the same mistake
+    # whether or not it happens to bite yet, and the two conclude scalars are one decision.
+    #
+    # The conditional-presence clause below does NOT depend on either membership test. An
+    # unrecognized verdict is simply not in `_SEVERITY_OWING`, so a severity beside it is
+    # forbidden and a missing one is not demanded — which is the correct reading of a run that
+    # rolled up to something the enum does not name.
+    verdict = conclude.get("impact_verdict")
+    severity = conclude.get("impact_severity")
+    # `null` is the format's own word for "no severity", so it is an ABSENT severity here and
+    # not a present one — the same reading `_project_conclude_scalars` gives the bare token.
+    stated = _row_states_something(severity) and severity != "null"
+    owed = verdict in _SEVERITY_OWING
+    if owed and not stated:
+        errors.append(
+            f"conclude: `impact_verdict {verdict}` with no `impact_severity` — the verdict "
+            f"says a registered threshold was crossed or could not be shown not to be, and "
+            f"the severity is how far. Add `impact_severity` "
+            f"({', '.join(v for v in vocab.IMPACT_SEVERITY if v != 'null')}), or roll up to "
+            f"`within` if nothing was actually exceeded"
+        )
+    if stated and not owed:
+        errors.append(
+            f"conclude: `impact_severity {severity}` beside `impact_verdict "
+            f"{verdict if verdict is not None else 'null'}` — severity is the magnitude of a "
+            f"consequence the run is CLAIMING, and this verdict claims none. Write "
+            f"`impact_severity null`, or say which predicate was exceeded and roll the "
+            f"verdict up to match"
+        )
+    return errors
+
+
+#: The `conclude.impact_verdict` values that OWE an `impact_severity` — the ones where the run
+#: is CLAIMING a consequence, so the severity says how large. Subtracted from the row-level
+#: verdict enum rather than restated: `within` is the one member that claims none, and the
+#: conclude-only `none` is not in that enum at all, so both fall out for the right reason
+#: instead of by being left off a hand-written pair.
+_SEVERITY_OWING: frozenset[str] = frozenset(vocab.IMPACT_VERDICT) - {"within"}
+
+
+def _shelved_hypothesis_ids(companion: CompanionBody) -> set[str]:
+    """Every `h-*` a `:T shelved` row retired, across every lead — the hypotheses a run set
+    aside rather than answered, which is one of the two ways #34 lets a prediction go."""
+    return {
+        hid
+        for lead in _leads(companion)
+        for hid in lead.get("shelved") or []
+        if isinstance(hid, str)
+    }
+
+
+def _check_prediction_closure(companion: CompanionBody) -> list[str]:
+    """Every `p*`/`ap*` on a hypothesis the run is still carrying was settled by some
+    resolution, or deferred in `:T conclude.deferred_preds` with a reason.
+
+    The contract ANALYZE owes PREDICT. PREDICT pre-commits a prediction set precisely so the
+    grading cannot be chosen after the evidence lands; without a closure gate, ANALYZE cites
+    the two predictions that came in and the other three are never heard from again, and no
+    reader of the finished document can tell they existed.
+
+    The late half of a pair. `_check_prediction_completeness` (spec #6) asks the same question
+    at WRITE time and only of a `++`, and offers no deferral — a `++` claims every prediction
+    came in, so there is nothing outstanding to defer. This asks it of every weight, at
+    CONCLUDE, and offers the deferral because at that point "the tool was never available" is a
+    true and final answer.
+
+    Two discharges besides citation, and both are read off the RESOLUTION RECORD rather than
+    the `status` column the spec's wording names. `status` is a `:H` cell fixed at declaration
+    time and append-only forbids updating it, so it can never carry a FINAL status; the run
+    says "refuted" by moving the weight to `--` and "shelved" with a `:T shelved` row. That is
+    the same translation `_check_hypothesis_persistence` applies to spec #24.
+
+    A citation only counts from a resolution with a non-null `after`. A row that cites `p1` and
+    moves nowhere has recorded that the lead looked, not that the prediction settled — and
+    `_walkers.final_weights` would read that row as the hypothesis's final position anyway.
+
+    Scoped to the hypothesis that declared the prediction, never document-wide: a sibling's
+    `p1` discharges nothing here, which is the cross-citation rule #25 refuses one level down
+    and `_check_prediction_refs` enforces on the citing row.
+    """
+    conclude = companion.get("conclude")
+    if not conclude:
+        return []
+    resolved: set[str] = set()
+    for _lid, res in _walkers.iter_resolutions(companion):
+        hid = res.get("hypothesis")
+        after = (res.get("after") or "").strip()
+        if not isinstance(hid, str) or not after or after in vocab.NULL_WEIGHTS:
+            continue
+        for pid in res.get("matched_prediction_ids") or []:
+            if isinstance(pid, str) and pid:
+                resolved.add(f"{hid}.{pid}")
+    shelved = _shelved_hypothesis_ids(companion)
+    weights = _walkers.final_weights(companion)
+    declared = [
+        _Commitment(hid, pid)
+        for hid, hyp in _walkers.all_hypotheses(companion).items()
+        if weights.get(hid) != REFUTED_WEIGHT and hid not in shelved
+        for pid in sorted(_declared_prediction_ids(hyp))
+    ]
+    return [
+        _closure_refusal(
+            f"prediction {c.ref} on live hypothesis {c.owner}", "deferred_preds", c.ref,
+            blank_rationale=blank,
+            resolve=(
+                f"cite {c.local_id} in a `:T resolutions` head that moves {c.owner}"
+            ),
+        )
+        for c, blank in _unclosed_commitments(
+            declared,
+            resolved=resolved,
+            deferrals=conclude.get("deferred_predictions") or [],
+        )
+    ]
+
+
 def _check_loop_close(companion: CompanionBody) -> list[str]:
     closed = companion.get("closed_loops") or []
     if not closed:
@@ -1777,12 +2784,26 @@ def diagnose(
         companion, deferred=deferred_hypothesis_ids(warnings),
     )))
     found.extend(_plain(_check_prediction_refs(companion)))
-    found.extend(_plain(_check_fork_distinctness(companion)))
     found.extend(_plain(_check_authz_contract_ids(companion)))
     found.extend(_plain(_check_tested_commitment_refs(companion)))
     found.extend(_plain(_check_strong_move_provenance(companion)))
+    found.extend(_plain(_check_prediction_completeness(companion)))
+    found.extend(_plain(_check_attribute_prediction_structure(companion)))
+    found.extend(_plain(_check_sibling_fork_distinctness(companion)))
+    found.extend(_plain(_check_lead_prediction_structure(companion)))
+    found.extend(_plain(_check_impact_prediction_structure(companion)))
+    found.extend(_plain(_check_impact_resolution_refs(companion)))
     found.extend(_check_closed_vocab(companion, proposed_text))
+    found.extend(_plain(_check_screen_structure(companion)))
     found.extend(_plain(_check_disposition_gating(companion)))
+    found.extend(_plain(_check_ceiling_test_scope(companion)))
+    found.extend(_plain(_check_hypothesis_persistence(companion)))
+    # The three closure gates, together and last: they are one sentence over three namespaces
+    # (`_unclosed_commitments`), and each is only safe to run because its `deferred_*` table is
+    # now projected.
+    found.extend(_plain(_check_authz_contract_closure(companion)))
+    found.extend(_plain(_check_impact_closure(companion)))
+    found.extend(_plain(_check_prediction_closure(companion)))
     found.extend(_plain(_check_loop_close(companion)))
     return found
 

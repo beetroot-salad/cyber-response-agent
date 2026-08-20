@@ -85,7 +85,10 @@ Each case yields a per-dimension score. Aggregate = (weighted sum across cases).
 
 ## D3. Structural conformance (binary, weight 2)
 - 1 if the envelope passes orchestrator parsing AND invlang validator
-  (presence-matrix violations, ID format, append-only, rule #21/#26/#32).
+  (presence-matrix violations, ID format, append-only, rule #21/#26).
+  *(Spec v2.20: rule #32 was named here too. It is struck — never
+  implemented, and no document in the corpus has ever discharged it;
+  see its gap entry in `docs/investigation-language.md`.)*
 - 0 if any structural error.
 - Run by replaying the output through `invlang_validate.py` against a synthetic
   prior `investigation.md`.

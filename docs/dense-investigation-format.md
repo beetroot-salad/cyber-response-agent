@@ -71,8 +71,10 @@ Lead-level pre-committed branch plans (non-branching but interpretation-vulnerab
 ```
 :L l-{id}.lead_preds [id|if|read_as|advance_to]
 lp1|"access matches identity's prior 72h cadence within 1σ"|"periodic tooling pattern"|identity-of-use-lookup
-lp2|"bursty cluster concentrated in last 10 min"|"anomalous spike"|PREDICT
+lp2|"bursty cluster concentrated in last 10 min"|"anomalous spike"|HYPOTHESIZE
 ```
+
+`advance_to` is another lead's `name` (never its `l-*` id), or one of the two sentinels `CONCLUDE` / `HYPOTHESIZE`. v0.1 wrote `PREDICT` in the second row above; that is the PHASE name for the block `:H hypothesize.hypotheses` lives in, not a third sentinel, and rule #18 names the two. Corrected in #933, when `_check_lead_prediction_structure` started resolving the cell.
 
 Impact-prediction commitments authored at PREDICT (graded by ANALYZE into `:R impact` rows):
 
@@ -114,7 +116,7 @@ Every `:R` row lands on a lead's outcome, so every header carries `resolved_by` 
 
 ```
 :R authz [edge|verdict|anchor_kind|anchor_id|grounding|authority|as_of|effective_window?|fulfills|resolved_by|cites_leads?|cites_past_case?|conditioning?]
-e-010|authorized|approved-monitoring-sources|ams-registry-2026-01|org-authority|full|2026-04-23T14:00Z|2026-01-01..2026-06-30|h-001.ac1|l-001|||
+e-010|authorized|approved-monitoring-sources|ams-registry-2026-01|org-authority|full|2026-04-23T14:00Z|2026-01-01..2026-06-30|ac1|l-001|||
 
 :R consultations [resolved_by|cites_leads?|anchor_id|anchor_kind|grounding|result|as_of|authority|effective_window?|anchor_query?|conditioning?|concerns?]
 l-002||backup-30d-baseline|session-volume-baseline|telemetry-baseline|confirmed|2026-04-23T14:32Z|partial||30d session_total_bytes|30d window excludes quarter-end|
@@ -148,7 +150,9 @@ Form: `<hyp-id> <before> → <after>    [<lead-id> <pred/refut-ids> <severity_of
 
 For CONCLUDE:
 
-Scalar fields stay as flat key/value lines. Array-shaped fields (`surviving_hypotheses`, `deferred_authorizations`, `deferred_impact_predictions`, `deferred_predictions`, `ceiling_test`) get their own structured tables. Empty arrays render as a single `none` row; populated arrays carry one row per entry.
+Scalar fields stay as flat key/value lines. Array-shaped fields (`surviving_hypotheses`, `deferred_authorizations`, `deferred_impact_predictions`, `deferred_predictions`) get their own structured tables. Empty arrays render as a single `none` row; populated arrays carry one row per entry.
+
+`ceiling_test` is the exception, and v0.1 had it wrong. It is a **repeated flat row**, not a sub-table — one row per unreachable check, naming the host and the data source. That is what `skills/invlang/SKILL.md` §`:T conclude` teaches, what eleven checked-in lessons instruct ("name them by host and source type in `ceiling_test`"), what `schema.Conclude.ceiling_test: list[str]` carries, and what every `:T conclude` block on disk writes. The `[kind|subject]` sub-table this document previously specified came from the pilot spec's YAML, where `ceiling_test` was the single out-of-band step that would resolve a severity ceiling; the shipped field generalised to "every check I could not make" and dropped the `kind` enum, which appears in no vocabulary and no document. Reconciled here in #933. A block written under the retired sub-table spelling is still accepted and ignored by the parser (`_RETIRED_CEILING_TEST_BLOCK`) rather than refused.
 
 ```
 :T conclude
@@ -159,6 +163,7 @@ impact_verdict         within
 impact_severity        null
 confidence             medium
 matched_archetype      monitoring-probe
+ceiling_test           none
 ceiling_rationale      n/a
 summary                "SSH login as 'sensu' from internal monitoring-host confirmed sanctioned."
 
@@ -174,12 +179,9 @@ none
 
 :T conclude.deferred_preds [prediction_ref|rationale]
 none
-
-:T conclude.ceiling_test [kind|subject]
-none
 ```
 
-`ceiling_test` and `ceiling_rationale` carry `none` / `n/a` unless `termination.category: severity-ceiling`, in which case both are required (rule #13). For shelving inside a lead, see §`:L` lead-scoped sub-blocks (`:T shelved`).
+`ceiling_test` carries `none` when nothing was out of reach, and one row per gap otherwise (repeat the key). Rule #13 requires at least one under `termination.category: severity-ceiling` — implemented as `_check_ceiling_test_scope`. Its "forbidden otherwise" half is NOT enforced and should not be: the shipped field records every check the run could not make, which a run may legitimately have under any termination category, and the lessons corpus instructs writing it. `ceiling_rationale` is the companion scalar and carries no validator rule. For shelving inside a lead, see §`:L` lead-scoped sub-blocks (`:T shelved`).
 
 ### `:G` — frontier graph (derived view, not append-only)
 
@@ -214,7 +216,20 @@ e-001|attempted_auth|v-001|v-002|2026-04-20T09:00:00Z|siem-event:wazuh-indexer|t
 
 ## PREDICT (loop 1)
 
-Two siblings under v-001's `initiated_by`: a sanctioned-probe identity (carries the authz contract) and the §Integrity discipline peer (?adversary-controlled-source-session).
+Two siblings under v-001's `initiated_by`: a sanctioned-probe identity (carries the authz contract) and an §Integrity peer (?adversary-controlled-source-session).
+
+<!-- Spec v2.20: this read "the §Integrity discipline peer". The peer
+     shape is still the right representation for an integrity concern
+     and the example is unchanged, but the *discipline* — rule #32,
+     which would have required this peer whenever a contract sat on an
+     acting-entity parent — is struck. A peer here is an author's
+     judgement, not a gate's demand. Worth knowing when reading this
+     block: these two rows are the ONLY pair in the tree that would
+     have discharged #32, and they are hand-authored here to
+     illustrate the discipline. No run, no golden, and no shipped
+     worked example ever did. That is cited as reason 2 in rule #32's
+     gap entry in `docs/investigation-language.md`. -->
+
 
 :H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|preds|refuts|authz?|weight|status]
 h-001|?monitoring-probe|v-001|initiated_by|identity|approved-monitoring-service-account|p1:proposed_parent:"triple (172.22.0.10,sensu,target-endpoint) listed in approved-monitoring-sources"|r1[p1]:"triple absent or revoked"|ac1:proposed:approved-monitoring-sources:"triple listed as active":esc/esc|null|active
@@ -234,7 +249,7 @@ v-003|identity|approved-monitoring-service-account|sensu-svc|kind=service-accoun
 e-010|initiated_by|v-003|v-001||authoritative-source:approved-monitoring-sources
 
 :R authz [edge|verdict|anchor_kind|anchor_id|grounding|authority|as_of|fulfills|resolved_by]
-e-010|authorized|approved-monitoring-sources|ams-registry-2026-01|org-authority|full|2026-04-23T14:00Z|h-001.ac1|l-001
+e-010|authorized|approved-monitoring-sources|ams-registry-2026-01|org-authority|full|2026-04-23T14:00Z|ac1|l-001
 
 ## ANALYZE (loop 1)
 
@@ -302,15 +317,16 @@ Token comparison: original YAML investigation.md ≈ 1,200 chars across 123 line
 | `findings[].new_hypotheses[]` | `:H l-{id}.new_hypotheses` (column shape inherited from top-level `:H`) |
 | `findings[].shelved[]` | `:T shelved` |
 | `findings[].resolutions[]` (sibling of `outcome:`, not under it) | `:T resolutions` |
-| `conclude.{termination.category,termination.rationale,disposition,impact_verdict,impact_severity,confidence,matched_archetype,ceiling_rationale,summary}` | `:T conclude` flat key/value lines |
+| `conclude.{termination.category,termination.rationale,disposition,impact_verdict,impact_severity,confidence,matched_archetype,ceiling_test,ceiling_rationale,summary}` | `:T conclude` flat key/value lines (`ceiling_test` repeats — one row per gap) |
 | `conclude.surviving_hypotheses[]` | `:T conclude.surviving [hyp_id\|final_weight]` |
 | `conclude.deferred_authorizations[]` | `:T conclude.deferred_authz [contract_ref\|rationale]` |
 | `conclude.deferred_impact_predictions[]` | `:T conclude.deferred_impact [prediction_ref\|rationale]` |
 | `conclude.deferred_predictions[]` | `:T conclude.deferred_preds [prediction_ref\|rationale]` |
-| `conclude.ceiling_test` | `:T conclude.ceiling_test [kind\|subject]` |
 | `*.reasoning`, `*.story`, `*.summary`, `*.selection_rationale` | Dual: terse checklist cell on the row (`:T resolutions :: <annotation>`, `:T conclude summary "<…>"`, `:H ... story:"<…>"` if promoted) + Markdown prose in the phase block. Both required; validator checks cell presence, agent reads prose. |
 | `*.conditioning_context[]` | Structured cell only: `conditioning?` column on `:R authz`, `:R consultations`, `:R impact` (entries semicolon-separated within the cell). Per-resolution scaffolding, not narrative. |
 | `*.concerns[]` | `concerns?` column on the carrying `:V`, `:E`, `:H`, `:R *`, or `:L` row (entries semicolon-separated within the cell). |
+
+**Projection status.** As of #933 every row above is projected by `skills/invlang/parser.py` except one: `:L l-{id}.substitutions` is recognized and its rows discarded, because `query_details.substitutions` has no reader — no rule resolves against it and no prompt renders it. `:L l-{id}.lead_preds`, `:L l-{id}.impact_preds` and the three `:T conclude.deferred_*` tables were in the same state until #933 and are now projected; arming rules #18, #26, #29, #30, #31 and #34 depended on it. Every OTHER `:<TAG> l-NNN.<sub>` and `:T conclude.<sub>` name is now a parse warning, so a misspelled block is refused on write instead of vanishing.
 
 ## Validator translation (sketch)
 
@@ -321,7 +337,7 @@ Each rule re-expressed against a line-shape parser. Examples:
 | #4 edge-authority cite | every `:T resolutions` row with `++`/`--` after has at least one `e-{id}` token in supp-edges, and that edge's `auth_kind` ∈ {siem-event, runtime-audit, authoritative-source} |
 | #5 refutation IDs | every `--` row's pred/refut tokens include at least one `r{n}` resolving to the target hypothesis |
 | #6 prediction completeness | per-hypothesis union of `p{n}` tokens across `++` resolution rows = full prediction set declared on `:H` |
-| #13 ceiling_test scope | `:T conclude.ceiling_test` row ≠ `none` *iff* `termination.category` = `severity-ceiling`; `ceiling_rationale` non-empty under the same condition. |
+| #13 ceiling_test scope | at least one `ceiling_test` row in `:T conclude` when `termination.category` = `severity-ceiling`. Implemented one-way only, and the `ceiling_rationale` clause not at all — see §`:T conclude` above and `_check_ceiling_test_scope`. |
 | #14 partial-authority cap | a `:T resolutions` row whose every cited `:R` grounding entry has `authority=partial` is capped to after ∈ {+, -}. A row with at least one full-authority cited entry is *not* capped. |
 | #21 authz-gated benign | `:T conclude disposition: benign` ⇒ every `ac{n}` declared on a confirmed-weight hypothesis row appears as a `:R authz authorized` row |
 | #23 sibling fork distinctness | within a sibling group, no two LIVE `:H` rows whose declared claims are identical after case/whitespace normalization — the claim text of each `p{n}` in the `preds` cell, plus `(target, attribute, claim)` of each `ap{n}` in `attr_preds`; the `p{n}` subject is excluded. A row with both cells empty is exempt (in the sub-block spelling the `:H` row and its `.preds` are separate appends). `parent_class` may repeat, and repeats when open |
@@ -356,7 +372,11 @@ Today's YAML `analyze:` envelope (per `soc-agent/agents/analyze.md`) is reshaped
 :A routing                                                       # PRESENT iff decision=halt
 decision               halt
 termination_category   trust-root | adversarial-refuted | severity-ceiling | exhaustion-escalation
-disposition            benign | true_positive | unclear
+disposition            benign | false-positive | inconclusive | malicious
+                       # v2.18: was `benign | true_positive | unclear`.
+                       # The live enum is `DISPOSITION_VALUES` in
+                       # `defender/_vocab.py`; the other two spellings
+                       # were never in it.
 confidence             high | medium | low
 surviving              <hyp-id>[,<hyp-id>...]
 matched_archetype      null

@@ -67,7 +67,7 @@ def _two_hypotheses() -> str:
         'p2|proposed_parent|"no packaging metadata for the binary"\n'
         "\n"
         ":H h-001.attr_preds [id|target|attribute|claim]\n"
-        'ap1|v-001|signing|"unsigned"\n'
+        'ap1|attached_vertex|signing|"unsigned"\n'
         "\n"
         ":H h-001.refuts [id|refutes|claim]\n"
         'r1|p1,p2|"parent is a distro-packaged systemd unit"\n'

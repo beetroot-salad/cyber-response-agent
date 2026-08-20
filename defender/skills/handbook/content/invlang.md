@@ -65,7 +65,7 @@ A recurring decision the handbook gets asked about:
   splits them on. Slots the alert has not settled stay `??` in
   `parent_class`; a class tuple minted to carry the fork is the defect, not
   the requirement. Rule #23 enforces the textual floor of that
-  (`validate._check_fork_distinctness`): live siblings on one anchor whose
+  (`validate._check_sibling_fork_distinctness`): live siblings on one anchor whose
   declared claims are identical are refused on write. The same claim in
   different words is invisible to it.
 - **`??` (refinement)** — when the question is "what kind of entity is this

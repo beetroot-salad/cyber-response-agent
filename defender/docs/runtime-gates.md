@@ -171,6 +171,6 @@ because the spec's own examples contradict the per-type slot grammar. See
 
 Sibling-fork uniqueness WAS on that list for the same reason and no longer
 is: #934 made the predicted observable the distinctness axis, and
-`validate._check_fork_distinctness` enforces the textual floor over the
+`validate._check_sibling_fork_distinctness` enforces the textual floor over the
 declared claims — live siblings, same anchor, identical claim sets. What
 two claims MEAN stays the author's discipline; no validator reads that.

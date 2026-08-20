@@ -68,8 +68,9 @@ ANALYZE on returned summaries (`gather_raw/{lead_id}/`):
 ```invlang
 :T resolutions
 h-001  null → --   [l-001 r1 severe ⟂ e-002 :: source repo declares no telemetry; binding is in an obfuscated post-install script]
-h-002  null → -    [l-002 r1 mild ⟂ e-001 :: daemon outlives job, but a CI-tool phone-home that survives job exit is unusual rather than refuted outright]
-h-003  null → +    [l-001 p1 mild ⟂ e-002 :: recent maintainer with no other packages; l-003 p2 mild ⟂ e-001 :: IP registered just before publication, SNI/host mismatch — circumstantial, no C2 channel observed]
+h-002  null → -    [l-002 p1,p2,r1 mild ⟂ e-001 :: daemon outlives job, but a CI-tool phone-home that survives job exit is unusual rather than refuted outright]
+h-003  null → +    [l-001 p1 mild ⟂ e-002 :: recent maintainer with no other packages]
+h-003  + → +       [l-003 p2 mild ⟂ e-001 :: IP registered just before publication, SNI/host mismatch — circumstantial, no C2 channel observed]
 ```
 
 No single lead reaches `++` on `?post-install-implant`: confirming
@@ -87,6 +88,9 @@ confidence             medium
 impact_verdict         none-detected
 matched_archetype      novel-dependency-with-anomalous-egress
 summary                "build-runner-07.ci is making periodic queries to a recently-registered domain via a post-install daemon in a freshly-published npm package by a single-package maintainer. Legitimate-telemetry path is refuted; malicious-C2 path is supported circumstantially but cannot be confirmed in-loop. Hand off for sandbox detonation + maintainer review."
+
+:T conclude.deferred_authz [contract_ref|rationale]
+h-001.ac1|"superseded by mechanism refutation at l-001 — ?declared-package-telemetry reached --, so whether CI-runner egress to package telemetry endpoints is permitted no longer bears on the close"
 ```
 
 `disposition` is the run's closed vocabulary (`enum disposition`), the same
@@ -94,3 +98,16 @@ three keywords `report.md` carries — escalation is not one of them. The
 hand-off is said by `termination.category exhaustion-escalation` plus the
 `summary`; the disposition itself is `inconclusive`, because that is what "the
 malicious path could not be refuted or confirmed" means.
+
+Every commitment the run made is accounted for at the close. `h-002`'s `p1` and
+`p2` are cited in the resolution head that moved it — one held, one failed, and
+both are what `r1` fired on — so the closure rule can see they were settled
+rather than dropped. `h-003` needed two leads to settle its two predictions, so
+it takes **two rows**: `l-001` moves it to `+` and `l-003` confirms at the same
+weight with `+ → +`. One row carries one head; a second head packed into the
+first row's annotation is prose, and the prediction it names reads as abandoned.
+`h-001`'s `ac1` was never resolved, because refuting the mechanism made the
+authorization question moot; that is a claim about the case, so it is written as
+a `:T conclude.deferred_authz` row rather than left to a reader to infer from
+the `--`. A contract or a prediction that is declared and then simply disappears
+is refused at CONCLUDE (rules #26 and #34).
