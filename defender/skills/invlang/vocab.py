@@ -13,10 +13,16 @@ WEIGHT_BUCKETS: tuple[str, ...] = ("++", "+", "-", "--")
 WEIGHT_ORDER: dict[str | None, int] = {"--": 0, "-": 1, None: 2, "+": 3, "++": 4}
 STRONG_WEIGHTS: frozenset[str] = frozenset({"++", "--"})
 REFUTED_WEIGHT: str = "--"
+#: The other pole, named for the same reason `REFUTED_WEIGHT` is:
+#: `_walkers.live_hypothesis_ids` asks "is this one refuted" and
+#: `validate._check_prediction_completeness` asks "is this one confirmed", and a literal at
+#: either site drifts from the bucket list above without a test noticing.
+CONFIRMED_WEIGHT: str = "++"
 assert STRONG_WEIGHTS.issubset(WEIGHT_BUCKETS), (
     "STRONG_WEIGHTS must be a subset of WEIGHT_BUCKETS"
 )
 assert REFUTED_WEIGHT in STRONG_WEIGHTS, "REFUTED_WEIGHT must be a strong weight"
+assert CONFIRMED_WEIGHT in STRONG_WEIGHTS, "CONFIRMED_WEIGHT must be a strong weight"
 
 
 #: What a `:H <h>.authz` row's `edge_ref` says when the contract stands against the

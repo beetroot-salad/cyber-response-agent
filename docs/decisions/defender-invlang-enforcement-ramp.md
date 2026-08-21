@@ -128,6 +128,119 @@ error rather than letting the write through. Scope is anchored to
 7. strong-move citation — a `++`/`--` must name at least one of them.
    The other half of rule 3's provenance tuple: which pre-committed
    claim the cited observation settled.
+8. prediction completeness — a `++` must name **all** of them (#933,
+   spec rule #6). Rule 7 stops at "cites something": a hypothesis
+   declaring five predictions reached *confirmed* on whichever one the
+   lead found convenient, and the other four were never heard from
+   again. The union is over every resolution on the hypothesis, not
+   just the `++` row, so it only grows — a document that clears this
+   clears it for good, which is what makes it safe on an append-only
+   file. **`ap*` counts**: `_declared_prediction_ids` is the one
+   definition of the declared set, and spec rule #34 (the CONCLUDE-time
+   closure gate this is the write-time half of) enumerates `p*` and
+   `ap*` alike, so a `p*`-only reading would exempt an observable from
+   the gate for being declared under `.attr_preds`. Corpus: fires on
+   two experiment fixtures, both genuine — in
+   `experiments/judge-glm52-vs-kimik3/fixtures/case-00{1,2}` the run's
+   own `l-002` showed no successful auth and `p3` predicted one, and it
+   graded `++` anyway. Neither is a shipped golden or a worked example;
+   they are snapshots of model output and are left as they are.
+9. SCREEN structural integrity (#933, spec rule #17) — a
+   `screen_result` on a lead with no `mode: screen` (a verdict about a
+   screen that never ran), on an intermediate screen lead (a partial
+   answer in the slot readers take for the final one), or a
+   `screen_result: match` beside a `:H hypothesize.hypotheses` block (a
+   run claiming both that the fast path closed it and that it
+   investigated). Read off `findings[].screen_result`; the spec's
+   `outcome.` prefix is pre-dense spelling the projector never used.
+   Corpus: zero fires — SCREEN is barely exercised on disk, which is
+   why this could be armed at error severity without measurement risk.
+10. sibling-fork distinctness (#933, spec rule #23; the deferral closed
+   below). Two hypotheses in the same `(parent, attached_to)` group
+   whose claim sets are identical after whitespace/case normalization.
+   The group key is derived from the ID SHAPE `h-{parent}-{nonce}` —
+   there is no `parent_hypothesis_id` column. **Not keyed on
+   `parent_class`**, and `test_invlang_sibling_fork_934.py` is the guard
+   that keeps it that way: siblings legitimately share `??/??/??` since
+   #934. Detection floor is textual and stays there — paraphrase is
+   authoring discipline, and a check that tried to read two sentences
+   as one prediction would refuse correct documents. This **subsumes
+   spec rule #35** (sibling prediction divergence), which is not
+   implemented separately and does not need to be: this rule's
+   signature is #35's with ONE column dropped, `predictions[].subject`,
+   so every pair #35 refuses this refuses too. Corpus: zero fires.
+   *(Spec v2.19 finished this: #35 is struck as subsumed, and the
+   empty-signature skip — stated here and in the code as "#35's
+   convention" — now belongs to #23.)*
+
+   **One rule, two implementations, one survivor.** #934 and #933 wrote
+   this check independently and within a day of each other. #934's
+   `_check_fork_distinctness` shipped first and is the one that stays,
+   under its own name: #933's was an identically-shaped rewrite built on
+   a base #934 had already superseded, so keeping both would have
+   reported every fork violation twice and keeping #933's would have
+   renamed a shipped symbol for nothing. Everything the two agreed on —
+   the live-only scope, the `(target, attribute, claim)` key on
+   attribute predictions, the `subject` cell left out of the `.preds`
+   key, sentence punctuation folded away — was already #934's and is
+   untouched. Two things came across from #933's before it was deleted,
+   and only two:
+   * **Shelved counts as retired.** `live_hypothesis_ids` filters on
+     final weight `--` alone and knows nothing about `:T shelved`, so
+     without this term rule 10 and rule 11 disagreed about what the run
+     is still carrying — and rule 10 is the one that WEDGES on the
+     disagreement, because both repairs it offers rewrite an immutable
+     `:H` row and the only exit left is a `--` the run never earned.
+   * **The trailing full stop comes off the END only.** `str.strip`
+     takes a character SET, so `strip(" .\"'")` also ate a LEADING
+     decimal point — fusing `.5σ above baseline` with `5σ above
+     baseline` and refusing a pair that forks on a tenfold threshold.
+     Quotes still come off both ends; the format wraps a whole cell.
+   #933's blank-claim skip came across with them: a blank `.attr_preds`
+   claim contributes nothing to the signature, where counting it would
+   manufacture a spurious fork report on top of the two rule 12 errors
+   the blank cells already earn.
+11. hypothesis persistence at CONCLUDE (#933, spec rule #24) — a close
+   that WRITES a `:T conclude.surviving` table and leaves a
+   non-refuted hypothesis out of it. Scoped to a written table, and
+   that scope is the measured half of the decision: the table is
+   omittable by construction (rule 5 above computes survival from the
+   resolution record precisely because it is), so an absent table is
+   read as deferring to that record, under which nothing was dropped.
+   Reading an absent table as an empty one would refuse **seven of the
+   eight** ```invlang documents in the tree — both e2e goldens,
+   `examples/example-c-cumulative-escalation.md`, and four experiment
+   fixtures — none of which writes the table at all. Making it
+   mandatory is a decision about what ANALYZE must write and is not
+   made here. A table present as the `none` empty-array marker still
+   counts as written: it claims nothing survived, and a live hypothesis
+   contradicts that. Two of spec #24's discharge arms were excised as
+   part of arming it — `termination.{category,rationale}` is an
+   unchecked scalar beside free text, and `matched_archetype` is a
+   `schema.Conclude` field read by zero production code against an
+   archetype catalog that does not exist. Corpus: zero fires.
+12. attribute-prediction structure (#933, spec rule #33) — `^ap\d+$` id
+   shape, `target ∈ {proposed_parent, attached_vertex, proposed_edge}`,
+   non-empty `claim`. The parser `_require`s id/target/attribute to be
+   PRESENT and never looks at what they say, so `a1|the parent|colour|`
+   parsed clean and landed a prediction no citation site could resolve.
+   Two of spec #33's clauses are deliberately absent from the check:
+   **uniqueness** is already owned upstream (`_warn_repeated_ids` makes
+   a within-block repeat a parse error; `_extend_by_id` keys
+   accumulation by id, so a cross-block repeat never reaches the record
+   — and must not be refused, since re-emitting a sub-block with one
+   row added is the documented append shape), and the
+   **one-observable-per-entry** clause is semantic, left to the author
+   exactly as on rule #29. Corpus: zero fires — no shipped document
+   uses `.attr_preds` at all. It fired twice on ONE test fixture,
+   `test_invlang_sibling_fork_934.py`'s `_ATTR_FORK`, which wrote a
+   vertex id in the `target` cell; that shipped with #934 because #33
+   had no implementation yet, and the cell is now `attached_vertex` —
+   the same prediction about the same object, said in the grammar. The
+   only other `v-*` target left in the tree is
+   `test_invlang_parser_characterization.py`'s, which is deliberate:
+   it characterizes the parser passing the cell through unread, which
+   is exactly why this rule has to exist.
 
 Pre-MVP, historical runs on earlier invlang variants are expected to fail
 — intentional. Two guards were named here for the claim that the runtime
@@ -142,6 +255,30 @@ parse-clean and gate-clean, plus Example A validated as the gate sees it,
 fences applied in order (#934). The stale Example A (`type=endpoint`,
 `file:binary`, prose-cited resolutions, a bare `provenance` attr key) was
 fixed to current grammar as part of the original work.
+
+13. **Refutation scope (#933, spec rule #7's family).** A
+    `:H h-NNN.refuts` row's `refutes` column cites `p*` / `ap*` ids the
+    declaring hypothesis actually declares. `_check_refutation_scope`.
+
+    The third site naming a prediction, and the one nothing resolved.
+    Rule 6 walks the ids a MOVE matched and rule 5's half walks the `r*`
+    a `--` cited; neither asks what the refutation itself claims to
+    overturn, so `r1|p9,ap9|"…"` on a hypothesis declaring neither
+    validated clean. Not only bookkeeping: a hypothesis reaches
+    `refuted` through a `--`, and the prediction-closure rule (spec #34,
+    not ramped yet) exempts a refuted hypothesis — so a phantom-scoped
+    refutation discharged every prediction on it without settling any.
+    The exemption is right; the hole was upstream.
+
+    Scoped to the declaring hypothesis for the reason rule 6 is: a
+    sibling's `p2` is not this hypothesis's evidence in either
+    direction. Silent on a hypothesis declaring no predictions — the
+    lean shape spec rule #23 exempts, not a defect this owns.
+
+    Measured before arming: 17 documents carry a `.refuts` block, 31
+    hypotheses declare refutation shapes, 47 refutation rows, **0
+    unresolved ids**. Error severity costs nothing on the current
+    corpus.
 
 **Struck from the spec, and so never ramped (#933).** Five clauses left
 `docs/investigation-language.md` without ever having had an
@@ -371,7 +508,7 @@ Numbering preserved for grep-stability, per the v2.15 convention.
 **Open: two current-spec rules were deferred because the spec
 contradicted its own worked examples.** Don't enforce one until its spec
 is reconciled, or it'll false-positive on valid current writes. One is
-still open; the second is now decided and waiting on implementation:
+still open; the second shipped in #933 and is struck below:
 
 - **Per-type class-slot grammar.** `skills/invlang/SKILL.md` §Classification
   grammar defines slash-tuples per type with slot enums in `vocab.py`, but
@@ -381,20 +518,18 @@ still open; the second is now decided and waiting on implementation:
   role enum vs the examples (add `monitoring-agent`, or correct the
   examples to `monitoring`), settle the `??` / `{a,b,c}` / `unclassified-*`
   / `ambiguous-*-or-*` escape grammar, then implement + enforce.
-- **Sibling-fork uniqueness.** ~~§Sibling-fork uniqueness says sibling
-  hypotheses must differ on a topological axis
-  (`parent_type`/`parent_class`/`attached_to`/`rel`), but the
-  §Discovery-hypotheses worked example forks `h-001`/`h-002` that are
-  identical on all four axes.~~ **Decided and shipped (#934):** prediction
-  divergence IS the distinctness — siblings must differ on a predicted
-  observable, and slots the alert has not settled stay `??` in
-  `parent_class` rather than being minted into a fork axis.
-  `validate._check_fork_distinctness` enforces the floor: live siblings
-  sharing `(parent hypothesis, anchor)` whose declared claims are identical
-  after case/whitespace normalization. The classification-keyed spelling
-  the rule was specified under does NOT ship — it would refuse the
-  `??/??/??` siblings this makes canonical. Semantic distinctness is not
-  detectable and stays the author's discipline.
+- ~~**Sibling-fork uniqueness.**~~ **Closed.** The spec contradiction
+  (§Sibling-fork uniqueness demanded a topological difference on
+  `parent_type`/`parent_class`/`attached_to`/`rel` while the
+  §Discovery-hypotheses worked example forked `h-001`/`h-002` identical
+  on all four axes, on the predictions alone) was decided in #934 —
+  prediction divergence IS the distinctness, and slots the alert has not
+  settled stay `??` in `parent_class` rather than being minted into a
+  fork axis — and implemented in #933 as rule 10 above. The constraint
+  that came with the decision holds in the shipped check: it is keyed on
+  the claim set, never on `parent_class`, and
+  `test_invlang_sibling_fork_934.py` fails if that changes. Semantic
+  distinctness is not detectable and stays the author's discipline.
 
   What that drops, deliberately: #933's reproduction — two siblings both
   on a CONCRETE `unclassified-process`, from a real 2026-08-13 run — now
@@ -407,4 +542,4 @@ still open; the second is now decided and waiting on implementation:
 
 Both were spec-owner decisions, not validator bugs. The class-slot one
 stays file-and-hold here until the canonical SKILL is internally
-consistent; the fork one is closed.
+consistent; it is now the only one left open.

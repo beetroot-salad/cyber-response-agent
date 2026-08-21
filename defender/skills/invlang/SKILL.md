@@ -473,6 +473,32 @@ Keep commitments lean: one proposed upstream vertex plus one edge.
 1–2 predictions per hypothesis. `refutes` is a comma-separated list of
 prediction ids the refutation would overturn.
 
+A prediction about one ATTRIBUTE of one of the hypothesis's objects goes
+in `:H h-NNN.attr_preds` instead — same commitment, said as a value
+rather than a sentence:
+
+```invlang
+:H h-002.attr_preds [id|target|attribute|claim]
+ap1|proposed_parent|signing|"UNSIGNED"
+```
+
+`target` is one of `proposed_parent`, `attached_vertex`,
+`proposed_edge` — WHICH of the hypothesis's own three objects carries
+the attribute, never a `v-*`/`e-*` id: the proposed parent and edge have
+no id yet, and the attached vertex is already named by `attached_to`.
+Ids are `ap<n>` here and `p<n>` in `.preds`, both denied on write outside
+those namespaces, because a resolution head reads only `p*`/`ap*`/`r*`
+and an id outside them can be cited by nothing. An `ap<n>` counts toward
+every rule a `p<n>` does — a resolution head cites it, and a `refutes`
+list names it. So a `++` on a hypothesis carrying one cites the `ap<n>`
+alongside its `p<n>`:
+
+```invlang
+:T resolutions
+h-002  null → ++    [l-002 p1,ap1 severe ⟂ e-010 :: unsigned binary, no package]
+```
+
+
 ### Forking a hypothesis mid-run
 
 Append-only forbids rewriting the loop-1 block, so a hypothesis a

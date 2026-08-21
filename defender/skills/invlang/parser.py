@@ -439,7 +439,10 @@ def _hyp_sub_attr_pred_row(block: Block, row: str) -> AttrPredictionRecord:
     )
     return {
         "id": rec["id"],
-        "target": rec["target"],
+        # `target` is a CLOSED vocabulary since rule #33 armed (`_ATTR_PRED_TARGETS`), so it
+        # is unquoted for the same reason `claim` is: a row that quotes both cells names a
+        # legal target and would otherwise be refused for the quotes.
+        "target": _unquote(rec["target"]),
         "attribute": rec["attribute"],
         "claim": _unquote(rec.get("claim", "")),
     }

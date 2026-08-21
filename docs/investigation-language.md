@@ -1,8 +1,13 @@
 # Investigation Language
 
-**Status:** Spec v2.19. Implemented.
+**Status:** Spec v2.20. Implemented.
 **Query tool:** `soc-agent/scripts/invlang/` — see `cli.py --help`
 **On-disk surface:** `​```invlang` fenced blocks. `​```yaml` fences in `investigation.md` are rejected by the validator. Block-tag grammar (`:V` / `:E` / `:H` / `:L` / `:R` / `:T` / `:G`), row shapes, and the surface-to-canonical-dict projection live in `docs/dense-investigation-format.md`. The canonical companion dict — what the validator and the corpus queries operate on — is what every block projects to via `soc-agent/scripts/handlers/_dense_parser.py`.
+
+**v2.20 delta:** five documented-but-unarmed rules implemented (#933) — #6, #17, #23, #24, #33. Rule count unchanged at 26: nothing is added or struck, five numbers stop being aspirational. Each of the five now carries an **Implemented as `<function>`** line naming the function in `defender/skills/invlang/validate.py`, joining rule #21 — the absence of any rule → function link anywhere in this section is what let five rules sit unenforced across three spec revisions with nobody able to tell. Rules without such a line are not thereby implemented; the backfill is #933 follow-up work.
+- Rule #24 is trimmed a second time. Two of arm (b)'s three sub-arms are excised as unbacked (`termination` is free text and an unchecked scalar; `matched_archetype` is read by zero production code and resolves against no catalog), and the surviving arm is scoped to closes that WRITE a `:T conclude.surviving` table — see the note on the rule.
+- Severity: #6, #17, #23, #24 and #33 all land at **error**. Measured over the same 32 units, re-measured against the post-#934 corpus: #17, #23, #33 and #24-as-implemented fire on nothing; #6 fires on one distinct document (checked in twice byte-identically as `experiments/judge-glm52-vs-kimik3/fixtures/case-00{1,2}`), an experiment fixture capturing model output, genuine — a `++` on a hypothesis whose own third prediction the run's leads had contradicted. No shipped golden and no worked example fires.
+- Rule #33's uniqueness clause needs no implementation and gets none — see the note on the rule. *(#35 was the other clause of that shape, and v2.19 above took it further: a rule that needs no implementation because another rule already refuses strictly more of it is not a rule, and #35 is struck.)*
 
 **v2.19 delta:** one rule struck and one gap finally written down — 27 → 26 active. Arithmetic: 36 numbers − 10 gaps = 26; the gap list grows from nine to ten with #32. #35 is the tenth number but not a tenth strike: v2.17 merged it into #23 and counted it as a gap in the header, while leaving its entry standing as a rule. This is where the entry catches up with the count. Doc-only, and doc-only in the strict sense: neither rule was ever implemented anywhere in this repository. `defender/skills/invlang/validate.py` has no `_check_integrity_peer_discipline` and no `_check_sibling_prediction_divergence`; both names survive only in `experiments/relax-invoker-identity-peer/`, against a `soc-agent` tree this repository does not contain.
 - **Rule #32 (integrity peer discipline) becomes the tenth gap.** Four independent reasons, argued in full at the rule's entry: it is universally non-complied-with (of the 10 content-distinct hypotheses in the corpus carrying an `authorization_contract`, 6 satisfy #32's trigger, all 6 fail it, 0 discharge it — two of the six are shipped goldens, one is a shipped worked example, and one is the runtime SKILL's own canonical "Right" answer); its discharge test is a `name.startswith("?adversary-controlled-")` prefix match on model-authored free text, the same lexical-token experiment #36 already ran and v2.16 already reverted; arming it would mint six `?adversary-controlled-X` rows written to clear the gate rather than to test integrity, the manufactured-compliance failure #934 measured one rule over; and it reinstates the "maintain adversarial hypothesis until `--`" bookkeeping rule that `docs/decisions/adversarial-as-attribute-not-hypothesis.md` item 6 dropped and that rule #21 says it replaced. **The coverage gap it leaves is real** — authorized-bulk-read-from-a-compromised-account clears authz, clears impact, and never tests the integrity premise. The recorded answer to that gap is not a structural gate but §Hypothesis → *Behavioral-consistency prediction*, and the gap entry says so.
@@ -979,6 +984,27 @@ The validator enforces **26 active rules** (rules 1–36 with ten gaps: 36 numbe
    write time on `++` resolutions; rule #34 is the late closure
    gate at CONCLUDE on every weight.
 
+   Implemented as `_check_prediction_completeness`
+   (`defender/skills/invlang/validate.py`). **"Full prediction set"
+   is the union of `predictions[]` (`p*`) and
+   `attribute_predictions[]` (`ap*`)** — the set
+   `_declared_prediction_ids` builds and the set rule #34 enumerates.
+   Rules #33 and #34 both make an `ap*` citable in
+   `matched_prediction_ids`, so a `p*`-only reading would let an
+   author take an observable out of this gate by declaring it under
+   `.attr_preds`, which is a formatting choice. The union is taken
+   across every resolution on the hypothesis that MOVED it — not only
+   the `++` row, and not a `null → null` row, which recorded that the
+   lead looked rather than that the prediction settled. It therefore
+   only grows: a write that clears this gate clears it for good on an
+   append-only document. "Moved" is membership in the four weight
+   buckets, not "anything that is not `null` / `∅`": the `after` cell
+   is an unvalidated token, so an open test would make a misspelled
+   weight discharge every prediction it cites while skipping this gate
+   and rule #4. The walk is factored out as
+   `validate._settled_predictions` for rule #34's closure gate to read,
+   so the two cannot disagree about which citations count.
+
 7. **Reference resolution.** Every `v-*`, `e-*`, `h-*`, `l-*`
    reference in any field points to a record that exists in the
    companion. Hierarchical hypothesis IDs `h-{parent}-{nonce}`
@@ -987,10 +1013,17 @@ The validator enforces **26 active rules** (rules 1–36 with ten gaps: 36 numbe
    `e-*` id. Authorization resolution `fulfills_contract` of shape
    `h-{id}.ac{n}` points to a hypothesis whose `authorization_contract`
    declares that `ac{n}`. Attribute-update `target` of shape
-   `v-{id}` or `e-{id}` points to a declared record.
+   `v-{id}` or `e-{id}` points to a declared record. Refutation-shape
+   `refutes_predictions` cites `p*` / `ap*` ids the SAME hypothesis
+   declares — a refutation overturns its own hypothesis's predictions,
+   and a `--` citing it inherits that scope.
    *(Absorbs former #12 hierarchical hypothesis IDs, #19 contract
    edge_ref, #20 fulfills_contract back-ref, and the resolution
    clause of former #22 attribute-update target.)*
+
+   Implemented as `_check_lead_refs`, `_check_hypothesis_refs`,
+   `_check_prediction_refs`, `_check_refutation_scope` and
+   `_check_attr_update_targets` (`defender/skills/invlang/validate.py`).
 
 8. **Append-only.** No existing record is mutated.
 
@@ -1050,6 +1083,15 @@ The validator enforces **26 active rules** (rules 1–36 with ten gaps: 36 numbe
     SCREEN-matched companion does not enumerate hypotheses.
     *(Absorbs former #16 — SCREEN scope and SCREEN-match
     omit-hypothesize collapse into one structural rule.)*
+
+    Implemented as `_check_screen_structure`
+    (`defender/skills/invlang/validate.py`), reading
+    `findings[].screen_result` — where the `:L findings` column
+    projects. The `outcome.` prefix above is pre-dense envelope
+    spelling the projector has never used. "Only the final lead in a
+    SCREEN sequence" is read as "the next lead in `:L findings` order
+    does not also screen", so a second screen phase later in a run is
+    its own sequence rather than a continuation of the first.
 
 18. **Lead-level predictions structure.** When `lead.predictions` is
     present, each entry has `id` (matching `^lp\d+$`, unique within
@@ -1121,15 +1163,50 @@ The validator enforces **26 active rules** (rules 1–36 with ten gaps: 36 numbe
     Whether two differently-worded claims say the same thing is not
     detectable and stays the author's discipline.
 
+    Implemented as `_check_fork_distinctness`
+    (`defender/skills/invlang/validate.py`). The sibling group key is
+    the parent read off the id shape `h-{parent}-{nonce}` paired with
+    `attached_to` — there is no `parent_hypothesis_id` column to key
+    on.
+
+    **The two prediction blocks contribute differently shaped keys,
+    because their `claim` cells are different kinds of thing.** A
+    `.preds` claim is a sentence carrying its own subject ("failures
+    arrive in bursts"), so `subject` is out of the key: one sentence
+    filed under two subject labels is still one observable. An
+    `.attr_preds` claim is a VALUE — `unsigned`, `none`, `partial` —
+    which names nothing without the `target` and `attribute` saying
+    what it is a value OF, so those are in. Keying attribute
+    predictions on the bare value would fuse
+    `proposed_parent.signing=unsigned` with
+    `attached_vertex.publisher=unsigned` and refuse a pair one lead
+    splits by measuring two different things.
+
+    **Empty-signature hypotheses are skipped.** A hypothesis declaring
+    no prediction at all has no fork axis to compare, so it collides
+    with nothing and is passed over; the leanness and refutation-link
+    rules own that shape. This was stated as rule #35's convention
+    until #934 merged #35 into this rule; it is this rule's convention
+    now.
+
 24. **Hypothesis persistence — no orphaned hypotheses at CONCLUDE.**
     When a `conclude:` block is present, every hypothesis declared in
     `hypothesize.hypotheses[]` or any prior `lead.outcome.new_hypotheses[]`
     must either (a) have its final effective weight be `--` across the
-    resolutions chain, OR (b) be cited in the conclude block (as the
-    termination target, as the matched archetype's mechanism, or as a
-    surviving-but-indeterminate hypothesis).
+    resolutions chain, (b) be named in
+    `conclude.surviving_hypotheses[]`, OR (c) be retired by a
+    `:T shelved` row.
+    *(Arm (c) is the same translation rule #34 applies: `:H` rows are
+    immutable, so a `:T shelved` row is the only way a run can say it
+    stopped carrying a hypothesis without refuting it. Without it the
+    rule's two offered repairs are both false claims about the case —
+    listing a set-aside hypothesis as surviving asserts the run is
+    still carrying it, and `--` asserts a refutation that never
+    happened.)*
     *(v2.18: arm (b)'s surviving sub-arm read "…driving `status:
-    escalated`". The qualifier is dropped — no such status exists.)*
+    escalated`". The qualifier is dropped — no such status exists.
+    v2.20: the other two sub-arms are excised, and the rule is scoped
+    to closes that write the table — both notes below.)*
     A hypothesis declared and then silently ignored — never refuted,
     never carried into CONCLUDE — fails this rule. Closes the "silent
     hypothesis drop across loops" bias: grading blindness on one
@@ -1137,6 +1214,45 @@ The validator enforces **26 active rules** (rules 1–36 with ten gaps: 36 numbe
     existed. The ANALYZE subagent is the proximate enforcer (it
     decides when weights are terminal); this rule is the structural
     backstop at the CONCLUDE write boundary.
+
+    Implemented as `_check_hypothesis_persistence`
+    (`defender/skills/invlang/validate.py`).
+
+    **v2.20 — two of arm (b)'s three sub-arms excised.** The arm read
+    "cited in the conclude block (as the termination target, as the
+    matched archetype's mechanism, or as a surviving-but-indeterminate
+    hypothesis)". Neither of the first two is a projected hypothesis
+    reference and neither was ever checkable.
+    `termination.rationale` is free text and `termination.category` an
+    unchecked scalar, so nothing in the termination pair names an
+    `h-*`. `matched_archetype` is declared at
+    `defender/skills/invlang/schema.py` (`Conclude`), written only in
+    test fixtures and worked examples, read by **zero** production
+    code, and resolved against an archetype catalog that does not
+    exist anywhere in the repository — so "the matched archetype's
+    mechanism" is a reference into nothing. An escape hatch that
+    cannot be checked is one every document holds open; what remains
+    is the one arm the parser actually projects.
+
+    **v2.20 — scoped to closes that write the table.**
+    `conclude.surviving_hypotheses` is omittable by construction:
+    `parser._project_surviving_block` projects it *checkable, not
+    authoritative*, and benign gating computes survival from the
+    resolution record precisely so a run may leave it out. So an
+    ABSENT table is read as the document deferring to that record,
+    under which every non-refuted hypothesis is surviving and nothing
+    was dropped — the rule stands down. A table that is PRESENT (rows,
+    or the `none` empty-array marker) is read as the author's own
+    enumeration, and a live hypothesis missing from it fails.
+    Measured before choosing: reading an absent table as an empty one
+    would newly refuse **seven of the eight** ```invlang documents in
+    the tree — both shipped goldens
+    (`defender/fixtures-e2e/golden-sshpivot-ab3`,
+    `golden-v2sshd`), `defender/examples/example-c-cumulative-escalation.md`,
+    and four experiment fixtures — because none of them writes the
+    table at all. Making it mandatory is a decision about what ANALYZE
+    must WRITE, not about what a document says, and it is not made
+    here.
 
 25. **Same-level sibling rollup — prediction IDs are hypothesis-scoped.**
     On any `gather[i].resolutions[j]` entry for target hypothesis `H`,
@@ -1263,6 +1379,22 @@ The validator enforces **26 active rules** (rules 1–36 with ten gaps: 36 numbe
     ids alongside `p*` ids on the same hypothesis.
     `matched_prediction_ids[]` on a resolution may likewise cite both
     `p*` and `ap*` ids from the target hypothesis.
+
+    Implemented as `_check_attribute_prediction_structure`
+    (`defender/skills/invlang/validate.py`) for the `^ap\d+$` id
+    shape, the `target` enum and the non-empty `claim`. The other two
+    clauses need no code there and get none. `attribute` non-empty is
+    already a parse error — `_hyp_sub_attr_pred_row` `_require`s it,
+    and `_require` tests truthiness. **Uniqueness within the
+    hypothesis** is enforced one level up in two places:
+    `_warn_repeated_ids` makes a repeat inside one `.attr_preds` block
+    a parse error, and `_extend_by_id` keys accumulation by id so a
+    repeat ACROSS blocks never reaches the projected record — and must
+    not be refused there, because re-emitting a sub-block with one row
+    added is the documented append shape. A uniqueness check in
+    `validate.py` would be unreachable code that read as live. The
+    "one observable per entry, split compound `AND`/`OR`" clause is
+    semantic and deliberately not enforced, exactly as on rule #29.
 
 34. **Prediction closure at CONCLUDE.** When a `conclude:` block is
     written, every declared `predictions[].id` (`p*`) and
