@@ -122,9 +122,12 @@ error rather than letting the write through. Scope is anchored to
    cross-citation rule 6 refuses one level down; a row naming no
    hypothesis falls back to every declared one. `ac*` is checkable
    nowhere else — no resolution head cites a contract. An id in no
-   recognized namespace is left alone: `:L l-NNN.lead_preds` is
-   documented and unprojected (#820), so its `lp*` resolves against
-   nothing and reporting it would deny a legal document.
+   recognized namespace is left alone; the one that reaches here is
+   `lp*`. *(#933 projected `:L l-NNN.lead_preds`, so "it resolves
+   against nothing" has stopped being the reason. The exemption stands
+   on a better one: an `lp*` is scoped to a LEAD and this column is
+   scoped to a HYPOTHESIS, so no hypothesis's declarations could resolve
+   it, and rule 16 below owns that namespace where it lives.)*
 7. strong-move citation — a `++`/`--` must name at least one of them.
    The other half of rule 3's provenance tuple: which pre-committed
    claim the cited observation settled.
@@ -244,6 +247,256 @@ error rather than letting the write through. Scope is anchored to
    it characterizes the parser passing the cell through unread, which
    is exactly why this rule has to exist.
 
+13. **The two projector holes, closed first (#933, #820).** Rules 14–18
+   below could not be written until the parser stopped discarding their
+   data, so this entry is the precondition and not a rule. Two holes:
+   every `:T conclude.*` sub-block except `conclude.surviving` was
+   recognized, consumed and dropped by a bare `return True`, and
+   `:L l-NNN.lead_preds` / `.impact_preds` were documented and
+   unprojected. Now projected: `Conclude.deferred_{authorizations,
+   impact_predictions,predictions}[]` (from `:T conclude.deferred_{authz,
+   impact,preds}`, normalized to one `{ref, rationale}` record shape
+   because the three tables spell the reference column two ways) and
+   `findings[].{predictions,impact_predictions}[]`.
+   **The deferral tables landed in the same change as the rules that
+   demand them** — arming "every declared X resolves" over an unprojected
+   escape hatch refuses documents whose author already wrote the answer.
+
+   `:L l-NNN.substitutions` stays recognized-and-dropped, deliberately:
+   `query_details.substitutions` has no reader, so projecting it invents
+   a field to hold rows nothing asks for, and warning on it would refuse
+   a block the format permits. It is the last `:L` hole.
+
+   **`ceiling_test` reconciled: the flat row is real, the sub-table is
+   not.** `docs/dense-investigation-format.md` specified
+   `:T conclude.ceiling_test [kind|subject]`, inherited from the pilot
+   spec's YAML where `ceiling_test: {kind, subject}` named *the*
+   out-of-band step that would resolve a severity ceiling. The shipped
+   field is a REPEATED FLAT ROW naming one unreachable check each —
+   `skills/invlang/SKILL.md` §`:T conclude` teaches it, eleven checked-in
+   lessons under `defender/lessons/` instruct it,
+   `schema.Conclude.ceiling_test: list[str]` carries it, and
+   `render_synthesis` puts it in front of the judge
+   (`test_ceiling_test_reaches_the_judge_prompt` records 49 run files
+   that were writing the rows before anything read them). The `kind`
+   enum appears in no vocabulary and no document.
+   The format doc is corrected; a block written under the retired
+   sub-table spelling is still accepted and ignored
+   (`_RETIRED_CEILING_TEST_BLOCK`) rather than refused, because the
+   content goes in the flat row either way and denying the write would
+   cost a run for following a stale format note.
+
+   **Projection behaviour, measured separately from the rule fires.**
+   Over every ```invlang-bearing document in the tree (20 files, 75
+   validation units — 10 whole companions plus every fence of every
+   multi-illustration document): **zero new parse warnings, zero changed
+   parse warnings.** No document writes any newly projected block, any
+   newly allowlisted block, or an unknown `:T conclude.<sub>` /
+   `:<TAG> l-NNN.<sub>` name. `_check_append_only` is untouched (it
+   compares `:V`/`:E` records and fence counts, neither of which these
+   blocks are). `deferred_hypothesis_ids` is untouched: the new warnings
+   carry no `dropped_ids` and their block labels do not match
+   `HYP_DECLARATION_BLOCK_RE`, so they cannot stand the
+   undeclared-hypothesis rule down. The `:H` arm of the "unknown lead
+   sub-block" warning keeps its `h-*`-filtered `dropped_ids` verbatim.
+   `test_real_corpus_companion_is_byte_identical` still passes on both
+   goldens — neither writes any affected block.
+
+   **Two new refusal paths, both zero-fire today.** An unknown
+   `:T conclude.<sub>` and an unknown `:<TAG> l-NNN.<sub>` are now parse
+   warnings where they were silent. The conclude one matters most:
+   `:T conclude.deferred_authorizations` (the FIELD name, which the spec
+   also uses) would otherwise drop the whole deferral table and rule 15
+   would then refuse a contract the author DID account for — an error
+   pointing away from its cause. The asymmetry with
+   `_project_conclude_scalars`, which stays silent on an unrecognized
+   flat KEY, is deliberate and stated at both sites: a flat key can be
+   lesson-instructed content, a block name is grammar.
+14. **#13 ceiling_test scope (spec rule #13) — half the rule, and the
+   half that fails silent.** `_check_ceiling_test_scope`. Only "required
+   when `termination.category: severity-ceiling`" is armed. Corpus: zero
+   fires (nothing in the tree writes that category).
+
+   "Forbidden otherwise" is **not** armed and should not be. It was
+   written against the pilot spec's single `{kind, subject}` ceiling
+   step; the shipped field is the list of checks a run could not make,
+   and eleven lessons instruct writing it whenever a source was out of
+   reach. Forbidding it elsewhere refuses a run for obeying a lesson —
+   the one failure `learning/core/persist.py` turns into a discarded run.
+   `golden-v2sshd` names two such gaps under `data-ceiling`.
+
+   **The trigger is unbacked and the vocabulary was NOT closed.**
+   `termination.category` is free text with no `vocab` entry, so
+   `severity_ceiling` disables this rule in silence. That direction is
+   the safe one — a typo costs a miss, never a wrongful refusal — but it
+   is real. Closing the four-value spec enum was measured and declined:
+   both shipped e2e goldens are outside it (`data-ceiling`,
+   `adversarial-confirmed`), and so are three test corpora (`exhaustion`,
+   `adversarial-confirmed`, `natural`). Closing it would refuse the
+   goldens, whose `investigation.md` is REPLAYED through this gate from
+   `tool_trace.jsonl` — so it is not a fixture edit but a trace rewrite.
+   **Open: close `termination.category`.** Order is teach in
+   `skills/invlang/SKILL.md`, re-record the goldens, then arm.
+15. **#26 authz contract closure (spec rule #26).**
+   `_check_authz_contract_closure`. Every declared `ac*` is fulfilled by
+   a `:R authz` row or deferred in `:T conclude.deferred_authz` with a
+   non-empty rationale, under every disposition and including contracts
+   on refuted hypotheses — refutation is offered as a deferral RATIONALE,
+   not an automatic discharge. Closes the orphan-contract hole rule 5
+   left open on every escalation path (59% of declared contracts had no
+   resolution in the pre-v2.10 corpus).
+
+   Corpus: **one fire**, on `examples/example-c-cumulative-escalation.md`,
+   which declares `h-001.ac1` and abandons it. The example was wrong, not
+   the rule: it is shipped teaching material, the deferral rationale the
+   spec itself lists ("superseded by mechanism refutation at lead l-007")
+   is exactly this case, and the fix is one additive row. Fixed here, so
+   the worked example now demonstrates the mechanism. It remains
+   clean outright: the vocabulary drift it also carried (`endpoint`,
+   `package`, `queried_dns`, `org-policy` — 12 errors, an unrelated
+   backlog) was fixed by #934's rewrite of the same file, and
+   `test_shipped_invlang_documents.py` now holds it there.
+
+   DEFERS to `_check_benign_authz` on any contract the active disposition
+   gate is already refusing, matched on that gate's OUTPUT rather than on
+   the disposition keyword — so a price added to `_DISPOSITION_GATES`
+   that also refuses contracts is deferred to without an edit. Reporting
+   both would name one missing row twice, and this rule's deferral arm is
+   a trap beside the benign gate: deferring clears this rule and leaves
+   benign blocked. (That deference is also what keeps
+   `test_invlang_hypothesis_accumulation`'s one-error assertion true.)
+16. **#18 lead-prediction structure (spec rule #18).**
+   `_check_lead_prediction_structure`. `lp<n>` id shape, non-empty `if` /
+   `read_as` / `advance_to`, and `advance_to` resolving to a declared
+   lead NAME or to `CONCLUDE` / `HYPOTHESIZE`. Corpus: zero fires — no
+   document writes `lead_preds` at all, so this is unmeasured rather than
+   measured-clean, and the surface is fully opt-in. Uniqueness is owned
+   upstream exactly as on rule 12.
+
+   `advance_to` resolves against every declared lead NAME including the
+   declaring lead's own. `:L findings` document order is the only
+   ordering the dense surface carries, so the spec's "elsewhere in the
+   companion" can only mean "not this row" — which would refuse a
+   self-route and nothing else. Left alone: two loops may declare
+   same-named leads under different ids and no cell says which one a
+   name means, so the test can be wrong where accepting the self-route
+   costs nothing.
+
+   **The route-compliance clause is NOT implemented, and honouring
+   "warning" is why — the READING is settled, the CHANNEL is not.**
+   "Followed by another lead" is the next `:L findings` row in document
+   order, the same ordering rule 9 already uses for "the final lead in a
+   SCREEN sequence". What blocks it is that warn severity here is not an
+   advisory: locus-less warn diagnostics are dropped by
+   `runtime/tools._addressable` and do nothing, and a warn WITH a locus
+   flags that row and blocks every later write until `fix_row` rewrites
+   it. Neither candidate row may be rewritten — the follower's
+   `:L findings` row is a committed lead declaration the warn family has
+   never reached (`_tool_fix_row`: "the warn family walks
+   `:R attr_updates` blocks and nothing else"), and letting a run edit
+   its own `lead_preds` pre-registration to match where it ended up
+   destroys the only thing pre-registration is for. Raising it to error
+   would not honour the spec. **Open: a warn channel that can point at a
+   row without making it rewritable**, or a decision to widen `fix_row`'s
+   scope deliberately.
+
+   `docs/dense-investigation-format.md`'s worked example wrote
+   `advance_to PREDICT`; that is the PHASE name for the block
+   `:H hypothesize.hypotheses` lives in, not a third sentinel. Rule #18
+   names two, so the example was corrected rather than the enum widened.
+17. **#29 impact-prediction structure + #30 impact-resolution refs.**
+   `_check_impact_prediction_structure`, `_check_impact_resolution_refs`.
+   Rule #30's required-field list is exactly the seven the spec writes
+   (`prediction_ref`, `dimension`, `verdict`, `grounding_kind`,
+   `authority_for_question`, `as_of`, `reasoning`) — NOT extended into
+   `anchor_id` / `anchor_kind`, which is rule #11's territory — and
+   reported as one error per ROW rather than one per column, since an
+   under-filled row is one defect. The refusal names those FIELDS and
+   not the `[pred_ref|dim|…]` column aliases an author may write: the
+   header spelling is the author's choice, and a message naming the
+   alias sends a reader looking up a name the spec does not use.
+   `ip<n>` shape, closed `dimension`, five non-empty outcome cells; and
+   on the grading side, `pred_ref` resolving (bare within the emitting
+   lead, qualified across leads), `dimension` MATCHING the predicate's,
+   closed `verdict` and `grounding_kind` with `past-case` refused by
+   name, and the seven required cells. Corpus: **zero fires for both** —
+   no document in the tree writes an `:R impact` row or an
+   `impact_preds` block, so the whole impact axis is unexercised. Both
+   are therefore unmeasured rather than measured-clean; what makes them
+   safe to arm is that they engage only on blocks a run has to opt into.
+   The axis is now taught end-to-end in `skills/invlang/SKILL.md`
+   §`:R impact` — teaching only half of it would let a run register a
+   predicate it has no documented way to grade, which rule 18 then
+   refuses.
+18. **#31 impact closure + #34 prediction closure.**
+   `_check_impact_closure`, `_check_prediction_closure`. With rule 15
+   these are **one sentence over three namespaces** — *every declared X
+   is resolved, or deferred with a reason* — and they share one
+   implementation of the closure walk (`_unclosed_commitments`), with
+   each keeping its own declared set, its own definition of resolved, and
+   its own prose. #31's spec text already said it "mirrors rule #26's
+   orphan gate"; now it does so literally.
+
+   BOTH reference spellings are accepted, and refusing either would be a
+   restriction nobody taught. A deferral written with the qualified
+   reference (`h-001.ac1`) discharges only that commitment; one written
+   bare (`ac1`) discharges every owner's — the same document-wide
+   reading rule 5 gives a bare `fulfills_contract`. Generous on purpose
+   and stated at the helper: over-refusing a deferral leaves an author
+   with no legal repair, while over-accepting one costs an orphan a
+   differently-spelled row would have excused anyway.
+
+   **#31.** Closure arm plus `impact_severity`'s required-iff PAIRING
+   with `impact_verdict` — structural, and it holds whatever the two
+   cells say. Corpus: zero fires.
+
+   **Neither conclude scalar's VOCABULARY is armed.** The SKILL has
+   never stated `impact_verdict ∈ {none, within, exceeds,
+   indeterminate}` nor `impact_severity ∈ {null, low, moderate, high}`;
+   both live only in `docs/investigation-language.md`. Refusing on a
+   vocabulary the runtime prompt never gave the model is the failure
+   spec rule #32 was struck for, one issue ago. `impact_verdict` has the
+   measurement behind it: it fires on BOTH shipped e2e goldens
+   (`none-detected`, `attempted-lateral-movement`), and arming it took
+   seven e2e tests red in the trial — those two are not authored
+   fixtures but recorded runs replayed through this gate from
+   `tool_trace.jsonl`, so "fixing" them rewrites a trace of what a model
+   wrote. `impact_severity` measures zero fires and is left unenforced
+   with it, because the two are one decision. Both ARE registered in
+   `vocab.SLOTS`, which is the teaching step and the thing that has to
+   land first. **Open: arm both** after the teaching has been in front
+   of a corpus generation.
+
+   **#34.** Every `p*`/`ap*` on a hypothesis that is neither `--` nor
+   shelved is cited by a resolution with a non-null `after`, or deferred.
+   "Final status" is read off the resolution record, not off the `:H`
+   `status` column — append-only fixes that cell at declaration time, so
+   it can never carry a FINAL status; same translation rule 11 applies to
+   spec #24. Corpus: **two fires**, both on
+   `experiments/judge-glm52-vs-kimik3/fixtures/case-00{1,2}` — the same
+   two documents and the same `h-001.p3` rule 8 already fires on, both
+   genuine, neither a shipped golden or a worked example, both left as
+   they are.
+
+   `examples/example-c` fired three times before its `:T resolutions`
+   block was corrected, and the last of those is a defect #934's rewrite
+   introduced: it moved `h-003` with TWO citation heads packed into one
+   row (`[l-001 p1 ... :: prose; l-003 p2 ... :: prose]`). The grammar
+   reads one head per row, so `l-003 p2` was swallowed into the first
+   head's annotation string and `h-003.p2` was never settled. The
+   in-grammar spelling is a second row at the same weight — `h-003
+   + → +` — which is what both shipped goldens already do
+   (`golden-sshpivot-ab3` writes `h-002 ++ → ++` for its second lead).
+   Fixed here; the rule found it, which is the whole point of arming a
+   closure gate over prompt surface.
+
+   The five minimal fixtures in `defender/tests/test_invlang_rules_933.py`
+   and the one in `..._adversarial.py` that this rule caught — written
+   for rules #23/#24, predating the deferral table — carry a
+   `:T conclude.deferred_preds` block each and are green. To back the
+   rule out, deleting the `_check_prediction_closure` line from
+   `diagnose` defers #34 and nothing else depends on it.
+
 Pre-MVP, historical runs on earlier invlang variants are expected to fail
 — intentional. Two guards were named here for the claim that the runtime
 SKILL never teaches invlang the gate blocks, and NEITHER existed in this
@@ -258,7 +511,7 @@ fences applied in order (#934). The stale Example A (`type=endpoint`,
 `file:binary`, prose-cited resolutions, a bare `provenance` attr key) was
 fixed to current grammar as part of the original work.
 
-13. **Refutation scope (#933, spec rule #7's family).** A
+19. **Refutation scope (#933, spec rule #7's family).** A
     `:H h-NNN.refuts` row's `refutes` column cites `p*` / `ap*` ids the
     declaring hypothesis actually declares. `_check_refutation_scope`.
 
@@ -267,10 +520,10 @@ fixed to current grammar as part of the original work.
     a `--` cited; neither asks what the refutation itself claims to
     overturn, so `r1|p9,ap9|"…"` on a hypothesis declaring neither
     validated clean. Not only bookkeeping: a hypothesis reaches
-    `refuted` through a `--`, and the prediction-closure rule (spec #34,
-    not ramped yet) exempts a refuted hypothesis — so a phantom-scoped
-    refutation discharged every prediction on it without settling any.
-    The exemption is right; the hole was upstream.
+    `refuted` through a `--`, and rule 18's prediction closure exempts a
+    refuted hypothesis — so a phantom-scoped refutation discharged every
+    prediction on it without settling any. The exemption is right; the
+    hole was upstream.
 
     Scoped to the declaring hypothesis for the reason rule 6 is: a
     sibling's `p2` is not this hypothesis's evidence in either
@@ -545,3 +798,34 @@ still open; the second shipped in #933 and is struck below:
 Both were spec-owner decisions, not validator bugs. The class-slot one
 stays file-and-hold here until the canonical SKILL is internally
 consistent; it is now the only one left open.
+
+**Open, from #933 (rules 13–18 above).** Three, restated here so they are
+findable without reading the rule entries:
+
+- **Close `termination.category`.** A free-text scalar with no
+  vocabulary, and rule 14 turns on the exact string `severity-ceiling`,
+  so a typo disables it in silence. Order: teach the enum in
+  `skills/invlang/SKILL.md`, re-record the goldens (`data-ceiling`,
+  `adversarial-confirmed`), then arm.
+- **Arm `conclude.impact_verdict` and `conclude.impact_severity`.** Same
+  order, same reason: `impact_verdict`'s enum fires on both shipped e2e
+  goldens today, neither field has ever been stated in the SKILL, and a
+  vocabulary is either taught or it is not. Both are registered in
+  `vocab.SLOTS` by #933 — that is the teaching; the arming is not.
+- **A warn channel that can point at a row without making it
+  rewritable.** Rule 16's route-compliance clause needs one and there is
+  none: a locus-less warn is dropped by `runtime/tools._addressable`,
+  and a warn with a locus lets `fix_row` rewrite that row. Either that
+  channel, or a deliberate decision to widen `fix_row`'s scope past
+  `:R attr_updates`.
+
+The authoring surface moved with the rules, which is the other half of
+arming a closure gate: `skills/invlang/SKILL.md` gained the
+`:L l-NNN.lead_preds` shape, a `:R impact` section carrying the whole
+impact axis (register at PLAN, grade at ANALYZE), and a
+§`:T conclude` table naming the three deferral tables with the
+"send them in the SAME `append_block`" note — the whole document is
+validated on every write, so a `:T conclude` that lands without them is
+refused before they can follow. `defender/examples/example-c-cumulative-escalation.md`
+was corrected for the same reason: a shipped worked example that
+violates a newly-armed rule teaches the violation.

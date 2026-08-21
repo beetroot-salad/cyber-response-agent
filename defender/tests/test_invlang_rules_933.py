@@ -477,15 +477,76 @@ def test_a_refutation_on_a_hypothesis_with_no_predictions_is_left_alone() -> Non
 # version again.
 
 
+_ONE_CONTRACT = _HYP_HEADER + """\
+h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
+
+:H h-001.preds [id|subject|claim]
+p1|proposed_edge|"failures arrive in bursts"
+
+:H h-001.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
+ac1|e-001|endpoint-policy|"is this auth permitted"|escalate|escalate
+
+"""
+
+
+def test_a_conclude_block_that_records_nothing_is_refused() -> None:
+    """The CLOSURE gates read "is this document closing" off a non-empty `conclude`, and
+    `_project_conclude_scalars` drops an unrecognized key in silence — so a close keyed
+    entirely on keys the projection does not carry stood #13/#24/#26/#31/#34 all down with no
+    diagnostic. A `:T conclude` that lands nothing is now its own parse refusal."""
+    errors = _errors(_PROLOGUE + _ONE_CONTRACT + _LEAD + """\
+:T conclude
+handoff_notes          "sent to tier 2"
+""")
+    assert any("`:T conclude` recorded nothing" in e for e in errors)
+
+
+def test_a_lone_deferral_table_does_not_arm_the_closure_gates() -> None:
+    """`:T conclude.deferred_preds` carrying the SKILL-taught `none` marker opens the
+    `conclude` bucket, which a truthiness test read as a close in progress — refusing a
+    mid-run write for every commitment the run had not reached CONCLUDE on yet."""
+    assert _errors(_PROLOGUE + _ONE_CONTRACT + _LEAD + """\
+:T conclude.deferred_preds [prediction_ref|rationale]
+none
+""") == []
+
+
+def test_a_quoted_deferral_reference_still_defers() -> None:
+    """The ref cell is matched verbatim against `h-001.ac1`, so an unquoted read made a
+    quoted row defer nothing — while the refusal told the author to add the row they had
+    just written."""
+    assert _errors(_PROLOGUE + _ONE_CONTRACT + _LEAD + """\
+:T resolutions
+h-001  null → +    [l-001 p1 mild ⟂ e-001 :: bursty]
+
+:T conclude
+disposition            inconclusive
+confidence             low
+summary                "s"
+
+:T conclude.surviving [hyp_id|final_weight]
+h-001|+
+
+:T conclude.deferred_authz [contract_ref|rationale]
+"h-001.ac1"|"authority anchor unavailable"
+""") == []
+
+
 def test_quoted_cells_of_a_closed_vocabulary_are_read_unquoted() -> None:
-    """`target` is compared against a closed set by rule #33. Quoting a whole cell is the
-    format's own habit and the neighbouring cells are already unquoted, so a uniformly-quoted
-    row named a legal target and was refused for the quotes."""
+    """`target`, `dim` and `advance_to` are compared against closed sets by rules #33, #29
+    and #18. Quoting a whole cell is the format's own habit and their neighbours are already
+    unquoted, so a uniformly-quoted row named legal values and was refused for the quotes."""
     assert _errors(_PROLOGUE + _ONE_HYPOTHESIS + """\
 :H h-001.attr_preds [id|target|attribute|claim]
 ap1|"proposed_parent"|signing|"UNSIGNED"
 
-""" + _LEAD) == []
+""" + _LEAD + """\
+:L l-001.lead_preds [id|if|read_as|advance_to]
+lp1|"cadence matches"|"periodic tooling"|"CONCLUDE"
+
+:L l-001.impact_preds [id|dim|claim|on_match|on_mismatch|on_indeterminate|escalation_on]
+ip1|"confidentiality"|"bytes within baseline"|within|exceeds|indeterminate|exceeds
+""") == []
 
 
 def test_a_citation_from_a_row_that_moved_nowhere_does_not_cover_a_confirmation() -> None:
@@ -540,6 +601,70 @@ x1|proposed_edge|"failures arrive in bursts"
     assert any("a prediction is numbered `p<n>`" in e for e in errors)
 
 
+def test_a_blank_ceiling_test_row_is_not_a_receipt() -> None:
+    """`ceiling_test  ""` projects as a one-element list holding the empty string — truthy,
+    and a receipt naming no gap. The honest `none` marker projects as absence and IS refused,
+    so a bare truthiness test made the blank easier to pass than the honest answer."""
+    errors = _errors(_PROLOGUE + _ONE_HYPOTHESIS + _LEAD + """\
+:T resolutions
+h-001  null → +    [l-001 p1,p2 mild ⟂ e-001 :: bursty, no interval]
+
+:T conclude
+disposition            inconclusive
+confidence             low
+termination.category   severity-ceiling
+ceiling_test           ""
+summary                "s"
+
+:T conclude.surviving [hyp_id|final_weight]
+h-001|+
+""")
+    assert any("with no `ceiling_test`" in e for e in errors)
+
+
+def test_a_shared_contract_id_is_discharged_only_by_its_own_anchor_kind() -> None:
+    """`_check_authz_contract_ids` permits two declarers of one `ac*` when one is refuted —
+    which is exactly the shape this rule covers and the benign gate does not. A bare-id
+    discharge set let the live hypothesis's row settle the refuted one's unrelated question,
+    the automatic discharge rule #26 says it does not grant."""
+    errors = _errors(_PROLOGUE + _HYP_HEADER + """\
+h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
+h-002|?scheduled-retry|v-001|runs_on|process|??/??/??||null|active
+
+:H h-001.preds [id|subject|claim]
+p1|proposed_edge|"failures arrive in bursts"
+
+:H h-001.refuts [id|refutes|claim]
+r1|p1|"failures are evenly spaced"
+
+:H h-001.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
+ac1|e-001|change-mgmt|"was this change approved"|escalate|escalate
+
+:H h-002.preds [id|subject|claim]
+p1|proposed_edge|"the scheduler owns the retry"
+
+:H h-002.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
+ac1|e-001|iam-policy|"may this identity authenticate here"|escalate|escalate
+
+""" + _LEAD + """\
+:R authz [resolved_by|fulfills|verdict|grounding|anchor_id|anchor_kind|authority|as_of|reasoning]
+l-001|ac1|authorized|iam-policy-binding|POL-1|iam-policy|full|2026-05-05T03:42:11Z|"bound"
+
+:T resolutions
+h-001  null → --   [l-001 r1 severe ⟂ e-001 :: evenly spaced]
+h-002  null → +    [l-001 p1 mild ⟂ e-001 :: scheduler owns it]
+
+:T conclude
+disposition            inconclusive
+confidence             low
+summary                "s"
+
+:T conclude.surviving [hyp_id|final_weight]
+h-002|+
+""")
+    assert any("authz contract h-001.ac1 is declared and then abandoned" in e for e in errors)
+
+
 def test_two_screen_phases_in_different_loops_are_two_sequences() -> None:
     """"Intermediate" is "the next lead ALSO screens", read off `findings` order. Without the
     same-loop term, a loop-1 sequence whose last lead screens and a loop-2 screen beside it
@@ -569,6 +694,16 @@ def test_a_leading_decimal_point_is_not_stripped_from_a_claim() -> None:
 # them refused. They sit here rather than in their own file so they share the one prologue —
 # the same reason the blocks above do.
 
+_CLOSE_INCONCLUSIVE = """\
+:T conclude
+disposition            inconclusive
+summary                "s"
+
+:T conclude.surviving [hyp_id|final_weight]
+h-001|null
+
+"""
+
 _ONE_PRED = _HYP_HEADER + """\
 h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
 
@@ -576,6 +711,150 @@ h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
 p1|proposed_edge|"failures arrive in bursts"
 
 """
+
+
+def _moved(after: str) -> str:
+    return f":T resolutions\nh-001 null \u2192 {after}    [l-001 p1 mild \u27c2 e-001]\n\n"
+
+
+@pytest.mark.parametrize("after", ["confirmed", "x", "+++", "CONFIRMED"])
+def test_an_off_vocabulary_after_token_settles_no_prediction(after: str) -> None:
+    """The `after` cell is an unvalidated `\\S+` and nothing checks it against
+    `WEIGHT_BUCKETS`, so a "moved unless null" test made a misspelling the CHEAPEST row in the
+    language: it discharged rule #34, skipped rule #4 (which fires on `STRONG_WEIGHTS`) and
+    skipped rule #6 (which fires on `++`), where the honest `null` was refused."""
+    errors = _errors(_PROLOGUE + _ONE_PRED + _LEAD + _moved(after) + _CLOSE_INCONCLUSIVE)
+    assert any("h-001.p1" in e and "declared and then abandoned" in e for e in errors), errors
+
+
+@pytest.mark.parametrize("after", ["+", "-"])
+def test_a_real_weight_still_settles_the_prediction_it_cites(after: str) -> None:
+    """The liveness control: closing the off-vocabulary hole must not close the door on a
+    resolution that really moved the hypothesis."""
+    assert _errors(_PROLOGUE + _ONE_PRED + _LEAD + _moved(after) + _CLOSE_INCONCLUSIVE) == []
+
+#: A `:R impact` row and the `ip1` it grades, with EVERY cell quoted — legal, and the shape
+#: that drew three simultaneous refusals before the read side learned to unquote.
+_IMPACT_QUOTED = (
+    ":L l-001.impact_preds "
+    "[id|dim|claim|on_match|on_mismatch|on_indeterminate|escalation_on]\n"
+    'ip1|"confidentiality"|"session bytes within the 30d baseline"'
+    "|within|exceeds|indeterminate|exceeds\n\n"
+    ":R impact [resolved_by|pred_ref|dim|observed|verdict|grounding|authority|as_of"
+    "|reasoning]\n"
+    'l-001|"ip1"|"confidentiality"|"180GB"|"exceeds"|"telemetry-baseline"|"partial"'
+    '|"2026-05-05T04:00:00Z"|"3 sigma over a 2 sigma threshold"\n\n'
+)
+
+
+_LONE_CONTRACT = _HYP_HEADER + """\
+h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
+
+:H h-001.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
+ac1|e-001|iam-policy|"may this identity authenticate here"|escalate|escalate
+
+"""
+
+
+def _authz_row(fulfills: str) -> str:
+    return (
+        ":R authz [resolved_by|fulfills|verdict|grounding|anchor_id|anchor_kind|authority"
+        "|as_of|reasoning]\n"
+        f'l-001|{fulfills}|authorized|iam-policy-binding|POL-1|iam-policy|full'
+        '|2026-05-05T03:42:11Z|"bound"\n\n'
+    )
+
+
+@pytest.mark.parametrize("fulfills", ["ac1", "h-001.ac1"])
+def test_either_fulfills_spelling_discharges_the_contract(fulfills: str) -> None:
+    """Spec rule #7 blesses the qualified `h-{id}.ac{n}`; `skills/invlang/SKILL.md` teaches the
+    bare `ac<n>`. Rule #26 indexed the raw cell and looked it up bare, so the spelling the spec
+    calls correct refused a close for a contract the run had answered."""
+    assert _errors(
+        _PROLOGUE + _LONE_CONTRACT + _LEAD + _authz_row(fulfills) + _CLOSE_INCONCLUSIVE
+    ) == []
+
+
+def test_a_qualified_fulfills_discharges_only_its_own_declarer() -> None:
+    """...and no other hypothesis's `ac1`: the qualified form names its declarer, which is the
+    whole reason it is worth accepting."""
+    errors = _errors(_PROLOGUE + _HYP_HEADER + """\
+h-001|?a|v-001|runs_on|process|??/??/??||null|active
+h-002|?b|v-001|runs_on|process|??/??/??||--|refuted
+
+:H h-001.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
+ac1|e-001|iam-policy|"may this identity authenticate here"|escalate|escalate
+
+:H h-002.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
+ac1|e-001|change-mgmt|"was this change approved"|escalate|escalate
+
+""" + _LEAD + _authz_row("h-001.ac1") + _CLOSE_INCONCLUSIVE)
+    assert [e for e in errors if "h-002.ac1" in e], errors
+    assert not [e for e in errors if "h-001.ac1" in e], errors
+
+
+def test_twin_contracts_under_one_anchor_kind_are_discharged_by_nothing() -> None:
+    """`_authz_contract_error` states it first: a `:R authz` row names only the contract id, so
+    when two hypotheses declare one `ac*` under the SAME anchor kind no row can be attributed
+    to either. Reading the shared kind as a discharge let one row close two questions — and
+    `_check_authz_contract_ids` exempts the collision when one side is refuted, which is
+    exactly the shape rule #26 covers and the benign gate does not."""
+    errors = _errors(_PROLOGUE + _HYP_HEADER + """\
+h-001|?a|v-001|runs_on|process|??/??/??||null|active
+h-002|?b|v-001|runs_on|process|??/??/??||--|refuted
+
+:H h-001.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
+ac1|e-001|iam-policy|"may this identity authenticate here"|escalate|escalate
+
+:H h-002.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
+ac1|e-001|iam-policy|"a different question under the same anchor"|escalate|escalate
+
+""" + _LEAD + _authz_row("ac1") + _CLOSE_INCONCLUSIVE)
+    named = [e for e in errors if "is declared and then abandoned" in e]
+    assert [e for e in named if "h-001.ac1" in e], errors
+    assert [e for e in named if "h-002.ac1" in e], errors
+    # The repair has to be one the grammar can express: `fulfills=ac1` is already written.
+    assert all("renumber it" in e for e in named), errors
+
+
+@pytest.mark.parametrize(
+    ("rationale", "discharges"),
+    [('"telemetry never arrived"', True), ("none", False), ("n/a", False), ('""', False)],
+)
+def test_the_empty_marker_is_not_a_deferral_rationale(
+    rationale: str, discharges: bool
+) -> None:
+    """`none` / `n/a` is the format's own word for "nothing to say", taught two paragraphs from
+    the deferral tables as the empty-TABLE marker. A bare-truthiness test made it a discharge —
+    one word clearing the only guard the escape hatch has, while the honest empty cell is
+    refused."""
+    errors = _errors(
+        _PROLOGUE + _ONE_PRED + _LEAD + _CLOSE_INCONCLUSIVE
+        + f":T conclude.deferred_preds [prediction_ref|rationale]\nh-001.p1|{rationale}\n\n"
+    )
+    assert (errors == []) is discharges, errors
+
+
+@pytest.mark.parametrize(
+    "block",
+    [
+        ":L l-001.lead_preds [id|if|read_as|advance_to]\nnone\n\n",
+        ":L l-001.impact_preds "
+        "[id|dim|claim|on_match|on_mismatch|on_indeterminate|escalation_on]\nnone\n\n",
+    ],
+)
+def test_a_lone_none_row_is_the_empty_table_marker_on_a_lead_plan_block(block: str) -> None:
+    """`_row_cells` pads a lone marker to the block width, so without the filter every sibling
+    sub-table applies it landed as a record whose id IS `none` — and rules #18 / #29 emitted
+    four and seven refusals apiece, none of which said the author wrote the marker."""
+    from defender.skills.invlang.parser import parse_dense_companion
+
+    body = _PROLOGUE + _ONE_PRED + _LEAD + block
+    companion, warnings = parse_dense_companion(_doc(body))
+    assert warnings == []
+    assert "predictions" not in companion["findings"][0]
+    assert "impact_predictions" not in companion["findings"][0]
+    assert _errors(body) == []
 
 
 def test_a_shelved_sibling_clears_the_fork_rule() -> None:
@@ -612,10 +891,80 @@ l-002|0|second-phase-screen|v-001|screen|||elastic|10m
 """) == []
 
 
+def test_a_quoted_lead_name_resolves_an_advance_to() -> None:
+    """`_lead_pred_row` unquotes `advance_to` and `_lead_header_record` does not unquote
+    `name`, so a document quoting its cells uniformly was refused with a message listing the
+    destination among the names it said did not match — and the declaring `:L findings` row is
+    committed, so the refusal had no repair."""
+    assert _errors(_PROLOGUE + _ONE_PRED + """\
+:L findings [id|loop|name|target|tests|system|window]
+l-001|1|"auth history"|v-001|h-001|elastic|10m
+l-002|1|"cadence check"|v-001|h-001|elastic|10m
+
+:L l-001.lead_preds [id|if|read_as|advance_to]
+lp1|"failures cluster in the last 10 min"|"anomalous spike"|"cadence check"
+""") == []
+
+
+def test_a_uniformly_quoted_impact_resolution_is_read_as_written() -> None:
+    """`_impact_pred_row` unquotes the DECLARING side and `_canonicalize_resolution_row`
+    unquotes nothing, so the same quoting on the grading row drew three refusals at once — two
+    off-enum and one unresolvable `pred_ref` — for values all spelled correctly."""
+    assert _errors(_PROLOGUE + _ONE_PRED + _LEAD + _IMPACT_QUOTED) == []
+
+
+def test_a_second_conclude_block_of_unrecognized_keys_does_not_refuse_the_close() -> None:
+    """`_project_conclude_scalars` refuses to warn on an unrecognized flat key because "the
+    lessons corpus can instruct conclude rows this projection does not carry, and
+    `learning/core/persist.py` dead-letters a run whose investigation.md fails validation".
+    A per-BLOCK "recorded nothing" flag turned exactly that write into the refusal that comment
+    forbids, on a document whose close is already fully recorded."""
+    assert _errors(
+        _PROLOGUE + _ONE_PRED + _LEAD + _CLOSE_INCONCLUSIVE
+        + ":T conclude\nescalation_target      soc-tier2\n\n"
+        + ":T conclude.deferred_preds [prediction_ref|rationale]\n"
+          'h-001.p1|"telemetry never arrived"\n\n'
+    ) == []
+
+
+def test_a_conclude_block_that_really_records_nothing_still_warns() -> None:
+    """The liveness control for the test above: a close that projects to `{}` stands every
+    CONCLUDE rule down, and has to be loud."""
+    assert any(
+        "recorded nothing" in e
+        for e in _errors(
+            _PROLOGUE + _ONE_PRED + _LEAD
+            + ":T conclude\nescalation_target      soc-tier2\n\n"
+        )
+    )
+
+
 # --- #940 sweep regressions ------------------------------------------------------------------
 #
 # The second pass over the first pass. Two of these are defects the FIRST round of #940 fixes
 # introduced, which is the reason the block exists as its own heading.
+
+_LESSON_CONCLUDE = ":T conclude\nanalyst_note           soc-tier2\n\n"
+_REAL_CONCLUDE = (
+    ':T conclude\ndisposition            benign\nsummary                "s"\n\n'
+    ":T conclude.surviving [hyp_id|final_weight]\nh-001|null\n\n"
+)
+_DEFER_P1 = (
+    ":T conclude.deferred_preds [prediction_ref|rationale]\n"
+    'h-001.p1|"telemetry never arrived"\n\n'
+)
+
+
+def test_a_lesson_keyed_conclude_block_is_accepted_in_either_order() -> None:
+    """The "recorded nothing" verdict is about the DOCUMENT, so it cannot depend on where in
+    the document the empty block sits. Decided inline it was scoped to the blocks projected
+    BEFORE this one — a PREFIX — so the pair it exists to protect passed in one order and was
+    refused in the other, and on a document already holding such a block every later append
+    re-derived the refusal against a block nobody may edit."""
+    base = _PROLOGUE + _ONE_PRED + _LEAD
+    assert _errors(base + _REAL_CONCLUDE + _DEFER_P1 + _LESSON_CONCLUDE) == []
+    assert _errors(base + _LESSON_CONCLUDE + _REAL_CONCLUDE + _DEFER_P1) == []
+
 
 def _screen_row(mode: str, result: str) -> str:
     return (
@@ -1072,3 +1421,82 @@ def test_an_annotation_naming_one_id_does_not_discard_the_heads_list() -> None:
 :T resolutions
 h-001  null → ++   [l-001 p1,p2 severe ⟂ e-001 :: bursts observed ⟺ p1]
 """) == []
+
+def _shelved(rationale: str) -> str:
+    return f":T shelved [hyp_id|by_lead|rationale]\nh-001|l-001|{rationale}\n\n"
+
+
+def test_shelving_without_a_reason_discharges_nothing() -> None:
+    """`:T shelved` is the widest discharge in the language since #933 — rules #23, #24 and
+    #34 all read it as settling the question. The deferral tables built in the same change
+    refuse a blank rationale by name ("a blank cell records nothing while still discharging
+    it"); that argument does not weaken when the discharge gets broader, so the two escape
+    hatches are priced the same. Measured before the fix: two rationale-less rows took a
+    document from seven refusals to one."""
+    base = _PROLOGUE + _ONE_PRED + _LEAD
+    assert any(
+        "shelved with no rationale" in e
+        for e in _errors(base + _shelved("") + _REAL_CONCLUDE)
+    )
+    assert any(
+        "shelved with no rationale" in e
+        for e in _errors(base + _shelved("none") + _REAL_CONCLUDE)
+    )
+
+
+def test_a_shelved_row_with_a_reason_is_the_discharge_it_claims_to_be() -> None:
+    """The liveness control, and the in-grammar repair: `_project_shelved_block` keys the
+    rationale by hypothesis, so re-sending the row WITH a reason clears this — which is why
+    the check reads `shelved_rationales` rather than the row."""
+    assert _errors(
+        _PROLOGUE + _ONE_PRED + _LEAD + _shelved('"outranked by h-002"') + _REAL_CONCLUDE
+    ) == []
+
+
+_IP1 = (
+    ":L l-001.impact_preds "
+    "[id|dim|claim|on_match|on_mismatch|on_indeterminate|escalation_on]\n"
+    'ip1|confidentiality|"bytes within the 30d baseline"'
+    "|within|exceeds|indeterminate|exceeds\n\n"
+)
+
+
+def _impact_rows(*rows: str) -> str:
+    head = (
+        ":R impact [resolved_by|pred_ref|dim|observed|verdict|grounding|authority|as_of"
+        "|reasoning]\n"
+    )
+    return head + "".join(rows) + "\n"
+
+
+_GRADE_EXCEEDS = (
+    'l-001|ip1|confidentiality|"180GB"|exceeds|telemetry-baseline|partial'
+    '|2026-05-05T04:00:00Z|"3 sigma over"\n'
+)
+_GRADE_WITHIN = (
+    'l-001|ip1|confidentiality|"2GB"|within|telemetry-baseline|partial'
+    '|2026-05-05T04:00:00Z|"inside baseline"\n'
+)
+
+
+def test_one_impact_predicate_may_not_be_graded_two_ways() -> None:
+    """`_check_impact_closure` asks only whether SOME row names the ref, so a predicate could
+    be graded `exceeds` AND `within` and still read as resolved — letting the close pick which
+    of its own answers to be measured against, which is the after-the-fact choice the
+    pre-registration axis exists to prevent. The authz axis already refuses the analogous
+    disagreement."""
+    errors = _errors(
+        _PROLOGUE + _ONE_PRED + _LEAD + _IP1
+        + _impact_rows(_GRADE_EXCEEDS, _GRADE_WITHIN)
+        + _REAL_CONCLUDE + _DEFER_P1
+    )
+    assert any("graded exceeds, within" in e for e in errors), errors
+
+
+def test_one_impact_predicate_graded_once_is_clean() -> None:
+    """The liveness control: agreement is the rule, not a ban on grading."""
+    assert _errors(
+        _PROLOGUE + _ONE_PRED + _LEAD + _IP1
+        + _impact_rows(_GRADE_EXCEEDS)
+        + _REAL_CONCLUDE + _DEFER_P1
+    ) == []

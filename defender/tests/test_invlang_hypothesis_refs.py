@@ -356,6 +356,10 @@ def test_the_surviving_key_is_not_advertised_as_a_flat_conclude_row():
     companion = _parsed(
         _declaring("h-001") + "\n"
         ":T conclude\n"
+        # A recognized key beside the unrecognized one: a `:T conclude` that records NOTHING
+        # is warned in its own right, and this test is about the flat-key hint rather than
+        # about an empty close.
+        "disposition            inconclusive\n"
         "surviving_hypotheses   none\n"
         "\n"
         ":T conclude.surviving [hyp_id|final_weight]\n"
@@ -528,8 +532,12 @@ def test_a_row_naming_both_hypotheses_may_name_either_commitment():
 
 
 def test_an_unprojected_namespace_in_tests_is_left_alone():
-    """`:L l-NNN.lead_preds` is documented and unprojected (#820), so an `lp*` resolves
-    against nothing here. Reporting it would deny a document the format permits."""
+    """An `lp*` in the `tests` column resolves against nothing here, and stays exempt now
+    that #933 projects `:L l-NNN.lead_preds` — for a structural reason rather than the old
+    "nothing declares it". An `lp*` is scoped to a LEAD and this column is scoped to a
+    HYPOTHESIS, so no hypothesis's declarations could resolve one; `COMMITMENT_ID_RE`
+    `fullmatch`es `p\\d+` and so excludes `lp1` outright. Do not remove the carve-out on the
+    strength of the namespace now being projected."""
     assert _commitment_errors(_with_preds("h-001,lp1")) == []
 
 
