@@ -214,7 +214,20 @@ e-001|attempted_auth|v-001|v-002|2026-04-20T09:00:00Z|siem-event:wazuh-indexer|t
 
 ## PREDICT (loop 1)
 
-Two siblings under v-001's `initiated_by`: a sanctioned-probe identity (carries the authz contract) and the §Integrity discipline peer (?adversary-controlled-source-session).
+Two siblings under v-001's `initiated_by`: a sanctioned-probe identity (carries the authz contract) and an §Integrity peer (?adversary-controlled-source-session).
+
+<!-- Spec v2.19: this read "the §Integrity discipline peer". The peer
+     shape is still the right representation for an integrity concern
+     and the example is unchanged, but the *discipline* — rule #32,
+     which would have required this peer whenever a contract sat on an
+     acting-entity parent — is struck. A peer here is an author's
+     judgement, not a gate's demand. Worth knowing when reading this
+     block: these two rows are the ONLY pair in the tree that would
+     have discharged #32, and they are hand-authored here to
+     illustrate the discipline. No run, no golden, and no shipped
+     worked example ever did. That is cited as reason 2 in rule #32's
+     gap entry in `docs/investigation-language.md`. -->
+
 
 :H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|preds|refuts|authz?|weight|status]
 h-001|?monitoring-probe|v-001|initiated_by|identity|approved-monitoring-service-account|p1:proposed_parent:"triple (172.22.0.10,sensu,target-endpoint) listed in approved-monitoring-sources"|r1[p1]:"triple absent or revoked"|ac1:proposed:approved-monitoring-sources:"triple listed as active":esc/esc|null|active
@@ -356,7 +369,11 @@ Today's YAML `analyze:` envelope (per `soc-agent/agents/analyze.md`) is reshaped
 :A routing                                                       # PRESENT iff decision=halt
 decision               halt
 termination_category   trust-root | adversarial-refuted | severity-ceiling | exhaustion-escalation
-disposition            benign | true_positive | unclear
+disposition            benign | false-positive | inconclusive | malicious
+                       # v2.18: was `benign | true_positive | unclear`.
+                       # The live enum is `DISPOSITION_VALUES` in
+                       # `defender/_vocab.py`; the other two spellings
+                       # were never in it.
 confidence             high | medium | low
 surviving              <hyp-id>[,<hyp-id>...]
 matched_archetype      null

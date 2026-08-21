@@ -31,8 +31,9 @@ Schema changes (see `docs/investigation-language.md` schema delta — drafted al
 5. **New validator rules:**
    - `legitimacy_contract.edge_ref` resolves to `proposed` or an existing `e-*`.
    - Every `edge.legitimacy.fulfills_contract` points to an existing hypothesis + contract entry.
-   - A confirmed-weight hypothesis (`++`/`+`) with an unfulfilled contract — or any fulfilling edge with `verdict: indeterminate` — caps disposition at `unclear` + `status: escalated`. `benign` requires every contracted edge to carry `verdict: authorized`.
-   - Any `verdict: unauthorized` forces `status: escalated` (disposition becomes `true_positive` or `unclear` depending on remaining evidence).
+   - A confirmed-weight hypothesis (`++`/`+`) with an unfulfilled contract — or any fulfilling edge with `verdict: indeterminate` — blocks `benign`. `benign` requires every contracted edge to carry `verdict: authorized`.
+   - Any `verdict: unauthorized` likewise blocks `benign`.
+   - *(v2.18: these two bullets also stated what disposition the blocked case is forced TO — `status: escalated` with `unclear` / `true_positive`. Excised with rule #21's escalation half; none of those tokens is in `DISPOSITION_VALUES` (`defender/_vocab.py`) and nothing enforced them. What survives — an undischarged contract blocks `benign` — is what `_check_benign_authz` implements.)*
 6. **Drop the "maintain adversarial hypothesis until `--`" rule** from SKILL.md §HYPOTHESIZE completeness checks and operating principle #4. Teeth move from hypothesis-bookkeeping to evidence-based structural enforcement via the validator rules above.
 
 **Open questions resolved:**
@@ -44,6 +45,8 @@ Schema changes (see `docs/investigation-language.md` schema delta — drafted al
 - Legitimacy contracts for session-hijack / forgery? — No. Contracts answer policy-authorization questions only. Integrity/forgery questions are mechanism-level — enumerate them as hypotheses on the `authenticated_as` edge (`?normal-authn` vs `?hijacked-session`), discriminated by behavioral observation (impossible travel, device-fingerprint shift, MFA anomaly). Contracts bottom out at the AuthN edge; below that is mechanism.
 
 **Behavioral-consistency prediction (opt-in addition to hypothesis, no schema extension):**
+
+*(Spec v2.19: this section is the standing answer to the compromised-credential gap, and validator rule #32 — a structural gate mandating an `?adversary-controlled-*` peer whenever a contract sat on a `session` / `identity` / `process` parent — is struck partly because it re-derived that gap and answered it the way this section had already declined to. Before proposing a structural integrity gate, read this section and rule #32's gap entry in `docs/investigation-language.md`.)*
 
 A legitimacy contract resolved `authorized` establishes policy compliance, not integrity. The compromised-credential case (policy says yes, pattern says off) needs a third check. Rather than schematize it, extend the hypothesis-prediction guidance: when baseline data exists, the agent MAY add a single baseline-consistency prediction using the existing `predictions`/`refutation_shape` machinery.
 

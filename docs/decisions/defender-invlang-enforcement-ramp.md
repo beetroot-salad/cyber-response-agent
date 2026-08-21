@@ -143,6 +143,37 @@ fences applied in order (#934). The stale Example A (`type=endpoint`,
 `file:binary`, prose-cited resolutions, a bare `provenance` attr key) was
 fixed to current grammar as part of the original work.
 
+**Struck from the spec, and so never ramped (#933).** Five clauses left
+`docs/investigation-language.md` without ever having had an
+implementation here, so none of them is a rung this list skipped — they
+are rungs that turned out not to exist. Recorded because a reader
+counting rule numbers against this list will otherwise go looking for
+them:
+
+- **Spec rule #36** (affirmative `true_positive` disposition) — struck
+  at spec v2.18 as retired vocabulary. `true_positive` is not in
+  `DISPOSITION_VALUES` (`defender/_vocab.py`) and has never appeared
+  under `defender/` in this repository's history; the
+  `hooks/scripts/invlang_checks_authorization.py` path the v2.14/v2.16
+  deltas cite does not exist.
+- **Spec rule #21's escalation half** and **rule #24's trailing
+  `status: escalated` clause** — struck at v2.18 with it, for the same
+  reason. #21's benign half is rule 5 above and is untouched.
+- **Spec rule #32** (integrity peer discipline) — struck at v2.19. Its
+  discharge test is a `name.startswith("?adversary-controlled-")`
+  prefix match on model-authored free text: 6 of the 10 contract-bearing
+  hypotheses in the corpus trigger it, all 6 fail it, 0 discharge it, and
+  arming it would mint the peers rather than find them. The coverage gap
+  is real and its recorded answer is the behavioral-consistency
+  prediction in `docs/decisions/adversarial-as-attribute-not-hypothesis.md`,
+  not a structural gate.
+- **Spec rule #35** (sibling prediction divergence) — struck at v2.19 as
+  subsumed by #23, which refuses strictly more
+  (`validate._check_fork_distinctness`).
+
+None is a candidate for a later rung. Re-arming any of them is a fresh
+spec decision, not a scheduling one.
+
 **Open: two current-spec rules were deferred because the spec
 contradicted its own worked examples.** Don't enforce one until its spec
 is reconciled, or it'll false-positive on valid current writes. One is

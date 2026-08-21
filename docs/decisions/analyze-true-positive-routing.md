@@ -4,6 +4,15 @@ status: backlog
 groups: analyze
 ---
 
+> **Superseded in part (v2.18 of `docs/investigation-language.md`).** The validator rule this
+> task proposed landed as spec rule #36 and has since been **struck as retired vocabulary**:
+> `true_positive` is not in `DISPOSITION_VALUES` (`defender/_vocab.py` — `benign`,
+> `false-positive`, `inconclusive`, `malicious`) and never was, so no validator ever enforced
+> it. The *empirical finding* below — that absence-of-benign-confirmation is not evidence of
+> adversarial action — is unaffected and is the reason spec #36 is recorded as a gap rather
+> than deleted. Anyone reviving this should read it against the live enum: `true_positive` →
+> `malicious`, `unclear` → `inconclusive`. Left as written for the record.
+
 **Goal.** ANALYZE must not route `disposition: true_positive` from absence-of-anchor-confirmation alone. `true_positive` requires affirmative `++` on a hypothesis whose classification is adversarial. Where the only surviving hypothesis is benign-mechanism with an unconfirmed authorization contract, the route is `escalated/unclear` (or `escalated/inconclusive`), not `true_positive`. ANALYZE must also honor PREDICT's `branch_plan.predictions[].advance_to` recommendations for the matched lead outcome instead of substituting its own routing.
 
 This task is **self-contained** — it captures the empirical evidence, the structural defect, and the fix, and does not depend on any other task shipping for its rationale to land.
