@@ -37,7 +37,11 @@ defender/
   hooks/            # gate LOGIC imported as libraries (lead claim, descriptors, budget, lesson-load) — no longer Claude Code hooks
   skills/           # invlang, gather, handbook, advisory + per-system references (elastic/ identity/ cmdb/ ticket/ change-mgmt/ threat-intel/ host-state/)
   scripts/          # adapters/, gather_tools/, visualize/, lessons/, case_history/, policy_cli.py, pricing.py, workspace_map.py
-  learning/         # offline loop: loop.py (orchestrator CLI), lead_repository.py (THE read/join surface), pipeline/, author/, core/, leads/, tickets/, ops/, frontend/
+  learning/         # offline loop: loop.py (orchestrator CLI), lead_repository.py (THE read/join surface),
+                    #   _prompt.py + _pydantic_stage.py (the shared stage-assembly pair, used by every engine),
+                    #   pipeline/, author/, core/, leads/, branch/, tickets/, ops/, frontend/
+                    #   branch/ is the turn-N branch (#920): ledger.py records every response the estate served
+                    #   with the decision behind it; estate/ is what a sibling world queries through
   evals/            # metrics + harness-on-the-harness (scenarios/)
   lessons/          # checked-in lesson corpus
   fixtures/         # alert.json (+ optional gather_raw payloads) used as runtime inputs

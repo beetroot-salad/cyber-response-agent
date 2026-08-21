@@ -216,15 +216,22 @@ def test_a_multi_source_from_is_not_left_half_staged():
     Half-staged is the worst of the three outcomes: the world's difference is silently absent
     from part of the evidence, the query still runs, and the sibling reports a measurement over
     a corpus that is partly the base run's. Refusing is a correct answer here — a query that
-    cannot be pointed at a world's view is exactly what `StagingError` is for."""
+    cannot be pointed at a world's view is exactly what `StagingError` is for.
+
+    The demand is the REFUSAL, not the absence of the first source. Asserting only
+    `"logs-system.auth-*" not in out` is satisfied by the very output this test is named after:
+    `FROM logs-system.auth-w-b, logs-nginx.access-*` drops the first spelling and leaves the
+    second reading the unstaged base. Swallowing the refusal into `out = ""` made it weaker
+    still — any unrelated `StagingError`, including a regression that refused every ES|QL body,
+    passed."""
     body = "FROM logs-system.auth-*, logs-nginx.access-*\n| STATS COUNT(*)"
 
-    try:
-        out = elastic.redirect("esql", {"query": body}, "b")["query"]
-    except elastic.StagingError:
-        out = ""  # refusing stages nothing, which is not half-staging
+    with pytest.raises(elastic.StagingError) as refusal:
+        elastic.redirect("esql", {"query": body}, "b")
 
-    assert "logs-system.auth-*" not in out
+    assert "several corpora" in str(refusal.value), (
+        "the refusal names some other fault, so this passes without the multi-source rule "
+        f"ever running: {refusal.value}")
 
 
 def test_a_lowercased_from_still_retargets():

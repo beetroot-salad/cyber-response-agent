@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from defender._io import read_jsonl_rows
+from defender._io import read_jsonl_rows, read_text_soft
 from defender._run_paths import RunPaths
 
 from . import session_store
@@ -64,10 +64,18 @@ def open_source_store(run_dir: Path) -> Any:
     `main_session_id` finding no root session in a store that was never the right one.
     """
     run_dir = Path(run_dir)
-    recorded = Path(session_store.resolve_store_path(run_dir))
-    pointer = json.loads(
-        (run_dir / session_store.POINTER_FILENAME).read_text(encoding="utf-8"))
-    case_id = pointer["case_id"]
+    # ONE read of the pointer, and every way it can be malformed lands as `BranchError` — the
+    # class the driver's store-setup handler catches. A bare `KeyError`/`JSONDecodeError` from
+    # here escapes that handler and takes the process down with the wire log still registered.
+    try:
+        pointer = json.loads(
+            (run_dir / session_store.POINTER_FILENAME).read_text(encoding="utf-8"))
+        recorded = Path(pointer["store_path"])
+        case_id = pointer["case_id"]
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        raise BranchError(
+            f"{run_dir} carries no readable case pointer "
+            f"({session_store.POINTER_FILENAME}): {e!r}") from e
     derived = session_store.store_path_for(case_id, runs_base=run_dir.parent)
     if derived != recorded:
         raise BranchError(
@@ -103,24 +111,61 @@ def fence_count_at(store: Any, session_id: str, branch_message_id: int) -> int:
     COARSE, like the thing it feeds. A fence lands per `append_block`, so many message-level
     branch points share one frontier — `frontier_at` says the same of itself and reports
     `snapped` when a caller asks past the end.
+
+    ONE ROW PER FENCE, and it is the tool RETURN. `session_store._tool_name` stamps the name on
+    BOTH halves of a round-trip — the `ModelResponse` carrying the `ToolCallPart` and the
+    `ModelRequest` carrying the `ToolReturnPart` — so counting every row that names
+    `append_block` doubles the count, and past the document's midpoint `frontier_at` then snaps
+    to the FINISHED document, which is the one state a branch point must never be read at. The
+    return is the half that agrees with the prefix: `hydrate(role="send")` truncates a trailing
+    response whose tool call is unresolved, so the fence is counted exactly when the prefix
+    carries it.
+
+    A MEMBERSHIP test, not equality: `_tool_name` comma-joins every distinct tool a message
+    names ("One response legitimately carries several tool calls"), so `== "append_block"`
+    silently counts a turn that batched the fence with any other tool as no fence at all.
     """
     ids = session_store.path_row_ids(store, session_id)
     rows = session_store.hydrate(store, session_id, role="actor")
     return sum(
         1 for row_id, row in zip(ids, rows, strict=True)
-        if row_id <= branch_message_id and row.get("tool_name") == "append_block"
+        if row_id <= branch_message_id and row.get("kind") == "request"
+        and "append_block" in (row.get("tool_name") or "").split(",")
     )
 
 
+def main_session(store: Any) -> str:
+    """The source run's MAIN session, or a `BranchError`.
+
+    `main_session_id` raises a bare `ValueError` on zero or several roots — a store that is not
+    the one the branch point lives in, which `open_source_store`'s docstring names as the fault
+    it surfaces far away. Re-raised as this module's own class so it reaches the driver's
+    store-setup handler rather than unwinding the process.
+    """
+    try:
+        return session_store.main_session_id(store)
+    except ValueError as e:
+        raise BranchError(f"the source store holds no single root 'main' session: {e}") from e
+
+
 def frontier_at_branch(store: Any, spec: BranchSpec):
-    """The investigation's open state as it stood at the branch point."""
-    from defender._io import read_text_soft
+    """The investigation's open state as it stood at the branch point.
+
+    `frontier_at` is imported HERE, not at module scope, and that is load-bearing rather than
+    untidy. `driver.py` does `from . import branch` at module level, so hoisting this pulls
+    `skills.invlang.frontier` and ten sibling invlang modules into the import graph of every
+    process that imports the driver — measured with `-X importtime` at 109ms cumulative for
+    that subtree, paid by every investigation, every gather subagent and every e2e child,
+    when only a resume ever reaches this function.
+    """
     from defender.skills.invlang.frontier import frontier_at
 
-    session_id = session_store.main_session_id(store)
     text, _ = read_text_soft(RunPaths(Path(spec.source_run_dir)).investigation)
+    # A run that authored no document reads as the empty frontier, which is what `validate`
+    # refuses on — the same answer `frontier_at` gives a fence-less document.
     return frontier_at(
-        text or "", fence_count_at(store, session_id, spec.branch_message_id))
+        text if text is not None else "",
+        fence_count_at(store, main_session(store), spec.branch_message_id))
 
 
 def validate(store: Any, spec: BranchSpec) -> None:
@@ -134,15 +179,45 @@ def validate(store: Any, spec: BranchSpec) -> None:
     the generated-world design the redesign rejected, reached by branching too early rather
     than by choosing it.
 
-    **A non-empty frontier.** `frontier_at` answers the empty frontier for a fence-less
-    document, and an empty frontier is nothing open to discriminate — the pair would have no
+    **SOMETHING OPEN in the frontier.** `frontier_at` answers the empty frontier for a
+    fence-less document, and nothing open is nothing to discriminate — the pair would have no
     question to divide.
+
+    Open means `slots` or `contracts`, NOT `Frontier.is_empty()`. That predicate also counts
+    `held`, which is what the document has already SETTLED: a finished investigation carries
+    ~15 held facts against zero open slots, so `is_empty()` reads it as a perfectly good branch
+    point when it is the exact case this precondition exists to refuse — branched too late,
+    with every question already answered. `is_empty()` is false only for a document with no
+    populated cells at all, which is the same set the fence-less arm already covers.
+
+    **A frontier that was not SNAPPED.** `frontier_at` clamps an out-of-range fence index and
+    says so rather than raising, and its own docstring names why that must not pass silently:
+    "a curator who asks for block 12 of a 4-block document and is handed the terminal frontier
+    has been handed the one state that keys nothing". `snapped` here means the store counted
+    more landed fences than the document holds — a refused `append_block` still leaves a tool
+    return in the session — so the message-to-fence mapping is not trustworthy for this run,
+    and the answer would be the FINISHED document's frontier, the one a branch must never read.
     """
     run_dir = Path(spec.source_run_dir)
     if spec.branch_message_id <= 0:
         raise BranchError(
             f"branch_message_id must be a real message, got {spec.branch_message_id} — "
             "message 0 precedes every payload, so no world can contradict the prefix")
+
+    # ON MAIN'S PATH, and not merely a number. `fence_count_at` scores rows with
+    # `row_id <= branch_message_id`, so an id past the tip reads as "every fence" and one
+    # belonging to another session in the same case DB — a `gather:l-NNN` leg's row — reads as
+    # "all of MAIN's fences so far". Neither is caught downstream: `fork` walks parents from
+    # the id it is given regardless of session, so the foreign id yields a child whose prefix
+    # is a SUB-AGENT's transcript while this function vouched for MAIN's document, and the
+    # phantom id survives to `hydrate`, which fails far away with `UnresolvablePathElement`
+    # after the run dir's pointer has already been written.
+    path = session_store.path_row_ids(store, main_session(store))
+    if spec.branch_message_id not in path:
+        raise BranchError(
+            f"message {spec.branch_message_id} is not on the source run's MAIN path "
+            f"({len(path)} row(s), {path[0] if path else '-'}..{path[-1] if path else '-'}) — "
+            "a branch point has to be a message this run's own main session actually holds")
 
     rows = read_jsonl_rows(RunPaths(run_dir).executed_queries)
     if not rows:
@@ -151,11 +226,19 @@ def validate(store: Any, spec: BranchSpec) -> None:
             "empty prefix by construction, which is the generated-world design, not a branch")
 
     frontier = frontier_at_branch(store, spec)
-    if frontier.frontier.is_empty():
+    open_state = frontier.frontier
+    if not open_state.slots and not open_state.contracts:
         raise BranchError(
-            f"the frontier at message {spec.branch_message_id} is empty "
-            f"(fence {frontier.n} of {frontier.total}) — nothing is open there for a pair of "
-            "worlds to divide")
+            f"nothing is open in the frontier at message {spec.branch_message_id} "
+            f"(fence {frontier.n} of {frontier.total}: 0 slots, 0 contracts, "
+            f"{len(open_state.held)} held) — there is no question there for a pair of worlds "
+            "to divide")
+    if frontier.snapped:
+        raise BranchError(
+            f"message {spec.branch_message_id} maps to fence {frontier.requested}, but "
+            f"{RunPaths(run_dir).investigation} holds only {frontier.total} — the answer was "
+            f"snapped to the terminal frontier, which is the one state a branch point must "
+            "not be read at")
 
 
 def framework_view(prefix: list) -> list:
@@ -197,7 +280,7 @@ def open_main_session(store: Any, spec: BranchSpec | None) -> tuple[str, list | 
     if spec is None:
         return store.new_session(agent_id="main"), None
     validate(store, spec)
-    source_session = session_store.main_session_id(store)
+    source_session = main_session(store)
     session_id = store.fork(source_session, at_message_id=spec.branch_message_id)
     prefix = session_store.hydrate(store, session_id, role="send")
     visible = framework_view(prefix)

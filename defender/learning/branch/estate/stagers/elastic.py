@@ -24,20 +24,41 @@ from __future__ import annotations
 
 import re
 
+from defender.scripts.adapters.faults import USAGE_EXIT_CODE, AdapterFault
+
 #: The leading `FROM` command. ES|QL requires it FIRST, which is what makes this a
 #: leading-clause substitution rather than general query-language surgery: everything after the
 #: first pipe is another command and is never touched.
 _FROM = re.compile(r"\A(?P<lead>\s*FROM\s+)(?P<rest>.*)\Z", re.IGNORECASE | re.DOTALL)
 #: `FROM <sources> METADATA <fields>` — the one suffix that may follow the source list inside
 #: the same command, and it must survive the rewrite.
-_METADATA = re.compile(r"\bMETADATA\b", re.IGNORECASE)
+#:
+#: WHITESPACE-DELIMITED, not `\b`-delimited. `-` and `.` are non-word characters, so `\bMETADATA\b`
+#: matches INSIDE an ordinary index name: `FROM logs-metadata-*` split as `logs-` plus a
+#: `METADATA metadata-*` suffix, staging half the query against the base corpus and emitting a
+#: two-source `FROM` — the silent half-retarget `_one_source` refuses a comma list to prevent —
+#: while `FROM metadata-events-*` was refused outright as naming no source.
+_METADATA = re.compile(r"(?:(?<=\s)|\A)METADATA(?=\s|\Z)", re.IGNORECASE)
 
 #: Verbs whose index is a PARAMETER rather than part of the query body.
 PARAM_INDEXED = ("query", "alerts")
 
 
-class StagingError(Exception):
-    """A query that cannot be pointed at a world's view."""
+class StagingError(AdapterFault):
+    """A query that cannot be pointed at a world's view.
+
+    An `AdapterFault` carrying the USAGE code, not a bare exception. It is raised from inside
+    the served verb body, so `QueryCapture` is what meets it — and its catch-all maps an
+    unrecognised exception to `DEFAULT_FAULT_EXIT`, which is 2, which is in
+    `circuit_breaker.INFRA_EXIT_CODES`. A capability refusal would therefore have been counted
+    as an environment outage: two of them trip the breaker for the whole system and five abort
+    the run, so the pair would measure "the estate was up for the base and down for the
+    sibling" — the contamination the base/sibling design exists to exclude. Every refusal here
+    also names something the caller can act on (pass an explicit index; address one corpus;
+    open with FROM), which is what the usage class means.
+    """
+
+    exit_code = USAGE_EXIT_CODE
 
 
 def rewrite_from(query: str, view: str) -> str:
@@ -116,8 +137,22 @@ def view_name(base_pattern: str, world_id: str) -> str:
 
     Per WORLD, never shared: siblings reading one view would see each other's staged documents,
     and the pair would be measuring contamination rather than a difference.
+
+    The stem must be a NAME an alias can carry, and two degenerate patterns are not. `*` trims
+    to the empty string, so the view would be `-w-A` — a leading `-` is an exclusion pattern to
+    ES|QL and an illegal first character for an index or alias, so the staged query resolves to
+    no sources at all. A pattern wildcarded anywhere but the tail (`logs-*-2026`) keeps its `*`
+    inside the derived name, which no alias answers to. Both are refused rather than guessed,
+    for the reason the no-index arm below is: a view nobody reads runs the sibling green
+    against the BASE corpus while reporting a world that was never applied.
     """
-    return f"{base_pattern.rstrip('*').rstrip('-.')}-w-{world_id}"
+    stem = base_pattern.rstrip("*").rstrip("-.")
+    if not stem or "*" in stem:
+        raise StagingError(
+            f"{base_pattern!r} does not reduce to an alias name (got {stem!r}) — a world view "
+            "is built by suffixing the corpus it stages, and a bare wildcard or one that is "
+            "not a trailing suffix leaves nothing to suffix")
+    return f"{stem}-w-{world_id}"
 
 
 def redirect(verb: str, params: dict, world_id: str | None) -> dict:

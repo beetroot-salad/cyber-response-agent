@@ -26,15 +26,20 @@ from __future__ import annotations
 from typing import Any
 
 
-def _names(obj: dict, entity: str) -> bool:
-    """Does this object identify `entity`?
+def _named(obj: dict) -> set:
+    """The entity names this object could identify: its own STRING values, never a recursive
+    read.
 
-    A STRING comparison over the object's own values, never a recursive one: a nested object
-    naming the entity is that object's business, and the walk reaches it separately. Without
-    that bound a patch for one host would land on every ancestor container that happens to hold
-    it, which is the whole payload.
+    A nested object naming the entity is that object's business, and the walk reaches it
+    separately. Without that bound a patch for one host would land on every ancestor container
+    that happens to hold it, which is the whole payload.
+
+    Collected ONCE per node rather than rescanned per entity. Asked the other way round — "does
+    this object name entity E?", for each E — the same field scan runs once per patch, so a
+    world with thirty patched entities reads every string in the payload thirty times on every
+    served call. The set makes the per-node cost independent of the patch table's size.
     """
-    return any(v == entity for v in obj.values() if isinstance(v, str))
+    return {v for v in obj.values() if isinstance(v, str)}
 
 
 def apply_patches(payload: Any, patches: dict[str, dict]) -> tuple[Any, int]:
@@ -46,6 +51,12 @@ def apply_patches(payload: Any, patches: dict[str, dict]) -> tuple[Any, int]:
 
     Rebuilt rather than mutated in place, because the base payload is the FAMILY's recording:
     mutating it would edit one sibling's world into the shared row every other sibling replays.
+
+    STRUCTURE-SHARED where nothing matched: an untouched subtree is handed back as the SAME
+    object, never written into, so the non-mutation guarantee holds while the copying stays
+    proportional to what the world actually changed. Rebuilding unconditionally made the
+    commonest case — a payload naming none of the patched entities, which the caller then
+    discards whole — the most expensive one.
     """
     if not patches:
         return payload, 0
@@ -54,14 +65,18 @@ def apply_patches(payload: Any, patches: dict[str, dict]) -> tuple[Any, int]:
     def walk(node: Any) -> Any:
         nonlocal applied
         if isinstance(node, list):
-            return [walk(item) for item in node]
+            items = [walk(item) for item in node]
+            return node if all(new is old for new, old in zip(items, node, strict=True)) else items
         if not isinstance(node, dict):
             return node
         out = {k: walk(v) for k, v in node.items()}
-        for entity, patch in patches.items():
-            if _names(node, entity):
-                out.update(patch)
-                applied += 1
-        return out
+        named = _named(node)
+        hits = [patch for entity, patch in patches.items() if entity in named]
+        for patch in hits:
+            out.update(patch)
+        applied += len(hits)
+        if hits or any(out[k] is not v for k, v in node.items()):
+            return out
+        return node
 
     return walk(payload), applied

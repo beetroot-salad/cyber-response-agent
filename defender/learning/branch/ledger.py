@@ -19,12 +19,12 @@ drift from the one that knows.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from defender._io import append_jsonl, read_jsonl_rows
+from defender.scripts.gather_tools.record_query import _json_safe_params, _request_key
 
 #: What produced a served payload. A row carrying anything else is a writer that has invented
 #: a decision class, which is the same failure as a row nobody wrote.
@@ -42,14 +42,20 @@ class LedgerError(Exception):
 def request_key(system: str, verb: str, params: Any) -> str:
     """The canonical identity of one question.
 
-    Spelled the way `record_query._request_key` spells it, and for the same reason: a key that
-    sorts its params is stable against a dict built in a different order, and two spellings of
-    "the same question" would split one memo into two.
+    `record_query._request_key`'s FUNCTION, not its spelling. A key that sorts its params is
+    stable against a dict built in a different order, and two spellings of "the same question"
+    would split one memo into two — and a hand-identical copy in a module that does not import
+    the original is how the two learn different rules. It is also what makes the correlation
+    this table's docstring promises an actual join: `executed_queries.jsonl` keys the same
+    `(system, verb, params)` through this call.
+
+    `_json_safe_params` rides with it for the same reason it does there. Without it a
+    non-finite float keys as the bare token `Infinity` — which `json.dumps` will happily write
+    into the row too, producing a line no JSON reader but Python's own will parse — while
+    `record_query` keys the same call as `"inf"`, so the join silently misses.
     """
-    return json.dumps(
-        [system, verb, params if isinstance(params, dict) else {}],
-        sort_keys=True, default=str,
-    )
+    return _request_key(
+        system, verb, _json_safe_params(params) if isinstance(params, dict) else {})
 
 
 @dataclass(frozen=True)
@@ -67,8 +73,13 @@ class ServedCall:
         return request_key(self.system, self.verb, self.params)
 
     def row(self) -> dict:
+        # `_json_safe_params`, because `append_jsonl` dumps with the stdlib defaults: a param
+        # the key already coerced would otherwise reach the file as `Infinity`/`NaN` — tokens
+        # no JSON reader outside Python parses — or raise `TypeError` mid-serve on a value
+        # `default=str` would have carried.
         return {
-            "system": self.system, "verb": self.verb, "params": self.params,
+            "system": self.system, "verb": self.verb,
+            "params": _json_safe_params(self.params),
             "payload_text": self.payload_text, "source": self.source,
             "world_id": self.world_id,
         }
@@ -86,7 +97,6 @@ class Ledger:
     """
 
     path: Path
-    world_id: str | None = None
 
     def __post_init__(self) -> None:
         self._memo: dict[tuple[str | None, str], str] = {}
@@ -95,10 +105,16 @@ class Ledger:
             # tolerant reader's job is to hand back what is there rather than to vouch for it.
             # Keying on the coerced spelling keeps a malformed row addressable instead of
             # crashing the replay that has to notice it.
+            text = row.get("payload_text")
+            if not isinstance(text, str) or not text:
+                # A row with no payload is not an ANSWER, and memoizing it as `""` would make
+                # `base_payload` report a hit that `json.loads` then dies on — moving the crash
+                # one frame down instead of tolerating the row. Skipped, so the key falls
+                # through to the live adapter, which is the honest reading of "nothing recorded".
+                continue
             key = request_key(str(row.get("system")), str(row.get("verb")), row.get("params"))
             world = row.get("world_id")
-            self._memo[(world if world is None else str(world), key)] = str(
-                row.get("payload_text", ""))
+            self._memo[(world if world is None else str(world), key)] = text
 
     def base_payload(self, system: str, verb: str, params: Any) -> str | None:
         """The family's recorded answer for this key, if one world already asked it.
@@ -115,7 +131,14 @@ class Ledger:
                 f"{call.system}.{call.verb} was served with source {call.source!r}, which is "
                 f"not one of {sorted(SOURCES)} — a response with no honest decision behind it "
                 "is the silent-scenario-deletion hazard this table exists to catch")
-        self._memo[(call.world_id, call.key)] = call.payload_text
+        # PERSIST FIRST, memoize only on success. Memoizing first meant a failed append left
+        # the family's base payload live in memory with no row behind it: every later call for
+        # that key took the hit, issued no adapter call, and served a payload the table cannot
+        # account for — "a served response with no row", the one state this table exists to
+        # make visible. A later sibling rebuilding the memo from the file would find nothing,
+        # re-ask the live estate and get different bytes, so the pair's invariance would be
+        # gone with nothing in the record to show it.
         append_jsonl(  # lint-unguarded-tree-write: ok — episode archive under the learning state root, host-side, outside every box mount
             self.path, [call.row()])
+        self._memo[(call.world_id, call.key)] = call.payload_text
         return call
