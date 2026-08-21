@@ -13,7 +13,7 @@ from defender.learning.core.config import (
     actor_model,
     subagent_timeout,
 )
-from defender.learning.pipeline._pydantic_stage import run_stage
+from defender.learning._pydantic_stage import run_stage
 from defender.runtime import providers
 from defender.runtime.agent_definition import (
     AgentDefinition,

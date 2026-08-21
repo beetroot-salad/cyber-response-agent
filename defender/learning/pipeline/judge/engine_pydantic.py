@@ -11,7 +11,7 @@ from defender.learning.core.config import (
     judge_model,
     subagent_timeout,
 )
-from defender.learning.pipeline._pydantic_stage import build_stage_agent, run_stage
+from defender.learning._pydantic_stage import build_stage_agent, run_stage
 from defender.runtime import observe, providers
 from defender.runtime.agent_definition import (
     AgentDefinition,

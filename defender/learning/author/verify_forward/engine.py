@@ -10,7 +10,7 @@ from defender.learning.core.config import (
     verifier_effort,
     verifier_model,
 )
-from defender.learning.pipeline._pydantic_stage import run_stage
+from defender.learning._pydantic_stage import run_stage
 from defender.runtime import providers
 from defender.runtime.agent_definition import AgentDefinition, ToolSet, bind
 from defender.runtime.agent_role import AgentRole

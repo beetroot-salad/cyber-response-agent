@@ -22,6 +22,7 @@ from pydantic_ai.usage import UsageLimits
 
 from defender._io import write_guarded
 
+from . import branch
 from . import compaction
 from . import observe
 from . import orient
@@ -132,6 +133,30 @@ def _user_prompt(  # noqa: PLR0913 — the harness's own pre-turn seams (#808)
         f"{orientation}"
     )
     return prompt, ancestor_block, status
+
+
+def _opening_prompt(  # noqa: PLR0913 — `_user_prompt`'s parameters plus the resume it chooses between
+    resume: Any, run_dir: Path, alert_path: Path, defender_dir: Path,
+    *, verbs: Any, limits: dict, run_id: str | None,
+) -> tuple[str, str, str, Any]:
+    """MAIN's first message, and the registry lead-0 may use — for a fresh run or a resumed one.
+
+    A RESUMED run does not orient. Lead-0 and the correlation dispatch are turn-0 work: they
+    read the alert cold and resolve its ancestors, and a branch point is by construction past
+    that — the defender already holds the payloads. Re-running them would put a second
+    orientation section in front of a history that already contains the first, and dispatch a
+    lead the source run already ran.
+
+    So the resume returns lead-0's registry as `None`, which is the seam the correlation task is
+    ALREADY gated on rather than a second switch: `run_investigation` dispatches item 3 only
+    when `lead_zero_verbs is not None`. One flag, two readers, no third state to keep in sync.
+    """
+    if resume is None:
+        prompt, block, status = _user_prompt(
+            run_dir, alert_path, defender_dir, verbs=verbs, limits=limits, run_id=run_id,
+        )
+        return prompt, block, status, verbs
+    return resume.continuation_prompt, "", "", None
 
 
 def _budget_state_for_enforcement(state: dict, deps: AgentDeps) -> dict:
@@ -750,6 +775,20 @@ def _default_store_factory(case_id: str, run_dir: Path) -> Any:
     return session_store.open_store(case_id=case_id, runs_base=run_dir.parent)
 
 
+def _resolve_store_factory(resume: Any) -> StoreFactory:
+    """Which store this run opens, DERIVED from whether it is a resume.
+
+    A fresh run mints its own; a resume joins the source run's, because that is where the
+    prefix rows live and `fork` walks parents inside one connection. Deriving it here rather
+    than asking the caller for both a `resume=` and a matching `store_factory=` is what stops
+    the two from disagreeing — a spec pointing at run X beside a factory opening run Y's store
+    forks against a database that does not hold the branch point.
+    """
+    if resume is None:
+        return _default_store_factory
+    return branch.store_factory_for(resume)
+
+
 def _run_summary(  # noqa: PLR0913 — one dict literal's full field set, named once
     *, output: Any, model_name: str | None, requests: int, truncated_by: str | None,
     exit_reason: str | None, case_id: str, store_path: Any,
@@ -820,7 +859,7 @@ async def _reap_correlation_task(task: Any) -> None:
 
 async def _drive_agent(  # noqa: PLR0913 — the loop's own inputs: agent, prompt, deps, store, bounds
     agent: Agent[AgentDeps, str], prompt: str, deps: AgentDeps, store: Any, session_id: str,
-    bounds: challenge_gate.Bounds,
+    bounds: challenge_gate.Bounds, message_history: list | None = None,
 ) -> tuple[Any, str | None, str | None]:
     """Runs the `async for node in run` loop and classifies its caught exits into
     `(truncated_by, exit_reason)`; returns the (possibly unfinished) `run` alongside them so
@@ -831,6 +870,14 @@ async def _drive_agent(  # noqa: PLR0913 — the loop's own inputs: agent, promp
     try:
         async with agent.iter(
             prompt, deps=deps,
+            # A RESUMED run's inherited prefix, or None for a fresh one. The store's render
+            # processor rebuilds history from the store on every request and `selection.ingest`
+            # compares the live list against `last_render_len` — which a fork has ALREADY
+            # seeded to its inherited prefix. So a fresh `agent.iter`, whose list starts empty,
+            # underflows against a store that is correct. Handing the prefix back here is what
+            # closes that, and it is exact rather than approximate: `fork` and
+            # `hydrate(role="send")` both truncate through `_complete_prefix_len`.
+            message_history=message_history,
             # RS7: the ceiling that terminates a run is raised by the gate's own forced-turn
             # cap, read FROM the bound rather than restated as a literal. Every run pays it
             # whether or not the gate ever fires — a property of the run, not of a review.
@@ -920,6 +967,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     bounds: challenge_gate.Bounds | None = None,
     model_override: str | None = None,
     toolset: Any = None,
+    resume: Any = None,
 ) -> dict:
     model_name = resolve_main_model(model_name)
     # Lead-0's OWN registry seam: a scenario that injected no `verbs=` at all must not have
@@ -969,12 +1017,16 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
         raise
 
     case_id = uuid.uuid4().hex
-    factory = store_factory if store_factory is not None else _default_store_factory  # lint-default: ok — DI seam owning its default (R12's fifth seam)
+    factory = store_factory if store_factory is not None else _resolve_store_factory(resume)  # lint-default: ok — DI seam owning its default (R12's fifth seam; a resume derives its own)
     store = None
     try:
         store = factory(case_id, run_dir)
         session_store.write_case_pointer(run_dir, case_id=case_id, store_path=store.path)
-        session_id = store.new_session(agent_id="main")
+        # A resume JOINS a case rather than minting one: the store the factory hands back is
+        # the SOURCE run's, and the prefix rows live in it. `case_id` above is still what this
+        # sibling's own pointer records, so its run dir stays self-describing while its session
+        # hangs off the branch point.
+        session_id, resume_history = branch.open_main_session(store, resume)
     except (sqlite3.Error, session_store.StoreError, OSError) as e:
         # The store is opened during SETUP, outside `_drive_agent`'s handler — so without
         # this, a stale-version file (or a plain filesystem fault: an unwritable
@@ -998,8 +1050,8 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
             case_id=case_id, store_path=None,
         )
 
-    prompt, lead_zero_block, lead_zero_status = _user_prompt(
-        run_dir, alert_path, defender_dir,
+    prompt, lead_zero_block, lead_zero_status, lead_zero_verbs = _opening_prompt(
+        resume, run_dir, alert_path, defender_dir,
         verbs=lead_zero_verbs, limits=limits, run_id=run_id,
     )
 
@@ -1046,7 +1098,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
 
     t0 = time.time()
     run, truncated_by, exit_reason = await _drive_agent(
-        agent, prompt, deps, store, session_id, gate_bounds,
+        agent, prompt, deps, store, session_id, gate_bounds, resume_history,
     )
     wall_ms = (time.time() - t0) * 1000.0
     await _reap_correlation_task(correlation_task)

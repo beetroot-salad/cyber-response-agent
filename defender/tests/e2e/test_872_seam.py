@@ -470,7 +470,7 @@ def test_every_build_function_routes_through_the_site_that_installs_the_gate(
 
     from defender.agents import AGENTS
     from defender.learning.core.config import StageWiring
-    from defender.learning.pipeline._pydantic_stage import build_stage_agent
+    from defender.learning._pydantic_stage import build_stage_agent
     from defender.learning.pipeline.judge.engine_pydantic import build_judge_agent
     from defender.runtime import challenge_gate, driver, review_roles
     from defender.runtime.agent_definition import AgentRole

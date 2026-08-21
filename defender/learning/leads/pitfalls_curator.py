@@ -34,7 +34,7 @@ from defender.learning.leads.declared_systems import (
 )
 from defender.runtime.verbs import is_system_name
 from defender.learning.leads.lead_extraction import LeadAuthorError
-from defender.learning.pipeline._prompt import stage_user_message, structured_json_body
+from defender.learning._prompt import stage_user_message, structured_json_body
 from defender.learning.leads.path_validation import (
     LEARNING_DIR,
     SKILLS_REL,

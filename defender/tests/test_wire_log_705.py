@@ -278,7 +278,7 @@ def test_pydantic_stage_still_classifies_an_empty_final_response(tmp_path):
     `RunUnprocessable`, so a test asserting "it gates RunUnprocessable" is
     non-discriminating. The steerability is filed separately under R9; what this PR owes is
     that removing `_seen` changes NOTHING about the verdict."""
-    from defender.learning.pipeline import _pydantic_stage
+    from defender.learning import _pydantic_stage
 
     outputs = {"empty": "", "nbsp": " ", "zwsp": "​", "text": "a real answer"}
     verdicts: dict[str, tuple[bool, bool]] = {}

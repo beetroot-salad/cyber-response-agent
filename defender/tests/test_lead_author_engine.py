@@ -52,8 +52,8 @@ from defender.learning.leads.lead_author_engine import (  # noqa: E402
     _run_lead_author_pydantic,
     run_author_stage,
 )
-from defender.learning.pipeline import _pydantic_stage  # noqa: E402
-from defender.learning.pipeline._pydantic_stage import run_stage  # noqa: E402
+from defender.learning import _pydantic_stage  # noqa: E402
+from defender.learning._pydantic_stage import run_stage  # noqa: E402
 from defender.runtime import observe, permission, providers  # noqa: E402
 from defender.runtime.agent_definition import bind  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402

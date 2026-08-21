@@ -11,7 +11,7 @@ from defender._yaml import safe_load
 from defender.learning import lead_repository
 from defender.learning.core.config import RunUnprocessable
 from defender.learning.core.validate import strip_yaml_fence
-from defender.learning.pipeline._prompt import stage_user_message
+from defender.learning._prompt import stage_user_message
 
 
 
