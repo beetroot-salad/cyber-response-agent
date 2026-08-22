@@ -66,6 +66,7 @@ from defender.learning.branch.estate.registry import (  # noqa: E402
 from defender.learning.branch.ledger import (  # noqa: E402
     BASE,
     PASSTHROUGH,
+    PATCHED,
     SOURCES,
     STAGED,
     Ledger,
@@ -852,6 +853,14 @@ def test_an_unstaged_call_records_one_identity_not_two(tmp_path):
     reg.verbs("cmdb")["get-host"](ctx, host="canary-1")
 
     own = [r for r in served_rows(ledger_path) if r["world_id"] == "A"]
-    assert own and "asked_params" not in own[0], (
+    assert len(own) == 1
+    assert "asked_params" not in own[0], (
         "an unstaged call's asked and run forms are the same call; a second column would be a "
         f"copy that can only drift. Got {own[0]}")
+
+    # And the two identities coincide on the object, which is what "one identity" MEANS —
+    # the absent column is the storage consequence, not the property itself.
+    call = ServedCall(
+        system="cmdb", verb="get-host", params={"host": "canary-1"},
+        payload_text="{}", source=PATCHED, world_id="A")
+    assert call.key == call.correlation_key
