@@ -148,11 +148,15 @@ error rather than letting the write through. Scope is anchored to
    they are snapshots of model output and are left as they are.
 9. SCREEN structural integrity (#933, spec rule #17) — a
    `screen_result` on a lead with no `mode: screen` (a verdict about a
-   screen that never ran), on an intermediate screen lead (a partial
-   answer in the slot readers take for the final one), or a
-   `screen_result: match` beside a `:H hypothesize.hypotheses` block (a
-   run claiming both that the fast path closed it and that it
-   investigated). Read off `findings[].screen_result`; the spec's
+   screen that never ran), or a `screen_result: match` beside a
+   `:H hypothesize.hypotheses` block (a run claiming both that the fast
+   path closed it and that it investigated). **The third arm, on an
+   intermediate screen lead, was armed and then STRUCK (v2.22).** It
+   refused a committed `:L findings` cell for a fact — whether another
+   screen follows in the same loop — that is about leads not yet
+   written, so no author could act on it and no write could withdraw the
+   row it named. The two arms that remain refuse a row for what is on
+   the row, which the write gate catches before it commits. Read off `findings[].screen_result`; the spec's
    `outcome.` prefix is pre-dense spelling the projector never used.
    Corpus: zero fires — SCREEN is barely exercised on disk, which is
    why this could be armed at error severity without measurement risk.
