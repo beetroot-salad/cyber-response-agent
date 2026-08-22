@@ -788,8 +788,30 @@ ac1|e-001|iam-policy|"a different question under the same anchor"|escalate|escal
     named = [e for e in errors if "is declared and then abandoned" in e]
     assert [e for e in named if "h-001.ac1" in e], errors
     assert [e for e in named if "h-002.ac1" in e], errors
-    # The repair has to be one the grammar can express: `fulfills=ac1` is already written.
-    assert all("renumber it" in e for e in named), errors
+    # The repair has to be one the grammar can express AND one that works. `fulfills=ac1` is
+    # already written, and renumbering an append-only `:H` row is not a repair at all — so the
+    # message names the QUALIFIED `fulfills=h-NNN.ac1`, which this rule resolves through its
+    # `qualified` set and which does discharge a twin (asserted below).
+    assert all("fulfills=h-001.ac1" in e for e in named if "h-001.ac1" in e), errors
+    assert all("fulfills=h-002.ac1" in e for e in named if "h-002.ac1" in e), errors
+    assert all("numbers across the DOCUMENT" in e for e in named), errors
+
+
+def test_the_twin_repair_the_message_names_actually_discharges_both() -> None:
+    """The control on the message above. A repair a refusal offers has to clear it — otherwise
+    the only exit left is a `:T conclude.deferred_authz` row recording that the run never
+    answered a question it did answer."""
+    assert _errors(_PROLOGUE + _HYP_HEADER + """\
+h-001|?a|v-001|runs_on|process|??/??/??||null|active
+h-002|?b|v-001|runs_on|process|??/??/??||--|refuted
+
+:H h-001.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
+ac1|e-001|iam-policy|"may this identity authenticate here"|escalate|escalate
+
+:H h-002.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
+ac1|e-001|iam-policy|"a different question under the same anchor"|escalate|escalate
+
+""" + _LEAD + _authz_row("h-001.ac1") + _authz_row("h-002.ac1") + _CLOSE_INCONCLUSIVE) == []
 
 
 @pytest.mark.parametrize(

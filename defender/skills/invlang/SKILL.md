@@ -242,13 +242,14 @@ payload rather than packing into `attrs?`.
 ```invlang
 :L findings [id|loop|name|target|mode?|tests|system|window]
 l-001|1|auth-history-jsmith-bastion|v-001||h-001,h-002|siem|90d
-
-# PLAN names the lead by measurement and the `system` it targets; gather
-# chooses the template and binds params, and writes both as a row in
-# `executed_queries.jsonl` (the queries table, FK `lead_id`). Do not include
-# `template` or `query` columns at PLAN time — they are gather's record,
-# not the defender's.
 ```
+
+PLAN names the lead by measurement and the `system` it targets; gather
+chooses the template and binds params, and writes both as a row in
+`executed_queries.jsonl` (the queries table, FK `lead_id`). Do not include
+`template` or `query` columns at PLAN time — they are gather's record, not
+the defender's. invlang has no comment syntax: a `#` line inside a block is
+read as a row and refused against the header.
 
 A lead is a procedure: what was run, against what target, for which
 commitments. Route plans go in `:L l-001.lead_preds` — routing rules,
@@ -413,11 +414,12 @@ summary                "Login matched established bastion usage"
 - `impact_verdict` / `impact_severity` — the roll-up over this run's
   `:R impact` rows (`enum conclude.impact_verdict`), and how large the
   consequence is (`enum conclude.impact_severity`). The pair is checked for
-  CONSISTENCY on write: `exceeds` and `indeterminate` REQUIRE a severity —
-  the verdict claims a threshold was crossed, and the severity is how far —
-  while `within` and `none` forbid one, so write `impact_severity null`
-  beside them or leave the row out. A run that registered no `ip<n>` rolls up
-  to `none`.
+  CONSISTENCY on write: a verdict that CLAIMS a consequence requires a
+  severity — the verdict says a threshold was crossed, the severity says how
+  far — while the two that claim none (`within`, and the conclude-only
+  `none` a run that registered no `ip<n>` rolls up to) forbid one, so write
+  `impact_severity null` beside them or leave the row out. Look the members
+  up; they are not restated here.
 - `detection_notes` — **optional** except under `disposition
   false-positive`, which requires it; and only for a detection defect ORIENT
   actually found:
@@ -613,7 +615,7 @@ write.
 Authz contracts live in `:H h-NNN.authz`:
 
 ```invlang
-:H h-NNN.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
+:H h-001.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
 ac1|proposed|iam-policy|"service account allowed to read object at event time"|escalate|escalate
 ```
 

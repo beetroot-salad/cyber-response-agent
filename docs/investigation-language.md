@@ -206,7 +206,7 @@ next move is pure enrichment.
 | 0 | Alert under-specified; the next lead enriches before a fork is possible | — |
 | 1 | Mechanism pinned by alert fields; only authz, integrity, or impact open | Makes the open axis explicit; drives lead choice |
 | 2–3 | Mechanisms diverge on already-observable fields | Makes the discriminator explicit; partitions leads |
-| > 3 | Usually a refinement that belongs under a hierarchical parent | Shelve the parent; emit children as `h-{parent}-{ordinal}` |
+| > 3 | Usually a refinement that belongs under a hierarchical parent | Emit children as `h-{parent}-{ordinal}`; retire the parent by resolving it |
 
 Cardinality is structural in the companion: the `hypothesize:` block
 is present iff ≥ 1 new hypotheses are authored this loop. Omission
@@ -590,8 +590,13 @@ Do not propose a distant ancestor.
 hypothesis into more specific sub-cases, allocate child IDs as
 `h-{parent}-{ordinal}` (e.g., `h-001` → `h-001-001`, `h-001-002`).
 Write children as full hypothesis records in the lead's
-`new_hypotheses`. Shelve the parent in the same block. Children
-inherit no weight from the parent; their histories are independent.
+`new_hypotheses`. Retire the parent by RESOLVING it — a `:T resolutions`
+row moving it to `--` when the children refute it, or a
+`:T conclude.surviving` row (and a `:T conclude.deferred_preds` row per
+unsettled `p*`) when the run is still carrying it. `:T shelved`, which
+used to do this in the same block, is retired (#933) and the parser
+refuses it by name. Children inherit no weight from the parent; their
+histories are independent.
 
 **Lean means 1–2 predictions.** A single prediction captures the
 core discriminating claim. Add a second only when two independent
@@ -633,7 +638,7 @@ A lead has one header row in `:L findings` plus zero or more lead-scoped sub-blo
 | `:L l-{id}.impact_preds` | pre-registered threshold predicates (`ip*`) graded by ANALYZE into `:R impact` rows |
 | `:L l-{id}.substitutions` | query substitutions (`key|value` pairs) |
 | `:H l-{id}.new_hypotheses` | hypotheses born inside the lead |
-| `:T shelved` | RETIRED (#933). No investigation on record ever wrote one, while it stayed a discharge arm on rules #23, #24 and #34 and two fields on the shipped document — a retirement route the validator honoured and the injected SKILL.md never taught. The parser refuses the block by name and projects nothing; a hypothesis leaves the live frontier by being resolved to `--`, or by being left out of `:T conclude.surviving`. |
+| `:T shelved` | RETIRED (#933). No investigation on record ever wrote one, while it stayed a discharge arm on rules #23, #24 and #34 and two fields on the shipped document — a retirement route the validator honoured and the injected SKILL.md never taught. The parser refuses the block by name and projects nothing; a hypothesis leaves the live frontier by being RESOLVED — `--` when the run refuted it, a `:T conclude.surviving` row NAMING it when the run is still carrying it. Omitting it from a written surviving table is not a retirement; rule #24 refuses that. |
 | `:R authz` | authorization-contract verdicts on confirmed edges (see §Authorization) |
 | `:R consultations` | non-authz anchor queries (baselines, registry lookups) |
 | `:R impact` | impact-prediction verdicts (see §Impact) |

@@ -108,6 +108,51 @@ def test_the_prune_drops_every_inference_key(companion):
             assert key not in lead, f"{lead.get('id')}.{key} survived the cut"
 
 
+def test_a_leads_plan_blocks_do_not_reach_a_lens():
+    """The POSITIVE control for the two `INFERENCE_LEAD_KEYS` members #933 added.
+
+    No document in the corpus carries a `:L l-NNN.lead_preds` or `:L l-NNN.impact_preds`
+    block, so the golden-driven loop above asserts their absence from data that never held
+    them — and the prune is a DENYLIST, which the projector's own docstring says reaches a
+    field only once it is named. A `lead_preds` row carries `read_as` (the interpretation the
+    run pre-committed to) and `advance_to` (the disposition it planned to route to); an
+    `impact_preds` row carries the verdict mapping. Handing either to a blind lens tells it
+    which way the run had already decided to move.
+    """
+    filled = parse_investigation(
+        "```invlang\n"
+        ":V prologue.vertices [id|type|class|ident|attrs?]\n"
+        "v-001|identity|user/known-corp|dev.dana|\n"
+        "\n"
+        ":L findings [id|loop|name|target|tests|system|window]\n"
+        "l-001|1|probe|v-001||elastic|alert-time\n"
+        "\n"
+        ":L l-001.lead_preds [id|if|read_as|advance_to]\n"
+        'lp1|"burst in the last 10 min"|"anomalous spike"|CONCLUDE\n'
+        "\n"
+        ":L l-001.impact_preds "
+        "[id|dim|claim|on_match|on_mismatch|on_indeterminate|escalation_on]\n"
+        'ip1|confidentiality|"bytes within the 30d baseline"|within|exceeds|indeterminate'
+        "|exceeds\n"
+        "```\n"
+    )
+    lead = (filled.get("findings") or [{}])[0]
+    assert lead.get("predictions"), "the fixture projects no `lead_preds` — proves nothing"
+    assert lead.get("impact_predictions"), (
+        "the fixture projects no `impact_preds` — proves nothing"
+    )
+
+    for projection in _every_lens(filled) or [support_projection(filled, SALT)]:
+        body = _body(projection)
+        for projected in body.get("findings") or []:
+            for key in ("predictions", "impact_predictions"):
+                assert key not in projected, (
+                    f"{projection.lens} can read {projected.get('id')}.{key}"
+                )
+        assert "anomalous spike" not in projection.text
+        assert "escalation_on" not in projection.text
+
+
 def test_no_hypothesis_carries_its_weight_into_a_lens():
     """The `:H` half of the cut, and the one the `:T` family rule does not reach.
 

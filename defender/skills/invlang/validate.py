@@ -878,6 +878,21 @@ def _settled_predictions(companion: CompanionBody) -> dict[str, set[str]]:
     return matched
 
 
+def _confirmed_at(companion: CompanionBody) -> dict[str, str]:
+    """Per hypothesis, the FIRST lead whose resolution moved it to `++`.
+
+    One walk for rules #6 and #34, which is what keeps the pair from double-reporting: #6 owns
+    every prediction on a hypothesis some row confirmed, and #34 has to know which those are so
+    it does not offer a deferral for one #6 is already refusing.
+    """
+    out: dict[str, str] = {}
+    for lid, res in _walkers.iter_resolutions(companion):
+        hid = res.get("hypothesis")
+        if isinstance(hid, str) and _resolution_move(res) == CONFIRMED_WEIGHT:
+            out.setdefault(hid, lid)
+    return out
+
+
 def _check_prediction_completeness(companion: CompanionBody) -> list[str]:
     """A hypothesis graded `++` has settled every prediction it declared, not only the ones
     the confirming lead happened to look at.
@@ -903,11 +918,7 @@ def _check_prediction_completeness(companion: CompanionBody) -> list[str]:
     This fires at write time on `++` alone and offers nothing, because a `++` has no
     outstanding prediction to defer — the grade IS the claim that there is none.
     """
-    confirmed_at: dict[str, str] = {}
-    for lid, res in _walkers.iter_resolutions(companion):
-        hid = res.get("hypothesis")
-        if isinstance(hid, str) and _resolution_move(res) == CONFIRMED_WEIGHT:
-            confirmed_at.setdefault(hid, lid)
+    confirmed_at = _confirmed_at(companion)
     if not confirmed_at:
         # Before the two document-wide folds below, which is the whole cost of this check.
         # No `++` anywhere is every in-flight document up to the confirming lead, and every
@@ -1051,12 +1062,21 @@ def _cell(record: Mapping[str, object], key: str) -> str:
     required columns cannot call `.strip()` on the result. Every projected cell is a `str`;
     stating that once here beats a cast at each of the sites that walk a column list.
 
-    `_unquote`d as a BELT over the parser's braces rather than in place of them:
-    `_lead_header_record` unquotes these cells on the way in, and unquoting an already
-    unquoted cell is identity. Keeping the read here means a projector that grows a new lead
-    column, or a record built some other way, still meets a closed-set comparison the way the
-    rule means it — a cell read raw on one side of a comparison and unquoted on the other is
-    how a uniformly quoted row gets refused for a value it spells correctly.
+    `_unquote`d because the two sides of the impact axis disagree about quoting and the checks
+    have to see through it. `_impact_pred_row` unquotes `dim` and `claim`; the `:R impact` row
+    beside it goes through `_canonicalize_resolution_row`, which copies every cell verbatim —
+    so an author who wraps cells uniformly registers `confidentiality` and grades
+    `"confidentiality"`, and the enum tests and the `dim`-vs-predicate comparison refuse a row
+    whose values are all correct. It is a BELT over the parser's braces elsewhere rather than
+    in place of them: `_lead_header_record` already unquotes its cells on the way in, and
+    unquoting an unquoted cell is identity — so a projector that grows a new lead column still
+    meets a closed-set comparison the way the rule means it.
+
+    Stripped on BOTH sides of the unquote. Stripping only before it leaves the padding INSIDE a
+    quoted cell, so `" confidentiality "` reads as a padded `confidentiality` — and the two
+    halves of every comparison below then disagree about a value they spell identically, on
+    committed rows neither side can rewrite. `is_conclude_empty_marker` reads a cell the same
+    way, and for the same reason.
     """
     value = record.get(key)
     return _unquote(value.strip()).strip() if isinstance(value, str) else ""
@@ -1137,19 +1157,22 @@ def _check_lead_prediction_structure(companion: CompanionBody) -> list[str]:
     edit its own pre-registration to match where it ended up destroys the only thing
     pre-registration is for. See the enforcement ramp for the deferral.
     """
-    # `_unquote`d, because `_lead_pred_row` unquotes the `advance_to` it is compared against
-    # and `_lead_header_record` does NOT unquote the `name` it lands. Without this the two
-    # halves of one comparison disagree on the quote characters, and a document that quotes
-    # its cells uniformly is refused with a message listing the destination among the names it
-    # says do not match. The declaring row is a committed `:L findings` row the author cannot
-    # rewrite, so the refusal has no repair.
+    # Through `_cell`, which unquotes AND strips — `_lead_header_record` does neither to the
+    # `name` it lands, while `advance_to` is unquoted by `_lead_pred_row` and stripped below.
+    # Without one reading for both halves, a document that quotes its cells uniformly (or
+    # pads one) is refused with a message listing the destination among the names it says do
+    # not match. The declaring row is a committed `:L findings` row the author cannot rewrite,
+    # so the refusal has no repair.
+    #
+    # ONE `_leads` walk, bound: the destination set and the loop below ask the same list.
+    leads = _leads(companion)
     names = {
-        _unquote(f["name"]) for f in _leads(companion)
+        _cell(f, "name") for f in leads
         if isinstance(f.get("name"), str) and f["name"]
-    }
+    } - {""}
     destinations = names | set(_ROUTE_SENTINELS)
     errors: list[str] = []
-    for lead in _leads(companion):
+    for lead in leads:
         lid = lead.get("id", "?")
         for lp in lead.get("predictions") or []:
             if not isinstance(lp, dict):
@@ -1166,7 +1189,7 @@ def _check_lead_prediction_structure(companion: CompanionBody) -> list[str]:
             for key, column, cost in _LEAD_PRED_CELLS:
                 if not _cell(lp, key):
                     errors.append(f"{where}: empty `{column}` — {cost}")
-            dest = (lp.get("advance_to") or "").strip()
+            dest = _cell(lp, "advance_to")
             if dest and dest not in destinations:
                 errors.append(
                     f"{where}: `advance_to` names {dest!r}, which is neither a lead NAME this "
@@ -1275,6 +1298,17 @@ _IMPACT_RESOLUTION_REQUIRED: tuple[str, ...] = (
 )
 
 
+def _qualify(lid: str, ref: str) -> str:
+    """A `pred_ref` under its CROSS-LEAD identity: a bare `ip<n>` is scoped to the lead the row
+    landed on, a qualified `l-NNN.ip<n>` already names its own.
+
+    ONE owner, because rules #30 and #31 both resolve this cell and a document in which they
+    resolve it differently is reported as graded by one and abandoned by the other — with a
+    deferral row for a predicate the run did grade as the only exit.
+    """
+    return ref if "." in ref else f"{lid}.{ref}"
+
+
 def _declared_impact_predictions(
     companion: CompanionBody,
 ) -> dict[str, ImpactPrediction]:
@@ -1356,9 +1390,10 @@ def _check_impact_resolution_refs(companion: CompanionBody) -> list[str]:
                 errors.append(
                     f"{where}: `grounding past-case` — impact is per-instance reasoning about "
                     f"what THIS event did, and a past case establishes only what a CATEGORY "
-                    f"of event was permitted to do. Ground it on "
-                    f"{', '.join(vocab.IMPACT_GROUNDING)}, or defer the prediction in "
-                    f"`:T conclude.deferred_impact` with that as the rationale"
+                    f"of event was permitted to do. Re-send this row grounded on "
+                    f"{', '.join(vocab.IMPACT_GROUNDING)}. Deferring the predicate in "
+                    f"`:T conclude.deferred_impact` does NOT clear this: the refusal is on the "
+                    f"`:R impact` row, and append-only leaves it on disk"
                 )
             else:
                 errors += _check_vocab(
@@ -1370,7 +1405,7 @@ def _check_impact_resolution_refs(companion: CompanionBody) -> list[str]:
                 continue
             # Bare `ip{n}` is scoped to the lead the row landed on — the one the `resolved_by`
             # column named, which is the only lead that could have measured it.
-            ref = raw_ref if "." in raw_ref else f"{lid}.{raw_ref}"
+            ref = _qualify(lid, raw_ref)
             pred = declared.get(ref)
             if pred is None:
                 errors.append(
@@ -1383,7 +1418,14 @@ def _check_impact_resolution_refs(companion: CompanionBody) -> list[str]:
                 continue
             if verdict:
                 verdicts_by_ref.setdefault(ref, set()).add(verdict)
-            dim, pred_dim = _cell(row, "dimension"), pred.get("dimension")
+            # BOTH sides through `_cell`. `_impact_pred_row` unquotes `dim` but does not
+            # re-strip it, so a declaring cell written `" confidentiality "` keeps its
+            # padding — and a correct `:R impact` row grading `confidentiality` is then
+            # refused for an axis it names correctly, on a committed `:L l-NNN.impact_preds`
+            # row the author cannot rewrite. The blank test one screen up already reads the
+            # predicate this way (`_check_impact_prediction_structure`); this is the same
+            # read.
+            dim, pred_dim = _cell(row, "dimension"), _cell(pred, "dimension")
             if dim and pred_dim and dim != pred_dim:
                 errors.append(
                     f"{where}: `dimension {dim}` but {ref} was registered on {pred_dim!r} — a "
@@ -2032,7 +2074,15 @@ def _check_benign_open_slots(companion: CompanionBody) -> list[str]:
 
 
 def _anchor_kind(record: Any) -> str:
-    return (record.get("anchor_kind") or "").strip() if isinstance(record, dict) else ""
+    """The anchor kind a `:H h-NNN.authz` contract or a `:R authz` row carries, normalized.
+
+    Through `_cell`, because this is the only column the two sides of the shared-`ac<n>`
+    discrimination both carry — `_hyp_sub_authz_row` copies it verbatim and
+    `_canonicalize_resolution_row` copies it verbatim, so an author who quotes uniformly makes
+    the two halves of one comparison disagree about a kind they spell identically, and no row
+    can then be attributed to its contract.
+    """
+    return _cell(record, "anchor_kind") if isinstance(record, dict) else ""
 
 
 def _declarers_by_contract_id(
@@ -2050,8 +2100,12 @@ def _declarers_by_contract_id(
         for c in hyp.get("authorization_contract") or []:
             if not isinstance(c, dict):
                 continue
-            cid = c.get("id")
-            if isinstance(cid, str) and cid:
+            # `_cell`, which unquotes: `_hyp_sub_authz_row` copies `id` verbatim while every
+            # reader matches it against a `fulfills` cell read through `_cell`, so a quoted
+            # declaring id is a contract no row can ever discharge — and rule #26's refusal
+            # then advises a `fulfills="ac1"` cell that unquotes straight back to `ac1`.
+            cid = _cell(c, "id")
+            if cid:
                 declared_by.setdefault(cid, []).append((hid, _anchor_kind(c)))
     return declared_by
 
@@ -2063,7 +2117,7 @@ def _authz_contract_error(
     verdicts: dict[str, list[tuple[str, str]]],
 ) -> str | None:
     """Why this ONE contract on this LIVE hypothesis does not close benign — or `None`."""
-    cid = contract.get("id", "?")
+    cid = _cell(contract, "id") or "?"
     anchor = _anchor_kind(contract)
     competing = [(h, a) for h, a in declarers.get(cid, []) if h != hid]
     candidates = verdicts.get(cid) or []
@@ -2134,8 +2188,13 @@ def outstanding_authz_contracts(
 
     verdicts: dict[str, list[tuple[str, str]]] = {}
     for row in _walkers.iter_authz_resolutions(companion):
-        cid = row.get("fulfills_contract")
-        if isinstance(cid, str):
+        # `_cell`, matching `_check_authz_contract_closure`. Read raw, a uniformly quoted
+        # `fulfills` keys `'"ac1"'` here and `ac1` there, so the closure gate calls the contract
+        # discharged while this — the definition `_check_benign_authz` AND `frontier`
+        # `_open_contracts` both read — calls it outstanding. Two answers about one row, and the
+        # frontier drops the contract that is actually wedging the close.
+        cid = _cell(row, "fulfills_contract")
+        if cid:
             verdicts.setdefault(cid, []).append(
                 (row.get("verdict", "indeterminate"), _anchor_kind(row))
             )
@@ -2719,9 +2778,13 @@ def _check_ceiling_test_scope(companion: CompanionBody) -> list[str]:
         f"category says live hypotheses remain and their critical edges cannot be tested, so "
         f"the close owes the specific check it could not make. Add one "
         f"`ceiling_test  \"<host> <data source> not retrieved\"` row per gap to `:T conclude` "
-        f"(repeat the key; the SKILL's §`:T conclude` has the shape), naming the source rather "
-        f"than the shape of the question. If nothing was actually out of reach, this run did "
-        f"not hit a ceiling — terminate on the category that describes what happened."
+        f"(repeat the key; the SKILL's §`:T conclude` has the shape), naming the source "
+        f"rather than the shape of the question. If you wrote a `:T conclude.ceiling_test "
+        f"[kind|subject]` sub-table, that is the RETIRED spelling from "
+        f"`docs/dense-investigation-format.md` — the parser recognizes it and projects "
+        f"nothing, so its rows never reach this rule; re-send them as flat rows. If nothing "
+        f"was actually out of reach, this run did not hit a ceiling — terminate on the "
+        f"category that describes what happened."
     ]
 
 
@@ -2951,10 +3014,18 @@ def _authz_closure_repair(
         return plain
     twins = sorted(mine & competing)
     if twins:
+        # The QUALIFIED spelling, because it is the one this rule actually accepts:
+        # `_check_authz_contract_closure` resolves `c.ref in qualified`, so `fulfills={c.ref}`
+        # discharges a twin that no bare id could. Advising "renumber it" alone would be a
+        # repair the author cannot make — `:H` rows are append-only — on the one shape where a
+        # legal repair exists. `_check_benign_authz` still matches the bare form, so the bare
+        # row is named too; a document that owes both writes both.
         return (
-            f"renumber it — {c.local_id} is also declared on another hypothesis under anchor "
-            f"kind {twins[0]!r}, and a `:R authz` row names only the contract id, so no row "
-            f"can be attributed to this one; `ac<n>` numbers across the DOCUMENT"
+            f"fulfil it with a `:R authz` row carrying `fulfills={c.ref}` — {c.local_id} is "
+            f"also declared on another hypothesis under anchor kind {twins[0]!r}, so the bare "
+            f"id names no one contract and only the qualified `h-NNN.ac<n>` form says which "
+            f"question the row answered (`ac<n>` numbers across the DOCUMENT, so the durable "
+            f"fix is not to share one)"
         )
     # `mine` cannot be empty here: `c` came from the same `all_hypotheses` walk that built
     # `declarers`, under the same guard, so its own `(owner, kind)` pair is always in it — an
@@ -2994,8 +3065,9 @@ def _check_authz_contract_closure(
     Matched on the gate's OUTPUT, not on the disposition keyword. `outstanding_authz_contracts`
     is the shared definition of "still open" and hands back the exact string the gate emits, so
     a price added to `_DISPOSITION_GATES` that also refuses contracts is deferred to with no
-    edit here — where a `== "benign"` test would leave the next one double-reporting. It costs
-    a second `_check_disposition_gating` pass over an in-memory dict.
+    edit here — where a `== "benign"` test would leave the next one double-reporting. The
+    gate's output is HANDED IN by `diagnose`, which already ran it this pass; the `gated=None`
+    default re-runs it for a direct caller and is what every test in the tree reaches.
 
     Fulfilment is read by id, with no verdict condition: an `unauthorized` row settles the
     question, and what that verdict then costs the document is the benign gate's business. A
@@ -3022,13 +3094,13 @@ def _check_authz_contract_closure(
     # of its cost on a `benign` document (`_check_benign_grounding` + `_check_benign_open_slots`
     # + `_check_benign_authz`, itself three `all_hypotheses` rebuilds). The default keeps the
     # function callable on its own, which is how every test in the tree reaches it.
-    if gated is None:
+    if gated is None:  # lint-default: ok — the standalone fallback; `diagnose` binds it
         gated = set(_check_disposition_gating(companion))
     # Guarded on `gated`: only a priced disposition can put a contract in it, and
     # `outstanding_authz_contracts` is three `all_hypotheses` rebuilds plus two lead walks —
     # otherwise computed in full and then filtered away by an empty set on every other close.
     spoken_for = {
-        f"{hid}.{c.get('id')}"
+        f"{hid}.{_cell(c, 'id')}"
         for hid, c, why in outstanding_authz_contracts(companion)
         if why in gated
     } if gated else set()
@@ -3045,8 +3117,9 @@ def _check_authz_contract_closure(
     qualified: set[str] = set()
     for row in _walkers.iter_authz_resolutions(companion):
         # Through `_cell`, which unquotes — the read every other cell this rule compares gets.
-        # `_canonicalize_resolution_row` copies the `fulfills` cell verbatim while
-        # `:H h-NNN.authz`'s `id` arrives unquoted, so a uniformly quoted row keys `'"ac1"'`
+        # `_canonicalize_resolution_row` copies the `fulfills` cell verbatim, as
+        # `_hyp_sub_authz_row` does the `id` it is matched against — BOTH sides are read
+        # through `_cell` for that reason. Read raw, a uniformly quoted row keys `'"ac1"'`
         # here, matches no declared `ac1`, and the refusal tells the author to write the row
         # they just wrote. Before the closure gate that only cost a `benign` close
         # (`_check_benign_authz`); now it costs every close.
@@ -3059,11 +3132,11 @@ def _check_authz_contract_closure(
         else:
             kinds_by_id.setdefault(cid, set()).add(_anchor_kind(row))
     declared = [
-        _Commitment(hid, c["id"])
+        _Commitment(hid, _cell(c, "id"))
         for hid, hyp in _walkers.all_hypotheses(companion).items()
         for c in hyp.get("authorization_contract") or []
-        if isinstance(c, dict) and isinstance(c.get("id"), str) and c["id"]
-        and f"{hid}.{c['id']}" not in spoken_for
+        if isinstance(c, dict) and _cell(c, "id")
+        and f"{hid}.{_cell(c, 'id')}" not in spoken_for
     ]
     resolved = {
         c.ref
@@ -3120,17 +3193,17 @@ def _check_impact_closure(companion: CompanionBody) -> list[str]:
     for lead in _leads(companion):
         lid = lead.get("id", "?")
         for row in (lead.get("outcome") or {}).get("impact_resolutions") or []:
-            # `_cell`, which unquotes — the same read `_check_impact_resolution_refs` makes, so
-            # the two rules cannot resolve one `pred_ref` to two different strings and report
-            # a predicate as graded and abandoned at once.
+            # `_cell` + `_qualify`, both shared with `_check_impact_resolution_refs`, so the
+            # two rules cannot resolve one `pred_ref` to two different strings and report a
+            # predicate as graded and abandoned at once.
             ref = _cell(row, "prediction_ref") if isinstance(row, dict) else ""
             if ref:
-                resolved.add(ref if "." in ref else f"{lid}.{ref}")
+                resolved.add(_qualify(lid, ref))
+    # The SAME index `_check_impact_resolution_refs` resolves against, not a second walk with
+    # the same guard written out again: what counts as a declared `ip*` is one question.
     declared = [
-        _Commitment(lead.get("id", "?"), ip["id"])
-        for lead in _leads(companion)
-        for ip in lead.get("impact_predictions") or []
-        if isinstance(ip, dict) and isinstance(ip.get("id"), str) and ip["id"]
+        _Commitment(*ref.rsplit(".", 1))
+        for ref in _declared_impact_predictions(companion)
     ]
     errors = [
         _closure_refusal(
@@ -3171,6 +3244,13 @@ def _check_impact_closure(companion: CompanionBody) -> list[str]:
     # rolled up to something the enum does not name.
     verdict = conclude.get("impact_verdict")
     severity = conclude.get("impact_severity")
+    # BOTH cells normalized the same way, and the verdict is the half that used to be read raw.
+    # `_project_conclude_scalars` `_unquote`s a scalar without re-stripping, so
+    # `impact_verdict "exceeds "` reaches here with its padding and `Exceeds` reaches here with
+    # its case — and a raw membership test then reads either as a verdict claiming nothing,
+    # refusing the run for the `impact_severity` the SKILL just told it to write. One reading
+    # for the pair, because the pair is one clause.
+    verdict_key = _cell(conclude, "impact_verdict").lower()
     # `null` is the format's own word for "no severity", so it is an ABSENT severity here and
     # not a present one — the same reading `_project_conclude_scalars` gives the bare token.
     # Case-FOLDED, like `is_conclude_empty_marker` beside it: a case-sensitive test makes
@@ -3178,9 +3258,9 @@ def _check_impact_closure(companion: CompanionBody) -> list[str]:
     # none, so the one spelling that should be refused hardest is the one that validates clean.
     stated = (
         _row_states_something(severity)
-        and str(severity).strip().lower() != "null"
+        and _cell(conclude, "impact_severity").lower() != "null"
     )
-    owed = verdict in _SEVERITY_OWING
+    owed = verdict_key in _SEVERITY_OWING
     if owed and not stated:
         errors.append(
             f"conclude: `impact_verdict {verdict}` with no `impact_severity` — the verdict "
@@ -3250,10 +3330,19 @@ def _check_prediction_closure(companion: CompanionBody) -> list[str]:
         for pid in pids
     }
     weights = _walkers.final_weights(companion)
+    # DEFERS to rule #6 on any hypothesis a resolution moved to `++`, the way
+    # `_check_authz_contract_closure` defers to the disposition gate — and for the identical
+    # reason. `_check_prediction_completeness` already refuses every uncited prediction on a
+    # `++`, and offers no deferral because, as the docstring above says, "a `++` claims every
+    # prediction came in, so there is nothing outstanding to defer". Reporting it here too
+    # hands the author a repair (`:T conclude.deferred_preds`) that clears THIS rule and leaves
+    # #6 refusing — a fix that does not fix the document, and one that then sits on disk as a
+    # deferral contradicting the run's own `++`.
+    confirmed = _confirmed_at(companion)
     declared = [
         _Commitment(hid, pid)
         for hid, hyp in _walkers.all_hypotheses(companion).items()
-        if weights.get(hid) != REFUTED_WEIGHT
+        if weights.get(hid) != REFUTED_WEIGHT and hid not in confirmed
         for pid in sorted(_declared_prediction_ids(hyp))
     ]
     return [
