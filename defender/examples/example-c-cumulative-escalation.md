@@ -79,6 +79,16 @@ neither is in the runtime tool surface. The path of least resistance
 (stop at three `+`/`-`) underweights the integration. REPORT escalates
 on the cumulative pattern.
 
+The deferral table goes FIRST, in its own `append_block`, and `:T conclude`
+last — the whole document is validated on every write, so a `:T conclude`
+that lands before it is refused for a contract the next call was about to
+account for (SKILL.md §`:T conclude`).
+
+```invlang
+:T conclude.deferred_authz [contract_ref|rationale]
+h-001.ac1|"superseded by mechanism refutation at l-001 — ?declared-package-telemetry reached --, so whether CI-runner egress to package telemetry endpoints is permitted no longer bears on the close"
+```
+
 ```invlang
 :T conclude
 termination.category   exhaustion-escalation
@@ -88,9 +98,6 @@ confidence             medium
 impact_verdict         none
 matched_archetype      novel-dependency-with-anomalous-egress
 summary                "build-runner-07.ci is making periodic queries to a recently-registered domain via a post-install daemon in a freshly-published npm package by a single-package maintainer. Legitimate-telemetry path is refuted; malicious-C2 path is supported circumstantially but cannot be confirmed in-loop. Hand off for sandbox detonation + maintainer review."
-
-:T conclude.deferred_authz [contract_ref|rationale]
-h-001.ac1|"superseded by mechanism refutation at l-001 — ?declared-package-telemetry reached --, so whether CI-runner egress to package telemetry endpoints is permitted no longer bears on the close"
 ```
 
 `disposition` is the run's closed vocabulary (`enum disposition`), the same

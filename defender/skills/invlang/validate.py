@@ -11,6 +11,7 @@ from . import _walkers, vocab
 from ._cells import _row_dict, _unquote
 from ._types import RowError
 from .parser import (
+    _CONCLUDE_SUBTABLE_FIELDS,
     COMMITMENT_ID_RE,
     HYPOTHESIS_ID_RE,
     INVLANG_FENCE_RE,
@@ -1191,11 +1192,14 @@ def _check_lead_prediction_structure(companion: CompanionBody) -> list[str]:
 
 _IMPACT_PRED_ID_RE = re.compile(r"ip\d+")
 
-#: `:L l-NNN.impact_preds`' five verdict-shaped cells. Grouped rather than spelled out one
-#: branch apiece because they fail the same way and for the same reason: the row is a
-#: PREDICATE, and a predicate missing one of its outcomes cannot be graded on that outcome.
+#: `:L l-NNN.impact_preds`' six required cells, spelled as the CANONICAL key the projector
+#: emits — the same choice `_IMPACT_RESOLUTION_REQUIRED` makes and for the same reason: `dim`
+#: projects as `dimension` (`_impact_pred_row`), and naming the column alias sends a reader
+#: looking up a name the spec does not use. Grouped rather than spelled out one branch apiece
+#: because they fail the same way and for the same reason: the row is a PREDICATE, and a
+#: predicate missing its axis or one of its outcomes cannot be graded on that outcome.
 _IMPACT_PRED_CELLS: tuple[str, ...] = (
-    "claim", "on_match", "on_mismatch", "on_indeterminate", "escalation_on",
+    "dimension", "claim", "on_match", "on_mismatch", "on_indeterminate", "escalation_on",
 )
 
 
@@ -1238,24 +1242,32 @@ def _check_impact_prediction_structure(companion: CompanionBody) -> list[str]:
                     f"`pred_ref` resolves in that namespace, both bare and as the "
                     f"cross-lead `{lid}.ip<n>`, so an id outside it can be graded by nothing"
                 )
+            # Through `_cell`, like every neighbouring read: `_impact_pred_row` unquotes `dim`
+            # but does not re-strip it, so a uniformly quoted `" confidentiality "` reaches
+            # here with its padding and a raw membership test refuses the row for naming an
+            # axis it names correctly. Reading it twice — raw for the enum, stripped for the
+            # blank test — also drew TWO refusals for one whitespace-only cell.
+            dimension = _cell(ip, "dimension")
             errors += _check_vocab(
-                ip.get("dimension"), vocab.IMPACT_DIMENSION,
-                f"{where}: dimension {ip.get('dimension')!r} is not one of "
+                dimension, vocab.IMPACT_DIMENSION,
+                f"{where}: dimension {dimension!r} is not one of "
                 f"{', '.join(vocab.IMPACT_DIMENSION)} — the cell says which axis the "
                 f"consequence is measured on, and `:R impact` grades against it",
             )
-            if not (ip.get("dimension") or "").strip():
+            # ONE error per ROW, not per column, for the reason
+            # `_check_impact_resolution_refs` gives on the grading side: an under-filled row
+            # is one defect, and seven near-identical refusals for one row bury every other
+            # check. `dim` rides with them — the columns differ only in what each is for, and
+            # the sentence below says that once.
+            blank = [c for c in _IMPACT_PRED_CELLS if not _cell(ip, c)]
+            if blank:
                 errors.append(
-                    f"{where}: empty `dim` — a predicate with no dimension names no axis, and "
-                    f"the `:R impact` row that grades it has nothing to match"
+                    f"{where}: empty {', '.join(f'`{c}`' for c in blank)} — an impact "
+                    f"predicate registers its axis, its threshold AND every outcome before "
+                    f"the measurement lands, so all of {', '.join(_IMPACT_PRED_CELLS)} are "
+                    f"required; a blank cell lets ANALYZE decide that outcome after seeing "
+                    f"the answer"
                 )
-            for cell in _IMPACT_PRED_CELLS:
-                if not _cell(ip, cell):
-                    errors.append(
-                        f"{where}: empty `{cell}` — an impact predicate registers its "
-                        f"threshold AND every outcome before the measurement lands; a blank "
-                        f"cell lets ANALYZE decide that outcome after seeing the answer"
-                    )
     return errors
 
 
@@ -2733,11 +2745,18 @@ def _check_ceiling_test_scope(companion: CompanionBody) -> list[str]:
 
 
 #: The `Conclude` fields a `:T conclude.deferred_*` block writes, and the ONLY fields it can
-#: write. Subtracted below because `_project_deferral_block` opens `conclude` before it reads a
-#: row, so a deferral table is enough to make the dict truthy on its own.
-_DEFERRAL_FIELDS: frozenset[str] = frozenset({
-    "deferred_authorizations", "deferred_impact_predictions", "deferred_predictions",
-})
+#: write. Subtracted below so a mid-run write of the SKILL-taught empty-table marker cannot
+#: read as a close — belt to `_project_deferral_block`'s braces, which opens the table lazily
+#: for the same reason.
+#:
+#: DERIVED from `parser._DEFERRAL_BLOCKS` (via `_CONCLUDE_SUBTABLE_FIELDS`), never restated:
+#: that dict's own comment invites "a fourth namespace should be a row here, not a fourth
+#: projector", and a hand-written copy one module over is exactly what such a row leaves
+#: behind — after which a mid-run `:T conclude.deferred_<new>` arms all three closure gates
+#: against every commitment the run has not reached yet. `surviving_hypotheses` is the one
+#: sub-table field that is NOT subtracted: it is a claim about the CLOSE, which
+#: `_check_hypothesis_persistence` already reads as one.
+_DEFERRAL_FIELDS: frozenset[str] = _CONCLUDE_SUBTABLE_FIELDS - {"surviving_hypotheses"}
 
 
 def _is_closing(companion: CompanionBody) -> bool:
@@ -2745,9 +2764,9 @@ def _is_closing(companion: CompanionBody) -> bool:
     actually mean by `if not conclude`.
 
     A truthiness test on the projected dict answers a different question and gets it wrong in
-    both directions. A lone `:T conclude.deferred_preds` carrying the SKILL-taught `none` row
-    makes `conclude` truthy with no close in sight, so a mid-run write of the empty-table
-    marker is refused for every commitment the run has not reached CONCLUDE on yet. And the
+    both directions. A `:T conclude.deferred_preds` carrying a REAL row makes `conclude`
+    truthy with no close in sight, so a mid-run write that defers one commitment would be
+    refused for every commitment the run has not reached CONCLUDE on yet. And the
     other way, a `:T conclude` block is now guaranteed to record SOMETHING —
     `_project_conclude_scalars` warns when it recognizes no key at all — so an empty dict can
     only mean the close is not written.
@@ -2870,6 +2889,24 @@ def _closure_refusal(
     )
 
 
+def _declarer_kinds(
+    c: _Commitment, declarers: dict[str, list[tuple[str, str]]]
+) -> tuple[set[str], set[str]]:
+    """This commitment's own anchor kinds, and the ones a COMPETING declarer of the same
+    `ac<n>` carries.
+
+    One walk for the two readers of it — `_discharged_by_row` decides the refusal and
+    `_authz_closure_repair` words its repair — because they are a matched pair: a repair
+    derived from a different split than the predicate advises a row the gate will reject
+    again, on an append-only `:R authz` row the author cannot rewrite.
+    """
+    rows = declarers.get(c.local_id, [])
+    return (
+        {a for h, a in rows if h == c.owner},
+        {a for h, a in rows if h != c.owner},
+    )
+
+
 def _discharged_by_row(
     c: _Commitment,
     declarers: dict[str, list[tuple[str, str]]],
@@ -2894,8 +2931,7 @@ def _discharged_by_row(
     kinds = kinds_by_id.get(c.local_id)
     if not kinds:
         return False
-    mine = {a for h, a in declarers.get(c.local_id, []) if h == c.owner}
-    competing = {a for h, a in declarers.get(c.local_id, []) if h != c.owner}
+    mine, competing = _declarer_kinds(c, declarers)
     if not competing:
         return True
     if mine & competing:
@@ -2920,8 +2956,7 @@ def _authz_closure_repair(
     refusal already offers.
     """
     plain = f"fulfil it with a `:R authz` row carrying `fulfills={c.local_id}`"
-    mine = {a for h, a in declarers.get(c.local_id, []) if h == c.owner}
-    competing = {a for h, a in declarers.get(c.local_id, []) if h != c.owner}
+    mine, competing = _declarer_kinds(c, declarers)
     if not competing:
         return plain
     twins = sorted(mine & competing)
@@ -2931,14 +2966,18 @@ def _authz_closure_repair(
             f"kind {twins[0]!r}, and a `:R authz` row names only the contract id, so no row "
             f"can be attributed to this one; `ac<n>` numbers across the DOCUMENT"
         )
-    kind = sorted(mine)
+    # `mine` cannot be empty here: `c` came from the same `all_hypotheses` walk that built
+    # `declarers`, under the same guard, so its own `(owner, kind)` pair is always in it — an
+    # empty anchor kind still contributes `{""}`.
     return (
-        f"{plain} AND `anchor_kind={kind[0]}` — {c.local_id} is declared on more than one "
-        f"hypothesis, so the anchor kind is what says which question the row answered"
-    ) if kind else plain
+        f"{plain} AND `anchor_kind={sorted(mine)[0]}` — {c.local_id} is declared on more than "
+        f"one hypothesis, so the anchor kind is what says which question the row answered"
+    )
 
 
-def _check_authz_contract_closure(companion: CompanionBody) -> list[str]:
+def _check_authz_contract_closure(
+    companion: CompanionBody, *, gated: set[str] | None = None
+) -> list[str]:
     """Every declared `:H h-NNN.authz` contract is fulfilled by a `:R authz` row, or deferred
     in `:T conclude.deferred_authz` with a reason.
 
@@ -2988,7 +3027,13 @@ def _check_authz_contract_closure(companion: CompanionBody) -> list[str]:
     conclude = companion.get("conclude") or {}
     if not _is_closing(companion):
         return []
-    gated = set(_check_disposition_gating(companion))
+    # HANDED IN by `diagnose`, which already ran the gate this pass — re-running it here made
+    # this the most expensive check in the validator, and the re-run is by far the larger half
+    # of its cost on a `benign` document (`_check_benign_grounding` + `_check_benign_open_slots`
+    # + `_check_benign_authz`, itself three `all_hypotheses` rebuilds). The default keeps the
+    # function callable on its own, which is how every test in the tree reaches it.
+    if gated is None:
+        gated = set(_check_disposition_gating(companion))
     # Guarded on `gated`: only a priced disposition can put a contract in it, and
     # `outstanding_authz_contracts` is three `all_hypotheses` rebuilds plus two lead walks —
     # otherwise computed in full and then filtered away by an empty set on every other close.
@@ -3009,8 +3054,14 @@ def _check_authz_contract_closure(companion: CompanionBody) -> list[str]:
     #: that contract and never another hypothesis's `ac1`.
     qualified: set[str] = set()
     for row in _walkers.iter_authz_resolutions(companion):
-        cid = row.get("fulfills_contract")
-        if not isinstance(cid, str) or not cid:
+        # Through `_cell`, which unquotes — the read every other cell this rule compares gets.
+        # `_canonicalize_resolution_row` copies the `fulfills` cell verbatim while
+        # `:H h-NNN.authz`'s `id` arrives unquoted, so a uniformly quoted row keys `'"ac1"'`
+        # here, matches no declared `ac1`, and the refusal tells the author to write the row
+        # they just wrote. Before the closure gate that only cost a `benign` close
+        # (`_check_benign_authz`); now it costs every close.
+        cid = _cell(row, "fulfills_contract")
+        if not cid:
             continue
         owner, dot, local = cid.rpartition(".")
         if dot and local and HYPOTHESIS_ID_RE.fullmatch(owner):
@@ -3132,7 +3183,13 @@ def _check_impact_closure(companion: CompanionBody) -> list[str]:
     severity = conclude.get("impact_severity")
     # `null` is the format's own word for "no severity", so it is an ABSENT severity here and
     # not a present one — the same reading `_project_conclude_scalars` gives the bare token.
-    stated = _row_states_something(severity) and severity != "null"
+    # Case-FOLDED, like `is_conclude_empty_marker` beside it: a case-sensitive test makes
+    # `impact_severity NULL` a present severity that satisfies `exceeds` while saying there is
+    # none, so the one spelling that should be refused hardest is the one that validates clean.
+    stated = (
+        _row_states_something(severity)
+        and str(severity).strip().lower() != "null"
+    )
     owed = verdict in _SEVERITY_OWING
     if owed and not stated:
         errors.append(
@@ -3362,14 +3419,18 @@ def diagnose(
     found.extend(_plain(_check_impact_resolution_refs(companion)))
     found.extend(_check_closed_vocab(companion, proposed_text))
     found.extend(_plain(_check_screen_structure(companion)))
-    found.extend(_plain(_check_disposition_gating(companion)))
+    # Bound, not recomputed: `_check_authz_contract_closure` defers to this gate's OUTPUT on
+    # any contract it is already refusing, and running it twice per write is the single most
+    # expensive thing in the pass.
+    gated = _check_disposition_gating(companion)
+    found.extend(_plain(gated))
     found.extend(_plain(_check_ceiling_test_scope(companion)))
     found.extend(_plain(_check_hypothesis_persistence(companion)))
     found.extend(_plain(_check_shelved_rationale(companion)))
     # The three closure gates, together and last: they are one sentence over three namespaces
     # (`_unclosed_commitments`), and each is only safe to run because its `deferred_*` table is
     # now projected.
-    found.extend(_plain(_check_authz_contract_closure(companion)))
+    found.extend(_plain(_check_authz_contract_closure(companion, gated=set(gated))))
     found.extend(_plain(_check_impact_closure(companion)))
     found.extend(_plain(_check_prediction_closure(companion)))
     found.extend(_plain(_check_loop_close(companion)))

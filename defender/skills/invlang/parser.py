@@ -776,11 +776,39 @@ def _canonicalize_resolution_row(rec: dict[str, str]) -> ResolutionRow:
 #: guard below must not read the second and third as a key being overwritten.
 _CONCLUDE_LISTS: frozenset[str] = frozenset({"ceiling_test"})
 
+#: `:T conclude.deferred_*` — the sub-table name an author writes, the `Conclude` field its
+#: rows land in, and the column naming the deferred commitment. One entry per closure rule
+#: (#26 authorization contracts, #31 impact predictions, #34 predictions), because those three
+#: are one rule over three namespaces: a fourth namespace should be a row here, not a fourth
+#: projector. THE owner of the three field names — every set below is derived from it, so the
+#: row this comment invites cannot leave one of them behind.
+_DEFERRAL_BLOCKS: dict[str, tuple[str, str]] = {
+    "conclude.deferred_authz": ("deferred_authorizations", "contract_ref"),
+    "conclude.deferred_impact": ("deferred_impact_predictions", "prediction_ref"),
+    "conclude.deferred_preds": ("deferred_predictions", "prediction_ref"),
+}
+
+#: The `Conclude` fields a `:T conclude.<sub>` block writes — everything else under `conclude`
+#: came from a flat `<key> <value>` row in `:T conclude` itself. Derived from
+#: `_DEFERRAL_BLOCKS` rather than restated. `validate._DEFERRAL_FIELDS` is the same subtraction
+#: one module over, minus `surviving_hypotheses` — that one is a claim about the CLOSE, which
+#: `_is_closing` counts and `_warn_conclude_recorded_nothing` does not — and it IMPORTS this
+#: set rather than restating it, for the reason this comment gives.
+_CONCLUDE_SUBTABLE_FIELDS: frozenset[str] = frozenset(
+    {"surviving_hypotheses", *(field for field, _col in _DEFERRAL_BLOCKS.values())}
+)
+
 #: `Conclude` fields that are their OWN `:T conclude.*` sub-table, never a flat
 #: `<key> <value>` row. They must be subtracted because `_CONCLUDE_SCALARS` is read off
 #: `Conclude.__annotations__`: a sub-table field left in is otherwise advertised in
 #: `_CONCLUDE_KEYS_HINT` as a legal flat key AND projected as a STRING over the list the
 #: sub-table built, making `_project_surviving_block`'s `setdefault(...).append(...)` raise.
+#:
+#: `_CONCLUDE_SUBTABLE_FIELDS` plus `termination`, which is a sub-table of the flat block
+#: rather than a block of its own (`termination.category` / `.rationale` rows fold into one
+#: nested dict). Derived rather than hand-listed: this is the set whose staleness produces the
+#: `AttributeError` the paragraph above describes, so it must not be the one copy nobody
+#: updates.
 #:
 #: `ceiling_test` is deliberately NOT here. The dense-format proposal spells it as a
 #: `[kind|subject]` sub-table; the shipped surface — `skills/invlang/SKILL.md`, eleven checked-in
@@ -788,11 +816,7 @@ _CONCLUDE_LISTS: frozenset[str] = frozenset({"ceiling_test"})
 #: per row, which is what `_CONCLUDE_LISTS` above carries. The flat row is the real one; see
 #: `_project_t_block` for what happens to a block written under the retired spelling.
 _CONCLUDE_SUBTABLES: frozenset[str] = frozenset({
-    "termination",
-    "surviving_hypotheses",
-    "deferred_authorizations",
-    "deferred_impact_predictions",
-    "deferred_predictions",
+    "termination", *_CONCLUDE_SUBTABLE_FIELDS,
 })
 
 #: The scalar rows `:T conclude` projects, and the CLOSED set an unrecognized row is judged
@@ -805,17 +829,6 @@ _CONCLUDE_KEYS_HINT = ", ".join(
     sorted(_CONCLUDE_SCALARS | _CONCLUDE_LISTS)
     + ["termination.category", "termination.rationale"]
 )
-
-#: `:T conclude.deferred_*` — the sub-table name an author writes, the `Conclude` field its
-#: rows land in, and the column naming the deferred commitment. One entry per closure rule
-#: (#26 authorization contracts, #31 impact predictions, #34 predictions), because those three
-#: are one rule over three namespaces: a fourth namespace should be a row here, not a fourth
-#: projector.
-_DEFERRAL_BLOCKS: dict[str, tuple[str, str]] = {
-    "conclude.deferred_authz": ("deferred_authorizations", "contract_ref"),
-    "conclude.deferred_impact": ("deferred_impact_predictions", "prediction_ref"),
-    "conclude.deferred_preds": ("deferred_predictions", "prediction_ref"),
-}
 
 #: The `:T conclude.ceiling_test [kind|subject]` sub-table of the dense-format PROPOSAL, kept
 #: recognized-and-ignored rather than projected or refused.
@@ -832,16 +845,6 @@ _DEFERRAL_BLOCKS: dict[str, tuple[str, str]] = {
 #: does not read either way, and denying the write would cost a run for following a stale
 #: format note. The format doc is reconciled to the flat spelling in the same change.
 _RETIRED_CEILING_TEST_BLOCK = "conclude.ceiling_test"
-
-#: The `Conclude` fields a `:T conclude.<sub>` block writes — everything else under `conclude`
-#: came from a flat `<key> <value>` row in `:T conclude` itself. Derived from
-#: `_DEFERRAL_BLOCKS` rather than restated, so the "fourth namespace is a row here" its comment
-#: invites cannot leave this set behind. `validate._DEFERRAL_FIELDS` is the same subtraction
-#: one module over, minus `surviving_hypotheses` — that one is a claim about the CLOSE, which
-#: `_is_closing` counts and `_warn_conclude_recorded_nothing` does not.
-_CONCLUDE_SUBTABLE_FIELDS: frozenset[str] = frozenset(
-    {"surviving_hypotheses", *(field for field, _col in _DEFERRAL_BLOCKS.values())}
-)
 
 
 def _close_loop(rows: list[str]) -> int | None:
@@ -1079,7 +1082,13 @@ class _Projector:
             return True
         if key in _CONCLUDE_LISTS:
             seen.add(key)
-            if is_conclude_empty_marker(value):
+            # `value is None` is the caller's mapping of the literal `null`, which the format
+            # spells beside `none` for the same "nothing to say" — `is_conclude_empty_marker`
+            # cannot see it, because by here the string is already gone. Without this arm
+            # `ceiling_test  null` appends `None` into a declared `list[str]` AND makes
+            # `conclude` truthy, so `validate._is_closing` reads a mid-run block as a close
+            # and the three closure gates refuse every commitment the run has not reached.
+            if value is None or is_conclude_empty_marker(value):
                 return False  # lint-row-drop: ok — the empty-ARRAY marker, not a row
             cast(list[str], conclude.setdefault(key, [])).append(value)
             return True
@@ -1120,6 +1129,27 @@ class _Projector:
                     f"conclude: {key!r} is set twice in this block; the later row wins and "
                     f"the earlier value is lost. Keep one row per key, and join a value that "
                     f"spilled onto a second line back into one line.",
+                )
+            elif (
+                key in _CONCLUDE_SCALARS
+                and key in conclude
+                and conclude[key] != value
+            ):
+                # The SAME loss one block over. `seen` is per-block while `conclude` is
+                # document-wide, so a close that arrives as two `:T conclude` blocks — the
+                # shape `_warn_conclude_recorded_nothing` is written around — could restate
+                # `disposition` and silently replace it, with every downstream gate
+                # (`_check_disposition_gating`, `_check_benign_authz`, `spoken_for`) then
+                # running against a keyword the run only half wrote. Narrowed to a CHANGED
+                # value: re-stating a key with the same value loses nothing, and append-only
+                # means a document already carrying that shape must stay writable.
+                self._warn(
+                    block, index, row,
+                    f"conclude: {key!r} is already set to {conclude[key]!r} by an earlier "
+                    f"`:T conclude` block, and this row replaces it — append-only means the "
+                    f"first value cannot be withdrawn, so the two rows are a disagreement "
+                    f"rather than a correction. Drop this row, or restate the value the "
+                    f"close is actually making everywhere it appears.",
                 )
             landed |= self._land_conclude_row(key, value, conclude, termination, seen)
             # An unrecognized key is IGNORED, not warned. It reads like the obvious place to
@@ -1683,9 +1713,34 @@ class _Projector:
         A blank RATIONALE is not a drop and is not warned here. The row lands, and the closure
         rule refuses it by name — that check can say what a rationale is for, where a parse
         warning could only say the row was discarded.
+
+        `conclude` and the table are opened LAZILY — on the first row that lands, never on
+        entry. Opening them eagerly makes a table whose only row is the empty-ARRAY marker
+        project as `conclude = {"deferred_predictions": []}`, and every reader that asks "did
+        this run conclude" by presence or truthiness then answers yes for a document that
+        recorded nothing: `corpus._load_one` admits the case as complete, `render_synthesis`
+        puts `deferred_predictions: []` in front of the judge as the conclusion, and
+        `validate._is_closing` needs a bespoke subtraction to say otherwise. `:T
+        conclude.surviving` is the deliberate exception one method up — present-and-empty
+        there is the CLAIM that nothing survived, and `_check_hypothesis_persistence` reads it
+        as one. There is no such claim to make here: "deferred nothing" is what an absent
+        table already says.
         """
-        conclude: dict[str, Any] = self.out.setdefault("conclude", {})
-        rows: list[dict[str, str]] = conclude.setdefault(field, [])
+        # A DECLARED header that names neither cell by the name this projection reads is the
+        # one shape whose damage is silent. `_row_dict` keys on the author's header, so
+        # `[contract_ref|reason]` lands every row with a blank `rationale` — and the closure
+        # rule then refuses the commitment for "an empty rationale" the author DID write,
+        # naming the cell rather than the header that discarded it. Refused as a block, the
+        # way `_stale_hyp_header` refuses an off-schema `:H` declaration.
+        if block.columns and not {ref_col, "rationale"}.issubset(block.columns):
+            self._warn(
+                block, -1, "",
+                f"column header {block.columns!r} does not match `:T {block.name} "
+                f"[{ref_col}|rationale]` — this projection reads those two names, so a cell "
+                f"under any other one is dropped and the closure rule then refuses the "
+                f"commitment for a rationale you wrote; whole block rejected",
+            )
+            return
         for idx, row, rec in self._for_each_row(block, [ref_col, "rationale"]):
             # `_unquote`d like the rationale beside it. The three closure rules match this
             # cell against `h-001.ac1` / `h-001.p2` / `l-002.ip1` verbatim, so a quoted cell
@@ -1707,6 +1762,8 @@ class _Projector:
             rationale = _unquote(rec.get("rationale", ""))
             if rationale:
                 entry["rationale"] = rationale
+            conclude: dict[str, Any] = self.out.setdefault("conclude", {})
+            rows: list[dict[str, str]] = conclude.setdefault(field, [])
             rows.append(entry)
 
     def _project_shelved_block(self, block: Block) -> None:

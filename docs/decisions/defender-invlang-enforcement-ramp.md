@@ -255,8 +255,11 @@ error rather than letting the write through. Scope is anchored to
    `:L l-NNN.lead_preds` / `.impact_preds` were documented and
    unprojected. Now projected: `Conclude.deferred_{authorizations,
    impact_predictions,predictions}[]` (from `:T conclude.deferred_{authz,
-   impact,preds}`, normalized to one `{ref, rationale}` record shape
-   because the three tables spell the reference column two ways) and
+   impact,preds}`, each row keeping the reference column its own table
+   spells — `contract_ref` on `deferred_authz`, `prediction_ref` on the
+   other two — rather than normalized to one `ref` key, because the column
+   name is what the two format docs call the field and `_deferral_index`
+   is the one reader and takes either) and
    `findings[].{predictions,impact_predictions}[]`.
    **The deferral tables landed in the same change as the rules that
    demand them** — arming "every declared X resolves" over an unprojected
@@ -824,8 +827,10 @@ arming a closure gate: `skills/invlang/SKILL.md` gained the
 `:L l-NNN.lead_preds` shape, a `:R impact` section carrying the whole
 impact axis (register at PLAN, grade at ANALYZE), and a
 §`:T conclude` table naming the three deferral tables with the
-"send them in the SAME `append_block`" note — the whole document is
-validated on every write, so a `:T conclude` that lands without them is
-refused before they can follow. `defender/examples/example-c-cumulative-escalation.md`
+"send the deferral tables FIRST, each in its own `append_block`, and
+`:T conclude` last" note — the whole document is validated on every
+write, so a `:T conclude` that lands before them is refused for
+commitments the run was about to account for, while a `deferred_*` table
+on its own is not yet a close and lands clean. `defender/examples/example-c-cumulative-escalation.md`
 was corrected for the same reason: a shipped worked example that
 violates a newly-armed rule teaches the violation.

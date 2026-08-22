@@ -81,8 +81,19 @@ def is_conclude_empty_marker(value: object) -> bool:
     A SCALAR row keeps the marker — only the list branch drops it — so a gate that asks
     "did the run state a defect" has to ask this rather than `value.strip()`: `detection_notes
     none` is the row that explicitly says there is no defect, and it is not blank.
+
+    `_unquote`d, because every OTHER reader of a cell sees through the author's quoting and
+    this one has to agree with them. A block whose single row is `"none"` is the empty-TABLE
+    marker written by an author who quotes uniformly; read raw, it lands as a RECORD whose id
+    is `"none"` — an `lp*` that fails four of rule #18's arms, an undeclared `h-*` at
+    `:T conclude.surviving`'s reference site — and the refusal never says the author wrote the
+    marker. Unquoting an already-unquoted cell is identity, so this is the read every caller
+    wanted.
     """
-    return isinstance(value, str) and value.strip().lower() in _CONCLUDE_EMPTY_MARKERS
+    return (
+        isinstance(value, str)
+        and _unquote(value.strip()).strip().lower() in _CONCLUDE_EMPTY_MARKERS
+    )
 
 
 def _count_unescaped_quotes(s: str) -> int:
