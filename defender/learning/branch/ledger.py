@@ -65,6 +65,22 @@ def request_key(system: str, verb: str, params: Any) -> str:
 
 @dataclass(frozen=True)
 class ServedCall:
+    """One served call, under BOTH the question asked and the question run.
+
+    They differ exactly when a world stages: `prepare` rewrites the call to point at that
+    world's corpus, which is what staging IS. So the two identities answer two different
+    questions and neither can do the other's job.
+
+    `key` — the form that RAN. What the family tier memoizes on, and it must stay the prepared
+    form: keyed on the asked form instead, a sibling would replay another world's answer, read
+    off that world's staged corpus. That is contamination, strictly worse than re-reading.
+
+    `correlation_key` — the form ASKED. What a cross-world comparison pairs on. Without it
+    `ΔO` is computed over `keys(A) ∩ keys(B)`, and on a staged system that intersection is
+    EMPTY — A recorded `FROM …-w-A` and B recorded `FROM …-w-B`, so no row of A's ever meets a
+    row of B's and the difference between them reads as no difference at all. Silent, and
+    silent on the event stream, which is where most of a run's evidence lives.
+    """
 
     system: str
     verb: str
@@ -72,22 +88,39 @@ class ServedCall:
     payload_text: str
     source: str
     world_id: str | None
+    #: What the model asked, when staging rewrote it. `None` means nothing was rewritten, so
+    #: the two identities coincide — the ordinary case for the six unstaged systems.
+    asked_params: dict | None = None
 
     @property
     def key(self) -> str:
+        """The memo identity: the call as it RAN."""
         return request_key(self.system, self.verb, self.params)
+
+    @property
+    def correlation_key(self) -> str:
+        """The comparison identity: the call as it was ASKED."""
+        return request_key(
+            self.system, self.verb,
+            self.params if self.asked_params is None else self.asked_params)
 
     def row(self) -> dict:
         # `_json_safe_params`, because `append_jsonl` dumps with the stdlib defaults: a param
         # the key already coerced would otherwise reach the file as `Infinity`/`NaN` — tokens
         # no JSON reader outside Python parses — or raise `TypeError` mid-serve on a value
         # `default=str` would have carried.
-        return {
+        row = {
             "system": self.system, "verb": self.verb,
             "params": _json_safe_params(self.params),
             "payload_text": self.payload_text, "source": self.source,
             "world_id": self.world_id,
         }
+        if self.asked_params is not None:
+            # Written only when it says something. An absent column reads as "nothing was
+            # rewritten", which is true of every unstaged call and is the honest default; a
+            # column echoing `params` on every row would make the two identities look like one.
+            row["asked_params"] = _json_safe_params(self.asked_params)
+        return row
 
 
 @dataclass

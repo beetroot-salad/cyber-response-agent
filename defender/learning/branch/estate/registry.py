@@ -116,6 +116,10 @@ class WorldRegistry(ModuleVerbRegistry):
                 system=system, verb=verb, params=dict(prepared),
                 payload_text=base_text if out is payload else _payload_text(out),
                 source=decision, world_id=world.world_id,
+                # Only when staging moved it. This is what lets a sibling's row find its
+                # opposite number: the prepared forms differ BY CONSTRUCTION on a staged
+                # system, so a comparison keyed on them alone pairs nothing.
+                asked_params=dict(params) if prepared != params else None,
             ))
             return out
 

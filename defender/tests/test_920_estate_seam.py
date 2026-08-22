@@ -801,3 +801,57 @@ def test_a_base_world_stages_nothing(tmp_path):
     assert [c["params"]["query"] for c in adapter_calls(ctx, "esql")] == [body]
     assert [r["world_id"] for r in served_rows(ledger_path)] == [None, "base"], (
         "the family recording and the base world's own row must not share a slot")
+
+
+def test_two_siblings_rows_pair_on_the_question_asked_not_the_one_run(tmp_path):
+    """    A staged call records BOTH identities, so a cross-world comparison can find its pairs.
+
+    `ΔO` is computed over the keys two worlds have in common. On a staged system the prepared
+    forms differ BY CONSTRUCTION — that is what staging is — so a comparison keyed on them
+    alone intersects to nothing: A recorded `FROM …-w-A`, B recorded `FROM …-w-B`, no row of
+    A's ever meets a row of B's, and "the worlds differ" and "the worlds are identical" produce
+    the same empty answer. Silent, and silent on the event stream, where most of a run's
+    evidence lives.
+
+    The memo key must NOT be the asked form, and this pins both halves: pair on what was asked,
+    memoize on what ran. Keyed the other way, B replays A's answer — read off A's staged
+    corpus — which is contamination rather than merely a re-read."""
+    ledger_path = tmp_path / "served.jsonl"
+    adapters, ctx = fake_estate(tmp_path), run_ctx(tmp_path)
+    ledger = Ledger(ledger_path)
+    body = "FROM logs-system.auth-*\n| LIMIT 5"
+
+    for wid in ("A", "B"):
+        reg = WorldRegistry(
+            adapters, FAKE_GRANT, world=World(wid, ("elastic",)), ledger=ledger)
+        reg.verbs("elastic")["esql"](ctx, query=body)
+
+    rows = [r for r in served_rows(ledger_path) if r["world_id"] in ("A", "B")]
+    assert len(rows) == 2
+
+    ran = {r["world_id"]: r["params"]["query"] for r in rows}
+    assert ran["A"] != ran["B"], "each world must read its OWN corpus"
+
+    asked = {r["world_id"]: r["asked_params"]["query"] for r in rows}
+    assert asked["A"] == asked["B"] == body, (
+        "both worlds were asked the same question; without that recorded, their rows cannot "
+        f"be paired and ΔO over this system is empty rather than measured. Got {asked}")
+
+
+def test_an_unstaged_call_records_one_identity_not_two(tmp_path):
+    """    Nothing was rewritten, so there is no second identity to record.
+
+    The column is written only when it says something. Echoing `params` onto every row would
+    make the two identities look like one thing, which is the confusion the pair exists to
+    prevent."""
+    ledger_path = tmp_path / "served.jsonl"
+    adapters, ctx = fake_estate(tmp_path), run_ctx(tmp_path)
+    reg = WorldRegistry(
+        adapters, FAKE_GRANT, world=World("A", ("cmdb",)), ledger=Ledger(ledger_path))
+
+    reg.verbs("cmdb")["get-host"](ctx, host="canary-1")
+
+    own = [r for r in served_rows(ledger_path) if r["world_id"] == "A"]
+    assert own and "asked_params" not in own[0], (
+        "an unstaged call's asked and run forms are the same call; a second column would be a "
+        f"copy that can only drift. Got {own[0]}")
