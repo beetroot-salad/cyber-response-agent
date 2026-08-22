@@ -57,7 +57,7 @@ Sub-cell grammar:
 
 ### `:L` — leads (header + lead-scoped sub-blocks)
 
-A lead's structured rows say which lead they belong to, never where they sit. Sub-blocks name it in the block tag (`:V l-{id}.…`); row-shaped blocks name it in a column — `resolved_by` on every `:R`, `by_lead` on `:T shelved`, the leading id on a `:T resolutions` row. Keeping a lead's rows lexically under its `:L findings` row stays good practice, but it carries no meaning to the parser: an unattributed row is rejected, not inherited. Block tags valid under a lead: `:V l-{id}.observations.vertices`, `:E l-{id}.observations.edges`, `:R authz`, `:R consultations`, `:R impact`, `:R attr_updates`, `:L l-{id}.lead_preds`, `:L l-{id}.impact_preds`, `:L l-{id}.substitutions`, `:H l-{id}.new_hypotheses`, `:T shelved`, `:T resolutions`.
+A lead's structured rows say which lead they belong to, never where they sit. Sub-blocks name it in the block tag (`:V l-{id}.…`); row-shaped blocks name it in a column — `resolved_by` on every `:R`, the leading id on a `:T resolutions` row. Keeping a lead's rows lexically under its `:L findings` row stays good practice, but it carries no meaning to the parser: an unattributed row is rejected, not inherited. Block tags valid under a lead: `:V l-{id}.observations.vertices`, `:E l-{id}.observations.edges`, `:R authz`, `:R consultations`, `:R impact`, `:R attr_updates`, `:L l-{id}.lead_preds`, `:L l-{id}.impact_preds`, `:L l-{id}.substitutions`, `:H l-{id}.new_hypotheses`, `:T resolutions`.
 
 Lead header (one row per lead — only scalar/list fields):
 
@@ -99,12 +99,9 @@ Hypotheses born inside a lead use the same column shape as `:H hypothesize.hypot
 h-003|?...|...
 ```
 
-Hypotheses dropped from the live frontier:
-
-```
-:T shelved [hyp_id|by_lead|rationale]
-h-003|l-002|"monitoring-window does not overlap; mechanism cannot fire"
-```
+`:T shelved` is RETIRED (#933). A hypothesis leaves the live frontier by being resolved:
+the run moves its final weight to `--` in a `:T resolutions` row, or leaves it out of
+`:T conclude.surviving`. The parser refuses the block by name and projects none of its rows.
 
 ### `:R` — resolution-shaped rows (authz / consultations / impact / attr_updates)
 
@@ -181,7 +178,7 @@ none
 none
 ```
 
-`ceiling_test` carries `none` when nothing was out of reach, and one row per gap otherwise (repeat the key). Rule #13 requires at least one under `termination.category: severity-ceiling` — implemented as `_check_ceiling_test_scope`. Its "forbidden otherwise" half is NOT enforced and should not be: the shipped field records every check the run could not make, which a run may legitimately have under any termination category, and the lessons corpus instructs writing it. `ceiling_rationale` is the companion scalar and carries no validator rule. For shelving inside a lead, see §`:L` lead-scoped sub-blocks (`:T shelved`).
+`ceiling_test` carries `none` when nothing was out of reach, and one row per gap otherwise (repeat the key). Rule #13 requires at least one under `termination.category: severity-ceiling` — implemented as `_check_ceiling_test_scope`. Its "forbidden otherwise" half is NOT enforced and should not be: the shipped field records every check the run could not make, which a run may legitimately have under any termination category, and the lessons corpus instructs writing it. `ceiling_rationale` is the companion scalar and carries no validator rule.
 
 ### `:G` — frontier graph (derived view, not append-only)
 
@@ -315,7 +312,6 @@ Token comparison: original YAML investigation.md ≈ 1,200 chars across 123 line
 | `findings[].outcome.observations.{vertices,edges}` | `:V l-{id}.observations.vertices`, `:E l-{id}.observations.edges` |
 | `findings[].outcome.{authorization_resolutions,anchor_consultations,impact_resolutions,attribute_updates}` | `:R authz`, `:R consultations`, `:R impact`, `:R attr_updates` |
 | `findings[].new_hypotheses[]` | `:H l-{id}.new_hypotheses` (column shape inherited from top-level `:H`) |
-| `findings[].shelved[]` | `:T shelved` |
 | `findings[].resolutions[]` (sibling of `outcome:`, not under it) | `:T resolutions` |
 | `conclude.{termination.category,termination.rationale,disposition,impact_verdict,impact_severity,confidence,matched_archetype,ceiling_test,ceiling_rationale,summary}` | `:T conclude` flat key/value lines (`ceiling_test` repeats — one row per gap) |
 | `conclude.surviving_hypotheses[]` | `:T conclude.surviving [hyp_id\|final_weight]` |
@@ -342,7 +338,7 @@ Each rule re-expressed against a line-shape parser. Examples:
 | #21 authz-gated benign | `:T conclude disposition: benign` ⇒ every `ac{n}` declared on a confirmed-weight hypothesis row appears as a `:R authz authorized` row |
 | #23 sibling fork distinctness | within a sibling group, no two LIVE `:H` rows whose declared claims are identical after case/whitespace normalization — the claim text of each `p{n}` in the `preds` cell, plus `(target, attribute, claim)` of each `ap{n}` in `attr_preds`; the `p{n}` subject is excluded. A row with both cells empty is exempt (in the sub-block spelling the `:H` row and its `.preds` are separate appends). `parent_class` may repeat, and repeats when open |
 | #25 same-level rollup | every `p{n}` cited on a resolution for `h-001` belongs to `h-001`'s preds, not a sibling's |
-| #34 prediction closure at CONCLUDE | for every hypothesis whose final status is neither `refuted` nor `shelved` (i.e. `active` or `confirmed`), every `p{n}` and `ap{n}` declared on `:H` either appears in a `:T resolutions` row's pred-tokens with non-null after, or as a row in `:T conclude.deferred_preds` |
+| #34 prediction closure at CONCLUDE | for every hypothesis whose final status is not `refuted` (i.e. `active` or `confirmed`), every `p{n}` and `ap{n}` declared on `:H` either appears in a `:T resolutions` row's pred-tokens with non-null after, or as a row in `:T conclude.deferred_preds` |
 
 The full 35-rule rewrite is mechanical. Estimated parser size: ~150 LOC Python (one regex per block tag, one tokenizer per row shape).
 

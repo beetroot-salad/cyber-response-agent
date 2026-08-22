@@ -292,7 +292,7 @@ h-002|null
 def test_a_surviving_table_that_omits_a_live_hypothesis_is_refused() -> None:
     errors = _errors(_SURVIVING_ONE_OF_TWO)
     assert len(errors) == 1
-    assert "hypothesis h-002 is neither refuted, shelved, nor carried into the close" in errors[0]
+    assert "hypothesis h-002 is neither refuted nor carried into the close" in errors[0]
     assert "omits it" in errors[0]
 
 
@@ -330,7 +330,7 @@ def test_an_empty_surviving_table_still_speaks() -> None:
 none|
 """)
     assert len(errors) == 2
-    assert all("neither refuted, shelved, nor carried into the close" in e for e in errors)
+    assert all("neither refuted nor carried into the close" in e for e in errors)
 
 
 # --- rule #33: attribute-prediction structure ---------------------------------------------
@@ -559,31 +559,6 @@ h-001  null → null [l-001 p2 mild ⟂ e-001 :: looked, moved nowhere]
 h-001  null → ++   [l-001 p1 severe ⟂ e-001 :: bursty]
 """)
     assert any("leaves p2 unmatched" in e for e in errors)
-
-
-def test_a_shelved_hypothesis_may_be_left_out_of_the_surviving_table() -> None:
-    """A `:T shelved` row is the in-grammar way to retire a hypothesis without refuting it,
-    and the spec's rule #34 reads it as one. Without the same arm on #24 the rule's two offered
-    repairs are both false claims: listing a set-aside hypothesis as surviving, or a `--`
-    that never happened."""
-    assert _errors(_PROLOGUE + _ONE_HYPOTHESIS + _HYP_HEADER + """\
-h-002|?scheduled-retry|v-001|runs_on|process|??/??/??||null|active
-
-""" + _LEAD + """\
-:T shelved [hyp_id|by_lead|rationale]
-h-002|l-001|"set aside — no tooling reaches the scheduler"
-
-:T resolutions
-h-001  null → +    [l-001 p1,p2 mild ⟂ e-001 :: bursty, no interval]
-
-:T conclude
-disposition            inconclusive
-confidence             low
-summary                "s"
-
-:T conclude.surviving [hyp_id|final_weight]
-h-001|+
-""") == []
 
 
 def test_a_prediction_numbered_outside_the_p_namespace_is_refused() -> None:
@@ -855,28 +830,6 @@ def test_a_lone_none_row_is_the_empty_table_marker_on_a_lead_plan_block(block: s
     assert "predictions" not in companion["findings"][0]
     assert "impact_predictions" not in companion["findings"][0]
     assert _errors(body) == []
-
-
-def test_a_shelved_sibling_clears_the_fork_rule() -> None:
-    """`live_hypothesis_ids` filters on final weight `--` alone, so rule #23 kept refusing a
-    pair rule #24 and rule #34 both read as retired. Both repairs #23 offers rewrite an
-    immutable `:H` row, leaving a `--` the run never earned as the only exit."""
-    siblings = _HYP_HEADER + """\
-h-001|?a|v-001|runs_on|process|??/??/??||null|active
-h-002|?b|v-001|runs_on|process|??/??/??||null|active
-
-:H h-001.preds [id|subject|claim]
-p1|proposed_edge|"failures arrive in bursts"
-
-:H h-002.preds [id|subject|claim]
-p1|proposed_edge|"failures arrive in bursts"
-
-"""
-    assert [e for e in _errors(_PROLOGUE + siblings + _LEAD) if _SIBLING_FORK_TAG in e]
-    assert _errors(
-        _PROLOGUE + siblings + _LEAD
-        + ':T shelved [hyp_id|by_lead|rationale]\nh-002|l-001|"collapsed into h-001"\n\n'
-    ) == []
 
 
 def test_a_matched_screen_is_never_an_intermediate_lead() -> None:
@@ -1335,27 +1288,6 @@ l-001|1|auth-history|v-001|"h-999,p9"|elastic|10m
     assert any("tests undeclared hypothesis 'h-999'" in e for e in errors)
 
 
-def test_a_quoted_shelved_row_still_retires_the_hypothesis_it_names() -> None:
-    """`:T shelved` and `:T conclude.surviving` are the two cells rules #23 and #24 discharge
-    against by equality, and both reached the comparison raw."""
-    assert _errors(_PROLOGUE + _HYP_HEADER + """\
-h-001|?a|v-001|runs_on|process|??/??/??||null|active
-h-002|?b|v-001|runs_on|process|??/??/??||null|active
-
-:H h-001.preds [id|subject|claim]
-p1|proposed_edge|"failures arrive in bursts"
-
-:H h-002.preds [id|subject|claim]
-p1|proposed_edge|"failures arrive in bursts"
-
-:L findings [id|loop|name|target|tests|system|window]
-l-001|1|auth-history|v-001|h-001|elastic|10m
-
-:T shelved [hyp_id|by_lead|rationale]
-"h-002"|"l-001"|"set aside"
-""") == []
-
-
 def test_a_quoted_surviving_row_carries_the_hypothesis_into_the_close() -> None:
     """The sibling of the arm above, on the table rule #24 reads. Quoted, the refusal listed
     the id it claimed was missing."""
@@ -1421,37 +1353,6 @@ def test_an_annotation_naming_one_id_does_not_discard_the_heads_list() -> None:
 :T resolutions
 h-001  null → ++   [l-001 p1,p2 severe ⟂ e-001 :: bursts observed ⟺ p1]
 """) == []
-
-def _shelved(rationale: str) -> str:
-    return f":T shelved [hyp_id|by_lead|rationale]\nh-001|l-001|{rationale}\n\n"
-
-
-def test_shelving_without_a_reason_discharges_nothing() -> None:
-    """`:T shelved` is the widest discharge in the language since #933 — rules #23, #24 and
-    #34 all read it as settling the question. The deferral tables built in the same change
-    refuse a blank rationale by name ("a blank cell records nothing while still discharging
-    it"); that argument does not weaken when the discharge gets broader, so the two escape
-    hatches are priced the same. Measured before the fix: two rationale-less rows took a
-    document from seven refusals to one."""
-    base = _PROLOGUE + _ONE_PRED + _LEAD
-    assert any(
-        "shelved with no rationale" in e
-        for e in _errors(base + _shelved("") + _REAL_CONCLUDE)
-    )
-    assert any(
-        "shelved with no rationale" in e
-        for e in _errors(base + _shelved("none") + _REAL_CONCLUDE)
-    )
-
-
-def test_a_shelved_row_with_a_reason_is_the_discharge_it_claims_to_be() -> None:
-    """The liveness control, and the in-grammar repair: `_project_shelved_block` keys the
-    rationale by hypothesis, so re-sending the row WITH a reason clears this — which is why
-    the check reads `shelved_rationales` rather than the row."""
-    assert _errors(
-        _PROLOGUE + _ONE_PRED + _LEAD + _shelved('"outranked by h-002"') + _REAL_CONCLUDE
-    ) == []
-
 
 _IP1 = (
     ":L l-001.impact_preds "

@@ -610,43 +610,17 @@ def test_a_surviving_row_with_no_hypothesis_id_is_named_not_dropped():
     assert _parse_errors(validate_companion(doc))
 
 
-def test_a_shelved_row_with_no_hypothesis_id_is_named_not_dropped():
-    """The same drop three lines above a warning for the very same shape: `:T shelved`
-    already refused a row with no lead attribution, while one with no hypothesis id went
-    silently — and #34's prediction-closure rule reads that list to decide which hypotheses
-    still owe their predictions."""
-    doc = _conclude_table(':T shelved [hyp_id|by_lead|rationale]\n|l-001|"outranked by h-001"')
-    _companion, warnings = parse_dense_companion(doc)
-    assert len(warnings) == 1
-    assert warnings[0].reason.startswith("shelved row has no hypothesis id")
-    assert _parse_errors(validate_companion(doc))
-
-
-def test_an_empty_table_written_as_the_none_marker_stays_silent_in_both():
-    """The control that makes those two warnings honest, and a bug of its own on the shelved
-    side: `_row_cells` pads a lone `none` row to the block's width, so the marker reached
-    `_project_shelved_block` as `hyp_id="none"` with an empty `by_lead` and earned the
-    lead-attribution warning. A run that shelved nothing was told it had written a bad row."""
+def test_an_empty_table_written_as_the_none_marker_stays_silent():
+    """The control that makes the guard above honest. `_row_cells` pads a lone `none` row to
+    the block's width, so the marker arrives as a real record with `hyp_id="none"` — a run
+    that carried nothing into the close must not be told it wrote a bad row."""
     for block in (
         ":T conclude.surviving [hyp_id|final_weight]\nnone",
-        ":T shelved [hyp_id|by_lead|rationale]\nnone",
-        ":T shelved [hyp_id|by_lead|rationale]\nn/a",
+        ":T conclude.surviving [hyp_id|final_weight]\nn/a",
     ):
         doc = _conclude_table(block)
         assert parse_dense_companion(doc)[1] == [], block
         assert validate_companion(doc) == [], block
-
-
-def test_a_shelved_row_that_names_both_still_lands():
-    """The positive control for the pair of guards above."""
-    doc = _conclude_table(
-        ':T shelved [hyp_id|by_lead|rationale]\nh-001|l-001|"outranked by h-002"'
-    )
-    companion, warnings = parse_dense_companion(doc)
-    assert warnings == []
-    lead = companion["findings"][0]
-    assert lead["shelved"] == ["h-001"]
-    assert lead["shelved_rationales"] == {"h-001": "outranked by h-002"}
 
 
 def test_a_hypothesis_row_with_an_empty_id_is_refused_once_not_twice():

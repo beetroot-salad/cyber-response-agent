@@ -448,7 +448,7 @@ deferred:
 | declared | settled by | deferred in |
 |---|---|---|
 | `ac<n>` on `:H h-NNN.authz` | a `:R authz` row whose `fulfills` names it | `:T conclude.deferred_authz [contract_ref\|rationale]` |
-| `p<n>`/`ap<n>` on a hypothesis that is neither `--` nor shelved | a `:T resolutions` head that cites it and moves the hypothesis | `:T conclude.deferred_preds [prediction_ref\|rationale]` |
+| `p<n>`/`ap<n>` on a hypothesis that is not `--` | a `:T resolutions` head that cites it and moves the hypothesis | `:T conclude.deferred_preds [prediction_ref\|rationale]` |
 | `ip<n>` on `:L l-NNN.impact_preds` | a `:R impact` row whose `pred_ref` names it | `:T conclude.deferred_impact [prediction_ref\|rationale]` |
 
 ```invlang

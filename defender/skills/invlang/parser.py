@@ -298,9 +298,10 @@ HYP_DECLARATION_BLOCK_RE = re.compile(
 
 #: An `h-*` id, including the hierarchical child form: when a lean hypothesis refines into
 #: sub-cases the language allocates `h-{parent}-{ordinal}` (`h-001` → `h-001-001`) and writes
-#: the children into the lead's `new_hypotheses` with the parent shelved in the same block
-#: (`docs/investigation-language.md` §Refinement via hierarchical IDs). One owner: the
-#: validator reads which tokens are hypothesis references from here, and
+#: the children into the lead's `new_hypotheses` (`docs/investigation-language.md` §Refinement
+#: via hierarchical IDs); the parent is retired by resolving it, #933 having retired the
+#: `:T shelved` row that used to do it in the same block. One owner: the validator reads
+#: which tokens are hypothesis references from here, and
 #: `deferred_hypothesis_ids` reads which dropped rows it can map back to one.
 HYPOTHESIS_ID_RE = re.compile(r"h-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*")
 
@@ -790,10 +791,9 @@ _DEFERRAL_BLOCKS: dict[str, tuple[str, str]] = {
 
 #: The `Conclude` fields a `:T conclude.<sub>` block writes — everything else under `conclude`
 #: came from a flat `<key> <value>` row in `:T conclude` itself. Derived from
-#: `_DEFERRAL_BLOCKS` rather than restated. `validate._DEFERRAL_FIELDS` is the same subtraction
-#: one module over, minus `surviving_hypotheses` — that one is a claim about the CLOSE, which
-#: `_is_closing` counts and `_warn_conclude_recorded_nothing` does not — and it IMPORTS this
-#: set rather than restating it, for the reason this comment gives.
+#: `_DEFERRAL_BLOCKS` rather than restated. `validate._NON_CLOSING_FIELDS` IMPORTS this set
+#: whole rather than restating it: none of these fields means the document wrote `:T conclude`,
+#: so none of them may arm the closure gates.
 _CONCLUDE_SUBTABLE_FIELDS: frozenset[str] = frozenset(
     {"surviving_hypotheses", *(field for field, _col in _DEFERRAL_BLOCKS.values())}
 )
@@ -959,8 +959,7 @@ class _Projector:
         A lone `none` / `n/a` row says the table is empty; `_row_cells` pads it to the block
         width so it reaches `project_one` as a real record with `id == "none"`. Every
         sub-table projector that reads an id filters it (`_project_surviving_block`,
-        `_project_shelved_block`, `_project_deferral_block`); the two `:L` plan blocks read
-        one too.
+        `_project_deferral_block`); the two `:L` plan blocks read one too.
         """
         return [
             rec for rec in self._project_rows(block, project_one)
@@ -1242,9 +1241,31 @@ class _Projector:
             self._project_resolutions_block(block)
             return True
         if name == "shelved":
-            self._project_shelved_block(block)
+            self._warn_retired_shelved(block)
             return True
         return False
+
+    def _warn_retired_shelved(self, block: Block) -> None:
+        """`:T shelved` is retired, and says so by name rather than as "unknown block".
+
+        The generic fallthrough is an error pointing away from its cause — the same defect
+        `_warn_unknown_conclude_subblock` exists to prevent one tag over. A run that writes the
+        row is not guessing at a block tag; it is using a spelling every version of the format
+        docs taught, so the refusal owes it the replacement rather than a shrug.
+
+        Retired because no investigation on record ever wrote one, while it stayed a discharge
+        arm on rules #23, #24 and #34 and two fields on the shipped document — a retirement
+        route the validator honoured and the injected SKILL.md never taught, so the only runs
+        that could reach it were the ones that guessed the grammar right.
+        """
+        self._warn(
+            block, -1, "",
+            "`:T shelved` is retired — a hypothesis leaves the live frontier by being "
+            "RESOLVED, and a run that is no longer carrying one says so by moving its final "
+            "weight to `--` in a `:T resolutions` row, or by leaving it out of "
+            "`:T conclude.surviving`. Neither this block nor its rows are projected, so "
+            "nothing here reaches the close.",
+        )
 
     def _stale_hyp_header(self, block: Block) -> bool:
         """True (and warned) when a `:H` DECLARATION block's header is off-schema.
@@ -1445,9 +1466,9 @@ class _Projector:
         committed block, so a loop that adds a route or a predicate writes a SECOND block and
         assignment would delete the first one's rows with no warning.
 
-        Both drop the empty-TABLE marker, the way `_project_surviving_block`,
-        `_project_shelved_block` and `_project_deferral_block` do. `_row_cells` pads a lone
-        `none` to the block width, so without the filter it lands as a record whose id IS
+        Both drop the empty-TABLE marker, the way `_project_surviving_block` and
+        `_project_deferral_block` do. `_row_cells` pads a lone `none` to the block width, so
+        without the filter it lands as a record whose id IS
         `none` — and rules #18 / #29 then emit four and seven refusals apiece, none of which
         says the author wrote the marker.
         """
@@ -1765,44 +1786,6 @@ class _Projector:
             conclude: dict[str, Any] = self.out.setdefault("conclude", {})
             rows: list[dict[str, str]] = conclude.setdefault(field, [])
             rows.append(entry)
-
-    def _project_shelved_block(self, block: Block) -> None:
-        """`:T shelved [hyp_id|by_lead|rationale]` — which hypotheses a lead set aside.
-
-        Both empty-cell cases warn. A missing `hyp_id` would leave the shelved hypothesis out
-        of every lead's `shelved` list, and the prediction-closure rule reads that list to
-        decide which hypotheses still owe their predictions.
-
-        The empty-TABLE marker is honoured here the way `:T conclude.surviving` honours it:
-        `_row_cells` pads a lone `none` row to the block's width, so the marker arrives as
-        `hyp_id="none"` with an empty `by_lead` and would otherwise earn the lead-attribution
-        warning.
-        """
-        for idx, row, rec in self._for_each_row(block):
-            # Unquoted: `validate._shelved_hypothesis_ids` resolves these against the declared
-            # `h-*` by equality (rules #23 and #24 both discharge on the answer), so a quoted
-            # `"h-002"` loses the discharge and is reported as an undeclared hypothesis
-            # besides.
-            hyp = _unquote(rec.get("hyp_id") or "")
-            if is_conclude_empty_marker(hyp):
-                continue  # lint-row-drop: ok — the empty-TABLE marker, not a row
-            if not hyp:
-                self._warn(
-                    block, idx, row,
-                    "shelved row has no hypothesis id — the row records WHICH hypothesis "
-                    "was set aside, so an empty `hyp_id` cell records nothing. Name the "
-                    "`h-*`, or write the whole table as one `none` row if nothing was "
-                    "shelved.",
-                )
-                continue
-            lid = _unquote(rec.get("by_lead") or "")
-            if not lid:
-                self._warn(block, idx, row, "shelved row has no lead attribution")
-                continue
-            lead = self.lead_bucket(lid)
-            lead.setdefault("shelved", []).append(hyp)
-            if rec.get("rationale"):
-                lead.setdefault("shelved_rationales", {})[hyp] = _unquote(rec["rationale"])
 
 
 def companion_from_blocks(

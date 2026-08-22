@@ -61,7 +61,7 @@ prompt-side change: #934; validator implementation
 **v2.14 delta:** *(Superseded by v2.18 above: rule #36 is struck as retired vocabulary. The implementation path cited below does not exist in this repository. Left as written for the record.)* rule #36 — affirmative `true_positive` disposition. Closes the absence-of-benign-confirmation cascade (4 production runs documented in `docs/decisions/analyze-true-positive-routing.md`) by structurally rejecting `disposition: true_positive` writes whose `surviving_hypotheses[]` carries no hypothesis that is both adversarially-classified AND graded `++`. Validator implementation: `hooks/scripts/invlang_checks_authorization.py:_check_affirmative_true_positive`. Empirically motivated: trap-set evaluation showed prompt-only guidance lets ~50% of false-true-positive cases through; the structural gate raises catch rate to ~100%.
 
 **v2.13 delta:** Tier-0 contract-completeness rules between PREDICT and ANALYZE.
-- Rule #34 (prediction closure at CONCLUDE) — at REPORT, every declared `p*` / `ap*` on a non-refuted, non-shelved hypothesis must be cited in some resolution's `matched_prediction_ids[]` with a non-null `after`, OR appear in `conclude.deferred_predictions[]` with rationale. Generalises rule #6 (which only fired on `++`) into a coverage gate at REPORT regardless of weight. New conclude surface: `deferred_predictions[]` (parallel to `deferred_authorizations[]` and `deferred_impact_predictions[]`).
+- Rule #34 (prediction closure at CONCLUDE) — at REPORT, every declared `p*` / `ap*` on a non-refuted hypothesis must be cited in some resolution's `matched_prediction_ids[]` with a non-null `after`, OR appear in `conclude.deferred_predictions[]` with rationale. Generalises rule #6 (which only fired on `++`) into a coverage gate at REPORT regardless of weight. New conclude surface: `deferred_predictions[]` (parallel to `deferred_authorizations[]` and `deferred_impact_predictions[]`).
 - Rule #35 (sibling prediction divergence) — *(Superseded: #35 was merged into rule #23 at v2.17 and rewritten as a gap entry at v2.19, and the rule #32 it generalises is struck at v2.19 too. Left as written for the record.)* within a sibling group (shared `parent_hypothesis_id` + `attached_to_vertex`), no two siblings may declare identical prediction signatures (combining `(subject, claim)` from `predictions[]` and `(target, attribute, claim)` from `attribute_predictions[]`, case-normalised). Generalises rule #32 (integrity-peer-specific, contract-gated) to all sibling forks regardless of contract presence.
 - Companion to spec rule #33 (attribute-prediction structure) — already in schema.md; documented here for completeness.
 
@@ -517,9 +517,9 @@ verdict. Omit the `hypothesize` block in these cases.
 
 For full-loop investigations, `hypothesize` is written once (after
 CONTEXTUALIZE, before the first GATHER lead). Subsequent-loop hypothesis
-evolution is captured inside leads via `new_hypotheses` (additions) and
-`shelved` (retractions). There is no second top-level `hypothesize`
-block.
+evolution is captured inside leads via `new_hypotheses` (additions); a
+hypothesis is retracted by being resolved to `--`, `:T shelved` having
+been retired in #933. There is no second top-level `hypothesize` block.
 
 ### Vertex
 
@@ -633,7 +633,7 @@ A lead has one header row in `:L findings` plus zero or more lead-scoped sub-blo
 | `:L l-{id}.impact_preds` | pre-registered threshold predicates (`ip*`) graded by ANALYZE into `:R impact` rows |
 | `:L l-{id}.substitutions` | query substitutions (`key|value` pairs) |
 | `:H l-{id}.new_hypotheses` | hypotheses born inside the lead |
-| `:T shelved` | hypotheses dropped from the live frontier, one row per hypothesis, each naming its lead in the `by_lead` COLUMN. Not `:T l-{id}.shelved`: `:T` carries no `l-NNN.`-prefixed block, and since #933 the parser refuses one on write rather than dropping its rows in silence. |
+| `:T shelved` | RETIRED (#933). No investigation on record ever wrote one, while it stayed a discharge arm on rules #23, #24 and #34 and two fields on the shipped document — a retirement route the validator honoured and the injected SKILL.md never taught. The parser refuses the block by name and projects nothing; a hypothesis leaves the live frontier by being resolved to `--`, or by being left out of `:T conclude.surviving`. |
 | `:R authz` | authorization-contract verdicts on confirmed edges (see §Authorization) |
 | `:R consultations` | non-authz anchor queries (baselines, registry lookups) |
 | `:R impact` | impact-prediction verdicts (see §Impact) |
@@ -1056,8 +1056,8 @@ The validator enforces **26 active rules** (rules 1–36 with ten gaps: 36 numbe
 8. **Append-only.** No existing record is mutated.
 
 9. **Lead block self-containment.** Every vertex, edge, or hypothesis
-   produced by a lead lives inside that lead's `outcome.observations`,
-   `new_hypotheses`, or `shelved`.
+   produced by a lead lives inside that lead's `outcome.observations`
+   or `new_hypotheses`.
 
 10. **(Demoted to review-only.)** *Mechanical leads stay within their
     data source* — a lead's `outcome.observations` contains only
@@ -1293,13 +1293,15 @@ The validator enforces **26 active rules** (rules 1–36 with ten gaps: 36 numbe
     When a `conclude:` block is present, every hypothesis declared in
     `hypothesize.hypotheses[]` or any prior `lead.outcome.new_hypotheses[]`
     must either (a) have its final effective weight be `--` across the
-    resolutions chain, (b) be named in
-    `conclude.surviving_hypotheses[]`, OR (c) be retired by a
-    `:T shelved` row.
-    *(Arm (c) is the same translation rule #34 applies: `:H` rows are
-    immutable, so a `:T shelved` row is the only way a run can say it
-    stopped carrying a hypothesis without refuting it. Without it the
-    rule's two offered repairs are both false claims about the case —
+    resolutions chain, OR (b) be named in
+    `conclude.surviving_hypotheses[]`.
+    *(A third arm — retirement by a `:T shelved` row — was removed in
+    #933 along with the block. It let a run stop carrying a hypothesis
+    without refuting it, which is a real shape; but no investigation on
+    record ever used it, and the block was never taught in the injected
+    SKILL.md, so the arm was reachable only by a run that guessed its
+    grammar while the rule stayed armed for everyone. A run that is no
+    longer carrying a hypothesis resolves it. The removed note read:
     listing a set-aside hypothesis as surviving asserts the run is
     still carrying it, and `--` asserts a refutation that never
     happened.)*
@@ -1601,7 +1603,7 @@ The validator enforces **26 active rules** (rules 1–36 with ten gaps: 36 numbe
 34. **Prediction closure at CONCLUDE.** When a `conclude:` block is
     written, every declared `predictions[].id` (`p*`) and
     `attribute_predictions[].id` (`ap*`) on a hypothesis whose final
-    status is neither `refuted` nor `shelved` (i.e. `active` or
+    status is not `refuted` (i.e. `active` or
     `confirmed`) must be either (a) cited in some resolution's
     `matched_prediction_ids[]` with a non-null `after`, OR (b) listed
     in `conclude.deferred_predictions[]` with a non-empty `rationale`.
@@ -1629,8 +1631,9 @@ The validator enforces **26 active rules** (rules 1–36 with ten gaps: 36 numbe
     `status` column, and that is the same translation
     `_check_hypothesis_persistence` applies to rule #24: `status` is
     fixed at declaration time and append-only forbids updating it, so it
-    can never carry a FINAL status. Refuted is final weight `--`;
-    shelved is a `:T shelved` row. Scoped to the declaring hypothesis,
+    can never carry a FINAL status. Refuted is final weight `--`, and
+    since #933 retired `:T shelved` it is the whole of what "final
+    status" means here. Scoped to the declaring hypothesis,
     never document-wide — a sibling's `p1` discharges nothing, which is
     the cross-citation rule #25 refuses one level down.
 

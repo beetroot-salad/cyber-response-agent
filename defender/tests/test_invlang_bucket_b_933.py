@@ -1284,10 +1284,9 @@ def _pred_closure_doc(
     refuts: str = "",
     resolutions: str | None = None,
     deferred: str = "",
-    shelved: str = "",
 ) -> str:
     """`resolutions=None` writes the default `p1` citation; `resolutions=""` writes no
-    `:T resolutions` block at all, which is what the shelved fixture needs."""
+    `:T resolutions` block at all."""
     if resolutions is None:
         resolutions = _resolutions(_cites("p1"))
     return _doc(
@@ -1298,7 +1297,6 @@ def _pred_closure_doc(
         refuts,
         _LEADS,
         resolutions,
-        shelved,
         _conclude(),
         deferred or _deferred_preds(),
     )
@@ -1381,29 +1379,13 @@ def test_an_attribute_prediction_deferred_with_a_rationale_closes_clean() -> Non
 
 
 def test_predictions_on_a_refuted_hypothesis_are_exempt() -> None:
-    """"on a hypothesis whose final status is neither `refuted` nor `shelved`". `:H` rows are
-    immutable, so `--` on the resolution chain is the only way a run can say "refuted" after
-    the fact — which is also how `_check_benign_authz` already reads survival."""
+    """"on a hypothesis whose final status is not `refuted`". `:H` rows are immutable, so
+    `--` on the resolution chain is the only way a run can say "refuted" after the fact — which is also how `_check_benign_authz` already reads survival."""
     doc = _pred_closure_doc(
         preds=_H1_PREDS,
         refuts=_H1_REFUT,
         resolutions=_resolutions(
             "h-001  null → --   [l-001 r1 severe ⟂ e-001 :: the series is bursty, not cadenced]"
-        ),
-    )
-    assert _errors(doc) == []
-
-
-def test_predictions_on_a_shelved_hypothesis_are_exempt() -> None:
-    """The other exemption. A `:T shelved` row retires the hypothesis from the live frontier
-    with its own rationale, so its predictions are already accounted for. No resolution row at
-    all here, so nothing but the shelving can be what closes p1 and p2."""
-    doc = _pred_closure_doc(
-        preds=_H1_PREDS,
-        resolutions="",
-        shelved=(
-            ":T shelved [hyp_id|by_lead|rationale]\n"
-            'h-001|l-001|"the monitoring window does not overlap; the mechanism cannot fire"'
         ),
     )
     assert _errors(doc) == []

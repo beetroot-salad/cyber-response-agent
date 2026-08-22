@@ -206,34 +206,24 @@ def _lead_prefix(lid: str) -> str:
 
 
 def _cited_hypothesis_ids(lead: FindingRecord) -> Iterator[tuple[str, list[str]]]:
-    """Every `h-*` a LEAD names, per site, paired with the phrase that says where.
+    """Every `h-*` a LEAD names, paired with the phrase that says where.
 
-    Two sites, and both are lists the parser splits without ever looking the ids up:
-    `:L findings`' `tests` column projects to `tests_hypotheses` through `_split_csv`, and
-    `:T shelved`'s first cell appends to `shelved`.
+    One site since #933 retired `:T shelved`: `:L findings`' `tests` column, which the parser
+    splits to `tests_hypotheses` through `_split_csv` without ever looking the ids up.
 
-    The shape gate applies at `tests` ONLY, because only `tests` is mixed: it lists the
-    COMMITMENTS the lead was run for, which is three id kinds (`ac1` and `p2` alongside `h-*`).
-    A `p2` resolves against `:H h-NNN.preds` and an `ac1` against `:H h-NNN.authz` — separate
-    rules against separate declaring blocks — so reading the column as hypotheses-only would
-    deny a correct document.
-
-    `:T shelved`'s column is `hyp_id`: every value in it IS a hypothesis reference. Gating it
-    on shape would exempt exactly the typo the rule exists to catch — `h_888`, `H-888`,
-    `hyp-888` all shelve nothing and would pass in silence — so the gate is withheld there and
-    an unrecognizable id is reported like any other undeclared one.
+    SHAPE-GATED, because `tests` is mixed: it lists the COMMITMENTS the lead was run for,
+    which is three id kinds (`ac1` and `p2` alongside `h-*`). A `p2` resolves against
+    `:H h-NNN.preds` and an `ac1` against `:H h-NNN.authz` — separate rules against separate
+    declaring blocks — so reading the column as hypotheses-only would deny a correct document.
+    The cost is that a malformed `h-*` here (`h_888`, `H-888`) reads as some other kind of id
+    and passes; the column cannot distinguish them, and denying the document is worse.
     """
-    for site, ids, shaped in (
-        ("`:L findings` tests", lead.get("tests_hypotheses"), True),
-        ("`:T shelved` shelves", lead.get("shelved"), False),
-    ):
-        cited = [
-            hid for hid in (ids or [])
-            if isinstance(hid, str) and hid
-            and (not shaped or HYPOTHESIS_ID_RE.fullmatch(hid))
-        ]
-        if cited:
-            yield site, cited
+    cited = [
+        hid for hid in (lead.get("tests_hypotheses") or [])
+        if isinstance(hid, str) and hid and HYPOTHESIS_ID_RE.fullmatch(hid)
+    ]
+    if cited:
+        yield "`:L findings` tests", cited
 
 
 def _hypothesis_references(
@@ -272,10 +262,9 @@ def _check_hypothesis_refs(
     time, so a phantom would move to `++` in silence and `_walkers.final_weights` would report
     it live.
 
-    FOUR sites reference an `h-*` and this owns all four: a resolution, a lead's `tests`, a
-    `:T shelved` row, and `:T conclude.surviving`. The middle two are the ones a run reaches
-    first — a lead can claim to TEST a hypothesis nobody declared, and a shelve can retire one
-    that never existed.
+    THREE sites reference an `h-*` and this owns all three: a resolution, a lead's `tests`,
+    and `:T conclude.surviving`. The middle one is the one a run reaches first — a lead can
+    claim to TEST a hypothesis nobody declared.
 
     `deferred` keeps the deference honest: a `:H` DECLARATION block the parser rejected (a
     stale header, an `attached_to` naming an edge) leaves every reference to it looking
@@ -527,15 +516,13 @@ def _check_fork_distinctness(companion: CompanionBody) -> list[str]:
     write would be denied for a row the author may no longer touch. Refuting one of the two is
     the in-grammar repair.
 
-    SHELVED counts as retired, the same reading `_check_hypothesis_persistence` (#24) takes.
-    `live_hypothesis_ids` filters on final weight `--` alone and knows nothing about
-    `:T shelved`, so without this term the two rules disagree about what the run is still
-    carrying — and this one is the only one that WEDGES on the disagreement: both repairs it
-    offers rewrite an immutable `:H` row, leaving a `--` the run never earned as the sole exit.
-    Setting one sibling aside is the in-grammar retirement, and #24's own arm (c) exists so a
-    run is not forced to claim a refutation that never happened.
+    LIVE is final weight `--` alone, which is the whole of what retirement means since #933
+    retired `:T shelved`: a run that is no longer carrying a sibling resolves it. The rule and
+    `_check_hypothesis_persistence` (#24) read the same word the same way, which is the
+    property that matters — the two used to be able to disagree about what the run was still
+    carrying, and this is the rule that wedged on the disagreement.
     """
-    live = set(_walkers.live_hypothesis_ids(companion)) - _shelved_hypothesis_ids(companion)
+    live = set(_walkers.live_hypothesis_ids(companion))
     groups: dict[tuple[str, str], dict[frozenset[str], list[str]]] = {}
     for hid, hyp in _walkers.all_hypotheses(companion).items():
         if hid not in live:
@@ -2616,13 +2603,15 @@ def _check_hypothesis_persistence(companion: CompanionBody) -> list[str]:
     neither refuted nor listed was dropped, and nothing else on disk says so.
 
     The failure is grading blindness papered over by silence: a hypothesis declared in loop 1,
-    never moved off `null`, never shelved, and left out of the close reads exactly like one
-    that was never proposed. The document then concludes over a smaller mechanism set than it
-    opened with, and no reader can tell which one went missing.
+    never moved off `null`, and left out of the close reads exactly like one that was never
+    proposed. The document then concludes over a smaller mechanism set than it opened with,
+    and no reader can tell which one went missing.
 
     Two discharges. Final effective weight `--` — the run refuted it — or a
     `:T conclude.surviving` row naming it. What was not refuted is what the run is still
-    carrying, and naming it is the whole price.
+    carrying, and naming it is the whole price. #933 retired the third, a `:T shelved` row:
+    no investigation on record ever wrote one, and an escape hatch the injected SKILL.md never
+    taught was reachable only by a run that guessed its grammar.
 
     A close that writes NO surviving table is out of scope, and that is a measured concession
     rather than an oversight. The table is omittable by construction — `_project_surviving_block`
@@ -2657,22 +2646,14 @@ def _check_hypothesis_persistence(companion: CompanionBody) -> list[str]:
         row["hypothesis"] for row in conclude["surviving_hypotheses"]
         if isinstance(row, dict) and isinstance(row.get("hypothesis"), str)
     }
-    # SHELVED is the third discharge, for the reason rule #34 reads it as
-    # one namespace over: a `:T shelved` row is the in-grammar way to retire a hypothesis
-    # without refuting it, and `:H` rows are immutable so there is no other. Without it the
-    # rule's two offered repairs are both false claims about the case — listing a set-aside
-    # hypothesis as surviving says the run is still carrying it, and `--` claims a refutation
-    # that never happened.
-    shelved = _shelved_hypothesis_ids(companion)
     return [
-        f"conclude: hypothesis {hid} is neither refuted, shelved, nor carried into the "
-        f"close — its final weight is {_weight_text(weight)} and the "
-        f"`:T conclude.surviving` table, which names {_known_ids(surviving)}, omits it. "
-        f"Resolve it to {REFUTED_WEIGHT!r}, set it aside with a `:T shelved` row, or add "
-        f"its row; a hypothesis declared and then dropped reads like one that was never "
-        f"proposed"
+        f"conclude: hypothesis {hid} is neither refuted nor carried into the close — its "
+        f"final weight is {_weight_text(weight)} and the `:T conclude.surviving` table, "
+        f"which names {_known_ids(surviving)}, omits it. Resolve it to "
+        f"{REFUTED_WEIGHT!r}, or add its row; a hypothesis declared and then dropped reads "
+        f"like one that was never proposed"
         for hid, weight in _walkers.final_weights(companion).items()
-        if weight != REFUTED_WEIGHT and hid not in surviving and hid not in shelved
+        if weight != REFUTED_WEIGHT and hid not in surviving
     ]
 
 
@@ -2744,19 +2725,18 @@ def _check_ceiling_test_scope(companion: CompanionBody) -> list[str]:
     ]
 
 
-#: The `Conclude` fields a `:T conclude.deferred_*` block writes, and the ONLY fields it can
-#: write. Subtracted below so a mid-run write of the SKILL-taught empty-table marker cannot
-#: read as a close — belt to `_project_deferral_block`'s braces, which opens the table lazily
-#: for the same reason.
+#: Every `:T conclude.*` SUB-TABLE field — the fields a block writes without the document
+#: having written `:T conclude` itself. Subtracted below so a mid-run write of one cannot read
+#: as a close: `_project_deferral_block` opens its table lazily for the same reason, and
+#: `_project_surviving_block` CANNOT (see `_is_closing`), which is why the subtraction is the
+#: load-bearing half here rather than the belt.
 #:
-#: DERIVED from `parser._DEFERRAL_BLOCKS` (via `_CONCLUDE_SUBTABLE_FIELDS`), never restated:
-#: that dict's own comment invites "a fourth namespace should be a row here, not a fourth
-#: projector", and a hand-written copy one module over is exactly what such a row leaves
-#: behind — after which a mid-run `:T conclude.deferred_<new>` arms all three closure gates
-#: against every commitment the run has not reached yet. `surviving_hypotheses` is the one
-#: sub-table field that is NOT subtracted: it is a claim about the CLOSE, which
-#: `_check_hypothesis_persistence` already reads as one.
-_DEFERRAL_FIELDS: frozenset[str] = _CONCLUDE_SUBTABLE_FIELDS - {"surviving_hypotheses"}
+#: DERIVED from `parser._CONCLUDE_SUBTABLE_FIELDS`, never restated: that dict's own comment
+#: invites "a fourth namespace should be a row here, not a fourth projector", and a
+#: hand-written copy one module over is exactly what such a row leaves behind — after which a
+#: mid-run `:T conclude.deferred_<new>` arms all three closure gates against every commitment
+#: the run has not reached yet.
+_NON_CLOSING_FIELDS: frozenset[str] = _CONCLUDE_SUBTABLE_FIELDS
 
 
 def _is_closing(companion: CompanionBody) -> bool:
@@ -2771,11 +2751,21 @@ def _is_closing(companion: CompanionBody) -> bool:
     `_project_conclude_scalars` warns when it recognizes no key at all — so an empty dict can
     only mean the close is not written.
 
-    `surviving_hypotheses` counts: `:T conclude.surviving` is a claim about the close, and
-    `_check_hypothesis_persistence` already reads it as one.
+    `surviving_hypotheses` does NOT count, though it is a claim ABOUT the close: being a claim
+    about the close is not being the close, which is the question this asks.
+    `_project_surviving_block` opens the key before it reads a row and must keep doing so —
+    `_check_hypothesis_persistence` reads KEY PRESENCE to tell an absent table (defer to the
+    resolution record) from one written as the `none` marker (a claim that NOTHING survived),
+    so the lazy-open used for the deferral tables would silently disarm that rule. That leaves
+    the subtraction as the only place to draw the line, and it costs nothing: rule #24 gates
+    itself on its own key-presence test and never consults this function.
+
+    Without the subtraction, a mid-run `:T conclude.surviving` with no `:T conclude` anywhere
+    arms all three closure gates — and since append-only forbids removing the block and
+    `fix_row` cannot reach it, the document is unwritable from then on.
     """
     conclude = companion.get("conclude")
-    return isinstance(conclude, dict) and bool(set(conclude) - _DEFERRAL_FIELDS)
+    return isinstance(conclude, dict) and bool(set(conclude) - _NON_CLOSING_FIELDS)
 
 
 @dataclass(frozen=True)
@@ -3218,71 +3208,6 @@ def _check_impact_closure(companion: CompanionBody) -> list[str]:
 _SEVERITY_OWING: frozenset[str] = frozenset(vocab.IMPACT_VERDICT) - {"within"}
 
 
-def _shelved_hypothesis_ids(companion: CompanionBody) -> set[str]:
-    """Every `h-*` a `:T shelved` row retired, across every lead — the hypotheses a run set
-    aside rather than answered, which is one of the two ways #34 lets a prediction go."""
-    return {
-        hid
-        for lead in _leads(companion)
-        for hid in lead.get("shelved") or []
-        if isinstance(hid, str)
-    }
-
-
-def _shelved_rationales(companion: CompanionBody) -> dict[str, str]:
-    """The reason each shelved hypothesis was set aside, across every lead.
-
-    Document-wide, matching `_shelved_hypothesis_ids`: a hypothesis two leads both shelved is
-    accounted for if either row said why.
-    """
-    out: dict[str, str] = {}
-    for lead in _leads(companion):
-        rationales = lead.get("shelved_rationales")
-        if not isinstance(rationales, dict):
-            continue
-        for hid, why in rationales.items():
-            if isinstance(hid, str) and _row_states_something(why):
-                out.setdefault(hid, why)
-    return out
-
-
-def _check_shelved_rationale(companion: CompanionBody) -> list[str]:
-    """A `:T shelved` row says WHY the hypothesis was set aside.
-
-    Shelving is a DISCHARGE, and since #933 it is the widest one in the language: three of the
-    rules armed here read it as settling the question — #23 stops comparing the hypothesis
-    against its siblings, #24 stops requiring it in the surviving table, and #34 releases every
-    `p*`/`ap*` it declared. Measured on a document with two same-claim hypotheses, one contract
-    and four predictions: two rationale-less `:T shelved` rows take it from seven refusals to
-    one.
-
-    The deferral tables built in this same change refuse a blank rationale by name, on the
-    ground that "a blank cell records nothing while still discharging it". That argument does
-    not weaken when the discharge gets broader — it is the same sentence about a bigger claim,
-    so the two escape hatches are priced the same. Without this, a run that cannot answer its
-    commitments has a CHEAPER exit than the one the rules teach, and the finished document
-    carries no "why" anywhere.
-
-    Read off `shelved_rationales`, not off the row, so the repair is in-grammar: `:T shelved`
-    rows are append-only like everything else, and `_project_shelved_block` keys the rationale
-    by hypothesis — so re-emitting the row WITH a reason sets the key and clears this, where a
-    parse warning on the original row could never be cleared.
-
-    `none` / `n/a` does not count, for the reason `_unclosed_commitments` gives: it is the
-    format's own word for "nothing to say".
-    """
-    excused = _shelved_rationales(companion)
-    return [
-        f"conclude: hypothesis {hid} is shelved with no rationale — a `:T shelved` row "
-        f"RETIRES the hypothesis, releasing it from the sibling-fork rule, the surviving "
-        f"table and every prediction it declared, so the row owes the reason it was set "
-        f"aside. Re-send the row as `{hid}|<lead>|\"<why it was set aside>\"`, or resolve "
-        f"the hypothesis instead; a discharge with no reason reads like one that was never "
-        f"made."
-        for hid in sorted(_shelved_hypothesis_ids(companion) - set(excused))
-    ]
-
-
 def _check_prediction_closure(companion: CompanionBody) -> list[str]:
     """Every `p*`/`ap*` on a hypothesis the run is still carrying was settled by some
     resolution, or deferred in `:T conclude.deferred_preds` with a reason.
@@ -3298,11 +3223,12 @@ def _check_prediction_closure(companion: CompanionBody) -> list[str]:
     CONCLUDE, and offers the deferral because at that point "the tool was never available" is a
     true and final answer.
 
-    Two discharges besides citation, and both are read off the RESOLUTION RECORD rather than
-    the `status` column the spec's wording names. `status` is a `:H` cell fixed at declaration
-    time and append-only forbids updating it, so it can never carry a FINAL status; the run
-    says "refuted" by moving the weight to `--` and "shelved" with a `:T shelved` row. That is
-    the same translation `_check_hypothesis_persistence` applies to spec #24.
+    The discharge besides citation is read off the RESOLUTION RECORD rather than the `status`
+    column the spec's wording names. `status` is a `:H` cell fixed at declaration time and
+    append-only forbids updating it, so it can never carry a FINAL status; the run says
+    "refuted" by moving the weight to `--`. That is the same translation
+    `_check_hypothesis_persistence` applies to spec #24 — and since #933 retired `:T shelved`,
+    the two rules read one word, not two.
 
     A citation only counts from a resolution with a non-null `after`. A row that cites `p1` and
     moves nowhere has recorded that the lead looked, not that the prediction settled — and
@@ -3323,12 +3249,11 @@ def _check_prediction_closure(companion: CompanionBody) -> list[str]:
         for hid, pids in _settled_predictions(companion).items()
         for pid in pids
     }
-    shelved = _shelved_hypothesis_ids(companion)
     weights = _walkers.final_weights(companion)
     declared = [
         _Commitment(hid, pid)
         for hid, hyp in _walkers.all_hypotheses(companion).items()
-        if weights.get(hid) != REFUTED_WEIGHT and hid not in shelved
+        if weights.get(hid) != REFUTED_WEIGHT
         for pid in sorted(_declared_prediction_ids(hyp))
     ]
     return [
@@ -3426,7 +3351,6 @@ def diagnose(
     found.extend(_plain(gated))
     found.extend(_plain(_check_ceiling_test_scope(companion)))
     found.extend(_plain(_check_hypothesis_persistence(companion)))
-    found.extend(_plain(_check_shelved_rationale(companion)))
     # The three closure gates, together and last: they are one sentence over three namespaces
     # (`_unclosed_commitments`), and each is only safe to run because its `deferred_*` table is
     # now projected.

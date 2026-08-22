@@ -295,8 +295,6 @@ class FindingRecord(_FindingRequired, total=False):
     impact_predictions: list[ImpactPrediction]
     new_hypotheses: list[HypothesisRecord]
     resolutions: list[ResolutionRecord]
-    shelved: list[str]
-    shelved_rationales: dict[str, str]
 
 
 

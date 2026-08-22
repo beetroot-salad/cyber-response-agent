@@ -132,7 +132,7 @@ def test_a_warned_or_landed_escape_is_not_a_drop(tmp_path):
 
 def test_both_verdicts_inside_one_function_family(tmp_path):
     """The discrimination that makes the detector real, and the shape of the motivating
-    `_project_shelved_block` finding: warned and unwarned escapes side by side, one
+    `_project_surviving_block` finding: warned and unwarned escapes side by side, one
     flagged and one cleared."""
     assert _quals(_GATE._scan(_scope(tmp_path, _DROPS + _WARNS))) == {
         "_Projector.project_drop"
@@ -342,7 +342,6 @@ def test_every_finding_this_gate_was_built_on_stays_fixed():
         # F-2's two spellings — the guard was split, so both are gone.
         "defender/skills/invlang/parser.py:_tokenize_fence:continue:in_story or cur is None",
         "defender/skills/invlang/parser.py:_tokenize_fence:continue:in_story",
-        "defender/skills/invlang/parser.py:_Projector._project_shelved_block:continue:not hyp",
         "defender/skills/invlang/parser.py:_Projector._project_surviving_block:"
         "continue:not hid or is_conclude_empty_marker(hid)",
     ):

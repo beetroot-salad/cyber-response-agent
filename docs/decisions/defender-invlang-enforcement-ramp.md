@@ -74,14 +74,14 @@ error rather than letting the write through. Scope is anchored to
    dropped is skipped (its commitments cannot be scoped), and so is a row
    with nothing to scope against at all.
 
-   #818 closed only the `:T resolutions` row. FOUR sites reference an
-   `h-*` and `_check_hypothesis_refs` now owns all four (#821): the
-   resolution, `:L findings`'s `tests` column, `:T shelved`, and
-   `:T conclude.surviving`. Two of the three added are the ones a run
-   reaches FIRST — a lead can claim to test a hypothesis nobody declared,
-   and a `:T shelved` row can retire one that never existed — so a typo
-   used to surface a step late, pointing at the resolution rather than at
-   the PLAN row that introduced it. The fourth is the one a run reaches
+   #818 closed only the `:T resolutions` row. THREE sites reference an
+   `h-*` and `_check_hypothesis_refs` now owns all three (#821, minus
+   `:T shelved`, retired in #933): the resolution, `:L findings`'s
+   `tests` column, and `:T conclude.surviving`. One of the two added is
+   the one a run reaches FIRST — a lead can claim to test a hypothesis
+   nobody declared — so a typo used to surface a step late, pointing at
+   the resolution rather than at the PLAN row that introduced it. The
+   third is the one a run reaches
    LAST, and the parser was accepting it and discarding its rows
    (`if name.startswith("conclude."): return True`), so the closing claim
    about what is still standing could name a phantom and nothing looked.
@@ -93,13 +93,11 @@ error rather than letting the write through. Scope is anchored to
    mixed: it is the commitments the lead was run for and the shipped
    golden proves that is three id kinds (`golden-sshpivot-ab3` tests `ac1`
    on l-002, `p2` on l-003), so reading the column as hypotheses-only
-   denies a correct document. `:T shelved`'s column is `hyp_id` — every
-   value in it IS a hypothesis reference, so no shape gate applies there;
-   one would exempt exactly the typo the rule exists to catch (`h_888`
-   shelves nothing and would pass in silence). The shape itself covers the
-   hierarchical child form `h-{parent}-{ordinal}`, which is what a lean
-   hypothesis refines into and what the lead's `new_hypotheses` declares
-   with the parent shelved in the same block.
+   denies a correct document. The shape itself covers the hierarchical
+   child form `h-{parent}-{ordinal}`, which is what a lean hypothesis
+   refines into and what the lead's `new_hypotheses` declares. (#933
+   retired `:T shelved`, the one site whose column was unmixed and so
+   took no shape gate; `tests` is now the only lead-side site.)
 
    The validator is a gate in front of a walker that minted the same
    phantom, and #821 closed that too: `_walkers.final_weights` seeded an
@@ -188,12 +186,13 @@ error rather than letting the write through. Scope is anchored to
    key, sentence punctuation folded away — was already #934's and is
    untouched. Two things came across from #933's before it was deleted,
    and only two:
-   * **Shelved counts as retired.** `live_hypothesis_ids` filters on
-     final weight `--` alone and knows nothing about `:T shelved`, so
-     without this term rule 10 and rule 11 disagreed about what the run
-     is still carrying — and rule 10 is the one that WEDGES on the
-     disagreement, because both repairs it offers rewrite an immutable
-     `:H` row and the only exit left is a `--` the run never earned.
+   * **Shelved counted as retired.** `live_hypothesis_ids` filters on
+     final weight `--` alone and knew nothing about `:T shelved`, so
+     without that term rule 10 and rule 11 disagreed about what the run
+     was still carrying — and rule 10 is the one that WEDGES on the
+     disagreement. #933 retired `:T shelved` outright, which settles the
+     disagreement the other way: `--` is now the whole of what retirement
+     means, and the two rules read one word.
    * **The trailing full stop comes off the END only.** `str.strip`
      takes a character SET, so `strip(" .\"'")` also ate a LEADING
      decimal point — fusing `.5σ above baseline` with `5σ above
@@ -470,8 +469,8 @@ error rather than letting the write through. Scope is anchored to
    land first. **Open: arm both** after the teaching has been in front
    of a corpus generation.
 
-   **#34.** Every `p*`/`ap*` on a hypothesis that is neither `--` nor
-   shelved is cited by a resolution with a non-null `after`, or deferred.
+   **#34.** Every `p*`/`ap*` on a hypothesis that is not `--` is cited by
+   a resolution with a non-null `after`, or deferred.
    "Final status" is read off the resolution record, not off the `:H`
    `status` column — append-only fixes that cell at declaration time, so
    it can never carry a FINAL status; same translation rule 11 applies to
