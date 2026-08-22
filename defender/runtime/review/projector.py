@@ -15,9 +15,9 @@ whenever the wording changes.
 
 **The cut is the `:T` tag family.** invlang already separates the two sides: `:R` records
 check results and learned facts, `:T resolutions` records belief movement. The rule is the
-whole family, not a list of the sub-blocks inside it — `:T resolutions`, `:T conclude`,
-`:T close` and `:T shelved` are all inference, and enumerating three of the four is how the
-rule drifts the next time a fifth is added. `:V`, `:E`, `:R`, `:H` and `:L` are what a lens
+whole family, not a list of the sub-blocks inside it — `:T resolutions`, `:T conclude` and
+`:T close` are all inference, and enumerating two of the three is how the rule drifts the next
+time a fourth is added. `:V`, `:E`, `:R`, `:H` and `:L` are what a lens
 sees.
 
 The cut reads the PARSED object rather than matching tag prefixes over the raw document:
@@ -67,9 +67,20 @@ UNTRUSTED_NOTE = (
 #: `:T close` appends to `closed_loops`.
 INFERENCE_COMPANION_KEYS: tuple[str, ...] = ("conclude", "closed_loops")
 
-#: The `:T`-derived keys the parser nests under each `:L findings` lead. `:T resolutions`
-#: lands in `resolutions`; `:T shelved` lands in `shelved` and `shelved_rationales`.
-INFERENCE_LEAD_KEYS: tuple[str, ...] = ("resolutions", "shelved", "shelved_rationales")
+#: The INFERENCE keys the parser nests under each `:L findings` lead. `:T resolutions`
+#: lands in `resolutions`.
+#:
+#: `predictions` and `impact_predictions` are the `:L l-NNN.{lead_preds,impact_preds}` blocks,
+#: projected since #933. They are not `:T`-derived, and they are here for the reason
+#: `INFERENCE_HYPOTHESIS_KEYS` is: a lens asked to reconstruct the reading must not be handed
+#: the reading. A `lead_preds` row carries `read_as` — the interpretation the run pre-committed
+#: to — and `advance_to`, which names the disposition it planned to route to; an `impact_preds`
+#: row carries `on_match` / `on_mismatch` / `escalation_on`, the verdict mapping that turns a
+#: measurement into an escalation. The prune is a DENYLIST (`_without`), so a field the parser
+#: starts projecting under a lead reaches every lens until it is named here.
+INFERENCE_LEAD_KEYS: tuple[str, ...] = (
+    "resolutions", "predictions", "impact_predictions",
+)
 
 #: The BELIEF-STATE keys on a hypothesis record — wherever one is declared: the `:H
 #: hypothesize.hypotheses` table and any lead's `new_hypotheses`. `weight` is the hypothesis's

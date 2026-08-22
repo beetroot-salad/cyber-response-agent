@@ -5,9 +5,9 @@ exactly what those rows declare.
 nothing declared. It was the shallowest of three reference sites and the second of two
 depths, and #821 is the rest of both:
 
-  * `:L findings`' `tests` column and `:T shelved`'s `hyp_id` reference a hypothesis the
+  * `:L findings`' `tests` column references a hypothesis the
     same way and neither resolved it. A lead could claim to TEST a hypothesis nobody
-    declared, and a `:T shelved` row could retire one that never existed — both upstream of
+    declared — upstream of
     the resolution the rule did catch, so a typo surfaced (if at all) one step late and
     pointing at the wrong row.
 
@@ -47,7 +47,6 @@ _HYP_HEADER = (
     "[id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]"
 )
 _LEAD_HEADER = ":L findings [id|loop|name|target|tests|system|window]"
-_SHELVED_HEADER = ":T shelved [hyp_id|by_lead|rationale]"
 _EDGE = (
     ":E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]\n"
     "e-002|executed|v-001|v-001|2026-05-05T03:42:11Z|siem-event:siem|\n"
@@ -55,8 +54,8 @@ _EDGE = (
 
 #: Scoped to this rule. `examples/` carries unrelated errors that predate it, so the corpus
 #: check below stays a check on the rule rather than a freeze of the whole validator's
-#: verdict. One substring covers all four sites — `moves`/`tests`/`shelves`/`names`
-#: undeclared hypothesis — because they share the message body by construction.
+#: verdict. One substring covers all three sites — `moves`/`tests`/`names` undeclared
+#: hypothesis — because they share the message body by construction.
 _MARKERS = ("undeclared hypothesis",)
 _COMMITMENT_MARKER = "tests commitment"
 
@@ -99,36 +98,18 @@ def test_a_lead_that_tests_an_undeclared_hypothesis_is_rejected():
     assert "h-001" in errors[0], "the error must show what IS declared"
 
 
-def test_a_shelved_row_retiring_an_undeclared_hypothesis_is_rejected():
-    """The second. Shelving is how a hypothesis leaves the run, so a phantom here reads as
-    a hypothesis that was raised and dropped — the record says a question was considered
-    and closed when it was never asked."""
-    errors = _errors(_doc(
-        _declaring("h-001") + "\n"
-        + _lead("h-001") + "\n"
-        + _SHELVED_HEADER + "\n"
-        'h-888|l-001|"weak signal"\n'
-    ))
-    assert len(errors) == 1
-    assert "'h-888'" in errors[0]
-
-
-def test_a_phantom_hierarchical_child_is_reported_at_both_sites():
+def test_a_phantom_hierarchical_child_is_reported():
     """The id shape the language allocates when a lean hypothesis refines into sub-cases:
     `h-001` → `h-001-001` (`docs/investigation-language.md` §Refinement via hierarchical
-    IDs), written into the lead's `new_hypotheses` with the parent shelved in the SAME
-    block — so `tests` and `:T shelved` are precisely where children are named. A
-    single-segment `h-[A-Za-z0-9]+` gate failed on the second hyphen and skipped them,
-    which exempted the one id shape the two new sites were added for."""
+    IDs), written into the lead's `new_hypotheses` — so `tests` is precisely where children
+    are named. A single-segment `h-[A-Za-z0-9]+` gate failed on the second hyphen and skipped
+    them, which exempted the one id shape the site was added for."""
     errors = _errors(_doc(
         _declaring("h-001") + "\n"
         + _lead("h-001,h-001-777") + "\n"
-        + _SHELVED_HEADER + "\n"
-        'h-001-888|l-001|"refined away"\n'
     ))
-    assert len(errors) == 2, errors
+    assert len(errors) == 1, errors
     assert "'h-001-777'" in errors[0]
-    assert "'h-001-888'" in errors[1]
 
 
 def test_a_declared_hierarchical_child_costs_the_document_nothing():
@@ -140,24 +121,7 @@ def test_a_declared_hierarchical_child_costs_the_document_nothing():
         ":H l-001.new_hypotheses "
         "[id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]\n"
         + _hyp_row("h-001-001", "?refined-child") + "\n"
-        + _SHELVED_HEADER + "\n"
-        'h-001|l-001|"refined into children"\n'
     )) == []
-
-
-def test_a_misspelled_shelved_id_is_reported_rather_than_skipped():
-    """`:T shelved`'s column is `hyp_id` — every value in it IS a hypothesis reference, so
-    an id of no recognizable shape is a phantom, not a commitment of some other kind. A
-    shape gate here would exempt exactly the typo the rule exists to catch."""
-    for bad in ("h_888", "H-888", "hyp-888"):
-        errors = _errors(_doc(
-            _declaring("h-001") + "\n"
-            + _lead("h-001") + "\n"
-            + _SHELVED_HEADER + "\n"
-            + f'{bad}|l-001|"weak signal"\n'
-        ))
-        assert len(errors) == 1, (bad, errors)
-        assert repr(bad) in errors[0]
 
 
 def test_a_commitment_of_another_kind_in_tests_is_not_read_as_a_hypothesis():
@@ -191,7 +155,7 @@ def test_a_second_hypothesize_block_declares_a_fork_the_same_way():
     )) == []
 
 
-def test_a_dropped_declaration_block_stands_both_sites_down():
+def test_a_dropped_declaration_block_stands_the_site_down():
     """The same deference #819 established, keyed to the declaring block. The `:H` header
     is off-schema so the parser rejects the whole block and h-001 never exists — every
     reference to it then looks phantom, and the parse warning already names the cause. One
@@ -202,8 +166,6 @@ def test_a_dropped_declaration_block_stands_both_sites_down():
         "h-001|?adversary-shell|v-001|executed\n"
         "\n"
         + _lead("h-001") + "\n"
-        + _SHELVED_HEADER + "\n"
-        'h-001|l-001|"dropped along with its block"\n'
     )
     assert _errors(doc) == []
     assert [e for e in validate_companion(doc) if "whole block rejected" in e]
@@ -356,6 +318,10 @@ def test_the_surviving_key_is_not_advertised_as_a_flat_conclude_row():
     companion = _parsed(
         _declaring("h-001") + "\n"
         ":T conclude\n"
+        # A recognized key beside the unrecognized one: a `:T conclude` that records NOTHING
+        # is warned in its own right, and this test is about the flat-key hint rather than
+        # about an empty close.
+        "disposition            inconclusive\n"
         "surviving_hypotheses   none\n"
         "\n"
         ":T conclude.surviving [hyp_id|final_weight]\n"
@@ -428,8 +394,6 @@ def test_the_misspelled_declaration_block_defers_for_the_ids_it_dropped():
         ":H l-001.new_hypothesis "
         "[id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]\n"
         + _hyp_row("h-010", "?mid-run-fork") + "\n"
-        + _SHELVED_HEADER + "\n"
-        'h-010|l-001|"retired"\n'
         "\n"
         ":T resolutions\n"
         "h-010  null → +    [l-001 weak ⟂ e-002 :: the fork holds]"
@@ -528,8 +492,12 @@ def test_a_row_naming_both_hypotheses_may_name_either_commitment():
 
 
 def test_an_unprojected_namespace_in_tests_is_left_alone():
-    """`:L l-NNN.lead_preds` is documented and unprojected (#820), so an `lp*` resolves
-    against nothing here. Reporting it would deny a document the format permits."""
+    """An `lp*` in the `tests` column resolves against nothing here, and stays exempt now
+    that #933 projects `:L l-NNN.lead_preds` — for a structural reason rather than the old
+    "nothing declares it". An `lp*` is scoped to a LEAD and this column is scoped to a
+    HYPOTHESIS, so no hypothesis's declarations could resolve one; `COMMITMENT_ID_RE`
+    `fullmatch`es `p\\d+` and so excludes `lp1` outright. Do not remove the carve-out on the
+    strength of the namespace now being projected."""
     assert _commitment_errors(_with_preds("h-001,lp1")) == []
 
 

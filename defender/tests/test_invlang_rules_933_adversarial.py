@@ -462,7 +462,7 @@ h-001.p1|"the interval histogram lead did not return"
 h-002.p1|"the interval histogram lead did not return"
 """)
     assert len(errors) == 1
-    assert "hypothesis h-002 is neither refuted, shelved, nor carried into the close" in errors[0]
+    assert "hypothesis h-002 is neither refuted nor carried into the close" in errors[0]
 
 
 # --- rule #33: attribute-prediction structure ---------------------------------------------

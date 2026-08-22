@@ -154,6 +154,50 @@ class Observations(TypedDict, total=False):
     edges: list[EdgeRecord]
 
 
+class _LeadPredRequired(TypedDict):
+    id: str
+
+
+class LeadPrediction(_LeadPredRequired, total=False):
+    """A `:L l-NNN.lead_preds` row — a pre-committed ROUTE, not a world-state prediction.
+
+    `if` reads as a condition on what the lead comes back with, `read_as` the interpretation
+    that condition licenses, and `advance_to` the next lead (or `CONCLUDE` / `HYPOTHESIZE`)
+    that reading routes to. The distinction from `:H h-NNN.preds` is load-bearing: nothing
+    grades an `lp*`, no resolution head can cite one, and `_check_tested_commitment_refs`
+    leaves an `lp*` in `:L findings`' `tests` column alone for exactly that reason.
+
+    `condition`, not `if`: a class-syntax TypedDict key has to be an identifier, and `if` is a
+    keyword. The parser renames the cell the same way `_lead_header_record` renames
+    `trust_root` → `trust_root_reached`.
+    """
+
+    condition: str
+    read_as: str
+    advance_to: str
+
+
+class _ImpactPredRequired(TypedDict):
+    id: str
+
+
+class ImpactPrediction(_ImpactPredRequired, total=False):
+    """A `:L l-NNN.impact_preds` row — the impact predicate a lead pre-registers at PREDICT
+    and `:R impact` grades at ANALYZE.
+
+    Only `id` is required by the parser. Every other cell is checked by
+    `validate._check_impact_prediction_structure`, which can say what a blank `on_mismatch`
+    costs; a `RowError` here would say only that the row was dropped.
+    """
+
+    dimension: str
+    claim: str
+    on_match: str
+    on_mismatch: str
+    on_indeterminate: str
+    escalation_on: str
+
+
 
 
 # The `:R` resolution buckets. Their rows are column-header driven — the author's `[a|b|c]`
@@ -244,10 +288,13 @@ class FindingRecord(_FindingRequired, total=False):
     tests_hypotheses: list[str]
     outcome: LeadOutcome
     query_details: QueryDetails
+    #: `:L l-NNN.lead_preds`. Named `predictions` because that is the field the spec's rule #18
+    #: constrains ("when `lead.predictions` is present"); it holds ROUTES, and the world-state
+    #: predictions a resolution cites live on the HYPOTHESIS as `HypothesisRecord.predictions`.
+    predictions: list[LeadPrediction]
+    impact_predictions: list[ImpactPrediction]
     new_hypotheses: list[HypothesisRecord]
     resolutions: list[ResolutionRecord]
-    shelved: list[str]
-    shelved_rationales: dict[str, str]
 
 
 
@@ -264,6 +311,28 @@ class SurvivingHypothesis(TypedDict, total=False):
 
     hypothesis: str
     final_weight: str
+
+
+class DeferralRecord(TypedDict, total=False):
+    """One `:T conclude.deferred_*` row — a commitment the close is NOT closing, and why.
+
+    The escape hatch the three closure rules (#26 contracts, #31 impact predictions, #34
+    predictions) rest on: a run that could not answer a question it committed to says so here
+    instead of dropping it. Which is why the RATIONALE is the load-bearing cell — a blank one
+    turns the hatch into a way to discharge every commitment at once, so the closure rules
+    refuse it.
+
+    The three tables spell the reference column two ways — `contract_ref` on
+    `:T conclude.deferred_authz`, `prediction_ref` on the other two — and each row keeps the
+    spelling its own table uses. NOT normalized to one `ref` key: the column name is what
+    `docs/investigation-language.md` and `docs/dense-investigation-format.md` call the field,
+    and this whole issue is about the spec and the code drifting apart. `validate._deferral_index`
+    is the one reader and takes either.
+    """
+
+    contract_ref: str
+    prediction_ref: str
+    rationale: str
 
 
 class Conclude(TypedDict, total=False):
@@ -308,6 +377,13 @@ class Conclude(TypedDict, total=False):
     # Self-reported and omittable, which is why benign-gating computes survival from the
     # resolution record instead (enforcement ramp rule 5). Checkable, not authoritative.
     surviving_hypotheses: list[SurvivingHypothesis]
+    # The three deferral tables, from `:T conclude.deferred_{authz,impact,preds}`. Each is the
+    # ONLY answer other than "resolved" that its closure rule accepts, which is why all three
+    # are projected in the same change that arms those rules: a strict half without its escape
+    # hatch refuses documents that have no legal repair.
+    deferred_authorizations: list[DeferralRecord]
+    deferred_impact_predictions: list[DeferralRecord]
+    deferred_predictions: list[DeferralRecord]
     termination: Termination
 
 

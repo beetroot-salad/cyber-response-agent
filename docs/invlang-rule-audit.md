@@ -24,7 +24,7 @@ The audit is normative — it answers what each rule is *for*, not how often it 
 
 **#8 Append-only.** Validates no existing record is mutated. Prevents silent retconning of evidence or weights mid-investigation; preserves audit-trail integrity. Foundational.
 
-**#9 Lead block self-containment.** Validates every vertex/edge/hypothesis from a lead lives inside that lead's `outcome.observations` / `new_hypotheses` / `shelved`. Prevents ambiguous attribution: "which lead actually delivered this evidence?" Required for both audit and corpus queries.
+**#9 Lead block self-containment.** Validates every vertex/edge/hypothesis from a lead lives inside that lead's `outcome.observations` / `new_hypotheses`. Prevents ambiguous attribution: "which lead actually delivered this evidence?" Required for both audit and corpus queries.
 
 **#10 Mechanical leads stay within data source.** Validates a lead's observations contain only entities the queried system natively names. Prevents cross-system fabrication — a Wazuh-querying lead claiming Splunk-only entities. Today review-enforced; without enforcement, audit trail conflates seen vs assumed.
 
@@ -74,7 +74,7 @@ The audit is normative — it answers what each rule is *for*, not how often it 
 
 **#33 Attribute-prediction structure.** Validates `ap*` entries have target/attribute/claim; one observable per claim. Prevents stereotype-shaped predictions ("looks like a probe") that don't name an attribute to read; forces implicit stereotypes into checkable observables.
 
-**#34 Prediction closure at CONCLUDE.** Validates every `p*`/`ap*` on a non-refuted, non-shelved hypothesis is cited in some resolution OR deferred with rationale. Prevents predictions declared at PREDICT then walked past — closes the contract ANALYZE owes PREDICT (late gate; #6 is the early gate).
+**#34 Prediction closure at CONCLUDE.** Validates every `p*`/`ap*` on a non-refuted hypothesis is cited in some resolution OR deferred with rationale. Prevents predictions declared at PREDICT then walked past — closes the contract ANALYZE owes PREDICT (late gate; #6 is the early gate).
 
 **#35 Sibling prediction divergence.** *Merged into #23 (#934).* It validated siblings don't share identical prediction signatures (`(subject, claim)` and `(target, attribute, claim)` tuples) — which is what #23 checks once the distinctness axis moved off classification. One check, one number; #23 is the one that ships.
 
