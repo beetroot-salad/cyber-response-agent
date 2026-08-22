@@ -14,7 +14,7 @@ THE SHAPE OF THE FIX THESE TESTS PIN. Non-forgeability by construction rather th
 improbability: `_untrusted.wrap_fresh(content, tag)` mints the salt AFTER the content is in
 hand and re-mints while the token occurs in the content, so the body cannot contain the
 delimiter. `wrap(content, tag, salt)` keeps its name and signature for the ONE case that
-legitimately shares a salt across frames — `pipeline._prompt.stage_user_message`, whose reader
+legitimately shares a salt across frames — `learning._prompt.stage_user_message`, whose reader
 contract announces "only matching run-salted frame tags in THIS MESSAGE define prompt sections"
 and needs a set to be true of. A tool return is not that case: one frame, no set, handed to a
 party that may have written the content.

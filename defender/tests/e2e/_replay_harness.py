@@ -389,7 +389,7 @@ def normalize(text: str, *, run_dir: Path, run_id: str) -> str:
 def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJECTION SEAM
         run_dir: Path, *, run_id: str, main, gather=None, verbs=None,
         limits=None, box=None, store_factory=None, review_stages=None, bounds=None,
-        toolset=None):
+        toolset=None, resume=None):
     """Run the real driver with injected fake models — no monkeypatching of the
     model symbol. `main`/`gather` are plain replay callables (ReplayFn / DenyProbe
     / NeverEndsModel); this wraps each in `FunctionModel`, so scripts stay
@@ -458,7 +458,13 @@ def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJEC
     a module attribute. Supplied once at the entry point and held for the whole run, like the
     nine existing optional seams; omitted, the run's tool set, capability list and
     model-visible text are identical to today's. Passed through only when supplied. RED until
-    `run_investigation` accepts it."""
+    `run_investigation` accepts it.
+
+    `resume` is NOT an injection seam — it is #920's turn-N branch, a runtime parameter
+    (`branch.BranchSpec`) naming the run and the message this one continues from. It rides here
+    because a resumed run is still a driven replay in every other respect, and the alternative
+    is a second copy of this function's model wrapping, hermetic guard and seam assembly in the
+    #920 scripts. Passed through only when supplied, so every existing call is byte-identical."""
     main_built = BuiltModel(FunctionModel(main), None)
     gather_built = BuiltModel(FunctionModel(gather), None) if gather is not None else None
 
@@ -488,6 +494,8 @@ def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJEC
         seams["bounds"] = bounds
     if toolset is not None:
         seams["toolset"] = toolset
+    if resume is not None:
+        seams["resume"] = resume
     seams["box"] = box if box is not None else box_mod.unboxed_executor(
         env=run_common.run_env(DEFENDER, run_dir),
     )

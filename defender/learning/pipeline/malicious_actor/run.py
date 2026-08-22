@@ -19,7 +19,7 @@ from defender.learning.core.config import (
     actor_model,  # noqa: F401 — re-exported for ops/replay_actor.py's `sub.actor_model`
 )
 from defender.learning.core.persist import derive_alert_rule_key
-from defender.learning.pipeline._prompt import stage_user_message
+from defender.learning._prompt import stage_user_message
 from defender.learning.pipeline.malicious_actor import mitre_corpus
 
 _SKIP_SCAN_LINES = 8

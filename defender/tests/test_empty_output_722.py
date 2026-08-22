@@ -43,7 +43,7 @@ from defender.learning.core import config  # noqa: E402
 from defender.learning.core.config import RunUnprocessable  # noqa: E402
 from defender.learning.leads.lead_author_engine import LEAD_AUTHOR_DEF  # noqa: E402
 from defender._text import is_content_less  # noqa: E402
-from defender.learning.pipeline._pydantic_stage import (  # noqa: E402
+from defender.learning._pydantic_stage import (  # noqa: E402
     _last_response_is_empty_text,
     run_stage,
 )

@@ -12,7 +12,7 @@ from typing import Any
 import yaml
 
 from defender import _flock, _git
-from defender.learning.pipeline._prompt import stage_user_message, structured_json_body
+from defender.learning._prompt import stage_user_message, structured_json_body
 from defender._text import is_content_less
 from defender._untrusted import wrap
 from defender._corpus import PROVENANCE_KEYS, iter_lessons

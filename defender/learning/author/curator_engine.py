@@ -19,8 +19,8 @@ from defender.learning.author.verify_forward.checks import ForwardCheck
 from defender.learning.author.verify_forward.engine import _run_verify_pydantic
 from defender.learning.core import config
 from defender.learning.core.config import RunUnprocessable, StageContext, StageWiring
-from defender.learning.pipeline._pydantic_stage import run_stage
-from defender.learning.pipeline._prompt import stage_user_message
+from defender.learning._pydantic_stage import run_stage
+from defender.learning._prompt import stage_user_message
 from defender.runtime import providers
 from defender.runtime.agent_definition import AgentDefinition, ResolvedRoots, RunScope, ToolSet, bind
 from defender.runtime.agent_role import AgentRole

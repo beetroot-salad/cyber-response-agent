@@ -9,7 +9,7 @@ from defender._untrusted import wrap
 from defender.learning import lead_repository
 from defender._run_paths import RunPaths
 from defender.learning.core.config import JudgeWiring
-from defender.learning.pipeline._prompt import stage_user_message
+from defender.learning._prompt import stage_user_message
 from defender.learning.pipeline.judge.compare import (
     build_comparison,
     parse_investigation_companion,

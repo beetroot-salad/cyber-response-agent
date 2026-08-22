@@ -70,6 +70,14 @@ EXCLUDED_PREFIXES = (
     "defender/docs/",
     # Per-vendor adapters live under scripts/adapters/ — by design vendor-named.
     "defender/scripts/adapters/",
+    # Per-vendor corpus STAGERS for the turn-N branch (#920), the read-side twin of
+    # scripts/adapters/. Staging a sibling world means retargeting a query at that world's
+    # view of the corpus, and how an index is addressed is irreducibly per-vendor: elastic
+    # carries it in an ES|QL `FROM` clause for 12 of its 15 templates and in an `index`
+    # parameter for the rest. This carve-out is deliberately ONE directory deep so the
+    # boundary is enforced rather than asserted — `estate/registry.py` beside it stays inside
+    # the gate, and a vendor name leaking into the agnostic seam still fails.
+    "defender/learning/branch/estate/stagers/",
 )
 
 EXCLUDED_FILES = {

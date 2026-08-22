@@ -22,6 +22,7 @@ from pydantic_ai.usage import UsageLimits
 
 from defender._io import write_guarded
 
+from . import branch
 from . import compaction
 from . import observe
 from . import orient
@@ -132,6 +133,40 @@ def _user_prompt(  # noqa: PLR0913 — the harness's own pre-turn seams (#808)
         f"{orientation}"
     )
     return prompt, ancestor_block, status
+
+
+def _opening_prompt(  # noqa: PLR0913 — `_user_prompt`'s parameters plus the resume it chooses between
+    resume: Any, run_dir: Path, alert_path: Path, defender_dir: Path,
+    *, verbs: Any, limits: dict, run_id: str | None,
+) -> tuple[str, str, str]:
+    """MAIN's first message — for a fresh run or a resumed one.
+
+    A RESUMED run does not orient. Lead-0 and the correlation dispatch are turn-0 work: they
+    read the alert cold and resolve its ancestors, and a branch point is by construction past
+    that — the defender already holds the payloads. Re-running them would put a second
+    orientation section in front of a history that already contains the first, and dispatch a
+    lead the source run already ran. `run_investigation` gates that dispatch on `resume is None`
+    directly, so the skip is stated where it happens rather than smuggled through a registry
+    this function nulls.
+
+    THE COORDINATE HEADER RIDES ALONG, even though the wording of the continuation itself is
+    the caller's (the 2026-08-16 experiment's own caveat was that its continuation wording
+    biased the run toward closing). It has to: a sibling gets its OWN run dir, while every path
+    in the inherited prefix names the SOURCE run's — and `permission.decide_read` resolves its
+    roots from `deps.run_dir`, so a model re-reading `<source>/investigation.md` off its own
+    history is denied with no correct path to substitute. The two lines are the same scaffold
+    `_user_prompt` emits; they are coordinates, not instruction.
+    """
+    if resume is None:
+        return _user_prompt(
+            run_dir, alert_path, defender_dir, verbs=verbs, limits=limits, run_id=run_id,
+        )
+    prompt = (
+        f"{resume.continuation_prompt}\n\n"
+        f"run_dir: {run_dir}\n"
+        f"alert: {alert_path}\n"
+    )
+    return prompt, "", ""
 
 
 def _budget_state_for_enforcement(state: dict, deps: AgentDeps) -> dict:
@@ -750,6 +785,27 @@ def _default_store_factory(case_id: str, run_dir: Path) -> Any:
     return session_store.open_store(case_id=case_id, runs_base=run_dir.parent)
 
 
+def _resolve_store_factory(resume: Any, store_factory: StoreFactory | None) -> StoreFactory:
+    """Which store this run opens, DERIVED from whether it is a resume.
+
+    A fresh run mints its own (or takes the injected seam's); a resume joins the source run's,
+    because that is where the prefix rows live and `fork` walks parents inside one connection.
+
+    THE RESUME WINS, and that ordering is the whole point. Deciding it here rather than letting
+    the caller supply both a `resume=` and a matching `store_factory=` is what stops the two
+    from disagreeing — a spec pointing at run X beside a factory opening run Y's store forks
+    against a database that does not hold the branch point, and `_walk_parents` terminates
+    cleanly on an id it cannot resolve, so the result is a silently truncated prefix rather
+    than an error. Asking the caller and then preferring the caller's answer would leave that
+    disagreement reachable, which is exactly what this function claims to close.
+    """
+    if resume is not None:
+        return branch.store_factory_for(resume)
+    if store_factory is not None:
+        return store_factory
+    return _default_store_factory
+
+
 def _run_summary(  # noqa: PLR0913 — one dict literal's full field set, named once
     *, output: Any, model_name: str | None, requests: int, truncated_by: str | None,
     exit_reason: str | None, case_id: str, store_path: Any,
@@ -820,7 +876,7 @@ async def _reap_correlation_task(task: Any) -> None:
 
 async def _drive_agent(  # noqa: PLR0913 — the loop's own inputs: agent, prompt, deps, store, bounds
     agent: Agent[AgentDeps, str], prompt: str, deps: AgentDeps, store: Any, session_id: str,
-    bounds: challenge_gate.Bounds,
+    bounds: challenge_gate.Bounds, message_history: list | None = None,
 ) -> tuple[Any, str | None, str | None]:
     """Runs the `async for node in run` loop and classifies its caught exits into
     `(truncated_by, exit_reason)`; returns the (possibly unfinished) `run` alongside them so
@@ -831,6 +887,14 @@ async def _drive_agent(  # noqa: PLR0913 — the loop's own inputs: agent, promp
     try:
         async with agent.iter(
             prompt, deps=deps,
+            # A RESUMED run's inherited prefix, or None for a fresh one. The store's render
+            # processor rebuilds history from the store on every request and `selection.ingest`
+            # compares the live list against `last_render_len` — which a fork has ALREADY
+            # seeded to its inherited prefix. So a fresh `agent.iter`, whose list starts empty,
+            # underflows against a store that is correct. Handing the prefix back here is what
+            # closes that, and it is exact rather than approximate: `fork` and
+            # `hydrate(role="send")` both truncate through `_complete_prefix_len`.
+            message_history=message_history,
             # RS7: the ceiling that terminates a run is raised by the gate's own forced-turn
             # cap, read FROM the bound rather than restated as a literal. Every run pays it
             # whether or not the gate ever fires — a property of the run, not of a review.
@@ -920,6 +984,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     bounds: challenge_gate.Bounds | None = None,
     model_override: str | None = None,
     toolset: Any = None,
+    resume: Any = None,
 ) -> dict:
     model_name = resolve_main_model(model_name)
     # Lead-0's OWN registry seam: a scenario that injected no `verbs=` at all must not have
@@ -969,13 +1034,31 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
         raise
 
     case_id = uuid.uuid4().hex
-    factory = store_factory if store_factory is not None else _default_store_factory  # lint-default: ok — DI seam owning its default (R12's fifth seam)
+    factory = _resolve_store_factory(resume, store_factory)  # lint-default: ok — DI seam owning its default (R12's fifth seam; a resume derives its own, and outranks it)
     store = None
     try:
         store = factory(case_id, run_dir)
         session_store.write_case_pointer(run_dir, case_id=case_id, store_path=store.path)
-        session_id = store.new_session(agent_id="main")
-    except (sqlite3.Error, session_store.StoreError, OSError) as e:
+        # A resume JOINS a case rather than minting one: the store the factory hands back is
+        # the SOURCE run's, and the prefix rows live in it.
+        #
+        # KNOWN GAP, not a claim of correctness. `case_id` above is a fresh uuid, and the
+        # pointer therefore pairs it with a store named after the SOURCE's case — a store that
+        # holds no session under this id, because `fork` inherits its parent row's `case_id`.
+        # Two things follow, and both are live: `branch.open_source_store` on a sibling run dir
+        # can never match its derived path against the recorded one, so a branch cannot be
+        # taken from a branch; and any reader resolving a run dir to a store and then to
+        # `main_session_id` — `scripts/visualize/visualize_run.py` does exactly this — lands on
+        # the ROOT of the lineage, i.e. the source run's transcript rather than the sibling's.
+        # Closing it means deciding what a sibling's case identity IS, which is #920 PR 2's
+        # call, not a line to change here.
+        session_id, resume_history = branch.open_main_session(store, resume)
+    # `branch.BranchError` rides here with the store faults: a refused branch point (message 0,
+    # no captured evidence, an empty or snapped frontier, a pointer that names another store)
+    # is a SETUP failure, and without it the raise escapes `run_investigation` entirely —
+    # leaving the sqlite connection open AND `llm_requests.jsonl` permanently registered in
+    # `observe._ACTIVE_PATHS`, so the next sibling in an in-process sweep can never reopen it.
+    except (sqlite3.Error, session_store.StoreError, branch.BranchError, OSError) as e:
         # The store is opened during SETUP, outside `_drive_agent`'s handler — so without
         # this, a stale-version file (or a plain filesystem fault: an unwritable
         # run_dir/runs_base for the pointer write or the store's own mkdir) takes the whole
@@ -998,8 +1081,8 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
             case_id=case_id, store_path=None,
         )
 
-    prompt, lead_zero_block, lead_zero_status = _user_prompt(
-        run_dir, alert_path, defender_dir,
+    prompt, lead_zero_block, lead_zero_status = _opening_prompt(
+        resume, run_dir, alert_path, defender_dir,
         verbs=lead_zero_verbs, limits=limits, run_id=run_id,
     )
 
@@ -1007,7 +1090,10 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     # awaited later, inside the store's render processor, right before MAIN's SECOND request.
     # A scenario with no injected registry dispatches nothing.
     correlation_task: Any = None
-    if lead_zero_verbs is not None:
+    # `resume is None` is stated here rather than carried by a nulled `lead_zero_verbs`: a
+    # resume skipping turn-0 work is a fact about the run, and a reader at this line must be
+    # able to see it without tracing where the registry was set to `None` and why.
+    if resume is None and lead_zero_verbs is not None:
         from . import lead_zero as lead_zero_mod
 
         try:
@@ -1046,7 +1132,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
 
     t0 = time.time()
     run, truncated_by, exit_reason = await _drive_agent(
-        agent, prompt, deps, store, session_id, gate_bounds,
+        agent, prompt, deps, store, session_id, gate_bounds, resume_history,
     )
     wall_ms = (time.time() - t0) * 1000.0
     await _reap_correlation_task(correlation_task)

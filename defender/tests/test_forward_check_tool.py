@@ -58,7 +58,7 @@ from defender.learning.author.verify_forward.engine import (  # noqa: E402
     VerifierDeps,
     _run_verify_pydantic,
 )
-from defender.learning.pipeline._pydantic_stage import build_stage_agent  # noqa: E402
+from defender.learning._pydantic_stage import build_stage_agent  # noqa: E402
 from defender.learning.author.lessons.run import build_user_prompt  # noqa: E402
 from defender.runtime import observe, permission, providers  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402

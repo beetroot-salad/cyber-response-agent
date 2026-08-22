@@ -13,7 +13,7 @@ from defender.learning.core.config import (
     benign_actor_effort,
     benign_actor_model,
 )
-from defender.learning.pipeline._prompt import stage_user_message
+from defender.learning._prompt import stage_user_message
 from defender.learning.tickets import ticket_seeds
 
 #: THIS leg's gate scope — strictly less than the adversarial leg's (one script, one corpus):

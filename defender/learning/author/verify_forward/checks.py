@@ -13,7 +13,7 @@ from defender.learning.author.verify_forward.shared import (
     parse_verdict,
 )
 from defender.learning.core import config
-from defender.learning.pipeline._prompt import stage_user_message
+from defender.learning._prompt import stage_user_message
 
 
 @dataclass(frozen=True)
