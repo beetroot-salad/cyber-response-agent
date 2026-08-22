@@ -23,6 +23,19 @@ assert STRONG_WEIGHTS.issubset(WEIGHT_BUCKETS), (
 )
 assert REFUTED_WEIGHT in STRONG_WEIGHTS, "REFUTED_WEIGHT must be a strong weight"
 assert CONFIRMED_WEIGHT in STRONG_WEIGHTS, "CONFIRMED_WEIGHT must be a strong weight"
+#: How a `:H` row's `weight` cell spells "no weight yet". `_hypothesis_record` maps it to
+#: `None`; the token itself needs an owner because the messages that quote it back to the
+#: author must spell what the author wrote.
+NULL_WEIGHT: str = "null"
+#: BOTH null spellings a `:T resolutions` arrow accepts. `docs/dense-investigation-format.md`
+#: gives the cells as `{∅, ++, +, -, --}` and the corpus writes `null` in the same slot, so a
+#: check that knows only one of the two refuses documents the format documents.
+NULL_WEIGHT_CELLS: tuple[str, ...] = (NULL_WEIGHT, "∅")
+#: Every token a weight cell may hold, for the closed-vocabulary check the two write sites
+#: share. Without it the `after` cell is an unvalidated `\S+`, and a misspelled grade is the
+#: cheapest row in the language: it skips the strong-move provenance gate and the `++`
+#: coverage gate alike, where the honest spelling is refused for what it leaves open.
+WEIGHT_CELL_VALUES: tuple[str, ...] = (*WEIGHT_BUCKETS, *NULL_WEIGHT_CELLS)
 
 
 #: What a `:H <h>.authz` row's `edge_ref` says when the contract stands against the
@@ -151,6 +164,20 @@ CREDENTIAL_KIND: tuple[str, ...] = (
 )
 
 
+#: `:H h-NNN.attr_preds`' `target` cell — WHICH of the hypothesis's three objects carries the
+#: predicted attribute. A closed set rather than a `v-*`/`e-*` id: the proposed parent and the
+#: proposed edge do not exist yet, so there is no id to point at, and the attached vertex is
+#: already named by the hypothesis's own `attached_to`. Here rather than beside the rule that
+#: refuses against it, so `invlang vocab attr-pred.target` can enumerate what the refusal wants.
+ATTR_PRED_TARGETS: tuple[str, ...] = (
+    "proposed_parent", "attached_vertex", "proposed_edge",
+)
+
+
+#: NOT in `SLOTS`, and `ATTR_PRED_TARGETS` and `WEIGHT_CELL_VALUES` are not either:
+#: `test_invlang_vocab` holds that registry closed because every slot in it is inlined into the
+#: runtime's ORIENT prompt, so registering one is a prompt change rather than a side effect of
+#: naming a vocabulary. They live here for the one owner, not for `invlang vocab`.
 SLOTS: dict[str, tuple[str, ...]] = {
     "disposition": DISPOSITION,
     "types": TYPES,

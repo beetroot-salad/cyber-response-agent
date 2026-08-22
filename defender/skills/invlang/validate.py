@@ -120,7 +120,7 @@ def _check_lead_refs(companion: CompanionBody) -> list[str]:
     a comma-joined pair of real ids (`l-004,l-005`) are indistinguishable from a declaration at
     projection time. Only a declared lead carries a name, so that is what separates the two.
     """
-    findings = [f for f in (companion.get("findings") or []) if isinstance(f, dict)]
+    findings = _leads(companion)
     declared = {
         f["id"] for f in findings
         if isinstance(f.get("id"), str) and f.get("name")
@@ -192,6 +192,12 @@ def _undeclared_hypothesis(where: str, site: str, hid: str, declared: str) -> st
     )
 
 
+def _leads(companion: CompanionBody) -> list[FindingRecord]:
+    """Every projected lead, non-dict entries dropped. THE way this module reads `findings`,
+    so a hand-rolled walk cannot skip the guard the next one over remembers."""
+    return [f for f in companion.get("findings") or [] if isinstance(f, dict)]
+
+
 def _lead_prefix(lid: str) -> str:
     return f"lead {lid}: "
 
@@ -246,9 +252,7 @@ def _hypothesis_references(
     ]
     if surviving:
         yield "", "`:T conclude.surviving` names", surviving
-    for lead in companion.get("findings") or []:
-        if not isinstance(lead, dict):
-            continue
+    for lead in _leads(companion):
         where = _lead_prefix(lead.get("id", "?"))
         for site, cited in _cited_hypothesis_ids(lead):
             yield where, site, cited
@@ -328,9 +332,7 @@ def _check_tested_commitment_refs(companion: CompanionBody) -> list[str]:
         for hid, hyp in _walkers.all_hypotheses(companion).items()
     }
     errors: list[str] = []
-    for lead in companion.get("findings") or []:
-        if not isinstance(lead, dict):
-            continue
+    for lead in _leads(companion):
         tested = [t for t in lead.get("tests_hypotheses") or [] if isinstance(t, str)]
         named = [t for t in tested if HYPOTHESIS_ID_RE.fullmatch(t)]
         if any(h not in by_hyp for h in named):
@@ -400,6 +402,8 @@ def _check_prediction_refs(companion: CompanionBody) -> list[str]:
                 f"{_known_ids(refuts)})"
             )
     return errors
+
+
 def _parent_hypothesis_id(hid: str) -> str:
     """The hypothesis `hid` hangs under, or `""` for a top-level one.
 
@@ -411,19 +415,39 @@ def _parent_hypothesis_id(hid: str) -> str:
     return head if "-" in head else ""
 
 
+#: A LEADING full stop that is sentence punctuation rather than a decimal point — the one
+#: `_normalized_claim` may strip. `".5σ above baseline"` keeps its dot because a digit follows
+#: it; `". the parent is systemd"` loses one, because otherwise a leading dot is a free way to
+#: spell an observable a sibling already spelled and walk past rule #23.
+_LEADING_SENTENCE_STOP_RE = re.compile(r"^\.(?!\d)")
+
+
 def _normalized_claim(claim: Any) -> str:
     """One claim, stripped of the differences that are not differences: case, inner
     whitespace, and the sentence punctuation the model varies freely.
 
-    TRAILING, and the direction matters. `str.strip` takes a character SET, so stripping
-    `" .\\"'"` from both ends also eats a LEADING decimal point — collapsing
+    A leading full stop is kept only in front of a DIGIT. `str.strip` takes a character SET,
+    so stripping `" .\\"'"` from both ends also eats a decimal point — collapsing
     `".5σ above baseline"` into `"5σ above baseline"` and refusing a sibling pair that forks
-    on a tenfold threshold. Quotes come off both ends (the format wraps a whole cell); the
-    full stop only comes off the end it can be sentence punctuation on.
+    on a tenfold threshold. Keeping every leading dot instead is the opposite failure and the
+    worse one: it fails OPEN, because `". failures arrive in bursts"` then normalizes apart
+    from `"failures arrive in bursts"` and one typed character retires rule #23 on a pair that
+    forks on nothing.
+
+    TO A FIXPOINT, because one pass of a strip set is not one pass of the punctuation an
+    author can nest. A quote sitting OUTSIDE the sentence period (`the unit is \'enabled\'.`
+    beside `the unit is \'enabled.\'` — the same observable, punctuated two ways) is only
+    exposed once the full stop is gone, and the stop under it only once the quote is. The loop
+    terminates because every iteration strips or stops.
     """
     if not isinstance(claim, str):
         return ""
-    return " ".join(claim.lower().split()).strip("\"'").rstrip(" .").lstrip()
+    text = " ".join(claim.lower().split())
+    while True:
+        nxt = _LEADING_SENTENCE_STOP_RE.sub("", text.strip("\"'")).rstrip(" .").strip()
+        if nxt == text:
+            return text
+        text = nxt
 
 
 def _predicted_observables(hyp: HypothesisRecord) -> frozenset[str]:
@@ -532,7 +556,6 @@ def _check_fork_distinctness(companion: CompanionBody) -> list[str]:
     return errors
 
 
-
 def _check_refutation_scope(companion: CompanionBody) -> list[str]:
     """A refutation shape overturns ITS OWN hypothesis's predictions, and only those.
 
@@ -564,7 +587,15 @@ def _check_refutation_scope(companion: CompanionBody) -> list[str]:
             continue
         for shape in shapes:
             rid = shape.get("id", "?")
-            for pid in _unresolved(shape.get("refutes_predictions") or [], declared):
+            cited = [
+                pid for pid in shape.get("refutes_predictions") or []
+                # `none` / `n/a` is the format's empty-ARRAY marker, not a prediction id
+                # (`docs/dense-investigation-format.md`), and `:H` rows are immutable — so
+                # reading it as a citation refuses a row saying "this refutation overturns
+                # nothing" with no repair the grammar can express.
+                if not is_conclude_empty_marker(pid)
+            ]
+            for pid in _unresolved(cited, declared):
                 errors.append(
                     f"`:H {hid}.refuts` row {rid!r} refutes prediction {pid!r}, which "
                     f"{hid} does not declare (`:H {hid}.preds` / `.attr_preds` declare: "
@@ -723,7 +754,10 @@ def _check_strong_move_provenance(companion: CompanionBody) -> list[str]:
 
     errors: list[str] = []
     for lid, res in _walkers.iter_resolutions(companion):
-        after = res.get("after")
+        # Through `_resolution_move`, the one owner of "what did this row move the hypothesis
+        # to". Read raw here and closed there, this gate and rule #6's would answer the same
+        # question two ways — the disagreement `_resolution_move`'s docstring says it prevents.
+        after = _resolution_move(res)
         if after not in STRONG_WEIGHTS:
             continue
         hyp = res.get("hypothesis", "?")
@@ -776,21 +810,78 @@ def _resolution_move(res: Any) -> str:
     return after if after in vocab.WEIGHT_BUCKETS else ""
 
 
+#: A prediction id the row's own `⟺` annotation puts under a NEGATION — `¬p2`, or its ASCII
+#: fallback `~p2`. `parser._extract_iff_literals` files it in `matched_prediction_ids` on
+#: purpose: that field means "this lead TESTED the id", and polarity is attribution-neutral
+#: (`test_invlang_parser.test_resolution_negated_iff_literal_still_attributes`). Rule #6 asks
+#: a different question — did the prediction COME IN — and the two answers are opposite on
+#: exactly this token, so the rule subtracts what the row says did not materialize rather than
+#: the parser changing what the field means for everyone.
+_NEGATED_LITERAL_RE = re.compile(r"[¬~]\s*(ap\d+|p\d+|r\d+)\b")
+
+
+def _contradicted_predictions(res: Any) -> set[str]:
+    """The `p*`/`ap*` a resolution's own annotation says did NOT materialize."""
+    reasoning = res.get("reasoning") if isinstance(res, dict) else None
+    if not isinstance(reasoning, str):
+        return set()
+    return {
+        tok for tok in _NEGATED_LITERAL_RE.findall(reasoning.replace("<=>", "⟺"))
+        if not tok.startswith("r")
+    }
+
+
+def _refutation_scopes(hyp: HypothesisRecord) -> dict[str, set[str]]:
+    """Per `r*` this hypothesis declares, the `p*`/`ap*` its `refutes` cell names."""
+    return {
+        shape["id"]: {
+            pid for pid in shape.get("refutes_predictions") or []
+            if isinstance(pid, str) and pid and not is_conclude_empty_marker(pid)
+        }
+        for shape in hyp.get("refutation_shape") or []
+        if isinstance(shape, dict) and isinstance(shape.get("id"), str)
+    }
+
+
 def _settled_predictions(companion: CompanionBody) -> dict[str, set[str]]:
     """Per hypothesis, the `p*`/`ap*` ids some resolution cited on a row that MOVED it.
 
     A `null → null` row that cites `p1` recorded that the lead looked, not that the prediction
-    settled. One walk for rules #6 and #34; see `_resolution_move` for why the move test is
-    closed on the bucket vocabulary.
+    settled. See `_resolution_move` for why the move test is closed on the bucket vocabulary.
+
+    A cited `r*` counts for the predictions IT names. `_check_strong_move_provenance` already
+    reads `matched_refutation_ids` as the same half of a strong move's provenance tuple that
+    `matched_prediction_ids` is — a refutation shape that was tested and failed to materialize
+    settles the predictions it would have overturned — and reading only the `p*` side here
+    leaves a `++` whose evidence is a dead refutation with exactly one spelling that clears
+    the gate: citing the prediction as MATCHED, which is a claim the run did not make.
+
+    A NEGATED literal does not settle its prediction. `matched_prediction_ids` means "this
+    lead tested the id" and files `¬p2` alongside `p1`, which is right for attribution and
+    inverted for this rule — so `⟺ p1 ∧ ¬p2` would otherwise clear a `++` on the strength of
+    an annotation saying one of the two predictions did not come in.
     """
     matched: dict[str, set[str]] = {}
+    hyps = _walkers.all_hypotheses(companion)
+    scopes_by_hyp: dict[str, dict[str, set[str]]] = {}
     for _lid, res in _walkers.iter_resolutions(companion):
         hid = res.get("hypothesis")
         if not isinstance(hid, str) or not _resolution_move(res):
             continue
-        matched.setdefault(hid, set()).update(
+        hyp = hyps.get(hid)
+        if hid not in scopes_by_hyp:
+            scopes_by_hyp[hid] = _refutation_scopes(hyp) if hyp is not None else {}
+        scopes = scopes_by_hyp[hid]
+        row: set[str] = {
             p for p in res.get("matched_prediction_ids") or [] if isinstance(p, str) and p
-        )
+        }
+        for rid in res.get("matched_refutation_ids") or []:
+            row |= scopes.get(rid, set()) if isinstance(rid, str) else set()
+        # THIS row's negations against THIS row's citations, before the union. Subtracting from
+        # the accumulated set instead would let a later row's `¬p1` un-settle a prediction an
+        # earlier move settled — the union only grows, which is what keeps the rule repairable
+        # on an append-only document.
+        matched.setdefault(hid, set()).update(row - _contradicted_predictions(res))
     return matched
 
 
@@ -819,13 +910,18 @@ def _check_prediction_completeness(companion: CompanionBody) -> list[str]:
     This fires at write time on `++` alone and offers nothing, because a `++` has no
     outstanding prediction to defer — the grade IS the claim that there is none.
     """
-    hyps = _walkers.all_hypotheses(companion)
-    matched = _settled_predictions(companion)
     confirmed_at: dict[str, str] = {}
     for lid, res in _walkers.iter_resolutions(companion):
         hid = res.get("hypothesis")
         if isinstance(hid, str) and _resolution_move(res) == CONFIRMED_WEIGHT:
             confirmed_at.setdefault(hid, lid)
+    if not confirmed_at:
+        # Before the two document-wide folds below, which is the whole cost of this check.
+        # No `++` anywhere is every in-flight document up to the confirming lead, and every
+        # run that never confirms.
+        return []
+    hyps = _walkers.all_hypotheses(companion)
+    matched = _settled_predictions(companion)
 
     errors: list[str] = []
     for hid, lid in confirmed_at.items():
@@ -848,13 +944,7 @@ def _check_prediction_completeness(companion: CompanionBody) -> list[str]:
     return errors
 
 
-#: `attribute_predictions[].target` names WHICH of the hypothesis's three objects carries the
-#: predicted attribute. A closed set rather than a `v-*`/`e-*` id: the proposed parent and the
-#: proposed edge do not exist yet, so there is no id to point at, and the attached vertex is
-#: already named by the hypothesis's own `attached_to`.
-_ATTR_PRED_TARGETS: tuple[str, ...] = (
-    "proposed_parent", "attached_vertex", "proposed_edge",
-)
+_ATTR_PRED_TARGETS = vocab.ATTR_PRED_TARGETS
 _ATTR_PRED_ID_RE = re.compile(r"ap\d+")
 
 
@@ -897,14 +987,23 @@ def _check_attribute_prediction_structure(companion: CompanionBody) -> list[str]
                     f"`ap<n>` — `matched_prediction_ids` and `.refuts` resolve ids in that "
                     f"namespace, so one outside it can be cited by nothing"
                 )
+            # Lowercased, because `_predicted_observables` lowercases the same cell into rule
+            # #23's fork key. Compared raw, `Proposed_Parent` is the canonical target to one
+            # rule and an illegal one to the other, in the same pass over the same row.
             target = ap.get("target")
-            if target not in _ATTR_PRED_TARGETS:
+            if str(target).strip().lower() not in _ATTR_PRED_TARGETS:
                 errors.append(
                     f"`:H {hid}.attr_preds` row {apid!r}: target {target!r} is not one of "
                     f"{', '.join(_ATTR_PRED_TARGETS)} — the cell says which of the "
                     f"hypothesis's OWN objects carries the attribute, not which vertex id"
                 )
-            if not (ap.get("claim") or "").strip():
+            # `_normalized_claim`, not a bare `.strip()`: `"."` / `"..."` / `"''"` are
+            # non-blank cells that carry no observable, and `_predicted_observables` already
+            # drops them from rule #23's fork signature on that reading. Testing the RAW cell
+            # here leaves a pair of siblings whose only predictions normalize to nothing
+            # passing BOTH rules — this one because the cell is non-blank, #23 because the
+            # signature is empty.
+            if not _normalized_claim(ap.get("claim")):
                 attribute = ap.get("attribute") or "?"
                 errors.append(
                     f"`:H {hid}.attr_preds` row {apid!r}: empty `claim` — the row pre-commits "
@@ -945,16 +1044,10 @@ def _check_prediction_id_namespace(companion: CompanionBody) -> list[str]:
     ]
 
 
-
-
 def _check_vocab(value: Any, allowed: Any, errmsg: str) -> list[str]:
     if isinstance(value, str) and value and value not in allowed:
         return [errmsg]
     return []
-
-
-def _leads(companion: CompanionBody) -> list[FindingRecord]:
-    return [f for f in companion.get("findings") or [] if isinstance(f, dict)]
 
 
 def _cell(record: Mapping[str, object], key: str) -> str:
@@ -965,16 +1058,15 @@ def _cell(record: Mapping[str, object], key: str) -> str:
     required columns cannot call `.strip()` on the result. Every projected cell is a `str`;
     stating that once here beats a cast at each of the sites that walk a column list.
 
-    `_unquote`d because the two sides of the impact axis disagree about quoting and the checks
-    have to see through it. `_impact_pred_row` unquotes `dim` and `claim`; the `:R impact` row
-    beside it goes through `_canonicalize_resolution_row`, which copies every cell verbatim —
-    so an author who wraps cells uniformly registers `confidentiality` and grades
-    `"confidentiality"`, and the enum tests and the `dim`-vs-predicate comparison refuse a row
-    whose values are all correct. Unquoting an already-unquoted cell is identity, so this is
-    the read every column-list walker wanted.
+    `_unquote`d as a BELT over the parser's braces rather than in place of them:
+    `_lead_header_record` unquotes these cells on the way in, and unquoting an already
+    unquoted cell is identity. Keeping the read here means a projector that grows a new lead
+    column, or a record built some other way, still meets a closed-set comparison the way the
+    rule means it — a cell read raw on one side of a comparison and unquoted on the other is
+    how a uniformly quoted row gets refused for a value it spells correctly.
     """
     value = record.get(key)
-    return _unquote(value.strip()) if isinstance(value, str) else ""
+    return _unquote(value.strip()).strip() if isinstance(value, str) else ""
 
 
 def _check_vocab_vertices(companion: CompanionBody) -> list[str]:
@@ -1023,6 +1115,41 @@ def _check_vocab_hypotheses(companion: CompanionBody) -> list[str]:
             f"hypothesis {h.get('id', '?')}: rel {rel!r} is not a known "
             f"relation (`enum relations`)",
         )
+    return errors
+
+
+def _check_vocab_weights(companion: CompanionBody) -> list[str]:
+    """The two cells that carry a weight, against the bucket list plus `null`.
+
+    The one enum in the language that had no arm here, and the gap was not inert: every
+    weight-keyed gate reads one of these two cells and every one of them is a membership test,
+    so an off-vocabulary token skips all of them at once. `h-001 null → confirmed` cleared the
+    strong-move provenance gate (which fires on `STRONG_WEIGHTS`), the `++` coverage gate
+    (which fires on `CONFIRMED_WEIGHT`) and the refutation-citation gate, where the honest
+    `++` is refused for the predictions it leaves open — while `_walkers.final_weights`
+    propagated the token verbatim and reported the hypothesis live. One typo was strictly
+    better for the author than telling the truth.
+
+    `:H`'s cell is checked as well as the resolution's: `_hypothesis_record` maps `null` to
+    `None` and stores anything else verbatim, so a weight declared at birth is the same
+    unvalidated token by another route.
+    """
+    errors: list[str] = []
+    for hid, h in _walkers.all_hypotheses(companion).items():
+        errors += _check_vocab(
+            h.get("weight"), vocab.WEIGHT_CELL_VALUES,
+            f"hypothesis {hid}: weight {h.get('weight')!r} is not a weight — a `:H` row's "
+            f"cell is one of {', '.join(vocab.WEIGHT_CELL_VALUES)}",
+        )
+    for lid, res in _walkers.iter_resolutions(companion):
+        for cell in ("before", "after"):
+            errors += _check_vocab(
+                res.get(cell), vocab.WEIGHT_CELL_VALUES,
+                f"lead {lid}: resolution of {res.get('hypothesis', '?')} has "
+                f"{cell} {res.get(cell)!r}, which is not a weight — the cells either side of "
+                f"the arrow are one of {', '.join(vocab.WEIGHT_CELL_VALUES)}; a token outside "
+                f"the list moves nothing and skips every gate that reads the grade",
+            )
     return errors
 
 
@@ -1191,6 +1318,7 @@ def _check_closed_vocab(companion: CompanionBody, proposed_text: str) -> list[Di
     out += _plain(_check_vocab_hypotheses(companion))
     out += _plain(_check_conclude_vocab(companion))
     out += _plain(_check_vocab_anchor_kinds(companion))
+    out += _plain(_check_vocab_weights(companion))
     out += _check_attr_update_keys(proposed_text)
     return out
 
@@ -1804,7 +1932,7 @@ def _check_false_positive_gating(companion: CompanionBody) -> list[str]:
     lead_id = lead_id.strip()
 
     lead = next(
-        (f for f in companion.get("findings") or [] if f.get("id") == lead_id), None
+        (f for f in _leads(companion) if f.get("id") == lead_id), None
     )
     if lead is None:
         return errors + [
@@ -2024,8 +2152,11 @@ def _check_screen_structure(companion: CompanionBody) -> list[str]:
     fast path, so a companion that then enumerates hypotheses claims both that no investigation
     was needed and that one happened.
 
-    "Intermediate" is read as "the next lead in `:L findings` order also screens", which lets a
-    second screen phase later in the run be its own sequence rather than folding into the first.
+    "Intermediate" is read as "some LATER lead in the same loop also screens", which lets a
+    second screen phase later in the run be its own sequence rather than folding into the
+    first. Not "the NEXT lead screens": `companion["findings"]` is the projector's lead buckets
+    in first-mention order rather than `:L findings` order, and a sequence may have a retrieval
+    lead standing between two of its screens — adjacency would stand the arm down for both.
 
     Read off `findings[].screen_result`, which is where the `:L findings` column projects. The
     spec spells the field `outcome.screen_result`, from the pre-dense envelope; the projection
@@ -2036,65 +2167,89 @@ def _check_screen_structure(companion: CompanionBody) -> list[str]:
     is projected — the same limit `_check_false_positive_gating` records for `entity_check`.
     """
     leads = _leads(companion)
+    # One `_cell` read per (lead, column), reused by all three arms below. LOWERCASED at the
+    # read, because both cells are compared against a closed value and neither is checked by
+    # any `_check_vocab_*` arm: `Screen` read raw fails CLOSED (a row refused for a mode it
+    # spells correctly, with advice the author already followed) and `Match` read raw fails
+    # OPEN (the fast-path arm below never fires).
+    results = [_cell(lead, "screen_result").lower() for lead in leads]
+    if not any(results):
+        # Before the second per-lead fold. No `screen_result` anywhere is every document in
+        # the tree today, and every run that never takes the fast path.
+        return []
+    modes = [_cell(lead, "mode").lower() for lead in leads]
+    first_match = ""
     errors: list[str] = []
     for i, lead in enumerate(leads):
-        result = _cell(lead, "screen_result")
-        if not result:
+        result = results[i]
+        # `none` / `n/a` is the format's empty-cell spelling, not a verdict — the same reading
+        # `_check_refutation_scope` takes of a `refutes` cell. Writing it in an unused trailing
+        # column is the shipped convention (`defender/examples/example-b-parallel-iam-cmdb.md`
+        # does it in `window`), so reading it as a screen result refuses a row that says
+        # "nothing here" and offers "drop the cell" as the repair.
+        if not result or is_conclude_empty_marker(result):
             continue
         lid = lead.get("id", "?")
-        # `mode` through `_cell` like `screen_result` beside it. Reading one side of the
-        # comparison raw is the two-sides-disagree failure `_cell`'s docstring describes for
-        # the impact axis: a uniformly quoted `:L findings` row is refused for a `mode` it
-        # spells correctly, and the advice ("set `mode: screen`") is what the author did.
-        mode = _cell(lead, "mode")
-        nxt = leads[i + 1] if i + 1 < len(leads) else None
+        mode = modes[i]
+        # The matched-screen arm below speaks only for leads that ACTUALLY screened. A
+        # `match` on a lead with no `mode: screen` is one defect — the mode arm's — and
+        # letting it reach the fast-path arm too tells the same author, in the same pass, to
+        # set the mode cell AND to delete a legitimate hypothesize block over a screen that
+        # never ran.
+        if mode == SCREEN_MODE and result == SCREEN_MATCH and not first_match:
+            first_match = str(lid)
         if mode != SCREEN_MODE:
             errors.append(
                 f"lead {lid}: `screen_result: {result}` on a lead whose mode is {mode!r} — "
                 f"the column records a SCREEN's verdict; set `mode: screen` on the lead that "
                 f"ran the screen, or drop the cell"
             )
-        elif (
-            nxt is not None
-            # Also `_cell`: read raw, a quoted `mode` on the FOLLOWER makes this false and the
-            # intermediate-screen arm stops firing in silence — the same asymmetry, failing
-            # open instead of closed.
-            and _cell(nxt, "mode") == SCREEN_MODE
-            # A `match` is never intermediate. This rule's own third arm reads a matched screen
-            # as ENDING the run on the fast path, so the leads planned after it never ran —
-            # refusing the row for a follower that exists only as a `:L findings` declaration
-            # leaves no legal repair: `:L findings` rows are append-only and cannot be
-            # withdrawn, and `no_match` would be a false claim that the screen fell through.
-            and result != SCREEN_MATCH
-            # SAME LOOP, which is what makes the next screen lead part of THIS sequence. The
-            # docstring's "a second screen phase later in the run is its own sequence" is only
-            # true with this term: a loop-1 sequence whose last lead screens, followed by a
-            # loop-2 screen, is adjacent in `findings` and would otherwise have its legitimate
-            # result refused as intermediate.
-            #
-            # `_lead_header_record` omits `loop` when the cell is blank, so an ABSENT loop on
-            # either side is read as "same sequence" rather than as a difference: the spec has
-            # screen leads always in loop 0, which is exactly the cell an author leaves out,
-            # and `None != 0` would otherwise stand the rule down for the documents it is
-            # most for.
-            and (
-                lead.get("loop") is None
-                or nxt.get("loop") is None
-                or nxt.get("loop") == lead.get("loop")
-            )
-        ):
+            continue
+        # A `match` is never intermediate. This rule's own third arm reads a matched screen as
+        # ENDING the run on the fast path, so the leads planned after it never ran — refusing
+        # the row for a follower that exists only as a `:L findings` declaration leaves no
+        # legal repair: `:L findings` rows are append-only and cannot be withdrawn, and
+        # `no_match` would be a false claim that the screen fell through.
+        if result == SCREEN_MATCH:
+            continue
+        # EVERY later screen lead in the same loop, not only the immediately next lead.
+        # Adjacency in `findings` is not sequence membership twice over: `companion["findings"]`
+        # is the projector's lead buckets in FIRST-MENTION order (a `:T resolutions` head or a
+        # `:T shelved` row naming a lead ahead of its `:L findings` row reorders the list), and
+        # a screen sequence may have a retrieval lead standing between two of its screens.
+        # Read off `modes[i + 1]` alone, either one stands the arm down in silence.
+        #
+        # SAME LOOP is what bounds the sequence, so a second screen phase later in the run is
+        # its own. `_lead_header_record` omits `loop` when the cell is blank, so an ABSENT loop
+        # on either side is read as "same sequence": the spec has screen leads always in loop
+        # 0, which is exactly the cell an author leaves out, and `None != 0` would otherwise
+        # stand the rule down for the documents it is most for.
+        nxt = next(
+            (
+                other
+                for j, other in enumerate(leads)
+                if j > i
+                and modes[j] == SCREEN_MODE
+                and (
+                    lead.get("loop") is None
+                    or other.get("loop") is None
+                    or other.get("loop") == lead.get("loop")
+                )
+            ),
+            None,
+        )
+        if nxt is not None:
             errors.append(
                 f"lead {lid}: `screen_result: {result}` on an intermediate screen lead — "
                 f"{nxt.get('id', '?')} screens after it in loop {lead.get('loop', '?')}, so "
                 f"the sequence has not answered yet; only its final lead carries the result"
             )
-    matched = [f.get("id", "?") for f in leads if _cell(f, "screen_result") == SCREEN_MATCH]
-    if matched and (companion.get("hypothesize") or {}).get("hypotheses"):
+    if first_match and _walkers.all_hypotheses(companion):
         errors.append(
-            f"lead {matched[0]}: `screen_result: {SCREEN_MATCH}` closes the run on the fast "
-            f"path, but `:H hypothesize.hypotheses` enumerates hypotheses — a matched screen "
-            f"and an investigation are two different runs; drop the block, or record the "
-            f"screen as `no_match` and keep investigating"
+            f"lead {first_match}: `screen_result: {SCREEN_MATCH}` closes the run on the fast "
+            f"path, but {_HYPOTHESIS_DECLARING_BLOCKS} enumerates hypotheses — a matched "
+            f"screen and an investigation are two different runs; drop the block, or record "
+            f"the screen as `no_match` and keep investigating"
         )
     return errors
 
@@ -2106,7 +2261,7 @@ def _weight_text(weight: Any) -> str:
     leaves the key off — so `{weight!r}` renders `None` for exactly the hypothesis a
     persistence refusal is about. `null` is what the author wrote and what they can search for.
     """
-    return repr(weight) if isinstance(weight, str) and weight else "'null'"
+    return repr(weight if isinstance(weight, str) and weight else vocab.NULL_WEIGHT)
 
 
 def _check_hypothesis_persistence(companion: CompanionBody) -> list[str]:

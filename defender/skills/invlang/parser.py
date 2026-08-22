@@ -361,8 +361,22 @@ def _is_current_hyp_header(cols: list[str] | None) -> bool:
     return set(cols) == _HYP_HEADER_COLS
 
 
+#: The `:H` header cells a CHECK compares against something, rather than carries as text:
+#: `attached_to` is half of rule #23's sibling-group key, `weight` and `status` are closed
+#: cells, `rel`/`parent_type`/`parent_class` are closed vocabularies, and `id` is resolved by
+#: equality at four sites. Read raw, a uniformly quoted row anchors on `'"v-001"'` — which
+#: equals no other sibling's anchor, so the pair drops out of the fork group in silence — and
+#: a quoted `"--"` is not `REFUTED_WEIGHT`, so the hypothesis the run refuted reads as live.
+_HYP_COMPARED_CELLS = (
+    "id", "name", "attached_to", "rel", "parent_type", "parent_class", "weight", "status",
+)
+
+
 def _hypothesis_record(block: Block, row: str) -> HypothesisRecord:
     rec = _row_dict(block, row)
+    for key in _HYP_COMPARED_CELLS:
+        if key in rec:
+            rec[key] = _unquote(rec[key]).strip()
     _require(rec, "id", "name", msg="hypothesis missing id/name")
     out: HypothesisRecord = {"id": rec["id"], "name": rec["name"]}
     if rec.get("attached_to"):
@@ -423,6 +437,13 @@ _HYP_AUTHZ_COLS = ["id", "edge_ref", "anchor_kind", "predicate", "on_unauth", "o
 
 def _hyp_sub_pred_row(block: Block, row: str) -> PredictionRecord:
     rec = _row_dict(block, row, _HYP_PRED_COLS)
+    # Unquoted, STRIPPED, and BEFORE `_require` — the same three things `_hyp_sub_attr_pred_row`
+    # does, for the same three reasons. `_check_prediction_id_namespace` compares `id` against
+    # a closed namespace, so `" p1 "` is a legal `p<n>` refused for its padding on a `:H` row
+    # that is immutable; and an id cell of `""` is truthy before the unquote, so `_require`
+    # passes it and the refusal downstream names row `'?'` — a row the author cannot find.
+    for key in ("id", "subject"):
+        rec[key] = _unquote(rec.get(key, "")).strip()
     _require(rec, "id", "subject", msg="preds row missing id/subject")
     return {
         "id": rec["id"],
@@ -433,16 +454,26 @@ def _hyp_sub_pred_row(block: Block, row: str) -> PredictionRecord:
 
 def _hyp_sub_attr_pred_row(block: Block, row: str) -> AttrPredictionRecord:
     rec = _row_dict(block, row, _HYP_ATTR_PRED_COLS)
+    # EVERY cell, not just `target`. Each of the four is read by a check that compares it
+    # against something: `id` against the `ap<n>` namespace (rule #33), `target` against
+    # `_ATTR_PRED_TARGETS`, and `attribute` and `claim` as two thirds of rule #23's fork key.
+    # Unquoting one and leaving the next raw is how a uniformly quoted row gets refused for a
+    # legal target (`id`) or slips past the fork rule with a signature no sibling can collide
+    # with (`attribute`).
+    #
+    # And BEFORE `_require`, which is what makes rule #33's stated reason for not checking
+    # `attribute` itself ("already a parse error — `_require` tests truthiness") true: a
+    # quoted run of spaces reaches `_require` as `'"  "'`, which is truthy, and lands an
+    # attribute predicting nothing whose fork key degrades to `proposed_parent.=unsigned`.
+    for key in ("id", "target", "attribute"):
+        rec[key] = _unquote(rec.get(key, "")).strip()
     _require(
         rec, "id", "target", "attribute",
         msg="attr_preds row missing id/target/attribute",
     )
     return {
         "id": rec["id"],
-        # `target` is a CLOSED vocabulary since rule #33 armed (`_ATTR_PRED_TARGETS`), so it
-        # is unquoted for the same reason `claim` is: a row that quotes both cells names a
-        # legal target and would otherwise be refused for the quotes.
-        "target": _unquote(rec["target"]),
+        "target": rec["target"],
         "attribute": rec["attribute"],
         "claim": _unquote(rec.get("claim", "")),
     }
@@ -450,13 +481,22 @@ def _hyp_sub_attr_pred_row(block: Block, row: str) -> AttrPredictionRecord:
 
 def _hyp_sub_refut_row(block: Block, row: str) -> RefutationRecord:
     rec = _row_dict(block, row, _HYP_REFUT_COLS)
+    # Stripped before `_require`, like `.preds` and `.attr_preds`. Rule #5 resolves a `--`'s
+    # cited `r*` against this cell by equality, so a padded `"r1 "` parses clean and then
+    # refuses the citation with "cites refutation 'r1', which h-001 does not declare
+    # (declares: r1 )" — an error whose own text lists the id it says is missing.
+    rec["id"] = _unquote(rec.get("id", "")).strip()
     _require(rec, "id", msg="refuts row missing id")
     out: RefutationRecord = {
         "id": rec["id"],
         "claim": _unquote(rec.get("claim", "")),
     }
     if rec.get("refutes"):
-        out["refutes_predictions"] = _split_csv(rec["refutes"])
+        # Unquoted BEFORE the split: `_check_refutation_scope` resolves these tokens against
+        # the declared ids by equality, and a quoted whole cell (`"p1,p2"`) otherwise splits
+        # the quote characters INTO the ids, yielding `'"p1'` and `'p2"'` — two refusals
+        # whose own text lists both ids as declared.
+        out["refutes_predictions"] = _split_csv(_unquote(rec["refutes"]))
     return out
 
 
@@ -493,13 +533,23 @@ def _lead_header_record(
         ("status", "status"),
     ):
         if rec.get(k_in):
-            v: Any = rec[k_in]
+            # UNQUOTED, and before the `loop` coercion. Every one of these five is read by a
+            # check that compares it to something — `mode` and `screen_result` against rule
+            # #17's closed cells, `loop` against the next lead's — so a uniformly quoted row
+            # is refused for a `mode` it spells correctly, or (worse, failing open) has its
+            # quoted `"1"` survive `int()` as a string that equals no other lead's loop.
+            v: Any = _unquote(rec[k_in])
             if k_in == "loop":
                 with contextlib.suppress(ValueError):
                     v = int(v)
             identity[k_out] = v
     if rec.get("tests"):
-        identity["tests_hypotheses"] = _split_csv(rec["tests"])
+        # Unquoted BEFORE the split, exactly as `.refuts`' `refutes` is. Read raw, a quoted
+        # whole cell (`"h-001,p1"`) splits the quote characters INTO the ids, and this column
+        # fails OPEN where `refutes` failed closed: `_cited_hypothesis_ids` filters `tests` on
+        # `HYPOTHESIS_ID_RE` and `_check_tested_commitment_refs` on `COMMITMENT_ID_RE`, so
+        # `'"h-999'` matches neither and both references vanish with no diagnostic.
+        identity["tests_hypotheses"] = _split_csv(_unquote(rec["tests"]))
     outcome: dict[str, Any] = {}
     if rec.get("fail_reason"):
         outcome["failure_reason"] = rec["fail_reason"]
@@ -533,6 +583,10 @@ _IFF_LITERAL_RE = re.compile(rf"\b(?:{_REF_ID_RE.pattern})\b")
 #: `:L findings`' `tests` column can name. Composed from `_REF_ID_RE` so the namespaces keep
 #: one owner.
 COMMITMENT_ID_RE = re.compile(rf"(?:{_REF_ID_RE.pattern})|ac\d+")
+
+
+def _dedup(ids: list[str]) -> list[str]:
+    return list(dict.fromkeys(ids))
 
 
 def _extract_iff_literals(annotation: str) -> tuple[list[str], list[str]]:
@@ -586,8 +640,15 @@ def _resolution_record(row: str) -> tuple[str | None, ResolutionRecord]:
     # Same split as the `⟺` side: an id-shaped token that is not `r*` is a prediction, so
     # `ap*` files under predictions in both spellings. A bare `startswith("p")` drops `ap1`.
     head_ids = [t for t in head_refs if _REF_ID_RE.fullmatch(t)]
-    matched_pred_ids = iff_pred_ids or [t for t in head_ids if not t.startswith("r")]
-    matched_refut_ids = iff_refut_ids or [t for t in head_ids if t.startswith("r")]
+    # UNION, not `iff_ids or head_ids`. The `⟺` form exists for the row that cites nothing in
+    # its head, and replacing meant one iff literal in a `::` segment — which is otherwise free
+    # prose — DISCARDED the head's own list: a `++` whose head cites `p1,p2` and whose
+    # annotation reads `⟺ p1` was refused by rule #6 for leaving p2 unmatched, with advice
+    # ("cite the rest") the row already followed.
+    matched_pred_ids = _dedup(
+        [t for t in head_ids if not t.startswith("r")] + iff_pred_ids
+    )
+    matched_refut_ids = _dedup([t for t in head_ids if t.startswith("r")] + iff_refut_ids)
     record: ResolutionRecord = {
         "hypothesis": m.group("hyp"),
         "hypothesis_id": m.group("hyp"),
@@ -1252,7 +1313,10 @@ class _Projector:
         conclude: dict[str, Any] = self.out.setdefault("conclude", {})
         rows: list[dict[str, str]] = conclude.setdefault("surviving_hypotheses", [])
         for idx, row, rec in self._for_each_row(block, _SURVIVING_COLS):
-            hid = rec.get("hyp_id")
+            # Unquoted for the reason the `:T shelved` cell is: rule #24 asks whether the table
+            # NAMES a hypothesis, by equality, and a quoted row otherwise earns the refusal
+            # "the `:T conclude.surviving` table, which names \"h-001\", omits it".
+            hid = _unquote(rec.get("hyp_id") or "")
             # `none` / `n/a` is how an EMPTY array is written here, not a hypothesis id
             # (`docs/dense-investigation-format.md`: "Empty arrays render as a single `none`
             # row"). Projecting the marker makes the undeclared-`h-*` rule refuse a run whose
@@ -1274,7 +1338,7 @@ class _Projector:
             # same reference — a reader that knows one shape reads the other.
             entry = {"hypothesis": hid}
             if rec.get("final_weight"):
-                entry["final_weight"] = rec["final_weight"]
+                entry["final_weight"] = _unquote(rec["final_weight"])
             rows.append(entry)
 
     def _project_shelved_block(self, block: Block) -> None:
@@ -1290,7 +1354,11 @@ class _Projector:
         warning.
         """
         for idx, row, rec in self._for_each_row(block):
-            hyp = rec.get("hyp_id")
+            # Unquoted: `validate._shelved_hypothesis_ids` resolves these against the declared
+            # `h-*` by equality (rules #23 and #24 both discharge on the answer), so a quoted
+            # `"h-002"` loses the discharge and is reported as an undeclared hypothesis
+            # besides.
+            hyp = _unquote(rec.get("hyp_id") or "")
             if is_conclude_empty_marker(hyp):
                 continue  # lint-row-drop: ok — the empty-TABLE marker, not a row
             if not hyp:
@@ -1302,7 +1370,7 @@ class _Projector:
                     "shelved.",
                 )
                 continue
-            lid = rec.get("by_lead")
+            lid = _unquote(rec.get("by_lead") or "")
             if not lid:
                 self._warn(block, idx, row, "shelved row has no lead attribution")
                 continue

@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import pytest
 
-from defender.skills.invlang.validate import validate_companion
+from defender.skills.invlang.validate import _SIBLING_FORK_TAG, validate_companion
 
 _PROLOGUE = """\
 :V prologue.vertices [id|type|class|ident|attrs?]
@@ -313,7 +313,7 @@ def test_identical_claims_under_the_SAME_parent_are_a_fork() -> None:
         ),
     ))
     assert len(errors) == 1
-    assert "hypotheses h-001-a, h-001-b anchor on v-001 and predict the same observables" in errors[0]
+    assert "hypotheses h-001-a, h-001-b anchor on v-001 and " + _SIBLING_FORK_TAG in errors[0]
 
 
 def test_two_siblings_repeating_one_attribute_prediction_are_refused() -> None:
@@ -331,7 +331,7 @@ ap1|proposed_parent|signing|"the binary is unsigned"
 ap1|proposed_parent|signing|"The binary is   unsigned."
 """)
     assert len(errors) == 1
-    assert "hypotheses h-001, h-002 anchor on v-001 and predict the same observables" in errors[0]
+    assert "hypotheses h-001, h-002 anchor on v-001 and " + _SIBLING_FORK_TAG in errors[0]
 
 
 def test_an_attribute_prediction_keys_on_what_the_value_is_a_value_of() -> None:
@@ -405,7 +405,7 @@ def test_two_siblings_declaring_no_predictions_are_skipped() -> None:
 h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
 h-002|?scheduled-service-retry|v-001|runs_on|process|??/??/??||null|active
 """)
-    assert "predict the same observables" not in joined
+    assert _SIBLING_FORK_TAG not in joined
 
 
 def test_a_pair_of_blank_claims_is_an_empty_signature_not_a_shared_one() -> None:
@@ -422,7 +422,7 @@ ap1|proposed_parent|signing|
 :H h-002.attr_preds [id|target|attribute|claim]
 ap1|proposed_parent|signing|
 """)
-    assert "predict the same observables" not in joined
+    assert _SIBLING_FORK_TAG not in joined
     assert joined.count("empty `claim`") == 2
 
 

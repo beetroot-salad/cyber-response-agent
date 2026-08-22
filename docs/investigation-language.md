@@ -1089,9 +1089,15 @@ The validator enforces **26 active rules** (rules 1–36 with ten gaps: 36 numbe
     `findings[].screen_result` — where the `:L findings` column
     projects. The `outcome.` prefix above is pre-dense envelope
     spelling the projector has never used. "Only the final lead in a
-    SCREEN sequence" is read as "the next lead in `:L findings` order
-    does not also screen", so a second screen phase later in a run is
-    its own sequence rather than a continuation of the first.
+    SCREEN sequence" is read as "no LATER lead in the same loop also
+    screens", so a second screen phase in a later loop is its own
+    sequence rather than a continuation of the first. Later rather
+    than NEXT: a sequence may have a retrieval lead standing between
+    two of its screens, and `findings` is the projector's lead buckets
+    in first-mention order rather than `:L findings` order, so
+    adjacency would stand the arm down on the shape it exists to
+    catch. `mode` and `screen_result` are compared case-insensitively
+    and the `none` / `n/a` empty-cell marker is not read as a verdict.
 
 18. **Lead-level predictions structure.** When `lead.predictions` is
     present, each entry has `id` (matching `^lp\d+$`, unique within

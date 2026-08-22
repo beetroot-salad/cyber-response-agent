@@ -489,15 +489,16 @@ no id yet, and the attached vertex is already named by `attached_to`.
 Ids are `ap<n>` here and `p<n>` in `.preds`, both denied on write outside
 those namespaces, because a resolution head reads only `p*`/`ap*`/`r*`
 and an id outside them can be cited by nothing. An `ap<n>` counts toward
-every rule a `p<n>` does — a resolution head cites it, and a `refutes`
-list names it. So a `++` on a hypothesis carrying one cites the `ap<n>`
-alongside its `p<n>`:
+every rule a `p<n>` does — a resolution head cites it, a `refutes` list
+names it, and it is in the set a `++` has to settle. So a `++` on
+`h-002` cites the `ap<n>` **and every `p<n>` the hypothesis declared**;
+`++` says all of them came in, and a head naming a subset is denied on
+write (grade `+` for partial coverage):
 
 ```invlang
 :T resolutions
-h-002  null → ++    [l-002 p1,ap1 severe ⟂ e-010 :: unsigned binary, no package]
+h-002  null → ++    [l-002 p1,p2,ap1 severe ⟂ e-001 :: rotating subdomains, rapid-fire bursts, unsigned binary]
 ```
-
 
 ### Forking a hypothesis mid-run
 

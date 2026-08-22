@@ -232,11 +232,13 @@ error rather than letting the write through. Scope is anchored to
    row added is the documented append shape), and the
    **one-observable-per-entry** clause is semantic, left to the author
    exactly as on rule #29. Corpus: zero fires — no shipped document
-   uses `.attr_preds` at all. It fired twice on ONE test fixture,
-   `test_invlang_sibling_fork_934.py`'s `_ATTR_FORK`, which wrote a
-   vertex id in the `target` cell; that shipped with #934 because #33
-   had no implementation yet, and the cell is now `attached_vertex` —
-   the same prediction about the same object, said in the grammar. The
+   uses `.attr_preds` at all. It fired three times across TWO test
+   fixtures — twice on `test_invlang_sibling_fork_934.py`'s `_ATTR_FORK`
+   and once on `test_invlang_prediction_refs.py`'s `_two_hypotheses` —
+   each of which wrote a vertex id in the `target` cell; both shipped
+   with #934 because #33 had no implementation yet, and the cells are
+   now `attached_vertex` — the same prediction about the same object,
+   said in the grammar. The
    only other `v-*` target left in the tree is
    `test_invlang_parser_characterization.py`'s, which is deliberate:
    it characterizes the parser passing the cell through unread, which
