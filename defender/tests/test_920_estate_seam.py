@@ -187,7 +187,9 @@ class DecisionApplier:
 
     decision: str
 
-    def prepare(self, system: str, verb: str, params: dict, world: Any) -> dict:
+    def prepare(
+        self, system: str, verb: str, params: dict, world: Any, ctx: Any = None,
+    ) -> dict:
         return params
 
     def apply(

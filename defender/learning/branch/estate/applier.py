@@ -62,11 +62,20 @@ class WorldApplier:
             return None
         return world.world_id
 
-    def prepare(self, system: str, verb: str, params: dict, world: Any) -> dict:
+    def prepare(self, system: str, verb: str, params: dict, world: Any, ctx: Any = None) -> dict:
+        """This call, pointed at the world's corpus if the system has one.
+
+        `ctx` rides through because a stager may need the RUN's own config to know where a call
+        addresses its corpus. A call that omits its index parameter is not indexless — it is
+        naming the run's configured default — and a frame that cannot see that would have to
+        refuse a shipped template outright, dropping a whole evidence class from the sibling
+        while the base keeps it. That is a base-vs-sibling difference belonging to the harness
+        rather than the world, which is the one kind this seam must never manufacture.
+        """
         stager = STAGERS.get(system)
         if stager is None:
             return params
-        return stager.redirect(verb, params, self._staging_world(system, world))
+        return stager.redirect(verb, params, self._staging_world(system, world), ctx)
 
     def apply(
         self, system: str, verb: str, params: dict, payload: Any, world: Any,  # noqa: ARG002
@@ -91,7 +100,13 @@ class WorldApplier:
         """
         if not _touches(world, system):
             return PASSTHROUGH, payload
-        if system in STAGERS:
-            return STAGED, payload
+        stager = STAGERS.get(system)
+        if stager is not None:
+            # STAGED names what happened to THIS CALL, not what is true of the system. A verb
+            # the stager never retargets — a liveness probe reaches no corpus to stage — had a
+            # world's difference applied to it in name only, which is a wrong row in the one
+            # table built to make wrong rows visible. The stager owns that question because
+            # only it knows which of its verbs address a corpus.
+            return (STAGED if stager.stages(verb) else PASSTHROUGH), payload
         patched, applied = apply_patches(payload, self.patches.get(system, {}))
         return (PATCHED, patched) if applied else (PASSTHROUGH, payload)

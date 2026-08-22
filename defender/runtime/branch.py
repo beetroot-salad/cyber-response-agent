@@ -245,7 +245,8 @@ def framework_view(prefix: list) -> list:
     """The prefix as the FRAMEWORK will hold it, which is not always as the store holds it.
 
     `pydantic_ai` normalises a handed-in `message_history` before the first request, and part
-    of that is MERGING ADJACENT `ModelRequest`s. The store deliberately produces exactly that
+    of that is MERGING ADJACENT SAME-ROLE messages — requests with requests, and responses
+    with responses; both shapes are measured in `test_920_framework_contract.py`. The store deliberately produces exactly that
     shape: #808's correlation lead is a synthesized `ModelRequest` written straight into MAIN's
     session, landing next to the tool-return `ModelRequest` before it. Measured: a four-message
     prefix of that shape comes back as three.

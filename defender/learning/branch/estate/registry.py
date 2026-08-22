@@ -23,7 +23,7 @@ from typing import Any
 
 from defender.runtime.verbs import ModuleVerbRegistry
 
-from ..ledger import BASE, Ledger, ServedCall
+from ..ledger import BASE, REFUSED, Ledger, ServedCall
 from .applier import WorldApplier
 
 
@@ -88,7 +88,18 @@ class WorldRegistry(ModuleVerbRegistry):
         @functools.wraps(fn)
         def served(ctx: Any, **params: Any) -> Any:
             applier, ledger, world = self.applier, self.ledger, self.world
-            prepared = applier.prepare(system, verb, params, world)
+            try:
+                prepared = applier.prepare(system, verb, params, world, ctx)
+            except Exception as refusal:
+                # A refusal is EVIDENCE, and an unrecorded one is indistinguishable from the
+                # sibling never asking. Recorded against the params as ASKED — the retarget is
+                # exactly what failed, so there is no prepared form to name — then re-raised
+                # so the query tool still turns it into the fault row the model reads.
+                ledger.record(ServedCall(
+                    system=system, verb=verb, params=dict(params),
+                    payload_text=str(refusal), source=REFUSED, world_id=world.world_id,
+                ))
+                raise
             payload, base_text = _base_payload(fn, ctx, prepared, system, verb, ledger)
             decision, out = applier.apply(system, verb, prepared, payload, world)
             # `out is payload` on every decision that changes nothing (STAGED, PASSTHROUGH), and

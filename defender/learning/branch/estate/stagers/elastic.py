@@ -23,7 +23,9 @@ run's configured patterns — a branched run declares its own. `esql` (elastic_a
 from __future__ import annotations
 
 import re
+from typing import Any
 
+from defender.scripts.adapters.esql_text import split_first_command
 from defender.scripts.adapters.faults import USAGE_EXIT_CODE, AdapterFault
 
 #: The leading `FROM` command. ES|QL requires it FIRST, which is what makes this a
@@ -42,6 +44,21 @@ _METADATA = re.compile(r"(?:(?<=\s)|\A)METADATA(?=\s|\Z)", re.IGNORECASE)
 
 #: Verbs whose index is a PARAMETER rather than part of the query body.
 PARAM_INDEXED = ("query", "alerts")
+
+#: Which config key each param-indexed verb defaults its index to, mirroring
+#: `elastic_adapter.query`/`alerts`. A call that omits `index` is not indexless — it is
+#: addressing THIS, and a stager that cannot see it would have to refuse a shipped template.
+_DEFAULT_INDEX_KEY = {"query": "ELASTIC_EVENTS_INDEX", "alerts": "ELASTIC_ALERTS_INDEX"}
+
+
+def stages(verb: str) -> bool:
+    """Does retargeting this verb do anything?
+
+    `health-check` reaches no corpus, so a world stages nothing for it — and reporting it as
+    STAGED would put a decision in the ledger that names the system honestly and the CALL
+    wrongly.
+    """
+    return verb in PARAM_INDEXED or verb == "esql"
 
 
 class StagingError(AdapterFault):
@@ -68,7 +85,9 @@ def rewrite_from(query: str, view: str) -> str:
     is every downstream pipe stage — the query the defender wrote is the query that runs, over
     a different corpus.
     """
-    head, sep, tail = query.partition("|")
+    # QUOTE-AWARE, not `partition('|')`: a `|` inside a quoted source name
+    # (`FROM "logs|weird"`) is DATA, and splitting there cuts the source in half.
+    head, tail = split_first_command(query)
     m = _FROM.match(head)
     if m is None:
         raise StagingError(
@@ -82,7 +101,7 @@ def rewrite_from(query: str, view: str) -> str:
     # measuring it only on the no-METADATA path silently joined `METADATA _id` to the following
     # `| WHERE`, turning a two-line query into one.
     gap = rest[len(rest.rstrip()):]
-    return f"{m.group('lead')}{view}{suffix}{gap}{sep}{tail}"
+    return f"{m.group('lead')}{view}{suffix}{gap}{tail}"
 
 
 def _one_source(expression: str, origin: str) -> str:
@@ -109,19 +128,33 @@ def _one_source(expression: str, origin: str) -> str:
     return source
 
 
-def source_pattern(verb: str, params: dict) -> str | None:
-    """Where this call addresses its corpus, by whichever route the verb carries it."""
+def source_pattern(verb: str, params: dict, ctx: Any = None) -> str | None:
+    """Where this call addresses its corpus, by whichever route the verb carries it.
+
+    An omitted `index` is resolved through the RUN'S OWN CONFIG, the same file and key the
+    adapter would have fallen back to. `elastic_adapter.query`/`alerts` declare
+    `index: str | None = None` on purpose and a shipped template relies on it —
+    `correlate-alerts-by-entity.md` is `params: [end, start]` and its prose says "the verb
+    defaults its `index` to …, so there is no FROM to write". Refusing that call would drop a
+    whole evidence class from the sibling while the base kept it: a base-vs-sibling difference
+    that is the STAGER'S, not the world's, which is the one kind this seam must never create.
+    """
     if verb in PARAM_INDEXED:
         index = params.get("index")
-        if not isinstance(index, str) or not index:
+        if isinstance(index, str) and index:
+            return _one_source(index, f"{verb}'s index parameter")
+        if ctx is None:
             return None
-        return _one_source(index, f"{verb}'s index parameter")
+        from defender.scripts.adapters.elastic_adapter import load_config
+
+        return _one_source(
+            load_config(ctx)[_DEFAULT_INDEX_KEY[verb]], f"{verb}'s configured default index")
     if verb != "esql":
         return None
     body = params.get("query")
     if not isinstance(body, str):
         raise StagingError(f"esql params carry no query body: {params!r}")
-    m = _FROM.match(body.partition("|")[0])
+    m = _FROM.match(split_first_command(body)[0])
     if m is None:
         raise StagingError(f"ES|QL query does not open with FROM: {body[:80]!r}")
     rest = m.group("rest")
@@ -155,7 +188,7 @@ def view_name(base_pattern: str, world_id: str) -> str:
     return f"{stem}-w-{world_id}"
 
 
-def redirect(verb: str, params: dict, world_id: str | None) -> dict:
+def redirect(verb: str, params: dict, world_id: str | None, ctx: Any = None) -> dict:
     """`params` pointed at `world_id`'s view of whatever corpus they already address.
 
     `world_id is None` is the base world — it stages nothing, so its params come back untouched
@@ -169,7 +202,7 @@ def redirect(verb: str, params: dict, world_id: str | None) -> dict:
     """
     if world_id is None or verb not in (*PARAM_INDEXED, "esql"):
         return params
-    base = source_pattern(verb, params)
+    base = source_pattern(verb, params, ctx)
     if base is None:
         raise StagingError(
             f"{verb} addresses its corpus through the run's configured default, which cannot "

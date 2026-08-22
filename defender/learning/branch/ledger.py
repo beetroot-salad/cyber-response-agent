@@ -32,7 +32,12 @@ BASE = "base"
 STAGED = "staged"
 PATCHED = "patched"
 PASSTHROUGH = "passthrough"
-SOURCES = frozenset({BASE, STAGED, PATCHED, PASSTHROUGH})
+#: The call reached the seam and was REFUSED — a world whose corpus this query cannot be
+#: pointed at. Its own class because the alternative is silence: a refusal that writes no row
+#: is "a served response with no row", which is the exact state this table exists to make
+#: visible, and a reader counting evidence would see the sibling simply never asking.
+REFUSED = "refused"
+SOURCES = frozenset({BASE, STAGED, PATCHED, PASSTHROUGH, REFUSED})
 
 
 class LedgerError(Exception):
@@ -122,8 +127,31 @@ class Ledger:
         A hit means NO adapter call: the estate is live, so two siblings querying it minutes
         apart would see different data and the pair's whole invariance would be a fiction.
         Recording once per family is what buys determinism back without snapshot-restore.
+
+        A MISS RE-READS THE FILE before conceding. The memo is built at construction, so a
+        sibling running beside another in a separate process holds a snapshot from before that
+        one started writing: both miss, both call the live adapter, and the pair's two bases
+        are two different reads — the failure the family tier exists to prevent, arriving by
+        the one route it does not watch. This NARROWS that window; it does not close it. Two
+        processes can still miss between the re-read and the append, and closing it properly
+        needs a lock this seam does not yet have.
         """
-        return self._memo.get((None, request_key(system, verb, params)))
+        key = request_key(system, verb, params)
+        hit = self._memo.get((None, key))
+        if hit is not None:
+            return hit
+        self._refresh()
+        return self._memo.get((None, key))
+
+    def _refresh(self) -> None:
+        """Re-absorb the file, keeping whatever this process already holds."""
+        for row in read_jsonl_rows(self.path):
+            text = row.get("payload_text")
+            if not isinstance(text, str) or not text:
+                continue
+            row_key = request_key(str(row.get("system")), str(row.get("verb")), row.get("params"))
+            world = row.get("world_id")
+            self._memo.setdefault((world if world is None else str(world), row_key), text)
 
     def record(self, call: ServedCall) -> ServedCall:
         if call.source not in SOURCES:

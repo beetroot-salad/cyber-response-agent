@@ -39,6 +39,14 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from defender.scripts.adapters.elastic_adapter import esql_payload  # noqa: E402
+from defender.scripts.adapters.esql_text import (  # noqa: E402
+    separator_offsets,
+    # noqa: F401 — re-export: `validate_cases` and `test_controls` reach this through the
+    # CONTROLS module namespace, which is the interface it has always had. The splitter moved
+    # to `esql_text` so the turn-N corpus stager could share it rather than grow the second
+    # copy this module's own docstring warns about.
+    split_commands,  # noqa: F401
+)
 
 ES_SH = REPO_ROOT / "infra" / "bin" / "es.sh"
 
@@ -52,11 +60,6 @@ _BOUND = re.compile(r'(@timestamp\s*(?:>=|>|<=|<)\s*")([^"]+)(")')
 # (`esql_bounds` reads group 2; a rewrite puts back groups 1 and 3), and inserting a
 # capture would renumber them under every caller at once.
 _OPERATOR = re.compile(r"(?:>=|>|<=|<)")
-
-# ES|QL separates commands with `|`, NOT with newlines. A query is free to write its
-# whole pipeline on one line, so anything that reasons about "the source command" has
-# to split on the separator the language actually uses — see `add_esql_window`.
-_COMMAND_SEP = "|"
 
 # Shape-matched by default: whole weeks back, so a Saturday capture is controlled
 # against prior Saturdays. The playground's baseline generators are
@@ -183,40 +186,6 @@ def shift_esql_window(query: str, start: datetime, end: datetime) -> str:
         query)
 
 
-def _separator_offsets(query: str) -> list[int]:
-    """Offsets of the `|` characters that actually separate commands.
-
-    A `|` inside a string literal is DATA, not a separator — `WHERE message RLIKE
-    "sshd|sudo"` carries one — so a naive `split("|")` cuts a predicate in half. Splicing
-    there produces a control that will not even parse, and reading command positions off
-    it names the wrong command as the one that ran first.
-    """
-    out: list[int] = []
-    in_string = escaped = False
-    for i, ch in enumerate(query):
-        if escaped:
-            escaped = False
-        elif ch == "\\" and in_string:
-            escaped = True
-        elif ch == '"':
-            in_string = not in_string
-        elif ch == _COMMAND_SEP and not in_string:
-            out.append(i)
-    return out
-
-
-def split_commands(query: str) -> list[str]:
-    """This query's commands, split on the separators ES|QL actually uses.
-
-    THE splitter for anything that reasons about command order — `add_esql_window` when it
-    places its clause, and `validate_cases` when it reads back where that clause landed.
-    Two copies of "split on `|`" is how one of them learns about quoting and the other
-    does not.
-    """
-    edges = [-1, *_separator_offsets(query), len(query)]
-    return [query[a + 1:b] for a, b in zip(edges, edges[1:], strict=False)]
-
-
 def add_esql_window(query: str, start: datetime, end: datetime) -> str:
     """Add a `@timestamp` restriction to a query that carries none.
 
@@ -245,9 +214,9 @@ def add_esql_window(query: str, start: datetime, end: datetime) -> str:
     # Everything after the first separator is put back VERBATIM, separator included:
     # the clause is the only thing this may add, and re-joining parsed commands would
     # let it reformat a predicate it has no business touching. The offset comes from
-    # `_separator_offsets` rather than `partition`, so a `|` inside a string literal in
+    # `separator_offsets` rather than `partition`, so a `|` inside a string literal in
     # the source command is not mistaken for the end of it.
-    offsets = _separator_offsets(query)
+    offsets = separator_offsets(query)
     if not offsets:
         return f"{query.rstrip()}\n{clause}"
     cut = offsets[0]
