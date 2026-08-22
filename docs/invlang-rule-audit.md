@@ -2,6 +2,8 @@
 
 Asks one question of each of the 35 rules in `docs/investigation-language.md` v2.13: **what behavior does it validate, and what specific failure mode does it prevent?** Companion to `dense-investigation-format.md` v0.1. Discussion artifact, not a spec change.
 
+> **Pinned to v2.13; read the spec for the current rule set.** This audit predates the v2.15 consolidation, the v2.17 merge of #35 into #23, the v2.18 retired-vocabulary trim, and the v2.19 strike of #32. Entries #12, #19, #20, #22 describe rules that are now gaps (merged into #1/#7); **entries #32 and #35 describe rules that are now gaps too** — #32 struck in v2.19 (its discharge test is a lexical prefix match that six of six triggering hypotheses fail and only this doc's companion `dense-investigation-format.md` illustration satisfies, and mandating the peer would mint it; the coverage gap it leaves is real and is answered by the behavioral-consistency prediction, not by a gate) and #35 merged into #23 at v2.17 (#934) and rewritten as a gap entry at v2.19, #23 being implemented as `_check_fork_distinctness` and refuses strictly more. There is no entry for #36 (added v2.14, struck v2.18). The spec is now 26 active rules across numbers 1–36 with ten gaps: #10, #12, #15, #16, #19, #20, #22, #32, #35, #36. The summary sections below still list #32 under load-bearing safety and #35 under discipline, and still pose "#23 vs #35 — likely co-fire" as an open question that #934 has since answered; only #21's entry has been amended in place, because it was the one carrying vocabulary the system never had. The rest is left as the audit was written.
+
 The audit is normative — it answers what each rule is *for*, not how often it currently fires. Empirical fire-rate is a separate question (see end).
 
 ## Per-rule audit
@@ -46,7 +48,7 @@ The audit is normative — it answers what each rule is *for*, not how often it 
 
 **#20 Authorization back-reference resolves.** Validates `fulfills_contract: h-{id}.ac{n}` points to a real contract. Prevents resolutions that claim to fulfill phantom contracts. (Reference integrity.)
 
-**#21 Authorization-gated disposition.** Validates `disposition:benign` ⇒ every authz contract on confirmed-weight hypotheses resolves `authorized`; `unauthorized` forces unclear/true_positive. Prevents the single most dangerous failure mode: resolved-benign on alerts whose mechanism was never proven permitted. **Most load-bearing safety rule.**
+**#21 Authorization-gated disposition.** Validates `disposition:benign` ⇒ every authz contract on confirmed-weight hypotheses resolves `authorized`. Prevents the single most dangerous failure mode: resolved-benign on alerts whose mechanism was never proven permitted. **Most load-bearing safety rule.** *(v2.18: this entry also read "`unauthorized` forces unclear/true_positive". Excised with rule #21's escalation half — neither spelling is in `DISPOSITION_VALUES` (`defender/_vocab.py`). The benign half described here is the enforced half: `_check_benign_authz` in `defender/skills/invlang/validate.py`.)*
 
 **#22 Attribute-update target shape.** Validates `attribute_updates.target` is exactly one of `v-{id}` or `e-{id}` and resolves. Prevents enrichments pointing at nothing. (Reference integrity.)
 

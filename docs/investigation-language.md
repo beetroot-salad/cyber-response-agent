@@ -1,8 +1,23 @@
 # Investigation Language
 
-**Status:** Spec v2.17. Implemented.
+**Status:** Spec v2.19. Implemented.
 **Query tool:** `soc-agent/scripts/invlang/` — see `cli.py --help`
 **On-disk surface:** `​```invlang` fenced blocks. `​```yaml` fences in `investigation.md` are rejected by the validator. Block-tag grammar (`:V` / `:E` / `:H` / `:L` / `:R` / `:T` / `:G`), row shapes, and the surface-to-canonical-dict projection live in `docs/dense-investigation-format.md`. The canonical companion dict — what the validator and the corpus queries operate on — is what every block projects to via `soc-agent/scripts/handlers/_dense_parser.py`.
+
+**v2.19 delta:** one rule struck and one gap finally written down — 27 → 26 active. Arithmetic: 36 numbers − 10 gaps = 26; the gap list grows from nine to ten with #32. #35 is the tenth number but not a tenth strike: v2.17 merged it into #23 and counted it as a gap in the header, while leaving its entry standing as a rule. This is where the entry catches up with the count. Doc-only, and doc-only in the strict sense: neither rule was ever implemented anywhere in this repository. `defender/skills/invlang/validate.py` has no `_check_integrity_peer_discipline` and no `_check_sibling_prediction_divergence`; both names survive only in `experiments/relax-invoker-identity-peer/`, against a `soc-agent` tree this repository does not contain.
+- **Rule #32 (integrity peer discipline) becomes the tenth gap.** Four independent reasons, argued in full at the rule's entry: it is universally non-complied-with (of the 10 content-distinct hypotheses in the corpus carrying an `authorization_contract`, 6 satisfy #32's trigger, all 6 fail it, 0 discharge it — two of the six are shipped goldens, one is a shipped worked example, and one is the runtime SKILL's own canonical "Right" answer); its discharge test is a `name.startswith("?adversary-controlled-")` prefix match on model-authored free text, the same lexical-token experiment #36 already ran and v2.16 already reverted; arming it would mint six `?adversary-controlled-X` rows written to clear the gate rather than to test integrity, the manufactured-compliance failure #934 measured one rule over; and it reinstates the "maintain adversarial hypothesis until `--`" bookkeeping rule that `docs/decisions/adversarial-as-attribute-not-hypothesis.md` item 6 dropped and that rule #21 says it replaced. **The coverage gap it leaves is real** — authorized-bulk-read-from-a-compromised-account clears authz, clears impact, and never tests the integrity premise. The recorded answer to that gap is not a structural gate but §Hypothesis → *Behavioral-consistency prediction*, and the gap entry says so.
+- **Rule #35 (sibling prediction divergence) was made the eighth gap at v2.17** and is rewritten as one here — subsumed by rule #23 as reconciled and implemented in #934 as `_check_fork_distinctness`. #35's signature is `predictions[]` `(subject, claim)` plus `attribute_predictions[]` `(target, attribute, claim)`; #23 keeps the attribute-prediction tuple whole and drops `subject` from the prediction one, so every pair #35 refuses #23 refuses too, plus the pair that wrote one sentence under two subject labels. Strictly stronger, same sibling group, same empty-signature skip. v2.17's header already counted #35 as a gap; this is where the entry catches up and stops calling it a rule.
+- **Rule #23 now owns the empty-signature skip.** It was stated as "per rule #35's convention" while #35 was the rule that had it. With #35 struck the convention has nowhere to be borrowed from, so #23 states it.
+- **`integrity_waived?` is now read by nothing.** The column is in the `:H` grammar, the parser projects it (`defender/skills/invlang/parser.py`), `HypothesisRecord` types it (`schema.py`), and every worked example emits it — and with #32 struck no validator rule consumes it. It is NOT removed here: removing a projected column is a grammar change with a parser, a schema, and roughly thirty test fixtures behind it, and the field still has a use as an authoring note. Recorded as an unread column pending a decision.
+- Gaps are now #10, #12, #15, #16, #19, #20, #22, #32, #35, #36 — ten of the 36 numbers, leaving 26 active.
+- **Not re-armed, and #32 not re-armed under a different discharge test.** Struck, not rewritten. Reasons 3 and 4 argue against the rule's *shape*, not against its spelling; a structural gate on integrity is the thing being rejected, so replacing the prefix match with a better one is not the follow-up.
+
+**v2.18 delta:** retired-vocabulary trim — 28 → 27 active rules. Doc-only; no validator behaviour change, because there was no behaviour to change. Rule #36 and the escalation clauses of #21/#24 were specified against a disposition vocabulary the system never had: `true_positive`, `unclear`, and a `status: escalated` routing target. The live run-disposition enum is `DISPOSITION_VALUES = ("benign", "false-positive", "inconclusive", "malicious")` (`defender/_vocab.py`), and `true_positive` has never appeared anywhere under `defender/` in the repository's history — this was not a rename that drifted out of sync, the spec invented a vocabulary and the code never adopted it.
+- Rule #36 (affirmative `true_positive` disposition) becomes the ninth gap. Its entire substance is a constraint on routing a value the enum cannot express, and nothing enforces it: `true_positive` has zero occurrences in `defender/skills/invlang/validate.py`, and the `hooks/scripts/invlang_checks_authorization.py:_check_affirmative_true_positive` the v2.14/v2.16 deltas cite does not exist. Numbering preserved with a redirect note, per the v2.15 convention.
+- Rule #21 keeps its **benign** half, which is implemented — `_check_benign_authz` in `defender/skills/invlang/validate.py`. Its **escalation** half (the `status: escalated` forcing and the disposition ∈ {`unclear`, `true_positive`} floors) is excised, here and in its §Authorization prose restatement. Rule #24's trailing `status: escalated` clause is excised for the same reason; the persistence rule itself is untouched.
+- §Two-axis CONCLUDE restated in the live enum (`true_positive` → `malicious`, `unclear` → `inconclusive`), which is a spelling correction, not a semantic one — `defender/_vocab.py` documents `malicious` as the confirmed-threat landing and `inconclusive` as the nothing-established landing.
+- Gaps are now #10, #12, #15, #16, #19, #20, #22, #35, #36 — nine of the 36 numbers, leaving 27 active. (#35 is v2.17's, not this delta's.)
+- **Not re-armed under the live spelling.** Struck, not translated. #36's substance survives translation and #21's escalation half largely does (see the notes at each), but re-arming a rule under a new vocabulary is a separate decision; these are gaps until someone makes it.
 
 **v2.17 delta:** rule #23 (hypothesis fork distinctness) re-keyed from
 `proposed_edge.parent_vertex.classification` onto the predicted observable, and
@@ -13,30 +28,33 @@ marker on a `parent_class` nothing closes. §Three shapes of adversariness and
 rather than by its classification. Active-rule count 29 → 28. Rationale and the
 prompt-side change: #934; validator implementation
 `defender/skills/invlang/validate.py:_check_fork_distinctness`.
+- The header count moved to eight gaps here, but #35's ENTRY was left standing as a
+  rule with a "merged into #23" note, so the list still read 36 numbers against
+  seven gap entries — 29, not 28. v2.19 rewrites the entry and closes that.
 
-**v2.16 delta:** rule #36 simplified — `disposition: true_positive` now requires only `++` on a surviving hypothesis (weight-only). The v2.14 adversarial-classification token check is removed; the lexical token list desynced from playbook-canonical fork names (e.g. `?credentials-used-outside-registered-actor`) and produced false rejections of legitimately-graded `true_positive` routings. The affirmative-evidence signal is captured by the `++` requirement; the "wrong-named survivor" failure mode is caught by Tier-2 judges and rule #21. Validator implementation: `hooks/scripts/invlang_checks_authorization.py:_check_affirmative_true_positive`. Parser-side X5 (`scripts/handlers/_output_parser.py:_validate_cross_block_invariants`) similarly weight-only.
+**v2.16 delta:** *(Superseded by v2.18 above: rule #36 is struck as retired vocabulary. The implementation path cited below does not exist in this repository. Left as written for the record.)* rule #36 simplified — `disposition: true_positive` now requires only `++` on a surviving hypothesis (weight-only). The v2.14 adversarial-classification token check is removed; the lexical token list desynced from playbook-canonical fork names (e.g. `?credentials-used-outside-registered-actor`) and produced false rejections of legitimately-graded `true_positive` routings. The affirmative-evidence signal is captured by the `++` requirement; the "wrong-named survivor" failure mode is caught by Tier-2 judges and rule #21. Validator implementation: `hooks/scripts/invlang_checks_authorization.py:_check_affirmative_true_positive`. Parser-side X5 (`scripts/handlers/_output_parser.py:_validate_cross_block_invariants`) similarly weight-only.
 
-**v2.15 delta:** Validator rule consolidation — 36 → 29 active rules. Doc-only refactor; no validator behavior change. Drives:
+**v2.15 delta:** Validator rule consolidation — 36 → 29 active rules *(29 was current until v2.17 above, which merges #35 into #23; v2.18 then strikes #36 and v2.19 #32, and the count is now 26)*. Doc-only refactor; no validator behavior change. Drives:
 - Reference-resolution merge: rules #12, #19, #20, and the resolution clause of #22 fold into rule #7. Single "all references resolve in scope" rule covers `v-*`, `e-*`, `h-*`, `l-*`, hierarchical `h-{parent}-{nonce}`, contract `edge_ref`, `fulfills_contract`, and `attribute_updates.target`.
 - SCREEN structural integrity merge: former #16 (screen_result scope) absorbs into #17.
 - Schema-validity scope expansion: rule #1 absorbs former #15 (sub-vertex `v-{parent}-{nonce}` shape) and the exclusivity clause of former #22 (target shape).
 - Past-case ⇒ partial enum constraint moves from former #27a to rule #11; #27 retains the no-sole-grounding rule for benign.
 - Demotion: former #10 (mechanical leads stay within data source) is now a review-only discipline guideline — semantic, not validator-enforced. Retained in §Conventions.
-- Numbering preserved with redirect notes at the seven gaps (#10, #12, #15, #16, #19, #20, #22) so existing code, prompt, and test references to those rule numbers remain greppable. Rule #36 (v2.14) is unaffected by the consolidation and counts toward the 29 active rules.
+- Numbering preserved with redirect notes at the seven gaps (#10, #12, #15, #16, #19, #20, #22) so existing code, prompt, and test references to those rule numbers remain greppable. Rule #36 (v2.14) is unaffected by the consolidation and counts toward the 29 active rules. *(Superseded: #35 became the eighth gap at v2.17, #36 the ninth at v2.18 and #32 the tenth at v2.20, leaving ten gaps and 26 active rules. The 36 → 29 arithmetic below describes v2.15 as it landed and is left as written.)*
 - Per-rule audit: see `docs/invlang-rule-audit.md` (added 2026-04 alongside `docs/dense-investigation-format.md`).
 
-**v2.14 delta:** rule #36 — affirmative `true_positive` disposition. Closes the absence-of-benign-confirmation cascade (4 production runs documented in `docs/decisions/analyze-true-positive-routing.md`) by structurally rejecting `disposition: true_positive` writes whose `surviving_hypotheses[]` carries no hypothesis that is both adversarially-classified AND graded `++`. Validator implementation: `hooks/scripts/invlang_checks_authorization.py:_check_affirmative_true_positive`. Empirically motivated: trap-set evaluation showed prompt-only guidance lets ~50% of false-true-positive cases through; the structural gate raises catch rate to ~100%.
+**v2.14 delta:** *(Superseded by v2.18 above: rule #36 is struck as retired vocabulary. The implementation path cited below does not exist in this repository. Left as written for the record.)* rule #36 — affirmative `true_positive` disposition. Closes the absence-of-benign-confirmation cascade (4 production runs documented in `docs/decisions/analyze-true-positive-routing.md`) by structurally rejecting `disposition: true_positive` writes whose `surviving_hypotheses[]` carries no hypothesis that is both adversarially-classified AND graded `++`. Validator implementation: `hooks/scripts/invlang_checks_authorization.py:_check_affirmative_true_positive`. Empirically motivated: trap-set evaluation showed prompt-only guidance lets ~50% of false-true-positive cases through; the structural gate raises catch rate to ~100%.
 
 **v2.13 delta:** Tier-0 contract-completeness rules between PREDICT and ANALYZE.
 - Rule #34 (prediction closure at CONCLUDE) — at REPORT, every declared `p*` / `ap*` on a non-refuted, non-shelved hypothesis must be cited in some resolution's `matched_prediction_ids[]` with a non-null `after`, OR appear in `conclude.deferred_predictions[]` with rationale. Generalises rule #6 (which only fired on `++`) into a coverage gate at REPORT regardless of weight. New conclude surface: `deferred_predictions[]` (parallel to `deferred_authorizations[]` and `deferred_impact_predictions[]`).
-- Rule #35 (sibling prediction divergence) — within a sibling group (shared `parent_hypothesis_id` + `attached_to_vertex`), no two siblings may declare identical prediction signatures (combining `(subject, claim)` from `predictions[]` and `(target, attribute, claim)` from `attribute_predictions[]`, case-normalised). Generalises rule #32 (integrity-peer-specific, contract-gated) to all sibling forks regardless of contract presence.
+- Rule #35 (sibling prediction divergence) — *(Superseded: #35 was merged into rule #23 at v2.17 and rewritten as a gap entry at v2.19, and the rule #32 it generalises is struck at v2.19 too. Left as written for the record.)* within a sibling group (shared `parent_hypothesis_id` + `attached_to_vertex`), no two siblings may declare identical prediction signatures (combining `(subject, claim)` from `predictions[]` and `(target, attribute, claim)` from `attribute_predictions[]`, case-normalised). Generalises rule #32 (integrity-peer-specific, contract-gated) to all sibling forks regardless of contract presence.
 - Companion to spec rule #33 (attribute-prediction structure) — already in schema.md; documented here for completeness.
 
 **v2.12 delta:** top-level block rename `gather:` → `findings:`. Same merge semantics (same-id append; ANALYZE merges outcome.resolutions + verdicts onto the GATHER-populated entry), clearer name for cross-phase state. Handler-authored: subagents emit plain-YAML envelopes; `scripts/handlers/gather.py` + `scripts/handlers/analyze.py` synthesize `findings[]` and merge via the existing validator. Raw SIEM/anchor payloads moved off the companion to `runs/<run-id>/raw_details/loop-<N>/<lead-id>.yaml`; analyze-handler preloads them per-loop.
 
 **v2.11 delta:** three orthogonal resolution axes named explicitly.
 - **Impact** promoted from a signature-knowledge hand-wave to a lead-level first-class record. `impact_predictions[]` on leads declare threshold predicates before evidence lands; ANALYZE grades observations against them and emits `impact_resolutions[]` on lead outcomes; `conclude.impact_verdict` and `conclude.impact_severity` are a second axis alongside `disposition`. The authorized-but-malifying class (authorized bulk read at 3σ above baseline; authorized admin delete of 10 000 rows) resolves here — not on authz. Signature-tier `impact_profile.md` deferred pending corpus measurements; per-signature impact knowledge lives in playbook prose until threshold drift is observed.
-- **Integrity** promoted from a paragraph under §Authorization to its own §Integrity section. Mechanism-hypothesis placement reaffirmed (`?adversary-controlled-*` peers with predictions on discriminating observables); integrity is evidential, not anchored, and not a contract. Discipline: `authorization_contract` on a hypothesis whose predicted edge has an acting-entity source (`session`, `identity`, `process`) expects a peer integrity hypothesis unless `integrity_waived: <rationale>` is present — closes the authorized-bulk-read-from-compromised-account shortcut. Forthcoming validator rule; guidance applies today.
+- **Integrity** promoted from a paragraph under §Authorization to its own §Integrity section. Mechanism-hypothesis placement reaffirmed (`?adversary-controlled-*` peers with predictions on discriminating observables); integrity is evidential, not anchored, and not a contract. Discipline: `authorization_contract` on a hypothesis whose predicted edge has an acting-entity source (`session`, `identity`, `process`) expects a peer integrity hypothesis unless `integrity_waived: <rationale>` is present — closes the authorized-bulk-read-from-compromised-account shortcut. Forthcoming validator rule; guidance applies today. *(Superseded by v2.20: the forthcoming validator rule — #32 — never arrived and is now struck; the mandate half of this discipline is struck with it, here and in its §Integrity prose restatement. The representational half — an integrity concern is a peer mechanism hypothesis with predictions on discriminating observables, not a contract — is unaffected and still current.)*
 - **Hypothesis cardinality 0-N** made explicit. §Lean hypotheses renamed §Hypothesis cardinality and leanness, with a table mapping cardinality to intent (0 = enriching, 1 = mechanism pinned, 2-3 = observable-diverging peers, >3 = refine under a hierarchical parent). Mirrors PREDICT Shapes D/E/I/A/M in `soc-agent/agents/predict.md`.
 - **Terminology cleanup.** `vertex.trust_root: true` attribute dropped — unvalidated and unqueried; the signal already lives on `outcome.trust_root_reached: v-{id}` (ref-checked) and `conclude.termination.category: trust-root`. "Anchor" reserved for external authority surfaces (`anchor_id`, `anchor_kind`, `anchor_consultations[]`); the "anchor:" gloss on `attached_to_vertex` removed — the field name self-explains.
 
@@ -277,14 +295,27 @@ fit integrity: the question is evidential rather than categorical, no
 single anchor owns the answer, and the question is the same across
 peer hypotheses (not mechanism-conditional the way authz is).
 
-**Acting-entity discipline.** When an `authorization_contract` is
+**Acting-entity discipline — the mandate is struck (v2.19); the gap
+is real.** This paragraph read: when an `authorization_contract` is
 declared on a hypothesis whose predicted edge has an acting-entity
 source (`session`, `identity`, `process`), a peer integrity
 mechanism is expected unless the hypothesis carries an explicit
-`integrity_waived: <rationale>` note. Closes the failure mode where
+`integrity_waived: <rationale>` note. That is validator rule #32,
+which v2.19 strikes — see its gap entry for the four reasons, of
+which the load-bearing one is that a mandated peer is a minted peer,
+not an integrity question someone asked.
+
+The failure mode it named is still open and still worth naming:
 authz clears, impact clears, and the integrity premise was never
 tested — the authorized-bulk-read from a compromised service
-account. Forthcoming validator rule; guidance applies today.
+account. What is struck is the answer, not the question. The
+recorded answer is the **behavioral-consistency prediction** in
+§Hypothesis: opt-in, gated on baseline availability, scope, and
+weight-sensitivity, capped at `moderate` severity, running through
+the prediction machinery that already exists rather than through a
+structural gate. `docs/decisions/adversarial-as-attribute-not-hypothesis.md`
+reached that answer before #32 was written; #32 was the structural
+gate that decision had already declined.
 
 Integrity bottoms out at the authentication edge: below the
 session → identity authz layer, further integrity questions require
@@ -328,17 +359,25 @@ resolving lead ran must either have a fulfilling
 `conclude.deferred_impact_predictions[]` with rationale. Mirrors
 rule #26's orphan gate for authorization contracts.
 
-**Two-axis CONCLUDE.** The `:T conclude` block carries both axes — `disposition` (authz/mechanism: `benign` \| `true_positive` \| `unclear`) and `impact_verdict` (impact: `none` \| `within` \| `exceeds` \| `indeterminate`), with `impact_severity` set when `impact_verdict ∈ {exceeds, indeterminate}`. They combine orthogonally:
+**Two-axis CONCLUDE.** The `:T conclude` block carries both axes — `disposition` (authz/mechanism) and `impact_verdict` (impact: `none` \| `within` \| `exceeds` \| `indeterminate`), with `impact_severity` set when `impact_verdict ∈ {exceeds, indeterminate}`. The disposition axis is the live enum `DISPOSITION_VALUES` in `defender/_vocab.py`: `benign` \| `false-positive` \| `inconclusive` \| `malicious`. They combine orthogonally:
 - `(benign, within)` — routine activity, no escalation.
 - `(benign, exceeds)` — **authorized but malifying.** Mechanism
   confirmed benign; consequence exceeds threshold. Requires analyst
   review on impact even though the mechanism cleared.
-- `(true_positive, within)` — confirmed threat whose consequence
+- `(malicious, within)` — confirmed threat whose consequence
   stayed bounded (failed probe, denied access attempt).
-- `(true_positive, exceeds)` — confirmed threat with realized
+- `(malicious, exceeds)` — confirmed threat with realized
   consequence. Highest-severity class.
-- `(unclear, *)` — mechanism indeterminate; impact verdict still
+- `(inconclusive, *)` — mechanism indeterminate; impact verdict still
   recorded for handoff.
+
+`false-positive` is the fourth live disposition and is deliberately
+absent from this grid: it describes the DETECTOR misfiring rather than
+the alerted entity, so it makes no claim on the impact axis that this
+grid could pair it with. It is reached only through
+`_check_false_positive_gating` (`defender/skills/invlang/validate.py`).
+*(v2.18: this grid read `true_positive` / `unclear` until the
+retired-vocabulary trim; those spellings were never in the enum.)*
 
 Escalation policy in the plugin configuration may drive on either
 axis independently.
@@ -526,7 +565,7 @@ not the edge itself. It lives in
 
 ### Hypothesis
 
-Field grammar: `:H <block> [id|name|attached_to|rel|parent_type|parent_class|parent_attrs?|preds|attr_preds?|refuts?|authz?|integrity_waived?|weight|status|concerns?]` — see `soc-agent/knowledge/invlang/schema.md` §Hypothesis for cell semantics, sub-cell packing (`p<n>:<subject>:"<claim>"`, `ap<n>:<target>:<attribute>:"<claim>"`, `r<n>[<refs>]:"<claim>"`, `ac<n>:<edge_ref>:<anchor_kind>:"<predicate>":<on_unauth>/<on_indet>`), and the integrity-waiver rule. Used by `:H hypothesize.hypotheses` (top-level) and `:H l-{id}.new_hypotheses` (born inside a lead).
+Field grammar: `:H <block> [id|name|attached_to|rel|parent_type|parent_class|parent_attrs?|preds|attr_preds?|refuts?|authz?|integrity_waived?|weight|status|concerns?]` — see `soc-agent/knowledge/invlang/schema.md` §Hypothesis for cell semantics, sub-cell packing (`p<n>:<subject>:"<claim>"`, `ap<n>:<target>:<attribute>:"<claim>"`, `r<n>[<refs>]:"<claim>"`, `ac<n>:<edge_ref>:<anchor_kind>:"<predicate>":<on_unauth>/<on_indet>`). Used by `:H hypothesize.hypotheses` (top-level) and `:H l-{id}.new_hypotheses` (born inside a lead). *(v2.19: this sentence also pointed at "the integrity-waiver rule" — rule #32, now struck. `integrity_waived?` stays in the grammar and stays projected, but no validator rule reads it; see the v2.19 delta.)*
 
 **One-hop discipline.** `proposed_edge.parent_vertex` is the
 immediate upstream cause — exactly one hop from `attached_to_vertex`.
@@ -779,15 +818,23 @@ hypothesis (weight `++` or `+`, status `confirmed` or `active`) has at
 least one fulfilling `authorization_resolutions` entry with `verdict:
 authorized` on a contracted edge. Any contract that is unfulfilled
 (and not in `deferred_authorizations`, per rule #26), or whose
-fulfillment carries `verdict: indeterminate`, caps disposition at
-`unclear` with `status: escalated`. Any `verdict: unauthorized` forces
-`status: escalated` with disposition ∈ {`unclear`, `true_positive`}
-depending on remaining evidence. Past-case-sourced resolutions
+fulfillment carries `verdict: indeterminate`, blocks `benign`.
+Past-case-sourced resolutions
 (`grounding_kind: past-case`) cannot be the sole grounding for
 `authorized` on a benign-eligible contract (rule #27). This replaces
 the former
 "maintain adversarial hypothesis until `--`" bookkeeping rule; teeth
 are structural via validator rules #21 and #26–#28.
+
+*(v2.18: this paragraph also stated what an unfulfilled or
+`unauthorized` contract forces disposition TO — `status: escalated`
+with disposition ∈ {`unclear`, `true_positive`}. Excised with rule
+#21's escalation half: none of those three tokens is in
+`DISPOSITION_VALUES` (`defender/_vocab.py`), and nothing enforced
+them. What survives is the negative constraint, which is what
+`_check_benign_authz` actually implements: an undischarged contract
+blocks `benign`. Where it lands instead is unconstrained by this
+spec.)*
 
 ---
 
@@ -901,7 +948,7 @@ coverage.
 
 ## Validator rules
 
-The validator enforces **28 active rules** (rules 1–36 with eight gaps). Eight historical rule numbers (#10, #12, #15, #16, #19, #20, #22, #35) are gaps — their content was either merged into a sibling rule or demoted to review-only discipline. Numbering is preserved for grep-stability of existing code, prompt, and test references; merged rules carry a redirect to their new home. Rule #36 is the most recent addition (v2.14, affirmative true_positive disposition) — included in the 28-active count. #35 is the eighth gap: #934 moved fork distinctness onto the predicted observable, which is what #35 already checked, so the two became one rule and #23 is the number that ships (the v2.15 delta below predates that merge and still counts 29).
+The validator enforces **26 active rules** (rules 1–36 with ten gaps: 36 numbers − 10 gaps = 26). Ten historical rule numbers (#10, #12, #15, #16, #19, #20, #22, #32, #35, #36) are gaps — their content was merged into a sibling rule, demoted to review-only discipline, subsumed by a stronger rule (#35 → #23, v2.17), or struck outright (#36 as retired vocabulary, v2.18; #32 as a mandate that would manufacture its own compliance, v2.20). Numbering is preserved for grep-stability of existing code, prompt, and test references; merged rules carry a redirect to their new home, and each struck rule carries a note on why. Rules #21 and #24 remain active but were trimmed in v2.18 — see the excision notes on each.
 
 1. **Schema validity.** Required fields present, enums valid, IDs
    well-formed (including hierarchical patterns for hypotheses,
@@ -1025,11 +1072,24 @@ The validator enforces **28 active rules** (rules 1–36 with eight gaps). Eight
     `confirmed` or `active`) to have at least one fulfilling
     `authorization_resolutions` entry with `verdict: authorized`.
     Unfulfilled contracts (and not listed in `deferred_authorizations`
-    per rule #26), or fulfillments with `verdict: indeterminate`,
-    force `status: escalated` and disposition ∈ {`unclear`}. Any
-    `verdict: unauthorized` forces `status: escalated` with
-    disposition ∈ {`unclear`, `true_positive`}. Replaces the former
-    "maintain adversarial hypothesis until `--`" bookkeeping rule.
+    per rule #26), or fulfillments with `verdict: indeterminate`, or
+    any `verdict: unauthorized`, therefore block `benign`. Replaces
+    the former "maintain adversarial hypothesis until `--`"
+    bookkeeping rule.
+
+    Implemented as `_check_benign_authz`
+    (`defender/skills/invlang/validate.py`).
+
+    **v2.18 — escalation half excised.** The rule also read: those
+    shapes "force `status: escalated` and disposition ∈ {`unclear`}",
+    and an `unauthorized` verdict forces `status: escalated` with
+    disposition ∈ {`unclear`, `true_positive`}. Neither `unclear` nor
+    `true_positive` is in `DISPOSITION_VALUES`
+    (`defender/_vocab.py`), no `status: escalated` routing target
+    exists, and `escalated` has zero occurrences in the validator. The
+    benign half above is the enforced half and is unchanged. Only the
+    positive floor — *which* non-benign value an undischarged contract
+    must land on — was retired vocabulary, and it is gone.
 
 22. **(Merged into rules #1 and #7.)** Attribute-update target shape
     — exclusivity check (exactly one of `v-{id}` / `e-{id}`) lives
@@ -1067,7 +1127,9 @@ The validator enforces **28 active rules** (rules 1–36 with eight gaps). Eight
     must either (a) have its final effective weight be `--` across the
     resolutions chain, OR (b) be cited in the conclude block (as the
     termination target, as the matched archetype's mechanism, or as a
-    surviving-but-indeterminate hypothesis driving `status: escalated`).
+    surviving-but-indeterminate hypothesis).
+    *(v2.18: arm (b)'s surviving sub-arm read "…driving `status:
+    escalated`". The qualifier is dropped — no such status exists.)*
     A hypothesis declared and then silently ignored — never refuted,
     never carried into CONCLUDE — fails this rule. Closes the "silent
     hypothesis drop across loops" bias: grading blindness on one
@@ -1155,7 +1217,9 @@ The validator enforces **28 active rules** (rules 1–36 with eight gaps). Eight
     indeterminate}` and forbidden otherwise. Rule #14 (partial
     authority cap) applies to impact resolutions as well.
 
-32. **Integrity peer discipline.** When a hypothesis carries an
+32. **(Struck — a mandate that would manufacture its own compliance.)**
+    Integrity peer discipline. Specified (v2.11 as prose, numbered as a
+    rule from v2.13) as: when a hypothesis carries an
     `authorization_contract` AND its
     `proposed_edge.parent_vertex.type` is an acting-entity type
     (`session`, `identity`, `process`), either (a) a sibling
@@ -1164,10 +1228,30 @@ The validator enforces **28 active rules** (rules 1–36 with eight gaps). Eight
     (b) the contract-carrying hypothesis must carry
     `integrity_waived: <non-empty rationale>`. Non-acting-entity
     parent vertex types (endpoint, file, storage, database, …) are
-    exempt. Closes the authorized-bulk-read-from-compromised-account
-    shortcut — authz clears, impact clears, but the integrity premise
-    was never tested. Integrity resolves through normal weight
-    machinery on the peer, not through a separate contract.
+    exempt. Its purpose was to close the
+    authorized-bulk-read-from-compromised-account shortcut — authz
+    clears, impact clears, but the integrity premise was never tested
+    — with integrity resolving through normal weight machinery on the
+    peer rather than through a separate contract.
+
+    Never implemented. There is no `_check_integrity_peer_discipline`
+    in `defender/skills/invlang/validate.py`; the name appears in this
+    repository only in `experiments/relax-invoker-identity-peer/`,
+    against a `soc-agent` tree that is not here.
+
+    Struck in v2.19. Its discharge test is a
+    `name.startswith("?adversary-controlled-")` prefix match on
+    model-authored free text: 6 of the 10 contract-bearing hypotheses
+    in the corpus trigger it, all 6 fail it, **0 discharge it**, and
+    arming it would mint the peers rather than find them. That
+    measurement, the four arguments it rests on, and the coverage gap
+    it leaves open — whose recorded answer is the
+    behavioral-consistency prediction in
+    `docs/decisions/adversarial-as-attribute-not-hypothesis.md`, not a
+    structural gate — are in
+    `docs/decisions/defender-invlang-enforcement-ramp.md` §Struck from
+    the spec. The `integrity_waived?` column stays in the `:H` grammar
+    and is now read by nothing.
 
 33. **Attribute-prediction structure.** Each `attribute_predictions[]`
     entry on a hypothesis has `id` matching `^ap\d+$` (unique within the
@@ -1194,59 +1278,52 @@ The validator enforces **28 active rules** (rules 1–36 with eight gaps). Eight
     predict pre-commits a prediction set; analyze must address every
     entry by REPORT or the loop owes a justification.
 
-35. **Sibling prediction divergence.** Within a sibling group —
+35. **(Struck — subsumed by rule #23.)** Sibling prediction
+    divergence. Specified (v2.13) as: within a sibling group —
     hypotheses sharing `(parent_hypothesis_id, attached_to_vertex)` —
-    no two siblings may declare identical prediction signatures. A
-    signature is the union of `predictions[]` `(subject, claim)` and
-    `attribute_predictions[]` `(target, attribute, claim)` tuples
-    (case-normalised). Identical signatures mean both hypotheses
-    propose the same observable expectations and ANALYZE has no
-    discriminator to grade them differently — the fork is paraphrase,
-    not mechanism. Generalises rule #32 (integrity-peer specific,
-    requires shared `proposed_edge` structure and at least one
-    `authorization_contract`) to all sibling forks regardless of
-    contract presence. **Merged into rule #23 (#934).** #23 was the
-    classification-keyed rule this one complemented; once #934 moved
-    the distinctness axis onto the predicted observable, the two state
-    one check, and #23 is the one that ships. Read #23 for the live
-    text; two things stated here carry over — the signature spans
-    `attribute_predictions[]` as well as `predictions[]`, and
-    empty-signature hypotheses are skipped. One does not: #23 drops
-    `subject` from the `predictions[]` key.
+    no two siblings may declare identical prediction signatures, a
+    signature being the union of `predictions[]` `(subject, claim)`
+    and `attribute_predictions[]` `(target, attribute, claim)` tuples
+    (case-normalised), with empty-signature hypotheses skipped.
+    Identical signatures mean both hypotheses propose the same
+    observable expectations and ANALYZE has no discriminator to grade
+    them differently — the fork is paraphrase, not mechanism. That
+    substance is entirely preserved; it now lives in rule #23.
 
-36. **Affirmative true_positive disposition.** When
-    `conclude.disposition` is `true_positive`, at least one entry in
-    `conclude.surviving_hypotheses[]` must reference a hypothesis
-    whose final weight (computed across all resolutions in document
-    order) is `++`. When `surviving_hypotheses` is absent or empty,
-    every declared hypothesis is candidate.
+    Why #23 refuses strictly more — its signature is #35's with
+    `predictions[].subject` dropped, which only widens what collides —
+    is recorded in `docs/decisions/defender-invlang-enforcement-ramp.md`
+    §Struck from the spec.
 
-    The `++` weight is the structural signal of *affirmative grading
-    evidence*: per rule #6 + edge-authority discipline, a `++`
-    resolution must cite a severe lead resolving against an
-    authoritative edge, so the grading is bound to concrete
-    observation rather than to absence-of-benign-confirmation. Empirically
-    motivated by 4 production runs (see `docs/decisions/analyze-true-positive-
-    routing.md`) where ANALYZE routed `true_positive` while no surviving
-    hypothesis was graded `++` — every survivor was at `+` or null,
-    i.e. no severe-lead refutation/confirmation had landed. The honest
-    landing in that shape is `disposition: unclear` (paired with
-    `termination_category: severity-ceiling` or
-    `exhaustion-escalation`).
+36. **(Retired — vocabulary the system does not have.)** Affirmative
+    `true_positive` disposition. Specified (v2.14, simplified v2.16) as
+    a constraint on `conclude.disposition: true_positive` — requiring at
+    least one `conclude.surviving_hypotheses[]` entry whose final weight
+    is `++`, so the routing rested on affirmative grading evidence
+    rather than on absence-of-benign-confirmation.
 
-    **History.** v2.14 introduced this rule as a two-part check
-    (adversarial-classification token + ++). The lexical token list
-    desynced from playbook-canonical adversarial fork names — e.g. the
-    5710 playbook's `?credentials-used-outside-registered-actor` is
-    semantically adversarial (it captures the case where a third party
-    used a registered credential string outside the registered actor's
-    process), but lacked an allowlisted prefix and produced false
-    rejections on legitimately-graded `true_positive` routings (run
-    `20260429-202152-rule5710` was the first observed case). v2.16
-    drops the classification check; the affirmative-evidence signal is
-    fully captured by the `++` weight requirement, and the "wrong-named
-    survivor routed true_positive" failure mode is caught by Tier-2
-    report judges plus rule #21 (which forces `benign` on every
-    `legitimacy_contract: authorized` survivor — a survivor whose
-    contracts all resolve `authorized` cannot reach `true_positive`
-    without contradicting #21).
+    Struck in v2.18 because `true_positive` is not a disposition this
+    system can express. The live enum is
+    `DISPOSITION_VALUES = ("benign", "false-positive", "inconclusive",
+    "malicious")` in `defender/_vocab.py`; `true_positive` has never
+    appeared anywhere under `defender/` in the repository's history, so
+    this was never a rename that drifted out of sync. Nothing enforced
+    the rule — `true_positive` has zero occurrences in
+    `defender/skills/invlang/validate.py`, and the
+    `hooks/scripts/invlang_checks_authorization.py:_check_affirmative_true_positive`
+    that the v2.14 and v2.16 deltas cite as its implementation does not
+    exist in this repository.
+
+    **The substance survives translation; the translation was not
+    made.** Read against the live enum the rule becomes: `disposition:
+    malicious` requires a `++`-graded survivor, and the honest landing
+    where none exists is `inconclusive`. That is a coherent rule and
+    `defender/_vocab.py` supports the mapping directly — `malicious` is
+    the confirmed-threat landing, `inconclusive` the nothing-established
+    one. Re-arming it under the live spelling is a separate decision
+    that has not been made, so it is recorded here as a gap rather than
+    silently rewritten into an active rule. The empirical motivation is
+    preserved in `docs/decisions/analyze-true-positive-routing.md` (4
+    production runs) for whoever takes that decision up.
+
+    Numbering preserved for grep-stability, per the v2.15 convention.

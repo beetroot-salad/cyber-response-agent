@@ -143,6 +143,231 @@ fences applied in order (#934). The stale Example A (`type=endpoint`,
 `file:binary`, prose-cited resolutions, a bare `provenance` attr key) was
 fixed to current grammar as part of the original work.
 
+**Struck from the spec, and so never ramped (#933).** Five clauses left
+`docs/investigation-language.md` without ever having had an
+implementation here, so none of them is a rung this list skipped — they
+are rungs that turned out not to exist. Recorded because a reader
+counting rule numbers against this list will otherwise go looking for
+them:
+
+- **Spec rule #36** (affirmative `true_positive` disposition) — struck
+  at spec v2.18 as retired vocabulary. `true_positive` is not in
+  `DISPOSITION_VALUES` (`defender/_vocab.py`) and has never appeared
+  under `defender/` in this repository's history; the
+  `hooks/scripts/invlang_checks_authorization.py` path the v2.14/v2.16
+  deltas cite does not exist.
+- **Spec rule #21's escalation half** and **rule #24's trailing
+  `status: escalated` clause** — struck at v2.18 with it, for the same
+  reason. #21's benign half is rule 5 above and is untouched.
+- **Spec rule #32** (integrity peer discipline) — struck at v2.19. Its
+  discharge test is a `name.startswith("?adversary-controlled-")`
+  prefix match on model-authored free text: 6 of the 10 contract-bearing
+  hypotheses in the corpus trigger it, all 6 fail it, 0 discharge it, and
+  arming it would mint the peers rather than find them. The coverage gap
+  is real and its recorded answer is the behavioral-consistency
+  prediction in `docs/decisions/adversarial-as-attribute-not-hypothesis.md`,
+  not a structural gate.
+- **Spec rule #35** (sibling prediction divergence) — struck at v2.19 as
+  subsumed by #23, which refuses strictly more
+  (`validate._check_fork_distinctness`).
+
+None is a candidate for a later rung. Re-arming any of them is a fresh
+spec decision, not a scheduling one.
+
+### Why #32 was struck — the evidence
+
+Moved here from rule #32's gap entry, which had grown to 170 lines inside a
+reference list whose longest ACTIVE rule is 25. The verdict stays in the spec;
+the working belongs in the ledger.
+
+**1. Measured non-compliance — 6 fire, 0 discharge.** Over every
+non-archival ```invlang document in the tree (both e2e goldens,
+both `defender/examples/`, the worked examples in
+`defender/SKILL.md` and `defender/skills/invlang/SKILL.md`, and
+the experiment fixtures), 10 content-distinct hypotheses carry an
+`authorization_contract` — 11 if the byte-identical
+`judge-glm52-vs-kimik3` case-002 mirror is counted separately —
+and of those, **6 satisfy #32's trigger and 0 discharge it.** No
+`?adversary-controlled-` peer sits in the sibling group of any
+contract carrier on that surface (the sole exception in the whole
+tree is a hand-authored design-doc illustration — see reason 2),
+and `integrity_waived` has never been set to anything on any row,
+in any document, in the repository's history. The six failures are
+not stragglers:
+
+| document | hypothesis | parent type | sibling written instead |
+|---|---|---|---|
+| `defender/fixtures-e2e/golden-sshpivot-ab3` | `h-001` | `session` | `?adversarial-cross-tier-pivot` |
+| `defender/fixtures-e2e/golden-v2sshd` | `h-002` | `process` | `?scanner-or-noise-probe` |
+| `defender/examples/example-b-parallel-iam-cmdb.md` | `h-001` | `process` | `?adversary-on-monitoring-source` |
+| `defender/skills/invlang/SKILL.md` §Sibling-fork uniqueness, the **"Right"** block | `h-001` | `identity` | *(none — one hypothesis, two contracts, which is what the section teaches)* |
+| `experiments/actor-basin-276/…/falco-net-tool-live` | `h-001` | `process` | *(none)* |
+| `experiments/actor-basin-276/…/sshd-gabe-live` | `h-001` | `identity` | *(none)* |
+
+Two are shipped goldens. One is a shipped worked example. One is
+the canonical **correct** answer in the runtime authoring skill —
+§Sibling-fork uniqueness's "Right" block is a single
+`identity`-parented hypothesis carrying two authz contracts, and
+#32 refuses it. A rule that refuses the document teaching the
+right shape is not measuring the corpus; the corpus is measuring
+the rule.
+
+**2. The discharge test is lexical.**
+`name.startswith("?adversary-controlled-")` is a prefix match on
+model-authored free text, and this repository has run that
+experiment already. Rule #36's v2.14 shipped an
+adversarial-classification token list; it desynced from
+playbook-canonical fork names (`?credentials-used-outside-registered-actor`
+is the example the v2.16 delta records) and produced false
+rejections of correctly-graded routings, and v2.16 deleted it.
+Row 3 of the table above is that failure recurring before the rule
+was even armed: `?adversary-on-monitoring-source` is an integrity
+peer, written deliberately, doing exactly what the discipline
+asks — and it fails the prefix. Meanwhile the corpus's actual
+`?adversary-controlled-` names sit where #32 does not fire:
+`?adversary-controlled-write` in `defender/SKILL.md` and
+`?adversary-controlled-writer` in the pre-dense pilot fixtures are
+both on hypothesis pairs carrying no contract at all.
+
+**The prefix and the trigger co-occur exactly once in the tree, and
+it is not a run.** `docs/dense-investigation-format.md`'s
+stress-1 worked example pairs `?monitoring-probe` (an `identity`
+parent carrying `ac1`) with `?adversary-controlled-source-session`,
+and it discharges #32 cleanly. That document is a hand-authored
+design proposal — *"Status: design experiment, v0.1 … Not
+implemented"*, pinned to spec v2.13 — written alongside the
+§Integrity discipline to illustrate it, in a ```markdown fence
+rather than the ```invlang surface the corpus count above scans.
+The single document that satisfies the rule is the rule's own
+illustration. Nothing a model produced, and nothing that ships,
+has ever satisfied it.
+
+**3. It would produce manufactured compliance, not integrity
+reasoning.** This is the load-bearing reason. #934 documented what
+this system does when the spec mandates a structural property the
+model cannot naturally satisfy: it mints the shape. All four
+tuple-class sibling pairs in the corpus differed in **all three**
+class slots — invented wholesale to clear the old topological
+§Sibling-fork uniqueness — and one of them then lost weight on a
+three-conjunct refutation of which exactly one conjunct was
+observed, because the manufactured axis was not the axis anyone
+was reasoning about. Arming #32 predicts the same outcome one rule
+over: six `?adversary-controlled-X` rows written to clear the
+gate, each needing predictions that also clear rule #23's
+distinctness check, i.e. predictions reverse-engineered from two
+validators rather than from a question about the actor. That is
+the failure #934 fixed, shipped again immediately after fixing it.
+
+*Corroborating, with a caveat.* The one time a rule under this
+number ran anywhere,
+`experiments/relax-invoker-identity-peer/results/final.md`
+measured it and recommended shipping it **disabled** — item 1 of a
+seven-part composite intervention against a lock-on-benign failure
+mode, alongside disabling #35. Read that record before re-arming
+#32. The caveat: it disabled a `soc-agent`
+`_check_integrity_peer_discipline` whose described behaviour
+("necessary because the agent will write peer forks the rule would
+otherwise reject") is the *converse* of what #32's spec text
+mandates, so what was measured may not be the rule written here.
+That divergence is itself evidence — the number has meant two
+different things in two places, which is what happens to a rule
+nobody can point at an implementation of.
+
+**4. It contradicts a settled decision.**
+`docs/decisions/adversarial-as-attribute-not-hypothesis.md`
+(`status: done`) item 6: *"Drop the 'maintain adversarial
+hypothesis until `--`' rule … Teeth move from
+hypothesis-bookkeeping to evidence-based structural enforcement."*
+Rule #21's own text says it *"Replaces the former 'maintain
+adversarial hypothesis until `--`' bookkeeping rule."* #32 is that
+bookkeeping rule reinstated three numbers later, and reinstated
+specifically on the hypotheses carrying the contract #21 gates on
+— so the decision's replacement and the thing it replaced would
+have fired on the same rows. The same decision doc had also
+already answered the narrower question directly: *"Legitimacy
+contracts for session-hijack / forgery? — No… Integrity/forgery
+questions are mechanism-level."* Mechanism-level, not gate-level.
+
+**The gap is real, and this entry is not pretending otherwise.**
+Striking #32 leaves the authorized-bulk-read-from-a-compromised-account
+case uncovered: the IAM anchor answers "authorized" about the
+claimed identity, that answer is correct under the authz
+question's scope, impact may clear on volume, and nothing has
+asked whether the session was the claimed session.
+`adversarial-as-attribute-not-hypothesis.md` names this in as many
+words — *"A legitimacy contract resolved `authorized` establishes
+policy compliance, not integrity. The compromised-credential case
+(policy says yes, pattern says off) needs a third check."*
+
+**Its answer was not a structural gate, and that is the point.**
+The same section answers it with the **opt-in
+behavioral-consistency prediction**: one baseline-consistency
+prediction on the existing `predictions` / `refutation_shape`
+machinery, gated on three conditions (baseline is queryable for
+this identity; the prediction is scoped to the alert's entities
+and window, not a hunt; the outcome is weight-sensitive), capped
+at `moderate` severity because identity patterns drift and
+"looks consistent" is cheap by coincidence, and with an
+unavailable baseline written into `concerns` rather than
+confabulated. It is restated in this spec at §Hypothesis →
+*Behavioral-consistency prediction (optional)*. **Read that before
+re-deriving #32.** A structural gate on this question was
+considered and declined on the record; #32 was the gate, arriving
+later without the decision being revisited.
+
+**Left standing, unread: the `integrity_waived?` column.** It is
+in the `:H` grammar, `defender/skills/invlang/parser.py` projects
+it, `schema.py` types it on `HypothesisRecord`, and every worked
+example emits the empty cell — and with #32 struck, no validator
+rule consumes it. Deliberately not removed here: dropping a
+projected column touches the parser, the schema, and roughly
+thirty test fixtures, and the field remains usable as an authoring
+note. Whether it stays is a separate decision nobody has taken.
+
+Numbering preserved for grep-stability, per the v2.15 convention.
+
+### Why #23 subsumes #35
+
+Moved here from rule #35's gap entry, for the same reason.
+
+**Rule #23 refuses strictly more.**
+`_check_fork_distinctness`
+(`defender/skills/invlang/validate.py`, shipped in #934) keys on
+the same sibling group — the parent hypothesis read off the
+`h-{parent}-{nonce}` id shape, paired with `attached_to`, there
+being no `parent_hypothesis_id` column to key on — skips the same
+empty signatures, and compares the normalized signature across
+both `predictions[]` and `attribute_predictions[]`. That signature
+is #35's with ONE column dropped: `predictions[].subject`. The
+attribute-prediction tuple is kept whole, because an `.attr_preds`
+claim is a bare value and `target` / `attribute` are what say
+which measurement it is a value of. Dropping `subject` only widens
+what is refused — any pair colliding on the fuller tuple collides
+without it — so **every pair #35 refuses, #23 refuses too**, plus
+the pair #35 would let through, the one that wrote a single
+sentence under two different subject labels. One sentence twice is
+one observable twice however it is attributed, and the claim is
+what a lead comes back on.
+
+Merged into #23 at v2.17 (#934) and rewritten as a gap entry at
+v2.19, rather than kept as a weaker parallel statement of an
+implemented rule. v2.17 counted it as a gap in the header while
+leaving this entry standing as a rule, which is what made the
+header say 28 over a list that still totalled 29. Two rule numbers
+over one check also invite the reading that some pair fails #35
+and passes #23; none can. The two stopped being distinct when
+#934 rewrote #23 off
+`parent_class` and onto the predicted observable — before that,
+#23 keyed on `proposed_edge.parent_vertex.classification` and #35
+on prediction text, and "complements #23" was true. This entry
+previously said #35 "complements rule #23 (which blocks shared
+`parent_vertex.classification`)"; that describes the pre-#934 rule
+and had already stopped being true. #32, which #35's text called
+the integrity-peer-specific rule it generalised, is struck at its
+own entry above for unrelated reasons.
+
+Numbering preserved for grep-stability, per the v2.15 convention.
+
 **Open: two current-spec rules were deferred because the spec
 contradicted its own worked examples.** Don't enforce one until its spec
 is reconciled, or it'll false-positive on valid current writes. One is
