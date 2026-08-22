@@ -329,6 +329,10 @@ prediction/refutation IDs and supporting edges. Head shape is
 {`severe`, `moderate`, `weak`} is positional-last and required — leave
 it out and the parser reads your ids as the severity.
 
+`++` says every prediction the hypothesis declared came in, so the head
+cites all of them, `p<n>` and `ap<n>` alike. A head naming a subset is
+denied on write — grade `+` for partial coverage.
+
 ### `:T conclude` (REPORT)
 
 ```invlang
@@ -482,18 +486,11 @@ rather than a sentence:
 ap1|proposed_parent|signing|"UNSIGNED"
 ```
 
-`target` is one of `proposed_parent`, `attached_vertex`,
-`proposed_edge` — WHICH of the hypothesis's own three objects carries
-the attribute, never a `v-*`/`e-*` id: the proposed parent and edge have
-no id yet, and the attached vertex is already named by `attached_to`.
-Ids are `ap<n>` here and `p<n>` in `.preds`, both denied on write outside
-those namespaces, because a resolution head reads only `p*`/`ap*`/`r*`
-and an id outside them can be cited by nothing. An `ap<n>` counts toward
-every rule a `p<n>` does — a resolution head cites it, a `refutes` list
-names it, and it is in the set a `++` has to settle. So a `++` on
-`h-002` cites the `ap<n>` **and every `p<n>` the hypothesis declared**;
-`++` says all of them came in, and a head naming a subset is denied on
-write (grade `+` for partial coverage):
+`target` names which of the hypothesis's own objects carries the
+attribute, never a `v-*`/`e-*` id (`defender-invlang enum
+attr-pred.target`). Ids are `ap<n>` here and `p<n>` in `.preds`, and an
+`ap<n>` counts toward every rule a `p<n>` does — so a `++` on `h-002`
+cites all three:
 
 ```invlang
 :T resolutions

@@ -174,10 +174,11 @@ ATTR_PRED_TARGETS: tuple[str, ...] = (
 )
 
 
-#: NOT in `SLOTS`, and `ATTR_PRED_TARGETS` and `WEIGHT_CELL_VALUES` are not either:
-#: `test_invlang_vocab` holds that registry closed because every slot in it is inlined into the
-#: runtime's ORIENT prompt, so registering one is a prompt change rather than a side effect of
-#: naming a vocabulary. They live here for the one owner, not for `invlang vocab`.
+#: The author-facing lookup registry behind `defender-invlang enum`. `test_invlang_vocab` pins
+#: the key set so a slot arrives as an acknowledged edit: what the runtime prompts inline is the
+#: COMMAND (`defender/SKILL.md`), never the values, so a slot is a new thing an author can look
+#: up rather than more prompt to read. `WEIGHT_CELL_VALUES` stays out — no cell sends an author
+#: here for it, and `:T resolutions` teaches the five buckets where the arrow is written.
 SLOTS: dict[str, tuple[str, ...]] = {
     "disposition": DISPOSITION,
     "types": TYPES,
@@ -200,6 +201,7 @@ SLOTS: dict[str, tuple[str, ...]] = {
     "configuration.kind": CONFIGURATION_KIND,
     "app-object.kind": APP_OBJECT_KIND,
     "credential.kind": CREDENTIAL_KIND,
+    "attr-pred.target": ATTR_PRED_TARGETS,
 }
 
 
