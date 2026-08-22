@@ -893,6 +893,33 @@ def _confirmed_at(companion: CompanionBody) -> dict[str, str]:
     return out
 
 
+def _confirmed_and_standing(companion: CompanionBody) -> dict[str, str]:
+    """Per hypothesis whose FINAL weight is still `++`, the first lead that moved it there.
+
+    THE HANDOFF between rules #6 and #34, and one definition so the two cannot both stand down
+    on the same hypothesis. #6 owns a hypothesis standing at `++` and refuses every uncited
+    prediction on it; #34 owns everything else not refuted and offers a deferral. Split across
+    two spellings — #6 on "final weight is `++`" and #34 on "some row moved it to `++`" — a
+    hypothesis confirmed and later downgraded falls in the gap between them, and its uncited
+    predictions are never asked about by either.
+
+    STILL `++`, not EVER `++`, because the second is not a fact an append-only document can
+    repair. A `++` is a claim about the predictions declared when it was written, and
+    `:H h-NNN.preds` is appended: the moment a later block declares one more, a row committed
+    to disk becomes a `++` that does not cover its own hypothesis, and no write can reach back
+    into it. Reading the FINAL weight makes the repair the message already offers a real one —
+    appending `h-NNN ++ → +` withdraws the coverage claim, which is what an author who has just
+    declared an untested prediction means. `_confirmed_at` stays first-move for the LEAD id,
+    because the row that made the claim is the row the author has to look at.
+    """
+    weights = _walkers.final_weights(companion)
+    return {
+        hid: lid
+        for hid, lid in _confirmed_at(companion).items()
+        if weights.get(hid) == CONFIRMED_WEIGHT
+    }
+
+
 def _check_prediction_completeness(companion: CompanionBody) -> list[str]:
     """A hypothesis graded `++` has settled every prediction it declared, not only the ones
     the confirming lead happened to look at.
@@ -903,9 +930,16 @@ def _check_prediction_completeness(companion: CompanionBody) -> list[str]:
     never looked at are never heard from again. Partial coverage is what `+` is for.
 
     The union is taken over EVERY resolution on the hypothesis, not only the `++` row: a
-    prediction an earlier `+` move already settled is settled. That is also what keeps the rule
-    repairable on an append-only document — the union only grows, so a write that clears the
-    gate clears it for good, and a later downgrade cannot re-open a row nobody can now edit.
+    prediction an earlier `+` move already settled is settled.
+
+    BOTH sides of the comparison grow, which is what the rule has to survive. The cited side
+    growing is harmless — a write that clears the gate clears it for good. The DECLARED side
+    growing is not: `:H h-NNN.preds` arrives by append, so declaring one more prediction on a
+    hypothesis already carrying a committed `++` turns that row into a `++` that no longer
+    covers its own hypothesis, and `:H` rows cannot be rewritten. `_confirmed_and_standing` is
+    what makes that repairable — the rule asks whether the hypothesis STANDS at `++`, so
+    appending `h-NNN ++ → +` withdraws the claim and clears the refusal. Reading "some row
+    once said `++`" instead leaves a document with no legal next write.
 
     `ap*` counts toward the set. `_declared_prediction_ids` is this module's one answer to
     "what did the hypothesis declare", and its other two readers take the union; rule #34 — the
@@ -918,11 +952,13 @@ def _check_prediction_completeness(companion: CompanionBody) -> list[str]:
     This fires at write time on `++` alone and offers nothing, because a `++` has no
     outstanding prediction to defer — the grade IS the claim that there is none.
     """
-    confirmed_at = _confirmed_at(companion)
+    if not _confirmed_at(companion):
+        # Before the document-wide folds below, which are the whole cost of this check. No
+        # `++` anywhere is every in-flight document up to the confirming lead, and every run
+        # that never confirms.
+        return []
+    confirmed_at = _confirmed_and_standing(companion)
     if not confirmed_at:
-        # Before the two document-wide folds below, which is the whole cost of this check.
-        # No `++` anywhere is every in-flight document up to the confirming lead, and every
-        # run that never confirms.
         return []
     hyps = _walkers.all_hypotheses(companion)
     matched = _settled_predictions(companion)
@@ -942,8 +978,9 @@ def _check_prediction_completeness(companion: CompanionBody) -> list[str]:
                 f"lead {lid}: resolution of {hid} to {CONFIRMED_WEIGHT!r} leaves "
                 f"{_known_ids(unmet)} unmatched — {CONFIRMED_WEIGHT!r} says every prediction "
                 f"the hypothesis declared came in, and the resolutions on {hid} cite "
-                f"{_known_ids(cited & declared)} of {_known_ids(declared)}; cite the rest, or "
-                f"grade '+' for partial coverage"
+                f"{_known_ids(cited & declared)} of {_known_ids(declared)}; cite the rest in "
+                f"a resolution that moves {hid}, or append `{hid} {CONFIRMED_WEIGHT} → +` to "
+                f"grade it partial coverage"
             )
     return errors
 
@@ -2537,19 +2574,23 @@ def _check_screen_structure(companion: CompanionBody) -> list[str]:
     that decides nothing.
 
     On a lead with no `mode: screen` it is a verdict about a screen that never ran, written in
-    the slot every reader takes for the run's fast-path answer. On an INTERMEDIATE screen lead
-    it is a partial answer in that same slot: a screen sequence narrows across leads and only
-    the last of them has seen every indicator, so an earlier `no_match` reads as the sequence's
-    result while the sequence is still running. A `match` beside a `hypothesize` block is the
-    third, and the only one with a disposition behind it — a matched screen ENDS the run on the
-    fast path, so a companion that then enumerates hypotheses claims both that no investigation
-    was needed and that one happened.
+    the slot every reader takes for the run's fast-path answer. A `match` beside a `hypothesize`
+    block is the second, and the only one with a disposition behind it — a matched screen ENDS
+    the run on the fast path, so a companion that then enumerates hypotheses claims both that
+    no investigation was needed and that one happened.
 
-    "Intermediate" is read as "some LATER lead in the same loop also screens", which lets a
-    second screen phase later in the run be its own sequence rather than folding into the
-    first. Not "the NEXT lead screens": `companion["findings"]` is the projector's lead buckets
-    in first-mention order rather than `:L findings` order, and a sequence may have a retrieval
-    lead standing between two of its screens — adjacency would stand the arm down for both.
+    THE INTERMEDIATE ARM IS GONE, and it is not coming back in this shape. The spec's third
+    clause reads a `screen_result` on any screen lead that a later same-loop screen follows as
+    a partial answer in the sequence's slot. The reading is defensible and the refusal is not
+    reachable: whether a screen is the last one is a fact about leads not yet written, so the
+    author cannot know it when writing the row, and by the time a second screen makes the first
+    intermediate the first is a committed `:L findings` cell that no write can withdraw. The
+    arm named that earlier lead and offered "only its final lead carries the result", which is
+    an instruction to have written a different row. This module already carved `match` out for
+    exactly that reason ("refusing the row for a follower ... leaves no legal repair"); the
+    carve-out was the whole rule. What is lost is real — an early `no_match` still reads as the
+    sequence's answer to a careless reader — and it is a reader-side concern that `:L findings`
+    order and the `loop` column already answer. Recorded in the enforcement ramp.
 
     Read off `findings[].screen_result`, which is where the `:L findings` column projects. The
     spec spells the field `outcome.screen_result`, from the pre-dense envelope; the projection
@@ -2598,45 +2639,6 @@ def _check_screen_structure(companion: CompanionBody) -> list[str]:
                 f"ran the screen, or drop the cell"
             )
             continue
-        # A `match` is never intermediate. This rule's own third arm reads a matched screen as
-        # ENDING the run on the fast path, so the leads planned after it never ran — refusing
-        # the row for a follower that exists only as a `:L findings` declaration leaves no
-        # legal repair: `:L findings` rows are append-only and cannot be withdrawn, and
-        # `no_match` would be a false claim that the screen fell through.
-        if result == SCREEN_MATCH:
-            continue
-        # EVERY later screen lead in the same loop, not only the immediately next lead.
-        # Adjacency in `findings` is not sequence membership twice over: `companion["findings"]`
-        # is the projector's lead buckets in FIRST-MENTION order (a `:T resolutions` head or a
-        # `:T shelved` row naming a lead ahead of its `:L findings` row reorders the list), and
-        # a screen sequence may have a retrieval lead standing between two of its screens.
-        # Read off `modes[i + 1]` alone, either one stands the arm down in silence.
-        #
-        # SAME LOOP is what bounds the sequence, so a second screen phase later in the run is
-        # its own. `_lead_header_record` omits `loop` when the cell is blank, so an ABSENT loop
-        # on either side is read as "same sequence": the spec has screen leads always in loop
-        # 0, which is exactly the cell an author leaves out, and `None != 0` would otherwise
-        # stand the rule down for the documents it is most for.
-        nxt = next(
-            (
-                other
-                for j, other in enumerate(leads)
-                if j > i
-                and modes[j] == SCREEN_MODE
-                and (
-                    lead.get("loop") is None
-                    or other.get("loop") is None
-                    or other.get("loop") == lead.get("loop")
-                )
-            ),
-            None,
-        )
-        if nxt is not None:
-            errors.append(
-                f"lead {lid}: `screen_result: {result}` on an intermediate screen lead — "
-                f"{nxt.get('id', '?')} screens after it in loop {lead.get('loop', '?')}, so "
-                f"the sequence has not answered yet; only its final lead carries the result"
-            )
     if first_match and _walkers.all_hypotheses(companion):
         errors.append(
             f"lead {first_match}: `screen_result: {SCREEN_MATCH}` closes the run on the fast "
@@ -3338,7 +3340,7 @@ def _check_prediction_closure(companion: CompanionBody) -> list[str]:
     # hands the author a repair (`:T conclude.deferred_preds`) that clears THIS rule and leaves
     # #6 refusing — a fix that does not fix the document, and one that then sits on disk as a
     # deferral contradicting the run's own `++`.
-    confirmed = _confirmed_at(companion)
+    confirmed = _confirmed_and_standing(companion)
     declared = [
         _Commitment(hid, pid)
         for hid, hyp in _walkers.all_hypotheses(companion).items()
