@@ -1,0 +1,1074 @@
+"""#933 — the five spec rules that were written down and never armed.
+
+Rules #6 (prediction completeness for `++`), #17 (SCREEN structural integrity), #23
+(hypothesis fork distinctness), #24 (hypothesis persistence at CONCLUDE) and #33
+(attribute-prediction structure) were active in `docs/investigation-language.md` with no
+implementing function. Each block below pairs the violation with a LIVENESS CONTROL — the same
+document, one cell different, validating clean — so a check that stopped running fails here
+rather than passing vacuously.
+
+The shared prologue is the smallest document the other rules accept: one vertex with a settled
+class, one `siem-event` edge for rule #4, and no `conclude`, so nothing but the rule under test
+can speak.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from defender.skills.invlang.validate import _SIBLING_FORK_TAG, validate_companion
+
+_PROLOGUE = """\
+:V prologue.vertices [id|type|class|ident|attrs?]
+v-001|compute|monitoring/internal/known-corp|172.18.0.15|
+
+:E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]
+e-001|attempted_auth|v-001|v-001|2026-05-05T03:42:11Z|siem-event:siem|
+
+"""
+
+_HYP_HEADER = (
+    ":H hypothesize.hypotheses "
+    "[id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]\n"
+)
+
+_ONE_HYPOTHESIS = _HYP_HEADER + """\
+h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
+
+:H h-001.preds [id|subject|claim]
+p1|proposed_edge|"failures arrive in bursts"
+p2|proposed_edge|"no fixed interval separates the failures"
+
+"""
+
+_LEAD = """\
+:L findings [id|loop|name|target|tests|system|window]
+l-001|1|auth-history|v-001|h-001|elastic|10m
+
+"""
+
+
+def _doc(body: str) -> str:
+    return "```invlang\n" + body + "```\n"
+
+
+def _errors(body: str) -> list[str]:
+    return validate_companion(_doc(body), None)
+
+
+# --- rule #6: prediction completeness for `++` --------------------------------------------
+
+_SIX_FULL = _PROLOGUE + _ONE_HYPOTHESIS + _LEAD + """\
+:T resolutions
+h-001  null → ++   [l-001 p1,p2 severe ⟂ e-001 :: bursty, no interval]
+"""
+
+_SIX_PARTIAL = _SIX_FULL.replace("[l-001 p1,p2 severe", "[l-001 p1 severe")
+
+#: The same hypothesis with its second observable declared as an ATTRIBUTE prediction instead.
+#: `matched_prediction_ids` may cite either namespace (rules #33/#34), so an `ap*` left
+#: unmatched is the same hole as a `p*` left unmatched — pinning the judgment call that #6's
+#: "full prediction set" is `_declared_prediction_ids`'s union and not `p*` alone.
+_SIX_WITH_ATTR_PRED = _PROLOGUE + _HYP_HEADER + """\
+h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
+
+:H h-001.preds [id|subject|claim]
+p1|proposed_edge|"failures arrive in bursts"
+
+:H h-001.attr_preds [id|target|attribute|claim]
+ap1|proposed_edge|interval|"no fixed interval separates the failures"
+
+""" + _LEAD + """\
+:T resolutions
+h-001  null → ++   [l-001 p1 severe ⟂ e-001 :: bursty]
+"""
+
+
+def test_a_double_plus_leaving_a_declared_prediction_unmatched_is_refused() -> None:
+    errors = _errors(_SIX_PARTIAL)
+    assert len(errors) == 1
+    assert "resolution of h-001 to '++' leaves p2 unmatched" in errors[0]
+    assert "grade '+' for partial coverage" in errors[0]
+
+
+def test_the_same_double_plus_citing_every_prediction_validates_clean() -> None:
+    """The liveness control. One id back in the head and the document passes, so the refusal
+    above is the coverage gate and not some other rule the fixture trips."""
+    assert _errors(_SIX_FULL) == []
+
+
+def test_an_unmatched_attribute_prediction_blocks_a_double_plus_like_a_p_star_would() -> None:
+    errors = _errors(_SIX_WITH_ATTR_PRED)
+    assert len(errors) == 1
+    assert "leaves ap1 unmatched" in errors[0]
+
+
+def test_citing_the_attribute_prediction_clears_it() -> None:
+    """The control for the arm above: `ap1` in the head and the same document passes."""
+    assert _errors(
+        _SIX_WITH_ATTR_PRED.replace("[l-001 p1 severe", "[l-001 p1,ap1 severe")
+    ) == []
+
+
+# --- rule #17: SCREEN structural integrity ------------------------------------------------
+
+_SCREEN_HEADER = ":L findings [id|loop|name|target|mode|tests|system|window|screen_result]\n"
+
+_SCREEN_CLEAN = _PROLOGUE + _SCREEN_HEADER + """\
+l-001|1|monitoring-probe-screen|v-001|screen||cmdb|n/a|no_match
+"""
+
+_SCREEN_ON_A_NON_SCREEN_LEAD = _PROLOGUE + _SCREEN_HEADER + """\
+l-001|1|auth-history|v-001|||elastic|10m|no_match
+"""
+
+_SCREEN_ON_AN_INTERMEDIATE_LEAD = _PROLOGUE + _SCREEN_HEADER + """\
+l-001|1|source-screen|v-001|screen||cmdb|n/a|no_match
+l-002|1|cadence-screen|v-001|screen||elastic|24h|no_match
+"""
+
+_SCREEN_MATCH_WITH_HYPOTHESES = _PROLOGUE + _ONE_HYPOTHESIS + _SCREEN_HEADER + """\
+l-001|1|monitoring-probe-screen|v-001|screen||cmdb|n/a|match
+"""
+
+
+def test_a_screen_result_on_a_lead_that_did_not_screen_is_refused() -> None:
+    errors = _errors(_SCREEN_ON_A_NON_SCREEN_LEAD)
+    assert len(errors) == 1
+    assert "lead l-001: `screen_result: no_match` on a lead whose mode is ''" in errors[0]
+
+
+def test_a_screen_result_on_an_intermediate_screen_lead_is_refused() -> None:
+    errors = _errors(_SCREEN_ON_AN_INTERMEDIATE_LEAD)
+    assert len(errors) == 1
+    assert "on an intermediate screen lead" in errors[0]
+    assert "l-002 screens after it" in errors[0]
+
+
+def test_a_matched_screen_beside_a_hypothesize_block_is_refused() -> None:
+    errors = _errors(_SCREEN_MATCH_WITH_HYPOTHESES)
+    assert len(errors) == 1
+    assert "`screen_result: match` closes the run on the fast path" in errors[0]
+
+
+@pytest.mark.parametrize(("case", "body"), [
+    # The plain shape: one screen lead, `mode: screen`, last in the run.
+    ("a-lone-screen-lead", _SCREEN_CLEAN),
+    # The sequence's FINAL lead may carry the result — only the earlier ones may not.
+    ("the-final-lead-of-a-sequence",
+     _SCREEN_ON_AN_INTERMEDIATE_LEAD.replace("|n/a|no_match", "|n/a|")),
+    # A screen that did NOT match leaves the run free to hypothesize.
+    ("no-match-beside-a-hypothesize-block",
+     _SCREEN_MATCH_WITH_HYPOTHESES.replace("|n/a|match", "|n/a|no_match")),
+])
+def test_the_screen_shapes_the_rule_must_accept(case: str, body: str) -> None:
+    """The liveness controls, one per arm — each is the refused document with the single cell
+    that made it wrong put right."""
+    assert _errors(body) == []
+
+
+# --- rule #23: hypothesis fork distinctness -----------------------------------------------
+
+_FORK_DISTINCT = _PROLOGUE + _HYP_HEADER + """\
+h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
+h-002|?scheduled-service-retry|v-001|runs_on|process|??/??/??||null|active
+
+:H h-001.preds [id|subject|claim]
+p1|proposed_edge|"failures arrive in bursts, no fixed interval between them"
+
+:H h-002.preds [id|subject|claim]
+p1|proposed_edge|"failures repeat on a fixed interval"
+"""
+
+_FORK_IDENTICAL = _FORK_DISTINCT.replace(
+    'p1|proposed_edge|"failures repeat on a fixed interval"',
+    'p1|proposed_edge|"Failures arrive in bursts,   no fixed interval between them"',
+)
+
+#: The same claims on hypotheses hung on DIFFERENT vertices. Not siblings, so not a fork.
+_SAME_CLAIMS_ON_TWO_ANCHORS = _PROLOGUE.replace(
+    "v-001|compute|monitoring/internal/known-corp|172.18.0.15|",
+    "v-001|compute|monitoring/internal/known-corp|172.18.0.15|\n"
+    "v-002|compute|monitoring/internal/known-corp|172.18.0.16|",
+) + _HYP_HEADER + """\
+h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
+h-002|?credential-guessing|v-002|runs_on|process|??/??/??||null|active
+
+:H h-001.preds [id|subject|claim]
+p1|proposed_edge|"failures arrive in bursts, no fixed interval between them"
+
+:H h-002.preds [id|subject|claim]
+p1|proposed_edge|"failures arrive in bursts, no fixed interval between them"
+"""
+
+
+def test_siblings_declaring_the_same_claims_are_refused() -> None:
+    errors = _errors(_FORK_IDENTICAL)
+    assert len(errors) == 1
+    assert "hypotheses h-001, h-002 anchor on v-001 and " + _SIBLING_FORK_TAG in errors[0]
+    # The message names the RULE rather than the colliding claim text: two hypotheses that
+    # collide here are identical over their whole signature, so quoting it back adds length
+    # and not information, and the repair is a differing prediction rather than an edit to
+    # the sentence quoted.
+    assert "siblings must differ on at least one predicted observable" in errors[0]
+
+
+def test_one_differing_claim_is_the_whole_price() -> None:
+    """The liveness control. The refused document above differs from this one only in the text
+    of `h-002`'s single claim."""
+    assert _errors(_FORK_DISTINCT) == []
+
+
+#: Identical claims under DIFFERENT parent classes — the mirror of `_FORK_DISTINCT`, and the
+#: half that tells the two candidate rules apart. Keyed on the claim set this is a fork and is
+#: refused; keyed on `parent_class` it is two distinct upstreams and passes.
+_FORK_IDENTICAL_DISTINCT_CLASSES = _FORK_IDENTICAL.replace(
+    "h-002|?scheduled-service-retry|v-001|runs_on|process|??/??/??|",
+    "h-002|?scheduled-service-retry|v-001|runs_on|process|init-or-entrypoint|",
+)
+
+
+def test_the_axis_is_the_claim_set_and_not_the_parent_class() -> None:
+    """The #934 guard, stated so that only the right rule can pass it.
+
+    Two documents a classification-keyed check grades the opposite way round: siblings sharing
+    an open `??/??/??` while forking on their claims are legal (#934 made the shared open tuple
+    canonical), and siblings holding different classifications while declaring the same claim
+    are a fork. Keying on `parent_class` refuses the first and accepts the second, so no such
+    check passes both assertions.
+
+    Replaces a substring test on the error text, which could not establish this: neither
+    spelling of the rule prints the column name, so `"parent_class" not in errors` was true of
+    the reversion it was written to catch.
+    """
+    assert _errors(_FORK_DISTINCT) == []
+    errors = _errors(_FORK_IDENTICAL_DISTINCT_CLASSES)
+    assert len(errors) == 1
+    assert "hypotheses h-001, h-002 anchor on v-001 and " + _SIBLING_FORK_TAG in errors[0]
+
+
+def test_the_same_claims_on_different_anchors_are_not_siblings() -> None:
+    assert _errors(_SAME_CLAIMS_ON_TWO_ANCHORS) == []
+
+
+# --- rule #24: hypothesis persistence at CONCLUDE -----------------------------------------
+
+_TWO_LIVE_HYPOTHESES = _PROLOGUE + _HYP_HEADER + """\
+h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
+h-002|?scheduled-service-retry|v-001|runs_on|process|??/??/??||null|active
+
+:H h-001.preds [id|subject|claim]
+p1|proposed_edge|"failures arrive in bursts"
+
+:H h-002.preds [id|subject|claim]
+p1|proposed_edge|"failures repeat on a fixed interval"
+
+""" + _LEAD + """\
+:T conclude
+termination.category   exhaustion
+disposition            inconclusive
+impact_verdict         none
+confidence             low
+summary                "Neither cadence story was settled"
+
+:T conclude.deferred_preds [prediction_ref|rationale]
+h-001.p1|"the interval histogram lead did not return"
+h-002.p1|"the interval histogram lead did not return"
+
+"""
+
+_SURVIVING_ONE_OF_TWO = _TWO_LIVE_HYPOTHESES + """\
+:T conclude.surviving [hyp_id|final_weight]
+h-001|null
+"""
+
+_SURVIVING_BOTH = _TWO_LIVE_HYPOTHESES + """\
+:T conclude.surviving [hyp_id|final_weight]
+h-001|null
+h-002|null
+"""
+
+
+def test_a_surviving_table_that_omits_a_live_hypothesis_is_refused() -> None:
+    errors = _errors(_SURVIVING_ONE_OF_TWO)
+    assert len(errors) == 1
+    assert "hypothesis h-002 is neither refuted, shelved, nor carried into the close" in errors[0]
+    assert "omits it" in errors[0]
+
+
+def test_a_surviving_table_naming_every_live_hypothesis_validates_clean() -> None:
+    """The liveness control — one row added to the refused document."""
+    assert _errors(_SURVIVING_BOTH) == []
+
+
+def test_refuting_the_hypothesis_discharges_it_instead() -> None:
+    """The other arm: `--` is a discharge, so a refuted hypothesis needs no surviving row."""
+    refuted = _SURVIVING_ONE_OF_TWO.replace(
+        ":T conclude\n",
+        ":T resolutions\n"
+        "h-002  null → --   [l-001 p1 severe ⟂ e-001 :: interval is fixed to the second]\n\n"
+        ":T conclude\n",
+    )
+    assert _errors(refuted) == []
+
+
+def test_a_close_that_writes_no_surviving_table_is_out_of_scope() -> None:
+    """The measured concession, pinned so it is a decision and not a regression.
+
+    `:T conclude.surviving` is omittable by construction and an absent table defers to the
+    resolution record, under which both hypotheses survive and nothing was dropped. Reading an
+    absent table as an empty one would refuse seven of the eight ```invlang documents in the
+    tree, both shipped goldens among them."""
+    assert _errors(_TWO_LIVE_HYPOTHESES) == []
+
+
+def test_an_empty_surviving_table_still_speaks() -> None:
+    """`none` is the format's empty-ARRAY marker, so the table is present and claims nothing
+    survived — which two live hypotheses contradict."""
+    errors = _errors(_TWO_LIVE_HYPOTHESES + """\
+:T conclude.surviving [hyp_id|final_weight]
+none|
+""")
+    assert len(errors) == 2
+    assert all("neither refuted, shelved, nor carried into the close" in e for e in errors)
+
+
+# --- rule #33: attribute-prediction structure ---------------------------------------------
+
+def _with_attr_preds(rows: str) -> str:
+    return _PROLOGUE + _HYP_HEADER + """\
+h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
+
+:H h-001.preds [id|subject|claim]
+p1|proposed_edge|"failures arrive in bursts"
+
+:H h-001.attr_preds [id|target|attribute|claim]
+""" + rows
+
+
+@pytest.mark.parametrize(("case", "rows", "fragment"), [
+    ("id-outside-the-ap-namespace",
+     'a1|proposed_parent|signing|"unsigned"\n',
+     "row 'a1': an attribute prediction is numbered `ap<n>`"),
+    ("target-outside-the-enum",
+     'ap1|v-001|signing|"unsigned"\n',
+     "target 'v-001' is not one of proposed_parent, attached_vertex, proposed_edge"),
+    ("claim-cell-empty",
+     "ap1|proposed_parent|signing|\n",
+     "row 'ap1': empty `claim`"),
+])
+def test_a_defective_attribute_prediction_row_is_refused(
+    case: str, rows: str, fragment: str
+) -> None:
+    errors = _errors(_with_attr_preds(rows))
+    assert len(errors) == 1
+    assert fragment in errors[0]
+
+
+def test_a_well_formed_attribute_prediction_validates_clean() -> None:
+    """The liveness control. Every defect above is one cell away from this row."""
+    assert _errors(_with_attr_preds('ap1|proposed_parent|signing|"unsigned"\n')) == []
+
+
+def test_the_uniqueness_clause_is_already_owned_by_the_parser() -> None:
+    """Rule #33's fourth clause needs no code in `validate.py`, and this records who has it.
+
+    A repeat inside one `.attr_preds` block is a `_warn_repeated_ids` parse error, which is
+    already error severity. A repeat ACROSS blocks never reaches the projected record —
+    `_extend_by_id` keys accumulation by id — and must not be refused, since re-emitting a
+    sub-block with one row added is the documented append shape.
+    """
+    within_one_block = _errors(_with_attr_preds(
+        'ap1|proposed_parent|signing|"unsigned"\n'
+        'ap1|proposed_parent|cmdline|"launched from a terminal"\n'
+    ))
+    assert len(within_one_block) == 1
+    assert "'ap1' is declared twice in this block" in within_one_block[0]
+
+    across_two_blocks = _errors(_with_attr_preds(
+        'ap1|proposed_parent|signing|"unsigned"\n'
+        "\n"
+        ":H h-001.attr_preds [id|target|attribute|claim]\n"
+        'ap1|proposed_parent|signing|"unsigned"\n'
+        'ap2|proposed_parent|cmdline|"launched from a terminal"\n'
+    ))
+    assert across_two_blocks == []
+
+
+# --- refutation scope: the third `p*` site, which rule #7's family never reached ----------
+
+_REFUT_IN_SCOPE = _PROLOGUE + _HYP_HEADER + """\
+h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
+
+:H h-001.preds [id|subject|claim]
+p1|proposed_edge|"failures arrive in bursts"
+
+:H h-001.attr_preds [id|target|attribute|claim]
+ap1|proposed_parent|signing|"unsigned"
+
+:H h-001.refuts [id|refutes|claim]
+r1|p1,ap1|"the series is cadenced and the binary is signed"
+"""
+
+_REFUT_OUT_OF_SCOPE = _REFUT_IN_SCOPE.replace("r1|p1,ap1|", "r1|p1,ap9|")
+
+#: A sibling's `p1` is not this hypothesis's evidence in either direction. The id EXISTS in the
+#: document, so a document-wide lookup accepts this and only a hypothesis-scoped one refuses it.
+_REFUT_CITES_A_SIBLINGS_PREDICTION = _PROLOGUE + _HYP_HEADER + """\
+h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
+h-002|?scheduled-service-retry|v-001|runs_on|process|??/??/??||null|active
+
+:H h-001.preds [id|subject|claim]
+p1|proposed_edge|"failures arrive in bursts"
+
+:H h-002.preds [id|subject|claim]
+p2|proposed_edge|"failures repeat on a fixed interval"
+
+:H h-001.refuts [id|refutes|claim]
+r1|p2|"the series is cadenced"
+"""
+
+#: A refutation on a hypothesis that declared no predictions yet. Lean, legal, and nothing for
+#: the scope rule to resolve against — rule #23 exempts the same shape.
+_REFUT_ON_A_PREDICTIONLESS_HYPOTHESIS = _PROLOGUE + _HYP_HEADER + """\
+h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
+
+:H h-001.refuts [id|refutes|claim]
+r1|p1|"the series is cadenced"
+"""
+
+
+def test_a_refutation_naming_an_undeclared_prediction_is_refused() -> None:
+    """`:H h-NNN.refuts`'s `refutes` column is the third site naming a `p*`/`ap*`, and it
+    resolved against nothing: `_check_prediction_refs` walks which ids a MOVE matched, rule
+    #5's half walks the `r*` a `--` cited, and neither asks what the refutation itself claims
+    to overturn."""
+    errors = _errors(_REFUT_OUT_OF_SCOPE)
+    assert len(errors) == 1
+    assert "row 'r1' refutes prediction 'ap9'" in errors[0]
+    assert "h-001 does not declare" in errors[0]
+
+
+def test_a_refutation_naming_its_own_hypothesis_predictions_is_clean() -> None:
+    """The liveness control, across both PREDICT namespaces — the refused document above
+    differs only in `ap1` becoming `ap9`."""
+    assert _errors(_REFUT_IN_SCOPE) == []
+
+
+def test_a_refutation_may_not_reach_a_siblings_prediction() -> None:
+    """Scoped to the declaring hypothesis for the reason `_check_prediction_refs` is. `p2` is
+    declared in this document, just not by `h-001`, so a document-wide lookup passes it."""
+    errors = _errors(_REFUT_CITES_A_SIBLINGS_PREDICTION)
+    assert len(errors) == 1
+    assert "row 'r1' refutes prediction 'p2'" in errors[0]
+
+
+def test_a_refutation_on_a_hypothesis_with_no_predictions_is_left_alone() -> None:
+    """A predictionless hypothesis has nothing to resolve against; refusing here would deny
+    the lean shape rule #23 exempts rather than catch a defect this rule owns."""
+    assert _errors(_REFUT_ON_A_PREDICTIONLESS_HYPOTHESIS) == []
+
+
+# --- review follow-ups: the holes the armed rules left open --------------------------------
+#
+# Every case below was reachable on the first arming pass and is now closed. They live here
+# rather than in a file of their own because each is the SAME rule as the block above it, one
+# input further out — a rule that stops firing on these is a rule that shipped its first
+# version again.
+
+
+def test_quoted_cells_of_a_closed_vocabulary_are_read_unquoted() -> None:
+    """`target` is compared against a closed set by rule #33. Quoting a whole cell is the
+    format's own habit and the neighbouring cells are already unquoted, so a uniformly-quoted
+    row named a legal target and was refused for the quotes."""
+    assert _errors(_PROLOGUE + _ONE_HYPOTHESIS + """\
+:H h-001.attr_preds [id|target|attribute|claim]
+ap1|"proposed_parent"|signing|"UNSIGNED"
+
+""" + _LEAD) == []
+
+
+def test_a_citation_from_a_row_that_moved_nowhere_does_not_cover_a_confirmation() -> None:
+    """Rule #6 unioned `matched_prediction_ids` over EVERY resolution, so a `null → null`
+    row citing `p2` covered the `++` — while rule #34, the late half of the same pair, does
+    not count it. The write gate passed a document its own closure gate refuses."""
+    errors = _errors(_PROLOGUE + _ONE_HYPOTHESIS + _LEAD + """\
+:T resolutions
+h-001  null → null [l-001 p2 mild ⟂ e-001 :: looked, moved nowhere]
+h-001  null → ++   [l-001 p1 severe ⟂ e-001 :: bursty]
+""")
+    assert any("leaves p2 unmatched" in e for e in errors)
+
+
+def test_a_shelved_hypothesis_may_be_left_out_of_the_surviving_table() -> None:
+    """A `:T shelved` row is the in-grammar way to retire a hypothesis without refuting it,
+    and the spec's rule #34 reads it as one. Without the same arm on #24 the rule's two offered
+    repairs are both false claims: listing a set-aside hypothesis as surviving, or a `--`
+    that never happened."""
+    assert _errors(_PROLOGUE + _ONE_HYPOTHESIS + _HYP_HEADER + """\
+h-002|?scheduled-retry|v-001|runs_on|process|??/??/??||null|active
+
+""" + _LEAD + """\
+:T shelved [hyp_id|by_lead|rationale]
+h-002|l-001|"set aside — no tooling reaches the scheduler"
+
+:T resolutions
+h-001  null → +    [l-001 p1,p2 mild ⟂ e-001 :: bursty, no interval]
+
+:T conclude
+disposition            inconclusive
+confidence             low
+summary                "s"
+
+:T conclude.surviving [hyp_id|final_weight]
+h-001|+
+""") == []
+
+
+def test_a_prediction_numbered_outside_the_p_namespace_is_refused() -> None:
+    """Rule #33 armed the id-shape check on `.attr_preds` and left `.preds` unchecked. A
+    resolution head reads only `p*`/`ap*`/`r*`, so an id outside the namespace can be cited
+    by nothing — and rule #34 then refuses the close with a repair the grammar cannot
+    express."""
+    errors = _errors(_PROLOGUE + _HYP_HEADER + """\
+h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
+
+:H h-001.preds [id|subject|claim]
+x1|proposed_edge|"failures arrive in bursts"
+
+""" + _LEAD)
+    assert any("a prediction is numbered `p<n>`" in e for e in errors)
+
+
+def test_two_screen_phases_in_different_loops_are_two_sequences() -> None:
+    """"Intermediate" is "the next lead ALSO screens", read off `findings` order. Without the
+    same-loop term, a loop-1 sequence whose last lead screens and a loop-2 screen beside it
+    fold into one, and the first phase's legitimate result is refused."""
+    assert _errors(_PROLOGUE + """\
+:L findings [id|loop|name|target|mode|screen_result|tests|system|window]
+l-001|1|known-pattern-screen|v-001|screen|no_match||elastic|10m
+l-002|2|second-phase-screen|v-001|screen|no_match||elastic|10m
+""") == []
+
+
+def test_a_leading_decimal_point_is_not_stripped_from_a_claim() -> None:
+    """`str.strip` takes a character SET, so the trailing-full-stop strip also ate a leading
+    decimal point — fusing two siblings that fork on a tenfold threshold into one signature
+    and refusing the fork."""
+    from defender.skills.invlang.validate import _normalized_claim
+
+    assert _normalized_claim(".5 sigma above baseline") != _normalized_claim(
+        "5 sigma above baseline"
+    )
+    assert _normalized_claim('  "Alpha holds."  ') == "alpha holds"
+
+
+# --- #940 review regressions ---------------------------------------------------------------
+#
+# Each of these was a hole a rule armed in this change left open, or a legal document one of
+# them refused. They sit here rather than in their own file so they share the one prologue —
+# the same reason the blocks above do.
+
+_ONE_PRED = _HYP_HEADER + """\
+h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
+
+:H h-001.preds [id|subject|claim]
+p1|proposed_edge|"failures arrive in bursts"
+
+"""
+
+
+def test_a_shelved_sibling_clears_the_fork_rule() -> None:
+    """`live_hypothesis_ids` filters on final weight `--` alone, so rule #23 kept refusing a
+    pair rule #24 and rule #34 both read as retired. Both repairs #23 offers rewrite an
+    immutable `:H` row, leaving a `--` the run never earned as the only exit."""
+    siblings = _HYP_HEADER + """\
+h-001|?a|v-001|runs_on|process|??/??/??||null|active
+h-002|?b|v-001|runs_on|process|??/??/??||null|active
+
+:H h-001.preds [id|subject|claim]
+p1|proposed_edge|"failures arrive in bursts"
+
+:H h-002.preds [id|subject|claim]
+p1|proposed_edge|"failures arrive in bursts"
+
+"""
+    assert [e for e in _errors(_PROLOGUE + siblings + _LEAD) if _SIBLING_FORK_TAG in e]
+    assert _errors(
+        _PROLOGUE + siblings + _LEAD
+        + ':T shelved [hyp_id|by_lead|rationale]\nh-002|l-001|"collapsed into h-001"\n\n'
+    ) == []
+
+
+def test_a_matched_screen_is_never_an_intermediate_lead() -> None:
+    """This rule's own third arm reads a `match` as ENDING the run on the fast path, so the
+    leads planned after it never ran. Refusing the row for a follower that exists only as an
+    append-only `:L findings` declaration left no legal repair — `no_match` would be a false
+    claim that the screen fell through."""
+    assert _errors(_PROLOGUE + """\
+:L findings [id|loop|name|target|mode|screen_result|tests|system|window]
+l-001|0|first-phase-screen|v-001|screen|match||elastic|10m
+l-002|0|second-phase-screen|v-001|screen|||elastic|10m
+""") == []
+
+
+# --- #940 sweep regressions ------------------------------------------------------------------
+#
+# The second pass over the first pass. Two of these are defects the FIRST round of #940 fixes
+# introduced, which is the reason the block exists as its own heading.
+
+def _screen_row(mode: str, result: str) -> str:
+    return (
+        ":L findings [id|loop|name|target|mode|screen_result|tests|system|window]\n"
+        f"l-001|1|probe|v-001|{mode}|{result}|h-001|elastic|10m\n\n"
+    )
+
+
+def test_rule_17_reads_mode_and_screen_result_the_same_way() -> None:
+    """`screen_result` went through the unquoting `_cell` and `mode` stayed raw, so a
+    uniformly quoted `:L findings` row was refused for a `mode` it spells correctly — with
+    advice ("set `mode: screen`") the author had already followed, on an append-only row that
+    cannot be rewritten."""
+    assert _errors(_PROLOGUE + _screen_row("screen", "no_match") + _ONE_PRED) == []
+    assert _errors(_PROLOGUE + _screen_row('"screen"', '"no_match"') + _ONE_PRED) == []
+
+
+def test_a_quoted_mode_on_the_follower_still_makes_it_a_screen_lead() -> None:
+    """The same asymmetry running the other way, failing OPEN: read raw, a quoted `mode` on
+    the NEXT lead made the intermediate-screen arm stop firing in silence."""
+    assert any(
+        "intermediate screen lead" in e
+        for e in _errors(_PROLOGUE + """\
+:L findings [id|loop|name|target|mode|screen_result|tests|system|window]
+l-001|1|first|v-001|"screen"|"no_match"|h-001|elastic|10m
+l-002|1|second|v-001|"screen"||h-001|elastic|10m
+""" + _ONE_PRED)
+    )
+
+
+# --- #943 review regressions -----------------------------------------------------------------
+#
+# The quoting sweep the `target` fix started, finished across the rest of the row, plus the two
+# normalization holes the fork rule was left with. Each case below validated CLEAN (or was
+# refused with advice the author had already followed) before this block existed.
+
+
+def test_every_quotable_cell_of_a_prediction_row_is_read_unquoted() -> None:
+    """The parser unquoted `target` and `claim` and left `id` and `attribute` raw, so the two
+    rules that COMPARE those cells disagreed with the two that do not.
+
+    Failing closed on `id`: `_check_prediction_id_namespace` and rule #33's id-shape arm refuse
+    a uniformly quoted row for a namespace it is already inside, on a `:H` row that is
+    immutable — the refusal has no repair. `refutes` is the third: quoted whole, the cell
+    splits its own quote characters INTO the ids and every one of them is reported undeclared
+    beside a list that contains it.
+    """
+    assert _errors(_PROLOGUE + _HYP_HEADER + """\
+h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
+
+:H h-001.preds [id|subject|claim]
+"p1"|"proposed_edge"|"failures arrive in bursts"
+"p2"|"proposed_edge"|"no fixed interval separates the failures"
+
+:H h-001.attr_preds [id|target|attribute|claim]
+"ap1"|"proposed_parent"|"signing"|"UNSIGNED"
+
+:H h-001.refuts [id|refutes|claim]
+"r1"|"p1,p2"|"the series is cadenced"
+""") == []
+
+
+def test_a_quoted_attribute_cell_does_not_rescue_a_duplicate_fork() -> None:
+    """Failing OPEN, the other half of the same asymmetry. `attribute` is two thirds of the
+    `.attr_preds` fork key with `target`, so quoting it on one sibling gave the pair two
+    signatures for one observable and rule #23 stood down."""
+    errors = _errors(_PROLOGUE + _HYP_HEADER + """\
+h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
+h-002|?scheduled-service-retry|v-001|runs_on|process|??/??/??||null|active
+
+:H h-001.attr_preds [id|target|attribute|claim]
+ap1|proposed_parent|signing|"UNSIGNED"
+
+:H h-002.attr_preds [id|target|attribute|claim]
+ap1|proposed_parent|"signing"|"UNSIGNED"
+""")
+    assert len(errors) == 1
+    assert _SIBLING_FORK_TAG in errors[0]
+
+
+def test_a_quoted_loop_cell_still_makes_the_next_lead_the_same_sequence() -> None:
+    """`mode` and `screen_result` went through the unquoting read and `loop` beside them did
+    not — and `_lead_header_record` only `int()`s a loop cell that parses, so `"1"` survived as
+    a string that equals no other lead's loop and the intermediate arm stood down in silence."""
+    errors = _errors(_PROLOGUE + """\
+:L findings [id|loop|name|target|mode|screen_result|tests|system|window]
+l-001|1|first|v-001|screen|no_match||elastic|10m
+l-002|"1"|second|v-001|screen|||elastic|10m
+""")
+    assert len(errors) == 1
+    assert "on an intermediate screen lead" in errors[0]
+
+
+def test_a_refutation_that_overturns_nothing_writes_the_empty_array_marker() -> None:
+    """`none` is the format's empty-ARRAY spelling, honoured for `:T conclude.surviving` and
+    `:T shelved`. Read as a prediction id it made "this refutation overturns nothing" an
+    error-severity refusal of an immutable row."""
+    assert _errors(_PROLOGUE + _ONE_HYPOTHESIS + """\
+:H h-001.refuts [id|refutes|claim]
+r1|none|"the series is cadenced"
+""") == []
+
+
+def test_a_claim_that_normalizes_to_nothing_is_an_empty_claim() -> None:
+    """`_predicted_observables` drops a claim normalizing to `""` from the fork signature on
+    the stated grounds that "rule #33 already refuses the row" — which was true of a BLANK cell
+    and false of `"."`, `"..."` or `"''"`. Two siblings could carry one placeholder each and
+    pass both rules: #33 because the cell is non-blank, #23 because the signature is empty."""
+    errors = _errors(_PROLOGUE + _HYP_HEADER + """\
+h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
+h-002|?scheduled-service-retry|v-001|runs_on|process|??/??/??||null|active
+
+:H h-001.attr_preds [id|target|attribute|claim]
+ap1|proposed_parent|signing|"..."
+
+:H h-002.attr_preds [id|target|attribute|claim]
+ap1|proposed_parent|signing|"..."
+""")
+    assert len(errors) == 2
+    assert all("empty `claim`" in e for e in errors)
+
+
+def test_a_quote_outside_the_full_stop_normalizes_like_one_inside_it() -> None:
+    """The leading-decimal fix strips quotes ONCE and before the full stop, where the spelling
+    it replaced stripped a mixed set until both ends were clean. A quote sitting outside the
+    sentence period is only exposed after the stop comes off, so British and American quote
+    punctuation of ONE claim keyed as two — and the fork rule stood down."""
+    from defender.skills.invlang.validate import _normalized_claim
+
+    assert _normalized_claim("the unit is 'enabled'.") == _normalized_claim(
+        "the unit is 'enabled.'"
+    )
+    # The property the rewrite bought, re-pinned so neither direction can be traded for the
+    # other: a LEADING full stop is never sentence punctuation.
+    assert _normalized_claim(".5 sigma above baseline") != _normalized_claim(
+        "5 sigma above baseline"
+    )
+
+
+def test_a_screen_result_on_a_lead_that_never_screened_does_not_also_close_the_run() -> None:
+    """The mode arm and the matched-screen arm were not alternatives: one `match` on a lead
+    with no `mode: screen` earned both, and the second told the author to delete a legitimate
+    `:H hypothesize.hypotheses` block over a screen that never ran."""
+    errors = _errors(_PROLOGUE + _ONE_HYPOTHESIS + """\
+:L findings [id|loop|name|target|mode|screen_result|tests|system|window]
+l-001|1|auth-history|v-001||match|h-001|elastic|10m
+""")
+    assert len(errors) == 1
+    assert "on a lead whose mode is ''" in errors[0]
+
+
+def test_the_matched_screen_arm_names_the_lead_that_screened() -> None:
+    """The liveness control for the arm above — with `mode: screen` on the row, the fast-path
+    refusal is exactly what comes back."""
+    errors = _errors(_PROLOGUE + _ONE_HYPOTHESIS + """\
+:L findings [id|loop|name|target|mode|screen_result|tests|system|window]
+l-001|1|probe-screen|v-001|screen|match|h-001|cmdb|n/a
+""")
+    assert len(errors) == 1
+    assert "closes the run on the fast path" in errors[0]
+
+
+def test_a_whitespace_only_attribute_is_the_parse_error_rule_33_says_it_is() -> None:
+    """Rule #33 leaves `attribute` to the parser on the stated grounds that `_require` tests
+    truthiness — which held for a bare empty cell and not for a quoted run of spaces, since
+    `_require` saw the cell before anything unquoted it. The row then declared an `ap1` that
+    rules #6/#34 require settled while naming no attribute, and degraded rule #23's fork key
+    to `proposed_parent.=unsigned`."""
+    errors = _errors(_PROLOGUE + _HYP_HEADER + """\
+h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
+
+:H h-001.attr_preds [id|target|attribute|claim]
+ap1|proposed_parent|"  "|"unsigned"
+""")
+    assert len(errors) == 1
+    assert "attr_preds row missing id/target/attribute" in errors[0]
+
+
+# --- #943 second-review regressions ----------------------------------------------------------
+#
+# Nine more inputs the first arming pass let through, in the order the rules are declared
+# above. Every one is the SAME rule one input further out, so each carries the control that
+# says the rule is still the thing being measured.
+
+
+def test_a_leading_full_stop_does_not_split_a_fork() -> None:
+    """`_normalized_claim` stopped eating a LEADING full stop so `".5σ above baseline"` keeps
+    its decimal point. Kept for EVERY leading stop, the correction fails open the other way:
+    one typed character makes an observable a sibling already spelled normalize apart, and
+    rule #23 retires on a pair that forks on nothing."""
+    def fork(second: str) -> str:
+        return _PROLOGUE + _HYP_HEADER + f"""\
+h-001|?a|v-001|runs_on|process|??/??/??||null|active
+h-002|?b|v-001|runs_on|process|??/??/??||null|active
+
+:H h-001.preds [id|subject|claim]
+p1|proposed_edge|"failures arrive in bursts"
+
+:H h-002.preds [id|subject|claim]
+p1|proposed_edge|"{second}"
+"""
+    assert len(_errors(fork("failures arrive in bursts"))) == 1
+    for evasion in (".failures arrive in bursts", ". failures arrive in bursts"):
+        errors = _errors(fork(evasion))
+        assert len(errors) == 1, evasion
+        assert _SIBLING_FORK_TAG in errors[0]
+
+
+def test_a_decimal_point_still_forks_a_pair_that_forks_on_one() -> None:
+    """The control for the arm above, and the reason the strip is conditional rather than
+    gone: the tenfold-threshold pair the leading-dot fix was written for still validates."""
+    assert _errors(_PROLOGUE + _HYP_HEADER + """\
+h-001|?a|v-001|runs_on|process|??/??/??||null|active
+h-002|?b|v-001|runs_on|process|??/??/??||null|active
+
+:H h-001.preds [id|subject|claim]
+p1|proposed_edge|".5 sigma above baseline"
+
+:H h-002.preds [id|subject|claim]
+p1|proposed_edge|"5 sigma above baseline"
+""") == []
+
+
+def test_an_off_vocabulary_grade_is_refused_rather_than_ignored() -> None:
+    """The `after` cell was an unvalidated `\\S+`, and every weight-keyed gate is a membership
+    test — so a misspelled grade skipped the strong-move provenance gate and the `++` coverage
+    gate at once, where the honest `++` is refused for what it leaves open. A typo was
+    strictly cheaper than telling the truth."""
+    for token in ("confirmed", "+++"):
+        errors = _errors(_SIX_PARTIAL.replace("null → ++", f"null → {token}"))
+        assert len(errors) == 1, token
+        assert f"after {token!r}, which is not a weight" in errors[0]
+
+
+def test_a_weight_declared_at_birth_is_checked_against_the_same_list() -> None:
+    """The `:H` cell is the other write site for a weight, and `_hypothesis_record` stores
+    anything that is not `null` verbatim."""
+    errors = _errors(_PROLOGUE + _HYP_HEADER + """\
+h-001|?a|v-001|runs_on|process|??/??/??||strongly-confirmed|active
+""")
+    assert len(errors) == 1
+    assert "weight 'strongly-confirmed' is not a weight" in errors[0]
+
+
+def test_a_confirmation_resting_on_a_dead_refutation_is_not_forced_to_lie() -> None:
+    """`_check_strong_move_provenance` reads `matched_refutation_ids` as the same half of a
+    strong move's provenance that `matched_prediction_ids` is; rule #6 read only the `p*`
+    side, so a `++` whose evidence is a refutation that failed to materialize had exactly one
+    spelling that cleared the gate — citing the prediction as MATCHED, which is a claim the
+    run did not make."""
+    assert _errors(_PROLOGUE + _HYP_HEADER + """\
+h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
+
+:H h-001.preds [id|subject|claim]
+p1|proposed_edge|"failures arrive in bursts"
+p2|proposed_edge|"no fixed interval separates the failures"
+
+:H h-001.refuts [id|refutes|claim]
+r1|p2|"a fixed interval separates them"
+
+:L findings [id|loop|name|target|tests|system|window]
+l-001|1|auth-history|v-001|h-001|elastic|10m
+l-002|2|cadence|v-001|h-001|elastic|24h
+
+:T resolutions
+h-001  null → +    [l-001 p1 weak ⟂ e-001 :: bursty]
+h-001  +    → ++   [l-002 r1 severe ⟂ e-001 :: the interval never appeared]
+""") == []
+
+
+def test_an_intermediate_screen_is_intermediate_across_a_retrieval_lead() -> None:
+    """"Intermediate" was read as "the NEXT lead screens". A screen sequence may have a
+    retrieval lead standing between two of its screens — and `companion["findings"]` is the
+    projector's lead buckets in first-mention order besides — so adjacency stood the arm down
+    on the shape it exists to catch."""
+    errors = _errors(_PROLOGUE + _SCREEN_HEADER + """\
+l-001|1|source-screen|v-001|screen||cmdb|n/a|no_match
+l-002|1|fetch-the-indicator|v-001|||elastic|10m|
+l-003|1|cadence-screen|v-001|screen||elastic|24h|no_match
+""")
+    assert len(errors) == 1
+    assert errors[0].startswith("lead l-001:")
+    assert "l-003 screens after it" in errors[0]
+
+
+def test_a_second_screen_phase_in_a_later_loop_is_still_its_own_sequence() -> None:
+    """The control for the arm above: widening "next lead" to "some later lead" must not
+    fold a loop-2 screen into the loop-1 sequence."""
+    assert _errors(_PROLOGUE + _SCREEN_HEADER + """\
+l-001|1|source-screen|v-001|screen||cmdb|n/a|no_match
+l-002|2|cadence-screen|v-001|screen||elastic|24h|no_match
+""") == []
+
+
+def test_the_empty_cell_marker_is_not_a_screen_verdict() -> None:
+    """`n/a` in an unused trailing column is the shipped convention
+    (`defender/examples/example-b-parallel-iam-cmdb.md` writes it in `window`), so reading it
+    as a verdict refuses a row that says "nothing here" and offers "drop the cell" as the
+    repair for a cell that already means that."""
+    assert _errors(_PROLOGUE + _SCREEN_HEADER + """\
+l-001|1|source-screen|v-001|screen||cmdb|n/a|no_match
+l-002|2|auth-history|v-001|||elastic|10m|n/a
+""") == []
+
+
+def test_a_matched_screen_sees_a_hypothesis_born_inside_a_lead() -> None:
+    """The fast-path arm read only `:H hypothesize.hypotheses`, and a hypothesis born mid-run
+    is declared at the other of the two declaring blocks — so moving the block one lead over
+    disarmed the arm on the contradiction it owns."""
+    errors = _errors(_PROLOGUE + _SCREEN_HEADER + """\
+l-001|0|probe-screen|v-001|screen||cmdb|n/a|match
+
+:H l-001.new_hypotheses [id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]
+h-001|?a|v-001|runs_on|process|??/??/??||null|active
+
+:H h-001.preds [id|subject|claim]
+p1|proposed_edge|"failures arrive in bursts"
+""")
+    assert len(errors) == 1
+    assert "closes the run on the fast path" in errors[0]
+
+
+def test_a_screen_cell_the_author_capitalized_is_read_as_the_value_it_spells() -> None:
+    """Neither `mode` nor `screen_result` is in any `_check_vocab_*` arm, so a case difference
+    went uncorrected in both directions: `Screen` was refused for a mode the author spelled
+    correctly, and `Match` slipped past the fast-path arm in silence."""
+    assert _errors(_PROLOGUE + _SCREEN_HEADER + """\
+l-001|1|source-screen|v-001|Screen||cmdb|n/a|no_match
+""") == []
+    errors = _errors(_PROLOGUE + _ONE_HYPOTHESIS + _SCREEN_HEADER + """\
+l-001|0|probe-screen|v-001|screen||cmdb|n/a|Match
+""")
+    assert len(errors) == 1
+    assert "closes the run on the fast path" in errors[0]
+
+
+def test_a_padded_prediction_id_is_the_p_star_it_spells() -> None:
+    """`.preds` and `.refuts` unquoted their `id` and stopped there, while `.attr_preds`
+    stripped as well — so `" p1 "` was refused for its padding on an immutable `:H` row while
+    `" ap1 "` beside it was accepted, and `"r1 "` parsed clean and then refused the `--` that
+    cited it with "does not declare (declares: r1 )"."""
+    assert _errors(_PROLOGUE + _HYP_HEADER + """\
+h-001|?a|v-001|runs_on|process|??/??/??||null|active
+
+:H h-001.preds [id|subject|claim]
+" p1 "|proposed_edge|"failures arrive in bursts"
+
+:H h-001.refuts [id|refutes|claim]
+"r1 "|" p1 "|"a fixed interval separates them"
+
+:L findings [id|loop|name|target|tests|system|window]
+l-001|1|auth-history|v-001|h-001|elastic|10m
+
+:T resolutions
+h-001  null → --   [l-001 r1 severe ⟂ e-001 :: refuted]
+""") == []
+
+
+def test_a_quoted_tests_cell_still_names_the_ids_it_lists() -> None:
+    """`:L findings`' `tests` column reached `_split_csv` raw, so a quoted whole cell split
+    the quote characters INTO the ids. Both readers gate on id shape and DROP what does not
+    match, so the lead's hypothesis attribution and its commitment scoping vanished with no
+    diagnostic — the fail-OPEN half of the defect `refutes` was fixed for."""
+    errors = _errors(_PROLOGUE + _ONE_HYPOTHESIS + """\
+:L findings [id|loop|name|target|tests|system|window]
+l-001|1|auth-history|v-001|"h-999,p9"|elastic|10m
+""")
+    assert any("tests undeclared hypothesis 'h-999'" in e for e in errors)
+
+
+def test_a_quoted_shelved_row_still_retires_the_hypothesis_it_names() -> None:
+    """`:T shelved` and `:T conclude.surviving` are the two cells rules #23 and #24 discharge
+    against by equality, and both reached the comparison raw."""
+    assert _errors(_PROLOGUE + _HYP_HEADER + """\
+h-001|?a|v-001|runs_on|process|??/??/??||null|active
+h-002|?b|v-001|runs_on|process|??/??/??||null|active
+
+:H h-001.preds [id|subject|claim]
+p1|proposed_edge|"failures arrive in bursts"
+
+:H h-002.preds [id|subject|claim]
+p1|proposed_edge|"failures arrive in bursts"
+
+:L findings [id|loop|name|target|tests|system|window]
+l-001|1|auth-history|v-001|h-001|elastic|10m
+
+:T shelved [hyp_id|by_lead|rationale]
+"h-002"|"l-001"|"set aside"
+""") == []
+
+
+def test_a_quoted_surviving_row_carries_the_hypothesis_into_the_close() -> None:
+    """The sibling of the arm above, on the table rule #24 reads. Quoted, the refusal listed
+    the id it claimed was missing."""
+    assert _errors(_PROLOGUE + _ONE_HYPOTHESIS + _LEAD + """\
+:T conclude.surviving [hyp_id|final_weight]
+"h-001"|null
+""") == []
+
+
+def test_an_attribute_prediction_target_is_read_case_insensitively() -> None:
+    """`_predicted_observables` lowercases `target` into rule #23's fork key while rule #33
+    compared it raw — one cell read as the canonical target by one rule and an illegal one by
+    the other, in the same pass over the same row."""
+    assert _errors(_PROLOGUE + _HYP_HEADER + """\
+h-001|?a|v-001|runs_on|process|??/??/??||null|active
+
+:H h-001.attr_preds [id|target|attribute|claim]
+ap1|Proposed_Parent|signing|"unsigned"
+""") == []
+
+
+def test_a_quoted_anchor_still_puts_two_siblings_in_one_fork_group() -> None:
+    """`:H`'s header row was the one projector the quoting sweep skipped, and `attached_to` is
+    half of rule #23's sibling-group key — so a uniformly quoted anchor equalled no other
+    sibling's and the pair dropped out of the group in silence, refusing nothing."""
+    def fork(anchor2: str, weight2: str) -> str:
+        return _PROLOGUE + _HYP_HEADER + f"""\
+h-001|?a|v-001|runs_on|process|??/??/??||null|active
+h-002|?b|{anchor2}|runs_on|process|??/??/??||{weight2}|active
+
+:H h-001.preds [id|subject|claim]
+p1|proposed_edge|"failures arrive in bursts"
+
+:H h-002.preds [id|subject|claim]
+p1|proposed_edge|"failures arrive in bursts"
+"""
+    errors = _errors(fork('"v-001"', "null"))
+    assert len(errors) == 1
+    assert _SIBLING_FORK_TAG in errors[0]
+    # `weight` is the other compared cell on that row: quoted, `"--"` was not REFUTED_WEIGHT,
+    # so the hypothesis the run refuted read as live and the retired pair was refused anyway.
+    assert _errors(fork("v-001", '"--"')) == []
+
+
+def test_a_prediction_the_annotation_negates_does_not_cover_a_confirmation() -> None:
+    """`matched_prediction_ids` means "this lead TESTED the id" and files `¬p2` beside `p1`
+    (`test_invlang_parser.test_resolution_negated_iff_literal_still_attributes`). Rule #6 asks
+    whether the prediction CAME IN, and the two answers are opposite on that token — so a `++`
+    cleared the coverage gate on an annotation saying one of its predictions did not."""
+    errors = _errors(_PROLOGUE + _ONE_HYPOTHESIS + _LEAD + """\
+:T resolutions
+h-001  null → ++   [l-001 severe ⟂ e-001 :: bursty but the interval was fixed ⟺ p1 ∧ ¬p2]
+""")
+    assert len(errors) == 1
+    assert "leaves p2 unmatched" in errors[0]
+
+
+def test_an_annotation_naming_one_id_does_not_discard_the_heads_list() -> None:
+    """`matched_pred_ids = iff_pred_ids or head_ids` was a REPLACEMENT, so one iff literal in
+    the `::` segment — otherwise free prose — wiped the head's own citations and rule #6
+    refused a `++` for leaving unmatched a prediction the row visibly cites."""
+    assert _errors(_PROLOGUE + _ONE_HYPOTHESIS + _LEAD + """\
+:T resolutions
+h-001  null → ++   [l-001 p1,p2 severe ⟂ e-001 :: bursts observed ⟺ p1]
+""") == []

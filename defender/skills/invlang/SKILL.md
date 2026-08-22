@@ -329,6 +329,10 @@ prediction/refutation IDs and supporting edges. Head shape is
 {`severe`, `moderate`, `weak`} is positional-last and required — leave
 it out and the parser reads your ids as the severity.
 
+`++` says every prediction the hypothesis declared came in, so the head
+cites all of them, `p<n>` and `ap<n>` alike. A head naming a subset is
+denied on write — grade `+` for partial coverage.
+
 ### `:T conclude` (REPORT)
 
 ```invlang
@@ -472,6 +476,26 @@ predictions, not on `parent_class`.
 Keep commitments lean: one proposed upstream vertex plus one edge.
 1–2 predictions per hypothesis. `refutes` is a comma-separated list of
 prediction ids the refutation would overturn.
+
+A prediction about one ATTRIBUTE of one of the hypothesis's objects goes
+in `:H h-NNN.attr_preds` instead — same commitment, said as a value
+rather than a sentence:
+
+```invlang
+:H h-002.attr_preds [id|target|attribute|claim]
+ap1|proposed_parent|signing|"UNSIGNED"
+```
+
+`target` names which of the hypothesis's own objects carries the
+attribute, never a `v-*`/`e-*` id (`defender-invlang enum
+attr-pred.target`). Ids are `ap<n>` here and `p<n>` in `.preds`, and an
+`ap<n>` counts toward every rule a `p<n>` does — so a `++` on `h-002`
+cites all three:
+
+```invlang
+:T resolutions
+h-002  null → ++    [l-002 p1,p2,ap1 severe ⟂ e-001 :: rotating subdomains, rapid-fire bursts, unsigned binary]
+```
 
 ### Forking a hypothesis mid-run
 
