@@ -134,10 +134,18 @@ error rather than letting the write through. Scope is anchored to
    declaring five predictions reached *confirmed* on whichever one the
    lead found convenient, and the other four were never heard from
    again. The union is over every resolution on the hypothesis, not
-   just the `++` row, so it only grows — a document that clears this
-   clears it for good, which is what makes it safe on an append-only
-   file. **`ap*` counts**: `_declared_prediction_ids` is the one
-   definition of the declared set, and spec rule #34 (the CONCLUDE-time
+   just the `++` row, so the CITED side only grows — a document that
+   clears this on that side clears it for good. The DECLARED side grows
+   too (`:H h-NNN.preds` arrives by append), which is the wedge closed
+   at v2.22: the trigger is now a hypothesis STANDING at `++`
+   (`_confirmed_and_standing`, reading the withdrawing row's own
+   `before` cell rather than a fold of the chain — `final_weights`
+   orders by lead declaration, not by append, so a fold answers a
+   different question on any multi-lead document), so `h-NNN ++ → +`
+   withdraws the coverage
+   claim and clears the refusal. **`ap*` counts**:
+   `_declared_prediction_ids` is the one definition of the declared set,
+   and spec rule #34 (the CONCLUDE-time
    closure gate this is the write-time half of) enumerates `p*` and
    `ap*` alike, so a `p*`-only reading would exempt an observable from
    the gate for being declared under `.attr_preds`. Corpus: fires on
@@ -155,9 +163,16 @@ error rather than letting the write through. Scope is anchored to
    refused a committed `:L findings` cell for a fact — whether another
    screen follows in the same loop — that is about leads not yet
    written, so no author could act on it and no write could withdraw the
-   row it named. The two arms that remain refuse a row for what is on
-   the row, which the write gate catches before it commits. Read off `findings[].screen_result`; the spec's
-   `outcome.` prefix is pre-dense spelling the projector never used.
+   row it named. The mode arm that remains refuses a row for what is on
+   that row, which the write gate catches before it commits. The
+   match-beside-`hypothesize` arm does NOT: it names a committed
+   `:L findings` cell for a `:H` block written later, and one of the two
+   repairs it offers ("record the screen as `no_match`") is not a write
+   an append-only document can make. It is kept because the OTHER repair
+   — do not write the block — is reachable at the write gate, which the
+   struck arm had no equivalent of. Read off `findings[].screen_result`;
+   the spec's `outcome.` prefix is pre-dense spelling the projector
+   never used.
    Corpus: zero fires — SCREEN is barely exercised on disk, which is
    why this could be armed at error severity without measurement risk.
 10. sibling-fork distinctness (#933, spec rule #23; the deferral closed
@@ -391,9 +406,11 @@ error rather than letting the write through. Scope is anchored to
    **The route-compliance clause is NOT implemented, and honouring
    "warning" is why — the READING is settled, the CHANNEL is not.**
    "Followed by another lead" is the next `:L findings` row in document
-   order, the same ordering rule 9 already uses for "the final lead in a
-   SCREEN sequence". What blocks it is that warn severity here is not an
-   advisory: locus-less warn diagnostics are dropped by
+   order — the ordering rule 9's intermediate arm used for "the final
+   lead in a SCREEN sequence" before v2.22 struck it. That strike is a
+   second reason not to arm this clause: it has the same shape, refusing
+   a row for which lead FOLLOWS it. What blocks it is that warn severity
+   here is not an advisory: locus-less warn diagnostics are dropped by
    `runtime/tools._addressable` and do nothing, and a warn WITH a locus
    flags that row and blocks every later write until `fix_row` rewrites
    it. Neither candidate row may be rewritten — the follower's

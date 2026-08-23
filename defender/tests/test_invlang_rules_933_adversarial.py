@@ -10,8 +10,11 @@ What survived, and therefore what these pin:
 * #6 — the `++`-only trigger (a `+` may under-cite), the union across resolutions, the
   citation floor of ZERO, hypotheses born inside a lead, and the per-hypothesis scoping of
   the citation pool.
-* #17 — the "next lead also screens" reading of *intermediate*, the `match`-without-
-  `hypothesize` shape that is the rule's whole point, and leads past the first.
+* #17 — the `match`-without-`hypothesize` shape that is the rule's whole point, and leads
+  past the first. The block's *intermediate* mutants went stale at spec v2.22, which struck
+  that arm: `test_a_screen_lead_followed_by_a_non_screen_lead_carries_its_result` and
+  `test_a_result_on_a_non_screen_lead_is_one_defect_not_two` no longer fail on any mutant and
+  are kept as liveness shapes, not as mutation kills.
 * #23 — the PARENT half of the sibling key, `ap*` claims in the signature (keyed on
   `target`/`attribute` as well as the value, because the value alone names nothing), partial
   overlap, and the empty-signature skip.
@@ -212,9 +215,11 @@ _SCREEN_HEADER = ":L findings [id|loop|name|target|mode|tests|system|window|scre
 
 
 def test_a_screen_lead_followed_by_a_non_screen_lead_carries_its_result() -> None:
-    """"Intermediate" is read as "the NEXT lead also screens" precisely so a screen phase that
-    ends can be answered. Dropping that conjunct — any following lead makes the screen
-    intermediate — refuses this, which is the ordinary shape: screen, then investigate."""
+    """The ordinary shape: screen, then investigate.
+
+    Derived from a mutant of the intermediate arm — dropping the "also screens" conjunct made
+    any following lead refuse this. v2.22 struck the whole arm, so there is no mutant left for
+    this to fail on; it stays as the liveness shape the rule must keep accepting."""
     assert _errors(_PROLOGUE + _SCREEN_HEADER + """\
 l-001|1|monitoring-probe-screen|v-001|screen||cmdb|n/a|no_match
 l-002|1|auth-history|v-001|||elastic|10m|
@@ -240,9 +245,13 @@ l-001|1|monitoring-probe-screen|v-001|screen||cmdb|n/a|match
 
 
 def test_a_result_on_a_non_screen_lead_is_one_defect_not_two() -> None:
-    """The mode arm and the intermediate arm are alternatives: a lead that never screened
-    cannot also be an intermediate member of a screen sequence. Running both would tell the
-    author to set `mode: screen` and to drop the cell for being mid-sequence at once."""
+    """One defect, one refusal: the non-screen lead is refused for its mode and the screen
+    lead beside it is not refused at all.
+
+    Written when the mode arm's alternative was the intermediate arm — running both would have
+    told the author to set `mode: screen` and to drop the cell for being mid-sequence at once.
+    v2.22 struck that arm, so the `len(errors) == 1` here now only pins that a legal screen
+    lead draws nothing."""
     errors = _errors(_PROLOGUE + _SCREEN_HEADER + """\
 l-001|1|auth-history|v-001|||elastic|10m|no_match
 l-002|1|monitoring-probe-screen|v-001|screen||cmdb|n/a|no_match

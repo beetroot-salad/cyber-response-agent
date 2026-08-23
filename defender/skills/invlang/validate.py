@@ -881,9 +881,19 @@ def _settled_predictions(companion: CompanionBody) -> dict[str, set[str]]:
 def _confirmed_at(companion: CompanionBody) -> dict[str, str]:
     """Per hypothesis, the FIRST lead whose resolution moved it to `++`.
 
-    One walk for rules #6 and #34, which is what keeps the pair from double-reporting: #6 owns
-    every prediction on a hypothesis some row confirmed, and #34 has to know which those are so
-    it does not offer a deferral for one #6 is already refusing.
+    The raw walk. `_confirmed_and_standing` is the predicate rules #6 and #34 share — read it
+    for who owns what, and call THAT rather than this one: "some row confirmed it" is not the
+    question either rule asks any more.
+
+    FIRST is pinned by `test_the_first_confirming_lead_is_the_one_named` ("the append-only
+    document's earliest offending write, not its latest") and is LEFT AS IT IS, but the reason
+    it was pinned no longer holds: that reading belongs to the "ever `++`" trigger this rule
+    used to have. Under the STANDING-weight trigger the row making the claim is the most recent
+    `++`, and `_walkers.final_weights` folds in this walk order with the last move winning — so
+    a `++ → +` appended under the FIRST lead is silently overwritten by a later lead's `++`
+    while the same row under the LAST one clears the refusal. Which lead the message should
+    name, and whether the fold should be by append order at all, is an open question the
+    message works around below by not naming one.
     """
     out: dict[str, str] = {}
     for lid, res in _walkers.iter_resolutions(companion):
@@ -893,31 +903,82 @@ def _confirmed_at(companion: CompanionBody) -> dict[str, str]:
     return out
 
 
+def _withdrawn_confirmations(companion: CompanionBody) -> set[str]:
+    """Every hypothesis whose `++` a resolution row explicitly took back.
+
+    THE MARKER IS THE `before` CELL, and reading it is the whole point. A row spelled
+    `h-001 ++ → +` says on its face "the thing that stood at `++` no longer does" — the claim
+    and its withdrawal are both written down, in one row, by the author. Nothing has to be
+    inferred from where the row sits.
+
+    NOT `_walkers.final_weights`, which is the reading this replaces and the reason it had to
+    be replaced. That walker resolves last-move-wins by LEAD-DECLARATION order, not by append
+    order — its own docstring says so — so on any document with more than one lead a withdrawal
+    attributed to an earlier-declared lead loses to a `++` attributed to a later-declared one,
+    and the write the refusal asks for is silently ignored. It also reads the `after` cell RAW
+    where `_confirmed_at` reads it through the closed `_resolution_move`, so `++ → null` came
+    out as a weight of `'null'` — not `'++'`, therefore "not standing" — and disarmed the rule
+    outright. Both are ordering-and-vocabulary accidents of a walker built to answer a
+    different question. The `before` cell has neither: it is one row's own statement, so the
+    set it builds is the same whatever order the rows were written in.
+
+    A NULL `after` withdraws too. `++ → null` and `++ → ∅` are legal weight cells and both say
+    the run stopped standing behind the grade, which is exactly what `++ → +` says with a
+    number on it. What follows a withdrawal is rule #34's business at CONCLUDE, where a
+    non-refuted hypothesis owes every declared prediction a citation or a deferral — so
+    withdrawing moves the question, it never discards it.
+
+    KNOWN AND NOT REFUSED: a `++` withdrawn inside the block that wrote it (`null → ++` and
+    `++ → +` in one `:T resolutions`) is a grade that never stood, and this reads it as
+    withdrawn like any other. #34 still asks for the predictions at CONCLUDE, so nothing
+    escapes accounting; what does persist is a `++` row on disk that
+    `runtime/review/projector.ablation_target` still counts as a strong move. Refusing it wants
+    its own rule about rows that annihilate within a block, not a special case here.
+    """
+    withdrawn: set[str] = set()
+    for _lid, res in _walkers.iter_resolutions(companion):
+        hid = res.get("hypothesis")
+        if not isinstance(hid, str):
+            continue
+        if _cell(res, "before") == CONFIRMED_WEIGHT and _cell(res, "after") != CONFIRMED_WEIGHT:
+            withdrawn.add(hid)
+    return withdrawn
+
+
 def _confirmed_and_standing(companion: CompanionBody) -> dict[str, str]:
-    """Per hypothesis whose FINAL weight is still `++`, the first lead that moved it there.
+    """Per hypothesis that moved to `++` and has not taken it back, the first lead that moved
+    it there.
 
     THE HANDOFF between rules #6 and #34, and one definition so the two cannot both stand down
     on the same hypothesis. #6 owns a hypothesis standing at `++` and refuses every uncited
     prediction on it; #34 owns everything else not refuted and offers a deferral. Split across
-    two spellings — #6 on "final weight is `++`" and #34 on "some row moved it to `++`" — a
-    hypothesis confirmed and later downgraded falls in the gap between them, and its uncited
+    two spellings — one on "stands at `++`" and one on "some row moved it to `++`" — a
+    hypothesis confirmed and later withdrawn falls in the gap between them, and its uncited
     predictions are never asked about by either.
 
-    STILL `++`, not EVER `++`, because the second is not a fact an append-only document can
+    STANDING, not EVER `++`, because the second is not a fact an append-only document can
     repair. A `++` is a claim about the predictions declared when it was written, and
     `:H h-NNN.preds` is appended: the moment a later block declares one more, a row committed
     to disk becomes a `++` that does not cover its own hypothesis, and no write can reach back
-    into it. Reading the FINAL weight makes the repair the message already offers a real one —
-    appending `h-NNN ++ → +` withdraws the coverage claim, which is what an author who has just
-    declared an untested prediction means. `_confirmed_at` stays first-move for the LEAD id,
-    because the row that made the claim is the row the author has to look at.
+    into it. Reading the withdrawal makes the repair the message offers a real one — appending
+    `h-NNN ++ → +` says the run is no longer claiming full coverage, which is what an author
+    who has just declared an untested prediction means. `_confirmed_at` stays first-move for
+    the LEAD id, which `test_the_first_confirming_lead_is_the_one_named` pins — see the caveat
+    on that walk for why the STANDING trigger makes the pinned reading arguable.
+
+    OUTSIDE IT: a `:H` row DECLARED at `++` that no resolution ever moves. This is the
+    intersection with `_confirmed_at`, so such a row is invisible to #6 and handed to #34,
+    which offers it a deferral. That is a gap, not a design: see the note on
+    `_check_prediction_completeness`.
     """
-    weights = _walkers.final_weights(companion)
-    return {
-        hid: lid
-        for hid, lid in _confirmed_at(companion).items()
-        if weights.get(hid) == CONFIRMED_WEIGHT
-    }
+    confirmed = _confirmed_at(companion)
+    if not confirmed:
+        # Before the second `iter_resolutions` walk. No `++` move anywhere makes the result
+        # empty whatever the withdrawals say, and that is every in-flight document up to the
+        # confirming lead, and every run that never confirms.
+        return {}
+    withdrawn = _withdrawn_confirmations(companion)
+    return {hid: lid for hid, lid in confirmed.items() if hid not in withdrawn}
 
 
 def _check_prediction_completeness(companion: CompanionBody) -> list[str]:
@@ -949,16 +1010,19 @@ def _check_prediction_completeness(companion: CompanionBody) -> list[str]:
 
     NOT the closure gate. Rule #34 asks the same question of every weight at CONCLUDE and
     offers `conclude.deferred_predictions[]` as the answer to "that one could not be checked".
-    This fires at write time on `++` alone and offers nothing, because a `++` has no
-    outstanding prediction to defer — the grade IS the claim that there is none.
+    This fires at write time on a hypothesis STANDING at `++` alone and offers nothing,
+    because a standing `++` has no outstanding prediction to defer — the grade IS the claim
+    that there is none. The two halves of that partition are one predicate
+    (`_confirmed_and_standing`) so they cannot drift apart; the pre-v2.22 spelling was "any row
+    ever wrote `++`", under which a confirmed-then-downgraded hypothesis belonged to #6 and now
+    belongs to #34.
     """
-    if not _confirmed_at(companion):
-        # Before the document-wide folds below, which are the whole cost of this check. No
-        # `++` anywhere is every in-flight document up to the confirming lead, and every run
-        # that never confirms.
-        return []
     confirmed_at = _confirmed_and_standing(companion)
     if not confirmed_at:
+        # Before the two document-wide folds below, which are the whole remaining cost of this
+        # check. `_confirmed_and_standing` short-circuits on its own cheap half first, so no
+        # `++` anywhere — every in-flight document up to the confirming lead, and every run
+        # that never confirms — costs one `iter_resolutions` walk and stops.
         return []
     hyps = _walkers.all_hypotheses(companion)
     matched = _settled_predictions(companion)
@@ -967,8 +1031,10 @@ def _check_prediction_completeness(companion: CompanionBody) -> list[str]:
     for hid, lid in confirmed_at.items():
         hyp = hyps.get(hid)
         if hyp is None:
-            # `_check_hypothesis_refs` owns the undeclared-`h-*` defect. A phantom declares no
-            # predictions, so the coverage question is vacuous here and its answer misleading.
+            # `_check_hypothesis_refs` owns the undeclared-`h-*` defect. Unreachable today —
+            # `_confirmed_and_standing` filters through `final_weights`, which is keyed on the
+            # DECLARED set and drops a phantom — and kept because that walker's own docstring
+            # weighs seeding resolution-only ids, which would hand them back.
             continue
         declared = _declared_prediction_ids(hyp)
         cited = matched.get(hid, set())
@@ -979,8 +1045,9 @@ def _check_prediction_completeness(companion: CompanionBody) -> list[str]:
                 f"{_known_ids(unmet)} unmatched — {CONFIRMED_WEIGHT!r} says every prediction "
                 f"the hypothesis declared came in, and the resolutions on {hid} cite "
                 f"{_known_ids(cited & declared)} of {_known_ids(declared)}; cite the rest in "
-                f"a resolution that moves {hid}, or append `{hid} {CONFIRMED_WEIGHT} → +` to "
-                f"grade it partial coverage"
+                f"a resolution that moves {hid}, or withdraw the coverage claim by appending "
+                f"`{hid}  {CONFIRMED_WEIGHT} → +   [<lead> <ids> <severity> ⟂ <edges>]` to a "
+                f"`:T resolutions` block to grade it partial coverage"
             )
     return errors
 
@@ -1182,10 +1249,12 @@ def _check_lead_prediction_structure(companion: CompanionBody) -> list[str]:
     this list — and refusing the cross-block case would refuse the documented append shape.
 
     NOT checked: the ROUTE-COMPLIANCE clause. "Followed by another lead" would read as the
-    next `:L findings` row in DOCUMENT ORDER, the same ordering `_check_screen_structure`
-    already uses for "the final lead in a SCREEN sequence" — the reading is settled and it is
-    not what blocks this. The CHANNEL is. Spec rule #18 asks for a WARNING, and there is no
-    honest way to emit one here. A warn diagnostic without a `Locus` is dropped by
+    next `:L findings` row in DOCUMENT ORDER — the ordering `_check_screen_structure`'s
+    intermediate arm used for "the final lead in a SCREEN sequence" until v2.22 STRUCK it, and
+    that strike is now a second reason not to arm this clause: it has the same shape, refusing
+    a committed row for which lead FOLLOWS it. The CHANNEL blocks it independently: spec
+    rule #18 asks for a WARNING, and there is no honest way to emit one here. A warn
+    diagnostic without a `Locus` is dropped by
     `runtime/tools._addressable` and does nothing at all; a warn diagnostic WITH one FLAGS that
     row and blocks every later write until `fix_row` rewrites it — and both candidate rows must
     not be rewritten. The follower's `:L findings` row is a committed lead declaration, which
@@ -2570,27 +2639,36 @@ SCREEN_MATCH = "match"
 
 
 def _check_screen_structure(companion: CompanionBody) -> list[str]:
-    """A `screen_result` is a SCREEN lead's verdict, and three ways a document can carry one
+    """A `screen_result` is a SCREEN lead's verdict, and two ways a document can carry one
     that decides nothing.
 
     On a lead with no `mode: screen` it is a verdict about a screen that never ran, written in
     the slot every reader takes for the run's fast-path answer. A `match` beside a `hypothesize`
     block is the second, and the only one with a disposition behind it — a matched screen ENDS
     the run on the fast path, so a companion that then enumerates hypotheses claims both that
-    no investigation was needed and that one happened.
+    no investigation was needed and that one happened. Its LOCUS is a committed `:L findings`
+    cell while its trigger is a `:H` block written later, so of the two repairs it offers only
+    one — do not write the block — is a write an append-only document can make. That one IS
+    reachable at the write gate, which is the whole of why this arm survives the strike below
+    and the intermediate arm did not; "record the screen as `no_match`" is not, and the message
+    keeps offering it only because a document writing both in ONE write can take it.
 
     THE INTERMEDIATE ARM IS GONE, and it is not coming back in this shape. The spec's third
     clause reads a `screen_result` on any screen lead that a later same-loop screen follows as
     a partial answer in the sequence's slot. The reading is defensible and the refusal is not
     reachable: whether a screen is the last one is a fact about leads not yet written, so the
     author cannot know it when writing the row, and by the time a second screen makes the first
-    intermediate the first is a committed `:L findings` cell that no write can withdraw. The
+    intermediate the first is a committed `:L findings` cell no legal write can withdraw. The
     arm named that earlier lead and offered "only its final lead carries the result", which is
-    an instruction to have written a different row. This module already carved `match` out for
-    exactly that reason ("refusing the row for a follower ... leaves no legal repair"); the
-    carve-out was the whole rule. What is lost is real — an early `no_match` still reads as the
-    sequence's answer to a careless reader — and it is a reader-side concern that `:L findings`
-    order and the `loop` column already answer. Recorded in the enforcement ramp.
+    an instruction to have written a different row — and unlike the `match` arm it offered no
+    second repair the proposed write could take. An earlier revision carved `match` out of this
+    arm for exactly that reason, and the carve-out was the whole rule. What is lost is real —
+    an early `no_match` still reads as the sequence's answer to a careless reader — and it is a
+    reader-side concern that `:L findings` DOCUMENT order and the `loop` column answer for a
+    human. Not for a programmatic one: `companion["findings"]` is the projector's lead buckets
+    in FIRST-MENTION order, so a `:T resolutions` head naming a lead ahead of its `:L findings`
+    row reorders the list and "the last `screen_result` in the loop" is not the last one
+    written. Recorded in the enforcement ramp.
 
     Read off `findings[].screen_result`, which is where the `:L findings` column projects. The
     spec spells the field `outcome.screen_result`, from the pre-dense envelope; the projection
@@ -2601,21 +2679,24 @@ def _check_screen_structure(companion: CompanionBody) -> list[str]:
     is projected — the same limit `_check_false_positive_gating` records for `entity_check`.
     """
     leads = _leads(companion)
-    # One `_cell` read per (lead, column), reused by all three arms below. LOWERCASED at the
-    # read, because both cells are compared against a closed value and neither is checked by
-    # any `_check_vocab_*` arm: `Screen` read raw fails CLOSED (a row refused for a mode it
-    # spells correctly, with advice the author already followed) and `Match` read raw fails
-    # OPEN (the fast-path arm below never fires).
+    # LOWERCASED at the read, because both cells are compared against a closed value and
+    # neither is checked by any `_check_vocab_*` arm: `Screen` read raw fails CLOSED (a row
+    # refused for a mode it spells correctly, with advice the author already followed) and
+    # `Match` read raw fails OPEN (the fast-path arm below never fires).
+    #
+    # `screen_result` is the only one of the two folded across the whole document, and only to
+    # buy the early return. `mode` is read PER ROW inside the loop: both surviving arms ask it
+    # of the row they are judging, and the parallel-list shape the struck intermediate arm
+    # needed (it scanned `modes[j]` for every `j > i`) is an invitation to reach across leads
+    # again, which is the reading that arm was struck for.
     results = [_cell(lead, "screen_result").lower() for lead in leads]
     if not any(results):
-        # Before the second per-lead fold. No `screen_result` anywhere is every document in
-        # the tree today, and every run that never takes the fast path.
+        # Before the per-lead fold. No `screen_result` anywhere is every document in the tree
+        # today, and every run that never takes the fast path.
         return []
-    modes = [_cell(lead, "mode").lower() for lead in leads]
     first_match = ""
     errors: list[str] = []
-    for i, lead in enumerate(leads):
-        result = results[i]
+    for lead, result in zip(leads, results, strict=True):
         # `none` / `n/a` is the format's empty-cell spelling, not a verdict — the same reading
         # `_check_refutation_scope` takes of a `refutes` cell. Writing it in an unused trailing
         # column is the shipped convention (`defender/examples/example-b-parallel-iam-cmdb.md`
@@ -2624,21 +2705,20 @@ def _check_screen_structure(companion: CompanionBody) -> list[str]:
         if not result or is_conclude_empty_marker(result):
             continue
         lid = lead.get("id", "?")
-        mode = modes[i]
+        mode = _cell(lead, "mode").lower()
         # The matched-screen arm below speaks only for leads that ACTUALLY screened. A
         # `match` on a lead with no `mode: screen` is one defect — the mode arm's — and
         # letting it reach the fast-path arm too tells the same author, in the same pass, to
         # set the mode cell AND to delete a legitimate hypothesize block over a screen that
         # never ran.
-        if mode == SCREEN_MODE and result == SCREEN_MATCH and not first_match:
-            first_match = str(lid)
         if mode != SCREEN_MODE:
             errors.append(
                 f"lead {lid}: `screen_result: {result}` on a lead whose mode is {mode!r} — "
                 f"the column records a SCREEN's verdict; set `mode: screen` on the lead that "
                 f"ran the screen, or drop the cell"
             )
-            continue
+        elif result == SCREEN_MATCH and not first_match:
+            first_match = str(lid)
     if first_match and _walkers.all_hypotheses(companion):
         errors.append(
             f"lead {first_match}: `screen_result: {SCREEN_MATCH}` closes the run on the fast "
@@ -3300,8 +3380,9 @@ def _check_prediction_closure(companion: CompanionBody) -> list[str]:
     reader of the finished document can tell they existed.
 
     The late half of a pair. `_check_prediction_completeness` (spec #6) asks the same question
-    at WRITE time and only of a `++`, and offers no deferral — a `++` claims every prediction
-    came in, so there is nothing outstanding to defer. This asks it of every weight, at
+    at WRITE time and only of a hypothesis STANDING at `++` (`_confirmed_and_standing`, the one
+    predicate that partitions the two), and offers no deferral — a standing `++` claims every
+    prediction came in, so there is nothing outstanding to defer. This asks it of every weight, at
     CONCLUDE, and offers the deferral because at that point "the tool was never available" is a
     true and final answer.
 
@@ -3323,16 +3404,18 @@ def _check_prediction_closure(companion: CompanionBody) -> list[str]:
     conclude = companion.get("conclude") or {}
     if not _is_closing(companion):
         return []
-    # ONE walk with rule #6's, so the write gate and the closure gate cannot disagree about
-    # which citations count — a disagreement leaves the author DEFERRING a prediction on a
-    # `++` that claims none is outstanding.
+    # ONE DEFINITION with rule #6's (`_settled_predictions`), so the write gate and the closure
+    # gate cannot disagree about which citations count — a disagreement leaves the author
+    # DEFERRING a prediction on a `++` that claims none is outstanding. Not one WALK: the two
+    # rules run in separate passes and each folds it.
     resolved = {
         f"{hid}.{pid}"
         for hid, pids in _settled_predictions(companion).items()
         for pid in pids
     }
+    hyps = _walkers.all_hypotheses(companion)
     weights = _walkers.final_weights(companion)
-    # DEFERS to rule #6 on any hypothesis a resolution moved to `++`, the way
+    # DEFERS to rule #6 on any hypothesis STANDING at `++`, the way
     # `_check_authz_contract_closure` defers to the disposition gate — and for the identical
     # reason. `_check_prediction_completeness` already refuses every uncited prediction on a
     # `++`, and offers no deferral because, as the docstring above says, "a `++` claims every
@@ -3340,10 +3423,13 @@ def _check_prediction_closure(companion: CompanionBody) -> list[str]:
     # hands the author a repair (`:T conclude.deferred_preds`) that clears THIS rule and leaves
     # #6 refusing — a fix that does not fix the document, and one that then sits on disk as a
     # deferral contradicting the run's own `++`.
+    #
+    # `weights` THREADED, not refolded: the exclusion is only sound while this line's
+    # `!= REFUTED_WEIGHT` and the predicate's `== CONFIRMED_WEIGHT` read the same fold.
     confirmed = _confirmed_and_standing(companion)
     declared = [
         _Commitment(hid, pid)
-        for hid, hyp in _walkers.all_hypotheses(companion).items()
+        for hid, hyp in hyps.items()
         if weights.get(hid) != REFUTED_WEIGHT and hid not in confirmed
         for pid in sorted(_declared_prediction_ids(hyp))
     ]
