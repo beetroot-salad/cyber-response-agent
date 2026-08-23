@@ -408,14 +408,24 @@ def main(argv: list[str]) -> int:
         # suite/graph arg handed to pytest would resolve against the wrong base
         # (run from repo/tests with arg `spec`, pytest would hunt <rootdir>/spec).
         p = Path(args[0]).resolve()
-        suite_dir = p if p.is_dir() else p.parent
+        suite_dir = _suite.suite_dir_from_arg(p)
     else:
-        dirs = sorted({g.parent for g in _config.artifacts(cfg)})
+        dirs = sorted({_suite.suite_dir_from_arg(g) for g in _config.artifacts(cfg)})
         if len(dirs) != 1:
             print(f"check_stub: give the suite dir or graph explicitly (found {len(dirs)} "
                   f"candidate dirs)", file=sys.stderr)
             return 2
         suite_dir = dirs[0].resolve()
+    # See check_calls: an explicit `--target` seeds `targets`, so without this an empty directory
+    # would run the whole stub pass over zero tests and report it as an answer (#949).
+    if not _suite.suite_files(suite_dir):
+        print(
+            f"check_stub: no Python under {suite_dir} — nothing to scan, so this is a "
+            f"could-not-look rather than a clean run. Point at the suite directory, or at a "
+            f"graph whose `tests:` field names it.",
+            file=sys.stderr,
+        )
+        return 2
     root = _config.repo_root(suite_dir)
     targets, floor = _suite.target_modules(suite_dir, root)
     for t in explicit:

@@ -346,8 +346,12 @@ def main(argv: list[str]) -> int:
     cfg = _config.load(opts["config"])
     paths = [Path(a) for a in args] or _config.artifacts(cfg)
     if not paths:
+        # 2, not 0 (#949): "there was nothing to read" is a could-not-look, not a clean run.
+        # `check_claims`, `check_lint` and `check_gate` all return 2 on this identical branch,
+        # and this file's own unreadable-graph arm returns 2 four lines down — this was the one
+        # member of the family that reported an empty corpus as a pass.
         print("check_binds: no spec_graph_*.yaml found", file=sys.stderr)
-        return 0
+        return 2
     all_findings: list[str] = []
     unreadable: list[Path] = []
     for p in paths:

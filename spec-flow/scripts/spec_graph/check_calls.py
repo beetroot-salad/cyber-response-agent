@@ -150,13 +150,26 @@ def main(argv: list[str]) -> int:
         # project-rooted) and exit 2 with a false "every import resolves". Anchor the
         # root at the argument, resolved so `is_dir`/rooting checks are cwd-independent.
         p = Path(args[0]).resolve()
-        suite_dirs = [p if p.is_dir() else p.parent]
+        suite_dirs = [_suite.suite_dir_from_arg(p)]
         root = _config.repo_root(suite_dirs[0])
     else:
         root = _config.repo_root()
-        suite_dirs = sorted({g.parent for g in _config.artifacts(cfg)})
+        suite_dirs = sorted({_suite.suite_dir_from_arg(g) for g in _config.artifacts(cfg)})
     if not suite_dirs:
         print("check_calls: no suite directory (no graphs matched and none given)", file=sys.stderr)
+        return 2
+    # A resolved directory with no Python in it is a could-not-look, and it has to be said HERE
+    # rather than left to the no-targets arm below: an explicit `--target` seeds `targets`, so an
+    # empty directory sails past that arm and prints "0 test(s) that never reach the target" over
+    # a suite that was never opened. That was the #949 symptom.
+    empty = [d for d in suite_dirs if not _suite.suite_files(d)]
+    if empty:
+        print(
+            f"check_calls: no Python under {[str(d) for d in empty]} — nothing to scan, so this "
+            f"is a could-not-look rather than a clean run. Point at the suite directory, or at a "
+            f"graph whose `tests:` field names it.",
+            file=sys.stderr,
+        )
         return 2
     all_findings: list[str] = []
     blind: list[Path] = []

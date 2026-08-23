@@ -48,6 +48,44 @@ def suite_dir_for(graph_path: Path, graph: dict) -> Path:
     return _config.repo_root() / str(declared)
 
 
+def suite_dir_from_arg(arg: Path) -> Path:
+    """The suite directory a CLI argument names — the resolution `check_calls` and `check_stub`
+    were missing (#949).
+
+    A DIRECTORY is itself. A FILE is a graph, and the suite it names is the one its `tests:`
+    field declares — not the directory the graph happens to sit in. Those
+    were the same answer until the graphs moved into one corpus, and `p.parent` has been wrong
+    ever since: it resolves to the specs directory, which holds no Python at all, so a run given
+    `--target` reported "0 test(s) that never reach the target" over a suite it never opened.
+    `check_binds` already routes through `suite_dir_for`; these two did not.
+
+    ANCHORED ON THE GRAPH, not the process. `suite_dir_for` resolves `tests:` against
+    `_config.repo_root()` with no argument — the repo the process is standing in — which is right
+    for `check_binds` (it only ever walks its own configured corpus) and wrong here: both callers
+    take an explicit path argument, and their existing comments already note that it "may live in
+    a different repo than the process cwd". Resolving against the graph's own root keeps that
+    property, which `p.parent` had for free and a process-anchored join would have quietly cost.
+
+    An unreadable or non-mapping graph falls back to the graph's own directory rather than
+    raising here. That is not a silent pass: both callers refuse a resolved directory holding no
+    Python, which is precisely where that fallback lands.
+    """
+    if arg.is_dir():
+        return arg
+    import yaml  # local, matching `_config` below: only this path needs the parse
+
+    import _config
+
+    try:
+        graph = yaml.safe_load(arg.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        return arg.parent
+    declared = graph.get("tests") if isinstance(graph, dict) else None
+    if not declared:
+        return arg.parent
+    return _config.repo_root(arg.parent) / str(declared)
+
+
 def suite_files(suite_dir: Path) -> list[Path]:
     """The suite's `*.py`, minus `shuffle-premises` copies (`*.copyN.py`): they carry the
     same test names with premise-only docstrings and sort before the real file, so left in
