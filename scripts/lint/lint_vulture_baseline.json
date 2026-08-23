@@ -3,8 +3,6 @@
   "entries": {
     "defender/_paths.py: unused variable 'adapters_rel' (60% confidence)": "test-only: the #869 declared-systems adapter root, mirroring its sibling `skills_rel`'s own shape; `paths.adapters_dir` (which vulture does see used, in runtime/verbs.py) is derived from it, and `test_869_boundary.py` asserts `paths.adapters_dir == wt / DefenderPaths.adapters_rel` directly against the class attribute.",
     "defender/evals/oracle_golden/score.py: unused variable 'MECHANICAL_CAUSES' (60% confidence)": "test-only: the golden-set cause partition, asserted total by the #693 scorer tests",
-    "defender/hooks/_cmd_segments.py: unused attribute 'commenters' (60% confidence)": "false-positive: `shlex.shlex` instance attribute — assigned by us, read by shlex internals during tokenize()",
-    "defender/hooks/_cmd_segments.py: unused attribute 'whitespace_split' (60% confidence)": "false-positive: `shlex.shlex` instance attribute — assigned by us, read by shlex internals during tokenize()",
     "defender/hooks/inject_system_skill_description.py: unused variable 'ADAPTERS_DIR' (60% confidence)": "test-only: the adapter root the #632 verb-grant tests construct ModuleVerbRegistry against",
     "defender/learning/author/drain.py: unused variable 'LOCK_ORDER' (60% confidence)": "test-only by design: the lock acquisition order declared in exactly ONE place so #719's deadlock test can assert it; the drains take the locks in code, not by reading this tuple",
     "defender/learning/core/markers.py: unused function 'enqueue_for_authoring' (60% confidence)": "#791 dead: the authoring queue write the curation request replaced. Deletion is out of scope for #791 by an explicit sentence; the spec tests still drive it.",
