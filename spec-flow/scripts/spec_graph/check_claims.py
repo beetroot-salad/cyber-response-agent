@@ -346,7 +346,10 @@ def main(argv: list[str]) -> int:
             spend.extend(check_spend_points(p, graph))
             typing.extend(check_typing(p, graph))
             alphabet.extend(check_alphabet(p, graph))
-        except (OSError, yaml.YAMLError, TypeError, AttributeError) as e:
+        # `ValueError` covers UnicodeDecodeError: a non-utf-8 graph is the commonest unreadable
+        # one, and it is NOT an OSError — without it the read escapes as a traceback behind exit 1
+        # ("looked, found something") for a gate that read nothing.
+        except (OSError, ValueError, yaml.YAMLError, TypeError, AttributeError) as e:
             # Collected, not returned on: bailing here threw away every finding the
             # already-checked graphs produced.
             print(f"check_claims: cannot read {p}: {e.__class__.__name__}: {e}", file=sys.stderr)

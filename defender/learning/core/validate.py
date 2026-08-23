@@ -277,11 +277,17 @@ def _validate_environment_observation(i: int, o: Any) -> None:
             raise RunUnprocessable(
                 f"environment_observations[{i}].{k} must be a non-empty string"
             )
-    _validate_entity_selectors(i, o.get("entities") or [])
+    # `is not None`, not `or []` (defender/CLAUDE.md, "Conventions"): the coalescing form
+    # swallows every FALSY non-list — `{}`, `0`, `""`, `false` — before the type guard below
+    # can see it, so the commonest wrong spelling of this field (an empty mapping where a
+    # list belongs) would be accepted as "no entities" while a non-empty mapping is refused.
+    entities = o.get("entities")
+    if entities is not None:
+        _validate_entity_selectors(i, entities)
 
 
 def _validate_entity_selectors(i: int, entities: Any) -> None:
-    """The optional `entities` list of an environment observation.
+    """The optional `entities` list of an environment observation, when the key is present.
 
     `isinstance` BEFORE the loop, the same guard and the same reason as `_validate_finding`'s
     `type` check: a scalar here raises `TypeError: 'int' object is not iterable` past the

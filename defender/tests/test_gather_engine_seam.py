@@ -33,9 +33,16 @@ class _ToolRecorder:
 
     def __init__(self):
         self.names: list = []
+        self.sequential: dict[str, bool] = {}
 
-    def tool(self, fn):
+    def tool(self, fn=None, **kwargs):
+        """Both decorator spellings. `register_tools` registers its shared-artifact writers as
+        `@agent.tool(sequential=True)`, so a recorder that accepts only the bare positional form
+        raises `TypeError` on the very branch this test is here to enumerate."""
+        if fn is None:
+            return lambda f: self.tool(f, **kwargs)
         self.names.append(fn.__name__)
+        self.sequential[fn.__name__] = bool(kwargs.get("sequential", False))
         return fn
 
 
@@ -46,6 +53,11 @@ def test_register_tools_registers_exactly_the_toolset():
     full = _ToolRecorder()
     tools.register_tools(full, ToolSet(read=True, bash=True, write=True))
     assert full.names == ["bash", "read_file", "write_file", "edit_file"]
+    # The two writers are shared-artifact writes; unserialized, two calls in one model response
+    # race and one is lost. Read-only tools stay parallel.
+    assert full.sequential == {
+        "bash": False, "read_file": False, "write_file": True, "edit_file": True,
+    }
 
 
 

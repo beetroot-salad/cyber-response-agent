@@ -17,11 +17,11 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
 import textwrap
 
-from conftest import DEFAULT_CHECK_ACTORS, SPEC_GRAPH_DIR, run_script
+import pytest
+from conftest import DEFAULT_CHECK_ACTORS, run_script
 
 GRAPH = "schema_version: 1\ndemands: []\nactors: []\n"
 
@@ -63,13 +63,14 @@ def test_positive_control_a_real_base_still_answers(make_repo):
 
 def _run_bare(repo, *argv):
     """check_actors with arbitrary argv — `Repo.run` always passes `--base`, and the whole
-    point of the test below is the run that does not."""
-    env = dict(os.environ)
-    env["PYTHONPATH"] = str(SPEC_GRAPH_DIR) + os.pathsep + env.get("PYTHONPATH", "")
-    return subprocess.run(
-        [sys.executable, str(DEFAULT_CHECK_ACTORS), *argv],
-        cwd=repo.root, env=env, capture_output=True, text=True, timeout=60,
-    )
+    point of the test below is the run that does not.
+
+    `$CHECK_ACTORS_PATH` is honoured, the same two lines `test_gate_blindness_652_654._run_bare`
+    uses: conftest documents that override as the null-stub discrimination seam, so a copy that
+    hardcodes the real script is structurally exempt from the gate every other test here is
+    measured by."""
+    check = os.environ.get("CHECK_ACTORS_PATH", str(DEFAULT_CHECK_ACTORS))
+    return run_script(check, *argv, cwd=repo.root, timeout=60)
 
 
 def test_the_default_base_comes_from_the_profile_not_a_hardcoded_main(make_repo):
@@ -79,7 +80,12 @@ def test_the_default_base_comes_from_the_profile_not_a_hardcoded_main(make_repo)
     `conventions.defaultBranch` is the key the ship skill already reads, and spec-flow ships as
     a plugin to repos we do not control — one on `master` would otherwise owe an explicit
     `--base` on every invocation, where before the preflight it merely got a quiet wrong
-    answer. Trading one failure mode for another is not the fix."""
+    answer. Trading one failure mode for another is not the fix.
+
+    Asserted POSITIVELY — the census reached a verdict — and not as `returncode != 2`. A crash
+    in `main` exits 1 with an empty stderr, which satisfies both a `!= 2` and a substring
+    absence; this file's own docstring forbids exactly that shape, and the assertion below is
+    the one that fails when the config path is broken or stubbed out."""
     r, _ = _diffable_repo(make_repo)
     r._git("branch", "-M", "master")
     profile = json.loads((r.root / ".claude/spec-flow.json").read_text())
@@ -87,8 +93,20 @@ def test_the_default_base_comes_from_the_profile_not_a_hardcoded_main(make_repo)
     r.write(".claude/spec-flow.json", json.dumps(profile))
     r.commit("declare the branch")
     out = _run_bare(r, "spec_graph_x.yaml")
-    assert out.returncode != 2, out.stdout + out.stderr
-    assert "does not resolve to a commit" not in out.stderr, out.stderr
+    assert out.returncode in (0, 1), out.stdout + out.stderr
+    assert "unmodelled driver context(s) over 1 graph(s) (base=master)" in out.stdout, out.stdout
+
+
+def test_the_default_base_is_refused_when_the_profile_does_not_declare_it(make_repo):
+    """The discriminating twin: the SAME fixture with no `conventions.defaultBranch`. The default
+    falls back to `main`, which this repo (renamed to `master`) does not have, so the preflight
+    refuses. Without this the test above passes on a build that ignores the profile entirely and
+    happens to be handed a repo where `main` also resolves."""
+    r, _ = _diffable_repo(make_repo)
+    r._git("branch", "-M", "master")
+    out = _run_bare(r, "spec_graph_x.yaml")
+    assert out.returncode == 2, out.stdout + out.stderr
+    assert "does not resolve to a commit" in out.stderr, out.stderr
 
 
 # ── F-37b: check_binds joins the rest of the family on an empty corpus ───────
@@ -200,6 +218,70 @@ def test_a_suite_directory_with_no_python_is_refused_even_with_an_explicit_targe
     p = run_script("check_calls.py", str(r.root / "empty"), "--target", "app.mod", cwd=r.root)
     assert p.returncode == 2, p.stdout + p.stderr
     assert "no tests" in p.stderr
+
+
+# ── F-38b: the recorded-pass allow-list follows the graphs that NAME the suite ──
+def _recorded_pass_repo(make_repo):
+    """TWO graphs in `specs/`, both naming the one `suite/`, each recording one of its vacuous
+    tests. Neither is a sibling of the suite, which is the whole point: the sibling glob that
+    used to be the only source finds nothing here."""
+    r = make_repo()
+    r.config(code_roots=["app"])
+    r.write("app/existing.py", "X = 1\n")
+    for graph, recorded in (("a", "test_recorded_by_a"), ("b", "test_recorded_by_b")):
+        r.write(f"specs/spec_graph_{graph}.yaml",
+                "schema_version: 1\ntests: suite\ndemands: []\nhandoff:\n"
+                f'  nullstub_passes:\n    - "{recorded} — deliberate"\n')
+    r.write("suite/test_spec.py", textwrap.dedent("""\
+        from app.newmod import summarize
+
+
+        def test_recorded_by_a():
+            assert True
+
+
+        def test_recorded_by_b():
+            assert True
+
+
+        def test_really_drives_it():
+            assert summarize("a.txt") == "the summary"
+    """))
+    r.commit("base")
+    return r
+
+
+@pytest.mark.parametrize("arg", ["specs/spec_graph_a.yaml", "suite", None],
+                         ids=["graph", "suite-dir", "no-arg"])
+def test_recorded_passes_are_read_from_every_graph_that_names_the_suite(make_repo, arg):
+    """pytest is handed the whole SUITE, so the allow-list has to cover every graph that names
+    it — including, for the graph form, the SIBLING graphs the argument does not mention.
+
+    All three invocation forms must agree: `spec-graph nullstub <suite-dir>` is the one
+    write-tests actually emits, and a directory carries no graph identity of its own. Reading one
+    graph's block (or none) re-reports a consciously recorded pass as a NULLSTUB-PASS finding —
+    advising the author to record it in the very block that already records it."""
+    r = _recorded_pass_repo(make_repo)
+    argv = [str(r.root / arg)] if arg else []
+    p = run_script("check_stub.py", *argv, "--python", sys.executable,
+                   "--target", "app.newmod", cwd=r.root)
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert "NULLSTUB-PASS" not in p.stdout, p.stdout
+
+
+def test_an_unrecorded_pass_is_still_a_finding(make_repo):
+    """The positive control: the allow-list suppresses precisely what it lists, and a third
+    vacuous test nobody recorded is still reported. Without this the test above passes on a
+    check_stub that reports nothing at all."""
+    r = _recorded_pass_repo(make_repo)
+    r.write("suite/test_extra.py", "def test_nobody_recorded_me():\n    assert True\n")
+    r.commit("an unrecorded vacuous test")
+    p = run_script("check_stub.py", str(r.root / "suite"), "--python", sys.executable,
+                   "--target", "app.newmod", cwd=r.root)
+    assert p.returncode == 1, p.stdout + p.stderr
+    assert "test_nobody_recorded_me" in p.stdout, p.stdout
+    assert "test_recorded_by_a" not in p.stdout, p.stdout
+    assert "test_recorded_by_b" not in p.stdout, p.stdout
 
 
 # ── F-39: the alphabet rule reaches the claims that enumerate ────────────────

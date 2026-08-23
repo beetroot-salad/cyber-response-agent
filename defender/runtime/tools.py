@@ -1241,13 +1241,21 @@ def register_tools(agent, tools: ToolSet, verbs: Any = None) -> None:
             return _tool_read_file(ctx.deps, path, pattern, tail)
 
     if tools.write:
-        @agent.tool
+        # `sequential=True` on BOTH, the same rule `append_block`/`fix_row` carry below and the
+        # close tool carries in close_tool.py: these two write a SHARED ARTIFACT, so two
+        # `ToolCallPart`s in one model response would otherwise run as concurrent tasks and one
+        # write would be lost. `edit_file` is the worse of the two — it is a read-modify-write
+        # (`_probe_read_text`, splice, `write_guarded`), so two concurrent edits on one file both
+        # read the same pre-image and one splice vanishes while both calls report success. These
+        # are granted to CORPUS_AUTHOR and LEAD_AUTHOR, whose lesson files the learning corpus is
+        # built from.
+        @agent.tool(sequential=True)
         async def write_file(ctx: RunContext[AgentDeps], path: str, content: str) -> str:
             """Write a file within this agent's declared write scope, replacing it whole.
             Content is validated against the schema for whatever artifact the path names."""
             return _tool_write_file(ctx.deps, path, content)
 
-        @agent.tool
+        @agent.tool(sequential=True)
         async def edit_file(
             ctx: RunContext[AgentDeps], path: str, old_string: str, new_string: str
         ) -> str:

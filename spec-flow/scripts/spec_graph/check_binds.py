@@ -367,7 +367,10 @@ def main(argv: list[str]) -> int:
         # surface as an AttributeError traceback behind exit 1 ("found findings").
         try:
             all_findings.extend(check(p, cfg))
-        except (OSError, yaml.YAMLError, TypeError, AttributeError) as e:
+        # `ValueError` covers UnicodeDecodeError: a non-utf-8 graph is the commonest unreadable
+        # one, and it is NOT an OSError — without it the read escapes as a traceback behind exit 1
+        # ("looked, found something") for a gate that read nothing.
+        except (OSError, ValueError, yaml.YAMLError, TypeError, AttributeError) as e:
             print(f"check_binds: cannot read {p}: {e.__class__.__name__}: {e}", file=sys.stderr)
             unreadable.append(p)
             continue

@@ -151,9 +151,14 @@ def main(argv: list[str]) -> int:
         # root at the argument, resolved so `is_dir`/rooting checks are cwd-independent.
         p = Path(args[0]).resolve()
         suite_dirs = [_suite.suite_dir_from_arg(p)]
-        root = _config.repo_root(suite_dirs[0])
+        root: Path | None = _config.repo_root(suite_dirs[0])
     else:
-        root = _config.repo_root()
+        # No single root: `suite_dir_from_arg` anchors each graph's `tests:` on ITS OWN checkout,
+        # so a process-anchored root would classify one suite's imports against another repo —
+        # every import reads as third-party and the dir comes back "blind" with a false "every
+        # suite import resolves". Anchored per dir inside the loop instead, which is also what
+        # the explicit-argument branch above does.
+        root = None
         suite_dirs = sorted({_suite.suite_dir_from_arg(g) for g in _config.artifacts(cfg)})
     if not suite_dirs:
         print("check_calls: no suite directory (no graphs matched and none given)", file=sys.stderr)
@@ -174,7 +179,7 @@ def main(argv: list[str]) -> int:
         if not _suite.has_tests(d):
             no_tests.append(d)
             continue
-        targets, floor = _suite.target_modules(d, root)
+        targets, floor = _suite.target_modules(d, root or _config.repo_root(d))
         for t in explicit:
             targets.setdefault(t, set())
         for note in floor:

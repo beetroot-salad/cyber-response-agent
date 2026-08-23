@@ -314,7 +314,10 @@ def parse_label(raw: str) -> dict:
     # mapping raises `TypeError: unhashable type` instead of the `GrammarError` this branch
     # exists to raise — and `_pass`'s retry loop catches only `GrammarError`, so the crash
     # skips all three attempts and unwinds out of the batch, discarding every lead measured
-    # beside it. The `in (True, False, None)` tests below are tuples and never hash.
+    # beside it. The tri-state tests below need `isinstance(x, bool)` rather than membership
+    # in a tuple: a tuple never hashes, but `in` compares with `==`, and `0 == False` /
+    # `1 == True`, so a YAML integer would pass the vocabulary check and then miss every
+    # `is False` / `is True` branch downstream.
     if not isinstance(kind, str) or kind not in LABEL_KINDS:
         raise GrammarError(f"delta_kind {kind!r} not in {sorted(LABEL_KINDS)}")
     reason = doc.get("undecidable_reason")
@@ -324,7 +327,7 @@ def parse_label(raw: str) -> dict:
     elif reason is not None:
         raise GrammarError(f"undecidable_reason {reason!r} on a decided label {kind!r}")
     hetero = doc.get("heterogeneous")
-    if hetero not in (True, False, None):
+    if not (isinstance(hetero, bool) or hetero is None):
         raise GrammarError(f"heterogeneous {hetero!r} is not true/false/null")
     evidence = doc.get("evidence")
     if not isinstance(evidence, str) or not evidence.strip():
@@ -342,7 +345,7 @@ def parse_verdict_reply(raw: str) -> dict:
     if "faithful" not in doc:
         raise GrammarError("no `faithful` key")
     faithful = doc["faithful"]
-    if faithful not in (True, False, None):
+    if not (isinstance(faithful, bool) or faithful is None):
         raise GrammarError(f"faithful {faithful!r} is not true/false/null")
     reason, cause = doc.get("undecidable_reason"), doc.get("cause")
     if faithful is None:

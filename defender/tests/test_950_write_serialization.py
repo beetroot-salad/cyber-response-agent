@@ -21,6 +21,7 @@ Both are shapes that a reader has to notice, because nothing mechanical was watc
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -57,9 +58,15 @@ GOLDEN = DEFENDER / "fixtures-e2e" / "golden-sshpivot-ab3" / "investigation.md"
 #: inside the box) and `gather` (registered by `driver.build_agent` through
 #: `register_gather_tool`, and it persists per `lead_id`, so its own docstring promises the
 #: parallel dispatch that `sequential=True` would take away). `write_file`/`edit_file` are not
-#: MAIN's — `MAIN_DEF.tools` carries `write=False` — but they are unserialized on the roles that
-#: do grant them (CURATOR, LEAD_AUTHOR), which this roster cannot see.
+#: MAIN's — `MAIN_DEF.tools` carries `write=False` — so they are checked over a write-granting
+#: `ToolSet` by `test_every_write_role_writer_is_sequential` below rather than here.
 WRITERS = ("append_block", "fix_row", "close_investigation")
+
+#: The writers a role gets from `ToolSet(write=True)` — CORPUS_AUTHOR and LEAD_AUTHOR grant these,
+#: and MAIN does not, so `main_tools` structurally cannot see them. `edit_file` is the sharper of
+#: the two: `_tool_edit_file` reads the file, splices, and writes it back, so two concurrent calls
+#: both read the same pre-image and one splice is lost while both report success.
+WRITE_ROLE_WRITERS = ("write_file", "edit_file")
 
 #: Two ways a model spells a scalar field as a container. Both are unhashable, which is the
 #: property that turned a refusal into a crash; `frozenset`/`set` membership raises on them.
@@ -100,6 +107,39 @@ def test_every_writer_main_can_call_is_sequential(main_tools):
     assert not missing, (
         f"writer tool(s) {missing} are registered without sequential=True — two calls in one "
         f"model response would run concurrently and one write would be lost"
+    )
+
+
+@pytest.fixture(scope="module")
+def write_role_tools() -> dict:
+    """The roster a write-granting role gets. `MAIN_DEF.tools` carries `write=False`, so the two
+    tools `ToolSet(write=True)` registers are invisible to `main_tools` — and they are shared-artifact
+    writers on the roles that DO grant them, which is where the lesson corpus is authored."""
+    agent = Agent("test", deps_type=AgentDeps)
+    register_tools(agent, replace(MAIN_DEF.tools, write=True))
+    return dict(agent._function_toolset.tools)
+
+
+def test_every_write_role_writer_is_sequential(write_role_tools):
+    """The same rule over the roster `main_tools` cannot reach.
+
+    Two `edit_file` calls in one model response on one lesson file otherwise discard one splice
+    while telling the model both landed — the #950 lost update, on the artifact the learning
+    corpus is built from rather than on report.md."""
+    missing = [
+        n for n in WRITE_ROLE_WRITERS
+        if n in write_role_tools and not getattr(write_role_tools[n], "sequential", False)
+    ]
+    assert not missing, (
+        f"writer tool(s) {missing} are registered without sequential=True — two calls in one "
+        f"model response would run concurrently and one write would be lost"
+    )
+
+
+def test_the_write_role_roster_is_actually_registered(write_role_tools):
+    """The control for the test above, whose `n in tools` guard would otherwise pass vacuously."""
+    assert set(WRITE_ROLE_WRITERS) <= set(write_role_tools), (
+        f"expected {WRITE_ROLE_WRITERS} among {sorted(write_role_tools)}"
     )
 
 

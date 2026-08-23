@@ -262,12 +262,17 @@ def resource(names: list[str], cfg: dict) -> int:
 def main(argv: list[str]) -> int:
     _cli.utf8_stdio()
     opts, args = _cli.parse_argv(argv, valued={"--base", "--config"})
-    base = opts["base"] or "main"
     if not args or args[0] not in ("drivers", "resource"):
         print("usage: spec-graph trace {drivers [--base <ref>] | resource [<name> ...]}",
               file=sys.stderr)
         return 2
     cfg = _config.load(opts["config"])
+    # The profile's branch, the same source `check_actors.main` reads (#949). `drivers` carries
+    # the same hard rev-parse preflight, so a hardcoded "main" here is not a quiet wrong answer
+    # any more — it is a mandatory `--base` on every invocation in any repo whose default branch
+    # is named something else, which is the failure the config key exists to prevent. Two
+    # spellings of one fact would let the sibling subcommands disagree about the same repo.
+    base = opts["base"] or cfg["defaultBranch"]
     try:
         if args[0] == "drivers":
             return drivers(base, cfg)
