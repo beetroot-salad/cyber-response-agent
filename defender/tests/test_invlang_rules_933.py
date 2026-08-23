@@ -88,7 +88,13 @@ def test_a_double_plus_leaving_a_declared_prediction_unmatched_is_refused() -> N
     errors = _errors(_SIX_PARTIAL)
     assert len(errors) == 1
     assert "resolution of h-001 to '++' leaves p2 unmatched" in errors[0]
-    assert "grade '+' for partial coverage" in errors[0]
+    # The repair is spelled as a row that PARSES: bare "h-001 ++ → +" is refused by
+    # `_RESOLUTION_LINE_RE` for the missing citation head, so a message offering it as a
+    # literal hands the author a second refusal instead of a fix. The LEAD is filled in for
+    # the same reason — `<lead>` copied verbatim draws `undeclared lead '<lead>'`, which is
+    # the second refusal by another route.
+    assert "`h-001  ++ → +   [l-001 <ids> <severity> ⟂ <edges>]`" in errors[0]
+    assert "grade it partial coverage" in errors[0]
 
 
 def test_the_same_double_plus_citing_every_prediction_validates_clean() -> None:
@@ -122,7 +128,7 @@ _SCREEN_ON_A_NON_SCREEN_LEAD = _PROLOGUE + _SCREEN_HEADER + """\
 l-001|1|auth-history|v-001|||elastic|10m|no_match
 """
 
-_SCREEN_ON_AN_INTERMEDIATE_LEAD = _PROLOGUE + _SCREEN_HEADER + """\
+_SCREEN_SEQUENCE_EVERY_LEAD_SCORED = _PROLOGUE + _SCREEN_HEADER + """\
 l-001|1|source-screen|v-001|screen||cmdb|n/a|no_match
 l-002|1|cadence-screen|v-001|screen||elastic|24h|no_match
 """
@@ -138,13 +144,6 @@ def test_a_screen_result_on_a_lead_that_did_not_screen_is_refused() -> None:
     assert "lead l-001: `screen_result: no_match` on a lead whose mode is ''" in errors[0]
 
 
-def test_a_screen_result_on_an_intermediate_screen_lead_is_refused() -> None:
-    errors = _errors(_SCREEN_ON_AN_INTERMEDIATE_LEAD)
-    assert len(errors) == 1
-    assert "on an intermediate screen lead" in errors[0]
-    assert "l-002 screens after it" in errors[0]
-
-
 def test_a_matched_screen_beside_a_hypothesize_block_is_refused() -> None:
     errors = _errors(_SCREEN_MATCH_WITH_HYPOTHESES)
     assert len(errors) == 1
@@ -154,9 +153,8 @@ def test_a_matched_screen_beside_a_hypothesize_block_is_refused() -> None:
 @pytest.mark.parametrize(("case", "body"), [
     # The plain shape: one screen lead, `mode: screen`, last in the run.
     ("a-lone-screen-lead", _SCREEN_CLEAN),
-    # The sequence's FINAL lead may carry the result — only the earlier ones may not.
-    ("the-final-lead-of-a-sequence",
-     _SCREEN_ON_AN_INTERMEDIATE_LEAD.replace("|n/a|no_match", "|n/a|")),
+    # Every lead of a sequence may carry its own result; see the wedge regression below.
+    ("every-lead-of-a-sequence", _SCREEN_SEQUENCE_EVERY_LEAD_SCORED),
     # A screen that did NOT match leaves the run free to hypothesize.
     ("no-match-beside-a-hypothesize-block",
      _SCREEN_MATCH_WITH_HYPOTHESES.replace("|n/a|match", "|n/a|no_match")),
@@ -641,9 +639,12 @@ h-002|+
 
 
 def test_two_screen_phases_in_different_loops_are_two_sequences() -> None:
-    """"Intermediate" is "the next lead ALSO screens", read off `findings` order. Without the
-    same-loop term, a loop-1 sequence whose last lead screens and a loop-2 screen beside it
-    fold into one, and the first phase's legitimate result is refused."""
+    """Two screen phases in different loops, each carrying its own result.
+
+    Written against the intermediate arm's same-loop term, which v2.22 struck along with the
+    rest of that arm — so nothing here can refuse this document any more, and the test is kept
+    only as a shape the rule must keep accepting. The refusal it used to pin is gone for good;
+    see `test_appending_the_next_screen_of_a_sequence_leaves_the_committed_one_alone`."""
     assert _errors(_PROLOGUE + """\
 :L findings [id|loop|name|target|mode|screen_result|tests|system|window]
 l-001|1|known-pattern-screen|v-001|screen|no_match||elastic|10m
@@ -854,11 +855,15 @@ def test_a_lone_none_row_is_the_empty_table_marker_on_a_lead_plan_block(block: s
     assert _errors(body) == []
 
 
-def test_a_matched_screen_is_never_an_intermediate_lead() -> None:
-    """This rule's own third arm reads a `match` as ENDING the run on the fast path, so the
-    leads planned after it never ran. Refusing the row for a follower that exists only as an
-    append-only `:L findings` declaration left no legal repair — `no_match` would be a false
-    claim that the screen fell through."""
+def test_a_matched_screen_followed_by_a_second_screen_lead_is_clean() -> None:
+    """A `match` with a later screen lead beside it, and no `hypothesize` block: nothing to
+    refuse.
+
+    This pinned the `match` carve-out inside the intermediate arm — a matched screen ENDS the
+    run, so refusing its row for a follower that exists only as an append-only `:L findings`
+    declaration left no legal repair. v2.22 struck the arm and the carve-out with it, so the
+    document is clean for a simpler reason and no mutation of the surviving arms can fail
+    this. Kept as a liveness shape, not as coverage."""
     assert _errors(_PROLOGUE + """\
 :L findings [id|loop|name|target|mode|screen_result|tests|system|window]
 l-001|0|first-phase-screen|v-001|screen|match||elastic|10m
@@ -957,19 +962,6 @@ def test_rule_17_reads_mode_and_screen_result_the_same_way() -> None:
     assert _errors(_PROLOGUE + _screen_row('"screen"', '"no_match"') + _ONE_PRED) == []
 
 
-def test_a_quoted_mode_on_the_follower_still_makes_it_a_screen_lead() -> None:
-    """The same asymmetry running the other way, failing OPEN: read raw, a quoted `mode` on
-    the NEXT lead made the intermediate-screen arm stop firing in silence."""
-    assert any(
-        "intermediate screen lead" in e
-        for e in _errors(_PROLOGUE + """\
-:L findings [id|loop|name|target|mode|screen_result|tests|system|window]
-l-001|1|first|v-001|"screen"|"no_match"|h-001|elastic|10m
-l-002|1|second|v-001|"screen"||h-001|elastic|10m
-""" + _ONE_PRED)
-    )
-
-
 # --- #943 review regressions -----------------------------------------------------------------
 #
 # The quoting sweep the `target` fix started, finished across the rest of the row, plus the two
@@ -1020,17 +1012,17 @@ ap1|proposed_parent|"signing"|"UNSIGNED"
     assert _SIBLING_FORK_TAG in errors[0]
 
 
-def test_a_quoted_loop_cell_still_makes_the_next_lead_the_same_sequence() -> None:
-    """`mode` and `screen_result` went through the unquoting read and `loop` beside them did
-    not — and `_lead_header_record` only `int()`s a loop cell that parses, so `"1"` survived as
-    a string that equals no other lead's loop and the intermediate arm stood down in silence."""
-    errors = _errors(_PROLOGUE + """\
+def test_a_quoted_loop_cell_still_projects_as_the_integer_it_spells() -> None:
+    """`_lead_header_record` only `int()`s a loop cell that parses, and the `int()` sits under
+    `contextlib.suppress` — so before the unquoting sweep `"1"` survived as a STRING that
+    equals no other lead's loop. Observed on the projection rather than through a rule: rule
+    #17 no longer reads `loop`, and `_check_loop_close` is the reader that still does."""
+    from defender.skills.invlang.parser import parse_dense_companion
+    body, _warnings = parse_dense_companion(_doc(_PROLOGUE + """\
 :L findings [id|loop|name|target|mode|screen_result|tests|system|window]
-l-001|1|first|v-001|screen|no_match||elastic|10m
-l-002|"1"|second|v-001|screen|||elastic|10m
-""")
-    assert len(errors) == 1
-    assert "on an intermediate screen lead" in errors[0]
+l-001|"1"|first|v-001|screen|||elastic|10m
+"""))
+    assert [lead.get("loop") for lead in body["findings"]] == [1]
 
 
 def test_a_refutation_that_overturns_nothing_writes_the_empty_array_marker() -> None:
@@ -1207,30 +1199,6 @@ l-002|2|cadence|v-001|h-001|elastic|24h
 :T resolutions
 h-001  null → +    [l-001 p1 weak ⟂ e-001 :: bursty]
 h-001  +    → ++   [l-002 r1 severe ⟂ e-001 :: the interval never appeared]
-""") == []
-
-
-def test_an_intermediate_screen_is_intermediate_across_a_retrieval_lead() -> None:
-    """"Intermediate" was read as "the NEXT lead screens". A screen sequence may have a
-    retrieval lead standing between two of its screens — and `companion["findings"]` is the
-    projector's lead buckets in first-mention order besides — so adjacency stood the arm down
-    on the shape it exists to catch."""
-    errors = _errors(_PROLOGUE + _SCREEN_HEADER + """\
-l-001|1|source-screen|v-001|screen||cmdb|n/a|no_match
-l-002|1|fetch-the-indicator|v-001|||elastic|10m|
-l-003|1|cadence-screen|v-001|screen||elastic|24h|no_match
-""")
-    assert len(errors) == 1
-    assert errors[0].startswith("lead l-001:")
-    assert "l-003 screens after it" in errors[0]
-
-
-def test_a_second_screen_phase_in_a_later_loop_is_still_its_own_sequence() -> None:
-    """The control for the arm above: widening "next lead" to "some later lead" must not
-    fold a loop-2 screen into the loop-1 sequence."""
-    assert _errors(_PROLOGUE + _SCREEN_HEADER + """\
-l-001|1|source-screen|v-001|screen||cmdb|n/a|no_match
-l-002|2|cadence-screen|v-001|screen||elastic|24h|no_match
 """) == []
 
 
@@ -1423,3 +1391,214 @@ def test_one_impact_predicate_graded_once_is_clean() -> None:
         + _impact_rows(_GRADE_EXCEEDS)
         + _REAL_CONCLUDE + _DEFER_P1
     ) == []
+
+
+# --- the two append-only wedges -------------------------------------------------------------
+#
+# A rule may refuse a row only for something knowable when that row is written. Both cases
+# below broke it in the same way: a document that validated CLEAN was turned into a refusal by
+# a LATER legal append, naming a committed row that no write can reach back into. Each test
+# runs the append sequence in order, because the defect is invisible in the end state alone —
+# the final document is the only thing a single-shot test would see, and it looks like an
+# ordinary refusal.
+
+_WEDGE_HYP = _HYP_HEADER + """\
+h-001|?a|v-001|runs_on|process|??/??/??||null|active
+
+:H h-001.preds [id|subject|claim]
+p1|proposed_edge|"failures arrive in bursts"
+
+"""
+_WEDGE_HYP_TWO_PREDS = _WEDGE_HYP.replace(
+    'p1|proposed_edge|"failures arrive in bursts"\n',
+    'p1|proposed_edge|"failures arrive in bursts"\np2|proposed_edge|"the interval is fixed"\n',
+)
+
+_WEDGE_LEAD = (
+    ":L findings [id|loop|name|target|mode|tests|system|window]\n"
+    "l-001|1|probe|v-001||h-001|elastic|24h\n\n"
+)
+_WEDGE_CONFIRM = ":T resolutions\nh-001  null → ++   [l-001 p1 severe ⟂ e-001]\n\n"
+_WEDGE_APPEND_P2 = (
+    ':H h-001.preds [id|subject|claim]\np2|proposed_edge|"the interval is fixed"\n\n'
+)
+
+
+def test_declaring_one_more_prediction_after_a_double_plus_leaves_a_legal_next_write() -> None:
+    """Rule #6 compared a growing cited set against a growing DECLARED set.
+
+    Turn 1 commits the `++` covering the one prediction h-001 declared — clean. Turn 2 appends
+    a second prediction, which is the documented append shape and cannot be un-written, and the
+    committed `++` retroactively stopped covering its own hypothesis. Both repairs the message
+    offered were unreachable: citing p2 asserts an untested prediction came in, and the
+    downgrade did nothing because the rule keyed on the FIRST `++` a row ever wrote.
+    """
+    turn_1 = _PROLOGUE + _WEDGE_HYP + _WEDGE_LEAD + _WEDGE_CONFIRM
+    assert _errors(turn_1) == []
+
+    turn_2 = turn_1 + _WEDGE_APPEND_P2
+    assert [e for e in _errors(turn_2) if "leaves p2 unmatched" in e]
+
+    # THE REPAIR, and the whole point: the run says it is no longer claiming full coverage.
+    turn_3 = turn_2 + ":T resolutions\nh-001  ++ → +   [l-001 p1 severe ⟂ e-001]\n\n"
+    assert _errors(turn_3) == []
+
+
+_TWO_LEADS = (
+    ":L findings [id|loop|name|target|mode|tests|system|window]\n"
+    "l-001|1|first|v-001||h-001|elastic|24h\n"
+    "l-002|1|second|v-001||h-001|elastic|24h\n\n"
+)
+
+
+def test_the_withdrawal_is_read_off_the_row_and_not_off_the_lead_order() -> None:
+    """The repair has to work whichever lead the withdrawing row is attributed to.
+
+    Keyed on `_walkers.final_weights` it did not. That walker resolves last-move-wins by
+    LEAD-DECLARATION order rather than append order, so a `++` on the later-declared lead beat
+    a withdrawal on the earlier one and the advertised repair was a silent no-op — on every
+    document with more than one lead, which is every real one. Both attributions below are the
+    same document to an author and have to be the same document here.
+    """
+    base = _PROLOGUE + _WEDGE_HYP + _TWO_LEADS + (
+        ":T resolutions\nh-001  null → ++   [l-002 p1 severe ⟂ e-001]\n\n"
+    ) + _WEDGE_APPEND_P2
+    assert [e for e in _errors(base) if "leaves p2 unmatched" in e]
+    for lead in ("l-001", "l-002"):
+        withdrawn = base + (
+            f":T resolutions\nh-001  ++ → +   [{lead} p1 severe ⟂ e-001]\n\n"
+        )
+        assert _errors(withdrawn) == [], f"withdrawal attributed to {lead} was not honoured"
+
+
+def test_a_null_move_off_a_double_plus_withdraws_it_and_conclude_still_asks() -> None:
+    """`++ → null` is a legal weight cell and says the run stopped standing behind the grade.
+
+    Read through `final_weights` it was worse than a withdrawal: that walker reads `after` RAW
+    where `_confirmed_and_standing` reads both cells closed on the weight-cell vocabulary, so
+    the hypothesis was neither confirmed-and-standing nor refuted and rule #6 simply switched
+    off — a document main refuses. It is a withdrawal like any other, and #34 collects after.
+    """
+    withdrawn = _PROLOGUE + _WEDGE_HYP + _TWO_LEADS + (
+        ":T resolutions\nh-001  null → ++     [l-002 p1 severe ⟂ e-001]\n\n"
+    ) + _WEDGE_APPEND_P2 + (
+        ":T resolutions\nh-001  ++   → null   [l-002 p1 severe ⟂ e-001]\n\n"
+    )
+    # The WHOLE list, not a filter: a filtered negative survives the rule being deleted.
+    assert _errors(withdrawn) == []
+    closing = withdrawn + (
+        ':T conclude\ndisposition            benign\nsummary                "s"\n\n'
+        ":T conclude.surviving [hyp_id|final_weight]\nh-001|null\n\n"
+    )
+    assert [e for e in _errors(closing) if "h-001.p2" in e and "abandoned" in e]
+
+
+@pytest.mark.parametrize(("case", "rows", "owner"), [
+    # `final_weights` reports `-` here — the l-001 bucket folds first — while the document's
+    # last-written row grades `++`. #6 owns it: a `++` moved and nothing took it back.
+    ("standing-double-plus-that-the-fold-calls-weaker",
+     ":T resolutions\nh-001  null → -    [l-002 p1 severe \u27c2 e-001]\n\n"
+     ":T resolutions\nh-001  -    → ++   [l-001 p1 severe \u27c2 e-001]\n\n",
+     "leaves p2 unmatched"),
+    # And the mirror: `final_weights` reports `++` while the document withdrew it. #34 owns it.
+    ("withdrawn-double-plus-that-the-fold-calls-confirmed",
+     ":T resolutions\nh-001  null → ++   [l-002 p1 severe \u27c2 e-001]\n\n"
+     ":T resolutions\nh-001  ++   → +    [l-001 p1 severe \u27c2 e-001]\n\n",
+     "h-001.p2"),
+])
+def test_exactly_one_rule_owns_the_hypothesis_whichever_way_the_fold_reads_it(
+    case: str, rows: str, owner: str,
+) -> None:
+    """The #6/#34 handoff, pinned against the ordering that broke it.
+
+    Both documents are ones `_walkers.final_weights` reads BACKWARDS, and they fail in opposite
+    directions: keyed on the fold, the first was owned by neither rule and the second was
+    refused by #6 for a claim the document had already withdrawn. The withdrawal marker is a
+    property of ONE ROW, so neither case depends on where that row sits.
+    """
+    doc = _PROLOGUE + _WEDGE_HYP_TWO_PREDS + _TWO_LEADS + rows + (
+        ':T conclude\ndisposition            benign\nsummary                "s"\n\n'
+        ":T conclude.surviving [hyp_id|final_weight]\nh-001|++\n\n"
+    )
+    errors = _errors(doc)
+    # EXACTLY ONE. A filter that only asks "did the owner speak" passes when BOTH rules
+    # speak, which is the failure this test is named for.
+    assert len(errors) == 1, errors
+    assert owner in errors[0], errors
+
+
+def test_a_withdrawal_the_document_takes_back_re_arms_the_gate() -> None:
+    """The repair is a WITHDRAWAL, not an exemption — re-confirming puts the claim back.
+
+    Read as a set of "was it ever withdrawn", one `++ → +` row stood rule #6 down for the rest
+    of the document, so `++ → +` followed by `+ → ++` was a two-row exemption on a hypothesis
+    the document still grades `++`: `final_weights` reported `++`, `:T conclude.surviving`
+    accepted `h-001|++`, and the uncited prediction was asked about by nobody at write time.
+    Counting entries against exits hears the re-confirmation; `test_the_withdrawal_is_read_off
+    _the_row_and_not_off_the_lead_order` holds the other direction, that the count stays
+    order-free.
+    """
+    confirmed = _PROLOGUE + _WEDGE_HYP_TWO_PREDS + _TWO_LEADS + (
+        ":T resolutions\nh-001  null → ++   [l-001 p1 severe ⟂ e-001]\n\n"
+    )
+    assert [e for e in _errors(confirmed) if "leaves p2 unmatched" in e]
+
+    withdrawn = confirmed + ":T resolutions\nh-001  ++ → +   [l-002 p1 severe ⟂ e-001]\n\n"
+    assert _errors(withdrawn) == []
+
+    reconfirmed = withdrawn + ":T resolutions\nh-001  + → ++   [l-002 p1 severe ⟂ e-001]\n\n"
+    assert [e for e in _errors(reconfirmed) if "leaves p2 unmatched" in e], (
+        "a re-confirmed `++` is standing again and owes its predictions"
+    )
+
+
+def test_a_row_that_moves_nothing_does_not_withdraw_a_double_plus() -> None:
+    """An off-vocabulary `after` is the cheapest row in the language, and it must not buy this.
+
+    `_resolution_move` is closed on the bucket list precisely so `h-001 null → confirmed`
+    cannot discharge a gate by moving nowhere. Read OPEN, the exit side handed the same token
+    the opposite favour: `++ → confirmd` moved nothing and yet took the `++` back, so the one
+    typo deleted rule #6's refusal and left only the vocabulary arm speaking.
+    """
+    doc = _PROLOGUE + _WEDGE_HYP_TWO_PREDS + _TWO_LEADS + (
+        ":T resolutions\n"
+        "h-001  null → ++   [l-001 p1 severe ⟂ e-001]\n"
+        "h-001  ++ → confirmd   [l-001 p1 severe ⟂ e-001]\n\n"
+    )
+    errors = _errors(doc)
+    assert [e for e in errors if "leaves p2 unmatched" in e], errors
+    assert [e for e in errors if "is not a weight" in e], errors
+
+
+def test_a_downgraded_double_plus_is_asked_for_its_prediction_at_conclude() -> None:
+    """The control on the repair above — it withdraws a claim, it does not discard a
+    prediction. Rule #34 excludes what #6 owns so the two cannot both refuse one hypothesis;
+    keyed on "ever `++`" it would also exclude a downgraded one, and p2 would be asked about by
+    NEITHER rule. `_confirmed_and_standing` is the single predicate that splits them.
+    """
+    closing = (
+        _PROLOGUE + _WEDGE_HYP + _WEDGE_LEAD + _WEDGE_CONFIRM + _WEDGE_APPEND_P2
+        + ":T resolutions\nh-001  ++ → +   [l-001 p1 severe ⟂ e-001]\n\n"
+        + ':T conclude\ndisposition            benign\nsummary                "s"\n\n'
+        + ":T conclude.surviving [hyp_id|final_weight]\nh-001|+\n\n"
+    )
+    assert [e for e in _errors(closing) if "h-001.p2" in e and "abandoned" in e]
+
+
+def test_appending_the_next_screen_of_a_sequence_leaves_the_committed_one_alone() -> None:
+    """Rule #17's intermediate arm asked the author to know, when writing a screen lead,
+    whether another screen would follow it in the same loop.
+
+    Turn 1 commits a screen lead that falls through — clean, and it is the last screen so far.
+    Turn 2 appends the next narrowing screen, which is the sequence the rule's own docstring
+    describes, and turn 1's committed `:L findings` cell became an error naming a row no write
+    can withdraw. The arm is gone; the two arms whose defects ARE knowable at write time stay,
+    and the tests above hold them.
+    """
+    turn_1 = _PROLOGUE + _SCREEN_HEADER + (
+        "l-001|0|source-screen|v-001|screen||cmdb|n/a|no_match\n"
+    )
+    assert _errors(turn_1) == []
+
+    turn_2 = turn_1 + "l-002|0|cadence-screen|v-001|screen||elastic|24h|no_match\n"
+    assert _errors(turn_2) == []

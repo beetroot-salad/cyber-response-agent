@@ -376,6 +376,18 @@ it out and the parser reads your ids as the severity.
 cites all of them, `p<n>` and `ap<n>` alike. A head naming a subset is
 denied on write — grade `+` for partial coverage.
 
+The claim is checked against the predictions declared **now**, so
+declaring one more `p<n>`/`ap<n>` on a hypothesis that already carries a
+committed `++` re-opens it. You cannot rewrite the committed row, and
+citing the new prediction would assert an untested claim came in. The
+repair is to **withdraw the coverage claim** by appending
+`h-NNN  ++ → +   [<lead> <ids> <severity> ⟂ <edges>]` — the run is no
+longer claiming full coverage, which is what declaring an untested
+prediction means. Appending `+ → ++` later re-asserts it, and the head
+must then cite every prediction. Whatever the grade ends at, every
+declared prediction is still owed a citation or a
+`:T conclude.deferred_preds` row at CONCLUDE.
+
 ### `:T conclude` (REPORT)
 
 ```invlang

@@ -619,9 +619,12 @@ def _lead_header_record(
         if rec.get(k_in):
             # UNQUOTED, and before the `loop` coercion. Every one of these five is read by a
             # check that compares it to something — `mode` and `screen_result` against rule
-            # #17's closed cells, `loop` against the next lead's — so a uniformly quoted row
-            # is refused for a `mode` it spells correctly, or (worse, failing open) has its
-            # quoted `"1"` survive `int()` as a string that equals no other lead's loop.
+            # #17's closed cells, `loop` against `:T close`'s loop numbers in
+            # `_check_loop_close` (rule #17's own `loop` reading went with the
+            # intermediate-screen arm at v2.22) — so a uniformly quoted row is refused for a
+            # `mode` it spells correctly, or (worse) has its quoted `"1"` survive `int()` as a
+            # string that matches no closed loop, and a legal close is refused for a finding
+            # it committed.
             v: Any = _unquote(rec[k_in])
             if k_in == "loop":
                 with contextlib.suppress(ValueError):
