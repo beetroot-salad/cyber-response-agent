@@ -90,8 +90,10 @@ def test_a_double_plus_leaving_a_declared_prediction_unmatched_is_refused() -> N
     assert "resolution of h-001 to '++' leaves p2 unmatched" in errors[0]
     # The repair is spelled as a row that PARSES: bare "h-001 ++ → +" is refused by
     # `_RESOLUTION_LINE_RE` for the missing citation head, so a message offering it as a
-    # literal hands the author a second refusal instead of a fix.
-    assert "`h-001  ++ → +   [<lead> <ids> <severity> ⟂ <edges>]`" in errors[0]
+    # literal hands the author a second refusal instead of a fix. The LEAD is filled in for
+    # the same reason — `<lead>` copied verbatim draws `undeclared lead '<lead>'`, which is
+    # the second refusal by another route.
+    assert "`h-001  ++ → +   [l-001 <ids> <severity> ⟂ <edges>]`" in errors[0]
     assert "grade it partial coverage" in errors[0]
 
 
@@ -1473,16 +1475,17 @@ def test_a_null_move_off_a_double_plus_withdraws_it_and_conclude_still_asks() ->
     """`++ → null` is a legal weight cell and says the run stopped standing behind the grade.
 
     Read through `final_weights` it was worse than a withdrawal: that walker reads `after` RAW
-    where `_confirmed_at` reads it through the closed `_resolution_move`, so the hypothesis was
-    neither confirmed-and-standing nor refuted and rule #6 simply switched off — a document
-    main refuses. It is a withdrawal like any other, and #34 is what collects afterwards.
+    where `_confirmed_and_standing` reads both cells closed on the weight-cell vocabulary, so
+    the hypothesis was neither confirmed-and-standing nor refuted and rule #6 simply switched
+    off — a document main refuses. It is a withdrawal like any other, and #34 collects after.
     """
     withdrawn = _PROLOGUE + _WEDGE_HYP + _TWO_LEADS + (
         ":T resolutions\nh-001  null → ++     [l-002 p1 severe ⟂ e-001]\n\n"
     ) + _WEDGE_APPEND_P2 + (
         ":T resolutions\nh-001  ++   → null   [l-002 p1 severe ⟂ e-001]\n\n"
     )
-    assert not [e for e in _errors(withdrawn) if "leaves p2 unmatched" in e]
+    # The WHOLE list, not a filter: a filtered negative survives the rule being deleted.
+    assert _errors(withdrawn) == []
     closing = withdrawn + (
         ':T conclude\ndisposition            benign\nsummary                "s"\n\n'
         ":T conclude.surviving [hyp_id|final_weight]\nh-001|null\n\n"
@@ -1518,7 +1521,53 @@ def test_exactly_one_rule_owns_the_hypothesis_whichever_way_the_fold_reads_it(
         ":T conclude.surviving [hyp_id|final_weight]\nh-001|++\n\n"
     )
     errors = _errors(doc)
-    assert [e for e in errors if owner in e], errors
+    # EXACTLY ONE. A filter that only asks "did the owner speak" passes when BOTH rules
+    # speak, which is the failure this test is named for.
+    assert len(errors) == 1, errors
+    assert owner in errors[0], errors
+
+
+def test_a_withdrawal_the_document_takes_back_re_arms_the_gate() -> None:
+    """The repair is a WITHDRAWAL, not an exemption — re-confirming puts the claim back.
+
+    Read as a set of "was it ever withdrawn", one `++ → +` row stood rule #6 down for the rest
+    of the document, so `++ → +` followed by `+ → ++` was a two-row exemption on a hypothesis
+    the document still grades `++`: `final_weights` reported `++`, `:T conclude.surviving`
+    accepted `h-001|++`, and the uncited prediction was asked about by nobody at write time.
+    Counting entries against exits hears the re-confirmation; `test_the_withdrawal_is_read_off
+    _the_row_and_not_off_the_lead_order` holds the other direction, that the count stays
+    order-free.
+    """
+    confirmed = _PROLOGUE + _WEDGE_HYP_TWO_PREDS + _TWO_LEADS + (
+        ":T resolutions\nh-001  null → ++   [l-001 p1 severe ⟂ e-001]\n\n"
+    )
+    assert [e for e in _errors(confirmed) if "leaves p2 unmatched" in e]
+
+    withdrawn = confirmed + ":T resolutions\nh-001  ++ → +   [l-002 p1 severe ⟂ e-001]\n\n"
+    assert _errors(withdrawn) == []
+
+    reconfirmed = withdrawn + ":T resolutions\nh-001  + → ++   [l-002 p1 severe ⟂ e-001]\n\n"
+    assert [e for e in _errors(reconfirmed) if "leaves p2 unmatched" in e], (
+        "a re-confirmed `++` is standing again and owes its predictions"
+    )
+
+
+def test_a_row_that_moves_nothing_does_not_withdraw_a_double_plus() -> None:
+    """An off-vocabulary `after` is the cheapest row in the language, and it must not buy this.
+
+    `_resolution_move` is closed on the bucket list precisely so `h-001 null → confirmed`
+    cannot discharge a gate by moving nowhere. Read OPEN, the exit side handed the same token
+    the opposite favour: `++ → confirmd` moved nothing and yet took the `++` back, so the one
+    typo deleted rule #6's refusal and left only the vocabulary arm speaking.
+    """
+    doc = _PROLOGUE + _WEDGE_HYP_TWO_PREDS + _TWO_LEADS + (
+        ":T resolutions\n"
+        "h-001  null → ++   [l-001 p1 severe ⟂ e-001]\n"
+        "h-001  ++ → confirmd   [l-001 p1 severe ⟂ e-001]\n\n"
+    )
+    errors = _errors(doc)
+    assert [e for e in errors if "leaves p2 unmatched" in e], errors
+    assert [e for e in errors if "is not a weight" in e], errors
 
 
 def test_a_downgraded_double_plus_is_asked_for_its_prediction_at_conclude() -> None:

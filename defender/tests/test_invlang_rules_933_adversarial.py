@@ -12,9 +12,11 @@ What survived, and therefore what these pin:
   the citation pool.
 * #17 — the `match`-without-`hypothesize` shape that is the rule's whole point, and leads
   past the first. The block's *intermediate* mutants went stale at spec v2.22, which struck
-  that arm: `test_a_screen_lead_followed_by_a_non_screen_lead_carries_its_result` and
-  `test_a_result_on_a_non_screen_lead_is_one_defect_not_two` no longer fail on any mutant and
-  are kept as liveness shapes, not as mutation kills.
+  that arm: `test_a_screen_lead_followed_by_a_non_screen_lead_carries_its_result` no longer
+  fails on any mutant and is kept as a liveness shape.
+  `test_a_result_on_a_non_screen_lead_is_one_defect_not_two` is NOT stale — it was written
+  against the intermediate arm, but its `len(errors) == 1` kills a mutant of the surviving
+  MODE arm (disarm that arm and the count goes to zero), so it is still a mutation kill.
 * #23 — the PARENT half of the sibling key, `ap*` claims in the signature (keyed on
   `target`/`attribute` as well as the value, because the value alone names nothing), partial
   overlap, and the empty-signature skip.
@@ -250,8 +252,9 @@ def test_a_result_on_a_non_screen_lead_is_one_defect_not_two() -> None:
 
     Written when the mode arm's alternative was the intermediate arm — running both would have
     told the author to set `mode: screen` and to drop the cell for being mid-sequence at once.
-    v2.22 struck that arm, so the `len(errors) == 1` here now only pins that a legal screen
-    lead draws nothing."""
+    v2.22 struck that arm, so the `len(errors) == 1` here pins two things that are both still
+    live: that the surviving MODE arm fires (disarm it and the count is zero), and that the
+    legal screen lead beside it draws nothing."""
     errors = _errors(_PROLOGUE + _SCREEN_HEADER + """\
 l-001|1|auth-history|v-001|||elastic|10m|no_match
 l-002|1|monitoring-probe-screen|v-001|screen||cmdb|n/a|no_match

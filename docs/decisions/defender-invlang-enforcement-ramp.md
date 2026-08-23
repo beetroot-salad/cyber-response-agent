@@ -138,12 +138,18 @@ error rather than letting the write through. Scope is anchored to
    clears this on that side clears it for good. The DECLARED side grows
    too (`:H h-NNN.preds` arrives by append), which is the wedge closed
    at v2.22: the trigger is now a hypothesis STANDING at `++`
-   (`_confirmed_and_standing`, reading the withdrawing row's own
-   `before` cell rather than a fold of the chain — `final_weights`
-   orders by lead declaration, not by append, so a fold answers a
-   different question on any multi-lead document), so `h-NNN ++ → +`
-   withdraws the coverage
-   claim and clears the refusal. **`ap*` counts**:
+   (`_confirmed_and_standing`, COUNTING each row's `++` entries against
+   its exits rather than folding the chain — `final_weights` orders by
+   lead declaration, not by append, so a fold answers a different
+   question on any multi-lead document, while a bare "ever withdrawn"
+   set never hears a later `+ → ++`), so `h-NNN ++ → +` withdraws the
+   coverage claim and clears the refusal, and re-confirming puts it
+   back. **Open:** the `before` cell has no CONTINUITY check — nothing
+   compares it to the weight the previous resolution left — so an exit
+   written before the `++` it names cancels it, and #6 stands down on a
+   document that never withdrew anything. The fix is a continuity rule
+   on `before`, which makes the cell trustworthy for every reader
+   rather than for this count alone. **`ap*` counts**:
    `_declared_prediction_ids` is the one definition of the declared set,
    and spec rule #34 (the CONCLUDE-time
    closure gate this is the write-time half of) enumerates `p*` and
@@ -165,12 +171,20 @@ error rather than letting the write through. Scope is anchored to
    written, so no author could act on it and no write could withdraw the
    row it named. The mode arm that remains refuses a row for what is on
    that row, which the write gate catches before it commits. The
-   match-beside-`hypothesize` arm does NOT: it names a committed
-   `:L findings` cell for a `:H` block written later, and one of the two
-   repairs it offers ("record the screen as `no_match`") is not a write
-   an append-only document can make. It is kept because the OTHER repair
-   — do not write the block — is reachable at the write gate, which the
-   struck arm had no equivalent of. Read off `findings[].screen_result`;
+   match-beside-`hypothesize` arm names a committed cell in one half of
+   its trigger whichever way round the document was written — but WHICH
+   half is committed decides which of its two repairs is reachable, and
+   one always is. Leads first: the `:L findings` cell is committed and
+   "do not write the block" is the repair. `:H` first, the ordinary
+   phase order: the block is committed and "record the screen as
+   `no_match`" is. Either way the trigger is the write in hand, which
+   the struck arm had no equivalent of. **Open:** one ordering has
+   neither — a `match` committed on an earlier screen, a later screen in
+   the same loop falling through, and a `:H` block beside it. The run's
+   answer is the last screen's `no_match` and hypothesizing is correct,
+   yet the arm names the earlier committed `match`. Closing it wants the
+   arm to read the loop's LAST `screen_result` in `:L findings` document
+   order, which `companion["findings"]` does not carry. Read off `findings[].screen_result`;
    the spec's `outcome.` prefix is pre-dense spelling the projector
    never used.
    Corpus: zero fires — SCREEN is barely exercised on disk, which is
@@ -822,8 +836,26 @@ Both were spec-owner decisions, not validator bugs. The class-slot one
 stays file-and-hold here until the canonical SKILL is internally
 consistent; it is now the only one left open.
 
-**Open, from #933 (rules 13–18 above).** Three, restated here so they are
+**Open, from #933 (rules 13–18 above).** Four, restated here so they are
 findable without reading the rule entries:
+
+- **Fold `_walkers.final_weights` in APPEND order.** It resolves
+  last-move-wins by LEAD-DECLARATION order, which is a different question
+  from "where did this hypothesis end up", and v2.22 had to route rule #6
+  around it (`_confirmed_and_standing` counts a row's own `++` entries
+  against its exits instead). Rule #34's OTHER exclusion still reads the
+  fold, so the two halves of one partition read weights two different
+  ways, and a document that refutes a hypothesis on an earlier-declared
+  lead than the one that confirmed it draws `prediction h-NNN.p2 on live
+  hypothesis h-NNN is declared and then abandoned` — on a hypothesis
+  whose own `:T conclude.surviving` row says `--`. That is a FALSE
+  REFUSAL of a correctly written document, and the repair it offers (a
+  deferral) contradicts the refutation. Not fixed in v2.22 on purpose:
+  the honest fix is the fold itself, which needs a parser-level row
+  sequence and has eight readers across `validate.py`, `queries.py`,
+  `compare.py` and `runtime/review/projector.py`. Routing a second rule
+  around it would make three readings of "the weight" in one module,
+  which is how this defect was built.
 
 - **Close `termination.category`.** A free-text scalar with no
   vocabulary, and rule 14 turns on the exact string `severity-ceiling`,

@@ -7,7 +7,7 @@
 **v2.22 delta:** the two APPEND-ONLY WEDGES are closed (#933 follow-up). **The active count is unchanged at 26** — rules #6 and #17 both keep their numbers; #17 loses one of its three clauses and #6 changes which documents it speaks about, neither adds or strikes a rule.
 
 - **The invariant both broke.** A validator over an append-only document may refuse a row only for something knowable when that row is written. Both rules refused a document that had validated CLEAN, turned into an error by a LATER legal append, naming a committed row no write can reach back into — and in both cases the repair the message offered was one the author could not take.
-- **Rule #6** compared a growing cited set against a growing DECLARED set. `:H h-NNN.preds` arrives by append, so declaring one more prediction on a hypothesis already carrying a committed `++` turned that row into a `++` that no longer covered its own hypothesis. The offered repair — grade `+` — did nothing, because the rule keyed on the first `++` any row ever wrote. It now asks whether the hypothesis STANDS at `++` (`_confirmed_and_standing`), so appending `h-NNN ++ → +` withdraws the coverage claim and clears the refusal. **Standing is read off the withdrawing row's own `before` cell, never off a fold of the resolution chain.** A row spelled `h-NNN ++ → +` states the claim and its withdrawal together, so the reading is the same wherever the row sits; `_walkers.final_weights` resolves last-move-wins by LEAD-DECLARATION order rather than append order, which on any multi-lead document lets a `++` on a later-declared lead beat a withdrawal on an earlier one — and reads the `after` cell raw besides, so `++ → null` came out as neither confirmed nor refuted and switched the rule off. A withdrawal to `null` or `∅` counts like any other: what follows one is #34's business at CONCLUDE. Rule #34's exclusion moves to the same predicate in the same change: split across two spellings, a confirmed-then-downgraded hypothesis would fall in the gap and its uncited predictions would be asked about by neither rule.
+- **Rule #6** compared a growing cited set against a growing DECLARED set. `:H h-NNN.preds` arrives by append, so declaring one more prediction on a hypothesis already carrying a committed `++` turned that row into a `++` that no longer covered its own hypothesis. The offered repair — grade `+` — did nothing, because the rule keyed on the first `++` any row ever wrote. It now asks whether the hypothesis STANDS at `++` (`_confirmed_and_standing`), so appending `h-NNN ++ → +` withdraws the coverage claim and clears the refusal. **Standing is COUNTED off each row's own `before`/`after` pair, never folded over an order the projection does not carry.** A row entering `++` scores +1, one leaving it −1, a `++ → ++` restatement neither; on a chain whose rows join up the net is positive exactly when the last move left the hypothesis at `++`. Counting is what makes the reading order-free *and* keeps it honest in both directions — `_walkers.final_weights` resolves last-move-wins by LEAD-DECLARATION order rather than append order, so on a multi-lead document a `++` on a later-declared lead beat a withdrawal on an earlier one; and a bare "was it ever withdrawn" set fixes that while breaking the other way, standing the rule down for good on a hypothesis that appends `+ → ++` and grades itself `++` again. Both cells are read closed on the weight-cell vocabulary, so `++ → null` and `++ → ∅` withdraw like any other exit while a misspelled `++ → confirmd` moves nothing and takes nothing back. What follows a withdrawal is #34's business at CONCLUDE. Rule #34's exclusion moves to the same predicate in the same change: split across two spellings, a confirmed-then-downgraded hypothesis would fall in the gap and its uncited predictions would be asked about by neither rule.
 - **Rule #17's intermediate-lead clause is struck** as unenforceable by shape, the same disposition v2.19 gave #32. Whether a screen lead is the sequence's last depends on leads not yet written. The implementation had already carved `match` out of the arm for exactly this reason; the carve-out was the whole rule.
 
 **v2.21 delta:** seven more documented-but-unarmed rules implemented (#933) — #13, #18, #26, #29, #30, #31, #34. **The active count does not change and stays at 26**: nothing is added and nothing is struck, seven numbers stop being aspirational. Each now carries an **Implemented as `<function>`** line, continuing the v2.20 backfill; 14 of the 26 active rules now have one (the five from v2.20, these seven, plus #7 and #21), and the 12 that do not are the backfill still owed.
@@ -665,12 +665,21 @@ fall through — and are always in `loop: 0`. `outcome.screen_result`
 records whether the overall SCREEN matched (`match`) or fell through
 (`no_match`). The sequence's answer is its final lead's, so a reader
 takes the last `screen_result` in the loop in `:L findings` DOCUMENT
-order; earlier leads may carry their own and the validator does not
-refuse them. It cannot: whether a screen is the sequence's last is a
-fact about leads not yet written. A programmatic reader must go back
-to the surface for that order — `companion["findings"]` is the
+order; an earlier lead may carry its own `no_match` and the validator
+does not refuse it. It cannot: whether a screen is the sequence's last
+is a fact about leads not yet written. A programmatic reader must go
+back to the surface for that order — `companion["findings"]` is the
 projector's lead buckets in FIRST-MENTION order, so a `:T resolutions`
 head naming a lead ahead of its `:L findings` row reorders the list.
+
+`match` is the exception, and it is not softened by the reading above:
+the surviving arm of rule #17 refuses ANY lead carrying `match` beside
+a `hypothesize` block, last in its sequence or not. So a sequence whose
+earlier screen matched and whose later screen fell through cannot then
+hypothesize — the run has to treat the `match` as the answer. **This is
+the one append-only wedge v2.22 leaves open**: the arm names a
+committed `:L findings` cell, and where the `:H` block is committed
+first neither repair it offers is a write the document can make.
 
 **`tests` is optional.** Present when the lead is discriminating
 between specific competing hypotheses. Absent when the lead is
@@ -1045,13 +1054,16 @@ The validator enforces **26 active rules** (rules 1–36 with ten gaps: 36 numbe
    clears it for good. The DECLARED side grows too, which is why the
    trigger is `validate._confirmed_and_standing` and not "some row once
    wrote `++`" — see the v2.22 delta at the top of this document. That
-   predicate reads the WITHDRAWING ROW's `before` cell
-   (`_withdrawn_confirmations`) rather than folding the chain: a
-   `++ → +` row carries the claim and its retraction in one place, so
-   the answer does not depend on which lead the row is attributed to.
-   `_walkers.final_weights` is the wrong fold for this question twice
-   over — it orders by lead declaration rather than append, and it
-   reads `after` raw where `_confirmed_at` reads it closed.
+   predicate COUNTS each row's `before`/`after` pair: a row that enters
+   `++` scores +1, one that leaves it −1, and a `++ → ++` restatement
+   neither. On a chain whose rows join up, entries and exits alternate,
+   so a positive count means the last move left the hypothesis at `++`
+   — the same answer a last-move-wins fold gives, reached without an
+   order the projection does not carry. `_walkers.final_weights` is the
+   wrong fold for this question twice over: it orders by lead
+   declaration rather than append, and it reads `after` raw where the
+   count reads both cells closed on the weight-cell vocabulary, so
+   `++ → confirmd` moves nothing and takes nothing back.
    "Moved" is membership in the four weight buckets, not "anything that
    is not `null` / `∅`": the `after` cell
    is an unvalidated token, so an open test would make a misspelled
