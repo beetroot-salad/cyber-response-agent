@@ -54,12 +54,3 @@ def unwrap(cmd: str) -> str | None:
         return _strip_prefix_from_raw(cmd, tokens[:i])
     return cmd
 
-
-def tokenize(script: str) -> list[str] | None:
-    lex = shlex.shlex(script, posix=True, punctuation_chars=True)
-    lex.whitespace_split = True
-    lex.commenters = ""
-    try:
-        return list(lex)
-    except ValueError:
-        return None

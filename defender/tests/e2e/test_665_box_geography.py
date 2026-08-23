@@ -426,6 +426,73 @@ def test_a_create_that_lost_a_name_race_does_not_reap_the_winner(tmp_path, lane)
         "the create-fault arm reaped a container another lane owns"
 
 
+@pytest.mark.parametrize("lane", ["investigation", "request"])
+@pytest.mark.parametrize("state", ["created", "running", "restarting", "paused", "removing"])
+def test_the_pre_create_sweep_refuses_a_container_that_is_not_finished(tmp_path, lane, state):
+    """#955 F-49 — the sibling of the arm above, on the path that runs FIRST.
+
+    The create-fault arm asks whose container this is before reaping. The pre-create sweep did
+    not: it was a bare `docker rm -f <name>`, guarded only by a test for the `running` state.
+    That guard cannot cover the case it exists for. `docker run --detach` is create-then-start,
+    so a concurrent lane's box is in `created` — not `running` — for the whole window in which
+    two lanes can hold one name, and the run-cycle lane REUSES its name across starts. The
+    loser of that race reaped the winner's live container mid-run, and the winner then reported
+    the loss as a mount error rather than as the collision it was.
+
+    Pre-create there is no token yet — none is minted until after this call — so ownership here
+    is decided by whether anyone can still be USING the container, not by whose it is. Every
+    state but the finished ones is refused, and the refusal must come BEFORE any create."""
+    run_dir = make_run_dir(tmp_path)
+    _populate_mount_sources(_run_cycle_mounts(run_dir), tmp_path)
+    rec = RecordingDocker(status=state)
+    start = (
+        (lambda: box_mod.start_box(run_dir, DEFENDER, docker=rec))
+        if lane == "investigation"
+        else (lambda: start_box_request(_request(run_dir), docker=rec))
+    )
+    with pytest.raises(box_mod.BoxFault, match="refusing rather than reaping"):
+        start()
+    assert not any(c[:3] == ["docker", "rm", "-f"] for c in rec.calls), \
+        f"the pre-create sweep reaped a container in {state!r}, which nobody has finished with"
+    assert rec.create_argv is None, \
+        "the refusal came after a create — a box was started on a contested name"
+
+
+@pytest.mark.parametrize("lane", ["investigation", "request"])
+def test_the_pre_create_sweep_still_clears_a_finished_container(tmp_path, lane):
+    """The other half of F-49, and the half that keeps the fix from being a wedge.
+
+    A name the run-cycle lane reuses accumulates one `exited` container per pass, and refusing
+    ALL of them would deny every second start on that name — turning a leak into an outage, and
+    trading the fault this fix removes for a worse one. `exited`/`dead` mean nobody is using
+    it, so the sweep clears it and the start proceeds."""
+    run_dir = make_run_dir(tmp_path)
+    _populate_mount_sources(_run_cycle_mounts(run_dir), tmp_path)
+    rec = RecordingDocker(status="exited")
+    if lane == "investigation":
+        box_mod.start_box(run_dir, DEFENDER, docker=rec)
+    else:
+        start_box_request(_request(run_dir), docker=rec)
+    assert rec.create_argv is not None, "a finished container blocked the start"
+    reap = next(i for i, c in enumerate(rec.calls) if c[:3] == ["docker", "rm", "-f"])
+    create = next(i for i, c in enumerate(rec.calls) if len(c) > 1 and c[1] == "run")
+    assert reap < create, "the stale container was cleared after the create, not before it"
+
+
+def test_a_daemon_answer_the_sweep_cannot_read_is_not_taken_as_finished(tmp_path):
+    """`_FINISHED_STATES` membership is the test, so an unparseable answer fails CLOSED.
+
+    An `inspect` that succeeds while saying nothing intelligible is not evidence that the
+    container is done with, and reading it as one would restore exactly the reap this fix
+    removes — on the daemon least able to be trusted about it."""
+    run_dir = make_run_dir(tmp_path)
+    _populate_mount_sources(_run_cycle_mounts(run_dir), tmp_path)
+    rec = RecordingDocker(status="")
+    with pytest.raises(box_mod.BoxFault, match="refusing rather than reaping"):
+        box_mod.start_box(run_dir, DEFENDER, docker=rec)
+    assert not any(c[:3] == ["docker", "rm", "-f"] for c in rec.calls)
+
+
 def test_the_box_is_stamped_with_the_token_its_own_fault_arm_checks(tmp_path):
     """The label and the check are one mechanism, so pin them together: a stamp the fault arm
     does not read, or a read of a label nothing stamps, both leave the reap deciding on

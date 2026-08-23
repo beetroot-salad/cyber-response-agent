@@ -20,6 +20,7 @@ from defender.learning.core.config import (
     source_first_party_key,
 )
 from defender._paths import PATHS
+from defender._run_id import is_valid_run_id
 from defender.runtime import box as box_mod
 from defender.run_common import is_held_out_alert_copy
 from defender.learning.core.directions import (
@@ -243,6 +244,36 @@ def run_one(
     if agents is None:
         agents = InProcessSubagents()
 
+    run_id = run_dir.name
+    if not is_valid_run_id(run_id):
+        _log(f"run_id={run_id!r} fails the run-id grammar — REFUSING (its lock file and its "
+             f"container name are both derived from it)")
+        return 0
+    # One live pass per run. `learn_drain`'s lease keeps two DRAINERS apart and this is not
+    # about them: the single-run CLI stage reaches `run_one` holding no lease, and the
+    # run-cycle box reuses one container name per run id, so a hand-run pass on a run the
+    # worker already claimed put two lanes on one name (#955 F-49). Refusing is the whole
+    # behaviour — a second pass has nothing to add to a run already being learned.
+    from defender.learning.author import shared as _author_shared
+
+    with _author_shared.flock_or_skip(paths.run_cycle_lock_file(run_id)) as locked:
+        if not locked:
+            _log(f"run_id={run_id} another pass is already live on this run — REFUSING "
+                 f"(both would share the container name defender-runcycle-{run_id})")
+            return 0
+        return _run_one_locked(
+            run_dir, paths=paths, agents=agents, start_box=start_box, stop_box=stop_box,
+        )
+
+
+def _run_one_locked(
+    run_dir: Path,
+    *,
+    paths: LoopPaths,
+    agents: Subagents,
+    start_box: Callable[..., Any],
+    stop_box: Callable[..., None],
+) -> int:
     run_id = run_dir.name
     src = RunPaths(run_dir)
     if is_held_out_alert_copy(src.alert, paths.held_out_fixtures):

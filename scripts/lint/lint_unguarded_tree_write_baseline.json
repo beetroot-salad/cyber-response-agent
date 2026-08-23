@@ -43,7 +43,7 @@
     "learning/core/run_cycle.py:_validate_judge_yaml": "",
     "learning/core/run_cycle.py:_write_leg_status": "",
     "learning/core/run_cycle.py:run_direction": "",
-    "learning/core/run_cycle.py:run_one": "",
+    "learning/core/run_cycle.py:_run_one_locked": "same write as the baselined run_one() entry it replaces: the learning run dir's own mkdir, moved when #955 F-49 split the per-run lock acquisition out of run_one().",
     "learning/core/subagents.py:actor": "",
     "learning/frontend/build.py:main": "",
     "learning/frontend/serialize.py:main": "",

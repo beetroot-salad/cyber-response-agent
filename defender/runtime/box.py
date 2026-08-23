@@ -379,9 +379,27 @@ def _call(docker: DockerFn, argv: list[str]) -> subprocess.CompletedProcess:
         raise BoxFault(f"could not invoke docker ({argv[:2]}): {e}") from e
 
 
-def _is_running(docker: DockerFn, name: str) -> bool:
+#: The container states from which nothing can still be starting or running — whatever holds
+#: the name is FINISHED with it, and reaping it costs nobody anything.
+#:
+#: Every other state is refused, `created` above all, and that is the point of the set rather
+#: than a `running` test (#955 F-49). `docker run --detach` is create-then-start, so a
+#: concurrent lane's box sits in `created` for the whole window in which two lanes can collide
+#: on one name — precisely the window a liveness test reads as "not live, reap it", and
+#: precisely the collision the reap then resolves by destroying the other lane's run.
+_FINISHED_STATES = frozenset({"exited", "dead"})
+
+
+def _container_status(docker: DockerFn, name: str) -> str | None:
+    """Docker's own word for what this name holds, or `None` for no such container.
+
+    An answer we cannot read — rc 0 with nothing parseable — is reported as the empty string
+    rather than `None`, which keeps it OUT of `_FINISHED_STATES` and therefore unreapable. A
+    daemon we cannot understand is not evidence that the container is done with."""
     proc = _call(docker, ["docker", "inspect", "-f", "{{.State.Status}}", name])
-    return proc.returncode == 0 and "running" in (proc.stdout or "")
+    if proc.returncode != 0:
+        return None
+    return (proc.stdout or "").strip()
 
 
 #: Stamped on every box at create, so a fault arm can tell OUR container from another lane's
@@ -415,7 +433,28 @@ def _reap_stale_before_create(docker: DockerFn, name: str) -> None:
     Nothing has been created yet and no fault is being carried, so an unreachable daemon has
     no signal to trample and every reason to abort the start: proceeding to `docker run`
     against a daemon that just refused `rm -f` would fail again, or collide with the stale
-    container this call exists to clear. Contrast `_reap_on_fault`."""
+    container this call exists to clear. Contrast `_reap_on_fault`.
+
+    Ownership is decided by STATE here, not by the start token `_reap_on_fault` reads, and the
+    difference is not an inconsistency: the token is minted per start, so at this point in the
+    call there is no token that could be ours, and every container under this name would read
+    as foreign. What can be established is whether anyone can still be USING it. A finished
+    container is nobody's; anything else may be a lane mid-start, and this arm refuses rather
+    than reap it (#955 F-49) — the same trade `_reap_on_fault` states, decided the same way.
+    An unreapable leak costs one stale container and a loud fault an operator can clear by
+    hand; reaping the wrong box costs another run its artifacts and reports the loss as a
+    mount error."""
+    status = _container_status(docker, name)
+    if status is None:
+        return
+    if status not in _FINISHED_STATES:
+        described = status or "in a state this daemon would not name"
+        raise BoxFault(
+            f"a container named {name} already exists and is {described} — refusing rather "
+            "than reaping it, because a container that is not finished may belong to another "
+            "lane still writing its artifacts. If it is a leak, "
+            f"`docker rm -f {name}` clears it."
+        )
     _call(docker, ["docker", "rm", "-f", name])
 
 
@@ -647,11 +686,6 @@ def _start_boxed(
     shared_mounts: SharedMountsFn = _shared_mounts,
 ) -> BoxExecutor:
     name = container_name(run_dir.name)
-    if _is_running(docker, name):
-        raise BoxFault(
-            f"a LIVE container named {name} already exists — refusing rather than reaping "
-            "it, because that box belongs to another run still writing its artifacts"
-        )
     _reap_stale_before_create(docker, name)
     start_token = uuid.uuid4().hex
     created = _call(
@@ -740,11 +774,6 @@ def _start_boxed_request(
         raise BoxFault(
             f"composed container name {request.name!r} fails the run-id grammar "
             f"(allowed: {RUN_ID_ALLOWED})"
-        )
-    if _is_running(docker, request.name):
-        raise BoxFault(
-            f"a LIVE container named {request.name} already exists — refusing rather than "
-            "reaping it, because that box belongs to another batch still writing its artifacts"
         )
     _reap_stale_before_create(docker, request.name)
     start_token = uuid.uuid4().hex

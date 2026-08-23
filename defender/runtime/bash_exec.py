@@ -3,20 +3,145 @@ from __future__ import annotations
 
 import contextlib
 import os
+import shlex
 import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from defender.hooks._cmd_segments import tokenize
 
 _OPERATOR_CHARS = frozenset("<>|&;")
 _PIPELINE_SEPARATORS = frozenset({"||", "&&", ";"})
 
+#: The characters that END a word and start an operator run — `shlex`'s own punctuation set
+#: from the `punctuation_chars=True` lexing this module used to do, kept verbatim so the
+#: scanner splits words exactly where that lexer split them. WIDER than `_OPERATOR_CHARS`:
+#: `(`/`)` break a word here without being operators the grammar accepts, and `feed_token`
+#: refuses them a few lines later — which is what they always did, and not a licence.
+_SHLEX_PUNCTUATION = frozenset("();<>|&")
+
+#: The only fd this executor knows how to route. Bash's IO_NUMBER admits any digit run; every
+#: other one is refused, so the scan only has to recognise this one.
+_STDERR_FD = "2"
+
 #: The tokens that leave a line INCOMPLETE when they close it — `A |`, `A &&` need the next
 #: line to mean anything. `;` is deliberately absent: `A;` is a finished command.
 _DANGLING_CONNECTORS = frozenset({"|", "&&", "||"})
+
+
+def _literal_mask(line: str) -> list[bool] | None:
+    """Which characters of `line` stand as themselves — unquoted, unescaped, and not a quote
+    or escape character of the syntax. `None` if a quote never closes.
+
+    Everything `_scan` decides rests on this: whether an operator character IS an operator, and
+    whether it was glued to the word on its left. Both are facts about the raw text, and both
+    are gone by the time `shlex` has resolved a word to its value (#955 F-50)."""
+    mask = [False] * len(line)
+    quote: str | None = None
+    i = 0
+    while i < len(line):
+        c = line[i]
+        if quote is None:
+            if c == "\\":
+                i += 2          # escaped: a literal CHARACTER, never an operator
+                continue
+            if c in ("'", '"'):
+                quote = c
+                i += 1
+                continue
+            mask[i] = True
+            i += 1
+            continue
+        if c == "\\" and quote == '"':
+            i += 2
+            continue
+        if c == quote:
+            quote = None
+        i += 1
+    return None if quote is not None else mask
+
+
+def _word_value(span: str) -> str | None:
+    """One word's raw text — quotes and escapes intact — reduced to the value it stands for.
+
+    `shlex` again, but over a span that HAS no unquoted whitespace and no unquoted operator, so
+    it is being asked only to resolve quoting and must hand back exactly one word. `comments`
+    is off for the reason the line lexer always cleared `commenters`: `#` is an ordinary
+    character in a filename or a pattern here, and the default would truncate the word at it."""
+    try:
+        parts = shlex.split(span, comments=False, posix=True)
+    except ValueError:
+        return None
+    return parts[0] if len(parts) == 1 else None
+
+
+def _scan(line: str) -> tuple[list[str], frozenset[int], frozenset[int]] | None:
+    r"""The line's tokens, which of them are OPERATORS, and which operators carry an fd.
+
+    Structure is decided against the RAW TEXT and only the values go through `shlex`, which is
+    the whole of #955 F-50. Lexing the line with `punctuation_chars=True` — as this module did
+    — hands back a stream in which the two questions the grammar turns on can no longer be
+    asked:
+
+      * WAS THE OPERATOR GLUED to the word on its left? `2>` is a single IO_NUMBER redirect
+        and `2 >` is the word `2` followed by a redirect of stdout, and both arrive as
+        `['2', '>']`. Reading the fd off the previous TOKEN accepted `head -c 2 >/dev/null`
+        and ran `head -c` — the gate answering on an argument's VALUE, and the executor
+        running a command the model did not write.
+      * WAS IT AN OPERATOR AT ALL? A quoted or escaped one is an ordinary character: the `\;`
+        that `find -exec` requires came back as a bare `;` token and was read as a pipeline
+        separator, dropping the terminator `find` cannot run without.
+
+    Both are answered here and neither can be answered downstream, so the tokenizer is the
+    only place the fix fits."""
+    mask = _literal_mask(line)
+    if mask is None:
+        return None
+    toks: list[str] = []
+    operators: set[int] = set()
+    fd_prefixed: set[int] = set()
+    i, n = 0, len(line)
+    while i < n:
+        if mask[i] and line[i].isspace():
+            i += 1
+            continue
+        if mask[i] and line[i] in _SHLEX_PUNCTUATION:
+            j = i
+            while j < n and mask[j] and line[j] in _SHLEX_PUNCTUATION:
+                j += 1
+            if _is_fd_prefix(line, mask, i, toks):
+                fd_prefixed.add(len(toks))
+            operators.add(len(toks))
+            toks.append(line[i:j])
+            i = j
+            continue
+        j = i
+        while j < n and not (mask[j] and (line[j].isspace() or line[j] in _SHLEX_PUNCTUATION)):
+            j += 1
+        word = _word_value(line[i:j])
+        if word is None:
+            return None
+        toks.append(word)
+        i = j
+    return toks, frozenset(operators), frozenset(fd_prefixed)
+
+
+def _is_fd_prefix(line: str, mask: list[bool], at: int, toks: list[str]) -> bool:
+    """Whether the operator run starting at `at` is bash's IO_NUMBER — an unquoted `2` glued
+    to its left that STARTS its own word.
+
+    The last clause is not decoration: bash reads `foo2>` as the word `foo2` redirecting
+    stdout, not as a redirect of fd 2, and a quoted `"2">` the same way. Only a bare digit run
+    standing alone is the fd."""
+    if at == 0 or not mask[at - 1] or line[at - 1] != _STDERR_FD:
+        return False
+    if not toks or toks[-1] != _STDERR_FD:
+        return False
+    if at == 1:
+        return True
+    before = line[at - 2]
+    return mask[at - 2] and (before.isspace() or before in _SHLEX_PUNCTUATION)
 
 
 class BashExecError(Exception):
@@ -75,8 +200,18 @@ class _PipelineBuilder:
             self.cur_stages = []
             self.pending_connector = next_connector
 
-    def feed_token(self, toks: list[str], i: int) -> int:
+    def feed_token(
+        self, toks: list[str], i: int,
+        operators: frozenset[int], fd_prefixed: frozenset[int],
+    ) -> int:
         t, n = toks[i], len(toks)
+        if i not in operators:
+            # A token whose TEXT is an operator but whose raw spelling was quoted or escaped —
+            # `find … {} \;`, `echo ';'`. Every arm below dispatches on text, so without this
+            # the `;` that `find -exec` requires was read as a pipeline separator and dropped,
+            # leaving `find` to run a command it cannot complete (#955 F-50's other half).
+            self.cur_argv.append(t)
+            return i + 1
         if t in _DANGLING_CONNECTORS and not self.cur_argv:
             # A connector with no COMPLETE command to its left. Within a line that is a bash
             # syntax error; ACROSS lines (`A\n| B`) the token would be dropped and `A | B`
@@ -97,13 +232,25 @@ class _PipelineBuilder:
             self.end_pipeline(t)
             return i + 1
         if t == ">":
-            if self.cur_argv and self.cur_argv[-1] == "2" and i + 1 < n and toks[i + 1] == "/dev/null":
+            # `i in fd_prefixed` is the whole of the fd test; `cur_argv[-1] == "2"` only
+            # confirms the token stream agrees with the raw text about which word that was.
+            # Testing the TOKEN alone (as both arms did until #955 F-50) reads an ordinary
+            # numeric operand as an fd: `head -c 2 >/dev/null` was accepted and ran
+            # `head -c` — the gate's answer turning on an argument's VALUE, and the executor
+            # running a command the model did not write.
+            if (
+                i in fd_prefixed and self.cur_argv and self.cur_argv[-1] == _STDERR_FD
+                and i + 1 < n and toks[i + 1] == "/dev/null"
+            ):
                 self.cur_argv.pop()
                 self.cur_stderr = "devnull"
                 return i + 2
             raise BashExecError(f"unexpected redirect token in validated command: {t!r}")
         if t == ">&":
-            if self.cur_argv and self.cur_argv[-1] == "2" and i + 1 < n and toks[i + 1] == "1":
+            if (
+                i in fd_prefixed and self.cur_argv and self.cur_argv[-1] == _STDERR_FD
+                and i + 1 < n and toks[i + 1] == "1"
+            ):
                 self.cur_argv.pop()
                 self.cur_stderr = "stdout"
                 return i + 2
@@ -117,13 +264,14 @@ class _PipelineBuilder:
 def parse(inner: str) -> list[Pipeline]:
     builder = _PipelineBuilder()
     for line in inner.split("\n"):
-        toks = tokenize(line)
-        if toks is None:
+        scanned = _scan(line)
+        if scanned is None:
             raise UntokenizableCommand("untokenizable command reached the executor")
+        toks, operators, fd_prefixed = scanned
         i, n = 0, len(toks)
         while i < n:
-            i = builder.feed_token(toks, i)
-        if toks and toks[-1] in _DANGLING_CONNECTORS:
+            i = builder.feed_token(toks, i, operators, fd_prefixed)
+        if toks and toks[-1] in _DANGLING_CONNECTORS and len(toks) - 1 in operators:
             # `A |` / `A &&` closing a line. There is no shell to join the lines, so the
             # connector would be dropped and the implicit `;` below would run the next line
             # as an independent command.

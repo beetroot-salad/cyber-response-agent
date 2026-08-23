@@ -152,19 +152,37 @@ class FakeDocker:
     It CLASSIFIES NOTHING. Each reply is an exit code plus the exact stdout/stderr shape an
     EXECUTED probe observed, so every assertion about what the reply MEANS is an assertion
     about production code. `reply` is `(verb) -> (rc, stdout, stderr)`; the default is the
-    all-succeed daemon."""
+    all-succeed daemon.
 
-    def __init__(self, reply=None):
+    `inspect` is the ONE verb `reply` does not see, and `existing` answers it instead. Every
+    scripted table here is about a create, an exec or a reap, and each spells "any other verb"
+    as `(0, "", "")` — which for a state query is not "fine", it is a daemon reporting rc 0 and
+    no state at all. No daemon does that: a name holding nothing answers rc 1. Routing the
+    query around `reply` keeps those tables saying what they were written to say, and keeps
+    the state a test DOES care about (`existing="running"`) something it must ask for."""
+
+    def __init__(self, reply=None, existing: str | None = None):
         self.calls: list[_DockerCall] = []
         self._reply = reply
+        #: The `.State.Status` of a container already holding the name, or `None` for the
+        #: default — nothing in the way, which is what almost every test here wants.
+        self.existing = existing
 
     def __call__(self, argv, **kwargs) -> subprocess.CompletedProcess:
         call = _DockerCall(list(argv))
         self.calls.append(call)
-        rc, out, err = (
-            self._reply(call.verb) if self._reply is not None else self._all_succeed(call)
-        )
+        if call.verb == "inspect":
+            rc, out, err = self._inspect()
+        else:
+            rc, out, err = (
+                self._reply(call.verb) if self._reply is not None else self._all_succeed(call)
+            )
         return subprocess.CompletedProcess(list(argv), rc, out, err)
+
+    def _inspect(self) -> tuple[int, str, str]:
+        if self.existing is None:
+            return (1, "", "Error: No such object\n")
+        return (0, f"{self.existing}\n", "")
 
     @staticmethod
     def _all_succeed(call: _DockerCall) -> tuple[int, str, str]:
@@ -177,7 +195,9 @@ class FakeDocker:
         been asserting the failure path instead.
 
         So an `exec` that ends in a path echoes that file's bytes, the way a real `cat`
-        would. Everything else still succeeds silently.
+        would. Everything else still succeeds silently. `inspect` never reaches here — see
+        `existing` on the class, which exists because this same trap bit the state query too
+        (#955 F-49).
 
         #771 M2's alias-ban probe (`docker exec -w <cwd> <name> python3 -c <script>`) is
         answered as the healthy verdict rather than falling into the path-echo branch below:
@@ -1190,6 +1210,12 @@ def test_a_stopped_box_of_the_same_name_does_not_block_a_new_run(tmp_path):
         def __call__(self, argv, **kwargs):
             call = _DockerCall(list(argv))
             self.calls.append(call)
+            if call.verb == "inspect" and state["present"]:
+                # The container this test is ABOUT: stopped, holding the name, colliding on
+                # create. `exited` is what a real daemon calls it, and it is what tells the
+                # pre-create sweep the container is finished and may be cleared — the
+                # distinction from the live sibling two tests down, which must not be.
+                return subprocess.CompletedProcess(list(argv), 0, "exited\n", "")
             if call.verb in ("rm", "kill"):
                 state["present"] = False
                 return subprocess.CompletedProcess(list(argv), *C43A_RM_MISSING)
