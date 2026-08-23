@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 from collections.abc import Callable
 
-from defender.learning.core.config import RunUnprocessable
+from defender.learning.core.config import RunAlreadyLive, RunUnprocessable
 from defender.learning.core.drains import author_drain, lead_author_drain
 from defender.learning.core.faults import SYSTEMIC_FAULTS
 from defender.learning.core.run_cycle import learn_drain, run_one
@@ -83,6 +83,13 @@ def _run_stage(stage: Callable[[], int], *, allow_run_error: bool = False) -> in
         if e.__context__ is not None:
             print(f"[loop] FATAL: ...it displaced: {e.__context__!r}", file=sys.stderr)
         return 2
+    except RunAlreadyLive as e:
+        # Not an error and not a traceback: a human asking for a run the worker already holds
+        # has made no mistake, and blocking would hang their terminal behind a full learning
+        # cycle. `run_one` raises this so the DRAIN can keep the queue marker; the CLI's own
+        # answer is the one #955 F-49 chose — say so, do nothing, exit clean.
+        print(f"[loop] {e}", file=sys.stderr)
+        return 0
     except RunUnprocessable as e:
         if not allow_run_error:
             raise

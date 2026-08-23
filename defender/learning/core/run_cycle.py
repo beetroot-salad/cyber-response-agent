@@ -13,6 +13,7 @@ from defender._yaml import safe_load
 from defender.learning.core.config import (
     DEFAULT_PATHS,
     LegDirs,
+    RunAlreadyLive,
     RunUnprocessable,
     LoopPaths,
     RunPaths,
@@ -33,6 +34,7 @@ from defender.learning.core.markers import (
     ClaimedMarker,
     claim_markers,
     quarantine_marker,
+    requeue_marker,
 )
 from defender.learning.core.persist import (
     DirectionArtifacts,
@@ -246,9 +248,15 @@ def run_one(
 
     run_id = run_dir.name
     if not is_valid_run_id(run_id):
-        _log(f"run_id={run_id!r} fails the run-id grammar — REFUSING (its lock file and its "
-             f"container name are both derived from it)")
-        return 0
+        # RAISED, not returned as 0. `_serve_marker` reads any non-raising return as a
+        # completed learn and unlinks the queue marker, so a returned refusal deletes the one
+        # record that this run was never processed. This is the terminal kind — the name will
+        # not become valid — so it takes the same channel the pre-#955 code reached by letting
+        # `container_name`'s own grammar check raise: quarantine, with a reason on disk.
+        raise RunUnprocessable(
+            f"run_id={run_id!r} fails the run-id grammar — REFUSING (its lock file and its "
+            f"container name are both derived from it)"
+        )
     # One live pass per run. `learn_drain`'s lease keeps two DRAINERS apart and this is not
     # about them: the single-run CLI stage reaches `run_one` holding no lease, and the
     # run-cycle box reuses one container name per run id, so a hand-run pass on a run the
@@ -258,9 +266,16 @@ def run_one(
 
     with _author_shared.flock_or_skip(paths.run_cycle_lock_file(run_id)) as locked:
         if not locked:
-            _log(f"run_id={run_id} another pass is already live on this run — REFUSING "
-                 f"(both would share the container name defender-runcycle-{run_id})")
-            return 0
+            # RAISED for the same reason the grammar refusal above is, and to a DIFFERENT
+            # channel: this one is transient, so `_serve_marker` re-queues rather than
+            # quarantines. Returning 0 here told the drain the run had been learned and it
+            # deleted both markers — so a hand-run pass that then died left the run learned by
+            # nobody, absent from the queue, and absent from `failed/`, under a log line
+            # reading "drained 1 run(s)".
+            raise RunAlreadyLive(
+                f"run_id={run_id} another pass is already live on this run — REFUSING "
+                f"(both would share the container name defender-runcycle-{run_id})"
+            )
         return _run_one_locked(
             run_dir, paths=paths, agents=agents, start_box=start_box, stop_box=stop_box,
         )
@@ -343,6 +358,24 @@ def _render_transcript(run_dir: Path) -> None:
     render_and_mirror(run_dir)
 
 
+def _requeue_claim(claim: ClaimedMarker, *, note: str) -> None:
+    """Hand one claimed run back to the queue, then release the claim.
+
+    Mirrors `drains._requeue_or_drop`: the re-queue lands at the TOP level (`queued_path`),
+    never at `claim.path`, which this pass is about to unlink — and it is create-if-absent, so
+    a fresher request for the same run that arrived while this one was claimed keeps the slot
+    under the queue's "the later run always wins" contract."""
+    if requeue_marker(claim.queued_path, claim.spec):
+        _log(f"learn_drain: {note} — left queued for retry")
+    else:
+        _log(
+            f"learn_drain: {note} — a fresher request for the same run landed while it was "
+            "claimed and supersedes it; dropping this one"
+        )
+    with contextlib.suppress(OSError):
+        claim.path.unlink()
+
+
 def _serve_marker(
     claim: ClaimedMarker,
     qdir: Path,
@@ -351,6 +384,13 @@ def _serve_marker(
 ) -> bool:
     try:
         run_one_fn(claim.run_dir)
+    except RunAlreadyLive as e:
+        # NOT a failure and NOT a completion: another pass holds this run and will finish it,
+        # or will die and leave it for the next tick. Either way this claim has learned
+        # nothing, so the request goes back on the QUEUE — not to `failed/`, which is for runs
+        # no retry can help, and not to the unlink below, which is the claim saying "done".
+        _requeue_claim(claim, note=str(e))
+        return False
     except Exception as e:  # noqa: BLE001 — one poison run must not wedge the worker
         quarantine_marker(claim.spec, claim.path, qdir, f"run-one-error: {e!r}")
         return False

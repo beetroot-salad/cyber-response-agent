@@ -76,6 +76,15 @@ defender/learning/_author.lock
 defender/learning/author-queue/
 defender/learning/learn-queue/
 defender/learning/.author-drain.lock
+defender/learning/.lead-author-drain.lock
+defender/learning/.learn-drain.lock
+# Load-bearing, not tidiness: `drains._discard_worktree_changes` runs `git clean -fdq` on the
+# repo root in a finally on every author/pitfalls tick, and `-fd` removes untracked-and-NOT-
+# ignored paths. Unignored, that clean unlinks a run-cycle lock a live `run_one` is HOLDING;
+# the holder keeps the flock on the orphaned inode while the next pass creates a fresh inode
+# at the same path and takes it — two lanes on defender-runcycle-{run_id}, which is the exact
+# collision the lock was added for. Every sibling above survives that clean by being ignored.
+defender/learning/run-cycle-locks/
 defender/learning/runs/
 defender/learning/eval/results/
 defender/learning/eval/_tmp/

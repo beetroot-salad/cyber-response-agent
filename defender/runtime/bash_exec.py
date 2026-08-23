@@ -11,6 +11,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 
+#: The operator runs `feed_token` REFUSES outright. Narrower than `_SHLEX_PUNCTUATION` on
+#: purpose, and the gap is `(`/`)`: a run containing one is not refused here — it falls
+#: through to `cur_argv` and crosses as a literal argv word. `parse('echo $(whoami)')` is
+#: `['echo', '$', '(', 'whoami', ')']` and `parse('cat <(id)')` is `['cat','<(','id',')']`,
+#: both accepted, and `test_540_exec_seam.py` pins that shape deliberately. What keeps them
+#: off an authorised argv is `permission/bash.py::_stage_unsafe`, which refuses any stage
+#: carrying `(`, `)`, `$(` or a backtick — a layer up, not here. Nothing expands either way,
+#: because no shell re-parses downstream.
 _OPERATOR_CHARS = frozenset("<>|&;")
 _PIPELINE_SEPARATORS = frozenset({"||", "&&", ";"})
 
@@ -18,12 +26,28 @@ _PIPELINE_SEPARATORS = frozenset({"||", "&&", ";"})
 #: from the `punctuation_chars=True` lexing this module used to do, kept verbatim so the
 #: scanner splits words exactly where that lexer split them. WIDER than `_OPERATOR_CHARS`:
 #: `(`/`)` break a word here without being operators the grammar accepts, and `feed_token`
-#: refuses them a few lines later — which is what they always did, and not a licence.
+#: does NOT refuse them — see `_OPERATOR_CHARS` for where that refusal actually lives. Kept
+#: wide regardless, because splitting the word is what the lexer this replaced did, and the
+#: shape downstream is pinned on it.
 _SHLEX_PUNCTUATION = frozenset("();<>|&")
+
+#: The characters that SEPARATE words — `shlex.whitespace`, which is also bash's default IFS.
+#: Spelled out rather than reached for through `str.isspace()`, which is a much wider Unicode
+#: predicate: it is true for `\x0b`, `\x0c`, `\x1c`-`\x1f`, `\x85`, NBSP and every Unicode
+#: space, none of which bash or the `shlex` lexer this scanner replaces treats as a separator.
+#: Splitting on those cut a word bash keeps whole — `cat 'a\xa0b'` reaching the executor as
+#: `['cat', 'a', 'b']` — which is #955 F-50's own defect (an argv that is not the one the model
+#: wrote, authorised by a gate reading the rewritten one) one character class over.
+_BLANKS = frozenset(" \t\r\n")
 
 #: The only fd this executor knows how to route. Bash's IO_NUMBER admits any digit run; every
 #: other one is refused, so the scan only has to recognise this one.
 _STDERR_FD = "2"
+
+#: The two fd-2 redirects this executor implements: `operator -> (required target, stderr mode)`.
+#: A table rather than two near-identical arms, because the condition they share is #955 F-50's
+#: own fix and one copy of it is one place it can be got wrong.
+_FD2_REDIRECTS = {">": ("/dev/null", "devnull"), ">&": ("1", "stdout")}
 
 #: The tokens that leave a line INCOMPLETE when they close it — `A |`, `A &&` need the next
 #: line to mean anything. `;` is deliberately absent: `A;` is a finished command.
@@ -63,12 +87,22 @@ def _literal_mask(line: str) -> list[bool] | None:
 
 
 def _word_value(span: str) -> str | None:
-    """One word's raw text — quotes and escapes intact — reduced to the value it stands for.
+    r"""One word's raw text — quotes and escapes intact — reduced to the value it stands for.
 
     `shlex` again, but over a span that HAS no unquoted whitespace and no unquoted operator, so
     it is being asked only to resolve quoting and must hand back exactly one word. `comments`
     is off for the reason the line lexer always cleared `commenters`: `#` is an ordinary
-    character in a filename or a pattern here, and the default would truncate the word at it."""
+    character in a filename or a pattern here, and the default would truncate the word at it.
+
+    A span carrying none of the three characters that MEAN anything to `shlex` — `'`, `"`, `\`
+    — already IS its value, and the fast path says so rather than building a lexer to be told.
+    That is not a micro-optimisation on a cold path: `parse` runs on every Bash tool call, and
+    the slow path builds one `shlex.shlex` PER WORD where the lexer this scanner replaced built
+    one per LINE, which is 80-90% of the scan's cost and made the gate up to 3x slower than the
+    code it replaced. `_scan` has already split on unquoted blanks and punctuation, so what is
+    left cannot be more than one word."""
+    if not ("'" in span or '"' in span or "\\" in span):
+        return span
     try:
         parts = shlex.split(span, comments=False, posix=True)
     except ValueError:
@@ -103,7 +137,7 @@ def _scan(line: str) -> tuple[list[str], frozenset[int], frozenset[int]] | None:
     fd_prefixed: set[int] = set()
     i, n = 0, len(line)
     while i < n:
-        if mask[i] and line[i].isspace():
+        if mask[i] and line[i] in _BLANKS:
             i += 1
             continue
         if mask[i] and line[i] in _SHLEX_PUNCTUATION:
@@ -117,7 +151,7 @@ def _scan(line: str) -> tuple[list[str], frozenset[int], frozenset[int]] | None:
             i = j
             continue
         j = i
-        while j < n and not (mask[j] and (line[j].isspace() or line[j] in _SHLEX_PUNCTUATION)):
+        while j < n and not (mask[j] and (line[j] in _BLANKS or line[j] in _SHLEX_PUNCTUATION)):
             j += 1
         word = _word_value(line[i:j])
         if word is None:
@@ -141,7 +175,7 @@ def _is_fd_prefix(line: str, mask: list[bool], at: int, toks: list[str]) -> bool
     if at == 1:
         return True
     before = line[at - 2]
-    return mask[at - 2] and (before.isspace() or before in _SHLEX_PUNCTUATION)
+    return mask[at - 2] and (before in _BLANKS or before in _SHLEX_PUNCTUATION)
 
 
 class BashExecError(Exception):
@@ -231,28 +265,24 @@ class _PipelineBuilder:
         if t in _PIPELINE_SEPARATORS:
             self.end_pipeline(t)
             return i + 1
-        if t == ">":
+        if t in _FD2_REDIRECTS:
+            # ONE arm for both spellings, because the test they share is the one #955 F-50 got
+            # wrong, and two copies of it is two places a later correction can be applied to
+            # only one — which is the shape the original defect already had.
+            #
             # `i in fd_prefixed` is the whole of the fd test; `cur_argv[-1] == "2"` only
             # confirms the token stream agrees with the raw text about which word that was.
             # Testing the TOKEN alone (as both arms did until #955 F-50) reads an ordinary
             # numeric operand as an fd: `head -c 2 >/dev/null` was accepted and ran
             # `head -c` — the gate's answer turning on an argument's VALUE, and the executor
             # running a command the model did not write.
+            target, stderr = _FD2_REDIRECTS[t]
             if (
                 i in fd_prefixed and self.cur_argv and self.cur_argv[-1] == _STDERR_FD
-                and i + 1 < n and toks[i + 1] == "/dev/null"
+                and i + 1 < n and toks[i + 1] == target
             ):
                 self.cur_argv.pop()
-                self.cur_stderr = "devnull"
-                return i + 2
-            raise BashExecError(f"unexpected redirect token in validated command: {t!r}")
-        if t == ">&":
-            if (
-                i in fd_prefixed and self.cur_argv and self.cur_argv[-1] == _STDERR_FD
-                and i + 1 < n and toks[i + 1] == "1"
-            ):
-                self.cur_argv.pop()
-                self.cur_stderr = "stdout"
+                self.cur_stderr = stderr
                 return i + 2
             raise BashExecError(f"unexpected redirect token in validated command: {t!r}")
         if t and set(t) <= _OPERATOR_CHARS:

@@ -399,11 +399,16 @@ def test_a_create_that_lost_a_name_race_does_not_reap_the_winner(tmp_path, lane)
 
     A non-zero `docker run --detach` means either "we created it and the task would not start"
     (ours, the leak) or "the name was already taken" (another lane's box, still writing its
-    artifacts). Only the start-token label separates them. `_is_running` was tried first and
+    artifacts). Only the start-token label separates them. A liveness test was tried first and
     cannot: a concurrent lane's container is itself in `created` for the whole window in which
-    the conflict happens, so it reads as not-running and would be reaped anyway — which is why
-    this test injects `running=False` alongside a foreign token. It is the run-cycle lane that
-    makes this reachable at all, being the one caller that REUSES its container name."""
+    the conflict happens, so it reads as not-running and would be reaped anyway.
+
+    Since #955 F-49 the pre-create sweep refuses any name it finds occupied, so the only way
+    this arm is still reached is the TOCTOU window it always described: the name held NOTHING
+    when the sweep looked, and the other lane won the race before our create. That is what the
+    double states — no `status`, so the state query answers "no such object", and a foreign
+    token on the label query one call later. It is the run-cycle lane that makes this reachable
+    at all, being the one caller that REUSES its container name."""
     run_dir = make_run_dir(tmp_path)
     _populate_mount_sources(_run_cycle_mounts(run_dir), tmp_path)
     rec = RecordingDocker(
@@ -413,7 +418,9 @@ def test_a_create_that_lost_a_name_race_does_not_reap_the_winner(tmp_path, lane)
             cite="C43a — the daemon's own name-conflict rc/text",
         ),
         existing_token="another-lane-holds-this-name",
-        running=False,   # ...and it is in `created`, exactly as ours would be
+        # No `status`: the sweep found the name free, and the other lane took it in the window
+        # between that look and our create. Stating a status here would model a container the
+        # pre-create sweep refuses, and this arm would never run.
     )
     start = (
         (lambda: box_mod.start_box(run_dir, DEFENDER, docker=rec))

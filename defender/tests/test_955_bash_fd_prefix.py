@@ -78,24 +78,39 @@ def test_the_verdict_does_not_depend_on_the_value_of_an_operand(operand):
     assert _parsed(f"head -c {operand} >& 1") is None
 
 
-@pytest.mark.parametrize("cmd", [
-    "head -c 2 >/dev/null",
-    "cat /etc/hosts 2 >/dev/null",
-    "tail -n 2 >&1",
-    "cut -f 2 >& 1",
+@pytest.mark.parametrize(("cmd", "argv"), [
+    # The spaced spellings, which this executor REFUSES — `>`/`>&` after a bare `2` is a
+    # redirect of STDOUT, which is not on this surface. `None` is the whole assertion.
+    ("head -c 2 >/dev/null", None),
+    ("cat /etc/hosts 2 >/dev/null", None),
+    ("tail -n 2 >&1", None),
+    ("cut -f 2 >& 1", None),
+    # …and the ACCEPTED neighbours, which are where an operand can actually go missing. The
+    # expected argv is written out rather than derived from `cmd.split()`: a derivation has to
+    # re-implement the grammar under test to know which words are operator and which are
+    # operand, and gets it wrong on exactly the shapes that matter (for `cut -f 2 >& 1` it
+    # keeps the redirect TARGET `1` as an operand). Every case above refuses, so a body that
+    # only asserted on the accepted ones asserted NOTHING at all.
+    ("head -c 2 2>/dev/null", ["head", "-c", "2"]),
+    ("cat /etc/hosts 2>/dev/null", ["cat", "/etc/hosts"]),
+    ("tail -n 2 2>&1", ["tail", "-n", "2"]),
+    ("cut -f 2 2>&1", ["cut", "-f", "2"]),
+    ("cut -f 22 2>&1", ["cut", "-f", "22"]),
+    ("echo 2 2>/dev/null", ["echo", "2"]),
 ])
-def test_an_accepted_command_never_loses_an_operand(cmd):
+def test_an_accepted_command_never_loses_an_operand(cmd, argv):
     """The second half of the defect: when the fd test fired wrongly, it POPPED the operand.
 
     Whatever the verdict, the argv that survives parse must be the argv the model wrote. A
     refusal satisfies this; a silent rewrite does not, and the executor and the gate share
-    this parse, so neither could see the substitution."""
+    this parse, so neither could see the substitution. The only word a redirect may remove is
+    the fd prefix that IS the redirect — `head -c 2 2>/dev/null` keeps its `-c 2`."""
     result = _parsed(cmd)
-    if result is None:
+    if argv is None:
+        assert result is None, f"{cmd!r} was accepted — a spaced `>` is a redirect of stdout"
         return
-    argv, _stderr = result
-    words = [w for w in cmd.split() if w not in (">", ">&") and not w.startswith(">")]
-    assert argv == words, f"{cmd!r} parsed to {argv} — an operand was dropped"
+    assert result is not None, f"{cmd!r} was refused — the fd redirect itself broke"
+    assert result[0] == argv, f"{cmd!r} parsed to {result[0]} — an operand was dropped"
 
 
 @pytest.mark.parametrize(("cmd", "stderr"), [
@@ -145,6 +160,39 @@ def test_a_quoted_or_escaped_operator_is_a_word(cmd, argv):
     assert parsed[0] == argv, f"{cmd!r} parsed to {parsed[0]}"
 
 
+#: Characters `str.isspace()` calls whitespace and the shell does NOT. `shlex.whitespace` is
+#: ' \t\r\n' and bash's default IFS is space/tab/newline; every character here is an ordinary
+#: word character to both, and to `bash` itself.
+_NOT_SHELL_BLANKS = ["\x0b", "\x0c", "\x1c", "\x1f", "\x85", "\xa0", "\u2003", "\u3000"]
+
+
+@pytest.mark.parametrize("blank", _NOT_SHELL_BLANKS)
+def test_a_character_the_shell_does_not_split_on_stays_inside_its_word(blank):
+    """The third question the raw text has to answer, beside "glued?" and "an operator?":
+    WHERE DOES THE WORD END?
+
+    `str.isspace()` is a Unicode predicate and the shell's blank set is four ASCII characters.
+    Reaching for the former cut `cat 'a\xa0b'` into `['cat', 'a', 'b']` — two operands where
+    the model wrote one, and neither of them the file it named. That is F-50's own defect
+    (the argv that runs is not the argv that was written, and the gate authorises the rewritten
+    one) one character class over, and it is worse than a mis-parse: it moved a real VERDICT,
+    turning a `cat <run_dir>/a\xa0b` that the main policy denied — the NBSP fails its path
+    shape — into an allow on a two-operand argv whose halves each pass."""
+    result = _parsed(f"w -n a{blank}b")
+    assert result is not None, f"U+{ord(blank):04X} made an ordinary command untokenizable"
+    assert result[0] == ["w", "-n", f"a{blank}b"], (
+        f"U+{ord(blank):04X} split a word bash keeps whole — the executor would run an argv "
+        "the model did not write, and the gate would have authorised that one"
+    )
+
+
+@pytest.mark.parametrize("blank", [" ", "\t"])
+def test_the_characters_the_shell_DOES_split_on_still_split(blank):
+    """The control the test above needs: pinning "do not split on X" is satisfied by a scanner
+    that never splits at all, which would collapse every command into a single argv word."""
+    assert _parsed(f"w -n a{blank}b")[0] == ["w", "-n", "a", "b"]
+
+
 def test_an_unquoted_operator_is_still_an_operator():
     """The control the test above needs: if quoting were ignored the other way round, every
     pipeline in the tree would collapse into one argv and this file would still be green."""
@@ -175,17 +223,20 @@ def shim_dir():
         path = Path(d) / _SHIM
         path.write_text(_SHIM_SRC, encoding="utf-8")
         path.chmod(0o755)
-        yield Path(d)
+        # The bash path is resolved ONCE, here, rather than per candidate: `shutil.which`
+        # walks the whole PATH with a stat per directory, and the candidate matrix is a
+        # cross product that only grows.
+        yield Path(d), shutil.which("bash")
 
 
-def _bash_meaning(shim_dir: Path, cmd: str):
+def _bash_meaning(shim: tuple[Path, str], cmd: str):
     """What bash DOES with `cmd`: the argv it passed the shim, and where the shim's stderr
     marker landed. `None` if bash itself refuses the text."""
+    shim_dir, bash = shim
     argv_file = shim_dir / "argv.out"
     argv_file.unlink(missing_ok=True)
     # The shim dir goes in FRONT of the inherited PATH rather than replacing it: `subprocess`
     # resolves the executable against the PATH in `env`, so a bare replacement loses bash too.
-    bash = shutil.which("bash")
     env = {
         **os.environ,
         "PATH": f"{shim_dir}{os.pathsep}{os.environ.get('PATH', '')}",

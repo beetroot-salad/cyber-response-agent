@@ -159,7 +159,9 @@ class FakeDocker:
     as `(0, "", "")` — which for a state query is not "fine", it is a daemon reporting rc 0 and
     no state at all. No daemon does that: a name holding nothing answers rc 1. Routing the
     query around `reply` keeps those tables saying what they were written to say, and keeps
-    the state a test DOES care about (`existing="running"`) something it must ask for."""
+    the state a test DOES care about (`existing="running"`) something it must ask for. It is
+    answered per FORMAT STRING, because `existing` is a state and box.py asks two other
+    questions down the same verb — see `_inspect`."""
 
     def __init__(self, reply=None, existing: str | None = None):
         self.calls: list[_DockerCall] = []
@@ -172,16 +174,32 @@ class FakeDocker:
         call = _DockerCall(list(argv))
         self.calls.append(call)
         if call.verb == "inspect":
-            rc, out, err = self._inspect()
+            rc, out, err = self._inspect(list(argv))
         else:
             rc, out, err = (
                 self._reply(call.verb) if self._reply is not None else self._all_succeed(call)
             )
         return subprocess.CompletedProcess(list(argv), rc, out, err)
 
-    def _inspect(self) -> tuple[int, str, str]:
+    def _inspect(self, argv: list[str]) -> tuple[int, str, str]:
+        """box.py asks THREE different questions through `docker inspect`, and the format
+        string is what separates them — on a real daemon and here. Answering all three from
+        `existing` handed `_start_token` the STATE word as a start token, so a test that set
+        `existing="running"` would silently make `_reap_on_fault` read another lane's box as
+        its own and force-remove it — the #884 F-29 ownership check inverted by the double,
+        not by production. `_box665.RecordingDocker` already dispatches this way."""
         if self.existing is None:
             return (1, "", "Error: No such object\n")
+        fmt = argv[argv.index("-f") + 1] if "-f" in argv else ""
+        if not fmt:
+            # `--format`, not `-f`: the DooD shared-mounts query. A container that exists but
+            # whose mount table we do not model answers with an empty table, never a state.
+            return (0, "", "")
+        if "Config.Labels" in fmt:
+            # The start-token label. This double models a container held by SOMEONE ELSE (that
+            # is what `existing` means), and docker prints `<no value>` for a label a container
+            # does not carry — which `_start_token` reads as "not ours", the honest answer.
+            return (0, "<no value>\n", "")
         return (0, f"{self.existing}\n", "")
 
     @staticmethod
