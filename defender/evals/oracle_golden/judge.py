@@ -309,11 +309,17 @@ def _document(raw: str) -> dict:
 def parse_label(raw: str) -> dict:
     doc = _document(raw)
     kind = doc.get("delta_kind")
-    if kind not in LABEL_KINDS:
+    # `isinstance` FIRST at every one of this file's four closed vocabularies: they are
+    # `frozenset`s and `doc` is the model's own parsed YAML, so a field spelled as a list or a
+    # mapping raises `TypeError: unhashable type` instead of the `GrammarError` this branch
+    # exists to raise — and `_pass`'s retry loop catches only `GrammarError`, so the crash
+    # skips all three attempts and unwinds out of the batch, discarding every lead measured
+    # beside it. The `in (True, False, None)` tests below are tuples and never hash.
+    if not isinstance(kind, str) or kind not in LABEL_KINDS:
         raise GrammarError(f"delta_kind {kind!r} not in {sorted(LABEL_KINDS)}")
     reason = doc.get("undecidable_reason")
     if kind == "undecidable":
-        if reason not in LABEL_UNDECIDABLE_REASONS:
+        if not isinstance(reason, str) or reason not in LABEL_UNDECIDABLE_REASONS:
             raise GrammarError(f"undecidable needs a reason, got {reason!r}")
     elif reason is not None:
         raise GrammarError(f"undecidable_reason {reason!r} on a decided label {kind!r}")
@@ -340,12 +346,12 @@ def parse_verdict_reply(raw: str) -> dict:
         raise GrammarError(f"faithful {faithful!r} is not true/false/null")
     reason, cause = doc.get("undecidable_reason"), doc.get("cause")
     if faithful is None:
-        if reason not in VERDICT_UNDECIDABLE_REASONS:
+        if not isinstance(reason, str) or reason not in VERDICT_UNDECIDABLE_REASONS:
             raise GrammarError(f"undecidable needs a reason, got {reason!r}")
     elif reason is not None:
         raise GrammarError(f"undecidable_reason {reason!r} on a decided verdict")
     if faithful is False:
-        if cause not in CAUSES:
+        if not isinstance(cause, str) or cause not in CAUSES:
             raise GrammarError(f"cause {cause!r} not in {sorted(CAUSES)}")
     elif cause is not None:
         raise GrammarError(f"cause {cause!r} on a verdict that is not false")

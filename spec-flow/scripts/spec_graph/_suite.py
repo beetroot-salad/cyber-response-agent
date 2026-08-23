@@ -26,7 +26,7 @@ from pathlib import Path
 _COPY = re.compile(r"\.copy\d+\.py$")
 
 
-def suite_dir_for(graph_path: Path, graph: dict) -> Path:
+def suite_dir_for(graph_path: Path, graph: dict, *, root: Path | None = None) -> Path:
     """The suite a graph is the derivation of.
 
     This used to be the graph's own directory, which made adjacency load-bearing in code
@@ -34,18 +34,31 @@ def suite_dir_for(graph_path: Path, graph: dict) -> Path:
     spec happened to touch. The graph now names its suite (`tests:`, repo-relative), so the
     graphs can live together and be gated as one corpus.
 
+    ANCHORED ON THE GRAPH when `root` is given. `_config.repo_root()` with no argument is the
+    repo the PROCESS stands in, which is wrong for any caller handed an explicit path: the
+    argument may name a graph in another checkout (a write-tests worktree is the ordinary case),
+    and a process-anchored join then silently reads the wrong tree's suite. Every caller passes
+    the graph's own directory; the `None` default is kept only so the parameter reads as the
+    anchor it is rather than as a required repeat of `graph_path.parent`.
+
     Falls back to the graph's directory when the field is absent, which keeps the plugin's
     own fixture graphs (and any graph written before the field existed) working. The
     fallback is safe rather than silent: a graph that names the wrong suite, or none, loses
     its docstrings and `check_binds` reports every demand as a prose orphan — loudly, not
     as a clean pass.
+
+    A `tests:` that is not a plain RELATIVE STRING takes the same fallback. `str()` on a list or
+    an int fabricates a directory name nobody typed (`tests: [a, b]` → a literal `['a', 'b']`
+    directory in the diagnostic), and `root / "/abs"` DISCARDS root outright, so an absolute
+    value silently resolves the suite outside the repo — and `check_stub` then runs pytest
+    there. Neither is a suite this can resolve, so neither is guessed at.
     """
     declared = graph.get("tests")
-    if not declared:
+    if not isinstance(declared, str) or not declared or Path(declared).is_absolute():
         return graph_path.parent
     import _config  # local: only this path needs the repo-root resolution
 
-    return _config.repo_root() / str(declared)
+    return _config.repo_root(root) / declared
 
 
 def suite_dir_from_arg(arg: Path) -> Path:
@@ -59,31 +72,61 @@ def suite_dir_from_arg(arg: Path) -> Path:
     `--target` reported "0 test(s) that never reach the target" over a suite it never opened.
     `check_binds` already routes through `suite_dir_for`; these two did not.
 
-    ANCHORED ON THE GRAPH, not the process. `suite_dir_for` resolves `tests:` against
-    `_config.repo_root()` with no argument — the repo the process is standing in — which is right
-    for `check_binds` (it only ever walks its own configured corpus) and wrong here: both callers
-    take an explicit path argument, and their existing comments already note that it "may live in
-    a different repo than the process cwd". Resolving against the graph's own root keeps that
-    property, which `p.parent` had for free and a process-anchored join would have quietly cost.
+    ONE resolver, not two: the `tests:` rule lives in `suite_dir_for` and this is the
+    path-argument dispatcher in front of it. A second copy anchored differently would answer
+    differently for one graph depending on which sibling checker asked.
 
     An unreadable or non-mapping graph falls back to the graph's own directory rather than
     raising here. That is not a silent pass: both callers refuse a resolved directory holding no
-    Python, which is precisely where that fallback lands.
+    Python, which is precisely where that fallback lands. The except tuple carries `ValueError`
+    for `UnicodeDecodeError` — a non-utf-8 graph is the commonest unreadable one, and it is a
+    `ValueError`, not an `OSError`, so without it the read escapes as a traceback behind exit 1
+    ("the gate looked and found something") for a gate that looked at nothing.
     """
     if arg.is_dir():
         return arg
-    import yaml  # local, matching `_config` below: only this path needs the parse
+    import yaml  # local, matching `_config` above: only these paths need the parse
 
-    import _config
+    import _cli
 
     try:
-        graph = yaml.safe_load(arg.read_text(encoding="utf-8"))
-    except (OSError, yaml.YAMLError):
+        graph = _cli.load_graph(arg)
+    except (OSError, ValueError, TypeError, yaml.YAMLError):
         return arg.parent
-    declared = graph.get("tests") if isinstance(graph, dict) else None
-    if not declared:
-        return arg.parent
-    return _config.repo_root(arg.parent) / str(declared)
+    # `.resolve()` because `run()` moves cwd to the pytest rootdir and `_pytest_cwd` compares
+    # `d == root` string-wise: a `tests: ../shared` left un-normalised never matches the root it
+    # is under. The directory arm above is already resolved by both callers.
+    return suite_dir_for(arg, graph, root=arg.parent).resolve()
+
+
+def has_tests(suite_dir: Path) -> bool:
+    """Whether a resolved suite directory holds anything pytest would COLLECT.
+
+    Not "holds any Python" (#949). A directory of only `conftest.py` and helper modules passes
+    a bare `.py` test while collecting nothing, and both consumers then print their clean line —
+    `0 test(s) that never reach the target`, exit 0 — over a suite with no tests in it, which is
+    the false clean this guard exists to stop. Both of pytest's default file patterns count:
+    this corpus is `test_*.py` throughout, but spec-flow ships to repos that are not, and
+    refusing a `*_test.py` suite would trade one false answer for another.
+    """
+    return any(
+        p.name.startswith("test_") or p.stem.endswith("_test") for p in suite_files(suite_dir)
+    )
+
+
+def no_tests_refusal(tool: str, dirs: list[Path]) -> str:
+    """The family's could-not-look sentence for a resolved suite directory holding no tests.
+
+    One wording for both consumers: `check_calls` and `check_stub` print the identical three
+    sentences, and a wording fix applied to one copy leaves the other stale — which matters
+    because the message is what an author greps for and what the tests assert on.
+    """
+    named = str(dirs[0]) if len(dirs) == 1 else str([str(d) for d in dirs])
+    return (
+        f"{tool}: no tests under {named} — nothing to collect, so this is a could-not-look "
+        f"rather than a clean run. Point at the suite directory, or at a graph whose "
+        f"`tests:` field names it."
+    )
 
 
 def suite_files(suite_dir: Path) -> list[Path]:

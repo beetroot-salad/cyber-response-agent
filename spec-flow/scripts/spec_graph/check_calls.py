@@ -158,22 +158,22 @@ def main(argv: list[str]) -> int:
     if not suite_dirs:
         print("check_calls: no suite directory (no graphs matched and none given)", file=sys.stderr)
         return 2
+    all_findings: list[str] = []
+    blind: list[Path] = []
     # A resolved directory with no Python in it is a could-not-look, and it has to be said HERE
     # rather than left to the no-targets arm below: an explicit `--target` seeds `targets`, so an
     # empty directory sails past that arm and prints "0 test(s) that never reach the target" over
     # a suite that was never opened. That was the #949 symptom.
-    empty = [d for d in suite_dirs if not _suite.suite_files(d)]
-    if empty:
-        print(
-            f"check_calls: no Python under {[str(d) for d in empty]} — nothing to scan, so this "
-            f"is a could-not-look rather than a clean run. Point at the suite directory, or at a "
-            f"graph whose `tests:` field names it.",
-            file=sys.stderr,
-        )
-        return 2
-    all_findings: list[str] = []
-    blind: list[Path] = []
+    #
+    # COLLECTED, not returned on — for the same reason `blind` is, and it matters more now that
+    # `suite_dirs` is one entry per GRAPH: a single graph whose `tests:` names a retired, renamed
+    # or not-yet-written suite would otherwise throw away every finding the other suites produced
+    # and print nothing at all.
+    no_tests: list[Path] = []
     for d in suite_dirs:
+        if not _suite.has_tests(d):
+            no_tests.append(d)
+            continue
         targets, floor = _suite.target_modules(d, root)
         for t in explicit:
             targets.setdefault(t, set())
@@ -188,8 +188,16 @@ def main(argv: list[str]) -> int:
         all_findings.extend(check(d, targets))
     for f in all_findings:
         print(f"  {f}")
-    print(f"\n[check_calls] {len(all_findings)} test(s) that never reach the target "
-          f"over {len(suite_dirs) - len(blind)} suite dir(s).")
+    # The summary line is printed only when a suite was actually SCANNED. Over zero of them it
+    # reads "0 test(s) that never reach the target over 0 suite dir(s)" — honest in its second
+    # clause and a clean bill of health in its first, and the first is the half a human reads.
+    # The exit code is already 2 here; #949 is about the sentence disagreeing with it.
+    scanned = len(suite_dirs) - len(blind) - len(no_tests)
+    if scanned:
+        print(f"\n[check_calls] {len(all_findings)} test(s) that never reach the target "
+              f"over {scanned} suite dir(s).")
+    if no_tests:
+        print(_suite.no_tests_refusal("check_calls", no_tests), file=sys.stderr)
     if blind:
         print(
             f"check_calls: no target identified for {[str(d) for d in blind]} — every suite "
@@ -198,6 +206,7 @@ def main(argv: list[str]) -> int:
             f"module reads as a third-party import; name it with --target <dotted.module>.",
             file=sys.stderr,
         )
+    if no_tests or blind:
         return 2
     return 1 if all_findings else 0
 

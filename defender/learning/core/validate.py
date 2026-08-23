@@ -277,7 +277,24 @@ def _validate_environment_observation(i: int, o: Any) -> None:
             raise RunUnprocessable(
                 f"environment_observations[{i}].{k} must be a non-empty string"
             )
-    for sel in o.get("entities") or []:
+    _validate_entity_selectors(i, o.get("entities") or [])
+
+
+def _validate_entity_selectors(i: int, entities: Any) -> None:
+    """The optional `entities` list of an environment observation.
+
+    `isinstance` BEFORE the loop, the same guard and the same reason as `_validate_finding`'s
+    `type` check: a scalar here raises `TypeError: 'int' object is not iterable` past the
+    declared `RunUnprocessable` and out of `_validate_judge_yaml` — which catches only
+    `(yaml.YAMLError, RunUnprocessable)` and writes the `*.raw.txt` audit companion INSIDE that
+    handler, so the crash takes the only record of what the judge replied with it.
+    """
+    if not isinstance(entities, list):
+        raise RunUnprocessable(
+            f"environment_observations[{i}].entities must be a list of "
+            "{type, class} selector mappings"
+        )
+    for sel in entities:
         if not isinstance(sel, dict) or "type" not in sel or "class" not in sel:
             raise RunUnprocessable(
                 f"environment_observations[{i}].entities selectors must be "

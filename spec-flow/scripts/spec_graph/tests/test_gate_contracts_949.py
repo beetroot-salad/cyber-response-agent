@@ -15,11 +15,13 @@ control proving the same fixture reaches a real answer when it can look.
 """
 from __future__ import annotations
 
+import json
+import os
+import subprocess
+import sys
 import textwrap
 
-import sys
-
-from conftest import run_script
+from conftest import DEFAULT_CHECK_ACTORS, SPEC_GRAPH_DIR, run_script
 
 GRAPH = "schema_version: 1\ndemands: []\nactors: []\n"
 
@@ -57,6 +59,36 @@ def test_positive_control_a_real_base_still_answers(make_repo):
     out = r.run("spec_graph_x.yaml", base)
     assert out.returncode in (0, 1), out.stdout + out.stderr
     assert "unmodelled driver context(s)" in out.stdout
+
+
+def _run_bare(repo, *argv):
+    """check_actors with arbitrary argv — `Repo.run` always passes `--base`, and the whole
+    point of the test below is the run that does not."""
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(SPEC_GRAPH_DIR) + os.pathsep + env.get("PYTHONPATH", "")
+    return subprocess.run(
+        [sys.executable, str(DEFAULT_CHECK_ACTORS), *argv],
+        cwd=repo.root, env=env, capture_output=True, text=True, timeout=60,
+    )
+
+
+def test_the_default_base_comes_from_the_profile_not_a_hardcoded_main(make_repo):
+    """The preflight above turns a wrong default base into a hard refusal rather than a quiet
+    empty diff, so the default has to be the branch the project declares.
+
+    `conventions.defaultBranch` is the key the ship skill already reads, and spec-flow ships as
+    a plugin to repos we do not control — one on `master` would otherwise owe an explicit
+    `--base` on every invocation, where before the preflight it merely got a quiet wrong
+    answer. Trading one failure mode for another is not the fix."""
+    r, _ = _diffable_repo(make_repo)
+    r._git("branch", "-M", "master")
+    profile = json.loads((r.root / ".claude/spec-flow.json").read_text())
+    profile["conventions"] = {"defaultBranch": "master"}
+    r.write(".claude/spec-flow.json", json.dumps(profile))
+    r.commit("declare the branch")
+    out = _run_bare(r, "spec_graph_x.yaml")
+    assert out.returncode != 2, out.stdout + out.stderr
+    assert "does not resolve to a commit" not in out.stderr, out.stderr
 
 
 # ── F-37b: check_binds joins the rest of the family on an empty corpus ───────
@@ -143,6 +175,23 @@ def test_check_stub_follows_the_graphs_tests_field(make_repo):
     assert "no target identified" not in p.stderr, p.stderr
 
 
+def test_a_directory_of_helpers_with_no_tests_is_refused(make_repo):
+    """The guard asks whether pytest would COLLECT anything, not whether the directory holds
+    `.py`. A suite of only `conftest.py` and helpers passes a bare-Python test while collecting
+    nothing, and the run then prints its clean line — `0 test(s) that never reach the target`,
+    exit 0 — over a suite with no tests in it. That is the #949 false clean surviving the guard
+    added to stop it."""
+    r = _graph_and_suite(make_repo)
+    helpers = r.root / "helpers"
+    helpers.mkdir()
+    (helpers / "conftest.py").write_text("import pytest\n")
+    (helpers / "_util.py").write_text("X = 1\n")
+    p = run_script("check_calls.py", str(helpers), "--target", "app.mod", cwd=r.root)
+    assert p.returncode == 2, p.stdout + p.stderr
+    assert "no tests" in p.stderr
+    assert "0 test(s) that never reach the target" not in p.stdout
+
+
 def test_a_suite_directory_with_no_python_is_refused_even_with_an_explicit_target(make_repo):
     """The backstop, and the reason it cannot be left to the existing no-targets arm: an
     explicit `--target` seeds the target map, so an empty directory sailed straight past it."""
@@ -150,7 +199,7 @@ def test_a_suite_directory_with_no_python_is_refused_even_with_an_explicit_targe
     (r.root / "empty").mkdir()
     p = run_script("check_calls.py", str(r.root / "empty"), "--target", "app.mod", cwd=r.root)
     assert p.returncode == 2, p.stdout + p.stderr
-    assert "no Python" in p.stderr
+    assert "no tests" in p.stderr
 
 
 # ── F-39: the alphabet rule reaches the claims that enumerate ────────────────
@@ -203,4 +252,8 @@ def test_the_same_claim_with_an_alphabet_passes(make_repo):
     r.write("spec_graph_x.yaml", CENSUS_CLAIM + ALPHABET_BLOCK)
     r.commit("base")
     p = run_script("check_claims.py", str(r.root / "spec_graph_x.yaml"), cwd=r.root)
+    # The exit code, not just the absent word: a crash prints nothing to stdout and would
+    # satisfy the substring assertion on its own — the same vacuous pass the ALPHABET_BLOCK
+    # indentation note above records having already happened here once.
+    assert p.returncode == 0, p.stdout + p.stderr
     assert "alphabet" not in p.stdout, p.stdout

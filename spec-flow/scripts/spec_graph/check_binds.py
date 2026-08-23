@@ -225,7 +225,10 @@ class _Scan:
         self.demands: list[dict] = graph.get("demands", []) or []
         self.waivers: dict = graph.get("binds_waivers", {}) or {}
         self.exercise_waivers: dict = graph.get("exercise_waivers", {}) or {}
-        self.suite_dir = _suite.suite_dir_for(path, graph)
+        # `root=`: the graph may be named on the command line from another checkout (a
+        # write-tests worktree run from the main tree), and a process-anchored join would
+        # read THIS repo's suite for THAT repo's graph — every demand then a phantom orphan.
+        self.suite_dir = _suite.suite_dir_for(path, graph, root=path.parent)
         self.test_fns = _test_functions(self.suite_dir)
         # Code kwarg name → graph concept name, when the two disagree: the graph may model
         # the anchor tree as `anchor_tree` while the code threads it as the `anchor_dir=`
@@ -342,6 +345,11 @@ def check(path: Path, cfg: dict) -> list[str]:
 
 
 def main(argv: list[str]) -> int:
+    # utf-8 out, like every other main in this family: the finding text carries em-dashes,
+    # so a C/ascii-locale runner raises UnicodeEncodeError on the very `print` that reports a
+    # finding — a traceback behind exit 1 ("looked, found something") for output that never
+    # arrived. `check_binds` and `check_claims` were the only two mains without this call.
+    _cli.utf8_stdio()
     opts, args = _cli.parse_argv(argv, valued={"--config"})
     cfg = _config.load(opts["config"])
     paths = [Path(a) for a in args] or _config.artifacts(cfg)

@@ -68,10 +68,12 @@ def _floor_dynamic(texts: dict[Path, str], root: Path) -> list[str]:
 
 
 def drivers(base: str, cfg: dict) -> int:
-    # Verify the base ref FIRST: `git diff` against a nonexistent/unfetched ref exits 128
-    # with EMPTY stdout (the census's _sh is check=False), which downstream reads as "no
-    # changed modules — nothing to anchor", exit 0: a could-not-look dressed as an answered
-    # census. rev-parse is the cheap oracle for "does this ref name a commit here".
+    # Verify the base ref FIRST: `git diff` against a nonexistent/unfetched ref exits 128 with
+    # EMPTY stdout. `check_actors._changed_paths` now carries the same preflight and its `_sh`
+    # reads the return code, so this is no longer the only thing standing between a bad ref and
+    # an "answered" census — it survives to name the REF rather than the diff command, and to
+    # say so before the census spends a repo walk. rev-parse is the cheap oracle for "does this
+    # ref name a commit here".
     probe = subprocess.run(
         ["git", "rev-parse", "--verify", "--quiet", f"{base}^{{commit}}"],
         cwd=_config.repo_root(), capture_output=True, text=True, encoding="utf-8", check=False,

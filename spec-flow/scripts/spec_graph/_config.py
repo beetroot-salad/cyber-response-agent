@@ -66,8 +66,11 @@ def load(explicit: str | None = None) -> dict[str, Any]:
     """The `specGraph` section of the project profile, with defaults filled in."""
     path = Path(explicit) if explicit else repo_root() / CONFIG_REL
     raw: dict[str, Any] = {}
+    conventions: dict[str, Any] = {}
     if path.is_file():
-        raw = json.loads(path.read_text(encoding="utf-8")).get("specGraph", {}) or {}
+        profile = json.loads(path.read_text(encoding="utf-8"))
+        raw = profile.get("specGraph", {}) or {}
+        conventions = profile.get("conventions", {}) or {}
     return {
         # Where the committed spec_graph_*.yaml artifacts live (glob, repo-relative).
         "artifacts": raw.get("artifacts", "**/spec_graph_*.yaml"),
@@ -84,6 +87,14 @@ def load(explicit: str | None = None) -> dict[str, Any]:
         # Shared roots for `spec-graph trace resource`: name → {writers, readers, grep},
         # each sink `<file>::<symbol>` (see trace.py's docstring).
         "resources": raw.get("resources", {}),
+        # The branch a diff-taking checker compares against when `--base` is not given. Read
+        # from `conventions`, NOT `specGraph`: it is the same fact the ship skill already
+        # documents there, and a second spelling would let the two disagree. Hardcoding "main"
+        # was harmless while an unresolvable base silently produced an empty diff; once
+        # check_actors preflights the ref (#949) it becomes a mandatory `--base` on every
+        # invocation in any repo whose default branch is named something else — and this ships
+        # as a plugin to repos we do not control.
+        "defaultBranch": conventions.get("defaultBranch") or "main",
     }
 
 

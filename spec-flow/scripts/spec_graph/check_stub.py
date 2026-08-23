@@ -234,15 +234,28 @@ def _pytest_cwd(suite_dir: Path, root: Path) -> Path:
     return root
 
 
-def _recorded_passes(suite_dir: Path) -> set[str]:
-    """Test names listed in any sibling graph's handoff.nullstub_passes ("<test> — <class>")."""
+def _recorded_passes(suite_dir: Path, graph: Path | None = None) -> set[str]:
+    """Test names recorded as legitimate null-stub passes ("<test> — <class>").
+
+    Read from the GRAPH THIS RUN WAS HANDED as well as from any graph beside the suite. The
+    sibling glob was the whole of it while a graph lived next to its tests; once `tests:` moved
+    the corpus into one directory, the graph handed on the command line is by construction NOT
+    a sibling of the suite it names, so the glob found nothing and every consciously recorded
+    pass came back a NULLSTUB-PASS finding — advising the author to record it in the very block
+    that already records it.
+    """
+    candidates = sorted(suite_dir.glob("spec_graph_*.yaml"))
+    if graph is not None and graph.is_file() and graph not in candidates:
+        candidates.append(graph)
     recorded: set[str] = set()
-    for g in sorted(suite_dir.glob("spec_graph_*.yaml")):
+    for g in candidates:
         # A malformed sibling graph must not kill the stub run — skip it; its shape is
         # check_lint's finding, not this check's.
         try:
             handoff = _cli.load_graph(g).get("handoff") or {}
-        except (yaml.YAMLError, TypeError):
+        except (OSError, ValueError, yaml.YAMLError, TypeError):
+            continue
+        if not isinstance(handoff, dict):
             continue
         for entry in handoff.get("nullstub_passes", []) or []:
             # The documented separator is the em-dash ONLY; also splitting on "--"
@@ -381,11 +394,12 @@ def _classify(results: dict[str, dict], recorded: set[str]) -> tuple[list[str], 
     return findings, discriminated
 
 
-def run(suite_dir: Path, targets: dict[str, set[str]], python: str, keep: bool) -> int:
+def run(suite_dir: Path, targets: dict[str, set[str]], python: str, keep: bool,
+        graph: Path | None = None) -> int:
     results = _collect_results(suite_dir, targets, python, keep)
     if results is None:
         return 2
-    findings, discriminated = _classify(results, _recorded_passes(suite_dir))
+    findings, discriminated = _classify(results, _recorded_passes(suite_dir, graph))
     for f in findings:
         print(f"  {f}")
     print(f"\n[check_stub] {discriminated} discriminating, {len(findings)} finding(s), "
@@ -409,7 +423,11 @@ def main(argv: list[str]) -> int:
         # (run from repo/tests with arg `spec`, pytest would hunt <rootdir>/spec).
         p = Path(args[0]).resolve()
         suite_dir = _suite.suite_dir_from_arg(p)
+        # Kept for `_recorded_passes`: the graph names the suite AND carries the
+        # `handoff.nullstub_passes` allow-list, and the two stopped being the same file.
+        graph_arg: Path | None = p if p.is_file() else None
     else:
+        graph_arg = None
         dirs = sorted({_suite.suite_dir_from_arg(g) for g in _config.artifacts(cfg)})
         if len(dirs) != 1:
             print(f"check_stub: give the suite dir or graph explicitly (found {len(dirs)} "
@@ -418,13 +436,8 @@ def main(argv: list[str]) -> int:
         suite_dir = dirs[0].resolve()
     # See check_calls: an explicit `--target` seeds `targets`, so without this an empty directory
     # would run the whole stub pass over zero tests and report it as an answer (#949).
-    if not _suite.suite_files(suite_dir):
-        print(
-            f"check_stub: no Python under {suite_dir} — nothing to scan, so this is a "
-            f"could-not-look rather than a clean run. Point at the suite directory, or at a "
-            f"graph whose `tests:` field names it.",
-            file=sys.stderr,
-        )
+    if not _suite.has_tests(suite_dir):
+        print(_suite.no_tests_refusal("check_stub", [suite_dir]), file=sys.stderr)
         return 2
     root = _config.repo_root(suite_dir)
     targets, floor = _suite.target_modules(suite_dir, root)
@@ -439,7 +452,7 @@ def main(argv: list[str]) -> int:
             file=sys.stderr,
         )
         return 2
-    return run(suite_dir, targets, python, keep)
+    return run(suite_dir, targets, python, keep, graph_arg)
 
 
 if __name__ == "__main__":

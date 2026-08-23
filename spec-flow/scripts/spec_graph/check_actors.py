@@ -32,7 +32,9 @@ Exit codes:
   1  an unmodelled driver reaches the change. Waive an out-of-scope context by listing its
      stem under a top-level `actor_waivers:` in the graph.
   2  the census COULD NOT ANSWER — no graph artifacts matched, the source census came back
-     empty, or a file the gate could not parse/read sits somewhere a driver could hide.
+     empty, `--base` names no commit in this checkout (misspelled, or not fetched on a shallow
+     clone), git refused the diff that builds the changed set, or a file the gate could not
+     parse/read sits somewhere a driver could hide.
      Never a silent pass (the #618/#621 convention: a gate that cannot look must not report
      clean).
 
@@ -87,10 +89,22 @@ def _sh(cmd: list[str]) -> str:
     # back as the empty string and was indistinguishable from "the diff touched nothing". That is
     # the shape the comment in `_changed_paths` warns about, arriving through this function rather
     # than around it. A census that could not run git has not answered; it has gone blind.
-    proc = subprocess.run(
-        cmd, cwd=_config.repo_root(),
-        capture_output=True, text=True, encoding="utf-8", check=False
-    )
+    #
+    # And a DECODE failure is blindness too, not a traceback: pinning the encoding defeats the
+    # ambient locale, but `text=True` still decodes STRICTLY, so a repo with `core.quotePath=false`
+    # and a latin-1 path name raises out of `subprocess.run` itself — before the returncode check
+    # below can say anything — and exit 1 ("looked, found something") is what the caller reads.
+    try:
+        proc = subprocess.run(
+            cmd, cwd=_config.repo_root(),
+            capture_output=True, text=True, encoding="utf-8", check=False
+        )
+    except UnicodeDecodeError as exc:
+        raise CensusBlind(
+            f"`{' '.join(cmd)}` emitted bytes that are not utf-8 in {_config.repo_root()} "
+            f"({exc}) — the changed set could not be built. Set `core.quotePath=true` (git's "
+            f"default) so non-ASCII paths arrive C-quoted."
+        ) from exc
     if proc.returncode != 0:
         raise CensusBlind(
             f"`{' '.join(cmd)}` exited {proc.returncode} in {_config.repo_root()} — the changed "
@@ -395,8 +409,11 @@ def main(argv: list[str]) -> int:
     # utf-8 out is the OUTPUT twin of the utf-8-pinned reads in `_read_texts` — see _cli.
     _cli.utf8_stdio()
     opts, args = _cli.parse_argv(argv, valued={"--base", "--config"})
-    base = opts["base"] or "main"
     cfg = _config.load(opts["config"])
+    # The profile's branch, not a hardcoded "main" (#949). The preflight this PR adds turns a
+    # wrong default into a hard exit 2 rather than a quiet empty diff, so the default has to be
+    # the one the project actually declares.
+    base = opts["base"] or cfg["defaultBranch"]
     graphs = [Path(a) for a in args] or _config.artifacts(cfg)
     try:
         if not graphs:

@@ -143,8 +143,9 @@ def check_alphabet(path: Path, graph: dict) -> list[str]:
     for c in graph.get("claims", []) or []:
         # NOT gated on `probe_kind == "executed"` (#949). It was, and that made the rule
         # unfireable on exactly the claims it was written for: `_REQUIRED["census"] == {"search"}`
-        # and `:292` makes a census claim that closed on any other instrument a finding in its
-        # own right, so no gate-clean graph can ever present a census claim with
+        # and `check()`'s `pk not in _REQUIRED[kind]` arm make a census claim that closed on any
+        # other instrument a finding in its own right, so no gate-clean graph can ever present a
+        # census claim with
         # `probe_kind: executed`. Nine committed census claims enumerate a tree with `ls-files`
         # / `rglob` / `iterdir` and record no alphabet; every one of them was skipped here.
         # An enumeration is spelled as a `search` or a `read` probe as readily as an executed one.
@@ -316,6 +317,11 @@ def check(path: Path, graph: dict) -> list[str]:
 
 
 def main(argv: list[str]) -> int:
+    # utf-8 out, like every other main in this family: the finding text carries em-dashes,
+    # so a C/ascii-locale runner raises UnicodeEncodeError on the very `print` that reports a
+    # finding — a traceback behind exit 1 ("looked, found something") for output that never
+    # arrived. `check_binds` and `check_claims` were the only two mains without this call.
+    _cli.utf8_stdio()
     opts, args = _cli.parse_argv(argv, valued={"--config"})
     cfg = _config.load(opts["config"])
     paths = [Path(a) for a in args] or _config.artifacts(cfg)

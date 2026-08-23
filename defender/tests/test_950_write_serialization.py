@@ -49,9 +49,16 @@ from defender.tests._review_bundle import bundle, composer_reply  # noqa: E402
 DEFENDER = Path(__file__).resolve().parents[1]
 GOLDEN = DEFENDER / "fixtures-e2e" / "golden-sshpivot-ab3" / "investigation.md"
 
-#: The tools that WRITE — the roster this file's serialization rule is about. A read-only tool
-#: running concurrently with anything is fine; two writers are not. Named here rather than
-#: derived, so adding a writer is a deliberate edit to this list and not a silent exemption.
+#: The tools that write ONE SHARED ARTIFACT — the roster this file's serialization rule is
+#: about. A read-only tool running concurrently with anything is fine; two writers racing on one
+#: file are not. Named here rather than derived, so adding a writer is a deliberate edit to this
+#: list and not a silent exemption — which also means this list is the rule's whole reach, and a
+#: new writer that never joins it is not checked. What is deliberately OUT: `bash` (writes only
+#: inside the box) and `gather` (registered by `driver.build_agent` through
+#: `register_gather_tool`, and it persists per `lead_id`, so its own docstring promises the
+#: parallel dispatch that `sequential=True` would take away). `write_file`/`edit_file` are not
+#: MAIN's — `MAIN_DEF.tools` carries `write=False` — but they are unserialized on the roles that
+#: do grant them (CURATOR, LEAD_AUTHOR), which this roster cannot see.
 WRITERS = ("append_block", "fix_row", "close_investigation")
 
 #: Two ways a model spells a scalar field as a container. Both are unhashable, which is the
@@ -59,11 +66,16 @@ WRITERS = ("append_block", "fix_row", "close_investigation")
 UNHASHABLE = ([HOLDS], {"finding": HOLDS})
 
 
-def _main_agent():
-    """MAIN's real tool roster on one agent: the whole writer surface in one place.
+@pytest.fixture(scope="module")
+def main_tools() -> dict:
+    """MAIN's real tool roster, registered once: the whole writer surface in one place.
 
     `MAIN_DEF.tools`, not a ToolSet built here — the roster under test has to be the one the
-    registry actually ships, or a writer that MAIN gains goes unchecked."""
+    registry actually ships, or a writer that MAIN gains goes unchecked.
+
+    The dict reaches a pydantic-ai private because `sequential` is not on any public surface —
+    deliberate: the flag is the thing under test, and a framework rename should fail loudly here
+    rather than silently stop checking."""
     agent = Agent("test", deps_type=AgentDeps)
     register_tools(agent, MAIN_DEF.tools)
     register_close_tool(
@@ -71,36 +83,30 @@ def _main_agent():
         stages=bundle(composer=composer_reply(finding="holds")),
         bounds=challenge_gate.default_bounds(),
     )
-    return agent
-
-
-def _registered(agent) -> dict:
-    """The agent's registered function tools by name. Reaches a pydantic-ai private because
-    `sequential` is not on any public surface — deliberate: the flag is the thing under test,
-    and a framework rename should fail loudly here rather than silently stop checking."""
     return dict(agent._function_toolset.tools)
 
 
 # ── the writer serialization rule ────────────────────────────────────────────
-def test_every_writer_main_can_call_is_sequential():
+def test_every_writer_main_can_call_is_sequential(main_tools):
     """The rule `append_block` and `fix_row` already followed, applied to the roster.
 
     A writer without the flag is a lost update whenever the model emits two tool calls in one
     response — for `close_investigation` that is the run's disposition, which report.md's
     frontmatter carries and the learning loop trains on."""
-    tools = _registered(_main_agent())
-    missing = [n for n in WRITERS if n in tools and not getattr(tools[n], "sequential", False)]
+    missing = [
+        n for n in WRITERS
+        if n in main_tools and not getattr(main_tools[n], "sequential", False)
+    ]
     assert not missing, (
         f"writer tool(s) {missing} are registered without sequential=True — two calls in one "
         f"model response would run concurrently and one write would be lost"
     )
 
 
-def test_the_writer_roster_is_actually_registered():
+def test_the_writer_roster_is_actually_registered(main_tools):
     """The control for the test above, whose `n in tools` guard would otherwise let a renamed
     or unregistered writer pass vacuously."""
-    tools = _registered(_main_agent())
-    assert set(WRITERS) <= set(tools), f"expected {WRITERS} among {sorted(tools)}"
+    assert set(WRITERS) <= set(main_tools), f"expected {WRITERS} among {sorted(main_tools)}"
 
 
 # ── the closed-vocabulary rule, both sites ───────────────────────────────────
