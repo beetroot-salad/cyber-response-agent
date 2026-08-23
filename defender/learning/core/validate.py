@@ -210,7 +210,11 @@ def _validate_finding(i: int, f: Any, allowed_types: set[str]) -> None:
         v = f[k]
         if not isinstance(v, str) or is_content_less(v):
             raise RunUnprocessable(f"finding[{i}].{k} must be a non-empty string")
-    if f["type"] not in allowed_types:
+    # `isinstance` first — `allowed_types` is a set, so a non-string `type` raises an
+    # unhashable-TypeError past `RunUnprocessable` and out of `_validate_judge_yaml`
+    # BEFORE the `*.raw.txt` audit companion is written, losing the only record of what
+    # the judge replied. The two keys checked directly above already guard this way.
+    if not isinstance(f["type"], str) or f["type"] not in allowed_types:
         raise RunUnprocessable(
             f"finding[{i}].type={f['type']!r} not in {sorted(allowed_types)}"
         )
