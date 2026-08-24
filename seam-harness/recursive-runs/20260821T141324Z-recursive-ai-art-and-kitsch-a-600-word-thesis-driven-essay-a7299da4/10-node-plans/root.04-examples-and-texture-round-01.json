@@ -1,0 +1,25 @@
+{
+  "account": "The acceptance condition is fully mechanical and checkable in isolation: produce 4–6 numbered example sketches, each naming a widely recognizable example plus one sentence of significance, no citations, at most 250 words total. All grounding context is present in the dossier (audience, register, no-obscurity rule), and no external source or sibling output is required. I therefore decide directly rather than spawning children. Deliverable follows (six examples, three from the kitsch tradition and three from current AI image culture):\n\n1. Velvet Elvis — the black-velvet portrait of Elvis Presley sold at roadside stands. It is kitsch's purest emblem, and it forecasts the glossy-but-hollow surface AI now reproduces on demand.\n2. Greeting-card verse, with its tidy, unearned uplift. It is the same saccharine sentiment the AI image defaults to when told to be \"heartwarming\" or \"dreamy.\"\n3. Dogs Playing Poker, the poster that generations have bought as art. It proves that mass-produced mawkish sentiment long predates and prepared audiences for the algorithm.\n4. The endlessly repeated AI wolf-in-a-misty-forest stock image flooding print-on-demand sites. It shows AI turning formula into commodity by maximizing bland, instantly familiar appeal.\n5. \"Théâtre d'Opéra Spatial,\" the AI-generated image that took a prize at a Colorado state fair in 2022. It reveals kitsch's sentimental sheen winning a contest because a machine satisfied the wish, not because the picture had something to say.\n6. The prompt-as-wish tail — \"hyperrealistic, cinematic, trending\" — pasted onto generations. It is the engineer's wish-list, the exact verbal stance of a greeting card asking fate to deliver the pretty ideal.\n\nTotal count: 6 examples, well under 250 words, all plain and widely recognizable, no citations.",
+  "children": [],
+  "decidability": {
+    "acceptance_mechanical": true,
+    "account": "The dossier supplies all needed constants (audience, register, no-citations, 4–6/[≤250-word]/recognizable conditions). The deliverable is a self-contained illustrative list needing no external source, sibling output, or further evidence. Six examples were produced meeting every criterion; count and word budget verified directly.",
+    "context_complete": true,
+    "grounded_referents": [
+      "Audience: general educated reader",
+      "Plain essay register, no citations",
+      "4–6 numbered example sketches required",
+      "≤250 words total",
+      "Only widely recognizable examples",
+      "Examples drawn from both kitsch tradition and current AI image culture",
+      "One sentence of significance per example"
+    ],
+    "independent_of_future_siblings": true,
+    "missing_context": []
+  },
+  "disposition": "solve",
+  "irreducible_core": null,
+  "requested_source_ids": [],
+  "requested_source_paths": [],
+  "synthesis_contract": null
+}

@@ -1,0 +1,17 @@
+{
+  "acceptance_condition": "For each candidate aggregation operator, a deterministic test (e.g., permuting input order, duplicating an input) establishes whether outputs are invariant (commutative/idempotent) or not, with effect sizes on final-answer variability reported for at least the operators used in the note's experiment.",
+  "content_sha256": "c95b9d709e1173f22fdfb151b604c799c57e61e314e933a5fdd8babb1036ccb4",
+  "demand_ids": [
+    "D3",
+    "D4"
+  ],
+  "id": "question:raised:92a7343df8a6:rq-shapiro-merge",
+  "node_id": "work:002-inv-shapiro-r2#raised:rq-shapiro-merge",
+  "rationale": "Shapiro's theorems give convergence only when merge is a semilattice LUB or updates commute (pages 5–6). Both focal baselines (independent sampling + aggregation, staged Q/A) end in an aggregation step; if that step is a stochastic LLM call, it violates these conditions, so final answers may depend on agent ordering and sampling noise — a confound for the preregistered matched-compute experiment and a mechanistic distinction between aggregation designs.",
+  "tags": [
+    "method",
+    "uncertainty",
+    "interface"
+  ],
+  "text": "Which aggregation operators used in multi-agent LLM pipelines (majority vote, evidence union, LLM free-text synthesis) satisfy or violate the CRDT sufficient conditions for well-defined merging (commutativity, idempotence, monotonicity), and does order/non-determinism of the final aggregation step measurably change the merged answer?"
+}

@@ -1,0 +1,14 @@
+{
+  "acceptance_condition": "Establish demand D2 with evidence.",
+  "content_sha256": "a1e8e73a66a88854b181cd8e700ee47c190021995492e4c13a7f3f2480683936",
+  "demand_ids": [
+    "D2"
+  ],
+  "id": "question:demand:D2",
+  "node_id": null,
+  "rationale": "The request explicitly forbids a survey-only outcome.",
+  "tags": [
+    "decision"
+  ],
+  "text": "The memo makes one concrete, implementable recommendation rather than merely surveying the literature."
+}

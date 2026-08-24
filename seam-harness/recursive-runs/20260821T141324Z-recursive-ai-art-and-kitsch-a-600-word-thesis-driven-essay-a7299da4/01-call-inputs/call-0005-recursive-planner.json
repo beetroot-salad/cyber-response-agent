@@ -1,0 +1,96 @@
+{
+  "call_id": "call-0005-recursive-planner",
+  "context": {
+    "ancestor_decisions": [
+      "Audience: general educated reader (decision:1).",
+      "Genre/register: standalone cultural criticism (decision:1).",
+      "Stance posture: the writer selects and defends a clear, nuanced thesis; a neutral survey is explicitly out of scope (decision:2).",
+      "Form expectations: plain essay prose with a title; citations and named theorists are not required (decision:3).",
+      "Suggested title from the envelope: 'AI Art and Kitsch' (title_hint).",
+      "No source materials are provided; the essay draws on the writer's own reasoning about AI art and kitsch.",
+      "This child returns analytical raw material for the parent to synthesize, not prose for the final essay."
+    ],
+    "assigned_demands": [
+      {
+        "id": "D2",
+        "rationale": "Decision:1 fixes the audience and the genre; the essay must work on its own without surrounding context.",
+        "statement": "Address a general educated reader as a piece of standalone cultural criticism."
+      }
+    ],
+    "constraints": [
+      "Total length must land within roughly 550–650 words.",
+      "The essay must be standalone: comprehensible without external context or companion materials.",
+      "A title must be present.",
+      "Plain essay prose — no citation apparatus or academic formatting required by the brief."
+    ],
+    "expansion_required": false,
+    "max_children": 4,
+    "node": {
+      "acceptance_condition": "Returns 4–6 numbered example sketches, each naming the example in plain words plus one sentence of significance; total at most 250 words; only widely recognizable examples; no obscure references and no citations.",
+      "demand_ids": [
+        "D2"
+      ],
+      "depth": 1,
+      "expected_contribution": "The concrete examples that make the essay's argument vivid and self-contained.",
+      "id": "root.04-examples-and-texture",
+      "objective": "Assemble 4–6 concrete, widely recognizable illustrations a general educated reader will know or immediately grasp, drawn both from the kitsch tradition (such as mass-market sentimental painting, greeting-card verse, velvet-Elvis decor) and from current AI image culture (such as formulaic AI images flooding stock and print-on-demand sites, AI images winning art contests, the prompt-as-wish dynamic), each with one sentence stating what it shows about AI art and kitsch.",
+      "parent_id": "root",
+      "rationale": "A standalone essay for a general reader needs concrete texture so its abstractions land; this child supplies the illustrative evidence the parent can deploy without external sources.",
+      "separator_facts": [
+        "Audience: general educated reader (decision:1).",
+        "Genre/register: standalone cultural criticism (decision:1).",
+        "Stance posture: the writer selects and defends a clear, nuanced thesis; a neutral survey is explicitly out of scope (decision:2).",
+        "Form expectations: plain essay prose with a title; citations and named theorists are not required (decision:3).",
+        "Suggested title from the envelope: 'AI Art and Kitsch' (title_hint).",
+        "No source materials are provided; the essay draws on the writer's own reasoning about AI art and kitsch.",
+        "This child returns analytical raw material for the parent to synthesize, not prose for the final essay."
+      ],
+      "source_ids": [
+        "request",
+        "decision:1",
+        "decision:3"
+      ],
+      "source_paths": []
+    },
+    "product_intent": "The essay exists to give a general educated reader a self-contained piece of cultural criticism on AI art and kitsch — one that argues a defensible, nuanced thesis in accessible prose rather than neutrally surveying the topic.",
+    "remaining_depth": 2,
+    "remaining_node_budget": 13,
+    "source_materials": [
+      {
+        "content": "Write an approximately 600-word essay on AI art and kitsch.",
+        "id": "request",
+        "kind": "natural_request",
+        "label": "Original task request",
+        "locator": null
+      },
+      {
+        "content": "The audience is a general educated reader and the essay is standalone cultural criticism.",
+        "id": "decision:1",
+        "kind": "user_decision",
+        "label": "Explicit user decision 1",
+        "locator": null
+      },
+      {
+        "content": "Use plain essay prose with a title; no citations or named theorists are required; aim for roughly 550 to 650 words.",
+        "id": "decision:3",
+        "kind": "user_decision",
+        "label": "Explicit user decision 3",
+        "locator": null
+      }
+    ],
+    "stable_context": [
+      "Audience: general educated reader (decision:1).",
+      "Genre/register: standalone cultural criticism (decision:1).",
+      "Stance posture: the writer selects and defends a clear, nuanced thesis; a neutral survey is explicitly out of scope (decision:2).",
+      "Form expectations: plain essay prose with a title; citations and named theorists are not required (decision:3).",
+      "Suggested title from the envelope: 'AI Art and Kitsch' (title_hint).",
+      "No source materials are provided; the essay draws on the writer's own reasoning about AI art and kitsch."
+    ],
+    "workspace_documents": [],
+    "workspace_index": []
+  },
+  "dependency_type": "PlanningDeps",
+  "input_sha256": "eba05480c7d56042cc29b6374535546d10eadbaaa9e4826b6ccc31649069269c",
+  "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+  "role": "recursive_planner"
+}

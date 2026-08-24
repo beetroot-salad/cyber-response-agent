@@ -1,0 +1,10 @@
+{
+  "content_sha256": "a38d4ecfe5b32cd22ed95e358fa14a72e4d948b25d678dc86da9be0315beac7b",
+  "id": "link:a38d4ecfe5b32cd22ed95e35",
+  "origin": "runtime",
+  "proposed_by_node_id": null,
+  "rationale": null,
+  "relation": "depends_on",
+  "source_id": "question:raised:07d805ce56d7:rq-sharp",
+  "target_id": "question:demand:D4"
+}

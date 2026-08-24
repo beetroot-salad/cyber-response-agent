@@ -1,0 +1,428 @@
+{
+  "created_at": "2026-08-21T16:38:22.979193+00:00",
+  "events": [
+    {
+      "event_hash": "ee7ce9e3f784329260b2a3401092a18f338ae332a3f2a5f1cfdd381760219576",
+      "index": 0,
+      "metadata": {},
+      "name": "recursive-run",
+      "path": "00-input/recursive-run.json",
+      "previous_event_hash": null,
+      "record_sha256": "7622eae7f69ef998bceae0138ba9ffa00cb736526a64c12966dcd1300fd93348",
+      "stage": "00-input",
+      "timestamp": "2026-08-21T16:38:23.034372+00:00"
+    },
+    {
+      "event_hash": "85344fde00963aaebe29ef9d35b5aa6ac458632cc3bc89584d008d284215918e",
+      "index": 1,
+      "metadata": {},
+      "name": "replay-source",
+      "path": "00-input/replay-source.json",
+      "previous_event_hash": "ee7ce9e3f784329260b2a3401092a18f338ae332a3f2a5f1cfdd381760219576",
+      "record_sha256": "c2646505e6af06c196ba535a74d1f2303cd2d1f96b97262c1b40bf0188e937b9",
+      "stage": "00-input",
+      "timestamp": "2026-08-21T16:38:23.036640+00:00"
+    },
+    {
+      "event_hash": "6d7e19d887b5e1914cf649cd9c196af7be47c8f3c8693f3ada4f1f7ce038d1d9",
+      "index": 2,
+      "metadata": {
+        "role": "node_plan_replay",
+        "source_run": "/workspace/seam-harness/harder-runs/20260821T162556Z-recursive-four-unit-fractions-summing-to-one-half-3bcd5059"
+      },
+      "name": "root-round-01",
+      "path": "10-node-plans/root-round-01.json",
+      "previous_event_hash": "85344fde00963aaebe29ef9d35b5aa6ac458632cc3bc89584d008d284215918e",
+      "record_sha256": "a718e0072d6140c0a603778eda967f74582087deb984ac261141a5e916b2b5e4",
+      "stage": "10-node-plans",
+      "timestamp": "2026-08-21T16:38:23.104616+00:00"
+    },
+    {
+      "event_hash": "7e60630092ccb4667474819f496ce32bdaefa8e020370006146c7a3fe57ca9f8",
+      "index": 3,
+      "metadata": {
+        "original_packet_sha256": "e5fa0b8f043e3862345d1227c06181aaf307400d8275fe24f8d7f5fed6108086",
+        "replayed_from": "/workspace/seam-harness/harder-runs/20260821T162556Z-recursive-four-unit-fractions-summing-to-one-half-3bcd5059"
+      },
+      "name": "root.01-theory-bounds-lemma",
+      "path": "30-evidence-packets/root.01-theory-bounds-lemma.json",
+      "previous_event_hash": "6d7e19d887b5e1914cf649cd9c196af7be47c8f3c8693f3ada4f1f7ce038d1d9",
+      "record_sha256": "09781606e75117db698cc8f79b7eec80b2887ea15065ac4b2314ab557411d63d",
+      "stage": "30-evidence-packets",
+      "timestamp": "2026-08-21T16:38:23.161845+00:00"
+    },
+    {
+      "event_hash": "0074fc448d9653149a9b74f414ce5e369492e70d890e8628e95bb0f3bdb3d0c4",
+      "index": 4,
+      "metadata": {
+        "original_packet_sha256": "e5fa0b8f043e3862345d1227c06181aaf307400d8275fe24f8d7f5fed6108086",
+        "replayed_from": "/workspace/seam-harness/harder-runs/20260821T162556Z-recursive-four-unit-fractions-summing-to-one-half-3bcd5059"
+      },
+      "name": "root.01-theory-bounds-lemma",
+      "path": "31-node-traces/root.01-theory-bounds-lemma.json",
+      "previous_event_hash": "7e60630092ccb4667474819f496ce32bdaefa8e020370006146c7a3fe57ca9f8",
+      "record_sha256": "f85ec1009674fe28dbbeb870b13b6ac74970eb28a85336d7b157e78ba5f1a8fb",
+      "stage": "31-node-traces",
+      "timestamp": "2026-08-21T16:38:23.235726+00:00"
+    },
+    {
+      "event_hash": "43c036624562cb9864a15f283ea1b976022a3e88496ead9f0159b591bd06db1e",
+      "index": 5,
+      "metadata": {
+        "original_packet_sha256": "a7626abceac58d13d818588fb5079fe6dc3fbc977d1038c40ffb879f7d78ea26",
+        "replayed_from": "/workspace/seam-harness/harder-runs/20260821T162556Z-recursive-four-unit-fractions-summing-to-one-half-3bcd5059"
+      },
+      "name": "root.02-table-divisor-method",
+      "path": "30-evidence-packets/root.02-table-divisor-method.json",
+      "previous_event_hash": "0074fc448d9653149a9b74f414ce5e369492e70d890e8628e95bb0f3bdb3d0c4",
+      "record_sha256": "952d4939d51a4f3f1066813dcaae43dd5cca87643c318f049b57c4fe08076ea1",
+      "stage": "30-evidence-packets",
+      "timestamp": "2026-08-21T16:38:23.323424+00:00"
+    },
+    {
+      "event_hash": "e04a7ae23db4fdab1b2eaab34ef6afa411f880341f78b2c90df6d55b35c56dab",
+      "index": 6,
+      "metadata": {
+        "original_packet_sha256": "a7626abceac58d13d818588fb5079fe6dc3fbc977d1038c40ffb879f7d78ea26",
+        "replayed_from": "/workspace/seam-harness/harder-runs/20260821T162556Z-recursive-four-unit-fractions-summing-to-one-half-3bcd5059"
+      },
+      "name": "root.02-table-divisor-method",
+      "path": "31-node-traces/root.02-table-divisor-method.json",
+      "previous_event_hash": "43c036624562cb9864a15f283ea1b976022a3e88496ead9f0159b591bd06db1e",
+      "record_sha256": "40293d1f4d26174935869ecb942503934e81659b94b2f771f9289f68e787a4a6",
+      "stage": "31-node-traces",
+      "timestamp": "2026-08-21T16:38:23.427858+00:00"
+    },
+    {
+      "event_hash": "b77b865be1eea7729c24469c8a5fbd0bbf2a983676d81d23d9482947926db420",
+      "index": 7,
+      "metadata": {
+        "role": "node_plan_replay",
+        "source_run": "/workspace/seam-harness/harder-runs/20260821T162556Z-recursive-four-unit-fractions-summing-to-one-half-3bcd5059"
+      },
+      "name": "root.03-table-direct-scan-round-01",
+      "path": "10-node-plans/root.03-table-direct-scan-round-01.json",
+      "previous_event_hash": "e04a7ae23db4fdab1b2eaab34ef6afa411f880341f78b2c90df6d55b35c56dab",
+      "record_sha256": "7820757389bf43d396b9b2dacd18064604e25125f0a07a835fcc7886ea9f1a14",
+      "stage": "10-node-plans",
+      "timestamp": "2026-08-21T16:38:23.526184+00:00"
+    },
+    {
+      "event_hash": "ea2807a0e3abf8d2dfd2ded4b70c08ccdacc6a4877810366302abdb8fea4b966",
+      "index": 8,
+      "metadata": {
+        "original_packet_sha256": "ca09c34e215ec5505944865f463fe8db76cae83b093dfad03078bd485e990f0c",
+        "replayed_from": "/workspace/seam-harness/harder-runs/20260821T162556Z-recursive-four-unit-fractions-summing-to-one-half-3bcd5059"
+      },
+      "name": "root.04-completeness-audit",
+      "path": "30-evidence-packets/root.04-completeness-audit.json",
+      "previous_event_hash": "b77b865be1eea7729c24469c8a5fbd0bbf2a983676d81d23d9482947926db420",
+      "record_sha256": "dc6e54d065ab7e0d1d2a26169283de74685032f744564bd6e1e9004802717389",
+      "stage": "30-evidence-packets",
+      "timestamp": "2026-08-21T16:38:23.666483+00:00"
+    },
+    {
+      "event_hash": "8a2e6dbb17f2590fcdf95245113f17186c32eaf4cbae66f1df70503279924794",
+      "index": 9,
+      "metadata": {
+        "original_packet_sha256": "ca09c34e215ec5505944865f463fe8db76cae83b093dfad03078bd485e990f0c",
+        "replayed_from": "/workspace/seam-harness/harder-runs/20260821T162556Z-recursive-four-unit-fractions-summing-to-one-half-3bcd5059"
+      },
+      "name": "root.04-completeness-audit",
+      "path": "31-node-traces/root.04-completeness-audit.json",
+      "previous_event_hash": "ea2807a0e3abf8d2dfd2ded4b70c08ccdacc6a4877810366302abdb8fea4b966",
+      "record_sha256": "f5d6859277ada3b6799242d45c4883638c43d6b0e0ba7853b5a6698668a5f4db",
+      "stage": "31-node-traces",
+      "timestamp": "2026-08-21T16:38:23.755775+00:00"
+    },
+    {
+      "event_hash": "59e9d5fe8b0243e501c6d4fd687e5b73d4a050ddbc12a428488f6f70c7f02083",
+      "index": 10,
+      "metadata": {
+        "original_packet_sha256": "6eb5324a93039a58e8d90e17e93259471386f81192e2f4bcc20bf95c58461929",
+        "replayed_from": "/workspace/seam-harness/harder-runs/20260821T162556Z-recursive-four-unit-fractions-summing-to-one-half-3bcd5059"
+      },
+      "name": "root.03-table-direct-scan.01-scan-x3",
+      "path": "30-evidence-packets/root.03-table-direct-scan.01-scan-x3.json",
+      "previous_event_hash": "8a2e6dbb17f2590fcdf95245113f17186c32eaf4cbae66f1df70503279924794",
+      "record_sha256": "9b8c5041a134d5e74d1ad53c20cdaa85ad4cae032008dba28c0aaa97f20a338f",
+      "stage": "30-evidence-packets",
+      "timestamp": "2026-08-21T16:38:23.895559+00:00"
+    },
+    {
+      "event_hash": "8a5aeeb6c93eac7f516fa1b53be340d2ad5fe528c6fdbceedb4efc487cfd86b2",
+      "index": 11,
+      "metadata": {
+        "original_packet_sha256": "6eb5324a93039a58e8d90e17e93259471386f81192e2f4bcc20bf95c58461929",
+        "replayed_from": "/workspace/seam-harness/harder-runs/20260821T162556Z-recursive-four-unit-fractions-summing-to-one-half-3bcd5059"
+      },
+      "name": "root.03-table-direct-scan.01-scan-x3",
+      "path": "31-node-traces/root.03-table-direct-scan.01-scan-x3.json",
+      "previous_event_hash": "59e9d5fe8b0243e501c6d4fd687e5b73d4a050ddbc12a428488f6f70c7f02083",
+      "record_sha256": "fa0daa999ecc6d183484a0125e2fa8ecf63f32de76ab1e1f3abeed08c0342fde",
+      "stage": "31-node-traces",
+      "timestamp": "2026-08-21T16:38:23.915232+00:00"
+    },
+    {
+      "event_hash": "6395cf91ad50382e3d8007a58c0d7c9c2c4912741a25fa68acf9182d3a627662",
+      "index": 12,
+      "metadata": {
+        "original_packet_sha256": "f839809f3d81878174a8bd9ddbf2538f736023be14f65047cd757cd00262c144",
+        "replayed_from": "/workspace/seam-harness/harder-runs/20260821T162556Z-recursive-four-unit-fractions-summing-to-one-half-3bcd5059"
+      },
+      "name": "root.03-table-direct-scan.02-scan-x4-x5",
+      "path": "30-evidence-packets/root.03-table-direct-scan.02-scan-x4-x5.json",
+      "previous_event_hash": "8a5aeeb6c93eac7f516fa1b53be340d2ad5fe528c6fdbceedb4efc487cfd86b2",
+      "record_sha256": "1856cfe6a66a1d2fa633190baefd996788077785a4025a76694cf47dd75f54c5",
+      "stage": "30-evidence-packets",
+      "timestamp": "2026-08-21T16:38:23.918633+00:00"
+    },
+    {
+      "event_hash": "69e4324ca4cee84a632d78e9f7cf31e00e10e1fe428ee4ace33745f36bee1f48",
+      "index": 13,
+      "metadata": {
+        "original_packet_sha256": "f839809f3d81878174a8bd9ddbf2538f736023be14f65047cd757cd00262c144",
+        "replayed_from": "/workspace/seam-harness/harder-runs/20260821T162556Z-recursive-four-unit-fractions-summing-to-one-half-3bcd5059"
+      },
+      "name": "root.03-table-direct-scan.02-scan-x4-x5",
+      "path": "31-node-traces/root.03-table-direct-scan.02-scan-x4-x5.json",
+      "previous_event_hash": "6395cf91ad50382e3d8007a58c0d7c9c2c4912741a25fa68acf9182d3a627662",
+      "record_sha256": "995ba68b3099b98ac0aa8e7b533cbaeba724ef8f2ddeca66de21e40731caf174",
+      "stage": "31-node-traces",
+      "timestamp": "2026-08-21T16:38:23.926878+00:00"
+    },
+    {
+      "event_hash": "948aa4a8cfc6e94c04831b23cbdcbf6a2f38ea9b672d2f37487a91b61d7e9674",
+      "index": 14,
+      "metadata": {
+        "role": "node_plan_replay",
+        "source_run": "/workspace/seam-harness/harder-runs/20260821T162556Z-recursive-four-unit-fractions-summing-to-one-half-3bcd5059"
+      },
+      "name": "root.03-table-direct-scan.03-scan-x6-x7-x8-round-01",
+      "path": "10-node-plans/root.03-table-direct-scan.03-scan-x6-x7-x8-round-01.json",
+      "previous_event_hash": "69e4324ca4cee84a632d78e9f7cf31e00e10e1fe428ee4ace33745f36bee1f48",
+      "record_sha256": "49a56a575c99d90761e0983f2ca05ff8b81e2adda03882bcde105a322f107214",
+      "stage": "10-node-plans",
+      "timestamp": "2026-08-21T16:38:23.937071+00:00"
+    },
+    {
+      "event_hash": "9a24cdc3caa7612d2343ccbd18de5527bfd89fff92fe992182aef7f4fca81914",
+      "index": 15,
+      "metadata": {
+        "original_packet_sha256": "5a6b8636c6a85e01b53e17d8b4a1c3b6e63c5371c2de8d4f8d2b1ba415e824d6",
+        "replayed_from": "/workspace/seam-harness/harder-runs/20260821T162556Z-recursive-four-unit-fractions-summing-to-one-half-3bcd5059"
+      },
+      "name": "root.03-table-direct-scan.04-crosscheck-bound-formula",
+      "path": "30-evidence-packets/root.03-table-direct-scan.04-crosscheck-bound-formula.json",
+      "previous_event_hash": "948aa4a8cfc6e94c04831b23cbdcbf6a2f38ea9b672d2f37487a91b61d7e9674",
+      "record_sha256": "d6719090e09fc073b55da2ffebe18020b21cfac81c9dd9e25e6d7898d4d5f010",
+      "stage": "30-evidence-packets",
+      "timestamp": "2026-08-21T16:38:24.003794+00:00"
+    },
+    {
+      "event_hash": "81db4631d72c9b671c13d2130a9f00df931b05e864c842d1f3a49ff50c4d8044",
+      "index": 16,
+      "metadata": {
+        "original_packet_sha256": "5a6b8636c6a85e01b53e17d8b4a1c3b6e63c5371c2de8d4f8d2b1ba415e824d6",
+        "replayed_from": "/workspace/seam-harness/harder-runs/20260821T162556Z-recursive-four-unit-fractions-summing-to-one-half-3bcd5059"
+      },
+      "name": "root.03-table-direct-scan.04-crosscheck-bound-formula",
+      "path": "31-node-traces/root.03-table-direct-scan.04-crosscheck-bound-formula.json",
+      "previous_event_hash": "9a24cdc3caa7612d2343ccbd18de5527bfd89fff92fe992182aef7f4fca81914",
+      "record_sha256": "24de5eb75fb54c85d0e8234ec1c4b9f445e999de5a80592b18a112133062d019",
+      "stage": "31-node-traces",
+      "timestamp": "2026-08-21T16:38:24.009594+00:00"
+    },
+    {
+      "event_hash": "08b780c1f483620849096954d192aaa046dbf4e8d3af5d5bf9e3e2d1051eb78c",
+      "index": 17,
+      "metadata": {
+        "original_packet_sha256": "6de045e4891debd8fe8019838aa9becdb9c8c1ca7099949ada464af118bc7690",
+        "replayed_from": "/workspace/seam-harness/harder-runs/20260821T162556Z-recursive-four-unit-fractions-summing-to-one-half-3bcd5059"
+      },
+      "name": "root.03-table-direct-scan.03-scan-x6-x7-x8.01-x6",
+      "path": "30-evidence-packets/root.03-table-direct-scan.03-scan-x6-x7-x8.01-x6.json",
+      "previous_event_hash": "81db4631d72c9b671c13d2130a9f00df931b05e864c842d1f3a49ff50c4d8044",
+      "record_sha256": "17b4f282849624e9eaf5e4b7648fd7a09bab8f7c90daee7a838e1fe738ddc505",
+      "stage": "30-evidence-packets",
+      "timestamp": "2026-08-21T16:38:24.021429+00:00"
+    },
+    {
+      "event_hash": "c9f59b3c9997f621474eecbc400e1266c265d2e2171cdf06cdf8d7a42db5ce73",
+      "index": 18,
+      "metadata": {
+        "original_packet_sha256": "6de045e4891debd8fe8019838aa9becdb9c8c1ca7099949ada464af118bc7690",
+        "replayed_from": "/workspace/seam-harness/harder-runs/20260821T162556Z-recursive-four-unit-fractions-summing-to-one-half-3bcd5059"
+      },
+      "name": "root.03-table-direct-scan.03-scan-x6-x7-x8.01-x6",
+      "path": "31-node-traces/root.03-table-direct-scan.03-scan-x6-x7-x8.01-x6.json",
+      "previous_event_hash": "08b780c1f483620849096954d192aaa046dbf4e8d3af5d5bf9e3e2d1051eb78c",
+      "record_sha256": "6e47c9d56e181577470e93e466aae4de252adaf4c471c56071a3e78152327a54",
+      "stage": "31-node-traces",
+      "timestamp": "2026-08-21T16:38:24.026876+00:00"
+    },
+    {
+      "event_hash": "c330daba66012629ccc6c2b6ed5734e722c2a50fb5e5787e151cd46246a67165",
+      "index": 19,
+      "metadata": {
+        "original_packet_sha256": "a590d15ebc432da58705fb1828dd20381c94584b376b4607644f183032ef95aa",
+        "replayed_from": "/workspace/seam-harness/harder-runs/20260821T162556Z-recursive-four-unit-fractions-summing-to-one-half-3bcd5059"
+      },
+      "name": "root.03-table-direct-scan.03-scan-x6-x7-x8.02-x7",
+      "path": "30-evidence-packets/root.03-table-direct-scan.03-scan-x6-x7-x8.02-x7.json",
+      "previous_event_hash": "c9f59b3c9997f621474eecbc400e1266c265d2e2171cdf06cdf8d7a42db5ce73",
+      "record_sha256": "a9c6e930d1103907937a9e6b364495597c8e5df7f090a27e78fd9bf5bf309756",
+      "stage": "30-evidence-packets",
+      "timestamp": "2026-08-21T16:38:24.032974+00:00"
+    },
+    {
+      "event_hash": "243d28c5bfbf0179a1bed98d03985b8688d2603b32cdaa6fc0c7159f2005b62b",
+      "index": 20,
+      "metadata": {
+        "original_packet_sha256": "a590d15ebc432da58705fb1828dd20381c94584b376b4607644f183032ef95aa",
+        "replayed_from": "/workspace/seam-harness/harder-runs/20260821T162556Z-recursive-four-unit-fractions-summing-to-one-half-3bcd5059"
+      },
+      "name": "root.03-table-direct-scan.03-scan-x6-x7-x8.02-x7",
+      "path": "31-node-traces/root.03-table-direct-scan.03-scan-x6-x7-x8.02-x7.json",
+      "previous_event_hash": "c330daba66012629ccc6c2b6ed5734e722c2a50fb5e5787e151cd46246a67165",
+      "record_sha256": "4f10f614b565260bf918db2e93aef5ba50f56ec522ad784d371e9e3d07c87f7a",
+      "stage": "31-node-traces",
+      "timestamp": "2026-08-21T16:38:24.036030+00:00"
+    },
+    {
+      "event_hash": "e83dd335360f2d6b896e28c4c116c49c36208a9887394458191d4bbb3ae8c127",
+      "index": 21,
+      "metadata": {
+        "original_packet_sha256": "7333c3aa10833527b40a7d73b9cfbe75dd1dbad1d2f01c79577a5c8981cd7392",
+        "replayed_from": "/workspace/seam-harness/harder-runs/20260821T162556Z-recursive-four-unit-fractions-summing-to-one-half-3bcd5059"
+      },
+      "name": "root.03-table-direct-scan.03-scan-x6-x7-x8.03-x8",
+      "path": "30-evidence-packets/root.03-table-direct-scan.03-scan-x6-x7-x8.03-x8.json",
+      "previous_event_hash": "243d28c5bfbf0179a1bed98d03985b8688d2603b32cdaa6fc0c7159f2005b62b",
+      "record_sha256": "95017332de7c34c97d770c3e66b900d65bcc3cf5e52bb144aa045bf3bee635c2",
+      "stage": "30-evidence-packets",
+      "timestamp": "2026-08-21T16:38:24.039783+00:00"
+    },
+    {
+      "event_hash": "80566d24caa663f5eb006f0afd770fe3e209308fe0b78a0a584a9e80a64809b7",
+      "index": 22,
+      "metadata": {
+        "original_packet_sha256": "7333c3aa10833527b40a7d73b9cfbe75dd1dbad1d2f01c79577a5c8981cd7392",
+        "replayed_from": "/workspace/seam-harness/harder-runs/20260821T162556Z-recursive-four-unit-fractions-summing-to-one-half-3bcd5059"
+      },
+      "name": "root.03-table-direct-scan.03-scan-x6-x7-x8.03-x8",
+      "path": "31-node-traces/root.03-table-direct-scan.03-scan-x6-x7-x8.03-x8.json",
+      "previous_event_hash": "e83dd335360f2d6b896e28c4c116c49c36208a9887394458191d4bbb3ae8c127",
+      "record_sha256": "b50cd2cbdaefc16e90e4613755731c1319a1e1c5d05eb1cd8e05389f09d53b2a",
+      "stage": "31-node-traces",
+      "timestamp": "2026-08-21T16:38:24.042875+00:00"
+    },
+    {
+      "event_hash": "851ab4a7599deb922ce32b25edd03c3ce08f74b69368dce83e8afb33f7150c6b",
+      "index": 23,
+      "metadata": {
+        "model": "fireworks:accounts/fireworks/routers/kimi-k3-fast",
+        "role": "synthesizer"
+      },
+      "name": "call-0001-synthesizer",
+      "path": "01-call-inputs/call-0001-synthesizer.json",
+      "previous_event_hash": "80566d24caa663f5eb006f0afd770fe3e209308fe0b78a0a584a9e80a64809b7",
+      "record_sha256": "0e4d088c9c08cef08fd1505f893433ab470379052fea9f9b77e3ff17339b607e",
+      "stage": "01-call-inputs",
+      "timestamp": "2026-08-21T16:38:24.050431+00:00"
+    },
+    {
+      "event_hash": "aae253243f3178d4135fc77ecd2f072bb69e2e260e0737d2ff8bedc68a78e5a2",
+      "index": 24,
+      "metadata": {
+        "call_id": "call-0001-synthesizer",
+        "elapsed_ms": 121396,
+        "input_sha256": "f6ae382859e96fa476ca60a36d16121ddc912a42eb5d4878cb2219cc4db6a984",
+        "model": "fireworks:accounts/fireworks/routers/kimi-k3-fast",
+        "role": "synthesizer",
+        "usage": {
+          "cache_read_tokens": 7616,
+          "details": {
+            "reasoning_tokens": 7904
+          },
+          "input_tokens": 7617,
+          "output_tokens": 11199,
+          "requests": 1
+        }
+      },
+      "name": "root.03-table-direct-scan.03-scan-x6-x7-x8-synthesis",
+      "path": "20-node-work/root.03-table-direct-scan.03-scan-x6-x7-x8-synthesis.json",
+      "previous_event_hash": "851ab4a7599deb922ce32b25edd03c3ce08f74b69368dce83e8afb33f7150c6b",
+      "record_sha256": "725874d209197431c1f59f37dd316589ee4d176a7f6b0baa4f06293d858589a5",
+      "stage": "20-node-work",
+      "timestamp": "2026-08-21T16:40:25.453192+00:00"
+    },
+    {
+      "event_hash": "d834aab506949c9660a7c6f08cbe442754fd43a0c9f3cae19eabff98272efa54",
+      "index": 25,
+      "metadata": {},
+      "name": "root.03-table-direct-scan.03-scan-x6-x7-x8",
+      "path": "30-evidence-packets/root.03-table-direct-scan.03-scan-x6-x7-x8.json",
+      "previous_event_hash": "aae253243f3178d4135fc77ecd2f072bb69e2e260e0737d2ff8bedc68a78e5a2",
+      "record_sha256": "a1471631dff6de2fad9c9becf3206344b64872638e878683ca0c4d036c6e7f97",
+      "stage": "30-evidence-packets",
+      "timestamp": "2026-08-21T16:40:25.458836+00:00"
+    },
+    {
+      "event_hash": "530ca78738f485fdfbd8a62a005ba6bee99d12e6ea536a1df7854b83d036817c",
+      "index": 26,
+      "metadata": {},
+      "name": "root.03-table-direct-scan.03-scan-x6-x7-x8",
+      "path": "31-node-traces/root.03-table-direct-scan.03-scan-x6-x7-x8.json",
+      "previous_event_hash": "d834aab506949c9660a7c6f08cbe442754fd43a0c9f3cae19eabff98272efa54",
+      "record_sha256": "0e04792e56475d2674acd83a7b9addd77ed457b69b62cedef92d3038295b3a20",
+      "stage": "31-node-traces",
+      "timestamp": "2026-08-21T16:40:25.462050+00:00"
+    },
+    {
+      "event_hash": "4ddc1dae634fa892d952900fce7f12dd5dfc2bbdd0cabf67722b43c24fb44d79",
+      "index": 27,
+      "metadata": {
+        "model": "fireworks:accounts/fireworks/routers/kimi-k3-fast",
+        "role": "synthesizer"
+      },
+      "name": "call-0002-synthesizer",
+      "path": "01-call-inputs/call-0002-synthesizer.json",
+      "previous_event_hash": "530ca78738f485fdfbd8a62a005ba6bee99d12e6ea536a1df7854b83d036817c",
+      "record_sha256": "0f36b9e928c6df3a5f4a2d09f09e09474b07b8de5f5a59853caabf1f085cbbc5",
+      "stage": "01-call-inputs",
+      "timestamp": "2026-08-21T16:40:25.473189+00:00"
+    },
+    {
+      "event_hash": "eb95f7a8f757640ae5d9a31b5e46649c963a76c526df84c9f635566719a14e50",
+      "index": 28,
+      "metadata": {
+        "call_id": "call-0002-synthesizer",
+        "input_sha256": "aa7735e0f228d9cb8b3199e5b4f4e286cdf662ed784d780d5eb411fee4b7beb2",
+        "model": "fireworks:accounts/fireworks/routers/kimi-k3-fast",
+        "role": "synthesizer"
+      },
+      "name": "call-0002-synthesizer",
+      "path": "02-call-errors/call-0002-synthesizer.json",
+      "previous_event_hash": "4ddc1dae634fa892d952900fce7f12dd5dfc2bbdd0cabf67722b43c24fb44d79",
+      "record_sha256": "628e7560b492c5f6e9d0e52af279df7aed87798cf3a4bd43198273afb1c61a52",
+      "stage": "02-call-errors",
+      "timestamp": "2026-08-21T16:43:12.325503+00:00"
+    },
+    {
+      "event_hash": "8c4bfcce37761e8ca38406d7b947d89bef44e2bfe1a4450899e90651bdaa6313",
+      "index": 29,
+      "metadata": {},
+      "name": "failure",
+      "path": "99-result/failure.json",
+      "previous_event_hash": "eb95f7a8f757640ae5d9a31b5e46649c963a76c526df84c9f635566719a14e50",
+      "record_sha256": "628e7560b492c5f6e9d0e52af279df7aed87798cf3a4bd43198273afb1c61a52",
+      "stage": "99-result",
+      "timestamp": "2026-08-21T16:43:12.332345+00:00"
+    }
+  ],
+  "finished_at": "2026-08-21T16:43:12.336091+00:00",
+  "run_id": "20260821T163822Z-recursive-four-unit-fractions-summing-to-one-half-088ad5ee",
+  "schema_version": 1,
+  "status": "failed"
+}

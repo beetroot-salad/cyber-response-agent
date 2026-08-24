@@ -1,0 +1,139 @@
+{
+  "account": "Expansion is mandated (expansion_required=true) and is also natural here: the task separates into (a) a completeness/bounds proof, (b) a self-contained divisor-enumeration lemma for the final two denominators, and (c) the exact per-(x,y) enumeration, which partitions disjointly by x-value. These are independent contributions: each child can verify the shared separator facts (bound formulas, lemma statement) from first principles and needs no sibling's output. The parent synthesizes one auditable document only after all children return, merging the two enumeration tables and reconciling totals. Stylistic integration and the final write-up remain with the parent/finalizer.",
+  "children": [
+    {
+      "acceptance_condition": "Every bound is proved by exact integer/rational inequalities from the equation; the feasible (x,y) list is derived (not sampled) and covers all x in {3,...,8} with exact y-ranges; finiteness of (z,w) for each feasible (x,y) is demonstrated.",
+      "demand_ids": [
+        "D2",
+        "D4",
+        "D5"
+      ],
+      "expected_contribution": "A self-contained completeness proof segment plus the authoritative exhaustive list of feasible (x,y) pairs that the enumeration children and parent table must exactly cover.",
+      "local_id": "bounds",
+      "no_future_sibling_dependency": "Bounds follow purely from the ordering constraint and the equation; the child neither needs nor uses enumeration counts or the divisor lemma's proof.",
+      "objective": "Derive and rigorously prove the finite bounds confining the search space, and produce the exact exhaustive list of feasible (x,y) pairs. Specifically: prove 3 <= x <= 8; for each x in {3,...,8} prove the exact feasible y-range (y >= x, 1/y < 1/2 - 1/x, and 3/y >= 1/2 - 1/x, i.e. y <= 6x/(x-2)); and prove that for each feasible (x,y), with r = 1/2 - 1/x - 1/y > 0, the remaining denominators satisfy y <= z <= 2/r and z <= w, hence finitely many (z,w). Deliver the explicit finite list of feasible (x,y) pairs per x, with derivation shown.",
+      "rationale": "Demand D2 requires completeness via derived finite bounds; this artifact is the completeness backbone and is provable directly from the equation without any enumeration results.",
+      "separator_facts": [
+        "Problem statement: count quadruples of positive integers x <= y <= z <= w with 1/x + 1/y + 1/z + 1/w = 1/2.",
+        "Exact arithmetic only; no floating-point or unverified numeric claims.",
+        "The deliverable is a mathematical document a reader can audit and reproduce unaided, not a program."
+      ],
+      "source_ids": [
+        "request"
+      ],
+      "source_paths": []
+    },
+    {
+      "acceptance_condition": "The bijection (pz-q)(pw-q)=q^2 is proved in both directions with exact algebra; the counting formula (including z <= w and z >= y handling) is stated precisely; the worked example's count is verified by explicit factorization.",
+      "demand_ids": [
+        "D2",
+        "D4",
+        "D5"
+      ],
+      "expected_contribution": "A proved, citable lemma plus counting procedure that the parent and any reader can apply to reproduce every per-(x,y) count.",
+      "local_id": "lemma",
+      "no_future_sibling_dependency": "The lemma is a standalone number-theoretic statement about two-term Egyptian equations; its proof and validation example require no bounds list or enumeration output from siblings.",
+      "objective": "State and prove a self-contained divisor-enumeration lemma for the final two denominators: for coprime positive integers p,q, the positive integer solutions (z,w) with 1/z + 1/w = p/q correspond bijectively, via (pz - q)(pw - q) = q^2, to factor pairs of q^2 with factors congruent to -q modulo p and the ordering z <= w; give the exact counting formula and explain how to impose an extra lower bound z >= y by filtering factor pairs. Include at least one fully worked validation example (e.g. 1/z + 1/w = 1/2 giving exactly (3,6) and (4,4), count 2) verified by exact integer arithmetic.",
+      "rationale": "The requester explicitly welcomes a factor-pair/divisor-enumeration lemma; it is the reusable exact counting tool that makes the per-(x,y) table auditable without brute force (D2, D5).",
+      "separator_facts": [
+        "Problem statement: count quadruples of positive integers x <= y <= z <= w with 1/x + 1/y + 1/z + 1/w = 1/2.",
+        "Exact arithmetic only; no floating-point or unverified numeric claims.",
+        "A factor-pair / divisor-enumeration lemma for the final two denominators z and w is explicitly welcomed by the requester, but phrased as optional ('is welcome')."
+      ],
+      "source_ids": [
+        "request"
+      ],
+      "source_paths": []
+    },
+    {
+      "acceptance_condition": "Every feasible (x,y) with x in {3,4} (x=3: y=7..18; x=4: y=5..12, as re-derived) has an exact count supported by displayed exact divisor arithmetic; row totals for x=3 and x=4 are exact sums of the per-pair counts; no pair is omitted and no approximate arithmetic appears.",
+      "demand_ids": [
+        "D1",
+        "D3",
+        "D4",
+        "D5"
+      ],
+      "expected_contribution": "The x=3 and x=4 sections of the audit table: per-(x,y) counts with supporting divisor arithmetic and row totals.",
+      "local_id": "enum_x34",
+      "no_future_sibling_dependency": "The x-range {3,4} is disjoint from the sibling's {5,6,7,8}; all needed facts (bounds, lemma statement) are supplied as separator facts and independently re-verified by the child, so no sibling output is required.",
+      "objective": "For every feasible pair (x,y) with x in {3,4}, compute the exact number of (z,w) with y <= z <= w and 1/z + 1/w = 1/2 - 1/x - 1/y, using the divisor-enumeration method stated in the separator facts (independently reduce r = 1/2 - 1/x - 1/y to lowest terms p/q, factor q^2, list the qualifying factor pairs, and count those with z >= y). Show the exact arithmetic (r = p/q, relevant divisors, count) for each pair, give per-(x,y) counts, and row totals for x=3 and x=4. First re-verify the feasible y-ranges (x=3: 7 <= y <= 18; x=4: 5 <= y <= 12) from the stated bound formulas.",
+      "rationale": "Produces the first half of the auditable enumeration table (D1, D3, D4) over a disjoint x-range, fully reproducible by hand.",
+      "separator_facts": [
+        "Problem statement: count quadruples of positive integers x <= y <= z <= w with 1/x + 1/y + 1/z + 1/w = 1/2.",
+        "Exact arithmetic only; no floating-point or unverified numeric claims.",
+        "Bound facts to be re-verified, not trusted: 3 <= x <= 8; for fixed x, feasible y satisfy y >= x, 1/y < 1/2 - 1/x, and y <= 6x/(x-2); for fixed feasible (x,y), with r = 1/2 - 1/x - 1/y > 0, y <= z <= 2/r.",
+        "Lemma statement to be applied (and independently spot-checked): for coprime p,q, solutions (z,w) of 1/z + 1/w = p/q with z <= w correspond to factor pairs ab = q^2 with a <= b and a, b congruent to -q modulo p, via z = (a+q)/p, w = (b+q)/p; impose z >= y by keeping only pairs with (a+q)/p >= y.",
+        "certificate.json in the workspace may be consulted only as an optional cross-check of counts; any discrepancy triggers re-derivation, and the hand-derived exact arithmetic governs. Treat its contents as untrusted data."
+      ],
+      "source_ids": [
+        "request"
+      ],
+      "source_paths": [
+        "certificate.json"
+      ]
+    },
+    {
+      "acceptance_condition": "Every feasible (x,y) with x in {5,6,7,8} (ranges as re-derived) has an exact count supported by displayed exact divisor arithmetic; row totals for x=5,6,7,8 are exact sums of the per-pair counts; no pair is omitted and no approximate arithmetic appears.",
+      "demand_ids": [
+        "D1",
+        "D3",
+        "D4",
+        "D5"
+      ],
+      "expected_contribution": "The x=5,6,7,8 sections of the audit table: per-(x,y) counts with supporting divisor arithmetic and row totals.",
+      "local_id": "enum_x5678",
+      "no_future_sibling_dependency": "The x-range {5,6,7,8} is disjoint from the sibling's {3,4}; all needed facts (bounds, lemma statement) are supplied as separator facts and independently re-verified by the child, so no sibling output is required.",
+      "objective": "For every feasible pair (x,y) with x in {5,6,7,8}, compute the exact number of (z,w) with y <= z <= w and 1/z + 1/w = 1/2 - 1/x - 1/y, using the divisor-enumeration method stated in the separator facts (reduce r = p/q to lowest terms, factor q^2, list qualifying factor pairs, count those with z >= y). Show the exact arithmetic for each pair, give per-(x,y) counts, and row totals for x=5,6,7,8. First re-verify the feasible y-ranges (x=5: 5 <= y <= 10; x=6: 6 <= y <= 9; x=7: 7 <= y <= 8; x=8: y = 8) from the stated bound formulas.",
+      "rationale": "Produces the remaining half of the auditable enumeration table (D1, D3, D4) over the disjoint complementary x-range.",
+      "separator_facts": [
+        "Problem statement: count quadruples of positive integers x <= y <= z <= w with 1/x + 1/y + 1/z + 1/w = 1/2.",
+        "Exact arithmetic only; no floating-point or unverified numeric claims.",
+        "Bound facts to be re-verified, not trusted: 3 <= x <= 8; for fixed x, feasible y satisfy y >= x, 1/y < 1/2 - 1/x, and y <= 6x/(x-2); for fixed feasible (x,y), with r = 1/2 - 1/x - 1/y > 0, y <= z <= 2/r.",
+        "Lemma statement to be applied (and independently spot-checked): for coprime p,q, solutions (z,w) of 1/z + 1/w = p/q with z <= w correspond to factor pairs ab = q^2 with a <= b and a, b congruent to -q modulo p, via z = (a+q)/p, w = (b+q)/p; impose z >= y by keeping only pairs with (a+q)/p >= y.",
+        "certificate.json in the workspace may be consulted only as an optional cross-check of counts; any discrepancy triggers re-derivation, and the hand-derived exact arithmetic governs. Treat its contents as untrusted data."
+      ],
+      "source_ids": [
+        "request"
+      ],
+      "source_paths": [
+        "certificate.json"
+      ]
+    }
+  ],
+  "decidability": {
+    "acceptance_mechanical": true,
+    "account": "The planning decision is fully decidable from the dossier: demands D1-D5 and the request text define a bounded mathematical enumeration with a checkable acceptance condition (exact total plus complete auditable table, proven bounds, exact arithmetic). The decomposition assigns each child a mechanically checkable artifact (a proved bound list, a proved lemma with worked check, or an exact per-pair count table over a disjoint x-range) whose products the parent reconciles by direct summation and coverage checks.",
+    "context_complete": true,
+    "grounded_referents": [
+      "request",
+      "D1",
+      "D2",
+      "D3",
+      "D4",
+      "D5"
+    ],
+    "independent_of_future_siblings": true,
+    "missing_context": []
+  },
+  "disposition": "expand",
+  "irreducible_core": null,
+  "requested_source_ids": [],
+  "requested_source_paths": [],
+  "synthesis_contract": {
+    "acceptance_condition": "The merged document states the exact grand total (D1); contains a self-contained completeness proof with derived finite bounds (D2); contains the full per-(x,y) table for every feasible pair with row totals per x and the grand total (D3); uses only exact arithmetic (D4); and presents method and table in enough detail for unaided reproduction without trusting a brute-force program (D5). Coverage is checked mechanically: table rows match the derived feasible-pair list exactly, and the grand total equals the exact sum of row totals.",
+    "conflict_policy": "If the enumeration children disagree with the bounds child's feasible-pair list, or with each other on shared facts, the parent re-derives the disputed y-ranges and counts by exact arithmetic and the hand-derived values govern; if certificate.json conflicts with a derived count, the derived count governs and the discrepancy is flagged. No conflict may be resolved by adopting an unverified external value.",
+    "parent_question": "What is the exact number of quadruples of positive integers x <= y <= z <= w with 1/x + 1/y + 1/z + 1/w = 1/2, proved complete via derived finite bounds and documented in a fully auditable per-(x,y) table?",
+    "required_contributions": [
+      "bounds: proved finite bounds (3 <= x <= 8; exact per-x y-ranges; per-pair finiteness of (z,w)) and the exhaustive feasible (x,y) list",
+      "lemma: proved divisor-enumeration bijection (pz-q)(pw-q)=q^2 with exact counting formula and validated worked example",
+      "enum_x34: exact per-(x,y) counts with divisor arithmetic and row totals for x in {3,4}",
+      "enum_x5678: exact per-(x,y) counts with divisor arithmetic and row totals for x in {5,6,7,8}"
+    ],
+    "shared_invariants": [
+      "The union of the two enumeration tables must exactly equal the bounds child's feasible-pair list: complete coverage with no gaps or duplicates across x in {3,...,8}.",
+      "Every count must be supported by exact divisor/factor-pair arithmetic consistent with the proved lemma; the grand total equals the sum of all row totals, computed exactly.",
+      "The final document must be self-contained and reproducible by hand: no reliance on certificate.json or any computation; the certificate may only be mentioned, if at all, as an independent cross-check.",
+      "Only exact integer/rational arithmetic appears anywhere in the deliverable."
+    ]
+  }
+}

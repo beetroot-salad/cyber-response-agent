@@ -1,0 +1,10 @@
+{
+  "imported_actions": 6,
+  "imported_answers": 15,
+  "imported_packets": 15,
+  "imported_questions": 30,
+  "next_step": 8,
+  "source_chain_valid": true,
+  "source_run": "/workspace/seam-harness/math-research-runs/20260822T191805Z-adaptive-markov-hurwitz-equation-a-2-b-2-c-2-d-2-4abcd-vieta-mutation-graph-structure-and-growth-4a36e20f",
+  "source_status": "completed"
+}

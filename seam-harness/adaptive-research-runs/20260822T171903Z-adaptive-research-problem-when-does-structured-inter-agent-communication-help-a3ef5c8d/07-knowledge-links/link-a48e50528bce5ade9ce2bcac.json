@@ -1,0 +1,10 @@
+{
+  "content_sha256": "a48e50528bce5ade9ce2bcac2601a43ed0dd8099097f3f73e2af133d487029f9",
+  "id": "link:a48e50528bce5ade9ce2bcac",
+  "origin": "agent",
+  "proposed_by_node_id": "work:002-inv-shapiro-r2",
+  "rationale": "This packet performs exactly the assigned compact extraction of Shapiro 2011's CRDT/SEC machinery with page-marker citations.",
+  "relation": "answers",
+  "source_id": "answer:work:002-inv-shapiro-r2",
+  "target_id": "question:work:002-inv-shapiro-r2"
+}

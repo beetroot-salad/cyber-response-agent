@@ -1,0 +1,17 @@
+{
+  "acceptance_condition": "A study with ground-truth tasks, mixed-capability LLM agents at varied majority/minority and capability configurations, measuring both answer-shift rates (conformity) and group accuracy pre/post exposure, under matched total inference compute.",
+  "content_sha256": "98a46980a67d67c9c380d05199af4120496fa3d9b4dc109c26768d618b39daf2",
+  "demand_ids": [
+    "D4",
+    "D3"
+  ],
+  "id": "question:raised:eaee61611e26:rq-choi-1",
+  "node_id": "work:002-inv-choi-r2#raised:rq-choi-1",
+  "rationale": "Choi's topics are deliberately ground-truth-free, so its conformity rates measure persuasion, not accuracy. The note's mechanism needs to know whether the capability-dominance effect (one strong agent outweighs a majority) is error-correcting (strong agent is right and pulls the group toward truth) or error-amplifying (strong agent is confidently wrong and collapses diversity) on verifiable tasks - this determines whether staged retrieval should amplify or dampen high-capability voices.",
+  "tags": [
+    "uncertainty",
+    "evidence",
+    "method"
+  ],
+  "text": "Do Choi-style conformity dynamics - majority pull dominated by single high-capability agents, and minority capitulation - reproduce on tasks with verifiable ground truth, and when they occur, do they reduce or increase aggregate error relative to independent sampling?"
+}

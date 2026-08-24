@@ -1,0 +1,21 @@
+{
+  "account": "The node's objective is to prove the finite bounds and produce the exact feasible (x,y) list. This is a bounded, checkable derivation directly from the equation: (1) x ≥ 3 from 4/x ≥ 1/2 and x < 8 from 1/x > 1/2 - 1/2? Actually x < 8 from 3/x < 1/2? More precisely, from x ≤ y ≤ z ≤ w, we have 4/x ≥ 1/2 ⇒ x ≤ 8, and 1/x < 1/2 ⇒ x > 2, so x ∈ {3,...,8}. (2) For each x, y ≥ x and 1/y < 1/2 - 1/x ⇒ y > 2x/(x-2), combined with 3/y ≥ 1/2 - 1/x ⇒ y ≤ 6x/(x-2). The exact integer ranges are mechanically computable: for x=3: y ∈ {7,...,18}; x=4: y ∈ {5,...,12}; x=5: y ∈ {5,...,10}; x=6: y ∈ {5,...,9}; x=7: y ∈ {6,...,8}; x=8: y ∈ {8,...,8}. (3) For each feasible (x,y), r = 1/2 - 1/x - 1/y > 0, and since 1/z + 1/w = r, we have 2/z ≥ r ⇒ z ≤ 2/r, and z ≤ w plus 1/z + 1/w = r gives 1/z < r ⇒ z > 1/r, hence finite z. For each z, w is determined by 1/w = r - 1/z, which must be a positive unit fraction ≥ 1/z, giving finitely many w. This proof is fully checkable by exact arithmetic. No additional evidence is needed; the dossier contains the complete problem statement and the workspace index only shows a certificate that is not needed for this proof. Therefore the node can be solved directly.",
+  "children": [],
+  "decidability": {
+    "acceptance_mechanical": true,
+    "account": "The problem statement and constraints in the dossier fully specify the bounds to prove. The acceptance condition is mechanical: each inequality must be derived from the equation and the final list must match the enumerated ranges. No sibling output is needed.",
+    "context_complete": true,
+    "grounded_referents": [
+      "x ≤ y ≤ z ≤ w positive integers",
+      "1/x + 1/y + 1/z + 1/w = 1/2",
+      "r = 1/2 - 1/x - 1/y"
+    ],
+    "independent_of_future_siblings": true,
+    "missing_context": []
+  },
+  "disposition": "solve",
+  "irreducible_core": null,
+  "requested_source_ids": [],
+  "requested_source_paths": [],
+  "synthesis_contract": null
+}

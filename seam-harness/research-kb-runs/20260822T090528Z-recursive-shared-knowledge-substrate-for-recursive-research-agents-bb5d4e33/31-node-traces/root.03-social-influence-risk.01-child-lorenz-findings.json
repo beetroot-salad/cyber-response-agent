@@ -1,0 +1,11 @@
+{
+  "child_ids": [],
+  "depth": 2,
+  "effective_disposition": "solve",
+  "node_id": "root.03-social-influence-risk.01-child-lorenz-findings",
+  "packet_id": "packet:root.03-social-influence-risk.01-child-lorenz-findings",
+  "packet_sha256": "11d7757414911f2c4ea445b3738817d07a0a5d281d30feae4aaf5efa79c27e71",
+  "parent_id": "root.03-social-influence-risk",
+  "proposed_disposition": "solve",
+  "stop_reason": null
+}

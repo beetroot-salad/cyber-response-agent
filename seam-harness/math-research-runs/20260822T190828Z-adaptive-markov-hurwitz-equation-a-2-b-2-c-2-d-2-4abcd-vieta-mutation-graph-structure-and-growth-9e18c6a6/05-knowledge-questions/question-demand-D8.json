@@ -1,0 +1,14 @@
+{
+  "acceptance_condition": "Establish demand D8 with evidence.",
+  "content_sha256": "0d16d9815ddd49c69e80cf5d585f3e55b16cefa7989a67819ecff9965d9adf08",
+  "demand_ids": [
+    "D8"
+  ],
+  "id": "question:demand:D8",
+  "node_id": null,
+  "rationale": "Explicit request item; no literature survey.",
+  "tags": [
+    "evidence"
+  ],
+  "text": "Generate and attack intermediate conjectures; formulate sharper asymptotic conjectures only when supported by explicit reasoning, and keep speculation strictly separated from proved results."
+}

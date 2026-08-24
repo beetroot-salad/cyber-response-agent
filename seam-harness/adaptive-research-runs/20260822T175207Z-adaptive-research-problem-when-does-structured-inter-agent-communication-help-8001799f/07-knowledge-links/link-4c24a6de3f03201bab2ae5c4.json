@@ -1,0 +1,10 @@
+{
+  "content_sha256": "4c24a6de3f03201bab2ae5c4916931108461c893c5af67ef24aa850a790be10f",
+  "id": "link:4c24a6de3f03201bab2ae5c4",
+  "origin": "runtime",
+  "proposed_by_node_id": null,
+  "rationale": null,
+  "relation": "refines",
+  "source_id": "question:work:002-inv-smit-mad-r2",
+  "target_id": "question:demand:D4"
+}

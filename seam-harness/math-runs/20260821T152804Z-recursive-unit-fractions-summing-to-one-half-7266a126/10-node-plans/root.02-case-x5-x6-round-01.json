@@ -1,0 +1,25 @@
+{
+  "account": "This node is fully bounded and mechanically decidable from the supplied dossier. For x=5, the equation becomes 1/y + 1/z = 3/10, which clears to (3y - 10)(3z - 10) = 100; enumerating positive factor pairs d1*d2 = 100 with d1 <= d2 and applying the congruence d ≡ 2 (mod 3) leaves only (10,10), giving y = z = 5 and the ordered triple (5,5,10). For x=6, the equation becomes 1/y + 1/z = 1/3, which clears to (y - 3)(z - 3) = 9; the positive factor pairs with x <= y are (1,9) and (3,3), giving (6,4,12) and (6,6,6) — but only (6,6,6) satisfies y <= z after the required ordering (6,4,12) is rejected because 4 < 6. Exact substitution verifies both accepted triples: 1/5+1/5+1/10 = 1/2 and 1/6+1/6+1/6 = 1/2. The cited acceptance condition is checkable by direct arithmetic with no further sibling output needed.",
+  "children": [],
+  "decidability": {
+    "acceptance_mechanical": true,
+    "account": "All required facts and methods (divisor enumeration, congruence filter, ordering condition, exact substitution) are already present in the dossier, and the acceptance condition is a finite mechanical computation with no dependence on sibling results.",
+    "context_complete": true,
+    "grounded_referents": [
+      "1/y + 1/z = 3/10 for x = 5",
+      "(3y - 10)(3z - 10) = 100",
+      "congruence d ≡ 2 (mod 3)",
+      "1/y + 1/z = 1/3 for x = 6",
+      "(y - 3)(z - 3) = 9",
+      "ordered triples (5,5,10) and (6,6,6)",
+      "direct substitution checks"
+    ],
+    "independent_of_future_siblings": true,
+    "missing_context": []
+  },
+  "disposition": "solve",
+  "irreducible_core": null,
+  "requested_source_ids": [],
+  "requested_source_paths": [],
+  "synthesis_contract": null
+}

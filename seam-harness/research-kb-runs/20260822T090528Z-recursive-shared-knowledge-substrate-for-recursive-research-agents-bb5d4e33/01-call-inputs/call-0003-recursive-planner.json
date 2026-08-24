@@ -1,0 +1,1048 @@
+{
+  "call_id": "call-0003-recursive-planner",
+  "context": {
+    "ancestor_decisions": [
+      "SC1: The evidentiary corpus is exactly seven extracted-text files under papers/text: dung-1995-argumentation.txt (Dung 1995, Artificial Intelligence 77), shapiro-et-al-2011-crdts.txt (Shapiro et al., SSS 2011), lorenz-et-al-2011-social-influence.txt (Lorenz et al., PNAS 108, 2011), du-et-al-2023-multiagent-debate.txt (Du et al. 2023, arXiv 2305.14325), smit-et-al-2023-going-mad.txt (Smit et al. 2023, arXiv 2311.17371), zhang-et-al-2025-mad-question.txt (Zhang et al. 2025, arXiv 2502.08788), choi-et-al-2025-conformity.txt (Choi et al., Findings of ACL 2025).",
+      "SC2: Page boundaries in the extracted texts are marked with lines of the form `===== PDF PAGE N =====`, and these markers are the citation anchors required by D12/C3.",
+      "SC3: The corpus intentionally contains conflicting empirical conclusions — multi-agent debate gains (Du et al. 2023) versus matched-compute null results and conformity findings (Smit et al. 2023; Zhang et al. 2025; Choi et al. 2025; Lorenz et al. 2011 on social influence undermining crowd wisdom) — and the manifest requires preserving and reconciling these conflicts.",
+      "SC4: The envelope's single conversation decision asserts that the seven full extracted texts are present in the solve workspace under papers/text with explicit PDF page markers; the intake envelope itself encloses only the manifest, not the full texts.",
+      "SC5: The manifest (material:001) is located at /workspace/seam-harness/research-kb-workspace/CORPUS.md, indicating a benchmark-style workspace named research-kb-workspace under a seam-harness directory.",
+      "SC6: The proposed substrate plus the two baselines named in D4 (open conversational forum; no inter-agent communication) naturally supply the three or more conditions required by D14.",
+      "Corpus membership: papers/text/shapiro-et-al-2011-crdts.txt is Shapiro, Preguica, Baquero, Zawirski, 'Conflict-Free Replicated Data Types' (SSS 2011); it is one of exactly seven extracted-text files under papers/text that constitute the only evidentiary corpus.",
+      "Page boundaries in the extracted texts are marked with lines of the form `===== PDF PAGE N =====`; citations must carry these markers (D12/C3).",
+      "Evidence is restricted to the seven workspace corpus files; no outside sources may be used (C2).",
+      "Source-supported claims must be clearly distinguished from design inferences in everything returned (D13)."
+    ],
+    "assigned_demands": [
+      {
+        "id": "D5",
+        "rationale": "First of six specification areas listed in the request.",
+        "statement": "The data model and its invariants are specified."
+      },
+      {
+        "id": "D7",
+        "rationale": "Third of six specification areas listed in the request.",
+        "statement": "Persistence and concurrent-update semantics are specified."
+      },
+      {
+        "id": "D10",
+        "rationale": "Sixth specification area; the request says 'the exact role of model versus runtime.'",
+        "statement": "The exact division of responsibility between model and runtime is specified."
+      },
+      {
+        "id": "D12",
+        "rationale": "Grounding scope, citation count, and page-marker requirement are stated in the request; marker format and corpus enumeration come from the manifest.",
+        "statement": "All evidentiary claims are grounded only in the supplied workspace corpus, with at least five distinct source files cited and citations carrying PDF page markers from the extracted text."
+      },
+      {
+        "id": "D13",
+        "rationale": "Stated verbatim in the request.",
+        "statement": "Source-supported claims are clearly distinguished from design inferences."
+      }
+    ],
+    "constraints": [
+      "C1: Total length must be 1,400–1,800 words.",
+      "C2: No evidence outside the seven corpus files may be used; the request restricts grounding to the supplied workspace corpus and the manifest declares these files the only evidentiary corpus for the benchmark.",
+      "C3: Citations must reference at least five distinct source files and include PDF page markers as they appear in the extracted texts (page boundaries marked `===== PDF PAGE N =====`).",
+      "C4: Papers must not be selected or weighted by desired outcome; the corpus's conflicting empirical conclusions must be preserved and reconciled."
+    ],
+    "expansion_required": false,
+    "knowledge_board": {
+      "answer_ids_by_question": {},
+      "answers_by_id": {},
+      "content_sha256": "47968ab01731530bc09c946bc6fbf5d9910f6bef2a00f6d3084b78239893611a",
+      "entry_ids_by_tag": {
+        "constraint": [
+          "question:root.02-crdt-persistence"
+        ],
+        "counterexample": [
+          "question:demand:D14",
+          "question:root",
+          "question:root.03-social-influence-risk",
+          "question:root.05-debate-nulls-boundaries"
+        ],
+        "decision": [
+          "question:demand:D1",
+          "question:demand:D2",
+          "question:demand:D3"
+        ],
+        "definition": [
+          "question:demand:D14",
+          "question:root.01-arg-semantics"
+        ],
+        "evidence": [
+          "question:demand:D10",
+          "question:demand:D11",
+          "question:demand:D12",
+          "question:demand:D13",
+          "question:demand:D15",
+          "question:demand:D4",
+          "question:demand:D5",
+          "question:demand:D7",
+          "question:demand:D8",
+          "question:demand:D9",
+          "question:root.01-arg-semantics",
+          "question:root.02-crdt-persistence",
+          "question:root.03-social-influence-risk",
+          "question:root.04-debate-gains-evidence"
+        ],
+        "measurement": [
+          "question:demand:D14",
+          "question:root",
+          "question:root.04-debate-gains-evidence",
+          "question:root.05-debate-nulls-boundaries"
+        ],
+        "method": [
+          "question:demand:D6",
+          "question:root",
+          "question:root.01-arg-semantics",
+          "question:root.02-crdt-persistence"
+        ],
+        "risk": [
+          "question:root.03-social-influence-risk",
+          "question:root.05-debate-nulls-boundaries"
+        ]
+      },
+      "incoming_link_ids_by_entry": {
+        "question:demand:D10": [
+          "link:b39e9bd6e534d53587c33f92"
+        ],
+        "question:demand:D11": [
+          "link:c0525acb5ba38548b9c5ff19",
+          "link:d508e58a1c643d9abfe73da0",
+          "link:f87ac7b536be5b768b698c28"
+        ],
+        "question:demand:D12": [
+          "link:4694364cb7b8f08ed6b70438",
+          "link:b9ccd3ec073289680e72b9c5",
+          "link:dbc379c523a802d7234d668c",
+          "link:e5bfef49b3f76c9371b77861",
+          "link:ec67afe3731a822e2d0c2942"
+        ],
+        "question:demand:D13": [
+          "link:018c1bfba9c89f886979e58a",
+          "link:3e163e5b6c87fe659c9c8b95",
+          "link:5ecc297a5272dee784b1b751",
+          "link:95a52b650d408c309a8140ee",
+          "link:9e148f747df068b5a106ef78"
+        ],
+        "question:demand:D14": [
+          "link:54ace6aa7dbc682ce36b1598",
+          "link:5fbb61d2e80f257b289c0591",
+          "link:9f307b082e580d3f1768454b"
+        ],
+        "question:demand:D15": [
+          "link:6018f82dcea4e7b30c3a5022"
+        ],
+        "question:demand:D3": [
+          "link:a83bc0e755e8fd359c4a6e60"
+        ],
+        "question:demand:D4": [
+          "link:7c6b34c58d2a7a2bcc9f5e5f"
+        ],
+        "question:demand:D5": [
+          "link:b02788fef9fd73ad10830bc3"
+        ],
+        "question:demand:D6": [
+          "link:f63ca17b95f176b627952fd3"
+        ],
+        "question:demand:D7": [
+          "link:79a9672c7c764f123cad7df4"
+        ],
+        "question:demand:D8": [
+          "link:960009408650bf4b3e01a852"
+        ],
+        "question:root": [
+          "link:088e1a7cfea6dde8ac04eab3",
+          "link:1709dd7fbf8587de0c575188",
+          "link:1e97bab1f415d57cbc837a88",
+          "link:2395134f0213cf5cee3f1947",
+          "link:48a3d569758cae1eb71a2043",
+          "link:4f798cb83c7582c38cfb88bd",
+          "link:52aaf440a0cfa52148fd0e0a",
+          "link:541766fc32e4d84c2fd63c44",
+          "link:561e0fcd22b650ab4cc0fd61",
+          "link:5b751584b8c43c9e15d281fe",
+          "link:5e97df7da6a94755d85a5407",
+          "link:709f42e6e4da8b14cdf82243",
+          "link:7a79aa5755f5b9590ce191cb",
+          "link:815a52c06ab01fa3052d160f",
+          "link:9dc3c1ef66fc5dbb330f0173",
+          "link:9e16c1c1dacc451174870ea4",
+          "link:ad2d4893bb4dadfa6cec4d51",
+          "link:dbcff4ec9d62472bedb7ee52",
+          "link:e5a9bece7311def890467b91",
+          "link:f7b3972e183578733d308198"
+        ]
+      },
+      "links_by_id": {
+        "link:018c1bfba9c89f886979e58a": {
+          "content_sha256": "018c1bfba9c89f886979e58a9631b6ef6020a5ed12294f6a1c4c676e582196bd",
+          "id": "link:018c1bfba9c89f886979e58a",
+          "relation": "refines",
+          "source_id": "question:root.04-debate-gains-evidence",
+          "target_id": "question:demand:D13"
+        },
+        "link:088e1a7cfea6dde8ac04eab3": {
+          "content_sha256": "088e1a7cfea6dde8ac04eab354d79aadb3b99bdfe714c1e70ee16af4ac5294d0",
+          "id": "link:088e1a7cfea6dde8ac04eab3",
+          "relation": "refines",
+          "source_id": "question:demand:D5",
+          "target_id": "question:root"
+        },
+        "link:1709dd7fbf8587de0c575188": {
+          "content_sha256": "1709dd7fbf8587de0c57518805fdc68ed1e83353f3c151db8647dedebbe0f474",
+          "id": "link:1709dd7fbf8587de0c575188",
+          "relation": "refines",
+          "source_id": "question:root.02-crdt-persistence",
+          "target_id": "question:root"
+        },
+        "link:1e97bab1f415d57cbc837a88": {
+          "content_sha256": "1e97bab1f415d57cbc837a88883226a5539b431d3810d7ee0268b965646a5d6f",
+          "id": "link:1e97bab1f415d57cbc837a88",
+          "relation": "refines",
+          "source_id": "question:demand:D2",
+          "target_id": "question:root"
+        },
+        "link:2395134f0213cf5cee3f1947": {
+          "content_sha256": "2395134f0213cf5cee3f1947b0c2d057b3d7f586083bbad7eb028a4e1cb94466",
+          "id": "link:2395134f0213cf5cee3f1947",
+          "relation": "refines",
+          "source_id": "question:demand:D3",
+          "target_id": "question:root"
+        },
+        "link:3e163e5b6c87fe659c9c8b95": {
+          "content_sha256": "3e163e5b6c87fe659c9c8b952fc8449114bfac7f5eaa1df8d326258e6a7b3d50",
+          "id": "link:3e163e5b6c87fe659c9c8b95",
+          "relation": "refines",
+          "source_id": "question:root.02-crdt-persistence",
+          "target_id": "question:demand:D13"
+        },
+        "link:4694364cb7b8f08ed6b70438": {
+          "content_sha256": "4694364cb7b8f08ed6b704380e475b1b267eef0480f37fe42f282740828ea040",
+          "id": "link:4694364cb7b8f08ed6b70438",
+          "relation": "refines",
+          "source_id": "question:root.01-arg-semantics",
+          "target_id": "question:demand:D12"
+        },
+        "link:48a3d569758cae1eb71a2043": {
+          "content_sha256": "48a3d569758cae1eb71a204319e430a0e2b17bbc10631decec88626d38dc50ca",
+          "id": "link:48a3d569758cae1eb71a2043",
+          "relation": "refines",
+          "source_id": "question:demand:D6",
+          "target_id": "question:root"
+        },
+        "link:4f798cb83c7582c38cfb88bd": {
+          "content_sha256": "4f798cb83c7582c38cfb88bdfd835c99a0dc601b856720119fe64365ae22c42a",
+          "id": "link:4f798cb83c7582c38cfb88bd",
+          "relation": "refines",
+          "source_id": "question:root.04-debate-gains-evidence",
+          "target_id": "question:root"
+        },
+        "link:52aaf440a0cfa52148fd0e0a": {
+          "content_sha256": "52aaf440a0cfa52148fd0e0a8b15fa3f4ceca2d9fe1d0d3675835f8b82c24bb7",
+          "id": "link:52aaf440a0cfa52148fd0e0a",
+          "relation": "refines",
+          "source_id": "question:root.03-social-influence-risk",
+          "target_id": "question:root"
+        },
+        "link:541766fc32e4d84c2fd63c44": {
+          "content_sha256": "541766fc32e4d84c2fd63c44d39b887384e9693d9c10a19e869a69b53453f7ea",
+          "id": "link:541766fc32e4d84c2fd63c44",
+          "relation": "refines",
+          "source_id": "question:demand:D4",
+          "target_id": "question:root"
+        },
+        "link:54ace6aa7dbc682ce36b1598": {
+          "content_sha256": "54ace6aa7dbc682ce36b15989cdd24cf38992ead6108329a60b48ba7f74178c9",
+          "id": "link:54ace6aa7dbc682ce36b1598",
+          "relation": "refines",
+          "source_id": "question:root.03-social-influence-risk",
+          "target_id": "question:demand:D14"
+        },
+        "link:561e0fcd22b650ab4cc0fd61": {
+          "content_sha256": "561e0fcd22b650ab4cc0fd61392437d8f3e7ca904a6e6b7e7839642ba210692d",
+          "id": "link:561e0fcd22b650ab4cc0fd61",
+          "relation": "refines",
+          "source_id": "question:demand:D1",
+          "target_id": "question:root"
+        },
+        "link:5b751584b8c43c9e15d281fe": {
+          "content_sha256": "5b751584b8c43c9e15d281fecd110c27cec4e2ff68b62909aecadf66ffec777f",
+          "id": "link:5b751584b8c43c9e15d281fe",
+          "relation": "refines",
+          "source_id": "question:root.01-arg-semantics",
+          "target_id": "question:root"
+        },
+        "link:5e97df7da6a94755d85a5407": {
+          "content_sha256": "5e97df7da6a94755d85a5407cb21fe71750a2eca9df79c7bbac4d680689fc42e",
+          "id": "link:5e97df7da6a94755d85a5407",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries",
+          "target_id": "question:root"
+        },
+        "link:5ecc297a5272dee784b1b751": {
+          "content_sha256": "5ecc297a5272dee784b1b7519dc0b15b4464cd484190bf3de02879a3f667a502",
+          "id": "link:5ecc297a5272dee784b1b751",
+          "relation": "refines",
+          "source_id": "question:root.03-social-influence-risk",
+          "target_id": "question:demand:D13"
+        },
+        "link:5fbb61d2e80f257b289c0591": {
+          "content_sha256": "5fbb61d2e80f257b289c0591a887616bbe55c8e7f85593092ba47b199a267ece",
+          "id": "link:5fbb61d2e80f257b289c0591",
+          "relation": "refines",
+          "source_id": "question:root.04-debate-gains-evidence",
+          "target_id": "question:demand:D14"
+        },
+        "link:6018f82dcea4e7b30c3a5022": {
+          "content_sha256": "6018f82dcea4e7b30c3a50227a5bbde2d9842609c4f66b0c1b1b7933d6a7a18a",
+          "id": "link:6018f82dcea4e7b30c3a5022",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries",
+          "target_id": "question:demand:D15"
+        },
+        "link:709f42e6e4da8b14cdf82243": {
+          "content_sha256": "709f42e6e4da8b14cdf82243f398085db7de30b6558d5ee57c30811a4bbb707f",
+          "id": "link:709f42e6e4da8b14cdf82243",
+          "relation": "refines",
+          "source_id": "question:demand:D7",
+          "target_id": "question:root"
+        },
+        "link:79a9672c7c764f123cad7df4": {
+          "content_sha256": "79a9672c7c764f123cad7df46a777bdbe38ef67bc5bca2231fe605d3970331ce",
+          "id": "link:79a9672c7c764f123cad7df4",
+          "relation": "refines",
+          "source_id": "question:root.02-crdt-persistence",
+          "target_id": "question:demand:D7"
+        },
+        "link:7a79aa5755f5b9590ce191cb": {
+          "content_sha256": "7a79aa5755f5b9590ce191cb65a36bfac312cd7011b4339d02a7b22f29e67a35",
+          "id": "link:7a79aa5755f5b9590ce191cb",
+          "relation": "refines",
+          "source_id": "question:demand:D8",
+          "target_id": "question:root"
+        },
+        "link:7c6b34c58d2a7a2bcc9f5e5f": {
+          "content_sha256": "7c6b34c58d2a7a2bcc9f5e5f0bce4c8a056e5bb10f00717a604aaa79136145cf",
+          "id": "link:7c6b34c58d2a7a2bcc9f5e5f",
+          "relation": "refines",
+          "source_id": "question:root.04-debate-gains-evidence",
+          "target_id": "question:demand:D4"
+        },
+        "link:815a52c06ab01fa3052d160f": {
+          "content_sha256": "815a52c06ab01fa3052d160f517b7436a84926a916c938a154527f6ad9f63fe6",
+          "id": "link:815a52c06ab01fa3052d160f",
+          "relation": "refines",
+          "source_id": "question:demand:D13",
+          "target_id": "question:root"
+        },
+        "link:95a52b650d408c309a8140ee": {
+          "content_sha256": "95a52b650d408c309a8140ee8c6ebca2fef1ce6a298affcd77e68b2c5e9698bd",
+          "id": "link:95a52b650d408c309a8140ee",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries",
+          "target_id": "question:demand:D13"
+        },
+        "link:960009408650bf4b3e01a852": {
+          "content_sha256": "960009408650bf4b3e01a8526773683245ec77daf9cd3d401176b91e3d2c5d60",
+          "id": "link:960009408650bf4b3e01a852",
+          "relation": "refines",
+          "source_id": "question:root.01-arg-semantics",
+          "target_id": "question:demand:D8"
+        },
+        "link:9dc3c1ef66fc5dbb330f0173": {
+          "content_sha256": "9dc3c1ef66fc5dbb330f0173535d446c45af5188095bf062d2f8de4e0707a33e",
+          "id": "link:9dc3c1ef66fc5dbb330f0173",
+          "relation": "refines",
+          "source_id": "question:demand:D15",
+          "target_id": "question:root"
+        },
+        "link:9e148f747df068b5a106ef78": {
+          "content_sha256": "9e148f747df068b5a106ef7855e07d89cf45cd6f352308627d4460c862c9e2b9",
+          "id": "link:9e148f747df068b5a106ef78",
+          "relation": "refines",
+          "source_id": "question:root.01-arg-semantics",
+          "target_id": "question:demand:D13"
+        },
+        "link:9e16c1c1dacc451174870ea4": {
+          "content_sha256": "9e16c1c1dacc451174870ea4511dc149959278b7f7237d7a2755f0a8820b1171",
+          "id": "link:9e16c1c1dacc451174870ea4",
+          "relation": "refines",
+          "source_id": "question:demand:D11",
+          "target_id": "question:root"
+        },
+        "link:9f307b082e580d3f1768454b": {
+          "content_sha256": "9f307b082e580d3f1768454bde85ab9516764862ddd3e20b7688a0060f590870",
+          "id": "link:9f307b082e580d3f1768454b",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries",
+          "target_id": "question:demand:D14"
+        },
+        "link:a83bc0e755e8fd359c4a6e60": {
+          "content_sha256": "a83bc0e755e8fd359c4a6e60e1429a2524d3b9f114eafad89e022184a5d223cd",
+          "id": "link:a83bc0e755e8fd359c4a6e60",
+          "relation": "refines",
+          "source_id": "question:root.01-arg-semantics",
+          "target_id": "question:demand:D3"
+        },
+        "link:ad2d4893bb4dadfa6cec4d51": {
+          "content_sha256": "ad2d4893bb4dadfa6cec4d5140baa6fa9767b2438aafa6411ce349e9e4ecc616",
+          "id": "link:ad2d4893bb4dadfa6cec4d51",
+          "relation": "refines",
+          "source_id": "question:demand:D9",
+          "target_id": "question:root"
+        },
+        "link:b02788fef9fd73ad10830bc3": {
+          "content_sha256": "b02788fef9fd73ad10830bc3e9d81dcb10ab065dd7cb0854743a1a9ff757ebb6",
+          "id": "link:b02788fef9fd73ad10830bc3",
+          "relation": "refines",
+          "source_id": "question:root.02-crdt-persistence",
+          "target_id": "question:demand:D5"
+        },
+        "link:b39e9bd6e534d53587c33f92": {
+          "content_sha256": "b39e9bd6e534d53587c33f923f5010b29d4e1d076282274cb24f7efef425bb04",
+          "id": "link:b39e9bd6e534d53587c33f92",
+          "relation": "refines",
+          "source_id": "question:root.02-crdt-persistence",
+          "target_id": "question:demand:D10"
+        },
+        "link:b9ccd3ec073289680e72b9c5": {
+          "content_sha256": "b9ccd3ec073289680e72b9c51fe29849bd5f0a857121c6ccbf09d130cc2e3ac2",
+          "id": "link:b9ccd3ec073289680e72b9c5",
+          "relation": "refines",
+          "source_id": "question:root.02-crdt-persistence",
+          "target_id": "question:demand:D12"
+        },
+        "link:c0525acb5ba38548b9c5ff19": {
+          "content_sha256": "c0525acb5ba38548b9c5ff191f7515142f60365966e0df4035197e2f190a8644",
+          "id": "link:c0525acb5ba38548b9c5ff19",
+          "relation": "refines",
+          "source_id": "question:root.04-debate-gains-evidence",
+          "target_id": "question:demand:D11"
+        },
+        "link:d508e58a1c643d9abfe73da0": {
+          "content_sha256": "d508e58a1c643d9abfe73da06ff8d2166070d8bf0177c3bb003e03a99924621c",
+          "id": "link:d508e58a1c643d9abfe73da0",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries",
+          "target_id": "question:demand:D11"
+        },
+        "link:dbc379c523a802d7234d668c": {
+          "content_sha256": "dbc379c523a802d7234d668c3e454859f9aa203d2a2e546f530980165cc90d8f",
+          "id": "link:dbc379c523a802d7234d668c",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries",
+          "target_id": "question:demand:D12"
+        },
+        "link:dbcff4ec9d62472bedb7ee52": {
+          "content_sha256": "dbcff4ec9d62472bedb7ee5294e35b526a4cde4fadd713d11e33f955d20f5328",
+          "id": "link:dbcff4ec9d62472bedb7ee52",
+          "relation": "refines",
+          "source_id": "question:demand:D14",
+          "target_id": "question:root"
+        },
+        "link:e5a9bece7311def890467b91": {
+          "content_sha256": "e5a9bece7311def890467b9156fcc92d2fec9948bcc4ff14bd2ab4b30bc4e243",
+          "id": "link:e5a9bece7311def890467b91",
+          "relation": "refines",
+          "source_id": "question:demand:D12",
+          "target_id": "question:root"
+        },
+        "link:e5bfef49b3f76c9371b77861": {
+          "content_sha256": "e5bfef49b3f76c9371b77861e45ee1d512f019aef67172fd18c7132135626f34",
+          "id": "link:e5bfef49b3f76c9371b77861",
+          "relation": "refines",
+          "source_id": "question:root.03-social-influence-risk",
+          "target_id": "question:demand:D12"
+        },
+        "link:ec67afe3731a822e2d0c2942": {
+          "content_sha256": "ec67afe3731a822e2d0c29420bb7d4b2f11e3ec8cb83837b645384f34bcf5d18",
+          "id": "link:ec67afe3731a822e2d0c2942",
+          "relation": "refines",
+          "source_id": "question:root.04-debate-gains-evidence",
+          "target_id": "question:demand:D12"
+        },
+        "link:f63ca17b95f176b627952fd3": {
+          "content_sha256": "f63ca17b95f176b627952fd3651d46f56dfec6c8994b0b0df30d2fc331ace8a9",
+          "id": "link:f63ca17b95f176b627952fd3",
+          "relation": "refines",
+          "source_id": "question:root.03-social-influence-risk",
+          "target_id": "question:demand:D6"
+        },
+        "link:f7b3972e183578733d308198": {
+          "content_sha256": "f7b3972e183578733d308198b9f3de5fda8854126c6aa66264d14afa484ff56a",
+          "id": "link:f7b3972e183578733d308198",
+          "relation": "refines",
+          "source_id": "question:demand:D10",
+          "target_id": "question:root"
+        },
+        "link:f87ac7b536be5b768b698c28": {
+          "content_sha256": "f87ac7b536be5b768b698c28521f264405bf959a3d7cc8591192a09721ce5721",
+          "id": "link:f87ac7b536be5b768b698c28",
+          "relation": "refines",
+          "source_id": "question:root.03-social-influence-risk",
+          "target_id": "question:demand:D11"
+        }
+      },
+      "outgoing_link_ids_by_entry": {
+        "question:demand:D1": [
+          "link:561e0fcd22b650ab4cc0fd61"
+        ],
+        "question:demand:D10": [
+          "link:f7b3972e183578733d308198"
+        ],
+        "question:demand:D11": [
+          "link:9e16c1c1dacc451174870ea4"
+        ],
+        "question:demand:D12": [
+          "link:e5a9bece7311def890467b91"
+        ],
+        "question:demand:D13": [
+          "link:815a52c06ab01fa3052d160f"
+        ],
+        "question:demand:D14": [
+          "link:dbcff4ec9d62472bedb7ee52"
+        ],
+        "question:demand:D15": [
+          "link:9dc3c1ef66fc5dbb330f0173"
+        ],
+        "question:demand:D2": [
+          "link:1e97bab1f415d57cbc837a88"
+        ],
+        "question:demand:D3": [
+          "link:2395134f0213cf5cee3f1947"
+        ],
+        "question:demand:D4": [
+          "link:541766fc32e4d84c2fd63c44"
+        ],
+        "question:demand:D5": [
+          "link:088e1a7cfea6dde8ac04eab3"
+        ],
+        "question:demand:D6": [
+          "link:48a3d569758cae1eb71a2043"
+        ],
+        "question:demand:D7": [
+          "link:709f42e6e4da8b14cdf82243"
+        ],
+        "question:demand:D8": [
+          "link:7a79aa5755f5b9590ce191cb"
+        ],
+        "question:demand:D9": [
+          "link:ad2d4893bb4dadfa6cec4d51"
+        ],
+        "question:root.01-arg-semantics": [
+          "link:4694364cb7b8f08ed6b70438",
+          "link:5b751584b8c43c9e15d281fe",
+          "link:960009408650bf4b3e01a852",
+          "link:9e148f747df068b5a106ef78",
+          "link:a83bc0e755e8fd359c4a6e60"
+        ],
+        "question:root.02-crdt-persistence": [
+          "link:1709dd7fbf8587de0c575188",
+          "link:3e163e5b6c87fe659c9c8b95",
+          "link:79a9672c7c764f123cad7df4",
+          "link:b02788fef9fd73ad10830bc3",
+          "link:b39e9bd6e534d53587c33f92",
+          "link:b9ccd3ec073289680e72b9c5"
+        ],
+        "question:root.03-social-influence-risk": [
+          "link:52aaf440a0cfa52148fd0e0a",
+          "link:54ace6aa7dbc682ce36b1598",
+          "link:5ecc297a5272dee784b1b751",
+          "link:e5bfef49b3f76c9371b77861",
+          "link:f63ca17b95f176b627952fd3",
+          "link:f87ac7b536be5b768b698c28"
+        ],
+        "question:root.04-debate-gains-evidence": [
+          "link:018c1bfba9c89f886979e58a",
+          "link:4f798cb83c7582c38cfb88bd",
+          "link:5fbb61d2e80f257b289c0591",
+          "link:7c6b34c58d2a7a2bcc9f5e5f",
+          "link:c0525acb5ba38548b9c5ff19",
+          "link:ec67afe3731a822e2d0c2942"
+        ],
+        "question:root.05-debate-nulls-boundaries": [
+          "link:5e97df7da6a94755d85a5407",
+          "link:6018f82dcea4e7b30c3a5022",
+          "link:95a52b650d408c309a8140ee",
+          "link:9f307b082e580d3f1768454b",
+          "link:d508e58a1c643d9abfe73da0",
+          "link:dbc379c523a802d7234d668c"
+        ]
+      },
+      "question_ids_by_answer": {},
+      "questions_by_id": {
+        "question:demand:D1": {
+          "acceptance_condition": "Establish demand D1 with evidence.",
+          "content_sha256": "358b8c8d2ee8dcbcd62f92e95fcfeb759f5784e13dd5bd756c15e8ad80406fad",
+          "demand_ids": [
+            "D1"
+          ],
+          "id": "question:demand:D1",
+          "node_id": null,
+          "rationale": "Format and length bound stated verbatim in the request.",
+          "tags": [
+            "decision"
+          ],
+          "text": "The deliverable is a single architecture decision memo of 1,400–1,800 words."
+        },
+        "question:demand:D10": {
+          "acceptance_condition": "Establish demand D10 with evidence.",
+          "content_sha256": "42c24ef84552b31fbec60cb25073a16b7d0d6ae637909b5aaa0649e671486bc9",
+          "demand_ids": [
+            "D10"
+          ],
+          "id": "question:demand:D10",
+          "node_id": null,
+          "rationale": "Sixth specification area; the request says 'the exact role of model versus runtime.'",
+          "tags": [
+            "evidence"
+          ],
+          "text": "The exact division of responsibility between model and runtime is specified."
+        },
+        "question:demand:D11": {
+          "acceptance_condition": "Establish demand D11 with evidence.",
+          "content_sha256": "b48aa66909c810d05ced3a63029ee4d813e20b8bd7343488b183f69dac4e2b40",
+          "demand_ids": [
+            "D11"
+          ],
+          "id": "question:demand:D11",
+          "node_id": null,
+          "rationale": "Required by the request and reinforced by the manifest's instruction not to select papers by desired outcome.",
+          "tags": [
+            "evidence"
+          ],
+          "text": "The memo reconciles — rather than hides — the tension between papers reporting multi-agent debate gains and papers reporting matched-compute null results or conformity."
+        },
+        "question:demand:D12": {
+          "acceptance_condition": "Establish demand D12 with evidence.",
+          "content_sha256": "70610c0e88a285479759ef950cb1fa33e28da10095af537fb19e5ee24c60fdc7",
+          "demand_ids": [
+            "D12"
+          ],
+          "id": "question:demand:D12",
+          "node_id": null,
+          "rationale": "Grounding scope, citation count, and page-marker requirement are stated in the request; marker format and corpus enumeration come from the manifest.",
+          "tags": [
+            "evidence"
+          ],
+          "text": "All evidentiary claims are grounded only in the supplied workspace corpus, with at least five distinct source files cited and citations carrying PDF page markers from the extracted text."
+        },
+        "question:demand:D13": {
+          "acceptance_condition": "Establish demand D13 with evidence.",
+          "content_sha256": "e4e6151f4fb92956ae2d8e295acd8c66fb86a3b7aa8512390bd8da1b78cda6ea",
+          "demand_ids": [
+            "D13"
+          ],
+          "id": "question:demand:D13",
+          "node_id": null,
+          "rationale": "Stated verbatim in the request.",
+          "tags": [
+            "evidence"
+          ],
+          "text": "Source-supported claims are clearly distinguished from design inferences."
+        },
+        "question:demand:D14": {
+          "acceptance_condition": "Establish demand D14 with evidence.",
+          "content_sha256": "89489912e05f5dae6a67e4300048e4863d654b8355bd1892d03970cecd421850",
+          "demand_ids": [
+            "D14"
+          ],
+          "id": "question:demand:D14",
+          "node_id": null,
+          "rationale": "Condition count and all five metric families are enumerated in the request.",
+          "tags": [
+            "counterexample",
+            "measurement",
+            "definition"
+          ],
+          "text": "A falsifiable evaluation plan compares at least three conditions and defines metrics for quality, diversity/correlation, latency, token cost, and recovery-from-wrong-consensus."
+        },
+        "question:demand:D15": {
+          "acceptance_condition": "Establish demand D15 with evidence.",
+          "content_sha256": "c63b60742108a5627760487657dad3280b9b724cdef7fd8f2f8b22e469072dc3",
+          "demand_ids": [
+            "D15"
+          ],
+          "id": "question:demand:D15",
+          "node_id": null,
+          "rationale": "Stated verbatim in the request.",
+          "tags": [
+            "evidence"
+          ],
+          "text": "Important limitations and unresolved questions are stated."
+        },
+        "question:demand:D2": {
+          "acceptance_condition": "Establish demand D2 with evidence.",
+          "content_sha256": "a1e8e73a66a88854b181cd8e700ee47c190021995492e4c13a7f3f2480683936",
+          "demand_ids": [
+            "D2"
+          ],
+          "id": "question:demand:D2",
+          "node_id": null,
+          "rationale": "The request explicitly forbids a survey-only outcome.",
+          "tags": [
+            "decision"
+          ],
+          "text": "The memo makes one concrete, implementable recommendation rather than merely surveying the literature."
+        },
+        "question:demand:D3": {
+          "acceptance_condition": "Establish demand D3 with evidence.",
+          "content_sha256": "2b4510f300813f4c6d054088afcdeb580e129c09c780589126e578caad7f1cb3",
+          "demand_ids": [
+            "D3"
+          ],
+          "id": "question:demand:D3",
+          "node_id": null,
+          "rationale": "All five capabilities are enumerated verbatim in the request.",
+          "tags": [
+            "decision"
+          ],
+          "text": "The recommended design treats questions and answers as first-class many-to-many graph objects, supporting: multiple competing answers per question; one answer addressing multiple questions; question-to-question relations; answer-to-answer provenance or conflict relations; and controlled tags."
+        },
+        "question:demand:D4": {
+          "acceptance_condition": "Establish demand D4 with evidence.",
+          "content_sha256": "495d059579b7faeff7b7c3dea23a59e4beecd9d2061aa750429abe0bdc2fd29e",
+          "demand_ids": [
+            "D4"
+          ],
+          "id": "question:demand:D4",
+          "node_id": null,
+          "rationale": "Both comparison targets are named verbatim in the request.",
+          "tags": [
+            "evidence"
+          ],
+          "text": "The design is compared against two named baselines: an open conversational forum and no inter-agent communication."
+        },
+        "question:demand:D5": {
+          "acceptance_condition": "Establish demand D5 with evidence.",
+          "content_sha256": "04efdfb487681553676fbfc02e1e0eba20f7638dcd990d68fffd3b7e56f7324a",
+          "demand_ids": [
+            "D5"
+          ],
+          "id": "question:demand:D5",
+          "node_id": null,
+          "rationale": "First of six specification areas listed in the request.",
+          "tags": [
+            "evidence"
+          ],
+          "text": "The data model and its invariants are specified."
+        },
+        "question:demand:D6": {
+          "acceptance_condition": "Establish demand D6 with evidence.",
+          "content_sha256": "16aa3a487c4a63da4bd967a8004443a36ebbea7ca9716b65b773f14e6af5e164",
+          "demand_ids": [
+            "D6"
+          ],
+          "id": "question:demand:D6",
+          "node_id": null,
+          "rationale": "Second of six specification areas listed in the request.",
+          "tags": [
+            "method"
+          ],
+          "text": "Staged visibility and the communication protocol are specified."
+        },
+        "question:demand:D7": {
+          "acceptance_condition": "Establish demand D7 with evidence.",
+          "content_sha256": "e9aace925c8874d470e5e66f133e5698e954d9c79c85ac15d05a6b1be90f8648",
+          "demand_ids": [
+            "D7"
+          ],
+          "id": "question:demand:D7",
+          "node_id": null,
+          "rationale": "Third of six specification areas listed in the request.",
+          "tags": [
+            "evidence"
+          ],
+          "text": "Persistence and concurrent-update semantics are specified."
+        },
+        "question:demand:D8": {
+          "acceptance_condition": "Establish demand D8 with evidence.",
+          "content_sha256": "be321eb0feda8aa2c452bdc5b58cd0c2d3a82e7337259f185b4b495784e0d94b",
+          "demand_ids": [
+            "D8"
+          ],
+          "id": "question:demand:D8",
+          "node_id": null,
+          "rationale": "Fourth of six specification areas listed in the request.",
+          "tags": [
+            "evidence"
+          ],
+          "text": "Contradiction and belief-revision behavior is specified."
+        },
+        "question:demand:D9": {
+          "acceptance_condition": "Establish demand D9 with evidence.",
+          "content_sha256": "fbacaee35ff37b6cdf07a99f4704b78e431674fb8d042f8604710966157351f4",
+          "demand_ids": [
+            "D9"
+          ],
+          "id": "question:demand:D9",
+          "node_id": null,
+          "rationale": "Fifth of six specification areas listed in the request.",
+          "tags": [
+            "evidence"
+          ],
+          "text": "Retrieval and ranking are specified."
+        },
+        "question:root": {
+          "acceptance_condition": "Satisfy every assigned whole-task demand and explicit constraint.",
+          "content_sha256": "4ce436fa1c007db64fdec92524d279656612f912b3191f3b4454fb209e9fb892",
+          "demand_ids": [
+            "D1",
+            "D2",
+            "D3",
+            "D4",
+            "D5",
+            "D6",
+            "D7",
+            "D8",
+            "D9",
+            "D10",
+            "D11",
+            "D12",
+            "D13",
+            "D14",
+            "D15"
+          ],
+          "id": "question:root",
+          "node_id": "root",
+          "rationale": "The whole task submitted after intake.",
+          "tags": [
+            "counterexample",
+            "method",
+            "measurement"
+          ],
+          "text": "Produce a 1,400–1,800 word architecture decision memo that commits to one concrete, implementable design for a shared knowledge substrate serving recursively decomposing AI research agents: questions and answers modeled as first-class many-to-many graph objects; the design compared against an open conversational forum and against no inter-agent communication; full specification of the data model and invariants, staged visibility and communication protocol, persistence and concurrent-update semantics, contradiction and belief-revision behavior, retrieval/ranking, and the exact role of model versus runtime; evidence restricted to the seven-file workspace corpus with at least five distinct source files cited via PDF page markers; the corpus's conflicting empirical conclusions reconciled rather than hidden; source-supported claims distinguished from design inferences; and a falsifiable evaluation plan (at least three conditions, five named metric families) plus explicit limitations and unresolved questions."
+        },
+        "question:root.01-arg-semantics": {
+          "acceptance_condition": "Returns (a) at least four findings from the Dung file, each a quote or close paraphrase carrying the file-relative citation and the exact `===== PDF PAGE N =====` marker(s) of the page where it appears, and (b) at least three design constraints for conflict/belief-revision semantics, each explicitly labeled as design inference rather than source claim.",
+          "content_sha256": "1cda59f1ebda0deba5fd22d60e9e1bdf079a900c1c0be6105aeac164ebc3d3ec",
+          "demand_ids": [
+            "D3",
+            "D8",
+            "D12",
+            "D13"
+          ],
+          "id": "question:root.01-arg-semantics",
+          "node_id": "root.01-arg-semantics",
+          "rationale": "Dung 1995 is the corpus's only formal treatment of conflict and acceptability; it grounds the conflict-relation capability of D3 and the contradiction/belief-revision specification of D8 with citable formal definitions.",
+          "tags": [
+            "definition",
+            "evidence",
+            "method"
+          ],
+          "text": "Read papers/text/dung-1995-argumentation.txt and extract, each anchored to the exact `===== PDF PAGE N =====` marker(s) where it appears: the definition of an argumentation framework (set of arguments plus binary attack relation), acceptability of an argument, conflict-free and admissible sets, the characteristic function, and the grounded/preferred/stable extension semantics, including any stated links to nonmonotonic reasoning or logic programming. Then derive, each explicitly labeled as design inference, how these notions can anchor answer-to-answer conflict/provenance relations and contradiction and belief-revision behavior in a many-to-many question/answer graph (e.g., answers as arguments, attack edges as conflicts, extensions as mutually consistent answer sets)."
+        },
+        "question:root.02-crdt-persistence": {
+          "acceptance_condition": "Returns (a) at least four findings from the Shapiro file, each a quote or close paraphrase carrying the file-relative citation and the exact `===== PDF PAGE N =====` marker(s), and (b) at least three design constraints for persistence/concurrency (including at least one explicit split between CRDT-enforced and runtime-enforced invariants), each labeled as design inference.",
+          "content_sha256": "9708f3549586149eb68c3673c506178691fb9804268b1639f230c6784a9e2085",
+          "demand_ids": [
+            "D5",
+            "D7",
+            "D10",
+            "D12",
+            "D13"
+          ],
+          "id": "question:root.02-crdt-persistence",
+          "node_id": "root.02-crdt-persistence",
+          "rationale": "Shapiro et al. 2011 is the corpus's only distributed-systems treatment; it grounds the persistence and concurrent-update specification (D7), the merge-safe portion of the data model's invariants (D5), and the runtime-versus-model enforcement boundary (D10).",
+          "tags": [
+            "evidence",
+            "method",
+            "constraint"
+          ],
+          "text": "Read papers/text/shapiro-et-al-2011-crdts.txt and extract, each anchored to the exact `===== PDF PAGE N =====` marker(s) where it appears: the distinction between state-based and operation-based CRDTs, the strong eventual consistency guarantee and its conditions, the semilattice/monotonicity requirements for convergence, and at least two concrete reusable data types (e.g., grow-only set, observed-remove set, last-writer-wins register). Then derive, each explicitly labeled as design inference, concurrent-update semantics for a many-to-many question/answer graph substrate (e.g., add-only question and answer objects, add-wins tag sets) and identify which invariants CRDTs cannot enforce (e.g., uniqueness, schema validity, tag-vocabulary control) so that the runtime must enforce them."
+        },
+        "question:root.03-social-influence-risk": {
+          "acceptance_condition": "Returns (a) at least three anchored findings per file (at least six total), each a quote or close paraphrase carrying the file-relative citation and the exact `===== PDF PAGE N =====` marker(s), and (b) at least three staged-visibility or diversity-measurement design constraints, each explicitly labeled as design inference.",
+          "content_sha256": "2f332a3b5c9f0b6fd719848ae59287e9e0a5c4fbe833be72bbf5567676c75d50",
+          "demand_ids": [
+            "D6",
+            "D11",
+            "D12",
+            "D13",
+            "D14"
+          ],
+          "id": "question:root.03-social-influence-risk",
+          "node_id": "root.03-social-influence-risk",
+          "rationale": "Lorenz 2011 and Choi 2025 are the corpus's evidence that unstructured information sharing degrades collective accuracy; they ground the staged-visibility protocol (D6), the conformity side of the reconciliation (D11), and the diversity/correlation metric family (D14).",
+          "tags": [
+            "evidence",
+            "risk",
+            "counterexample"
+          ],
+          "text": "Read papers/text/lorenz-et-al-2011-social-influence.txt and papers/text/choi-et-al-2025-conformity.txt. Extract, each anchored to the exact `===== PDF PAGE N =====` marker(s): Lorenz et al.'s core experimental findings on how social influence affects the wisdom of crowds (effects on estimate diversity, accuracy, and confidence, as stated in the text) and Choi et al.'s empirical findings on group conformity in multi-agent systems (the conditions under which agents conform to peer or majority answers, as stated in the text). Then derive, each explicitly labeled as design inference, staged-visibility constraints for the substrate (e.g., committing independent answers before exposing peers' answers, delayed or partial disclosure) and implications for measuring answer diversity and correlation."
+        },
+        "question:root.04-debate-gains-evidence": {
+          "acceptance_condition": "Returns (a) at least four anchored findings from the Du file covering claimed gains, experimental setup (agents, rounds, tasks, consensus mechanism), and stated limitations, each carrying the file-relative citation and the exact `===== PDF PAGE N =====` marker(s), and (b) at least two design constraints and one evaluation-replication requirement, each explicitly labeled as design inference.",
+          "content_sha256": "2be78886a3947f382843991a648c9946b59844f7afbc180ae5d035bf173143b2",
+          "demand_ids": [
+            "D4",
+            "D11",
+            "D12",
+            "D13",
+            "D14"
+          ],
+          "id": "question:root.04-debate-gains-evidence",
+          "node_id": "root.04-debate-gains-evidence",
+          "rationale": "Du et al. 2023 is the corpus's positive evidence for multi-agent debate; it grounds one side of the required reconciliation (D11), informs the baseline comparison (D4), and defines the replication arm of the evaluation plan (D14).",
+          "tags": [
+            "evidence",
+            "measurement"
+          ],
+          "text": "Read papers/text/du-et-al-2023-multiagent-debate.txt and extract, each anchored to the exact `===== PDF PAGE N =====` marker(s): the improvements in factuality and reasoning the paper claims for multiagent debate, the experimental setup (number of agents, number of debate rounds, tasks used, and how consensus or a final answer is reached), and any limitations the authors state. Then derive, each explicitly labeled as design inference: which debate behaviors a shared question/answer substrate must capture to retain these gains, and what an evaluation condition replicating the paper's setup would require."
+        },
+        "question:root.05-debate-nulls-boundaries": {
+          "acceptance_condition": "Returns (a) at least three anchored findings per file (at least six total), each a quote or close paraphrase carrying the file-relative citation and the exact `===== PDF PAGE N =====` marker(s), and (b) at least three reconciliation hypotheses and at least three evaluation-design constraints (together covering the five named metric families), each explicitly labeled as design inference.",
+          "content_sha256": "89203749570be368520298607541a4b6b5c225a2bc75e8bdbf69bacd54a5bc66",
+          "demand_ids": [
+            "D11",
+            "D12",
+            "D13",
+            "D14",
+            "D15"
+          ],
+          "id": "question:root.05-debate-nulls-boundaries",
+          "node_id": "root.05-debate-nulls-boundaries",
+          "rationale": "Smit et al. 2023 and Zhang et al. 2025 are the corpus's null-result and boundary-condition evidence; they ground the reconciliation (D11) without hiding it, the falsifiable evaluation plan (D14), and the limitations and unresolved questions (D15).",
+          "tags": [
+            "counterexample",
+            "measurement",
+            "risk"
+          ],
+          "text": "Read papers/text/smit-et-al-2023-going-mad.txt and papers/text/zhang-et-al-2025-mad-question.txt. Extract, each anchored to the exact `===== PDF PAGE N =====` marker(s): Smit et al.'s critical or null results on multi-agent debate (including any comparisons against single-agent or matched-compute baselines, as stated in the text) and Zhang et al.'s analysis of when and why multi-agent debate helps or fails (task dependence and boundary conditions, as stated in the text). Then derive, each explicitly labeled as design inference: at least three reconciliation hypotheses attributing the disagreement with Du et al. 2023 to named conditions (task type, compute parity, visibility or timing of peer answers), and constraints for a falsifiable evaluation plan covering quality, diversity/correlation, latency, token cost, and recovery-from-wrong-consensus."
+        }
+      },
+      "standard_tags": [
+        "definition",
+        "constraint",
+        "evidence",
+        "method",
+        "counterexample",
+        "risk",
+        "assumption",
+        "uncertainty",
+        "decision",
+        "interface",
+        "measurement",
+        "synthesis"
+      ],
+      "version": 65
+    },
+    "max_children": 5,
+    "node": {
+      "acceptance_condition": "Returns (a) at least four findings from the Shapiro file, each a quote or close paraphrase carrying the file-relative citation and the exact `===== PDF PAGE N =====` marker(s), and (b) at least three design constraints for persistence/concurrency (including at least one explicit split between CRDT-enforced and runtime-enforced invariants), each labeled as design inference.",
+      "demand_ids": [
+        "D5",
+        "D7",
+        "D10",
+        "D12",
+        "D13"
+      ],
+      "depth": 1,
+      "expected_contribution": "The persistence and concurrent-update semantics of the committed design, plus the principled line between convergence guarantees the substrate gets for free and invariants the runtime must check.",
+      "id": "root.02-crdt-persistence",
+      "knowledge_tags": [
+        "evidence",
+        "method",
+        "constraint"
+      ],
+      "objective": "Read papers/text/shapiro-et-al-2011-crdts.txt and extract, each anchored to the exact `===== PDF PAGE N =====` marker(s) where it appears: the distinction between state-based and operation-based CRDTs, the strong eventual consistency guarantee and its conditions, the semilattice/monotonicity requirements for convergence, and at least two concrete reusable data types (e.g., grow-only set, observed-remove set, last-writer-wins register). Then derive, each explicitly labeled as design inference, concurrent-update semantics for a many-to-many question/answer graph substrate (e.g., add-only question and answer objects, add-wins tag sets) and identify which invariants CRDTs cannot enforce (e.g., uniqueness, schema validity, tag-vocabulary control) so that the runtime must enforce them.",
+      "parent_id": "root",
+      "rationale": "Shapiro et al. 2011 is the corpus's only distributed-systems treatment; it grounds the persistence and concurrent-update specification (D7), the merge-safe portion of the data model's invariants (D5), and the runtime-versus-model enforcement boundary (D10).",
+      "separator_facts": [
+        "SC1: The evidentiary corpus is exactly seven extracted-text files under papers/text: dung-1995-argumentation.txt (Dung 1995, Artificial Intelligence 77), shapiro-et-al-2011-crdts.txt (Shapiro et al., SSS 2011), lorenz-et-al-2011-social-influence.txt (Lorenz et al., PNAS 108, 2011), du-et-al-2023-multiagent-debate.txt (Du et al. 2023, arXiv 2305.14325), smit-et-al-2023-going-mad.txt (Smit et al. 2023, arXiv 2311.17371), zhang-et-al-2025-mad-question.txt (Zhang et al. 2025, arXiv 2502.08788), choi-et-al-2025-conformity.txt (Choi et al., Findings of ACL 2025).",
+        "SC2: Page boundaries in the extracted texts are marked with lines of the form `===== PDF PAGE N =====`, and these markers are the citation anchors required by D12/C3.",
+        "SC3: The corpus intentionally contains conflicting empirical conclusions — multi-agent debate gains (Du et al. 2023) versus matched-compute null results and conformity findings (Smit et al. 2023; Zhang et al. 2025; Choi et al. 2025; Lorenz et al. 2011 on social influence undermining crowd wisdom) — and the manifest requires preserving and reconciling these conflicts.",
+        "SC4: The envelope's single conversation decision asserts that the seven full extracted texts are present in the solve workspace under papers/text with explicit PDF page markers; the intake envelope itself encloses only the manifest, not the full texts.",
+        "SC5: The manifest (material:001) is located at /workspace/seam-harness/research-kb-workspace/CORPUS.md, indicating a benchmark-style workspace named research-kb-workspace under a seam-harness directory.",
+        "SC6: The proposed substrate plus the two baselines named in D4 (open conversational forum; no inter-agent communication) naturally supply the three or more conditions required by D14.",
+        "Corpus membership: papers/text/shapiro-et-al-2011-crdts.txt is Shapiro, Preguica, Baquero, Zawirski, 'Conflict-Free Replicated Data Types' (SSS 2011); it is one of exactly seven extracted-text files under papers/text that constitute the only evidentiary corpus.",
+        "Page boundaries in the extracted texts are marked with lines of the form `===== PDF PAGE N =====`; citations must carry these markers (D12/C3).",
+        "Evidence is restricted to the seven workspace corpus files; no outside sources may be used (C2).",
+        "Source-supported claims must be clearly distinguished from design inferences in everything returned (D13)."
+      ],
+      "source_ids": [
+        "ref:shapiro-2011-crdts"
+      ],
+      "source_paths": [
+        "papers/text/shapiro-et-al-2011-crdts.txt"
+      ]
+    },
+    "product_intent": "The memo exists to commit the agent system to a single defensible substrate architecture — and to justify that commitment strictly from the supplied corpus — so that recursively decomposing research agents can share, contest, and reuse questions and answers as structured state, capturing the gains reported for multi-agent debate while structurally guarding against the matched-compute null results and conformity failure modes documented in the same corpus.",
+    "remaining_depth": 2,
+    "remaining_node_budget": 14,
+    "source_materials": [
+      {
+        "content": "Enumerated in material:001; asserted present in the solve workspace by the conversation decision; content not enclosed at intake.",
+        "id": "ref:shapiro-2011-crdts",
+        "kind": "referent:file",
+        "label": "Extracted text of Shapiro, Preguiça, Baquero, Zawirski, 'Conflict-Free Replicated Data Types' (SSS 2011).",
+        "locator": "papers/text/shapiro-et-al-2011-crdts.txt"
+      }
+    ],
+    "stable_context": [
+      "SC1: The evidentiary corpus is exactly seven extracted-text files under papers/text: dung-1995-argumentation.txt (Dung 1995, Artificial Intelligence 77), shapiro-et-al-2011-crdts.txt (Shapiro et al., SSS 2011), lorenz-et-al-2011-social-influence.txt (Lorenz et al., PNAS 108, 2011), du-et-al-2023-multiagent-debate.txt (Du et al. 2023, arXiv 2305.14325), smit-et-al-2023-going-mad.txt (Smit et al. 2023, arXiv 2311.17371), zhang-et-al-2025-mad-question.txt (Zhang et al. 2025, arXiv 2502.08788), choi-et-al-2025-conformity.txt (Choi et al., Findings of ACL 2025).",
+      "SC2: Page boundaries in the extracted texts are marked with lines of the form `===== PDF PAGE N =====`, and these markers are the citation anchors required by D12/C3.",
+      "SC3: The corpus intentionally contains conflicting empirical conclusions — multi-agent debate gains (Du et al. 2023) versus matched-compute null results and conformity findings (Smit et al. 2023; Zhang et al. 2025; Choi et al. 2025; Lorenz et al. 2011 on social influence undermining crowd wisdom) — and the manifest requires preserving and reconciling these conflicts.",
+      "SC4: The envelope's single conversation decision asserts that the seven full extracted texts are present in the solve workspace under papers/text with explicit PDF page markers; the intake envelope itself encloses only the manifest, not the full texts.",
+      "SC5: The manifest (material:001) is located at /workspace/seam-harness/research-kb-workspace/CORPUS.md, indicating a benchmark-style workspace named research-kb-workspace under a seam-harness directory.",
+      "SC6: The proposed substrate plus the two baselines named in D4 (open conversational forum; no inter-agent communication) naturally supply the three or more conditions required by D14."
+    ],
+    "workspace_documents": [
+      {
+        "content": "===== PDF PAGE 1 =====\n\nConﬂict-free Replicated Data Types⋆\nMarc Shapiro1,5, Nuno Preguiça2,1, Carlos Baquero3, and Marek Zawirski1,4\n1 INRIA, Paris, France\n2 CITI, Universidade Nova de Lisboa, Portugal\n3 Universidade do Minho, Portugal\n4 UPMC, Paris, France\n5 LIP6, Paris, France\nKeywords: Eventual Consistency, Replicated Shared Objects, Large-Scale Dis-\ntributed Systems\nAbstract. Replicating data under Eventual Consistency (EC) allows\nany replica to accept updates without remote synchronisation. This en-\nsures performance and scalability in large-scale distributed systems (e.g.,\nclouds). However, published EC approaches are ad-hoc and error-prone.\nUnder a formal Strong Eventual Consistency (SEC) model, we study suf-\nﬁcient conditions for convergence. A data type that satisﬁes these con-\nditions is called a Conﬂict-free Replicated Data Type (CRDT). Replicas\nof any CRDT are guaranteed to converge in a self-stabilising manner,\ndespite any number of failures. This paper formalises two popular ap-\nproaches (state- and operation-based) and their relevant suﬃcient con-\nditions. We study a number of useful CRDTs, such as sets with clean\nsemantics, supporting bothadd and remove operations, and consider in\ndepth the more complex Graph data type. CRDT types can be composed\nto develop large-scale distributed applications, and have interesting the-\noretical properties.\n1 Introduction\nReplicationandconsistencyareessentialfeaturesofanylargedistributedsystem,\nsuch as the WWW, peer-to-peer, or cloud computing platforms. The standard\n“strong consistency” approach serialises updates in a global total order [10].\nThis constitutes a performance and scalability bottleneck. Furthermore, strong\nconsistency conﬂicts with availability and partition-tolerance [8].\nWhen network delays are large or partitioning is an issue, as in delay-tolerant\nnetworks, disconnected operation, cloud computing, or P2P systems,eventual\nconsistency promises better availability and performance [17,21]. An update ex-\necutes at some replica, without synchronisation; later, it is sent to the other\n⋆ This research is supported in part by ANR project ConcoRDanT (ANR-10-BLAN\n0208). Marek Zawirski is supported in part by his Google Europe Fellowship in\nDistributed Computing 2010. Nuno Preguiça is partially supported by CITI (PEst-\nOE/EEI/UI0527/2011). Carlos Baquero is partially supported by FCT project Cas-\ntor (PTDC/EIA-EIA/104022/2008).\n\n===== PDF PAGE 2 =====\n\n2\nreplicas. All updates eventually take eﬀect at all replicas, asynchronously and\npossibly in diﬀerent orders. Concurrent updates may conﬂict; conﬂict arbitration\nmay require a consensus and a roll-back.6\nThis weaker consistency is considered acceptable for some classes of applica-\ntions. However, conﬂict resolution is hard. The literature oﬀers little guidance on\ndesigning a correct optimistic system. Ad-hoc approaches are brittle and error-\nprone; witness for instance the concurrency anomalies of the Amazon Shopping\nCart [3].\nWe propose a simple, theoretically-sound approach to eventual consistency.\nOur system model, Strong Eventual Consistency or SEC, avoids the complex-\nity of conﬂict resolution and of roll-back.Conﬂict-freedomensures safety and\nliveness despite any number of failures. It leverages simple mathematical prop-\nerties that ensure absence of conﬂict, i.e., monotonicity in a semi-lattice and/or\ncommutativity. A trivial example is a replicated counter, which (assuming no\noverﬂow) converges because its increment and decrement operations commute.\nIn our conﬂict-free replicated data types(CRDTs), an update does not require\nsynchronisation, and CRDT replicas provably converge to a correct common\nstate. CRDTs remain responsive, available and scalable despite high network\nlatency, faults, or disconnection.\nNon-trivial CRDTs are known to exist: for instance, we previously published\nTreedoc, a sequence CRDT for co-operative text editing [14]. Our aim here is to\nexpand our knowledge of the principles and practice of CRDTs. We claim the\nfollowing contributions for this paper:\n– A solution to the CAP problem, Strong Eventual Consistency (SEC).\n– Formal deﬁnitions of Strong Eventual Consistency (SEC) and of CRDTs.\n– Two suﬃcient conditions for SEC.\n– A strong equivalence between the two conditions.\n– We show that SEC is incomparable to sequential consistency.\n– Description of basic CRDTs, including integer vectors and counters.\n– More advanced CRDTs, including sets and graphs.\nWe refer the interested reader to a separate technical report [18] for further\ndetail and for a comprehensive portfolio of CRDT designs.\n2 System model\nWe consider a system of processes interconnected by an asynchronous net-\nwork. The network can partition and recover. We assume a ﬁnite setΠ =\n{p0,...,p n−1}of non-byzantine processes. Processes inΠmay crash silently;\na crashed process may remain crashed forever, or may recover with its memory\nintact. A non-crashed process is saidcorrect.\n6 Aconﬂictisacombinationofconcurrentupdates,whichmaybeindividuallycorrect,\nbut that, taken together, would violate some invariant.\n\n===== PDF PAGE 3 =====\n\n3\nD\ns2.m(s1)\ns3.m(s2)\nD\ns2.u(b)\nS\nS\ns1.u(a) s1.m(s2)\nD\ns3\ns\n1\ns2\ns\ns1\ns2\ns2\nFig. 1. State-based replication\ns1.t(a); s1.u(a')\ns2.t(b); \ns2.u(b')\nD\ns3.u(a')\ns1.u(b')\nD\ns3.u(b')\nD\nS\nS\nD\ns2.u(a')\ns3\ns\n1\ns2\ns\nb' a'\nb' Fig. 2. Operation-based replication\n2.1 State-based object\nIn this section we specify replicated objects in the so-calledstate-based style.\nThe intuition is illustrated in Figure 1. Executing an update modiﬁes the state\nof a single replica. Every replica occasionally sends its local state to some other\nreplica, which merges the state thus received into its own state. In this way,\nevery update eventually reaches every replica, either directly or indirectly.\nWith no loss of generality, we consider a single object with one replica at each\nprocess. An object is a tuple(S,s 0,q,u,m ). The replica at processpi has state\nsi∈S, called itspayload; the initial state iss0. A client of the object may read\nthe state of the object viaquery method q and modify it viaupdate method u.\nMethod m serves tomerge the state from a remote replica. A method (whether\nq,u or m) executes at a single replica.\nSystems that deliver every update to every replica eventually in a fault-\ntolerant manner are well-known in the literature, for instance gossip or anti-\nentropy approaches [5,13]. For simplicity, we will assume hereafter a fully con-\nnected communication graph, where every arc is a fair-lossy channel. Inﬁnitely\noften, the replica atpi sends (if it is correct) its current state topj; replicapj (if\nit is correct)merges the received state into its local state by executing method\nm.\nA method whose precondition is satisﬁed is saidenabled. We assume that an\nenabled method executes as soon as it is invoked. Method executions at some\nreplica are numbered sequentially from1. Thekth method execution at replica\ni will be notedf k\ni (a), wheref is eitherq,u orm, anda denotes the arguments.\nWe noteKi(f ) the ordinal of executionf at replicai, i.e.,Ki(f k\nj (a)) = k for\ni = j, and is undeﬁned otherwise. (Abusing notation somewhat, we may drop\nsubscripts, superscripts and/or arguments when there is no ambiguity.)\nThe states of a replica are numbered sequentially incrementing with each\nmethod execution. Thus, replicai has initial states0\ni = s0. Before itskth exe-\ncution of a method it has statesk−1\ni , andsk\ni afterwards. We note the transition\nsk−1\ni •f k\ni (a) = sk\ni.\nWe deﬁne state equivalences≡s′if all queries return the same result fors\nand s′. A query has no side-eﬀects, i.e.,(s•q)≡s.\nDeﬁnition 1 (Causal History (state-based)). We deﬁne the object’s\ncausal history C = [ c1,...,c n] (where ci goes through a sequence of states\nc0\ni,...,c k\ni,...) as follows. Initially,c0\ni = ∅, for alli. If thekth method execution\nat i is: (i) a queryq: the causal history does not change, i.e.,ck\ni =ck−1\ni ; (ii) an\n\n===== PDF PAGE 4 =====\n\n4\nupdate (noteduk\ni (a)): it is added to the causal history, i.e.,ck\ni =ck−1\ni ∪{uk\ni (a)};\n(iii) a mergemk\ni (sk′\ni′ ), then the local and remote histories are unioned together:\nck\ni =ck−1\ni ∪ck′\ni′ .\nWe say that an update isdelivered at some replica when it is included in the\ncausal history at that replica. An updateu happened-beforeu′iﬀu is deliv-\nered when u′executes: u→u′def\n= u∈ck−1\nj , where u′executes at replica pj\nand Kj(u′) = k. Updates areconcurrent if neither happened-before the other:\nu‖u′def\n= u⁄→u′∧u′⁄→u. Note that the causal history is a formal reasoning\ndevice, which is normally not needed in a concrete implementation.\nGiven our communication assumptions, we can conclude that, in a state-\nbased object, every update is eventually delivered to all replicas. However, this is\nnot suﬃcient to ensure that replicas converge. For instance, if the merge method\nm is a no-op, an update executed at some replica has no eﬀect on other replicas,\nand they will never converge.\n2.2 Strong Eventual Consistency\nInformally, eventual consistency means that replicas eventually reach the same\nﬁnalvalueifclientsstopsubmittingupdates.Wecapturethisintuitionasfollows:\nDeﬁnition 2 (Eventual Consistency (EC)).\nEventual delivery:An update delivered at some correct replica is eventually\ndelivered to all correct replicas:∀i,j :f∈ci⇒♦f∈cj.\nConvergence: Correct replicas that have delivered the same updates eventually\nreach equivalent state:∀i,j : □ci =cj⇒♦□si≡sj.\nTermination: All method executions terminate.\nSeveral EC systems will execute an update immediately, only to discover later\nthat it conﬂicts with another, and to roll back to resolve this conﬂict [20]. This\nconstitutes a waste of resources, and in general requires a consensus to ensure\nthat all replicas arbitrate conﬂicts in the same way. To avoid this, we require a\nstronger condition:\nDeﬁnition 3 (Strong eventual consistency (SEC)).An object is Strongly\nEventually Consistent if it is Eventually Consistent and:\nStrong Convergence:Correct replicas that have delivered the same updates\nhave equivalent state:∀i,j :ci =cj⇒si≡sj.\n2.3 State-based Convergent Replicated Data Type (CvRDT)\nWe now propose a suﬃcient condition for strong convergence in state-based\nobjects. A join semilattice (or just semilattice hereafter) is a partial order≤\nequipped with aleast upper bound(LUB)⊔for all pairs:m = x⊔y is a Least\nUpper Bound of{x,y}under≤iﬀ∀m′,x≤m′∧y≤m′⇒x≤m∧y≤m∧m≤\nm′. It follows that⊔is: commutative:x⊔y =y⊔x; idempotent:x⊔x =x; and\nassociative: (x⊔y)⊔z =x⊔(y⊔z).\n\n===== PDF PAGE 5 =====\n\n5\nDeﬁnition 4 (Monotonic semilattice object). A state-based object,\nequipped with partial order≤, noted (S,≤,s 0,q,u,m ), that has the following\nproperties, is called a monotonic semi-lattice:(i) Set S of payload values forms\na semilattice ordered by≤. (ii) Merging states with remote states′computes\nthe LUB of the two states, i.e.,s•m(s′) = s⊔s′. (iii) State is monotonically\nnon-decreasing across updates, i.e.,s≤s•u.\nTheorem 1 (Convergent Replicated Data Type (CvRDT)).Assuming\neventual delivery and termination, any state-based object that satisﬁes the mono-\ntonic semilattice property is SEC.\nForlackofspace,weomittheproofthatispresentedinacompaniontechnical\nreport [19]. A CvRDT converges towards the LUB of the most recent updates.\nWe require thatx≤y∧y≤x⇒x≡y.\n2.4 Op-based Commutative Replicated Data Type (CmRDT)\nAlternatively to the state-based style, a replicated object may be speciﬁed\nin the operation-based (or op-based) style. An op-based object is a tuple\n(S,s 0,q,t,u,P ), whereS,s 0 andq have the same meaning as above (respectively\nstate domain, initial state and query method). An op-based object has no merge\nmethod; instead an update is split into a pair(t,u ), wheret is a side-eﬀect-free\nprepare-updatemethod and u is an eﬀect-updatemethod. The prepare-update\nexecutes at the single replica where the operation is invoked (itssource). At\nthe source, prepare-update methodt is followed immediately by eﬀect-update\nmethod u, i.e.,f k−1\ni = t⇒f k\ni = u. (If this were not true, there would be no\ncausality between successive updates.)\nThe eﬀect-update method executes at all replicas (saiddownstream). The\nsource replica delivers the eﬀect-update to downstream replicas using a commu-\nnication protocol speciﬁed by the delivery relationP, explained below.\nWe use the same notations for states and causal history as above, except that\nnow f can refer to any ofq,t or u. Both queries and prepare-update methods\nare side-eﬀect-free, i.e.,s•q≡s•t≡s.\nDeﬁnition 5 (Causal History (op-based)).An object’scausal historyC =\n{c1,...,c n}is deﬁned as follows. Initially,c0\ni = ∅, for alli. If thekth method\nexecution ati is: (i) a queryq or a prepare-updatet, the causal history does not\nchange, i.e.,ck\ni =ck−1\ni ; (ii) an eﬀect-updateuk\ni (a), thenck\ni =ck−1\ni ∪{uk\ni (a)}.\nAn update is said delivered at a replica when the update is included in the\nreplica’s causal history. Update(t,u ) happened-before (t′,u′) iﬀ the former is\ndelivered when the latter executes:(t,u )→(t′,u′)⇔u∈ck−1\nj , wheret′executes\nat pj and k =Kj(t′). The deﬁnition of concurrent updates remains as above.\nWe assume an underlying reliable causally-ordered broadcast communication\nprotocol, i.e., one that delivers every message to every recipient exactly once\nand in an order consistent with happened-before. Such protocols are a standard\nfeature of distributed systems; they do not require consensus and they deliver\n\n===== PDF PAGE 6 =====\n\n6\nto all correct processes as long as any network partition eventually recovers (as\nwe assumed earlier). It follows that two updates that are related by happened-\nbefore execute at all replicas in the same sequential order:(t,u )→(t′,u′)⇒\n∀i,K i(u)<K i(u′). However, concurrent updates may be delivered in any order.\nDeﬁnition 6 (Commutativity).Updates (t,u ) and (t′,u′) commute, iﬀ for\nany reachable replica states where bothu andu′are enabled,u (resp.u′) remains\nenabled in states•u′(resp.s•u), ands•u•u′≡s•u′•u.\nClearly, a suﬃcient condition for convergence of an op-based object is that all\nits concurrent operations commute. An object satisfying this condition is called\na Commutative Replicated Data Type (CmRDT).\nP is a delivery precondition, i.e., eﬀect-update methodu is enabled only if\nthe precondition is satisﬁed. We interpret this temporally, i.e., delivery ofu at\nreplicai may delayed, untilP (si,u ) is true. Therefore, for liveness, we now have\nthe added obligation to prove that delivery is eventually enabled. Therefore\nwe restrict our scope to preconditions for which causally-ordered broadcast is\nsuﬃcient to ensureP.\nTheorem 2 (Commutative Replicated Data Type (CmRDT)).Assum-\ning causal delivery of updates and method termination, any op-based object that\nsatisﬁes the commutativity property for all concurrent updates, and whose deliv-\nery precondition is satisﬁed by causal delivery, is SEC.\nThe proof is presented in [19].\n3 Some results\n3.1 Fault-tolerance and the CAP theorem\nThe CAP theorem states that it is impossible to simultaneously ensure strong\nconsistency (C), availability (A) and tolerate network partition (P) [8]. As, net-\nwork faults unavoidably occur in a large-scale environment, a real system must\nsacriﬁce either consistency or availability. Availability is often the top priority in\npractice [3]: does this mean giving up all consistency guarantees?\nNo: SEC provides a solution. A SEC replica is always available for both reads\nand writes, independently of network conditions. Any communicating subset of\nreplicas of a SEC object eventually converges, even if partitioned from the rest\nof the network. SEC is weaker than strong consistency but nonetheless provides\nthe well-deﬁned guarantee of strong eventual convergence.\nSEC provides an extreme form of fault tolerance, as a SEC object tolerates\nup ton−1 simultaneous crashes. Remarkably, SEC does not require to solve\nconsensus.\n\n===== PDF PAGE 7 =====\n\n7\n3.2 CvRDTs and CmRDTs are equivalent\nOperation-based emulation of a state-based object\nTheorem 3 (CmRDT emulation).Any SEC state-based object can be emu-\nlated by a SEC op-based object of a corresponding interface.\nProof. Given a CvRDT represented by tuple(S,≤,s 0,q,u,m ), we emulate it by\na CmRDT object(S,s 0,q,t,u ′,P ), which we specify hereby.\nState and query of CvRDT can be directly stored and processed by emulating\nCmRDTusingthesamedeﬁnitions.Aprepare-update t(a)hasthesameinterface\n(accepts the same domain of arguments and returns the same domain of value)\nas an updateu(a). It records the result of applying updateu(a) on a copy of\ncurrent replica states:s′=s•u(a); return value ofu(a) is passed to the client.\nRecorded states′is used as an argument of an actual eﬀect-updateu′(s′), which\nis delivered to all replicas by the underlying protocol of CmRDT. Precondition\nP is unrestricted and enables delivery at any time. Eﬀect-updateu′(s′) merges\nreceived state using original CvRDT method:s•u′(s′)\ndef\n= s•m(s′).\nSince merge always commutes, then updatesu′(s′) commute and since the\ncommunication is reliable, we have a CmRDT with strong eventual consistency,\nwhich propagates all updates of emulated CvRDT.\nState-based emulation of an operation-based object State-based emu-\nlation of an operation-based object essentially formalises the mechanics of an\nepidemic reliable causal broadcast.\nTheorem 4 (CvRDT emulation).Any SEC op-based object can be emulated\nby a SEC state-based object of a corresponding interface.\nProof. Given a CmRDT represented by tuple(S,s 0,q,t,u,P ), we emulate it by\na CvRDT object((S×U×U ),≤, (s0, ∅, ∅),q′,u′,m ), which we specify hereby.\nWithout loss of generality, we assume that each invocationuk\ni is unique across\nreplicas and setU denotes all possible updates. CvRDT’s state is then deﬁned\nas a triple(sm,M,D ), wheresm is a state of emulated CmRDT,M and D are\ntwo add-only sets of, respectively, known and delivered updates. A relation≤is\ndeﬁned as following:(sm,M,D )≤(s′\nm,M′,D′)\ndef\n= M⊆M′∧D⊆D′.\nAquery q′(a)hasthesameinterfaceas q(a);wedeﬁneitasatrivialdelegation\nto q(a) on the CmRDT,sm•q(a). An updateu′(a) has the same interface as\nprepare-update t(a). It ﬁrst delegates the invocation to prepare-updatet(a) of\nthe CmRDT that in turn triggers eﬀect-updateu(a), which becomes a locally\nknown update. Finally,u′(a) uses a recursive functiond to process updates:\nd(sm,M,D )\ndef\n=\n{\nd(sm•u(a),M,D ∪{u(a)}) if∃u(a)∈M\\D :P (sm,u (a))\n(sm,M,D ) otherwise\nHence, u′(a) is deﬁned as:(sm,M,D )•u′(a)\ndef\n= d(sm•t(a),M∪{u(a)},D ).\n\n===== PDF PAGE 8 =====\n\n8\nFinally, mergem takes a union of known messages and processes available\nupdates: (sm,M,D )•m(s′\nm,M′,D′)\ndef\n= d(sm,M∪M′,D ).\nSince the emulation ensures that messages are delivered exactly once to each\nreplica’s embedded object, in the appropriate order, and since the CvRDT con-\nforms to SEC criteria, the embedded CmRDT instance is also SEC.\nNote that the emulating object forms a monotonic semilattice over domain\nS×U×U. Calling or delivering an operation adds it to the relevant message\nset, and therefore advances the state in the partial order. The merge methodm\nis deﬁned to take the union of theM sets and (possibly) updatingD, and is\nthus a LUB operation. This construction is similar to Wuu and Bernstein’s log\ncovered in Section 4.2.\n3.3 SEC is incomparable to sequential consistency\nA state-based replica executes a sequence of query, update, and merge methods.\nIn addition to its sequential behaviour, a CRDT speciﬁes concurrent behaviours\nthat must satisfy the strong convergence property. As we show now, this permits\nexecutions that would be impossible in a sequentially-consistent system.\nConsider a Set CRDTS with operations add(e) and remove(e). Immediately\nafter add(e), the state will satisfye∈S; afterremove(e) the state satisﬁese /∈S.\nIn a sequential execution, the last update wins, e.g., afterremove(e)→add(e)\nthe state satisﬁese∈S. Concurrent adds or removes of diﬀerent elements are\nindependent, e.g., afteradd(e)‖remove(e′) the state satisﬁese∈S∧e′/∈S.\nThere is a choice of alternative semantics for concurrent updates of the same\nelement. When concurrently adding and removing the same element, the add\ncould win, or the remove could win, or the update of the replica with the highest\nIP address could win, or the state might be reset to a distinguished state⊥, and\nso on. All these alternatives satisfy the strong convergence condition, and any\nof them may be reasonable for some application.\nLet us consider the add-wins alternative: afteradd(e)‖remove(e) the state\nsatisﬁese∈S. Now consider the following scenario. Replicap0 executes the se-\nquence add(e); remove(e′). Concurrently, replicap1 executes add(e′); remove(e).\nThen, replicap3 merges the state fromp0 and p1. According to the concurrent\nspeciﬁcation, the ﬁnal state atp3 satisﬁese∈S∧e′∈S. Such a state would\nnever occur in a sequentially-consistent execution, in which eitherremove(e) or\nremove(e′) must be last. Thus, there is a SEC object that is not sequentially\nconsistent.\nNowconsidertheconverse.Intheabsenceofcrashes,asequentially-consistent\nobject is SEC. Indeed, sequential consistency is deﬁned by a single order of\noperations, after which all replicas must terminate with the same state. However,\nin the general case, sequential consistency requires consensus, which cannot be\nsolved in the presence ofn−1 crashes. Therefore, SEC is incomparable with\nsequential consistency.\n\n===== PDF PAGE 9 =====\n\n9\n4 Example CRDTs\nWe now recall some basic CRDTs that are known in the existing literature,\nwhich we will later compose to build higher-level objects. We will use state- or\nop-based speciﬁcations as most convenient. Generally, we ﬁnd the state-based\nstyle more compact and easier to reason about formally, whereas the op-based\nstyle is often convenient for implementation.\n4.1 Integer vectors and counters\nConsider the state-oriented speciﬁcation of a vector-of-integers object:\n(Nn, [0,..., 0],≤n, [0,..., 0], value, inc, maxn). Vectorsv,v′∈Nn are (partially)\nordered byv≤n v′⇔∀j∈[0..n−1],v [i]≤v′[i]. A query invocation value()\nreturns a copy of the local payload. An updateinc(i) increments the payload\nentry at indexi, that is,s•inc(i) = [s′[0],...,s′[n−1]] where s′[j] = s[j] + 1 if\ni =j and s′[j] = s[j] otherwise. Merging two vectors takes the per-index maxi-\nmum, i.e.,s•maxn(s′) = [max(s[0],s′[0]),..., max(s[n−1],s′[n−1])]. We omit\nthe proof that it is a CRDT.\nIf each processpi is restricted to incrementing its own indexinc(i), this is\nthe well-known vector clock [11].\nAn increment-only integer counter is very similar; the only diﬀerence being\nthat query invocation value() of a vector in statev returns|v|\ndef\n= ∑\njv[j]. We\nconstruct an integer counter that can be both incremented and decremented, by\nbasically associating two increment-only countersI and D, where incrementing\nincrementsI and decrementing incrementsD, whereas value() returns|I|−|D|.\nThe ordering method≤is deﬁned as(I,D )≤(I′,D′)\ndef\n= I≤n I′∧D≤n D′.\n4.2 U-Set, map and log\nAnother simple CRDT construct is an add-only set object (S,⊆\n, ∅, value, add(e),∪). The payload is any set; sets are ordered by inclu-\nsion. A query value() returns a copy of the local payload. Updateadd(e) adds\nelemente to the set, i.e.,s•add(e) = s∪{e}. It is well-known that sets ordered\nby⊆form a semi-lattice with∪as the LUB operator. It is clearly monotonic\nby the deﬁnition ofadd. Therefore, the add-only set is a CRDT.\nWuu and Bernstein build further CRDTs by combination of these basic com-\nponents [23]. They propose a set with bothadd and remove operations by asso-\nciating two add-only setsA andR; adding an element adds it toA, removing it\nadds it toR; queryvalue() returns the set diﬀerenceA\\R. (R is often called the\ntombstone set. A client is allowed to remove only an element that is currently in\nA). Note that they assume that every element is unique and added only once;\nwe call their construct U-Set [18]. Wuu and Bernstein derive their Dictionary\ndata type from U-Set in the obvious way.\nA Log is a replicated object, whose payload contains a set (initially empty) of\n(event,timestamp) pairs. It assumes that each process maintains a vector clock\n\n===== PDF PAGE 10 =====\n\n10\nin the usual manner [11]. When an eventeoccurs at processi, the process invokes\nupdate add(e); the update method updates the vector clock (say, to statev) and\nadds the pair(e,v ) to the set. The timestamp ensures that each entry is unique.\nThe merge method takes the union of the local and a remote set.\nTo avoid unbounded growth, Wuu and Bernstein propose a distributed\ngarbage collection algorithm that discards unneeded entries. In order to tol-\nerate n−1 crashes, only an entry that has been delivered to all processes may\nbe discarded. If vector clock entryvi[j] = k, this implies that process i has\ndelivered allk ﬁrst events of processpj. Each replica maintains in its payload\na copy of all remote vector clocks; for each remote site, the merge procedure\nkeeps the largest version. Then, a replica may discard a log entry as soon as\nits timestamp is less than all the remote vector clocks. This algorithm does not\nrequire a consensus, but it is live only if no process is crashed. However, this\nmay be acceptable, since the liveness of garbage collection does not impact the\ncorrectness of the main algorithm.\nThis algorithm may be adapted to other data types, for instance to discarding\nthe A and R entries of a removed element in the U-Set.\n5 Directed Graph CRDT\nNow let us examine how one would design a more complex data type: a Directed\nGraph CRDT. Graphs are an important general-purpose data structure. Some\nimportant applications and algorithms work on graphs, e.g., shortest-path or\nweb page-rank.\n5.1 Thought experiment\nTo motivate our graph design, consider the “thought experiment” of designing\na web search engine. The search engine uses a directed graph representing the\nweb structure. This graph may be used, among other things, to compute page\nrank. Such an application processes large amounts of data and performs many\nupdates. For eﬃciency and scalability, processing should be asynchronous; for\nresponsiveness, processing should be incremental, as fast as each page is crawled.\nProcessing should not require any synchronisation, e.g., transactions. A CRDT\ncould be ideal.\nWe start with a Set CRDT containing some initial URLs to be crawled. A\nnumber of crawler processes run in parallel; each one removes some URL from\nthe set and downloads it. (It might happen that the same page is downloaded\ntwice but this does not impact correctness.)\nWhen a crawler ﬁnds a new page, it executes the correspondingaddVertex.\nFor every page, it parses the links that it contains, comparing it with the page’s\nprevious version, if any, and executes the correspondingaddArc and removeArc\ninvocations. Finally, the URLs of the linked pages are added to the set to be\ncrawled. Note thataddArc must work even if the page at the tail of the arc has\nnot yet been found (it might not even exist), but such an arc is not functional; a\n\n===== PDF PAGE 11 =====\n\n11\npayload set V, A -- sets of pairs { (element e, unique-tag w), ...}\ninitial ∅,∅ -- V : vertices; A: arcs\nquery lookup (vertex v) : boolean b\nlet b = (∃w : (v, w) ∈ V )\nquery lookup (arc (v′, v′′)) : boolean b\nlet b = (lookup(v′) ∧ lookup(v′′) ∧ (∃w : ((v′, v′′), w) ∈ A)\nupdate addVertex (vertex v)\nprepare (v) : w\nlet w = unique() -- unique() returns a unique value\neﬀect(v, w)\nV := V ∪ {(v, w)} -- v + unique tag\nupdate removeVertex(vertex v)\nprepare (v) : R\npre lookup(v) -- precondition\npre ⁄ ∃v′ : lookup((v, v′)) -- v is not the head of an existing arc\nlet R = {(v, w)|∃w : (v, w) ∈ V } -- Collect all unique pairs in V containing v\neﬀect(R)\nV := V \\R\nupdate addArc (vertex v′, vertex v′′)\nprepare (v′, v′′) : w\npre lookup(v′) -- head node must exist\nlet w = unique() -- unique() returns a unique value\neﬀect(v′, v′′, w)\nA := A ∪ {((v′, v′′), w)} -- (v′, v′′) + unique tag\nupdate removeArc(vertex v′, vertex v′′)\nprepare (v′, v′′) : R\npre lookup((v′, v′′)) -- arc(v′, v′′) exists\nlet R = {((v′, v′′), w)|∃w : ((v′, v′′), w) ∈ A}\neﬀect(R) -- Collect all unique pairs in A containing arc (v′, v′′)\nA := A \\R\nFig. 3. Directed Graph Speciﬁcation (op-based)\nlookup of the corresponding arc should fail. Similarly if a node has been removed,\nall arcs incident to the node disappear. In this way, the behaviour of our CRDT\nwill be consistent with that of web pages, which are allowed to contain non-\nfunctional URLs. Once the linked page is created, the link become relevant, e.g.,\nfor navigation and for page-rank computation.\nIn the web application, the graph is very large; sending the state between\nreplicas and merging would be very costly. Therefore, we choose an op-based\napproach.\n5.2 Design alternatives for arc removal\nA directed graph is a pair of sets(V,A ), called vertices and arcs respectively,\nsuch thatA⊆V×V. Updates must maintain the invariant that the head and\n\n===== PDF PAGE 12 =====\n\n12\ntail vertices of an arc both exist. Therefore, adding an arc toA has the precon-\ndition that its two vertices are inV; conversely, a vertex may be removed only\nif it supports no arc; these are preconditions to prepare-update. Furthermore,\nthe system must ensure that concurrentaddArc(v′,v′′)‖removeVertex(v′) do\nnot violate the invariant. Several alternatives may be considered:(i) Give prece-\ndence to removeVertex(v′): all edges to or fromv′are removed as a side eﬀect.\nThis is easy to implement, by hiding any arc that includes a removed vertex.\n(ii) Give precedence to addArc(v′,v′′): if eitherv′or v′′has been removed, it\nis restored. This requires recreating nodes that have being explicitly deleted.\n(iii) removeVertex(v′) is delayed until all concurrent addArc operations have\nexecuted. This requires synchronisation which violates the goals of asynchrony\nand fault tolerance. There is no perfect choice. Hereafter, we choose Option(i)\nbecause it is adequate in our application scenario.\n5.3 Graph speciﬁcation\nFigure 3 shows our speciﬁcation for a Directed-Graph CRDT. We prove that\nthis object is indeed a CmRDT in [19].\nThis CRDT maintains two sets internally, one for the vertices and one for the\narcs. To add a vertexv, the prepare-update method creates a unique identiﬁer,\nw, and the eﬀect-update method adds the pair(v,w ) to the set of vertices.\nWith this approach, each vertex has an unique internal identiﬁer. If the same\nvertex is added twice, the two additions will be distinguished by their two unique\nidentiﬁers. A lookup will mask the duplicates.\nTo remove vertexv, the prepare-update computes the setR of pairs that\ncontainv, i.e., all copies known in the source replica; the eﬀect-update method\nremoves this same setR from the set of vertices in all replicas. As operations\nare delivered in causal order, when the eﬀect-update method executes in some\nreplica, for each pair inR, the correspondentaddVertex operations has already\nexecuted. Thus, unlike the state-based solution of Section 4.2, a set need not\nkeep tombstones.\nIf the same vertex is removed and added concurrently, theaddVertex wins,\nas the new unique identiﬁer is not included in the set computed by the remove’s\nprepare-update. This approach is consistent with a sequential execution, as the\na vertex can removed only if it is observed. The same approach is used for arcs.\nTo remove a vertex, the source replica checks that the vertex is observed,\nand also that it is not the head of any existing arc. Conversely, to add an arc, its\nhead node must exist, but there is no check for existence of the tail. The lookup\nmethod will mask the existence of such an arc. However, if the tail is added\nlater, then the arc becomes visible. Similarly, concurrent updates may remove a\nvertex that is the head of an arc. However, the lookup method will mask such\nan arc.\n\n===== PDF PAGE 13 =====\n\n13\n6 Comparison with previous work\nEventual consistency has been an active topic of research in highly-available,\nlarge-scale asynchronous systems [17,21]. Contrary to much previous work [3, for\ninstance], we take a formal approach grounded in the theory of commutativity\nand semilattices.\nThe state-based approach was invented for register-like objects, where the\nonly update operation is assignment. It is in wide use in ﬁle systems such as\nNFS, AFS or Coda, and in key-value stores such as Dynamo [3] and Riak. Op-\nbased approaches are used when the cost of transferring state is too high, e.g.,\ndatabases, and when operation semantics are important, e.g., cooperative sys-\ntems such as Bayou [13] or IceCube [15].\nAlthough the CRDT concept was identiﬁed only recently, related designs\nhave been published before. Johnson et. al. invented the LWW-Register [9]. They\npropose a database of registers that can be created, updated and deleted, using\nthe last-writer-wins (LWW) rule to arbitrate between concurrent changes. LWW\nensures a total order of operations, at the cost of losing concurrent updates.\nConcurrent editing uses the related concept of Operational Transformation\n(OT), due to Ellis and Gibbs [7]. To ensure responsiveness, a local operation ex-\necutes immediately. Operations are not designed to commute; however, a replica\nreceiving an update transforms it against previously-executed concurrent up-\ndates to achieve a similar result. OT algorithms for a decentralised architecture\nhave been proposed; Oster et al. show that most of them are incorrect [12]. We\nbelieve that designing for commutativity from the start is cleaner and simpler.\nThe foundations of CvRDTs were introduced by Baquero and Moura [1]. We\nextend their work with CmRDTs and with a number of new results. The CRDT\nconcept was invented by Shapiro and Preguiça on their work on Treedoc, a\nSequence CRDT for concurrent editing [14]. Logoot is another Sequence CRDT\nthat supports anundo mechanism based on a CRDT Counter [22].\nRoh et al. [16] independently developed the related concept of Replicated\nAbstract Data Type. They generalise LWW to a partial order of updates, which\nthey leverage to build several LWW-style classes.\nBurckhardt and Leijen propose the Concurrent Revisions programming\nmodel for shared abstract data types, in which a forked revision runs in iso-\nlation until it joins again. Join is based on a three-way merge function [2]. They\nshow that simple sequential merge functions exist for ADTs built upon Abelian\ngroups. We have also demonstrated the relation between CRDTs and sequential\nconsistency in a similar, but more loosely-coupled, replication model.\nDucourthial et al. study algebraic structures with speciﬁc properties in order\nto solve self-stabilisation problems [6]. They propose the so-called r-operator for\n“silent” tasks [4]. Strong convergence can be seen as as a silent task, given a\nlimited number of disturbing updates. However, there are diﬀerences between\nthe two approaches. Whereas a self-stabilising system must tolerate arbitrary\nmemory corruption, a shared mutable object should change state durably only\nby executing update operations. Furthermore, whereas CvRDT states constitute\na monotonic semi-lattice, ther-operator requries a total order.\n\n===== PDF PAGE 14 =====\n\n14\n7 Conclusion\nWe presented the concept of a CRDT, a replicated data type for which some sim-\nple mathematical properties guarantee eventual consistency. In the state-based\nstyle, the successive states of an object should form a monotonic semilattice,\nwith merge computing a least upper bound. In the op-based style, concurrent\noperations should commute. Assuming only that the communication subsystem\nensures eventual delivery (in causal order for op-based objects), CRDTs are\nguaranteed to converge towards a common, correct state, without requiring any\nsynchronisation.\nWe presented some simple CRDT examples, such as sets, and detailed how\nto create a directed Graph CRDT, which might be used in a large-scale web\nsearch engine. Our data types have a clean and deterministic semantics in the\npresence of concurrent updates.\nEventual consistency is a critical technique in many large-scale distributed\nsystems, including delay-tolerant networks, sensor networks, peer-to-peer net-\nworks, collaborative computing, cloud computing, and so on. However, work on\neventual consistency was mostly ad-hoc so far. Although some of our CRDTs\nwere known before in the literature or in the folklore, this is the ﬁrst work to\nengage in a systematic study. We believe this is required if eventual consistency\nis to gain a solid theoretical and practical foundation.\nFuture work is both theoretical and practical. On the theory side, this will\ninclude understanding the class of computations that can be accomplished by\nCRDTs, the complexity classes of CRDTs, the classes of invariants that can\nbe supported by a CRDT, the relations between CRDTs and concepts such as\nself-stabilisation and aggregation, and so on. On the practical side, we plan to\nimplement the data types speciﬁed herein as a library, to use them in practical\napplications, and to evaluate their performance analytically and experimentally.\nAnother direction is to support infrequent, non-critical synchronous operations,\nsuch as committing a state or performing a global reset. We will also look into\nstronger global invariants, possibly using probabilistic or heuristic techniques.\nReferences\n1. Baquero, C., Moura, F.: Speciﬁcation of convergent abstract data types for au-\ntonomous mobile computing. Tech. rep., Departamento de Informática, Universi-\ndade do Minho (Oct 1997)\n2. Burckhardt, S., Leijen, D.: Semantics of concurrent revisions. Programming Lan-\nguages and Systems pp. 116–135 (2011)\n3. DeCandia, G., Hastorun, D., Jampani, M., Kakulapati, G., Lakshman, A., Pilchin,\nA., Sivasubramanian, S., Vosshall, P., Vogels, W.: Dynamo: Amazon’s highly avail-\nable key-value store. In: Symp. on Op. Sys. Principles (SOSP). Operating Systems\nReview, vol. 41, pp. 205–220 (Oct 2007)\n4. Delaët, S., Ducourthial, B., Tixeuil, S.: Self-stabilization with R-operators revis-\nited. Self-Stabilizing Systems pp. 68–80 (2005)\n\n===== PDF PAGE 15 =====\n\n15\n5. Demers, A.J., Greene, D.H., Hauser, C., Irish, W., Larson, J.: Epidemic algo-\nrithms for replicated database maintenance. In: Symp. on Principles of Dist. Comp.\n(PODC). pp. 1–12 (Aug 1987), also appears Op. Sys. Review 22(1): 8-32 (1988)\n6. Ducourthial, B.: R-semi-groups: a generic approach for designing stabilizing silent\ntasks. In: Int. Conf. on Stabilization, Safety, and Security of Distributed Systems\n(SSS). pp. 281–295 (2007)\n7. Ellis, C.A., Gibbs, S.J.: Concurrency control in groupware systems. In: Int. Conf.\non the Mgt. of Data (SIGMOD). pp. 399–407 (1989)\n8. Gilbert, S., Lynch, N.: Brewer’s conjecture and the feasibility of consistent, avail-\nable, partition-tolerant web services. SIGACT News 33(2), 51–59 (2002)\n9. Johnson, P.R., Thomas, R.H.: The maintenance of duplicate databases. Internet\nRequest for Comments RFC 677, Information Sciences Institute (Jan 1976)\n10. Lamport, L.: Time, clocks, and the ordering of events in a distributed system.\nCommunications of the ACM 21(7), 558–565 (Jul 1978)\n11. Mattern, F.: Virtual time and global states of distributed systems. In: Int. W. on\nParallel and Distributed Algorithms. pp. 215–226 (1989)\n12. Oster, G., Urso, P., Molli, P., Imine, A.: Proving correctness of transformation\nfunctions in collaborative editing systems. Rapport de recherche RR-5795, LORIA\n– INRIA Lorraine (Dec 2005)\n13. Petersen, K., Spreitzer, M.J., Terry, D.B., Theimer, M.M., Demers, A.J.: Flexi-\nble update propagation for weakly consistent replication. In: Symp. on Op. Sys.\nPrinciples (SOSP). pp. 288–301 (Oct 1997)\n14. Preguiça, N., Marquès, J.M., Shapiro, M., Leţia, M.: A commutative replicated\ndata type for cooperative editing. In: Int. Conf. on Distributed Comp. Sys.\n(ICDCS). pp. 395–403 (Jun 2009)\n15. Preguiça, N., Shapiro, M., Matheson, C.: Semantics-based reconciliation for col-\nlaborative and mobile environments. In: Int. Conf. on Coop. Info. Sys. (CoopIS).\nLecture Notes in Comp. Sc., vol. 2888, pp. 38–55 (Nov 2003)\n16. Roh, H.G., Jeon, M., Kim, J.S., Lee, J.: Replicated abstract data types: Building\nblocks for collaborative applications. Journal of Parallel and Dist. Comp. ((To\nappear) 2011)\n17. Saito, Y., Shapiro, M.: Optimistic replication. ACM Comput. Surv. 37(1), 42–81\n(Mar 2005)\n18. Shapiro, M., Preguiça, N., Baquero, C., Zawirski, M.: A comprehensive study of\nConvergent and Commutative Replicated Data Types. Rapport de recherche 7506,\nInstitut Nat. de la Recherche en Informatique et Automatique (INRIA), Rocquen-\ncourt, France (Jan 2011)\n19. Shapiro, M., Preguiça, N., Baquero, C., Zawirski, M.: Conﬂict-free Replicated Data\nTypes. Rapport de recherche 7686, Institut Nat. de la Recherche en Informatique\net Automatique (INRIA), Rocquencourt, France (Jul 2011)\n20. Terry, D.B., Theimer, M.M., Petersen, K., Demers, A.J., Spreitzer, M.J., Hauser,\nC.H.: Managing update conﬂicts in Bayou, a weakly connected replicated storage\nsystem. In: 15th Symp. on Op. Sys. Principles (SOSP). pp. 172–182 (Dec 1995)\n21. Vogels, W.: Eventually consistent. ACM Queue 6(6), 14–19 (Oct 2008)\n22. Weiss,S.,Urso,P.,Molli,P.:Logoot-undo:Distributedcollaborativeeditingsystem\non P2P networks. IEEE Trans. on Parallel and Dist. Sys. (TPDS) 21, 1162–1174\n(2010)\n23. Wuu, G.T.J., Bernstein, A.J.: Eﬃcient solutions to the replicated log and dictio-\nnary problems. In: Symp. on Principles of Dist. Comp. (PODC). pp. 233–242 (Aug\n1984)",
+        "content_sha256": "5363f488d988a892dd33e2cbba81c87e558deda9efdd190bc608ef9a8d4ba26a",
+        "path": "papers/text/shapiro-et-al-2011-crdts.txt",
+        "size_bytes": 42422
+      }
+    ],
+    "workspace_index": [
+      {
+        "content_sha256": "f6605c2b9bb68dd7906b2881ec1f0b48b32f607c7b768cd3ec8ab5a9ca46afaa",
+        "path": "CORPUS.md",
+        "size_bytes": 1937
+      },
+      {
+        "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+        "path": "papers/text/choi-et-al-2025-conformity.txt",
+        "size_bytes": 60691
+      },
+      {
+        "content_sha256": "0674b1614409c389ff275c78c696138a9453e321fee21b90ea1e4354700be7e2",
+        "path": "papers/text/du-et-al-2023-multiagent-debate.txt",
+        "size_bytes": 97256
+      },
+      {
+        "content_sha256": "8731efeb90375496d5dc1ea00840bc54e28f908021deff777966babcbc797f6f",
+        "path": "papers/text/dung-1995-argumentation.txt",
+        "size_bytes": 93057
+      },
+      {
+        "content_sha256": "10d6e61835ae38ecc32c345b6c18f5d4259ef40874694d12f60c4dd6162e160f",
+        "path": "papers/text/lorenz-et-al-2011-social-influence.txt",
+        "size_bytes": 46369
+      },
+      {
+        "content_sha256": "5363f488d988a892dd33e2cbba81c87e558deda9efdd190bc608ef9a8d4ba26a",
+        "path": "papers/text/shapiro-et-al-2011-crdts.txt",
+        "size_bytes": 42422
+      },
+      {
+        "content_sha256": "a1263656cb4d7e298c289b4ee44368fe9f38c1c2efc4ce88f0d54d60a62a3d1c",
+        "path": "papers/text/smit-et-al-2023-going-mad.txt",
+        "size_bytes": 80205
+      },
+      {
+        "content_sha256": "41e1d26db346207d4be0ec393e7bed983875ae417ca7aa5a530d390dca72e06e",
+        "path": "papers/text/zhang-et-al-2025-mad-question.txt",
+        "size_bytes": 95563
+      }
+    ]
+  },
+  "dependency_type": "PlanningDeps",
+  "input_sha256": "cf3a9a2ae82a0388b2bf15ad1af82bb68c4c488cf99e327a8ec3b182a9ea571c",
+  "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+  "role": "recursive_planner"
+}

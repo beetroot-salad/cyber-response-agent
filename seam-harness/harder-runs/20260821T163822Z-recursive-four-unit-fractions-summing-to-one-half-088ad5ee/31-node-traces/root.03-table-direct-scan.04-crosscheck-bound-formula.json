@@ -1,0 +1,11 @@
+{
+  "child_ids": [],
+  "depth": 2,
+  "effective_disposition": "solve",
+  "node_id": "root.03-table-direct-scan.04-crosscheck-bound-formula",
+  "packet_id": "packet:root.03-table-direct-scan.04-crosscheck-bound-formula",
+  "packet_sha256": "5a6b8636c6a85e01b53e17d8b4a1c3b6e63c5371c2de8d4f8d2b1ba415e824d6",
+  "parent_id": "root.03-table-direct-scan",
+  "proposed_disposition": "solve",
+  "stop_reason": null
+}

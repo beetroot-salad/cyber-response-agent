@@ -1,0 +1,10 @@
+{
+  "content_sha256": "1fb67419d9ef0b2539547a7b2f2d281690ab0a633a391e4c86a02de4a9452635",
+  "id": "link:1fb67419d9ef0b2539547a7b",
+  "origin": "runtime",
+  "proposed_by_node_id": null,
+  "rationale": null,
+  "relation": "partially_answers",
+  "source_id": "answer:work:005-rq-sharp-attack",
+  "target_id": "question:raised:07d805ce56d7:rq-sharp"
+}

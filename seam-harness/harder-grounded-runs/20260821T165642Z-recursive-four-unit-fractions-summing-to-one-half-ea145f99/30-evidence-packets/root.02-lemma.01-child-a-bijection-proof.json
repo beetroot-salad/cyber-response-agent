@@ -1,0 +1,91 @@
+{
+  "account": "The dossier supplies the node's objective, rationale, acceptance condition, and exact-algebra constraint, but it contains no source materials, workspace documents, or external references. Consequently, I cannot observe, verify, or cite any substantive mathematical statements from the dossier; the proof components for the forward direction, the factor positivity/congruence conditions, and the inverse map must all be derived mathematically rather than observed from a source. I can only note the exact-algebra requirement and what the acceptance condition demands.",
+  "assumptions": [
+    "The variables p, q, z, w are positive integers and p, q are coprime, as stated in the node objective.",
+    "The factor-pair notion (u,v) uses the conventional interpretation that u and v are positive integers with uv = q^2 and u <= v.",
+    "The congruence 'u ≡ -q (mod p)' is to be interpreted modulo p in the standard integer sense."
+  ],
+  "boundary_findings": [],
+  "child_packet_ids": [],
+  "claims": [
+    {
+      "basis": "hypothesis",
+      "citations": [],
+      "confidence": 1.0,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "id": "root.02-lemma.01-child-a-bijection-proof:C001",
+      "statement": "The node's acceptance condition requires deriving (pz - q)(pw - q) = q^2 from 1/z + 1/w = p/q using exact fractions."
+    },
+    {
+      "basis": "hypothesis",
+      "citations": [],
+      "confidence": 1.0,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "id": "root.02-lemma.01-child-a-bijection-proof:C002",
+      "statement": "The node's objective requires proving the bijection in both directions and includes the exact map u = pz - q and v = pw - q."
+    },
+    {
+      "basis": "hypothesis",
+      "citations": [],
+      "confidence": 1.0,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "id": "root.02-lemma.01-child-a-bijection-proof:C003",
+      "statement": "The acceptance condition and constraints require exact arithmetic only; no floating-point or unverified numeric computation is permitted."
+    },
+    {
+      "basis": "inferred",
+      "citations": [],
+      "confidence": 0.95,
+      "counterevidence": [],
+      "derived_from_claim_ids": [
+        "root.02-lemma.01-child-a-bijection-proof:C001"
+      ],
+      "id": "root.02-lemma.01-child-a-bijection-proof:C004",
+      "statement": "For coprime positive integers p, q, if positive integers z, w satisfy 1/z + 1/w = p/q and u = pz - q, v = pw - q, then uv = q^2."
+    },
+    {
+      "basis": "inferred",
+      "citations": [],
+      "confidence": 0.9,
+      "counterevidence": [],
+      "derived_from_claim_ids": [
+        "root.02-lemma.01-child-a-bijection-proof:C002"
+      ],
+      "id": "root.02-lemma.01-child-a-bijection-proof:C005",
+      "statement": "For every admissible factor pair u, v with uv = q^2, u <= v, u ≡ -q mod p, and v ≡ -q mod p, the inverse z = (u + q)/p and w = (v + q)/p gives positive integers satisfying 1/z + 1/w = p/q and z <= w."
+    },
+    {
+      "basis": "hypothesis",
+      "citations": [],
+      "confidence": 1.0,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "id": "root.02-lemma.01-child-a-bijection-proof:C006",
+      "statement": "The dossier contains no source materials or workspace documents that provide algebraic derivations, citations, or boundary checks for this proof."
+    }
+  ],
+  "content_sha256": "ab166b0aa0a9bd9aac18bddd1be4de1540f71533adffd5a93f3081762ba9cd1f",
+  "counterevidence": [],
+  "id": "packet:root.02-lemma.01-child-a-bijection-proof",
+  "next_observation": "Obtain any source material or prior lemma draft that includes the algebraic derivation or the factor-pair enumeration; otherwise the proof must be independently reconstructed under the exact-algebra constraint.",
+  "node_id": "root.02-lemma.01-child-a-bijection-proof",
+  "objective": "State and prove, in both directions with exact algebra, that for coprime positive integers p and q, the positive integer solutions (z,w) of 1/z + 1/w = p/q with z <= w correspond bijectively to factor pairs (u,v) of q^2 such that u <= v, u ≡ -q (mod p), v ≡ -q (mod p), via u = pz - q and v = pw - q.",
+  "source_ids_consulted": [],
+  "sufficiency": "blocked",
+  "unresolved": [
+    "No source or stored derivation exists in the dossier to cite for the exact algebraic identity. The proof steps themselves must be constructed and verified independently.",
+    "Runtime discarded unknown citation sources from c1: ['node.root.02-lemma.01-child-a-bijection-proof']",
+    "Runtime downgraded unsupported observed claim c1 to hypothesis",
+    "Runtime discarded unknown citation sources from c2: ['node.root.02-lemma.01-child-a-bijection-proof']",
+    "Runtime downgraded unsupported observed claim c2 to hypothesis",
+    "Runtime discarded unknown citation sources from c3: ['node.root.02-lemma.01-child-a-bijection-proof']",
+    "Runtime downgraded unsupported observed claim c3 to hypothesis",
+    "Runtime discarded unknown citation sources from c4: ['node.root.02-lemma.01-child-a-bijection-proof']",
+    "Runtime discarded unknown citation sources from c5: ['node.root.02-lemma.01-child-a-bijection-proof']",
+    "Runtime discarded unknown citation sources from c6: ['node.root.02-lemma.01-child-a-bijection-proof']",
+    "Runtime downgraded unsupported observed claim c6 to hypothesis"
+  ]
+}

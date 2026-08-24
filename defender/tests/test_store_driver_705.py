@@ -396,7 +396,7 @@ def test_gather_history_is_not_store_rendered_and_learning_stages_get_neither(tm
             assert MAIN_ONLY_MARKER not in artifact.read_text(), (
                 f"main's history reached {artifact.name}, a gather out-edge")
 
-    from defender.learning.pipeline import _pydantic_stage
+    from defender.learning import _pydantic_stage
     stage_source = Path(_pydantic_stage.__file__).read_text()
     neither = "learning-stage agents get neither the fold nor the store (O21)"
     assert "session_store" not in stage_source, neither

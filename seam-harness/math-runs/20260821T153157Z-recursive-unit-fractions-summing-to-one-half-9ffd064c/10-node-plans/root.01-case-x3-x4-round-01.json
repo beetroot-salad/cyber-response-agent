@@ -1,0 +1,24 @@
+{
+  "account": "The dossier already contains the full derivation setup and acceptance condition for this node: the global bound reduces x to {3,4,5,6}, and this node is scoped to x=3 and x=4. For x=3, the equation becomes 1/y + 1/z = 1/6, yielding (y-6)(z-6)=36; for x=4, it becomes 1/y + 1/z = 1/4, yielding (y-4)(z-4)=16. Each requires only exact divisor-pair enumeration with integrality and x <= y <= z filters, followed by direct common-denominator substitution checks. The acceptance condition is mechanical and the context is complete, so no further expansion or evidence is needed.",
+  "children": [],
+  "decidability": {
+    "acceptance_mechanical": true,
+    "account": "All necessary formulas, divisor-enumeration method, constraints, and acceptance criteria are present in the dossier. The work is a bounded exact-arithmetic derivation for the two specified x-values.",
+    "context_complete": true,
+    "grounded_referents": [
+      "1/x + 1/y + 1/z = 1/2",
+      "x <= y <= z",
+      "x in {3,4,5,6}",
+      "x=3 gives 1/y + 1/z = 1/6 and (y-6)(z-6)=36",
+      "x=4 gives 1/y + 1/z = 1/4 and (y-4)(z-4)=16",
+      "expected triples: x=3: (3,7,42),(3,8,24),(3,9,18),(3,10,15),(3,12,12); x=4: (4,5,20),(4,6,12),(4,8,8)"
+    ],
+    "independent_of_future_siblings": true,
+    "missing_context": []
+  },
+  "disposition": "solve",
+  "irreducible_core": null,
+  "requested_source_ids": [],
+  "requested_source_paths": [],
+  "synthesis_contract": null
+}

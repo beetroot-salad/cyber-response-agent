@@ -1,0 +1,24 @@
+{
+  "account": "This node asks for a bounded, self-contained deliverable: a plain-language definition of kitsch plus 3–5 one-sentence diagnostic marks, at most 200 words, no citations or named theorists, not drafted as essay paragraphs. All context needed to produce it is present in the dossier (audience, register, form constraints, and the writer's own reasoning since no source materials are provided), and the acceptance condition is mechanical — countable marks, one-sentence explanations, a hard word cap, and an explicit non-paragraph format. No further evidence or decomposition is required, so I solve directly. Deliverable below.\n\nDEFINITION — Kitsch is art that trades in pre-packaged feeling: emotion handed to the viewer already assembled, to be consumed instantly and comfortably rather than experienced or earned. It borrows familiar, respectable subjects and renders them sweetly and predictably, flattering the audience's taste rather than testing it. (In criticism the term has long carried mild contempt, used to label things that look artful but only perform the look of feeling.)\n\nDIAGNOSTIC MARKS —\n1. Pre-digested emotion: it tells you exactly what to feel, delivering a ready-made sentiment like nostalgia or tenderness instead of inviting you to discover one.\n2. Formulaic cliché: it runs on well-worn images and stock phrases that cost the maker nothing and demand nothing of the viewer.\n3. Effortless consumption: its meaning arrives in the first glance and never deepens — no patience, training, or second look is required.\n4. Reassurance rather than challenge: it confirms what you already believe and avoids all discomfort, soothing instead of unsettling.\n5. Self-congratulation: it flatters the consumer as refined for admiring something so obviously lovely, and that flattery is part of the pleasure it sells.\n\nTotal under 200 words; returns exactly one definition (2 sentences) plus 5 numbered one-sentence marks and a brief note on the term's critical usage.",
+  "children": [],
+  "decidability": {
+    "acceptance_mechanical": true,
+    "account": "The dossier supplies all needed constraints (general educated reader, plain prose, no citations/theorists, word cap, non-paragraph format) and the task draws solely on the writer's own reasoning, so nothing is missing. The acceptance condition is a countable checklist — exactly one short definition, a specific number of one-sentence marks, and a hard 200-word limit — which can be mechanically verified in a single pass without any sibling or external evidence.",
+    "context_complete": true,
+    "grounded_referents": [
+      "general educated reader (decision:1)",
+      "standalone plain prose essay genre (decision:1)",
+      "working definition as analytical raw material, not final essay prose",
+      "3-5 one-sentence diagnostic marks",
+      "200-word ceiling",
+      "no citations or named theorists required (decision:3)"
+    ],
+    "independent_of_future_siblings": true,
+    "missing_context": []
+  },
+  "disposition": "solve",
+  "irreducible_core": null,
+  "requested_source_ids": [],
+  "requested_source_paths": [],
+  "synthesis_contract": null
+}

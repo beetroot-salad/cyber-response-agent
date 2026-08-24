@@ -1,0 +1,7 @@
+{
+  "content_sha256": "51690085156fe3cf966ed76e26e4fb127c76cfece9e412f4aaddc34b65fbf7a5",
+  "id": "link:51690085156fe3cf966ed76e",
+  "relation": "depends_on",
+  "source_id": "question:raised:02321ad0fccdf448",
+  "target_id": "question:root.04-debate-gains-evidence.02-derive-design-and-eval"
+}

@@ -1,0 +1,461 @@
+{
+  "frame": {
+    "title": "Shared knowledge substrate for recursive research agents",
+    "task": "Produce a 1,400–1,800 word architecture decision memo that commits to one concrete, implementable design for a shared knowledge substrate serving recursively decomposing AI research agents: questions and answers modeled as first-class many-to-many graph objects; the design compared against an open conversational forum and against no inter-agent communication; full specification of the data model and invariants, staged visibility and communication protocol, persistence and concurrent-update semantics, contradiction and belief-revision behavior, retrieval/ranking, and the exact role of model versus runtime; evidence restricted to the seven-file workspace corpus with at least five distinct source files cited via PDF page markers; the corpus's conflicting empirical conclusions reconciled rather than hidden; source-supported claims distinguished from design inferences; and a falsifiable evaluation plan (at least three conditions, five named metric families) plus explicit limitations and unresolved questions.",
+    "product_intent": "The memo exists to commit the agent system to a single defensible substrate architecture — and to justify that commitment strictly from the supplied corpus — so that recursively decomposing research agents can share, contest, and reuse questions and answers as structured state, capturing the gains reported for multi-agent debate while structurally guarding against the matched-compute null results and conformity failure modes documented in the same corpus.",
+    "demands": [
+      {
+        "id": "D1",
+        "statement": "The deliverable is a single architecture decision memo of 1,400–1,800 words.",
+        "rationale": "Format and length bound stated verbatim in the request."
+      },
+      {
+        "id": "D2",
+        "statement": "The memo makes one concrete, implementable recommendation rather than merely surveying the literature.",
+        "rationale": "The request explicitly forbids a survey-only outcome."
+      },
+      {
+        "id": "D3",
+        "statement": "The recommended design treats questions and answers as first-class many-to-many graph objects, supporting: multiple competing answers per question; one answer addressing multiple questions; question-to-question relations; answer-to-answer provenance or conflict relations; and controlled tags.",
+        "rationale": "All five capabilities are enumerated verbatim in the request."
+      },
+      {
+        "id": "D4",
+        "statement": "The design is compared against two named baselines: an open conversational forum and no inter-agent communication.",
+        "rationale": "Both comparison targets are named verbatim in the request."
+      },
+      {
+        "id": "D5",
+        "statement": "The data model and its invariants are specified.",
+        "rationale": "First of six specification areas listed in the request."
+      },
+      {
+        "id": "D6",
+        "statement": "Staged visibility and the communication protocol are specified.",
+        "rationale": "Second of six specification areas listed in the request."
+      },
+      {
+        "id": "D7",
+        "statement": "Persistence and concurrent-update semantics are specified.",
+        "rationale": "Third of six specification areas listed in the request."
+      },
+      {
+        "id": "D8",
+        "statement": "Contradiction and belief-revision behavior is specified.",
+        "rationale": "Fourth of six specification areas listed in the request."
+      },
+      {
+        "id": "D9",
+        "statement": "Retrieval and ranking are specified.",
+        "rationale": "Fifth of six specification areas listed in the request."
+      },
+      {
+        "id": "D10",
+        "statement": "The exact division of responsibility between model and runtime is specified.",
+        "rationale": "Sixth specification area; the request says 'the exact role of model versus runtime.'"
+      },
+      {
+        "id": "D11",
+        "statement": "The memo reconciles — rather than hides — the tension between papers reporting multi-agent debate gains and papers reporting matched-compute null results or conformity.",
+        "rationale": "Required by the request and reinforced by the manifest's instruction not to select papers by desired outcome."
+      },
+      {
+        "id": "D12",
+        "statement": "All evidentiary claims are grounded only in the supplied workspace corpus, with at least five distinct source files cited and citations carrying PDF page markers from the extracted text.",
+        "rationale": "Grounding scope, citation count, and page-marker requirement are stated in the request; marker format and corpus enumeration come from the manifest."
+      },
+      {
+        "id": "D13",
+        "statement": "Source-supported claims are clearly distinguished from design inferences.",
+        "rationale": "Stated verbatim in the request."
+      },
+      {
+        "id": "D14",
+        "statement": "A falsifiable evaluation plan compares at least three conditions and defines metrics for quality, diversity/correlation, latency, token cost, and recovery-from-wrong-consensus.",
+        "rationale": "Condition count and all five metric families are enumerated in the request."
+      },
+      {
+        "id": "D15",
+        "statement": "Important limitations and unresolved questions are stated.",
+        "rationale": "Stated verbatim in the request."
+      }
+    ],
+    "stable_context": [
+      "SC1: The evidentiary corpus is exactly seven extracted-text files under papers/text: dung-1995-argumentation.txt (Dung 1995, Artificial Intelligence 77), shapiro-et-al-2011-crdts.txt (Shapiro et al., SSS 2011), lorenz-et-al-2011-social-influence.txt (Lorenz et al., PNAS 108, 2011), du-et-al-2023-multiagent-debate.txt (Du et al. 2023, arXiv 2305.14325), smit-et-al-2023-going-mad.txt (Smit et al. 2023, arXiv 2311.17371), zhang-et-al-2025-mad-question.txt (Zhang et al. 2025, arXiv 2502.08788), choi-et-al-2025-conformity.txt (Choi et al., Findings of ACL 2025).",
+      "SC2: Page boundaries in the extracted texts are marked with lines of the form `===== PDF PAGE N =====`, and these markers are the citation anchors required by D12/C3.",
+      "SC3: The corpus intentionally contains conflicting empirical conclusions — multi-agent debate gains (Du et al. 2023) versus matched-compute null results and conformity findings (Smit et al. 2023; Zhang et al. 2025; Choi et al. 2025; Lorenz et al. 2011 on social influence undermining crowd wisdom) — and the manifest requires preserving and reconciling these conflicts.",
+      "SC4: The envelope's single conversation decision asserts that the seven full extracted texts are present in the solve workspace under papers/text with explicit PDF page markers; the intake envelope itself encloses only the manifest, not the full texts.",
+      "SC5: The manifest (material:001) is located at /workspace/seam-harness/research-kb-workspace/CORPUS.md, indicating a benchmark-style workspace named research-kb-workspace under a seam-harness directory.",
+      "SC6: The proposed substrate plus the two baselines named in D4 (open conversational forum; no inter-agent communication) naturally supply the three or more conditions required by D14."
+    ],
+    "referents": [
+      {
+        "id": "ref:corpus-manifest",
+        "description": "CORPUS.md — research corpus manifest enumerating the seven extracted source texts, their paths, bibliographic details, source URLs, and the page-marker convention; declares them the only evidentiary corpus.",
+        "kind": "file",
+        "locator": "/workspace/seam-harness/research-kb-workspace/CORPUS.md",
+        "observed_fact": "Full content enclosed in the intake envelope as material:001."
+      },
+      {
+        "id": "ref:dung-1995-argumentation",
+        "description": "Extracted text of Dung 1995, 'On the Acceptability of Arguments and its Fundamental Role in Nonmonotonic Reasoning, Logic Programming and n-Person Games' (Artificial Intelligence 77).",
+        "kind": "file",
+        "locator": "papers/text/dung-1995-argumentation.txt",
+        "observed_fact": "Enumerated in material:001; asserted present in the solve workspace by the conversation decision; content not enclosed at intake."
+      },
+      {
+        "id": "ref:shapiro-2011-crdts",
+        "description": "Extracted text of Shapiro, Preguiça, Baquero, Zawirski, 'Conflict-Free Replicated Data Types' (SSS 2011).",
+        "kind": "file",
+        "locator": "papers/text/shapiro-et-al-2011-crdts.txt",
+        "observed_fact": "Enumerated in material:001; asserted present in the solve workspace by the conversation decision; content not enclosed at intake."
+      },
+      {
+        "id": "ref:lorenz-2011-social-influence",
+        "description": "Extracted text of Lorenz et al., 'How Social Influence Can Undermine the Wisdom of Crowd Effect' (PNAS 108, 2011).",
+        "kind": "file",
+        "locator": "papers/text/lorenz-et-al-2011-social-influence.txt",
+        "observed_fact": "Enumerated in material:001; asserted present in the solve workspace by the conversation decision; content not enclosed at intake."
+      },
+      {
+        "id": "ref:du-2023-multiagent-debate",
+        "description": "Extracted text of Du et al., 'Improving Factuality and Reasoning in Language Models through Multiagent Debate' (2023).",
+        "kind": "file",
+        "locator": "papers/text/du-et-al-2023-multiagent-debate.txt",
+        "observed_fact": "Enumerated in material:001; asserted present in the solve workspace by the conversation decision; content not enclosed at intake."
+      },
+      {
+        "id": "ref:smit-2023-going-mad",
+        "description": "Extracted text of Smit et al., 'Should We Be Going MAD? A Look at Multi-Agent Debate Strategies for LLMs' (2023).",
+        "kind": "file",
+        "locator": "papers/text/smit-et-al-2023-going-mad.txt",
+        "observed_fact": "Enumerated in material:001; asserted present in the solve workspace by the conversation decision; content not enclosed at intake."
+      },
+      {
+        "id": "ref:zhang-2025-mad-question",
+        "description": "Extracted text of Zhang et al., 'If Multi-Agent Debate Is the Answer, What Is the Question?' (2025).",
+        "kind": "file",
+        "locator": "papers/text/zhang-et-al-2025-mad-question.txt",
+        "observed_fact": "Enumerated in material:001; asserted present in the solve workspace by the conversation decision; content not enclosed at intake."
+      },
+      {
+        "id": "ref:choi-2025-conformity",
+        "description": "Extracted text of Choi et al., 'An Empirical Study of Group Conformity in Multi-Agent Systems' (Findings of ACL 2025).",
+        "kind": "file",
+        "locator": "papers/text/choi-et-al-2025-conformity.txt",
+        "observed_fact": "Enumerated in material:001; asserted present in the solve workspace by the conversation decision; content not enclosed at intake."
+      }
+    ],
+    "constraints": [
+      "C1: Total length must be 1,400–1,800 words.",
+      "C2: No evidence outside the seven corpus files may be used; the request restricts grounding to the supplied workspace corpus and the manifest declares these files the only evidentiary corpus for the benchmark.",
+      "C3: Citations must reference at least five distinct source files and include PDF page markers as they appear in the extracted texts (page boundaries marked `===== PDF PAGE N =====`).",
+      "C4: Papers must not be selected or weighted by desired outcome; the corpus's conflicting empirical conclusions must be preserved and reconciled."
+    ]
+  },
+  "source_envelope": {
+    "raw_request": "Write a 1,400–1,800 word architecture decision memo for a shared knowledge substrate used by recursively decomposing AI research agents. The memo must make a concrete implementable recommendation, not merely survey the literature. Treat questions and answers as first-class many-to-many graph objects: allow multiple competing answers per question, one answer to address multiple questions, question-to-question relations, answer-to-answer provenance or conflict relations, and controlled tags. Compare this design against an open conversational forum and against no inter-agent communication. Specify the data model and invariants, staged visibility and communication protocol, persistence and concurrent-update semantics, contradiction and belief-revision behavior, retrieval/ranking, and the exact role of model versus runtime. Reconcile rather than hide the tension between papers reporting multi-agent debate gains and papers reporting matched-compute null results or conformity. Ground the memo only in the supplied workspace corpus; cite at least five distinct source files with PDF page markers from the extracted text. Clearly distinguish source-supported claims from design inferences. Include a falsifiable evaluation plan comparing at least three conditions, with quality, diversity/correlation, latency, token cost, and recovery-from-wrong-consensus metrics. State important limitations and unresolved questions.",
+    "title_hint": "Shared knowledge substrate for recursive research agents",
+    "conversation_decisions": [
+      "The compact corpus manifest is attached to intake, and the seven full extracted source texts it enumerates are present in the solve workspace under papers/text with explicit PDF page markers."
+    ],
+    "materials": [
+      {
+        "id": "material:001",
+        "kind": "file",
+        "label": "CORPUS.md",
+        "content": "# Research corpus manifest\n\nThe full extracted texts are available under `papers/text/`. Page boundaries are marked as `===== PDF PAGE N =====`. These source files are the only evidentiary corpus for the benchmark.\n\n- `papers/text/dung-1995-argumentation.txt` — Phan Minh Dung, \"On the Acceptability of Arguments and its Fundamental Role in Nonmonotonic Reasoning, Logic Programming and n-Person Games\" (Artificial Intelligence 77, 1995). Source: https://cse-robotics.engr.tamu.edu/dshell/cs631/papers/dung95acceptability.pdf\n- `papers/text/shapiro-et-al-2011-crdts.txt` — Marc Shapiro, Nuno Preguiça, Carlos Baquero, Marek Zawirski, \"Conflict-Free Replicated Data Types\" (SSS 2011). Source: https://perso.lip6.fr/Marc.Shapiro/papers/2011/CRDTs_SSS-2011.pdf\n- `papers/text/lorenz-et-al-2011-social-influence.txt` — Jan Lorenz et al., \"How Social Influence Can Undermine the Wisdom of Crowd Effect\" (PNAS 108, 2011). Source: https://doi.org/10.1073/pnas.1008636108\n- `papers/text/du-et-al-2023-multiagent-debate.txt` — Yilun Du et al., \"Improving Factuality and Reasoning in Language Models through Multiagent Debate\" (2023). Source: https://arxiv.org/abs/2305.14325\n- `papers/text/smit-et-al-2023-going-mad.txt` — Andries Smit et al., \"Should We Be Going MAD? A Look at Multi-Agent Debate Strategies for LLMs\" (2023). Source: https://arxiv.org/abs/2311.17371\n- `papers/text/zhang-et-al-2025-mad-question.txt` — Hangfan Zhang et al., \"If Multi-Agent Debate Is the Answer, What Is the Question?\" (2025). Source: https://arxiv.org/abs/2502.08788\n- `papers/text/choi-et-al-2025-conformity.txt` — Min Choi et al., \"An Empirical Study of Group Conformity in Multi-Agent Systems\" (Findings of ACL 2025). Source: https://aclanthology.org/2025.findings-acl.265/\n\nThe corpus intentionally contains conflicting empirical conclusions. The memo must preserve and reconcile those conflicts rather than select papers by desired outcome.\n",
+        "locator": "/workspace/seam-harness/research-kb-workspace/CORPUS.md"
+      }
+    ]
+  },
+  "intake": {
+    "assessment": {
+      "readiness": "ready",
+      "derivations": [
+        {
+          "target": "frame.title",
+          "source_ids": [
+            "request"
+          ],
+          "status": "explicit",
+          "account": "Taken verbatim from the envelope's title_hint."
+        },
+        {
+          "target": "product_intent",
+          "source_ids": [
+            "request"
+          ],
+          "status": "inferred",
+          "account": "Synthesized from the request as a whole — a decision memo that must reconcile debate-gain evidence with null/conformity evidence for a shared agent knowledge layer; no single sentence states the intent verbatim."
+        },
+        {
+          "target": "demand:D1",
+          "source_ids": [
+            "request"
+          ],
+          "status": "explicit",
+          "account": "'Write a 1,400–1,800 word architecture decision memo'."
+        },
+        {
+          "target": "demand:D2",
+          "source_ids": [
+            "request"
+          ],
+          "status": "explicit",
+          "account": "'must make a concrete implementable recommendation, not merely survey the literature'."
+        },
+        {
+          "target": "demand:D3",
+          "source_ids": [
+            "request"
+          ],
+          "status": "explicit",
+          "account": "All five graph capabilities (competing answers per question, answer addressing multiple questions, Q–Q relations, A–A provenance/conflict relations, controlled tags) are enumerated verbatim."
+        },
+        {
+          "target": "demand:D4",
+          "source_ids": [
+            "request"
+          ],
+          "status": "explicit",
+          "account": "'Compare this design against an open conversational forum and against no inter-agent communication.'"
+        },
+        {
+          "target": "demand:D5",
+          "source_ids": [
+            "request"
+          ],
+          "status": "explicit",
+          "account": "First of the six specification areas listed in the request ('the data model and invariants')."
+        },
+        {
+          "target": "demand:D6",
+          "source_ids": [
+            "request"
+          ],
+          "status": "explicit",
+          "account": "'staged visibility and communication protocol' listed verbatim."
+        },
+        {
+          "target": "demand:D7",
+          "source_ids": [
+            "request"
+          ],
+          "status": "explicit",
+          "account": "'persistence and concurrent-update semantics' listed verbatim."
+        },
+        {
+          "target": "demand:D8",
+          "source_ids": [
+            "request"
+          ],
+          "status": "explicit",
+          "account": "'contradiction and belief-revision behavior' listed verbatim."
+        },
+        {
+          "target": "demand:D9",
+          "source_ids": [
+            "request"
+          ],
+          "status": "explicit",
+          "account": "'retrieval/ranking' listed verbatim."
+        },
+        {
+          "target": "demand:D10",
+          "source_ids": [
+            "request"
+          ],
+          "status": "explicit",
+          "account": "'the exact role of model versus runtime' listed verbatim."
+        },
+        {
+          "target": "demand:D11",
+          "source_ids": [
+            "request",
+            "material:001"
+          ],
+          "status": "explicit",
+          "account": "Request requires reconciling rather than hiding the debate-gains vs null/conformity tension; manifest adds that papers must not be selected by desired outcome."
+        },
+        {
+          "target": "demand:D12",
+          "source_ids": [
+            "request",
+            "decision:0",
+            "material:001"
+          ],
+          "status": "explicit",
+          "account": "Corpus-only grounding, five-file citation minimum, and page-marker requirement are in the request; the corpus enumeration and marker format are in the manifest; availability of the full texts at solve time rests on the envelope's single conversation decision (decision:0)."
+        },
+        {
+          "target": "demand:D13",
+          "source_ids": [
+            "request"
+          ],
+          "status": "explicit",
+          "account": "'Clearly distinguish source-supported claims from design inferences.'"
+        },
+        {
+          "target": "demand:D14",
+          "source_ids": [
+            "request"
+          ],
+          "status": "explicit",
+          "account": "Falsifiability, the three-condition minimum, and all five metric families (quality, diversity/correlation, latency, token cost, recovery-from-wrong-consensus) are enumerated verbatim."
+        },
+        {
+          "target": "demand:D15",
+          "source_ids": [
+            "request"
+          ],
+          "status": "explicit",
+          "account": "'State important limitations and unresolved questions.'"
+        },
+        {
+          "target": "constraint:C1",
+          "source_ids": [
+            "request"
+          ],
+          "status": "explicit",
+          "account": "Word bound stated in the request."
+        },
+        {
+          "target": "constraint:C2",
+          "source_ids": [
+            "request",
+            "material:001"
+          ],
+          "status": "explicit",
+          "account": "Request: 'Ground the memo only in the supplied workspace corpus.' Manifest: 'These source files are the only evidentiary corpus for the benchmark.'"
+        },
+        {
+          "target": "constraint:C3",
+          "source_ids": [
+            "request",
+            "material:001"
+          ],
+          "status": "explicit",
+          "account": "Distinct-file minimum and page-marker citation requirement from the request; marker syntax (`===== PDF PAGE N =====`) from the manifest."
+        },
+        {
+          "target": "constraint:C4",
+          "source_ids": [
+            "material:001"
+          ],
+          "status": "explicit",
+          "account": "Manifest: 'The memo must preserve and reconcile those conflicts rather than select papers by desired outcome.'"
+        },
+        {
+          "target": "stable_context:SC1",
+          "source_ids": [
+            "material:001"
+          ],
+          "status": "explicit",
+          "account": "File list, paths, and bibliographic details copied from the manifest."
+        },
+        {
+          "target": "stable_context:SC2",
+          "source_ids": [
+            "material:001"
+          ],
+          "status": "explicit",
+          "account": "Marker syntax stated in the manifest."
+        },
+        {
+          "target": "stable_context:SC3",
+          "source_ids": [
+            "material:001"
+          ],
+          "status": "explicit",
+          "account": "Manifest states the corpus intentionally contains conflicting empirical conclusions; the characterization of which papers fall on which side follows the manifest's own titles and the request's framing."
+        },
+        {
+          "target": "stable_context:SC4",
+          "source_ids": [
+            "decision:0",
+            "material:001"
+          ],
+          "status": "explicit",
+          "account": "The envelope's single conversation decision asserts the seven full texts are present under papers/text; only the manifest is enclosed at intake."
+        },
+        {
+          "target": "stable_context:SC5",
+          "source_ids": [
+            "material:001"
+          ],
+          "status": "explicit",
+          "account": "Locator provided with material:001."
+        },
+        {
+          "target": "stable_context:SC6",
+          "source_ids": [
+            "request"
+          ],
+          "status": "inferred",
+          "account": "The request names exactly two baselines; combined with the proposed design they yield three conditions satisfying D14. The request does not state this mapping explicitly."
+        },
+        {
+          "target": "referent:ref:corpus-manifest",
+          "source_ids": [
+            "material:001"
+          ],
+          "status": "explicit",
+          "account": "Manifest file and locator supplied directly in the envelope."
+        },
+        {
+          "target": "referents:papers-text-files",
+          "source_ids": [
+            "material:001",
+            "decision:0"
+          ],
+          "status": "explicit",
+          "account": "All seven referent paths are enumerated verbatim in the manifest and their presence in the solve workspace is asserted by decision:0; their contents are not enclosed at intake, so nothing about their internal substance is claimed here."
+        }
+      ],
+      "assumptions": [
+        "The seven full extracted texts will be readable at solve time under papers/text/ exactly as enumerated; intake could verify only the manifest, so the feasibility of D12/C3 (page-marker citations) rests entirely on the conversation decision's assertion.",
+        "Default audience is a technical decision-maker for the agent system (e.g., research/engineering leadership); no venue, template, or style guide constrains the memo beyond the mandated content.",
+        "Citation style is author-chosen provided each citation identifies the source file and its PDF page marker(s); no bibliography or inline format is prescribed.",
+        "The evaluation plan is a proposed experimental design written within the memo; executing experiments or producing runnable code is not part of the deliverable.",
+        "'Controlled tags' denotes a governed tag vocabulary whose specific design is left to the memo author as part of the recommendation.",
+        "Whether the 1,400–1,800 word budget includes headings and citations is unspecified; assumed to apply to memo prose — a low-consequence bookkeeping default."
+      ],
+      "unresolved": [
+        "Contents, extraction quality, and page-marker integrity of the seven papers/text files are unverified at intake; only the manifest was enclosed.",
+        "No prescribed section ordering, memo template, or citation style exists in the envelope.",
+        "'Recovery-from-wrong-consensus' has no pre-supplied operationalization; the memo must define this metric as part of its evaluation plan.",
+        "Whether the evaluation plan is expected to be executable in the seam-harness workspace or is a paper-style proposal is unstated; defaulted to a design-only proposal per the request's wording ('include a falsifiable evaluation plan')."
+      ],
+      "clarification_questions": [],
+      "framing_notes": "The raw request is an unusually complete specification of a single writing deliverable: format, length, mandated specification areas, baselines, evidence rules, citation thresholds, evaluation metrics, and reconciliation duties are all stated verbatim, so nearly every demand and constraint above is explicit rather than inferred, and the frame preserves the request's vocabulary (e.g., 'staged visibility', 'belief-revision', 'recovery-from-wrong-consensus'). Two features shape the frame. First, the evidentiary basis is closed — exactly the seven files enumerated in material:001, with the manifest and the single conversation decision jointly establishing their solve-time availability while intake itself sees only the manifest; this is the frame's principal load-bearing assumption rather than a clarification blocker, because the decision states it outright. Second, the corpus is deliberately conflicted (debate gains versus matched-compute nulls, conformity, and social-influence effects), and both the request and the manifest forbid resolving that conflict by selective citation; this is captured as demand D11 and constraint C4. Instructions appearing inside CORPUS.md were treated as task data; they corroborate the raw request and are carried with material:001 provenance. Remaining uncertainties (citation style, audience, template, word-count bookkeeping, runnability of the evaluation plan, metric operationalization) all have safe defaults that do not alter the deliverable's substance, so no clarification questions are raised and the intake is marked ready: dispatching this frame preserves the request without relying on any unstated consequential choice. No decomposition, memo structure, section plan, or design preference is proposed here — those belong to downstream roles."
+    },
+    "source_sha256": "21811ada839085bdf582e5d8195b1d46bfca7caf96e2227d47df5f8f4435b282",
+    "frame_sha256": "1e91e6e11c0441e9190b835384f1fcdb7be27e139b2db632e83619fb833bcc4f",
+    "generated_by_model": "fireworks:accounts/fireworks/routers/kimi-k3-fast",
+    "elapsed_ms": 96682,
+    "usage": {
+      "details": {
+        "reasoning_tokens": 8469
+      },
+      "requests": 1,
+      "output_tokens": 13177,
+      "cache_read_tokens": 0,
+      "input_tokens": 2055
+    }
+  },
+  "questioner_lenses": [
+    "adversarial counterexample",
+    "environment and execution context",
+    "failure semantics",
+    "shared invariant hunting",
+    "artifact and referent inspection"
+  ],
+  "policy": {
+    "root_model": "fireworks:accounts/fireworks/models/kimi-k3",
+    "leaf_model": "fireworks:accounts/fireworks/models/kimi-k3",
+    "max_planning_rounds": 2,
+    "max_concurrency": 5,
+    "request_limit_per_role": 3
+  }
+}

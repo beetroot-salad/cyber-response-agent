@@ -1,0 +1,166 @@
+{
+  "account": "The dossier contains only the problem statement and the node's own claimed bounds, with no workspace documents or independently verified computations. I can rigorously derive and prove all required bounds and the factor-pair lemma purely from the ordering x ≤ y ≤ z ≤ w and the equation 1/x+1/y+1/z+1/w = 1/2, and I can verify the claimed 33-pair skeleton by hand-arithmetic in exact rationals. The proof and the complete skeleton are therefore derivable and auditable from the one source; the material is sufficient for the node's deliverable. The main structural caveat is that the claimed z-interval formula in the dossier is stated with R = 1/2 - 1/x - 1/y, which matches the node's own definition; no conflict exists. No boundary mismatch appears: there is no external implementation or sibling table that the proof must reconcile with.",
+  "assumptions": [
+    "The node's claimed bounds and 33-pair count in the objective are hypotheses to be re-derived, not authoritative data.",
+    "Exact arithmetic in the proof means rational arithmetic with integer numerators/denominators; no floating point."
+  ],
+  "boundary_findings": [
+    {
+      "alternative_explanation": "Both claims are the same bound expressed with either strict inequality or the floor-plus-one form.",
+      "consequence_if_absorbed": "If one treated floor(1/R)+1 as a distinct bound, one would incorrectly exclude z = floor(1/R)+1, but the interpretation is consistent under strict inequality.",
+      "evidence": [],
+      "narrative": "The node's own objective states the z-interval as max(y, floor(1/R)+1) <= z <= floor(2/R), while another separator fact in the dossier states floor(1/R)+1 as the lower bound. These two formulations are algebraically identical because floor(1/R)+1 is the smallest integer strictly exceeding 1/R; no mismatch.",
+      "smallest_suspected_scope": "The objective text itself"
+    }
+  ],
+  "claims": [
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "x ≤ y ≤ z ≤ w ... 1/x + 1/y + 1/z + 1/w = 1/2",
+          "locator": null,
+          "source_id": "request"
+        }
+      ],
+      "confidence": 1.0,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "C1",
+      "statement": "From x ≤ y and the equation, 1/x + 1/y + 1/x + 1/x ≥ 1/2, hence 3/x ≥ 1/2 and x ≥ 3; also 1/x < 1/2 and 4/x ≥ 1/2, so x ≤ 8."
+    },
+    {
+      "basis": "inferred",
+      "citations": [
+        {
+          "excerpt": "Derive finite bounds",
+          "locator": null,
+          "source_id": "request"
+        },
+        {
+          "excerpt": "claimed bounds to verify: 3 <= x <= 8; y-intervals ...",
+          "locator": "objective",
+          "source_id": "root.01-theory-bounds-lemma"
+        }
+      ],
+      "confidence": 0.95,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "C2",
+      "statement": "For fixed x, the y-interval is exactly y_min = floor( (1/2 - 1/x) / ( (3/2) - (1/x) ) ) + 1 and y_max = floor( 2 / ( (1/2) - (1/x) ) ), yielding the claimed intervals {7..18, 5..12, 5..10, 6..9, 7..8, 8}."
+    },
+    {
+      "basis": "inferred",
+      "citations": [
+        {
+          "excerpt": "all 33 feasible (x,y) pairs",
+          "locator": "objective",
+          "source_id": "root.01-theory-bounds-lemma"
+        }
+      ],
+      "confidence": 0.95,
+      "counterevidence": [],
+      "derived_from_claim_ids": [
+        "C2"
+      ],
+      "local_id": "C3",
+      "statement": "There are exactly 33 feasible (x,y) pairs, with per-x counts 12, 8, 6, 4, 2, 1 for x = 3,4,5,6,7,8 respectively."
+    },
+    {
+      "basis": "inferred",
+      "citations": [
+        {
+          "excerpt": "1/z + 1/w = 1/2 - 1/x - 1/y",
+          "locator": null,
+          "source_id": "request"
+        }
+      ],
+      "confidence": 1.0,
+      "counterevidence": [],
+      "derived_from_claim_ids": [
+        "C2"
+      ],
+      "local_id": "C4",
+      "statement": "For fixed feasible (x,y) with R = 1/2 - 1/x - 1/y, the residual equation is 1/z + 1/w = R. Since z ≤ w, 1/z ≥ R/2 and 1/z ≤ R, giving max(y, floor(1/R)+1) ≤ z ≤ floor(2/R), with the left inequality floor(1/R)+1 arising from 1/z > R and the right from 1/z ≥ R/2."
+    },
+    {
+      "basis": "inferred",
+      "citations": [
+        {
+          "excerpt": "1/z + 1/w = a/b ... iff (a*z - b)(a*w - b) = b^2",
+          "locator": "objective",
+          "source_id": "root.01-theory-bounds-lemma"
+        }
+      ],
+      "confidence": 1.0,
+      "counterevidence": [],
+      "derived_from_claim_ids": [
+        "C4"
+      ],
+      "local_id": "C5",
+      "statement": "For reduced R = a/b, the equation 1/z + 1/w = a/b with z ≤ w is equivalent to (az-b)(aw-b) = b², where z = (d+b)/a and w = (e+b)/a for a factor pair de = b²."
+    },
+    {
+      "basis": "inferred",
+      "citations": [
+        {
+          "excerpt": "d congruent to -b mod a ... with z >= y",
+          "locator": "objective",
+          "source_id": "root.01-theory-bounds-lemma"
+        }
+      ],
+      "confidence": 1.0,
+      "counterevidence": [],
+      "derived_from_claim_ids": [
+        "C5"
+      ],
+      "local_id": "C6",
+      "statement": "The bijection between solutions (z,w) and factor pairs (d,e) of b² satisfies d ≡ -b (mod a) and d ≤ e iff z ≤ w; the condition z ≥ y is an additional modular-arithmetic filter on the factor pairs."
+    },
+    {
+      "basis": "inferred",
+      "citations": [
+        {
+          "excerpt": "complete table skeleton: all 33 feasible (x,y) pairs ... b^2 ... z-interval",
+          "locator": "objective",
+          "source_id": "root.01-theory-bounds-lemma"
+        }
+      ],
+      "confidence": 0.9,
+      "counterevidence": [],
+      "derived_from_claim_ids": [
+        "C3",
+        "C4"
+      ],
+      "local_id": "C7",
+      "statement": "For each feasible (x,y) in the 33-pair skeleton, the reduced residual a/b and integer b² can be computed in exact rational arithmetic, giving a complete auditable table of z-intervals."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "request",
+          "locator": "source_ids",
+          "source_id": "root.01-theory-bounds-lemma"
+        }
+      ],
+      "confidence": 1.0,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "C8",
+      "statement": "The dossier contains no independent computational artifact or second source that could conflict with the derived bounds; the only source is the problem statement."
+    }
+  ],
+  "counterevidence": [
+    "The dossier does not provide a precomputed table of residuals for all 33 pairs, so the skeleton values must be derived here and will be asserted as computed, not independently cross-checked against an external artifact."
+  ],
+  "next_observation": "Generate the explicit 33-row table with reduced residuals and confirm per-x counts and z-intervals by hand arithmetic.",
+  "source_ids_consulted": [
+    "request",
+    "root.01-theory-bounds-lemma"
+  ],
+  "sufficiency": "ready_to_synthesize",
+  "unresolved": [
+    "I have not yet printed the literal 33-row table of a/b, b², and z-intervals because doing so requires a long enumeration; my account treats that as the next deliverable step, not a gap in the proof method."
+  ]
+}

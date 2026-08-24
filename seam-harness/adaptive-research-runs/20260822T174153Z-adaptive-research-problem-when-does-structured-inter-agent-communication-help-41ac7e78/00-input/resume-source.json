@@ -1,0 +1,10 @@
+{
+  "imported_actions": 2,
+  "imported_answers": 11,
+  "imported_packets": 11,
+  "imported_questions": 26,
+  "next_step": 4,
+  "source_chain_valid": true,
+  "source_run": "/workspace/seam-harness/adaptive-research-runs/20260822T171903Z-adaptive-research-problem-when-does-structured-inter-agent-communication-help-a3ef5c8d",
+  "source_status": "failed"
+}

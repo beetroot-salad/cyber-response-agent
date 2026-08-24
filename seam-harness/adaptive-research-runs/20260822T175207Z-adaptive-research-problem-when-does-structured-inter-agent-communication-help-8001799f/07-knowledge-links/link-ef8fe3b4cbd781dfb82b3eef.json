@@ -1,0 +1,10 @@
+{
+  "content_sha256": "ef8fe3b4cbd781dfb82b3eefc0bab7f53595a1f1fcb141d956db7dc6acbfbac5",
+  "id": "link:ef8fe3b4cbd781dfb82b3eef",
+  "origin": "runtime",
+  "proposed_by_node_id": null,
+  "rationale": null,
+  "relation": "refines",
+  "source_id": "question:work:001-inv-du-debate",
+  "target_id": "question:demand:D4"
+}

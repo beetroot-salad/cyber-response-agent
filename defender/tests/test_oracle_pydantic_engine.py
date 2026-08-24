@@ -22,7 +22,7 @@ from pydantic_ai.models import override_allow_model_requests  # noqa: E402
 
 from defender.learning.core.config import StageWiring  # noqa: E402
 from defender.learning.core import config, subagents  # noqa: E402
-from defender.learning.pipeline import _pydantic_stage  # noqa: E402
+from defender.learning import _pydantic_stage  # noqa: E402
 from defender.learning.pipeline.oracle import run as oracle_run  # noqa: E402
 from defender.learning.pipeline.oracle_engine import (  # noqa: E402
     ORACLE_DEF,

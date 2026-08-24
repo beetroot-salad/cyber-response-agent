@@ -1,0 +1,215 @@
+{
+  "account": "Shapiro et al. 2011 formalize exactly the merge/aggregation stage of any multi-agent pipeline: how concurrent contributions combine without central coordination. Core machinery: (1) A Conflict-free Replicated Data Type (CRDT) is a replicated data type whose design satisfies sufficient conditions for Strong Eventual Consistency (SEC); SEC = eventual consistency (eventual delivery, convergence, termination) plus Strong Convergence — correct replicas that have delivered the same updates have equivalent state immediately, with no consensus, no roll-back, and no waiting for quiescence (Defs. 2–3, page 4). (2) Two sufficient conditions: state-based CvRDT — payload forms a join semilattice, merge computes the least upper bound (commutative, idempotent, associative), and state is monotonically non-decreasing; Theorem 1 gives SEC assuming eventual delivery and termination (pages 4–5). Op-based CmRDT — updates split into a side-effect-free prepare step at the source and an effect-update delivered downstream; if all concurrent updates commute and delivery is reliable and causally ordered, Theorem 2 gives SEC (pages 5–6). (3) The two styles are mutually emulatable (Theorems 3–4, pages 7–8), so 'merge states' vs 'merge operations' is an implementation choice, not a difference in guarantee. (4) Scope and limits: SEC solves the CAP dilemma by staying available and partition-tolerant without consensus, tolerating n−1 crashes (page 6); but eventual delivery alone is insufficient (no-op merge counterexample, page 4), and SEC is incomparable with sequential consistency — the converged state need not correspond to any sequential execution (page 8). Crucially for the research note, the guarantees are truth-neutral: correctness is defined relative to a chosen concurrent specification, not relative to fact. Add-wins, remove-wins, highest-IP-wins, or reset-to-⊥ all satisfy strong convergence ('any of them may be reasonable for some application', page 8); LWW imposes a total order 'at the cost of losing concurrent updates' (page 13). Cross-paper inference for the note (not Shapiro's claim): both independent-sampling-plus-aggregation and staged Q/A must pick a merge rule for agent contributions, and CRDT theory shows that rule choice determines which contributions survive aggregation while saying nothing about whether the merged content is true — formally grounding the dossier constraint that agreement or merge success is not evidence of correctness. A further diagnostic for the note: LLM free-text synthesis is generally neither commutative nor idempotent, so it fails the CRDT sufficient conditions and inherits no convergence guarantee at all.",
+  "assumptions": [
+    "Page attribution verified against explicit markers: Definitions 2–3 and the semilattice/LUB properties lie between '===== PDF PAGE 4 =====' (line ~177) and '===== PDF PAGE 5 =====' (line ~234); Definition 6 and Theorem 2 between page-6 and page-7 markers; section 3.3 and Theorem 4 between page-8 and page-9 markers.",
+    "The dossier constraint 'agreement/merge success is not evidence of truth' is supported by mapping the paper's specification-relative correctness (page 8) onto agent-answer aggregation; this mapping is treated as inference, and claim sh6 is stated at the level of the paper's text only."
+  ],
+  "boundary_findings": [
+    {
+      "alternative_explanation": "An LLM synthesizer could be engineered to approximate idempotence (e.g., deterministic decoding over a fixed evidence union), partially restoring CRDT-like behavior; this is an empirical design question, not excluded by the paper.",
+      "consequence_if_absorbed": "The note would overclaim that a merged/agreed multi-agent answer is well-defined or reliable merely because contributions were combined, conflating convergence (a structural property) with correctness — exactly the constraint the dossier forbids.",
+      "evidence": [
+        "papers/text/shapiro-et-al-2011-crdts.txt ===== PDF PAGE 5 ===== (Theorem 1 conditions: semilattice, LUB merge, monotonicity)",
+        "papers/text/shapiro-et-al-2011-crdts.txt ===== PDF PAGE 6 ===== (Theorem 2 condition: all concurrent updates commute)"
+      ],
+      "narrative": "CRDT guarantees presuppose deterministic, mathematically constrained merge operators (LUB or commuting operations). LLM-based answer synthesis — the actual merge stage in both focal baseline conditions — is stochastic, non-idempotent, and non-commutative, so none of Shapiro's convergence theorems apply to it directly. CRDT theory functions as a diagnostic boundary (what properties a merge must have for agreement to be well-defined), not as an applicable guarantee.",
+      "smallest_suspected_scope": "Application of Shapiro et al. 2011 to the LLM-agent aggregation stage in the research note's causal model."
+    }
+  ],
+  "claims": [
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "Definition 3 (Strong eventual consistency (SEC)). An object is Strongly Eventually Consistent if it is Eventually Consistent and: Strong Convergence: Correct replicas that have delivered the same updates have equivalent state: ∀i,j : ci = cj ⇒ si ≡ sj.",
+          "locator": "===== PDF PAGE 4 =====",
+          "source_id": "papers/text/shapiro-et-al-2011-crdts.txt"
+        },
+        {
+          "excerpt": "In our conflict-free replicated data types (CRDTs), an update does not require synchronisation, and CRDT replicas provably converge to a correct common state.",
+          "locator": "===== PDF PAGE 2 =====",
+          "source_id": "papers/text/shapiro-et-al-2011-crdts.txt"
+        }
+      ],
+      "confidence": 0.98,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "sh1",
+      "statement": "Shapiro et al. define a CRDT as a data type satisfying sufficient conditions for Strong Eventual Consistency (SEC), where SEC is eventual consistency (eventual delivery, convergence, termination) plus Strong Convergence: correct replicas that have delivered the same updates have equivalent state (∀i,j: ci=cj ⇒ si≡sj), without consensus or roll-back."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "Theorem 1 (Convergent Replicated Data Type (CvRDT)). Assuming eventual delivery and termination, any state-based object that satisfies the monotonic semilattice property is SEC.",
+          "locator": "===== PDF PAGE 5 =====",
+          "source_id": "papers/text/shapiro-et-al-2011-crdts.txt"
+        },
+        {
+          "excerpt": "It follows that ⊔ is: commutative: x⊔y = y⊔x; idempotent: x⊔x = x; and associative: (x⊔y)⊔z = x⊔(y⊔z).",
+          "locator": "===== PDF PAGE 4 =====",
+          "source_id": "papers/text/shapiro-et-al-2011-crdts.txt"
+        }
+      ],
+      "confidence": 0.98,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "sh2",
+      "statement": "State-based sufficient condition (CvRDT, Theorem 1): if the payload forms a join semilattice under ≤, merge computes the least upper bound (LUB), and state is monotonically non-decreasing across updates, then the object is SEC assuming eventual delivery and termination. The LUB is commutative, idempotent, and associative, so state-based merge is insensitive to message order and duplication."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "Theorem 2 (Commutative Replicated Data Type (CmRDT)). Assuming causal delivery of updates and method termination, any op-based object that satisfies the commutativity property for all concurrent updates, and whose delivery precondition is satisfied by causal delivery, is SEC.",
+          "locator": "===== PDF PAGE 6 =====",
+          "source_id": "papers/text/shapiro-et-al-2011-crdts.txt"
+        },
+        {
+          "excerpt": "An op-based object has no merge method; instead an update is split into a pair (t,u), where t is a side-effect-free prepare-update method and u is an effect-update method.",
+          "locator": "===== PDF PAGE 5 =====",
+          "source_id": "papers/text/shapiro-et-al-2011-crdts.txt"
+        }
+      ],
+      "confidence": 0.97,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "sh3",
+      "statement": "Operation-based sufficient condition (CmRDT, Theorem 2): an update is split into a side-effect-free prepare-update at the source replica and an effect-update delivered to all replicas; if all concurrent updates commute (Def. 6) and the delivery precondition is satisfied by reliable causally-ordered broadcast, then the object is SEC assuming termination."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "Theorem 3 (CmRDT emulation). Any SEC state-based object can be emulated by a SEC op-based object of a corresponding interface.",
+          "locator": "===== PDF PAGE 7 =====",
+          "source_id": "papers/text/shapiro-et-al-2011-crdts.txt"
+        },
+        {
+          "excerpt": "Theorem 4 (CvRDT emulation). Any SEC op-based object can be emulated by a SEC state-based object of a corresponding interface.",
+          "locator": "===== PDF PAGE 8 =====",
+          "source_id": "papers/text/shapiro-et-al-2011-crdts.txt"
+        }
+      ],
+      "confidence": 0.96,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "sh4",
+      "statement": "State-based and op-based CRDTs are equivalent in expressive power: any SEC state-based object can be emulated by a SEC op-based object (Theorem 3) and vice versa (Theorem 4), so the choice between shipping state and shipping operations is an implementation matter that does not change the convergence guarantee."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "SEC provides an extreme form of fault tolerance, as a SEC object tolerates up to n−1 simultaneous crashes. Remarkably, SEC does not require to solve consensus.",
+          "locator": "===== PDF PAGE 6 =====",
+          "source_id": "papers/text/shapiro-et-al-2011-crdts.txt"
+        },
+        {
+          "excerpt": "if the merge method m is a no-op, an update executed at some replica has no effect on other replicas, and they will never converge.",
+          "locator": "===== PDF PAGE 4 =====",
+          "source_id": "papers/text/shapiro-et-al-2011-crdts.txt"
+        },
+        {
+          "excerpt": "Such a state would never occur in a sequentially-consistent execution... Therefore, SEC is incomparable with sequential consistency.",
+          "locator": "===== PDF PAGE 8 =====",
+          "source_id": "papers/text/shapiro-et-al-2011-crdts.txt"
+        }
+      ],
+      "confidence": 0.96,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "sh5",
+      "statement": "The guarantees and their boundaries: SEC replicas remain available and converge under partitions without solving consensus, tolerating n−1 crashes (a proposed solution to CAP); but eventual delivery alone does not imply convergence (a no-op merge method never converges), and SEC is incomparable with sequential consistency — a converged SEC state may be unreachable in any sequential execution."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "the add could win, or the remove could win, or the update of the replica with the highest IP address could win, or the state might be reset to a distinguished state ⊥, and so on. All these alternatives satisfy the strong convergence condition, and any of them may be reasonable for some application.",
+          "locator": "===== PDF PAGE 8 =====",
+          "source_id": "papers/text/shapiro-et-al-2011-crdts.txt"
+        },
+        {
+          "excerpt": "LWW ensures a total order of operations, at the cost of losing concurrent updates.",
+          "locator": "===== PDF PAGE 13 =====",
+          "source_id": "papers/text/shapiro-et-al-2011-crdts.txt"
+        },
+        {
+          "excerpt": "CRDTs are guaranteed to converge towards a common, correct state, without requiring any synchronisation.",
+          "locator": "===== PDF PAGE 14 =====",
+          "source_id": "papers/text/shapiro-et-al-2011-crdts.txt"
+        }
+      ],
+      "confidence": 0.93,
+      "counterevidence": [
+        "The paper's own wording 'correct common state' (pages 2, 14) could be misread as a content-truth guarantee; the surrounding formalism defines 'correct' strictly as conformance to the data type's concurrent specification, not as factual correctness of payload content."
+      ],
+      "derived_from_claim_ids": [
+        "sh1",
+        "sh2",
+        "sh5"
+      ],
+      "local_id": "sh6",
+      "statement": "CRDT correctness is specification-relative, not truth-relative: for concurrent conflicting updates, add-wins, remove-wins, highest-IP-wins, or reset-to-⊥ all satisfy strong convergence and the paper states any of them may be reasonable for some application; LWW-style rules impose order only 'at the cost of losing concurrent updates'. Convergence and agreement therefore certify nothing about which merged content is true or even retained."
+    }
+  ],
+  "counterevidence": [
+    "Shapiro et al. themselves use 'correct state' language (===== PDF PAGE 2 =====, ===== PDF PAGE 14 =====); a careless reading could cite this as evidence that CRDT-style merging certifies content correctness, whereas the paper's own add-wins/remove-wins discussion (page 8) shows correctness is spec-relative.",
+    "All guarantees are asymptotic and conditional: eventual delivery over fair-lossy channels, method termination, and (op-based) causal-order broadcast; no timing, bandwidth, or staleness bounds are provided, and remove-style operations require tombstones or unique tags (pages 9–11), so naive set-union intuitions do not cover deletion/retraction of agent claims.",
+    "Mapping CRDT merge semantics onto LLM answer aggregation is the investigator's cross-domain inference, not a claim of the paper; the paper addresses deterministic replicated data types, not stochastic model outputs."
+  ],
+  "knowledge_links": [
+    {
+      "rationale": "This packet performs exactly the assigned compact extraction of Shapiro 2011's CRDT/SEC machinery with page-marker citations.",
+      "relation": "answers",
+      "source_id": "self",
+      "target_id": "question:work:002-inv-shapiro-r2"
+    },
+    {
+      "rationale": "The assignment was split from the wave-1 combined formal-tools packet; this covers the Shapiro half (Dung half is handled separately).",
+      "relation": "partially_answers",
+      "source_id": "self",
+      "target_id": "question:work:001-inv-formal-tools"
+    },
+    {
+      "rationale": "Provides a dedicated, page-marker-verified extraction of the Shapiro material that the wave-1 combined packet covered jointly with Dung.",
+      "relation": "refines",
+      "source_id": "self",
+      "target_id": "answer:work:001-inv-formal-tools"
+    }
+  ],
+  "next_observation": null,
+  "raised_questions": [
+    {
+      "acceptance_condition": "For each candidate aggregation operator, a deterministic test (e.g., permuting input order, duplicating an input) establishes whether outputs are invariant (commutative/idempotent) or not, with effect sizes on final-answer variability reported for at least the operators used in the note's experiment.",
+      "discriminating_outcomes": [
+        "If LLM synthesis output is invariant to input order and duplication, CRDT-style convergence reasoning transfers and merge design is not a confound.",
+        "If output varies materially under order/duplication perturbation, aggregation is a variance source that must be controlled (fixed order, averaged over seeds) in the experiment, and union/vote aggregators gain a formal advantage over synthesis aggregators."
+      ],
+      "local_id": "rq-shapiro-merge",
+      "rationale": "Shapiro's theorems give convergence only when merge is a semilattice LUB or updates commute (pages 5–6). Both focal baselines (independent sampling + aggregation, staged Q/A) end in an aggregation step; if that step is a stochastic LLM call, it violates these conditions, so final answers may depend on agent ordering and sampling noise — a confound for the preregistered matched-compute experiment and a mechanistic distinction between aggregation designs.",
+      "required_source_hints": [
+        "papers/text/shapiro-et-al-2011-crdts.txt"
+      ],
+      "tags": [
+        "method",
+        "uncertainty",
+        "interface"
+      ],
+      "target_question_ids": [
+        "question:demand:D3",
+        "question:demand:D7"
+      ],
+      "text": "Which aggregation operators used in multi-agent LLM pipelines (majority vote, evidence union, LLM free-text synthesis) satisfy or violate the CRDT sufficient conditions for well-defined merging (commutativity, idempotence, monotonicity), and does order/non-determinism of the final aggregation step measurably change the merged answer?"
+    }
+  ],
+  "source_ids_consulted": [
+    "papers/text/shapiro-et-al-2011-crdts.txt"
+  ],
+  "sufficiency": "ready_to_synthesize",
+  "unresolved": [
+    "Whether any aggregation operator actually used in multi-agent LLM systems (majority vote, evidence-union, LLM free-text synthesis) satisfies commutativity/idempotence/monotonicity; LLM synthesis plausibly violates all three, meaning staged Q/A and independent+aggregation pipelines may have no convergence guarantee of the CRDT kind — a diagnostic the research note should exploit but this extraction cannot settle.",
+    "The paper gives no guidance on merging weighted, probabilistic, or natural-language content; adapting semilattice machinery to confidence-bearing claims is open."
+  ]
+}

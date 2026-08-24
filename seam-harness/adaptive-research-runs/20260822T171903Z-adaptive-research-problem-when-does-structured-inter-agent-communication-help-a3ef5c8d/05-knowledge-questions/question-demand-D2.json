@@ -1,0 +1,14 @@
+{
+  "acceptance_condition": "Establish demand D2 with evidence.",
+  "content_sha256": "abe3841afcea444044bf18b62adcb219c9c406a451f5c26d911e6864d73b6c25",
+  "demand_ids": [
+    "D2"
+  ],
+  "id": "question:demand:D2",
+  "node_id": null,
+  "rationale": "A research problem requires an explanatory claim, not a survey.",
+  "tags": [
+    "evidence"
+  ],
+  "text": "State one original mechanistic thesis about when staged retrieval-mediated Q/A communication wins or loses under matched inference compute."
+}

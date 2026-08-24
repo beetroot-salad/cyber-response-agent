@@ -1,0 +1,92 @@
+{
+  "call_id": "call-0004-recursive-planner",
+  "context": {
+    "ancestor_decisions": [
+      "Audience: general educated reader (decision:1).",
+      "Genre/register: standalone cultural criticism (decision:1).",
+      "Stance posture: the writer selects and defends a clear, nuanced thesis; a neutral survey is explicitly out of scope (decision:2).",
+      "Form expectations: plain essay prose with a title; citations and named theorists are not required (decision:3).",
+      "Suggested title from the envelope: 'AI Art and Kitsch' (title_hint).",
+      "No source materials are provided; the essay draws on the writer's own reasoning about AI art and kitsch.",
+      "Stance posture: clear, nuanced defended thesis; neutral survey out of scope (decision:2).",
+      "Form expectations: plain essay prose with a title; no citations or named theorists required (decision:3).",
+      "No source materials are provided; reasoning only."
+    ],
+    "assigned_demands": [
+      {
+        "id": "D3",
+        "rationale": "Decision:2 explicitly requires an argued position with nuance, ruling out a merely descriptive overview.",
+        "statement": "Choose and defend a clear, nuanced thesis rather than producing a neutral survey."
+      }
+    ],
+    "constraints": [
+      "Total length must land within roughly 550–650 words.",
+      "The essay must be standalone: comprehensible without external context or companion materials.",
+      "A title must be present.",
+      "Plain essay prose — no citation apparatus or academic formatting required by the brief."
+    ],
+    "expansion_required": false,
+    "max_children": 4,
+    "node": {
+      "acceptance_condition": "Delivers at least two distinct counterarguments, each with (a) its strongest plain-language form, (b) what must be conceded, and (c) what rebuttal remains available to the essay's likely thesis.",
+      "demand_ids": [
+        "D3"
+      ],
+      "depth": 1,
+      "expected_contribution": "The objection-and-concession material that gives the final essay its nuance.",
+      "id": "root.03-steelman",
+      "objective": "Construct the two or three strongest counterarguments against the charge that AI art is kitsch - for example: the accusation of kitsch is historically a gatekeeping move against new media and popular taste; human prompting, selection, and curation supply the intention and taste that kitsch lacks; much AI output is not sentimental or formulaic at all; or kitsch requires sincerity while AI can only simulate it, making the category misfit. For each, state what a nuanced essay should honestly concede and what it can still rebut.",
+      "parent_id": "root",
+      "rationale": "Decision:2 demands nuance; a position is only nuanced if it survives and absorbs its best opposition. Mapping the opposition is an independent adversarial question.",
+      "separator_facts": [
+        "Audience: general educated reader (decision:1).",
+        "Genre/register: standalone cultural criticism (decision:1).",
+        "Stance posture: the writer selects and defends a clear, nuanced thesis; a neutral survey is explicitly out of scope (decision:2).",
+        "Form expectations: plain essay prose with a title; citations and named theorists are not required (decision:3).",
+        "Suggested title from the envelope: 'AI Art and Kitsch' (title_hint).",
+        "No source materials are provided; the essay draws on the writer's own reasoning about AI art and kitsch.",
+        "Stance posture: clear, nuanced defended thesis; neutral survey out of scope (decision:2).",
+        "Form expectations: plain essay prose with a title; no citations or named theorists required (decision:3).",
+        "No source materials are provided; reasoning only."
+      ],
+      "source_ids": [
+        "request",
+        "decision:2"
+      ],
+      "source_paths": []
+    },
+    "product_intent": "The essay exists to give a general educated reader a self-contained piece of cultural criticism on AI art and kitsch — one that argues a defensible, nuanced thesis in accessible prose rather than neutrally surveying the topic.",
+    "remaining_depth": 2,
+    "remaining_node_budget": 13,
+    "source_materials": [
+      {
+        "content": "Write an approximately 600-word essay on AI art and kitsch.",
+        "id": "request",
+        "kind": "natural_request",
+        "label": "Original task request",
+        "locator": null
+      },
+      {
+        "content": "The writer should choose and defend a clear, nuanced thesis rather than produce a neutral survey.",
+        "id": "decision:2",
+        "kind": "user_decision",
+        "label": "Explicit user decision 2",
+        "locator": null
+      }
+    ],
+    "stable_context": [
+      "Audience: general educated reader (decision:1).",
+      "Genre/register: standalone cultural criticism (decision:1).",
+      "Stance posture: the writer selects and defends a clear, nuanced thesis; a neutral survey is explicitly out of scope (decision:2).",
+      "Form expectations: plain essay prose with a title; citations and named theorists are not required (decision:3).",
+      "Suggested title from the envelope: 'AI Art and Kitsch' (title_hint).",
+      "No source materials are provided; the essay draws on the writer's own reasoning about AI art and kitsch."
+    ],
+    "workspace_documents": [],
+    "workspace_index": []
+  },
+  "dependency_type": "PlanningDeps",
+  "input_sha256": "71e32dcf3fdcad8dbf6ae1b1096cb8c27aee7b2e5cbe95cf14ebe8adba8b22b6",
+  "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+  "role": "recursive_planner"
+}

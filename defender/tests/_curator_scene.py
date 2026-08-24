@@ -111,7 +111,7 @@ def build_curator_agent(tmp_path: Path, prompt_path: Path, make_model):
     raises does not leak the open trace file.
     """
     from defender.learning.core.config import StageWiring
-    from defender.learning.pipeline._pydantic_stage import build_stage_agent
+    from defender.learning._pydantic_stage import build_stage_agent
     from defender.runtime import observe
 
     logger = observe.RequestLogger(tmp_path / "t.jsonl")

@@ -1,0 +1,18 @@
+{
+  "acceptance_condition": "A labeled observation table with explicit bounds (d<=100; state the a,b,c sweep bound), the two methods compared with the a<=2 slice of Method 1 complete and cross-checked, parent-edge values d'=4abc-d for every listed non-root vertex, explicit statements on items (b),(c),(d),(f), everything labeled OBSERVATION valid only within the stated bounds, total under 450 words.",
+  "content_sha256": "f586d529b3ed8d5cbac48ea6dd333ad4e608b233f1e447884e3563e974f5e426",
+  "demand_ids": [
+    "D7",
+    "D9"
+  ],
+  "id": "question:work:005-exception-search-v4",
+  "node_id": "work:005-exception-search-v4",
+  "rationale": "D7/D9 has never produced evidence (two output-overrun failures), and the memorandum's sanity-check section (D10) requires this bounded cross-validation of the proved D1-D3 plus a reproducible procedure statement. The spec was already shrunk once for feasibility; this re-issue tightens the cap to 450 words and front-loads the verification arithmetic so the packet can complete.",
+  "tags": [
+    "evidence",
+    "counterexample",
+    "measurement",
+    "method"
+  ],
+  "text": "Execute the frozen spec of question:work:004-exception-search-v3 verbatim: bounded hand-checkable enumeration, LABELED OBSERVATIONS ONLY, HARD CAP 450 words. Procedure (state explicitly for reproducibility): Method 1 (direct): for all sorted 1<=a<=b<=c<=20, test whether t^2 - 4abc t + (a^2+b^2+c^2) = 0 has an integer root d with c <= d <= 100, pruning via d | a^2+b^2+c^2 and d+d' = 4abc; list every hit. Method 2 (BFS from (1,1,1,1)): mutate all 4 coordinates, re-sort, discard d>100. Expected vertices, verify each by one-line substitution: (1,1,1,1) [4=4]; (1,1,1,3) [1+1+1+9=12=4*3]; (1,1,3,11) [1+1+9+121=132=4*33]; (1,1,11,41) [1+1+121+1681=1804=4*451]; check all children of (1,1,11,41) exceed 100 (mutate 11: 4*41-11=153; mutate a=1: 4*11*41-1=1803), so BFS stops. Report: (a) verified table; (b) any c=d within the bound? (expected none, consistent with proved L2); (c) any vertex with two height-decreasing mutations or two parents within the BFS tree? (expected none, consistent with proved D2/D3); (d) do Methods 1 and 2 agree exactly within d<=100? The a<=2 slice of Method 1 MUST be completed and explicitly cross-checked, since every proved vertex has a<=3; any Method-1 solution unreachable from the root would refute D1 - check and report. (e) For each non-root vertex compute d'=4abc-d and confirm 1<=d'<d, exhibiting the parent edge: (1,1,1,3): d'=1; (1,1,3,11): d'=1; (1,1,11,41): d'=3. (f) Report induction failure modes observed (e.g. re-sorting effects) or state their absence within the bound. Label EVERYTHING as OBSERVATION valid only within d<=100; non-occurrences prove nothing beyond the bound. If the full Method-1 sweep is too long, complete the a<=2 slice and label the truncation explicitly."
+}

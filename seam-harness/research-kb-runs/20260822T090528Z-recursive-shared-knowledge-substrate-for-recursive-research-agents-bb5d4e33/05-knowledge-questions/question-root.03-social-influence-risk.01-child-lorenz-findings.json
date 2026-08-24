@@ -1,0 +1,20 @@
+{
+  "acceptance_condition": "Returns at least three findings, each a quote or close paraphrase carrying the file-relative citation and the exact `===== PDF PAGE N =====` marker(s) of the page where it appears.",
+  "content_sha256": "9079847a2ceaf58a20f983897dc79cebb96667e69ac3b4854fa4d4c659fe769b",
+  "demand_ids": [
+    "D6",
+    "D11",
+    "D12",
+    "D13",
+    "D14"
+  ],
+  "id": "question:root.03-social-influence-risk.01-child-lorenz-findings",
+  "node_id": "root.03-social-influence-risk.01-child-lorenz-findings",
+  "rationale": "Lorenz et al. provide the human-subject experimental evidence that social influence reduces diversity without improving accuracy and boosts confidence; these findings are essential for the design inference on staged visibility.",
+  "tags": [
+    "evidence",
+    "risk",
+    "counterexample"
+  ],
+  "text": "Extract from papers/text/lorenz-et-al-2011-social-influence.txt at least three anchored findings on how social influence affects the wisdom of crowds, including effects on estimate diversity, accuracy, and confidence, each anchored to the exact `===== PDF PAGE N =====` marker(s)."
+}

@@ -1,0 +1,6 @@
+{
+  "disposition": "Leave the question unanswered so the next controller turn can retry, narrow, reroute, or proceed without it.",
+  "message": "Exceeded maximum output retries (2)",
+  "node_id": "work:005-rq-sharp-attack",
+  "type": "UnexpectedModelBehavior"
+}

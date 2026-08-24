@@ -337,10 +337,30 @@ def _user_event(message: Any) -> dict | None:
 
 
 def write_trace(run_dir: Path, *, store: Any, session_id: str, wall_ms: float) -> None:
+    """`{run_dir}/tool_trace.jsonl` — the events THIS run produced, and its own cost.
+
+    SLICED AT THE BRANCH POINT. `path_row_ids` walks parents across a fork, so a resumed run
+    (#920's turn-N branch) hydrates the source run's whole prefix alongside its own rows — and
+    every number below is a sum over what it hydrates. Left whole, a sibling's trace reports
+    the SOURCE's tool calls as its own and its `result` event bills the shared prefix's turns,
+    tokens and dollars to the sibling: `scripts/analytics/run_stats.py` reads exactly that
+    event, so an N-sibling sweep counts the prefix N times. `branch_point` answers `None` for
+    every unforked session, so the ordinary run is untouched.
+    """
     from . import session_store as ss  # local import — avoids a cycle at module load
 
+    # `branch_point` FIRST: it is one indexed row lookup and answers `None` for every unforked
+    # session, so the ordinary run pays that and nothing else. Asked after an unconditional
+    # `path_row_ids`, every run paid a whole extra parent walk — one query per message — whose
+    # result it then threw away.
+    cut = ss.branch_point(store, session_id)
     messages = ss.hydrate(store, session_id, role="analysis")
     coords = ss.hydrate(store, session_id, role="actor")
+    if cut is not None:
+        ids = ss.path_row_ids(store, session_id)
+        if cut in ids:
+            own = ids.index(cut) + 1
+            messages, coords = messages[own:], coords[own:]
 
     events: list[dict] = []
     for message, row in zip(messages, coords, strict=True):

@@ -1,0 +1,20 @@
+{
+  "account": "The full text of the Dung file is present in the dossier's workspace_documents, so all required definitions and page markers are directly available. The task is a bounded extraction: four or more findings with exact page markers, plus links to nonmonotonic reasoning/logic programming. No further decomposition is needed.",
+  "children": [],
+  "decidability": {
+    "acceptance_mechanical": true,
+    "account": "The source text is fully embedded in the dossier, so all quotes and page markers can be verified mechanically against the provided content.",
+    "context_complete": true,
+    "grounded_referents": [
+      "papers/text/dung-1995-argumentation.txt",
+      "ref:dung-1995-argumentation"
+    ],
+    "independent_of_future_siblings": true,
+    "missing_context": []
+  },
+  "disposition": "solve",
+  "irreducible_core": null,
+  "requested_source_ids": [],
+  "requested_source_paths": [],
+  "synthesis_contract": null
+}

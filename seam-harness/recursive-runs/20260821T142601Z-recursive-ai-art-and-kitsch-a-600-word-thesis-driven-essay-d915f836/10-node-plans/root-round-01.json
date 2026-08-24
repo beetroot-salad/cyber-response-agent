@@ -1,0 +1,139 @@
+{
+  "account": "expansion_required is true, so this node decomposes. The essay itself is a single integrated act of prose and cannot be split into drafting slices; instead, four independent analytical contributions are assigned to parallel children: (1) selection and defense of a candidate thesis, (2) a plain-language working account of kitsch tested against AI-generated art, (3) construction of the strongest counterarguments the thesis must absorb, and (4) a bank of concrete, recognizable examples of AI image culture. Each child reasons from the shared separator facts alone and needs no sibling output. This node then synthesizes their products into the standalone 550-650 word essay. No external sources exist or are needed, so no evidence request is warranted; the core is separable because the joins (which thesis, which examples survive, which objections to concede) are editorial decisions the parent can check against the acceptance condition rather than hidden inference.",
+  "children": [
+    {
+      "acceptance_condition": "Delivers one recommended thesis stated in a single sentence, at least one rejected alternative with the reason for rejection, and an ordered skeleton of argument moves each expressible in plain prose.",
+      "demand_ids": [
+        "D3"
+      ],
+      "expected_contribution": "The essay's central claim and structural backbone for the parent's synthesis.",
+      "local_id": "thesis-design",
+      "no_future_sibling_dependency": "Choosing and justifying a thesis requires only the shared stance/audience facts and the child's own reasoning; it does not need the definition, examples, or counterarguments the siblings produce - the parent will fit those to the chosen spine afterward.",
+      "objective": "Propose and defend one recommended thesis for an essay on AI art and kitsch, plus a compact argument skeleton (3-5 moves) that would carry it in roughly 600 words. The thesis must be clear and nuanced - more than 'AI art is kitsch' or 'AI art is not kitsch'; for instance, a claim about what AI generation does to kitsch's logic, or about where the kitsch actually resides (tool, output, market, or viewer). Compare at least two candidate theses and justify the choice.",
+      "rationale": "Decision:2 requires an argued position rather than a survey, so the spine of the essay - which claim is defended - is the highest-leverage independent decision. It can be made by reasoning alone from the shared facts.",
+      "separator_facts": [
+        "Audience: general educated reader (decision:1).",
+        "Genre/register: standalone cultural criticism (decision:1).",
+        "Stance posture: clear, nuanced defended thesis; neutral survey out of scope (decision:2).",
+        "Form expectations: plain essay prose with a title; no citations or named theorists required (decision:3).",
+        "No source materials are provided; reasoning only."
+      ],
+      "source_ids": [
+        "request",
+        "decision:2"
+      ],
+      "source_paths": []
+    },
+    {
+      "acceptance_condition": "Delivers a 100-150 word plain-language characterization of kitsch, a feature-by-feature verdict on its fit to AI-generated art (at least four features), and a statement of the one hardest conceptual tension the essay must address.",
+      "demand_ids": [
+        "D3",
+        "D2"
+      ],
+      "expected_contribution": "The essay's working definition and the analytical bridge between kitsch and AI art.",
+      "local_id": "kitsch-analysis",
+      "no_future_sibling_dependency": "Defining kitsch and testing the fit against AI art is self-contained conceptual work; it needs neither the chosen thesis, nor the example bank, nor the counterarguments - the parent will align this account with whatever spine is chosen.",
+      "objective": "Develop a plain-language working account of what kitsch is (its recognizable features: e.g., pre-digested emotion, formulaic beauty, instant legibility, comfort without risk, sentimentality, repetition of exhausted conventions - without leaning on named theorists) and test AI-generated art against it: which features fit AI output nearly by design, which do not, and where the fit breaks down (e.g., can something be kitsch without a sincere author behind it?).",
+      "rationale": "The essay needs a defensible shared understanding of kitsch before any thesis about AI art can land; this conceptual groundwork is an independent analytical question answerable from general cultural knowledge.",
+      "separator_facts": [
+        "Audience: general educated reader (decision:1).",
+        "Genre/register: standalone cultural criticism (decision:1).",
+        "Stance posture: clear, nuanced defended thesis; neutral survey out of scope (decision:2).",
+        "Form expectations: plain essay prose with a title; no citations or named theorists required (decision:3).",
+        "No source materials are provided; reasoning only."
+      ],
+      "source_ids": [
+        "request",
+        "decision:1",
+        "decision:2"
+      ],
+      "source_paths": []
+    },
+    {
+      "acceptance_condition": "Delivers at least two distinct counterarguments, each with (a) its strongest plain-language form, (b) what must be conceded, and (c) what rebuttal remains available to the essay's likely thesis.",
+      "demand_ids": [
+        "D3"
+      ],
+      "expected_contribution": "The objection-and-concession material that gives the final essay its nuance.",
+      "local_id": "steelman",
+      "no_future_sibling_dependency": "Steel-manning the anti-kitsch position depends only on general reasoning about the topic; it does not need the chosen thesis (the strongest objections apply to any thesis in this space), the definition, or the examples - the parent will reconcile concessions with the chosen spine.",
+      "objective": "Construct the two or three strongest counterarguments against the charge that AI art is kitsch - for example: the accusation of kitsch is historically a gatekeeping move against new media and popular taste; human prompting, selection, and curation supply the intention and taste that kitsch lacks; much AI output is not sentimental or formulaic at all; or kitsch requires sincerity while AI can only simulate it, making the category misfit. For each, state what a nuanced essay should honestly concede and what it can still rebut.",
+      "rationale": "Decision:2 demands nuance; a position is only nuanced if it survives and absorbs its best opposition. Mapping the opposition is an independent adversarial question.",
+      "separator_facts": [
+        "Audience: general educated reader (decision:1).",
+        "Genre/register: standalone cultural criticism (decision:1).",
+        "Stance posture: clear, nuanced defended thesis; neutral survey out of scope (decision:2).",
+        "Form expectations: plain essay prose with a title; no citations or named theorists required (decision:3).",
+        "No source materials are provided; reasoning only."
+      ],
+      "source_ids": [
+        "request",
+        "decision:2"
+      ],
+      "source_paths": []
+    },
+    {
+      "acceptance_condition": "Delivers at least four examples, each recognizable without specialist knowledge, each annotated with its kitsch-relevance (for or against the label), plus a recommendation of the two strongest with reasons.",
+      "demand_ids": [
+        "D3",
+        "D2"
+      ],
+      "expected_contribution": "The concrete illustrative material the essay will use to make its argument vivid.",
+      "local_id": "examples",
+      "no_future_sibling_dependency": "Recognizable examples and their kitsch-relevance can be assembled from general cultural knowledge alone; the child does not need the thesis, definition, or counterarguments - the parent will select whichever examples best serve the synthesized argument.",
+      "objective": "Assemble a bank of four to six concrete, widely recognizable examples of AI image/output culture suitable for a general educated reader (e.g., hyper-polished fantasy portraits and 'epic' landscapes from image generators, AI images styled after beloved animation studios flooding social feeds, AI-generated greeting-card imagery, art-contest-winning AI pictures and the surrounding controversy, stock-photo-like AI filler in advertising) and annotate each: why it reads as kitsch, or why it complicates or resists the label. Recommend the two examples an essay should keep.",
+      "rationale": "A piece of cultural criticism for a general reader needs vivid shared touchstones, not abstraction. Gathering and vetting examples is an independent evidence-style contribution that does not depend on the thesis.",
+      "separator_facts": [
+        "Audience: general educated reader (decision:1).",
+        "Genre/register: standalone cultural criticism (decision:1).",
+        "Stance posture: clear, nuanced defended thesis; neutral survey out of scope (decision:2).",
+        "Form expectations: plain essay prose with a title; no citations or named theorists required (decision:3).",
+        "No source materials are provided; reasoning only."
+      ],
+      "source_ids": [
+        "request",
+        "decision:1"
+      ],
+      "source_paths": []
+    }
+  ],
+  "decidability": {
+    "acceptance_mechanical": true,
+    "account": "All constraints (audience, genre, stance posture, form, length, title) are fixed by decision:1-3 and duplicated as separator facts; no source materials exist and none are required. The node's job - choosing decomposition angles and later reconciling them - is fully specified by the dossier. Acceptance is checkable: final essay must be titled, 550-650 words, plain standalone prose, and must argue a clear nuanced thesis (D1-D4).",
+    "context_complete": true,
+    "grounded_referents": [
+      "request",
+      "decision:1",
+      "decision:2",
+      "decision:3",
+      "D1",
+      "D2",
+      "D3",
+      "D4"
+    ],
+    "independent_of_future_siblings": true,
+    "missing_context": []
+  },
+  "disposition": "expand",
+  "irreducible_core": null,
+  "requested_source_ids": [],
+  "requested_source_paths": [],
+  "synthesis_contract": {
+    "acceptance_condition": "The synthesized essay satisfies D1-D4: 550-650 words, titled, plain standalone essay prose for a general educated reader, arguing one clear nuanced thesis about AI art and kitsch (not a neutral survey), using the working definition, at least two concrete examples, and at least one honestly conceded counterargument.",
+    "conflict_policy": "Where children disagree (e.g., on whether lack of intention disqualifies AI output as kitsch, or which example is strongest), the parent decides in favor of the position that best satisfies decision:2 - a clear thesis that survives its strongest objections - and prefers formulations that concede partial truths rather than rebut everything. The thesis-design child's recommendation is the default spine but may be modified where the steelman child exposes a fatal weakness.",
+    "parent_question": "What nuanced, defensible thesis should the ~600-word essay 'AI Art and Kitsch' argue, and with what definition, examples, and conceded objections should it argue it?",
+    "required_contributions": [
+      "A single recommended thesis statement with its supporting argument skeleton (child: thesis-design).",
+      "A plain-language working account of kitsch and a verdict on which of its features genuinely apply to AI-generated art and which do not (child: kitsch-analysis).",
+      "The two or three strongest counterarguments to the 'AI art is kitsch' charge, with guidance on what the essay must concede versus rebut (child: steelman).",
+      "A bank of four to six concrete, recognizable examples of AI image/output culture with notes on why each reads as kitsch or resists the label (child: examples)."
+    ],
+    "shared_invariants": [
+      "Audience is a general educated reader; no jargon, no named theorists required, no citation apparatus.",
+      "The essay must take and defend a position; neutral survey is out of scope (decision:2).",
+      "No source materials exist; all content comes from the writer's own reasoning.",
+      "Title required; envelope suggests 'AI Art and Kitsch'.",
+      "Final length 550-650 words."
+    ]
+  }
+}

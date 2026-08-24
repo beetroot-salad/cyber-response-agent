@@ -21,11 +21,26 @@ def test_list_slots_returns_sorted_strings():
     slots = vocab.list_slots()
     assert slots == sorted(slots)
     assert all(isinstance(s, str) for s in slots)
-    # A closed set on purpose: every slot here is inlined into the runtime's ORIENT prompt, so
-    # adding one is a prompt change and has to be an acknowledged edit rather than a side
-    # effect. `disposition` is the newest and the only slot invlang does not define — it is the
-    # project-general run vocabulary, imported so the two schemas that carry a disposition
-    # cannot drift into disagreeing about which keywords exist.
+    # A closed set on purpose: a slot is a lookup the invlang SKILL can send an author to, so
+    # it arrives as an acknowledged edit rather than a side effect of naming a tuple. What the
+    # runtime prompts carry is the `defender-invlang enum` COMMAND and not the values, so the
+    # cost of a slot is the lookup path, not prompt length. `disposition` is the only slot
+    # invlang does not define — it is the project-general run vocabulary, imported so the two
+    # schemas that carry a disposition cannot drift into disagreeing about which keywords exist.
+    #
+    # The five `impact.*` / `conclude.impact_*` slots are the newest, acknowledged here as
+    # part of #933. The three `impact.*` ones are refused on by rules #29 and #30, and
+    # `skills/invlang/SKILL.md` §`:R impact` points at `enum impact.dimension` rather than
+    # restating the values — which is what makes them slots and not a second copy that goes
+    # stale in a prompt. The two `conclude.impact_*` ones carry NO armed check: the SKILL has
+    # never stated either vocabulary, both shipped e2e goldens already hold an `impact_verdict`
+    # outside it (`none-detected`, `attempted-lateral-movement`, each also frozen into
+    # `_golden_invlang/*.companion.json` and replayed from `tool_trace.jsonl`), and refusing on
+    # a vocabulary the runtime prompt never taught is the failure spec rule #32 was struck for.
+    # They are registered anyway, because
+    # registering IS the teaching step that has to land before arming — and because a registry
+    # that answered "what may I write here" for some closed columns and not others would be
+    # worse than two more lines. See `docs/decisions/defender-invlang-enforcement-ramp.md`.
     expected = {
         "disposition",
         "types", "relations", "anchor-kinds", "auth-kinds",
@@ -35,6 +50,9 @@ def test_list_slots_returns_sorted_strings():
         "session.class", "storage.kind", "database.kind",
         "network-device.kind", "socket.protocol", "configuration.kind",
         "app-object.kind", "credential.kind",
+        "attr-pred.target",
+        "impact.dimension", "impact.verdict", "impact.grounding",
+        "conclude.impact_verdict", "conclude.impact_severity",
     }
     assert set(slots) == expected
 

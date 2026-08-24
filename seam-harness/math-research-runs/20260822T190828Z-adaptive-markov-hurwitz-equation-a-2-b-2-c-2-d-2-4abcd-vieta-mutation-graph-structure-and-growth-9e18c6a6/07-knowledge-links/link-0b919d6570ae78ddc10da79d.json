@@ -1,0 +1,10 @@
+{
+  "content_sha256": "0b919d6570ae78ddc10da79d1e0021f4ac570c474276617e6e3e2d453729731a",
+  "id": "link:0b919d6570ae78ddc10da79d",
+  "origin": "agent",
+  "proposed_by_node_id": "work:003-struct-core-v2",
+  "rationale": "The v1 answer is blocked with no claims; this packet supplies the complete proofs it failed to produce.",
+  "relation": "supersedes",
+  "source_id": "answer:work:003-struct-core-v2",
+  "target_id": "answer:work:001-struct-core"
+}

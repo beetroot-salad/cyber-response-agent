@@ -1,0 +1,15 @@
+{
+  "acceptance_condition": "Establish demand D9 with evidence.",
+  "content_sha256": "e1b4d2986ba3ee6d79620b80c54f040934fa2affb3831b7ed2f4c17b457d794e",
+  "demand_ids": [
+    "D9"
+  ],
+  "id": "question:demand:D9",
+  "node_id": null,
+  "rationale": "Explicit request item strengthened by decision 5.",
+  "tags": [
+    "constraint",
+    "method"
+  ],
+  "text": "Label every computational or hand-enumerated observation, stating explicit enumeration bounds and a reproducible, hand-checkable procedure."
+}

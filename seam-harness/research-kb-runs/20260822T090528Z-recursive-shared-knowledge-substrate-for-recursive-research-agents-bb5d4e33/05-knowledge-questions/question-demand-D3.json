@@ -1,0 +1,14 @@
+{
+  "acceptance_condition": "Establish demand D3 with evidence.",
+  "content_sha256": "2b4510f300813f4c6d054088afcdeb580e129c09c780589126e578caad7f1cb3",
+  "demand_ids": [
+    "D3"
+  ],
+  "id": "question:demand:D3",
+  "node_id": null,
+  "rationale": "All five capabilities are enumerated verbatim in the request.",
+  "tags": [
+    "decision"
+  ],
+  "text": "The recommended design treats questions and answers as first-class many-to-many graph objects, supporting: multiple competing answers per question; one answer addressing multiple questions; question-to-question relations; answer-to-answer provenance or conflict relations; and controlled tags."
+}

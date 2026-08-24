@@ -1,0 +1,172 @@
+{
+  "account": "Derived three explicit design inferences mapping Dung's argumentation framework to a many-to-many Q/A graph, embedding the three requested constraints (answers as arguments with attacks; provenance as foreign edges; admissible sets as consistency), all grounded in the Dung text definitions but labeled as design inferences per D13.",
+  "assumptions": [
+    "The file content in the dossier is the exact content of papers/text/dung-1995-argumentation.txt, as claimed by the manifest and the conversation decision.",
+    "The parent will receive sibling output covering preferred/grounded/stable extension semantics and belief revision; this child only derives the three requested constraints.",
+    "The Q/A graph substrate will enforce that attack edges are typed and that provenance edges are separate, as a schema invariant."
+  ],
+  "boundary_findings": [
+    {
+      "alternative_explanation": "The sibling child will supply the belief-revision constraints, so the omission is intentional scoping, not an error.",
+      "consequence_if_absorbed": "The final synthesis could omit belief-revision constraints if this child's scoped output is mistaken for the complete D8 answer.",
+      "evidence": [
+        "Node objective for root.01-arg-semantics.03-child-3 explicitly lists only the three constraints (answers as arguments, provenance as inert edges, admissible sets as consistency).",
+        "Sibling node root.01-arg-semantics.04-child-4 objective is 'Derive ... how Dung's extension semantics ... can specify contradiction and belief-revision behavior'."
+      ],
+      "narrative": "This child (root.01-arg-semantics.03-child-3) derives only the three requested design constraints. Sibling child root.01-arg-semantics.04-child-4 separately derives the extension-semantics-based belief-revision constraints. The parent node's acceptance condition is satisfied, but the full D8 requirement (belief revision) is only partially covered by this child; it must be integrated with the sibling.",
+      "smallest_suspected_scope": "Parent node root.01-arg-semantics"
+    }
+  ],
+  "claims": [
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "Definition 2. An argumentation framework is a pair AF=(AR,attacks) where AR is a set of arguments, and attacks is a binary relation on AR i.e. attacks subset AR x AR. For two arguments A and B the meaning of attacks(A,B) is that A represents an attack against B.",
+          "locator": "papers/text/dung-1995-argumentation.txt",
+          "source_id": "ref:dung-1995-argumentation"
+        }
+      ],
+      "confidence": 1.0,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "c1",
+      "statement": "Dung defines an argumentation framework as a pair AF=(AR, attacks) where AR is a set of arguments and attacks is a binary relation on AR, with the meaning that attacks(A,B) represents A attacking B."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "Definition 5. A set S of arguments is said to be conflict-free if there are no arguments A and B in S such that A attacks B.",
+          "locator": "papers/text/dung-1995-argumentation.txt",
+          "source_id": "ref:dung-1995-argumentation"
+        }
+      ],
+      "confidence": 1.0,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "c2",
+      "statement": "Dung defines a conflict-free set S as a set in which no argument attacks another: 'A set S of arguments is said to be conflict-free if there are no arguments A and B in S such that A attacks B.'"
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "(1) An argument A in AR is acceptable with respect to a set S of arguments iff for each argument B in AR: if B attacks A then B is attacked by S. (2) A conflict-free set of arguments S is admissible iff each argument in S is acceptable with respect to S.",
+          "locator": "papers/text/dung-1995-argumentation.txt",
+          "source_id": "ref:dung-1995-argumentation"
+        }
+      ],
+      "confidence": 1.0,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "c3",
+      "statement": "Dung defines an argument as acceptable with respect to a set S if every attacker of that argument is itself attacked by S, and defines an admissible set as a conflict-free set whose members are all acceptable with respect to it."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "Here, an argument is an abstract entity whose role is solely determined by its relations to other arguments. No special attention is paid to the internal structure of the arguments.",
+          "locator": "papers/text/dung-1995-argumentation.txt",
+          "source_id": "ref:dung-1995-argumentation"
+        }
+      ],
+      "confidence": 1.0,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "c4",
+      "statement": "Dung's framework is abstract in that arguments are entities 'whose role is solely determined by its relations to other arguments. No special attention is paid to the internal structure of the arguments.' This abstraction makes it suitable for modeling any node type as arguments."
+    },
+    {
+      "basis": "inferred",
+      "citations": [
+        {
+          "excerpt": "Definition 2. An argumentation framework is a pair AF=(AR,attacks) where AR is a set of arguments, and attacks is a binary relation on AR i.e. attacks subset AR x AR.",
+          "locator": "papers/text/dung-1995-argumentation.txt",
+          "source_id": "ref:dung-1995-argumentation"
+        }
+      ],
+      "confidence": 0.9,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "d1",
+      "statement": "Design inference: In the Q/A graph, every answer node is an argument (AR); a directed edge from answer A to answer B of type conflict/attack represents that accepting A contradicts or defeats B. This maps the answer-to-answer conflict requirement of D3 directly onto Dung's attacks relation."
+    },
+    {
+      "basis": "inferred",
+      "citations": [
+        {
+          "excerpt": "Definition 2. An argumentation framework is a pair AF=(AR,attacks) where AR is a set of arguments, and attacks is a binary relation on AR i.e. attacks subset AR x AR.",
+          "locator": "papers/text/dung-1995-argumentation.txt",
+          "source_id": "ref:dung-1995-argumentation"
+        },
+        {
+          "excerpt": "Definition 5. A set S of arguments is said to be conflict-free if there are no arguments A and B in S such that A attacks B.",
+          "locator": "papers/text/dung-1995-argumentation.txt",
+          "source_id": "ref:dung-1995-argumentation"
+        },
+        {
+          "excerpt": "(1) An argument A in AR is acceptable with respect to a set S of arguments iff for each argument B in AR: if B attacks A then B is attacked by S. (2) A conflict-free set of arguments S is admissible iff each argument in S is acceptable with respect to S.",
+          "locator": "papers/text/dung-1995-argumentation.txt",
+          "source_id": "ref:dung-1995-argumentation"
+        }
+      ],
+      "confidence": 0.85,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "d2",
+      "statement": "Design inference: Provenance edges, such as answer-addresses-question, answer-derived-from-answer, or question-related-to-question, are added to the graph as labeled edges that are disjoint from the attack edge type. Because conflict-free sets and acceptability are defined only over the attacks relation, provenance edges are inert for argumentation semantics and cannot alter which sets are conflict-free or admissible."
+    },
+    {
+      "basis": "inferred",
+      "citations": [
+        {
+          "excerpt": "(1) An argument A in AR is acceptable with respect to a set S of arguments iff for each argument B in AR: if B attacks A then B is attacked by S. (2) A conflict-free set of arguments S is admissible iff each argument in S is acceptable with respect to S.",
+          "locator": "papers/text/dung-1995-argumentation.txt",
+          "source_id": "ref:dung-1995-argumentation"
+        },
+        {
+          "excerpt": "Definition 7. A preferred extension of an argumentation framework AF is a maximal (with respect to set inclusion) admissible set of AF.",
+          "locator": "papers/text/dung-1995-argumentation.txt",
+          "source_id": "ref:dung-1995-argumentation"
+        }
+      ],
+      "confidence": 0.85,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "d3",
+      "statement": "Design inference: Mutually consistent answer sets for a given question are defined as admissible sets of the induced argumentation subgraph restricted to answers that address that question; such a set is conflict-free and every answer in it is defended against each attacker. The runtime can query these admissible sets for consistency and expose both credulous (multiple) and skeptical (grounded) alternatives."
+    },
+    {
+      "basis": "inferred",
+      "citations": [
+        {
+          "excerpt": "Here, an argument is an abstract entity whose role is solely determined by its relations to other arguments. No special attention is paid to the internal structure of the arguments.",
+          "locator": "papers/text/dung-1995-argumentation.txt",
+          "source_id": "ref:dung-1995-argumentation"
+        }
+      ],
+      "confidence": 0.8,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "d4",
+      "statement": "Design inference: Because Dung treats arguments as abstract entities whose internal structure is irrelevant, the graph substrate can later choose any representation for answer content (text, structured claims, etc.) without changing the conflict semantics, as long as the attack relation is defined consistently."
+    }
+  ],
+  "counterevidence": [
+    "The supplied dossier did not include the actual full text of the Dung file in a machine-readable form beyond the embedded content; however the embedded content is the file content, so the citations are grounded.",
+    "The parent objective also requires deriving belief-revision behavior; this child did not cover that aspect, as it is handled by sibling node root.01-arg-semantics.04-child-4.",
+    "The design inference on provenance edges assumes the runtime will never interpret provenance edges as attack edges; if a future system conflates edge types, the conflict-free property could be violated."
+  ],
+  "next_observation": "root.01-arg-semantics.04-child-4",
+  "source_ids_consulted": [
+    "ref:dung-1995-argumentation",
+    "papers/text/dung-1995-argumentation.txt"
+  ],
+  "sufficiency": "ready_to_synthesize",
+  "unresolved": [
+    "The exact syntax for specifying attack edges (e.g., is an attack always bidirectional or is it directional?) is not resolved by Dung's text; design must choose a directionality convention.",
+    "The mapping from natural-language answer conflict to a machine-checkable attack relation is not specified by the source; this is a model-level inference task."
+  ]
+}

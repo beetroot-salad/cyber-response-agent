@@ -1,0 +1,7 @@
+{
+  "content_sha256": "0324e6ac0ff4002288da59839d484e581f5dfef2e87364fb7778c843573065ef",
+  "id": "link:0324e6ac0ff4002288da5983",
+  "relation": "refines",
+  "source_id": "question:root.03-social-influence-risk.01-child-lorenz-findings",
+  "target_id": "question:demand:D6"
+}

@@ -1,0 +1,18 @@
+{
+  "acceptance_condition": "Returns at least four findings, each with a quote or close paraphrase from the source text, the exact `===== PDF PAGE N =====` marker(s) where it appears, and a clear label of which definition it covers.",
+  "content_sha256": "c9384ea5cb7ddcb0a61543e1bdf6731225c029fa35a61715af385947ed2f90f3",
+  "demand_ids": [
+    "D3",
+    "D8",
+    "D12",
+    "D13"
+  ],
+  "id": "question:root.01-arg-semantics.01-child-1",
+  "node_id": "root.01-arg-semantics.01-child-1",
+  "rationale": "These four core definitions are the foundation for all subsequent semantics and design derivations. Isolating them into a dedicated extraction child ensures the source evidence is gathered precisely before any design inference is made.",
+  "tags": [
+    "definition",
+    "evidence"
+  ],
+  "text": "Extract from papers/text/dung-1995-argumentation.txt, each anchored to the exact `===== PDF PAGE N =====` marker(s) where it appears, the definitions of: (a) argumentation framework (set of arguments plus binary attack relation), (b) acceptability of an argument, (c) conflict-free set, and (d) admissible set. For each concept, provide a direct quote or close paraphrase from the source text and note the page marker(s)."
+}

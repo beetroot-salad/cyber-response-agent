@@ -210,7 +210,11 @@ def _validate_finding(i: int, f: Any, allowed_types: set[str]) -> None:
         v = f[k]
         if not isinstance(v, str) or is_content_less(v):
             raise RunUnprocessable(f"finding[{i}].{k} must be a non-empty string")
-    if f["type"] not in allowed_types:
+    # `isinstance` first — `allowed_types` is a set, so a non-string `type` raises an
+    # unhashable-TypeError past `RunUnprocessable` and out of `_validate_judge_yaml`
+    # BEFORE the `*.raw.txt` audit companion is written, losing the only record of what
+    # the judge replied. The two keys checked directly above already guard this way.
+    if not isinstance(f["type"], str) or f["type"] not in allowed_types:
         raise RunUnprocessable(
             f"finding[{i}].type={f['type']!r} not in {sorted(allowed_types)}"
         )
@@ -273,7 +277,30 @@ def _validate_environment_observation(i: int, o: Any) -> None:
             raise RunUnprocessable(
                 f"environment_observations[{i}].{k} must be a non-empty string"
             )
-    for sel in o.get("entities") or []:
+    # `is not None`, not `or []` (defender/CLAUDE.md, "Conventions"): the coalescing form
+    # swallows every FALSY non-list — `{}`, `0`, `""`, `false` — before the type guard below
+    # can see it, so the commonest wrong spelling of this field (an empty mapping where a
+    # list belongs) would be accepted as "no entities" while a non-empty mapping is refused.
+    entities = o.get("entities")
+    if entities is not None:
+        _validate_entity_selectors(i, entities)
+
+
+def _validate_entity_selectors(i: int, entities: Any) -> None:
+    """The optional `entities` list of an environment observation, when the key is present.
+
+    `isinstance` BEFORE the loop, the same guard and the same reason as `_validate_finding`'s
+    `type` check: a scalar here raises `TypeError: 'int' object is not iterable` past the
+    declared `RunUnprocessable` and out of `_validate_judge_yaml` — which catches only
+    `(yaml.YAMLError, RunUnprocessable)` and writes the `*.raw.txt` audit companion INSIDE that
+    handler, so the crash takes the only record of what the judge replied with it.
+    """
+    if not isinstance(entities, list):
+        raise RunUnprocessable(
+            f"environment_observations[{i}].entities must be a list of "
+            "{type, class} selector mappings"
+        )
+    for sel in entities:
         if not isinstance(sel, dict) or "type" not in sel or "class" not in sel:
             raise RunUnprocessable(
                 f"environment_observations[{i}].entities selectors must be "

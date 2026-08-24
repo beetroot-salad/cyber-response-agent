@@ -1,0 +1,11 @@
+{
+  "child_ids": [],
+  "depth": 2,
+  "effective_disposition": "solve",
+  "node_id": "root.02-lemma.03-child-c-validation-example",
+  "packet_id": "packet:root.02-lemma.03-child-c-validation-example",
+  "packet_sha256": "a555dfd2018dcd26aa2442e221ee43353d7febcc05a932222fffcd0ecb644b06",
+  "parent_id": "root.02-lemma",
+  "proposed_disposition": "solve",
+  "stop_reason": null
+}

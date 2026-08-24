@@ -1,0 +1,270 @@
+{
+  "call_id": "call-0004-adaptive-investigator",
+  "queries": [
+    {
+      "arguments": {
+        "limit": 10,
+        "query": "exception search enumeration D7 D9",
+        "tags": [],
+        "unanswered_only": false
+      },
+      "result": {
+        "hits": [
+          {
+            "answer_count": 1,
+            "id": "question:work:003-exception-search-v2",
+            "kind": "question",
+            "score": 11.173786103901937,
+            "sufficiency": null,
+            "tags": [
+              "counterexample",
+              "evidence",
+              "risk",
+              "measurement"
+            ],
+            "text": "D7+D9: Perform a BOUNDED, hand-checkable enumeration and report labeled observations only. Procedure (state it explicitly so it is reproducible by hand): (Method 1, direct search) enumerate all candidate solutions with d <= 100 by looping over sorted triples 1 <= a <= b <= c <= 100 and solving d^2 - (4abc) d + (a^2+b^2+c^2) = 0 for integer d >= c, using the cheap necessary condition d | a^2+b^2+c^2 to prune; (Method 2, BFS) list all vertices reachable from (1,1,1,1) by breadth-first mutation, mutating all 4 coordinates, re-sorting, discarding d > 100. Expected reachable set (verify each by direct substitution, one line each): (1,1,1,1), (1,1,1,3), (1,1,3,11), (1,1,11,41) - check whether anything else with d <= 100 appears (e.g. from (1,1,3,11), mutating a gives 131 > 100; from (1,1,11,41), mutating 11 gives 153 > 100, mutating 1 gives 1803 > 100). Report as LABELED OBSERVATIONS (enumeration bound d <= 100): (a) the complete verified table with one-line substitution checks; (b) whether any solution with c = d occurs; (c) whether any vertex has two distinct height-decreasing mutations / multiple parents (within the BFS check each vertex's parent is unique); (d) whether the two methods agree exactly (any direct-search solution not reachable from the root would locally refute D1); (e) descent sanity: for each non-root vertex compute d' = 4abc - d and confirm 1 <= d' < d, exhibiting the parent edge; (f) note any induction failure modes observed (e.g. re-sorting effects) or state their absence within the bound. STRICT BREVITY: total well under 900 words; distinguish verified facts within the bound from non-occurrences (which prove nothing beyond d <= 100).",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 2,
+            "id": "question:work:001-exception-search",
+            "kind": "question",
+            "score": 8.969813299576,
+            "sufficiency": null,
+            "tags": [
+              "counterexample",
+              "evidence",
+              "risk",
+              "measurement"
+            ],
+            "text": "D7 (with D9 labeling): Actively search for exceptional structure by explicit, hand-checkable enumeration with stated bounds and a reproducible procedure (e.g., systematically generate all sorted solutions reachable from (1,1,1,1) with maximum coordinate d <= 100 by breadth-first mutation, and independently verify by a direct bounded search over quadruples with d <= 100 using divisibility constraints from the equation). Report: (a) a complete table of small solutions within the stated bound, each verified by direct substitution; (b) any solution with c = d, or with a mutation that fixes the maximum; (c) any vertex with two distinct height-decreasing mutations (multiple parents); (d) any cycle not passing through the root or any solution not reachable from the root within the bound (cross-check the two enumeration methods against each other); (e) failure modes of the natural induction/descent proof (e.g., cases where d' = 4abc - d is not positive, not smaller than d, or where the re-sorting breaks a naive induction hypothesis). Report everything found as labeled observations with the enumeration bound explicit, distinguishing verified counterexamples from mere non-occurrences within the bound.",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 0,
+            "id": "question:work:004-exception-search-v3",
+            "kind": "question",
+            "score": 7.871201010907891,
+            "sufficiency": null,
+            "tags": [
+              "evidence",
+              "counterexample",
+              "measurement"
+            ],
+            "text": "D7+D9: Bounded hand-checkable enumeration, LABELED OBSERVATIONS ONLY. HARD CAP 500 words. Procedure (state explicitly for reproducibility): Method 1 (direct): for all sorted 1<=a<=b<=c<=20, test whether t^2-4abc*t+(a^2+b^2+c^2)=0 has an integer root d>=c with d<=100, using d | a^2+b^2+c^2 and d+d'=4abc to prune; list every hit. Method 2 (BFS from (1,1,1,1)): mutate all coordinates, re-sort, discard d>100; list the tree. Expected (verify each by one-line substitution, e.g. 1+1+9+121=132=4*33): vertices (1,1,1,1), (1,1,1,3), (1,1,3,11), (1,1,11,41); check whether (1,1,11,41)'s children (mutate 11: 4*41-11=153>100; mutate a=1: 4*11*41-1=1803>100) and (1,3,11,131) all exceed 100, so BFS stops. Report: (a) verified table; (b) any c=d within bound? (expected none, consistent with proved L2); (c) any vertex with two height-decreasing mutations or two parents within the BFS tree? (expected none, consistent with proved D2/D3); (d) do Methods 1 and 2 agree exactly within d<=100? (any Method-1 solution unreachable from root would refute D1 — check and report); (e) for each non-root vertex compute d'=4abc-d and confirm 1<=d'<d exhibiting the parent edge; (f) report induction failure modes observed or state absence within the bound. Explicitly label everything as OBSERVATION valid only within d<=100, non-occurrences prove nothing beyond the bound. If the full Method-1 sweep is too long, do the a<=2 slice completely and label the truncation.",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 2,
+            "id": "question:demand:D7",
+            "kind": "question",
+            "score": 3.386294361119891,
+            "sufficiency": null,
+            "tags": [
+              "counterexample",
+              "risk"
+            ],
+            "text": "Actively search for and report exceptional small solutions, hidden cycles, vertices with multiple parents, and failure modes in any proposed induction; include counterexamples or sanity checks.",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 2,
+            "id": "question:demand:D9",
+            "kind": "question",
+            "score": 3.386294361119891,
+            "sufficiency": null,
+            "tags": [
+              "constraint",
+              "method"
+            ],
+            "text": "Label every computational or hand-enumerated observation, stating explicit enumeration bounds and a reproducible, hand-checkable procedure.",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 1,
+            "id": "question:root",
+            "kind": "question",
+            "score": 1.6931471805599454,
+            "sufficiency": null,
+            "tags": [
+              "risk",
+              "constraint"
+            ],
+            "text": "Investigate the mutation graph of sorted positive-integer solutions of a^2+b^2+c^2+d^2 = 4abcd under Vieta mutation. First prove or refute the structural claims — connectivity of every solution to (1,1,1,1), uniqueness of a height-decreasing mutation at every non-root vertex, and the consequent rooted-tree structure of the quotient graph — then pursue the open asymptotic part: strongest attainable rigorous upper and lower bounds for N(H), the relation between mutation depth and log H, an active search for exceptional small solutions, hidden cycles, multiple parents, and induction failure modes, and sharply separated conjectures. Deliver a self-contained research memorandum.",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 1,
+            "id": "question:work:003-struct-core-v2",
+            "kind": "question",
+            "score": 1.6931471805599454,
+            "sufficiency": null,
+            "tags": [
+              "method",
+              "evidence",
+              "constraint"
+            ],
+            "text": "Prove D1-D3 compactly for S = {sorted quadruples 1<=a<=b<=c<=d, a^2+b^2+c^2+d^2=4abcd} under Vieta mutation (x_i -> 4*(product of others) - x_i, then re-sort), with root (1,1,1,1). REQUIRED ROUTE (verify, fix, or replace, but keep it elementary): (L1, descent) at any non-root vertex the conjugate d' = 4abc - d = (a^2+b^2+c^2)/d is an integer >= 1; prove d' < d by contradiction: d' >= d gives a^2+b^2+c^2 >= d^2, and combined with a^2+b^2+c^2 <= 3c^2 gives d <= c*sqrt(3); feeding into the equation gives 2ab <= 3, hence a=b=1; then 2+c^2+d^2 = 4cd with c <= d <= 3c/2 forces c=1 and d=1, i.e. the root - contradiction. (L2) c = d only at the root: from a^2+b^2+2d^2 = 4abd^2 deduce d^2 | a^2+b^2 and a^2+b^2 <= 2d^2, so a^2+b^2 in {d^2, 2d^2}; the first gives 3=4ab (impossible), the second gives ab=1 and then d=1. (L3) mutating any coordinate strictly below the maximum strictly increases the maximum: new value >= 4ab d - d >= 3d > d since ab >= 1 (and a=d only at root by L2-type argument). Conclude: (D2) the mutation at the unique maximal coordinate is the unique height-decreasing mutation, i.e. strictly decreases d; (D1) iterating it strictly decreases the positive integer d, so every vertex descends to d=1, and the only vertex with d=1 is (1,1,1,1) - verify this endpoint claim; (D3) the quotient graph is a rooted tree: a cycle's maximal-height vertex would have two distinct height-decreasing mutations, contradicting D2; multiple parents likewise. Address explicitly the subtlety that equal coordinates (a=b or b=c) make some of the 4 coordinate-mutations coincide after sorting, so 'unique height-decreasing mutation' is a statement about distinct mutated vertices, not coordinate indices. KEEP THE ANSWER COMPACT (target well under 1200 words): lemma - proof format, no digressions, no worked tables beyond at most 3 one-line substitution checks. If any lemma fails, stop and report the verified counterexample instead.",
+            "unresolved_count": null
+          }
+        ],
+        "query": "exception search enumeration D7 D9",
+        "snapshot_sha256": "155fda6789134df12fb1e7d920cbac0b109504dec919ee6a4b3a1565bda6740a",
+        "truncated": false
+      },
+      "result_ids": [
+        "question:work:003-exception-search-v2",
+        "question:work:001-exception-search",
+        "question:work:004-exception-search-v3",
+        "question:demand:D7",
+        "question:demand:D9",
+        "question:root",
+        "question:work:003-struct-core-v2"
+      ],
+      "result_sha256": "7457196fab7f6b8cfbfe4d514fd1ac8f625f8339b1954c54caa5f59f328cee01",
+      "sequence": 1,
+      "tool": "search_questions"
+    },
+    {
+      "arguments": {
+        "limit": 10,
+        "query": "descent c=d root structural lemma",
+        "question_ids": [],
+        "tags": []
+      },
+      "result": {
+        "hits": [
+          {
+            "answer_count": null,
+            "id": "answer:work:003-struct-core-v2",
+            "kind": "answer",
+            "score": 21.808609589822048,
+            "sufficiency": "ready_to_synthesize",
+            "tags": [
+              "method",
+              "evidence",
+              "constraint",
+              "counterexample",
+              "uncertainty"
+            ],
+            "text": "MEMORANDUM — structural core (D1–D3) for S = {sorted 1≤a≤b≤c≤d, a²+b²+c²+d²=4abcd}, mutation x↦4·(product of others)−x then re-sort; root (1,1,1,1); height h(v)=d (decision 4). All proved from definitions SC1–SC2; no external materials exist (SC6).\n\nLEMMA V (Vieta conjugate). If (a,b,c,d)∈S then d′=4abc−d is an integer ≥1 and (a,b,c,d′), re-sorted, lies in S. Proof: d is a root of t²−4abc·t+(a²+b²+c²)=0; the other root d′ has d+d′=4abc∈ℤ and dd′=a²+b²+c²>0, so d′∈ℤ and d′≥1; the equation gives a²+b²+c²+d′²=4abc·d′. ∎\n\nLEMMA L2 (top tie only at root). If c=d then v=(1,1,1,1). Proof: the equation gives a²+b²=(4ab−2)d². Since ab≥1, RHS≥2d²; since a,b≤d, LHS≤2d². Equality: 4ab−2=2 ⇒ ab=1 ⇒ a=b=1, and 2=2d² ⇒ d=1. (Same as the suggested route: d² | a²+b² forces a²+b²∈{d²,2d²}; the first gives 4ab=3, impossible; the second is above.) Hence at every non-root vertex c<d: the maximum coordinate is unique; also a=d⇒c=d⇒root. ∎\n\nLEMMA L1 (descent). At every non-root v: 1≤d′<d. Proof: d′≥1 by Lemma V. Assume d′≥d. Then d²≤dd′=a²+b²+c²≤3c², so d≤c√3. Then 4abc²≤4abcd=a²+b²+c²+d²≤2(a²+b²+c²)≤6c², hence 4ab≤6, i.e. 2ab≤3, so ab=1 and a=b=1. Now d²≤a²+b²+c²=c²+2<(c+1)² (since 2<2c+1 for c≥1), so d≤c; with d≥c, d=c. The equation becomes 2+2c²=4c², so c=1 and v=(1,1,1,1) — contradiction. ∎ Note: no Pell/mod-3 step is needed; the previously suggested exclusion of m²=3c²−2 mod 3 is invalid as stated (m²≡1 mod 3 occurs, e.g. c=1), and this route avoids it entirely.\n\nLEMMA L3 (mutating below the max grows, factor ≥3). At non-root v, mutate x∈{a,b,c}: x′=4(abcd/x)−x≥4d−d=3d>d, because the other three coordinates include d (product ≥d) and x≤d. After re-sorting the new maximum is x′ (other entries ≤d<x′). So every mutation not at d strictly increases height, by factor ≥3 (for x=c the factor is ≥4ab−1). ∎\n\nCOROLLARY (no height-preserving mutation; the d-mutation lowers height). At non-root v: mutating d yields re-sorted (a,b,c,d′) with max=max(c,d′)<d (d′<d by L1, c<d by L2); mutating a,b,c yields max≥3d>d by L3. Hence every mutation strictly changes height. At the root the unique mutated vertex is (1,1,1,3), height 3>1. ∎\n\nTHEOREM D2 (unique height-decreasing mutation). At every non-root v exactly one mutated vertex has height<h(v): the one from mutating the maximum coordinate d; all other coordinate-mutations raise height to ≥3d. Uniqueness is at the level of vertices of the quotient (sorted) graph: if a=b or b=c, some of the four coordinate-mutations coincide after sorting (mutating a vs b when a=b gives the same multiset), but all such coincidences lie among height-increasing mutations, so the height-decreasing vertex is unique; since c<d (L2) it also comes from a unique coordinate index. No mutation fixes height. ∎\n\nTHEOREM D1 (connectivity). Define parent(v), v≠root: mutate at d, re-sort. By the Corollary h(parent(v))=max(c,d′)<d=h(v); by Lemma V parent(v)∈S. Iterating, height is a strictly decreasing positive integer, reaching 1 within d−1 steps; height 1 forces (1,1,1,1) (since 1≤a≤b≤c≤d=1), and (1,1,1,1)∈S as 1+1+1+1=4=4·1·1·1·1. So every v∈S is joined to the root by a mutation path. ∎\n\nTHEOREM D3 (rooted tree). The mutation relation on S is symmetric — coordinate mutation x↦M−x is an involution — so the quotient graph on sorted vertices is undirected. It is connected (D1). It is acyclic: in any cycle take a vertex v of maximal height; its two distinct cycle-neighbors have height≤h(v), cannot exceed h(v) (maximality), and cannot equal it (Corollary), so both are height-decreasing mutations of v — contradicting D2. Connected and acyclic ⇒ tree, rooted at (1,1,1,1) with parent as in D1; a multiple parent (a second lower-height neighbor) would contradict D2 identically. ∎\n\nLABELED OBSERVATIONS (hand-checkable spot checks, reproducible by direct substitution; not an enumeration): O1: (1,1,1,3): 1+1+1+9=12=4·3; d′=4−3=1, parent is root; all four root-mutations give 3, so the root has exactly one child. O2: (1,1,3,11): 1+1+9+121=132=4·33; d′=4·3−11=1, parent (1,1,1,3); mutating c=3 gives 41: (1,1,11,41), max 41≥3·11 (L3 confirmed). O3: (1,3,11,131): 1+9+121+17161=17292=4·4323, from (1,1,3,11) by mutating a 1 (4·1·3·11−1=131); d′=4·3·11−131=1, parent (1,1,3,11). Hence (1,1,3,11) has exactly two children (mutating a vs b coincide since a=b): branching exists and the equal-coordinate subtlety is realized already at depth 2.\n\nSTATUS: D1, D2, D3 PROVED, no counterexamples, no induction failure modes (L1 covers every non-root vertex; termination uses only that height is a positive integer). No growth law is assumed or implied; D4–D8 belong to the sibling threads.",
+            "unresolved_count": 3
+          }
+        ],
+        "query": "descent c=d root structural lemma",
+        "snapshot_sha256": "155fda6789134df12fb1e7d920cbac0b109504dec919ee6a4b3a1565bda6740a",
+        "truncated": false
+      },
+      "result_ids": [
+        "answer:work:003-struct-core-v2"
+      ],
+      "result_sha256": "83fc2c6e8b7bcee340eb694809b280a25209e9518d33c013609cadf2838cdb0d",
+      "sequence": 2,
+      "tool": "search_answers"
+    },
+    {
+      "arguments": {
+        "entry_id": "answer:work:003-exception-search-v2"
+      },
+      "result": {
+        "content": {
+          "claim_ids": [],
+          "content_sha256": "57c2dd395c406fbbd639c495c9a1bfd8fd5f73ed312bac7025eb07b9b91ccdb9",
+          "id": "answer:work:003-exception-search-v2",
+          "node_id": "work:003-exception-search-v2",
+          "packet": {
+            "account": "Investigation failed before producing evidence: UnexpectedModelBehavior: Exceeded maximum output retries (2)",
+            "assumptions": [],
+            "boundary_findings": [],
+            "child_packet_ids": [],
+            "claims": [],
+            "content_sha256": "446ab8e9a3cd6c89de18b19102494e0ae3cbc54b236b22cffa13828eaf89fc07",
+            "counterevidence": [],
+            "id": "packet:work:003-exception-search-v2",
+            "knowledge_links": [],
+            "next_observation": null,
+            "node_id": "work:003-exception-search-v2",
+            "objective": "D7+D9: Perform a BOUNDED, hand-checkable enumeration and report labeled observations only. Procedure (state it explicitly so it is reproducible by hand): (Method 1, direct search) enumerate all candidate solutions with d <= 100 by looping over sorted triples 1 <= a <= b <= c <= 100 and solving d^2 - (4abc) d + (a^2+b^2+c^2) = 0 for integer d >= c, using the cheap necessary condition d | a^2+b^2+c^2 to prune; (Method 2, BFS) list all vertices reachable from (1,1,1,1) by breadth-first mutation, mutating all 4 coordinates, re-sorting, discarding d > 100. Expected reachable set (verify each by direct substitution, one line each): (1,1,1,1), (1,1,1,3), (1,1,3,11), (1,1,11,41) - check whether anything else with d <= 100 appears (e.g. from (1,1,3,11), mutating a gives 131 > 100; from (1,1,11,41), mutating 11 gives 153 > 100, mutating 1 gives 1803 > 100). Report as LABELED OBSERVATIONS (enumeration bound d <= 100): (a) the complete verified table with one-line substitution checks; (b) whether any solution with c = d occurs; (c) whether any vertex has two distinct height-decreasing mutations / multiple parents (within the BFS check each vertex's parent is unique); (d) whether the two methods agree exactly (any direct-search solution not reachable from the root would locally refute D1); (e) descent sanity: for each non-root vertex compute d' = 4abc - d and confirm 1 <= d' < d, exhibiting the parent edge; (f) note any induction failure modes observed (e.g. re-sorting effects) or state their absence within the bound. STRICT BREVITY: total well under 900 words; distinguish verified facts within the bound from non-occurrences (which prove nothing beyond d <= 100).",
+            "raised_questions": [],
+            "source_ids_consulted": [],
+            "sufficiency": "blocked",
+            "unresolved": [
+              "Investigation failed before producing evidence: UnexpectedModelBehavior: Exceeded maximum output retries (2)"
+            ]
+          },
+          "packet_id": "packet:work:003-exception-search-v2",
+          "question_ids": [
+            "question:demand:D7",
+            "question:demand:D9",
+            "question:work:001-exception-search",
+            "question:work:003-exception-search-v2"
+          ],
+          "sufficiency": "blocked",
+          "summary": "Investigation failed before producing evidence: UnexpectedModelBehavior: Exceeded maximum output retries (2)",
+          "tags": [
+            "counterexample",
+            "evidence",
+            "risk",
+            "measurement",
+            "uncertainty"
+          ],
+          "unresolved": [
+            "Investigation failed before producing evidence: UnexpectedModelBehavior: Exceeded maximum output retries (2)"
+          ]
+        },
+        "id": "answer:work:003-exception-search-v2",
+        "incoming_links": [],
+        "kind": "answer",
+        "outgoing_links": [
+          {
+            "content_sha256": "0dcd52c6530a1f0af6e102b5ba51088ffcd08d5c577f4166443448cc736707de",
+            "id": "link:0dcd52c6530a1f0af6e102b5",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:003-exception-search-v2",
+            "target_id": "question:work:001-exception-search"
+          },
+          {
+            "content_sha256": "1496110f801e2239f42fc88c4e0087ae6302df667882afa3b700b94b6a2e10d0",
+            "id": "link:1496110f801e2239f42fc88c",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:003-exception-search-v2",
+            "target_id": "question:work:003-exception-search-v2"
+          },
+          {
+            "content_sha256": "16b88c4205b858e07e2cfdf2beeedd9559db216ef1662d14e1bb2f100689e312",
+            "id": "link:16b88c4205b858e07e2cfdf2",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:003-exception-search-v2",
+            "target_id": "question:demand:D7"
+          },
+          {
+            "content_sha256": "e2c596341241436663ab5d2737d72fc62a4b12d6c9339e058ccd104b9e22ea85",
+            "id": "link:e2c596341241436663ab5d27",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:003-exception-search-v2",
+            "target_id": "question:demand:D9"
+          }
+        ]
+      },
+      "result_ids": [
+        "answer:work:003-exception-search-v2"
+      ],
+      "result_sha256": "c275a48bc76b49db923e3afa3184aa6d0813a9e1da8fa5e9dae168b330255e3d",
+      "sequence": 3,
+      "tool": "get_entry"
+    }
+  ],
+  "snapshot_sha256": "155fda6789134df12fb1e7d920cbac0b109504dec919ee6a4b3a1565bda6740a"
+}

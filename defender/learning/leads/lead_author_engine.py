@@ -11,7 +11,7 @@ from defender.learning.core import config
 from defender.learning.core.config import RunUnprocessable, StageContext, StageWiring
 from defender.learning.leads.declared_systems import adapter_systems_under
 from defender.learning.leads.path_validation import CATALOG_REL, SKILLS_REL
-from defender.learning.pipeline._pydantic_stage import run_stage as _run_stage_fn
+from defender.learning._pydantic_stage import run_stage as _run_stage_fn
 from defender.runtime import providers
 from defender.runtime.agent_definition import AgentDefinition, ResolvedRoots, ToolSet, bind
 from defender.runtime.agent_role import AgentRole

@@ -1,0 +1,10 @@
+{
+  "content_sha256": "1805377e3d565e4be1f6401db54df6558f04d94f948cceb0302bbde85ddd8b4d",
+  "id": "link:1805377e3d565e4be1f6401d",
+  "origin": "runtime",
+  "proposed_by_node_id": null,
+  "rationale": null,
+  "relation": "partially_answers",
+  "source_id": "answer:work:001-inv-choi-conformity",
+  "target_id": "question:demand:D4"
+}

@@ -1,0 +1,14 @@
+{
+  "acceptance_condition": "Establish demand D3 with evidence.",
+  "content_sha256": "a0202d705ab9cb60c89f678a3b3885f8c81bb2c34e47e8a79c39ec5ba85b67b6",
+  "demand_ids": [
+    "D3"
+  ],
+  "id": "question:demand:D3",
+  "node_id": null,
+  "rationale": "The request's 'hence' clause; the deduction itself must be checked.",
+  "tags": [
+    "risk"
+  ],
+  "text": "Establish whether the quotient mutation graph is a rooted tree as a consequence of D1 and D2 — and if any of D1-D3 fails, exhibit and verify the failure structure (disconnected component, cycle, or multiple parents)."
+}

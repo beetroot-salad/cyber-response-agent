@@ -1,0 +1,89 @@
+{
+  "call_id": "call-0001-recursive-planner",
+  "context": {
+    "ancestor_decisions": [
+      "The problem equation is 1/x + 1/y + 1/z = 1/2, with x, y, z required to be positive integers.",
+      "Solutions are normalized by the ordering x <= y <= z, so each unordered solution is represented once.",
+      "The source envelope contains no conversation decisions and no materials; the raw request is the sole substantive input.",
+      "The envelope's title hint is 'Unit fractions summing to one half'."
+    ],
+    "assigned_demands": [
+      {
+        "id": "D1",
+        "rationale": "Primary imperative of the request.",
+        "statement": "The artifact gives the complete list of triples of positive integers x <= y <= z satisfying 1/x + 1/y + 1/z = 1/2."
+      },
+      {
+        "id": "D2",
+        "rationale": "Explicitly required alongside the list.",
+        "statement": "The artifact contains a rigorous proof that the list is complete, i.e., that no solutions are missing."
+      },
+      {
+        "id": "D3",
+        "rationale": "The request states the response should verify the listed triples directly.",
+        "statement": "Each listed triple is verified directly by substitution into the equation."
+      },
+      {
+        "id": "D4",
+        "rationale": "The request specifies the form of the final response.",
+        "statement": "The response is a self-contained mathematical argument whose steps a reader can check without external computational evidence."
+      }
+    ],
+    "constraints": [
+      "Exact arithmetic must be used throughout; no approximate or floating-point computation.",
+      "The response must not be a report about agents or a brute-force program; computation cannot substitute for proof.",
+      "Methods are confined to elementary number-theoretic techniques such as bounds, factorization, and divisor enumeration."
+    ],
+    "expansion_required": true,
+    "max_children": 4,
+    "node": {
+      "acceptance_condition": "Satisfy every assigned whole-task demand and explicit constraint.",
+      "demand_ids": [
+        "D1",
+        "D2",
+        "D3",
+        "D4"
+      ],
+      "depth": 0,
+      "expected_contribution": "The evidence basis for the final deliverable.",
+      "id": "root",
+      "objective": "Determine all triples of positive integers x <= y <= z satisfying 1/x + 1/y + 1/z = 1/2, and deliver a self-contained, rigorous mathematical argument that (a) gives the complete list of such triples, (b) verifies each listed triple directly against the equation using exact arithmetic, and (c) proves that no solutions are missing, using only elementary number-theoretic methods such as bounds, factorization, and divisor enumeration.",
+      "parent_id": null,
+      "rationale": "The whole task submitted after intake.",
+      "separator_facts": [
+        "The problem equation is 1/x + 1/y + 1/z = 1/2, with x, y, z required to be positive integers.",
+        "Solutions are normalized by the ordering x <= y <= z, so each unordered solution is represented once.",
+        "The source envelope contains no conversation decisions and no materials; the raw request is the sole substantive input.",
+        "The envelope's title hint is 'Unit fractions summing to one half'."
+      ],
+      "source_ids": [
+        "request"
+      ],
+      "source_paths": []
+    },
+    "product_intent": "The product is a proof document that resolves the unit-fraction equation 1/x + 1/y + 1/z = 1/2 in positive integers with certainty and verifiability: a reader can check, line by line, that the listed triples satisfy the equation and that the argument excludes all others. It exists to provide a rigorous human-checkable resolution, not a computational trace or process report.",
+    "remaining_depth": 3,
+    "remaining_node_budget": 17,
+    "source_materials": [
+      {
+        "content": "Determine all triples of positive integers \\(x \\le y \\le z\\) satisfying\n\n\\[\n\\frac1x+\\frac1y+\\frac1z=\\frac12.\n\\]\n\nGive the complete list and a rigorous proof that no solutions are missing. Use\nexact arithmetic. The final response should be a self-contained mathematical\nargument rather than a report about agents or a brute-force program. It may use\nbounds, factorization, divisor enumeration, or other elementary number-theoretic\nmethods, and it should verify the listed triples directly.\n\n",
+        "id": "request",
+        "kind": "natural_request",
+        "label": "Original task request",
+        "locator": null
+      }
+    ],
+    "stable_context": [
+      "The problem equation is 1/x + 1/y + 1/z = 1/2, with x, y, z required to be positive integers.",
+      "Solutions are normalized by the ordering x <= y <= z, so each unordered solution is represented once.",
+      "The source envelope contains no conversation decisions and no materials; the raw request is the sole substantive input.",
+      "The envelope's title hint is 'Unit fractions summing to one half'."
+    ],
+    "workspace_documents": [],
+    "workspace_index": []
+  },
+  "dependency_type": "PlanningDeps",
+  "input_sha256": "b3d60a9e8b0044da80fda5b84f79096d6640a6e291a6b9385ed7331fd41147d5",
+  "model": "fireworks:accounts/fireworks/routers/kimi-k3-fast",
+  "role": "recursive_planner"
+}

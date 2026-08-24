@@ -1,0 +1,10 @@
+{
+  "packet_ids": [
+    "packet:root.01-case-x3-x4",
+    "packet:root.03-independent-audit",
+    "packet:root.02-case-x5-x6",
+    "packet:root"
+  ],
+  "root_plan_sha256": "4bda5345fd718b78900b36419621564f548f2d33b9cb602c153fe185e9f92d18",
+  "source_run": "/workspace/seam-harness/math-runs/20260821T153907Z-recursive-unit-fractions-summing-to-one-half-11b01b33"
+}

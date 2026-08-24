@@ -1,0 +1,14 @@
+{
+  "acceptance_condition": "Establish demand D8 with evidence.",
+  "content_sha256": "668b491bef634f3793d4fa6449743bd9f571b93e219b87538eb6b0e1ed226a8f",
+  "demand_ids": [
+    "D8"
+  ],
+  "id": "question:demand:D8",
+  "node_id": null,
+  "rationale": "The result must expose its epistemic boundary.",
+  "tags": [
+    "counterexample"
+  ],
+  "text": "End with the strongest warranted conclusion, material unresolved questions, and the single observation most likely to falsify the thesis."
+}

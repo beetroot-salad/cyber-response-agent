@@ -1,0 +1,10 @@
+{
+  "content_sha256": "797ec2f1c5c5bf04dddb8db026ed17a83f3e1890eab69bc1f9a26dc9e53bbe8d",
+  "id": "link:797ec2f1c5c5bf04dddb8db0",
+  "origin": "agent",
+  "proposed_by_node_id": "work:004-upper-depth-v3",
+  "rationale": "Two-sided depth relation log_3(log_2 d + 1) <= depth(v) <= log_3 d proved, with the chain identified as the slowest branch (depth log_{2+sqrt3} d + O(1)).",
+  "relation": "answers",
+  "source_id": "answer:work:004-upper-depth-v3",
+  "target_id": "question:demand:D6"
+}

@@ -1,0 +1,14 @@
+{
+  "acceptance_condition": "Establish demand D13 with evidence.",
+  "content_sha256": "e4e6151f4fb92956ae2d8e295acd8c66fb86a3b7aa8512390bd8da1b78cda6ea",
+  "demand_ids": [
+    "D13"
+  ],
+  "id": "question:demand:D13",
+  "node_id": null,
+  "rationale": "Stated verbatim in the request.",
+  "tags": [
+    "evidence"
+  ],
+  "text": "Source-supported claims are clearly distinguished from design inferences."
+}

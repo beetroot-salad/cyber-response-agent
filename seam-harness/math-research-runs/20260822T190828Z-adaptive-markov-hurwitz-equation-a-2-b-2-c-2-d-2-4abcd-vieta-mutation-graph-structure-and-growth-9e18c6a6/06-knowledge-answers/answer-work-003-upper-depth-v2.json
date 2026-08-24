@@ -1,0 +1,18 @@
+{
+  "claim_ids": [],
+  "content_sha256": "31021f0aeadc41c63397cf45a81d97ab359b2fc5fba9ea906d1ac00922d45a43",
+  "id": "answer:work:003-upper-depth-v2",
+  "node_id": "work:003-upper-depth-v2",
+  "packet_id": "packet:work:003-upper-depth-v2",
+  "sufficiency": "blocked",
+  "summary": "Investigation failed before producing evidence: UnexpectedModelBehavior: Exceeded maximum output retries (2)",
+  "tags": [
+    "method",
+    "measurement",
+    "constraint",
+    "uncertainty"
+  ],
+  "unresolved": [
+    "Investigation failed before producing evidence: UnexpectedModelBehavior: Exceeded maximum output retries (2)"
+  ]
+}

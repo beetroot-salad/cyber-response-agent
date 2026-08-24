@@ -1,0 +1,11 @@
+{
+  "child_ids": [],
+  "depth": 2,
+  "effective_disposition": "solve",
+  "node_id": "root.04-completeness-audit.03-edge-cells",
+  "packet_id": "packet:root.04-completeness-audit.03-edge-cells",
+  "packet_sha256": "275319eb9678c4d6543e694ea07f8e6ce1600a9fce766b66005b04a6017fc88e",
+  "parent_id": "root.04-completeness-audit",
+  "proposed_disposition": "solve",
+  "stop_reason": null
+}

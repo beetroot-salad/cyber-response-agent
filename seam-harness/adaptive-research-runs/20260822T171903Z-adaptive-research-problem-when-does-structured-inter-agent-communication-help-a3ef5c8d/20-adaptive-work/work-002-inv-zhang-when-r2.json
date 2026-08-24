@@ -1,0 +1,272 @@
+{
+  "account": "Zhang et al. 2025 (arXiv:2502.08788v3; position paper subtitled 'Stop Overvaluing Multi-Agent Debate—We Must Rethink Evaluation and Embrace Model Heterogeneity') is the corpus's decisive matched-compute reappraisal. DESIGN: 5 MAD frameworks (SoM=Du et al. 2023, Multi-Persona, Exchange-of-Thoughts, ChatEval, AgentVerse) x 9 benchmarks (general knowledge: MMLU, MMLU-Pro, CommonsenseQA, ARC-Challenge, AGIEval; math: GSM8K, MATH; programming: HumanEval, MBPP) x 4 models (GPT-4o-mini, Claude-3.5-haiku, Llama3.1-8b, Llama3.1-70b), vs SA/CoT/SC baselines, debate rounds adjusted so every MAD method uses ~6 LLM calls; 3 repetitions with std (===== PDF PAGE 1, 6, 7 =====). HEADLINE: no MAD method exceeds a 20% win rate vs CoT across 36 scenarios; SoM/EoT/ChatEval/AgentVerse win ~15%, MP 0%; worse on programming, relatively better on math; the gap widens vs self-consistency at comparable LLM-call or token budgets (===== PDF PAGE 3, 7-8 =====). RECONCILIATION: MAD beats direct single-agent prompting in 34/45 GPT-4o-mini conditions—'perfectly aligns with previous findings'—but SoM and ChatEval were never compared to CoT in their original papers, so Du-style positives hold only against the weakest baseline (===== PDF PAGE 8 =====). HYPERPARAMETERS: agents 3->9, rounds 2->4 yield mostly stagnation or decline (sole exception EoT on GSM8K), ruling out misconfiguration as a universal explanation (===== PDF PAGE 8-9 =====). EFFICIENCY: SC converts extra tokens into accuracy; MAD is flat (SoM on MMLU) or trails SC at comparable tokens (EoT); per-question analysis shows aggressive methods (MP/ChatEval/AgentVerse) correct many errors but flip many correct answers, while conservative ones (SoM/EoT) avoid new errors but correct few—a correction/instability trade-off (===== PDF PAGE 9, 25 =====). HETEROGENEITY: Heter-MAD (each generation queries a random model from {GPT-4o-mini, Llama3.1-70b}, p=0.5) improves every tested framework (+6.4% SoM, +8.2% EoT vs single-model averages; up to +5.8% vs CoT-Average), with gains concentrated where models have complementary solvability and in simpler frameworks—'a universal antidote' (===== PDF PAGE 1, 4, 10-13 =====). POSITIONING: credits Du et al. 2023 as foundational but attributes MAD's overvaluation to fragmented, selective evaluation (Table 5 shows minimal benchmark overlap across prior MAD papers); aligns with Smit et al. 2024's null while dismissing its medical-only scope; flags that agents debate whole responses yet rebut final-answer differences rather than reasoning, and that current benchmarks need only single knowledge points (===== PDF PAGE 2, 5, 13, 14, 15 =====). Key identification gap for the root note: no heterogeneous self-consistency control, so the debate-specific value of heterogeneity over plain decorrelated sampling is not identified.",
+  "assumptions": [
+    "The text-extracted file's '===== PDF PAGE N =====' markers accurately delimit PDF pages; multi-column tables (e.g., Table 4) were parsed with some risk of cell misalignment, mitigated by cross-checking against the prose statements of the same numbers.",
+    "'36 scenarios' = 4 models x 9 benchmarks, as stated by the authors; SC is excluded from programming benchmarks because majority voting assumes a single correct answer (authors' footnote, '===== PDF PAGE 7 =====')."
+  ],
+  "boundary_findings": [
+    {
+      "alternative_explanation": "Heterogeneity gains are pure error-decorrelation of independent samples (Lorenz-style diversity preservation), with debate rounds contributing nothing or even harming via conformity — consistent with z3's matched-compute SC dominance.",
+      "consequence_if_absorbed": "The research note would overcredit staged communication/deliberation: if mixed-model SC matches Heter-MAD at matched compute, heterogeneity evidence supports a diversity-only mechanism and undercuts any claim that debate structure itself adds value.",
+      "evidence": [
+        "papers/text/zhang-et-al-2025-mad-question.txt '===== PDF PAGE 11 =====': Heter-MAD gains reported only 'vs SoM-Average/EoT-Average' and 'vs CoT-Average'; no SC-based comparator in Table 4",
+        "papers/text/zhang-et-al-2025-mad-question.txt '===== PDF PAGE 10 =====': Heter-MAD 'effectively reuses the prompts and architecture of any MAD method' — the only manipulation is which model generates, so any sampling-level diversity control would have been feasible but was omitted"
+      ],
+      "narrative": "Zhang et al. establish that model heterogeneity helps MAD but never run the decisive control: heterogeneous self-consistency (draw each SC sample from a different model, majority vote, zero communication). Heter-MAD is compared only to same-model MAD averages and CoT-Average. The communication channel's contribution beyond error decorrelation is therefore unidentified in this paper — the exact gap the root note's discriminating predictions must close.",
+      "smallest_suspected_scope": "Section 4 experimental design of Zhang et al. 2025 (Heter-MAD evaluation, PDF pages 10-13)."
+    }
+  ],
+  "claims": [
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "Table 1 benchmark configurations; Table 2 MAD framework comparison; 'we consider the number of LLM calls to be 6'; T=1, top-p=1",
+          "locator": "===== PDF PAGE 6 =====",
+          "source_id": "papers/text/zhang-et-al-2025-mad-question.txt"
+        },
+        {
+          "excerpt": "ANOVA test... p-value greater than 0.05 as an indicator that no significant differences—a tie—exist",
+          "locator": "===== PDF PAGE 3 =====",
+          "source_id": "papers/text/zhang-et-al-2025-mad-question.txt"
+        }
+      ],
+      "confidence": 0.97,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "z1",
+      "statement": "Zhang et al. 2025 evaluate 5 MAD frameworks (SoM, Multi-Persona, Exchange-of-Thoughts, ChatEval, AgentVerse) x 9 benchmarks spanning general knowledge (MMLU, MMLU-Pro, CommonsenseQA, ARC-Challenge, AGIEval), math (GSM8K, MATH), and programming (HumanEval, MBPP) x 4 foundation models (GPT-4o-mini, Claude-3.5-haiku, Llama3.1-8b, Llama3.1-70b), against SA/CoT/SC baselines; debate rounds are adjusted so all MAD methods align to ~6 LLM calls by default, T=1/top-p=1, win/tie/lose vs CoT decided by ANOVA with p>0.05 counted as a tie, and all experiments repeated three times with standard deviations ('===== PDF PAGE 1 =====', '===== PDF PAGE 6 =====', '===== PDF PAGE 7 =====')."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "none of these MAD methods achieve a win rate higher than 20% when compared to CoT across 36 scenarios (4 models × 9 benchmarks)",
+          "locator": "===== PDF PAGE 3 =====",
+          "source_id": "papers/text/zhang-et-al-2025-mad-question.txt"
+        },
+        {
+          "excerpt": "SoM, EoT, ChatEval, and AgentVerse only outperformed CoT in approximately 15% cases, while MP did not demonstrate significant improvement over CoT",
+          "locator": "===== PDF PAGE 7 =====",
+          "source_id": "papers/text/zhang-et-al-2025-mad-question.txt"
+        }
+      ],
+      "confidence": 0.97,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "z2",
+      "statement": "Headline negative result: no MAD method achieves a win rate higher than 20% vs CoT across 36 scenarios (4 models x 9 benchmarks); SoM, EoT, ChatEval and AgentVerse outperform CoT in only ~15% of cases and MP in 0%; by task type, MAD performs worst on programming and relatively best on mathematical reasoning ('===== PDF PAGE 3 =====', '===== PDF PAGE 7 =====')."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "the underperformance becomes even more pronounced when compared to SC, especially when using a comparable number of LLM calls or tokens",
+          "locator": "===== PDF PAGE 3 =====",
+          "source_id": "papers/text/zhang-et-al-2025-mad-question.txt"
+        }
+      ],
+      "confidence": 0.96,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "z3",
+      "statement": "The matched-compute comparison is decisive: MAD's underperformance 'becomes even more pronounced when compared to SC, especially when using a comparable number of LLM calls or tokens' — i.e., independent sampling plus majority-vote aggregation dominates debate at equal inference budget ('===== PDF PAGE 3 =====')."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "MAD frameworks outperform SA in most conditions (34 out of 45 conditions utilizing GPT-4o-mini), which perfectly aligns with previous findings in the field",
+          "locator": "===== PDF PAGE 8 =====",
+          "source_id": "papers/text/zhang-et-al-2025-mad-question.txt"
+        }
+      ],
+      "confidence": 0.95,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "z4",
+      "statement": "Reconciliation with prior positives: MAD frameworks outperform direct single-agent prompting (SA) in 34 of 45 GPT-4o-mini conditions, 'which perfectly aligns with previous findings in the field', but ChatEval and SoM were never compared to CoT in their original papers, MP was compared to CoT only on the undisclosed CIAR dataset, EoT's CoT advantage replicates only on Claude-3.5-haiku, and AgentVerse's HumanEval edge relies on an extra execution-evaluation stage 'arguably beyond the scope of MAD designs' ('===== PDF PAGE 8 =====')."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "increasing the number of agents or debate rounds often results in either stagnation or even a decline in performance... rules out suboptimal hyperparameter configurations as a universal explanation",
+          "locator": "===== PDF PAGE 9 =====",
+          "source_id": "papers/text/zhang-et-al-2025-mad-question.txt"
+        }
+      ],
+      "confidence": 0.95,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "z5",
+      "statement": "Hyperparameter scaling does not rescue MAD: increasing debate rounds 2->4 or agents 3->9 leaves outcomes mostly unchanged or declining (e.g., SoM still underperforms CoT on MMLU and HumanEval at 4 rounds or 9 agents); the sole exception is EoT on GSM8K, which improves continuously from 3 to 9 agents and surpasses CoT — so suboptimal hyperparameters are ruled out as a universal explanation for MAD's inferiority ('===== PDF PAGE 8 =====', '===== PDF PAGE 9 =====')."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "SC effectively utilizes the increased inference budget. However, MAD frameworks either: (i) show no positive trend... or (ii) continue to underperform SC while consuming a comparable number of tokens",
+          "locator": "===== PDF PAGE 9 =====",
+          "source_id": "papers/text/zhang-et-al-2025-mad-question.txt"
+        },
+        {
+          "excerpt": "overly aggressive methods may introduce instability, while conservative methods may struggle to capitalize on opportunities for correction",
+          "locator": "===== PDF PAGE 9 =====",
+          "source_id": "papers/text/zhang-et-al-2025-mad-question.txt"
+        }
+      ],
+      "confidence": 0.93,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "z6",
+      "statement": "Efficiency and mechanism: SC 'effectively utilizes the increased inference budget' while MAD either shows no positive scaling with tokens (SoM on MMLU) or improves yet still underperforms SC at comparable token counts (EoT on MMLU/GSM8K); per-question error analysis reveals a correction/instability trade-off — MP, ChatEval and AgentVerse correct many wrong answers but also erroneously flip many initially correct ones, whereas SoM and EoT are conservative, introducing few new errors but correcting few ('===== PDF PAGE 9 =====', Figure 6 on '===== PDF PAGE 25 =====')."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "Heter-SoM improves SoM-average by 6.4%, and Heter-EoT improves EoT-average by 8.2%... all the considered MAD methods outperform CoT-Average by up to 5.8%",
+          "locator": "===== PDF PAGE 11 =====",
+          "source_id": "papers/text/zhang-et-al-2025-mad-question.txt"
+        },
+        {
+          "excerpt": "Using identical agents from the same model undermines the very premise of debate—diverse knowledge and reasoning",
+          "locator": "===== PDF PAGE 4 =====",
+          "source_id": "papers/text/zhang-et-al-2025-mad-question.txt"
+        }
+      ],
+      "confidence": 0.95,
+      "counterevidence": [
+        "Gains are benchmarked against the AVERAGE of the two single-model MAD runs, not the best single model: e.g., on MMLU SoM-Llama (84.6) exceeds SoM-Heter (83.5), and vs CoT-Average several per-benchmark cells are negative (ARC-Challenge -1.4%, MBPP -2.0%) ('===== PDF PAGE 11 =====' Table 4) — 'universal antidote' holds on average, not per benchmark.",
+        "No heterogeneous self-consistency control (mixed-model majority vote with no communication) was run, so the debate-specific contribution of heterogeneity beyond decorrelated sampling is not identified."
+      ],
+      "derived_from_claim_ids": [],
+      "local_id": "z7",
+      "statement": "Model heterogeneity as 'a universal antidote': Heter-MAD, where each agent generation queries a randomly drawn model from {GPT-4o-mini, Llama3.1-70b} with p=0.5, consistently improves all tested frameworks — Heter-SoM +6.4% and Heter-EoT +8.2% over the average of the two single-model runs, and all heterogeneous MAD variants beat CoT-Average by up to +5.8%; gains concentrate on questions where the two models have complementary solvability (CW/WC categories), simpler frameworks (SoM, EoT) benefit more than complex ones (ChatEval, AgentVerse), and the authors argue identical agents 'undermine the very premise of debate' ('===== PDF PAGE 1 =====', '===== PDF PAGE 4 =====', '===== PDF PAGE 10 =====', '===== PDF PAGE 11 =====', '===== PDF PAGE 12-13 =====')."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "Smit et al. (2024) found that MAD methods do not reliably outperform other ensembling reasoning strategies. However, they specifically focus on medical prompting methods and medical benchmarks, which limits the generalizability",
+          "locator": "===== PDF PAGE 5 =====",
+          "source_id": "papers/text/zhang-et-al-2025-mad-question.txt"
+        },
+        {
+          "excerpt": "rebuttals focus on outcome differences rather than analyzing the logic behind discrepancies",
+          "locator": "===== PDF PAGE 13 =====",
+          "source_id": "papers/text/zhang-et-al-2025-mad-question.txt"
+        },
+        {
+          "excerpt": "Table 5: Evaluations details of previous MAD research. Overlapped benchmarks are marked out.",
+          "locator": "===== PDF PAGE 15 =====",
+          "source_id": "papers/text/zhang-et-al-2025-mad-question.txt"
+        }
+      ],
+      "confidence": 0.93,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "z8",
+      "statement": "Positioning and self-identified limits: the paper credits Du et al. 2023's SoM as the foundational MAD design and replicates its MAD>SA result, but attributes MAD's overvaluation to fragmented, selective evaluation — Table 5 shows minimal benchmark overlap among prior MAD papers; it aligns with Smit et al. (2024)'s finding that MAD does not reliably outperform ensembling strategies while criticizing its medical-only scope as limiting generalizability, and notes Khan et al. 2024's single-agent comparison was calibrated and limited to three datasets; its future agenda flags that agents 'engage in debates based solely on their complete responses... rebuttals focus on outcome differences rather than analyzing the logic behind discrepancies', and that current benchmarks 'require only a single knowledge point', so scenarios needing genuinely distributed knowledge may better suit MAD ('===== PDF PAGE 2 =====', '===== PDF PAGE 5 =====', '===== PDF PAGE 13 =====', '===== PDF PAGE 14 =====', '===== PDF PAGE 15 =====')."
+    }
+  ],
+  "counterevidence": [
+    "The win/tie/lose classification counts ANOVA p>0.05 as a 'tie' with only 3 repetitions per condition, so the ~40-60% tie rates partly reflect low statistical power rather than proven equivalence; the direction of the effect, however, is corroborated by the raw accuracies in Table 3 (e.g., SoM below CoT on 6 of 9 GPT-4o-mini benchmarks) ('===== PDF PAGE 3 =====', '===== PDF PAGE 7 =====').",
+    "MAD does beat direct single-agent prompting in 34/45 conditions, and SoM beats CoT on GSM8K across all round variations; debate is not uniformly harmful — the negative result is specifically against CoT/SC as stronger baselines ('===== PDF PAGE 8-9 =====').",
+    "Default matching is by LLM-call count (6), but MAD prompts embed peers' full responses, inflating input tokens; the token-level efficiency comparison relies on Figure 6 (appendix), and proprietary-model token counts could not be precisely controlled ('===== PDF PAGE 9 =====')."
+  ],
+  "knowledge_links": [
+    {
+      "rationale": "Covers the full wave-1 objective: design, headline results and interactions (task type, heterogeneity), hyperparameter scaling, compute/efficiency accounting, positioning vs Du et al., and stated limitations, each with page markers.",
+      "relation": "answers",
+      "source_id": "self",
+      "target_id": "question:work:001-inv-zhang-when"
+    },
+    {
+      "rationale": "Provides the negative/matched-compute pole of the corpus conflict (MAD < CoT/SC at equal calls/tokens) plus the reconciliation of Du's positive result (replicates only vs direct prompting), which D4 requires the note to reconcile rather than select.",
+      "relation": "supports",
+      "source_id": "self",
+      "target_id": "question:demand:D4"
+    },
+    {
+      "rationale": "Supplies causal-model variables: initial error correlation (same-model agents vs heterogeneous pools), social-influence pathology (aggressive correction flipping correct answers), task topology (single-knowledge-point benchmarks), and synthesis/aggregation (majority vote vs judge).",
+      "relation": "supports",
+      "source_id": "self",
+      "target_id": "question:demand:D3"
+    },
+    {
+      "rationale": "Zhang's observation that agents receive complete responses yet rebut final-answer differences rather than reasoning ('===== PDF PAGE 13 =====') bears directly on whether bare answers suffice for peer influence; combined with the heterogeneity result, it suggests decorrelation matters more than deliberation content.",
+      "relation": "refines",
+      "source_id": "self",
+      "target_id": "question:raised:784a683dbe8a:rq1"
+    },
+    {
+      "rationale": "Zhang replicates Du's MAD>SA effect (34/45 conditions) but shows SoM was never compared to CoT originally and loses to CoT/SC at matched calls — localizing Du's positive result to the weakest-baseline regime and quantifying the compute confound the Du packet flagged.",
+      "relation": "refines",
+      "source_id": "self",
+      "target_id": "answer:work:001-inv-du-debate"
+    },
+    {
+      "rationale": "Zhang independently converges on Smit et al.'s null (MAD does not reliably beat ensembling) on broader, non-medical benchmarks while explicitly noting Smit's scope limitation — cross-paper corroboration for the wave-2 Smit re-investigation.",
+      "relation": "supports",
+      "source_id": "self",
+      "target_id": "question:work:001-inv-smit-mad"
+    }
+  ],
+  "next_observation": null,
+  "raised_questions": [
+    {
+      "acceptance_condition": "A matched-compute experiment crossing communication (none/SC vs SoM-style debate) x pool (homogeneous vs heterogeneous models) on >=3 task strata, reporting accuracy with CIs and a preregistered decision rule: if Heter-SC >= Heter-MAD, diversity-only is supported; if Heter-MAD > Heter-SC by a preregistered margin, communication adds identifiable value.",
+      "discriminating_outcomes": [
+        "Heter-SC ≈ Heter-MAD at equal budget → communication contributes nothing beyond decorrelated sampling; staged retrieval-mediated designs must justify themselves on other grounds (e.g., token efficiency of selective exchange).",
+        "Heter-MAD > Heter-SC only on multi-knowledge/compositional tasks → deliberation value is conditioned on task topology, supporting the root note's moderator structure.",
+        "Heter-MAD > Heter-SC uniformly → a genuine deliberation effect exists and the note's mechanism must explain what communication adds beyond diversity."
+      ],
+      "local_id": "rz1",
+      "rationale": "Zhang's 'universal antidote' compares Heter-MAD only to same-model MAD averages and CoT-Average; without a heterogeneous-SC control, the heterogeneity result cannot distinguish a diversity-only mechanism (decorrelated errors suffice) from a deliberation mechanism (communication adds value given diversity). This is the pivotal discrimination for the root note's causal model and its predictions.",
+      "required_source_hints": [
+        "papers/text/zhang-et-al-2025-mad-question.txt"
+      ],
+      "tags": [
+        "method",
+        "uncertainty",
+        "evidence"
+      ],
+      "target_question_ids": [
+        "question:work:001-inv-zhang-when"
+      ],
+      "text": "Under matched LLM-call and token budgets, does heterogeneous self-consistency (each sample drawn from a distinct model, majority vote, no inter-agent communication) match or exceed Heter-MAD, and does the answer interact with task type?"
+    },
+    {
+      "acceptance_condition": "Construct or select task strata scored by number of required complementary knowledge/fact units (verified by ablating information given to single agents), then test the communication-condition x stratum interaction at matched compute with adequate power for the interaction, not just main effects.",
+      "discriminating_outcomes": [
+        "Ordering flips in favor of staged/debate conditions as knowledge-requirement grows → task topology is a real moderator; the corpus null is scope-limited.",
+        "No interaction: SC dominates at all strata → the topology conjecture is falsified and the negative result generalizes."
+      ],
+      "local_id": "rz2",
+      "rationale": "Zhang's own boundary claim ('===== PDF PAGE 14 =====') is that current benchmarks need only a single knowledge point, so MAD may be unnecessary there; if true, the headline negative result is task-topology-confounded and the root note must stratify by knowledge-requirement rather than treat the null as universal.",
+      "required_source_hints": [
+        "papers/text/zhang-et-al-2025-mad-question.txt",
+        "papers/text/smit-et-al-2023-going-mad.txt"
+      ],
+      "tags": [
+        "uncertainty",
+        "method"
+      ],
+      "target_question_ids": [
+        "question:work:001-inv-zhang-when"
+      ],
+      "text": "Does the MAD-vs-SC ordering reverse on tasks that genuinely require combining multiple, distributed knowledge points, as Zhang conjectures but never tests?"
+    }
+  ],
+  "source_ids_consulted": [
+    "papers/text/zhang-et-al-2025-mad-question.txt"
+  ],
+  "sufficiency": "ready_to_synthesize",
+  "unresolved": [
+    "Whether heterogeneous self-consistency (mixed-model sampling + majority vote, no communication) matches Heter-MAD at matched calls/tokens — the control needed to attribute heterogeneity gains to debate rather than to error decorrelation alone.",
+    "Why aggressive MAD variants flip initially correct answers: Zhang's corrected/erred analysis is behavioral and cannot distinguish social-influence conformity (Lorenz/Choi-style) from noise amplification or judge/aggregation failures.",
+    "Whether task topology (benchmarks requiring multiple, complementary knowledge points) reverses the MAD vs SC ordering — Zhang conjectures yes ('===== PDF PAGE 14 =====') but tests nothing."
+  ]
+}

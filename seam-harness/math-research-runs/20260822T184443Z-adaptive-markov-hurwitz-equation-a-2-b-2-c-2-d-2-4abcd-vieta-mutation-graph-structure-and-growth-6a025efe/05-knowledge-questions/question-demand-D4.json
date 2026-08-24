@@ -1,0 +1,14 @@
+{
+  "acceptance_condition": "Establish demand D4 with evidence.",
+  "content_sha256": "417fb30a9ffc62b52811284dc28cf8717f6ff869e6466d2d1df3e27df351e98c",
+  "demand_ids": [
+    "D4"
+  ],
+  "id": "question:demand:D4",
+  "node_id": null,
+  "rationale": "Open asymptotic component, upper side.",
+  "tags": [
+    "constraint"
+  ],
+  "text": "Prove the strongest rigorous upper growth bound attainable for N(H), the number of sorted solutions with maximum coordinate at most H."
+}

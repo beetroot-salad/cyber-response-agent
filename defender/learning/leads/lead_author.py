@@ -21,7 +21,7 @@ from defender import _scaffold_rules
 from defender._untrusted import wrap
 from defender.learning.core import config as _loop_config
 from defender.learning.core import persist as _loop_persist
-from defender.learning.pipeline._prompt import stage_user_message, structured_json_body
+from defender.learning._prompt import stage_user_message, structured_json_body
 from defender.learning.leads import lead_neighbors
 from defender.learning.leads import lead_render
 from defender.runtime.verbs import engine_for

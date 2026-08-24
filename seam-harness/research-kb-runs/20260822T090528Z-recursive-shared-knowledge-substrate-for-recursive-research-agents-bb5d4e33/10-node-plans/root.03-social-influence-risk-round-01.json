@@ -1,0 +1,110 @@
+{
+  "account": "The node requires extracting anchored findings from two distinct source files and then deriving design inferences. Separating the extraction of Lorenz et al. and Choi et al. into independent children allows parallel work on distinct evidence sources, with the parent synthesizing the design inferences and ensuring reconciliation across the two evidence bases.",
+  "children": [
+    {
+      "acceptance_condition": "Returns at least three findings, each a quote or close paraphrase carrying the file-relative citation and the exact `===== PDF PAGE N =====` marker(s) of the page where it appears.",
+      "demand_ids": [
+        "D6",
+        "D11",
+        "D12",
+        "D13",
+        "D14"
+      ],
+      "expected_contribution": "A set of anchored findings from Lorenz et al. detailing the social influence, range reduction, and confidence effects, with page markers.",
+      "knowledge_tags": [
+        "evidence",
+        "risk",
+        "counterexample"
+      ],
+      "local_id": "child-lorenz-findings",
+      "no_future_sibling_dependency": "This child only reads the Lorenz et al. file and extracts findings; it does not require any output from the sibling that extracts Choi et al.",
+      "objective": "Extract from papers/text/lorenz-et-al-2011-social-influence.txt at least three anchored findings on how social influence affects the wisdom of crowds, including effects on estimate diversity, accuracy, and confidence, each anchored to the exact `===== PDF PAGE N =====` marker(s).",
+      "rationale": "Lorenz et al. provide the human-subject experimental evidence that social influence reduces diversity without improving accuracy and boosts confidence; these findings are essential for the design inference on staged visibility.",
+      "separator_facts": [
+        "SC1: The evidentiary corpus is exactly seven extracted-text files under papers/text.",
+        "SC2: Page boundaries are marked with `===== PDF PAGE N =====` lines.",
+        "SC3: The corpus contains conflicting empirical conclusions that must be reconciled.",
+        "C2: No evidence outside the seven corpus files may be used.",
+        "C3: Citations must include PDF page markers.",
+        "D12: All evidentiary claims must be grounded in the corpus with page markers.",
+        "D13: Source-supported claims must be distinguished from design inferences."
+      ],
+      "source_ids": [
+        "ref:lorenz-2011-social-influence"
+      ],
+      "source_paths": [
+        "papers/text/lorenz-et-al-2011-social-influence.txt"
+      ]
+    },
+    {
+      "acceptance_condition": "Returns at least three findings, each a quote or close paraphrase carrying the file-relative citation and the exact `===== PDF PAGE N =====` marker(s) of the page where it appears.",
+      "demand_ids": [
+        "D6",
+        "D11",
+        "D12",
+        "D13",
+        "D14"
+      ],
+      "expected_contribution": "A set of anchored findings from Choi et al. detailing majority and intelligence effects on conformity, with page markers.",
+      "knowledge_tags": [
+        "evidence",
+        "risk"
+      ],
+      "local_id": "child-choi-findings",
+      "no_future_sibling_dependency": "This child only reads the Choi et al. file and extracts findings; it does not require any output from the sibling that extracts Lorenz et al.",
+      "objective": "Extract from papers/text/choi-et-al-2025-conformity.txt at least three anchored findings on group conformity in multi-agent systems, specifically the conditions under which agents conform to peer or majority answers, each anchored to the exact `===== PDF PAGE N =====` marker(s).",
+      "rationale": "Choi et al. provide the multi-agent empirical evidence that LLM agents conform to numerically dominant groups and to higher-intelligence agents; these findings ground the conformity risk and the need for anonymity/diversity in the design.",
+      "separator_facts": [
+        "SC1: The evidentiary corpus is exactly seven extracted-text files under papers/text.",
+        "SC2: Page boundaries are marked with `===== PDF PAGE N =====` lines.",
+        "SC3: The corpus contains conflicting empirical conclusions that must be reconciled.",
+        "C2: No evidence outside the seven corpus files may be used.",
+        "C3: Citations must include PDF page markers.",
+        "D12: All evidentiary claims must be grounded in the corpus with page markers.",
+        "D13: Source-supported claims must be distinguished from design inferences."
+      ],
+      "source_ids": [
+        "ref:choi-2025-conformity"
+      ],
+      "source_paths": [
+        "papers/text/choi-et-al-2025-conformity.txt"
+      ]
+    }
+  ],
+  "decidability": {
+    "acceptance_mechanical": false,
+    "account": "The node's acceptance condition is not purely mechanical because it requires synthesizing design inferences from two sources and checking the total count of findings and inferences; the parent must verify the synthesis. The node is independent of future siblings as it only uses the two source files and the given stable context.",
+    "context_complete": true,
+    "grounded_referents": [
+      "papers/text/lorenz-et-al-2011-social-influence.txt",
+      "papers/text/choi-et-al-2025-conformity.txt"
+    ],
+    "independent_of_future_siblings": true,
+    "missing_context": []
+  },
+  "disposition": "expand",
+  "irreducible_core": null,
+  "requested_source_ids": [
+    "ref:lorenz-2011-social-influence",
+    "ref:choi-2025-conformity"
+  ],
+  "requested_source_paths": [
+    "papers/text/lorenz-et-al-2011-social-influence.txt",
+    "papers/text/choi-et-al-2025-conformity.txt"
+  ],
+  "synthesis_contract": {
+    "acceptance_condition": "The synthesis returns at least six anchored findings total (three per child) and at least three design inferences on staged visibility or diversity measurement, each labeled as design inference.",
+    "conflict_policy": "If the two children's findings conflict (e.g., Lorenz shows human conformity, Choi shows LLM conformity), the synthesis must present both as complementary evidence for the same risk, not select one over the other.",
+    "parent_question": "How do the findings from Lorenz et al. and Choi et al. jointly inform staged-visibility constraints and diversity measurement in the substrate?",
+    "required_contributions": [
+      "At least three anchored findings from Lorenz et al. showing social influence reduces diversity, does not improve accuracy, and boosts confidence.",
+      "At least three anchored findings from Choi et al. showing conformity to majority and intelligence in LLM agents.",
+      "The synthesis must derive at least three design inferences labeled as such: (1) committing independent answers before exposing peers, (2) delayed or partial disclosure of peer answers, and (3) metrics for diversity and correlation that capture conformity-driven collapse."
+    ],
+    "shared_invariants": [
+      "All findings must carry exact `===== PDF PAGE N =====` markers.",
+      "Design inferences must be explicitly labeled as such and not conflated with source claims.",
+      "The synthesis must preserve the corpus's conflict between debate gains and conformity risks."
+    ]
+  }
+}

@@ -141,7 +141,26 @@ def check_alphabet(path: Path, graph: dict) -> list[str]:
     """
     findings: list[str] = []
     for c in graph.get("claims", []) or []:
-        if c.get("probe_kind") != "executed" or c.get("verdict") in _UNPROBED:
+        # NOT gated on `probe_kind == "executed"` (#949). It was, and that made the rule
+        # unfireable on exactly the claims it was written for: `_REQUIRED["census"] == {"search"}`
+        # and `check()`'s `pk not in _REQUIRED[kind]` arm make a census claim that closed on any
+        # other instrument a finding in its own right, so no gate-clean graph can ever present a
+        # census claim with
+        # `probe_kind: executed`. Nine committed census claims enumerate a tree with `ls-files`
+        # / `rglob` / `iterdir` and record no alphabet; every one of them was skipped here.
+        # An enumeration is spelled as a `search` or a `read` probe as readily as an executed one.
+        #
+        # The `_UNPROBED` skip STAYS: nothing has been run yet, so there is no alphabet to owe.
+        #
+        # The text scope is left wide (claim + probe + observed) deliberately. Matching the
+        # `probe:` field alone reads tighter and was the first proposal, but measured over the
+        # committed corpus it drops `spec_graph_540.yaml:C53a`, a real detection that fires
+        # today — its probe says "walked it" and the instrument is named in the claim. The cost
+        # of the wide scope is a prose match on a claim ABOUT enumerating code (two `read` probes
+        # in `spec_graph_647.yaml` reading two line ranges each); those are baselined, and
+        # tightening the GRAMMAR rather than the scope is the way to reach them without
+        # giving up C53a.
+        if c.get("verdict") in _UNPROBED:
             continue
         text = " ".join(str(c.get(k, "")) for k in ("claim", "probe", "observed"))
         m = _ENUMERATION_GRAMMAR.search(text)
@@ -298,6 +317,11 @@ def check(path: Path, graph: dict) -> list[str]:
 
 
 def main(argv: list[str]) -> int:
+    # utf-8 out, like every other main in this family: the finding text carries em-dashes,
+    # so a C/ascii-locale runner raises UnicodeEncodeError on the very `print` that reports a
+    # finding — a traceback behind exit 1 ("looked, found something") for output that never
+    # arrived. `check_binds` and `check_claims` were the only two mains without this call.
+    _cli.utf8_stdio()
     opts, args = _cli.parse_argv(argv, valued={"--config"})
     cfg = _config.load(opts["config"])
     paths = [Path(a) for a in args] or _config.artifacts(cfg)
@@ -322,7 +346,10 @@ def main(argv: list[str]) -> int:
             spend.extend(check_spend_points(p, graph))
             typing.extend(check_typing(p, graph))
             alphabet.extend(check_alphabet(p, graph))
-        except (OSError, yaml.YAMLError, TypeError, AttributeError) as e:
+        # `ValueError` covers UnicodeDecodeError: a non-utf-8 graph is the commonest unreadable
+        # one, and it is NOT an OSError — without it the read escapes as a traceback behind exit 1
+        # ("looked, found something") for a gate that read nothing.
+        except (OSError, ValueError, yaml.YAMLError, TypeError, AttributeError) as e:
             # Collected, not returned on: bailing here threw away every finding the
             # already-checked graphs produced.
             print(f"check_claims: cannot read {p}: {e.__class__.__name__}: {e}", file=sys.stderr)

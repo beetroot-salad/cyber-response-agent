@@ -1,0 +1,19 @@
+{
+  "acceptance_condition": "Returns at least three findings, each a quote or close paraphrase carrying the file-relative citation and the exact `===== PDF PAGE N =====` marker(s) of the page where it appears.",
+  "content_sha256": "40b99b51b5b3c92bf3543b7ba8acbab6dcce2ec89eb5c2b78a2a51be1f0bf314",
+  "demand_ids": [
+    "D6",
+    "D11",
+    "D12",
+    "D13",
+    "D14"
+  ],
+  "id": "question:root.03-social-influence-risk.02-child-choi-findings",
+  "node_id": "root.03-social-influence-risk.02-child-choi-findings",
+  "rationale": "Choi et al. provide the multi-agent empirical evidence that LLM agents conform to numerically dominant groups and to higher-intelligence agents; these findings ground the conformity risk and the need for anonymity/diversity in the design.",
+  "tags": [
+    "evidence",
+    "risk"
+  ],
+  "text": "Extract from papers/text/choi-et-al-2025-conformity.txt at least three anchored findings on group conformity in multi-agent systems, specifically the conditions under which agents conform to peer or majority answers, each anchored to the exact `===== PDF PAGE N =====` marker(s)."
+}

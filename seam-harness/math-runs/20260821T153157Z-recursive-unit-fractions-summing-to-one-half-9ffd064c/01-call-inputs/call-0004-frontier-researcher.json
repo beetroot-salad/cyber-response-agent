@@ -1,0 +1,83 @@
+{
+  "call_id": "call-0004-frontier-researcher",
+  "context": {
+    "ancestor_decisions": [
+      "The problem equation is 1/x + 1/y + 1/z = 1/2, with x, y, z required to be positive integers.",
+      "Solutions are normalized by the ordering x <= y <= z, so each unordered solution is represented once.",
+      "The source envelope contains no conversation decisions and no materials; the raw request is the sole substantive input.",
+      "The envelope's title hint is 'Unit fractions summing to one half'.",
+      "The problem equation is 1/x + 1/y + 1/z = 1/2, with x, y, z positive integers.",
+      "Solutions are normalized by x <= y <= z.",
+      "Exact arithmetic only; methods confined to bounds, factorization, and divisor enumeration.",
+      "Global bound: x <= y <= z implies 1/2 = 1/x+1/y+1/z <= 3/x, so x <= 6; also 1/x < 1/2 so x >= 3. Hence x ∈ {3,4,5,6}.",
+      "Factoring method: from 1/y + 1/z = r/s in lowest terms with s = r y - ... clear to (r y - s)(r z - s) = s^2, then enumerate factor pairs d1*d2 = s^2 with d1 <= d2 and check y = (d1+s)/r, z = (d2+s)/r are integers with x <= y."
+    ],
+    "assigned_demands": [
+      {
+        "id": "D1",
+        "rationale": "Primary imperative of the request.",
+        "statement": "The artifact gives the complete list of triples of positive integers x <= y <= z satisfying 1/x + 1/y + 1/z = 1/2."
+      },
+      {
+        "id": "D3",
+        "rationale": "The request states the response should verify the listed triples directly.",
+        "statement": "Each listed triple is verified directly by substitution into the equation."
+      }
+    ],
+    "constraints": [
+      "Exact arithmetic must be used throughout; no approximate or floating-point computation.",
+      "The response must not be a report about agents or a brute-force program; computation cannot substitute for proof.",
+      "Methods are confined to elementary number-theoretic techniques such as bounds, factorization, and divisor enumeration."
+    ],
+    "node": {
+      "acceptance_condition": "Child returns, for each of x=3 and x=4: the derived factored equation, the complete enumeration of factor pairs with the integrality and x <= y <= z filters applied, the final list of triples, and an exact substitution verification (common-denominator arithmetic) for every triple. Expected triples: x=3 yields (3,7,42),(3,8,24),(3,9,18),(3,10,15),(3,12,12); x=4 yields (4,5,20),(4,6,12),(4,8,8).",
+      "demand_ids": [
+        "D1",
+        "D3"
+      ],
+      "depth": 1,
+      "expected_contribution": "The complete solution sets for x=3 and x=4, each triple verified by exact substitution, plus the divisor-enumeration tables proving completeness within each case.",
+      "id": "root.01-case-x3-x4",
+      "objective": "Solve the equation 1/y + 1/z = 1/2 - 1/x with x <= y <= z, y,z positive integers, for x = 3 and x = 4, using the clearing-and-factoring method (Simon's Favorite Factoring Trick), enumerating all divisor pairs exactly, and list every resulting triple (x,y,z) with a direct exact substitution check of each.",
+      "parent_id": "root",
+      "rationale": "The bounds argument forces x ∈ {3,4,5,6}; grouping the two smallest x values balances workload across siblings. For x=3: 1/y+1/z = 1/6 gives (y-6)(z-6)=36. For x=4: 1/y+1/z = 1/4 gives (y-4)(z-4)=16. Both are clean divisor enumerations.",
+      "separator_facts": [
+        "The problem equation is 1/x + 1/y + 1/z = 1/2, with x, y, z required to be positive integers.",
+        "Solutions are normalized by the ordering x <= y <= z, so each unordered solution is represented once.",
+        "The source envelope contains no conversation decisions and no materials; the raw request is the sole substantive input.",
+        "The envelope's title hint is 'Unit fractions summing to one half'.",
+        "The problem equation is 1/x + 1/y + 1/z = 1/2, with x, y, z positive integers.",
+        "Solutions are normalized by x <= y <= z.",
+        "Exact arithmetic only; methods confined to bounds, factorization, and divisor enumeration.",
+        "Global bound: x <= y <= z implies 1/2 = 1/x+1/y+1/z <= 3/x, so x <= 6; also 1/x < 1/2 so x >= 3. Hence x ∈ {3,4,5,6}.",
+        "Factoring method: from 1/y + 1/z = r/s in lowest terms with s = r y - ... clear to (r y - s)(r z - s) = s^2, then enumerate factor pairs d1*d2 = s^2 with d1 <= d2 and check y = (d1+s)/r, z = (d2+s)/r are integers with x <= y."
+      ],
+      "source_ids": [
+        "request"
+      ],
+      "source_paths": []
+    },
+    "product_intent": "The product is a proof document that resolves the unit-fraction equation 1/x + 1/y + 1/z = 1/2 in positive integers with certainty and verifiability: a reader can check, line by line, that the listed triples satisfy the equation and that the argument excludes all others. It exists to provide a rigorous human-checkable resolution, not a computational trace or process report.",
+    "source_materials": [
+      {
+        "content": "Determine all triples of positive integers \\(x \\le y \\le z\\) satisfying\n\n\\[\n\\frac1x+\\frac1y+\\frac1z=\\frac12.\n\\]\n\nGive the complete list and a rigorous proof that no solutions are missing. Use\nexact arithmetic. The final response should be a self-contained mathematical\nargument rather than a report about agents or a brute-force program. It may use\nbounds, factorization, divisor enumeration, or other elementary number-theoretic\nmethods, and it should verify the listed triples directly.\n\n",
+        "id": "request",
+        "kind": "natural_request",
+        "label": "Original task request",
+        "locator": null
+      }
+    ],
+    "stable_context": [
+      "The problem equation is 1/x + 1/y + 1/z = 1/2, with x, y, z required to be positive integers.",
+      "Solutions are normalized by the ordering x <= y <= z, so each unordered solution is represented once.",
+      "The source envelope contains no conversation decisions and no materials; the raw request is the sole substantive input.",
+      "The envelope's title hint is 'Unit fractions summing to one half'."
+    ],
+    "stop_reason": null,
+    "workspace_documents": []
+  },
+  "dependency_type": "ResearchDeps",
+  "input_sha256": "c2e4996ba0c82e1bfc937f8e9530028d1ece079c46956409ad1ee50b4af767e2",
+  "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+  "role": "frontier_researcher"
+}

@@ -1,0 +1,10 @@
+{
+  "content_sha256": "0a1b21eb706ced60fe57534af8ebc58b47e19bade457dc2bb6f286c8b290debe",
+  "id": "link:0a1b21eb706ced60fe57534a",
+  "origin": "runtime",
+  "proposed_by_node_id": null,
+  "rationale": null,
+  "relation": "refines",
+  "source_id": "question:work:004-upper-depth-v3",
+  "target_id": "question:raised:e19298af7323:rq1"
+}

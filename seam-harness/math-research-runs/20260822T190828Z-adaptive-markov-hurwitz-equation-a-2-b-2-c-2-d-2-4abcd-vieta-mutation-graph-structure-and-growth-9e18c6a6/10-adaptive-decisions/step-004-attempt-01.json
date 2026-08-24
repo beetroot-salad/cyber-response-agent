@@ -1,0 +1,69 @@
+{
+  "account": "Posterior state: D1-D3 are fully proved (answer:work:003-struct-core-v2, ready_to_synthesize, clean elementary proofs of descent, unique height-decreasing mutation, rooted-tree structure, plus 3 labeled spot checks). The other three v2 investigations (upper-depth/D4+D6, lower-bound/D5, exception-search/D7+D9) all failed AGAIN with 'Exceeded maximum output retries' — zero evidence. Unanswered: rq1 (the D4 sharpening raised by the structural answer), D8, D10. D8 (conjectures) and D10 (memorandum) cannot responsibly start while D4-D7/D9 have no evidence. With 5 steps left, the dominant risk is a third output-overrun failure, so I re-scope each failed thread into a minimal, highly directive packet: exact lemma statements with proof skeletons supplied, hard word caps (<=700), explicit permission to skip optional parts. rq1 is mathematically the sharpening of D4 (slow chain factor 3 vs off-chain factor >= 4ab-1), so it is folded into the upper-depth packet rather than run as a fourth thread — the packet contains the full dichotomy route (a=b=1 forces the chain; ab nondecreasing along child-paths; first off-chain vertices have ab>=3 hence factor >= 11; geometric subtree count yields N(H) = O(H^rho), rho = log3/log11 < 1/2), which answers rq1 and upgrades D4 simultaneously. The three threads are genuinely independent: each rests only on SC1-SC2 plus self-contained restatements of the needed structural lemmas, so a frozen parallel wave is correct. No experiment adapter applies (text_statistics is irrelevant to proof). D8 and D10 are deferred to the next 1-2 steps once this evidence lands.",
+  "action": {
+    "investigations": [
+      {
+        "acceptance_condition": "Answer contains: proved T1-T3 with explicit constants (O(H) bound, two-sided depth relation); proved dichotomy (i)-(iii); and either the full sublinear bound N(H)=O(H^rho), rho=log3/log11 with an explicit or effective constant (rq1 Outcome A), or a precisely stated proved partial result plus labeled conjecture with the exact gap; total under 700 words.",
+        "demand_ids": [
+          "D4",
+          "D6"
+        ],
+        "independence_account": "Rests only on SC1-SC2 plus the already-proved structural facts (restated in-packet); needs nothing from the lower-bound or exception-search threads.",
+        "local_id": "upper-depth-v3",
+        "question": "D4+D6+rq1: Prove the strongest rigorous upper bound for N(H) and the two-sided depth-vs-log-H relation for the rooted tree of sorted solutions of a^2+b^2+c^2+d^2=4abcd. REQUIRED SKELETON (terse lemma-proof, HARD CAP 700 words, no tables, no digressions): Restate in one line each, citing as proved: mutation at max d strictly lowers d; mutations at a,b,c raise max to >= (4ab-1)d >= 3d; quotient graph is a tree rooted at (1,1,1,1); every vertex has <= 3 children, root has 1. (T1, depth upper) d >= 3^depth so depth <= log_3 d. (T2, crude upper) N(H) <= sum_{k<=log_3 H} 3^k <= (3H-1)/2 = O(H), explicit constant. (T3, depth lower) child max <= 4 d^3, so inductively log2(max at depth k) <= 3^k - 1, giving depth >= log_3(log2 d + 1); state the two-sided relation log_3(log_2 d+1) <= depth <= log_3 d. (T4, rq1 dichotomy — the main sharpening) Prove: (i) a=b=1 forces the vertex onto the chain: (1,1,c,d) satisfies c^2+d^2+2=4cd, and by the same descent argument all its solutions form the single chain v_0=(1,1,1,1), v_1=(1,1,1,3), v_{j+1}=(1,1,d_j,4d_j-c_j); chain ratio tends to 2+sqrt(3), so #chain vertices with d<=H is <= log_{2+sqrt3}(H)+O(1) = O(log H). (ii) Along any child-path (height-increasing), the product ab of the two smallest coordinates is nondecreasing (mutating a,b,or c replaces one of them by a larger value; check the three cases in one line each). (iii) The unique off-chain child of chain vertex v_j (j>=2, i.e. c_j>=3) is u_j=(1,c_j,d_j,4c_jd_j-1) with max m_j=4c_jd_j-1 >= 3 d_j; it has ab=c_j>=3, so by (ii) every descendant edge multiplies the max by >= 4*3-1=11. (iv) Subtree of u_j down to max<=H has depth <= log_{11}(H/m_j) and <= 3 children per vertex, hence size <= (3/2)*(H/m_j)^rho with rho=log 3/log 11 (=ln3/ln11, approx 0.458 < 1/2). (v) Sum over j>=2: since d_j >= 11(2+sqrt3)^{j-2}, sum_j m_j^{-rho} converges to an explicit constant; conclude N(H) <= C*H^rho + O(log H) with rho=log3/log11, i.e. N(H)=O(H^rho) sublinear — state C explicitly if cheap, else as an effective constant. If any step resists, prove what holds and label the rest CONJECTURE with the exact gap. STRICT BREVITY: symbol-dense lemma-proof style; omit prose motivation entirely.",
+        "rationale": "D4 and D6 failed twice on output length; this packet supplies the complete proof skeleton (including the rq1 dichotomy that yields the sublinear exponent rho=log3/log11) so the investigator only verifies and compacts. Coupling rq1 here is exact: rq1 asks precisely for the slow/fast dichotomy that upgrades the O(H) bound.",
+        "tags": [
+          "method",
+          "measurement",
+          "constraint",
+          "synthesis"
+        ],
+        "target_question_ids": [
+          "question:demand:D4",
+          "question:demand:D6",
+          "question:raised:e19298af7323:rq1"
+        ]
+      },
+      {
+        "acceptance_condition": "Proved explicit lower bound N(H) >= c*log H from the chain with correct closed form AND the proved super-log bound N(H) >= c'(log H)^{log_3 2} (or a precisely identified obstruction with the chain bound kept); all family members proved solutions and proved distinct; under 600 words.",
+        "demand_ids": [
+          "D5"
+        ],
+        "independence_account": "Purely constructive families (chain + one binary subtree); needs no results from the other two threads beyond the one-line Vieta root-swap it proves itself.",
+        "local_id": "lower-bound-v3",
+        "question": "D5: Prove the strongest rigorous lower bound for N(H). HARD CAP 600 words, terse lemma-proof. SKELETON: (L-A, chain) Define c_0=d_0? No: v_j=(1,1,c_j,d_j) with (c_1,d_1)=(1,3), c_{j+1}=d_j, d_{j+1}=4d_j-c_j. Prove by induction via the Vieta root-swap (state once: if (1,1,c,d) is a solution, mutating c gives solution (1,1,d,4d-c)) that every v_j is a solution, d_j strictly increasing, d_j = ((2+sqrt3)^j + (2-sqrt3)^j... derive the exact closed form: d_j solves x_{j+1}=4x_j-x_{j-1}? Verify: d_{j+1}=4d_j-c_j=4d_j-d_{j-1}, characteristic roots 2±sqrt3). Conclude N(H) >= log_{2+sqrt3}(H) - O(1): an explicit c*log H lower bound with c=1/ln(2+sqrt3). (L-B, binary subtree, the upgrade) At chain vertex v_j (j>=2), child u_j=(1,c_j,d_j,4c_jd_j-1) has max m_j<=4 d_j^2 and (prove) its two children-by-mutating-the-1-and-c_j are distinct; better: prove every off-chain vertex has at least 2 distinct children (mutations at a and at b; if a<b they differ since 4bcd-a vs 4acd-b: show inequality in one line; if a=b they coincide — handle). Then the binary tree rooted at u_j: at depth t the max is <= m_j^{3^t} * 4^{(3^t-1)/2} (from max' <= 4 max^3 induction) >= ... take logs: log max <= 3^t (log m_j + log 2). So depth-t binary subtree stays under H when 3^t (log m_j+log 2) <= log H, i.e. t >= log_3( log H / (log m_j + log 2) ). Total vertices from this subtree >= 2^t. Optimize over j (smallest m_j gives deepest t): with m_2 = 4*3*11-1=131: t = floor(log_3(log H / log 262...)) giving N(H) >= 2^{log_3(log H) - O(1)} = (log H)^{log 2/log 3 - o(1)}. Compute honestly and state the exact proved bound with explicit constants: N(H) >= max( log_{2+sqrt3} H - O(1), c' (log H)^{log_3 2} ) where log_3 2 approx 0.631, specifying for which H each dominates. If the binary-subtree distinctness step fails, prove it or drop to the chain bound and say exactly why. No tables, at most 2 one-line substitution checks.",
+        "rationale": "D5 failed twice on output length; the full route (chain closed form + binary-subtree (log H)^{log_3 2} upgrade) is supplied so only verification and compaction remain. Independent of the upper-bound thread: constructs families directly from the Vieta root property.",
+        "tags": [
+          "method",
+          "evidence",
+          "measurement"
+        ],
+        "target_question_ids": [
+          "question:demand:D5"
+        ]
+      },
+      {
+        "acceptance_condition": "A labeled observation table within explicit bounds (d<=100; state the a,b,c sweep bound), the two methods compared, parent-edge checks d'=4abc-d for every listed non-root vertex, and explicit statements on (b),(c),(d),(f); everything labeled OBSERVATION; under 500 words.",
+        "demand_ids": [
+          "D7",
+          "D9"
+        ],
+        "independence_account": "Finite arithmetic within d<=100; independent of both proof threads (its cross-checks gain meaning from proved D1-D3 but the enumeration itself needs nothing).",
+        "local_id": "exception-search-v3",
+        "question": "D7+D9: Bounded hand-checkable enumeration, LABELED OBSERVATIONS ONLY. HARD CAP 500 words. Procedure (state explicitly for reproducibility): Method 1 (direct): for all sorted 1<=a<=b<=c<=20, test whether t^2-4abc*t+(a^2+b^2+c^2)=0 has an integer root d>=c with d<=100, using d | a^2+b^2+c^2 and d+d'=4abc to prune; list every hit. Method 2 (BFS from (1,1,1,1)): mutate all coordinates, re-sort, discard d>100; list the tree. Expected (verify each by one-line substitution, e.g. 1+1+9+121=132=4*33): vertices (1,1,1,1), (1,1,1,3), (1,1,3,11), (1,1,11,41); check whether (1,1,11,41)'s children (mutate 11: 4*41-11=153>100; mutate a=1: 4*11*41-1=1803>100) and (1,3,11,131) all exceed 100, so BFS stops. Report: (a) verified table; (b) any c=d within bound? (expected none, consistent with proved L2); (c) any vertex with two height-decreasing mutations or two parents within the BFS tree? (expected none, consistent with proved D2/D3); (d) do Methods 1 and 2 agree exactly within d<=100? (any Method-1 solution unreachable from root would refute D1 — check and report); (e) for each non-root vertex compute d'=4abc-d and confirm 1<=d'<d exhibiting the parent edge; (f) report induction failure modes observed or state absence within the bound. Explicitly label everything as OBSERVATION valid only within d<=100, non-occurrences prove nothing beyond the bound. If the full Method-1 sweep is too long, do the a<=2 slice completely and label the truncation.",
+        "rationale": "D7/D9 failed twice on output length; shrinking the direct-search bound (c<=20, d<=100) and capping at 500 words makes completion feasible while still cross-validating the proved D1-D3 within the bound and satisfying D9's reproducibility requirement.",
+        "tags": [
+          "evidence",
+          "counterexample",
+          "measurement"
+        ],
+        "target_question_ids": [
+          "question:demand:D7",
+          "question:demand:D9"
+        ]
+      }
+    ],
+    "kind": "investigate",
+    "wave_rationale": "Three genuinely independent threads re-issued after two output-overrun failures each, now with complete proof skeletons and hard word caps to fit the output budget. Upper-depth absorbs rq1 (its dichotomy IS the D4 sharpening, yielding the provable sublinear exponent log3/log11). Lower bound and exception search proceed in parallel; D8 and D10 remain correctly blocked on this evidence and are deferred to the final steps."
+  }
+}

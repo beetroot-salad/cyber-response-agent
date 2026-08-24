@@ -1,0 +1,17 @@
+{
+  "acceptance_condition": "Returns at least three design constraints, each explicitly labeled as 'design inference', that specify how the extension semantics map to contradiction handling and belief revision, including which extension type is used for which purpose. Must not present these as source claims.",
+  "content_sha256": "228827c8d28ed8aea187996cb9faf8e8afbf5fa6f57221f18592f1b8b4b33535",
+  "demand_ids": [
+    "D8",
+    "D13"
+  ],
+  "id": "question:root.01-arg-semantics.04-child-4",
+  "node_id": "root.01-arg-semantics.04-child-4",
+  "rationale": "This child directly addresses D8 (contradiction and belief-revision behavior) by translating the extension semantics into a design for how the system handles conflicting answers and updates its state.",
+  "tags": [
+    "method",
+    "decision",
+    "constraint"
+  ],
+  "text": "Derive, each explicitly labeled as design inference, how Dung's extension semantics (grounded, preferred, stable) can specify contradiction and belief-revision behavior in a many-to-many question/answer graph. Specifically, produce at least three design constraints: (1) how to use preferred extensions to define credulous acceptance of answers, allowing multiple competing answers to coexist; (2) how to use the grounded extension to define a skeptical set of answers that are accepted regardless of conflict; and (3) how belief revision can be modeled as updating the attack relation or the set of arguments and recomputing extensions."
+}

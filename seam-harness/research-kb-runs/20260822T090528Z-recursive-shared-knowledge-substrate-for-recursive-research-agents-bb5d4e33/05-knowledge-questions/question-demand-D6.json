@@ -1,0 +1,14 @@
+{
+  "acceptance_condition": "Establish demand D6 with evidence.",
+  "content_sha256": "16aa3a487c4a63da4bd967a8004443a36ebbea7ca9716b65b773f14e6af5e164",
+  "demand_ids": [
+    "D6"
+  ],
+  "id": "question:demand:D6",
+  "node_id": null,
+  "rationale": "Second of six specification areas listed in the request.",
+  "tags": [
+    "method"
+  ],
+  "text": "Staged visibility and the communication protocol are specified."
+}

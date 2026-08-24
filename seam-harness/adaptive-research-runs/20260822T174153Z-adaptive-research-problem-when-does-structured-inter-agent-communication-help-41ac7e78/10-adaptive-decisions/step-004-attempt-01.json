@@ -1,0 +1,25 @@
+{
+  "account": "All seven corpus papers now have sufficiency='ready_to_synthesize' answers with page-marked claims (Du 2023 positive but ~3x compute-confounded; Smit 2023 null with dataset-dependent agreement-modulation; Zhang 2025 matched-compute SC-dominance plus an uncontrolled heterogeneity result; Lorenz 2011 answer-only diversity collapse in humans; Choi 2025 rationale-accompanied LLM conformity without ground truth; Dung 1995 adjudication semantics that cannot break symmetric ties; Shapiro 2011 truth-neutral merge conditions). The five open raised questions (rz1, rz2, rq1, rq-choi-1, rq-shapiro-merge) all have acceptance conditions requiring NEW experiments that the corpus and the only available adapter (text_statistics) cannot run — further investigation of them would be futile re-reading; their correct role is as D6 identification limits and as ready-made design inputs for D5/D7. The binding constraint on every remaining demand (D2 thesis, D3 causal model, D5 predictions, D7 experiment) is the absence of an integrated mechanistic account, and the graph already contains a runtime-created synthesis node (question:work:003-synthesis) with depends_on edges to all five raised questions. Synthesis is the highest-information bounded action; it is non-terminal and its output will seed the prediction-derivation and experiment-design steps that follow within the remaining 11 steps.",
+  "action": {
+    "acceptance_condition": "Produces a synthesis answer that: (a) states one mechanistic thesis naming the conditions under which staged retrieval-mediated Q/A wins or loses at matched compute; (b) reconciles all three empirical poles with explicit page-marked citations inherited from the source answers, including the Smit contradicts Du link; (c) draws the six-variable causal model with per-edge epistemic status; (d) lists rz1, rz2, rq1, rq-choi-1, and rq-shapiro-merge as open identification gaps carried forward to D5/D6/D7 rather than treating them as resolved; (e) distinguishes reported findings, cross-paper inference, and new hypothesis throughout.",
+    "answer_ids": [
+      "answer:work:001-inv-du-debate",
+      "answer:work:002-inv-smit-mad-r2",
+      "answer:work:002-inv-zhang-when-r2",
+      "answer:work:001-inv-lorenz-influence",
+      "answer:work:002-inv-choi-r2",
+      "answer:work:002-inv-dung-r2",
+      "answer:work:002-inv-shapiro-r2"
+    ],
+    "conflict_policy": "Never resolve the Du-vs-Smit-vs-Zhang conflict by selecting a preferred outcome; recode each conflict as a moderator claim (baseline strength, compute matching, task truth-topology, agreement intensity, model heterogeneity, hyperparameter sensitivity) with the conditions under which each direction was observed, and flag residual contradictions (e.g., agreement helping on medical QA vs hurting on CIAR) as task-topology interactions to be tested, not averaged away.",
+    "kind": "synthesize",
+    "objective": "Integrate the seven corpus answers into (1) a reconciled evidence map that explains, without discarding any finding, how Du 2023's debate gains, Smit 2023's null and dataset-dependent agreement effects, and Zhang 2025's matched-compute self-consistency dominance plus heterogeneity gains can all be true at once; (2) one explicit mechanistic thesis for when staged retrieval-mediated question/answer communication beats both independent sampling plus final aggregation and an open shared transcript under matched total inference compute; and (3) an explicit causal model over initial error correlation, evidence diversity, social influence/conformity, retrieval selectivity, synthesis competence, and task topology, with each edge labeled as corpus-evidenced, cross-paper inference, or non-identified (mapping rz1, rz2, rq1, rq-choi-1, and rq-shapiro-merge onto the specific edges they leave open).",
+    "question_ids": [
+      "question:work:003-synthesis",
+      "question:demand:D2",
+      "question:demand:D3",
+      "question:demand:D4"
+    ],
+    "rationale": "The evidence base is complete and mutually contradictory exactly as the dossier intends: Du shows debate > majority but never matches compute; Zhang shows the ordering collapses against CoT/SC at matched ~6-call budgets yet replicates MAD > SA and shows model heterogeneity helps every framework; Smit shows the effect is hyperparameter- and dataset-contingent with sign flips (high agreement helps MedQA/PubMedQA, hurts counter-intuitive CIAR); Lorenz and Choi supply the conformity pathway from two sides (bare-answer sufficiency in humans; rationale-accompanied, capability-dominated persuasion in LLMs); Dung and Shapiro show that adjudication and merging are truth-neutral and that stochastic LLM synthesis violates CRDT convergence conditions. Only an integrative step can convert these into the single mechanistic thesis and causal model that D2/D3 demand and that D5 predictions and the D7 experiment must derive from."
+  }
+}

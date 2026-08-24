@@ -54,9 +54,16 @@ def parse_argv(
     return opts, positionals
 
 
+#: The C loader when PyYAML was built against libyaml, the pure-Python one otherwise. Same
+#: safe subset, ~8x faster: this corpus is 4.4 MB of graph across 35 files, and every checker
+#: parses all of them — `_suite.suite_dir_from_arg` alone spent ~8 s of a 12 s `check_calls`
+#: run here on `SafeLoader`. Resolved once at import, never per call.
+_LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+
+
 def load_graph(path: Path) -> dict:
     """A spec graph off disk, empty-tolerant, shape-guarded."""
-    graph = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    graph = yaml.load(path.read_text(encoding="utf-8"), Loader=_LOADER) or {}
     if not isinstance(graph, dict):
         # Valid YAML, wrong shape. Without this the first `.get` raised AttributeError,
         # which a main catching only YAML/OS errors turns into exit 1 ("found findings")

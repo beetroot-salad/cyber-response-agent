@@ -26,7 +26,7 @@ from defender.learning.core.config import StageContext, StageWiring  # noqa: E40
 from defender.learning.author import shared as author_shared
 from defender.learning.core import config
 from defender.learning.core.config import RunUnprocessable, StageAbort
-from defender.learning.pipeline._pydantic_stage import run_stage
+from defender.learning._pydantic_stage import run_stage
 from defender.learning.pipeline.judge.compare import (
     LeadComparison,
     write_comparison_files,

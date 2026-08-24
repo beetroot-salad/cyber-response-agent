@@ -1,0 +1,10 @@
+{
+  "content_sha256": "16b966096c6b273fb30247d0573b7f10f750f43e542db51f62e590e9de279454",
+  "id": "link:16b966096c6b273fb30247d0",
+  "origin": "agent",
+  "proposed_by_node_id": "work:004-upper-depth-v3",
+  "rationale": "The v1 attempt produced no evidence (blocked); this packet completes the same demand pair D4+D6.",
+  "relation": "supersedes",
+  "source_id": "answer:work:004-upper-depth-v3",
+  "target_id": "answer:work:001-upper-bound-depth"
+}

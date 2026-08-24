@@ -1,0 +1,121 @@
+{
+  "account": "For the child node on Lorenz et al. findings, the dossier contains the full extracted text of Lorenz et al. 2011 with the three named effects — social influence effect (diversity down, accuracy not improved), range reduction effect (truth moves to periphery, crowd less reliable for observers), and confidence effect (individual confidence boosted despite no accuracy gain) — each with explicit PDF page markers. At least three distinct findings, each close paraphrases with exact markers, are supplied. The extracted text is sufficient; no boundary mismatches noted.",
+  "assumptions": [
+    "The extracted text is a faithful representation of the original PNAS article; page markers correspond to the PDF pages in the provided extraction."
+  ],
+  "boundary_findings": [],
+  "claims": [
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "the social inﬂuence effect denotes the fact that social inﬂuence diminishes diversity in groups without improving its accuracy. … social inﬂuence strongly reduces the group’s diversity … without signi ﬁcantly reducing its collective errors.",
+          "locator": "papers/text/lorenz-et-al-2011-social-influence.txt:===== PDF PAGE 3 =====",
+          "source_id": "ref:lorenz-2011-social-influence"
+        }
+      ],
+      "confidence": 0.97,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "linz-1",
+      "statement": "The 'social influence effect' diminishes group diversity without improving collective accuracy; Lorenz et al. show this statistically on the full dataset (average diversity reduced significantly while collective error changes only slightly)."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "The 'range reduction effect' moves the position of the truth to peripheral regions of the range of estimates so that the crowd becomes less reliable in providing expertise for external observers.",
+          "locator": "papers/text/lorenz-et-al-2011-social-influence.txt:===== PDF PAGE 1 =====",
+          "source_id": "ref:lorenz-2011-social-influence"
+        },
+        {
+          "excerpt": "the wisdom-of-crowd indicator tends to decline over time under conditions of social inﬂuence. … the wisdom of crowd indicator is about one unit lower in conditions with information exchange compared with the control condition.",
+          "locator": "papers/text/lorenz-et-al-2011-social-influence.txt:===== PDF PAGE 4 =====",
+          "source_id": "ref:lorenz-2011-social-influence"
+        }
+      ],
+      "confidence": 0.96,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "linz-2",
+      "statement": "The 'range reduction effect' moves the position of the truth to peripheral regions of the estimate range, making the crowd less reliable for external observers; the wisdom-of-crowd indicator declines under social influence."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "The conﬁdence effect reﬂects that opinion convergence boosts individuals’ conﬁdence in their estimates despite a lack of collective improvements in accuracy. … individuals’ conﬁdence is substantially and signi ﬁcantly boosted in the aggregated and full information conditions in comparison with the control condition.",
+          "locator": "papers/text/lorenz-et-al-2011-social-influence.txt:===== PDF PAGE 5 =====",
+          "source_id": "ref:lorenz-2011-social-influence"
+        }
+      ],
+      "confidence": 0.97,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "linz-3",
+      "statement": "The 'confidence effect' boosts individuals' confidence after convergence despite lack of improved accuracy; regression analysis shows confidence significantly higher in aggregated and full information conditions than in control."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "By comparing the no information condition with the aggregated and full information conditions … social inﬂuence promotes a convergence of estimates.",
+          "locator": "papers/text/lorenz-et-al-2011-social-influence.txt:===== PDF PAGE 3 =====",
+          "source_id": "ref:lorenz-2011-social-influence"
+        }
+      ],
+      "confidence": 0.94,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "linz-4",
+      "statement": "Convergence of estimates and reduction of diversity occur under both aggregated-information (arithmetic mean of all estimates) and full-information (trajectory figure plus numeric list) treatments; the control with no information shows no such convergence."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "the wisdom of crowd indicator is maxfijbxi ≤ truth ≤ bxn − iþ1g. … Its minimum of zero is achieved when the truth lies below the minimal or above the maximal estimate.",
+          "locator": "papers/text/lorenz-et-al-2011-social-influence.txt:===== PDF PAGE 6 =====",
+          "source_id": "ref:lorenz-2011-social-influence"
+        },
+        {
+          "excerpt": "the wisdom-of-crowd indicator tends to decline over time under conditions of social inﬂuence.",
+          "locator": "papers/text/lorenz-et-al-2011-social-influence.txt:===== PDF PAGE 4 =====",
+          "source_id": "ref:lorenz-2011-social-influence"
+        }
+      ],
+      "confidence": 0.93,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "linz-5",
+      "statement": "The wisdom of the crowd is measured by an indicator whose maximum (12/2 = 6) occurs when the truth lies between the two most central estimates; the indicator declines under social influence, meaning truth becomes less central."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "the negative effects of social inﬂuence occur especially in a certain range of question dif ﬁculty and individuals’ conﬁdence, a conjecture that should be explored in follow-up studies.",
+          "locator": "papers/text/lorenz-et-al-2011-social-influence.txt:===== PDF PAGE 5 =====",
+          "source_id": "ref:lorenz-2011-social-influence"
+        }
+      ],
+      "confidence": 0.92,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "linz-6",
+      "statement": "The paper concludes that the negative effects occur especially for certain question difficulty and individual confidence ranges; the authors note limitations and call for follow-up studies on this conjecture."
+    }
+  ],
+  "counterevidence": [
+    "The corpus text indicates that the collective error slightly declines under social influence, especially in the aggregated information condition, which runs against the headline claim of no accuracy improvement; the authors attribute this to right-skewed distributions and an upward drift from arithmetic-mean feedback (PDF PAGE 3, footnote ¶). This nuance should be preserved when citing the no-improvement finding."
+  ],
+  "next_observation": null,
+  "source_ids_consulted": [
+    "ref:lorenz-2011-social-influence"
+  ],
+  "sufficiency": "ready_to_synthesize",
+  "unresolved": [
+    "The exact magnitude and statistical details of the collective error decline under the aggregated condition are only footnoted; the SI appendix is not in the corpus.",
+    "The word-count acceptance condition (1400-1800 words) applies to the final memo, not this evidence draft."
+  ]
+}

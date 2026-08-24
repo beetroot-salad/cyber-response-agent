@@ -98,7 +98,7 @@ def test_accessor_returns_the_default_when_unset(monkeypatch):
 
 # The stage ENGINES — the entry points whose signatures the passthrough guard polices.
 _STAGE_MODULES = (
-    "learning/pipeline/_pydantic_stage.py",
+    "learning/_pydantic_stage.py",
     "learning/pipeline/actor_engine.py",
     "learning/pipeline/oracle_engine.py",
     "learning/pipeline/judge/engine_pydantic.py",

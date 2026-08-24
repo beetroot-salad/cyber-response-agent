@@ -366,7 +366,6 @@ _LEAD_HEADER_FAIL = (
                           "backup-30d|session-baseline|confirmed"),
         ("impact", ":R impact [dim|verdict]\nconfidentiality|exceeds"),
         ("attr_updates", ":R attr_updates [target|key|value]\nv-001|class|host"),
-        ("shelved", ":T shelved [hyp_id|rationale]\nh-002|\"weak signal\""),
     ],
 )
 def test_a_row_without_its_own_lead_is_refused_however_obvious_the_lead_looks(
@@ -454,14 +453,29 @@ def test_relisting_a_lead_with_fail_reason_keeps_its_projected_buckets():
     }
 
 
-def test_t_shelved_records_hyp_and_rationale_on_lead():
+def test_t_shelved_is_refused_by_name_and_projects_nothing():
+    """`:T shelved` is retired, and a document that writes one is told so rather than told
+    "unknown block".
+
+    The row used to project onto the lead as `shelved` / `shelved_rationales` and discharge
+    rules #23, #24 and #34. Nothing on record ever wrote one — the block was never in the
+    injected SKILL.md — so the only runs that could reach the retirement route were the ones
+    that guessed its grammar, while the rules it discharged stayed armed for everyone.
+
+    Refusing BY NAME rather than through the generic fallthrough is the same principle
+    `_warn_unknown_conclude_subblock` was added for: an error that points away from its cause
+    costs the author the one thing the diagnostic is for."""
     body, warnings = parse_dense_companion(
         _fence(':T shelved [hyp_id|by_lead|rationale]\nh-002|l-001|"weak signal"')
     )
-    assert warnings == []
-    lead = next(f for f in body["findings"] if f["id"] == "l-001")
-    assert lead["shelved"] == ["h-002"]
-    assert lead["shelved_rationales"] == {"h-002": "weak signal"}
+    assert len(warnings) == 1
+    assert "`:T shelved` is retired" in warnings[0].reason
+    assert "unknown block" not in warnings[0].reason
+    # Nothing lands: the block opens no lead bucket, so `l-001` is not even mentioned.
+    assert not any(
+        k.startswith("shelved") for lead in body.get("findings") or [] for k in lead
+    )
+    assert "shelved" not in json.dumps(body)
 
 
 def test_lead_scoped_new_hypotheses_project_onto_the_lead():

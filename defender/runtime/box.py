@@ -410,8 +410,32 @@ def _container_status(docker: DockerFn, name: str) -> str | None:
 
     An answer we cannot read — rc 0 with nothing parseable — is reported as the empty string
     rather than `None`, which keeps it OUT of `_FINISHED_STATES` and therefore unreapable. A
-    daemon we cannot understand is not evidence that the container is done with."""
-    return _inspect_field(docker, name, "{{.State.Status}}")
+    daemon we cannot understand is not evidence that the container is done with.
+
+    A NON-ZERO rc IS TWO ANSWERS, and they are opposite. `docker inspect` exits non-zero both
+    for "no such object" and for "cannot connect to the daemon" — and only THIS caller reads
+    `None` as "the name is free", which licenses a create against a name another lane may
+    hold: the collision the ownership check exists to make impossible. So the rc alone is not
+    taken as absence here; the daemon is asked whether it is answering at all. The daemon is
+    PROBED rather than the stderr text matched, because the text is a UI string and liveness
+    is the actual question.
+
+    `_start_token`'s `None` needs no such probe: there it means "nothing to own, reap
+    nothing", which is the safe direction on a path already unwinding a fault. Same rc, two
+    readings, and the difference is what each caller does with it — which is why
+    `_inspect_field` reports the rc and declines to interpret it."""
+    status = _inspect_field(docker, name, "{{.State.Status}}")
+    if status is not None:
+        return status
+    probe = _call(docker, ["docker", "version", "-f", "{{.Server.Version}}"])
+    if probe.returncode != 0:
+        raise BoxFault(
+            f"docker could not say what the name {name} holds, and could not answer for the "
+            f"daemon either ({(probe.stderr or '').strip()[:200]!r}) — refusing rather than "
+            "reading that as a free name, because a create against a name another lane holds "
+            "is the collision the ownership check exists to prevent"
+        )
+    return None
 
 
 #: Stamped on every box at create, so a fault arm can tell OUR container from another lane's

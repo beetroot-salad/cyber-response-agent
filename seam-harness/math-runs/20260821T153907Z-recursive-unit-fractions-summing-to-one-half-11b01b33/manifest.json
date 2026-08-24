@@ -1,0 +1,306 @@
+{
+  "created_at": "2026-08-21T15:39:07.498430+00:00",
+  "events": [
+    {
+      "event_hash": "63dc5249e41cc404044e4433d30004810a031bdfb295d5981c0ca16259358abc",
+      "index": 0,
+      "metadata": {},
+      "name": "recursive-run",
+      "path": "00-input/recursive-run.json",
+      "previous_event_hash": null,
+      "record_sha256": "ad27a01a0ff47f85c024e6b9fe7da1fa7f82edc51cb874e573e52186d739065d",
+      "stage": "00-input",
+      "timestamp": "2026-08-21T15:39:07.501943+00:00"
+    },
+    {
+      "event_hash": "d97b252bd3946b52bf3e4117a9c66b56d2e71dc71d5cb72132a93b57f981d0b7",
+      "index": 1,
+      "metadata": {},
+      "name": "replay-source",
+      "path": "00-input/replay-source.json",
+      "previous_event_hash": "63dc5249e41cc404044e4433d30004810a031bdfb295d5981c0ca16259358abc",
+      "record_sha256": "b1e16e5a0621c0f2ee639d86692743dc403b66895c21e471b548749bd670d76b",
+      "stage": "00-input",
+      "timestamp": "2026-08-21T15:39:07.504397+00:00"
+    },
+    {
+      "event_hash": "938596a2fa4dc12d91e4edbe5913739ca1add29543cdcaba29472dd7e2cfa512",
+      "index": 2,
+      "metadata": {
+        "role": "root_plan_replay",
+        "source_run": "/workspace/seam-harness/math-runs/20260821T153529Z-recursive-unit-fractions-summing-to-one-half-b21434b4"
+      },
+      "name": "root-round-01",
+      "path": "10-node-plans/root-round-01.json",
+      "previous_event_hash": "d97b252bd3946b52bf3e4117a9c66b56d2e71dc71d5cb72132a93b57f981d0b7",
+      "record_sha256": "65abe434d68fdb23abeab5facf8c48343416b417823f2ec59ea52b0ba11ca917",
+      "stage": "10-node-plans",
+      "timestamp": "2026-08-21T15:39:07.507011+00:00"
+    },
+    {
+      "event_hash": "24b170d7bf2395ffcdeb36458723d3727e6c2cca807d383a3da3d8492a952d70",
+      "index": 3,
+      "metadata": {
+        "original_packet_sha256": "3014e22f668ba4a092947348778fe2e526fa7e7688373fe24c2f2f6f81e74eda",
+        "replayed_from": "/workspace/seam-harness/math-runs/20260821T153529Z-recursive-unit-fractions-summing-to-one-half-b21434b4"
+      },
+      "name": "root.01-case-x3-x4",
+      "path": "30-evidence-packets/root.01-case-x3-x4.json",
+      "previous_event_hash": "938596a2fa4dc12d91e4edbe5913739ca1add29543cdcaba29472dd7e2cfa512",
+      "record_sha256": "b313e45a5f130039460cbb657f937d2d6ad069aed62bfd60a8785ff4358e2ee5",
+      "stage": "30-evidence-packets",
+      "timestamp": "2026-08-21T15:39:07.510385+00:00"
+    },
+    {
+      "event_hash": "85f56d79a55582fe0f06b20f3328125bfabd1eab3bd36a84ce8c85d5ef55a907",
+      "index": 4,
+      "metadata": {
+        "original_packet_sha256": "3014e22f668ba4a092947348778fe2e526fa7e7688373fe24c2f2f6f81e74eda",
+        "replayed_from": "/workspace/seam-harness/math-runs/20260821T153529Z-recursive-unit-fractions-summing-to-one-half-b21434b4"
+      },
+      "name": "root.01-case-x3-x4",
+      "path": "31-node-traces/root.01-case-x3-x4.json",
+      "previous_event_hash": "24b170d7bf2395ffcdeb36458723d3727e6c2cca807d383a3da3d8492a952d70",
+      "record_sha256": "c638ced2f8fecdb345b6f068cd9cd921f39f57990e910b37f15ee4901569ded9",
+      "stage": "31-node-traces",
+      "timestamp": "2026-08-21T15:39:07.512054+00:00"
+    },
+    {
+      "event_hash": "42f343745f3cdfab395a6c9b92e4d005423fb277f32a48bcdfd587c60a67c528",
+      "index": 5,
+      "metadata": {
+        "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+        "role": "recursive_planner"
+      },
+      "name": "call-0001-recursive-planner",
+      "path": "01-call-inputs/call-0001-recursive-planner.json",
+      "previous_event_hash": "85f56d79a55582fe0f06b20f3328125bfabd1eab3bd36a84ce8c85d5ef55a907",
+      "record_sha256": "33e4146d68ef7f88e6707911471cb5472250958614bbf4a7abab3c28fbfc77e8",
+      "stage": "01-call-inputs",
+      "timestamp": "2026-08-21T15:39:07.514902+00:00"
+    },
+    {
+      "event_hash": "3bcdf4bacc843f0daf3d4f0636aecd1aa3a2d56c3a0b747c22a4847dc45b4043",
+      "index": 6,
+      "metadata": {
+        "original_packet_sha256": "087351431491f78da1b4a10ea6605bd6882e663b3cd434d2b5cc5874eb4583ad",
+        "replayed_from": "/workspace/seam-harness/math-runs/20260821T153529Z-recursive-unit-fractions-summing-to-one-half-b21434b4"
+      },
+      "name": "root.03-independent-audit",
+      "path": "30-evidence-packets/root.03-independent-audit.json",
+      "previous_event_hash": "42f343745f3cdfab395a6c9b92e4d005423fb277f32a48bcdfd587c60a67c528",
+      "record_sha256": "d305a0a441c6f98050df9342254981e9848f26ad49d91d9a63f6b4289cef0f14",
+      "stage": "30-evidence-packets",
+      "timestamp": "2026-08-21T15:39:10.625997+00:00"
+    },
+    {
+      "event_hash": "d05472a80b8d951d96ea6ee354bb5dcce8dec63c7f95b05505cfe07ae0ab28a6",
+      "index": 7,
+      "metadata": {
+        "original_packet_sha256": "087351431491f78da1b4a10ea6605bd6882e663b3cd434d2b5cc5874eb4583ad",
+        "replayed_from": "/workspace/seam-harness/math-runs/20260821T153529Z-recursive-unit-fractions-summing-to-one-half-b21434b4"
+      },
+      "name": "root.03-independent-audit",
+      "path": "31-node-traces/root.03-independent-audit.json",
+      "previous_event_hash": "3bcdf4bacc843f0daf3d4f0636aecd1aa3a2d56c3a0b747c22a4847dc45b4043",
+      "record_sha256": "5568cfe51c66f2b3c36ac4ea70941b37f55e51f05f43e5003cb2b75d207fe3c4",
+      "stage": "31-node-traces",
+      "timestamp": "2026-08-21T15:39:10.628244+00:00"
+    },
+    {
+      "event_hash": "a9b99a3d03657f826f8eeef19f91c52300ab5847ea0f5649ab22d35358894bc7",
+      "index": 8,
+      "metadata": {
+        "call_id": "call-0001-recursive-planner",
+        "elapsed_ms": 18548,
+        "input_sha256": "f4a7d1d52de735b9621de4b11eae2ea90a1de7389ed32dee4cf54078b36be16e",
+        "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+        "role": "recursive_planner",
+        "usage": {
+          "cache_read_tokens": 2797,
+          "details": {
+            "reasoning_tokens": 1356
+          },
+          "input_tokens": 2798,
+          "output_tokens": 2072,
+          "requests": 1
+        }
+      },
+      "name": "root.02-case-x5-x6-round-01",
+      "path": "10-node-plans/root.02-case-x5-x6-round-01.json",
+      "previous_event_hash": "d05472a80b8d951d96ea6ee354bb5dcce8dec63c7f95b05505cfe07ae0ab28a6",
+      "record_sha256": "5b0864f3adc4a8bd6afe38e19e6fdc8bc1972623521f019e029075a5599d609f",
+      "stage": "10-node-plans",
+      "timestamp": "2026-08-21T15:39:26.065333+00:00"
+    },
+    {
+      "event_hash": "f2978d156ac3a78e8e81ca3644faed488591dac1c17acac56b4fb65cefd45b73",
+      "index": 9,
+      "metadata": {
+        "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+        "role": "frontier_researcher"
+      },
+      "name": "call-0002-frontier-researcher",
+      "path": "01-call-inputs/call-0002-frontier-researcher.json",
+      "previous_event_hash": "a9b99a3d03657f826f8eeef19f91c52300ab5847ea0f5649ab22d35358894bc7",
+      "record_sha256": "43378dde4b35ddbd6168e82c88e8450065a60b1078154892b4764550814a1e93",
+      "stage": "01-call-inputs",
+      "timestamp": "2026-08-21T15:39:26.068649+00:00"
+    },
+    {
+      "event_hash": "65bd33f3f8d6ed51e12d0b90d527cf845f91597ef88995ffac99091aaf628f46",
+      "index": 10,
+      "metadata": {
+        "call_id": "call-0002-frontier-researcher",
+        "elapsed_ms": 37180,
+        "input_sha256": "f8bbb23091a941e12fbec7606ff004686248d62dfee655d4faa9d2aef1d16d69",
+        "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+        "role": "frontier_researcher",
+        "usage": {
+          "cache_read_tokens": 2641,
+          "details": {
+            "reasoning_tokens": 2761
+          },
+          "input_tokens": 2642,
+          "output_tokens": 4883,
+          "requests": 1
+        }
+      },
+      "name": "root.02-case-x5-x6-research",
+      "path": "20-node-work/root.02-case-x5-x6-research.json",
+      "previous_event_hash": "f2978d156ac3a78e8e81ca3644faed488591dac1c17acac56b4fb65cefd45b73",
+      "record_sha256": "9fc6df810d4a9c35dcb31b7fddec80937c115e0867c7602264034fab90b2d8aa",
+      "stage": "20-node-work",
+      "timestamp": "2026-08-21T15:40:03.288398+00:00"
+    },
+    {
+      "event_hash": "e67d94d8244522a1287f532b9075279f50f88f0f49bcc6ac45a5d773a6c92a3d",
+      "index": 11,
+      "metadata": {},
+      "name": "root.02-case-x5-x6",
+      "path": "30-evidence-packets/root.02-case-x5-x6.json",
+      "previous_event_hash": "65bd33f3f8d6ed51e12d0b90d527cf845f91597ef88995ffac99091aaf628f46",
+      "record_sha256": "7a544f19f2465b6bf1d260b1e3e6b9e5934c8bc1e607c69768d3755cd6dd2eee",
+      "stage": "30-evidence-packets",
+      "timestamp": "2026-08-21T15:40:03.519079+00:00"
+    },
+    {
+      "event_hash": "737b23d60123bee120b3b2190490ce457c522daecb61038299ea577d17cb066d",
+      "index": 12,
+      "metadata": {},
+      "name": "root.02-case-x5-x6",
+      "path": "31-node-traces/root.02-case-x5-x6.json",
+      "previous_event_hash": "e67d94d8244522a1287f532b9075279f50f88f0f49bcc6ac45a5d773a6c92a3d",
+      "record_sha256": "73d16a57567d92501780ee00a918c6f802c32d75a91520f74703cf3b34f69f48",
+      "stage": "31-node-traces",
+      "timestamp": "2026-08-21T15:40:03.522289+00:00"
+    },
+    {
+      "event_hash": "22dc472ea208b20a247dff81acc2bd5e13bf7ca112aaf8b837f695680c532056",
+      "index": 13,
+      "metadata": {
+        "model": "fireworks:accounts/fireworks/models/kimi-k3",
+        "role": "synthesizer"
+      },
+      "name": "call-0003-synthesizer",
+      "path": "01-call-inputs/call-0003-synthesizer.json",
+      "previous_event_hash": "737b23d60123bee120b3b2190490ce457c522daecb61038299ea577d17cb066d",
+      "record_sha256": "998b10bd40a2ef6e8c669bcb145be064f118d0293128a34c4ebddb3383bc2bb5",
+      "stage": "01-call-inputs",
+      "timestamp": "2026-08-21T15:40:03.535273+00:00"
+    },
+    {
+      "event_hash": "e4a831249252cd0b30b14b1ef56954927010727dc375cdef475a02a7f2e4f7c6",
+      "index": 14,
+      "metadata": {
+        "call_id": "call-0003-synthesizer",
+        "elapsed_ms": 221479,
+        "input_sha256": "7e14b6e0d4586235a55263fc30a9d0f5c63f18842cfa08a6a29993c1431f336a",
+        "model": "fireworks:accounts/fireworks/models/kimi-k3",
+        "role": "synthesizer",
+        "usage": {
+          "cache_read_tokens": 10469,
+          "details": {
+            "reasoning_tokens": 3950
+          },
+          "input_tokens": 29023,
+          "output_tokens": 12260,
+          "requests": 2
+        }
+      },
+      "name": "root-synthesis",
+      "path": "20-node-work/root-synthesis.json",
+      "previous_event_hash": "22dc472ea208b20a247dff81acc2bd5e13bf7ca112aaf8b837f695680c532056",
+      "record_sha256": "83ea9468ff18cb9ab577cbe8cb0c800fe54f957120cb873516e39769b832423d",
+      "stage": "20-node-work",
+      "timestamp": "2026-08-21T15:43:45.024415+00:00"
+    },
+    {
+      "event_hash": "cd74b01cdc2b45bf65c9c6b37d2841e817f1573e3de76d35baacd7285911fab4",
+      "index": 15,
+      "metadata": {},
+      "name": "root",
+      "path": "30-evidence-packets/root.json",
+      "previous_event_hash": "e4a831249252cd0b30b14b1ef56954927010727dc375cdef475a02a7f2e4f7c6",
+      "record_sha256": "e88eb728fe2f57ab3db94bd21bb84667178e8deab075c14f856c0dab186cef01",
+      "stage": "30-evidence-packets",
+      "timestamp": "2026-08-21T15:43:45.047987+00:00"
+    },
+    {
+      "event_hash": "a154eb781ed69ee09b2a2e8139ee48537f90105f91f3e3b9d6814f2db6c765a6",
+      "index": 16,
+      "metadata": {},
+      "name": "root",
+      "path": "31-node-traces/root.json",
+      "previous_event_hash": "cd74b01cdc2b45bf65c9c6b37d2841e817f1573e3de76d35baacd7285911fab4",
+      "record_sha256": "cd6386f75fd3bcd92fb7fa6e2490231f551d121e97c6244c646f9061b6d379a1",
+      "stage": "31-node-traces",
+      "timestamp": "2026-08-21T15:43:45.059300+00:00"
+    },
+    {
+      "event_hash": "a19287885198bf912d08d0e1d70bf58f4b83d35bcd738f2fcdc83d08698c537b",
+      "index": 17,
+      "metadata": {
+        "model": "fireworks:accounts/fireworks/models/kimi-k3",
+        "role": "finalizer"
+      },
+      "name": "call-0004-finalizer",
+      "path": "01-call-inputs/call-0004-finalizer.json",
+      "previous_event_hash": "a154eb781ed69ee09b2a2e8139ee48537f90105f91f3e3b9d6814f2db6c765a6",
+      "record_sha256": "6e4e60dfbf202506a7d398d060e9e0e4c66210dce2a51a13f1b515cc5e211d7b",
+      "stage": "01-call-inputs",
+      "timestamp": "2026-08-21T15:43:45.088752+00:00"
+    },
+    {
+      "event_hash": "a46f2e0e135dc34e59f90225f1d0740405278d9852e572320867b8cf5bca3bf6",
+      "index": 18,
+      "metadata": {
+        "call_id": "call-0004-finalizer",
+        "input_sha256": "b96456a12703844b69ec3ada831b3a6fb4eed27fe1324866cdea07433d36ee1b",
+        "model": "fireworks:accounts/fireworks/models/kimi-k3",
+        "role": "finalizer"
+      },
+      "name": "call-0004-finalizer",
+      "path": "02-call-errors/call-0004-finalizer.json",
+      "previous_event_hash": "a19287885198bf912d08d0e1d70bf58f4b83d35bcd738f2fcdc83d08698c537b",
+      "record_sha256": "628e7560b492c5f6e9d0e52af279df7aed87798cf3a4bd43198273afb1c61a52",
+      "stage": "02-call-errors",
+      "timestamp": "2026-08-21T15:47:52.970963+00:00"
+    },
+    {
+      "event_hash": "daff08aa4958d4457592b3cc0ba31532acc8adcaadc746d13bafd95864f93a4f",
+      "index": 19,
+      "metadata": {},
+      "name": "failure",
+      "path": "99-result/failure.json",
+      "previous_event_hash": "a46f2e0e135dc34e59f90225f1d0740405278d9852e572320867b8cf5bca3bf6",
+      "record_sha256": "628e7560b492c5f6e9d0e52af279df7aed87798cf3a4bd43198273afb1c61a52",
+      "stage": "99-result",
+      "timestamp": "2026-08-21T15:47:52.976875+00:00"
+    }
+  ],
+  "finished_at": "2026-08-21T15:47:52.981321+00:00",
+  "run_id": "20260821T153907Z-recursive-unit-fractions-summing-to-one-half-11b01b33",
+  "schema_version": 1,
+  "status": "failed"
+}

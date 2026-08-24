@@ -1,0 +1,14 @@
+{
+  "claim_ids": [],
+  "content_sha256": "f13ae160d20f1b33fd94e67f96c011cd4e2062cfe0379764b81d698c06a4dc99",
+  "id": "answer:work:002-noop",
+  "node_id": "work:002-noop",
+  "packet_id": "packet:work:002-noop",
+  "sufficiency": "partial",
+  "summary": "Investigating current knowledge state to determine what this placeholder assignment should contribute.",
+  "tags": [
+    "evidence",
+    "uncertainty"
+  ],
+  "unresolved": []
+}

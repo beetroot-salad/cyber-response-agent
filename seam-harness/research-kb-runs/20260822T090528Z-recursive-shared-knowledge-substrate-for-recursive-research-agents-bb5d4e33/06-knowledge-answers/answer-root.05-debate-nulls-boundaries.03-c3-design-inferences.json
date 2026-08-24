@@ -1,0 +1,30 @@
+{
+  "claim_ids": [
+    "root.05-debate-nulls-boundaries.03-c3-design-inferences:C001",
+    "root.05-debate-nulls-boundaries.03-c3-design-inferences:C002",
+    "root.05-debate-nulls-boundaries.03-c3-design-inferences:C003",
+    "root.05-debate-nulls-boundaries.03-c3-design-inferences:C004",
+    "root.05-debate-nulls-boundaries.03-c3-design-inferences:C005",
+    "root.05-debate-nulls-boundaries.03-c3-design-inferences:C006"
+  ],
+  "content_sha256": "e3411c4dbfcb183bda6fd96576ba3831d3f836d49b597304d6d2dadcaae8285c",
+  "id": "answer:root.05-debate-nulls-boundaries.03-c3-design-inferences",
+  "node_id": "root.05-debate-nulls-boundaries.03-c3-design-inferences",
+  "packet_id": "packet:root.05-debate-nulls-boundaries.03-c3-design-inferences",
+  "sufficiency": "partial",
+  "summary": "This node derives the reconciliation and evaluation-design layer for the parent. The disagreement between Du et al. 2023 (debate gains) and Smit/Zhang (nulls/boundary conditions) is reconciled by three design inferences: (1) task-type dependence — the gains are not uniform across programming vs. math, so architecture must scope debate to tasks where evidence shows it helps; (2) compute parity — matched-compute comparisons defeat naive debate, so the substrate must be evaluated at equal token/compute budget; and (3) visibility/timing — conformity risk if peer answers are exposed too early, so staged independent commitment is required. Three evaluation-design constraints are added covering the five metric families: (a) quality and diversity/correlation measured as paired pre/post-debate deltas with independence metrics; (b) latency and token cost measured at matched-compute parity per condition; (c) recovery-from-wrong-consensus as a dedicated perturbation test. All six items are explicitly design inferences, informed by, but separated from, source-supported claims.",
+  "tags": [
+    "synthesis",
+    "risk",
+    "measurement",
+    "counterexample",
+    "uncertainty"
+  ],
+  "unresolved": [
+    "It remains unresolved whether the efficacy of the substrate depends on model heterogeneity, which Zhang proposes as universal antidote (Heter-SoM +6.4%), since this node did not extract the full Zhang analysis.",
+    "The exact latency/token accounting rules (e.g., whether to count debate rounds) are not specified in the separator facts and must be fixed by the parent.",
+    "Runtime discarded non-claim provenance references from c1: ['sf-zhang-task-dependence']",
+    "Runtime discarded non-claim provenance references from c2: ['sf-smit-null']",
+    "Runtime discarded non-claim provenance references from c3: ['sf-smit-agreement', 'sf-zhang-hyperparameter']"
+  ]
+}

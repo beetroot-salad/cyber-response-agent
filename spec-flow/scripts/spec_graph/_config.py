@@ -49,7 +49,19 @@ def repo_root(start: Path | None = None) -> Path:
     out = subprocess.run(
         cmd, capture_output=True, text=True, encoding="utf-8", check=False
     ).stdout.strip()
-    return Path(out) if out else (start if start is not None else Path.cwd())
+    if out:
+        return Path(out)
+    # git could not answer — no git on PATH, an exported tree with no `.git`, or a
+    # `safe.directory` dubious-ownership refusal in CI. Walk up for the marker rather than
+    # handing back `start` itself: every anchored caller passes a SPECS or SUITE directory, and
+    # a repo-relative `tests:` joined onto that resolves the suite inside the specs dir, where
+    # check_binds reports every demand as a phantom prose orphan at exit 1. The unanchored form
+    # keeps its cwd fallback, which is where the gate is run from.
+    base = (start if start is not None else Path.cwd()).resolve()
+    for cand in (base, *base.parents):
+        if (cand / ".git").exists():
+            return cand
+    return base
 
 
 def _walk(top: Path) -> list[Path]:
@@ -62,12 +74,28 @@ def _walk(top: Path) -> list[Path]:
     return found
 
 
+def _section(profile: Any, key: str) -> dict[str, Any]:
+    """One top-level object of the project profile, or `{}` when it is absent or not a mapping."""
+    section = profile.get(key) if isinstance(profile, dict) else None
+    return section if isinstance(section, dict) else {}
+
+
 def load(explicit: str | None = None) -> dict[str, Any]:
     """The `specGraph` section of the project profile, with defaults filled in."""
     path = Path(explicit) if explicit else repo_root() / CONFIG_REL
     raw: dict[str, Any] = {}
+    conventions: dict[str, Any] = {}
     if path.is_file():
-        raw = json.loads(path.read_text(encoding="utf-8")).get("specGraph", {}) or {}
+        profile = json.loads(path.read_text(encoding="utf-8"))
+        # `isinstance` on BOTH sections, not just `or {}`: the coalescing form only replaces a
+        # FALSY value, so a profile that spells either section as a string or a list survives it
+        # and the first `.get` below raises `AttributeError` — out of `load`, which every
+        # checker main calls OUTSIDE its try, so a malformed profile arrives as a traceback
+        # behind exit 1 ("looked, found something") for a gate that never loaded its config.
+        # `conventions` is the newly-read one and the likelier to be prose: the init skill
+        # documents everything outside `specGraph` as free-form for a skill to read.
+        raw = _section(profile, "specGraph")
+        conventions = _section(profile, "conventions")
     return {
         # Where the committed spec_graph_*.yaml artifacts live (glob, repo-relative).
         "artifacts": raw.get("artifacts", "**/spec_graph_*.yaml"),
@@ -84,6 +112,14 @@ def load(explicit: str | None = None) -> dict[str, Any]:
         # Shared roots for `spec-graph trace resource`: name → {writers, readers, grep},
         # each sink `<file>::<symbol>` (see trace.py's docstring).
         "resources": raw.get("resources", {}),
+        # The branch a diff-taking checker compares against when `--base` is not given. Read
+        # from `conventions`, NOT `specGraph`: it is the same fact the ship skill already
+        # documents there, and a second spelling would let the two disagree. Hardcoding "main"
+        # was harmless while an unresolvable base silently produced an empty diff; once
+        # check_actors preflights the ref (#949) it becomes a mandatory `--base` on every
+        # invocation in any repo whose default branch is named something else — and this ships
+        # as a plugin to repos we do not control.
+        "defaultBranch": conventions.get("defaultBranch") or "main",
     }
 
 

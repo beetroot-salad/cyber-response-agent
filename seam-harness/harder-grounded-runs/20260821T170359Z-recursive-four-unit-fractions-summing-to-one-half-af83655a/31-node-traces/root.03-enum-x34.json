@@ -1,0 +1,11 @@
+{
+  "child_ids": [],
+  "depth": 1,
+  "effective_disposition": "solve",
+  "node_id": "root.03-enum-x34",
+  "packet_id": "packet:root.03-enum-x34",
+  "packet_sha256": "a58bf3ac9015e466e3001cf2a14f025e34c9d809de45131b7aeaa5ef68387826",
+  "parent_id": "root",
+  "proposed_disposition": "solve",
+  "stop_reason": null
+}

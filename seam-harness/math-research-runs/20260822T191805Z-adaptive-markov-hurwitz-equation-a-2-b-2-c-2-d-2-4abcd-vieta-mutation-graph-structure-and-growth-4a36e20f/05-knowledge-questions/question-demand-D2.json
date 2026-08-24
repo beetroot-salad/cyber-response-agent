@@ -1,0 +1,15 @@
+{
+  "acceptance_condition": "Establish demand D2 with evidence.",
+  "content_sha256": "4ce78f8fb53cb45e5efb3a552fe30c4a6a7d9a372e792cfc91d10aedb07172c7",
+  "demand_ids": [
+    "D2"
+  ],
+  "id": "question:demand:D2",
+  "node_id": null,
+  "rationale": "Second structural claim; height semantics fixed by decision 4.",
+  "tags": [
+    "measurement",
+    "decision"
+  ],
+  "text": "Prove or refute: every non-root vertex has a unique height-decreasing mutation, where height-decreasing means strictly decreasing the maximum coordinate d (decision 4); coordinate sum may be used only as an auxiliary measure."
+}

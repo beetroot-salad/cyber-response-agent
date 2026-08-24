@@ -1,0 +1,19 @@
+{
+  "account": "The dossier includes the full extracted text of Lorenz et al. (2011) with explicit PDF page markers, and the task is to extract at least three anchored findings from this single source. All required findings can be directly grounded in the supplied text; no additional evidence is needed. The acceptance condition is mechanical: each finding must carry the file-relative citation and the exact '===== PDF PAGE N =====' marker. The node is independent of any sibling output because it only reads the Lorenz file, which is fully available.",
+  "children": [],
+  "decidability": {
+    "acceptance_mechanical": true,
+    "account": "The full text of Lorenz et al. is present in the dossier with page markers, so the extraction can be completed now without needing other files or sibling results.",
+    "context_complete": true,
+    "grounded_referents": [
+      "papers/text/lorenz-et-al-2011-social-influence.txt"
+    ],
+    "independent_of_future_siblings": true,
+    "missing_context": []
+  },
+  "disposition": "solve",
+  "irreducible_core": null,
+  "requested_source_ids": [],
+  "requested_source_paths": [],
+  "synthesis_contract": null
+}

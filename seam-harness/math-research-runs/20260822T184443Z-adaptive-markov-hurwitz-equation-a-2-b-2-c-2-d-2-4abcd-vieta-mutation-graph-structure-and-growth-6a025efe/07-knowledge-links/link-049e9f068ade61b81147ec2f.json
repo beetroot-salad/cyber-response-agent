@@ -1,0 +1,10 @@
+{
+  "content_sha256": "049e9f068ade61b81147ec2f651562bfedcd8b03d840f33580265ef85ffaece5",
+  "id": "link:049e9f068ade61b81147ec2f",
+  "origin": "runtime",
+  "proposed_by_node_id": null,
+  "rationale": null,
+  "relation": "partially_answers",
+  "source_id": "answer:work:001-lower-bound",
+  "target_id": "question:demand:D5"
+}

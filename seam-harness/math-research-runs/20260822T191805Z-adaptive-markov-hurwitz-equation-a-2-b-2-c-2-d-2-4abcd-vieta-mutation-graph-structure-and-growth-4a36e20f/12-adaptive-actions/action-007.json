@@ -1,0 +1,24 @@
+{
+  "account": "Posterior verified by direct inspection: exactly three substantive, ready_to_synthesize answers cover D1-D6 with complete first-principles proofs, and the only other answer-bearing threads (exception search, rq-sharp attack) are blocked with zero evidence. Budget signals (remaining_work_items: 0; controller feedback: \"No work budget remains for synthesis\") rule out both investigate and synthesize, so the single valid action is finish: the three proved answers jointly constitute the self-contained memorandum D10 requires, and every open item is either a labeled conjecture with an exact missing lemma or an explicitly reported execution gap. This matches the acceptance posture in the dossier: honest partial progress with clear obstructions and no assumed growth law.",
+  "action_id": "action:007",
+  "content_sha256": "090e6c93120bcc33596df7af06cc812abd6eb591591a519e3a3b41ec1a3e93e2",
+  "decision_call_id": "call-0008-adaptive-controller",
+  "experiment_id": null,
+  "input_entry_ids": [
+    "answer:work:003-struct-core-v2",
+    "answer:work:004-upper-depth-v3",
+    "answer:work:006-lower-bound-v5-compact",
+    "question:raised:529a9c7e8677:rq-d5-stronger",
+    "question:raised:07d805ce56d7:rq-sharp",
+    "question:work:005-exception-search-v4"
+  ],
+  "kind": "finish",
+  "output_entry_ids": [],
+  "sequence": 7,
+  "snapshot_after_sha256": "63ddc552a25a8b574f10e0dcf8670b66cbe685bf25a81068272d5f2dec31f6c0",
+  "snapshot_before_sha256": "63ddc552a25a8b574f10e0dcf8670b66cbe685bf25a81068272d5f2dec31f6c0",
+  "work_call_ids": [
+    "call-0009-adaptive-finalizer"
+  ],
+  "work_item_ids": []
+}

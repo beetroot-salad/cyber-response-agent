@@ -1,0 +1,17 @@
+{
+  "acceptance_condition": "A structured report on both papers with the requested formal results, explicit PDF page markers from papers/text/dung-1995-argumentation.txt and papers/text/shapiro-et-al-2011-crdts.txt, and a short note on what each formalism can and cannot license about multi-agent answer synthesis.",
+  "content_sha256": "780d01358d076b89b7b83a5e98f1de3266851f41556f97c296aa43705471a093",
+  "demand_ids": [
+    "D3",
+    "D6"
+  ],
+  "id": "question:work:001-w1-formal-theory",
+  "node_id": "work:001-w1-formal-theory",
+  "rationale": "The D3 causal model needs a formal grounding for 'synthesis competence' and aggregation that is not just folk intuition; Dung and Shapiro are the only theory sources and are orthogonal to the empirical papers, so they can be extracted in parallel.",
+  "tags": [
+    "definition",
+    "method",
+    "assumption"
+  ],
+  "text": "What formal apparatus do Dung 1995 and Shapiro et al. 2011 supply for a synthesis/aggregation operator over conflicting agent outputs? From Dung 1995 extract: the abstract argumentation framework definition, admissible/preferred/grounded semantics, and how conflict among arguments is resolved without numeric confidence. From Shapiro et al. 2011 extract: CRDT definitions, state-based vs op-based convergence, the monotone semilattice join condition, and what convergence guarantees do and do not imply about the semantic quality of merged content. Record every claim with its explicit ===== PDF PAGE N ===== marker."
+}

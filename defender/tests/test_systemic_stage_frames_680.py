@@ -21,7 +21,7 @@ from pydantic_ai.models import override_allow_model_requests
 from defender.learning.core.config import StageContext, StageWiring  # noqa: E402
 from defender.agents import MAIN_DEF, ORACLE_DEF
 from defender.learning.core import config
-from defender.learning.pipeline import _pydantic_stage
+from defender.learning import _pydantic_stage
 from defender.runtime.agent_definition import RunScope, bind
 from defender.runtime.box import BoxResult
 from defender.runtime.permission.files import (

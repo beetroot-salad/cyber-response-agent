@@ -1,0 +1,47 @@
+{
+  "account": "Wave 1 produced only two usable answers (Du et al. 2023 — the positive pole, and Lorenz et al. 2011 — the human diversity-collapse mechanism). The other four investigations (Smit null/critical reappraisal, Zhang 2025 matched-compute negative results, Choi 2025 conformity dynamics, and the Dung/Shapiro formal tools) are sufficiency='blocked' with zero claims due to a runtime failure ('Exceeded maximum output retries'), not due to missing evidence — I verified via source search that the Smit and Zhang files are fully readable and contain exactly the needed results (accuracy-vs-cost tables, MAD-vs-CoT win rates under 20%, heterogeneity findings). Synthesis is impossible and would violate constraints: without Smit and Zhang there is no conflicting evidence to reconcile for D4, and building the note on Du alone would silently select the preferred positive outcome. Without Choi, the conformity pathway of the D3 causal model and raised question rq1 (answer-only vs rationale exposure) are ungrounded. The highest-information bounded action is a retry wave: re-run the four blocked extractions with tightened scopes and explicit claim caps (the likely cause of the retry overflow was oversized output), splitting the combined two-paper formal investigation into two smaller single-paper investigations (5 total, within the 6-investigation limit). All five read disjoint files and can complete without any peer result, so they form a valid frozen parallel wave. rq1 and D2/D5-D8 are deliberately deferred: they depend on this evidence and will be addressed by synthesis once the wave lands.",
+  "action_id": "action:002",
+  "content_sha256": "0ec123d3efcd24bcfbd3515760e52310b34249fad5a75d309e5cca79b08fa44e",
+  "decision_call_id": "call-0008-adaptive-controller",
+  "experiment_id": null,
+  "input_entry_ids": [
+    "question:work:001-inv-smit-mad",
+    "question:work:001-inv-zhang-when",
+    "question:work:001-inv-choi-conformity",
+    "question:work:001-inv-formal-tools"
+  ],
+  "kind": "investigate",
+  "output_entry_ids": [
+    "answer:work:002-inv-choi-r2",
+    "answer:work:002-inv-dung-r2",
+    "answer:work:002-inv-shapiro-r2",
+    "answer:work:002-inv-smit-mad-r2",
+    "answer:work:002-inv-zhang-when-r2",
+    "question:raised:24ba60001ffb:rz1",
+    "question:raised:24ba60001ffb:rz2",
+    "question:raised:92a7343df8a6:rq-shapiro-merge",
+    "question:raised:eaee61611e26:rq-choi-1",
+    "question:work:002-inv-choi-r2",
+    "question:work:002-inv-dung-r2",
+    "question:work:002-inv-shapiro-r2",
+    "question:work:002-inv-smit-mad-r2",
+    "question:work:002-inv-zhang-when-r2"
+  ],
+  "sequence": 2,
+  "snapshot_after_sha256": "62beaa3bfbd3ecf364333e34115557ce4da42010690587e359451d1524288754",
+  "snapshot_before_sha256": "b158b2fdd220140d92e1d3205e96f22de6aa616228143a4537dfa1e7d2a7c579",
+  "work_call_ids": [
+    "call-0009-adaptive-investigator",
+    "call-0010-adaptive-investigator",
+    "call-0011-adaptive-investigator",
+    "call-0012-adaptive-investigator",
+    "call-0013-adaptive-investigator"
+  ],
+  "work_item_ids": [
+    "work:002-inv-smit-mad-r2",
+    "work:002-inv-zhang-when-r2",
+    "work:002-inv-choi-r2",
+    "work:002-inv-dung-r2",
+    "work:002-inv-shapiro-r2"
+  ]
+}

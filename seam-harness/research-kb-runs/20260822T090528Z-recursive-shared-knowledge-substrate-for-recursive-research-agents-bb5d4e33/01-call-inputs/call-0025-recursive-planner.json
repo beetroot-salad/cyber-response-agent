@@ -1,0 +1,1279 @@
+{
+  "call_id": "call-0025-recursive-planner",
+  "context": {
+    "ancestor_decisions": [
+      "SC1: The evidentiary corpus is exactly seven extracted-text files under papers/text: dung-1995-argumentation.txt (Dung 1995, Artificial Intelligence 77), shapiro-et-al-2011-crdts.txt (Shapiro et al., SSS 2011), lorenz-et-al-2011-social-influence.txt (Lorenz et al., PNAS 108, 2011), du-et-al-2023-multiagent-debate.txt (Du et al. 2023, arXiv 2305.14325), smit-et-al-2023-going-mad.txt (Smit et al. 2023, arXiv 2311.17371), zhang-et-al-2025-mad-question.txt (Zhang et al. 2025, arXiv 2502.08788), choi-et-al-2025-conformity.txt (Choi et al., Findings of ACL 2025).",
+      "SC2: Page boundaries in the extracted texts are marked with lines of the form `===== PDF PAGE N =====`, and these markers are the citation anchors required by D12/C3.",
+      "SC3: The corpus intentionally contains conflicting empirical conclusions — multi-agent debate gains (Du et al. 2023) versus matched-compute null results and conformity findings (Smit et al. 2023; Zhang et al. 2025; Choi et al. 2025; Lorenz et al. 2011 on social influence undermining crowd wisdom) — and the manifest requires preserving and reconciling these conflicts.",
+      "SC4: The envelope's single conversation decision asserts that the seven full extracted texts are present in the solve workspace under papers/text with explicit PDF page markers; the intake envelope itself encloses only the manifest, not the full texts.",
+      "SC5: The manifest (material:001) is located at /workspace/seam-harness/research-kb-workspace/CORPUS.md, indicating a benchmark-style workspace named research-kb-workspace under a seam-harness directory.",
+      "SC6: The proposed substrate plus the two baselines named in D4 (open conversational forum; no inter-agent communication) naturally supply the three or more conditions required by D14.",
+      "Corpus membership: papers/text/dung-1995-argumentation.txt is Dung 1995, Artificial Intelligence 77; it is one of exactly seven extracted-text files under papers/text that constitute the only evidentiary corpus.",
+      "Page boundaries in the extracted texts are marked with lines of the form `===== PDF PAGE N =====`; citations must carry these markers (D12/C3).",
+      "Evidence is restricted to the seven workspace corpus files; no outside sources may be used (C2).",
+      "Source-supported claims must be clearly distinguished from design inferences in everything returned (D13)."
+    ],
+    "assigned_demands": [
+      {
+        "id": "D3",
+        "rationale": "All five capabilities are enumerated verbatim in the request.",
+        "statement": "The recommended design treats questions and answers as first-class many-to-many graph objects, supporting: multiple competing answers per question; one answer addressing multiple questions; question-to-question relations; answer-to-answer provenance or conflict relations; and controlled tags."
+      },
+      {
+        "id": "D8",
+        "rationale": "Fourth of six specification areas listed in the request.",
+        "statement": "Contradiction and belief-revision behavior is specified."
+      },
+      {
+        "id": "D13",
+        "rationale": "Stated verbatim in the request.",
+        "statement": "Source-supported claims are clearly distinguished from design inferences."
+      }
+    ],
+    "constraints": [
+      "C1: Total length must be 1,400–1,800 words.",
+      "C2: No evidence outside the seven corpus files may be used; the request restricts grounding to the supplied workspace corpus and the manifest declares these files the only evidentiary corpus for the benchmark.",
+      "C3: Citations must reference at least five distinct source files and include PDF page markers as they appear in the extracted texts (page boundaries marked `===== PDF PAGE N =====`).",
+      "C4: Papers must not be selected or weighted by desired outcome; the corpus's conflicting empirical conclusions must be preserved and reconciled."
+    ],
+    "expansion_required": false,
+    "knowledge_board": {
+      "answer_ids_by_question": {},
+      "answers_by_id": {},
+      "content_sha256": "124829904f3f321467099290be263f3fb7315752b9a33ba319b3109909d6d3a4",
+      "entry_ids_by_tag": {
+        "constraint": [
+          "question:root.01-arg-semantics.03-child-3",
+          "question:root.01-arg-semantics.04-child-4",
+          "question:root.02-crdt-persistence"
+        ],
+        "counterexample": [
+          "question:demand:D14",
+          "question:root",
+          "question:root.03-social-influence-risk",
+          "question:root.05-debate-nulls-boundaries"
+        ],
+        "decision": [
+          "question:demand:D1",
+          "question:demand:D2",
+          "question:demand:D3",
+          "question:root.01-arg-semantics.04-child-4"
+        ],
+        "definition": [
+          "question:demand:D14",
+          "question:root.01-arg-semantics",
+          "question:root.01-arg-semantics.01-child-1",
+          "question:root.01-arg-semantics.02-child-2"
+        ],
+        "evidence": [
+          "question:demand:D10",
+          "question:demand:D11",
+          "question:demand:D12",
+          "question:demand:D13",
+          "question:demand:D15",
+          "question:demand:D4",
+          "question:demand:D5",
+          "question:demand:D7",
+          "question:demand:D8",
+          "question:demand:D9",
+          "question:root.01-arg-semantics",
+          "question:root.01-arg-semantics.01-child-1",
+          "question:root.01-arg-semantics.02-child-2",
+          "question:root.02-crdt-persistence",
+          "question:root.03-social-influence-risk",
+          "question:root.04-debate-gains-evidence"
+        ],
+        "measurement": [
+          "question:demand:D14",
+          "question:root",
+          "question:root.04-debate-gains-evidence",
+          "question:root.05-debate-nulls-boundaries"
+        ],
+        "method": [
+          "question:demand:D6",
+          "question:root",
+          "question:root.01-arg-semantics",
+          "question:root.01-arg-semantics.02-child-2",
+          "question:root.01-arg-semantics.03-child-3",
+          "question:root.01-arg-semantics.04-child-4",
+          "question:root.02-crdt-persistence"
+        ],
+        "risk": [
+          "question:root.03-social-influence-risk",
+          "question:root.05-debate-nulls-boundaries"
+        ]
+      },
+      "incoming_link_ids_by_entry": {
+        "question:demand:D10": [
+          "link:b39e9bd6e534d53587c33f92"
+        ],
+        "question:demand:D11": [
+          "link:c0525acb5ba38548b9c5ff19",
+          "link:d508e58a1c643d9abfe73da0",
+          "link:f87ac7b536be5b768b698c28"
+        ],
+        "question:demand:D12": [
+          "link:4694364cb7b8f08ed6b70438",
+          "link:87a2e4c96e349dd74dd63507",
+          "link:b9ccd3ec073289680e72b9c5",
+          "link:dbc379c523a802d7234d668c",
+          "link:e5bfef49b3f76c9371b77861",
+          "link:ec67afe3731a822e2d0c2942",
+          "link:f50baf801a7b654ba7ae10bb"
+        ],
+        "question:demand:D13": [
+          "link:018c1bfba9c89f886979e58a",
+          "link:12a865e14711209becd65449",
+          "link:3e163e5b6c87fe659c9c8b95",
+          "link:5ecc297a5272dee784b1b751",
+          "link:6232aef0823d9b4b6b296a53",
+          "link:95a52b650d408c309a8140ee",
+          "link:9684703e8c406f2d326c4fab",
+          "link:9e148f747df068b5a106ef78",
+          "link:bc161aff0ea79c64716a0424"
+        ],
+        "question:demand:D14": [
+          "link:54ace6aa7dbc682ce36b1598",
+          "link:5fbb61d2e80f257b289c0591",
+          "link:9f307b082e580d3f1768454b"
+        ],
+        "question:demand:D15": [
+          "link:6018f82dcea4e7b30c3a5022"
+        ],
+        "question:demand:D3": [
+          "link:6ba793723a82adc8c82ee4c8",
+          "link:7da341e183168a93aa2f2482",
+          "link:a83bc0e755e8fd359c4a6e60",
+          "link:e9746edbef150e5d5fbaf676"
+        ],
+        "question:demand:D4": [
+          "link:7c6b34c58d2a7a2bcc9f5e5f"
+        ],
+        "question:demand:D5": [
+          "link:b02788fef9fd73ad10830bc3"
+        ],
+        "question:demand:D6": [
+          "link:f63ca17b95f176b627952fd3"
+        ],
+        "question:demand:D7": [
+          "link:79a9672c7c764f123cad7df4"
+        ],
+        "question:demand:D8": [
+          "link:0b56b74235695fa84d5f1ccf",
+          "link:58b72597c7130ef71dc5945a",
+          "link:960009408650bf4b3e01a852",
+          "link:c73d0130ac8ada1f86e19c93",
+          "link:d68b6ea5f9914bee0338ae78"
+        ],
+        "question:root": [
+          "link:088e1a7cfea6dde8ac04eab3",
+          "link:1709dd7fbf8587de0c575188",
+          "link:1e97bab1f415d57cbc837a88",
+          "link:2395134f0213cf5cee3f1947",
+          "link:48a3d569758cae1eb71a2043",
+          "link:4f798cb83c7582c38cfb88bd",
+          "link:52aaf440a0cfa52148fd0e0a",
+          "link:541766fc32e4d84c2fd63c44",
+          "link:561e0fcd22b650ab4cc0fd61",
+          "link:5b751584b8c43c9e15d281fe",
+          "link:5e97df7da6a94755d85a5407",
+          "link:709f42e6e4da8b14cdf82243",
+          "link:7a79aa5755f5b9590ce191cb",
+          "link:815a52c06ab01fa3052d160f",
+          "link:9dc3c1ef66fc5dbb330f0173",
+          "link:9e16c1c1dacc451174870ea4",
+          "link:ad2d4893bb4dadfa6cec4d51",
+          "link:dbcff4ec9d62472bedb7ee52",
+          "link:e5a9bece7311def890467b91",
+          "link:f7b3972e183578733d308198"
+        ],
+        "question:root.01-arg-semantics": [
+          "link:73ac165f45b5a0d7e9992efd",
+          "link:afea422f881d4ada38347239",
+          "link:bc6c42a8a8162e5db52ad103",
+          "link:fe59130339e5d6967c73f65c"
+        ]
+      },
+      "links_by_id": {
+        "link:018c1bfba9c89f886979e58a": {
+          "content_sha256": "018c1bfba9c89f886979e58a9631b6ef6020a5ed12294f6a1c4c676e582196bd",
+          "id": "link:018c1bfba9c89f886979e58a",
+          "relation": "refines",
+          "source_id": "question:root.04-debate-gains-evidence",
+          "target_id": "question:demand:D13"
+        },
+        "link:088e1a7cfea6dde8ac04eab3": {
+          "content_sha256": "088e1a7cfea6dde8ac04eab354d79aadb3b99bdfe714c1e70ee16af4ac5294d0",
+          "id": "link:088e1a7cfea6dde8ac04eab3",
+          "relation": "refines",
+          "source_id": "question:demand:D5",
+          "target_id": "question:root"
+        },
+        "link:0b56b74235695fa84d5f1ccf": {
+          "content_sha256": "0b56b74235695fa84d5f1ccf46e0abd8bdd940c3c93ae10ae09faf374334ef20",
+          "id": "link:0b56b74235695fa84d5f1ccf",
+          "relation": "refines",
+          "source_id": "question:root.01-arg-semantics.04-child-4",
+          "target_id": "question:demand:D8"
+        },
+        "link:12a865e14711209becd65449": {
+          "content_sha256": "12a865e14711209becd65449bbe2100af1aab0a11638f38f1f83608a93ecbca3",
+          "id": "link:12a865e14711209becd65449",
+          "relation": "refines",
+          "source_id": "question:root.01-arg-semantics.01-child-1",
+          "target_id": "question:demand:D13"
+        },
+        "link:1709dd7fbf8587de0c575188": {
+          "content_sha256": "1709dd7fbf8587de0c57518805fdc68ed1e83353f3c151db8647dedebbe0f474",
+          "id": "link:1709dd7fbf8587de0c575188",
+          "relation": "refines",
+          "source_id": "question:root.02-crdt-persistence",
+          "target_id": "question:root"
+        },
+        "link:1e97bab1f415d57cbc837a88": {
+          "content_sha256": "1e97bab1f415d57cbc837a88883226a5539b431d3810d7ee0268b965646a5d6f",
+          "id": "link:1e97bab1f415d57cbc837a88",
+          "relation": "refines",
+          "source_id": "question:demand:D2",
+          "target_id": "question:root"
+        },
+        "link:2395134f0213cf5cee3f1947": {
+          "content_sha256": "2395134f0213cf5cee3f1947b0c2d057b3d7f586083bbad7eb028a4e1cb94466",
+          "id": "link:2395134f0213cf5cee3f1947",
+          "relation": "refines",
+          "source_id": "question:demand:D3",
+          "target_id": "question:root"
+        },
+        "link:3e163e5b6c87fe659c9c8b95": {
+          "content_sha256": "3e163e5b6c87fe659c9c8b952fc8449114bfac7f5eaa1df8d326258e6a7b3d50",
+          "id": "link:3e163e5b6c87fe659c9c8b95",
+          "relation": "refines",
+          "source_id": "question:root.02-crdt-persistence",
+          "target_id": "question:demand:D13"
+        },
+        "link:4694364cb7b8f08ed6b70438": {
+          "content_sha256": "4694364cb7b8f08ed6b704380e475b1b267eef0480f37fe42f282740828ea040",
+          "id": "link:4694364cb7b8f08ed6b70438",
+          "relation": "refines",
+          "source_id": "question:root.01-arg-semantics",
+          "target_id": "question:demand:D12"
+        },
+        "link:48a3d569758cae1eb71a2043": {
+          "content_sha256": "48a3d569758cae1eb71a204319e430a0e2b17bbc10631decec88626d38dc50ca",
+          "id": "link:48a3d569758cae1eb71a2043",
+          "relation": "refines",
+          "source_id": "question:demand:D6",
+          "target_id": "question:root"
+        },
+        "link:4f798cb83c7582c38cfb88bd": {
+          "content_sha256": "4f798cb83c7582c38cfb88bdfd835c99a0dc601b856720119fe64365ae22c42a",
+          "id": "link:4f798cb83c7582c38cfb88bd",
+          "relation": "refines",
+          "source_id": "question:root.04-debate-gains-evidence",
+          "target_id": "question:root"
+        },
+        "link:52aaf440a0cfa52148fd0e0a": {
+          "content_sha256": "52aaf440a0cfa52148fd0e0a8b15fa3f4ceca2d9fe1d0d3675835f8b82c24bb7",
+          "id": "link:52aaf440a0cfa52148fd0e0a",
+          "relation": "refines",
+          "source_id": "question:root.03-social-influence-risk",
+          "target_id": "question:root"
+        },
+        "link:541766fc32e4d84c2fd63c44": {
+          "content_sha256": "541766fc32e4d84c2fd63c44d39b887384e9693d9c10a19e869a69b53453f7ea",
+          "id": "link:541766fc32e4d84c2fd63c44",
+          "relation": "refines",
+          "source_id": "question:demand:D4",
+          "target_id": "question:root"
+        },
+        "link:54ace6aa7dbc682ce36b1598": {
+          "content_sha256": "54ace6aa7dbc682ce36b15989cdd24cf38992ead6108329a60b48ba7f74178c9",
+          "id": "link:54ace6aa7dbc682ce36b1598",
+          "relation": "refines",
+          "source_id": "question:root.03-social-influence-risk",
+          "target_id": "question:demand:D14"
+        },
+        "link:561e0fcd22b650ab4cc0fd61": {
+          "content_sha256": "561e0fcd22b650ab4cc0fd61392437d8f3e7ca904a6e6b7e7839642ba210692d",
+          "id": "link:561e0fcd22b650ab4cc0fd61",
+          "relation": "refines",
+          "source_id": "question:demand:D1",
+          "target_id": "question:root"
+        },
+        "link:58b72597c7130ef71dc5945a": {
+          "content_sha256": "58b72597c7130ef71dc5945a7ea892c0491c6cfa5d7daa9b80ce0db0814db408",
+          "id": "link:58b72597c7130ef71dc5945a",
+          "relation": "refines",
+          "source_id": "question:root.01-arg-semantics.03-child-3",
+          "target_id": "question:demand:D8"
+        },
+        "link:5b751584b8c43c9e15d281fe": {
+          "content_sha256": "5b751584b8c43c9e15d281fecd110c27cec4e2ff68b62909aecadf66ffec777f",
+          "id": "link:5b751584b8c43c9e15d281fe",
+          "relation": "refines",
+          "source_id": "question:root.01-arg-semantics",
+          "target_id": "question:root"
+        },
+        "link:5e97df7da6a94755d85a5407": {
+          "content_sha256": "5e97df7da6a94755d85a5407cb21fe71750a2eca9df79c7bbac4d680689fc42e",
+          "id": "link:5e97df7da6a94755d85a5407",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries",
+          "target_id": "question:root"
+        },
+        "link:5ecc297a5272dee784b1b751": {
+          "content_sha256": "5ecc297a5272dee784b1b7519dc0b15b4464cd484190bf3de02879a3f667a502",
+          "id": "link:5ecc297a5272dee784b1b751",
+          "relation": "refines",
+          "source_id": "question:root.03-social-influence-risk",
+          "target_id": "question:demand:D13"
+        },
+        "link:5fbb61d2e80f257b289c0591": {
+          "content_sha256": "5fbb61d2e80f257b289c0591a887616bbe55c8e7f85593092ba47b199a267ece",
+          "id": "link:5fbb61d2e80f257b289c0591",
+          "relation": "refines",
+          "source_id": "question:root.04-debate-gains-evidence",
+          "target_id": "question:demand:D14"
+        },
+        "link:6018f82dcea4e7b30c3a5022": {
+          "content_sha256": "6018f82dcea4e7b30c3a50227a5bbde2d9842609c4f66b0c1b1b7933d6a7a18a",
+          "id": "link:6018f82dcea4e7b30c3a5022",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries",
+          "target_id": "question:demand:D15"
+        },
+        "link:6232aef0823d9b4b6b296a53": {
+          "content_sha256": "6232aef0823d9b4b6b296a53d2e21c523c8450b5d430fa992fca58beb595c711",
+          "id": "link:6232aef0823d9b4b6b296a53",
+          "relation": "refines",
+          "source_id": "question:root.01-arg-semantics.03-child-3",
+          "target_id": "question:demand:D13"
+        },
+        "link:6ba793723a82adc8c82ee4c8": {
+          "content_sha256": "6ba793723a82adc8c82ee4c8f76a828ca69badf3fe99ec2c2692f86412fd4c2b",
+          "id": "link:6ba793723a82adc8c82ee4c8",
+          "relation": "refines",
+          "source_id": "question:root.01-arg-semantics.03-child-3",
+          "target_id": "question:demand:D3"
+        },
+        "link:709f42e6e4da8b14cdf82243": {
+          "content_sha256": "709f42e6e4da8b14cdf82243f398085db7de30b6558d5ee57c30811a4bbb707f",
+          "id": "link:709f42e6e4da8b14cdf82243",
+          "relation": "refines",
+          "source_id": "question:demand:D7",
+          "target_id": "question:root"
+        },
+        "link:73ac165f45b5a0d7e9992efd": {
+          "content_sha256": "73ac165f45b5a0d7e9992efd5d290f50ed09e3ce7cf84238705cb5f73745967f",
+          "id": "link:73ac165f45b5a0d7e9992efd",
+          "relation": "refines",
+          "source_id": "question:root.01-arg-semantics.02-child-2",
+          "target_id": "question:root.01-arg-semantics"
+        },
+        "link:79a9672c7c764f123cad7df4": {
+          "content_sha256": "79a9672c7c764f123cad7df46a777bdbe38ef67bc5bca2231fe605d3970331ce",
+          "id": "link:79a9672c7c764f123cad7df4",
+          "relation": "refines",
+          "source_id": "question:root.02-crdt-persistence",
+          "target_id": "question:demand:D7"
+        },
+        "link:7a79aa5755f5b9590ce191cb": {
+          "content_sha256": "7a79aa5755f5b9590ce191cb65a36bfac312cd7011b4339d02a7b22f29e67a35",
+          "id": "link:7a79aa5755f5b9590ce191cb",
+          "relation": "refines",
+          "source_id": "question:demand:D8",
+          "target_id": "question:root"
+        },
+        "link:7c6b34c58d2a7a2bcc9f5e5f": {
+          "content_sha256": "7c6b34c58d2a7a2bcc9f5e5f0bce4c8a056e5bb10f00717a604aaa79136145cf",
+          "id": "link:7c6b34c58d2a7a2bcc9f5e5f",
+          "relation": "refines",
+          "source_id": "question:root.04-debate-gains-evidence",
+          "target_id": "question:demand:D4"
+        },
+        "link:7da341e183168a93aa2f2482": {
+          "content_sha256": "7da341e183168a93aa2f2482cfb0cd30ab7ddc8c56a7e6b1b2e301181a8947a5",
+          "id": "link:7da341e183168a93aa2f2482",
+          "relation": "refines",
+          "source_id": "question:root.01-arg-semantics.02-child-2",
+          "target_id": "question:demand:D3"
+        },
+        "link:815a52c06ab01fa3052d160f": {
+          "content_sha256": "815a52c06ab01fa3052d160f517b7436a84926a916c938a154527f6ad9f63fe6",
+          "id": "link:815a52c06ab01fa3052d160f",
+          "relation": "refines",
+          "source_id": "question:demand:D13",
+          "target_id": "question:root"
+        },
+        "link:87a2e4c96e349dd74dd63507": {
+          "content_sha256": "87a2e4c96e349dd74dd63507348ae02d782fa34f165e168687cfcd996a261cc0",
+          "id": "link:87a2e4c96e349dd74dd63507",
+          "relation": "refines",
+          "source_id": "question:root.01-arg-semantics.02-child-2",
+          "target_id": "question:demand:D12"
+        },
+        "link:95a52b650d408c309a8140ee": {
+          "content_sha256": "95a52b650d408c309a8140ee8c6ebca2fef1ce6a298affcd77e68b2c5e9698bd",
+          "id": "link:95a52b650d408c309a8140ee",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries",
+          "target_id": "question:demand:D13"
+        },
+        "link:960009408650bf4b3e01a852": {
+          "content_sha256": "960009408650bf4b3e01a8526773683245ec77daf9cd3d401176b91e3d2c5d60",
+          "id": "link:960009408650bf4b3e01a852",
+          "relation": "refines",
+          "source_id": "question:root.01-arg-semantics",
+          "target_id": "question:demand:D8"
+        },
+        "link:9684703e8c406f2d326c4fab": {
+          "content_sha256": "9684703e8c406f2d326c4faba0303c371b043f221a201ff7ee3083e56600891d",
+          "id": "link:9684703e8c406f2d326c4fab",
+          "relation": "refines",
+          "source_id": "question:root.01-arg-semantics.02-child-2",
+          "target_id": "question:demand:D13"
+        },
+        "link:9dc3c1ef66fc5dbb330f0173": {
+          "content_sha256": "9dc3c1ef66fc5dbb330f0173535d446c45af5188095bf062d2f8de4e0707a33e",
+          "id": "link:9dc3c1ef66fc5dbb330f0173",
+          "relation": "refines",
+          "source_id": "question:demand:D15",
+          "target_id": "question:root"
+        },
+        "link:9e148f747df068b5a106ef78": {
+          "content_sha256": "9e148f747df068b5a106ef7855e07d89cf45cd6f352308627d4460c862c9e2b9",
+          "id": "link:9e148f747df068b5a106ef78",
+          "relation": "refines",
+          "source_id": "question:root.01-arg-semantics",
+          "target_id": "question:demand:D13"
+        },
+        "link:9e16c1c1dacc451174870ea4": {
+          "content_sha256": "9e16c1c1dacc451174870ea4511dc149959278b7f7237d7a2755f0a8820b1171",
+          "id": "link:9e16c1c1dacc451174870ea4",
+          "relation": "refines",
+          "source_id": "question:demand:D11",
+          "target_id": "question:root"
+        },
+        "link:9f307b082e580d3f1768454b": {
+          "content_sha256": "9f307b082e580d3f1768454bde85ab9516764862ddd3e20b7688a0060f590870",
+          "id": "link:9f307b082e580d3f1768454b",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries",
+          "target_id": "question:demand:D14"
+        },
+        "link:a83bc0e755e8fd359c4a6e60": {
+          "content_sha256": "a83bc0e755e8fd359c4a6e60e1429a2524d3b9f114eafad89e022184a5d223cd",
+          "id": "link:a83bc0e755e8fd359c4a6e60",
+          "relation": "refines",
+          "source_id": "question:root.01-arg-semantics",
+          "target_id": "question:demand:D3"
+        },
+        "link:ad2d4893bb4dadfa6cec4d51": {
+          "content_sha256": "ad2d4893bb4dadfa6cec4d5140baa6fa9767b2438aafa6411ce349e9e4ecc616",
+          "id": "link:ad2d4893bb4dadfa6cec4d51",
+          "relation": "refines",
+          "source_id": "question:demand:D9",
+          "target_id": "question:root"
+        },
+        "link:afea422f881d4ada38347239": {
+          "content_sha256": "afea422f881d4ada3834723956c888f8232b6a9904843c28f83b8dc9b8b59d5c",
+          "id": "link:afea422f881d4ada38347239",
+          "relation": "refines",
+          "source_id": "question:root.01-arg-semantics.03-child-3",
+          "target_id": "question:root.01-arg-semantics"
+        },
+        "link:b02788fef9fd73ad10830bc3": {
+          "content_sha256": "b02788fef9fd73ad10830bc3e9d81dcb10ab065dd7cb0854743a1a9ff757ebb6",
+          "id": "link:b02788fef9fd73ad10830bc3",
+          "relation": "refines",
+          "source_id": "question:root.02-crdt-persistence",
+          "target_id": "question:demand:D5"
+        },
+        "link:b39e9bd6e534d53587c33f92": {
+          "content_sha256": "b39e9bd6e534d53587c33f923f5010b29d4e1d076282274cb24f7efef425bb04",
+          "id": "link:b39e9bd6e534d53587c33f92",
+          "relation": "refines",
+          "source_id": "question:root.02-crdt-persistence",
+          "target_id": "question:demand:D10"
+        },
+        "link:b9ccd3ec073289680e72b9c5": {
+          "content_sha256": "b9ccd3ec073289680e72b9c51fe29849bd5f0a857121c6ccbf09d130cc2e3ac2",
+          "id": "link:b9ccd3ec073289680e72b9c5",
+          "relation": "refines",
+          "source_id": "question:root.02-crdt-persistence",
+          "target_id": "question:demand:D12"
+        },
+        "link:bc161aff0ea79c64716a0424": {
+          "content_sha256": "bc161aff0ea79c64716a0424c63bfdfb332c0bd704cffd83758db8a5eea87076",
+          "id": "link:bc161aff0ea79c64716a0424",
+          "relation": "refines",
+          "source_id": "question:root.01-arg-semantics.04-child-4",
+          "target_id": "question:demand:D13"
+        },
+        "link:bc6c42a8a8162e5db52ad103": {
+          "content_sha256": "bc6c42a8a8162e5db52ad103e89336417342ed4290b42fd544775604905085ab",
+          "id": "link:bc6c42a8a8162e5db52ad103",
+          "relation": "refines",
+          "source_id": "question:root.01-arg-semantics.04-child-4",
+          "target_id": "question:root.01-arg-semantics"
+        },
+        "link:c0525acb5ba38548b9c5ff19": {
+          "content_sha256": "c0525acb5ba38548b9c5ff191f7515142f60365966e0df4035197e2f190a8644",
+          "id": "link:c0525acb5ba38548b9c5ff19",
+          "relation": "refines",
+          "source_id": "question:root.04-debate-gains-evidence",
+          "target_id": "question:demand:D11"
+        },
+        "link:c73d0130ac8ada1f86e19c93": {
+          "content_sha256": "c73d0130ac8ada1f86e19c937c2e7dbad3fd108612e34cc41aaef320cfc06414",
+          "id": "link:c73d0130ac8ada1f86e19c93",
+          "relation": "refines",
+          "source_id": "question:root.01-arg-semantics.01-child-1",
+          "target_id": "question:demand:D8"
+        },
+        "link:d508e58a1c643d9abfe73da0": {
+          "content_sha256": "d508e58a1c643d9abfe73da06ff8d2166070d8bf0177c3bb003e03a99924621c",
+          "id": "link:d508e58a1c643d9abfe73da0",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries",
+          "target_id": "question:demand:D11"
+        },
+        "link:d68b6ea5f9914bee0338ae78": {
+          "content_sha256": "d68b6ea5f9914bee0338ae786598ebb1301e6f0c175b7233e615b761a521ec5b",
+          "id": "link:d68b6ea5f9914bee0338ae78",
+          "relation": "refines",
+          "source_id": "question:root.01-arg-semantics.02-child-2",
+          "target_id": "question:demand:D8"
+        },
+        "link:dbc379c523a802d7234d668c": {
+          "content_sha256": "dbc379c523a802d7234d668c3e454859f9aa203d2a2e546f530980165cc90d8f",
+          "id": "link:dbc379c523a802d7234d668c",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries",
+          "target_id": "question:demand:D12"
+        },
+        "link:dbcff4ec9d62472bedb7ee52": {
+          "content_sha256": "dbcff4ec9d62472bedb7ee5294e35b526a4cde4fadd713d11e33f955d20f5328",
+          "id": "link:dbcff4ec9d62472bedb7ee52",
+          "relation": "refines",
+          "source_id": "question:demand:D14",
+          "target_id": "question:root"
+        },
+        "link:e5a9bece7311def890467b91": {
+          "content_sha256": "e5a9bece7311def890467b9156fcc92d2fec9948bcc4ff14bd2ab4b30bc4e243",
+          "id": "link:e5a9bece7311def890467b91",
+          "relation": "refines",
+          "source_id": "question:demand:D12",
+          "target_id": "question:root"
+        },
+        "link:e5bfef49b3f76c9371b77861": {
+          "content_sha256": "e5bfef49b3f76c9371b77861e45ee1d512f019aef67172fd18c7132135626f34",
+          "id": "link:e5bfef49b3f76c9371b77861",
+          "relation": "refines",
+          "source_id": "question:root.03-social-influence-risk",
+          "target_id": "question:demand:D12"
+        },
+        "link:e9746edbef150e5d5fbaf676": {
+          "content_sha256": "e9746edbef150e5d5fbaf676c8f807df6b4c36bc26c0da1d42fa03c6b948da24",
+          "id": "link:e9746edbef150e5d5fbaf676",
+          "relation": "refines",
+          "source_id": "question:root.01-arg-semantics.01-child-1",
+          "target_id": "question:demand:D3"
+        },
+        "link:ec67afe3731a822e2d0c2942": {
+          "content_sha256": "ec67afe3731a822e2d0c29420bb7d4b2f11e3ec8cb83837b645384f34bcf5d18",
+          "id": "link:ec67afe3731a822e2d0c2942",
+          "relation": "refines",
+          "source_id": "question:root.04-debate-gains-evidence",
+          "target_id": "question:demand:D12"
+        },
+        "link:f50baf801a7b654ba7ae10bb": {
+          "content_sha256": "f50baf801a7b654ba7ae10bb0ec85d93d412936916c44348e9605e5fe39d4806",
+          "id": "link:f50baf801a7b654ba7ae10bb",
+          "relation": "refines",
+          "source_id": "question:root.01-arg-semantics.01-child-1",
+          "target_id": "question:demand:D12"
+        },
+        "link:f63ca17b95f176b627952fd3": {
+          "content_sha256": "f63ca17b95f176b627952fd3651d46f56dfec6c8994b0b0df30d2fc331ace8a9",
+          "id": "link:f63ca17b95f176b627952fd3",
+          "relation": "refines",
+          "source_id": "question:root.03-social-influence-risk",
+          "target_id": "question:demand:D6"
+        },
+        "link:f7b3972e183578733d308198": {
+          "content_sha256": "f7b3972e183578733d308198b9f3de5fda8854126c6aa66264d14afa484ff56a",
+          "id": "link:f7b3972e183578733d308198",
+          "relation": "refines",
+          "source_id": "question:demand:D10",
+          "target_id": "question:root"
+        },
+        "link:f87ac7b536be5b768b698c28": {
+          "content_sha256": "f87ac7b536be5b768b698c28521f264405bf959a3d7cc8591192a09721ce5721",
+          "id": "link:f87ac7b536be5b768b698c28",
+          "relation": "refines",
+          "source_id": "question:root.03-social-influence-risk",
+          "target_id": "question:demand:D11"
+        },
+        "link:fe59130339e5d6967c73f65c": {
+          "content_sha256": "fe59130339e5d6967c73f65c2a96e9139087d049b2a05d13180213f20c7609be",
+          "id": "link:fe59130339e5d6967c73f65c",
+          "relation": "refines",
+          "source_id": "question:root.01-arg-semantics.01-child-1",
+          "target_id": "question:root.01-arg-semantics"
+        }
+      },
+      "outgoing_link_ids_by_entry": {
+        "question:demand:D1": [
+          "link:561e0fcd22b650ab4cc0fd61"
+        ],
+        "question:demand:D10": [
+          "link:f7b3972e183578733d308198"
+        ],
+        "question:demand:D11": [
+          "link:9e16c1c1dacc451174870ea4"
+        ],
+        "question:demand:D12": [
+          "link:e5a9bece7311def890467b91"
+        ],
+        "question:demand:D13": [
+          "link:815a52c06ab01fa3052d160f"
+        ],
+        "question:demand:D14": [
+          "link:dbcff4ec9d62472bedb7ee52"
+        ],
+        "question:demand:D15": [
+          "link:9dc3c1ef66fc5dbb330f0173"
+        ],
+        "question:demand:D2": [
+          "link:1e97bab1f415d57cbc837a88"
+        ],
+        "question:demand:D3": [
+          "link:2395134f0213cf5cee3f1947"
+        ],
+        "question:demand:D4": [
+          "link:541766fc32e4d84c2fd63c44"
+        ],
+        "question:demand:D5": [
+          "link:088e1a7cfea6dde8ac04eab3"
+        ],
+        "question:demand:D6": [
+          "link:48a3d569758cae1eb71a2043"
+        ],
+        "question:demand:D7": [
+          "link:709f42e6e4da8b14cdf82243"
+        ],
+        "question:demand:D8": [
+          "link:7a79aa5755f5b9590ce191cb"
+        ],
+        "question:demand:D9": [
+          "link:ad2d4893bb4dadfa6cec4d51"
+        ],
+        "question:root.01-arg-semantics": [
+          "link:4694364cb7b8f08ed6b70438",
+          "link:5b751584b8c43c9e15d281fe",
+          "link:960009408650bf4b3e01a852",
+          "link:9e148f747df068b5a106ef78",
+          "link:a83bc0e755e8fd359c4a6e60"
+        ],
+        "question:root.01-arg-semantics.01-child-1": [
+          "link:12a865e14711209becd65449",
+          "link:c73d0130ac8ada1f86e19c93",
+          "link:e9746edbef150e5d5fbaf676",
+          "link:f50baf801a7b654ba7ae10bb",
+          "link:fe59130339e5d6967c73f65c"
+        ],
+        "question:root.01-arg-semantics.02-child-2": [
+          "link:73ac165f45b5a0d7e9992efd",
+          "link:7da341e183168a93aa2f2482",
+          "link:87a2e4c96e349dd74dd63507",
+          "link:9684703e8c406f2d326c4fab",
+          "link:d68b6ea5f9914bee0338ae78"
+        ],
+        "question:root.01-arg-semantics.03-child-3": [
+          "link:58b72597c7130ef71dc5945a",
+          "link:6232aef0823d9b4b6b296a53",
+          "link:6ba793723a82adc8c82ee4c8",
+          "link:afea422f881d4ada38347239"
+        ],
+        "question:root.01-arg-semantics.04-child-4": [
+          "link:0b56b74235695fa84d5f1ccf",
+          "link:bc161aff0ea79c64716a0424",
+          "link:bc6c42a8a8162e5db52ad103"
+        ],
+        "question:root.02-crdt-persistence": [
+          "link:1709dd7fbf8587de0c575188",
+          "link:3e163e5b6c87fe659c9c8b95",
+          "link:79a9672c7c764f123cad7df4",
+          "link:b02788fef9fd73ad10830bc3",
+          "link:b39e9bd6e534d53587c33f92",
+          "link:b9ccd3ec073289680e72b9c5"
+        ],
+        "question:root.03-social-influence-risk": [
+          "link:52aaf440a0cfa52148fd0e0a",
+          "link:54ace6aa7dbc682ce36b1598",
+          "link:5ecc297a5272dee784b1b751",
+          "link:e5bfef49b3f76c9371b77861",
+          "link:f63ca17b95f176b627952fd3",
+          "link:f87ac7b536be5b768b698c28"
+        ],
+        "question:root.04-debate-gains-evidence": [
+          "link:018c1bfba9c89f886979e58a",
+          "link:4f798cb83c7582c38cfb88bd",
+          "link:5fbb61d2e80f257b289c0591",
+          "link:7c6b34c58d2a7a2bcc9f5e5f",
+          "link:c0525acb5ba38548b9c5ff19",
+          "link:ec67afe3731a822e2d0c2942"
+        ],
+        "question:root.05-debate-nulls-boundaries": [
+          "link:5e97df7da6a94755d85a5407",
+          "link:6018f82dcea4e7b30c3a5022",
+          "link:95a52b650d408c309a8140ee",
+          "link:9f307b082e580d3f1768454b",
+          "link:d508e58a1c643d9abfe73da0",
+          "link:dbc379c523a802d7234d668c"
+        ]
+      },
+      "question_ids_by_answer": {},
+      "questions_by_id": {
+        "question:demand:D1": {
+          "acceptance_condition": "Establish demand D1 with evidence.",
+          "content_sha256": "358b8c8d2ee8dcbcd62f92e95fcfeb759f5784e13dd5bd756c15e8ad80406fad",
+          "demand_ids": [
+            "D1"
+          ],
+          "id": "question:demand:D1",
+          "node_id": null,
+          "rationale": "Format and length bound stated verbatim in the request.",
+          "tags": [
+            "decision"
+          ],
+          "text": "The deliverable is a single architecture decision memo of 1,400–1,800 words."
+        },
+        "question:demand:D10": {
+          "acceptance_condition": "Establish demand D10 with evidence.",
+          "content_sha256": "42c24ef84552b31fbec60cb25073a16b7d0d6ae637909b5aaa0649e671486bc9",
+          "demand_ids": [
+            "D10"
+          ],
+          "id": "question:demand:D10",
+          "node_id": null,
+          "rationale": "Sixth specification area; the request says 'the exact role of model versus runtime.'",
+          "tags": [
+            "evidence"
+          ],
+          "text": "The exact division of responsibility between model and runtime is specified."
+        },
+        "question:demand:D11": {
+          "acceptance_condition": "Establish demand D11 with evidence.",
+          "content_sha256": "b48aa66909c810d05ced3a63029ee4d813e20b8bd7343488b183f69dac4e2b40",
+          "demand_ids": [
+            "D11"
+          ],
+          "id": "question:demand:D11",
+          "node_id": null,
+          "rationale": "Required by the request and reinforced by the manifest's instruction not to select papers by desired outcome.",
+          "tags": [
+            "evidence"
+          ],
+          "text": "The memo reconciles — rather than hides — the tension between papers reporting multi-agent debate gains and papers reporting matched-compute null results or conformity."
+        },
+        "question:demand:D12": {
+          "acceptance_condition": "Establish demand D12 with evidence.",
+          "content_sha256": "70610c0e88a285479759ef950cb1fa33e28da10095af537fb19e5ee24c60fdc7",
+          "demand_ids": [
+            "D12"
+          ],
+          "id": "question:demand:D12",
+          "node_id": null,
+          "rationale": "Grounding scope, citation count, and page-marker requirement are stated in the request; marker format and corpus enumeration come from the manifest.",
+          "tags": [
+            "evidence"
+          ],
+          "text": "All evidentiary claims are grounded only in the supplied workspace corpus, with at least five distinct source files cited and citations carrying PDF page markers from the extracted text."
+        },
+        "question:demand:D13": {
+          "acceptance_condition": "Establish demand D13 with evidence.",
+          "content_sha256": "e4e6151f4fb92956ae2d8e295acd8c66fb86a3b7aa8512390bd8da1b78cda6ea",
+          "demand_ids": [
+            "D13"
+          ],
+          "id": "question:demand:D13",
+          "node_id": null,
+          "rationale": "Stated verbatim in the request.",
+          "tags": [
+            "evidence"
+          ],
+          "text": "Source-supported claims are clearly distinguished from design inferences."
+        },
+        "question:demand:D14": {
+          "acceptance_condition": "Establish demand D14 with evidence.",
+          "content_sha256": "89489912e05f5dae6a67e4300048e4863d654b8355bd1892d03970cecd421850",
+          "demand_ids": [
+            "D14"
+          ],
+          "id": "question:demand:D14",
+          "node_id": null,
+          "rationale": "Condition count and all five metric families are enumerated in the request.",
+          "tags": [
+            "counterexample",
+            "measurement",
+            "definition"
+          ],
+          "text": "A falsifiable evaluation plan compares at least three conditions and defines metrics for quality, diversity/correlation, latency, token cost, and recovery-from-wrong-consensus."
+        },
+        "question:demand:D15": {
+          "acceptance_condition": "Establish demand D15 with evidence.",
+          "content_sha256": "c63b60742108a5627760487657dad3280b9b724cdef7fd8f2f8b22e469072dc3",
+          "demand_ids": [
+            "D15"
+          ],
+          "id": "question:demand:D15",
+          "node_id": null,
+          "rationale": "Stated verbatim in the request.",
+          "tags": [
+            "evidence"
+          ],
+          "text": "Important limitations and unresolved questions are stated."
+        },
+        "question:demand:D2": {
+          "acceptance_condition": "Establish demand D2 with evidence.",
+          "content_sha256": "a1e8e73a66a88854b181cd8e700ee47c190021995492e4c13a7f3f2480683936",
+          "demand_ids": [
+            "D2"
+          ],
+          "id": "question:demand:D2",
+          "node_id": null,
+          "rationale": "The request explicitly forbids a survey-only outcome.",
+          "tags": [
+            "decision"
+          ],
+          "text": "The memo makes one concrete, implementable recommendation rather than merely surveying the literature."
+        },
+        "question:demand:D3": {
+          "acceptance_condition": "Establish demand D3 with evidence.",
+          "content_sha256": "2b4510f300813f4c6d054088afcdeb580e129c09c780589126e578caad7f1cb3",
+          "demand_ids": [
+            "D3"
+          ],
+          "id": "question:demand:D3",
+          "node_id": null,
+          "rationale": "All five capabilities are enumerated verbatim in the request.",
+          "tags": [
+            "decision"
+          ],
+          "text": "The recommended design treats questions and answers as first-class many-to-many graph objects, supporting: multiple competing answers per question; one answer addressing multiple questions; question-to-question relations; answer-to-answer provenance or conflict relations; and controlled tags."
+        },
+        "question:demand:D4": {
+          "acceptance_condition": "Establish demand D4 with evidence.",
+          "content_sha256": "495d059579b7faeff7b7c3dea23a59e4beecd9d2061aa750429abe0bdc2fd29e",
+          "demand_ids": [
+            "D4"
+          ],
+          "id": "question:demand:D4",
+          "node_id": null,
+          "rationale": "Both comparison targets are named verbatim in the request.",
+          "tags": [
+            "evidence"
+          ],
+          "text": "The design is compared against two named baselines: an open conversational forum and no inter-agent communication."
+        },
+        "question:demand:D5": {
+          "acceptance_condition": "Establish demand D5 with evidence.",
+          "content_sha256": "04efdfb487681553676fbfc02e1e0eba20f7638dcd990d68fffd3b7e56f7324a",
+          "demand_ids": [
+            "D5"
+          ],
+          "id": "question:demand:D5",
+          "node_id": null,
+          "rationale": "First of six specification areas listed in the request.",
+          "tags": [
+            "evidence"
+          ],
+          "text": "The data model and its invariants are specified."
+        },
+        "question:demand:D6": {
+          "acceptance_condition": "Establish demand D6 with evidence.",
+          "content_sha256": "16aa3a487c4a63da4bd967a8004443a36ebbea7ca9716b65b773f14e6af5e164",
+          "demand_ids": [
+            "D6"
+          ],
+          "id": "question:demand:D6",
+          "node_id": null,
+          "rationale": "Second of six specification areas listed in the request.",
+          "tags": [
+            "method"
+          ],
+          "text": "Staged visibility and the communication protocol are specified."
+        },
+        "question:demand:D7": {
+          "acceptance_condition": "Establish demand D7 with evidence.",
+          "content_sha256": "e9aace925c8874d470e5e66f133e5698e954d9c79c85ac15d05a6b1be90f8648",
+          "demand_ids": [
+            "D7"
+          ],
+          "id": "question:demand:D7",
+          "node_id": null,
+          "rationale": "Third of six specification areas listed in the request.",
+          "tags": [
+            "evidence"
+          ],
+          "text": "Persistence and concurrent-update semantics are specified."
+        },
+        "question:demand:D8": {
+          "acceptance_condition": "Establish demand D8 with evidence.",
+          "content_sha256": "be321eb0feda8aa2c452bdc5b58cd0c2d3a82e7337259f185b4b495784e0d94b",
+          "demand_ids": [
+            "D8"
+          ],
+          "id": "question:demand:D8",
+          "node_id": null,
+          "rationale": "Fourth of six specification areas listed in the request.",
+          "tags": [
+            "evidence"
+          ],
+          "text": "Contradiction and belief-revision behavior is specified."
+        },
+        "question:demand:D9": {
+          "acceptance_condition": "Establish demand D9 with evidence.",
+          "content_sha256": "fbacaee35ff37b6cdf07a99f4704b78e431674fb8d042f8604710966157351f4",
+          "demand_ids": [
+            "D9"
+          ],
+          "id": "question:demand:D9",
+          "node_id": null,
+          "rationale": "Fifth of six specification areas listed in the request.",
+          "tags": [
+            "evidence"
+          ],
+          "text": "Retrieval and ranking are specified."
+        },
+        "question:root": {
+          "acceptance_condition": "Satisfy every assigned whole-task demand and explicit constraint.",
+          "content_sha256": "4ce436fa1c007db64fdec92524d279656612f912b3191f3b4454fb209e9fb892",
+          "demand_ids": [
+            "D1",
+            "D2",
+            "D3",
+            "D4",
+            "D5",
+            "D6",
+            "D7",
+            "D8",
+            "D9",
+            "D10",
+            "D11",
+            "D12",
+            "D13",
+            "D14",
+            "D15"
+          ],
+          "id": "question:root",
+          "node_id": "root",
+          "rationale": "The whole task submitted after intake.",
+          "tags": [
+            "counterexample",
+            "method",
+            "measurement"
+          ],
+          "text": "Produce a 1,400–1,800 word architecture decision memo that commits to one concrete, implementable design for a shared knowledge substrate serving recursively decomposing AI research agents: questions and answers modeled as first-class many-to-many graph objects; the design compared against an open conversational forum and against no inter-agent communication; full specification of the data model and invariants, staged visibility and communication protocol, persistence and concurrent-update semantics, contradiction and belief-revision behavior, retrieval/ranking, and the exact role of model versus runtime; evidence restricted to the seven-file workspace corpus with at least five distinct source files cited via PDF page markers; the corpus's conflicting empirical conclusions reconciled rather than hidden; source-supported claims distinguished from design inferences; and a falsifiable evaluation plan (at least three conditions, five named metric families) plus explicit limitations and unresolved questions."
+        },
+        "question:root.01-arg-semantics": {
+          "acceptance_condition": "Returns (a) at least four findings from the Dung file, each a quote or close paraphrase carrying the file-relative citation and the exact `===== PDF PAGE N =====` marker(s) of the page where it appears, and (b) at least three design constraints for conflict/belief-revision semantics, each explicitly labeled as design inference rather than source claim.",
+          "content_sha256": "1cda59f1ebda0deba5fd22d60e9e1bdf079a900c1c0be6105aeac164ebc3d3ec",
+          "demand_ids": [
+            "D3",
+            "D8",
+            "D12",
+            "D13"
+          ],
+          "id": "question:root.01-arg-semantics",
+          "node_id": "root.01-arg-semantics",
+          "rationale": "Dung 1995 is the corpus's only formal treatment of conflict and acceptability; it grounds the conflict-relation capability of D3 and the contradiction/belief-revision specification of D8 with citable formal definitions.",
+          "tags": [
+            "definition",
+            "evidence",
+            "method"
+          ],
+          "text": "Read papers/text/dung-1995-argumentation.txt and extract, each anchored to the exact `===== PDF PAGE N =====` marker(s) where it appears: the definition of an argumentation framework (set of arguments plus binary attack relation), acceptability of an argument, conflict-free and admissible sets, the characteristic function, and the grounded/preferred/stable extension semantics, including any stated links to nonmonotonic reasoning or logic programming. Then derive, each explicitly labeled as design inference, how these notions can anchor answer-to-answer conflict/provenance relations and contradiction and belief-revision behavior in a many-to-many question/answer graph (e.g., answers as arguments, attack edges as conflicts, extensions as mutually consistent answer sets)."
+        },
+        "question:root.01-arg-semantics.01-child-1": {
+          "acceptance_condition": "Returns at least four findings, each with a quote or close paraphrase from the source text, the exact `===== PDF PAGE N =====` marker(s) where it appears, and a clear label of which definition it covers.",
+          "content_sha256": "c9384ea5cb7ddcb0a61543e1bdf6731225c029fa35a61715af385947ed2f90f3",
+          "demand_ids": [
+            "D3",
+            "D8",
+            "D12",
+            "D13"
+          ],
+          "id": "question:root.01-arg-semantics.01-child-1",
+          "node_id": "root.01-arg-semantics.01-child-1",
+          "rationale": "These four core definitions are the foundation for all subsequent semantics and design derivations. Isolating them into a dedicated extraction child ensures the source evidence is gathered precisely before any design inference is made.",
+          "tags": [
+            "definition",
+            "evidence"
+          ],
+          "text": "Extract from papers/text/dung-1995-argumentation.txt, each anchored to the exact `===== PDF PAGE N =====` marker(s) where it appears, the definitions of: (a) argumentation framework (set of arguments plus binary attack relation), (b) acceptability of an argument, (c) conflict-free set, and (d) admissible set. For each concept, provide a direct quote or close paraphrase from the source text and note the page marker(s)."
+        },
+        "question:root.01-arg-semantics.02-child-2": {
+          "acceptance_condition": "Returns at least four findings, each with a quote or close paraphrase, the exact `===== PDF PAGE N =====` marker(s), and an explicit label of the semantics or link.",
+          "content_sha256": "717436e329824a1e24cdbf8be987b048f97f01034021efdf1bef0d785b1706d7",
+          "demand_ids": [
+            "D3",
+            "D8",
+            "D12",
+            "D13"
+          ],
+          "id": "question:root.01-arg-semantics.02-child-2",
+          "node_id": "root.01-arg-semantics.02-child-2",
+          "rationale": "These semantics define the different ways to select acceptable sets of arguments, which will later be used to model mutually consistent answer sets. The links to nonmonotonic reasoning and logic programming are essential for the design rationale.",
+          "tags": [
+            "definition",
+            "evidence",
+            "method"
+          ],
+          "text": "Extract from papers/text/dung-1995-argumentation.txt, each anchored to the exact `===== PDF PAGE N =====` marker(s) where it appears, the definitions of the characteristic function F_AF, the grounded (skeptical) extension, the preferred (credulous) extension, and the stable extension. For each, provide a direct quote or close paraphrase and the page marker(s). Also note any stated links to nonmonotonic reasoning or logic programming, citing the relevant pages."
+        },
+        "question:root.01-arg-semantics.03-child-3": {
+          "acceptance_condition": "Returns at least three design constraints, each explicitly labeled as 'design inference', that specify how the Dung notions map to the Q/A graph, including concrete edge types and semantics. Each must be grounded in the extracted definitions but must not be presented as source claims.",
+          "content_sha256": "7b4d005f9b5150fc374220fecf6139e2e1a403769f6ebf456be6bd20b1c774b9",
+          "demand_ids": [
+            "D3",
+            "D8",
+            "D13"
+          ],
+          "id": "question:root.01-arg-semantics.03-child-3",
+          "node_id": "root.01-arg-semantics.03-child-3",
+          "rationale": "This child directly addresses D3 (answer-to-answer conflict/provenance relations) and D8 (contradiction behavior) by translating the formal definitions into design constraints for the graph substrate.",
+          "tags": [
+            "constraint",
+            "method"
+          ],
+          "text": "Derive, each explicitly labeled as design inference, how Dung's notions of argumentation framework, acceptability, conflict-free sets, and admissible sets can anchor answer-to-answer conflict and provenance relations in a many-to-many question/answer graph. Specifically, produce at least three design constraints: (1) how to model answers as arguments and conflicts as attack edges; (2) how to represent provenance relations (e.g., answer-addresses-question) as additional graph edges that do not alter conflict semantics; and (3) how admissible sets can define mutually consistent answer sets for a given question."
+        },
+        "question:root.01-arg-semantics.04-child-4": {
+          "acceptance_condition": "Returns at least three design constraints, each explicitly labeled as 'design inference', that specify how the extension semantics map to contradiction handling and belief revision, including which extension type is used for which purpose. Must not present these as source claims.",
+          "content_sha256": "228827c8d28ed8aea187996cb9faf8e8afbf5fa6f57221f18592f1b8b4b33535",
+          "demand_ids": [
+            "D8",
+            "D13"
+          ],
+          "id": "question:root.01-arg-semantics.04-child-4",
+          "node_id": "root.01-arg-semantics.04-child-4",
+          "rationale": "This child directly addresses D8 (contradiction and belief-revision behavior) by translating the extension semantics into a design for how the system handles conflicting answers and updates its state.",
+          "tags": [
+            "method",
+            "decision",
+            "constraint"
+          ],
+          "text": "Derive, each explicitly labeled as design inference, how Dung's extension semantics (grounded, preferred, stable) can specify contradiction and belief-revision behavior in a many-to-many question/answer graph. Specifically, produce at least three design constraints: (1) how to use preferred extensions to define credulous acceptance of answers, allowing multiple competing answers to coexist; (2) how to use the grounded extension to define a skeptical set of answers that are accepted regardless of conflict; and (3) how belief revision can be modeled as updating the attack relation or the set of arguments and recomputing extensions."
+        },
+        "question:root.02-crdt-persistence": {
+          "acceptance_condition": "Returns (a) at least four findings from the Shapiro file, each a quote or close paraphrase carrying the file-relative citation and the exact `===== PDF PAGE N =====` marker(s), and (b) at least three design constraints for persistence/concurrency (including at least one explicit split between CRDT-enforced and runtime-enforced invariants), each labeled as design inference.",
+          "content_sha256": "9708f3549586149eb68c3673c506178691fb9804268b1639f230c6784a9e2085",
+          "demand_ids": [
+            "D5",
+            "D7",
+            "D10",
+            "D12",
+            "D13"
+          ],
+          "id": "question:root.02-crdt-persistence",
+          "node_id": "root.02-crdt-persistence",
+          "rationale": "Shapiro et al. 2011 is the corpus's only distributed-systems treatment; it grounds the persistence and concurrent-update specification (D7), the merge-safe portion of the data model's invariants (D5), and the runtime-versus-model enforcement boundary (D10).",
+          "tags": [
+            "evidence",
+            "method",
+            "constraint"
+          ],
+          "text": "Read papers/text/shapiro-et-al-2011-crdts.txt and extract, each anchored to the exact `===== PDF PAGE N =====` marker(s) where it appears: the distinction between state-based and operation-based CRDTs, the strong eventual consistency guarantee and its conditions, the semilattice/monotonicity requirements for convergence, and at least two concrete reusable data types (e.g., grow-only set, observed-remove set, last-writer-wins register). Then derive, each explicitly labeled as design inference, concurrent-update semantics for a many-to-many question/answer graph substrate (e.g., add-only question and answer objects, add-wins tag sets) and identify which invariants CRDTs cannot enforce (e.g., uniqueness, schema validity, tag-vocabulary control) so that the runtime must enforce them."
+        },
+        "question:root.03-social-influence-risk": {
+          "acceptance_condition": "Returns (a) at least three anchored findings per file (at least six total), each a quote or close paraphrase carrying the file-relative citation and the exact `===== PDF PAGE N =====` marker(s), and (b) at least three staged-visibility or diversity-measurement design constraints, each explicitly labeled as design inference.",
+          "content_sha256": "2f332a3b5c9f0b6fd719848ae59287e9e0a5c4fbe833be72bbf5567676c75d50",
+          "demand_ids": [
+            "D6",
+            "D11",
+            "D12",
+            "D13",
+            "D14"
+          ],
+          "id": "question:root.03-social-influence-risk",
+          "node_id": "root.03-social-influence-risk",
+          "rationale": "Lorenz 2011 and Choi 2025 are the corpus's evidence that unstructured information sharing degrades collective accuracy; they ground the staged-visibility protocol (D6), the conformity side of the reconciliation (D11), and the diversity/correlation metric family (D14).",
+          "tags": [
+            "evidence",
+            "risk",
+            "counterexample"
+          ],
+          "text": "Read papers/text/lorenz-et-al-2011-social-influence.txt and papers/text/choi-et-al-2025-conformity.txt. Extract, each anchored to the exact `===== PDF PAGE N =====` marker(s): Lorenz et al.'s core experimental findings on how social influence affects the wisdom of crowds (effects on estimate diversity, accuracy, and confidence, as stated in the text) and Choi et al.'s empirical findings on group conformity in multi-agent systems (the conditions under which agents conform to peer or majority answers, as stated in the text). Then derive, each explicitly labeled as design inference, staged-visibility constraints for the substrate (e.g., committing independent answers before exposing peers' answers, delayed or partial disclosure) and implications for measuring answer diversity and correlation."
+        },
+        "question:root.04-debate-gains-evidence": {
+          "acceptance_condition": "Returns (a) at least four anchored findings from the Du file covering claimed gains, experimental setup (agents, rounds, tasks, consensus mechanism), and stated limitations, each carrying the file-relative citation and the exact `===== PDF PAGE N =====` marker(s), and (b) at least two design constraints and one evaluation-replication requirement, each explicitly labeled as design inference.",
+          "content_sha256": "2be78886a3947f382843991a648c9946b59844f7afbc180ae5d035bf173143b2",
+          "demand_ids": [
+            "D4",
+            "D11",
+            "D12",
+            "D13",
+            "D14"
+          ],
+          "id": "question:root.04-debate-gains-evidence",
+          "node_id": "root.04-debate-gains-evidence",
+          "rationale": "Du et al. 2023 is the corpus's positive evidence for multi-agent debate; it grounds one side of the required reconciliation (D11), informs the baseline comparison (D4), and defines the replication arm of the evaluation plan (D14).",
+          "tags": [
+            "evidence",
+            "measurement"
+          ],
+          "text": "Read papers/text/du-et-al-2023-multiagent-debate.txt and extract, each anchored to the exact `===== PDF PAGE N =====` marker(s): the improvements in factuality and reasoning the paper claims for multiagent debate, the experimental setup (number of agents, number of debate rounds, tasks used, and how consensus or a final answer is reached), and any limitations the authors state. Then derive, each explicitly labeled as design inference: which debate behaviors a shared question/answer substrate must capture to retain these gains, and what an evaluation condition replicating the paper's setup would require."
+        },
+        "question:root.05-debate-nulls-boundaries": {
+          "acceptance_condition": "Returns (a) at least three anchored findings per file (at least six total), each a quote or close paraphrase carrying the file-relative citation and the exact `===== PDF PAGE N =====` marker(s), and (b) at least three reconciliation hypotheses and at least three evaluation-design constraints (together covering the five named metric families), each explicitly labeled as design inference.",
+          "content_sha256": "89203749570be368520298607541a4b6b5c225a2bc75e8bdbf69bacd54a5bc66",
+          "demand_ids": [
+            "D11",
+            "D12",
+            "D13",
+            "D14",
+            "D15"
+          ],
+          "id": "question:root.05-debate-nulls-boundaries",
+          "node_id": "root.05-debate-nulls-boundaries",
+          "rationale": "Smit et al. 2023 and Zhang et al. 2025 are the corpus's null-result and boundary-condition evidence; they ground the reconciliation (D11) without hiding it, the falsifiable evaluation plan (D14), and the limitations and unresolved questions (D15).",
+          "tags": [
+            "counterexample",
+            "measurement",
+            "risk"
+          ],
+          "text": "Read papers/text/smit-et-al-2023-going-mad.txt and papers/text/zhang-et-al-2025-mad-question.txt. Extract, each anchored to the exact `===== PDF PAGE N =====` marker(s): Smit et al.'s critical or null results on multi-agent debate (including any comparisons against single-agent or matched-compute baselines, as stated in the text) and Zhang et al.'s analysis of when and why multi-agent debate helps or fails (task dependence and boundary conditions, as stated in the text). Then derive, each explicitly labeled as design inference: at least three reconciliation hypotheses attributing the disagreement with Du et al. 2023 to named conditions (task type, compute parity, visibility or timing of peer answers), and constraints for a falsifiable evaluation plan covering quality, diversity/correlation, latency, token cost, and recovery-from-wrong-consensus."
+        }
+      },
+      "standard_tags": [
+        "definition",
+        "constraint",
+        "evidence",
+        "method",
+        "counterexample",
+        "risk",
+        "assumption",
+        "uncertainty",
+        "decision",
+        "interface",
+        "measurement",
+        "synthesis"
+      ],
+      "version": 182
+    },
+    "max_children": 5,
+    "node": {
+      "acceptance_condition": "Returns at least three design constraints, each explicitly labeled as 'design inference', that specify how the Dung notions map to the Q/A graph, including concrete edge types and semantics. Each must be grounded in the extracted definitions but must not be presented as source claims.",
+      "demand_ids": [
+        "D3",
+        "D8",
+        "D13"
+      ],
+      "depth": 2,
+      "expected_contribution": "A set of three or more design constraints for the graph data model, clarifying how conflicts and provenance are represented and how consistency is defined, ready for integration into the synthesis.",
+      "id": "root.01-arg-semantics.03-child-3",
+      "knowledge_tags": [
+        "constraint",
+        "method"
+      ],
+      "objective": "Derive, each explicitly labeled as design inference, how Dung's notions of argumentation framework, acceptability, conflict-free sets, and admissible sets can anchor answer-to-answer conflict and provenance relations in a many-to-many question/answer graph. Specifically, produce at least three design constraints: (1) how to model answers as arguments and conflicts as attack edges; (2) how to represent provenance relations (e.g., answer-addresses-question) as additional graph edges that do not alter conflict semantics; and (3) how admissible sets can define mutually consistent answer sets for a given question.",
+      "parent_id": "root.01-arg-semantics",
+      "rationale": "This child directly addresses D3 (answer-to-answer conflict/provenance relations) and D8 (contradiction behavior) by translating the formal definitions into design constraints for the graph substrate.",
+      "separator_facts": [
+        "SC1: The evidentiary corpus is exactly seven extracted-text files under papers/text: dung-1995-argumentation.txt (Dung 1995, Artificial Intelligence 77), shapiro-et-al-2011-crdts.txt (Shapiro et al., SSS 2011), lorenz-et-al-2011-social-influence.txt (Lorenz et al., PNAS 108, 2011), du-et-al-2023-multiagent-debate.txt (Du et al. 2023, arXiv 2305.14325), smit-et-al-2023-going-mad.txt (Smit et al. 2023, arXiv 2311.17371), zhang-et-al-2025-mad-question.txt (Zhang et al. 2025, arXiv 2502.08788), choi-et-al-2025-conformity.txt (Choi et al., Findings of ACL 2025).",
+        "SC2: Page boundaries in the extracted texts are marked with lines of the form `===== PDF PAGE N =====`, and these markers are the citation anchors required by D12/C3.",
+        "SC3: The corpus intentionally contains conflicting empirical conclusions — multi-agent debate gains (Du et al. 2023) versus matched-compute null results and conformity findings (Smit et al. 2023; Zhang et al. 2025; Choi et al. 2025; Lorenz et al. 2011 on social influence undermining crowd wisdom) — and the manifest requires preserving and reconciling these conflicts.",
+        "SC4: The envelope's single conversation decision asserts that the seven full extracted texts are present in the solve workspace under papers/text with explicit PDF page markers; the intake envelope itself encloses only the manifest, not the full texts.",
+        "SC5: The manifest (material:001) is located at /workspace/seam-harness/research-kb-workspace/CORPUS.md, indicating a benchmark-style workspace named research-kb-workspace under a seam-harness directory.",
+        "SC6: The proposed substrate plus the two baselines named in D4 (open conversational forum; no inter-agent communication) naturally supply the three or more conditions required by D14.",
+        "Corpus membership: papers/text/dung-1995-argumentation.txt is Dung 1995, Artificial Intelligence 77; it is one of exactly seven extracted-text files under papers/text that constitute the only evidentiary corpus.",
+        "Page boundaries in the extracted texts are marked with lines of the form `===== PDF PAGE N =====`; citations must carry these markers (D12/C3).",
+        "Evidence is restricted to the seven workspace corpus files; no outside sources may be used (C2).",
+        "Source-supported claims must be clearly distinguished from design inferences in everything returned (D13)."
+      ],
+      "source_ids": [
+        "ref:dung-1995-argumentation"
+      ],
+      "source_paths": [
+        "papers/text/dung-1995-argumentation.txt"
+      ]
+    },
+    "product_intent": "The memo exists to commit the agent system to a single defensible substrate architecture — and to justify that commitment strictly from the supplied corpus — so that recursively decomposing research agents can share, contest, and reuse questions and answers as structured state, capturing the gains reported for multi-agent debate while structurally guarding against the matched-compute null results and conformity failure modes documented in the same corpus.",
+    "remaining_depth": 1,
+    "remaining_node_budget": 3,
+    "source_materials": [
+      {
+        "content": "Enumerated in material:001; asserted present in the solve workspace by the conversation decision; content not enclosed at intake.",
+        "id": "ref:dung-1995-argumentation",
+        "kind": "referent:file",
+        "label": "Extracted text of Dung 1995, 'On the Acceptability of Arguments and its Fundamental Role in Nonmonotonic Reasoning, Logic Programming and n-Person Games' (Artificial Intelligence 77).",
+        "locator": "papers/text/dung-1995-argumentation.txt"
+      }
+    ],
+    "stable_context": [
+      "SC1: The evidentiary corpus is exactly seven extracted-text files under papers/text: dung-1995-argumentation.txt (Dung 1995, Artificial Intelligence 77), shapiro-et-al-2011-crdts.txt (Shapiro et al., SSS 2011), lorenz-et-al-2011-social-influence.txt (Lorenz et al., PNAS 108, 2011), du-et-al-2023-multiagent-debate.txt (Du et al. 2023, arXiv 2305.14325), smit-et-al-2023-going-mad.txt (Smit et al. 2023, arXiv 2311.17371), zhang-et-al-2025-mad-question.txt (Zhang et al. 2025, arXiv 2502.08788), choi-et-al-2025-conformity.txt (Choi et al., Findings of ACL 2025).",
+      "SC2: Page boundaries in the extracted texts are marked with lines of the form `===== PDF PAGE N =====`, and these markers are the citation anchors required by D12/C3.",
+      "SC3: The corpus intentionally contains conflicting empirical conclusions — multi-agent debate gains (Du et al. 2023) versus matched-compute null results and conformity findings (Smit et al. 2023; Zhang et al. 2025; Choi et al. 2025; Lorenz et al. 2011 on social influence undermining crowd wisdom) — and the manifest requires preserving and reconciling these conflicts.",
+      "SC4: The envelope's single conversation decision asserts that the seven full extracted texts are present in the solve workspace under papers/text with explicit PDF page markers; the intake envelope itself encloses only the manifest, not the full texts.",
+      "SC5: The manifest (material:001) is located at /workspace/seam-harness/research-kb-workspace/CORPUS.md, indicating a benchmark-style workspace named research-kb-workspace under a seam-harness directory.",
+      "SC6: The proposed substrate plus the two baselines named in D4 (open conversational forum; no inter-agent communication) naturally supply the three or more conditions required by D14."
+    ],
+    "workspace_documents": [
+      {
+        "content": "===== PDF PAGE 1 =====\n\nELSEVIER Artificial Intelligence 77 (1995) 321-357 \nArtificial \nIntelligence \nOn the acceptability of arguments and its fundamental \nrole in nonmonotonic reasoning, logic programming and \nn-person games* \nPhan Minh Dung* \nDivisionoofoComputeroScience,oAsianoInstituteoofoTechnology,oGPOoBoxo2754,oBangkoko10501,o\nThailando\nReceived June 1993; revised April 1994 \nAbstract \nThe purpose of this paper is to study the fundamental mechanism, humans use in \nargumentation, and to explore ways to implement this mechanism on computers. \nWe do so by first developing a theory for argumentation whose central notion is the \nacceptability of arguments. Then we argue for the “correctness” or “appropriateness” of \nour theory with two strong arguments. The first one shows that most of the major \napproaches to nonmonotonic reasoning in AI and logic programming are special forms of \nour theory of argumentation. The second argument illustrates how our theory can be used \nto investigate the logical structure of many practical problems. This argument is based on a \nresult showing that our theory captures naturally the solutions of the theory of n-person \ngames and of the well-known stable marriage problem. \nBy showing that argumentation can be viewed as a special form of logic programming \nwith negation as failure, we introduce a general logic-programming-based method for \ngenerating meta-interpreters for argumentation systems, a method very much similar to the \ncompiler-compiler idea in conventional programming. \nKeyword: Argumentation; Nonmonotonic reasoning; Logic programming; n-person \ngames; The stable marriage problem \n“The true basis of the logic of existence and universality \nlies in the human activities of seeking and finding” \nJaakko Hintikka [24, p. 331 \n*The results in this paper (except those of Sections 3 and 4.3.2) have been published in condensed \nform in [15]. \n* E-mail: dung@cs.ait.ac.th. \n0004-3702/95/$09.50 0 1995 Elsevier Science B.V. All rights reserved \nSSDZo0004-3702(94)00041-7 \n\n===== PDF PAGE 2 =====\n\n322 P.M. Dung I Artificial Intelligence 77 (1995) 321-357 \n1. Introduction \nArgumentation constitutes a major component of human intelligence. The \nability to engage in arguments is essential for humans to understand new \nproblems, to perform scientific reasoning, to express, clarify and defend their \nopinions in their daily lives. The way humans argue is based on a very simple \nprinciple which is summarized succinctly by an old saying: “The one who has the \nlast word laughs best”. To illustrate this principle, let us take a look at an \nexample, a mock argument between two persons I and A, whose countries are at \nwar, about who is responsible for blocking negotiation in their region. \nExample 1.’ \nI: My government cannot negotiate with your government because your \ngovernment doesn’t even recognize my government. \nA: Your government doesn’t recognize my government either. \nThe explicit content of I’s utterance is that the failure of A’s government to \nrecognize I’s government blocks the negotiation. This establishes the responsibili- \nty of A’s government for blocking the negotiation by an implicit appeal to the \nfollowing commonsense interpretation rule: \nResponsibility attribution: If an actor performs an action which causes some \nstate of affairs, then the actor is responsible for that state of affairs unless its \naction was justified. \nA uses the same kind of reasoning to counterargue that I’s government is also \nresponsible for blocking the negotiation as I’s government doesn’t recognize A’s \ngovernment either. \nAt this point, neither arguer can claim “victory” without hurting his own \nposition. Consider the following continuation of the above arguments: \nI: But your government is a terrorist government. \nThis utterance justifies the failure of I’s government to recognize A’s government. \nThus the responsibility attribution rule cannot be appplied to make I’s govern- \nment responsible for blocking the negotiation. So this represents an attack on A’s \nargument. If the exchange stops here, then I clearly has the “last word”, which \nmeans that he has successfully argued that A’s government is responsible for \nblocking the negotiation. \nThe goal of this paper is to give a scientific account of the basic principle “The \none who has the last word laughs best” of argumentation, and to explore possible \nways for implementing this principle on computers. \nThe problems of understanding argumentation and its role in human reasoning \nhave been addressed by many researchers in different fields including philosophy, \nI This example is inspired by a similar example in [6] \n\n===== PDF PAGE 3 =====\n\nP.M. Dung I Artificial Intelligence 77 (1995) 321-357 323 \nlogic and AI. Toulmin [59] has given an excellent philosophical account of the \ngeneral structure of arguments. The relation between argumentation (in the form \nof a dialogue-game) and classical (monotonic) logic has been studied by Lorenz \nand Lorenzen [4] who have showed that classical first-order logic can be viewed as \ndialogue-game logic where propositions are entities which can be either won or \nlost. \nIn AI, much work has been done to analyze the structure of arguments and to \nbuild computer systems which can engage in the exchange of arguments. \nArgument systems which can understand editorials or engage in political \ndialogues have been built by Alvarado [l] and Birnbaum et al. [5, 6, 401. An \nin-depth analysis of argument structure has been provided by Cohen [9]. These \nworks can be considered as forming an heuristic approach to argument-based \ncommonsense reasoning. \nRoughly, the idea of argumentational reasoning is that a statement is believable \nif it can be argued successfully against attacking arguments. In other words, \nwhether or not a rational agent believes in a statement depends on whether or not \nthe argument supporting this statement can be successfully defended against the \ncounterarguments. Thus, the beliefs of a rational agent are characterized by the \nrelations between the “internal” arguments supporting his beliefs and the \n“external” arguments supporting contradictory beliefs. So, in a certain sense, \nargumentational reasoning is based on the “external stability” of the accepted \narguments. This is quite different and at the same time inherently related to the \nmainstream approaches to nonmonotonic reasoning in AI and logic programming \n[2, 22, 39, 41, 42, 51, 52, 601 which are based on a kind of “internal stability” of \nbeliefs.2 These two kinds of “stability” are like two sides of the same coin. Their \nrelationship is very much similar to the relationship between Hintikka’s game- \ntheoretic semantics and Tarskian semantics of logic and natural language [4, 24, \n531. \nThe understanding of the structure and acceptability of arguments are essential \nfor a computer system to be able to engage in exchanges of arguments. Much \nwork has been done to analyze the structure of arguments. Significant progress \nhas been achieved here [l, 5, 6, 9, 36, 40,45, 46, 59, 611. In contrast, it is still not \nclear how to understand the acceptability of arguments. The lack of progress here \nleaves the question about the semantical relations between argumentation and \nnonmonotonic reasoning open until today. One of the goals of this paper is to \nprovide an answer to these problems. \nMoore distinguished between default reasoning and autoepistemic reasoning \n[42]. According to him, default reasoning is drawing plausible inferences in the \nabsence of information to the contrary while autoepistemic reasoning is like \nreasoning about one’s own knowledge or beliefs. Thus default reasoning is like \narguing with Nature, where a conclusion, supported by some argument, can be \n* A set of beliefs is “internally stable” if it can “reproduce ” itself in a way which is solely determined \nby the set itself. In other words, its stability is totally determined by the “internal” relations between \nits elements. \n\n===== PDF PAGE 4 =====\n\n324 P.M. Dung I Arlijiciul Intelligence 77 (1995) 321-357 \ndrawn in the absence of any counterargument. On the other hand, reasoning \nabout one’s own knowledge or beliefs is much like arguing with oneself. So both \nautoepistemic reasoning and default reasoning are two forms of argumentation. In \nfact, we will demonstrate in this paper that many of the major approaches to \nnonmonotonic reasoning in AI and logic programming are different forms of \nargumentation. This result is not as surprising as it seems since all forms of \nreasoning with incomplete information rest on the simple intuitive idea that a \ndefeasible statement can be believed only in the absence of any evidence to the \ncontrary which is very much like the principle of argumentation. In [ll], this idea \nhas been applied to develop a simple and intuitive framework for semantics of \nlogic programming unifying many other previously proposed approaches [2, 22, \n51, 601. Later, Kakas. Kowalski and Toni [27] have pointed out that the \nframework given in [ 111 is in fact an argumentational approach to logic program- \nming. This important insight constitutes a major source of inspiration and \nmotivation for this paper.’ \nArgumentation is a major method humans use to justify their solutions to their \nsocial and economic problems. We demonstrate this by pointing out that many \nsolutions to the n-person games modelling meaningful economic systems [lo, 56, \n621 are based on our theory of argumentation. Further, using the stable marriage \nproblem as the benchmark, we show that our theory captures naturally the way \nhumans argue to justify their solutions to many social problems. The result we \ngain here provides also a strong argument to defeat an often held opinion in the \nAI and logic programming community that if a knowledge base has no stable \nsemantics then there must be some “bug” in it. \nThough argumentation is a powerful method for problem solving, it turns out \nthat it can be “implemented” easily in logic programming. We demonstrate this by \nshowing that argumentation can be viewed as logic programming with negation as \nfailure. This results shows that logic programming is the perfect tool for \nimplementing argumentation systems. \nIt seems necessary to point out again that our primary intention in this paper is \nnot to study the relationship between logic programming and nonmonotonic \nreasoning though much light is shed on this relationship from our result that both \nof them are forms of argumentation. Our main goal is to give an analysis of the \nnature of human argumentation in its full generality. This is done in two steps. In \nthe first step, a formal, abstract but simple theory of argumentation is developed \nto capture the notion of acceptability of arguments. In the next step, we \ndemonstrate the “correctness” (or “appropriateness”) of our theory. It is clear \nthat the “correctness” of our theory cannot be “proved” formally. The only way \nto accomplish this task is to provide relevant and convincing examples. Two \n“examples” are provided. The first one shows how our theory can be used to \ninvestigate the logical structure of many human economic and social problems. \n’ Recently inspired by this paper. Bondarenko. Toni and Kowalski [7] have developed an argumenta- \ntional assumption-based framework to nonmonotonic reasoning unifying many other approaches in a \nvery interesting way. \n\n===== PDF PAGE 5 =====\n\nP.M.wDungwIwArtificialwIntelligencew77w(1995)w321-357w 325w\nThe second one shows that many major approaches to nonmonotonic reasoning in \nAI and logic programming [ll, 22, 41, 42, 45, 46, 51, 52, 57, 601 are in fact \ndifferent forms of our theory of argumentation. \nThis paper provides four novel results. The first one is a theory of acceptability \nof arguments which, in fact, is a formal account of the principle of argumentation. \nThe second result shows the fundamental role our theory of argumentation can \nplay in investigating the logical structure of many social and economic problems. \nThe third result shows that logic programming as well as many major formalisms \nto nonmonotonic and defeasible reasoning in AI are argumentation systems. That \nmeans that all these systems are based on the same principle. They differ only by \nthe structure of their arguments. The fourth result introduces a general method \nfor implementing argumentation systems by showing that argumentation can be \nviewed as logic programming with negation as failure. This method is very much \nsimilar to the compiler-compiler idea in conventional programming. \nList of Contents \n2. Acceptability of arguments \n2.1. Argumentation frameworks \n2.2. Fixpoint semantics and grounded (skeptical) semantics \n2.3. Sufficient condition for coincidence between different semantics \n3. Argumentation, n-person game and the stable marriage problem \n4. Relations to nonmonotonic reasoning and logic programming \n4.1. Reiter’s default logic as argumentation \n4.2. Pollock’s inductive defeasible logic as grounded argumentation \n4.3. Logic programming as argumentation \n4.3.1. Negation as possibly infinite failure \n4.3.2. Negation as finite failure \n5. Argumentation as logic programming: a generator of meta-interpreters for \nargumentation systems \n6. Conclusions \nThe prerequisite relation between the sections is illustrated in the following \ntree: \nSection 2 \n-------V \nSection 3 Section 4 Section 5 \n2. Acceptability of arguments \n2.1. Argumentationwframeworksw\nOur theory of argumentation is based on a notion of argumentation framework \ndefined as a pair of a set of arguments, and a binary relation representing the \n\n===== PDF PAGE 6 =====\n\n326 P{M{gDunggigArtificialgIntelligenceg77gr1995sg321x357g\nattack relationship between arguments. Here, an argument is an abstract entity \nwhose role is solely determined by its relations to other arguments. No special \nattention is paid to the internal structure of the arguments. \nDefinition 2. An argumentationgframeworkgis a pair \nAFg=grARwgattackssg\nwhere ARgis a set of arguments, and attacksgis a binary relation on ARwgi.e. \nattacksgCgARgxgAR{g\nFor two arguments Agand Bwgthe meaning of attacksrAwgBsgis that Agrepresents \nan attack against B{g\nExample 3 rContinuationgofgExampleg1). The exchange between I and A can be \nrepresented by an argumentation framework rARwgattackssgas follows: ARg=g\n{ilwgiwwga}gand attacksg=g{riwwgaswgrawgiwswgri2wgas}gwith iwgand iwgdenoting the first and \nthe second argument of I, respectively, and agdenoting the argument of A. \nRemark 4. From now on, if not explicitly mentioned otherwise, we always refer \nto an arbitrary but fixed argumentation framework AFg=grARwgattackss{gFurther, \nwe say that Agattacks Bg(or Bgis attacked by Asgif attacksrAwgBsgholds. Similarly, \nwe say that a set S of arguments attacks BgrorgBgis attacked by S) if Bgis attacked \nby an argument in S. \nDefinition 5. A set S of arguments is said to be conflictxfreegif there are no \narguments Agand Bgin S such that Agattacks B{g\nFor a rational agent G, an argument Agis acceptable if G can defend Ag(from \nwithin his world) against all attacks on A{gFurther, it is reasonable to assume that \na rational agent accepts an argument only if it is acceptable. That means that the \nset of all arguments accepted by a rational agent is a set of arguments which can \ndefend itself against all attacks on it. This leads to the following definition of an \nadmissible (for a rational agent) set of arguments. \nDefinition 6. \n(1) An argument AgEgARgis acceptablegwith respect to a set S of arguments iff \nfor each argument BgEgAR:gif Bgattacks Agthen Bgis attacked by SP \n(2) A conflict-free set of arguments S is admissiblegiff each argument in S is \nacceptable with respect to S. \n‘See Remark 4. \n\n===== PDF PAGE 7 =====\n\nP.M. Dung I Artificial Intelligence 77 (1995) 321-357 327 \nThe (credulous) semantics of an argumentation framework is defined by the \nnotion of preferred extension. \nDefinition 7. A preferred extension of an argumentation framework AFpis a \nmaximal (with respect to set inclusion) admissible set of AF.p\nExample 8 (Continuation of Examplep3{.pIt is not difficult to see that AFphas \nexactly one preferred extension Ep=p{i, , i2}.p\nExample 9 yNixonpdiamond{.pThe well-known Nixon diamond example can be \nrepresented as an argumentation framework AFp=pyAR’pattacks{pwith ARp=p\n{A’pB}’pand attacksp=p{yA’pB{’pyB’pA{}pw h ere Aprepresents the argument “Nixon \nis anti-pacifist since he is a republican”, and B represents the argument “Nixon is \na pacifist since he is a quaker”. This argumentation framework has two preferred \nextensions, one in which Nixon is a pacifist and one in which Nixon is a quaker. \nLemma 10 (Fundamental Lemma). LetpSpbepunpadmissiblepsetpofparguments’pandpAp\nandpA’pbepargumentspwhichparepacceptablepwithprespectptopS.pThenp\n(1) S’ = S U {A}pispadmissible’pandp\ny2{pA’pispacceptablepwithprespectptopS’.p\nProof. (1) We need only to show that S’ is conflict-free. Assume the contrary. \nTherefore, there exists an argument B ES such that either Apattacks Bpor Bp\nattacks A.pFrom the admissibility of S and the acceptability of A’pthere is an \nargument B’pin S such that B’pattacks Bpor B’pattacks A.pSince S is conflict-free, \nit follows that B’pattacks A.pBut then there is an argument B”pin S such that B”p\nattacks B’.pContradiction! \n(2) Obvious. Cl \nThe following theorem follows directly from the Fundamental Lemma. \nTheorem 11. LetpAFpbepanpargumentationpframework.p\n(1) ThepsetpofpallpadmissiblepsetspofpAFpformpapcompleteppartialporderpwithp\nrespectptopsetpinclusion.p\ny2{pForpeachpadmissiblepsetpSpofpAF’ptherepexistspappreferredpextensionpEpofpAFp\nsuchpthatpSpcpE.p\nTheorem 11 together with the fact that the empty set is always admissible \nimplies the following corollary: \nCorollary 12. Everypargumentationpframeworkppossessespatpleastponeppreferredp\nextension.p\nHence, preferred extension semantics is always defined for any argumentation \nframework. \n\n===== PDF PAGE 8 =====\n\nÙ}8g PwMwgDungg:gArtificialgIntelligenceg77gp{995rgÙ}{vÙ57g\nStablegsemanticsgforgargumentationg\nTo compare our approach with other approaches, we introduce in the following \nthe notion of stable extension. \nDefinition 13. A conflict-free set of arguments S is called a stablegextensiongiff S \nattacks each argument which does not belong to S. \nIn Section 3, we will show that in the context of game theory, our notion of \nstable extension coincides with the notion of stable solutions of n-person games \nintroduced by Von Neuman and Morgenstern fifty years ago [62]. \nIt is easy to see that: \nLemma 14. S isgagstablegextensiongiff S = {A 1 AgisgnotgattackedgbygS}wg\nIt will turn out later (Section 4) that this proposition underlines exactly the way \nthe notions of stable models in logic programming, extensions in Reiter’s default \nlogic, and stable expansion in Moore’s autoepistemic logic are defined. \nThe relations between stable extension and preferred extension are clarified in \nthe following lemma. \nLemma 15. Everygstablegextensiongisgugpreferredgextensionugbutgnotgvicegversawg\nProof. It is clear that each stable extension is a preferred extension. To show that \nthe reverse does not hold, we construct the following argumentation framework: \nLet AgFg=gpARugattacksrgwith ARg=g{A}gand attacksg=g{pAugAr}wgIt is clear that the \nempty set is a preferred extension of AFgwhich is clearly not stable. 0 \nIt is not difficult to see that in the above examples, preferred extension and \nstable extension semantics coincide. \nThough stable semantics is not defined for every argumentation system, an \noften asked question is whethergorgnotgargumentationgsystemsgwithgnogstableg\nextensionsgrepresentgmeaningfulgsystemsg?gIn Section 3, we will provide meaningful \nargumentation systems without stable semantics, and thus provide a definite \nanswer to this question. \n2.2. Fixpointgsemanticsgandggroundedgpskepticalrgsemanticsg\nWe show in this subsection that argumentation can be characterized by a \nfixpoint theory providing an elegant way to introduce grounded (skeptical) \nsemantics. \nDefinition 16. The characteristicgfunctionugdenoted by FAFugof an argumentation \nframework AFg=gpARwgattacksrgis defined as follows: \n\n===== PDF PAGE 9 =====\n\nP.M. Dung I Artificial Intelligence 77 (1995) 321-357 329 \nFo : P_,PR ) \nF;;{S}o=o{Ao) AoIS acceptable with respect to S} . \nRemark 17. As we always refer to an arbitrary but fixed argumentation frame- \nwork AF,oweooften write Foinstead of FAFofor short. \nLemma 18. A conflict-free set S of arguments is admissible iff S C F{S}.o\nProof. The lemma follows immediately from the property “If S is conflict-free, \nthen F{S}ois also conflict-free”. So we need only to prove this property. Assume \nthat there are Aoand A’oin F{S}osuch that Aoattacks A’.oThus, there exists Boin S \nsuch that Boattacks A.oHence there is B’oin S such that B’oattacks B.o\nContradiction! So F{S}ois conflict-free. 0 \nIt is easy to see that, if an argument Aois acceptable with respect to S, then Aois \nalso acceptable with respect to any superset of S. Thus, it follows immediately \nthat: \nLemma 19. FAFoisomonotonico{withorespectotoosetoinclusion}.o\nThe skeptical semantics of argumentation frameworks is defined by the notion \nof grounded extension introduced in the following. \nDefinition 20. The groundedoextensionoof an argumentation framework AF,o\ndenoted by GE,,,o is the least fixed point of FAF.o\nExample 21 {ContinuationoofoExampleo8}.oIt is easy to see that \nG(4) = G2J , F&(4) = {ilyi21 y F:,(4) = ?i&) . \nThus GE,,o=o{iI,oi2}.oNote that GEAFois also the only preferred extension of AF.o\nExample 22 {ContinuationoofotheoNixonoexample}.oFrom AFo=o{AR,oattacks}owith \nAR = {A,oB},oand attackso=o{{A,oB},o{B,oA}},oit follows immediately that the \ngrounded extension is empty, i.e. a skeptical reasoner will not include anything. \nThe following notion of complete extension provides the link between preferred \nextensions (credulous semantics), and grounded extension (skeptical semantics). \nDefinition 23. An admissible set S of arguments is called a completeoextensionoiff \neach argument, which is acceptable with respect to S, belongs to S. \nIntuitively, the notion of complete extensions captures the kind of confident \nrational agent who believe in every thing he can defend. \n\n===== PDF PAGE 10 =====\n\n330 P.M. Dung I Artificial Intelligence 77 (1995) 321-357 \nLemma 24. A conflict-free set of arguments E is a complete extension iff E = \nF&E). \nThe relations between preferred extensions, grounded extensions and complete \nextensions is given in the following theorem. \nTheorem 25. \n(1) Each preferred extension is a complete extension, but not vice versa. \n(2) The grounded extension is the least (with respect to set inclusion) complete \nextension. \n(3) The complete extensions form a complete semilattice’ with respect to set \ninclusion. \nProof. (1) It is obvious from the fixpoint definition of complete extensions that \nevery preferred extension is a complete extension. The Nixon diamond example \nprovides a counter example that the reverse does not hold since the empty set is a \ncomplete extension but not a preferred one. \n(2) Obvious \n(3) Let SE be a nonempty set of complete extensions. Let \nLB = {E 1 E is admissible and EC E’ for each E’ in SE} \nIt is clear that GE E LB. So LB is not empty. Let S = U {E 1 E E LB}. It is clear \nthat S is admissible, i.e. S c F(S). Let E = lub(F’(S)) for ordinals i. Then it is \nclear that E is a complete extension and E E LB. Thus E = S. So E is the glb of \nSE. 0 \nRemark 26. In general, the intersection of all preferred extensions does not \ncoincide with the grounded extension. \nIn general, FAF is not continuous, but if the argumentation framework is \nfinitary then it is. \nDefinition 27. An argumentation framework AF = (AR, attacks) is finitary iff for \neach argument A, there are only finitely many arguments in AR which attack A. \nLemma 28. Zf AF is finitary, then FAF is o-continuous. \nProof. Let S, & . . . c S, c . . be an increasing sequence of sets of arguments, and \nlet S=S,U~~-US,U~~~. Let A E FAF(S). Since there are only finitely many \narguments which attack A. there exists a number m such that A E F,r(S,). \nTherefore, \nFAF(S)=FAF(SO)U...UF~F(S,I)U.... 0 \n’ A partial order (5’ . S) is a complete semilattice iff each nonempty subset of S has a glb and each \nincreasing sequence of S has a lub. \n\n===== PDF PAGE 11 =====\n\nPtMtdDungdIdArtificialdIntelligenced77dmw99ÙndyxwsyÙ7d yywd\nAn example of a non-finitary argumentation framework is given in Appendix \nA. \n2.3. Sufficientdconditionsdfordcoincidencedbetweenddifferentdsemanticsd\nWellsfoundeddargumentationdframeworksd\nWe want to give in this subsection a sufficient condition for the coincidence \nbetween the grounded semantics and preferred extension semantics as well as \nstable semantics. \nDefinition 29. An argumentation framework is wellsfoundeddiff there exists no \ninfinite sequence ArrrdAd1, . . . , Arrd. . . such that for each irdArpwdattacks Aitd\nThe following theorem shows that well-founded argumentation frameworks \nhave exactly one extension. \nTheorem 30. Everydwellsfoundeddargumentationdframeworkd hasdexactlydoned\ncompletedextensiondwhichdisdgroundedrdpreferreddanddstabletd\nProof. Assume the contrary, i.e. there exist a well-founded argumentation \nframework whose grounded extension is not a stable extension. Let AFd=d\nmARrdattacksndbe such an argumentation framework such that \nSd=d{Ad1 AdEdAR\\GErrd and Adis not attacked by GEAFnd\nis nonempty. Now we want to show that each argument Adin S is attacked by S \nitself. Let AdEStdSince Adis not acceptable with respect to GErrrd there is an \nattack of B against Adsuch that Bdis not attacked by GEAFtdFrom the definition of \nS, it is clear that Bddoes not belong to GEAFtdHence, Bdbelongs to S. Thus there \nexists an infinite sequence Ad1, Arrd. . . such that, for each irdAipldattacks Aitd\nContradiction! q \nCoherentdargumentationdframeworksd\nNowrdwedwant to give a condition for the coincidence between stable extensions \nand preferred extensions. In general, the existence of a preferred extension which \nis not stable indicates the existence of some “anomalies” in the corresponding \nargumentation frameworkP For example, the argumentation framework \n((4, (6% 41)’ h as an empty preferred extension which is not stable. So it is \ninteresting to find sufficient conditions to avoid such anomalies. \n6 The existence of “anomalies” does not mean that something is wrong in the concerned argumenta- \ntion frameworks. \n‘The argumentation framework corresponding to the logic program p +-not p is of this kind. \n\n===== PDF PAGE 12 =====\n\n332 P.M. Dung : Artificial Intelligence 77 (1995) 321-357 \nDefinition 31. \n(1) An argumentation framework AFkis said to be coherentkif each preferred \nextension of AkFkis stable. \n(2) We say that an argumentation framework AFkis relativelykgroundedkif its \ngrounded extension coincides with the intersection of all preferred exten- \nsions. \nIt follows directly from the definition that there exists at least one stable \nextension in a coherent argumentation framework. \nImagine an exchange of arguments between you and me about some proposi- \ntion C. You start by putting forward an argument Azzksupporting C. I don’t agree \nwith C, and so I present an argument Azkattacking your argument Azz}kTo defend \nAzzkand so C, you put forward another argument Ak7kattacking my argument Az}k\nNowkIkpresent Ak3kattacking Ak?}kIf we stop at this point, Azzkis defeated. It is clear \nthat Ak3kplays a decisive role -in the defeat of Azzkthough Azkdoes not directly \nattack Azz}kAkikis said to represent an indirect attack against Azz}kIn general, we \nsay that an argument BkindirectlykattackskAkif there exists a finite sequence \nA,,, 3 &r+, such that (1) A=A,, and B=A?zzzz}k and (2) for each izkOtisk\n2n}kAzyzkattacks Az}kWe say that an argument BkindirectlykdefendskAkif there exists \na finite sequence Azzzk }k}kAzzzksuch that (1) Ak=Azzkand B=kAznzkand (2) for \neach izkOSi<2n}k Azzkzkattacks Az}kAn argument Bkis said to be controversialkwith \nrespect to Akif Bkindirectly attacks Akand indirectly defends A}kAn argument is \ncontroversialkif it is controversial with respect to some argument A}k\nDefinition 32. \n(I) An argumentation framework is uncontroversialkif none of its arguments is \ncontroversial. \n(2) An argumentation framework is limitedkcontroversialkif there exists no \ninfinite sequence of arguments Azz}k }kAzz}k such that Az_zkis contro- \nversial with respect to Az}k\nIt is clear that every uncontroversial argumentation framework is limited \ncontroversial but not vice versa. \nTheorem 33. \n(1) Everyklimitedkcontroversialkurgumentutionkframeworkkiskcoherent}k\nu2vkEverykuncontroversialkargumentationkframeworkkiskcoherentkandkrelativelyk\ngrounded}k\nProof. (1) Assume that there exists a limited controversial argumentation \nframework AFkwhich is not coherent. Let Ekbe a preferred extension of AFk\nwhich is not stable. Let us define: \nAR’k=k{A’k1kA’kEkAR\\Ekand A’kis not attacked by E}k\nIt is clear that AR’kis nonempty. Let attuckskbe the restriction of attackskon AR’}k\n\n===== PDF PAGE 13 =====\n\nPnMnTDungTITArt@ialTIntelligenceTxxTgr{{vhTtsrmtvxT tttT\nLet AF’T=TgAR’lTattacks’hnTFrom Lemma 34, there exists a nonempty complete \nextension E’Tof AF’nTIt is easy to see that ETU E’Tis again an extension of AFnT\nContradiction! \n(2) follows immediately from the following Lemmas 34 and 35. 0 \nFor the proof of Lemmas 34 and 35, we need a couple of new notations. An \nargument ATis said to be a threatTto a set of argument S if ATattacks S and ATis \nnot attacked by S. A set of arguments DTis called a defense of a set of arguments \nS if DTattacks each threat to S. \nLemma 34. LetTAFTbeTaTlimitedTcontroversialTargumentationTframeworknTThenT\nthereTexistsTatTleastTaTnonemptyTcompleteTextensionTETofTAFnT\nProof. If the grounded extension of AFTis not empty, then the lemma is proved. \nSuppose now that the grounded extension of AFTis empty. Therefore, it follows \nimmediately that each argument ATin AFTis attacked by some other argument \n(otherwise, the grounded extension would not be empty). Let ATbe an argument \nsuch that there exists no B that is controversial with respect to AlTThe existence \nof such an argument is clearly guaranteed by the limited controversity of AI’nT\nDefine ElT=T{A}nTFor each natural number iT>TplTdefine the set EiTas follows: \nElT=TEi_lTU Di_lTwhere Di_lTis a minimal (with respect to inclusion) defense of \nETrml’TNowTweTprove by induction that for each i}T\nEiTis conflict-free, and each argument B E EiTindirectly defends AT. (*I \nIt is clear that this holds for iT=TpnTLet iT>TplTand assume that (*) holds for each \niTmT1. From the fact that each argument in AFTis attacked by some other \nargument, it is clear that there exists a minimal defense Dl_lTof Ei_lnTFrom the \ninduction hypothesis that each argument in El_lTindirectly defends AlTit is not \ndifficult to see that all arguments in Dl_iTindirectly defend AlTtoo. Thus from the \ninduction hypothesis, each argument in EiTindirectly defends AnTAssume now that \nEiTis not conflict-free. Thus there exist two arguments B and 23’ in ElTsuch that B \nattacks B’nTSince each argument in ElTindirectly defends AlTBTis clearly \ncontroversial with respect to AnTContradiction! So EiTis conflict-free. \nLet FT=TUi EinTIt is clear that FTis admissible. Let us define ETto be the least \ncomplete extension containing FnTHence ETis the desired extension. 0 \nLemma 35. LetTAFTbeTanTuncontroversialTargumentationTframeworklTandTATbeTanT\nargumentTsuchTthatTATisTnotTattackedTbyTtheTgroundedTextensionTGETofTAFTandT\nA@GEnT ThenT\n(1) thereTexistsTaTcompleteTextensionTElTsuchTthatTATETEllTandT\ngshTthereTexistsTaTcompleteTextensionTEsTsuchTthatTElTattacksTAnT\nProof. Let \nAR’T=T{A’T1 A’TETAR\\GETand A’Tis not attacked by GE}T. \n\n===== PDF PAGE 14 =====\n\n334 PuMueDungei ArtificialeIntelligencee77enx995oe’yxt’57e\nHence AeEeAR’ueThus AR’eis not empty. Let attacks’ebe the restriction of attackse\non AR’ueLet AF’e=enAR’seattacks’oue\n(1) Similar to the proof of Lemma 34, we can show that there exists a complete \nextension E,, of AF’esuch that AeEeEssueLet Ese=eGEeU EssueIt is clear that Eseis the \ndesired extension. \n(2) Since Aeis attacked by some argument in AR’sethere exists B EAR’ such \nthat Beattacks AueSoethere exists a complete extension Eseof AF’esuch that \nBeEeEsueHence Eye=eGEeU Eseis the desired extension. q \nCorollary 36. Everyelimitedecontroversialeargumentationeframeworkepossesseseate\nleasteoneestableeextensionue\nThis corollary in fact gives the answer to an often asked question about the \nexistence of stable semantics of knowledge representation formalisms like Reiter’s \ndefault logic, logic programming or autoepistemic logic. Much works have been \ndone to study this kind of questions [ 12, 17, 18, 23, 35, 541. The uncontroversity \nof argumentation frameworks is a generalization of the results given in these \nworks. \n3. Argumentation, n-person games and stable marriage problem \nIn the next two subsections. we will demonstrate the “correctness” of our \ntheory of argumentation through two examples in which we show how our theory \ncan be used to investigate the logical structure of the solutions to many practical \nproblems. \n3.1. Argumentationeinentpersonegamese\nIn the theory of n-person games developed by Von Neuman and Morgenstern \n[62], a social economy is viewed as a game whose players are the major forces of \nthe economy. Like a program. a game has two aspects: the operational aspects \nconcerning the question: Howetoeplay?seand the specification aspects concerning \nthe question: Whateisetheepayoff?e\nClassical game theory as presented in [lo, 56, 621 is mostly concerned with the \nspecification aspects of the games. In other words, the theory of n-person games \nis a theory about the possible payoffs to the players of the game. The central \nnotion of the theory of n-person games is the notion of solution of a game which \nis a set of payoff vectors called imputations, to its participants. Formally, an \nimputation of an n-person game is defined as a vector ( pI , . . , psoeof numbers \ngiving the utilities each player gets after the game. Hence in considering a social \neconomy as an n-person game, imputations model the ways the wealth is \ndistributed in an economy. The distribution of wealth in a stable economy does \nnot consist of a rigid system of apportionment, i.e. of imputation, but a variety of \nalternatives that, though following certain commonsense principles, nevertheless \n\n===== PDF PAGE 15 =====\n\nPuMueDungeIeArtificialeIntelligencee77enÙ995pe32Ùt357e 335e\ndiffer among themselves in many particular aspects. Such a system of imputation \ndescribes the “established order of the society” or the “accepted standard of \nbehavior” [62]. \nFormally, a cooperative n-person game (in normal form) is defined by a \ncharacteristic function Vewhich associates with each coalition a number determin- \ning the minimum amount that coalition can obtain if all its members join together \nand play as a team. The only condition imposed on the characteristic function is \nthe superaddivity which says that for each two disjoint coalitions Aeand B, if Ae\nand Bejoin together, they will get more than staying independent, i.e. VnAeU B) 2 \nVnApereVnBpueThe stability of a coalition is determined fully by the amount each \nof its members can get. So if any of the members of a coalition can get more in \nanother coalition then he will defect thus causing a new imputation of the game. \nThis is modelled by the notion of domination between imputations. An imputa- \ntion (pr, . . . , p,) is said to dominate another imputation ( qlse. . . , qspeif there is \na (nonempty) coalition Kece{e1, . . . , n} such that for each i E Ksepie>eqieand \nPi1 + . * ’ + Pike<VnKpe where Ke=e{il, . . . , ik}. Von Neuman and Morgenstern \n[62] define a solution of a cooperative n-person game, referred to as NM-solution, \nas a set of imputations satisfying the following two postulates (NMl) and (NM2). \n(NMl) No s in S is dominated by an s’ in S. \n(NM2) Every s not contained in S is dominated by some s’ contained in S. \nThe first postulate expresses the condition that the “established order of the \nsociety” represented by S is free from inner contradiction. The second postulate \nexpresses the fact that any attempt to build a coalition to impose a new \nimputation s$ZS will be blocked by some imputation s’ E S which dominates s. In \nother words, it is not possible to deviate from the “established order of the \nsociety”. That means that every thing has to conform to this “established order”. \nIt turns out that this “extremist standpoint” of an NM-solution is the cause for the \nnonexistence of an NM-solution to many meaningful economic systems. \nTo illustrate the intuition behind NM-solutions, let us consider the following \nexample taken from [lo]. Suppose that Pi, P2eand P3eare players in a three-person \ngame in which any coalition with either two or three players can get 2 units of \nwealth, while a player alone gets nothing. This game has infinitely many solutions. \nWe will look at two of them. The first solution S, consists of three imputations \ns1 = {P,:l, P*:l, P3:O}epe\nsqe=e{P,:l, Ps:OseP,:l} ) \ns3 = {Ps:OseP,:l, P,:l} . \nLet us check that this solution really satisfies the postulates NM1 and NM2. It is \nclear that S, satisfies the first postulate. Let s now be an arbitrary imputation \n{PmsseP2:u2seP3:u3}jjSsue Then it is easy to see that there exists {PssePs}ewith i # j \nsuch that ui + ui < 2 and max(ui, u,) < 1 (otherwise s would belong to S,). Without \nloss of generality, we can assume that i = 1 and i = 2. It is easy to see that s is \ndominated by si. The “established order” characterized by this solution dictates \nthat a bigger coalition is not tolerated if the same result can be achieved with a \n\n===== PDF PAGE 16 =====\n\nÙÙ6g PwMwgDunggIgArtificialgIntelligenceg77gp{995rgÙ’{vÙ57g\nsmaller one, and the participants in a coalition are treated equally. In the second \nsolution-a discriminatory solution-two players join, give the third player \nsomething less than his “fair share” of 213 and take the rest for themselves. This \nis similar to what happens in an apartheid society. \nIt is not difficult to see that the argument for the building of a coalition Kgis the \npayoff for each of its participants. Thus each imputation represents an argument \nfor building some coalition. So the set of imputations together with the domina- \ntion relation between them forms an argumentation framework. It is obvious that \nthe following theorem holds: \nTheorem 37. LetgIMPgbegthegsetgofgimputationsgofgagcooperativegnvpersonggamegGg\nandg\nattacksg=g{psugs’rg) s dominatesgs’rg\nThengeachgNMvsolutiongofgtheggamegGgisgagstablegextensiongofgpIMPugattacksrg\ninterpretedgasgangargumentationgframeworkugandgvicegversawg\nVon Neuman and Morgenstern believed that each cooperative n-person game \npossesses at least one NM-solution. \nThere can be, of course, no concession as regards existence. If it should turn \nout that our requirements concerning a solution S are, in any special case, \nunfulfillable-this would necessitate a fundamental change in the theory. \nThus a general proof of the existence of solutions for all particular cases is \nmost desirable. It will appear from our subsequent investigations that this \nproof has not yet been carried out in full generality but that in all cases \nconsidered so far solutions were found. [62] \nTwenty years later, F.W. Lucas constructed a ten-person game which has no \nNM-solution [56]. Later, Shubik [56] pointed out that despite having no NM- \nsolution, Lucas’ games model meaningful economic systems. The conclusion here \nis this: \nStablegextensionsgdognotgcapturegthegintuitivegsemanticsgofgeverygmeaningfulg\nargumentationgsystemwg\nWe will come back to this point again in the next subsection. \nAs preferred extensions exist for every argumentation framework, we can \nintroduce the preferredgsolutionsgto n-person games by defining them as the \npreferred extensions of the corresponding argumentation system pIMPugattacksrwg\nThe new solutions satisfy both conditions of a rational standard behavior: freeness \nfrom inner contradiction and the ability to withstand any attack from outside. \nThis is clearly a contribution to the theory of n-person games. \nAnother notion of solution of an n-person game is thegcoregdefined as the set of \nimputations whose members are not dominated by any other imputation [56]. It is \nnot difficult to see that: \n\n===== PDF PAGE 17 =====\n\nPoMoWDungWIWArtificialWIntelligenceW}}Whs’’xiWutsnux}W uu}W\nTheorem 38. LetWIMPWbeWtheWsetWofWimputationsWofWanWnnpersonWgameWGWandWletW\nattacksWbeWtheWcorrespondingWdominationWrelationWbetweenWthemoWThenWtheWcoreWofWGW\ncoincidesWwithWFhwiW whereWFWisWtheWcharacteristicWfunctionWofWhIMPmWattacksiW\ninterpretedWasWanWargumentationWframeworkoW\nuotoWArgumentationWandWtheWstableWmarriageWproblem’W\nGiven two sets MWand WWof 12 men and nWwomen respectively. The stable \nmarriage problem (SMP) is the problem of finding a way to arrange the marriage \nfor the men and women in MWand WmWwhere it is assumed that all the men and \nwomen in MWand WWhave expressed mutual preference (each man must say how \nhe feels about each woman and vice versa).9 The marriages have to be stable in \nthe sense that, if for example AWis married to BmWthen all those whom AWprefers to \nBWmust be married to someone whom they prefer to AoWFormally, a solution to \nthe SMP is a one-one correspondence S : MnlWWWsuch that there exists no pair \nhmmWwiWEMWxWWWsuch that mWprefers w to ShmiWand w prefers mWto S-‘(w). \nThe SMP can be formalized as the task of finding a stable extension of an \nargumentation framework AFW=WhARmWattacksiWas follows: It is clear that D \nrepresents a threat to a marriage hAmWBiWif AWprefers D to BoWIn other words, a \nhypothetical marriage of AWto D poses an attack to hAmWBioWBut this attack is \neliminated if DWis married to someone whom DWprefers to AoWLet \nAR=MxWmW\nattacksWcWARWxWARÙW\nhCmWDiWattacks hAmWBiWiff (1) AW=WCWand AWprefers DWto BmWor \n(2) DW=WBWand BWprefers C to AoW\nTheorem 39. AWsetWSWcWARWconstitutesWaWsolutionWtoWtheWSMPWiffWSWisWaWstableW\nextensionWofWtheWcorrespondingWargumentationWframeworkoW\nProof. (+) Let S be a solution of the SMP. Since S is a one-one correspondence \nbetween MWand WmWit is clear that S is conflict-free. Let hmmWwieSoWThen from the \ndefinition of S, either mWprefers ShmiWto w or w prefers S-‘(w) to moWHence, \nhmmWwiWis attacked by at least one element from {hmmWShmiimWhSn‘hwimWwi}WcWSoW\nhliW Let S be a stable extension of AFoWFrom the definition that S is \nconflict-free, it is clear that S and S-’ are partial functions from MWinto WWand \nfrom WWinto MWrespectively. Assume now that S is not a total function from MW\n‘WMathematically, the stable marriage problem is a special case of the graph matching problem which \nhas been studied extensively in the literature due to its wide applicability. For example, in the USA, a \nquite complicated system has been set up to place graduating medical students into hospital residency \npositions. Each student lists several hospitals in order of preference and each hospital lists several \nstudents in order of preference. The problem is to assign the students to positions in a fair way \nrespecting all the stated preferences [S]. \n9 That means that associated with each person is a strictly ordered preference list containing all \nmembers of the opposite sex. \n\n===== PDF PAGE 18 =====\n\n33x P.M. Dung I Artificial Intelligence 77 (199.5) 321-357 \ninto WÙmThen it is clear that there exists (m, W) E AR{msuch that both s(m) and \nS-‘(w) are undefined. Therefore, (m, W) is not attacked by S which is a \ncontradiction. Hence both S and S-’ are total functions, i.e. S is a one-one \ncorrespondence between M and WÙmFurther it is also easy to see that it follows \ndirectly from the stability of S that there exists no pair (m, w) EM XmWmsuch that \nmmprefers w to Swmymand w prefers mmto S -l(w). 0 \nTo demonstrate once more that there are practically relevant argumentation \nsystems which have no stable semantics, in the following we introduce the Stable \nMarriage Problem with Gays (SMPG) which is a modification of the SMP in \nwhich individuals of the same sex can be married to each other. The condition for \nthe stability of a marriage is defined as in the SMP. The problem now is finding a \nway to arrange the marriage for a maximal number of persons. In contrast to the \nSMP, the SMPG corresponds to the problem of finding a preferred extension in \nan argumentation framework AFm=mwAR“mattacksymwith ARm=mPmXmPmwhere Pmis the \nset of persons involved and attacksmis defined as in the SMP. The following \nexample shows that in general, the argumentation framework corresponding to an \nSMPG has no stable semantics. \nLet P=m{mÙmw“mp““my““mpi}mwhere mmis a man, w is a woman. For short we say \nthat x loves y if x prefers y to all others. Suppose that mmand w are in love with \neach other. Further suppose that there is a love triangle between p,. p2 and p3 as \nfollows: p, loves p2, p, loves p3 and p1 loves p, So it is not difficult to see that \nthere is no way to arrange a stable marriage for any among p, , p2 and p3. The \nonly stable marriage is between mmand w. Indeed, the corresponding argumenta- \ntion framework has exactly one preferred extension containing only the pair \nwm“mwyÙmIt is clear that there is nothing wrong in the above argumentation \nframework. If something is “wrong”, then it is the problem. i.e. the world we are \ntrying to model is somehow “wrong”. But it is “normal” that there are lots of \nthings which are “wrong” in some ways in the world around us. So it is natural to \nexpect that any knowledge system representing this world may not have a stable \nsemantics. Further, due to the result that nonmonotonic reasoning and logic \nprogramming are different forms of argumentation, and an argumentation system \nitself can be transformed into an equivalent logic program (see coming parts), the \nconclusion we draw here can be formulated as follows: \nLetmPmbemamknowledgembasemrepresentedmeithermasmamlogicmprogram“mormasmam\nnonmonotonicmtheorymormasmanmargumentationmframeworkÙmThenmtheremismnotm\nnecessarilymam“bug”minmPmifmPmhasmnomstablemsemanticsÙm\nThis theorem defeats an often held opinion in the logic programming and \nnonmonotonic reasoning community that if a logic program or a nonmonotonic \ntheory has no stable semantics then there is something “wrong” in it. \nThough it has been recognized earlier in [38]mthat the stable marriage problem \ncan be viewed as a nonmonotonic reasoning problem, argumentation presents a \ndirect and more natural representation and analysis of this problem. \n\n===== PDF PAGE 19 =====\n\nPuMugDunggIgArtificialgIntelligenceg77go’995pg3Ù’t357g 339g\n4. Nonmonotonic reasoning and logic programming as argumentation \nA number of different approaches to nonmonotonic reasoning has been \nproposed in AI [41, 42, 45, 46, 48, 49, 52, 571 which are very different at first \nsight. But it turns out that all of them are different forms of argumentation. Due \nto the lack of space, we only show in this section that two of them, Reiter’s \ndefault logic, as representative of the extension-based approach [41, 42, 48, 49, \n521, and Pollock’s inductive defeasible logic, as representative of the argument- \nbased approach [45, 46, 571, are different forms of argumentation. This clarifies \nthe relationship between these two approaches to nonmonotonic reasoning, a \nproblem which has been open until today. Further we also show that logic \nprogramming is a form of argumentation, too. Readers who are interested in \nmore details about the relations between argumentation and nonmonotonic \nreasoning are referred to a recent paper of Bondarenko, Toni and Kowalski [7] \nwho, generalizing the results given in this section, have developed an interesting \nassumption-based framework to nonmonotonic reasoning unifying other previous- \nly proposed formalism. \n4.1. Reiter’sgdefaultglogicgasgargumentationg\nA default is an expression of the form (p:jl , . . . , jklw) where psgjl , . . . , jk and \nw are closed first-order sentences with pgbeing called the prerequisite, jl, . . . , jk \nthe justifications and w the conclusion of the default. \nA default theory is a pair (D, W) where D is a set of defaults and Wgis a set of \nclosed first-order sentences. A default theory is said to be consistent if Wgis \nconsistent [52]. Reiter’s extension (or R-extension for short) [52] of a default \ntheory (D, Wpgis a closed first-order theory Egsatisfying the following conditions: \nEg=gIJg{Wsg1 igis a natural number} , \nwhere \nw,=w, \nW+l = ThoWipgU {w 1 3op:jlsug . . , jkl+v) in D such that \n{ j,} U Egis consistent for kg3gngÙg1, \nand pgEq}sg\nwith ThoWjpgdenoting the first-order closure of the theory W. \nLet S be a set of defaults. The set of all justifications of defaults in S is denoted \nby &s(S). \nLet T=(D,W)andK={j,,..., j,} c Jus(D). A closed wff kgis said to be a \ndefeasiblegconsequencegofgTgandgKgif there is a sequence (e,, e,, . . . , e,) with \ne, = kgsuch that, for each ei, either ei E Wgor ei is a logical consequence of the \npreceding members in the sequence or ei is the conclusion w of a default \n\n===== PDF PAGE 20 =====\n\n340 P.M. Dung / Artificial Intelligence 77 (199.5) 321-357 \n(p:j: , , j: iw) whose prerequisite p is a preceding member in the sequence \nand whose justifications j;. . , j: belong to KpbKbis said to be a supportbforbkb\nwithbrespectbtobTpb\nA default theory Tb=bjDnbWkbcan be interpreted as an argumentation frame- \nwork AFjTkb=bjARnnbattacksnkbas follows: \nARnb=b{jKnbkkb/ KbC_bprusjDk:bKbis a support for kbwith respect to T}b, \njKnbkkbattacksrbjK’pbk’kbiff lkbEbK’b\nThe following lemma shows that the argumentation framework AFjTkbis a \n“meaningful” one. \nLemma 40. LetbSbbebanbadmissiblebsetbofbargumentsbinbAFjTkpbLetb\nH=U{KIjKnkkES}b\nThenbTnHbkbfalse iff Tbisbconsistentpb\nProof. (+) Obvious. \n(+) Assume the contrary. Thus there is a finite nonempty subset Kbof Hbsuch \nthat TnKbkbfalse. Thus for each closed wff knbjKnbkkbEbARnpbLet jK’nbk’kbEbSbsuch \nthat K’bis not empty. So Kbrepresents an attack against jK’nbk’kpbFrom the \nadmissibility of S, there is Ab=bjH’nbh’kbin S such that lh’bEbKpbThat means that Ab\nattacks some argument Bbin S. Hence S is not conflict-free. Contradiction! 0 \nThe correspondence between the R-extensions of a default theory Tband the \nstable extensions of the corresponding argumentation framework AFjTkb is \ncaptured by the following mapping: \nDefinition 41. Let S be a first-order theory and S’ be a set of arguments of \nAFjTkpbDefine \nurgjSk={jKnkkEARnjVjjGK:b {j}US isconsistent}. \nfZatjS’k={krwjKnkkES’}pb\nFrom the definition of R-extension. it is not difficult to see that the following \nlemma holds: \nLemma 42. LetbTbbebabdefaultbtheorynbandbEbbebabfirstoorderbtheorypbThenbEbisbanb\nRoextensionbof Tbiff Eb=f[atjargjEkkpb\nIt follows directly that: \nTheorem 43. LetbTb=bjDnbWkbbebabdefaultbtheorypbLetbEbbebanbRoextensionbofbTb\nandbE’bbebabstablebextensionbofbAbFjTkpbThenb\n\n===== PDF PAGE 21 =====\n\nP.M. Dung I Artificial Intelligence 77 (1995) 321-357 341 \njskbargjEkbisbabstablebextensionbofbAFjTknb\njtkbfatjE’kbisbanbRoextensionbofbTpb\nProof. (1) Let Ab=bjHnbhkbbe an argument in AFjTkpbThen it is easy to see that Ab\nis not attacked by argjEkbiff for each (K, k) E a&E): -&$E’H iff VkbEbE:blkfHb\n(from Lemma 42) iff Vj E H:bEbU { j} is consistent iff AbEbargjEkpbSobfrom \nLemma 14, it follows immediately that argjEkbis a stable extension of AFjTkpb\njtkbIt is easy to see that for each argument (K, kk:bjKnbkkbEbargjflatjE’kkb iff \nVj E K: {j} UjlatjE’kb. 1s consistent iff (K, kkbis not attacked by E’biff (K, kkbEbE’b\n(from the fact that E’bis a stable extension of AFjTkband Lemma 14). Hence \nE’b=bargjflatjE’kkpb Sobflat jEkb=flatjargjfZatjE’kkkpb From Lemma 42, it follows \nthat fatjE’kbis an R-extension of Tpbrb\nIt is obvious that the preferred extension semantics of AFjTkbgeneralizes the \nR-extension semantics of TpbMoreover, we argue that preferred extension \nsemantics of AFjTkbcaptures in a more natural way the intuition of a default \n(p:j,, . . . , jklW) which says that in the absence of any evidence to the contrary of \nthe justifications j,, . . . , jk, concludes w if pbholds. It is clear that this intuitive \nunderstanding of defaults does not say that the existence of such a “paradox” \ndefault like j:lpqpkb can prevent us from concluding qbin the default theory \nTb=bj{j:lpqpk}nb jvkkpbBut R-extension semantics does exactly that, while pre- \nferred extension semantics does not. Supporters of R-extensions may argue that Tb\nin this case has a bug and we have to fix it before we conclude something from Tpb\nHow can we fix it? How can we know that the bug is in Dband not in W?bWeb\nknow it thanks to the preferred extension of AFjTkcb Further, interpreting a \ndefault theory Tbas a shorthand of its corresponding argumentation framework \nAFjTkbmakes it also possible to introduce a skeptical semantics of Reiter’s default \nlogic, thus building a bridge to other skeptical approaches to nonmonotonic \nreasoning. \nvptpbPollock’sbinductivebdefeasibleblogicbasbgroundedbargumentationb\nStarting from the ideas of prima facie reasons and defeaters in philosophy, \nPollock [45, 461 has constructed a theory for defeasible reasoning that is based on \nthe relations between arguments supporting contradictory conclusions. Pollock’s \nwork is one of the most general and influential approaches to defeasible reasoning \nwhich deviate from the mainstream approaches to nonmonotonic reasoning in AI. \nIn this subsection, we will show that Pollock’s inductive theory of defeasible \nreasoning is based on our notion of grounded extension. A byproduct of this \nresult is the illumination of the inherent relations between argument-based [45, \n46, 571 and extension-based [22, 41, 42, 52, 601 nonmonotonic reasoning in AI. \nGiven an argumentation framework jARnbattacksknbPollock’s theory of defeas- \nible reasoning is based on a hierarchy of arguments defined as follows: \n\n===== PDF PAGE 22 =====\n\nproP PiMiPDungPIPArtificialPIntelligencePuuPcnyysdPponhpsuP\nl All arguments are level-0 arguments. \nl An argument is a level-(n + 1) argument iff it is not attacked by any level-n \nargument. \nDefinition 44. An argument is indefeasiblePiff there is an m such that for each \nnP>PmgPthe argument is a level-n argument. \nLet ARgPdenote the set of level-i arguments. It is clear that for each igP\nARgP=PPlggcARghP gdPwhere \nPIggP: 2AR* 2AK , \nPIggcSdP=P{AP1 no argument in S attacks A}PiP\nThe operator PlgrgPis very closely related to FAFPas the following lemma shows. \nLemma 45. FApP=PPlggoPPIgghiP\nProof. Let S be a set of arguments in AFPand APbe an arbitrary argument in AFiP\nThen APEPFaSdP\niff each attack against APis attacked by an argument in S \niff each attack against APbelongs to ARVlggcSdP\niff no attack against APbelongs to PIAFcSdP\niff no argument in PlggcSdP attacks AP\niff APbelongs to PfgicPIgicSddiP mP\nThe relations between Pollock’s indefeasible arguments and our grounded \nextension semantics is illuminated in the following lemma and theorem. \nLemmaPrtiPLetPGEggPbePthePgroundedPextensionPofPAFiPThenP\nfCARgciiicARogP gCARogfgCiiicGElggP\nchiPicARggfgc_ARggciiicARgg=ARiP\nProof. It is easy to see that ARgP=PFgicrdiP Further, from the fact that for each \nnPpPmgPARgfgP=PFAFcARgdgPit follows immediately that, for each iPpPmgPARggP=P\nFacARgdP =PF}icARdgP and, for each iPoP1, ARgi_nP=PFaRcARgdP =PFLgcfdiP The \nlemma follows then directly from the monotonicity of FAFgPand the fact that GEggP\nis a fixpoint of FAFiPmP\nLet ARinrP=PU {ARgghgP/ iPpP1). It follows immediately that: \nTheorem 47. \n(1) AnPargumentPAPisPindefeasiblePiffPAPEPARinfiP\ncodPARinfPCPGEAFiP\ncpdPIfPAFPisPfinitarygPthenPARgggP=PGEgiiP\n\n===== PDF PAGE 23 =====\n\nPsMscDungcI ArtijcialcIntelligencec77clw99’mc{ywr{’7c {}{c\n4.3. Logiccprogrammingcascargumentationc\nIt is widely accepted today that logic programming provides an ideal environ- \nment for the implementation of knowledge bases. So, it is not surprising that \nmuch work has been done to study the semantics of logic programming. The \nsemantics of logic programming depends on whether we view negation as finite \nfailure or as possibly infinite failure. The first view can provide computable \nsemantics [8, 34, 371 but fails to capture the intended semantics in many cases. \nThe second view captures better the intended semantics of a logic program [ll, \n16, 22, 26, 51, 601 but is incomputable in general. In [ll, 271, an argument-based \nframework for logic programming with negation as possibly infinite failure has \nbeen given unifying many previously proposed approaches. Continuing this line of \nresearch, we will show in this section that a logic program can be considered as a \nschema for generating arguments. Different semantics will result from the \ndifference in the structure of the arguments. The computability of a semantics is \ndetermined by the computability of the arguments involved. \nA logic program is a finite set of clauses of the form b, +bi, scscscpcbppc\nlbcmolpcncscscpclbcmoncwhere the hi’scare atoms. For a logic problem Ppc\nGpcdenotes the set of all ground instances of clauses in PscFor each literal hpc\nthe complement of hcis denoted by hnscFurther, for each set of ground atoms Mpc\nlet wsMc=c{lbc1 bcEcM}sc\n4.3.1. Negationcascpossiblycinfinitecfailurec\nLet Kc=c{lbppc . . . , lbp}c be a set of ground negative literals. A ground atom kc\nis said to be a defeasible consequence of PpKpcdenoted by PpKckckpcif there is a \nsequence of ground atoms (e,, e,, . . . , e,) with e, = kcsuch that for each ei, either \nei +- E G, or ei is the head of a clause ei oaipc. . . , appclappppc . . . , lapppc in G, \nsuch that the positive literal a,, . . . , apcbelong to the preceding members in the \nsequence and the negative literal lapppc, . . . , lapppc belong to KscKcis said to be a \nsupportcforckcwithcrespectctocPsc\nA logic program Pcis transformed into an argumentation framework \nAjppplPmc =clARpcattacksmcas follows: \nARc=c{lKpckmc1 Kcis a support for kcwith respect to P}c\nU {l{lk}pc lkmmckcis a ground atom} , \nlKpchmcattacks lK’pch’mciff hncEcK’csc\nRemark 48. An argument of the form l{lk}pc lkmccaptures the idea that kcwould \nbe concluded false if there is no acceptable argument supporting ksc\nThe semantics of Pcdefined by the preferred extensions of AFpppppplPmc is called \npreferred extension semantics. It is not difficult to see that this semantics \ncoincides with the preferential semantics defined in [ll]. \n\n===== PDF PAGE 24 =====\n\nrssV PmMmVDungVIVArtificialVIntelligenceVwwVfpyytgVrqplrtwV\nCorrespondenceVbetweenVstubleVmodelsVof’VPVandVstableVextensionsVof AFkkkkkkfPgV\nLet MVbe a Herbrand interpretation (a set of ground positive literals) of P. MVis \nsaid to be a stableVmodelVof PViff MVis the least Herbrand model of the program \nobtained from G,, by (1) deleting every clause in G, whose body contains a \nnegative literal lbVwith bVEVMkVand (2) deleting all negative literals from the \nremaining clauses [22]. \nFor each interpretation MkVdefine \nCMV’V{uV[uVis a ground atom and a$M} \nLet ARkkkkkfPgV ’VfARkVattacksgkVand for each stable model M, let EkkkV’V{fKkVkgVEV\nARIK~l.CM}.ItiseasytoseethatkEMUl.CMiff3(K,k)EE,.Hence, \nfor each argument AV’VfKkVkgVEARkVAVEVEkViff VlbVEVK{VbgMV iff AVis not \nattacked by EkkkkmVFrom Lemma 14. it follows that: \nTheorem 49. LetVPVbeVaVlogicVprogrammVThenVaVHerbrandVinterpretationVMVisVaV\nstableVmodelVof PViff there is u stable extension EVof AFkkkkkfPgV suchVthatV\nMulmCM’{kprfKkkg~E}mV\nCorrespondenceVbetweenVwelllfoundedVmodelVof PVandVgroundedVextensionVofV\nAFqkkfPgV\nA consistent set of ground literal is called a partial interpretation of PmVThe \ndefinition of well-founded model [60] is based on the following notion of \nunfounded sets: A set S of positive ground atoms is an unfounded set of a logic \nprogram PVwith respect to a partial interpretation I iff for each clause C in G,, \nwhose head belongs to S, either the body of C is false with respect to I or it \ncontains a positive literal 1 such that I E S. The welllfoundedVmodelVof a logic \nprogram PVis defined as the least fixed point of the following monotonic operator \nVkkfIgV’VlmGUSfIgV U ‘Z’,(1) \nwhere \nTkfIgV’V{bVI3C E G,, such that headfCgV’VbV\nand bodyfCgVis true with respect to I} , \nand GUS(I) is the greatest unfounded set of PVwith respect to I. \nThe following theorem shows the equivalence between well-founded model of \nPVand grounded extension of AFfPgmV\nTheorem 50. LetVPVbeVuVlogicVprogramkVandVWFMVbeVtheVwelllfoundedVmodelVofVPmV\nLetVGEVbeVtheVgroundedVextensionVofVAFkkkkkkfPgmV ThenV\nWFMV’V{hV\\3(K, hgVEVGE}V\nProof. See Appendix B. Cl \n\n===== PDF PAGE 25 =====\n\nPmMmRDungRIRArtificialRIntelligenceRwwRgpyyuhRsrplsuwR stsR\nThough considering a logic program PRas an argumentation framework \nAFkkkkkkgPhR provides an appropriate platform for capturing the intended semantics \nof PkRany semantics based on AFkkkkkgPhR is incomputable due to the result that, in \ngeneral, the set of arguments of AFkkkkkgPhR is incomputable. \nLemma 51. LetRPRbeRanRarbitraryRlogicRprogramR andRAFkkkkkkgPhRÙRgARkRattackshmR\nThenkRinRgeneralkRARRisRnotRrecursivelyRdecidablekRimemRthereRisRnoRalgorithmRwhichR\nalwaysRterminatesRandRdecidesRforReachRpairRgKkRkhRwhetherRorRnotRgKkRkhREARmR\nProof. Let fRbe an n-ary partial recursive function which is not totally recursive. \nThen according to Theorem 9.6 in [37], there is a definite program PRand an \ngnRjRl)-ary predicate symbol pfRsuch that all computed answers for PRU \n{+Pf(sk’(0), . . . ,d‘“(O),x)} have the form {xIs~(O)} and for all nonnegative \nintegers klkR. . . , knkRweRhave fgkpkmR. . , knhRÙRkRiff {xIsk(0)} is the computed \nanswer for PRU {jpfgsklgohkR . . . , sk”(0), x)}. \nFor any sequence of nonnegative integers kl, . . . , knkR BRÙR(0, \npgsklgohkR. . . , sk”(0), khhRis an argument in AFkkkkkgPhR iff fgkpkR. . . , knhRis defined \nand fgkpkR. . . , knhRÙRkmRSince fRis partially recursive but not totally recursive, \nthere exists no algorithm which always terminates and can decide whether BRis an \nargument. 0 \nIt follows immediately that: \nTheorem 52. LetRPRbeRanRarbitraryRlogicRprogrammRThenRtheRstablekRwelllfoundedR\nandRpreferredRextensionRsemanticsRofRPRareRinRgeneralRincomputablemR\ntmsmrmRNegationsRasRfiniteRfailureR\nTo capture the semantics of negation as finite failure, a logic program PRis \ntransformed into an argumentation framework AFkkkkgPhRÙRgARkRattackshRas \nfollows: \nARRÙR{gKkRkhRjsCRERGk{RheadgChRÙRkRand bodygChRÙRK}R\nU {g{lk}kR lkhR1 kRis a ground atom} , \ngKkRhhRattacks gK’kRh’hRiff hiRERK’R. \nRemark 53. The definition of AFkkkkkgPhRmeans that each ground instance of a \nclause of PRconstitutes an argument for its head. \nIt follows immediately that: \nLemma 54. TheRsetRofRargumentsRinRAFkkkkkgPhR forReachRlogicRprogramRPRis \ncomputablemR\nThe relationship between Clark’s completion semantics and the AFkkkkgPhlR\nbased semantics is clarified by the following theorems. \n\n===== PDF PAGE 26 =====\n\nlmoM PgMgMDungMIM’rtificialMIntelligenceMppMajssnbMlkjflnpM\nTheorem 55. LetMPMbeManMarbitraryMlogicMprogramgMThenMaMHerbrandMinterpretationM\nMMisMaMmodelMofMClark’sMcompletionMofMPeMcampaPbe”MifMthereMisMaMstableMextensionMEM\nofM’FeeeeaPbM suchMthatMMMU lgCMMyM{kMj3(K. kbMEME}gM\nProof. (*) Let \nEeMyM{aKeMkbMEM’RM( kMEMMand KMis true with respect to M}M\nU {a{lk}eM dbM/ kSMbM\nLet aHeMhbMbe an arbitrary argument in ’RgMThen aHeMhbMEMEeMiff VlMEMHtMjMis true \nin MMiff Vl E HtMIcMis not true in MMiff aHgMhbMis not attacked by EegMHence from \nLemma 14, it follows that EeMis a stable extension. \n(G) Let MMyM{kMIlaKeMkbMEMEMand k is an atom}. Since EMis stable, it is clear \nthat, for each bMEMMeMthere is a C E G, such that headaCbMyMbMand bodyaCbMis true \nin MMand, for each bjZMMeMfor each C E G, if headaCbMyMbMthen bodyaCbMis false in \nMgMSoMit is clear that A4 is a model of campaPbgM iM\nFor each logic program PgMeach partial interpretation I, the operator FP(l) is \ndefined as follows: \nFeaIbMyM{kMhMlCMEMGeetMheadaCbMyMkMand \nbodyaCbMis true with respect to I} \nU alkMjMVCMEMGetMheadaCbMyMkMimplies: \nbodyaCbMis false with respect to I} . \nFitting’sMmodelMof a logic program PMis defined as the least fixpoint of FrM[19] \nTheorem 56. LetMPMbeMuMlogicMprogrameMundMFMMbeMFitting’sMmodelMofMPgMLetMGEM\nbeMtheMgroundedMextensionMofM’FeeeeaPbgM ThenM\nFMMyM{hM\\laKgMhbMEMGE}M\nProof. Let FMbe the characteristic function of ’FeeeeaPbgM We prove by induction \nthat for each ordinal ieMF’eaObMyM{hMIlaKeMhbMEMF’aibbgM\nIt is clear that F’,,(O) = {hMIlaKeMhbMEMF’aib}Mf or iMyMiMand for any limit ordinal iM\nif FeaibMyM{hMI3(K, hbMEMF’aib}Mholds for any j <i. Further, it is also not difficult \nto see that the equation F’eeaibMyM{hM) laKeMhbMEMF’aib}Mholds for nMdM1 if it holds \nfor n. 0 \n“‘The formal definition of come is given m Appendix C \n\n===== PDF PAGE 27 =====\n\nP.M. Dung I Artificial Intelligence 77 (1995) 321-357 347 \nxrwrwrcCoincidencecbetweencdifferentcsemanticsc\nDue to the fact that a logic program can have different semantics, it is often \nimportant for practical purposes to find sufficient syntactical conditions guarantee- \ning the existence and the equivalence of these semantics. In this section, we want \nto show that all the conditions which have been given in the logic programming \nliterature to guarantee the equivalence of different semantics can be captured by \nour newly introduced notions of well-foundedness and uncontroversity of ar- \ngumentation frameworks. \nLet Predcbe the set of all predicate symbols occurring in a logic program PrcThe \npredicate dependency graph [2] of Pcis a directed graph with signed edges. The \nnodes are the elements of PredrcAn edge from pcto qcis positive (respectively \nnegative) iff pcoccurs in the head of a clause C of Pcand qcoccurs in a positive \n(respectively negative) literal in the body of C. Define a+ 1 and 2 _ 1 by pcSoc1 qc\n(respectively pca_pcqmciff there is a (nonempty) path from pcto qccontaining an \neven (respectively odd) number of negative edges in the predicate dependency \ngraph.Further,letusdefinep~qiffp~+,qorp~_,q,andp~qiffp~qand \n4 >Prc\nA program is said to be hierarchicalc[w’]cif there is no p ap. A program is said \nto be stratifiedc[v]cif we never have both pc=cqcand pca_pcqrcA program is strictc\n[wypcyxucif there are no pcand qcsuch that pcaoc1 qcand pc==_ucqrcA program is \ncallqconsistentc[uvpc18, 35, 541 if there is no predicate symbol pcsuch that pcz=_ucprc\nIt is not difficult to see that the following theorems hold: \nTheorem 57. \n(1) ZfcPciscstratifiedpcthencAFppppplPmc iscwellqfoundedrc\nlvmcZfcPcischierarchicalpcthencAFpppplPmc iscwellqfoundedrc\nTheorem 58. \n(1) ZfcPciscstrictpcthencbothcAFppppplPmc andcAFpppplPmc arecuncontroversialrc\nlvmcZfcPcisccallqconsistentpcthencbothcAFpppppplPmc andcAFppppplPmc areclimitedc\ncontroversialrc\nTherefore, we immediately obtain the following results. \nCorollary 59. \n(1) Thecstablecandcwellqfoundedcsemanticscofcstratifiedclogiccprogramsccoinciderc\nlvmcClark’sccompletioncofcachierarchicalcprogramcPchascexactlyconecHerbrandc\nmodelcwhichccoincidescwithcFitting’scmodelcofcPrc\nCorollary 60. \n(1) Thecwellqfoundedcsemanticspcstablecsemanticscandcpreferredc extensionc\nsemanticscofcanycstrictclogiccprogramcPccoincidecincthecsensecthatcforceachc\ngroundcliteralckpckcEcWFMpciffckcisctruecinceachcstablecmodelcofcPrc\n\n===== PDF PAGE 28 =====\n\n348 I? M. Dung I Artificial Intelligence 77 (1995) 321-357 \nu2vlThelstablelsemanticslundlpreferredlextensionlsemanticsloflcallÙconsistentl\nlogiclprogramslcoincide.l\nu3vlEachlmaximallthreeÙvaluedlHerbrandlmodelloflcampuPvlisltwoÙvaluedliflPl\nislcallÙconsistent.l\nCorollary 61. \n(1) TherelexistslatlleastlonelstablelmodellforleachlcallÙconsistentllogicl\nprogram.l\nu2vlClark’slcompletionloflcallÙconsistentlP’lcampuPv’lis consistent. \nThough Corollaries 59 and 61 are not new, Theorems 57 and 58 give a much \ndeeper insight into the nature of strictness, stratification and call-consistency. \nFurther, they give also a much simpler proof for these results. \n5. Argumentation as logic programming: a generator of meta-interpreters for \nargumentation systems \nThere are extremely interesting relations between argumentation and logic \nprogramming. In the previous section, we have seen that logic programming can \nbe shown to be a form of argumentation. In this section, we will show that \nargumentation itself can be “viewed” as logic programming. This result is of great \nimportance. It introduces in fact a general method for generating meta-interpre- \nters for argumentation systems. This method is very similar to the compiler- \ncompiler idea in conventional programming. \nAny argumentation system is composed from two essential components: One \nfor generating the arguments together with the attack-relationship between them. \nThe other is for determining the acceptability of arguments. So we can think of an \nargumentation system as consisting of two units, an argument generation unit, \nAGU.land an argument processing unit, APU.lThe argument processing unit \nAPI/lis in fact a very simple logic program consisting of the following two \nclauses: \n(Cl) act(X) xldefeatuXv.l\nuC2vldefeatuXvlxÙÙuttackuY’lXv’lactuYv.l\nwhere actuXvlstands for “argument X is acceptable” and defeatuXvlfor “argument \nX is defeated”.” \nThe above described architecture of an argumentation system is illustrated by \nthe following picture: \n” Clause C2 means that an argument is defeated if it is attacked by an acceptable argument. Cl means \nthat X is acceptable if it is not defeated (or equivalently. each clause which attacks X is not acceptable \n(i.e. defeated)). \n\n===== PDF PAGE 29 =====\n\nPpMpaDungaIaArtificialaIntelligencea~~aitÙÙ{kawutow{~a wxÙa\nq \nJ \nattucksiAa1, Aalka\nutcucks(B, , Buka\nta\nacceptable arguments \nLet AFa=aiARnaattackskabe an argumentation framework. Let PAFadenote the logic \nprogram defined by \nPAFa=aAPUamaAGUa\nwith \nAPUa=a{Cl, C2}, AGU={uttacksiAnBk~~iAnBkEuttucks}p’la\nFurther, for each extension Eaof AFnadenote \nmiEka=aAGUaU {ucciAkaiAaEaE}a\nU {defeatiBka) Bais attacked by some AaEaE}a. \nThe following theorem shows the correctness of the above architecture. \nTheorem 62. LetaAFabeaanaargumentationaframeworkaandaEabeaanaextensionaofa\nAFpaThena\n(1) EaisaaastableaextensionaofaAFaiffamiEkaisauastableamodelaofaPAFpa\niukaEaisaaagroundedaextensionaofaAFaiffamiEkaU {otdefeutiAka) AaEaE}aisathea\nwellofoundedamodelaofaPAFpa\niwkaTheawellofoundedamodelaandaFitting’samodelaofaPAFacoincidepa\nProof. (1) Obvious from the definition of stable model [22], and from Lemma 14. \n(2) Let AFna=aAFnapifiPAFkpaLet X and Y be two arguments in AFnnpaHence X \nattacks Y iff there is an argument Aain AFasuch that X = (K, defeatiAkknaand \nY = (K’, k’kasuch that ldefeutiAkaEaK’paLet Faand Fnabe the characteristic \nfunctions of AFaand AFnnnarespectively. It is not difficult to prove by induction on ia\nthat for each ordinal ina\nmiF’ixkkaU {idefeata 1 AaEaF’ixkka=a{ha( iKnahkaEaF;ixk}a . \niwkaObvious. Cl \nI2 Each argument is considered as a distinct element in the Herbrand Universe of PAFpa\n\n===== PDF PAGE 30 =====\n\n350 P.M. Dung I Artificial intelligence 77 (1995) 321-357 \nKowalski [32] has pointed out that logic-based knowledge bases can be \ndescribed by the equation \nKnowledge Base = Knowledge + Logic \nFurther logic-based knowledge bases can be viewed as argumentation systems \nwhere the knowledge is coded in the structure of arguments and the logic is used \nto determine the acceptability of arguments. In that sense, the above architecture \nof argumentation systems can be considered as a schema for generating meta- \ninterpreters for knowledge bases. To increase the efficiency of this meta-interpre- \nter, techniques of partial evaluation and program transformation [3, 581 can be \napplied. \n6. Conclusions and discussions \nIn this paper. we have developed a highly abstract but simple theory of \nargumentation where the central notion of acceptability of arguments is captured \nin a general way. Then we proceed to argue for the appropriateness of our theory \nfirst by demonstrating how our theory can be used to investigate the logical \nstructure of many problems in human’s social and economic affairs, and second by \nshowing that nonmonotonic reasoning in AI and logic programming is just a form \nof argumentation. \nOur work can have many practical consequences. First, the theory of ar- \ngumentation frameworks proposed in this paper provides a unified foundation for \nthe different approaches to knowledge representation and reasoning in AI, \nphilosophy and logic programming. Therefore, our results can serve as the \nfoundation for the development of knowledge representation formalism capable \nof communicating knowledge among different knowledge representation systems. \nThis is especially important in constructing large knowledge bases as such systems \nwill require a sustained effort over a large geography by many teams which will be \nforced to use different knowledge representation languages in developing their \nsubsystems since no single formalism to knowledge representation can satisfy all \nthe “basic properties” of a knowledge base systemI [25, 32, 44, 501. \nBy uncovering the relationship between argumentation and n-person games we \npoint out the relationship between argumentation and negotiation. While negotia- \ntion can be viewed as the (operational) process to find a solution, argumentation \nis needed to justify a proposed solution. Hence, it is clear that there is no \nnegotiation without argumentation. In other words, argumentation is an integral \npart of negotiation. So we expect that our theory will have some impact to the \nstudy of DAI. \n” Poole [50] shows that no default reasoning system can have all of the following basic properties: \nconditioning, finite conjunctive closure, Horn representativity. consistency, arbitrary defaults. \n\n===== PDF PAGE 31 =====\n\nP.M.ÙDungÙIÙArtificialÙIntelligenceÙ77Ù(1995)Ù321-357Ù 351Ù\nThis paper is the first in a series of works devoted to study the theory, \narchitecture and development of argumentation systems. In [13], we study the \nrelations between argumentation, game-theoretical semantics and logic program- \nming. In general, we expect that the attacks against some arguments may have \ndifferent strengths, one may be more “deadly” than the others. So a study of how \nto differentiate the strength of arguments is necessary. A first step has been taken \nin [14] where we have identified two kinds of attacks, the reductio ad absurdum \nattacks and the specificity attacks. Bondarenko, Toni and Kowalski [7] have also \nstudied this problem in a more general context to provide an unified argumenta- \ntional assumption-based approach to nonmonotonic reasoning. Still, more work \nneeds to be done here. An interesting topic of research is the problem of \nself-defeating arguments as illustrated in the following example. Consider the \nargumentation framework ( {A, B} , {(A,ÙA),Ù(A,ÙB)}Ù) . The only preferred exten- \nsion here is empty though one can can argue that since AÙdefeats itself, BÙshould \nbe acceptable. Pollock [47] gives a convincing analysis of the importance and the \nnature of this problem. This problem has also been studied by Kakas, Mancarella \nand Dung in [26, 281 in the context of logic programming. We plan to look at this \nproblem in our framework of argumentation in the future. \nMany other argument systems have also been proposed in the literature [36, 45, \n46, 57, 611. The focus of most of these works is on the structure of arguments. \nVreeswijk classifies arguments into deductive arguments, statistically based \ninductive arguments and generic inductive arguments. According to Vreeswijk’s \nclassification, the systems in [37, 571 are deductive and generic inductive argument \nsystems. The attack-relation between arguments in Simari and Loui’s system [57] \nis based on Poole’s formalization [48] of the principle of specific information \noverriding more general information. Simari and Loui [57] adopt Pollock’s \ncriterion (see Section 3.2) for determining the acceptability of arguments. In [36], \nthe attack-relationship between arguments and their acceptability are not dis- \ncussed at all. But by pointing out that different approaches to nonmonotonic \nreasoning in AI can be viewed as argument systems satisfying certain complete- \nness conditions, Lin and Shoham [36] implicitly recognize the need for a \nmechanism for determining the acceptability of arguments in any argument \nsystem. \nAcknowledgement \nI am indebted to Bob Kowalski for his support, encouragement, and especially \nfor the many spiritful discussions with him which have been the major source of \nmotivation and inspiration for me to carry on with this work. So many many \nthanks to him. Thanks also to Franchesca Toni and Kostas Stathis for their vital \nhelp with the literature and also for some strong arguments. I am also grateful to \nLuis Monis Pereira and David Perkins for the constructive comments on an \nearlier version of this paper. John Pollock has been also very helpful and \n\n===== PDF PAGE 32 =====\n\n352 P.M. Dung ! Artificial Intelligence 77 (1995) 321-357 \nsupportive. So lots of thanks to him. I also would like to express my sincere \nthanks to an anonymous referee for his constructive and critical comments. \nThis paper has been partially supported by the Abduction Group at the \nImperial College under a grant from Fujitsu. Support from the EEC activity \nKIT01 1 -LPKRR is also acknowledged. \nAppendix A. Example \nThe argumentation framework AFsPtiof the following logic program Piis not \nfinitary . \nP:it-+1/l \nP + -Y(x) \nq(x) +- even(x, \nq(x) +--ieven \neven(s(x)) - 1even(x) \neven( 0) +-- \nAppendix B \nLet Z be a partial interpretation. Let Z,, = I and Z;,, = T&Z,) U I,. Define \nT{iuisIti=iUi{I{i1iiiis a natural number} . \nIt is easy to see that WFMiis the least fixed point of the following operator \nW{sIti=ilÙGUSsIti U T{{iuis1iU T.GUS(Z)) \nLet Fibe the characteristic function of AF{{{{{{sPtÙi To prove the theorem, it is \nenough to show that for each ordinal i \nW’,(O) = (A Ig(K, h) E F’(ld)} \nWe show this by induction, It is obvious that the above equation holds for i = 0 \nand also for limit ordinal i if it holds for ail ordinals less than i. Suppose now that \nthe above equation holds for i. We want to show now that it holds also for i -t- 1. \nLet I = W’,(0) and S = F’(0). F ram the definitions of W{iand FÙiit is clear that to \nshow the above equation, it is enough to show: \nGUS(Z) = {k 1 ({lk}, lk) E F’“(0)) . \nwhich itself follows directly from the following lemma: \nLemma B.l. LetiPibeiailogiciprogramiandiletiEibeianiadmissibleisetiofiargumentsi\nfromiAF{{{{{sPtÙi FurtheriletiIibeiaipartialiinterpretationidefinedibyiIi=i\n{hi13sK{ihtfiE}ÙiTheniforieachigroundiatomik{is{lk}{i lktfFsEti iff kE \nGUSsItÙi\n\n===== PDF PAGE 33 =====\n\nPnMnUDungUiUArtificialUIntelligenceU{{Ugr~~vhUtsrmtv{U tvtU\nProof. First, we need the following notion of proof trees. \nIf a + is a clause in G,, then the tree \naU\nis a proof tree of anU\nIf aUk~allU . . , lalUis a clause in G,, then the tree \nA ia, . . . laPI \nis a proof tree of anU\nIf amallnU . . , allUlallllU . . . , TanklllUis a clause in G,, and TllU. . . , TlUare \nproof trees of allU. . . , allUrespectively, then the tree \naU\nT4L 1 ... n n+l ... iaU??k??IU\nis a proof tree of anU\ngkhU Let kEUGUSgZhnUAssume that g{lk}lU lkhcFgEhlU i.e. there is an \nargument AU=UgKlUkhUsuch that AUis not attacked by EnUThere exists a proof tree \nTrUof kUwith respect to PUsuch that all of its terminals nodes are either q or an \nelement from K. We first prove the following proposition. \nProposition B.2. ThereUisUaUpathUfromUtheUrootUkUofUTrUtoUaUterminalUnodeUThUinUTrU\nsuchUthatUallUtheUpositiveUliteralsUonUthisUpathUbelongUtoUGUSgZhUandUhUEUInU\nProof. By induction on the height (the length of the longest path from the root to \na terminal node) of TrnU\nBaseUcaseÙUThe height of TrUis 1. The proposition follows directly from the fact \nthat GUS(Z) is an unfounded set. \nInductionUhypothesisÙULet the height of TrUbe IZ. Let C be the clause such that \nbodygChUis the set of all children of kUin TrnUSince GUS(Z) is an unfounded set and \nkUEUGUSgZhlUit follows that either Z U bodygChUis inconsistent or there is bUEU\nbodygChUnUGUSgZhnU\nCaseU1: Z U bodygChUisUinconsistentnU\n(a) There is an atom bUEUbodygChUsuch that lbUEUrnUHence, g{lb}lU lbhUEUEnU\nAs (K, bhUEUARUand EUis admissible and (K, bhUattacks g{lb}lU lbhlUthere is \n\n===== PDF PAGE 34 =====\n\n354 PsMscDungc/ ArfijicialcIntelligencecÙÙclIYYSmcyxvry}Ùc\nlu E K such that u E 1. Contradiction to the fact that Acis not attacked by \nEscSocCase I(a) does not occur. \n(b) There is lb in body(C) such that b E 1. This leads to a contradiction since \nlb E KscSoccase l(b) cannot occur either. \nCase 2: TherecischcEcbodylCmcncGUSlImscThe subtree Tr’cwith root bcof Trcis \nagain a proof tree of h with respect to KBscAs height of Tr’cis n - 1 and \n6 E GUS(I), it follows that there is a path from the root 6 to a terminal node lu \nin Tr’csuch that all the positive literals on this path belong to GUS(Z) and a E I. \nThe proposition follows then immediately. 0 \nFrom Proposition B.2. it follows immediately that Acis attacked by E. \nContradiction. So ({lk}, lk) E FlEmsc\nlymc Let X= {h I({+). lb) EFlEm}sc We want to prove that X is an un- \nfounded set of Pcwith respect to I. Assume that X is not an unfounded set with \nrespect to I. Then there is an atom a E X and a ground instance a + Bdcof a \nclause in Pcsuch that I U Bdcis consistent and no positive subgoal in Bdcbelongs to \nX. Thus for each positive subgoal h in Bdcthere exists an argument (Kh, b) such \nthat b’jZ1 for each lh’ E Kppc(otherwise ({lb}, lb) would be acceptable with \nrespect to Epcaccontradiction). Let \nKc=cUc{Kppc/ bcis a positive subgoal in Bd}cU {lb 1 lb E Bd}csc\nThen it is clear that lKpcumcEcARscSince ((lu}, la) E E, there is lb’ E Kcsuch \nthat h’ E IscThus lb’ E BdscContradiction to the fact that I U Bdcis consistent! SO \nX is unfounded with respect to I. E \nAppendix C \nThe following definition of camplPmcis taken from [37]. \nThe definition of a predicate p in a logic program Pcis the set of all clauses in Pc\nwhich have p in their head. \nTo define camplPmpceach clause p(r, . . t,,) t b, , . . , bppcis transformed into \np(x,, ,x,,)+3y,. , 3_v, (x,=t,) ,.... (x,,=t,,),b ,‘.“. h,, \nwhere the x,‘s are variables not appearing in the original clause, and the y,‘s are \nthe variables of the original clause. \nLet \np(x,, . sxppmoEpc . \np(x,. . ,x,~)+E~ . \nbe the transformed clauses of the definition of p. \nThen the completed definition of p is defined as \nVx,, . . .,Vx, p(x ,,..., xppmrEpc vsssvEpsc\n\n===== PDF PAGE 35 =====\n\nPkMkTDungTITArtificialTIntelligenceTuuTdnwwseTponipsuT pssT\nThe completed definition of a predicate pTwhose definition in PTis empty is \nvx,, . . . ,vx, lP(X*, . . . ,xJ. \ncamp(P) is defined as the collection of all predicates in PTtogether with Clark’s \nequality theory. \nReferences \n[1] S.J. Alvarado, Argument comprehension, in: S.C. Shapiro, ed., EncyclopediaTofTAIhTpmisokT\n[o]TK. Apt, H. Blair and A. Walker, Towards a theory of declarative knowledge, in: J. Minker, ed., \nFoundationTofTDeductiveTDatabasesTandTLogicTProgrammingT(Morgan Kaufmann, San Mateo, \nCA, 1988). \n[3] C. Aravindan and P.M. Dung, Partial deduction of logic programs with respect to well-founded \nsemantics, New GenerationTComputkT(to appear); also in: ProceedingsTThirdTInternationalT\nConferenceTonTAlgebraicTandTLogicTProgramminghTLecture Notes in Computer Science 632 \n(Springer-Verlag, Berlin, 1992). \n[4] E.M. Barth and J.L. Martens, eds., ArgumentationxTApproachesTtoTTheoryTFormationhTCLCS \nSeries (John Benjamins B.V., Amsterdam, 1982). \n[5] L. Birnbaum, M. Flowers and R. McGuire, Towards an AI model of argumentation, in: \nProceedingsTAAAZivmhTStanford, CA (1980) 313-315. \n[6] L. Birnbaum, Argument molecules: a functional representation of argument structure, in: \nProceedingsTAAAIivohTPittsburgh, PA (1982) 63-65. \n[7] A. Bondarenko, F. Toni and B. Kowalski, An assumption-based framework to nonmonotonic \nreasoning, Invited Paper, in: ProceedingsTSecondTInternationalTWorkshopTonTLogicTProgrammingT\nandTNonmonotonicTReasoninghTLisbon, Portugal (1993). \n(81 K.L. Clark, Negation as failure, in: H. Gallaire and J. Minker, eds., LogicTandTDatabaseT\n(Plenum, New York, 1978). \n[9] R. Cohen, Analyzing the structure of argumentative discourse, ComputkTLinguisticsTnpTdlioeT\ndnwvueTnniorkT\n[lo] M. Davis, GameTTheoryxTATNontechnicalTIntroductionT(Basic Books, New York). \n[ll] P.M. Dung, Negations as hypotheses: an abductive foundation for logic programming, in: \nProceedingsTEighthTInternationalTConferenceTonTLogicTProgramminghTParis (1991). \n[12] P.M. Dung, On the relations between stable and well-founded semantics of logic programs, \nTheoretkTComputkTScikT105 (1992) 7-25. \n(13) P.M. Dung, Logic programming as dialogue games, Technical Report, Division of Computer \nScience, Asian Institute of Technology, Bangkok (1992). \n[ 14) P.M. Dung, An argumentational semantics to logic programming with explicit negation, in: \nProceedingsTTenthTInternationalTConferenceTonTLogicTProgramminghTBudapest, Hungary (1993). \n[15] P.M. Dung, On the acceptability of arguments and its fundamental role in nonmonotonic \nreasoning and logic programming, in: ProceedingsTZJCAIiwphTChambery, France (1993). \n(161 K. Eshghi and R.A. Kowalski, Abduction compared with negation by failure, in: ProceedingsT\nSixthTInternationalTConferenceTonTLogicTProgramminghTLisbon, Portugal (1989). \n1171 D.W. Etherington, ReasoningTwithTIncompleteTInformationxTInvestigationTofTNonmonotonicT\nReasoninghTResearch Notes in AI (Pitman, London, 1987). \n[lS] F. Fages, Consistency of Clarks’ completion and existence of stable models, JkTMethodsTLogicT\nComputkTScikT(to appear). \n[19] M. Fitting, A. Kripke-Kleene semantics for logic programs, JkTLogicTProgramkToTdnwvseTowsipnokT\ndomnTD. Gabbay, Labelled deductive systems, Part 1, CIS Bericht 90-22 (1990). \n[21] H. Gefner, Beyond negation as failure, in: ProceedingsTSecondTInternationalTConferenceTonT\nPrinciplesTofTKnowledgeTRepresentationTandTReasoninghTCambridge, MA (1991). \n\n===== PDF PAGE 36 =====\n\n356 \nP21 \n1231 \n[241 \nPI \nP61 \nv71 \nP31 \n(291 \n[301 \n[311 \n(321 \n[331 \n[341 \n[351 \n[361 \n[371 \n1381 \n[391 \n[401 \n(411 \n[421 \nI431 \nWI \n[451 \nPgMgPDungPI ArtificialPIntelligencePssPaluugpbPnmlfXsP\nM. Gelfond and V. Lifschitz, The stable model semantics for logic programs, in: ProceedingsP\nFifthPInternationalPConferencePonPLogicPProgrammingPaluttbgP\nM. Gelfond and V. Lifschitz, Representing actions in extended logic programming, in: ProceedfP\ningsPJICSLPfumPaluumbgP\nJ. Hintikka, ThePGamePofPLanguageP(Reidel, Dordrecht, Netherlands, 1983). \nD.J. Israel, What is wrong with nonmonotonic logic? in: M.L. Ginsberg, ed., ReadingsPinP\nNonmonotonicPReasoningP(Morgan Kaufmann, San Mateo. CA, 1987). \nT. Kakas and P. Mancarella, Stable theories for logic programs, in: ProceedingsPISLPPulP(1991). \nT. Kakas, R. Kowalski and F. Toni. Abductive logic programming, JgPLogicPComputgPmParbP\naluumbPslufssigP\nT. Kakas, P. Mancarella and P.M. Dung, The acceptability semantics for logic programs, in: \nProceedingsPEleventhPInternationalPConferencePonPLogicPProgrammingPaluuobgP\nK. Konolige, On the relation between default and autoepistemic logic, ArtifgPIntellgPnpPaluttbP\nnonfntmwPalso in: M.L. Ginsberg, ed.. ReadingsPinPNonmonotonicPReasoningP(Morgan Kaufmann, \nSan Mateo, CA, 1987). \nR.A. Kowalski, LogicPforPProblemPSolvingP(Elsevier North-Holland, New York, 1979). \nR.A. Kowalski. Logic-based open systems, in: ProceedingsPStuttgartPConferencePonPDiscourseP\nRepresentationePDialoguePTableauxPandPLogicPProgrammingPaluttbgP\nR.A. Kowalski. The limitations of logic and its role in AI, in: J.W. Schmidt and C. Thanos, eds., \nFoundationPofPKnowledgePBasePManagementvPContributionPfromPLogicePDatabasesPandPAIP\n(Springer-Verlag, Berlin, 1989). \nR.A. Kowalski, Logic Programming in AI, Invited Lecture at IJCAI-91, Sydney, Australia \n(1991). \nK. Kunen, Negation in logic programming, JgPLogicPProgramgPoPalutsbPmtufnitgP\nK. Kunen. Signed data dependencies in logic programming, JgPLogicPProgramgPsPalutubPmnlfmopgP\nF. Lin and Y. Shoham. Argument systems: an uniform basis for nonmonotonic reasoning, in: \nProceedingsPFirstPInternationalPConferencePonPPrinciplesPofPKnowledgePRepresentationPandP\nReasoningePToronto, Ont. (1989). \nJ.W. Lloyd, FoundationsPofPLogicPProgrammingP(Springer-Verlag, Berlin, 1987). \nW. Marek, A. Nerode and J. Remmel, A theory of nonmonotonic rule systems I, AnngPMathgP\nArtifgPIntellgPlPaluuibPmolfmsngP\nJ. McCarthy. Circumscription-a form of non-monotonic reasoning, ArtifgPIntellgP13 (1980) \n27-39: also in: M.L. Ginsberg, ed., ReadingsPinPNonmonotonicPReasoningP(Morgan Kaufmann, \nSan Mateo, CA. 1987). \nR. McGuire gPL. Birnbaum and M. Flowers, Opportunistic processing in arguments, in: \nProceedingsPIJCAIftlePVancouver, BC (1981) 58-60. \nD. McDermott and J. Doyle, Non-monotonic logic I. ArtifgPIntellgPlnPalutibPolfsmwPalso in: M.L. \nGinsberg, ed., ReadingsPinPNonmonotonicPReasoningP(Morgan Kaufmann, San Mateo, CA, \n1987). \nR. Moore. Semantical considerations on nonmonotonic logic, ArtifgPIntellgPmpPalutpbPspfuowPalso \nin: M.L. Ginsberg, ed., ReadingsPinPNonmonotonicPReasoningP(Morgan Kaufmann, San Mateo, \nCA. 1987). \nL.M. Pereira, J.N. Aparicio and J.J. Alferes, Nonmonotonic reasoning with well-founded \nsemantics, in: ProceedingsPEighthPInternationalPConferencePonPLogicPProgrammingePParis (1991). \nD. Perlis, On the consistency of commonsense reasoning, in: M.L. Ginsberg, ed., ReadingsPinP\nNonmonotonicPReasoningP(Morgan Kaufmann, San Mateo, CA, 1987). \nJ.L. Pollock, Defeasible reasoning, CogngPScigP11 (1987) 481-518. \n1461 J.L. Pollock, A theory of defeasible reasoning, IntgPZntellgPSystgPrP(1) (1991). \n[47] J.L. Pollock, Justification and defeat, ArtifgPIntellgPrsPaluuobPnssfoisgP\n[ot]PD. Poole, On the comparison of theories: preferring the most specific explanation. in: \nProceedingsPIJCAIftpePLos Angeles, CA (1985). \n[49] D. Poole, A logical framework for default reasoning, ArtifgPIntellgPnrPaluttbPmsfosgP\n[pi]PD. Poole, The effect of knowledge on belief: conditioning, specificity and the lottery paradox in \ndefault reasoning, ArtifgPIntellgPouPaluulbPmtlfnisgP\n\n===== PDF PAGE 37 =====\n\nPhMhPDungPIPArtificialPIntelligencePttPbmvvrcPonmgortP ortP\n[rm]PT.C. Przymusinski, On the declarative semantics of deductive databases and logic programs, in: \nJ. Minker, FoundationsPofPDeductivePDatabasesP]PLogicPProgrammingPbmvuuchP\n[rn]PR. Reiter, A logic for default reasoning, ArtifhPIntellhPmoPbmvulcPumgmonyPalso in: M.L. Ginsberg, \ned., ReadingsPinPNonmonotonicPReasoningP(Morgan Kaufmann, San Mateo, CA, 1987). \n[53] B. Richard, Game-theoretical semantics and logical form, in J. Hintikka, ed., RaduPJhPBogdanP\n(Reidel, Dordrecht, Netherlands, 1987). \n[54] T. Sato, Completed logic programs and their consistency, J. LogicPProgramhPvPbmvvlcPoogophP\n[rr]PR. Sedgewick, AlgorithmsPinPCP(Addison-Wesley, Reading, MA, 1990). \n[56] M. Shubik, GamePTheoryPinPthePSocialPSciencesP(MIT Press, Cambridge, MA, 1985). \n[57] G.R. Simari and R.P. Loui, A mathematical treatment of defeasible reasoning and its \nimplementation, ArtifhPIntellhProPbmvvncPmnrgmrthP\n[ru]PH. Tamaki and T. Sato, Unfold/fold transformation of logic programs, in: ProceedingsPSecondP\nInternationalPConferencePofPLogicPProgrammingPbmvupchP\n[rv]PShPToulmin, The Uses of ArgumentsP(Cambridge University Press, Cambridge, England, 1958). \n[60] A. Van Gelder, K. Ross and J.S. Schlipf, Unfounded sets and well-founded semantics for general \nlogic programs, in: PODSPbmvuuchP\n[61] G. Vreeswijk, The feasibility of defeat in defeasible reasoning, in: ProceedingsPSecondPZnternagP\ntionalPConferencePonPPrinciplesPofPKnowledgePRepresentationPandPReasoningfPCambridge, MA \n(1991). \n[62] J. Von Neuman and 0. Morgenstem, Theory of GamesPandPEconomicPBehaviorP(Wiley, New \nYork). ",
+        "content_sha256": "8731efeb90375496d5dc1ea00840bc54e28f908021deff777966babcbc797f6f",
+        "path": "papers/text/dung-1995-argumentation.txt",
+        "size_bytes": 93057
+      }
+    ],
+    "workspace_index": [
+      {
+        "content_sha256": "f6605c2b9bb68dd7906b2881ec1f0b48b32f607c7b768cd3ec8ab5a9ca46afaa",
+        "path": "CORPUS.md",
+        "size_bytes": 1937
+      },
+      {
+        "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+        "path": "papers/text/choi-et-al-2025-conformity.txt",
+        "size_bytes": 60691
+      },
+      {
+        "content_sha256": "0674b1614409c389ff275c78c696138a9453e321fee21b90ea1e4354700be7e2",
+        "path": "papers/text/du-et-al-2023-multiagent-debate.txt",
+        "size_bytes": 97256
+      },
+      {
+        "content_sha256": "8731efeb90375496d5dc1ea00840bc54e28f908021deff777966babcbc797f6f",
+        "path": "papers/text/dung-1995-argumentation.txt",
+        "size_bytes": 93057
+      },
+      {
+        "content_sha256": "10d6e61835ae38ecc32c345b6c18f5d4259ef40874694d12f60c4dd6162e160f",
+        "path": "papers/text/lorenz-et-al-2011-social-influence.txt",
+        "size_bytes": 46369
+      },
+      {
+        "content_sha256": "5363f488d988a892dd33e2cbba81c87e558deda9efdd190bc608ef9a8d4ba26a",
+        "path": "papers/text/shapiro-et-al-2011-crdts.txt",
+        "size_bytes": 42422
+      },
+      {
+        "content_sha256": "a1263656cb4d7e298c289b4ee44368fe9f38c1c2efc4ce88f0d54d60a62a3d1c",
+        "path": "papers/text/smit-et-al-2023-going-mad.txt",
+        "size_bytes": 80205
+      },
+      {
+        "content_sha256": "41e1d26db346207d4be0ec393e7bed983875ae417ca7aa5a530d390dca72e06e",
+        "path": "papers/text/zhang-et-al-2025-mad-question.txt",
+        "size_bytes": 95563
+      }
+    ]
+  },
+  "dependency_type": "PlanningDeps",
+  "input_sha256": "842472e842f0f5d7306bc8948b1b9d83f94d7391135cda1b5ddd00ea4bb15856",
+  "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+  "role": "recursive_planner"
+}

@@ -242,17 +242,29 @@ payload rather than packing into `attrs?`.
 ```invlang
 :L findings [id|loop|name|target|mode?|tests|system|window]
 l-001|1|auth-history-jsmith-bastion|v-001||h-001,h-002|siem|90d
-
-# PLAN names the lead by measurement and the `system` it targets; gather
-# chooses the template and binds params, and writes both as a row in
-# `executed_queries.jsonl` (the queries table, FK `lead_id`). Do not include
-# `template` or `query` columns at PLAN time — they are gather's record,
-# not the defender's.
 ```
+
+PLAN names the lead by measurement and the `system` it targets; gather
+chooses the template and binds params, and writes both as a row in
+`executed_queries.jsonl` (the queries table, FK `lead_id`). Do not include
+`template` or `query` columns at PLAN time — they are gather's record, not
+the defender's. invlang has no comment syntax: a `#` line inside a block is
+read as a row and refused against the header.
 
 A lead is a procedure: what was run, against what target, for which
 commitments. Route plans go in `:L l-001.lead_preds` — routing rules,
-not world-state predictions.
+not world-state predictions:
+
+```invlang
+:L l-001.lead_preds [id|if|read_as|advance_to]
+lp1|"access matches the identity's prior 72h cadence within 1σ"|"periodic tooling"|CONCLUDE
+lp2|"burst concentrated in the last 10 min"|"anomalous spike"|HYPOTHESIZE
+```
+
+Route ids are `lp<n>`, and all four cells are required: the condition,
+what reading it licenses, and where that reading goes. `advance_to` is
+`CONCLUDE`, `HYPOTHESIZE`, or another lead's **`name`** — its `name`
+cell, never its `l-*` id.
 
 ### `:R` observations and learned facts
 
@@ -315,6 +327,37 @@ forces escalation per the contract's `on_unauth` / `on_indet`. A
 declared contract with no fulfilling row is treated as
 `indeterminate`.
 
+### `:R impact` (the impact axis)
+
+*Does this edge's effect matter enough to escalate?* — a third axis,
+orthogonal to authorization. Register the predicate at PLAN, grade it at
+ANALYZE:
+
+```invlang
+:L l-002.impact_preds [id|dim|claim|on_match|on_mismatch|on_indeterminate|escalation_on]
+ip1|confidentiality|"session_total_bytes within the 30d baseline ± 2σ"|within|exceeds|indeterminate|exceeds
+
+:R impact [resolved_by|pred_ref|dim|observed|verdict|grounding|anchor_id|anchor_kind|authority|as_of|reasoning]
+l-002|ip1|confidentiality|"180GB (3σ above the 60GB μ)"|exceeds|telemetry-baseline|backup-30d-baseline|approved-source-list|partial|2026-04-23T14:32Z|"observed 3σ; threshold 2σ"
+```
+
+On the `impact_preds` row every cell is required: register the threshold
+AND every outcome before the measurement lands, because a blank
+`on_mismatch` lets you decide what exceeding meant after seeing the
+answer. On the `:R impact` row, `pred_ref`, `dim`, `verdict`,
+`grounding`, `authority`, `as_of` and `reasoning` are required —
+`observed` and the anchor columns are not checked here.
+
+`pred_ref` is a bare `ip<n>` when the predicate belongs to
+`resolved_by`'s own lead, or `l-NNN.ip<n>` across leads, and `dim` must
+match the predicate's. Three closed catalogs — `enum impact.dimension`,
+`enum impact.verdict`, `enum impact.grounding`. `past-case` is
+deliberately absent from the last: impact is per-instance reasoning about
+what THIS event did, and a past case only says what a category of event
+was permitted to do. Every `ip<n>` you register must be graded or
+deferred by CONCLUDE (below), so do not register one you have no lead
+for.
+
 ### `:T resolutions` (belief movement)
 
 ```invlang
@@ -328,6 +371,22 @@ prediction/refutation IDs and supporting edges. Head shape is
 `[<lead> <ids> <severity> ⟂ <edges> :: <annotation>]`; `<severity>` ∈
 {`severe`, `moderate`, `weak`} is positional-last and required — leave
 it out and the parser reads your ids as the severity.
+
+`++` says every prediction the hypothesis declared came in, so the head
+cites all of them, `p<n>` and `ap<n>` alike. A head naming a subset is
+denied on write — grade `+` for partial coverage.
+
+The claim is checked against the predictions declared **now**, so
+declaring one more `p<n>`/`ap<n>` on a hypothesis that already carries a
+committed `++` re-opens it. You cannot rewrite the committed row, and
+citing the new prediction would assert an untested claim came in. The
+repair is to **withdraw the coverage claim** by appending
+`h-NNN  ++ → +   [<lead> <ids> <severity> ⟂ <edges>]` — the run is no
+longer claiming full coverage, which is what declaring an untested
+prediction means. Appending `+ → ++` later re-asserts it, and the head
+must then cite every prediction. Whatever the grade ends at, every
+declared prediction is still owed a citation or a
+`:T conclude.deferred_preds` row at CONCLUDE.
 
 ### `:T conclude` (REPORT)
 
@@ -364,6 +423,15 @@ summary                "Login matched established bastion usage"
   not retrieved" tells a reader nothing about what is still open. Omit the row
   (or write `none`) when nothing was out of reach. `ceiling_rationale` is the
   companion scalar: why concluding anyway is sound despite those gaps.
+- `impact_verdict` / `impact_severity` — the roll-up over this run's
+  `:R impact` rows (`enum conclude.impact_verdict`), and how large the
+  consequence is (`enum conclude.impact_severity`). The pair is checked for
+  CONSISTENCY on write: a verdict that CLAIMS a consequence requires a
+  severity — the verdict says a threshold was crossed, the severity says how
+  far — while the two that claim none (`within`, and the conclude-only
+  `none` a run that registered no `ip<n>` rolls up to) forbid one, so write
+  `impact_severity null` beside them or leave the row out. Look the members
+  up; they are not restated here.
 - `detection_notes` — **optional** except under `disposition
   false-positive`, which requires it; and only for a detection defect ORIENT
   actually found:
@@ -386,6 +454,45 @@ summary                "Login matched established bastion usage"
 Every row is ONE line. A value that opens a quote and does not close it on
 the same row is denied on write, because the lines below it record nothing —
 write long values as one long line, as `summary` already does.
+
+**Every commitment is accounted for at CONCLUDE.** A `:T conclude` block is
+denied on write while any of these is declared and neither settled nor
+deferred:
+
+| declared | settled by | deferred in |
+|---|---|---|
+| `ac<n>` on `:H h-NNN.authz` | a `:R authz` row whose `fulfills` names it | `:T conclude.deferred_authz [contract_ref\|rationale]` |
+| `p<n>`/`ap<n>` on a hypothesis that is not `--` | a `:T resolutions` head that cites it and moves the hypothesis | `:T conclude.deferred_preds [prediction_ref\|rationale]` |
+| `ip<n>` on `:L l-NNN.impact_preds` | a `:R impact` row whose `pred_ref` names it | `:T conclude.deferred_impact [prediction_ref\|rationale]` |
+
+```invlang
+:T conclude.deferred_authz [contract_ref|rationale]
+h-003.ac2|"authority anchor unavailable — CMDB read denied by the environment permission gate"
+
+:T conclude.deferred_preds [prediction_ref|rationale]
+none
+```
+
+Name the commitment in FULL where you can — `h-003.ac2`, `h-001.p2`,
+`l-002.ip1`. The bare `ac2` / `p2` / `ip1` is accepted too, and defers
+every owner's commitment of that number; the qualified form is what makes
+a deferral specific to one hypothesis or lead. (`:R authz`'s `fulfills`
+column is the other way round — it names the bare `ac<n>`.)
+
+The rationale is the point, and a blank one is denied: deferring says WHY the
+question could not be answered ("authority anchor unavailable", "superseded by
+mechanism refutation at l-007", "escalation forced before the measurement
+landed"), not merely that it was not. Write `none` as the single row when
+nothing was deferred.
+
+Send the deferral tables FIRST, each in its own `append_block`, and
+`:T conclude` last. The whole document is validated on every write, so a
+`:T conclude` that lands before them is refused for commitments you were about
+to account for — while a `deferred_*` table on its own is not yet a close and
+lands clean.
+
+Deferring is not a discharge in the other direction: `disposition benign`
+still needs its authz contracts ANSWERED, not accounted for.
 
 ### `:T close` (loop boundary)
 
@@ -473,6 +580,27 @@ Keep commitments lean: one proposed upstream vertex plus one edge.
 1–2 predictions per hypothesis. `refutes` is a comma-separated list of
 prediction ids the refutation would overturn.
 
+A prediction about one ATTRIBUTE of one of the hypothesis's objects goes
+in `:H h-NNN.attr_preds` instead — same commitment, said as a value
+rather than a sentence:
+
+```invlang
+:H h-002.attr_preds [id|target|attribute|claim]
+ap1|proposed_parent|signing|"UNSIGNED"
+```
+
+`target` names which of the hypothesis's own objects carries the
+attribute, never a `v-*`/`e-*` id (`defender-invlang enum
+attr-pred.target`). Ids are `ap<n>` here and `p<n>` in `.preds`, and an
+`ap<n>` counts toward every rule a `p<n>` does — a resolution head cites
+it, a `refutes` list names it, and CONCLUDE requires it settled or
+deferred. So a `++` on `h-002` cites all three:
+
+```invlang
+:T resolutions
+h-002  null → ++    [l-002 p1,p2,ap1 severe ⟂ e-001 :: rotating subdomains, rapid-fire bursts, unsigned binary]
+```
+
 ### Forking a hypothesis mid-run
 
 Append-only forbids rewriting the loop-1 block, so a hypothesis a
@@ -499,7 +627,7 @@ write.
 Authz contracts live in `:H h-NNN.authz`:
 
 ```invlang
-:H h-NNN.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
+:H h-001.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
 ac1|proposed|iam-policy|"service account allowed to read object at event time"|escalate|escalate
 ```
 

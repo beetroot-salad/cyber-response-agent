@@ -1,0 +1,1222 @@
+{
+  "call_id": "call-0008-recursive-planner",
+  "context": {
+    "ancestor_decisions": [
+      "SC1: The evidentiary corpus is exactly seven extracted-text files under papers/text: dung-1995-argumentation.txt (Dung 1995, Artificial Intelligence 77), shapiro-et-al-2011-crdts.txt (Shapiro et al., SSS 2011), lorenz-et-al-2011-social-influence.txt (Lorenz et al., PNAS 108, 2011), du-et-al-2023-multiagent-debate.txt (Du et al. 2023, arXiv 2305.14325), smit-et-al-2023-going-mad.txt (Smit et al. 2023, arXiv 2311.17371), zhang-et-al-2025-mad-question.txt (Zhang et al. 2025, arXiv 2502.08788), choi-et-al-2025-conformity.txt (Choi et al., Findings of ACL 2025).",
+      "SC2: Page boundaries in the extracted texts are marked with lines of the form `===== PDF PAGE N =====`, and these markers are the citation anchors required by D12/C3.",
+      "SC3: The corpus intentionally contains conflicting empirical conclusions — multi-agent debate gains (Du et al. 2023) versus matched-compute null results and conformity findings (Smit et al. 2023; Zhang et al. 2025; Choi et al. 2025; Lorenz et al. 2011 on social influence undermining crowd wisdom) — and the manifest requires preserving and reconciling these conflicts.",
+      "SC4: The envelope's single conversation decision asserts that the seven full extracted texts are present in the solve workspace under papers/text with explicit PDF page markers; the intake envelope itself encloses only the manifest, not the full texts.",
+      "SC5: The manifest (material:001) is located at /workspace/seam-harness/research-kb-workspace/CORPUS.md, indicating a benchmark-style workspace named research-kb-workspace under a seam-harness directory.",
+      "SC6: The proposed substrate plus the two baselines named in D4 (open conversational forum; no inter-agent communication) naturally supply the three or more conditions required by D14.",
+      "Corpus membership: papers/text/lorenz-et-al-2011-social-influence.txt is Lorenz et al., PNAS 108, 2011, and papers/text/choi-et-al-2025-conformity.txt is Choi et al., Findings of ACL 2025; both are among the exactly seven extracted-text files under papers/text that constitute the only evidentiary corpus.",
+      "Page boundaries in the extracted texts are marked with lines of the form `===== PDF PAGE N =====`; citations must carry these markers (D12/C3).",
+      "The corpus intentionally contains conflicting empirical conclusions (debate gains versus matched-compute null results and conformity findings); these conflicts must be preserved and reconciled, never hidden (C4).",
+      "Evidence is restricted to the seven workspace corpus files; no outside sources may be used (C2).",
+      "Source-supported claims must be clearly distinguished from design inferences in everything returned (D13).",
+      "SC1: The evidentiary corpus is exactly seven extracted-text files under papers/text.",
+      "SC2: Page boundaries are marked with `===== PDF PAGE N =====` lines.",
+      "SC3: The corpus contains conflicting empirical conclusions that must be reconciled.",
+      "C2: No evidence outside the seven corpus files may be used.",
+      "C3: Citations must include PDF page markers.",
+      "D12: All evidentiary claims must be grounded in the corpus with page markers.",
+      "D13: Source-supported claims must be distinguished from design inferences."
+    ],
+    "assigned_demands": [
+      {
+        "id": "D6",
+        "rationale": "Second of six specification areas listed in the request.",
+        "statement": "Staged visibility and the communication protocol are specified."
+      },
+      {
+        "id": "D11",
+        "rationale": "Required by the request and reinforced by the manifest's instruction not to select papers by desired outcome.",
+        "statement": "The memo reconciles — rather than hides — the tension between papers reporting multi-agent debate gains and papers reporting matched-compute null results or conformity."
+      },
+      {
+        "id": "D12",
+        "rationale": "Grounding scope, citation count, and page-marker requirement are stated in the request; marker format and corpus enumeration come from the manifest.",
+        "statement": "All evidentiary claims are grounded only in the supplied workspace corpus, with at least five distinct source files cited and citations carrying PDF page markers from the extracted text."
+      },
+      {
+        "id": "D13",
+        "rationale": "Stated verbatim in the request.",
+        "statement": "Source-supported claims are clearly distinguished from design inferences."
+      },
+      {
+        "id": "D14",
+        "rationale": "Condition count and all five metric families are enumerated in the request.",
+        "statement": "A falsifiable evaluation plan compares at least three conditions and defines metrics for quality, diversity/correlation, latency, token cost, and recovery-from-wrong-consensus."
+      }
+    ],
+    "constraints": [
+      "C1: Total length must be 1,400–1,800 words.",
+      "C2: No evidence outside the seven corpus files may be used; the request restricts grounding to the supplied workspace corpus and the manifest declares these files the only evidentiary corpus for the benchmark.",
+      "C3: Citations must reference at least five distinct source files and include PDF page markers as they appear in the extracted texts (page boundaries marked `===== PDF PAGE N =====`).",
+      "C4: Papers must not be selected or weighted by desired outcome; the corpus's conflicting empirical conclusions must be preserved and reconciled."
+    ],
+    "expansion_required": false,
+    "knowledge_board": {
+      "answer_ids_by_question": {},
+      "answers_by_id": {},
+      "content_sha256": "30c5fb06fd9ef6701d75da2ede305cf466421b7267fc2efddc2ae44639b8c954",
+      "entry_ids_by_tag": {
+        "constraint": [
+          "question:root.02-crdt-persistence"
+        ],
+        "counterexample": [
+          "question:demand:D14",
+          "question:root",
+          "question:root.03-social-influence-risk",
+          "question:root.03-social-influence-risk.01-child-lorenz-findings",
+          "question:root.05-debate-nulls-boundaries"
+        ],
+        "decision": [
+          "question:demand:D1",
+          "question:demand:D2",
+          "question:demand:D3"
+        ],
+        "definition": [
+          "question:demand:D14",
+          "question:root.01-arg-semantics"
+        ],
+        "evidence": [
+          "question:demand:D10",
+          "question:demand:D11",
+          "question:demand:D12",
+          "question:demand:D13",
+          "question:demand:D15",
+          "question:demand:D4",
+          "question:demand:D5",
+          "question:demand:D7",
+          "question:demand:D8",
+          "question:demand:D9",
+          "question:root.01-arg-semantics",
+          "question:root.02-crdt-persistence",
+          "question:root.03-social-influence-risk",
+          "question:root.03-social-influence-risk.01-child-lorenz-findings",
+          "question:root.03-social-influence-risk.02-child-choi-findings",
+          "question:root.04-debate-gains-evidence"
+        ],
+        "measurement": [
+          "question:demand:D14",
+          "question:root",
+          "question:root.04-debate-gains-evidence",
+          "question:root.05-debate-nulls-boundaries"
+        ],
+        "method": [
+          "question:demand:D6",
+          "question:root",
+          "question:root.01-arg-semantics",
+          "question:root.02-crdt-persistence"
+        ],
+        "risk": [
+          "question:root.03-social-influence-risk",
+          "question:root.03-social-influence-risk.01-child-lorenz-findings",
+          "question:root.03-social-influence-risk.02-child-choi-findings",
+          "question:root.05-debate-nulls-boundaries"
+        ]
+      },
+      "incoming_link_ids_by_entry": {
+        "question:demand:D10": [
+          "link:b39e9bd6e534d53587c33f92"
+        ],
+        "question:demand:D11": [
+          "link:02dc37f9cbcf4750d3be73d8",
+          "link:a1a9810843aae3a03593e758",
+          "link:c0525acb5ba38548b9c5ff19",
+          "link:d508e58a1c643d9abfe73da0",
+          "link:f87ac7b536be5b768b698c28"
+        ],
+        "question:demand:D12": [
+          "link:4694364cb7b8f08ed6b70438",
+          "link:4e426d372ead17fb60436027",
+          "link:b9ccd3ec073289680e72b9c5",
+          "link:dbc379c523a802d7234d668c",
+          "link:e5bfef49b3f76c9371b77861",
+          "link:ec67afe3731a822e2d0c2942",
+          "link:f4ba33e931f2c160cd230486"
+        ],
+        "question:demand:D13": [
+          "link:018c1bfba9c89f886979e58a",
+          "link:3e163e5b6c87fe659c9c8b95",
+          "link:4b9a041f6935d8c28302ae12",
+          "link:5ecc297a5272dee784b1b751",
+          "link:78cc1b9de710400b0dda32fa",
+          "link:95a52b650d408c309a8140ee",
+          "link:9e148f747df068b5a106ef78"
+        ],
+        "question:demand:D14": [
+          "link:0b9daac50599df76e5db111b",
+          "link:54ace6aa7dbc682ce36b1598",
+          "link:5fbb61d2e80f257b289c0591",
+          "link:6f3bc2c4325fd553d9d1d8f3",
+          "link:9f307b082e580d3f1768454b"
+        ],
+        "question:demand:D15": [
+          "link:6018f82dcea4e7b30c3a5022"
+        ],
+        "question:demand:D3": [
+          "link:a83bc0e755e8fd359c4a6e60"
+        ],
+        "question:demand:D4": [
+          "link:7c6b34c58d2a7a2bcc9f5e5f"
+        ],
+        "question:demand:D5": [
+          "link:b02788fef9fd73ad10830bc3"
+        ],
+        "question:demand:D6": [
+          "link:0324e6ac0ff4002288da5983",
+          "link:a3763323e4c5f13dcbac6274",
+          "link:f63ca17b95f176b627952fd3"
+        ],
+        "question:demand:D7": [
+          "link:79a9672c7c764f123cad7df4"
+        ],
+        "question:demand:D8": [
+          "link:960009408650bf4b3e01a852"
+        ],
+        "question:root": [
+          "link:088e1a7cfea6dde8ac04eab3",
+          "link:1709dd7fbf8587de0c575188",
+          "link:1e97bab1f415d57cbc837a88",
+          "link:2395134f0213cf5cee3f1947",
+          "link:48a3d569758cae1eb71a2043",
+          "link:4f798cb83c7582c38cfb88bd",
+          "link:52aaf440a0cfa52148fd0e0a",
+          "link:541766fc32e4d84c2fd63c44",
+          "link:561e0fcd22b650ab4cc0fd61",
+          "link:5b751584b8c43c9e15d281fe",
+          "link:5e97df7da6a94755d85a5407",
+          "link:709f42e6e4da8b14cdf82243",
+          "link:7a79aa5755f5b9590ce191cb",
+          "link:815a52c06ab01fa3052d160f",
+          "link:9dc3c1ef66fc5dbb330f0173",
+          "link:9e16c1c1dacc451174870ea4",
+          "link:ad2d4893bb4dadfa6cec4d51",
+          "link:dbcff4ec9d62472bedb7ee52",
+          "link:e5a9bece7311def890467b91",
+          "link:f7b3972e183578733d308198"
+        ],
+        "question:root.03-social-influence-risk": [
+          "link:6b4864ff816a275c94c2b20b",
+          "link:7e922f4ed4489666a469c376"
+        ]
+      },
+      "links_by_id": {
+        "link:018c1bfba9c89f886979e58a": {
+          "content_sha256": "018c1bfba9c89f886979e58a9631b6ef6020a5ed12294f6a1c4c676e582196bd",
+          "id": "link:018c1bfba9c89f886979e58a",
+          "relation": "refines",
+          "source_id": "question:root.04-debate-gains-evidence",
+          "target_id": "question:demand:D13"
+        },
+        "link:02dc37f9cbcf4750d3be73d8": {
+          "content_sha256": "02dc37f9cbcf4750d3be73d8862ac0733d973203558ae6c7a20caee8d426a18b",
+          "id": "link:02dc37f9cbcf4750d3be73d8",
+          "relation": "refines",
+          "source_id": "question:root.03-social-influence-risk.01-child-lorenz-findings",
+          "target_id": "question:demand:D11"
+        },
+        "link:0324e6ac0ff4002288da5983": {
+          "content_sha256": "0324e6ac0ff4002288da59839d484e581f5dfef2e87364fb7778c843573065ef",
+          "id": "link:0324e6ac0ff4002288da5983",
+          "relation": "refines",
+          "source_id": "question:root.03-social-influence-risk.01-child-lorenz-findings",
+          "target_id": "question:demand:D6"
+        },
+        "link:088e1a7cfea6dde8ac04eab3": {
+          "content_sha256": "088e1a7cfea6dde8ac04eab354d79aadb3b99bdfe714c1e70ee16af4ac5294d0",
+          "id": "link:088e1a7cfea6dde8ac04eab3",
+          "relation": "refines",
+          "source_id": "question:demand:D5",
+          "target_id": "question:root"
+        },
+        "link:0b9daac50599df76e5db111b": {
+          "content_sha256": "0b9daac50599df76e5db111bead89ac8ac3993c909645419e264001e142a188f",
+          "id": "link:0b9daac50599df76e5db111b",
+          "relation": "refines",
+          "source_id": "question:root.03-social-influence-risk.02-child-choi-findings",
+          "target_id": "question:demand:D14"
+        },
+        "link:1709dd7fbf8587de0c575188": {
+          "content_sha256": "1709dd7fbf8587de0c57518805fdc68ed1e83353f3c151db8647dedebbe0f474",
+          "id": "link:1709dd7fbf8587de0c575188",
+          "relation": "refines",
+          "source_id": "question:root.02-crdt-persistence",
+          "target_id": "question:root"
+        },
+        "link:1e97bab1f415d57cbc837a88": {
+          "content_sha256": "1e97bab1f415d57cbc837a88883226a5539b431d3810d7ee0268b965646a5d6f",
+          "id": "link:1e97bab1f415d57cbc837a88",
+          "relation": "refines",
+          "source_id": "question:demand:D2",
+          "target_id": "question:root"
+        },
+        "link:2395134f0213cf5cee3f1947": {
+          "content_sha256": "2395134f0213cf5cee3f1947b0c2d057b3d7f586083bbad7eb028a4e1cb94466",
+          "id": "link:2395134f0213cf5cee3f1947",
+          "relation": "refines",
+          "source_id": "question:demand:D3",
+          "target_id": "question:root"
+        },
+        "link:3e163e5b6c87fe659c9c8b95": {
+          "content_sha256": "3e163e5b6c87fe659c9c8b952fc8449114bfac7f5eaa1df8d326258e6a7b3d50",
+          "id": "link:3e163e5b6c87fe659c9c8b95",
+          "relation": "refines",
+          "source_id": "question:root.02-crdt-persistence",
+          "target_id": "question:demand:D13"
+        },
+        "link:4694364cb7b8f08ed6b70438": {
+          "content_sha256": "4694364cb7b8f08ed6b704380e475b1b267eef0480f37fe42f282740828ea040",
+          "id": "link:4694364cb7b8f08ed6b70438",
+          "relation": "refines",
+          "source_id": "question:root.01-arg-semantics",
+          "target_id": "question:demand:D12"
+        },
+        "link:48a3d569758cae1eb71a2043": {
+          "content_sha256": "48a3d569758cae1eb71a204319e430a0e2b17bbc10631decec88626d38dc50ca",
+          "id": "link:48a3d569758cae1eb71a2043",
+          "relation": "refines",
+          "source_id": "question:demand:D6",
+          "target_id": "question:root"
+        },
+        "link:4b9a041f6935d8c28302ae12": {
+          "content_sha256": "4b9a041f6935d8c28302ae12e7799a864137bc3d0de13ff3306810fa69f1c649",
+          "id": "link:4b9a041f6935d8c28302ae12",
+          "relation": "refines",
+          "source_id": "question:root.03-social-influence-risk.01-child-lorenz-findings",
+          "target_id": "question:demand:D13"
+        },
+        "link:4e426d372ead17fb60436027": {
+          "content_sha256": "4e426d372ead17fb60436027a1b23269655ffd020a87142f8b9dcc23ce0fa141",
+          "id": "link:4e426d372ead17fb60436027",
+          "relation": "refines",
+          "source_id": "question:root.03-social-influence-risk.01-child-lorenz-findings",
+          "target_id": "question:demand:D12"
+        },
+        "link:4f798cb83c7582c38cfb88bd": {
+          "content_sha256": "4f798cb83c7582c38cfb88bdfd835c99a0dc601b856720119fe64365ae22c42a",
+          "id": "link:4f798cb83c7582c38cfb88bd",
+          "relation": "refines",
+          "source_id": "question:root.04-debate-gains-evidence",
+          "target_id": "question:root"
+        },
+        "link:52aaf440a0cfa52148fd0e0a": {
+          "content_sha256": "52aaf440a0cfa52148fd0e0a8b15fa3f4ceca2d9fe1d0d3675835f8b82c24bb7",
+          "id": "link:52aaf440a0cfa52148fd0e0a",
+          "relation": "refines",
+          "source_id": "question:root.03-social-influence-risk",
+          "target_id": "question:root"
+        },
+        "link:541766fc32e4d84c2fd63c44": {
+          "content_sha256": "541766fc32e4d84c2fd63c44d39b887384e9693d9c10a19e869a69b53453f7ea",
+          "id": "link:541766fc32e4d84c2fd63c44",
+          "relation": "refines",
+          "source_id": "question:demand:D4",
+          "target_id": "question:root"
+        },
+        "link:54ace6aa7dbc682ce36b1598": {
+          "content_sha256": "54ace6aa7dbc682ce36b15989cdd24cf38992ead6108329a60b48ba7f74178c9",
+          "id": "link:54ace6aa7dbc682ce36b1598",
+          "relation": "refines",
+          "source_id": "question:root.03-social-influence-risk",
+          "target_id": "question:demand:D14"
+        },
+        "link:561e0fcd22b650ab4cc0fd61": {
+          "content_sha256": "561e0fcd22b650ab4cc0fd61392437d8f3e7ca904a6e6b7e7839642ba210692d",
+          "id": "link:561e0fcd22b650ab4cc0fd61",
+          "relation": "refines",
+          "source_id": "question:demand:D1",
+          "target_id": "question:root"
+        },
+        "link:5b751584b8c43c9e15d281fe": {
+          "content_sha256": "5b751584b8c43c9e15d281fecd110c27cec4e2ff68b62909aecadf66ffec777f",
+          "id": "link:5b751584b8c43c9e15d281fe",
+          "relation": "refines",
+          "source_id": "question:root.01-arg-semantics",
+          "target_id": "question:root"
+        },
+        "link:5e97df7da6a94755d85a5407": {
+          "content_sha256": "5e97df7da6a94755d85a5407cb21fe71750a2eca9df79c7bbac4d680689fc42e",
+          "id": "link:5e97df7da6a94755d85a5407",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries",
+          "target_id": "question:root"
+        },
+        "link:5ecc297a5272dee784b1b751": {
+          "content_sha256": "5ecc297a5272dee784b1b7519dc0b15b4464cd484190bf3de02879a3f667a502",
+          "id": "link:5ecc297a5272dee784b1b751",
+          "relation": "refines",
+          "source_id": "question:root.03-social-influence-risk",
+          "target_id": "question:demand:D13"
+        },
+        "link:5fbb61d2e80f257b289c0591": {
+          "content_sha256": "5fbb61d2e80f257b289c0591a887616bbe55c8e7f85593092ba47b199a267ece",
+          "id": "link:5fbb61d2e80f257b289c0591",
+          "relation": "refines",
+          "source_id": "question:root.04-debate-gains-evidence",
+          "target_id": "question:demand:D14"
+        },
+        "link:6018f82dcea4e7b30c3a5022": {
+          "content_sha256": "6018f82dcea4e7b30c3a50227a5bbde2d9842609c4f66b0c1b1b7933d6a7a18a",
+          "id": "link:6018f82dcea4e7b30c3a5022",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries",
+          "target_id": "question:demand:D15"
+        },
+        "link:6b4864ff816a275c94c2b20b": {
+          "content_sha256": "6b4864ff816a275c94c2b20b6b773656d702a57b923582817b5bf4ee5a8cf038",
+          "id": "link:6b4864ff816a275c94c2b20b",
+          "relation": "refines",
+          "source_id": "question:root.03-social-influence-risk.01-child-lorenz-findings",
+          "target_id": "question:root.03-social-influence-risk"
+        },
+        "link:6f3bc2c4325fd553d9d1d8f3": {
+          "content_sha256": "6f3bc2c4325fd553d9d1d8f3faea19c001987f62c0978022fbb27b6fe60a1607",
+          "id": "link:6f3bc2c4325fd553d9d1d8f3",
+          "relation": "refines",
+          "source_id": "question:root.03-social-influence-risk.01-child-lorenz-findings",
+          "target_id": "question:demand:D14"
+        },
+        "link:709f42e6e4da8b14cdf82243": {
+          "content_sha256": "709f42e6e4da8b14cdf82243f398085db7de30b6558d5ee57c30811a4bbb707f",
+          "id": "link:709f42e6e4da8b14cdf82243",
+          "relation": "refines",
+          "source_id": "question:demand:D7",
+          "target_id": "question:root"
+        },
+        "link:78cc1b9de710400b0dda32fa": {
+          "content_sha256": "78cc1b9de710400b0dda32fa024bac7009e9e616ae0c7eb5d5beed0f76c482df",
+          "id": "link:78cc1b9de710400b0dda32fa",
+          "relation": "refines",
+          "source_id": "question:root.03-social-influence-risk.02-child-choi-findings",
+          "target_id": "question:demand:D13"
+        },
+        "link:79a9672c7c764f123cad7df4": {
+          "content_sha256": "79a9672c7c764f123cad7df46a777bdbe38ef67bc5bca2231fe605d3970331ce",
+          "id": "link:79a9672c7c764f123cad7df4",
+          "relation": "refines",
+          "source_id": "question:root.02-crdt-persistence",
+          "target_id": "question:demand:D7"
+        },
+        "link:7a79aa5755f5b9590ce191cb": {
+          "content_sha256": "7a79aa5755f5b9590ce191cb65a36bfac312cd7011b4339d02a7b22f29e67a35",
+          "id": "link:7a79aa5755f5b9590ce191cb",
+          "relation": "refines",
+          "source_id": "question:demand:D8",
+          "target_id": "question:root"
+        },
+        "link:7c6b34c58d2a7a2bcc9f5e5f": {
+          "content_sha256": "7c6b34c58d2a7a2bcc9f5e5f0bce4c8a056e5bb10f00717a604aaa79136145cf",
+          "id": "link:7c6b34c58d2a7a2bcc9f5e5f",
+          "relation": "refines",
+          "source_id": "question:root.04-debate-gains-evidence",
+          "target_id": "question:demand:D4"
+        },
+        "link:7e922f4ed4489666a469c376": {
+          "content_sha256": "7e922f4ed4489666a469c37696eb63d617f14e1fa96f2fd51330061ee153d571",
+          "id": "link:7e922f4ed4489666a469c376",
+          "relation": "refines",
+          "source_id": "question:root.03-social-influence-risk.02-child-choi-findings",
+          "target_id": "question:root.03-social-influence-risk"
+        },
+        "link:815a52c06ab01fa3052d160f": {
+          "content_sha256": "815a52c06ab01fa3052d160f517b7436a84926a916c938a154527f6ad9f63fe6",
+          "id": "link:815a52c06ab01fa3052d160f",
+          "relation": "refines",
+          "source_id": "question:demand:D13",
+          "target_id": "question:root"
+        },
+        "link:95a52b650d408c309a8140ee": {
+          "content_sha256": "95a52b650d408c309a8140ee8c6ebca2fef1ce6a298affcd77e68b2c5e9698bd",
+          "id": "link:95a52b650d408c309a8140ee",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries",
+          "target_id": "question:demand:D13"
+        },
+        "link:960009408650bf4b3e01a852": {
+          "content_sha256": "960009408650bf4b3e01a8526773683245ec77daf9cd3d401176b91e3d2c5d60",
+          "id": "link:960009408650bf4b3e01a852",
+          "relation": "refines",
+          "source_id": "question:root.01-arg-semantics",
+          "target_id": "question:demand:D8"
+        },
+        "link:9dc3c1ef66fc5dbb330f0173": {
+          "content_sha256": "9dc3c1ef66fc5dbb330f0173535d446c45af5188095bf062d2f8de4e0707a33e",
+          "id": "link:9dc3c1ef66fc5dbb330f0173",
+          "relation": "refines",
+          "source_id": "question:demand:D15",
+          "target_id": "question:root"
+        },
+        "link:9e148f747df068b5a106ef78": {
+          "content_sha256": "9e148f747df068b5a106ef7855e07d89cf45cd6f352308627d4460c862c9e2b9",
+          "id": "link:9e148f747df068b5a106ef78",
+          "relation": "refines",
+          "source_id": "question:root.01-arg-semantics",
+          "target_id": "question:demand:D13"
+        },
+        "link:9e16c1c1dacc451174870ea4": {
+          "content_sha256": "9e16c1c1dacc451174870ea4511dc149959278b7f7237d7a2755f0a8820b1171",
+          "id": "link:9e16c1c1dacc451174870ea4",
+          "relation": "refines",
+          "source_id": "question:demand:D11",
+          "target_id": "question:root"
+        },
+        "link:9f307b082e580d3f1768454b": {
+          "content_sha256": "9f307b082e580d3f1768454bde85ab9516764862ddd3e20b7688a0060f590870",
+          "id": "link:9f307b082e580d3f1768454b",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries",
+          "target_id": "question:demand:D14"
+        },
+        "link:a1a9810843aae3a03593e758": {
+          "content_sha256": "a1a9810843aae3a03593e7581bafd125732b458f2ce82a2cf70fb51cabf0697e",
+          "id": "link:a1a9810843aae3a03593e758",
+          "relation": "refines",
+          "source_id": "question:root.03-social-influence-risk.02-child-choi-findings",
+          "target_id": "question:demand:D11"
+        },
+        "link:a3763323e4c5f13dcbac6274": {
+          "content_sha256": "a3763323e4c5f13dcbac6274b2ffd6f9c2541891a461aa2429d704abc91536e4",
+          "id": "link:a3763323e4c5f13dcbac6274",
+          "relation": "refines",
+          "source_id": "question:root.03-social-influence-risk.02-child-choi-findings",
+          "target_id": "question:demand:D6"
+        },
+        "link:a83bc0e755e8fd359c4a6e60": {
+          "content_sha256": "a83bc0e755e8fd359c4a6e60e1429a2524d3b9f114eafad89e022184a5d223cd",
+          "id": "link:a83bc0e755e8fd359c4a6e60",
+          "relation": "refines",
+          "source_id": "question:root.01-arg-semantics",
+          "target_id": "question:demand:D3"
+        },
+        "link:ad2d4893bb4dadfa6cec4d51": {
+          "content_sha256": "ad2d4893bb4dadfa6cec4d5140baa6fa9767b2438aafa6411ce349e9e4ecc616",
+          "id": "link:ad2d4893bb4dadfa6cec4d51",
+          "relation": "refines",
+          "source_id": "question:demand:D9",
+          "target_id": "question:root"
+        },
+        "link:b02788fef9fd73ad10830bc3": {
+          "content_sha256": "b02788fef9fd73ad10830bc3e9d81dcb10ab065dd7cb0854743a1a9ff757ebb6",
+          "id": "link:b02788fef9fd73ad10830bc3",
+          "relation": "refines",
+          "source_id": "question:root.02-crdt-persistence",
+          "target_id": "question:demand:D5"
+        },
+        "link:b39e9bd6e534d53587c33f92": {
+          "content_sha256": "b39e9bd6e534d53587c33f923f5010b29d4e1d076282274cb24f7efef425bb04",
+          "id": "link:b39e9bd6e534d53587c33f92",
+          "relation": "refines",
+          "source_id": "question:root.02-crdt-persistence",
+          "target_id": "question:demand:D10"
+        },
+        "link:b9ccd3ec073289680e72b9c5": {
+          "content_sha256": "b9ccd3ec073289680e72b9c51fe29849bd5f0a857121c6ccbf09d130cc2e3ac2",
+          "id": "link:b9ccd3ec073289680e72b9c5",
+          "relation": "refines",
+          "source_id": "question:root.02-crdt-persistence",
+          "target_id": "question:demand:D12"
+        },
+        "link:c0525acb5ba38548b9c5ff19": {
+          "content_sha256": "c0525acb5ba38548b9c5ff191f7515142f60365966e0df4035197e2f190a8644",
+          "id": "link:c0525acb5ba38548b9c5ff19",
+          "relation": "refines",
+          "source_id": "question:root.04-debate-gains-evidence",
+          "target_id": "question:demand:D11"
+        },
+        "link:d508e58a1c643d9abfe73da0": {
+          "content_sha256": "d508e58a1c643d9abfe73da06ff8d2166070d8bf0177c3bb003e03a99924621c",
+          "id": "link:d508e58a1c643d9abfe73da0",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries",
+          "target_id": "question:demand:D11"
+        },
+        "link:dbc379c523a802d7234d668c": {
+          "content_sha256": "dbc379c523a802d7234d668c3e454859f9aa203d2a2e546f530980165cc90d8f",
+          "id": "link:dbc379c523a802d7234d668c",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries",
+          "target_id": "question:demand:D12"
+        },
+        "link:dbcff4ec9d62472bedb7ee52": {
+          "content_sha256": "dbcff4ec9d62472bedb7ee5294e35b526a4cde4fadd713d11e33f955d20f5328",
+          "id": "link:dbcff4ec9d62472bedb7ee52",
+          "relation": "refines",
+          "source_id": "question:demand:D14",
+          "target_id": "question:root"
+        },
+        "link:e5a9bece7311def890467b91": {
+          "content_sha256": "e5a9bece7311def890467b9156fcc92d2fec9948bcc4ff14bd2ab4b30bc4e243",
+          "id": "link:e5a9bece7311def890467b91",
+          "relation": "refines",
+          "source_id": "question:demand:D12",
+          "target_id": "question:root"
+        },
+        "link:e5bfef49b3f76c9371b77861": {
+          "content_sha256": "e5bfef49b3f76c9371b77861e45ee1d512f019aef67172fd18c7132135626f34",
+          "id": "link:e5bfef49b3f76c9371b77861",
+          "relation": "refines",
+          "source_id": "question:root.03-social-influence-risk",
+          "target_id": "question:demand:D12"
+        },
+        "link:ec67afe3731a822e2d0c2942": {
+          "content_sha256": "ec67afe3731a822e2d0c29420bb7d4b2f11e3ec8cb83837b645384f34bcf5d18",
+          "id": "link:ec67afe3731a822e2d0c2942",
+          "relation": "refines",
+          "source_id": "question:root.04-debate-gains-evidence",
+          "target_id": "question:demand:D12"
+        },
+        "link:f4ba33e931f2c160cd230486": {
+          "content_sha256": "f4ba33e931f2c160cd2304869a863e1455dfc16a98442acfcd423dfb9133769c",
+          "id": "link:f4ba33e931f2c160cd230486",
+          "relation": "refines",
+          "source_id": "question:root.03-social-influence-risk.02-child-choi-findings",
+          "target_id": "question:demand:D12"
+        },
+        "link:f63ca17b95f176b627952fd3": {
+          "content_sha256": "f63ca17b95f176b627952fd3651d46f56dfec6c8994b0b0df30d2fc331ace8a9",
+          "id": "link:f63ca17b95f176b627952fd3",
+          "relation": "refines",
+          "source_id": "question:root.03-social-influence-risk",
+          "target_id": "question:demand:D6"
+        },
+        "link:f7b3972e183578733d308198": {
+          "content_sha256": "f7b3972e183578733d308198b9f3de5fda8854126c6aa66264d14afa484ff56a",
+          "id": "link:f7b3972e183578733d308198",
+          "relation": "refines",
+          "source_id": "question:demand:D10",
+          "target_id": "question:root"
+        },
+        "link:f87ac7b536be5b768b698c28": {
+          "content_sha256": "f87ac7b536be5b768b698c28521f264405bf959a3d7cc8591192a09721ce5721",
+          "id": "link:f87ac7b536be5b768b698c28",
+          "relation": "refines",
+          "source_id": "question:root.03-social-influence-risk",
+          "target_id": "question:demand:D11"
+        }
+      },
+      "outgoing_link_ids_by_entry": {
+        "question:demand:D1": [
+          "link:561e0fcd22b650ab4cc0fd61"
+        ],
+        "question:demand:D10": [
+          "link:f7b3972e183578733d308198"
+        ],
+        "question:demand:D11": [
+          "link:9e16c1c1dacc451174870ea4"
+        ],
+        "question:demand:D12": [
+          "link:e5a9bece7311def890467b91"
+        ],
+        "question:demand:D13": [
+          "link:815a52c06ab01fa3052d160f"
+        ],
+        "question:demand:D14": [
+          "link:dbcff4ec9d62472bedb7ee52"
+        ],
+        "question:demand:D15": [
+          "link:9dc3c1ef66fc5dbb330f0173"
+        ],
+        "question:demand:D2": [
+          "link:1e97bab1f415d57cbc837a88"
+        ],
+        "question:demand:D3": [
+          "link:2395134f0213cf5cee3f1947"
+        ],
+        "question:demand:D4": [
+          "link:541766fc32e4d84c2fd63c44"
+        ],
+        "question:demand:D5": [
+          "link:088e1a7cfea6dde8ac04eab3"
+        ],
+        "question:demand:D6": [
+          "link:48a3d569758cae1eb71a2043"
+        ],
+        "question:demand:D7": [
+          "link:709f42e6e4da8b14cdf82243"
+        ],
+        "question:demand:D8": [
+          "link:7a79aa5755f5b9590ce191cb"
+        ],
+        "question:demand:D9": [
+          "link:ad2d4893bb4dadfa6cec4d51"
+        ],
+        "question:root.01-arg-semantics": [
+          "link:4694364cb7b8f08ed6b70438",
+          "link:5b751584b8c43c9e15d281fe",
+          "link:960009408650bf4b3e01a852",
+          "link:9e148f747df068b5a106ef78",
+          "link:a83bc0e755e8fd359c4a6e60"
+        ],
+        "question:root.02-crdt-persistence": [
+          "link:1709dd7fbf8587de0c575188",
+          "link:3e163e5b6c87fe659c9c8b95",
+          "link:79a9672c7c764f123cad7df4",
+          "link:b02788fef9fd73ad10830bc3",
+          "link:b39e9bd6e534d53587c33f92",
+          "link:b9ccd3ec073289680e72b9c5"
+        ],
+        "question:root.03-social-influence-risk": [
+          "link:52aaf440a0cfa52148fd0e0a",
+          "link:54ace6aa7dbc682ce36b1598",
+          "link:5ecc297a5272dee784b1b751",
+          "link:e5bfef49b3f76c9371b77861",
+          "link:f63ca17b95f176b627952fd3",
+          "link:f87ac7b536be5b768b698c28"
+        ],
+        "question:root.03-social-influence-risk.01-child-lorenz-findings": [
+          "link:02dc37f9cbcf4750d3be73d8",
+          "link:0324e6ac0ff4002288da5983",
+          "link:4b9a041f6935d8c28302ae12",
+          "link:4e426d372ead17fb60436027",
+          "link:6b4864ff816a275c94c2b20b",
+          "link:6f3bc2c4325fd553d9d1d8f3"
+        ],
+        "question:root.03-social-influence-risk.02-child-choi-findings": [
+          "link:0b9daac50599df76e5db111b",
+          "link:78cc1b9de710400b0dda32fa",
+          "link:7e922f4ed4489666a469c376",
+          "link:a1a9810843aae3a03593e758",
+          "link:a3763323e4c5f13dcbac6274",
+          "link:f4ba33e931f2c160cd230486"
+        ],
+        "question:root.04-debate-gains-evidence": [
+          "link:018c1bfba9c89f886979e58a",
+          "link:4f798cb83c7582c38cfb88bd",
+          "link:5fbb61d2e80f257b289c0591",
+          "link:7c6b34c58d2a7a2bcc9f5e5f",
+          "link:c0525acb5ba38548b9c5ff19",
+          "link:ec67afe3731a822e2d0c2942"
+        ],
+        "question:root.05-debate-nulls-boundaries": [
+          "link:5e97df7da6a94755d85a5407",
+          "link:6018f82dcea4e7b30c3a5022",
+          "link:95a52b650d408c309a8140ee",
+          "link:9f307b082e580d3f1768454b",
+          "link:d508e58a1c643d9abfe73da0",
+          "link:dbc379c523a802d7234d668c"
+        ]
+      },
+      "question_ids_by_answer": {},
+      "questions_by_id": {
+        "question:demand:D1": {
+          "acceptance_condition": "Establish demand D1 with evidence.",
+          "content_sha256": "358b8c8d2ee8dcbcd62f92e95fcfeb759f5784e13dd5bd756c15e8ad80406fad",
+          "demand_ids": [
+            "D1"
+          ],
+          "id": "question:demand:D1",
+          "node_id": null,
+          "rationale": "Format and length bound stated verbatim in the request.",
+          "tags": [
+            "decision"
+          ],
+          "text": "The deliverable is a single architecture decision memo of 1,400–1,800 words."
+        },
+        "question:demand:D10": {
+          "acceptance_condition": "Establish demand D10 with evidence.",
+          "content_sha256": "42c24ef84552b31fbec60cb25073a16b7d0d6ae637909b5aaa0649e671486bc9",
+          "demand_ids": [
+            "D10"
+          ],
+          "id": "question:demand:D10",
+          "node_id": null,
+          "rationale": "Sixth specification area; the request says 'the exact role of model versus runtime.'",
+          "tags": [
+            "evidence"
+          ],
+          "text": "The exact division of responsibility between model and runtime is specified."
+        },
+        "question:demand:D11": {
+          "acceptance_condition": "Establish demand D11 with evidence.",
+          "content_sha256": "b48aa66909c810d05ced3a63029ee4d813e20b8bd7343488b183f69dac4e2b40",
+          "demand_ids": [
+            "D11"
+          ],
+          "id": "question:demand:D11",
+          "node_id": null,
+          "rationale": "Required by the request and reinforced by the manifest's instruction not to select papers by desired outcome.",
+          "tags": [
+            "evidence"
+          ],
+          "text": "The memo reconciles — rather than hides — the tension between papers reporting multi-agent debate gains and papers reporting matched-compute null results or conformity."
+        },
+        "question:demand:D12": {
+          "acceptance_condition": "Establish demand D12 with evidence.",
+          "content_sha256": "70610c0e88a285479759ef950cb1fa33e28da10095af537fb19e5ee24c60fdc7",
+          "demand_ids": [
+            "D12"
+          ],
+          "id": "question:demand:D12",
+          "node_id": null,
+          "rationale": "Grounding scope, citation count, and page-marker requirement are stated in the request; marker format and corpus enumeration come from the manifest.",
+          "tags": [
+            "evidence"
+          ],
+          "text": "All evidentiary claims are grounded only in the supplied workspace corpus, with at least five distinct source files cited and citations carrying PDF page markers from the extracted text."
+        },
+        "question:demand:D13": {
+          "acceptance_condition": "Establish demand D13 with evidence.",
+          "content_sha256": "e4e6151f4fb92956ae2d8e295acd8c66fb86a3b7aa8512390bd8da1b78cda6ea",
+          "demand_ids": [
+            "D13"
+          ],
+          "id": "question:demand:D13",
+          "node_id": null,
+          "rationale": "Stated verbatim in the request.",
+          "tags": [
+            "evidence"
+          ],
+          "text": "Source-supported claims are clearly distinguished from design inferences."
+        },
+        "question:demand:D14": {
+          "acceptance_condition": "Establish demand D14 with evidence.",
+          "content_sha256": "89489912e05f5dae6a67e4300048e4863d654b8355bd1892d03970cecd421850",
+          "demand_ids": [
+            "D14"
+          ],
+          "id": "question:demand:D14",
+          "node_id": null,
+          "rationale": "Condition count and all five metric families are enumerated in the request.",
+          "tags": [
+            "counterexample",
+            "measurement",
+            "definition"
+          ],
+          "text": "A falsifiable evaluation plan compares at least three conditions and defines metrics for quality, diversity/correlation, latency, token cost, and recovery-from-wrong-consensus."
+        },
+        "question:demand:D15": {
+          "acceptance_condition": "Establish demand D15 with evidence.",
+          "content_sha256": "c63b60742108a5627760487657dad3280b9b724cdef7fd8f2f8b22e469072dc3",
+          "demand_ids": [
+            "D15"
+          ],
+          "id": "question:demand:D15",
+          "node_id": null,
+          "rationale": "Stated verbatim in the request.",
+          "tags": [
+            "evidence"
+          ],
+          "text": "Important limitations and unresolved questions are stated."
+        },
+        "question:demand:D2": {
+          "acceptance_condition": "Establish demand D2 with evidence.",
+          "content_sha256": "a1e8e73a66a88854b181cd8e700ee47c190021995492e4c13a7f3f2480683936",
+          "demand_ids": [
+            "D2"
+          ],
+          "id": "question:demand:D2",
+          "node_id": null,
+          "rationale": "The request explicitly forbids a survey-only outcome.",
+          "tags": [
+            "decision"
+          ],
+          "text": "The memo makes one concrete, implementable recommendation rather than merely surveying the literature."
+        },
+        "question:demand:D3": {
+          "acceptance_condition": "Establish demand D3 with evidence.",
+          "content_sha256": "2b4510f300813f4c6d054088afcdeb580e129c09c780589126e578caad7f1cb3",
+          "demand_ids": [
+            "D3"
+          ],
+          "id": "question:demand:D3",
+          "node_id": null,
+          "rationale": "All five capabilities are enumerated verbatim in the request.",
+          "tags": [
+            "decision"
+          ],
+          "text": "The recommended design treats questions and answers as first-class many-to-many graph objects, supporting: multiple competing answers per question; one answer addressing multiple questions; question-to-question relations; answer-to-answer provenance or conflict relations; and controlled tags."
+        },
+        "question:demand:D4": {
+          "acceptance_condition": "Establish demand D4 with evidence.",
+          "content_sha256": "495d059579b7faeff7b7c3dea23a59e4beecd9d2061aa750429abe0bdc2fd29e",
+          "demand_ids": [
+            "D4"
+          ],
+          "id": "question:demand:D4",
+          "node_id": null,
+          "rationale": "Both comparison targets are named verbatim in the request.",
+          "tags": [
+            "evidence"
+          ],
+          "text": "The design is compared against two named baselines: an open conversational forum and no inter-agent communication."
+        },
+        "question:demand:D5": {
+          "acceptance_condition": "Establish demand D5 with evidence.",
+          "content_sha256": "04efdfb487681553676fbfc02e1e0eba20f7638dcd990d68fffd3b7e56f7324a",
+          "demand_ids": [
+            "D5"
+          ],
+          "id": "question:demand:D5",
+          "node_id": null,
+          "rationale": "First of six specification areas listed in the request.",
+          "tags": [
+            "evidence"
+          ],
+          "text": "The data model and its invariants are specified."
+        },
+        "question:demand:D6": {
+          "acceptance_condition": "Establish demand D6 with evidence.",
+          "content_sha256": "16aa3a487c4a63da4bd967a8004443a36ebbea7ca9716b65b773f14e6af5e164",
+          "demand_ids": [
+            "D6"
+          ],
+          "id": "question:demand:D6",
+          "node_id": null,
+          "rationale": "Second of six specification areas listed in the request.",
+          "tags": [
+            "method"
+          ],
+          "text": "Staged visibility and the communication protocol are specified."
+        },
+        "question:demand:D7": {
+          "acceptance_condition": "Establish demand D7 with evidence.",
+          "content_sha256": "e9aace925c8874d470e5e66f133e5698e954d9c79c85ac15d05a6b1be90f8648",
+          "demand_ids": [
+            "D7"
+          ],
+          "id": "question:demand:D7",
+          "node_id": null,
+          "rationale": "Third of six specification areas listed in the request.",
+          "tags": [
+            "evidence"
+          ],
+          "text": "Persistence and concurrent-update semantics are specified."
+        },
+        "question:demand:D8": {
+          "acceptance_condition": "Establish demand D8 with evidence.",
+          "content_sha256": "be321eb0feda8aa2c452bdc5b58cd0c2d3a82e7337259f185b4b495784e0d94b",
+          "demand_ids": [
+            "D8"
+          ],
+          "id": "question:demand:D8",
+          "node_id": null,
+          "rationale": "Fourth of six specification areas listed in the request.",
+          "tags": [
+            "evidence"
+          ],
+          "text": "Contradiction and belief-revision behavior is specified."
+        },
+        "question:demand:D9": {
+          "acceptance_condition": "Establish demand D9 with evidence.",
+          "content_sha256": "fbacaee35ff37b6cdf07a99f4704b78e431674fb8d042f8604710966157351f4",
+          "demand_ids": [
+            "D9"
+          ],
+          "id": "question:demand:D9",
+          "node_id": null,
+          "rationale": "Fifth of six specification areas listed in the request.",
+          "tags": [
+            "evidence"
+          ],
+          "text": "Retrieval and ranking are specified."
+        },
+        "question:root": {
+          "acceptance_condition": "Satisfy every assigned whole-task demand and explicit constraint.",
+          "content_sha256": "4ce436fa1c007db64fdec92524d279656612f912b3191f3b4454fb209e9fb892",
+          "demand_ids": [
+            "D1",
+            "D2",
+            "D3",
+            "D4",
+            "D5",
+            "D6",
+            "D7",
+            "D8",
+            "D9",
+            "D10",
+            "D11",
+            "D12",
+            "D13",
+            "D14",
+            "D15"
+          ],
+          "id": "question:root",
+          "node_id": "root",
+          "rationale": "The whole task submitted after intake.",
+          "tags": [
+            "counterexample",
+            "method",
+            "measurement"
+          ],
+          "text": "Produce a 1,400–1,800 word architecture decision memo that commits to one concrete, implementable design for a shared knowledge substrate serving recursively decomposing AI research agents: questions and answers modeled as first-class many-to-many graph objects; the design compared against an open conversational forum and against no inter-agent communication; full specification of the data model and invariants, staged visibility and communication protocol, persistence and concurrent-update semantics, contradiction and belief-revision behavior, retrieval/ranking, and the exact role of model versus runtime; evidence restricted to the seven-file workspace corpus with at least five distinct source files cited via PDF page markers; the corpus's conflicting empirical conclusions reconciled rather than hidden; source-supported claims distinguished from design inferences; and a falsifiable evaluation plan (at least three conditions, five named metric families) plus explicit limitations and unresolved questions."
+        },
+        "question:root.01-arg-semantics": {
+          "acceptance_condition": "Returns (a) at least four findings from the Dung file, each a quote or close paraphrase carrying the file-relative citation and the exact `===== PDF PAGE N =====` marker(s) of the page where it appears, and (b) at least three design constraints for conflict/belief-revision semantics, each explicitly labeled as design inference rather than source claim.",
+          "content_sha256": "1cda59f1ebda0deba5fd22d60e9e1bdf079a900c1c0be6105aeac164ebc3d3ec",
+          "demand_ids": [
+            "D3",
+            "D8",
+            "D12",
+            "D13"
+          ],
+          "id": "question:root.01-arg-semantics",
+          "node_id": "root.01-arg-semantics",
+          "rationale": "Dung 1995 is the corpus's only formal treatment of conflict and acceptability; it grounds the conflict-relation capability of D3 and the contradiction/belief-revision specification of D8 with citable formal definitions.",
+          "tags": [
+            "definition",
+            "evidence",
+            "method"
+          ],
+          "text": "Read papers/text/dung-1995-argumentation.txt and extract, each anchored to the exact `===== PDF PAGE N =====` marker(s) where it appears: the definition of an argumentation framework (set of arguments plus binary attack relation), acceptability of an argument, conflict-free and admissible sets, the characteristic function, and the grounded/preferred/stable extension semantics, including any stated links to nonmonotonic reasoning or logic programming. Then derive, each explicitly labeled as design inference, how these notions can anchor answer-to-answer conflict/provenance relations and contradiction and belief-revision behavior in a many-to-many question/answer graph (e.g., answers as arguments, attack edges as conflicts, extensions as mutually consistent answer sets)."
+        },
+        "question:root.02-crdt-persistence": {
+          "acceptance_condition": "Returns (a) at least four findings from the Shapiro file, each a quote or close paraphrase carrying the file-relative citation and the exact `===== PDF PAGE N =====` marker(s), and (b) at least three design constraints for persistence/concurrency (including at least one explicit split between CRDT-enforced and runtime-enforced invariants), each labeled as design inference.",
+          "content_sha256": "9708f3549586149eb68c3673c506178691fb9804268b1639f230c6784a9e2085",
+          "demand_ids": [
+            "D5",
+            "D7",
+            "D10",
+            "D12",
+            "D13"
+          ],
+          "id": "question:root.02-crdt-persistence",
+          "node_id": "root.02-crdt-persistence",
+          "rationale": "Shapiro et al. 2011 is the corpus's only distributed-systems treatment; it grounds the persistence and concurrent-update specification (D7), the merge-safe portion of the data model's invariants (D5), and the runtime-versus-model enforcement boundary (D10).",
+          "tags": [
+            "evidence",
+            "method",
+            "constraint"
+          ],
+          "text": "Read papers/text/shapiro-et-al-2011-crdts.txt and extract, each anchored to the exact `===== PDF PAGE N =====` marker(s) where it appears: the distinction between state-based and operation-based CRDTs, the strong eventual consistency guarantee and its conditions, the semilattice/monotonicity requirements for convergence, and at least two concrete reusable data types (e.g., grow-only set, observed-remove set, last-writer-wins register). Then derive, each explicitly labeled as design inference, concurrent-update semantics for a many-to-many question/answer graph substrate (e.g., add-only question and answer objects, add-wins tag sets) and identify which invariants CRDTs cannot enforce (e.g., uniqueness, schema validity, tag-vocabulary control) so that the runtime must enforce them."
+        },
+        "question:root.03-social-influence-risk": {
+          "acceptance_condition": "Returns (a) at least three anchored findings per file (at least six total), each a quote or close paraphrase carrying the file-relative citation and the exact `===== PDF PAGE N =====` marker(s), and (b) at least three staged-visibility or diversity-measurement design constraints, each explicitly labeled as design inference.",
+          "content_sha256": "2f332a3b5c9f0b6fd719848ae59287e9e0a5c4fbe833be72bbf5567676c75d50",
+          "demand_ids": [
+            "D6",
+            "D11",
+            "D12",
+            "D13",
+            "D14"
+          ],
+          "id": "question:root.03-social-influence-risk",
+          "node_id": "root.03-social-influence-risk",
+          "rationale": "Lorenz 2011 and Choi 2025 are the corpus's evidence that unstructured information sharing degrades collective accuracy; they ground the staged-visibility protocol (D6), the conformity side of the reconciliation (D11), and the diversity/correlation metric family (D14).",
+          "tags": [
+            "evidence",
+            "risk",
+            "counterexample"
+          ],
+          "text": "Read papers/text/lorenz-et-al-2011-social-influence.txt and papers/text/choi-et-al-2025-conformity.txt. Extract, each anchored to the exact `===== PDF PAGE N =====` marker(s): Lorenz et al.'s core experimental findings on how social influence affects the wisdom of crowds (effects on estimate diversity, accuracy, and confidence, as stated in the text) and Choi et al.'s empirical findings on group conformity in multi-agent systems (the conditions under which agents conform to peer or majority answers, as stated in the text). Then derive, each explicitly labeled as design inference, staged-visibility constraints for the substrate (e.g., committing independent answers before exposing peers' answers, delayed or partial disclosure) and implications for measuring answer diversity and correlation."
+        },
+        "question:root.03-social-influence-risk.01-child-lorenz-findings": {
+          "acceptance_condition": "Returns at least three findings, each a quote or close paraphrase carrying the file-relative citation and the exact `===== PDF PAGE N =====` marker(s) of the page where it appears.",
+          "content_sha256": "9079847a2ceaf58a20f983897dc79cebb96667e69ac3b4854fa4d4c659fe769b",
+          "demand_ids": [
+            "D6",
+            "D11",
+            "D12",
+            "D13",
+            "D14"
+          ],
+          "id": "question:root.03-social-influence-risk.01-child-lorenz-findings",
+          "node_id": "root.03-social-influence-risk.01-child-lorenz-findings",
+          "rationale": "Lorenz et al. provide the human-subject experimental evidence that social influence reduces diversity without improving accuracy and boosts confidence; these findings are essential for the design inference on staged visibility.",
+          "tags": [
+            "evidence",
+            "risk",
+            "counterexample"
+          ],
+          "text": "Extract from papers/text/lorenz-et-al-2011-social-influence.txt at least three anchored findings on how social influence affects the wisdom of crowds, including effects on estimate diversity, accuracy, and confidence, each anchored to the exact `===== PDF PAGE N =====` marker(s)."
+        },
+        "question:root.03-social-influence-risk.02-child-choi-findings": {
+          "acceptance_condition": "Returns at least three findings, each a quote or close paraphrase carrying the file-relative citation and the exact `===== PDF PAGE N =====` marker(s) of the page where it appears.",
+          "content_sha256": "40b99b51b5b3c92bf3543b7ba8acbab6dcce2ec89eb5c2b78a2a51be1f0bf314",
+          "demand_ids": [
+            "D6",
+            "D11",
+            "D12",
+            "D13",
+            "D14"
+          ],
+          "id": "question:root.03-social-influence-risk.02-child-choi-findings",
+          "node_id": "root.03-social-influence-risk.02-child-choi-findings",
+          "rationale": "Choi et al. provide the multi-agent empirical evidence that LLM agents conform to numerically dominant groups and to higher-intelligence agents; these findings ground the conformity risk and the need for anonymity/diversity in the design.",
+          "tags": [
+            "evidence",
+            "risk"
+          ],
+          "text": "Extract from papers/text/choi-et-al-2025-conformity.txt at least three anchored findings on group conformity in multi-agent systems, specifically the conditions under which agents conform to peer or majority answers, each anchored to the exact `===== PDF PAGE N =====` marker(s)."
+        },
+        "question:root.04-debate-gains-evidence": {
+          "acceptance_condition": "Returns (a) at least four anchored findings from the Du file covering claimed gains, experimental setup (agents, rounds, tasks, consensus mechanism), and stated limitations, each carrying the file-relative citation and the exact `===== PDF PAGE N =====` marker(s), and (b) at least two design constraints and one evaluation-replication requirement, each explicitly labeled as design inference.",
+          "content_sha256": "2be78886a3947f382843991a648c9946b59844f7afbc180ae5d035bf173143b2",
+          "demand_ids": [
+            "D4",
+            "D11",
+            "D12",
+            "D13",
+            "D14"
+          ],
+          "id": "question:root.04-debate-gains-evidence",
+          "node_id": "root.04-debate-gains-evidence",
+          "rationale": "Du et al. 2023 is the corpus's positive evidence for multi-agent debate; it grounds one side of the required reconciliation (D11), informs the baseline comparison (D4), and defines the replication arm of the evaluation plan (D14).",
+          "tags": [
+            "evidence",
+            "measurement"
+          ],
+          "text": "Read papers/text/du-et-al-2023-multiagent-debate.txt and extract, each anchored to the exact `===== PDF PAGE N =====` marker(s): the improvements in factuality and reasoning the paper claims for multiagent debate, the experimental setup (number of agents, number of debate rounds, tasks used, and how consensus or a final answer is reached), and any limitations the authors state. Then derive, each explicitly labeled as design inference: which debate behaviors a shared question/answer substrate must capture to retain these gains, and what an evaluation condition replicating the paper's setup would require."
+        },
+        "question:root.05-debate-nulls-boundaries": {
+          "acceptance_condition": "Returns (a) at least three anchored findings per file (at least six total), each a quote or close paraphrase carrying the file-relative citation and the exact `===== PDF PAGE N =====` marker(s), and (b) at least three reconciliation hypotheses and at least three evaluation-design constraints (together covering the five named metric families), each explicitly labeled as design inference.",
+          "content_sha256": "89203749570be368520298607541a4b6b5c225a2bc75e8bdbf69bacd54a5bc66",
+          "demand_ids": [
+            "D11",
+            "D12",
+            "D13",
+            "D14",
+            "D15"
+          ],
+          "id": "question:root.05-debate-nulls-boundaries",
+          "node_id": "root.05-debate-nulls-boundaries",
+          "rationale": "Smit et al. 2023 and Zhang et al. 2025 are the corpus's null-result and boundary-condition evidence; they ground the reconciliation (D11) without hiding it, the falsifiable evaluation plan (D14), and the limitations and unresolved questions (D15).",
+          "tags": [
+            "counterexample",
+            "measurement",
+            "risk"
+          ],
+          "text": "Read papers/text/smit-et-al-2023-going-mad.txt and papers/text/zhang-et-al-2025-mad-question.txt. Extract, each anchored to the exact `===== PDF PAGE N =====` marker(s): Smit et al.'s critical or null results on multi-agent debate (including any comparisons against single-agent or matched-compute baselines, as stated in the text) and Zhang et al.'s analysis of when and why multi-agent debate helps or fails (task dependence and boundary conditions, as stated in the text). Then derive, each explicitly labeled as design inference: at least three reconciliation hypotheses attributing the disagreement with Du et al. 2023 to named conditions (task type, compute parity, visibility or timing of peer answers), and constraints for a falsifiable evaluation plan covering quality, diversity/correlation, latency, token cost, and recovery-from-wrong-consensus."
+        }
+      },
+      "standard_tags": [
+        "definition",
+        "constraint",
+        "evidence",
+        "method",
+        "counterexample",
+        "risk",
+        "assumption",
+        "uncertainty",
+        "decision",
+        "interface",
+        "measurement",
+        "synthesis"
+      ],
+      "version": 79
+    },
+    "max_children": 5,
+    "node": {
+      "acceptance_condition": "Returns at least three findings, each a quote or close paraphrase carrying the file-relative citation and the exact `===== PDF PAGE N =====` marker(s) of the page where it appears.",
+      "demand_ids": [
+        "D6",
+        "D11",
+        "D12",
+        "D13",
+        "D14"
+      ],
+      "depth": 2,
+      "expected_contribution": "A set of anchored findings from Lorenz et al. detailing the social influence, range reduction, and confidence effects, with page markers.",
+      "id": "root.03-social-influence-risk.01-child-lorenz-findings",
+      "knowledge_tags": [
+        "evidence",
+        "risk",
+        "counterexample"
+      ],
+      "objective": "Extract from papers/text/lorenz-et-al-2011-social-influence.txt at least three anchored findings on how social influence affects the wisdom of crowds, including effects on estimate diversity, accuracy, and confidence, each anchored to the exact `===== PDF PAGE N =====` marker(s).",
+      "parent_id": "root.03-social-influence-risk",
+      "rationale": "Lorenz et al. provide the human-subject experimental evidence that social influence reduces diversity without improving accuracy and boosts confidence; these findings are essential for the design inference on staged visibility.",
+      "separator_facts": [
+        "SC1: The evidentiary corpus is exactly seven extracted-text files under papers/text: dung-1995-argumentation.txt (Dung 1995, Artificial Intelligence 77), shapiro-et-al-2011-crdts.txt (Shapiro et al., SSS 2011), lorenz-et-al-2011-social-influence.txt (Lorenz et al., PNAS 108, 2011), du-et-al-2023-multiagent-debate.txt (Du et al. 2023, arXiv 2305.14325), smit-et-al-2023-going-mad.txt (Smit et al. 2023, arXiv 2311.17371), zhang-et-al-2025-mad-question.txt (Zhang et al. 2025, arXiv 2502.08788), choi-et-al-2025-conformity.txt (Choi et al., Findings of ACL 2025).",
+        "SC2: Page boundaries in the extracted texts are marked with lines of the form `===== PDF PAGE N =====`, and these markers are the citation anchors required by D12/C3.",
+        "SC3: The corpus intentionally contains conflicting empirical conclusions — multi-agent debate gains (Du et al. 2023) versus matched-compute null results and conformity findings (Smit et al. 2023; Zhang et al. 2025; Choi et al. 2025; Lorenz et al. 2011 on social influence undermining crowd wisdom) — and the manifest requires preserving and reconciling these conflicts.",
+        "SC4: The envelope's single conversation decision asserts that the seven full extracted texts are present in the solve workspace under papers/text with explicit PDF page markers; the intake envelope itself encloses only the manifest, not the full texts.",
+        "SC5: The manifest (material:001) is located at /workspace/seam-harness/research-kb-workspace/CORPUS.md, indicating a benchmark-style workspace named research-kb-workspace under a seam-harness directory.",
+        "SC6: The proposed substrate plus the two baselines named in D4 (open conversational forum; no inter-agent communication) naturally supply the three or more conditions required by D14.",
+        "Corpus membership: papers/text/lorenz-et-al-2011-social-influence.txt is Lorenz et al., PNAS 108, 2011, and papers/text/choi-et-al-2025-conformity.txt is Choi et al., Findings of ACL 2025; both are among the exactly seven extracted-text files under papers/text that constitute the only evidentiary corpus.",
+        "Page boundaries in the extracted texts are marked with lines of the form `===== PDF PAGE N =====`; citations must carry these markers (D12/C3).",
+        "The corpus intentionally contains conflicting empirical conclusions (debate gains versus matched-compute null results and conformity findings); these conflicts must be preserved and reconciled, never hidden (C4).",
+        "Evidence is restricted to the seven workspace corpus files; no outside sources may be used (C2).",
+        "Source-supported claims must be clearly distinguished from design inferences in everything returned (D13).",
+        "SC1: The evidentiary corpus is exactly seven extracted-text files under papers/text.",
+        "SC2: Page boundaries are marked with `===== PDF PAGE N =====` lines.",
+        "SC3: The corpus contains conflicting empirical conclusions that must be reconciled.",
+        "C2: No evidence outside the seven corpus files may be used.",
+        "C3: Citations must include PDF page markers.",
+        "D12: All evidentiary claims must be grounded in the corpus with page markers.",
+        "D13: Source-supported claims must be distinguished from design inferences."
+      ],
+      "source_ids": [
+        "ref:lorenz-2011-social-influence"
+      ],
+      "source_paths": [
+        "papers/text/lorenz-et-al-2011-social-influence.txt"
+      ]
+    },
+    "product_intent": "The memo exists to commit the agent system to a single defensible substrate architecture — and to justify that commitment strictly from the supplied corpus — so that recursively decomposing research agents can share, contest, and reuse questions and answers as structured state, capturing the gains reported for multi-agent debate while structurally guarding against the matched-compute null results and conformity failure modes documented in the same corpus.",
+    "remaining_depth": 1,
+    "remaining_node_budget": 12,
+    "source_materials": [
+      {
+        "content": "Enumerated in material:001; asserted present in the solve workspace by the conversation decision; content not enclosed at intake.",
+        "id": "ref:lorenz-2011-social-influence",
+        "kind": "referent:file",
+        "label": "Extracted text of Lorenz et al., 'How Social Influence Can Undermine the Wisdom of Crowd Effect' (PNAS 108, 2011).",
+        "locator": "papers/text/lorenz-et-al-2011-social-influence.txt"
+      }
+    ],
+    "stable_context": [
+      "SC1: The evidentiary corpus is exactly seven extracted-text files under papers/text: dung-1995-argumentation.txt (Dung 1995, Artificial Intelligence 77), shapiro-et-al-2011-crdts.txt (Shapiro et al., SSS 2011), lorenz-et-al-2011-social-influence.txt (Lorenz et al., PNAS 108, 2011), du-et-al-2023-multiagent-debate.txt (Du et al. 2023, arXiv 2305.14325), smit-et-al-2023-going-mad.txt (Smit et al. 2023, arXiv 2311.17371), zhang-et-al-2025-mad-question.txt (Zhang et al. 2025, arXiv 2502.08788), choi-et-al-2025-conformity.txt (Choi et al., Findings of ACL 2025).",
+      "SC2: Page boundaries in the extracted texts are marked with lines of the form `===== PDF PAGE N =====`, and these markers are the citation anchors required by D12/C3.",
+      "SC3: The corpus intentionally contains conflicting empirical conclusions — multi-agent debate gains (Du et al. 2023) versus matched-compute null results and conformity findings (Smit et al. 2023; Zhang et al. 2025; Choi et al. 2025; Lorenz et al. 2011 on social influence undermining crowd wisdom) — and the manifest requires preserving and reconciling these conflicts.",
+      "SC4: The envelope's single conversation decision asserts that the seven full extracted texts are present in the solve workspace under papers/text with explicit PDF page markers; the intake envelope itself encloses only the manifest, not the full texts.",
+      "SC5: The manifest (material:001) is located at /workspace/seam-harness/research-kb-workspace/CORPUS.md, indicating a benchmark-style workspace named research-kb-workspace under a seam-harness directory.",
+      "SC6: The proposed substrate plus the two baselines named in D4 (open conversational forum; no inter-agent communication) naturally supply the three or more conditions required by D14."
+    ],
+    "workspace_documents": [
+      {
+        "content": "===== PDF PAGE 1 =====\n\nHow social in ﬂuence can undermine the wisdom of\ncrowd effect\nJan Lorenz a,1,2, Heiko Rauhut b,1,2, Frank Schweitzer a, and Dirk Helbing b,c,d\naChair of Systems Design, ETH Zürich, CH-8032 Zurich, Switzerland; bChair of Sociology, in particular of Modeling and Simulation, ETH Zürich, CH-8092 Zurich,\nSwitzerland; cSanta Fe Institute, Santa Fe, NM 87501; and dCollegium Budapest –Institute for Advanced Study, 1014 Budapest, Hungary\nEdited by Burton H. Singer, University of Florida, Gainesville, FL, and approved April 13, 2011 (received for review June 23, 2010)\nSocial groups can be remarkably smart and knowledgeable when\ntheir averaged judgements are compared with the judgements\nof individuals. Already Galton [Galton F (1907) Nature 75:7] found\nevidence that the median estimate of a group can be more accu-\nrate than estimates of experts. This wisdom of crowd effect was\nrecently supported by examples from stock markets, political\nelections, and quiz shows [Surowiecki J (2004) The Wisdom of\nCrowds]. In contrast, we demonstrate by experimental evidence\n(N = 144) that even mild social in ﬂuence can undermine the\nwisdom of crowd effect in simple estimation tasks. In the exper-\niment, subjects could reconsider their response to factual ques-\ntions after having received average or full information of the\nresponses of other subjects. We compare subjects ’ convergence\nof estimates and improvements in accuracy over ﬁve consecutive\nestimation periods with a control condition, in which no informa-\ntion about others ’ responses was provided. Although groups are\ninitially “wise,” knowledge about estimates of others narrows\nthe diversity of opinions to such an extent that it undermines\nthe wisdom of crowd effect in three different ways. The “social\ninﬂuence effect ” diminishes the diversity of the crowd without\nimprovements of its collective error. The “range reduction effect ”\nmoves the position of the truth to peripheral regions of the\nrange of estimates so that the crowd becomes less reliable in\nproviding expertise for external observers. The “conﬁdence ef-\nfect” boosts individuals ’ conﬁdence after convergence of their\nestimates despite lack of improved accuracy. Examples of the\nrevealed mechanism range from misled elites to the recent global\nﬁnancial crisis.\ncollective judgment | estimate aggregation | experimental social science |\nswarm intelligence | overconﬁdence\nU\nnder the right circumstances, the average of many individ-\nuals’ estimates can be surprisingly close to the truth, al-\nthough their separate values lie remarkably far from it. There is\nevidence from guessing tasks (1) and problem-solving experi-\nments (2–4) that the aggregate of many people ’s estimates tends\nto be closer to the true value than all of the separate individual\nor even expert guesses. This phenomenon is referred to as the\n“wisdom of crowd effect ” (5). Even individuals can apply this\nmechanism and improve their decisions by averaging multiple\nperspectives from their own reasoning (6 –8).\nIn the following, we will call an aggregate measure of a col-\nlection of individual estimates “wise” if it comes close to the true\nvalue, even though the individual estimates are largely dispersed.\nIn this case, single estimates are likely to lie far away from the\ntruth, whereas its aggregate lies close to it. The wisdom of crowds\neffect works if estimation errors of individuals are large but\nunbiased such that they cancel each other out. Thus, the het-\nerogeneity of numerous decision-makers generates a more ac-\ncurate aggregate estimate than the estimates of single lay or\nexpert decision-makers. This can be quanti ﬁed by the “diversity\nprediction theorem ” (9), which states that the collective error is\nequal to the average individual error minus the group ’s diversity\n(Materials and Methods ).\nThe wisdom of crowd effect is a statistical phenomenon and not\na social psychological effect, because it is based on a mathematical\naggregation of individual estimates. Nevertheless, social inﬂuence\nplays a role in individual decision-making and affects individual\nestimating. Therefore, social inﬂuence can also have an impact on\nthe statistical aggregate and the resulting collective wisdom of the\nrespective crowd. As social in ﬂuence among human group mem-\nbers may trigger individuals to revise their estimates (10), it can\nhave a substantial impact on the statistical wisdom of crowd effect\nin societies. When individuals become aware of the estimates of\nothers, they may revise their own estimates for various reasons:\nPeople may suspect that others have better information (11, 12),\nthey may partially follow the wisdom of the crowd (13), there\nmay be peer pressure toward conformity (14 –17), or the group\nmay engage in a process of deliberation about the facts. An ex-\nample of deliberation about facts would be the task of the In-\ntergovernmental Panel on Climate Change.\nAlthough there is evidence from social psychology that humans\nhave an inclination to adjust their opinions to those of others so\nthat they gradually converge toward consensus (4, 18), many\nexisting studies have two drawbacks. First, consensus formation\nhas often been investigated for questions for which there are no\nwell de ﬁned correct answers. Typical examples are attitudes to-\nward abortion, nuclear power, war on terror, or election polls.\nAnother case are “cultural” markets of musical tastes, in which it\nhas been demonstrated that almost any song of average quality\nmay become a hit if social inﬂuence is introduced by publishing the\nnumber of downloads (19). In this case, the popularity of a song\nand its perceived quality emerge through the process of interactive\ndownloading and rating. The herding effects created in this way\nprevent an objective measurement of quality. Therefore, such\nsettings do not reveal whether social inﬂuence works in favor or to\nthe disadvantage of the wisdom of the group.\nThe second drawback of existing studies is that correct answers\nare often not rewarded with monetary incentives, which makes\ncorrect estimations less important and conformity costless. In\ncontrast, we study the interconnection between social in ﬂuence\nand the wisdom in groups by using factual questions and mone-\ntary incentives for good individual guesses. First, this allows dis-\nentanglement of social in ﬂuence from the wisdom of the group.\nSecond, the incentives trigger the ability to use information of\nothers only for improving own estimates and not for aligning\nwith others for the sake of conformity. This allows investigation\nof how social in ﬂuence affects the group ’s wisdom.\nAuthor contributions: J.L., H.R., F.S., and D.H. designed research; J.L. and H.R. performed\nresearch; J.L. and H.R. analyzed data; and J.L. and H.R. wrote the paper.\nThe authors declare no con ﬂict of interest.\nThis article is a PNAS Direct Submission.\nFreely available online through the PNAS open access option.\n1J.L. and H.R. contributed equally to this work.\n2To whom correspondence may be addressed. E-mail: post@janlo.de or rauhut@gess.\nethz.ch.\nThis article contains supporting information online at www.pnas.org/lookup/suppl/doi:10.\n1073/pnas.1008636108/-/DCSupplemental.\n9020–9025 | PNAS | May 31, 2011 | vol. 108 | no. 22 www.pnas.org/cgi/doi/10.1073/pnas.1008636108\n\n===== PDF PAGE 2 =====\n\nIn this article, we will demonstrate that social in ﬂuence has\nthree effects that can undermine the wisdom of crowds. Two of\nthe effects are changes of statistical aggregates and one is psy-\nchological. The “social in ﬂuence effect ” describes the fact that\nsocial in ﬂuence diminishes the diversity of the group without\nimprovements in accuracy. The “range reduction effect ” moves\nthe position of the truth to peripheral regions. This corrupts the\nwisdom of the crowd from an observer ’s perspective in the sense\nthat the group becomes less reliable in guiding decision-makers.\nThe “conﬁdence effect” boosts individuals’conﬁdence. [A related\neffect is known as overcon ﬁdence (20 –22).] This boost in con ﬁ-\ndence subverts the wisdom of crowd effect psychologically, be-\ncause individuals’perceptions contradict the aggregate outcomes\nof a lack of improvements in accuracy and a decreased reliability\nof the group ’s range of estimates.\nRecent theoretical studies have analyzed the wisdom of crowd\neffect in the context of information diffusion in networks of\nsimulated agents in which too little and too much dissemination\nof information inhibits actors to ﬁnd optimal solutions, because\nthere is a need to maintain diversity on the one hand and in-\nformation ﬂow on the other (23). However, from an empirical\npoint of view, it is not clear whether the reduction of diversity is\nstrong enough to severely undermine the wisdom of crowd effect\nin reality. In the following, we demonstrate by means of labo-\nratory experiments that the wisdom of crowd effect is under-\nmined in all three of the aforementioned ways, even when social\ninﬂuence is relatively mild. Furthermore, the severity of statis-\ntical undermining is quanti ﬁed by a new indicator, which meas-\nures the centrality of the truth within a given set of estimates.\nExperimental Design\nTo identify how social in ﬂuence affects the wisdom of crowds, we\nconducted a laboratory experiment with real monetary stakes. A\ntotal of 144 participants were recruited from a sample of more\nthan 8000 students at Eidgenössische Technische Hochschule\nZürich in Zurich, Switzerland. Twelve experimental sessions\nwere conducted, each consisting of 12 subjects.\nThe participants had to solve six different estimation tasks\ntesting their real-world knowledge regarding geographical facts\nand crime statistics. We selected questions for which subjects\nwere unlikely to know the exact answer but also avoided those\nfor which they did not have a clue at all. Each question was\nsimultaneously presented to all subjects in a computer labora-\ntory by using the z-tree software (24). Each subject sat in an\nisolated cubicle in front of a computer with no visual, verbal, or\nchat contact with each other and was asked to enter the esti-\nmates privately without communicating with other subjects. All\nsubjects were told all details of the experimental procedures\nand payments by printed instructions, which described the\npayment rules, the anonymity warranty, the obligation to adhere\nto the no-communication policy, and the obligation to make no\nuse of any auxiliary devices such as the Internet or mobile\nphones. A test in the beginning ensured that subjects un-\nderstood the payment rules.\nIn the ﬁrst estimation period, all subjects had to respond to\nthe ﬁrst knowledge question on their own. After all 12 group\nmembers made an estimate, everybody was asked to give another\nestimate. In total, we elicited ﬁve consecutive responses for each\nknowledge question. Additionally, we elicited after the ﬁrst and\nﬁnal estimate for each question subjects ’conﬁdence in their esti-\nmate on a six-point Likert scale (1, very uncertain; 6, very certain).\nThe conﬁdence values were not communicated to others. After the\nﬁfth (and ﬁnal) estimate of each question, an evaluation was\nprovided that included the true answer, the ﬁve estimates of the\nrespective subject, the payments for each of the ﬁve estimates, and\nthe total payment for all estimates for one question.\nWe tested three different information conditions regarding\nwhat each subject learned about the estimates of the other\nsubjects. Subjects could base their second, third, fourth, and ﬁfth\nestimate on either aggregated or nonaggregated information\nregarding other people ’s estimates. Two of our conditions were\ndifferent operationalizations of social in ﬂuence, and the third\ncondition served as a control condition without social in ﬂuence.\nThe reason to use two different kinds of social in ﬂuence was to\ndemonstrate the robustness of our effects with regard to the\nspeciﬁc kind of social in ﬂuence.\nIn the “aggregated information” condition, subjects could re-\nconsider their estimate after having received the average (arith-\nmetic mean) of all 12 estimates of the former round. Subjects were\nalso reminded about their last estimate from the previous round.\nIn the “full information” treatment, subjects received a ﬁgure of\nthe trajectories of all subjects’estimates from all previous rounds.\nIn this ﬁgure, the estimates of each of the 12 subjects over all\nprevious rounds were represented by one line, adding up to 12\nseparate lines (one for each subject). In addition, the numerical\nvalues of all subjects ’ estimates from the last round were pre-\nsented and subjects were reminded about their own last estimate.*\nThe “no information” treatment served as a control and revealed\nno information about the other subjects ’ estimates. In this con-\ndition, subjects had to answer the same question ﬁve times on\ntheir own. They were reminded about their latest estimate.\nIn each session, two questions were posed in the control, two\nin the aggregated, and two in the full information treatment. The\norder of questions and the order of treatments was randomized\nacross experimental sessions. This means that the same six\nknowledge questions were posed in each experimental session,\nbut in a different order and in different information treatments.\nThe allocation of subjects to a random sequence of questions and\ninformation treatments ruled out order effects with regard to\nquestions and treatments.\nSubjects received monetary payments for each good estimate.\nP o s s i b l er e w a r d sw e r e4 ,2 ,o r1p o i n t si ft h e i re s t i m a t e sf e l li n t ot h e\n10%, 20%, or 40% intervals around the truth; otherwise, they\nreceived no points. The rewards applied to all rounds to make sure\nthat individuals took all of their decisions seriously. The correct\nanswer and the rewards for all ﬁve estimates were only disclosed to\nthe subjects after the ﬁfth estimate. This reward structure in-\ntroduced incentives only toﬁnd the truth and avoided incentives to\nconform with others. Furthermore, there were no incentives for\nstrategic considerations. For example, there was no bene ﬁto fb e -\ning better than others or of misleading others, because this did not\naffect individuals’payments. There was also no possibility to help\nothers by deviating from the strategy to ﬁnd the best estimate.\nTherefore, our experimental design put subjects into a situation in\nwhich they would try to get as close to the truth as possible by using\ntheir own knowledge and the estimates of others.\nMaterials and Methods provides more in-depth information\nregarding the knowledge questions, payment rules, and data\nstructure. SI Appendix contains all the details of the experimental\nprocedures that were presented to the subjects. Dataset S1\ncontains the raw data.\nResults\nAggregation of the Wisdom of Crowds. The empirical analysis of\nthe wisdom of crowds requires an appropriate aggregation\nmeasure. [Already in reply to Galton ’s article (1), there was\na discussion of how to ﬁnd the best aggregation measure for the\nwisdom of crowds (25, 26). It is common to use the unweighted\n*In real-life situations with social in ﬂuence, there may be additional effects, from which\nour experiment has abstracted: this includes competition, group pressure, and authority\neffects. For example, a criminologist could say: “I know the number of victims. ” In\ncontrast to such possibilities, our comparably mild and parsimonious kind of information\nfeedback has the advantage that it enables a particularly controlled experimental set-\nting in which there is little ambiguity about which kind of information feedback and\nsocial in ﬂuence played a role.\nLorenz et al. PNAS | May 31, 2011 | vol. 108 | no. 22 | 9021\nSOCIAL SCIENCESPSYCHOLOGICAL AND\nCOGNITIVE SCIENCES\n\n===== PDF PAGE 3 =====\n\narithmetic mean, but there are many reasonable alternatives,\ngiving ample room for adjustments or “tuning” (27–30).] In our\ncase, the arithmetic mean performs poorly, as we have validated\nby comparing its distance to the truth with the individual dis-\ntances to the truth. In only 21.3% of the cases is the arithmetic\nmean closer to the truth than the individual ﬁrst estimates. This\nis because the estimates of our type of questions are not normally\ndistributed but right-skewed. In other words, the majority of\nestimates are low and a minority of estimates are scattered in\na fat right tail, as it is the case for log-normal distributions.\nAs a large number of our subjects had problems choosing the\nright order of magnitude of their responses, they faced a problem\nof logarithmic nature (31). When using logarithms of estimates,\nthe arithmetic mean is closer to the logarithm of the truth than the\nindividuals’estimates in 77.1% of the cases. This conﬁrms that the\ngeometric mean (i.e., exponential of the mean of the logarith-\nmized data) is an accurate measure of the wisdom of crowds for\nour data (Table 1). In particular, log-normal distributions are\njustiﬁed for variables with high variance with a range of positive\nvalues only (32), which is the case for our data. † We further di-\nvided each estimate by the respective true value before taking the\nlogarithm to make the distributions of estimates comparable\nacross different questions. This yielded approximately normal\ndistributions and true values corresponding to zero.\nSocial In ﬂuence Effect. The ﬁrst kind of undermining of the wis-\ndom of crowds is a statistical effect, which we call social in ﬂuence\neffect. This effect denotes the fact that social in ﬂuence dimin-\nishes diversity in groups without improving its accuracy. This\nmeans that, on average, groups cannot make use of information\nexchange, but engage in a convergence process that does not\nyield improvements of the collective. ‡\nFig. 1 gives evidence for the social in ﬂuence effect. Here,\ngroup diversities and collective errors for each question and each\ntime step are computed on the transformed data set. Fig. 1 A\nshows for each information condition exemplary responses to\none question over the ﬁve time steps in one group. By comparing\nthe no information condition with the aggregated and full in-\nformation conditions, the typical effects of social in ﬂuence can\nclearly be seen. It is evident that social in ﬂuence promotes\na convergence of estimates. Fig. 1 B shows, for the same exem-\nplary sessions, core ranges of estimates and two types of aggre-\ngate measures: the arithmetic mean and the geometric mean.\nFig. 1 C provides the respective numbers for the exemplary ses-\nsions. We provide a test for the complete data in Fig. 1 D and E,\ndemonstrating that social in ﬂuence strongly reduces the group ’s\ndiversity§ without signi ﬁcantly reducing its collective errors. ¶\nThe robustness of the social in ﬂuence effect is supported by\nfurther statistical signi ﬁcance tests ( SI Appendix ). A Kolmo-\ngorov–Smirnov test con ﬁrms that the distribution of estimates\nchanges signi ﬁcantly if social in ﬂuence is allowed for. This\napplies particularly to the variance of the distribution, as an F\ntest shows. In addition, Kolmogorov –Smirnov and t tests for the\ngroup data demonstrate that the group diversity is signi ﬁcantly\nreduced under social in ﬂuence, whereas the collective error\nchanges only slightly. In the control condition without social\ninﬂuence, these effects are almost null.\nRange Reduction Effect. Let us take the perspective of a person\nwho, or government that, needs advice and requests expertise\nfrom different specialists. If all predictions are narrowly distrib-\nuted around a wrong value, a decision-maker would gain con ﬁ-\ndence in advice that is actually misleading. In fact, the close\nclustering around a wrong value makes the group less “wise” in\nthe sense that the group delivers a wrong hint regarding the lo-\ncation of the truth. This is the case because the truth would not\nbe located centrally but at outer regions of the range of esti-\nmates. We quantify this by a wisdom-of-crowd indicator, which\nTable 1. The wisdom of crowd effect exists with respect to the geometric mean but not with respect to the\narithmetic mean\nQuestion True value\nWisdom-of-crowd aggregation\nMedianArithmetic mean Geometric mean\n1. Population density of Switzerland 184 2,644 (+1,337.2%) 132 ( −28.1%) 130 ( −29.3%)\n2. Border length, Switzerland/Italy 734 1,959 (+166.9%) 338 ( −54%) 300 ( −59.1%)\n3. New immigrants to Zurich 10,067 26,773 (+165.9%) 8,178 ( −18.8%) 10,000 ( −0.7%)\n4. Murders, 2006, Switzerland 198 838 (+323.2%) 174 ( −11.9%) 170 ( −14.1%)\n5. Rapes, 2006, Switzerland 639 1,017 (+59.1%) 285 ( −55.4%) 250 ( −60.9%)\n6. Assaults, 2006, Switzerland 9,272 135,051 (+1,356.5%) 6,039 ( −34.9%) 4,000 ( −56.9%)\nThe aggregate measures arithmetic mean, geometric mean, and median are computed on the set of all ﬁrst estimates regardless of\nthe information condition. Values in parentheses are deviations from the true value as percentages.\n†Note that the framework of the diversity prediction theorem (9) can also be applied to\nlogarithmically transformed data. For the case of logarithmically transformed data, the\ncollective error of the logarithms is the logarithm of the geometric mean and one SD is\nthe logarithm of the geometric SD. Considering the logarithmic nature of our data, one\nmay argue that the geometric mean would have been a better design choice than the\narithmetic mean for the information feedback in the aggregated information condition.\nHowever, this measure is hard to understand for most subjects because it necessitates\nconﬁdence with logarithmic transformations. As the simple average (i.e., arithmetic\nmean) is known from daily life, this information is more meaningful for subjects. Hence,\nwe decided for the arithmetic mean.\n‡The empirical measurement of the social in ﬂuence effect requires questions with mod-\nerate difﬁculty. In particular, subjects should not have a precise factual knowledge of an\nissue, because this would prevent adaption and social in ﬂuence. We can empirically\nconﬁrm that this was not the case for our questions and subjects: in only 1.5% of all\ncases, subjects responded at all ﬁve times in the most inner payment range of one\nparticular question. This means in absolute values that 13 of 864 consecutive response\nruns were responded in the full payment range (144 subjects responded to six questions\nin a run of ﬁve consecutive responses). Three of these 13 “high-success runs ” were\nperformed by the same person and two from another person. All other high-success\nruns were performed by different persons.\n§It deserves to be mentioned that the initial diversity seems to be higher in the no in-\nformation condition. It could be that subjects anticipate to feel uneasy if their published\nestimates are too distant from those of others. This could foster that their initial esti-\nmates tend to be more “conservative” in the conditions with information feedback.\nInterestingly, this discrepancy in initial variance is mainly caused by the questions about\ncrime statistics and not about geographical facts.\n¶Note that the collective error slightly declines under social in ﬂuence, especially in the\naggregated information condition, which is partially supported by the signi ﬁcance tests\n(SI Appendix). This is a result of two empirical facts. First, the distributions of estimates are\nright-skewed. As a consequence, the arithmetic mean is usually much larger than most\nestimates and also much larger than the true value. Second, it is an empirical fact for our\nchoice of questions that the geometric mean (which is our aggregation measure to com-\npute the collective error) is always slightly lower than the true value (Table 1). The\nmechanism of presenting the arithmetic mean in the aggregated condition thus triggers\nan upward drift toward the true value. This issue is interesting but deserves future stud-\nies, as this effect may be different for different sets of questions.\n9022 | www.pnas.org/cgi/doi/10.1073/pnas.1008636108 Lorenz et al.\n\n===== PDF PAGE 4 =====\n\ngeneralizes the concept of “bracketing the truth ” (33) to more\nthan two persons. Our indicator considers a group to be maxi-\nmally wise if the truth lies between the two most central values of\nall estimates (in our case, between the sixth and the seventh\nlargest of 12 estimates). If the four most central values are\nneeded to enclose the true value, the level of wisdom is con-\nsidered to be lower, and if the six most central values are needed,\nit is even lower, and so forth. If it lies outside the range of\nestimates of all individuals, there is no wisdom of crowd effect at\nall (a precise de ﬁnition is provided in Methods and Materials ).\nFig. 2A shows bar plots of the wisdom-of-crowd indicator over\ntime for the three treatments for the same exemplary question as\nin Fig. 1. Furthermore, the corresponding core range of sorted\nestimates enclosing the true value is reported. The ﬁgure dem-\nonstrates that the wisdom-of-crowd indicator tends to decline\nover time under conditions of social in ﬂuence. This effect is\nsubstantial and statistically signi ﬁcant for all questions, which is\nconﬁrmed by the regression model in Fig. 2 B. It is revealed that\nthe wisdom of crowd indicator is about one unit lower in con-\nditions with information exchange compared with the control\ncondition. Note that the reduction is stronger under the aggre-\nA\nB\nC\nD E\nFig. 1. Social in ﬂuence effect: Social in ﬂuence diminishes group diversity\nwithout diminishing the collective error. (A) Typical examples of experimental ses-\nsions for all three information conditions, displaying theﬁve individual responses\nto the question, “How many murders were registered in Switzerland in\n2006?” In the no information condition, there is no convergence of esti-\nmates, whereas estimates converge in the aggregated and full information\nconditions. Each subject ’s decision over the ﬁve consecutive responses is\nrepresented by a different color. Black lines correspond to the true value;\nsurrounding gray zones represent the areas in which the subjects received\nmonetary payments (payments decrease from dark to light gray). ( B) Rep-\nresentation of the same data in aggregated form. The arithmetic mean is\nrepresented by a dotted line and the geometric mean by a dashed one. The\nranges of the 4, 6, 8, 10, and 12 inner estimates are represented by red, dark\norange, light orange, dark yellow, and light yellow colors. ( C) Values of the\ncollective error (squared deviation of group average from the truth) and\ngroup diversity (average squared deviation from the group average) for all\n12 estimates at each time step for the same exemplary session as in A and B\n(computed on logarithms of the estimates and normalized by true values).\n(D) Average group diversity for all information conditions over time (each\ndata point represents 24 groups, aggregated over all questions; computed\non logarithms of estimates and normalized by the respective true value;\nerror-bars represent 10% con ﬁdence intervals). ( E) Average collective error\n(data and presentation analogous to D).\nA\nB\nFig. 2. Although the wisdom of the crowd diminishes over time, individuals\ngain con ﬁdence in their own estimates. ( A) Sorted estimates over successive\nrounds for the same exemplary sessions as displayed in Fig. 1. Boxes repre-\nsent the most inner estimates that still include the true value. The range of\nthe box depicts the wisdom-of-crowd indicator. The maximum value of 6\nrepresents the highest value for the wisdom of the crowd meaning, that 6\nvalues are below and 6 above the true value. A wisdom-of-crowd indicator\nof 0 denotes that the truth is outside of the range of estimates. The colors of\nthe boxes and bars for the wisdom-of-crowd indicator are analogous to B\n(for values 0 –5, aubergine is additionally introduced for the value of 6).\nColored numbers represent individuals (analogous to colors in Fig. 1 A). The\nright column shows the certainty of the estimate as reported by the re-\nspective individual after estimate 1 and estimate 5 (1, very uncertain; 6, very\ncertain). These values were not propagated to other subjects. ( B) Con ﬁr-\nmation of exemplary trends by regression models taking all questions into\naccount. Linear regressions on (model 1) the groups ’ wisdom-of-crowd in-\ndicator and (model 2) individuals ’change in the certainty of their estimates.\nThe predictors in both models are the experimental treatments, imple-\nmented as dummy variables and coded with 1 as the experimental condition\n(aggregated or full information) and 0 otherwise. The control condition is\nthe reference category, represented by the intercept of the respective re-\ngression model. In model 1, the wisdom-of-crowd indicator is calculated for\nthe pooled second, third, fourth, and ﬁfth time step. The ﬁrst time step is\nexcluded because the initial period had no information feedback and can\ntherefore not yield treatment differences. In model 2, individuals ’increase in\nconﬁdence is the outcome variable, which is the difference between the\ninitial and ﬁnal individuals ’ certainty in their estimates. Robust SEs are cal-\nculated, taking the clustering within subjects into account.\nLorenz et al. PNAS | May 31, 2011 | vol. 108 | no. 22 | 9023\nSOCIAL SCIENCESPSYCHOLOGICAL AND\nCOGNITIVE SCIENCES\n\n===== PDF PAGE 5 =====\n\ngated information condition compared with the “full information\ncondition. [This matches previous ﬁndings on the effects of social\ninﬂuence in terms of gossip on the behavior, which seems to be\nstronger if gossip comes from fewer sources (34).] An increase of\none unit means that one has to consider one additional person in\nthe upper range and one additional person in the lower range of\nsorted estimates so that the truth is included in the selected\nrange. This effect demonstrates that the truth becomes less\ncentral if social in ﬂuence is allowed for. Another interpretation\nof this effect is that the group becomes less reliable in estimating\nthe truth if it has been exposed to social in ﬂuence.\nConﬁdence Effect. The third kind of undermining of the wisdom\nof crowds concerns the psychological consequences of the two\naforementioned statistical effects. The con ﬁdence effect re ﬂects\nthat opinion convergence boosts individuals ’conﬁdence in their\nestimates despite a lack of collective improvements in accuracy.\nFig. 2A shows the individuals ’self-reported change in con ﬁdence\nregarding their initial and ﬁnal estimates for the same exemplary\nsessions as studied before. It can be seen that individuals in these\nexemplary sessions become more con ﬁdent in the full infor-\nmation condition and less con ﬁdent in the control condition. We\nanalyze the general effects over all sessions and questions with\nregression models in Fig. 2 B. This regression analysis demon-\nstrates that individuals ’ conﬁdence is substantially and signi ﬁ-\ncantly boosted in the aggregated and full information conditions\nin comparison with the control condition without social in ﬂuence.\nWe can interpret this psychological effect in comparison with\nthe statistical effects: the con ﬁdence measure can be regarded as\n“subjective”— and self-reported reliability of estimates and the\nwisdom of crowd indicator as “objective”— statistical measure of\nreliability. The comparison of both illustrates that social inﬂuence\nundermines the wisdom of crowds by boosting the subjective and\ndecreasing the objective reliability of the crowd.\nDiscussion\nBased on the wisdom of crowd effect, groups can be remarkably\naccurate in estimating vaguely known facts. From the perspective\nof decision-makers, it would be valuable to request multiple inde-\npendent opinions and aggregate these as the basis of their judge-\nments. Real-life examples are predictions of economic growth\nrates, market potentials, the increase of the world temperature, tax\nestimations, the assessment of the impact of new technologies, or\nestimating the amount of ﬁnite natural resources.\nHowever, it is hardly feasible to receive independent opinions\nin society, because people are embedded in social networks and\ntypically inﬂuence each other to a certain extent. It is remarkable\nhow little social in ﬂuence is required to produce herding be-\nhavior and negative side effects for the mechanism underlying\nthe wisdom of crowds. In our experiment, we provided just the\nbare information of the estimates of others (in a similar way as\nthe previous stock price is known to traders trying to make\nmoney with their estimates of the fundamental value of a stock).\nWe did not allow for group leader effects, persuasion, or any\nother kind of social psychological in ﬂuence. We just provided\nnoncompetitive monetary incentives for the estimation of correct\nvalues. These incentives were designed such that the information\nof others could just be used to update the own knowledge. There\nwas no premium to coordinate with others ’opinions.\nOur experimental results show that social in ﬂuence triggers\nthe convergence of individual estimates and substantially reduces\nthe diversity of the group without improving its accuracy. The\nremaining diversity is often so small that the correct value shifts\nfrom the center to outer regions of the range of estimates. Thus,\nwhen taking committee decisions or following the advise of an\nexpert group that was exposed to social in ﬂuence, their opinions\nmay result in a set of predictions that does not even enclose the\ncorrect value anymore. From the perspective of decision-makers,\nsuch advice may be thoroughly misleading, because closely re-\nlated, seemingly independent advice may pretend certainty de-\nspite substantial deviations from the correct solution.\nPsychologically, however, the convergence of estimates sig-\nniﬁcantly boosts individuals ’ conﬁdence. This con ﬁdence gain\nhappens despite a lack of improvements, giving evidence for\na psychological trap whereby individuals are led into the false\nbelief of collective accuracy as a result of their convergence.\nNevertheless, the statistical effects of undermining are less se-\nvere for easier questions and if individuals are more con ﬁdent in\ntheir answers ( SI Appendix ). This gives weight to the conclusion\nthat the negative effects of social in ﬂuence occur especially in\na certain range of question dif ﬁculty and individuals ’conﬁdence,\na conjecture that should be explored in follow-up studies.\nOur results underpin the value of collecting individuals ’esti-\nmates in the absence of social in ﬂuence. However, in democratic\nsocieties, it is dif ﬁcult to accomplish such a collection of in-\ndependent estimates, because the loss of diversity in estimates\nappears to be a necessary byproduct of transparent decision-making\nprocesses. For example, opinion polls and the mass media largely\npromote information feedback and therefore trigger conver-\ngence of how we judge the facts. The wisdom of crowd effect is\nvaluable for society, but using it multiple times creates collective\noverconﬁdence in possibly false beliefs.\nPresumably, herding is even more pronounced for opinions or\nattitudes for which no prede ﬁned correct answers exist. For ex-\nample, prospective research may investigate herding and con-\nsensus formation on predictions of climate change or election\noutcomes. However, long-term predictions may have short-term\nconsequences on the system itself: pessimistic predictions for\nclimate change may entail international political consequences,\nor election polls may change the popularity of parties that have\nbeen exposed as those with the least support. These feedback\nloops hinder the disentanglement of herding behavior from the\nwisdom of crowds.\nMaterials and Methods\nKnowledge Questions, Payment Rules, and Data Structure. The following\nquestions were used:\n1. What is the population density in Switzerland in inhabitants per\nsquare kilometer?\n2. What is the length of the border between Switzerland and Italy\nin kilometers?\n3. How many more inhabitants did Zurich gain in 2006?\n4. How many murders were of ﬁcially registered in Switzerland in 2006?\n5. How many rapes were of ﬁcially registered in Switzerland in 2006?\n6. How many assaults were of ﬁcially registered in Switzerland in 2006?\nAll questions imply nonnegative or positive numbers as answers. Note that\nquestion 3 may have also allowed a negative gain of inhabitants, but the\nquestion was phrased such that it implied a gain and not a loss. Furthermore,\nentering negative numbers was not supported by our program.\nSubjects received monetary payments in Swiss Francs (CHF) for each good\nestimate, taking the distance between the estimate and the true value into\naccount. Three different intervals for monetary payments were used: 0% to\n10% deviation (1.40 CHF), 11% to 20% deviation (0.70 CHF), and 21% to 40%\ndeviation (0.35 CHF). Estimates that were more than 40% away from the true\nvalue were not ﬁnancially rewarded. Rewards were communicated in ex-\nperimental points and paid in CHF without requiring a signature after\nthe experiment.\nOur data ( Dataset S1) comprise 12 groups in which 12 subjects responded\nﬁve times to six knowledge questions in separate cubicles. Two questions\nwere posed in the control, two in the aggregated, and two in the full in-\nformation treatment. Thus, for each treatment, we had 24 groups: four\ngroups for each of the six questions. The order of the questions and treat-\nments was randomized among the experimental sessions.\nTen values were removed from the statistical analysis of the data set. Five\nof them were dramatic outliers from the same person in the same run. They\nwere 1,000 times larger than the second largest estimate; thus, the subject\nseemed to have confused meters and kilometers. Four estimates were\ndetected as “fun moves. ” The “fun” under the aggregate information\n9024 | www.pnas.org/cgi/doi/10.1073/pnas.1008636108 Lorenz et al.\n\n===== PDF PAGE 6 =====\n\ncondition was to make an incredibly large estimate to test how much the\nmean of the group would increase. Analogously, under the full information\ncondition, the fun was to make incredibly high guesses to produce steep\nlines. The latter fun moves did not affect the rest of the information because\nthere was always also a list of estimates from the previous round. One zero\nestimate was removed only when logarithmic data were used for compu-\ntational reasons.\nMeasures. For a set of estimates x1, ... , xn and the true value, we took the\nfollowing measures to quantify the impact of social in ﬂuence on the wisdom\nof crowds effect: The mean is denoted by /C22x ¼ 1\nn\nXn\ni¼1 xi . The collective error is\nthe squared deviation of the average from the truth ðtruth −/C22xÞ2 , the group\ndiversity is the variance of estimates (average of squared deviations from the\naverage) 1\nn\nXn\ni¼1 ðxi −/C22xÞ2 . The diversity prediction theorem (see ref. 9, p. 211,\nand ref. 35) states that collective error plus group diversity equals the av-\nerage individual error, which is the average of the squared deviations from\nthe truth\n/C18 1\nn\nXn\ni¼1 ðtruth − xi Þ2\n/C19\n. The proof is elementary. The collective er-\nror is also called “population bias ” (6). A low collective error combined with\na high group diversity implies that the wisdom of crowd effect works well,\nbecause asking many instead of one drastically improves accuracy. Both\nmeasures are used in Fig. 1 D and E. Notice that xi ¼ logð~xi =truthÞ are log-\narithms of the raw data point ~xi normalized by the corresponding true\nvalues. The arithmetic mean of these logarithms corresponds to the geo-\nmetric mean. Logarithms transform the results from arithmetic mean to\ngeometric means, where a wisdom of crowd effect exists. Normalization of\nraw estimates by the truth makes different questions comparable.\nFor the de ﬁnition of the wisdom-of-crowd indicator (Fig. 2) let bx1; ... ; bxn\nbe the sorted estimates. Then, the wisdom of crowd indicator is\nmaxfijbxi ≤ truth ≤ bxn − iþ1g. The wisdom-of-crowd indicator achieves its\nmaximum at [ n / 2] when the truth lies between the most central estimates\n(or at the most central estimate). Its minimum of zero is achieved when the\ntruth lies below the minimal or above the maximal estimate. Notice, that\na high wisdom-of-crowd indicator implies that the truth is close to the me-\ndian. Thus, it implicitly de ﬁnes the median as the appropriate measure of\naggregation. In our empirical case this is not in con ﬂict with the choice of\nthe geometric mean as can be seen by the similarity of the geometric mean\nand the median in Table 1. A theoretical reason is that the geometric mean\nand the median coincide for a log-normal distribution.\nACKNOWLEDGMENTS. This paper beneﬁted from comments made by Stefan\nHerzog, Michael Mäs, Ryan O. Murphy, two anonymous reviewers, and re-\nsearch assistance by Hanna Thorn and Silvana Jud. This study was supported\nby funding from Eidgenössische Technische Hochschule Zürich. Preliminary\nversions of the experiment were designed and conducted by J.L. in 2006 (36)\nand 2005.\n1. Galton F (1907) Vox populi. Nature 75:7.\n2. Lorge I, Fox D, Davitz J, Brenner M (1958) A survey of studies contrasting the quality\nof group performance and individual performance, 1920-1957. Psychol Bull 55:\n337–372.\n3. Hommes C, Sonnenmans J, Tuinstra J, van de Velden H (2005) Coordination of\nexpectations in asset pricing experiments. Rev Financial Stud 18:955–980.\n4. Yaniv I, Milyavsky M (2007) Using advice from multiple sources to revise and improve\njudgments. Organization Behav Hum Decis Process 103:104–120.\n5. Surowiecki J (2004) The Wisdom of Crowds: Why the Many Are Smarter than the Few\nand How Collective Wisdom Shapes Business, Economies, Societies, and Nations\n(Doubleday Books, New York).\n6. Vul E, Pashler H (2008) Measuring the crowd within: Probabilistic representations\nwithin individuals. Psychol Sci 19:645–647.\n7. Herzog SM, Hertwig R (2009) The wisdom of many in one mind: Improving individual\njudgments with dialectical bootstrapping. Psychol Sci 20:231–237.\n8. Rauhut H, Lorenz J (2010) The wisdom of crowds in one mind: How individuals can\nsimulate the knowledge of diverse societies to reach better decisions. J Math Psychol\n55:191–197.\n9. Page SE (2007) The Difference: How the Power of Diversity Creates Better Groups,\nFirms, Schools, and Societies (Princeton Univ Press, Princeton, NJ).\n10. Mason WA, Conrey FR, Smith ER (2007) Situating social in ﬂuence processes: dynamic,\nmultidirectional ﬂows of in ﬂuence within social networks. Pers Soc Psychol Rev 11:\n279–300.\n11. Banerjee AV (1992) A simple model of herd behavior. Q J Econ 107:797–817.\n12. Bikhchandani S, Hirshleifer D, Welch I (1992) A theory of fads, fashion, custom, and\ncultural change as informational cascades. J Polit Econ 100:992–1026.\n13. Mannes AE (2009) Are we wise about the wisdom of crowds? the use of group\njudgments in belief revision. Manage Sci 55:1267–1279.\n14. Allport GW (1924) The study of the undivided personality. J Abnorm Psychol Soc\nPsychol 19:132–141.\n15. Asch SE (1955) Opinions and social pressure. Sci Am 193:31–35.\n16. O ’Gorman HJ (1986) The discovery of pluralistic ignorance: An ironic lesson. J Hist\nBehav Sci 22:333–347.\n17. Miller DT, McFarland C (1991) When social comparison goes awry: The case of\npluralistic ignorance. Social Comparison: Contemporary Theory and Research , eds\nSuls J, Wills T (Lawrence Erlbaum, Hillsdale, NJ), pp 287 –313.\n18. Goldstone RL, Gureckis TM (2009) Collective behavior. Topics Cogn Sci 1:412–438.\n19. Salganik MJ, Dodds PS, Watts DJ (2006) Experimental study of inequality and\nunpredictability in an arti ﬁcial cultural market. Science 311:854–856.\n20. Tversky A, Kahneman D (1974) Judgment under uncertainty: Heuristics and biases.\nScience 185:1124–1131.\n21. Plous S (1993) The Psychology of Judgment and Decision Making (McGraw-Hill, New\nYork).\n22. Dawes RM, Mulford M (1996) The false consensus effect and overcon ﬁdence: Flaws in\njudgment or ﬂaws in how we study judgment? Organization Behav Hum Decis\nProcess 65:201–211.\n23. Lazer D, Friedman A (2007) The network structure of exploration and exploitation.\nAdmin Sci Q 52:667–694.\n24. Fischbacher U (2007) z-Tree: Zurich toolbox for ready-made economic experiments.\nExp Econ 10:171–178.\n25. Hooker RH (1907) Mean or median. Nature 75:487.\n26. Galton F (1907) The ballot-box. Nature 75:509–510.\n27. Genest C, Zidek J (1986) V Combining probability distributions: A critique and an\nannotated bibliography. Stat Sci 1:114–135.\n28. Dawid AP, et al. (1995) Coherent combination of experts ’ opinions. TEST 4:263–313.\n29. Chen KY, Fine LR, Huberman BA (2004) Eliminating public knowledge biases in\ninformation-aggregation mechanisms. Manage Sci 50:983–994.\n30. Golub B, Jackson MO (2010) Naïve learning in social networks: Convergence,\ninﬂuence, and the wisdom of crowds. Am Econ J Microecon 2:112–149.\n31. Dehaene S, Izard V, Spelke E, Pica P (2008) Log or linear? Distinct intuitions of the\nnumber scale in Western and Amazonian indigene cultures. Science 320:1217–1220.\n32. Limpert E, Stahel WA, Abby M (2001) Log-normal distributions across the sciences:\nKeys and clues. Bioscience 51:341–352.\n33. Larrick RP, Soll JB (2006) Intuitions about combining opinions: misappreciation of the\naveraging principle. Manage Sci 52:111–127.\n34. Sommerfeld RD, Krambeck HJ, Milinski M (2008) Multiple gossip statements and their\neffect on reputation and trustworthiness. Proc Biol Sci 275:2529–2536.\n35. Krogh A, Vedelsby J (1995) Neural network ensembles, cross validation, and active\nlearning. Adv Neural Inform Process Syst 7:231–238.\n36. Lorenz J (2007) Repeated averaging and bounded con ﬁdence – modeling, analysis\nand simulation of continuous opinion dynamics. PhD thesis (Universität Bremen,\nBremen, Germany).\nLorenz et al. PNAS | May 31, 2011 | vol. 108 | no. 22 | 9025\nSOCIAL SCIENCESPSYCHOLOGICAL AND\nCOGNITIVE SCIENCES",
+        "content_sha256": "10d6e61835ae38ecc32c345b6c18f5d4259ef40874694d12f60c4dd6162e160f",
+        "path": "papers/text/lorenz-et-al-2011-social-influence.txt",
+        "size_bytes": 46369
+      }
+    ],
+    "workspace_index": [
+      {
+        "content_sha256": "f6605c2b9bb68dd7906b2881ec1f0b48b32f607c7b768cd3ec8ab5a9ca46afaa",
+        "path": "CORPUS.md",
+        "size_bytes": 1937
+      },
+      {
+        "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+        "path": "papers/text/choi-et-al-2025-conformity.txt",
+        "size_bytes": 60691
+      },
+      {
+        "content_sha256": "0674b1614409c389ff275c78c696138a9453e321fee21b90ea1e4354700be7e2",
+        "path": "papers/text/du-et-al-2023-multiagent-debate.txt",
+        "size_bytes": 97256
+      },
+      {
+        "content_sha256": "8731efeb90375496d5dc1ea00840bc54e28f908021deff777966babcbc797f6f",
+        "path": "papers/text/dung-1995-argumentation.txt",
+        "size_bytes": 93057
+      },
+      {
+        "content_sha256": "10d6e61835ae38ecc32c345b6c18f5d4259ef40874694d12f60c4dd6162e160f",
+        "path": "papers/text/lorenz-et-al-2011-social-influence.txt",
+        "size_bytes": 46369
+      },
+      {
+        "content_sha256": "5363f488d988a892dd33e2cbba81c87e558deda9efdd190bc608ef9a8d4ba26a",
+        "path": "papers/text/shapiro-et-al-2011-crdts.txt",
+        "size_bytes": 42422
+      },
+      {
+        "content_sha256": "a1263656cb4d7e298c289b4ee44368fe9f38c1c2efc4ce88f0d54d60a62a3d1c",
+        "path": "papers/text/smit-et-al-2023-going-mad.txt",
+        "size_bytes": 80205
+      },
+      {
+        "content_sha256": "41e1d26db346207d4be0ec393e7bed983875ae417ca7aa5a530d390dca72e06e",
+        "path": "papers/text/zhang-et-al-2025-mad-question.txt",
+        "size_bytes": 95563
+      }
+    ]
+  },
+  "dependency_type": "PlanningDeps",
+  "input_sha256": "13033833d9622669524b66490764795b10363da5f44558212b61598ff35fc52d",
+  "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+  "role": "recursive_planner"
+}

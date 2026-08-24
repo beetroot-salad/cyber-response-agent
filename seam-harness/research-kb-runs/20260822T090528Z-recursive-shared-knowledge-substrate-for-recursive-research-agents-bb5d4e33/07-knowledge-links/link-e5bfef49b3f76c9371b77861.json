@@ -1,0 +1,7 @@
+{
+  "content_sha256": "e5bfef49b3f76c9371b77861e45ee1d512f019aef67172fd18c7132135626f34",
+  "id": "link:e5bfef49b3f76c9371b77861",
+  "relation": "refines",
+  "source_id": "question:root.03-social-influence-risk",
+  "target_id": "question:demand:D12"
+}

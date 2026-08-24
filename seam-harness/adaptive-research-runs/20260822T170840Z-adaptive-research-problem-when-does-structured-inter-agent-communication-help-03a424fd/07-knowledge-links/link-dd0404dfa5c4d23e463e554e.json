@@ -1,0 +1,10 @@
+{
+  "content_sha256": "dd0404dfa5c4d23e463e554e6aea08f0b636e3608515ea05c140f9d8e768984b",
+  "id": "link:dd0404dfa5c4d23e463e554e",
+  "origin": "runtime",
+  "proposed_by_node_id": null,
+  "rationale": null,
+  "relation": "refines",
+  "source_id": "question:work:001-w1-zhang2025",
+  "target_id": "question:demand:D4"
+}

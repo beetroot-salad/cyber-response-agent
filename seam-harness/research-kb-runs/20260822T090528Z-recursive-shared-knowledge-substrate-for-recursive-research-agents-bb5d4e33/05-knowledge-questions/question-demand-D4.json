@@ -1,0 +1,14 @@
+{
+  "acceptance_condition": "Establish demand D4 with evidence.",
+  "content_sha256": "495d059579b7faeff7b7c3dea23a59e4beecd9d2061aa750429abe0bdc2fd29e",
+  "demand_ids": [
+    "D4"
+  ],
+  "id": "question:demand:D4",
+  "node_id": null,
+  "rationale": "Both comparison targets are named verbatim in the request.",
+  "tags": [
+    "evidence"
+  ],
+  "text": "The design is compared against two named baselines: an open conversational forum and no inter-agent communication."
+}

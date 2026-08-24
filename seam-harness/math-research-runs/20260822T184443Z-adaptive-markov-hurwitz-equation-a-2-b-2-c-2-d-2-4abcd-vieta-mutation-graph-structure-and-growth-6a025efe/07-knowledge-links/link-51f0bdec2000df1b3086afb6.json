@@ -1,0 +1,10 @@
+{
+  "content_sha256": "51f0bdec2000df1b3086afb613d35239e5a51a4e15f8a38dbdaeb87865db059f",
+  "id": "link:51f0bdec2000df1b3086afb6",
+  "origin": "agent",
+  "proposed_by_node_id": "work:003-struct-core-v2",
+  "rationale": "Proves uniqueness of the height-decreasing mutation (maximum-coordinate semantics) including the equal-coordinate vertex-level subtlety.",
+  "relation": "answers",
+  "source_id": "answer:work:003-struct-core-v2",
+  "target_id": "question:demand:D2"
+}

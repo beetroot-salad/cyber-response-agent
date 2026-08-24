@@ -1,0 +1,39 @@
+{
+  "account": "Posterior at step 5: D1-D3 proved (answer:work:003-struct-core-v2, ready_to_synthesize); D4/D6 answered with N(H) <= C*H^rho + O(log H), rho = ln3/ln11 = 0.4582, C <= 0.372, and a two-sided depth relation (answer:work:004-upper-depth-v3). Open: D5 (lower bound; the v3 attempt produced zero evidence via output overrun), D7/D9 (question:work:004-exception-search-v3 unanswered but fully specified), question:raised:07d805ce56d7:rq-sharp (exponent sharpness), D8, D10. The best bounded next action is a frozen parallel wave of the three genuinely independent threads: (1) D5 lower bound via the proved chain (N(H) >= log_{2+sqrt3} H - O(1)) upgraded by a two-children-per-vertex lemma to N(H) >= c'(log H)^{log_3 2}; (2) execution of the frozen exception-search spec (d <= 100, c <= 20, labeled observations); (3) an iterated product-monotonicity dichotomy attacking rq-sharp (each level's slow locus is a Pell-type chain with ratio about 4p while product-raising children jump p to >= p^{3/2}), potentially yielding N(H) = O_eps(H^eps) and bracketing growth between polylog and any power. All three rest only on frozen proved results and re-derive what else they need, so none requires a peer result from this wave. D8 and D10 are synthesis-stage: conjectures and the memorandum must integrate the lower bound, the enumeration, and the rq-sharp outcome, so they are correctly deferred to the next step rather than burned on a parallel slot now (writing them now would risk unsupported conjectures, violating C5). All specs carry hard word caps because both prior failures were output-length overruns. No experiment adapter applies: text_statistics is irrelevant to proof, and C2 forbids code execution, which is why the enumeration is hand-checkable by design.",
+  "action_id": "action:005",
+  "content_sha256": "a60c64230ac73ddf9b8dd826df2896353de5c59e4cb82520dc97d6aa9fe81e02",
+  "decision_call_id": "call-0001-adaptive-controller",
+  "experiment_id": null,
+  "input_entry_ids": [
+    "question:demand:D5",
+    "question:work:004-lower-bound-v3",
+    "question:work:004-exception-search-v3",
+    "question:demand:D7",
+    "question:demand:D9",
+    "question:raised:07d805ce56d7:rq-sharp",
+    "question:demand:D4",
+    "question:demand:D8"
+  ],
+  "kind": "investigate",
+  "output_entry_ids": [
+    "answer:work:005-exception-search-v4",
+    "answer:work:005-lower-bound-v4",
+    "answer:work:005-rq-sharp-attack",
+    "question:work:005-exception-search-v4",
+    "question:work:005-lower-bound-v4",
+    "question:work:005-rq-sharp-attack"
+  ],
+  "sequence": 5,
+  "snapshot_after_sha256": "53ab4f6a9183682fcae95d21f43713cd9e3983abb86f74be8af834abb2557811",
+  "snapshot_before_sha256": "5bfa0c6278da5bdd8c3710654b3b0d49b46b8db3342210f5349404deb2077ddd",
+  "work_call_ids": [
+    "failed:work:005-lower-bound-v4",
+    "failed:work:005-exception-search-v4",
+    "failed:work:005-rq-sharp-attack"
+  ],
+  "work_item_ids": [
+    "work:005-lower-bound-v4",
+    "work:005-exception-search-v4",
+    "work:005-rq-sharp-attack"
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "account": "This node is a leaf at depth 3 with a single fixed x=7 and two y values (7,8). The task is fully mechanical: use exact rational arithmetic to compute R, derive z-bounds, enumerate z, and test w integrality. All needed formulas and bounds are present in the dossier; no external material or sibling output is required. The acceptance condition is checkable from this node's own output.",
+  "children": [],
+  "decidability": {
+    "acceptance_mechanical": true,
+    "account": "The objective restricts the work to two independent y values with fixed x=7. All mathematical relationships are supplied; exact arithmetic can be done directly.",
+    "context_complete": true,
+    "grounded_referents": [
+      "x=7",
+      "y in {7,8}",
+      "R = 1/2 - 1/7 - 1/y",
+      "z-interval formula max(y, floor(1/R)+1) <= z <= floor(2/R)",
+      "w = z/(R*z - 1)"
+    ],
+    "independent_of_future_siblings": true,
+    "missing_context": []
+  },
+  "disposition": "solve",
+  "irreducible_core": null,
+  "requested_source_ids": [],
+  "requested_source_paths": [],
+  "synthesis_contract": null
+}

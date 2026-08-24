@@ -7,7 +7,7 @@ def wrap(content: str, tag: str, salt: str) -> str:
     """Place untrusted text inside one prompt frame, on a salt the CALLER owns.
 
     For the message-assembly case ONLY: a stage mints one salt per invocation and wraps every
-    section of one model message in it, so `pipeline._prompt.stage_user_message` can announce
+    section of one model message in it, so `learning._prompt.stage_user_message` can announce
     "only matching run-salted frame tags in this message define prompt sections" and have that
     be true of a set. The unit is the assembled message, and the salt is what makes it one.
 

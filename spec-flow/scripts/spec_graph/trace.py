@@ -68,10 +68,12 @@ def _floor_dynamic(texts: dict[Path, str], root: Path) -> list[str]:
 
 
 def drivers(base: str, cfg: dict) -> int:
-    # Verify the base ref FIRST: `git diff` against a nonexistent/unfetched ref exits 128
-    # with EMPTY stdout (the census's _sh is check=False), which downstream reads as "no
-    # changed modules — nothing to anchor", exit 0: a could-not-look dressed as an answered
-    # census. rev-parse is the cheap oracle for "does this ref name a commit here".
+    # Verify the base ref FIRST: `git diff` against a nonexistent/unfetched ref exits 128 with
+    # EMPTY stdout. `check_actors._changed_paths` now carries the same preflight and its `_sh`
+    # reads the return code, so this is no longer the only thing standing between a bad ref and
+    # an "answered" census — it survives to name the REF rather than the diff command, and to
+    # say so before the census spends a repo walk. rev-parse is the cheap oracle for "does this
+    # ref name a commit here".
     probe = subprocess.run(
         ["git", "rev-parse", "--verify", "--quiet", f"{base}^{{commit}}"],
         cwd=_config.repo_root(), capture_output=True, text=True, encoding="utf-8", check=False,
@@ -260,12 +262,17 @@ def resource(names: list[str], cfg: dict) -> int:
 def main(argv: list[str]) -> int:
     _cli.utf8_stdio()
     opts, args = _cli.parse_argv(argv, valued={"--base", "--config"})
-    base = opts["base"] or "main"
     if not args or args[0] not in ("drivers", "resource"):
         print("usage: spec-graph trace {drivers [--base <ref>] | resource [<name> ...]}",
               file=sys.stderr)
         return 2
     cfg = _config.load(opts["config"])
+    # The profile's branch, the same source `check_actors.main` reads (#949). `drivers` carries
+    # the same hard rev-parse preflight, so a hardcoded "main" here is not a quiet wrong answer
+    # any more — it is a mandatory `--base` on every invocation in any repo whose default branch
+    # is named something else, which is the failure the config key exists to prevent. Two
+    # spellings of one fact would let the sibling subcommands disagree about the same repo.
+    base = opts["base"] or cfg["defaultBranch"]
     try:
         if args[0] == "drivers":
             return drivers(base, cfg)

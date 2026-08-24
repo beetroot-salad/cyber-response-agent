@@ -1,0 +1,29 @@
+{
+  "claim_ids": [
+    "root.04-debate-gains-evidence:C001",
+    "root.04-debate-gains-evidence:C002",
+    "root.04-debate-gains-evidence:C003",
+    "root.04-debate-gains-evidence:C004",
+    "root.04-debate-gains-evidence:C005",
+    "root.04-debate-gains-evidence:C006",
+    "root.04-debate-gains-evidence:C007",
+    "root.04-debate-gains-evidence:C008"
+  ],
+  "content_sha256": "472a9e1c81055756b35e8a8b1c5f4b9ed3474074fae5e7ba7ac74c6549008376",
+  "id": "answer:root.04-debate-gains-evidence",
+  "node_id": "root.04-debate-gains-evidence",
+  "packet_id": "packet:root.04-debate-gains-evidence",
+  "sufficiency": "ready_to_synthesize",
+  "summary": "Du et al. 2023 reports substantial accuracy gains from multiagent debate in both reasoning and factuality tasks, achieved under a specific experimental configuration (three agents, two rounds, gpt-3.5-turbo-0301, zero-shot) and a synchronous round-structured consensus procedure. Gains are reported for arithmetic, GSM8K, chess move prediction, biographies, MMLU, and chess move validity, with debate outperforming single-agent, reflection, and majority-voting baselines. The authors state three limitations: computational expense, context-length processing limits in longer debates, and convergence to incorrect answers that agents confidently affirm. From these source findings, design inferences constrain the shared question/answer substrate: it must represent multiple competing answers as first-class, addressable objects; support iterative criteria-based refinement across rounds with provenance; enforce a synchronous round protocol; and provide a consensus mechanism with a concrete convergence test. A faithful replication condition must instantiate 3 agents × 2 rounds with identical prompts, model, tasks, and evaluation protocols, and be falsifiable by reproducing the reported accuracy levels. The paper's own reported failure mode — confident convergence to wrong answers — requires the evaluation plan to include a recovery-from-wrong-consensus metric and argue against absorbing the synchronous-protocol boundary finding.",
+  "tags": [
+    "evidence",
+    "measurement",
+    "synthesis",
+    "counterexample",
+    "uncertainty"
+  ],
+  "unresolved": [
+    "The source does not specify how to store or represent 'multiple competing answers' in a substrate; the design must infer an internal representation (e.g., text vs structured fields) that is not constrained by the evidence.",
+    "The paper does not report how consensus is operationalized beyond noting convergence; the replication condition must define a concrete consensus test (e.g., equality of final answers) that is not derivable from the source."
+  ]
+}

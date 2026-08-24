@@ -1,0 +1,10 @@
+{
+  "content_sha256": "db72369df0b9cd72f28e92ce67014f6b74f1ef33c0d9e735a60f18a364db1e66",
+  "id": "link:db72369df0b9cd72f28e92ce",
+  "origin": "runtime",
+  "proposed_by_node_id": null,
+  "rationale": null,
+  "relation": "partially_answers",
+  "source_id": "answer:work:004-upper-depth-v3",
+  "target_id": "question:demand:D6"
+}

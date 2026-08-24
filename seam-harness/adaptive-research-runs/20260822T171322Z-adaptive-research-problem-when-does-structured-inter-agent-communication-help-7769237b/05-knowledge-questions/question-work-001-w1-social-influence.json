@@ -1,0 +1,13 @@
+{
+  "acceptance_condition": "A structured extraction covering both files with at least 8 findings total, each with file path + PDF page marker, including Lorenz's diversity/accuracy effects under each information condition and Choi's conformity measures and moderators.",
+  "content_sha256": "b0130efbac8bf750ccfc22a16ebb7a5c48bffbb071e70f65ba35afd5bbadafea",
+  "demand_ids": [],
+  "id": "question:work:001-w1-social-influence",
+  "node_id": "work:001-w1-social-influence",
+  "rationale": "These two papers supply the social-influence/conformity pathway of the causal model (D3): the mechanism by which open transcripts destroy the error independence that makes aggregation work, which is central to why staged retrieval-mediated Q/A might beat an open transcript.",
+  "tags": [
+    "evidence",
+    "measurement"
+  ],
+  "text": "Extract from papers/text/lorenz-et-al-2011-social-influence.txt and papers/text/choi-et-al-2025-conformity.txt: (a) Lorenz et al.'s experimental design and quantitative findings on how social influence (full vs. aggregated information feedback) affects estimate diversity, collective accuracy, and confidence in human crowds; (b) Choi et al.'s findings on group conformity in LLM multi-agent systems — when agents conform, what drives conformity (e.g., majority pressure, model identity, task), and measured effects on accuracy; (c) any parameters or effect sizes usable as priors for modeling error-correlation collapse under shared information. Record each finding with file path and explicit `===== PDF PAGE N =====` markers."
+}

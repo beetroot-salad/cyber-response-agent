@@ -1,0 +1,48 @@
+{
+  "account": "Inspection of the posterior state shows all four investigations from action:001 failed before producing any evidence (UnexpectedModelBehavior: Exceeded maximum output retries (2); zero claims, sufficiency=blocked). The only unanswered questions are D8 and D10, which depend on D1-D7/D9 and cannot start. The failure mode is output overruns, so I re-issue the same four genuinely independent threads (each rests only on stable definitions SC1-SC6 and re-derives its own lemmas) with tightened acceptance conditions, explicit brevity directives, and sharper proof-route guidance (e.g., a cleaner descent argument: d' >= d forces 2ab <= 3, hence a=b=1, d <= 3c/2, then c=1 and the root) to shorten search and output. D4+D6 stay coupled (same per-edge growth engine); D5 (constructive lower bounds) and D7/D9 (bounded hand enumeration) remain independent of the structural proof and of each other. D8/D10 are deferred to the remaining steps after evidence lands.",
+  "action_id": "action:003",
+  "content_sha256": "3d4983d4d0fb7433711754412327a17e0d278f7b6afbd87867c8772010297d42",
+  "decision_call_id": "call-0008-adaptive-controller",
+  "experiment_id": null,
+  "input_entry_ids": [
+    "question:work:001-struct-core",
+    "question:demand:D1",
+    "question:demand:D2",
+    "question:demand:D3",
+    "question:work:001-upper-bound-depth",
+    "question:demand:D4",
+    "question:demand:D6",
+    "question:work:001-lower-bound",
+    "question:demand:D5",
+    "question:work:001-exception-search",
+    "question:demand:D7",
+    "question:demand:D9"
+  ],
+  "kind": "investigate",
+  "output_entry_ids": [
+    "answer:work:003-exception-search-v2",
+    "answer:work:003-lower-bound-v2",
+    "answer:work:003-struct-core-v2",
+    "answer:work:003-upper-depth-v2",
+    "question:raised:e19298af7323:rq1",
+    "question:work:003-exception-search-v2",
+    "question:work:003-lower-bound-v2",
+    "question:work:003-struct-core-v2",
+    "question:work:003-upper-depth-v2"
+  ],
+  "sequence": 3,
+  "snapshot_after_sha256": "070f660b77ad7af57c26a9cbafbe3ed1b1442fc7437f1d103cd06996edf37651",
+  "snapshot_before_sha256": "89c23a3cb8fda7cd80a3895b33b91c4d7aab7b194bd4b555fa8cce1becdc8b98",
+  "work_call_ids": [
+    "call-0009-adaptive-investigator",
+    "failed:work:003-upper-depth-v2",
+    "failed:work:003-lower-bound-v2",
+    "failed:work:003-exception-search-v2"
+  ],
+  "work_item_ids": [
+    "work:003-struct-core-v2",
+    "work:003-upper-depth-v2",
+    "work:003-lower-bound-v2",
+    "work:003-exception-search-v2"
+  ]
+}

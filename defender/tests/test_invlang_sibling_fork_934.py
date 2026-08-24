@@ -23,7 +23,7 @@ mid-composition.
 from __future__ import annotations
 
 from defender.skills.invlang.parser import parse_dense_companion
-from defender.skills.invlang.validate import validate_companion
+from defender.skills.invlang.validate import _SIBLING_FORK_TAG, validate_companion
 
 #: Siblings that share every topological column and an OPEN `parent_class`, forking on one
 #: predicted observable apiece — the cadence a single lead over the failure series splits.
@@ -139,7 +139,22 @@ def test_the_benign_gate_is_live_on_that_document() -> None:
 # --------------------------------------------------------------------------- #
 
 def _fork_errors(doc: str) -> list[str]:
-    return [str(e) for e in validate_companion(doc, None) if "predict the same observables" in str(e)]
+    """Rule #23's diagnostics, picked out of the flat list `validate_companion` returns.
+
+    Filtered on `_SIBLING_FORK_TAG`, the constant the check BUILDS its message from — not on a
+    phrase copied out of that message. A filter spelled as a copied phrase is a filter that
+    silently matches nothing the day the prose is reworded, and every `== []` assertion below
+    would then pass by finding nothing rather than by the rule staying quiet. Importing the
+    identity makes that failure mode unreachable: the message and the filter cannot drift
+    apart, because there is only one string.
+
+    The `== []` assertions are still only as good as the positive controls beside them —
+    `test_siblings_predicting_the_same_observable_are_refused` and
+    `test_matching_attribute_predictions_do_not_rescue_a_duplicate` are what establish this
+    helper returns non-empty for a document the rule refuses, so a silent deletion of the
+    check would go red here rather than green everywhere.
+    """
+    return [str(e) for e in validate_companion(doc, None) if _SIBLING_FORK_TAG in str(e)]
 
 
 def _fork_doc(h1_claim: str, h2_claim: str, *, anchor2: str = "v-001", tail: str = "") -> str:
@@ -225,6 +240,15 @@ def test_refuting_one_of_the_two_is_the_repair() -> None:
     assert _fork_errors(doc) == []
 
 
+#: A fork carried entirely by `.attr_preds`: identical `.preds`, opposite predicted values for
+#: one attribute of the anchored vertex.
+#:
+#: `target` is `attached_vertex`, NOT `v-001`. The cell names WHICH of the hypothesis's three
+#: objects carries the attribute (`_ATTR_PRED_TARGETS`) — the proposed parent and proposed edge
+#: have no id yet, and the attached vertex is already named by `attached_to` — so a vertex id
+#: there is a rule #33 violation. It shipped as `v-001` because #33 had no implementation when
+#: this fixture was written; `attached_vertex` is the same prediction about the same object,
+#: said in the grammar.
 _ATTR_FORK = """\
 ```invlang
 :V prologue.vertices [id|type|class|ident|attrs?]
@@ -238,13 +262,13 @@ h-002|?scheduled-service-retry|v-001|runs_on|process|??||null|active
 p1|proposed_edge|"failures arrive in bursts"
 
 :H h-001.attr_preds [id|target|attribute|claim]
-ap1|v-001|signing|"UNSIGNED"
+ap1|attached_vertex|signing|"UNSIGNED"
 
 :H h-002.preds [id|subject|claim]
 p1|proposed_edge|"failures arrive in bursts"
 
 :H h-002.attr_preds [id|target|attribute|claim]
-ap1|v-001|signing|"SIGNED"
+ap1|attached_vertex|signing|"SIGNED"
 ```
 """
 

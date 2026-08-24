@@ -1,0 +1,17 @@
+{
+  "acceptance_condition": "Proved: child-max >= 3x parent-max off the parent edge; branching <= 3 (root: 1); N(H) <= (3H-1)/2; depth(v) <= log_3 max(v) and depth(v) >= log_3 log max(v) - O(1) with explicit constants; a clearly labeled statement of any sharper proved bound or, failing that, the precise obstruction plus a labeled conjecture. Explicit constants everywhere.",
+  "content_sha256": "2aa2253001d2c9cd4d6afe46ddcd5530de2a3eac0d4fd2e42ec336dfedc6b12c",
+  "demand_ids": [
+    "D4",
+    "D6"
+  ],
+  "id": "question:work:003-upper-depth-v2",
+  "node_id": "work:003-upper-depth-v2",
+  "rationale": "D4+D6 share one engine (multiplicative max-growth along tree edges); previous attempt died on output length, so the route is pre-digested and brevity is mandated. Conditional use of the tree structure is acceptable because struct-core-v2 proves it in the same wave and the two will be synthesized next.",
+  "tags": [
+    "method",
+    "measurement",
+    "constraint"
+  ],
+  "text": "From first principles, prove the strongest rigorous upper bound for N(H) = #{sorted solutions with d <= H} and the two-sided depth-vs-log-H relation, ASSUMING the tree structure (prove the per-edge growth and branching lemmas directly so the thread is self-contained where cheap). Compact plan: (i) at a non-root vertex, mutating any of the three non-maximal coordinates x gives a child with new maximum 4*(product of three others) - x >= (4ab-1)d >= 3d; hence max(v) >= 3^{depth(v)} and depth(v) <= log_3(max(v)); the root has exactly one child (1,1,1,3) - verify. (ii) Each non-root vertex has at most 3 children and the root exactly 1, so N(H) <= sum_{k=0}^{floor(log_3 H)} 3^k = (3^{floor(log_3 H)+1}-1)/2 <= (3H-1)/2 = O(H) with explicit constant. (iii) Two-sided depth relation: upper depth bound log_3 H from (i); lower bound from the coarse child estimate d_child <= 4*d^3 (since a,b,c <= d), giving log max(v) <= 3^{depth(v)} * C for an explicit constant C, hence depth(v) >= log_3(log max(v)) - O(1) along every branch; identify along which branches each extreme is approached. (iv) Attempt to sharpen the O(H) constant or exponent rigorously (e.g., exploit that the (1,1,c,d)-chain is the unique slowest branch and off-chain children grow by factor >= 4ab-1 with ab >= 2, so most of the tree grows much faster; try to prove N(H) = O(H^alpha) for some alpha < 1); if a sharper bound cannot be fully proved, state exactly what is proved, and label any improvement as CONJECTURE with the precise gap. KEEP COMPACT (well under 1200 words): theorems with terse proofs, explicit constants, no tables."
+}

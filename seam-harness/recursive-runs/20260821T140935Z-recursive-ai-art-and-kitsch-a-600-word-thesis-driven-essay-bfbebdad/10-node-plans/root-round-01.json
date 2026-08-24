@@ -1,0 +1,26 @@
+{
+  "account": "The dossier contains everything needed to write the essay directly: fixed audience and register (general educated reader, standalone cultural criticism), a mandated posture (one clear, nuanced defended thesis; neutral survey ruled out), form rules (plain prose, title present, no citation apparatus required), a suggested title (\"AI Art and Kitsch\"), and an explicit 550–650 word target. No external evidence is required — the envelope states the essay draws on the writer's own reasoning, and the workspace index is empty. Expansion is inappropriate here for three reasons. First, the natural sub-steps (select thesis, marshal arguments and counterarguments, draft, tune length) are strictly sequential, so as children they would violate the rule that no child may depend on a sibling's future output. Second, parallel \"angle\" children (e.g., one on the concept of kitsch, one on AI art's aesthetics) would produce raw material the parent must still weave into a single-voice 600-word essay — the real inferential and stylistic work would live in the join, which the irreducibly_coupled rationale warns against. Third, children must collect or decide one contribution rather than draft slices of the deliverable, and at this scale there is no independent evidence to collect. The acceptance condition is mechanically checkable: word count in [550, 650], title present, an identifiable defended thesis with acknowledged nuance, no survey-style neutrality, no citation apparatus, standalone comprehensibility. Solving at this node is therefore the locally decidable choice.",
+  "children": [],
+  "decidability": {
+    "acceptance_mechanical": true,
+    "account": "All referents are grounded in separator facts and user decisions: audience, genre, stance posture, form, title hint, and word range are fixed by decision:1–3; the topic pair (AI art, kitsch) comes from the original request. Acceptance reduces to countable/inspectable checks: (a) 550–650 words, (b) title present, (c) a single clearly stated thesis that is defended with reasons and acknowledges at least one genuine complication (nuance), (d) prose pitched at a general educated reader with no scholarly apparatus, (e) standalone intelligibility. No missing context, no sources to fetch, no sibling outputs to await.",
+    "context_complete": true,
+    "grounded_referents": [
+      "AI art (request)",
+      "kitsch (request)",
+      "general educated reader (decision:1)",
+      "standalone cultural criticism (decision:1)",
+      "clear, nuanced defended thesis (decision:2)",
+      "plain essay prose with title, no citations required (decision:3)",
+      "title hint 'AI Art and Kitsch' (separator fact)",
+      "550–650 word range (decision:3)"
+    ],
+    "independent_of_future_siblings": true,
+    "missing_context": []
+  },
+  "disposition": "solve",
+  "irreducible_core": null,
+  "requested_source_ids": [],
+  "requested_source_paths": [],
+  "synthesis_contract": null
+}

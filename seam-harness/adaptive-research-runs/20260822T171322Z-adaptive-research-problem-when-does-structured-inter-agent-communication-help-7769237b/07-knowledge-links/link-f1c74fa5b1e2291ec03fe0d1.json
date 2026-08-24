@@ -1,0 +1,10 @@
+{
+  "content_sha256": "f1c74fa5b1e2291ec03fe0d1946351750136698955c505f8243ac635b0825a91",
+  "id": "link:f1c74fa5b1e2291ec03fe0d1",
+  "origin": "runtime",
+  "proposed_by_node_id": null,
+  "rationale": null,
+  "relation": "refines",
+  "source_id": "question:work:001-w1-debate-positive",
+  "target_id": "question:demand:D2"
+}

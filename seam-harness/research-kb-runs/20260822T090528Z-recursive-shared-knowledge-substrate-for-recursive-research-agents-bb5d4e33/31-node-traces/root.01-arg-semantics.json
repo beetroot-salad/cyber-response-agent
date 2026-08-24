@@ -1,0 +1,16 @@
+{
+  "child_ids": [
+    "root.01-arg-semantics.01-child-1",
+    "root.01-arg-semantics.02-child-2",
+    "root.01-arg-semantics.03-child-3",
+    "root.01-arg-semantics.04-child-4"
+  ],
+  "depth": 1,
+  "effective_disposition": "synthesize",
+  "node_id": "root.01-arg-semantics",
+  "packet_id": "packet:root.01-arg-semantics",
+  "packet_sha256": "d14af513d9ecb31f39ec74681da5c996a60724b09756c03020683655d6e04d4a",
+  "parent_id": "root",
+  "proposed_disposition": "expand",
+  "stop_reason": null
+}

@@ -1,0 +1,15 @@
+{
+  "child_ids": [
+    "root.02-lemma.01-child-a-bijection-proof",
+    "root.02-lemma.02-child-b-counting-formula",
+    "root.02-lemma.03-child-c-validation-example"
+  ],
+  "depth": 1,
+  "effective_disposition": "synthesize",
+  "node_id": "root.02-lemma",
+  "packet_id": "packet:root.02-lemma",
+  "packet_sha256": "0fc052ec5e03c6c463c310ae614393acc707f88e8acf94bf13a16fbf374a7b42",
+  "parent_id": "root",
+  "proposed_disposition": "expand",
+  "stop_reason": null
+}

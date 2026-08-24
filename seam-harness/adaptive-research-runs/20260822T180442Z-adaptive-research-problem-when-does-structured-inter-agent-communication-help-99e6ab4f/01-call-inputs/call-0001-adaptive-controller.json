@@ -1,0 +1,181 @@
+{
+  "call_id": "call-0001-adaptive-controller",
+  "context": {
+    "assignment": {
+      "acceptance_condition": "Return one valid action grounded in visible entry IDs.",
+      "demand_ids": [
+        "D1",
+        "D2",
+        "D3",
+        "D4",
+        "D5",
+        "D6",
+        "D7",
+        "D8"
+      ],
+      "id": "controller:005",
+      "objective": "Choose the single best bounded next action.",
+      "rationale": "Revise the work shape from the observed knowledge state; do not preserve a stale plan for consistency.",
+      "tags": [
+        "decision"
+      ],
+      "target_question_ids": [
+        "question:raised:24ba60001ffb:rz1",
+        "question:raised:24ba60001ffb:rz2",
+        "question:raised:92a7343df8a6:rq-shapiro-merge",
+        "question:raised:eaee61611e26:rq-choi-1",
+        "question:demand:D1",
+        "question:demand:D2",
+        "question:demand:D5",
+        "question:demand:D6",
+        "question:demand:D7",
+        "question:demand:D8"
+      ]
+    },
+    "available_experiments": [
+      {
+        "argument_schema": {
+          "source_id": "string"
+        },
+        "description": "Deterministically count lines, words, characters, and unique lexical tokens in one source material or snapshotted workspace file.",
+        "executes_workspace_code": false,
+        "name": "text_statistics"
+      }
+    ],
+    "constraints": [
+      "Use only files under papers/text as external evidence.",
+      "Citations must name the workspace file and an explicit `===== PDF PAGE N =====` marker.",
+      "Distinguish reported findings, cross-paper inference, and the note author’s new hypothesis.",
+      "Do not treat agreement, graph centrality, retrieval rank, or number of agents as evidence of truth.",
+      "Do not resolve conflicting studies by silently selecting the preferred outcome."
+    ],
+    "controller_feedback": [],
+    "demands": [
+      {
+        "id": "D1",
+        "rationale": "The benchmark needs enough room for theory, evidence, and an executable study design.",
+        "statement": "Produce one coherent research note of 2,000–2,600 words."
+      },
+      {
+        "id": "D2",
+        "rationale": "A research problem requires an explanatory claim, not a survey.",
+        "statement": "State one original mechanistic thesis about when staged retrieval-mediated Q/A communication wins or loses under matched inference compute."
+      },
+      {
+        "id": "D3",
+        "rationale": "The model must expose variables and pathways that can be tested.",
+        "statement": "Construct an explicit causal model connecting initial error correlation, evidence diversity, social influence or conformity, retrieval selectivity, synthesis competence, and task topology."
+      },
+      {
+        "id": "D4",
+        "rationale": "The corpus was selected to contain incompatible-looking results.",
+        "statement": "Use and reconcile all relevant positive, null, and adverse findings in the seven-file corpus, with citations to file paths and PDF page markers."
+      },
+      {
+        "id": "D5",
+        "rationale": "Predictions are the bridge from explanation to falsification.",
+        "statement": "Derive at least four directional or interaction predictions that discriminate the proposed mechanism from compute-only, diversity-only, and deliberation-only alternatives."
+      },
+      {
+        "id": "D6",
+        "rationale": "The note must not overclaim from heterogeneous published studies.",
+        "statement": "Identify non-identifiability, measurement, and external-validity limits in the existing evidence."
+      },
+      {
+        "id": "D7",
+        "rationale": "A concrete study should be executable by another lab.",
+        "statement": "Specify a preregisterable matched-compute experiment: units, task strata, conditions, randomization, intervention fidelity, primary and secondary estimands, outcome measures, power-analysis inputs, exclusion rules, multiple-testing control, and failure or stopping criteria."
+      },
+      {
+        "id": "D8",
+        "rationale": "The result must expose its epistemic boundary.",
+        "statement": "End with the strongest warranted conclusion, material unresolved questions, and the single observation most likely to falsify the thesis."
+      }
+    ],
+    "knowledge_summary": {
+      "answer_count": 11,
+      "contradicted_question_count": 1,
+      "focus_question_ids": [
+        "question:raised:24ba60001ffb:rz1",
+        "question:raised:24ba60001ffb:rz2",
+        "question:raised:92a7343df8a6:rq-shapiro-merge",
+        "question:raised:eaee61611e26:rq-choi-1",
+        "question:demand:D1",
+        "question:demand:D2",
+        "question:demand:D5",
+        "question:demand:D6",
+        "question:demand:D7",
+        "question:demand:D8"
+      ],
+      "link_count": 135,
+      "question_count": 27,
+      "snapshot_sha256": "29cd6d24856251f628d0682a46c264439f1ae7e103d2bc499f982a7d9636c173",
+      "snapshot_version": 173,
+      "unanswered_question_count": 12
+    },
+    "max_parallel_investigations": 6,
+    "max_query_results": 10,
+    "max_source_chunk_chars": 8000,
+    "product_intent": "Stress-test adaptive inquiry on a genuinely open research problem whose useful decomposition cannot be known before reading conflicting evidence. The result should contribute a falsifiable explanatory hypothesis and experiment, not an architecture recommendation or literature memo.",
+    "recent_actions": [],
+    "remaining_steps": 10,
+    "remaining_work_items": 0,
+    "role": "controller",
+    "selected_packets": [],
+    "stable_context": [
+      "The comparison is matched total inference compute, not matched number of agents or calls.",
+      "The three focal communication conditions are staged retrieval-mediated Q/A, independent sampling plus final aggregation, and an open shared transcript.",
+      "Published benchmark accuracy is not assumed to transfer across task topology; task-level moderators are part of the research question.",
+      "The seven extracted texts in papers/text are the complete evidentiary corpus for this benchmark; page markers are explicit in each file."
+    ],
+    "step": 5,
+    "task": "Write a 2,000–2,600 word research note that develops and defends a new mechanistic answer to this question: under a matched inference-compute budget, when should staged, retrieval-mediated question/answer communication among language-model agents outperform both independent sampling with final aggregation and an open shared transcript? Use the supplied seven-paper corpus as evidence, but do not merely survey it. Reconcile its conflicting empirical findings; formulate an explicit causal model of information diversity, social influence, retrieval, and synthesis; derive at least four discriminating predictions that separate your mechanism from plausible alternatives; identify what the existing literature cannot identify; and give a preregisterable experiment with conditions, randomization, estimands, power-analysis inputs, failure criteria, and an analysis plan. End with the strongest warranted conclusion and the observation most likely to falsify it.",
+    "title": "Research problem: when does structured inter-agent communication help?",
+    "workspace_index": [
+      {
+        "content_sha256": "f6605c2b9bb68dd7906b2881ec1f0b48b32f607c7b768cd3ec8ab5a9ca46afaa",
+        "path": "CORPUS.md",
+        "size_bytes": 1937
+      },
+      {
+        "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+        "path": "papers/text/choi-et-al-2025-conformity.txt",
+        "size_bytes": 60691
+      },
+      {
+        "content_sha256": "0674b1614409c389ff275c78c696138a9453e321fee21b90ea1e4354700be7e2",
+        "path": "papers/text/du-et-al-2023-multiagent-debate.txt",
+        "size_bytes": 97256
+      },
+      {
+        "content_sha256": "8731efeb90375496d5dc1ea00840bc54e28f908021deff777966babcbc797f6f",
+        "path": "papers/text/dung-1995-argumentation.txt",
+        "size_bytes": 93057
+      },
+      {
+        "content_sha256": "10d6e61835ae38ecc32c345b6c18f5d4259ef40874694d12f60c4dd6162e160f",
+        "path": "papers/text/lorenz-et-al-2011-social-influence.txt",
+        "size_bytes": 46369
+      },
+      {
+        "content_sha256": "5363f488d988a892dd33e2cbba81c87e558deda9efdd190bc608ef9a8d4ba26a",
+        "path": "papers/text/shapiro-et-al-2011-crdts.txt",
+        "size_bytes": 42422
+      },
+      {
+        "content_sha256": "a1263656cb4d7e298c289b4ee44368fe9f38c1c2efc4ce88f0d54d60a62a3d1c",
+        "path": "papers/text/smit-et-al-2023-going-mad.txt",
+        "size_bytes": 80205
+      },
+      {
+        "content_sha256": "41e1d26db346207d4be0ec393e7bed983875ae417ca7aa5a530d390dca72e06e",
+        "path": "papers/text/zhang-et-al-2025-mad-question.txt",
+        "size_bytes": 95563
+      }
+    ]
+  },
+  "dependency_type": "AdaptiveDeps",
+  "input_sha256": "b0d44498f4533cdd2be42f4b6ad34cdc3e11a9d2b3a005371b0597d227e2c340",
+  "model": "fireworks:accounts/fireworks/models/kimi-k3",
+  "role": "adaptive_controller"
+}

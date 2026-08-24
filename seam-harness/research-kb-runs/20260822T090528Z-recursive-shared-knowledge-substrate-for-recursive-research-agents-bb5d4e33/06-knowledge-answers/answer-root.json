@@ -1,0 +1,31 @@
+{
+  "claim_ids": [
+    "root:C001",
+    "root:C002",
+    "root:C003",
+    "root:C004",
+    "root:C005",
+    "root:C006",
+    "root:C007",
+    "root:C008"
+  ],
+  "content_sha256": "bf6ac8f9943e62118269993213973905e73b937230a21d5aa6ff6b93a5dd1921",
+  "id": "answer:root",
+  "node_id": "root",
+  "packet_id": "packet:root",
+  "sufficiency": "ready_to_synthesize",
+  "summary": "The evidence basis is complete: five child packs, each ready_to_synthesize, cover the formal foundations (Dung 1995), persistence/concurrency (Shapiro 2011), conformity risk (Lorenz 2011; Choi 2025), debate gains (Du 2023), and null/boundary results (Smit 2023; Zhang 2025). The committed design is a staged-visibility, synchronous-round, argumentation-grounded question/answer graph substrate with add-only CRDT persistence, runtime-enforced invariants, and an evaluation plan with three conditions and the five named metric families. The empirical conflict is preserved and attributed to task type, compute parity, and visibility/timing, not dropped.",
+  "tags": [
+    "counterexample",
+    "method",
+    "measurement",
+    "synthesis",
+    "uncertainty"
+  ],
+  "unresolved": [
+    "The exact mapping from natural-language conflict to a machine-checkable ANSWER_CONFLICTS edge requires model-level inference; the runtime only stores edges.",
+    "Whether model heterogeneity (per Zhang) is necessary for gains remains untested in the three planned conditions.",
+    "The runtime's convergence test (string equality vs. semantic similarity) is not fully specified.",
+    "Smit et al.'s hyperparameter sensitivity implies the evaluation should include tuning sweeps, but the memo does not specify the budget."
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "claim_ids": [
+    "work:001-inv-lorenz-influence:C001",
+    "work:001-inv-lorenz-influence:C002",
+    "work:001-inv-lorenz-influence:C003",
+    "work:001-inv-lorenz-influence:C004",
+    "work:001-inv-lorenz-influence:C005",
+    "work:001-inv-lorenz-influence:C006",
+    "work:001-inv-lorenz-influence:C007",
+    "work:001-inv-lorenz-influence:C008",
+    "work:001-inv-lorenz-influence:C009",
+    "work:001-inv-lorenz-influence:C010",
+    "work:001-inv-lorenz-influence:C011",
+    "work:001-inv-lorenz-influence:C012"
+  ],
+  "content_sha256": "c514146b27f19270fc8fe6af8ba3d293cf6f569fdc7177eb28282572618bdd3e",
+  "id": "answer:work:001-inv-lorenz-influence",
+  "node_id": "work:001-inv-lorenz-influence",
+  "packet_id": "packet:work:001-inv-lorenz-influence",
+  "sufficiency": "ready_to_synthesize",
+  "summary": "Lorenz, Rauhut, Schweitzer & Helbing (PNAS 2011, N=144) ran a lab experiment isolating how minimal social influence degrades collective estimation. DESIGN (PDF PAGE 2, 5, 6): 12 sessions of 12 ETH Zurich students each answered six factual estimation questions (Swiss population density, Swiss-Italian border length, Zurich immigration 2006, murders/rapes/assaults registered in Switzerland 2006), chosen to be moderately difficult (only 1.5% of runs always in the top reward band). Each question was answered in five consecutive private rounds from isolated cubicles; confidence (6-point Likert) was elicited after rounds 1 and 5 and never shared. Monetary rewards (4/2/1 points = 1.40/0.70/0.35 CHF for estimates within 10/20/40% of truth, all rounds paid) were deliberately non-competitive so others' estimates could only be used to approach truth, not to conform for gain. Three within-session information conditions, order randomized: (i) NO INFORMATION control — re-answer five times, reminded only of own last estimate; (ii) AGGREGATED INFORMATION — see the arithmetic mean of all 12 estimates from the previous round; (iii) FULL INFORMATION — see a figure of all 12 individual estimate trajectories over all previous rounds plus last-round numerical values. Per treatment: 24 groups (4 per question). THREE SIGNATURE EFFECTS: (1) Social influence effect — estimates converge and group diversity is strongly, significantly reduced (KS and F tests) WITHOUT significant reduction of collective error; effects 'almost null' in control (PDF PAGE 3, Fig 1D/E). (2) Range reduction effect — a wisdom-of-crowd indicator (centrality of the truth among sorted estimates; max 6 for n=12) declines over rounds with information exchange; regression over all questions: ~1 unit lower than control, and the decline is STRONGER under aggregated than full information, which authors link to gossip-from-fewer-sources findings (PDF PAGE 4-5). (3) Confidence effect — confidence is significantly boosted in both information conditions vs control, despite no accuracy gains: 'subjective' reliability rises as 'objective' reliability falls, a psychological trap (PDF PAGE 4 caption, PAGE 5). WHEN INFLUENCE HELPED VS UNDERMINED: it undermined in all three ways whenever questions were hard/uncertain, but there was a slight collective-error decline, especially in the aggregated condition, which the authors attribute to an artifact: right-skewed estimates make the arithmetic mean feedback higher than most estimates and above the truth, while the geometric mean of first estimates sits slightly below the truth, so mean feedback induces an upward drift toward truth — 'this effect may be different for different sets of questions' (PDF PAGE 3 footnote). Undermining was 'less severe for easier questions and if individuals are more confident' (SI Appendix, cited PDF PAGE 5). Aggregation note: arithmetic mean beat individual first estimates in only 21.3% of cases; geometric mean in 77.1% (log-transform justified by right-skew); Table 1 gives per-question aggregates (PDF PAGE 3). AUTHORS' INTERPRETATION: even bare numerical feedback — no persuasion, leaders, or strategic incentives — triggers herding; diversity loss 'appears to be a necessary byproduct of transparent decision-making processes'; convergence breeds collective overconfidence (PDF PAGE 5). CAVEATS: initial diversity was higher in control (possible anticipatory conservatism, mainly crime questions); 10 of 864x5 values removed (outliers, 'fun moves'); human students, six right-skewed estimation tasks only (PDF PAGE 3, 5-6).",
+  "tags": [
+    "evidence",
+    "counterexample",
+    "uncertainty"
+  ],
+  "unresolved": [
+    "Numerical regression coefficients, standard errors, and p-values for the wisdom-of-crowd-indicator and confidence models (only in Fig 2B graphics and SI Appendix, not in extracted text).",
+    "Magnitude and functional form of the difficulty/confidence moderation (SI Appendix only).",
+    "Whether effects persist when justifications/reasons accompany estimates — the design deliberately stripped all argumentative content, leaving the exposure-vs-persuasion question open for LLM analogues.",
+    "Whether a geometric-mean feedback condition would have produced the same range-reduction ordering (authors flag this as a design limitation).",
+    "Runtime rejected knowledge-link proposal outside the frozen board or with invalid endpoint types: self supports question:demand:D3",
+    "Runtime rejected knowledge-link proposal outside the frozen board or with invalid endpoint types: self refines question:work:001-inv-choi-conformity"
+  ]
+}

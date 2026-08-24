@@ -1,0 +1,10 @@
+{
+  "content_sha256": "6f0f2ea35816b9a5ab1db04f09a583a3208988ea4be9287d1ebefa76235c9026",
+  "id": "link:6f0f2ea35816b9a5ab1db04f",
+  "origin": "runtime",
+  "proposed_by_node_id": null,
+  "rationale": null,
+  "relation": "answers",
+  "source_id": "answer:work:001-inv-lorenz-influence",
+  "target_id": "question:work:001-inv-lorenz-influence"
+}

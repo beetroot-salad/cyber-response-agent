@@ -1,0 +1,330 @@
+{
+  "created_at": "2026-08-21T15:31:57.137073+00:00",
+  "events": [
+    {
+      "event_hash": "10b61858bdf06c90f80ccd5dc9cac72894b5ea5a83c69f4a7de788f3bdf8369d",
+      "index": 0,
+      "metadata": {},
+      "name": "recursive-run",
+      "path": "00-input/recursive-run.json",
+      "previous_event_hash": null,
+      "record_sha256": "6feffd77914d3a2237d3423606402616bb58f114973207dab3f84ec42cc58a01",
+      "stage": "00-input",
+      "timestamp": "2026-08-21T15:31:57.142665+00:00"
+    },
+    {
+      "event_hash": "280b91a91801818a5df0aaa7192721ace45ee741e1a1a0f70a8cf5a12cd792e1",
+      "index": 1,
+      "metadata": {},
+      "name": "replay-source",
+      "path": "00-input/replay-source.json",
+      "previous_event_hash": "10b61858bdf06c90f80ccd5dc9cac72894b5ea5a83c69f4a7de788f3bdf8369d",
+      "record_sha256": "cbeed5f4fcdc29a51fa3fbd6f30c2fdb2d651e14cdfbe5644729dacaa0e3eaa8",
+      "stage": "00-input",
+      "timestamp": "2026-08-21T15:31:57.145812+00:00"
+    },
+    {
+      "event_hash": "95c72efa08dc597398850bb4e3426cd9fcdcf17e7917c24ad96f0f05ce13d0ec",
+      "index": 2,
+      "metadata": {
+        "role": "root_plan_replay",
+        "source_run": "/workspace/seam-harness/math-runs/20260821T152804Z-recursive-unit-fractions-summing-to-one-half-7266a126"
+      },
+      "name": "root-round-01",
+      "path": "10-node-plans/root-round-01.json",
+      "previous_event_hash": "280b91a91801818a5df0aaa7192721ace45ee741e1a1a0f70a8cf5a12cd792e1",
+      "record_sha256": "65abe434d68fdb23abeab5facf8c48343416b417823f2ec59ea52b0ba11ca917",
+      "stage": "10-node-plans",
+      "timestamp": "2026-08-21T15:31:57.148800+00:00"
+    },
+    {
+      "event_hash": "a26d8641c2275152e42cf9c6bff896437c8ea797b668ea4ee26e29c9c060f61a",
+      "index": 3,
+      "metadata": {
+        "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+        "role": "recursive_planner"
+      },
+      "name": "call-0001-recursive-planner",
+      "path": "01-call-inputs/call-0001-recursive-planner.json",
+      "previous_event_hash": "95c72efa08dc597398850bb4e3426cd9fcdcf17e7917c24ad96f0f05ce13d0ec",
+      "record_sha256": "d76fae35a12f7b7c1efad2402472d2a0bcfb8cb11b3ce0fb1fa585a4778e7b96",
+      "stage": "01-call-inputs",
+      "timestamp": "2026-08-21T15:31:57.154130+00:00"
+    },
+    {
+      "event_hash": "ae62c92b8fa798c30610e9590be59ecae20d5a6adcd1547aa2c893e3d48647fe",
+      "index": 4,
+      "metadata": {
+        "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+        "role": "recursive_planner"
+      },
+      "name": "call-0002-recursive-planner",
+      "path": "01-call-inputs/call-0002-recursive-planner.json",
+      "previous_event_hash": "a26d8641c2275152e42cf9c6bff896437c8ea797b668ea4ee26e29c9c060f61a",
+      "record_sha256": "6d61591d5119b810dba5fec34683ced33df538dc58a972c261d13b31ed538f8f",
+      "stage": "01-call-inputs",
+      "timestamp": "2026-08-21T15:32:00.248204+00:00"
+    },
+    {
+      "event_hash": "4776de3bce2a56f475996de2e8eb52e0d25ed81219165fbab1e36af84cc12f6f",
+      "index": 5,
+      "metadata": {
+        "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+        "role": "recursive_planner"
+      },
+      "name": "call-0003-recursive-planner",
+      "path": "01-call-inputs/call-0003-recursive-planner.json",
+      "previous_event_hash": "ae62c92b8fa798c30610e9590be59ecae20d5a6adcd1547aa2c893e3d48647fe",
+      "record_sha256": "1465158e2d5146ec41628fe5f60238e3106bd6b8d51d2b36b43f3703da364c3d",
+      "stage": "01-call-inputs",
+      "timestamp": "2026-08-21T15:32:00.280931+00:00"
+    },
+    {
+      "event_hash": "2db9a29ec9183b96b8b20e259640a87434f361b7971a3bd2df14aa868aefd565",
+      "index": 6,
+      "metadata": {
+        "call_id": "call-0001-recursive-planner",
+        "elapsed_ms": 13077,
+        "input_sha256": "46b7d6a22693fceded59195f3a6faaddebe225a2985bb211c40eb4c291abd8fb",
+        "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+        "role": "recursive_planner",
+        "usage": {
+          "cache_read_tokens": 2894,
+          "details": {
+            "reasoning_tokens": 279
+          },
+          "input_tokens": 2895,
+          "output_tokens": 758,
+          "requests": 1
+        }
+      },
+      "name": "root.01-case-x3-x4-round-01",
+      "path": "10-node-plans/root.01-case-x3-x4-round-01.json",
+      "previous_event_hash": "4776de3bce2a56f475996de2e8eb52e0d25ed81219165fbab1e36af84cc12f6f",
+      "record_sha256": "72bf6da725486dea8dfc4150d800e6309dd9d2202a5686ee892380730bd17b7b",
+      "stage": "10-node-plans",
+      "timestamp": "2026-08-21T15:32:10.233659+00:00"
+    },
+    {
+      "event_hash": "3b91e71c76f40010eba92cf8668ca1d69e228f467b812396ab73a283b62c6dcf",
+      "index": 7,
+      "metadata": {
+        "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+        "role": "frontier_researcher"
+      },
+      "name": "call-0004-frontier-researcher",
+      "path": "01-call-inputs/call-0004-frontier-researcher.json",
+      "previous_event_hash": "2db9a29ec9183b96b8b20e259640a87434f361b7971a3bd2df14aa868aefd565",
+      "record_sha256": "ae6fb4a4b0311fba01093578b4c89af18e951cc7fd25c07e7c6e921b6b7b7374",
+      "stage": "01-call-inputs",
+      "timestamp": "2026-08-21T15:32:10.237496+00:00"
+    },
+    {
+      "event_hash": "b6165fd3203014ad75d73d5300ef98eff56373958a3a182285a8186e3661b201",
+      "index": 8,
+      "metadata": {
+        "call_id": "call-0003-recursive-planner",
+        "elapsed_ms": 17542,
+        "input_sha256": "2d2f77161fa294f91001108ea4f84929c8473d726a642c4c5967e9258bf6ec9d",
+        "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+        "role": "recursive_planner",
+        "usage": {
+          "cache_read_tokens": 2787,
+          "details": {
+            "reasoning_tokens": 1253
+          },
+          "input_tokens": 2788,
+          "output_tokens": 1702,
+          "requests": 1
+        }
+      },
+      "name": "root.03-independent-audit-round-01",
+      "path": "10-node-plans/root.03-independent-audit-round-01.json",
+      "previous_event_hash": "3b91e71c76f40010eba92cf8668ca1d69e228f467b812396ab73a283b62c6dcf",
+      "record_sha256": "0c6744a39aec170e63f8cd86d193a5e944caf8c0cd32c4fa098b5f356e57cfec",
+      "stage": "10-node-plans",
+      "timestamp": "2026-08-21T15:32:17.825459+00:00"
+    },
+    {
+      "event_hash": "5a17bfd95475a363f103d54cfa50171c366408ef51e287e72e7af76f7fe97018",
+      "index": 9,
+      "metadata": {
+        "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+        "role": "frontier_researcher"
+      },
+      "name": "call-0005-frontier-researcher",
+      "path": "01-call-inputs/call-0005-frontier-researcher.json",
+      "previous_event_hash": "b6165fd3203014ad75d73d5300ef98eff56373958a3a182285a8186e3661b201",
+      "record_sha256": "ec1d28229548463c9b544b21b32f1ba9b5af4c85f35697d8502c2eca4232a115",
+      "stage": "01-call-inputs",
+      "timestamp": "2026-08-21T15:32:17.828344+00:00"
+    },
+    {
+      "event_hash": "e7c0a2a34bf8d7129223c4b26653bdbc5c62ef290d50c1e980255a6e893fbdfc",
+      "index": 10,
+      "metadata": {
+        "call_id": "call-0004-frontier-researcher",
+        "elapsed_ms": 40824,
+        "input_sha256": "c2e4996ba0c82e1bfc937f8e9530028d1ece079c46956409ad1ee50b4af767e2",
+        "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+        "role": "frontier_researcher",
+        "usage": {
+          "cache_read_tokens": 2707,
+          "details": {
+            "reasoning_tokens": 2961
+          },
+          "input_tokens": 2708,
+          "output_tokens": 4740,
+          "requests": 1
+        }
+      },
+      "name": "root.01-case-x3-x4-research",
+      "path": "20-node-work/root.01-case-x3-x4-research.json",
+      "previous_event_hash": "5a17bfd95475a363f103d54cfa50171c366408ef51e287e72e7af76f7fe97018",
+      "record_sha256": "24d5ca2a13050040953fb1710c4281c744eefefaa71cc7f7e6b540fb58525824",
+      "stage": "20-node-work",
+      "timestamp": "2026-08-21T15:32:51.063853+00:00"
+    },
+    {
+      "event_hash": "aa8c61ba77331faa33857821928c33b7612268b2a8f5b46c837100344f57cf59",
+      "index": 11,
+      "metadata": {},
+      "name": "root.01-case-x3-x4",
+      "path": "30-evidence-packets/root.01-case-x3-x4.json",
+      "previous_event_hash": "e7c0a2a34bf8d7129223c4b26653bdbc5c62ef290d50c1e980255a6e893fbdfc",
+      "record_sha256": "b313e45a5f130039460cbb657f937d2d6ad069aed62bfd60a8785ff4358e2ee5",
+      "stage": "30-evidence-packets",
+      "timestamp": "2026-08-21T15:32:51.065422+00:00"
+    },
+    {
+      "event_hash": "afb8ebcc435528eb8adab2bd0b2aabd3fc7795de96d3d0d1ea2c028bc145b96d",
+      "index": 12,
+      "metadata": {},
+      "name": "root.01-case-x3-x4",
+      "path": "31-node-traces/root.01-case-x3-x4.json",
+      "previous_event_hash": "aa8c61ba77331faa33857821928c33b7612268b2a8f5b46c837100344f57cf59",
+      "record_sha256": "c638ced2f8fecdb345b6f068cd9cd921f39f57990e910b37f15ee4901569ded9",
+      "stage": "31-node-traces",
+      "timestamp": "2026-08-21T15:32:51.066203+00:00"
+    },
+    {
+      "event_hash": "ce6027d52c8ab290b3ba5a4d5b666c208488d91694fb2d028711d04b96249513",
+      "index": 13,
+      "metadata": {
+        "call_id": "call-0002-recursive-planner",
+        "elapsed_ms": 51429,
+        "input_sha256": "f4a7d1d52de735b9621de4b11eae2ea90a1de7389ed32dee4cf54078b36be16e",
+        "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+        "role": "recursive_planner",
+        "usage": {
+          "cache_read_tokens": 2797,
+          "details": {
+            "reasoning_tokens": 1565
+          },
+          "input_tokens": 2798,
+          "output_tokens": 2095,
+          "requests": 1
+        }
+      },
+      "name": "root.02-case-x5-x6-round-01",
+      "path": "10-node-plans/root.02-case-x5-x6-round-01.json",
+      "previous_event_hash": "afb8ebcc435528eb8adab2bd0b2aabd3fc7795de96d3d0d1ea2c028bc145b96d",
+      "record_sha256": "304dc03e2e85d15b8c487d473fbcb925ae344f5eef358005743e0f172afe8c92",
+      "stage": "10-node-plans",
+      "timestamp": "2026-08-21T15:32:51.678825+00:00"
+    },
+    {
+      "event_hash": "836dfb7e9e5bfce470b49e5a8914f3f7939c4cd11c340c64e2d6aea1cdc8a605",
+      "index": 14,
+      "metadata": {
+        "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+        "role": "frontier_researcher"
+      },
+      "name": "call-0006-frontier-researcher",
+      "path": "01-call-inputs/call-0006-frontier-researcher.json",
+      "previous_event_hash": "ce6027d52c8ab290b3ba5a4d5b666c208488d91694fb2d028711d04b96249513",
+      "record_sha256": "9e7587876c7b2148994636a850cf0968f52b49fbc7a9f872ee2cf20e8db9a392",
+      "stage": "01-call-inputs",
+      "timestamp": "2026-08-21T15:32:51.681620+00:00"
+    },
+    {
+      "event_hash": "7b0a32c04727eb64814296e76f90b3bc5e81dad4dc2d08835d4500a3b4775874",
+      "index": 15,
+      "metadata": {
+        "call_id": "call-0005-frontier-researcher",
+        "elapsed_ms": 103045,
+        "input_sha256": "e0a3e169b0981bff136de0421d458d7dfad99917d3da1a2f59d80f74191bff1f",
+        "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+        "role": "frontier_researcher",
+        "usage": {
+          "cache_read_tokens": 5200,
+          "details": {
+            "reasoning_tokens": 9493
+          },
+          "input_tokens": 5582,
+          "output_tokens": 12601,
+          "requests": 2
+        }
+      },
+      "name": "root.03-independent-audit-research",
+      "path": "20-node-work/root.03-independent-audit-research.json",
+      "previous_event_hash": "836dfb7e9e5bfce470b49e5a8914f3f7939c4cd11c340c64e2d6aea1cdc8a605",
+      "record_sha256": "2bea6470a55c388844abf156081d8e8b01323b92737750bdea0cdffd1c96bc50",
+      "stage": "20-node-work",
+      "timestamp": "2026-08-21T15:34:00.876087+00:00"
+    },
+    {
+      "event_hash": "079be9307f9f91cd7f22b2779bb3567e013aa3188d568c63c43c321204ddc536",
+      "index": 16,
+      "metadata": {},
+      "name": "root.03-independent-audit",
+      "path": "30-evidence-packets/root.03-independent-audit.json",
+      "previous_event_hash": "7b0a32c04727eb64814296e76f90b3bc5e81dad4dc2d08835d4500a3b4775874",
+      "record_sha256": "d305a0a441c6f98050df9342254981e9848f26ad49d91d9a63f6b4289cef0f14",
+      "stage": "30-evidence-packets",
+      "timestamp": "2026-08-21T15:34:00.879413+00:00"
+    },
+    {
+      "event_hash": "7b66d4d6b985771a9580d74a0793f3040c31fb29e0c6f6dda641cef1b38fc5a4",
+      "index": 17,
+      "metadata": {},
+      "name": "root.03-independent-audit",
+      "path": "31-node-traces/root.03-independent-audit.json",
+      "previous_event_hash": "079be9307f9f91cd7f22b2779bb3567e013aa3188d568c63c43c321204ddc536",
+      "record_sha256": "5568cfe51c66f2b3c36ac4ea70941b37f55e51f05f43e5003cb2b75d207fe3c4",
+      "stage": "31-node-traces",
+      "timestamp": "2026-08-21T15:34:00.880989+00:00"
+    },
+    {
+      "event_hash": "363919f5bd5d0d740248ad66b8cf2ff8252232ca8f6daeef87cea8e760cf1b33",
+      "index": 18,
+      "metadata": {
+        "call_id": "call-0006-frontier-researcher",
+        "input_sha256": "f8bbb23091a941e12fbec7606ff004686248d62dfee655d4faa9d2aef1d16d69",
+        "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+        "role": "frontier_researcher"
+      },
+      "name": "call-0006-frontier-researcher",
+      "path": "02-call-errors/call-0006-frontier-researcher.json",
+      "previous_event_hash": "7b66d4d6b985771a9580d74a0793f3040c31fb29e0c6f6dda641cef1b38fc5a4",
+      "record_sha256": "628e7560b492c5f6e9d0e52af279df7aed87798cf3a4bd43198273afb1c61a52",
+      "stage": "02-call-errors",
+      "timestamp": "2026-08-21T15:34:49.072513+00:00"
+    },
+    {
+      "event_hash": "5945453f3f6ef2e266292d50a2672045e304ff1e5383a86a16f9d5d305b5bab9",
+      "index": 19,
+      "metadata": {},
+      "name": "failure",
+      "path": "99-result/failure.json",
+      "previous_event_hash": "363919f5bd5d0d740248ad66b8cf2ff8252232ca8f6daeef87cea8e760cf1b33",
+      "record_sha256": "628e7560b492c5f6e9d0e52af279df7aed87798cf3a4bd43198273afb1c61a52",
+      "stage": "99-result",
+      "timestamp": "2026-08-21T15:34:49.075578+00:00"
+    }
+  ],
+  "finished_at": "2026-08-21T15:34:49.079737+00:00",
+  "run_id": "20260821T153157Z-recursive-unit-fractions-summing-to-one-half-9ffd064c",
+  "schema_version": 1,
+  "status": "failed"
+}

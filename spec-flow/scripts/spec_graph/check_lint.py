@@ -388,7 +388,10 @@ def main(argv: list[str]) -> int:
         # above does not cover — the same could-not-read class as a bad top level, never
         # a traceback behind exit 1. Collected, not returned on: bailing here threw away
         # every finding the already-linted graphs produced.
-        except (OSError, yaml.YAMLError, TypeError, AttributeError) as e:
+        # `ValueError` covers UnicodeDecodeError: a non-utf-8 graph is the commonest unreadable
+        # one, and it is NOT an OSError — without it the read escapes as a traceback behind exit 1
+        # ("looked, found something") for a gate that read nothing.
+        except (OSError, ValueError, yaml.YAMLError, TypeError, AttributeError) as e:
             print(f"check_lint: cannot read {p}: {e.__class__.__name__}: {e}", file=sys.stderr)
             unreadable.append(p)
             continue

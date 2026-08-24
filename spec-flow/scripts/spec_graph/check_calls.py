@@ -150,18 +150,36 @@ def main(argv: list[str]) -> int:
         # project-rooted) and exit 2 with a false "every import resolves". Anchor the
         # root at the argument, resolved so `is_dir`/rooting checks are cwd-independent.
         p = Path(args[0]).resolve()
-        suite_dirs = [p if p.is_dir() else p.parent]
-        root = _config.repo_root(suite_dirs[0])
+        suite_dirs = [_suite.suite_dir_from_arg(p)]
+        root: Path | None = _config.repo_root(suite_dirs[0])
     else:
-        root = _config.repo_root()
-        suite_dirs = sorted({g.parent for g in _config.artifacts(cfg)})
+        # No single root: `suite_dir_from_arg` anchors each graph's `tests:` on ITS OWN checkout,
+        # so a process-anchored root would classify one suite's imports against another repo —
+        # every import reads as third-party and the dir comes back "blind" with a false "every
+        # suite import resolves". Anchored per dir inside the loop instead, which is also what
+        # the explicit-argument branch above does.
+        root = None
+        suite_dirs = sorted({_suite.suite_dir_from_arg(g) for g in _config.artifacts(cfg)})
     if not suite_dirs:
         print("check_calls: no suite directory (no graphs matched and none given)", file=sys.stderr)
         return 2
     all_findings: list[str] = []
     blind: list[Path] = []
+    # A resolved directory with no Python in it is a could-not-look, and it has to be said HERE
+    # rather than left to the no-targets arm below: an explicit `--target` seeds `targets`, so an
+    # empty directory sails past that arm and prints "0 test(s) that never reach the target" over
+    # a suite that was never opened. That was the #949 symptom.
+    #
+    # COLLECTED, not returned on — for the same reason `blind` is, and it matters more now that
+    # `suite_dirs` is one entry per GRAPH: a single graph whose `tests:` names a retired, renamed
+    # or not-yet-written suite would otherwise throw away every finding the other suites produced
+    # and print nothing at all.
+    no_tests: list[Path] = []
     for d in suite_dirs:
-        targets, floor = _suite.target_modules(d, root)
+        if not _suite.has_tests(d):
+            no_tests.append(d)
+            continue
+        targets, floor = _suite.target_modules(d, root or _config.repo_root(d))
         for t in explicit:
             targets.setdefault(t, set())
         for note in floor:
@@ -175,8 +193,16 @@ def main(argv: list[str]) -> int:
         all_findings.extend(check(d, targets))
     for f in all_findings:
         print(f"  {f}")
-    print(f"\n[check_calls] {len(all_findings)} test(s) that never reach the target "
-          f"over {len(suite_dirs) - len(blind)} suite dir(s).")
+    # The summary line is printed only when a suite was actually SCANNED. Over zero of them it
+    # reads "0 test(s) that never reach the target over 0 suite dir(s)" — honest in its second
+    # clause and a clean bill of health in its first, and the first is the half a human reads.
+    # The exit code is already 2 here; #949 is about the sentence disagreeing with it.
+    scanned = len(suite_dirs) - len(blind) - len(no_tests)
+    if scanned:
+        print(f"\n[check_calls] {len(all_findings)} test(s) that never reach the target "
+              f"over {scanned} suite dir(s).")
+    if no_tests:
+        print(_suite.no_tests_refusal("check_calls", no_tests), file=sys.stderr)
     if blind:
         print(
             f"check_calls: no target identified for {[str(d) for d in blind]} — every suite "
@@ -185,6 +211,7 @@ def main(argv: list[str]) -> int:
             f"module reads as a third-party import; name it with --target <dotted.module>.",
             file=sys.stderr,
         )
+    if no_tests or blind:
         return 2
     return 1 if all_findings else 0
 

@@ -20,9 +20,22 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# Every job carries `timeout-minutes` (#937). The gVisor install is bounded command by
+# command below, but that is one step: `docker pull`, `uv sync`, `npm install -g jscpd` and
+# the DooD container's own apt/pip/curl all reach hosts this runner does not control, and a
+# stall in any of them still runs to GitHub's 6-hour job default.
+#
+# 10 minutes, and the bound NESTS over the step bound the same way the step bound nests over
+# its commands. `test` is the binding job: 250s at its slowest over the last 12 runs on main,
+# of which 222s is outside the gVisor step (199s of unit tests + ~23s of setup). A stall that
+# burns the step's full 5-minute bound lands at 222 + 300 = 522s, inside 600s — so the step's
+# own timeout fires first and names the command, and this bound stays what it is for: the
+# backstop under the steps that carry no bound of their own. Raising the step bound without
+# raising this one inverts that and hands every stall to GitHub's generic job cancel.
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - uses: actions/checkout@v5
@@ -48,15 +61,66 @@ jobs:
       # microsoft/typescript-benchmarking and geomys/sandboxed-step. Without this step those
       # tests self-skip on a runner with no runsc, and the boundary would be pinned by nothing.
       - name: Install gVisor (runsc) for the box suite
+        # BOUNDED, every command (#937). This step talks to two hosts the runner does not
+        # control, and `set -e` fails fast on an ERROR but not on a STALL — so an
+        # unresponsive gvisor apt repo hung box-dood for 15 minutes on run 32278695386 and
+        # would have run to the 6-hour job default. It normally finishes in 12-31s.
+        #
+        # The per-command bounds NEST inside this one: 60 + 60 + 120 + 30 = 270s against a
+        # 300s step. The curl term is 60 and not 20, because --retry-max-time is the last
+        # instant a new attempt may START and that attempt still gets a full --max-time. That ordering is the whole point of having both — whichever command
+        # stalls, its own `timeout` exits 124 and names itself in the log, and the step bound
+        # stays a backstop for a stall no per-command bound covers. Bounds that summed ABOVE
+        # 300s would hand every multi-stall run back to GitHub's generic step cancel, which
+        # says only that the step was too slow. The step normally finishes in 12-31s, so even
+        # the tightest bound here is an order of magnitude off the normal path.
+        timeout-minutes: 5
         run: |
-          set -eux
-          curl -fsSL https://gvisor.dev/archive.key \
+          # `pipefail` on top of `set -eux`: curl feeds a pipe, so without it the pipeline
+          # reports gpg's status and a curl that hit its own bound reads as "no valid
+          # OpenPGP data found" — the bounded command's failure hidden behind its reader's.
+          set -euxo pipefail
+          # --retry-max-time bounds the retry SERIES; --max-time bounds one attempt, and
+          # curl resets it per retry, so without the series bound this line alone could
+          # spend 4 * 60s + delays and blow past the step bound.
+          curl -fsSL --max-time 20 --retry 3 --retry-delay 2 --retry-max-time 40 \
+            --retry-connrefused https://gvisor.dev/archive.key \
             | sudo gpg --dearmor -o /usr/share/keyrings/gvisor-archive-keyring.gpg
           echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/gvisor-archive-keyring.gpg] https://storage.googleapis.com/gvisor/releases release main" \
             | sudo tee /etc/apt/sources.list.d/gvisor.list > /dev/null
-          sudo apt-get update && sudo apt-get install -y runsc
+          # Split rather than `&&`-chained: under `set -e` the chain adds nothing, and one
+          # `timeout` per command is what tells an update stall from an install stall.
+          # Acquire::Retries because the gvisor apt host is the one that was observed
+          # stalling and the stall cleared on a re-run inside 20s: a bound with no retry
+          # converts that transient into a red build across three jobs, where curl — a
+          # different host, and not the one that failed — already retries.
+          #
+          # http::Timeout is what makes that retry SAFE to have. Retries apply to every
+          # source, not just gvisor's, and the runner's azure.archive.ubuntu.com mirror goes
+          # unreachable often: on run 32294123321 the default 30s connect timeout x 4
+          # attempts put a 120s floor under `update` and blew a 60s kill, with the gvisor
+          # host itself answering in under a second. Capping the per-connection wait at 10s
+          # makes the worst case 10 + 2*10 = 30s of dead-mirror stall.
+          APT_BOUNDED=(-o Acquire::Retries=2 -o Acquire::http::Timeout=10
+                       -o Acquire::https::Timeout=10)
+          # ...and `update` is SCOPED to the one source this step added, which is what makes
+          # the bound honest rather than a guess that keeps losing. The default `update`
+          # refreshes every mirror on the runner to install a package that needs none of
+          # them: `runsc` resolves to "1 newly installed, 0 to remove". On run 32294715524
+          # the capped timeout worked — azure Ign'd at 10s intervals instead of 30 — and the
+          # step still died at 124, because apt then failed over to archive.ubuntu.com and
+          # spent 76s pulling indices for repositories nothing here installs from. Raising
+          # the number again would just move the next stall; not fetching what we do not use
+          # removes it. sourceparts=/dev/null suppresses the OTHER .list.d entries, and
+          # List-Cleanup=0 keeps the image's existing lists on disk for anything downstream.
+          GVISOR_ONLY=(-o Dir::Etc::sourcelist=/etc/apt/sources.list.d/gvisor.list
+                       -o Dir::Etc::sourceparts=/dev/null -o APT::Get::List-Cleanup=0)
+          sudo timeout 60 apt-get "${APT_BOUNDED[@]}" "${GVISOR_ONLY[@]}" update
+          # install keeps the full source list (it resolves against the image's lists) and a
+          # roomier bound: the runsc deb is 168 MB, ~20s on a healthy runner.
+          sudo timeout 120 apt-get "${APT_BOUNDED[@]}" install -y runsc
           sudo runsc install -- --oci-seccomp
-          sudo systemctl restart docker
+          sudo timeout 30 systemctl restart docker
           docker info --format '{{.Runtimes}}'
           # Hard-fail rather than print. Every box in the #540 suite starts at the runtime
           # BoxSpec anchors (runsc), and the parity test self-skips a runtime the daemon does
@@ -131,6 +195,7 @@ jobs:
   # this split — `test` natively and `box-dood` under DooD — so the pairing is unchanged.
   box-native:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
 
@@ -150,15 +215,66 @@ jobs:
       # EVERY `runsc install` step in this file, so this copy is covered by that census
       # rather than trusted.
       - name: Install gVisor (runsc) for the box suite
+        # BOUNDED, every command (#937). This step talks to two hosts the runner does not
+        # control, and `set -e` fails fast on an ERROR but not on a STALL — so an
+        # unresponsive gvisor apt repo hung box-dood for 15 minutes on run 32278695386 and
+        # would have run to the 6-hour job default. It normally finishes in 12-31s.
+        #
+        # The per-command bounds NEST inside this one: 60 + 60 + 120 + 30 = 270s against a
+        # 300s step. The curl term is 60 and not 20, because --retry-max-time is the last
+        # instant a new attempt may START and that attempt still gets a full --max-time. That ordering is the whole point of having both — whichever command
+        # stalls, its own `timeout` exits 124 and names itself in the log, and the step bound
+        # stays a backstop for a stall no per-command bound covers. Bounds that summed ABOVE
+        # 300s would hand every multi-stall run back to GitHub's generic step cancel, which
+        # says only that the step was too slow. The step normally finishes in 12-31s, so even
+        # the tightest bound here is an order of magnitude off the normal path.
+        timeout-minutes: 5
         run: |
-          set -eux
-          curl -fsSL https://gvisor.dev/archive.key \
+          # `pipefail` on top of `set -eux`: curl feeds a pipe, so without it the pipeline
+          # reports gpg's status and a curl that hit its own bound reads as "no valid
+          # OpenPGP data found" — the bounded command's failure hidden behind its reader's.
+          set -euxo pipefail
+          # --retry-max-time bounds the retry SERIES; --max-time bounds one attempt, and
+          # curl resets it per retry, so without the series bound this line alone could
+          # spend 4 * 60s + delays and blow past the step bound.
+          curl -fsSL --max-time 20 --retry 3 --retry-delay 2 --retry-max-time 40 \
+            --retry-connrefused https://gvisor.dev/archive.key \
             | sudo gpg --dearmor -o /usr/share/keyrings/gvisor-archive-keyring.gpg
           echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/gvisor-archive-keyring.gpg] https://storage.googleapis.com/gvisor/releases release main" \
             | sudo tee /etc/apt/sources.list.d/gvisor.list > /dev/null
-          sudo apt-get update && sudo apt-get install -y runsc
+          # Split rather than `&&`-chained: under `set -e` the chain adds nothing, and one
+          # `timeout` per command is what tells an update stall from an install stall.
+          # Acquire::Retries because the gvisor apt host is the one that was observed
+          # stalling and the stall cleared on a re-run inside 20s: a bound with no retry
+          # converts that transient into a red build across three jobs, where curl — a
+          # different host, and not the one that failed — already retries.
+          #
+          # http::Timeout is what makes that retry SAFE to have. Retries apply to every
+          # source, not just gvisor's, and the runner's azure.archive.ubuntu.com mirror goes
+          # unreachable often: on run 32294123321 the default 30s connect timeout x 4
+          # attempts put a 120s floor under `update` and blew a 60s kill, with the gvisor
+          # host itself answering in under a second. Capping the per-connection wait at 10s
+          # makes the worst case 10 + 2*10 = 30s of dead-mirror stall.
+          APT_BOUNDED=(-o Acquire::Retries=2 -o Acquire::http::Timeout=10
+                       -o Acquire::https::Timeout=10)
+          # ...and `update` is SCOPED to the one source this step added, which is what makes
+          # the bound honest rather than a guess that keeps losing. The default `update`
+          # refreshes every mirror on the runner to install a package that needs none of
+          # them: `runsc` resolves to "1 newly installed, 0 to remove". On run 32294715524
+          # the capped timeout worked — azure Ign'd at 10s intervals instead of 30 — and the
+          # step still died at 124, because apt then failed over to archive.ubuntu.com and
+          # spent 76s pulling indices for repositories nothing here installs from. Raising
+          # the number again would just move the next stall; not fetching what we do not use
+          # removes it. sourceparts=/dev/null suppresses the OTHER .list.d entries, and
+          # List-Cleanup=0 keeps the image's existing lists on disk for anything downstream.
+          GVISOR_ONLY=(-o Dir::Etc::sourcelist=/etc/apt/sources.list.d/gvisor.list
+                       -o Dir::Etc::sourceparts=/dev/null -o APT::Get::List-Cleanup=0)
+          sudo timeout 60 apt-get "${APT_BOUNDED[@]}" "${GVISOR_ONLY[@]}" update
+          # install keeps the full source list (it resolves against the image's lists) and a
+          # roomier bound: the runsc deb is 168 MB, ~20s on a healthy runner.
+          sudo timeout 120 apt-get "${APT_BOUNDED[@]}" install -y runsc
           sudo runsc install -- --oci-seccomp
-          sudo systemctl restart docker
+          sudo timeout 30 systemctl restart docker
           docker info --format '{{.Runtimes}}'
           # Hard-fail rather than print — same reason as the `test` job: the suite self-skips
           # a runtime the daemon does not register, so a degraded install would leave this
@@ -189,21 +305,73 @@ jobs:
   # exist"); on older daemons it silently binds an EMPTY dir and F8's sentinel fails closed.
   box-dood:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
 
       # Same install as the `test` job: the boxes are created by the HOST daemon, so the
       # runtime has to be registered out here, not in the container running pytest.
       - name: Install gVisor (runsc) for the box suite
+        # BOUNDED, every command (#937). This step talks to two hosts the runner does not
+        # control, and `set -e` fails fast on an ERROR but not on a STALL — so an
+        # unresponsive gvisor apt repo hung box-dood for 15 minutes on run 32278695386 and
+        # would have run to the 6-hour job default. It normally finishes in 12-31s.
+        #
+        # The per-command bounds NEST inside this one: 60 + 60 + 120 + 30 = 270s against a
+        # 300s step. The curl term is 60 and not 20, because --retry-max-time is the last
+        # instant a new attempt may START and that attempt still gets a full --max-time. That ordering is the whole point of having both — whichever command
+        # stalls, its own `timeout` exits 124 and names itself in the log, and the step bound
+        # stays a backstop for a stall no per-command bound covers. Bounds that summed ABOVE
+        # 300s would hand every multi-stall run back to GitHub's generic step cancel, which
+        # says only that the step was too slow. The step normally finishes in 12-31s, so even
+        # the tightest bound here is an order of magnitude off the normal path.
+        timeout-minutes: 5
         run: |
-          set -eux
-          curl -fsSL https://gvisor.dev/archive.key \
+          # `pipefail` on top of `set -eux`: curl feeds a pipe, so without it the pipeline
+          # reports gpg's status and a curl that hit its own bound reads as "no valid
+          # OpenPGP data found" — the bounded command's failure hidden behind its reader's.
+          set -euxo pipefail
+          # --retry-max-time bounds the retry SERIES; --max-time bounds one attempt, and
+          # curl resets it per retry, so without the series bound this line alone could
+          # spend 4 * 60s + delays and blow past the step bound.
+          curl -fsSL --max-time 20 --retry 3 --retry-delay 2 --retry-max-time 40 \
+            --retry-connrefused https://gvisor.dev/archive.key \
             | sudo gpg --dearmor -o /usr/share/keyrings/gvisor-archive-keyring.gpg
           echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/gvisor-archive-keyring.gpg] https://storage.googleapis.com/gvisor/releases release main" \
             | sudo tee /etc/apt/sources.list.d/gvisor.list > /dev/null
-          sudo apt-get update && sudo apt-get install -y runsc
+          # Split rather than `&&`-chained: under `set -e` the chain adds nothing, and one
+          # `timeout` per command is what tells an update stall from an install stall.
+          # Acquire::Retries because the gvisor apt host is the one that was observed
+          # stalling and the stall cleared on a re-run inside 20s: a bound with no retry
+          # converts that transient into a red build across three jobs, where curl — a
+          # different host, and not the one that failed — already retries.
+          #
+          # http::Timeout is what makes that retry SAFE to have. Retries apply to every
+          # source, not just gvisor's, and the runner's azure.archive.ubuntu.com mirror goes
+          # unreachable often: on run 32294123321 the default 30s connect timeout x 4
+          # attempts put a 120s floor under `update` and blew a 60s kill, with the gvisor
+          # host itself answering in under a second. Capping the per-connection wait at 10s
+          # makes the worst case 10 + 2*10 = 30s of dead-mirror stall.
+          APT_BOUNDED=(-o Acquire::Retries=2 -o Acquire::http::Timeout=10
+                       -o Acquire::https::Timeout=10)
+          # ...and `update` is SCOPED to the one source this step added, which is what makes
+          # the bound honest rather than a guess that keeps losing. The default `update`
+          # refreshes every mirror on the runner to install a package that needs none of
+          # them: `runsc` resolves to "1 newly installed, 0 to remove". On run 32294715524
+          # the capped timeout worked — azure Ign'd at 10s intervals instead of 30 — and the
+          # step still died at 124, because apt then failed over to archive.ubuntu.com and
+          # spent 76s pulling indices for repositories nothing here installs from. Raising
+          # the number again would just move the next stall; not fetching what we do not use
+          # removes it. sourceparts=/dev/null suppresses the OTHER .list.d entries, and
+          # List-Cleanup=0 keeps the image's existing lists on disk for anything downstream.
+          GVISOR_ONLY=(-o Dir::Etc::sourcelist=/etc/apt/sources.list.d/gvisor.list
+                       -o Dir::Etc::sourceparts=/dev/null -o APT::Get::List-Cleanup=0)
+          sudo timeout 60 apt-get "${APT_BOUNDED[@]}" "${GVISOR_ONLY[@]}" update
+          # install keeps the full source list (it resolves against the image's lists) and a
+          # roomier bound: the runsc deb is 168 MB, ~20s on a healthy runner.
+          sudo timeout 120 apt-get "${APT_BOUNDED[@]}" install -y runsc
           sudo runsc install -- --oci-seccomp
-          sudo systemctl restart docker
+          sudo timeout 30 systemctl restart docker
           docker info --format '{{range $k, $v := .Runtimes}}{{$k}} {{end}}' \
             | tr ' ' '\n' | grep -qx runsc
 
@@ -231,7 +399,12 @@ jobs:
           apt-get install -y -qq --no-install-recommends curl ca-certificates
           # The docker CLI only — the daemon is the runner's, reached over the bind-mounted
           # socket. That IS the docker-outside-of-Docker topology.
-          curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-28.0.1.tgz \
+          # Bounded for the same reason as the gvisor key fetch (#937) — a third external
+          # host on this job's critical path. No `pipefail` here: `tar` takes one member out
+          # of the stream, so a reader that stopped early would fail the pipeline on SIGPIPE.
+          curl -fsSL --max-time 60 --retry 3 --retry-delay 2 --retry-max-time 120 \
+            --retry-connrefused \
+            https://download.docker.com/linux/static/stable/x86_64/docker-28.0.1.tgz \
             | tar -xz -C /usr/local/bin --strip-components=1 docker/docker
           pip install --quiet uv
           cd /repo/defender
@@ -249,6 +422,7 @@ jobs:
 
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
 
@@ -323,6 +497,7 @@ jobs:
 
   code-smells:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       # fetch-depth: 0 — the stale-ref gate diffs `origin/main...HEAD`, and the three-dot
       # form needs a MERGE-BASE. The default depth-1 checkout grafts HEAD

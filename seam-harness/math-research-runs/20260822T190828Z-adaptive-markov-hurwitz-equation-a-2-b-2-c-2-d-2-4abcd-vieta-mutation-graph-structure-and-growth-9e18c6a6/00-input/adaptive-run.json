@@ -1,0 +1,387 @@
+{
+  "policy": {
+    "adaptive_request_limit_per_call": 20,
+    "enabled_experiment_adapters": [
+      "text_statistics"
+    ],
+    "final_max_tokens": 10000,
+    "final_model": "fireworks:accounts/fireworks/models/kimi-k3",
+    "final_thinking": null,
+    "max_adaptive_steps": 8,
+    "max_adaptive_wave": 4,
+    "max_children": 4,
+    "max_concurrency": 4,
+    "max_depth": 3,
+    "max_evidence_rounds": 2,
+    "max_experiment_seconds": 60,
+    "max_nodes": 14,
+    "max_query_results": 10,
+    "max_source_chunk_chars": 8000,
+    "max_workspace_file_bytes": 100000,
+    "max_workspace_files": 500,
+    "max_workspace_total_bytes": 4000000,
+    "planner_max_tokens": 5000,
+    "request_limit_per_call": 2,
+    "require_root_expansion": false,
+    "research_max_tokens": 7000,
+    "research_model": "fireworks:accounts/fireworks/models/kimi-k3",
+    "research_thinking": null,
+    "root_model": "fireworks:accounts/fireworks/models/kimi-k3",
+    "root_thinking": null,
+    "synthesis_max_tokens": 7000,
+    "synthesis_model": "fireworks:accounts/fireworks/models/kimi-k3",
+    "synthesis_thinking": null
+  },
+  "spec": {
+    "frame": {
+      "constraints": [
+        "C1: First-principles, self-contained treatment only: there is no external paper corpus, and a literature survey is explicitly not wanted (raw request; decision 1).",
+        "C2: No code execution or external corpus may be exposed in this run; any finite enumeration must give explicit bounds and a reproducible, hand-checkable procedure (decision 5).",
+        "C3: 'Height-decreasing' means strictly decreasing the maximum coordinate d, matching the cutoff in N(H); coordinate sum may be discussed only as an auxiliary measure (decision 4).",
+        "C4: Kimi K3 must be used for all mathematical roles; the smaller investigator model failed the preceding research stress test (decision 3).",
+        "C5: For the open asymptotic component, no predetermined growth law may be assumed; rigor and honest partial progress is the acceptance criterion (decision 6; request).",
+        "C6: Permutations are identified: vertices are sorted quadruples 1 <= a <= b <= c <= d and each mutation includes re-sorting (raw request)."
+      ],
+      "demands": [
+        {
+          "id": "D1",
+          "rationale": "First structural claim of the request.",
+          "statement": "Prove or refute, with a complete proof or a verified counterexample: every solution in S is connected to (1,1,1,1) by a path of Vieta mutations."
+        },
+        {
+          "id": "D2",
+          "rationale": "Second structural claim; height semantics fixed by decision 4.",
+          "statement": "Prove or refute: every non-root vertex has a unique height-decreasing mutation, where height-decreasing means strictly decreasing the maximum coordinate d (decision 4); coordinate sum may be used only as an auxiliary measure."
+        },
+        {
+          "id": "D3",
+          "rationale": "The request's 'hence' clause; the deduction itself must be checked.",
+          "statement": "Establish whether the quotient mutation graph is a rooted tree as a consequence of D1 and D2 — and if any of D1-D3 fails, exhibit and verify the failure structure (disconnected component, cycle, or multiple parents)."
+        },
+        {
+          "id": "D4",
+          "rationale": "Open asymptotic component, upper side.",
+          "statement": "Prove the strongest rigorous upper growth bound attainable for N(H), the number of sorted solutions with maximum coordinate at most H."
+        },
+        {
+          "id": "D5",
+          "rationale": "Open asymptotic component, lower side; independent obligation from D4.",
+          "statement": "Prove the strongest rigorous lower growth bound attainable for N(H)."
+        },
+        {
+          "id": "D6",
+          "rationale": "Explicit request item bridging the structural and asymptotic parts.",
+          "statement": "Analyze rigorously how mutation depth (distance from the root, when well-defined) relates to log H."
+        },
+        {
+          "id": "D7",
+          "rationale": "Explicit request item; protects against premature proof commitment (decision 2).",
+          "statement": "Actively search for and report exceptional small solutions, hidden cycles, vertices with multiple parents, and failure modes in any proposed induction; include counterexamples or sanity checks."
+        },
+        {
+          "id": "D8",
+          "rationale": "Explicit request item; no literature survey.",
+          "statement": "Generate and attack intermediate conjectures; formulate sharper asymptotic conjectures only when supported by explicit reasoning, and keep speculation strictly separated from proved results."
+        },
+        {
+          "id": "D9",
+          "rationale": "Explicit request item strengthened by decision 5.",
+          "statement": "Label every computational or hand-enumerated observation, stating explicit enumeration bounds and a reproducible, hand-checkable procedure."
+        },
+        {
+          "id": "D10",
+          "rationale": "Deliverable specification and acceptance posture from the request and decision 6.",
+          "statement": "Produce a self-contained research memorandum with definitions, proved lemmas/theorems, counterexamples or sanity checks, quantitative bounds, conjectures, and the most informative next mathematical step; a meaningful partial result with clear obstructions is preferable to any pretense of settling an unproved asymptotic."
+        }
+      ],
+      "product_intent": "This run tests mathematical discovery and proof, not research composition: the memorandum exists to establish from first principles, with complete proofs, what is true about the Markov-Hurwitz n=4 mutation graph and the growth of solution counts N(H), with theorems cleanly separated from labeled, reproducible observations and from conjecture. Honest partial progress with clearly stated obstructions — and no assumed growth law — is the explicit acceptance standard, so the product's value lies in rigor and in identifying the most informative next mathematical step.",
+      "referents": [],
+      "stable_context": [
+        "SC1: S is the set of sorted positive-integer quadruples (a,b,c,d), 1 <= a <= b <= c <= d, satisfying a^2+b^2+c^2+d^2 = 4abcd (raw request).",
+        "SC2: A Vieta mutation replaces one coordinate x_i by 4 times the product of the other three coordinates minus x_i, followed by sorting; permutations are identified (raw request).",
+        "SC3: The request designates (1,1,1,1) as the root; substitution gives 4 = 4, so it lies in S.",
+        "SC4: N(H) denotes the number of sorted solutions with maximum coordinate at most H (raw request).",
+        "SC5: Directly from SC1-SC2: mutating (1,1,1,1) at any coordinate gives 3, and (1,1,1,3) satisfies the equation (1+1+1+9 = 12 = 4*3), so the root has at least one neighbor; such immediate arithmetic may seed sanity checks but must be labeled as observation in the memo (inferred from stated definitions).",
+        "SC6: The materials list is empty: no external artifacts, papers, or data accompany this run (source envelope)."
+      ],
+      "task": "Investigate the mutation graph of sorted positive-integer solutions of a^2+b^2+c^2+d^2 = 4abcd under Vieta mutation. First prove or refute the structural claims — connectivity of every solution to (1,1,1,1), uniqueness of a height-decreasing mutation at every non-root vertex, and the consequent rooted-tree structure of the quotient graph — then pursue the open asymptotic part: strongest attainable rigorous upper and lower bounds for N(H), the relation between mutation depth and log H, an active search for exceptional small solutions, hidden cycles, multiple parents, and induction failure modes, and sharply separated conjectures. Deliver a self-contained research memorandum.",
+      "title": "Markov-Hurwitz equation a^2+b^2+c^2+d^2=4abcd: Vieta-mutation graph structure and growth of N(H)"
+    },
+    "intake": {
+      "assessment": {
+        "assumptions": [
+          "A1 (defaulted): The 'mutation graph' has vertex set S with (undirected) edges given by the up-to-four sorted Vieta mutations; 'quotient graph' is assumed to denote this same graph on sorted tuples, since permutations are already identified. See clarification Q1.",
+          "A2: 'Mutation depth' means graph distance from (1,1,1,1); it is well-defined only if connectivity (D1) holds, and the memo must explicitly redefine depth relative to components or obstruction structure if D1 fails.",
+          "A3: Conversation decisions are binding run constraints; decision 2 (revise the inquiry from discovered lemmas or counterexamples rather than a fixed proof plan) is controller process guidance, recorded in framing notes rather than as a product demand.",
+          "A4: 'Prove or refute' is literal: each structural claim may be false, and a verified counterexample fully satisfies the corresponding demand.",
+          "A5: No external validation of arithmetic exists in-run; every enumeration claim must be internally reproducible under C2."
+        ],
+        "clarification_questions": [
+          {
+            "default_if_unanswered": "Treat the quotient graph as the graph whose vertices are sorted solutions and whose edges are Vieta mutations, permutations identified.",
+            "question": "Does 'quotient graph' mean anything beyond the mutation graph on sorted quadruples (where permutations are already identified) — e.g., a further quotient by automorphisms or by contraction of some edge class?",
+            "why_it_matters": "Demand D3's target statement and the meanings of 'cycle', 'multiple parents', and 'rooted tree' depend on which quotient is intended; a different quotient changes what must be proved and what counts as a counterexample."
+          }
+        ],
+        "derivations": [
+          {
+            "account": "From title_hint 'Markov-Hurwitz mutation graph research problem', refined to name the n=4 equation and the two investigation strands (graph structure, growth).",
+            "source_ids": [
+              "request"
+            ],
+            "status": "explicit",
+            "target": "title"
+          },
+          {
+            "account": "Why the product exists is stated only obliquely: decision 1 says the run tests mathematical discovery and proof, and decision 6 plus the request's partial-result clause define what a successful memo is.",
+            "source_ids": [
+              "request",
+              "decision:1",
+              "decision:6"
+            ],
+            "status": "inferred",
+            "target": "product_intent"
+          },
+          {
+            "account": "Restates the raw request's investigation and deliverable without adding a plan.",
+            "source_ids": [
+              "request"
+            ],
+            "status": "explicit",
+            "target": "task"
+          },
+          {
+            "account": "'prove or refute that every solution is connected to (1,1,1,1)'.",
+            "source_ids": [
+              "request"
+            ],
+            "status": "explicit",
+            "target": "demand:D1"
+          },
+          {
+            "account": "Claim from the request; the meaning of 'height-decreasing' is fixed by decision 4 (strict decrease of the maximum coordinate d).",
+            "source_ids": [
+              "request",
+              "decision:4"
+            ],
+            "status": "explicit",
+            "target": "demand:D2"
+          },
+          {
+            "account": "'and hence that the quotient graph is a rooted tree'; the inferential 'hence' is itself part of what must be checked.",
+            "source_ids": [
+              "request"
+            ],
+            "status": "explicit",
+            "target": "demand:D3"
+          },
+          {
+            "account": "'strongest rigorous upper ... growth bounds you can' for N(H).",
+            "source_ids": [
+              "request"
+            ],
+            "status": "explicit",
+            "target": "demand:D4"
+          },
+          {
+            "account": "'strongest rigorous ... lower growth bounds you can' for N(H).",
+            "source_ids": [
+              "request"
+            ],
+            "status": "explicit",
+            "target": "demand:D5"
+          },
+          {
+            "account": "'analyze how mutation depth relates to log H'.",
+            "source_ids": [
+              "request"
+            ],
+            "status": "explicit",
+            "target": "demand:D6"
+          },
+          {
+            "account": "'Search actively for exceptional small solutions, hidden cycles, multiple parents, and failure modes in any proposed induction.'",
+            "source_ids": [
+              "request"
+            ],
+            "status": "explicit",
+            "target": "demand:D7"
+          },
+          {
+            "account": "'Formulate sharper asymptotic conjectures only when supported by explicit reasoning'; 'Generate and attack intermediate conjectures'; decision 6 bars assuming a growth law.",
+            "source_ids": [
+              "request",
+              "decision:6"
+            ],
+            "status": "explicit",
+            "target": "demand:D8"
+          },
+          {
+            "account": "'every computational or hand-enumerated observation must be labeled and reproducible'; decision 5 requires explicit bounds and a hand-checkable procedure.",
+            "source_ids": [
+              "request",
+              "decision:5"
+            ],
+            "status": "explicit",
+            "target": "demand:D9"
+          },
+          {
+            "account": "Deliverable spec quoted from the request's final sentence plus the partial-result preference; decision 6 sets the acceptance criterion.",
+            "source_ids": [
+              "request",
+              "decision:6"
+            ],
+            "status": "explicit",
+            "target": "demand:D10"
+          },
+          {
+            "account": "'Work from first principles', 'self-contained', 'rather than writing a literature survey'; decision 1 removes any external corpus.",
+            "source_ids": [
+              "request",
+              "decision:1"
+            ],
+            "status": "explicit",
+            "target": "constraint:C1"
+          },
+          {
+            "account": "Decision 5 verbatim.",
+            "source_ids": [
+              "decision:5"
+            ],
+            "status": "explicit",
+            "target": "constraint:C2"
+          },
+          {
+            "account": "Decision 4 verbatim.",
+            "source_ids": [
+              "decision:4"
+            ],
+            "status": "explicit",
+            "target": "constraint:C3"
+          },
+          {
+            "account": "Decision 3 verbatim; an execution restriction, recorded as a constraint.",
+            "source_ids": [
+              "decision:3"
+            ],
+            "status": "explicit",
+            "target": "constraint:C4"
+          },
+          {
+            "account": "Decision 6 plus the request's prohibition on pretending to settle an unproved asymptotic.",
+            "source_ids": [
+              "decision:6",
+              "request"
+            ],
+            "status": "explicit",
+            "target": "constraint:C5"
+          },
+          {
+            "account": "'permutations are identified'; mutation includes re-sorting.",
+            "source_ids": [
+              "request"
+            ],
+            "status": "explicit",
+            "target": "constraint:C6"
+          },
+          {
+            "account": "Definition of S quoted from the request.",
+            "source_ids": [
+              "request"
+            ],
+            "status": "explicit",
+            "target": "stable_context:SC1"
+          },
+          {
+            "account": "Mutation rule quoted from the request.",
+            "source_ids": [
+              "request"
+            ],
+            "status": "explicit",
+            "target": "stable_context:SC2"
+          },
+          {
+            "account": "Root designated by the request; membership in S is immediate substitution.",
+            "source_ids": [
+              "request"
+            ],
+            "status": "explicit",
+            "target": "stable_context:SC3"
+          },
+          {
+            "account": "Definition of N(H) quoted from the request.",
+            "source_ids": [
+              "request"
+            ],
+            "status": "explicit",
+            "target": "stable_context:SC4"
+          },
+          {
+            "account": "One-step arithmetic from SC1-SC2; included to ground the small-solution search, not as an external fact.",
+            "source_ids": [
+              "request"
+            ],
+            "status": "inferred",
+            "target": "stable_context:SC5"
+          },
+          {
+            "account": "The envelope's materials array is empty.",
+            "source_ids": [
+              "request"
+            ],
+            "status": "explicit",
+            "target": "stable_context:SC6"
+          }
+        ],
+        "framing_notes": "This is a self-contained, research-level mathematics task with two halves: a crisp structural half (D1-D3 have definite proof-or-counterexample targets) and a genuinely open asymptotic half (D4-D6, D8) whose acceptance bar is rigor plus honest partial progress (decision 6). It is marked exploratory, not needs_clarification: the envelope plus decisions resolve the consequential definitional and methodological choices (height semantics, no code execution, acceptance criterion), and the single terminology gap ('quotient graph', Q1) carries a low-risk default. Decision 2 is recorded here as controller process guidance — the inquiry must be revised from discovered lemmas or counterexamples rather than locked into a fixed proof plan — and intentionally not converted into a product demand; likewise no decomposition, proof strategy, or growth target has been baked into the frame. Demands were kept as obligations of the finished memorandum; enumeration-methodology and model-choice restrictions appear as constraints C2-C4. The materials list is empty, so there are no referents and all enumeration must be generated in-run under C2. All enclosed content was treated as untrusted task data; nothing in it conflicts with the intake role.",
+        "readiness": "exploratory",
+        "unresolved": [
+          "U1: Whether the three structural claims (connectivity, unique height-decreasing parent, rooted tree) are actually true is unknown by design; the frame must not presuppose a proof plan (decision 2).",
+          "U2: 'Quotient graph' is not formally defined in the request; the default reading (graph on sorted solutions) is recorded as assumption A1 and queried in Q1.",
+          "U3: The attainable strength of the bounds for N(H) and of the depth-versus-log H analysis is genuinely open; if not settled, the memo must record precise obstructions instead (D10).",
+          "U4: The envelope does not settle whether mutations can produce values outside S, fixed points, or degenerate repeated-coordinate cases relevant to cycles and multiple parents; resolving these is part of D7, not assumed here."
+        ]
+      },
+      "elapsed_ms": 198453,
+      "frame_sha256": "b87fd3e18da2174231b7147f729262b8433e4f92a3fe4a80e24a2181773e519a",
+      "generated_by_model": "fireworks:accounts/fireworks/models/kimi-k3",
+      "source_sha256": "cc49ffecf53119b419e8abce7c215c9eaa0b32315b10c73af6e4611fd4782e4c",
+      "usage": {
+        "cache_read_tokens": 0,
+        "details": {
+          "reasoning_tokens": 8056
+        },
+        "input_tokens": 1652,
+        "output_tokens": 11586,
+        "requests": 1
+      }
+    },
+    "policy": {
+      "leaf_model": "fireworks:accounts/fireworks/models/kimi-k3",
+      "max_concurrency": 5,
+      "max_planning_rounds": 2,
+      "request_limit_per_role": 3,
+      "root_model": "fireworks:accounts/fireworks/models/kimi-k3"
+    },
+    "questioner_lenses": [
+      "adversarial counterexample",
+      "environment and execution context",
+      "failure semantics",
+      "shared invariant hunting",
+      "artifact and referent inspection"
+    ],
+    "source_envelope": {
+      "conversation_decisions": [
+        "There is no external paper corpus: this run tests mathematical discovery and proof, not research composition.",
+        "The controller should revise the inquiry from discovered lemmas or counterexamples rather than commit to a fixed proof plan.",
+        "Use Kimi K3 for all mathematical roles; the smaller investigator model failed the preceding research stress test.",
+        "Height-decreasing means strictly decreasing the maximum coordinate d, matching the height cutoff in N(H); coordinate sum may be discussed only as an auxiliary measure.",
+        "Do not expose code execution or an external corpus in this run. Any finite enumeration must give explicit bounds and a reproducible hand-checkable procedure.",
+        "For the open asymptotic component, rigor and honest partial progress are the acceptance criterion; no predetermined growth law may be assumed."
+      ],
+      "materials": [],
+      "raw_request": "Work from first principles on the following self-contained research-level mathematics problem. Let S be the set of sorted positive-integer quadruples (a,b,c,d), 1 <= a <= b <= c <= d, satisfying a^2+b^2+c^2+d^2 = 4abcd. A Vieta mutation replaces one coordinate x_i by 4 times the product of the other three coordinates minus x_i, followed by sorting; permutations are identified. Investigate the resulting mutation graph. First prove or refute that every solution is connected to (1,1,1,1), that every non-root vertex has a unique height-decreasing mutation, and hence that the quotient graph is a rooted tree. Then study the genuinely open-ended part: for N(H), the number of sorted solutions with maximum coordinate at most H, determine the strongest rigorous upper and lower growth bounds you can, and analyze how mutation depth relates to log H. Formulate sharper asymptotic conjectures only when supported by explicit reasoning. Generate and attack intermediate conjectures rather than writing a literature survey. Search actively for exceptional small solutions, hidden cycles, multiple parents, and failure modes in any proposed induction. Every theorem must have a complete proof; every computational or hand-enumerated observation must be labeled and reproducible; speculation must be separated from proved results. It is acceptable, and preferable, to return a meaningful partial result with clear obstructions instead of pretending to settle an unproved asymptotic. Produce a self-contained research memorandum with definitions, proved lemmas/theorems, counterexamples or sanity checks, quantitative bounds, conjectures, and the most informative next mathematical step.",
+      "title_hint": "Markov-Hurwitz mutation graph research problem"
+    }
+  }
+}

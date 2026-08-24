@@ -1,0 +1,10 @@
+{
+  "content_sha256": "6e79dd8f0b7ca4d78ecb3a66551c93a99e7ebd0d2e2b888c44fe6c6257eced66",
+  "id": "link:6e79dd8f0b7ca4d78ecb3a66",
+  "origin": "runtime",
+  "proposed_by_node_id": null,
+  "rationale": null,
+  "relation": "refines",
+  "source_id": "question:work:002-inv-shapiro-r2",
+  "target_id": "question:work:001-inv-formal-tools"
+}

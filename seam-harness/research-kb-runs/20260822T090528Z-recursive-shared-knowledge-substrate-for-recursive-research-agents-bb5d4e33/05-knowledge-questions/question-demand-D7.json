@@ -1,0 +1,14 @@
+{
+  "acceptance_condition": "Establish demand D7 with evidence.",
+  "content_sha256": "e9aace925c8874d470e5e66f133e5698e954d9c79c85ac15d05a6b1be90f8648",
+  "demand_ids": [
+    "D7"
+  ],
+  "id": "question:demand:D7",
+  "node_id": null,
+  "rationale": "Third of six specification areas listed in the request.",
+  "tags": [
+    "evidence"
+  ],
+  "text": "Persistence and concurrent-update semantics are specified."
+}

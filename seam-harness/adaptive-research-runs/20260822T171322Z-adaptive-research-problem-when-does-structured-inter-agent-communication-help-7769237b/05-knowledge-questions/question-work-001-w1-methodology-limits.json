@@ -1,0 +1,14 @@
+{
+  "acceptance_condition": "A catalog of at least 10 distinct limitation entries spanning all five empirical papers and both formal papers, each with file path + PDF page marker, each labeled reported vs. inferred, and each stating what comparison would be needed to identify the effect.",
+  "content_sha256": "6e983be62f0fa7e80d435fd8be23a634f21af45560af62aa305ec2e263aa61d8",
+  "demand_ids": [],
+  "id": "question:work:001-w1-methodology-limits",
+  "node_id": "work:001-w1-methodology-limits",
+  "rationale": "D6 requires identifying non-identifiability, measurement, and external-validity limits across the corpus; a dedicated critical sweep ensures the note does not overclaim and later lets the experiment design (D7) close the identified gaps (e.g., true compute matching).",
+  "tags": [
+    "risk",
+    "uncertainty",
+    "measurement"
+  ],
+  "text": "Read all seven files under papers/text with a methodology-critique lens and catalog: (a) for each empirical paper (du, smit, zhang, choi, lorenz), what its design cannot identify — confounds between communication structure and total inference compute, absence of matched-compute baselines, benchmark/data-contamination risks, model-generality limits, task-selection effects, and aggregation-rule sensitivity; (b) for the two formal papers (dung, shapiro), the gap between their formal guarantees and any empirical claim about LLM-agent communication; (c) external-validity limits for transferring published benchmark accuracy to new task topologies. Every catalog entry must name the file path and the explicit `===== PDF PAGE N =====` marker supporting it, and must distinguish what the paper reports from the critic's inference."
+}
