@@ -321,6 +321,13 @@ class _CapturingDocker:
         if argv[:2] == ["docker", "run"]:
             self.create_argv = argv
             return subprocess.CompletedProcess(argv, 1, "", "create refused by the fake")
+        if argv[:2] == ["docker", "inspect"]:
+            # What a real daemon says when the name holds NOTHING, which is what this double
+            # claims to report. It used to answer rc 0 with an empty stdout — read as "not
+            # running" by the substring test that stood here before #955 F-49, and read as an
+            # unintelligible daemon answer by the state check that replaced it. Neither is
+            # "no such container", and only the daemon's own rc says that.
+            return subprocess.CompletedProcess(argv, 1, "", "No such object\n")
         return subprocess.CompletedProcess(argv, 0, "", "")
 
 
