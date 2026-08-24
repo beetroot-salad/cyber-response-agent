@@ -1,7 +1,0 @@
-{
-  "content_sha256": "561e0fcd22b650ab4cc0fd61392437d8f3e7ca904a6e6b7e7839642ba210692d",
-  "id": "link:561e0fcd22b650ab4cc0fd61",
-  "relation": "refines",
-  "source_id": "question:demand:D1",
-  "target_id": "question:root"
-}

@@ -1,7 +1,0 @@
-{
-  "content_sha256": "0e78e3b98f0049333d8a357e5020b8fee6015f03a5d1c7eadbb41fe92e8aa9ed",
-  "id": "link:0e78e3b98f0049333d8a357e",
-  "relation": "depends_on",
-  "source_id": "question:raised:ce15459d7c754a38",
-  "target_id": "question:root.04-debate-gains-evidence"
-}

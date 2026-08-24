@@ -1,7 +1,0 @@
-{
-  "content_sha256": "709f42e6e4da8b14cdf82243f398085db7de30b6558d5ee57c30811a4bbb707f",
-  "id": "link:709f42e6e4da8b14cdf82243",
-  "relation": "refines",
-  "source_id": "question:demand:D7",
-  "target_id": "question:root"
-}
