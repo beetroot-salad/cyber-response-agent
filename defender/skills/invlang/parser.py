@@ -1690,10 +1690,24 @@ class _Projector:
         )
 
     def _project_findings_block(self, block: Block) -> None:
+        # A repeated id WITHIN this one block is never the cross-block amendment
+        # `_lead_header_record`'s callers rely on (see `_warn_repeated_ids`): the second row
+        # is discarded, loudly, and the first row's values are kept whole. Swept up front,
+        # over the rows that actually LAND (id+name present) — `_warn_repeated_ids` cannot be
+        # handed the raw row strings, since it reads `r.get("id")` (F-B).
+        landed: list[dict[str, str]] = []
         for idx, row, rec in self._for_each_row(block):
             if not rec.get("id") or not rec.get("name"):
                 self._warn(block, idx, row, "findings row missing id/name")
                 continue
+            landed.append(rec)
+        self._warn_repeated_ids(block, landed)
+        seen_ids: set[str] = set()
+        for rec in landed:
+            rid = rec["id"]
+            if rid in seen_ids:
+                continue  # lint-row-drop: ok — repeated within this block; see _warn_repeated_ids
+            seen_ids.add(rid)
             identity, outcome, query_details = _lead_header_record(rec)
             lead = self.lead_bucket(identity["id"])
             lead.update(identity)

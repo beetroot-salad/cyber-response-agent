@@ -8,8 +8,8 @@ from typing import Any, Literal
 
 from defender._vocab import normalized_disposition
 from . import _walkers, vocab
-from ._cells import _row_dict, _unquote
-from ._types import RowError
+from ._cells import _row_cells, _row_dict, _split_cells_raw, _unquote
+from ._types import Block, RowError
 from .parser import (
     _CONCLUDE_SUBTABLE_FIELDS,
     COMMITMENT_ID_RE,
@@ -1686,6 +1686,61 @@ def _is_legal_refinement_key(key: str) -> bool:
     return key in (SLOT_CLASS, SLOT_IDENT) or key.startswith(ATTR_PREFIX)
 
 
+def _illegal_key_diagnostic(
+    block: Block, row: str, cols: list[str], rec: dict[str, str], key: str,
+) -> Diagnostic:
+    """The warn-severity diagnostic for one `:R attr_updates` row whose `key` cell names
+    neither `class`, `ident` nor an `attrs.<name>`. Split out of `_check_attr_update_keys`
+    only to keep that loop under the mccabe cap; see its docstring for the raw-text rebuild
+    this builds `fix` from.
+    """
+    at = cols.index("key")
+    raw_cells = _split_cells_raw(row)
+    if len(raw_cells) < len(cols):
+        # A legal SHORT row under a header marking its trailing column(s) optional — pad out
+        # to the declared width, same as `_row_cells` pads the parsed record, so the pasted
+        # candidate is full-width rather than re-opening the same gap.
+        raw_cells = raw_cells + [""] * (len(cols) - len(raw_cells))
+    candidates = (
+        _swap_cell(raw_cells, at, "class"),
+        _swap_cell(raw_cells, at, f"attrs.{key}"),
+    )
+    # ALL-OR-NOTHING (F-M half one): re-split each candidate through the parser's OWN row
+    # reader — wrapped, not substituted, since it RAISES where this check used to return a
+    # value — and withhold the whole suggestion the moment either candidate cannot re-split
+    # to the declared width. One complete-looking suggestion with the other route silently
+    # missing would be worse than none.
+    withheld = False
+    for candidate in candidates:
+        try:
+            _row_cells(block, candidate, len(cols))
+        except RowError:
+            withheld = True
+            break
+    message = (
+        f":R attr_updates on {rec.get('target', '?')}: key {key!r} is not a "
+        f"valid refinement key — use `class` (class refinement), `ident` "
+        f"(identifier refinement) or `attrs.<name>` (attribute); a bare key "
+        f"is dropped silently"
+    )
+    if withheld:
+        message += (
+            " — the suggested repair is withheld: rebuilding it would not re-split "
+            "to this block's declared column count, so send the corrected row "
+            "yourself"
+        )
+    return Diagnostic(
+        message=message,
+        locus=Locus(block=":R attr_updates", row_text=row),
+        fix=() if withheld else candidates,
+        # THE one warn-severity family. The row is INERT — it changes no effective vertex
+        # state — so the block it rides in is worth keeping, and the model repairs the row
+        # with `fix_row` instead of re-emitting the whole block. Every other family stays a
+        # refusal: nothing is written and the model re-sends.
+        severity="warning",
+    )
+
+
 def _check_attr_update_keys(proposed_text: str) -> list[Diagnostic]:
     """`:R attr_updates` refinement rows — the KEY, and the value that key promises to carry
     — checked over the ROWS rather than the folded records.
@@ -1736,28 +1791,9 @@ def _check_attr_update_keys(proposed_text: str) -> list[Diagnostic]:
                     ))
                 continue
             # `rec`'s keys are the block's DECLARED columns, so a non-empty `key` is proof
-            # the header names a `key` column to substitute into.
-            at = cols.index("key")
-            cells = [rec.get(c, "") for c in cols]
-            out.append(Diagnostic(
-                message=(
-                    f":R attr_updates on {rec.get('target', '?')}: key {key!r} is not a "
-                    f"valid refinement key — use `class` (class refinement), `ident` "
-                    f"(identifier refinement) or `attrs.<name>` (attribute); a bare key "
-                    f"is dropped silently"
-                ),
-                locus=Locus(block=":R attr_updates", row_text=row),
-                fix=(
-                    _swap_cell(cells, at, "class"),
-                    _swap_cell(cells, at, f"attrs.{key}"),
-                ),
-                # THE one warn-severity family. The row is INERT — it changes no effective
-                # vertex state — so the block it rides in is worth keeping, and the model
-                # repairs the row with `fix_row` instead of re-emitting the whole block.
-                # Every other family stays a refusal: nothing is written and the model
-                # re-sends.
-                severity="warning",
-            ))
+            # the header names a `key` column to substitute into. Built from the row's RAW
+            # text, not from `rec` — see `_illegal_key_diagnostic`.
+            out.append(_illegal_key_diagnostic(block, row, cols, rec, key))
     return out
 
 

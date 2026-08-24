@@ -52,6 +52,40 @@ def _split_cells(row: str) -> list[str]:
     return _split_quoted(row, "|", unescape_delim=True, keep_empty=True)
 
 
+def _split_cells_raw(row: str) -> list[str]:
+    """Cell BOUNDARIES only — every byte the author wrote survives, whitespace and escapes
+    alike. `_split_cells` strips each cell and unescapes `\\|`; a repair that rebuilds a row
+    from THAT output normalises padding away and corrupts an escaped pipe (#954/F-47). This is
+    the no-strip boundary scanner a raw-text rebuild needs: it finds the same unquoted `|`
+    delimiters `_split_cells` does, so cell N here is cell N there, but hands back the raw
+    span rather than a stripped, unescaped copy — so a caller that replaces exactly one cell
+    and rejoins with `"|"` leaves every other cell byte-identical to what the author wrote."""
+    parts: list[str] = []
+    cur: list[str] = []
+    in_q = False
+    i = 0
+    while i < len(row):
+        ch = row[i]
+        if ch == "\\" and i + 1 < len(row):
+            cur.append(row[i : i + 2])
+            i += 2
+            continue
+        if ch == '"':
+            in_q = not in_q
+            cur.append(ch)
+            i += 1
+            continue
+        if ch == "|" and not in_q:
+            parts.append("".join(cur))
+            cur = []
+            i += 1
+            continue
+        cur.append(ch)
+        i += 1
+    parts.append("".join(cur))
+    return parts
+
+
 def _split_subcells(cell: str) -> list[str]:
     return _split_quoted(cell, ";")
 
