@@ -225,7 +225,17 @@ def fake_docker(tmp_path: Path) -> Path:
 
 def docker_ctx(tmp_path: Path, *, as_of: dt.datetime | None = None,
                defender_dir: Path | None = None) -> VerbContext:
-    """A `VerbContext` whose env is the whole world the transports fork into."""
+    """A `VerbContext` whose env is the whole world the transports fork into.
+
+    `as_of` DEFAULTS TO NONE, and that default is the production shape: `query_tool.py` builds
+    `VerbContext(defender_dir=…, run_dir=…, env=…)` and names no moment, so the registry's own
+    `_at` is the only thing in the tree that ever puts one there.
+
+    WHICH MEANS AN ARM ABOUT THE INJECTION MUST NOT PASS ONE. Handed `as_of=T0` here, the
+    adapter reads T0 off the context the TEST built and the registry's injection is pure
+    redundancy — delete it outright and every such arm still passes. Only the arms driving an
+    adapter DIRECTLY, with no registry between them, may name a moment here: for those, this
+    parameter IS the seam under test."""
     run_dir = tmp_path / "run"
     run_dir.mkdir(parents=True, exist_ok=True)
     return VerbContext(
@@ -387,10 +397,15 @@ def test_an_unstaged_host_state_call_reaches_the_adapter_carrying_the_runs_clock
     six host-state stamps on the wall clock, which is where they are today and which is exactly
     what makes two siblings' `captured_at` differ for no world's reason.
 
+    THE CONTEXT NAMES NO MOMENT. `docker_ctx` builds the production shape — `query_tool.py`
+    hands the seam a `VerbContext` with no `as_of` — so the T0 in the payload can only have come
+    from the registry putting it there. Handed a pre-seeded ctx, this arm passes with the
+    injection deleted outright, which is the whole property gone with nothing red.
+
     The stamp is asserted against T0 AND against `now`: equal to the first and different from
     the second is what separates "the clock was threaded" from "the adapter stamped something
     that happened to be a timestamp"."""
-    ctx = docker_ctx(tmp_path, as_of=T0)
+    ctx = docker_ctx(tmp_path)
     reg = WorldRegistry(REAL_ADAPTERS, GATHER_GRANT, world=World("w1"),
                         ledger=primed_ledger(tmp_path), as_of=T0)
 
@@ -413,8 +428,11 @@ def test_the_clock_rides_every_served_call_staged_or_not(tmp_path):
     is conditional by design (an untouched call addresses the corpus itself and has nothing to
     declare), and the CLOCK is not, because every payload a sibling records has to be
     reproducible whatever path it took to get there. An implementation that threaded the clock
-    where the world is threaded would show up here as an unstaged call with `as_of: None`."""
-    ctx = docker_ctx(tmp_path, as_of=T0)
+    where the world is threaded would show up here as an unstaged call with `as_of: None`.
+
+    The context arrives NAMING NO MOMENT, as `query_tool.py` builds it — so both `as_of` values
+    below are the registry's own work and not the fixture's."""
+    ctx = docker_ctx(tmp_path)
     reg = WorldRegistry(fake_estate(tmp_path), FAKE_GRANT,
                         world=World("w1", ("elastic",)), ledger=primed_ledger(tmp_path),
                         as_of=T0)
@@ -438,7 +456,7 @@ def test_the_clock_never_perturbs_the_params_a_call_records(tmp_path):
     dict on the way past — would make every call on every system report as rewritten: every row
     carrying a second identity identical to its first, the pairing column that exists to survive
     staging reduced to noise, and `restore` running over payloads nothing staged."""
-    ctx = docker_ctx(tmp_path, as_of=T0)
+    ctx = docker_ctx(tmp_path)
     reg = WorldRegistry(fake_estate(tmp_path), FAKE_GRANT, world=World("A", ("cmdb",)),
                         ledger=primed_ledger(tmp_path), as_of=T0)
 
@@ -460,7 +478,7 @@ def test_a_staged_call_still_records_the_two_identities_it_always_did(tmp_path):
 
     Without it, an implementation that simply stopped computing `asked` at all would satisfy
     "an unstaged call records one identity" and lose the cross-world pairing entirely."""
-    ctx = docker_ctx(tmp_path, as_of=T0)
+    ctx = docker_ctx(tmp_path)
     body = "FROM logs-system.auth-*\n| LIMIT 5"
     reg = WorldRegistry(fake_estate(tmp_path), FAKE_GRANT, world=World("a", ("elastic",)),
                         ledger=primed_ledger(tmp_path), as_of=T0)
@@ -471,6 +489,43 @@ def test_a_staged_call_still_records_the_two_identities_it_always_did(tmp_path):
     assert [r["source"] for r in own] == [STAGED]
     assert own[0]["asked_params"]["query"] == body
     assert own[0]["params"]["query"] != body
+
+
+def test_a_context_that_cannot_carry_the_clock_is_served_anyway(tmp_path):
+    """    A ctx with no `as_of` FIELD is handed to the body untouched, not repaired and not raised
+    on.
+
+    `dataclasses.replace` raises `TypeError` on a dataclass that simply does not declare the
+    field, and a `TypeError` here is not an `AdapterFault` — the query tool files it as exit 2,
+    an INFRA code the circuit breaker reads as the estate being DOWN for this sibling and up for
+    its base. One outage on one side of the pair is the exact contamination the whole seam is
+    built to exclude, and it would be caused by a test stub rather than by anything in the run.
+
+    So the guard errs toward serving: a ctx that cannot carry the declaration keeps whatever it
+    already had. Every real seam builds a `VerbContext`, which does carry it — the arm above is
+    the live case."""
+    from defender.learning.branch.ledger import BASE
+
+    @dataclasses.dataclass(frozen=True)
+    class ClocklessContext:
+        """A ctx from before the clock existed: no `as_of` to replace."""
+
+        defender_dir: Path
+        run_dir: Path
+        env: dict
+        capture: object = None
+        world_id: str | None = None
+
+    run_dir = tmp_path / "run"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    reg = WorldRegistry(fake_estate(tmp_path), FAKE_GRANT, world=World("w1"),
+                        ledger=primed_ledger(tmp_path), as_of=T0)
+
+    payload = reg.verbs("cmdb")["get-host"](
+        ClocklessContext(defender_dir=tmp_path, run_dir=run_dir, env={}), host="canary-1")
+
+    assert payload["host"] == "canary-1"
+    assert [r["source"] for r in served_rows(reg.ledger)] == [BASE, PASSTHROUGH]
 
 
 @pytest.mark.parametrize("as_of", [

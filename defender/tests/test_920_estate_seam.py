@@ -236,6 +236,34 @@ class DecisionApplier:
         return self.decision, payload
 
 
+@dataclass(frozen=True)
+class RefusingApplier:
+    """An applier whose `prepare` RAISES — the fault-injection seam for the refusal handler.
+
+    `prepare` is where a retarget is attempted, and it is reachable by two very different
+    faults: a query that cannot be pointed at this world's corpus (a capability refusal) and a
+    run whose config cannot be read at all (an environment outage). The seam files them under
+    different decision classes, so a test needs to choose which one it is raising."""
+
+    error: BaseException
+
+    def prepare(
+        self, system: str, verb: str, params: dict, world: Any, ctx: Any = None,
+    ) -> dict:
+        raise self.error
+
+    def restore(
+        self, system: str, verb: str, payload: Any, asked: dict | None, prepared: dict,
+        ctx: Any = None,
+    ) -> Any:
+        return payload
+
+    def apply(
+        self, system: str, verb: str, params: dict, payload: Any, world: Any,
+    ) -> tuple[str, Any]:
+        return PASSTHROUGH, payload
+
+
 def fake_estate(tmp_path: Path) -> Path:
     """A real adapters directory declaring `elastic` and `cmdb`, both recording."""
     adapters = tmp_path / "adapters"
@@ -609,6 +637,89 @@ def test_an_estate_fault_still_leaves_a_row(tmp_path):
         "row is the one state this table exists to make visible")
     assert rows[0]["world_id"] == "w1"
     assert "cmdb is down" in rows[0]["payload_text"]
+
+
+def test_a_refusal_out_of_prepare_still_leaves_a_row(tmp_path):
+    """    A retarget that CANNOT be made records a `refused` row — against the params as ASKED —
+    and the estate is never called.
+
+    The mirror of `test_an_estate_fault_still_leaves_a_row` one handler over, and the pair has
+    to be symmetric or the coverage is: `QueryCapture` turns this exception into a fault row the
+    model reads, so the defender HAS seen a response, and a seam that wrote nothing leaves
+    exactly the state this table exists to make visible — a served response with no row, read by
+    anyone counting evidence as a sibling that simply never asked.
+
+    ASKED, not prepared: the retarget is precisely what failed, so there is no prepared form to
+    name. And no `base` row rides along, because nothing reached the adapter — which is what
+    separates this from the fault arm, where the call ran and the estate broke."""
+    ledger_path = tmp_path / "served.jsonl"
+    ctx = run_ctx(tmp_path)
+    reg = world_registry(fake_estate(tmp_path), FAKE_GRANT, ledger_path,
+                         world=World("w1", touches=("elastic",)))
+    from defender.learning.branch.estate.stagers.elastic import StagingError
+
+    # A comma list names two corpora, which no single world view can carry.
+    with pytest.raises(StagingError):
+        reg.verbs("elastic")["esql"](ctx, query="FROM logs-a-*, logs-b-*\n| LIMIT 1")
+
+    rows = served_rows(ledger_path)
+    assert [r["source"] for r in rows] == [REFUSED], (
+        f"a refused retarget left {[r['source'] for r in rows]} behind; a served response with "
+        "no row is the one state this table exists to make visible")
+    assert rows[0]["world_id"] == "w1"
+    assert rows[0]["params"] == {"query": "FROM logs-a-*, logs-b-*\n| LIMIT 1"}, (
+        "the row names a prepared form, but preparing is what failed")
+    assert adapter_calls(ctx, "esql") == [], "the estate was called for a call that never staged"
+
+
+@pytest.mark.parametrize(("error", "expected"), [
+    ("staging", REFUSED),
+    ("environment", FAULT),
+])
+def test_prepare_files_a_capability_refusal_apart_from_an_environment_outage(
+        tmp_path, error, expected):
+    """    What `prepare` raises decides the CLASS: a usage-coded refusal is `refused`, anything
+    else is `fault`.
+
+    Both directions, because the seam's ternary collapses to either constant with nothing red
+    otherwise — every other arm that reaches this handler raises `StagingError`, so the two
+    branches coincide. `prepare` reads the run's config to resolve a default index, so an
+    ENVIRONMENT fault surfaces here too, and filing that as `refused` splits ONE outage along
+    the base/sibling axis: the base world returns from `redirect` before ever reading the
+    config, takes the identical fault out of the adapter body instead, and records `fault`. One
+    outage, two decision classes, divided by exactly the thing the table exists to measure."""
+    from defender.learning.branch.estate.stagers.elastic import StagingError
+
+    raised: BaseException = (
+        StagingError("this query names two corpora") if error == "staging"
+        else RuntimeError("config file not found: knowledge/.../config.env"))
+    ledger_path = tmp_path / "served.jsonl"
+    ctx = run_ctx(tmp_path)
+    reg = world_registry(fake_estate(tmp_path), FAKE_GRANT, ledger_path,
+                         world=World("w1", touches=("elastic",)),
+                         applier=RefusingApplier(raised))
+
+    with pytest.raises(type(raised)):
+        reg.verbs("elastic")["esql"](ctx, query="FROM logs-nginx.access-*\n| LIMIT 5")
+
+    assert [r["source"] for r in served_rows(ledger_path)] == [expected]
+
+
+def test_the_verb_table_handed_back_is_the_callers_to_edit(tmp_path):
+    """    `verbs()` returns a COPY, so one caller's edit cannot reach the next lookup.
+
+    The wrappers are memoized per system (they are built once and both routes to a callable go
+    through them), and `ModuleVerbRegistry.verbs` ends `return dict(verbs)` — callers may treat
+    that freedom as theirs. Handing out the live memo means an edit anywhere reaches every later
+    lookup INCLUDING `decide`'s, which is the route the grant is checked through: a verb swapped
+    in a returned table would then be admitted under the real one's class."""
+    reg = world_registry(fake_estate(tmp_path), FAKE_GRANT, tmp_path / "served.jsonl")
+    served = reg.verbs("cmdb")["get-host"]
+
+    reg.verbs("cmdb")["get-host"] = "not a verb at all"
+
+    assert reg.verbs("cmdb")["get-host"] is served
+    assert reg.decide("cmdb", "get-host").fn is served
 
 
 @pytest.mark.parametrize("touches", [None, 7, object()])

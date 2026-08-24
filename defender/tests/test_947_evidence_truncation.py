@@ -119,6 +119,16 @@ def dispatch_call_only(store, session_id, lead, *, call_id=None):
     return ss.path_row_ids(store, session_id)[-1]
 
 
+def bare_return(store, session_id, *, call_id):
+    """A `gather` RETURN with no call of its own — the shape a provider produces when it
+    re-answers an id it has already been refused on. Returns the return's row id."""
+    ss = store_mod()
+    store.append(session_id, [ModelRequest(parts=[ToolReturnPart(
+        tool_name=GATHER_TOOL, content="summary for a lead nobody re-dispatched",
+        tool_call_id=call_id)])], agent_id="main")
+    return ss.path_row_ids(store, session_id)[-1]
+
+
 def evidence(run_dir: Path, rows: list[tuple[str, int]]) -> None:
     """Write the source run's captured evidence: one table row, sidecar, claim and summary per
     `(lead, seq)`, in the order given — interleaved across leads, the way a real run's table is.
@@ -369,6 +379,31 @@ def test_a_lead_known_only_by_its_summary_still_crosses(tmp_path):
     resume(store, run_dir, returns[1], target)
 
     assert (target / "gather_summaries" / f"{summarized}.md").is_file()
+
+
+def test_a_refusal_clears_the_claim_before_any_later_return_can_pop_it(tmp_path):
+    """    A `RetryPromptPart` CLEARS the pending claim, so a later return under that id lands
+    nothing at all.
+
+    The arm beside this one re-dispatches under the reused id, which overwrites the pending
+    entry on the way past — so the clearing branch never has to do anything and deleting it
+    changes no answer. Here the return arrives with NO intervening call, which is the only
+    shape under which the refusal's own bookkeeping is what decides: cleared, nothing pops and
+    the refused lead stays out; left pending, the return pops the REFUSED claim and credits
+    `l-004` as landed at a turn where nothing ran.
+
+    Credited, that lead's evidence is inherited on the strength of a dispatch the tool refused
+    — which is evidence the sibling's own prefix does not name, carried across because a
+    refusal was mistaken for work."""
+    store, run_dir, session_id, _path_ids = legal_source(
+        tmp_path, investigation=GOLDEN_INVESTIGATION.read_text(encoding="utf-8"))
+    refused_dispatch(store, session_id, "l-004", call_id="reused-1")
+    orphan = bare_return(store, session_id, call_id="reused-1")
+    evidence(run_dir, [(UNDISPATCHED, 0), ("l-004", 0)])
+
+    assert branch_mod().leads_at(store, session_id, orphan, run_dir) == {UNDISPATCHED}, (
+        "a return under a REFUSED call id landed the refused lead — the sibling inherits "
+        "evidence on the strength of a dispatch that never ran")
 
 
 def test_a_refused_dispatch_does_not_land_for_whoever_reuses_its_call_id(tmp_path):

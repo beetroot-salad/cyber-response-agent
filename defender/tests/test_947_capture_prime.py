@@ -169,9 +169,14 @@ def fake_estate(tmp_path: Path) -> Path:
 
 
 def run_ctx(tmp_path: Path) -> VerbContext:
+    """The context a served call arrives on — NAMING NO MOMENT, as `query_tool.py` builds one.
+
+    Nothing here is about the clock, which is exactly why it must not be pre-seeded: a fixture
+    that hands the seam the value the seam is supposed to supply makes the seam redundant, and
+    an arm elsewhere that leans on this helper would pass with the injection deleted."""
     run_dir = tmp_path / "sibling-run"
     run_dir.mkdir(parents=True, exist_ok=True)
-    return VerbContext(defender_dir=tmp_path, run_dir=run_dir, env={}, as_of=T0)
+    return VerbContext(defender_dir=tmp_path, run_dir=run_dir, env={})
 
 
 # ==========================================================================

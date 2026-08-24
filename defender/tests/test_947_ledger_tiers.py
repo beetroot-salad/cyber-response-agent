@@ -323,6 +323,112 @@ def test_the_capture_outranks_a_live_row_for_the_same_key(tmp_path):
         "owner": "captured"}
 
 
+def test_a_failed_write_leaves_no_memo_behind_it(tmp_path):
+    """    A `record` whose append FAILS must not leave the payload live in memory.
+
+    Memoized first, a failed write leaves the family's answer in the memo with NO ROW behind it:
+    every later call for that key takes the hit, issues no adapter call, and serves a payload the
+    table cannot account for — "a served response with no row", the one state this table exists
+    to make visible. And it is silently divergent as well as unaccounted: a later sibling
+    rebuilding the memo from the file finds nothing, re-asks the live estate and gets different
+    bytes, so the pair's invariance is gone with nothing in the record to show it.
+
+    REACHABLE, not theoretical: `_record_beside` deliberately swallows write failures so that
+    recording why a call failed cannot displace the call's own exception — so the process runs on
+    after exactly this.
+
+    The fault is a real primitive rather than an authored exception: the ledger's own path is a
+    DIRECTORY, so the real `append_jsonl` takes the real `IsADirectoryError` from the real
+    open."""
+    root = episode(tmp_path)
+    ledger = Ledger(root / SERVED_DIRNAME / "w1.jsonl", base_path=base_file(root))
+    ledger.path.mkdir(parents=True)
+
+    with pytest.raises(IsADirectoryError):
+        ledger.record(ServedCall(
+            system="cmdb", verb="get-host", params={"host": "canary-1"},
+            payload_text='{"owner": "never landed"}', source=BASE, world_id=None))
+
+    assert ledger.base_payload("cmdb", "get-host", {"host": "canary-1"}) is None, (
+        "the payload is memoized with no row behind it — every later call for this key serves "
+        "bytes the table cannot account for, and any other process serves something else")
+
+
+def test_two_staged_calls_for_one_question_pair_on_the_asked_form(tmp_path):
+    """    `correlation_key` is computed from `asked_params`, so two worlds' staged rows PAIR.
+
+    The column being written is not the same claim as the function reading it, and only the
+    function is what a comparator calls. On a staged system the prepared forms differ BY
+    CONSTRUCTION — that is what staging is — so `ΔO` over `keys(A) ∩ keys(B)` intersects to
+    nothing: A recorded `FROM wv-a-…`, B recorded `FROM wv-b-…`, no row of A's ever meets a row
+    of B's, and "the worlds differ" and "the worlds are identical" produce the same empty
+    answer. Silent, and silent on the event stream, where most of a run's evidence lives.
+
+    Both halves in one assertion pair: the correlation keys must MEET while the memo keys must
+    NOT, because a `correlation_key` that quietly returned `key` would also make the two agree
+    if the params happened to match."""
+    asked = {"query": "FROM logs-system.auth-*"}
+    rows = [
+        ServedCall(system="elastic", verb="esql", params={"query": f"FROM wv-{w}-logs-system.auth-"},
+                   payload_text="{}", source=STAGED, world_id=w, asked_params=asked)
+        for w in ("a", "b")
+    ]
+
+    assert rows[0].correlation_key == rows[1].correlation_key, (
+        "two worlds asked one question and their rows do not pair — ΔO over this system is "
+        "empty rather than measured")
+    assert rows[0].key != rows[1].key, (
+        "the memo keys collapsed too, so each world would replay the other's staged corpus")
+
+
+def test_a_torn_base_row_is_not_served_as_an_answer(tmp_path):
+    """    A base row whose `payload_text` is present, non-empty and NOT JSON is skipped.
+
+    A torn line is what a crash mid-append leaves, and it is the shape the two cheaper guards
+    miss: it is a `str` and it is truthy. Served as a hit, it reaches `json.loads` INSIDE the
+    verb body, where the resulting `JSONDecodeError` is not an `AdapterFault` — so the query
+    tool's catch-all files it as exit 2, an INFRA code, and one torn row starts counting against
+    the circuit breaker for a system that is perfectly healthy.
+
+    Skipped, the key falls through to the live adapter, which is the honest reading of "nothing
+    recorded"."""
+    root = episode(tmp_path, rows=[{
+        "system": "cmdb", "verb": "get-host", "params": {"host": "canary-1"},
+        "payload_text": '{"owner": "est', "source": CAPTURED, "world_id": None,
+    }])
+    ledger = Ledger(root / SERVED_DIRNAME / "w1.jsonl", base_path=base_file(root))
+
+    assert ledger.base_payload("cmdb", "get-host", {"host": "canary-1"}) is None
+
+
+def test_a_world_owned_row_never_answers_for_the_family_even_when_it_is_first(tmp_path):
+    """    A world's OWN row is not the family's answer, whatever order the file happens to hold.
+
+    The two rules meet here and one has to win: `base_payload` reads the family tier ONLY, and a
+    duplicate resolves to the FIRST row. A memo that absorbed world rows would take this file's
+    opening row — a world's applied payload — and serve it to every sibling as the estate's own
+    answer, while each sibling's row still honestly reported `passthrough`. That is silent
+    scenario INJECTION, invisible in exactly the record meant to show it.
+
+    The ordering is the whole fixture: a world row BEFORE the base row for one key is what a
+    crashed earlier attempt leaves behind, and it is the only arrangement under which the tier
+    filter and the tie-break disagree. With the base row first, an unfiltered absorb answers
+    correctly by accident."""
+    root = episode(tmp_path)
+    path = root / SERVED_DIRNAME / "w1.jsonl"
+    call = dict(system="cmdb", verb="get-host", params={"host": "canary-1"})
+    append_jsonl(path, [
+        ServedCall(payload_text='{"owner": "world a made this"}', source=PATCHED,
+                   world_id="w1", **call).row(),
+        ServedCall(payload_text='{"owner": "estate"}', source=BASE, world_id=None, **call).row(),
+    ])
+
+    ledger = Ledger(path, base_path=base_file(root))
+
+    assert json.loads(ledger.base_payload("cmdb", "get-host", {"host": "canary-1"})) == {
+        "owner": "estate"}
+
+
 def test_a_duplicate_inside_one_file_resolves_to_the_first_row(tmp_path):
     """    Two rows for one key resolve to the FIRST, in memory and on a rebuild alike.
 
