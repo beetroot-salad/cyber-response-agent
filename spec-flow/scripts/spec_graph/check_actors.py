@@ -32,7 +32,9 @@ Exit codes:
   1  an unmodelled driver reaches the change. Waive an out-of-scope context by listing its
      stem under a top-level `actor_waivers:` in the graph.
   2  the census COULD NOT ANSWER — no graph artifacts matched, the source census came back
-     empty, or a file the gate could not parse/read sits somewhere a driver could hide.
+     empty, `--base` names no commit in this checkout (misspelled, or not fetched on a shallow
+     clone), git refused the diff that builds the changed set, or a file the gate could not
+     parse/read sits somewhere a driver could hide.
      Never a silent pass (the #618/#621 convention: a gate that cannot look must not report
      clean).
 
@@ -81,10 +83,35 @@ def _sh(cmd: list[str]) -> str:
     # emit non-ASCII paths — decoding those under a C/ascii locale would raise, and this is the very
     # output that drives the changed set (a crash here is a gate that never looked). Same #588/#589
     # class as the source reads, subprocess side.
-    return subprocess.run(
-        cmd, cwd=_config.repo_root(),
-        capture_output=True, text=True, encoding="utf-8", check=False
-    ).stdout
+    #
+    # The RETURN CODE IS READ (#949). This used to return `.stdout` alone under `check=False`, so
+    # any git failure — an unresolvable ref, a corrupt index, a repo git declines to read — came
+    # back as the empty string and was indistinguishable from "the diff touched nothing". That is
+    # the shape the comment in `_changed_paths` warns about, arriving through this function rather
+    # than around it. A census that could not run git has not answered; it has gone blind.
+    #
+    # And a DECODE failure is blindness too, not a traceback: pinning the encoding defeats the
+    # ambient locale, but `text=True` still decodes STRICTLY, so a repo with `core.quotePath=false`
+    # and a latin-1 path name raises out of `subprocess.run` itself — before the returncode check
+    # below can say anything — and exit 1 ("looked, found something") is what the caller reads.
+    try:
+        proc = subprocess.run(
+            cmd, cwd=_config.repo_root(),
+            capture_output=True, text=True, encoding="utf-8", check=False
+        )
+    except UnicodeDecodeError as exc:
+        raise CensusBlind(
+            f"`{' '.join(cmd)}` emitted bytes that are not utf-8 in {_config.repo_root()} "
+            f"({exc}) — the changed set could not be built. Set `core.quotePath=true` (git's "
+            f"default) so non-ASCII paths arrive C-quoted."
+        ) from exc
+    if proc.returncode != 0:
+        raise CensusBlind(
+            f"`{' '.join(cmd)}` exited {proc.returncode} in {_config.repo_root()} — the changed "
+            f"set could not be built, so every reach question would answer for a structural "
+            f"reason rather than a factual one. git said: {(proc.stderr or '').strip() or '(nothing)'}"
+        )
+    return proc.stdout
 
 
 def _changed_paths(base: str) -> set[Path]:
@@ -106,6 +133,23 @@ def _changed_paths(base: str) -> set[Path]:
     # census predicate already decides membership, and a local filter can only ever re-diverge
     # from it. One definition, in `_config._kept`, applied where the census is built.
     root = _config.repo_root()
+    # THE BASE RESOLVES FIRST (#949), the same preflight `trace.drivers` already carries and for
+    # the same reason: `git diff` against a ref that does not name a commit here — misspelled, or
+    # simply not fetched on a shallow CI clone — exits 128 with empty stdout. Measured on this repo
+    # before the fix: `--base main` reported 286 findings and `--base does-not-exist-ref` reported
+    # 42, the same as a near-empty diff, with nothing said about the ref. `rev-parse` is the cheap
+    # oracle for "does this name a commit here", and it runs before the diff so the diagnostic
+    # names the ref rather than the symptom.
+    probe = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", f"{base}^{{commit}}"],
+        cwd=root, capture_output=True, text=True, encoding="utf-8", check=False,
+    )
+    if probe.returncode != 0:
+        raise CensusBlind(
+            f"base ref `{base}` does not resolve to a commit here (misspelled, or not fetched?) "
+            f"— the changed set could not be built, so the import-reach arm would answer over an "
+            f"empty diff and report it as clean. Fetch the ref or pass a valid --base."
+        )
     out = _sh(["git", "diff", "--name-only", f"{base}...HEAD", "--", "*.py"])
     return {root / f for f in out.splitlines() if f.strip()}
 
@@ -365,8 +409,11 @@ def main(argv: list[str]) -> int:
     # utf-8 out is the OUTPUT twin of the utf-8-pinned reads in `_read_texts` — see _cli.
     _cli.utf8_stdio()
     opts, args = _cli.parse_argv(argv, valued={"--base", "--config"})
-    base = opts["base"] or "main"
     cfg = _config.load(opts["config"])
+    # The profile's branch, not a hardcoded "main" (#949). The preflight this PR adds turns a
+    # wrong default into a hard exit 2 rather than a quiet empty diff, so the default has to be
+    # the one the project actually declares.
+    base = opts["base"] or cfg["defaultBranch"]
     graphs = [Path(a) for a in args] or _config.artifacts(cfg)
     try:
         if not graphs:
@@ -384,7 +431,10 @@ def main(argv: list[str]) -> int:
             # to surface as an AttributeError traceback behind exit 1 ("found findings").
             try:
                 all_findings.extend(check(g, census, cfg))
-            except (OSError, yaml.YAMLError, TypeError, AttributeError) as e:
+            # `ValueError` covers UnicodeDecodeError: a non-utf-8 graph is the commonest unreadable
+            # one, and it is NOT an OSError — without it the read escapes as a traceback behind exit 1
+            # ("looked, found something") for a gate that read nothing.
+            except (OSError, ValueError, yaml.YAMLError, TypeError, AttributeError) as e:
                 print(f"check_actors: cannot read {g}: {e.__class__.__name__}: {e}",
                       file=sys.stderr)
                 unreadable.append(g)

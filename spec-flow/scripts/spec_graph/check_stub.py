@@ -44,6 +44,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from collections.abc import Sequence
 from pathlib import Path
 
 import yaml
@@ -234,17 +235,49 @@ def _pytest_cwd(suite_dir: Path, root: Path) -> Path:
     return root
 
 
-def _recorded_passes(suite_dir: Path) -> set[str]:
-    """Test names listed in any sibling graph's handoff.nullstub_passes ("<test> — <class>")."""
+def _owning_graphs(suite_dir: Path, cfg: dict) -> list[Path]:
+    """Every committed graph whose `tests:` resolves to this suite.
+
+    The suite is reached three ways — a graph path, a directory, or the corpus glob — and only
+    the first carries the graph's identity. `spec-graph nullstub <suite-dir>` is the form the
+    write-tests skill actually emits, so without this reverse map the two invocations that
+    matter most keep the #949 defect: no graph beside the suite, no `handoff.nullstub_passes`,
+    and every consciously recorded pass comes back a finding.
+    """
+    return [g for g in _config.artifacts(cfg) if _suite.suite_dir_from_arg(g) == suite_dir]
+
+
+def _recorded_passes(suite_dir: Path, graphs: Sequence[Path] = ()) -> set[str]:
+    """Test names recorded as legitimate null-stub passes ("<test> — <class>").
+
+    Read from the GRAPHS THAT NAME THIS SUITE as well as from any graph beside it. The sibling
+    glob was the whole of it while a graph lived next to its tests; once `tests:` moved the
+    corpus into one directory, a graph that names this suite is by construction NOT a sibling of
+    it, so the glob found nothing and every consciously recorded pass came back a NULLSTUB-PASS
+    finding — advising the author to record it in the very block that already records it.
+    """
+    candidates = sorted(suite_dir.glob("spec_graph_*.yaml"))
+    candidates += [g for g in graphs if g.is_file() and g not in candidates]
     recorded: set[str] = set()
-    for g in sorted(suite_dir.glob("spec_graph_*.yaml")):
+    for g in candidates:
         # A malformed sibling graph must not kill the stub run — skip it; its shape is
         # check_lint's finding, not this check's.
         try:
             handoff = _cli.load_graph(g).get("handoff") or {}
-        except (yaml.YAMLError, TypeError):
+        except (OSError, ValueError, yaml.YAMLError, TypeError):
             continue
-        for entry in handoff.get("nullstub_passes", []) or []:
+        if not isinstance(handoff, dict):
+            continue
+        # The list guard belongs HERE and not on the `or []`: a scalar `nullstub_passes` is
+        # truthy, so it survives the coalesce and `for entry in 5` raises TypeError OUTSIDE the
+        # try above — a traceback behind exit 1 for the malformed-graph case this loop's own
+        # comment promises to skip. A bare STRING is the quieter half: it iterates CHARACTERS
+        # into the allow-list, so every real recorded pass reverts to a finding and single-letter
+        # test names are silently whitelisted.
+        passes = handoff.get("nullstub_passes") or []
+        if not isinstance(passes, list):
+            continue
+        for entry in passes:
             # The documented separator is the em-dash ONLY; also splitting on "--"
             # truncated legitimate ids (test_flag[--residue] → "test_flag[").
             recorded.add(str(entry).split("—", 1)[0].strip())
@@ -381,11 +414,12 @@ def _classify(results: dict[str, dict], recorded: set[str]) -> tuple[list[str], 
     return findings, discriminated
 
 
-def run(suite_dir: Path, targets: dict[str, set[str]], python: str, keep: bool) -> int:
+def run(suite_dir: Path, targets: dict[str, set[str]], python: str, keep: bool,
+        graphs: Sequence[Path]) -> int:
     results = _collect_results(suite_dir, targets, python, keep)
     if results is None:
         return 2
-    findings, discriminated = _classify(results, _recorded_passes(suite_dir))
+    findings, discriminated = _classify(results, _recorded_passes(suite_dir, graphs))
     for f in findings:
         print(f"  {f}")
     print(f"\n[check_stub] {discriminated} discriminating, {len(findings)} finding(s), "
@@ -408,14 +442,34 @@ def main(argv: list[str]) -> int:
         # suite/graph arg handed to pytest would resolve against the wrong base
         # (run from repo/tests with arg `spec`, pytest would hunt <rootdir>/spec).
         p = Path(args[0]).resolve()
-        suite_dir = p if p.is_dir() else p.parent
+        suite_dir = _suite.suite_dir_from_arg(p)
+        # Needed by `_recorded_passes`: the graph names the suite AND carries the
+        # `handoff.nullstub_passes` allow-list, and the two stopped being the same file.
+        #
+        # EVERY owning graph, not just the one named. pytest is handed the whole suite directory,
+        # and a suite is named by MANY graphs now that `tests:` moved the corpus together — so an
+        # allow-list read from one graph under-reads the run it is filtering, and every pass
+        # recorded by a sibling graph comes back a NULLSTUB-PASS finding. The named graph is
+        # unioned in rather than assumed present: it may be uncommitted, or outside the glob.
+        graphs = _owning_graphs(suite_dir, cfg)
+        if p.is_file() and p not in graphs:
+            graphs.append(p)
     else:
-        dirs = sorted({g.parent for g in _config.artifacts(cfg)})
+        dirs = sorted({_suite.suite_dir_from_arg(g) for g in _config.artifacts(cfg)})
         if len(dirs) != 1:
             print(f"check_stub: give the suite dir or graph explicitly (found {len(dirs)} "
                   f"candidate dirs)", file=sys.stderr)
             return 2
         suite_dir = dirs[0].resolve()
+        graphs = _owning_graphs(suite_dir, cfg)
+    # NO `has_tests` preflight here, deliberately (#949). `_collect_results` already owns this
+    # exact refusal and owns it ACCURATELY: it asks the project's own pytest what it collected
+    # ("pytest collected no tests under {suite_dir} — the run proves nothing about
+    # discrimination", exit 2). A filename guard in front of it is a second, weaker oracle for
+    # the same question — it does not descend the way `pytest <suite_dir>` does, and it cannot
+    # see a `python_files` override — so it refuses ordinary `tests/unit/test_x.py` and
+    # `*_spec.py` layouts that pytest collects fine. `check_calls` keeps its guard because its
+    # scan really is flat; this one's is not, so the accurate answer is the only one worth having.
     root = _config.repo_root(suite_dir)
     targets, floor = _suite.target_modules(suite_dir, root)
     for t in explicit:
@@ -429,7 +483,7 @@ def main(argv: list[str]) -> int:
             file=sys.stderr,
         )
         return 2
-    return run(suite_dir, targets, python, keep)
+    return run(suite_dir, targets, python, keep, graphs)
 
 
 if __name__ == "__main__":

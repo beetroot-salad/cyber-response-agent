@@ -141,7 +141,13 @@ def read_composer_reply(text: str | None, *, refs: frozenset[str]) -> Review:
     # through to the permissive arm and commit an override with no failure kind — the review's
     # own breakage recorded as a finding about the evidence.
     finding = obj.get("finding")
-    if finding not in FINDINGS:
+    # `isinstance` BEFORE the membership test: `FINDINGS` is a frozenset, so a reply that
+    # spells this field as a list or a mapping raises `TypeError: unhashable type` rather
+    # than the `Unreadable` this branch exists to raise — and TypeError is not what any
+    # caller catches, so it escapes `challenge_gate` and `run_investigation` entirely,
+    # taking report.md and the review record with it and leaving this stage's trace row
+    # marked `ok: true`. Same guard `review` already carries six lines up.
+    if not isinstance(finding, str) or finding not in FINDINGS:
         raise Unreadable(
             f"the composer's finding is {finding!r}, outside {sorted(FINDINGS)}"
         )

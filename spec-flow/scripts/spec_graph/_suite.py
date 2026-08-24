@@ -26,7 +26,7 @@ from pathlib import Path
 _COPY = re.compile(r"\.copy\d+\.py$")
 
 
-def suite_dir_for(graph_path: Path, graph: dict) -> Path:
+def suite_dir_for(graph_path: Path, graph: dict, *, root: Path) -> Path:
     """The suite a graph is the derivation of.
 
     This used to be the graph's own directory, which made adjacency load-bearing in code
@@ -34,18 +34,131 @@ def suite_dir_for(graph_path: Path, graph: dict) -> Path:
     spec happened to touch. The graph now names its suite (`tests:`, repo-relative), so the
     graphs can live together and be gated as one corpus.
 
+    ANCHORED ON THE GRAPH. `root` is REQUIRED and every caller passes the graph's own directory:
+    `_config.repo_root()` with no argument is the repo the PROCESS stands in, which is wrong for
+    any caller handed an explicit path — the argument may name a graph in another checkout (a
+    write-tests worktree is the ordinary case), and a process-anchored join then silently reads
+    the wrong tree's suite. There is deliberately no default: a `None` one would be spelled the
+    same as the correct call and would silently restore exactly that defect.
+
     Falls back to the graph's directory when the field is absent, which keeps the plugin's
     own fixture graphs (and any graph written before the field existed) working. The
     fallback is safe rather than silent: a graph that names the wrong suite, or none, loses
     its docstrings and `check_binds` reports every demand as a prose orphan — loudly, not
     as a clean pass.
+
+    A `tests:` that is not a plain RELATIVE STRING takes the same fallback. `str()` on a list or
+    an int fabricates a directory name nobody typed (`tests: [a, b]` → a literal `['a', 'b']`
+    directory in the diagnostic), and `root / "/abs"` DISCARDS root outright, so an absolute
+    value silently resolves the suite outside the repo — and `check_stub` then runs pytest
+    there. Neither is a suite this can resolve, so neither is guessed at.
+
+    The same fallback catches a value that ESCAPES the repo without being absolute. `tests:
+    ../elsewhere` is not `is_absolute()`, but it joins and resolves to a directory outside the
+    checkout just as surely, and `check_stub` would run pytest — conftest execution included —
+    over whatever is there. The spelling is what differs; the outcome the absolute arm refuses is
+    identical, so the test is on the RESOLVED path rather than on how it was written.
     """
     declared = graph.get("tests")
-    if not declared:
+    if not isinstance(declared, str) or not declared or Path(declared).is_absolute():
         return graph_path.parent
     import _config  # local: only this path needs the repo-root resolution
 
-    return _config.repo_root() / str(declared)
+    anchor = _config.repo_root(root).resolve()
+    resolved = (anchor / declared).resolve()
+    if not resolved.is_relative_to(anchor):
+        return graph_path.parent
+    return resolved
+
+
+def suite_dir_from_arg(arg: Path) -> Path:
+    """The suite directory a CLI argument names — the resolution `check_calls` and `check_stub`
+    were missing (#949).
+
+    A DIRECTORY is itself. A FILE is a graph, and the suite it names is the one its `tests:`
+    field declares — not the directory the graph happens to sit in. Those
+    were the same answer until the graphs moved into one corpus, and `p.parent` has been wrong
+    ever since: it resolves to the specs directory, which holds no Python at all, so a run given
+    `--target` reported "0 test(s) that never reach the target" over a suite it never opened.
+    `check_binds` already routes through `suite_dir_for`; these two did not.
+
+    ONE resolver, not two: the `tests:` rule lives in `suite_dir_for` and this is the
+    path-argument dispatcher in front of it. A second copy anchored differently would answer
+    differently for one graph depending on which sibling checker asked.
+
+    An unreadable or non-mapping graph falls back to the graph's own directory rather than
+    raising here. That is not a silent pass: both callers refuse a resolved directory holding no
+    Python, which is precisely where that fallback lands. The except tuple carries `ValueError`
+    for `UnicodeDecodeError` — a non-utf-8 graph is the commonest unreadable one, and it is a
+    `ValueError`, not an `OSError`, so without it the read escapes as a traceback behind exit 1
+    ("the gate looked and found something") for a gate that looked at nothing.
+    """
+    if arg.is_dir():
+        # `.resolve()` here too: the two arms must have ONE post-condition, or `_pytest_cwd`'s
+        # `d == root` Path-equality compares a relative path against an absolute git-derived root
+        # and silently never matches. Relying on both callers having resolved first made this
+        # function's correctness depend on an invariant it does not enforce.
+        return arg.resolve()
+    import yaml  # local, matching `_config` above: only these paths need the parse
+
+    import _cli
+
+    try:
+        graph = _cli.load_graph(arg)
+    except (OSError, ValueError, TypeError, yaml.YAMLError):
+        return arg.parent
+    # `.resolve()` because `run()` moves cwd to the pytest rootdir and `_pytest_cwd` compares
+    # `d == root` string-wise: a `tests: ../shared` left un-normalised never matches the root it
+    # is under. The directory arm above is already resolved by both callers.
+    return suite_dir_for(arg, graph, root=arg.parent).resolve()
+
+
+#: A module-level test function, however the file is named. `check_calls` keys off the FUNCTION
+#: name (`name.startswith("test_")`), so this is the same question its scan asks.
+_DEF_TEST = re.compile(r"^(?:async\s+)?def\s+test_\w*\s*\(", re.MULTILINE)
+
+
+def has_tests(suite_dir: Path) -> bool:
+    """Whether `check_calls`' flat scan of this directory would find a test to reason about.
+
+    Not "holds any Python" (#949). A directory of only `conftest.py` and helper modules passes
+    a bare `.py` test while collecting nothing, and the consumer then prints its clean line —
+    `0 test(s) that never reach the target`, exit 0 — over a suite with no tests in it, which is
+    the false clean this guard exists to stop.
+
+    Asks whether a file DEFINES a test, not whether it is NAMED like one. Filename patterns are
+    `python_files`, which is configurable per project, and spec-flow ships as a plugin to repos
+    that do not use the default — a name-based guard refuses a `*_spec.py` suite that its own
+    consumer reads perfectly well, trading the false clean for a false refusal. The function name
+    is the thing `check_calls` actually keys off, so this matches its reach exactly.
+
+    Flat on purpose, matching `suite_files`: a nested test `check_calls` genuinely cannot read is
+    honestly a could-not-look. `check_stub` has no guard of this kind — it hands the directory to
+    the project's own pytest, which descends and honours the project's config, and refuses on
+    what that run actually collected.
+    """
+    for p in suite_files(suite_dir):
+        try:
+            if _DEF_TEST.search(p.read_text(encoding="utf-8")):
+                return True
+        except (OSError, ValueError):
+            continue  # unreadable here is check_calls' own scan's finding, not this guard's
+    return False
+
+
+def no_tests_refusal(tool: str, dirs: list[Path]) -> str:
+    """The family's could-not-look sentence for a resolved suite directory holding no tests.
+
+    One wording for both consumers: `check_calls` and `check_stub` print the identical three
+    sentences, and a wording fix applied to one copy leaves the other stale — which matters
+    because the message is what an author greps for and what the tests assert on.
+    """
+    named = str(dirs[0]) if len(dirs) == 1 else str([str(d) for d in dirs])
+    return (
+        f"{tool}: no tests under {named} — nothing to collect, so this is a could-not-look "
+        f"rather than a clean run. Point at the suite directory, or at a graph whose "
+        f"`tests:` field names it."
+    )
 
 
 def suite_files(suite_dir: Path) -> list[Path]:

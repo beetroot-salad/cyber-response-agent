@@ -544,7 +544,16 @@ def register_close_tool(agent, *, stages: Any, bounds: challenge_gate.Bounds) ->
     """MAIN's composition root ONLY — never called for any other role's agent build, and
     only when that root's effective `ToolSet.close` is on."""
 
-    @agent.tool
+    # `sequential=True`, for the same reason `append_block`/`fix_row` carry it (tools.py):
+    # two `ToolCallPart`s in ONE model response otherwise run as concurrent tasks. Here the
+    # lost update is the DISPOSITION. `state.closed` is not set until `_commit` has already
+    # replaced report.md, so two close calls both read it False at the R4 check, both run the
+    # review gate, and both reach `_commit` — which derives `turn_for_record` from
+    # `state.turns`, unchanged by either arm, so they collide on one `review_record.{turn}.json`
+    # and one `write_guarded(..., mode="replace")`. The run then records whichever disposition
+    # finished last while telling the model both closes succeeded, and report.md's frontmatter
+    # is what the learning loop trains on.
+    @agent.tool(sequential=True)
     async def close_investigation(
         ctx: RunContext[AgentDeps], disposition: DispositionArg
     ) -> str:

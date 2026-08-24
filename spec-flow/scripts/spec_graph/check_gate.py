@@ -665,7 +665,10 @@ def main(argv: list[str]) -> int:
         # shapes (a string where a mapping belongs, in actors/demands/boundaries/gate lists)
         # surface as AttributeError inside the walk — uncaught it was a traceback behind
         # exit 1 ("found findings"), not 2 ("could not look").
-        except (OSError, yaml.YAMLError, TypeError, AttributeError) as e:
+        # `ValueError` covers UnicodeDecodeError: a non-utf-8 graph is the commonest unreadable
+        # one, and it is NOT an OSError — without it the read escapes as a traceback behind exit 1
+        # ("looked, found something") for a gate that read nothing.
+        except (OSError, ValueError, yaml.YAMLError, TypeError, AttributeError) as e:
             # Never a silent pass: a graph the gate cannot read must not certify clean.
             # Collected, not returned on: bailing here threw away every finding the
             # already-checked graphs produced.
