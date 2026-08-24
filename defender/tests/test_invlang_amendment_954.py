@@ -750,21 +750,36 @@ def test_an_invisible_character_the_strip_does_not_remove_reaches_model_context_
     assert f"row: {row}" in render_diagnostic(d)
 
 
-def test_a_legal_short_row_is_rebuilt_byte_identically_then_padded_to_the_declared_width():
+def test_a_legal_short_row_is_rebuilt_byte_identically_then_padded_to_the_declared_width(
+    tmp_path,
+):
     """Under a header marking its trailing column optional, a legal short row's candidates are
     rebuilt from the author's raw text and then PADDED to the declared width — byte-identical
     in every cell the author wrote, full width on paste (F-F, D28).
 
-    The human's decision, and the one option that keeps a repair that works today. EXECUTED at
-    base (PO-J2 / J10): the current parsed-cell mechanism already pads a legal short row to
-    full width and that paste is accepted, so withholding instead would take away a working
-    repair — which had to be a recorded decision, not an accident of guard ordering.
+    The human's decision, recorded rather than left to an accident of guard ordering: the
+    parsed-cell mechanism at base already padded a legal short row to full width, and
+    withholding instead would have been a change to what this check offers.
+
+    WHAT THE PADDED CANDIDATE IS NOT is a repair the model can paste as it stands, and the
+    earlier wording ("that paste is accepted") claimed it was. EXECUTED against this tree:
+    `fix_row(old_row, "l-001|v-001|class|")` is REFUSED — `decide_write` runs the full
+    validator over the proposed text and the sibling empty-`value` family (error severity,
+    validate.py) refuses the now-present-but-blank cell, so nothing lands and the row stays
+    flagged. The candidate is a TEMPLATE: the author has to fill the value in the same edit.
+    That is the same scoping D32 records for the explicit-empty-value row, and it is why the
+    padding is about width parity with the paste gate, not about a working one-click repair.
+    DRIVEN, not merely stated — the earlier wording was prose no assertion checked, which is
+    how it stayed wrong; the block below observes the refusal and the filled-in repair that
+    does land, so a change to either end is visible rather than silent.
 
     The second half is the resolution's probe-grounded caveat: byte-identity is NOT automatic.
-    A rebuild that reuses `_split_quoted` — the natural choice, and the primitive `_split_cells`
-    and `_row_cells` are both built on — reaches full width, re-splits cleanly, even preserves
-    an escaped pipe, and still silently strips leading/trailing whitespace from every cell it
-    did not intend to touch. Only a no-strip boundary scanner passes the padded row.
+    A rebuild that reuses `_split_quoted` AS `_split_cells` CALLS IT — the natural choice, and
+    what `_row_cells` is built on — reaches full width, re-splits cleanly, even preserves an
+    escaped pipe, and still silently strips leading/trailing whitespace from every cell it did
+    not intend to touch. Only a no-strip boundary scan passes the padded row; `_split_cells_raw`
+    is that scan, and it reaches it through `_split_quoted(..., strip=False)` rather than a
+    second copy of the scanner, so "cell N here is cell N there" holds by construction.
     """
     plain = key_warning(attr_doc("l-001|v-001|bogus", header=OPTIONAL_ATTR_HEADER))
     assert plain.locus.row_text == "l-001|v-001|bogus"
@@ -776,6 +791,23 @@ def test_a_legal_short_row_is_rebuilt_byte_identically_then_padded_to_the_declar
     assert padded.fix == ("l-001|  v-001  |class|", "l-001|  v-001  |attrs.bogus|")
     for candidate in padded.fix:
         assert len(cells(candidate)) == 4
+
+    # The paste half, which no demand drove: the width guard passes and the sibling
+    # empty-`value` family then refuses, so the candidate is a template and not a repair.
+    from pydantic_ai.exceptions import ModelRetry
+
+    doc = attr_doc("l-001|v-001|bogus", header=OPTIONAL_ATTR_HEADER)
+    deps, run = main_deps(tmp_path)
+    seed_investigation(run, doc)
+    with pytest.raises(ModelRetry) as exc:
+        _fix(deps, "l-001|v-001|bogus", plain.fix[0])
+    assert "the `value` cell for key 'class' is empty" in str(exc.value)
+    assert _inv(run) == doc, "a refused paste must commit nothing"
+
+    # ...and the same candidate with the value filled in DOES land, so the refusal above is
+    # about the empty cell and not about the padding.
+    _fix(deps, "l-001|v-001|bogus", "l-001|v-001|class|bastion/internal/known-corp")
+    assert _flagged(_inv(run)) == [], "the filled-in repair closed the window"
 
 
 def test_paste_gate_enforces_the_same_declared_width_equality_as_the_offer_gate(tmp_path):
@@ -928,6 +960,143 @@ def test_a_withheld_fix_row_keeps_its_locus_and_stays_deletable(tmp_path):
     assert validate_investigation(after, None) is None
 
 
+#: A five-column header whose LAST column is optional, so a four-cell row is legal short and
+#: the rebuild has to pad. Needed because `OPTIONAL_ATTR_HEADER` puts the optional column
+#: immediately right of `key`, which hides what padding does to the cell before it.
+PADDING_ATTR_HEADER = "[resolved_by|target|key|value|note?]"
+
+#: A legal short row whose LAST WRITTEN cell ends in a lone backslash. Padding it rejoins
+#: `…c:\path\` + `|`, and that pair is an ESCAPED delimiter — the candidate comes back one
+#: cell short of the declared five. EXECUTED against the shipped mechanism: both candidates
+#: were OFFERED and `fix_row` then refused the paste with "it has 4 cells but the block
+#: declares 5".
+PAD_EATS_DELIMITER_ROW = "l-001|v-001|bogus|c:\\path\\"
+
+#: A key cell carrying BOTH an escaped pipe and a trailing escape, on a row that splits to the
+#: declared width. `key` reaches the rebuild already unescaped (`a|a\\`), so the added `|`
+#: pairs with the trailing backslash and the two cancel: the candidate re-splits to four cells
+#: with the author's `value` absorbed into the key's cell. EXECUTED against the shipped
+#: mechanism: OFFERED, pasted clean, and the document then claimed key `attrs.a` / value
+#: `a|hello` where the author wrote value `hello` — a corruption with no diagnostic anywhere.
+BYTES_MOVE_ROW = r"l-001|v-001|a\|a\ |hello"
+
+
+def test_a_rebuilt_row_that_loses_a_delimiter_is_withheld():
+    """A candidate whose rejoin turns an author's trailing backslash into an escaped `|` is
+    WITHHELD, because it no longer splits to the block's declared width.
+
+    The width the offer gate owes is the one the PASTE gate enforces, and the two are not the
+    same predicate: `runtime.tools._new_row_shape_reason` refuses on `!=` the declared count,
+    while `_row_cells` PADS anything at or above `required_cells` and returns normally. Under
+    a header with a trailing `?` column that gap is reachable, and a guard built only on the
+    row reader cannot see it — which is the second refusal F-47 exists to prevent, arriving
+    through the very branch that was added to avoid it.
+    """
+    for header, row in (
+        (PADDING_ATTR_HEADER, PAD_EATS_DELIMITER_ROW),
+        (OPTIONAL_ATTR_HEADER, "l-001|v-001|bogus\\"),
+    ):
+        d = key_warning(attr_doc(row, header=header))
+        assert d.fix == (), f"{row!r} under {header}"
+        assert d.severity == "warning"
+        assert d.locus is not None
+        assert d.locus.row_text == row
+        assert "withheld" in d.message.lower()
+
+
+def test_a_rebuilt_row_that_moves_bytes_between_cells_is_withheld():
+    """A candidate that re-splits to the declared width but carries the author's bytes in the
+    WRONG cell is WITHHELD — the one failure mode worse than a refusal.
+
+    `f"attrs.{key}"` splices in the PARSED key, where `\\|` is already unescaped, so the one
+    cell F-47 rewrites is the one cell whose escapes do not survive. Counting cells cannot see
+    it: here the added delimiter and the eaten one cancel exactly. The gate therefore compares
+    every OTHER cell against the row as the parser reads it, so a rebuild is allowed to drop
+    padding the tokenizer would have stripped anyway and is not allowed to move a byte across
+    a boundary.
+    """
+    d = key_warning(attr_doc(BYTES_MOVE_ROW))
+    assert d.fix == ()
+    assert d.locus is not None
+    assert d.locus.row_text == BYTES_MOVE_ROW
+    assert "withheld" in d.message.lower()
+
+    # The complementary condition: an escaped pipe the rebuild does NOT have to re-escape —
+    # one cell to the RIGHT of `key` — is still offered, so the guard is not "withhold on any
+    # backslash".
+    offered = key_warning(attr_doc(ESCAPED_PIPE_ROW))
+    assert offered.fix == (
+        r"l-001|v-001|class|curl\|bash",
+        r"l-001|v-001|attrs.bogus|curl\|bash",
+    )
+
+
+def test_a_candidate_carrying_a_fence_delimiter_is_withheld():
+    """A row whose cells carry ``` gets no candidate, because no rewrite of it can be pasted.
+
+    The third arm of the same offer/paste parity, and the one `_row_cells` structurally cannot
+    see: it is handed ONE row and has no notion of the fence the row sits inside, while
+    `runtime.tools._new_row_shape_reason` refuses any `new_row` carrying the delimiter — it
+    would close the block early. Mid-line backticks do not close the fence for the TOKENIZER
+    (`INVLANG_FENCE_RE` needs the delimiter at a line start), so the row parses, draws the
+    ordinary illegal-key warning, and at base was offered two `use:` lines that `fix_row`
+    refuses on sight.
+    """
+    from defender.runtime.tools import _new_row_shape_reason
+
+    row = "l-001|v-001|bogus|see ```x``` here"
+    d = key_warning(attr_doc(row))
+    assert d.fix == ()
+    assert "fence delimiter" in d.message
+    assert d.locus is not None
+    assert d.locus.row_text == row
+
+    # The channel: the paste gate really does refuse this shape, so the withholding above is
+    # parity with it and not a new rule.
+    assert _new_row_shape_reason("l-001|v-001|class|see ```x``` here", 4) is not None
+
+
+def test_the_repaired_cell_is_the_one_the_record_read():
+    """The candidate replaces the cell `key` actually CAME FROM, which under a header naming
+    `key` twice is the LAST such column, not the first.
+
+    `_row_dict` zips the header onto the cells, so a repeated column name lets the later cell
+    win — and `_apply_attr_update` reads the same record. A repair indexed on the FIRST match
+    rewrites a cell nothing objected to and leaves the offending one standing, so the row still
+    parses, the same warning fires again with the same suggestion, and the repair window never
+    closes.
+    """
+    d = key_warning(attr_doc("l-001|class|v-001|bogus|hello",
+                             header="[resolved_by|key|target|key|value]"))
+    assert d.fix == (
+        "l-001|class|v-001|class|hello",
+        "l-001|class|v-001|attrs.bogus|hello",
+    )
+    assert d.fix[1] != d.locus.row_text, "a candidate identical to the row repairs nothing"
+    # ...and the offered `attrs.` route really does clear the warning.
+    assert not [
+        x for x in diagnostics(
+            attr_doc(d.fix[1], header="[resolved_by|key|target|key|value]")
+        ) if x.severity == "warning"
+    ]
+
+
+def test_a_blank_target_cell_still_names_something_in_the_diagnostic():
+    """A `target` column the author left BLANK renders as `?`, not as nothing.
+
+    `rec` is keyed on the block's DECLARED columns, so `rec.get('target', '?')` never reaches
+    its default when the header names the column — the message came out as
+    ":R attr_updates on : key 'tty' is not a valid refinement key", naming no object at all,
+    on exactly the rows where the author most needs to be told which one.
+    """
+    for d in diagnostics(attr_doc("l-001||tty|x")):
+        if d.severity == "warning":
+            assert d.message.startswith(":R attr_updates on ?: key 'tty'"), d.message
+            break
+    else:
+        raise AssertionError("no warn diagnostic")
+
+
 def test_a_row_with_an_illegal_key_and_an_empty_value_is_flagged_once_and_still_offered_a_key_fix():
     """A row breaking two rules — an illegal key AND an empty value — draws exactly ONE
     diagnostic, the warn-severity illegal-key one, and it is still offered its candidates
@@ -975,16 +1144,36 @@ def test_the_review_gates_entire_input_sees_the_first_wins_bucket_not_a_blend():
     versus last-wins, and no demand observed it until this one was minted at phase E (its two
     siblings are D20 and D21). The lens is handed a JSON rendering of the
     pruned companion, so the discarded row's values must not appear in it at all.
+
+    THE VALUES ASSERTED ABSENT MUST BE THE DISCARDED ROW'S ALONE. `LATER_ROW`'s `target`
+    cell names `v-002`, but `VERTICES` — the prologue every fixture here shares — DECLARES
+    `v-002` as an unrelated identity vertex, and `support_projection` prunes `:V` rows by
+    nothing (only the `:T`-tag inference family is pruned by lead relevance). So `v-002`
+    renders under every reading, including `FIRST_ONLY_DOC`: asserting its absence pins the
+    fixture, not the fold. `name`, `system` and `window` are the three cells `LATER_ROW`
+    holds alone, and all three are asserted — `system`/`window` reach the lens through
+    `query_details`, which `name` on its own does not observe.
+
+    KEYED NEEDLES, not bare substrings. The rendering is a JSON body under an English
+    preamble, and `edr` sits inside ordinary words (`considered`, `hundred`) — a bare
+    `"edr" not in rendered` would silently become an assertion about the preamble's wording
+    the first time that prose is edited, while its control stayed green. `"system": "edr"` can
+    only come from a projected lead.
     """
     from defender.runtime.review.projector import parse_investigation, support_projection
 
-    rendered = support_projection(parse_investigation(REPEAT_DOC), "SALT").text
-    assert "alpha" in rendered
-    assert "beta" not in rendered, "the lens must not be shown the row the fold discarded"
-    assert "v-002" not in rendered
+    discarded = ('"name": "beta"', '"system": "edr"', '"time_window": "48h"')
 
-    # The control: the projection really does carry whichever row survives.
-    assert "beta" in support_projection(parse_investigation(LATER_ONLY_DOC), "SALT").text
+    rendered = support_projection(parse_investigation(REPEAT_DOC), "SALT").text
+    assert '"name": "alpha"' in rendered
+    for needle in discarded:
+        assert needle not in rendered, f"the lens was shown {needle}, from the discarded row"
+
+    # The control: the projection really does carry whichever row survives, and carries all
+    # three cells — so the three negatives above are about the fold, not about the channel.
+    later = support_projection(parse_investigation(LATER_ONLY_DOC), "SALT").text
+    for needle in discarded:
+        assert needle in later, f"the channel never carries {needle} — the negative is empty"
 
 
 def test_the_compaction_fold_sees_the_first_wins_bucket_not_a_blend():

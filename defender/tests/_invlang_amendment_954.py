@@ -195,12 +195,14 @@ def close_block(loop: int) -> str:
     return f"\n```invlang\n:T close\nloop {loop}\n```\n"
 
 
-def attr_doc(*rows: str, header: str = ATTR_HEADER, prologue: str | None = None) -> str:
+def attr_doc(*rows: str, header: str = ATTR_HEADER, prologue: str = VERTICES) -> str:
     """A complete document whose ONLY fault is whatever the given `:R attr_updates` rows
-    carry: two declared vertices, one declared lead, one refinement block."""
-    head = VERTICES if prologue is None else prologue
+    carry: two declared vertices, one declared lead, one refinement block.
+
+    `prologue` is anchored in the signature, like `header` beside it, rather than resolved
+    from `None` in the body (`defender/CLAUDE.md` — "Anchor a default in one place")."""
     return (
-        head
+        prologue
         + findings_block("l-001|1|cmdb-lookup|v-001||cmdb|n/a")
         + attr_block(*rows, header=header)
     )

@@ -5,7 +5,7 @@ import contextlib
 import re
 from collections.abc import Iterator
 from dataclasses import dataclass, field
-from typing import Any, cast
+from typing import Any, TypeVar, cast
 
 from ._cells import (
     _has_unbalanced_quote,
@@ -42,6 +42,12 @@ from .schema import (
     ResolutionRow,
     VertexRecord,
 )
+
+#: One projected row, whatever the block's projector builds them as. `_warn_repeated_ids` hands
+#: back the rows it did NOT warn about, and it is the caller that knows their type — a bare
+#: `list[Any]` there would launder `list[dict[str, str]]` into `Any` at every call site that
+#: consumes the return, which is the narrowing `_lead_header_record`'s `rec["id"]` relies on.
+_RowT = TypeVar("_RowT")
 
 INVLANG_FENCE_RE = re.compile(r"```invlang\n(.*?)\n```", re.DOTALL)
 HEADER_RE = re.compile(
@@ -1473,7 +1479,7 @@ class _Projector:
                 _extend_by_id(hyp.setdefault("authorization_contract", []), authz)
             return
 
-    def _warn_repeated_ids(self, block: Block, rows: list[Any]) -> None:
+    def _warn_repeated_ids(self, block: Block, rows: list[_RowT]) -> list[_RowT]:
         """An id written twice in ONE sub-block DELETES the second row, so say so.
 
         `_extend_by_id` keeps the first record per id — correct against the re-emission it
@@ -1498,15 +1504,30 @@ class _Projector:
         cannot see it — it is written against the cross-BLOCK re-emission, where the first
         declaration standing silently is the sanctioned append-only shape.
 
+        `:L findings` is the thirteenth site and the one whose rows the model edits
+        individually rather than re-emitting wholesale: a lead id written twice in one block
+        is not the cross-block re-listing the amendment path is built on, and the row it drops
+        carries the lead's whole header — name, target, loop, system, window — which every
+        reader that asks whether a lead is DECLARED then answers from the survivor alone.
+
         Only the rows of the block in hand are compared, which keeps that legal cross-block
         repeat silent.
+
+        RETURNS THE SURVIVORS — the first row per id, plus every row whose id is unreadable —
+        so a caller that has to ENFORCE the "only the FIRST row is kept" this message promises
+        (`_project_findings_block`, which folds by `lead_bucket` rather than through
+        `_extend_by_id`) reads the partition off the same walk that warned about it. The other
+        twelve call sites hand the result to `_extend_by_id`, which drops the repeat itself, and
+        ignore the return.
         """
         seen: set[str] = set()
+        firsts: list[_RowT] = []
         for r in rows:
             rid = r.get("id") if isinstance(r, dict) else None
             if not isinstance(rid, str) or not rid:
                 # A row with no readable id cannot be checked for a repeated one, and the
                 # caller still projects it — so nothing is dropped here.
+                firsts.append(r)
                 continue  # lint-row-drop: ok — no id to compare; the caller still lands it
             if rid in seen:
                 self._warn(
@@ -1515,7 +1536,10 @@ class _Projector:
                     f"and the later one is discarded with everything it declares. Give each "
                     f"row its own id, or send the added rows as a second block.",
                 )
+                continue  # lint-row-drop: ok — the warning above IS this row's drop channel
             seen.add(rid)
+            firsts.append(r)
+        return firsts
 
     def _off_schema_plan_header(self, block: Block, cols: list[str]) -> bool:
         """True (and warned) when a `:L` plan block's header names a column this projection
@@ -1694,20 +1718,16 @@ class _Projector:
         # `_lead_header_record`'s callers rely on (see `_warn_repeated_ids`): the second row
         # is discarded, loudly, and the first row's values are kept whole. Swept up front,
         # over the rows that actually LAND (id+name present) — `_warn_repeated_ids` cannot be
-        # handed the raw row strings, since it reads `r.get("id")` (F-B).
+        # handed the raw row strings, since it reads `r.get("id")` (F-B). It hands back the
+        # survivors it warned about, so the drop and the warning are ONE walk: a second `seen`
+        # set here would be a copy of the partition that check just made, free to drift from it.
         landed: list[dict[str, str]] = []
         for idx, row, rec in self._for_each_row(block):
             if not rec.get("id") or not rec.get("name"):
                 self._warn(block, idx, row, "findings row missing id/name")
                 continue
             landed.append(rec)
-        self._warn_repeated_ids(block, landed)
-        seen_ids: set[str] = set()
-        for rec in landed:
-            rid = rec["id"]
-            if rid in seen_ids:
-                continue  # lint-row-drop: ok — repeated within this block; see _warn_repeated_ids
-            seen_ids.add(rid)
+        for rec in self._warn_repeated_ids(block, landed):
             identity, outcome, query_details = _lead_header_record(rec)
             lead = self.lead_bucket(identity["id"])
             lead.update(identity)
