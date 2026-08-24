@@ -1,4 +1,0 @@
-{
-  "message": "Node root.03-table-direct-scan.03-scan-x6-x7-x8 cited unknown sources: ['packet:root.03-table-direct-scan.03-scan-x6-x7-x8.01-x6', 'root.03-table-direct-scan.03-scan-x6-x7-x8']",
-  "type": "RecursiveInvariantError"
-}

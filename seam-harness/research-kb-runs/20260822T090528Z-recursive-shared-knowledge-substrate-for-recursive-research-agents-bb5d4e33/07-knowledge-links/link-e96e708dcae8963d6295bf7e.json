@@ -1,7 +1,0 @@
-{
-  "content_sha256": "e96e708dcae8963d6295bf7e1ccd874fe09de30ef7fb904b33a268d8ca667f9b",
-  "id": "link:e96e708dcae8963d6295bf7e",
-  "relation": "depends_on",
-  "source_id": "question:raised:d1c06c3b4c403839",
-  "target_id": "question:root.05-debate-nulls-boundaries.03-c3-design-inferences"
-}

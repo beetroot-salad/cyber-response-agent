@@ -106,3 +106,8 @@ experiments/actor-author-discipline/**/__pycache__/
 # Throwaway script the ci.yml `box-dood` job writes into the checkout (it needs a path the
 # daemon can already resolve, which is exactly the checkout it bind-mounts).
 .dood-inner.sh
+
+# Local scratch: research/experiment runs, not product source (32.7 MB of run
+# artifacts). Swept into the tree by a `git add -A` during #941 and removed again;
+# ignored here so it cannot be re-added by accident.
+seam-harness/

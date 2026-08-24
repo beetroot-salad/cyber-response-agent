@@ -1,7 +1,0 @@
-{
-  "content_sha256": "29de20347505e128e9aced0e287595b3e1cf09392247332a046b1aac42dd0b08",
-  "id": "link:29de20347505e128e9aced0e",
-  "relation": "partially_answers",
-  "source_id": "answer:root.01-arg-semantics.02-child-2",
-  "target_id": "question:root.01-arg-semantics"
-}
