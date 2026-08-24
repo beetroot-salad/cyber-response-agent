@@ -17,6 +17,7 @@ if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
 from defender.learning import lead_repository  # noqa: E402
 from defender.learning.core.config import (  # noqa: E402
     DEFAULT_PATHS,
+    RunAlreadyLive,
     RunUnprocessable,
     StageAbort,
     LoopPaths,
@@ -66,7 +67,8 @@ from defender.learning.core.validate import (  # noqa: E402
 from defender.learning.core.prologue import extract_case_entities  # noqa: E402
 
 __all__ = [
-    "DEFAULT_PATHS", "RunUnprocessable", "StageAbort", "LoopPaths", "InProcessSubagents", "Subagents",
+    "DEFAULT_PATHS", "RunAlreadyLive", "RunUnprocessable", "StageAbort", "LoopPaths",
+    "InProcessSubagents", "Subagents",
     "run_one", "author_drain", "lead_author_drain", "learn_drain", "enqueue_for_learning",
     "main",
     "normalize_disposition", "strip_yaml_fence", "normalize_judge_yaml",

@@ -17,6 +17,7 @@ create argv / raised error / returned string.
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -399,11 +400,16 @@ def test_a_create_that_lost_a_name_race_does_not_reap_the_winner(tmp_path, lane)
 
     A non-zero `docker run --detach` means either "we created it and the task would not start"
     (ours, the leak) or "the name was already taken" (another lane's box, still writing its
-    artifacts). Only the start-token label separates them. `_is_running` was tried first and
+    artifacts). Only the start-token label separates them. A liveness test was tried first and
     cannot: a concurrent lane's container is itself in `created` for the whole window in which
-    the conflict happens, so it reads as not-running and would be reaped anyway — which is why
-    this test injects `running=False` alongside a foreign token. It is the run-cycle lane that
-    makes this reachable at all, being the one caller that REUSES its container name."""
+    the conflict happens, so it reads as not-running and would be reaped anyway.
+
+    Since #955 F-49 the pre-create sweep refuses any name it finds occupied, so the only way
+    this arm is still reached is the TOCTOU window it always described: the name held NOTHING
+    when the sweep looked, and the other lane won the race before our create. That is what the
+    double states — no `status`, so the state query answers "no such object", and a foreign
+    token on the label query one call later. It is the run-cycle lane that makes this reachable
+    at all, being the one caller that REUSES its container name."""
     run_dir = make_run_dir(tmp_path)
     _populate_mount_sources(_run_cycle_mounts(run_dir), tmp_path)
     rec = RecordingDocker(
@@ -413,7 +419,9 @@ def test_a_create_that_lost_a_name_race_does_not_reap_the_winner(tmp_path, lane)
             cite="C43a — the daemon's own name-conflict rc/text",
         ),
         existing_token="another-lane-holds-this-name",
-        running=False,   # ...and it is in `created`, exactly as ours would be
+        # No `status`: the sweep found the name free, and the other lane took it in the window
+        # between that look and our create. Stating a status here would model a container the
+        # pre-create sweep refuses, and this arm would never run.
     )
     start = (
         (lambda: box_mod.start_box(run_dir, DEFENDER, docker=rec))
@@ -477,6 +485,31 @@ def test_the_pre_create_sweep_still_clears_a_finished_container(tmp_path, lane):
     reap = next(i for i, c in enumerate(rec.calls) if c[:3] == ["docker", "rm", "-f"])
     create = next(i for i, c in enumerate(rec.calls) if len(c) > 1 and c[1] == "run")
     assert reap < create, "the stale container was cleared after the create, not before it"
+
+
+def test_the_pre_create_refusal_still_leaves_the_did_not_run_marker(tmp_path):
+    """#955 F-49's own §7 D2 obligation, on the arm that now raises MOST often.
+
+    The sibling test one block up pins the rule for the STARTUP-fault arm. This arm is newer
+    and its trigger is wider — every state but exited/dead, i.e. every leaked container on a
+    REUSED name, repeatably — so a refusal that leaves no verdict makes the tree read "nobody
+    has judged this run yet", which is the one state `write_did_not_run` exists to prevent.
+
+    The INVESTIGATION lane only: the request lane's `_did_not_run_for_request` writes one
+    verdict per WRITABLE mount, and the run-cycle request composes none, so there is nothing
+    for it to write and nothing here to assert about it."""
+    run_dir = make_run_dir(tmp_path)
+    _populate_mount_sources(_run_cycle_mounts(run_dir), tmp_path)
+    rec = RecordingDocker(status="running")
+    with pytest.raises(box_mod.BoxFault, match="refusing rather than reaping"):
+        box_mod.start_box(run_dir, DEFENDER, docker=rec)
+    assert box_mod.verdict_path(run_dir).is_file(), \
+        "the pre-create refusal left no §7 D2 verdict — the tree reads as unjudged"
+    verdict = json.loads(box_mod.verdict_path(run_dir).read_text(encoding="utf-8"))
+    assert verdict["ran"] is False, \
+        "a refusal that never started a box recorded the tree as SCANNED"
+    assert "refused before create" in verdict["reason"], \
+        f"the verdict does not say WHICH startup fault produced it: {verdict['reason']!r}"
 
 
 def test_a_daemon_answer_the_sweep_cannot_read_is_not_taken_as_finished(tmp_path):

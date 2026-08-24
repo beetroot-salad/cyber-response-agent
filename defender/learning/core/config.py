@@ -505,6 +505,20 @@ class RunUnprocessable(Exception):
     pass
 
 
+class RunAlreadyLive(Exception):
+    """Another pass already holds this run's per-run lock, so this one did NO work.
+
+    A distinct type rather than a return code, because the two callers of `run_one` must do
+    two different things with it and an `int` can carry neither. `learn_drain` has to keep the
+    queue marker — a refused pass has not learned the run, and its `_serve_marker` deletes the
+    marker for anything that does not raise, which turned "someone else has it" into "this run
+    is done and may be forgotten". The CLI has to exit 0 without a traceback: a human asking
+    for a run the worker already claimed has made no error.
+
+    TRANSIENT, and that is the whole difference from `RunUnprocessable`: the lock is released
+    when the other pass ends, so the marker is RE-QUEUED, never quarantined."""
+
+
 def pitfalls_threshold() -> int:
     # 3, not 5: at 5 the queue never filled — three archived runs (227 rows, 33 agent-fixable)
     # put only 2 records in front of the curator, so it never ran. A reasoned floor, not a

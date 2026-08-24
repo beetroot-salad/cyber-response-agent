@@ -851,10 +851,13 @@ def test_the_box_start_fault_removes_the_container_it_created(tmp_path):
         box_mod.start_box(run_tree(tmp_path), DEFENDER, docker=rec)
 
     # AFTER the create, and naming what create made — `_box665.reaped_after_create` carries
-    # why the two obvious spellings say nothing here (`start_box` opens with an unconditional
-    # pre-create `docker rm -f <name>`), and it is shared rather than restated so a future
-    # weakening cannot land on one arm's copy alone. It is the assertion #884 F-29 slipped past
-    # on the sibling create arm.
+    # why the two obvious spellings say nothing on the paths that DO pre-create reap, and it
+    # is shared rather than restated so a future weakening cannot land on one arm's copy
+    # alone. (Since #955 F-49 the pre-create reap is CONDITIONAL on a finished container, and
+    # this double reports the name as holding nothing, so no pre-create `rm -f` is issued here
+    # at all — the position check is a superset of what the weaker spellings would prove, not
+    # a workaround for them.) It is the assertion #884 F-29 slipped past on the sibling create
+    # arm.
     assert reaped_after_create(rec.calls), "the faulted start left its container running"
 
 

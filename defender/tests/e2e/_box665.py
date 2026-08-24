@@ -110,16 +110,18 @@ class RecordingDocker:
     captured `create_argv`. Faults are injected per subcommand and cite a claim."""
 
     def __init__(
-        self, *, running: bool = False, create: DockerFault | None = None,
+        self, *, create: DockerFault | None = None,
         sentinel: DockerFault | None = None, reap: DockerFault | None = None,
         exec_replies: list | None = None, existing_token: str | None = None,
         status: str | None = None,
     ):
-        # What `docker inspect -f {{.State.Status}}` answers, when a test needs a state the
-        # `running` flag cannot spell. `created` is the one that matters (#955 F-49): it is
-        # where a concurrent lane's box sits for the whole window two lanes can collide on one
-        # name, and it is indistinguishable from our own box between create and start. Left
-        # `None`, the `running` flag decides, so every pre-#955 case reads as it always did.
+        # What `docker inspect -f {{.State.Status}}` answers — docker's own word, or `None`
+        # for a name holding NOTHING (rc 1, as a real daemon answers). One knob, because there
+        # is one fact: a `running: bool` beside it could not spell `created`, which is the
+        # state that matters (#955 F-49) — where a concurrent lane's box sits for the whole
+        # window two lanes can collide on one name, indistinguishable from our own box between
+        # create and start — and two knobs for one fact means a test can state both and only
+        # one of them is read.
         self.status = status
         # What a `docker inspect` of the START-TOKEN LABEL finds under this name (#884 F-29's
         # ownership check). Three states, and the middle one is the whole point:
@@ -129,7 +131,6 @@ class RecordingDocker:
         #   <other>  another lane's box holding the same name: a create that lost a NAME
         #            RACE, which must survive whatever state it is in
         self.existing_token = existing_token
-        self.running = running          # _is_running → a LIVE same-name container (F3/po4)
         self.create = create            # DockerFault on `docker run` (create)
         self.sentinel = sentinel        # DockerFault on the sentinel exec readback
         self.reap = reap                # DockerFault on `docker rm -f`
@@ -138,14 +139,21 @@ class RecordingDocker:
         self.create_argv: list[str] | None = None
 
     def _inspect(self, argv: list[str]) -> subprocess.CompletedProcess:
-        """`docker inspect -f …`, which box.py asks two different questions through: the
-        container's STATE (`_is_running`) and its start-token LABEL (`_start_token`). The
-        format string is what separates them, exactly as it does on a real daemon."""
-        fmt = argv[argv.index("-f") + 1] if "-f" in argv else ""
+        """`docker inspect`, which box.py asks THREE different questions through: the
+        container's STATE (`_container_status`, `-f {{.State.Status}}`), its start-token LABEL
+        (`_start_token`, `-f {{index .Config.Labels …}}`), and this process's own MOUNT TABLE
+        (`_own_container_mounts`, `--format {{range .Mounts}}…`). The format string is what
+        separates them, exactly as it does on a real daemon — and the third asks with
+        `--format`, not `-f`, so a reply keyed on `-f` alone answered it with a state word."""
+        if "-f" not in argv:
+            # `--format`: the DooD mount table. Empty rather than a state word — this double
+            # models a container NAME, not this process's own bind mounts.
+            return _cp(0, "")
+        fmt = argv[argv.index("-f") + 1]
         if "Config.Labels" not in fmt:
             if self.status is not None:
                 return _cp(0, f"{self.status}\n")
-            return _cp(0, "running\n") if self.running else _cp(1, "", "No such object\n")
+            return _cp(1, "", "No such object\n")
         if self.existing_token is None:
             return _cp(1, "", "No such object\n")
         token = self.existing_token

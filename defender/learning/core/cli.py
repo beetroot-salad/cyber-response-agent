@@ -4,15 +4,10 @@ import sys
 from pathlib import Path
 from collections.abc import Callable
 
-from defender.learning.core.config import RunUnprocessable
+from defender.learning.core.config import RunAlreadyLive, RunUnprocessable
 from defender.learning.core.drains import author_drain, lead_author_drain
 from defender.learning.core.faults import SYSTEMIC_FAULTS
-from defender.learning.core.run_cycle import (
-    NOT_LEARNED,
-    UNLEARNABLE,
-    learn_drain,
-    run_one,
-)
+from defender.learning.core.run_cycle import learn_drain, run_one
 
 
 _HELP_EPILOG = """\
@@ -69,10 +64,13 @@ run; a SIEM-free worker drains it with `python3 defender/learning/loop.py --lear
 (running this LEARN stage + re-rendering each transcript). `python3
 defender/learning/loop.py <run_dir>` runs LEARN directly for a single run (re-processing).
 
-Exit codes: 0 success / 0 skipped (no direction, or actor SKIP) / 2 StageAbort (systemic
-fault — fix the deployment) / 2 RunUnprocessable on a direct single run (bad run data) /
-1 usage. On a drain, a RunUnprocessable is a bug (the per-item guards should have caught
-it), so it propagates uncaught rather than masquerading as a clean exit 2.
+Exit codes: 0 success / 0 skipped (no direction, or actor SKIP) / 0 REFUSED because another
+pass already holds this run's lock (`RunAlreadyLive` — nothing ran; the stderr line is the
+only signal, because blocking would hang the terminal behind a full learning cycle and a
+non-zero code would fail a wrapper over a condition that is nobody's error) / 2 StageAbort
+(systemic fault — fix the deployment) / 2 RunUnprocessable on a direct single run (bad run
+data) / 1 usage. On a drain, a RunUnprocessable is a bug (the per-item guards should have
+caught it), so it propagates uncaught rather than masquerading as a clean exit 2.
 """
 
 
@@ -88,6 +86,13 @@ def _run_stage(stage: Callable[[], int], *, allow_run_error: bool = False) -> in
         if e.__context__ is not None:
             print(f"[loop] FATAL: ...it displaced: {e.__context__!r}", file=sys.stderr)
         return 2
+    except RunAlreadyLive as e:
+        # Not an error and not a traceback: a human asking for a run the worker already holds
+        # has made no mistake, and blocking would hang their terminal behind a full learning
+        # cycle. `run_one` raises this so the DRAIN can keep the queue marker; the CLI's own
+        # answer is the one #955 F-49 chose — say so, do nothing, exit clean.
+        print(f"[loop] {e}", file=sys.stderr)
+        return 0
     except RunUnprocessable as e:
         if not allow_run_error:
             raise
@@ -163,15 +168,4 @@ def main(argv: list[str]) -> int:
     if not run_dir.is_dir():
         print(f"not a directory: {run_dir}", file=sys.stderr)
         return 1
-    # A TRANSIENT REFUSAL IS NOT A PROCESS ERROR. `run_one`'s refusal codes exist so the learn
-    # drain can tell "learned" from "left for another pass"; a hand-run pass on a run another
-    # lane holds has done nothing wrong and must not exit non-zero.
-    #
-    # `UNLEARNABLE` is the other half and does NOT map to 0. It means "no pass will ever learn
-    # this run" — today a run id failing the grammar its lock file and container name are both
-    # derived from — which is bad run data, the case this command's own exit-code contract
-    # already spells 2. Reported as success, a CI step or a wrapper gating on `$?` treats a
-    # permanently unprocessable run as processed; the drain's own arm QUARANTINES it, and the
-    # two lanes must not disagree about whether that is a failure.
-    outcome = _run_stage(lambda: run_one(run_dir), allow_run_error=True)
-    return {NOT_LEARNED: 0, UNLEARNABLE: 2}.get(outcome, outcome)
+    return _run_stage(lambda: run_one(run_dir), allow_run_error=True)
