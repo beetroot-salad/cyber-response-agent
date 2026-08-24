@@ -259,6 +259,46 @@ def test_a_lead_no_dispatch_accounts_for_survives_every_branch_point(tmp_path):
         f"the undispatched lead was dropped at some branch point: {everywhere}")
 
 
+def test_a_lead_named_only_by_a_table_row_still_crosses(tmp_path):
+    """    A lead whose only trace is a row in `executed_queries.jsonl` survives truncation too.
+
+    The third leg of the census, and the shape it has on a real run is a lead whose payload was
+    LOST: `persist_payload` answers `None` when the sidecar cannot be written (a full disk, a
+    `guarded_mkdir` refusal) and `record_query` writes the row anyway with no `payload_path`
+    behind it, deliberately — the row is the evidence that the call happened at all. Nothing
+    else in the run dir then names that lead.
+
+    Dropped from the census, its row is cut out of the sibling's inherited table, and the
+    sibling's own account of what its prefix did loses a call the prefix genuinely made — while
+    `repeat_note` and `_next_seq`, which read the table, stop seeing a question this defender
+    has already asked.
+
+    Same before/after as its two siblings: read once without the row and once with it, over one
+    run dir, so a census that never reads the table returns the same set twice and fails here."""
+    tabled = "l-tableonly"
+    store, run_dir, session_id, returns = gathering_source(tmp_path)
+    target = sibling_dir(tmp_path)
+
+    assert tabled not in branch_mod().leads_at(store, session_id, returns[0], run_dir), (
+        "the fixture's lead is already known through an artifact, so this arm would pass "
+        "against a census that never reads the queries table")
+    with RunPaths(run_dir).executed_queries.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps({
+            "lead_id": tabled, "seq": 0, "system": "elastic", "verb": "esql",
+            "query_id": "elastic.sshd-failed-by-srcip", "params": {"lead": tabled},
+            "payload_path": None, "exit_code": 0, "payload_status": "ok",
+        }) + "\n")
+
+    everywhere = [branch_mod().leads_at(store, session_id, at, run_dir) for at in returns]
+    assert all(tabled in leads for leads in everywhere), (
+        f"a lead named only by its table row is invisible to the lead census ({everywhere}) — "
+        "the sibling's inherited table loses a call its own prefix made")
+
+    resume(store, run_dir, returns[1], target)
+
+    assert tabled in {r["lead_id"] for r in read_jsonl_rows(RunPaths(target).executed_queries)}
+
+
 def test_a_lead_claimed_without_a_captured_row_still_crosses(tmp_path):
     """    A lead the source run CLAIMED but recorded no query for is still inherited.
 
@@ -287,6 +327,48 @@ def test_a_lead_claimed_without_a_captured_row_still_crosses(tmp_path):
     resume(store, run_dir, returns[1], target)
 
     assert (RunPaths(target).gather_raw / f"{claimed}.lead.json").is_file()
+
+
+def test_a_lead_known_only_by_its_summary_still_crosses(tmp_path):
+    """    A lead named by nothing but `gather_summaries/{lead}.md` survives truncation too.
+
+    The third source of the lead census, and the one with NO backstop. The claim-only lead
+    beside it is protected twice over — `claim_lead` writes `{lead}.lead.json` as an exclusive
+    create, so a sibling that re-used that id would at least be REFUSED. A summary-only lead has
+    no claim sidecar, so the reuse gate never fires: the sibling mints the id again, writes a
+    second `gather_summaries/{lead}.md` over a lead of its own, and the two runs' summaries
+    occupy one filename with nothing anywhere reporting a collision. Dropping this lead is
+    therefore quieter than dropping either of the others, which is why it is pinned rather than
+    left to the union's shape.
+
+    `{lead}.md` maps back through the same first-dot split the payload sidecars use
+    (`l-x.md` -> `l-x`), so the summaries directory names leads in exactly the sense the other
+    two sources do.
+
+    THE BEFORE/AFTER IS THE DISCRIMINATOR. The set is read once with the summary absent and once
+    with it present, over one run dir, so the only thing that differs between the two answers is
+    that file: a census built from the table and `gather_raw/` alone returns the same set twice
+    and fails here. The first read doubles as the fixture's own integrity check — if this lead
+    were reachable some other way, the arm would be measuring that other way."""
+    summarized = "l-summonly"
+    store, run_dir, session_id, returns = gathering_source(tmp_path)
+    summary = run_dir / "gather_summaries" / f"{summarized}.md"
+    target = sibling_dir(tmp_path)
+
+    assert summarized not in branch_mod().leads_at(store, session_id, returns[0], run_dir), (
+        "the fixture's lead is already known through the table or `gather_raw/`, so this arm "
+        "would pass against a census that never reads the summaries")
+    summary.write_text(f"# {summarized}\nwhat this lead measured\n", encoding="utf-8")
+
+    everywhere = [branch_mod().leads_at(store, session_id, at, run_dir) for at in returns]
+    assert all(summarized in leads for leads in everywhere), (
+        f"a lead named only by its summary is invisible to the lead census ({everywhere}) — its "
+        "summary is left behind, and with no claim sidecar nothing stops the sibling re-using "
+        "the id and writing a second run's summary over that filename")
+
+    resume(store, run_dir, returns[1], target)
+
+    assert (target / "gather_summaries" / f"{summarized}.md").is_file()
 
 
 def test_a_refused_dispatch_does_not_land_for_whoever_reuses_its_call_id(tmp_path):
