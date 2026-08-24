@@ -47,7 +47,24 @@ REFUSED = "refused"
 #: name different faults — a world that cannot be staged is the harness's, an estate that is
 #: down is the environment's, and the circuit breaker already tells them apart by exit code.
 FAULT = "fault"
-SOURCES = frozenset({BASE, STAGED, PATCHED, PASSTHROUGH, REFUSED, FAULT})
+#: The payload came from the SOURCE RUN's capture, primed before any sibling forked. Its own
+#: class because `base` no longer means what it meant: #920 defines the base world as "whatever
+#: the real adapters returned during the real run", and a row read live by whichever sibling
+#: asked first is the estate NOW, not the estate as captured. The two are the same only on a
+#: quiet estate, and nothing in a table that could not tell them apart would ever say so.
+#:
+#: Only the primer writes it, and the primer does not go through `record` — see the refusal
+#: there. A row a sibling could stamp `captured` would be a live read wearing capture
+#: provenance, which every downstream reader would believe.
+CAPTURED = "captured"
+SOURCES = frozenset({BASE, STAGED, PATCHED, PASSTHROUGH, REFUSED, FAULT, CAPTURED})
+#: The two labels that belong to the FAMILY tier — the rows every sibling replays, spelled
+#: `world_id=None`. `captured` is the capture; `base` is now the narrower thing it always
+#: honestly was, a live read of a key the capture never recorded, which only happens because a
+#: sibling asks questions its source never did. Counting `base` rows across a family therefore
+#: measures exactly that residual, which is the one part of the estate a primed base cannot
+#: make deterministic.
+FAMILY_SOURCES = frozenset({BASE, CAPTURED})
 #: The subset an APPLIER may name. `base` is the family TIER's label, not a decision — it is
 #: written by `_base_payload` alone, against `world_id=None` — and `refused`/`fault` are the
 #: seam's own, written when nothing got as far as a decision. Naming the three that are really
@@ -58,6 +75,32 @@ APPLIER_DECISIONS = frozenset({STAGED, PATCHED, PASSTHROUGH})
 
 class LedgerError(Exception):
     """A served response that cannot be honestly recorded."""
+
+
+#: The directory, under an episode, that holds the family's base and every world's own rows.
+SERVED_DIRNAME = "served"
+#: The family's capture, inside `SERVED_DIRNAME`. Named here because the primer writes it and
+#: every `Ledger` reads it, and a second spelling is how one starts writing where the other is
+#: not looking — with the run still green, because a missing base is indistinguishable from a
+#: key nobody asked.
+BASE_FILENAME = "base.jsonl"
+
+
+def payload_text(payload: Any) -> str:
+    """The canonical bytes for a payload, and the ONE spelling of them.
+
+    `sort_keys` is what makes two dumps of one answer compare equal, so a reader that spells
+    this differently does not merely look untidy — it produces a key that never matches. The
+    primer is the reason this lives here rather than beside its first caller: the source run's
+    captured sidecars were written WITHOUT `sort_keys`, so priming must load and re-dump through
+    exactly this, and a near-copy in a third module would make every primed row a permanent
+    miss with nothing red to show for it.
+
+    `default=str` keeps a value JSON has no spelling for — a `datetime`, a `Decimal`, a tuple —
+    from raising mid-serve, and it is applied on BOTH sides of that round trip, so the capture
+    and a live read degrade the same way.
+    """
+    return json.dumps(payload, sort_keys=True, default=str)
 
 
 def _is_json(text: str) -> bool:
@@ -167,14 +210,52 @@ class ServedCall:
 class Ledger:
     """The append-only record of one world's served calls, and the family's shared base.
 
-    Two tiers in one table, separated by `world_id`: `None` is the family's base payload for a
-    key — recorded once, replayed by every sibling — and a world id is that world's own. The
-    tiering is what makes a difference between siblings READABLE: everything off a world's
-    staged set is literally the same bytes, so a comparison only ever runs over rows that are
-    supposed to differ.
+    Two tiers, and they are now two FILES rather than two `world_id` values in one. `base_path`
+    is the family's capture, primed before any sibling forked and read-only for the whole run;
+    `path` is this world's own rows, and it has exactly one writer. The tiering is what makes a
+    difference between siblings READABLE: everything off a world's staged set is literally the
+    same bytes, so a comparison only ever runs over rows that are supposed to differ.
+
+    ONE WRITER PER FILE is the whole reason for the split, and it buys two things a shared file
+    could not. Siblings run in PARALLEL, and `append_jsonl` opens in text mode: a
+    multi-hundred-KB row is several `write()` calls, so two PROCESSES appending interleave into
+    a torn line that `read_jsonl_rows` then silently drops — the family's recording vanishing
+    with nothing in the table to show it. And the check-then-act race this class used to concede
+    ("both miss, both read live") cannot happen for a captured key at all, because nothing
+    writes the base tier while the run is in progress.
+
+    What the split does NOT close, stated so nobody reads more into it: a key the source run
+    never asked has no captured row, so each world reads it live and records its own `base` row.
+    Those rows are the residual, and counting them is how big it is.
     """
 
     path: Path
+    base_path: Path
+
+    @classmethod
+    def for_world(cls, episode_dir: Path, world_id: str) -> Ledger:
+        """This world's ledger under `episode_dir`, over the family's primed base.
+
+        A FACTORY rather than two paths at the call site, because "one writer per file" is the
+        property the whole split rests on and it is only true if two worlds can never be handed
+        the same path. Deriving it from the world id makes that structural.
+
+        The id is validated AS A FILENAME COMPONENT, which nothing upstream does: the registry
+        checks it is a non-empty string, and a stager checks it can name a corpus — and only
+        for a world that touches a staged system. Neither refuses `../base`, which would
+        resolve onto the family's own capture and let one world's rows be replayed by every
+        sibling as the estate.
+        """
+        if not isinstance(world_id, str) or not world_id:
+            raise LedgerError(
+                f"a world needs a non-empty string id to name its ledger, got {world_id!r}")
+        if world_id != Path(world_id).name or world_id in (".", ".."):
+            raise LedgerError(
+                f"world id {world_id!r} is not a single filename component — a world's rows are "
+                "a file beside the family's base, and an id carrying a separator would write "
+                "outside the episode or onto the capture its siblings replay")
+        served = Path(episode_dir) / SERVED_DIRNAME
+        return cls(path=served / f"{world_id}.jsonl", base_path=served / BASE_FILENAME)
 
     def __post_init__(self) -> None:
         #: THE FAMILY TIER ONLY, keyed by request key. `base_payload` is the sole reader and
@@ -182,62 +263,64 @@ class Ledger:
         #: full copy of every payload the run ever served — the table's own comment sizes those
         #: at 52KB each — for the life of the process, with nothing able to read them back.
         self._memo: dict[str, str] = {}
-        #: Bytes of `path` already absorbed into `_memo`. `_refresh` compares the file's size
-        #: against it and returns without reading when nothing has been appended since — which
-        #: is the ordinary case, because this process's own `record` keeps the memo current.
-        #: Without it every MISS re-read, re-parsed and re-keyed the whole table, and the table
-        #: grows by a full payload per served call: quadratic in bytes over a run, measured at
-        #: 5.5s and 858MB of re-reads for 120 calls at 52KB each.
-        self._absorbed = 0
-        #: `served` runs under `asyncio.to_thread`, and sibling gather leads dispatch in
-        #: parallel — so several threads reach `record` at once. `append_jsonl` opens in text
-        #: mode and a multi-hundred-KB row is several `write()` calls, which interleave into a
-        #: torn line that `read_jsonl_rows` then silently DROPS: the family's base recording
-        #: vanishes with nothing in the table to show it. One writer at a time closes that.
+        #: `served` runs under `asyncio.to_thread`, and this ONE world's gather leads dispatch
+        #: in parallel — so several threads reach `record` at once even though only one world
+        #: writes this file. Splitting the tiers closed the cross-PROCESS half of the tearing
+        #: problem; this is the cross-THREAD half, and it is untouched by the split.
         self._lock = threading.Lock()
-        self._refresh()
+        # THE BASE MUST ALREADY EXIST, and that refusal is the ordering guarantee. Priming runs
+        # once, before any sibling forks; a `Ledger` built against a missing base is a sibling
+        # that started early, and letting it through would mean every key missed the family tier
+        # and read the live estate — the run green, the episode worthless, and nothing in the
+        # record to say which. #920's fourth trap is this exact shape: "the seam fails open
+        # today", and a missed hook answering from the real estate instead of the capture.
+        if not self.base_path.is_file():
+            raise LedgerError(
+                f"no primed base at {self.base_path} — the family's capture is written once, "
+                "before any sibling forks, and a world serving without it reads the live estate "
+                "for every key while every row it writes still reads correctly")
+        # BASE FIRST, then this world's own, both first-row-wins: a captured answer outranks a
+        # live one left behind by a crashed earlier attempt at the same episode.
+        self._absorb(self.base_path)
+        self._absorb(self.path)
 
     def base_payload(self, system: str, verb: str, params: Any) -> str | None:
-        """The family's recorded answer for this key, if one world already asked it.
+        """The family's recorded answer for this key, if there is one.
 
-        A hit means NO adapter call: the estate is live, so two siblings querying it minutes
-        apart would see different data and the pair's whole invariance would be a fiction.
-        Recording once per family is what buys determinism back without snapshot-restore.
+        A hit means NO adapter call. For a CAPTURED key that is now a guarantee rather than a
+        race won: the base tier was primed before any sibling forked and nothing writes it while
+        the run is in progress, so every sibling replays the same bytes and there is no
+        check-then-act to lose. That is what the file split bought, and it is why this method no
+        longer re-reads anything.
 
-        A MISS RE-READS THE FILE before conceding. The memo is built at construction, so a
-        sibling running beside another in a separate process holds a snapshot from before that
-        one started writing: both miss, both call the live adapter, and the pair's two bases
-        are two different reads — the failure the family tier exists to prevent, arriving by
-        the one route it does not watch. This NARROWS that window; it does not close it: the
-        check-then-act spans the adapter call itself, so two siblings — in two processes, or
-        on two of this one's worker threads — can still both miss and both read live. Closing
-        it needs a per-key lock held ACROSS the adapter call, which this seam does not have.
+        For a key the capture never recorded — one a sibling invented, which it will, because a
+        sibling is continuing an investigation — there is no hit and no shared answer to have.
+        Each world reads live and records its own `base` row in its own file. Two worlds asking
+        the same invented question therefore get two live reads, which may differ; that residual
+        is real, it is not closed here, and the count of `base` rows across a family is its size.
         """
-        key = request_key(system, verb, params)
-        hit = self._memo.get(key)
-        if hit is not None:
-            return hit
-        self._refresh()
-        return self._memo.get(key)
+        return self._memo.get(request_key(system, verb, params))
 
-    def _refresh(self) -> None:
-        """Absorb the file, keeping whatever this process already holds.
+    def _absorb(self, path: Path) -> None:
+        """Fold one file's FAMILY-tier rows into the memo, first row wins.
 
-        THE ONE memo-building loop, and construction runs it too. Built twice, the two copies
-        resolved a duplicate key in opposite directions — construction kept the LAST row, this
-        kept the FIRST — so two siblings reading one file served different base payloads for
-        the same question, which is exactly the invariance the family tier exists to buy. One
-        loop, one rule: first row wins, which is the append-only reading of "recorded once".
+        THE ONE memo-building loop, run over the base and then over this world's own file.
+        First-row-wins is the append-only reading of "recorded once", and running one loop is
+        what stops two copies resolving a duplicate key in opposite directions — which they did,
+        one keeping the last row and one the first, so two siblings reading one file served
+        different base payloads for the same question.
         """
-        size = self.path.stat().st_size if self.path.is_file() else 0
-        if size == self._absorbed:
-            return
-        for row in read_jsonl_rows(self.path):
+        for row in read_jsonl_rows(path):
             # `str(...)`, not a cast: a torn or hand-edited row can carry anything, and the
             # tolerant reader's job is to hand back what is there rather than to vouch for it.
             # Keying on the coerced spelling keeps a malformed row addressable instead of
             # crashing the replay that has to notice it.
             text = row.get("payload_text")
+            if row.get("world_id") is not None:
+                # A world's OWN row, which nothing reads back: this memo answers the family tier
+                # and only the family tier. Absorbing it doubled the memo in payload bytes to
+                # answer a question no caller has.
+                continue
             # A row with no payload is not an ANSWER, and memoizing it as `""` would make
             # `base_payload` report a hit that `json.loads` then dies on — moving the crash one
             # frame down instead of tolerating the row. Nor is a row whose payload is not JSON:
@@ -246,22 +329,10 @@ class Ledger:
             # as exit 2 — an INFRA code, so one torn row counts against the circuit breaker.
             # Skipped either way, so the key falls through to the live adapter, which is the
             # honest reading of "nothing recorded".
-            if row.get("world_id") is not None:
-                # A world's OWN row, which nothing reads back: `base_payload` asks the family
-                # tier and only the family tier. Absorbing it doubled the memo in payload bytes
-                # to answer a question no caller has.
-                continue
             if not isinstance(text, str) or not text or not _is_json(text):
                 continue
             row_key = request_key(str(row.get("system")), str(row.get("verb")), row.get("params"))
             self._memo.setdefault(row_key, text)
-        # NEVER BACKWARDS. `size` was read before the loop, and `record` may have appended (and
-        # advanced `_absorbed` past it) while we were reading — so assigning it outright let a
-        # concurrent writer knock the counter below what is really absorbed, and `record`'s
-        # `before == self._absorbed` gate then stopped matching for the rest of the run: every
-        # later miss re-read and re-keyed the whole table, which is the cost this counter exists
-        # to remove. Measured at one full re-read per miss with a second writer on the path.
-        self._absorbed = max(self._absorbed, size)
 
     def record(self, call: ServedCall) -> ServedCall:
         if call.source not in SOURCES:
@@ -274,12 +345,24 @@ class Ledger:
         # world would put one world's answer in the slot its siblings read, and a world row with
         # no owner would be a difference nobody can attribute. That is the silent scenario
         # INJECTION the registry's own `world_id` check guards, arriving through the other door.
-        if (call.source == BASE) != (call.world_id is None):
+        if (call.source in FAMILY_SOURCES) != (call.world_id is None):
             raise LedgerError(
                 f"{call.system}.{call.verb} was recorded as {call.source!r} for world "
-                f"{call.world_id!r} — `base` is the FAMILY tier and is spelled `world_id=None`; "
-                "the two say the same thing and a row where they disagree is either one world's "
-                "answer offered as the shared recording, or a difference with no owner")
+                f"{call.world_id!r} — {sorted(FAMILY_SOURCES)} are the FAMILY tier and are "
+                "spelled `world_id=None`; the two say the same thing and a row where they "
+                "disagree is either one world's answer offered as the shared recording, or a "
+                "difference with no owner")
+        # CAPTURE PROVENANCE IS NOT A CLAIM A SERVED CALL MAY MAKE. `captured` asserts the
+        # payload came from the source run's own capture, and the only thing that can honestly
+        # assert that is the primer — which writes the base file directly, before any world
+        # exists, and never comes through here. Reachable this way, a live read would wear the
+        # one label that tells a reader "this was not read from the estate you are measuring",
+        # and every reader downstream would believe it.
+        if call.source == CAPTURED:
+            raise LedgerError(
+                f"{call.system}.{call.verb} was recorded as {CAPTURED!r} through the serving "
+                "path — only the primer may claim capture provenance, and it writes the base "
+                "file directly. A live read labelled `captured` is unfalsifiable downstream")
         # PERSIST FIRST, memoize only on success. Memoizing first meant a failed append left
         # the family's base payload live in memory with no row behind it: every later call for
         # that key took the hit, issued no adapter call, and served a payload the table cannot
@@ -293,23 +376,13 @@ class Ledger:
         row = call.row()
         key = call.key
         with self._lock:
-            before = self.path.stat().st_size if self.path.is_file() else 0
             append_jsonl(  # lint-unguarded-tree-write: ok — episode archive under the learning state root, host-side, outside every box mount
                 self.path, [row])
-            # Only when this process was current: if the file grew under us, another writer's
-            # rows are unabsorbed and the next miss has to re-read to see them. A writer that
-            # lands between our append and this `stat` is counted as absorbed when it is not —
-            # the cost is one redundant live read for that key, which is the same cross-process
-            # window `base_payload` already documents, not a wrong answer.
-            if before == self._absorbed:
-                self._absorbed = self.path.stat().st_size
             if call.world_id is None:
-                # FIRST ROW WINS, the rule `_refresh` absorbs the file under, and the same rule
-                # here because there is only one. Overwriting resolved a duplicate base key in
-                # the opposite direction: the window `base_payload` documents as still open lets
-                # two siblings both miss and both record, and this process then served the
-                # SECOND payload while any process rebuilding the memo from the file served the
-                # first. Two answers to one question, with both rows reading honestly — the
-                # invariance the family tier exists to buy, gone.
+                # FIRST ROW WINS, the rule `_absorb` folds a file under, and the same rule here
+                # because there is only one. This world's live read of a key the capture never
+                # held is recorded once and replayed by this world for the rest of the run;
+                # overwriting would let a second read of the same question answer differently
+                # mid-run, with both rows reading honestly.
                 self._memo.setdefault(key, call.payload_text)
         return call

@@ -22,6 +22,23 @@ still reaches lets the base run collect every sibling's staged documents — so 
 half cannot be admitted by reach and is admitted by DECLARATION instead: the estate registry
 hands the adapter a ctx naming the world, and `confine_index` resolves that world's views and
 no sibling's.
+
+THE SAME SPLIT RUNS THROUGH THE TIME WINDOW, and there it leaves a gap this module does not
+close. A branched run is pinned to its branch point's moment, so a payload cannot differ merely
+because one sibling executed later than another — the state adapters take that moment from the
+ctx, and `query`/`alerts` carry their window as `start`/`end` parameters, so an OMITTED upper
+bound is closed at the branch point before the search runs (`elastic_adapter._bounded_end`).
+A present bound is never rewritten: it is a scenario-timeline value the model chose, routinely
+months from the wall clock, so clamping it would truncate the alert's own window.
+
+`esql` has no such parameter. Its window is `| WHERE @timestamp >= "..."` INSIDE the body, so
+bounding it would mean editing a pipe stage — general query-language surgery, which everything
+above refuses for the reason `_METADATA` and `_one_source` refuse their own near-misses: every
+failure mode is a SILENT half-application, and a predicate this module half-understood would
+narrow evidence rather than omit it. So the bound is the model's to write, and the resumed run
+is TOLD the date instead (`driver._branch_clock`). All 12 committed `esql` templates already
+carry `< "${end}"`, so today this costs nothing; an ad-hoc query that omits an upper bound
+reads the live tail, and this paragraph is what speaks up when that starts to matter.
 """
 
 from __future__ import annotations

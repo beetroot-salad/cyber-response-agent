@@ -10,6 +10,7 @@ import types
 import typing
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Union, get_args, get_origin
 
@@ -72,6 +73,27 @@ class VerbContext:
     #: twenty-odd `VerbContext(...)` sites builds an unbranched run and should keep reading
     #: as one.
     world_id: str | None = None
+    #: The moment this call is being served AS OF, when it is being served for a branched
+    #: world. `None` is the ordinary run and the base world alike — both are executing now, so
+    #: both mint from the wall clock.
+    #:
+    #: Set by the estate registry, never by a model, and threaded UNCONDITIONALLY rather than
+    #: only on staged calls the way `world_id` is: a declaration widens what a call may reach
+    #: and so must be scoped to the call that earned it, while a clock admits nothing and
+    #: narrows nothing. The adapter that stamps a payload with the wall clock is the one that
+    #: makes an episode unreplayable, and it is never a staged one.
+    #:
+    #: A `datetime`, not a preformatted string: the MOMENT is the shared fact and the spelling
+    #: belongs to whoever stamps it — one system's payload contract is a trailing `Z`, another
+    #: accepts either, and a string would force every consumer to reparse to compare. Not
+    #: a callable either: a plain function as a dataclass default binds through the descriptor
+    #: protocol, so `ctx.clock()` would pass `ctx` as its first argument and raise `TypeError`
+    #: inside a verb body — which the query tool files as exit 2, an INFRA code the circuit
+    #: breaker reads as the estate being down for this sibling and up for its base.
+    #:
+    #: Appended LAST rather than inserted, so the twenty-odd positional `VerbContext(...)`
+    #: sites keep meaning what they meant.
+    as_of: datetime | None = None
 
 
 Verb = Callable[..., Any]

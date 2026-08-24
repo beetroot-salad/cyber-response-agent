@@ -10,6 +10,7 @@ from pathlib import Path as _Path
 if (_root := str(_Path(__file__).resolve().parents[3])) not in _sys.path:
     _sys.path.insert(0, _root)
 
+from defender import _clock
 from defender.runtime.verbs import VerbContext, verb
 from defender.scripts.adapters import _stub_transport as transport
 from defender.scripts.adapters.confinement import confine_index, guard_outbound
@@ -218,10 +219,38 @@ def _search_verb(  # noqa: PLR0913 — the two search verbs' shared body, one pa
         world_id=getattr(ctx, "world_id", None),
     )
     docs, total, truncated = _search(
-        ctx, config, resolved, native_query, start, end,
+        ctx, config, resolved, native_query, start, _bounded_end(ctx, end),
         time_field="@timestamp", limit=limit, sort=sort,
     )
     return search_envelope(resolved, docs, total, truncated, sort)
+
+
+def _bounded_end(ctx: VerbContext, end: str | None) -> str | None:
+    """The window's upper bound, closed at the run's own clock when the caller left it open.
+
+    `_build_search_body` emits NO range filter at all when both bounds are falsy, and this
+    index is a live agent stream sorted `desc` under a 20-doc cap — so an unbounded search
+    returns "the newest documents right now". That is the elastic twin of the host-state
+    adapter's wall-clock `captured_at`: a served payload that is not a function of the question
+    asked, and the reason an episode replayed a week later reads a different corpus.
+
+    A PRESENT `end` is never touched. It is a scenario-timeline value the model chose — the
+    corpus routinely puts it months from the wall clock — so clamping it to `as_of` would
+    truncate the alert's own window in service of a determinism the caller had already bought
+    by bounding the query.
+
+    THE START IS LEFT OPEN on purpose. An absent lower bound means "from the beginning of the
+    index", and the past does not change; only the open END admits documents that did not exist
+    when the branch point was written.
+
+    A NEW LOCAL rather than rebinding `end`, so the parameter keeps meaning what the caller
+    passed — and, downstream, so `params` is never perturbed: the estate seam reads
+    `prepared != params` to decide whether STAGING moved a call, and a window filled here would
+    make an unstaged call look staged, widening the world declaration and writing an
+    `asked_params` column whose whole meaning is "staging moved it".
+    """
+    at = getattr(ctx, "as_of", None)
+    return end if end is not None or at is None else _clock.z_seconds(at)
 
 
 def search_envelope(index: str, docs: list, total: int, truncated: bool, sort: str) -> dict:

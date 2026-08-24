@@ -18,16 +18,22 @@ from __future__ import annotations
 
 import contextlib
 import json
-import shutil
 import sqlite3
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from pydantic_ai.messages import RetryPromptPart, ToolCallPart, ToolReturnPart
 
-from defender._io import read_jsonl_rows, read_text_soft, write_guarded
-from defender._run_paths import RunPaths
+from defender._io import (
+    guarded_mkdir,
+    read_jsonl_rows,
+    read_text_soft,
+    read_text_utf8,
+    write_guarded,
+)
+from defender._run_paths import RunPaths, artifact_dir, artifact_file
 from defender.scripts.gather_tools.record_query import is_reserved_query_id
 
 from . import session_store
@@ -46,11 +52,20 @@ class BranchSpec:
     ("close it when the evidence supports a disposition") biased the run toward closing over
     gathering. The prompt is part of the measured instrument, so it belongs to whoever is
     running the measurement, not to the seam.
+
+    `as_of` is the branch point's own moment — the time the sibling is resuming INTO. It is
+    REQUIRED rather than defaulted, because the one wrong answer is the silent one: a spec that
+    fell back to "now" would let every sibling stamp its payloads with the afternoon it
+    executed, which is exactly the defect the field exists to remove, arriving through the
+    field itself. `branch_point_time` derives it from the source store; `validate` refuses a
+    spec whose value disagrees with that derivation, so a hand-written or copy-pasted spec
+    cannot carry another branch point's clock into this episode.
     """
 
     source_run_dir: Path
     branch_message_id: int
     continuation_prompt: str
+    as_of: datetime
 
 
 def open_source_store(run_dir: Path) -> Any:
@@ -195,13 +210,29 @@ def _appended_text(part: Any) -> str:
     read as no text rather than raised on: this counts what landed, and a call whose args
     cannot be read is one whose fences cannot be attributed either way.
     """
+    return _call_args(part).get("text", "")
+
+
+def _call_args(part: Any) -> dict:
+    """A `ToolCallPart`'s arguments as a dict, however the framework spelled them.
+
+    `args` is a dict on the ordinary path and a JSON STRING when the provider hands back
+    unparsed arguments — both shapes reach the store, and a reader that knew only the first
+    would silently score every one of the other's calls as carrying nothing. Anything else
+    reads as no arguments rather than raising: these callers COUNT what landed, and a call
+    whose args cannot be read is one whose effect cannot be attributed either way.
+
+    One reader because two would drift, and the drift is invisible: `_appended_text` and
+    `leads_at` both walk the same session for the same shapes, so a fix applied to one would
+    leave the other scoring a provider's calls at zero with nothing red.
+    """
     args = getattr(part, "args", None)
     if isinstance(args, str):
         try:
             args = json.loads(args)
         except ValueError:
-            return ""
-    return args.get("text", "") if isinstance(args, dict) else ""
+            return {}
+    return args if isinstance(args, dict) else {}
 
 
 def main_session(store: Any) -> str:
@@ -235,14 +266,104 @@ def source_session(store: Any, spec: BranchSpec) -> str:
     right. The same fallback `visualize_run` resolves its transcript through, spelled once here
     so the branch seam and the renderer cannot disagree about which session is a run's own.
     """
+    return session_for_run(store, Path(spec.source_run_dir))
+
+
+def session_for_run(store: Any, run_dir: Path) -> str:
+    """`source_session`'s answer, asked of a RUN DIR rather than of a spec.
+
+    Split out because T0 has to be derived BEFORE a `BranchSpec` exists — the spec carries
+    `as_of`, so anything that computes it cannot already hold one. Same rule, one spelling: a
+    second "which session does this run own" would be free to disagree with the branch seam
+    about exactly the question `attach_case_pointer` was added to settle.
+    """
     try:
-        recorded = session_store.resolve_session_id(Path(spec.source_run_dir))
+        recorded = session_store.resolve_session_id(Path(run_dir))
     except (OSError, ValueError):
         # A run dir with no readable pointer is one `open_source_store` has already refused on
         # the path that opens a store; reached any other way, the root is the honest fallback
         # and the refusals below still name what they find.
         recorded = None
     return recorded if recorded is not None else main_session(store)
+
+
+def branch_point_time(store: Any, run_dir: Path, branch_message_id: int) -> datetime:
+    """The moment the branch point was written — the clock a sibling resumes INTO.
+
+    Read off the STORE rather than the run dir's mtimes or the wall clock, because the store is
+    the only thing that knows when each message landed. `ModelRequest` and `ModelResponse` both
+    carry a `timestamp`, and the store round-trips it through pydantic-ai's own type adapter, so
+    the value is the framework's rather than one this module mints.
+
+    THE MAXIMUM over the prefix, not the branch row's own stamp. The rows are written in path
+    order but a resumed lineage can interleave, and a T0 EARLIER than some message the sibling
+    inherits would put the sibling before its own evidence — the one relationship the whole
+    design rests on. The max is the honest reading of "everything in the prefix has happened".
+
+    TRUNCATED TO WHOLE SECONDS, at the derivation and nowhere else. `_clock.Z_SECONDS` drops
+    sub-second precision, so a microsecond-bearing T0 formats to a string that no longer
+    round-trips to it — and `validate`'s cross-check would then reject the very spec this
+    function produced, for a difference no reader can see.
+    """
+    session = session_for_run(store, run_dir)
+    path = session_store.path_row_ids(store, session)
+    if branch_message_id not in path:
+        raise BranchError(
+            f"message {branch_message_id} is not on {run_dir}'s own main session, so it has no "
+            "branch-point time — the id has to be one this run's main path actually holds")
+    prefix = session_store.hydrate(store, session, role="analysis")
+    return _as_of_of(prefix[: path.index(branch_message_id) + 1], run_dir, branch_message_id)
+
+
+def _as_of_of(prefix: list, run_dir: Path, branch_message_id: int) -> datetime:
+    """T0 from an already-hydrated prefix slice.
+
+    The rule lives here alone so `branch_point_time` (which hydrates) and `validate` (which
+    already has the slice in hand) cannot compute it two ways — the failure that would produce
+    is a spec this module derived and then refused on its own cross-check.
+    """
+    stamps = [
+        at for at in (getattr(message, "timestamp", None) for message in prefix)
+        if isinstance(at, datetime)
+    ]
+    if not stamps:
+        # Every message class pydantic-ai defines carries a timestamp, so an empty set means the
+        # prefix is not what this function was pointed at. Falling back to the wall clock here
+        # would hand back "now" under the name of a branch point, which is the defect `as_of`
+        # exists to remove — arriving through its own derivation, and invisible afterwards.
+        raise BranchError(
+            f"no message at or before {branch_message_id} in {run_dir} carries a timestamp, so "
+            "the branch point has no moment to resume into")
+    latest = max(stamps)
+    aware = latest if latest.tzinfo is not None else latest.replace(tzinfo=UTC)
+    return aware.astimezone(UTC).replace(microsecond=0)
+
+
+def _refuse_bad_as_of(spec: BranchSpec, derived: datetime) -> None:
+    """Refuse a spec whose clock is not this branch point's.
+
+    Two failures, one raise-site. A NAIVE or non-UTC `as_of` formats a trailing `Z` that lies by
+    the host's offset, and nothing downstream can tell that from a correct stamp. A value that
+    disagrees with `branch_point_time` is a spec carrying ANOTHER branch point's clock — the
+    copy-paste case — and it lands as an episode whose siblings agree with each other and with
+    nothing else, which no comparison can detect from the inside.
+    """
+    at = spec.as_of
+    if not isinstance(at, datetime):
+        raise BranchError(
+            f"as_of must be a datetime, got {at!r} — a branch point without a moment cannot "
+            "pin the clock its siblings resume into")
+    if at.tzinfo is None or at.utcoffset() != timedelta(0):
+        raise BranchError(
+            f"as_of must be an aware UTC datetime, got {at!r} (offset {at.utcoffset()!r}) — a "
+            "naive or offset value formats a trailing `Z` that lies by that offset, and every "
+            "payload stamped from it is then wrong by the same amount with nothing to show it")
+    if at != derived:
+        raise BranchError(
+            f"as_of is {at.isoformat()} but message {spec.branch_message_id} of "
+            f"{spec.source_run_dir} was written at {derived.isoformat()} — a spec carrying "
+            "another branch point's clock yields an episode whose siblings agree with each "
+            "other and with nothing else")
 
 
 def frontier_at_branch(store: Any, spec: BranchSpec):
@@ -264,6 +385,101 @@ def frontier_at_branch(store: Any, spec: BranchSpec):
     return frontier_at(
         document,
         fence_count_at(store, source_session(store, spec), spec.branch_message_id, document))
+
+
+#: The tool whose call/return pair is the only join from a message id to a run's evidence.
+#:
+#: THE NAME pydantic-ai REGISTERS, which is the function's: `@main_agent.tool async def gather`
+#: in `tools_gather`. Spelled wrong, this matches no part in any message — `dispatched` stays
+#: empty, the lead-0 set difference below degenerates to the WHOLE table, and every sibling
+#: inherits every lead its source ever gathered while `leads_at` reports a clean answer.
+_DISPATCH_TOOL = "gather"
+
+
+def leads_at(store: Any, session_id: str, branch_message_id: int, run_dir: Path) -> set[str]:
+    """Which gather leads the run held by `branch_message_id`.
+
+    THE LEAD IS THE JOIN, because there is no other. `append_query_row` writes thirteen frozen
+    keys and not one of them is a timestamp or a message id, so a query row cannot be dated
+    against the session directly. What it does carry is `lead_id`, and every lead enters through
+    a `gather` call/return pair in MAIN's own transcript — so the session dates the
+    lead, and the lead dates its rows.
+
+    THE RETURN is what makes a lead count, mirroring `fence_count_at` for the same reason: the
+    return is the half the prefix agrees with, so a lead counts exactly when the inherited
+    history shows the model learning it exists. A `RetryPromptPart` drops the claim, because a
+    refused dispatch claims nothing and its `tool_call_id` may be reused.
+
+    UNDER-COUNTING IS THE SILENT DIRECTION AND IT IS CORRECT. A dispatch whose return had not
+    landed by the branch point is dropped — and it should be: the prefix does not carry that
+    return either, so the resumed model has no idea the lead exists and would be reasoning over
+    evidence its own history cannot cite. Do not "fix" this to count the call.
+
+    LEADS NO DISPATCH ACCOUNTS FOR ARE KEPT, always. Lead-0 writes its rows before the model's
+    first turn, so no dispatch in any session explains them and they are present at every branch
+    point. Derived as a set difference against the table rather than by naming the reserved ids,
+    for the same reason `fence_count_at` does not hardcode lead-0's fence: the ids are lead-0's
+    business, and a copy here would be a second place to update when they change.
+
+    The subtrahend is every lead a dispatch NAMED, not every lead that returned — see the
+    comment at the call site. Those are different sets exactly when a run ended with a dispatch
+    outstanding, and taking the narrower one silently reclassifies that lead as lead-0's.
+    """
+    ids = session_store.path_row_ids(store, session_id)
+    messages = session_store.hydrate(store, session_id, role="analysis")
+    pending: dict[str, str] = {}
+    dispatched: set[str] = set()
+    landed: set[str] = set()
+    for row_id, message in zip(ids, messages, strict=True):
+        for part in getattr(message, "parts", []):
+            if getattr(part, "tool_name", None) != _DISPATCH_TOOL:
+                continue
+            if isinstance(part, ToolCallPart):
+                lead_id = _call_args(part).get("lead_id")
+                if isinstance(lead_id, str) and lead_id:
+                    pending[part.tool_call_id] = lead_id
+                    # EVERY LEAD A DISPATCH NAMED, whether or not it ever returned — this set is
+                    # subtracted below to find lead-0's, and the question it has to answer is
+                    # "did the model ask for this lead?", not "did it hear back?". Recorded on
+                    # the RETURN instead, a lead dispatched and never answered — a run killed
+                    # mid-gather, or a dispatch still in flight at the tip — is absent here,
+                    # falls through the subtraction as if lead-0 had written it, and its
+                    # evidence is inherited by every sibling whose prefix never shows it
+                    # returning. That is the leak this whole function exists to close, arriving
+                    # through its one fallback.
+                    dispatched.add(lead_id)
+            elif isinstance(part, RetryPromptPart):
+                pending.pop(part.tool_call_id, None)
+            elif isinstance(part, ToolReturnPart):
+                claimed = pending.pop(part.tool_call_id, None)
+                if claimed is not None and row_id <= branch_message_id:
+                    landed.add(claimed)
+    return landed | (_known_leads(run_dir) - dispatched)
+
+
+def _known_leads(run_dir: Path) -> set[str]:
+    """Every lead this run dir names, by any of the three artifacts that name one.
+
+    THE TABLE IS NOT THE CENSUS. A lead is CLAIMED before it runs — `claim_lead` writes
+    `gather_raw/{lead}.lead.json` as an exclusive create, and that sidecar is the reuse gate —
+    so a lead can exist with no query row at all: it claimed, gathered nothing, and left only
+    the claim. Lead-0's correlation lead is exactly that shape.
+
+    Reading only the table therefore drops such a lead out of the set difference below, and the
+    sibling inherits no claim for it — after which the resumed run re-dispatches an id its own
+    prefix already used, `claim_lead` refuses the reuse, and turn-0 work is redone or lost. The
+    sidecar is what `e2e/test_920_branch_resume` pins, and it is why the census is over
+    ARTIFACTS rather than over rows.
+    """
+    paths = RunPaths(run_dir)
+    known = {
+        str(row.get("lead_id")) for row in read_jsonl_rows(paths.executed_queries)
+        if row.get("lead_id")
+    }
+    for directory in (paths.gather_raw, run_dir / "gather_summaries"):
+        if directory.is_dir():
+            known |= {_lead_of(entry.name) for entry in directory.iterdir()}
+    return {lead for lead in known if lead}
 
 
 #: What a sibling inherits from the source RUN DIR, beside the document.
@@ -381,12 +597,15 @@ def seed_investigation(store: Any, spec: BranchSpec | None, run_dir: Path) -> in
     # target — so a planted symlink at the sibling's `investigation.md` is replaced instead of
     # followed. The same lane `_tool_append_block` writes this file through.
     write_guarded(target, text[: bounds[fences - 1].end()] if fences else "")
-    _inherit_evidence(Path(spec.source_run_dir), Path(run_dir))
+    _inherit_evidence(
+        Path(spec.source_run_dir), Path(run_dir),
+        leads_at(store, source_session(store, spec), spec.branch_message_id,
+                 Path(spec.source_run_dir)))
     return fences
 
 
-def _inherit_evidence(source_run_dir: Path, run_dir: Path) -> None:
-    """Copy the run-dir artifacts the inherited prefix REFERS TO into the sibling's run dir.
+def _inherit_evidence(source_run_dir: Path, run_dir: Path, leads: set[str]) -> None:
+    """Copy the evidence the inherited prefix REFERS TO into the sibling's run dir.
 
     COPIED, not shared or symlinked. The sibling appends to `executed_queries.jsonl` and writes
     new payload sidecars beside the old ones, and a link would put those writes into the source
@@ -395,19 +614,110 @@ def _inherit_evidence(source_run_dir: Path, run_dir: Path) -> None:
     Absent is not an error. A source run that dispatched no gather has no `gather_raw/`, and
     `validate` has already refused the one absence that matters (an empty queries table), so
     everything else here is a directory that legitimately never existed.
+
+    TRUNCATED TO `leads`, which is what the source run held AT THE BRANCH POINT. Copied
+    whole, a sibling starts holding every payload the source went on to gather after the
+    fork — evidence its own inherited history cannot cite, for leads it never dispatched,
+    sitting in the table it reads as its own record of what it did. That is the source run's
+    conclusion arriving through the back door, and it would flow straight into the verdict
+    comparison the branch exists to produce.
     """
-    for name in _INHERITED:
-        src = source_run_dir / name
-        if not src.exists():
+    # THE ALERT FIRST, and from the SEAM rather than from whichever launcher ran. It is the case
+    # INPUT — not the source run's work — and every resumed history's first turn reads it, so a
+    # sibling without one has no `read_file` target for a path its own prefix names. A launcher
+    # that materialises the run dir has already put an identical copy here; rewriting it costs a
+    # few hundred bytes and makes the guarantee the seam's, so `run_investigation(resume=…)`
+    # holds it for every caller rather than only for the one CLI that remembers.
+    #
+    # NOT in `_INHERITED`: that tuple is what `refuse_seeded_run_dir` reads, and an alert is
+    # exactly what a freshly materialised sibling legitimately already holds — listing it there
+    # would refuse every sibling a launcher prepared.
+    alert = RunPaths(source_run_dir).alert
+    if alert.exists() or alert.is_symlink():
+        if not artifact_file(alert):
+            raise BranchError(
+                f"{alert} is not a plain file — the alert is the case input both siblings "
+                "investigate, and one that is a link is not the source run's own")
+        write_guarded(RunPaths(run_dir).alert, read_text_utf8(alert))
+
+    queries = RunPaths(source_run_dir).executed_queries
+    if queries.exists() or queries.is_symlink():
+        # REFUSED, NOT SKIPPED. `artifact_file` is an `lstat` check, so a symlink wearing the
+        # table's own name fails it — and skipping there would seed a sibling with NO evidence
+        # at all, which every downstream reader sees as a run that gathered nothing rather than
+        # as a run whose evidence was refused. `validate` has already proved the source captured
+        # something, so an unreadable table here is a fault, not an absence.
+        if not artifact_file(queries):
+            raise BranchError(
+                f"{queries} is not a plain file — following a link at the queries table's own "
+                "name would seed the sibling's evidence from outside the source run")
+        rows = [row for row in read_jsonl_rows(queries) if str(row.get("lead_id", "")) in leads]
+        write_guarded(
+            RunPaths(run_dir).executed_queries,
+            "".join(json.dumps(row) + "\n" for row in rows))  # lint-jsonl-io: ok — a whole-file seed written through the guarded lane, not an append
+    for name in ("gather_raw", "gather_summaries"):
+        _inherit_lead_dir(source_run_dir / name, run_dir / name, leads, run_dir)
+
+
+def _inherit_lead_dir(src: Path, dst: Path, leads: set[str], run_dir: Path) -> None:
+    """Copy the entries of one per-lead directory that belong to `leads`.
+
+    PER ENTRY, THROUGH THE GUARDED LANE, rather than `shutil.copytree`. Truncation needs
+    per-entry selection anyway, and copying entry by entry is what lets each one face
+    `artifact_file`/`artifact_dir` first — an `lstat` check, so a SYMLINK wearing an artifact's
+    name is refused rather than having its target's bytes copied into the sibling under that
+    name. The run dir is the box's rw bind and model-written bash writes into it, so a planted
+    link at an expected payload name is a real shape rather than a theoretical one; `copytree`
+    followed them without a word.
+
+    A REFUSAL IS LOUD. Skipping one silently reads downstream as a lead that gathered nothing,
+    which is indistinguishable from a lead the model never dispatched — and this whole function
+    exists to make the sibling's evidence say exactly what the prefix can cite.
+    """
+    if not src.exists():
+        # A source run that dispatched no gather has no such directory, and `validate` has
+        # already refused the one absence that matters (an empty queries table).
+        return
+    if not artifact_dir(src):
+        raise BranchError(
+            f"{src} is not a plain directory — a sibling's evidence is copied out of it, and "
+            "following a link here would seed the run from outside the source's own tree")
+    for entry in sorted(src.iterdir()):
+        if _lead_of(entry.name) not in leads:
             continue
-        dst = run_dir / name
-        if src.is_dir():
-            # `dirs_exist_ok`, because the scaffolding has already made `gather_raw/` — the
-            # check above proved it is EMPTY, so this fills a directory rather than merging
-            # into another run's.
-            shutil.copytree(src, dst, dirs_exist_ok=True)
+        if entry.is_dir():
+            if not artifact_dir(entry):
+                raise BranchError(f"{entry} is not a plain directory")
+            # THE DESTINATION IS MADE THROUGH THE GUARDED LANE, not by `write_guarded`'s own
+            # parents — it has none: `replace` mode stages beside the target and `os.replace`s
+            # in, so a missing parent is a `FileNotFoundError` on the staged name rather than a
+            # created directory. `copytree` used to do this implicitly, which is exactly why it
+            # was easy to drop when the copy became per-entry.
+            guarded_mkdir(dst / entry.name, base=run_dir)
+            for payload in sorted(entry.iterdir()):
+                if not artifact_file(payload):
+                    raise BranchError(
+                        f"{payload} is not a plain file — a link planted at a payload's own name "
+                        "would copy bytes from outside the run into the sibling under that name")
+                write_guarded(dst / entry.name / payload.name, read_text_utf8(payload))
+        elif artifact_file(entry):
+            guarded_mkdir(dst, base=run_dir)
+            write_guarded(dst / entry.name, read_text_utf8(entry))
         else:
-            write_guarded(dst, src.read_text(encoding="utf-8"))
+            raise BranchError(
+                f"{entry} is neither a plain file nor a plain directory — a sibling's evidence "
+                "must be what the source actually wrote, not what a link points at")
+
+
+def _lead_of(name: str) -> str:
+    """The lead a per-lead entry belongs to.
+
+    Three spellings across two directories — `l-001/` (a payload subtree), `l-001.lead.json` (a
+    claim sidecar) and `l-001.md` (a gather summary) — and all three are the lead id up to the
+    first dot. Suffix-stripping rather than a regex per shape, because a shape this function did
+    not know would otherwise silently belong to no lead and be dropped from every sibling.
+    """
+    return name.split(".", 1)[0]
 
 
 def validate(store: Any, spec: BranchSpec) -> None:
@@ -495,6 +805,12 @@ def validate(store: Any, spec: BranchSpec) -> None:
             "unanswered — the fork would inherit a dangling tool call as its head, and the "
             "first request of the resumed run would carry a `tool_use` with no result. Branch "
             "at the tool RETURN that answers it instead")
+
+    # THE CLOCK, checked here rather than at construction because `BranchSpec` is a frozen
+    # dataclass whose annotations are not runtime checks, and because the only thing that can
+    # say whether a moment is THIS branch point's is the store. Cheap: the derivation reuses
+    # the slice already hydrated above rather than re-reading.
+    _refuse_bad_as_of(spec, _as_of_of(upto, run_dir, spec.branch_message_id))
 
     # SENTINELS ARE NOT CAPTURES. A `∅.`-prefixed `query_id` is a writer-only record of a call
     # that never reached a system of record — a refused repeat, a param-schema rejection, a

@@ -177,6 +177,10 @@ These are deployment-specific facts every adapter SKILL should put in
   legitimately disagree on, e.g., process tables. Declare in
   `read_guidance` that host-state observations carry a
   `captured_at` and the agent should not cross-time-window them.
+  A branched run pins `captured_at` to its branch point (#920), so
+  the field is a function of the episode rather than of when the
+  sibling happened to execute — which is what lets two siblings'
+  payloads be compared at all.
 
 ## Batching and implementation order
 

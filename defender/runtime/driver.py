@@ -48,6 +48,7 @@ from .tools import (
 from .verb_grant import VerbGrant
 from .verbs import ModuleVerbRegistry
 
+from defender import _clock
 from defender._env import env_bool
 from defender._frontmatter import strip_frontmatter
 from defender._run_paths import RunPaths
@@ -169,8 +170,31 @@ def _opening_prompt(  # noqa: PLR0913 — `_user_prompt`'s parameters plus the r
         return _user_prompt(
             run_dir, alert_path, defender_dir, verbs=verbs, limits=limits, run_id=run_id,
         )
-    prompt = f"{resume.continuation_prompt}\n\n{_coordinates(run_dir, alert_path)}"
+    prompt = (
+        f"{resume.continuation_prompt}\n\n"
+        f"{_coordinates(run_dir, alert_path)}{_branch_clock(resume)}")
     return prompt, "", ""
+
+
+def _branch_clock(resume: Any) -> str:
+    """The line telling a resumed run WHEN it is.
+
+    A COORDINATE, not an instruction, which is why it rides here beside `_coordinates` and not
+    in `continuation_prompt`. That field is deliberately the caller's — the 2026-08-16
+    experiment's caveat was that its own continuation wording biased the run toward closing — so
+    putting the clock there would make it optional (a caller forgets it and the episode silently
+    has no clock statement) and per-caller (two siblings' prompts are authored separately, so
+    they could disagree about when they are, which is a difference in the one part of the
+    prompt that is supposed to be shared).
+
+    It is what the estate cannot enforce. The seam pins every timestamp the ADAPTERS mint, and
+    it closes an open upper bound on a search whose window is a parameter — but a query whose
+    window is written into its own body is the model's sentence, and no rewrite short of
+    parsing that language can bound it. Telling the model the date is what makes it write the
+    bound itself; the gap where it does not is recorded in the stager's own docstring.
+    """
+    at = getattr(resume, "as_of", None)
+    return "" if at is None else f"now: {_clock.z_seconds(at)}\n"
 
 
 def _budget_state_for_enforcement(state: dict, deps: AgentDeps) -> dict:

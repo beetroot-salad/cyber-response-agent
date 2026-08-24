@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -67,6 +68,9 @@ from defender.learning.branch.estate.registry import (  # noqa: E402
 from defender.learning.branch.ledger import (  # noqa: E402
     APPLIER_DECISIONS,
     BASE,
+    BASE_FILENAME,
+    CAPTURED,
+    FAMILY_SOURCES,
     FAULT,
     PASSTHROUGH,
     PATCHED,
@@ -177,6 +181,25 @@ FAKE_GRANT = VerbGrant(role="gather", entries=(
 
 CALLS_LOG = "adapter-calls.jsonl"
 
+#: The branch point's own moment (#947). Every world here is served under ONE clock, so nothing
+#: below turns on its value — but a registry cannot be built without one, because a defaulted
+#: clock is a wall-clock stamp in a branched run and the whole point is that there are none.
+AS_OF = datetime(2026, 5, 25, 15, 30, 45, tzinfo=UTC)
+
+
+def fresh_ledger(path: Path) -> Ledger:
+    """A `Ledger` over `path`, beside the primed capture #947 made REQUIRED.
+
+    EMPTY, deliberately. Nothing in this file is about the capture; what `base_path` has to be
+    here is a FILE, which is `Ledger.__post_init__`'s ordering guarantee that the episode was
+    primed before any sibling opened a ledger over it. Empty, every key MISSES it and falls
+    through to the live `base` recording — which is exactly the tier the family arms below were
+    written against, so their subject is unchanged."""
+    base = path.parent / BASE_FILENAME
+    base.parent.mkdir(parents=True, exist_ok=True)
+    base.touch()
+    return Ledger(path, base_path=base)
+
 
 @dataclass(frozen=True)
 class World:
@@ -258,7 +281,8 @@ def world_registry(
 ) -> WorldRegistry:
     """A `WorldRegistry` built through its own constructor, over a fresh ledger at `path`."""
     return WorldRegistry(
-        adapters, grant, world=world, ledger=Ledger(ledger_path), applier=applier,
+        adapters, grant, world=world, ledger=fresh_ledger(ledger_path), applier=applier,
+        as_of=AS_OF,
     )
 
 
@@ -463,9 +487,14 @@ def test_the_vocabulary_splits_into_the_tier_the_seam_and_the_applier():
     """    `SOURCES` is three kinds of label, and only one kind is an applier's to name.
 
     Without this split the sweep below reads as "any applier may claim any member", which
-    includes `base` — the FAMILY tier's own label, the slot every sibling replays from."""
-    assert APPLIER_DECISIONS | {BASE, REFUSED, FAULT} == SOURCES
-    assert BASE not in APPLIER_DECISIONS
+    includes the FAMILY tier's own labels — the slot every sibling replays from. That tier is
+    two labels since #947: `captured` is the source run's own capture, primed before any sibling
+    forked, and `base` is the live read of a key the capture never held. Both are `world_id=None`
+    and neither is an applier's to claim; the split between them is `test_947_ledger_tiers.py`."""
+    assert APPLIER_DECISIONS | FAMILY_SOURCES | {REFUSED, FAULT} == SOURCES
+    assert BASE in FAMILY_SOURCES
+    assert CAPTURED in FAMILY_SOURCES
+    assert not (APPLIER_DECISIONS & FAMILY_SOURCES)
 
 
 @pytest.mark.parametrize("decision", sorted(APPLIER_DECISIONS))
@@ -521,7 +550,7 @@ def test_the_ledger_refuses_an_invented_decision_at_its_own_door(tmp_path):
     The registry deliberately does not re-check the decision it just received — the same rule
     in two places is a rule with a copy that can drift, and the copy that drifts is the one
     that stops refusing. This arm is what makes that delegation safe to rely on."""
-    ledger = Ledger(tmp_path / "served.jsonl")
+    ledger = fresh_ledger(tmp_path / "served.jsonl")
     call = ServedCall(
         system="cmdb", verb="get-host", params={"host": "canary-1"},
         payload_text="{}", source="invented", world_id="w1",
@@ -542,7 +571,7 @@ def test_the_two_tiers_have_to_agree(tmp_path, source, world_id):
     AS the estate, while each sibling's own row still reads `passthrough`. A world-tier row
     with no owner is the mirror: a difference nobody can attribute, which a comparison then
     counts against whichever sibling it happens to read next."""
-    ledger = Ledger(tmp_path / "served.jsonl")
+    ledger = fresh_ledger(tmp_path / "served.jsonl")
 
     with pytest.raises(LedgerError, match="FAMILY tier"):
         ledger.record(ServedCall(
@@ -689,9 +718,9 @@ def test_two_siblings_read_one_base_recording(tmp_path):
     is per world."""
     ledger_path = tmp_path / "served.jsonl"
     adapters, ctx = fake_estate(tmp_path), run_ctx(tmp_path)
-    ledger = Ledger(ledger_path)
-    a = WorldRegistry(adapters, FAKE_GRANT, world=World("a"), ledger=ledger)
-    b = WorldRegistry(adapters, FAKE_GRANT, world=World("b"), ledger=ledger)
+    ledger = fresh_ledger(ledger_path)
+    a = WorldRegistry(adapters, FAKE_GRANT, world=World("a"), ledger=ledger, as_of=AS_OF)
+    b = WorldRegistry(adapters, FAKE_GRANT, world=World("b"), ledger=ledger, as_of=AS_OF)
 
     from_a = a.verbs("cmdb")["get-host"](ctx, host="canary-1")
     from_b = b.verbs("cmdb")["get-host"](ctx, host="canary-1")
@@ -714,7 +743,7 @@ def test_a_duplicate_base_row_resolves_the_same_way_in_memory_and_on_disk(tmp_pa
     answers to one question with both rows reading honestly, which is exactly the invariance
     the family tier exists to buy."""
     ledger_path = tmp_path / "served.jsonl"
-    ledger = Ledger(ledger_path)
+    ledger = fresh_ledger(ledger_path)
     call = dict(system="cmdb", verb="get-host", params={"host": "canary-1"},
                 source=BASE, world_id=None)
 
@@ -722,7 +751,7 @@ def test_a_duplicate_base_row_resolves_the_same_way_in_memory_and_on_disk(tmp_pa
     ledger.record(ServedCall(payload_text='{"owner": "second"}', **call))
 
     assert ledger.base_payload("cmdb", "get-host", {"host": "canary-1"}) \
-        == Ledger(ledger_path).base_payload("cmdb", "get-host", {"host": "canary-1"}) \
+        == fresh_ledger(ledger_path).base_payload("cmdb", "get-host", {"host": "canary-1"}) \
         == '{"owner": "first"}'
 
 
@@ -735,11 +764,11 @@ def test_a_ledger_reopened_from_disk_replays_the_family_recording(tmp_path):
     process, which is not where siblings live."""
     ledger_path = tmp_path / "served.jsonl"
     adapters, ctx = fake_estate(tmp_path), run_ctx(tmp_path)
-    first = WorldRegistry(adapters, FAKE_GRANT, world=World("a"), ledger=Ledger(ledger_path))
+    first = WorldRegistry(adapters, FAKE_GRANT, world=World("a"), ledger=fresh_ledger(ledger_path), as_of=AS_OF)
     from_a = first.verbs("cmdb")["get-host"](ctx, host="canary-1")
 
     reopened = WorldRegistry(
-        adapters, FAKE_GRANT, world=World("b"), ledger=Ledger(ledger_path))
+        adapters, FAKE_GRANT, world=World("b"), ledger=fresh_ledger(ledger_path), as_of=AS_OF)
     from_b = reopened.verbs("cmdb")["get-host"](ctx, host="canary-1")
 
     assert from_a == from_b
@@ -779,10 +808,10 @@ def test_a_staged_call_records_its_base_under_the_view_it_asked_for(tmp_path):
     world A's documents — the contamination `view_name`'s per-world alias exists to prevent."""
     ledger_path = tmp_path / "served.jsonl"
     adapters, ctx = fake_estate(tmp_path), run_ctx(tmp_path)
-    ledger = Ledger(ledger_path)
+    ledger = fresh_ledger(ledger_path)
     body = "FROM logs-system.auth-*\n| STATS COUNT(*)"
-    a = WorldRegistry(adapters, FAKE_GRANT, world=World("a", ("elastic",)), ledger=ledger)
-    b = WorldRegistry(adapters, FAKE_GRANT, world=World("b", ("elastic",)), ledger=ledger)
+    a = WorldRegistry(adapters, FAKE_GRANT, world=World("a", ("elastic",)), ledger=ledger, as_of=AS_OF)
+    b = WorldRegistry(adapters, FAKE_GRANT, world=World("b", ("elastic",)), ledger=ledger, as_of=AS_OF)
 
     from_a = a.verbs("elastic")["esql"](ctx, query=body)
     from_b = b.verbs("elastic")["esql"](ctx, query=body)
@@ -1062,7 +1091,7 @@ def test_a_world_may_not_answer_to_the_family_tiers_key(tmp_path):
     with pytest.raises(EstateError):
         WorldRegistry(
             fake_estate(tmp_path), FAKE_GRANT, world=BaseWorld(),
-            ledger=Ledger(ledger_path),
+            ledger=fresh_ledger(ledger_path), as_of=AS_OF,
             applier=WorldApplier({"cmdb": {"canary-1": {"owner": "world"}}}))
 
     assert not ledger_path.exists(), "a refused world must not have written a row"
@@ -1077,12 +1106,12 @@ def test_a_sibling_never_replays_another_worlds_patch_as_the_estate(tmp_path):
     the first world's, even though the two share one ledger."""
     ledger_path = tmp_path / "served.jsonl"
     adapters, ctx = fake_estate(tmp_path), run_ctx(tmp_path)
-    ledger = Ledger(ledger_path)
+    ledger = fresh_ledger(ledger_path)
 
     patcher = WorldRegistry(
-        adapters, FAKE_GRANT, world=World("base", ("cmdb",)), ledger=ledger,
+        adapters, FAKE_GRANT, world=World("base", ("cmdb",)), ledger=ledger, as_of=AS_OF,
         applier=WorldApplier({"cmdb": {"canary-1": {"owner": "world"}}}))
-    sibling = WorldRegistry(adapters, FAKE_GRANT, world=World("b"), ledger=ledger)
+    sibling = WorldRegistry(adapters, FAKE_GRANT, world=World("b"), ledger=ledger, as_of=AS_OF)
 
     assert patcher.verbs("cmdb")["get-host"](ctx, host="canary-1")["owner"] == "world"
     assert sibling.verbs("cmdb")["get-host"](ctx, host="canary-1")["owner"] == "estate"
@@ -1150,12 +1179,12 @@ def test_two_siblings_rows_pair_on_the_question_asked_not_the_one_run(tmp_path):
     corpus — which is contamination rather than merely a re-read."""
     ledger_path = tmp_path / "served.jsonl"
     adapters, ctx = fake_estate(tmp_path), run_ctx(tmp_path)
-    ledger = Ledger(ledger_path)
+    ledger = fresh_ledger(ledger_path)
     body = "FROM logs-system.auth-*\n| LIMIT 5"
 
     for wid in ("a", "b"):
         reg = WorldRegistry(
-            adapters, FAKE_GRANT, world=World(wid, ("elastic",)), ledger=ledger)
+            adapters, FAKE_GRANT, world=World(wid, ("elastic",)), ledger=ledger, as_of=AS_OF)
         reg.verbs("elastic")["esql"](ctx, query=body)
 
     rows = [r for r in served_rows(ledger_path) if r["world_id"] in ("a", "b")]
@@ -1179,7 +1208,7 @@ def test_an_unstaged_call_records_one_identity_not_two(tmp_path):
     ledger_path = tmp_path / "served.jsonl"
     adapters, ctx = fake_estate(tmp_path), run_ctx(tmp_path)
     reg = WorldRegistry(
-        adapters, FAKE_GRANT, world=World("A", ("cmdb",)), ledger=Ledger(ledger_path))
+        adapters, FAKE_GRANT, world=World("A", ("cmdb",)), ledger=fresh_ledger(ledger_path), as_of=AS_OF)
 
     reg.verbs("cmdb")["get-host"](ctx, host="canary-1")
 

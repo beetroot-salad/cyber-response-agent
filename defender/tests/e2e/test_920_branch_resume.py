@@ -44,6 +44,7 @@ pytest.importorskip("pydantic_ai")
 
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender._run_paths import RunPaths  # noqa: E402
+from defender.tests._branch_947 import spec_at  # noqa: E402
 from defender.tests._session_head_754 import message_ids  # noqa: E402
 from defender.tests._session_store_705 import sql, store_factory, store_mod  # noqa: E402
 from defender.tests.e2e._lead_zero_808 import (  # noqa: E402
@@ -112,13 +113,16 @@ def _source_run(tmp_path, sink, *, docs):
 
 
 def _spec(source, store):
-    """A `BranchSpec` fixed at the source run's own tip — the last message it produced."""
+    """A `BranchSpec` fixed at the source run's own tip — the last message it produced.
+
+    Built through `spec_at`, which derives the spec's `as_of` (#947) with the runtime's own
+    `branch_point_time`: T0 is a coordinate of the branch point rather than of the sibling, and
+    `validate` refuses a spec that carries any other moment — so a resume driven with a
+    hand-chosen one would be refused before the driver ever reached the seams this file is
+    about."""
     ss = store_mod()
-    branch = branch_mod()
     prefix_ids = ss.path_row_ids(store, ss.main_session_id(store))
-    return branch.BranchSpec(source_run_dir=source.run_dir,
-                             branch_message_id=prefix_ids[-1],
-                             continuation_prompt=CONTINUATION), prefix_ids
+    return spec_at(store, source.run_dir, prefix_ids[-1], prompt=CONTINUATION), prefix_ids
 
 
 def _resume(spec, sibling_dir, *, main, verbs=None):

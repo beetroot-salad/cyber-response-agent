@@ -19,7 +19,9 @@ enforces — a param it names will bind, one it omits is refused. Don't Read
 is not host-keyed.
 
 Each verb returns a JSON object with `captured_at` and the
-verb-specific payload. The host-keyed verbs (`proc-tree`, `passwd`,
+verb-specific payload. `captured_at` is the wall clock on an
+ordinary run and the branch point's moment on a resumed one.
+ The host-keyed verbs (`proc-tree`, `passwd`,
 `authorized-keys`, `fim-checksum`, `package-list`) also carry `host` plus
 their payload field (`ps_output`, `entries`, `keys`, `sha256`, `packages`);
 `container-inspect` keys on `container_id` and carries `name` + `image`.

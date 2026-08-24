@@ -22,12 +22,13 @@ import json
 import sys
 from collections.abc import Mapping
 from dataclasses import fields, is_dataclass, replace
+from datetime import datetime, timedelta
 from typing import Any
 
 from defender.runtime.verbs import ModuleVerbRegistry
 from defender.scripts.adapters.faults import USAGE_EXIT_CODE
 
-from ..ledger import BASE, FAULT, REFUSED, Ledger, LedgerError, ServedCall
+from ..ledger import BASE, FAULT, REFUSED, Ledger, LedgerError, ServedCall, payload_text
 from . import applier as applier_module
 from .applier import WorldApplier
 
@@ -36,15 +37,35 @@ class EstateError(Exception):
     """A world that cannot be served honestly."""
 
 
-def _payload_text(payload: Any) -> str:
-    return json.dumps(payload, sort_keys=True, default=str)
-
-
 class WorldRegistry(ModuleVerbRegistry):
     """A `ModuleVerbRegistry` whose verbs run for real and then answer to the world."""
 
-    def __init__(self, adapters_dir, grant, *, world: Any, ledger: Ledger, applier: Any = None):
+    def __init__(self, adapters_dir, grant, *, world: Any, ledger: Ledger, as_of: datetime,
+                 applier: Any = None):
         super().__init__(adapters_dir, grant)
+        # THE CLOCK FIRST, and read ONCE here rather than per call. A `TypeError` or an
+        # `AttributeError` raised deep inside `served` is not an `AdapterFault`, so the query
+        # tool files it as `DEFAULT_FAULT_EXIT` — which is 2, which is in
+        # `circuit_breaker.INFRA_EXIT_CODES`: two of those trip the breaker for the system and
+        # five abort the run, IN THE SIBLING AND NOT IN ITS BASE. That is the "the estate was up
+        # for one and down for the other" contamination the whole base/sibling design exists to
+        # exclude, and it would arrive from the field added to prevent a different one.
+        #
+        # `utcoffset() == timedelta(0)`, not `tzinfo is not None`: an aware datetime in any
+        # other zone passes the weaker test and then formats a trailing `Z` that lies by its
+        # offset. Every payload stamped from it is wrong by the same amount, consistently, which
+        # is precisely the kind of wrong nothing downstream can see.
+        if not isinstance(as_of, datetime):
+            raise EstateError(
+                f"a world needs the moment it is being served as of, got {as_of!r} — without it "
+                "every timestamp a sibling mints is the afternoon it executed rather than the "
+                "branch point it resumed into, and the episode cannot be replayed")
+        if as_of.tzinfo is None or as_of.utcoffset() != timedelta(0):
+            raise EstateError(
+                f"as_of must be an aware UTC datetime, got {as_of!r} (offset "
+                f"{as_of.utcoffset()!r}) — a naive or offset moment formats a `Z` that lies by "
+                "that offset")
+        self.as_of = as_of
         world_id = getattr(world, "world_id", None)
         if not isinstance(world_id, str) or not world_id:
             # `None` is the FAMILY tier's key, so no world may answer to it. A world that did
@@ -140,6 +161,20 @@ class WorldRegistry(ModuleVerbRegistry):
         @functools.wraps(fn)
         def served(ctx: Any, **params: Any) -> Any:
             applier, ledger, world = self.applier, self.ledger, self.world
+            # UNCONDITIONAL, and that is the whole point — unlike `_declaring` below, which
+            # fires only where staging MOVED the call. The two conditions look alike and are
+            # not: a declaration widens what a call may reach (`confine_index` admits a world's
+            # views by declaration, so setting it on an untouched call would admit that world's
+            # views for a read that was never retargeted), while a clock admits nothing and
+            # narrows nothing. And the adapter that makes an episode unreplayable by stamping
+            # the wall clock into its payload is host-state, which has no stager and is never
+            # staged — so a clock scoped to staged calls would miss every call it exists for.
+            #
+            # Rebound BEFORE `applier.prepare`, so the stager and `restore` see the same moment
+            # the adapter body will. Cannot raise — the guards in `_at` are total and `as_of`
+            # was validated at construction — which matters because this line sits OUTSIDE the
+            # refusal handler below.
+            ctx = _at(ctx, self.as_of)
             try:
                 prepared = applier.prepare(system, verb, params, world, ctx)
             except Exception as refusal:
@@ -199,7 +234,7 @@ class WorldRegistry(ModuleVerbRegistry):
                 ))
                 raise
             # `out is payload` on every decision that changes nothing (STAGED, PASSTHROUGH), and
-            # the base text is then the served text — the same bytes `_payload_text` would
+            # the base text is then the served text — the same bytes `payload_text` would
             # produce, since it is deterministic and already ran over this object. Re-dumping a
             # multi-hundred-KB result to rediscover that is the single most expensive thing the
             # seam did per call.
@@ -210,7 +245,7 @@ class WorldRegistry(ModuleVerbRegistry):
             # copy that drifts is the one that stops refusing.
             ledger.record(ServedCall(
                 system=system, verb=verb, params=dict(prepared),
-                payload_text=base_text if out is payload else _payload_text(out),
+                payload_text=base_text if out is payload else payload_text(out),
                 source=decision, world_id=world.world_id,
                 # Only when staging moved it. This is what lets a sibling's row find its
                 # opposite number: the prepared forms differ BY CONSTRUCTION on a staged
@@ -247,6 +282,27 @@ def _record_beside(ledger: Ledger, call: ServedCall) -> None:
     except Exception as write_failed:  # noqa: BLE001 — see docstring: never displace the raise
         print(f"[estate] could not record the {call.source} row for {call.system}.{call.verb} "
               f"({write_failed!r}); the call's own failure is what propagates", file=sys.stderr)
+
+
+def _at(ctx: Any, as_of: datetime) -> Any:
+    """`ctx`, carrying the moment this call is being served as of.
+
+    `_declaring`'s two guards, for `_declaring`'s two reasons — a non-dataclass or a dataclass
+    without the field is a test stub rather than a run, and `replace` would raise `TypeError`
+    on it, which the query tool files as an INFRA exit code the circuit breaker reads as the
+    estate being down for this sibling and up for its base.
+
+    A SEPARATE function rather than a second argument to `_declaring`, because the two are
+    applied under different conditions and folding them together is how one silently acquires
+    the other's scope: `_declaring` is a confinement widening and must stay scoped to the call
+    that earned it, while this must reach every call or it misses the unstaged adapters that
+    are the only ones minting a timestamp.
+    """
+    if not is_dataclass(ctx) or isinstance(ctx, type):
+        return ctx
+    if not any(f.name == "as_of" for f in fields(ctx)):
+        return ctx
+    return replace(ctx, as_of=as_of)
 
 
 def _declaring(ctx: Any, world_id: str) -> Any:
@@ -292,7 +348,7 @@ def _base_payload(  # noqa: PLR0913 — one call's whole identity: what runs it,
     is already in hand on both arms — recomputed there, a memo hit paid a `loads` plus a `dumps`
     to rediscover the string it was handed.
 
-    THE LIVE ARM ROUND-TRIPS TOO, so both arms hand back the same shape. `_payload_text` writes
+    THE LIVE ARM ROUND-TRIPS TOO, so both arms hand back the same shape. `payload_text` writes
     with `default=str`, so a value JSON has no spelling for — a `datetime`, a `Decimal`, a
     tuple — survives as itself for the world that issued the live call and comes back
     stringified (or as a list) for every world that replays the recording. That is a difference
@@ -313,7 +369,7 @@ def _base_payload(  # noqa: PLR0913 — one call's whole identity: what runs it,
     # neither carries the identity of the world that happened to run first. The live arm and
     # the memo arm then hand back payloads that differ by what the world staged and nothing
     # else — which is the whole of what a base-versus-sibling comparison is reading.
-    text = _payload_text(served if restore is None else restore(served))
+    text = payload_text(served if restore is None else restore(served))
     ledger.record(ServedCall(
         system=system, verb=verb, params=dict(params),
         payload_text=text, source=BASE, world_id=None,
