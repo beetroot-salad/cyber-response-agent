@@ -798,7 +798,13 @@ def _start_boxed_request(
     try:
         _reap_stale_before_create(docker, request.name)
     except BoxFault as e:
-        # `_start_boxed`'s reason, on the request lane's own geography.
+        # `_start_boxed`'s reason, on the request lane's own geography — with the caveat that
+        # geography makes: `_did_not_run_for_request` writes one verdict per WRITABLE mount,
+        # and `run_cycle._run_cycle_box_request` composes every mount `writable=False`. So on
+        # the RUN-CYCLE lane — the one caller that reuses a name, and therefore the one this
+        # arm exists for — this writes NOTHING. That is `stop_and_scrub`'s rule holding, not
+        # an omission (a tree the box could not write needs no verdict about what it wrote),
+        # but it means the §7 D2 cover the sibling arm gets is not cover this lane gets.
         _did_not_run_for_request(request, f"box start refused before create: {e}")
         raise
     start_token = uuid.uuid4().hex

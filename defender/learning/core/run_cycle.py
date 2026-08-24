@@ -389,7 +389,19 @@ def _serve_marker(
         # or will die and leave it for the next tick. Either way this claim has learned
         # nothing, so the request goes back on the QUEUE — not to `failed/`, which is for runs
         # no retry can help, and not to the unlink below, which is the claim saying "done".
-        _requeue_claim(claim, note=str(e))
+        try:
+            _requeue_claim(claim, note=str(e))
+        except OSError as io:  # noqa: BLE001 — see below
+            # `_requeue_claim` does real I/O (`mkdir`, a staged `write_atomic`, `os.link`) and
+            # an exception raised INSIDE a handler does not re-enter its sibling `except`
+            # clauses — so without this it escapes `_serve_marker`, `learn_drain` and
+            # `_run_stage` as an uncaught traceback, stopping the worker mid-queue and leaving
+            # every later marker unserved. That is the wedge the clause below is annotated
+            # against, on the arm that fires for the ORDINARY "someone else has it" case
+            # rather than for a poison run. The claim stays in `inflight/`, which the next
+            # tick reclaims — nothing is lost by giving up here.
+            _log(f"learn_drain: could not re-queue {claim.run_dir.name}: {io!r} — left in "
+                 "inflight/ for the next tick to reclaim")
         return False
     except Exception as e:  # noqa: BLE001 — one poison run must not wedge the worker
         quarantine_marker(claim.spec, claim.path, qdir, f"run-one-error: {e!r}")

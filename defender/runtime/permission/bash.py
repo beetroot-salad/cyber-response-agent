@@ -203,7 +203,13 @@ def decide_bash(
     run_dir: Path | None = None, defender_dir: Path | None = None,
     cwd_anchor: Path | None = None,
 ) -> BashDecision:
-    cmd = command.strip()
+    # `bash_exec.BLANKS`, not a bare `.strip()`: `str.strip()` is a UNICODE predicate and
+    # strips every character that set was deliberately narrowed to KEEP inside its word —
+    # `\r`, NBSP, `\x0b`, `\x85`, U+2003. Trimming them here re-opens #955 F-50 one layer up:
+    # `cat <run_dir>/report.md<NBSP>` was checked and RUN as `cat <run_dir>/report.md`, an argv
+    # the model did not write, authorised on the rewritten one. The two trims have to be one
+    # rule, so this one is told which set to use rather than trusted to agree.
+    cmd = command.strip(bash_exec.BLANKS)
     if not cmd:
         return BashDecision(True)
 

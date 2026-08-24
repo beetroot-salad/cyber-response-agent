@@ -157,17 +157,54 @@ def test_the_lock_is_released_so_the_next_pass_can_run(tmp_path, monkeypatch):
     author_shared.release_flock(held)
 
 
-def test_two_different_runs_are_not_serialised_against_each_other(tmp_path):
+def test_two_different_runs_are_not_serialised_against_each_other(tmp_path, monkeypatch):
     """Per run id, not one global lease. Two runs share no container name, and a global lock
-    would make the fix a throughput regression on the drain's whole queue."""
+    would make the fix a throughput regression on the drain's whole queue.
+
+    Driven through `run_one`, not through the path helper. Asserting only that two run ids
+    yield two takeable lock FILES is a claim about `LoopPaths.run_cycle_lock_file`'s key, and
+    a `run_one` that took an ADDITIONAL global lease beside the per-run one — the shape this
+    test exists to refuse — would satisfy it while serialising the whole queue. So run B has
+    to reach its box start while run A's lock is held by somebody else."""
+    satisfy_engine_keys(monkeypatch)
     paths = loop_paths(tmp_path)
-    a = _holding(paths, "case-955-a")
-    b = _holding(paths, "case-955-b")
+    run_b = make_run_dir(tmp_path, name="case-955-b")
+    reached: list[str] = []
+
+    def _start(*_a, **_kw):
+        reached.append("started")
+        raise RuntimeError("far enough — run B was not serialised behind run A")
+
+    took: list = []
+    real_flock_or_skip = author_shared.flock_or_skip
+    monkeypatch.setattr(  # lint-monkeypatch: ok — `run_one` takes its lock through a module
+        # -level helper with no injectable seam, and giving production one purely so a test
+        # can watch it would put a lever on the lock this file exists to pin. The patch is a
+        # pass-through recorder: `real_flock_or_skip` still does the acquisition.
+        author_shared, "flock_or_skip",
+        lambda path: (took.append(path), real_flock_or_skip(path))[1],
+    )
+
+    held_a = _holding(paths, "case-955-a")
+    assert held_a is not None, "the fixture could not take the lock it is meant to model"
     try:
-        assert a is not None, "the first run id could not take its own lock"
-        assert b is not None, \
-            "a second run id contended for the first one's lock — the lease is global, and "\
-            "the drain's whole queue is now serialised behind one run"
+        with pytest.raises(RuntimeError, match="far enough"):
+            run_cycle.run_one(
+                run_b, paths=paths, agents=object(),
+                start_box=_start, stop_box=noop_stop_box,
+            )
     finally:
-        author_shared.release_flock(a)
-        author_shared.release_flock(b)
+        author_shared.release_flock(held_a)
+    assert reached == ["started"], (
+        "a live pass on case-955-a blocked case-955-b — the lease is global, and the drain's "
+        "whole queue is now serialised behind one run"
+    )
+    # The behavioural half above cannot see an ADDITIONAL global lease taken BESIDE the
+    # per-run one: nothing outside `run_one` holds that lease, so run B sails past it and the
+    # queue is serialised anyway. So name what the pass may take — exactly the one lock, at
+    # exactly the per-run path — which is the property "per run id, not one global lease"
+    # actually is.
+    assert took == [paths.run_cycle_lock_file("case-955-b")], (
+        f"the pass took {took} — a lock beside the per-run one serialises every run against "
+        "every other, whatever the per-run lock's own key says"
+    )

@@ -1225,26 +1225,30 @@ def test_a_stopped_box_of_the_same_name_does_not_block_a_new_run(tmp_path):
     reply until a removal for that name has been issued, and succeeds afterwards. A start that
     skips the reap therefore cannot pass."""
     run = _clean_run_dir(tmp_path)
-    state = {"present": True}
 
     class StoppedCollision(FakeDocker):
+        """The stateful daemon rule, and NOTHING about `inspect`.
+
+        The container this test is about is stopped, holds the name, and collides on create.
+        `exited` is what a real daemon calls it, and it is what tells the pre-create sweep the
+        container is finished and may be cleared — the distinction from the live sibling two
+        tests down, which must not be. That state is `existing`, so the inspect goes through
+        `FakeDocker._inspect` and is answered PER FORMAT STRING: a subclass that answered
+        every inspect with the state word would hand `_start_token` `"exited"` as a start
+        token, which is the trap the base class's own docstring exists to close."""
+
         def __call__(self, argv, **kwargs):
             call = _DockerCall(list(argv))
-            self.calls.append(call)
-            if call.verb == "inspect" and state["present"]:
-                # The container this test is ABOUT: stopped, holding the name, colliding on
-                # create. `exited` is what a real daemon calls it, and it is what tells the
-                # pre-create sweep the container is finished and may be cleared — the
-                # distinction from the live sibling two tests down, which must not be.
-                return subprocess.CompletedProcess(list(argv), 0, "exited\n", "")
             if call.verb in ("rm", "kill"):
-                state["present"] = False
+                self.calls.append(call)
+                self.existing = None
                 return subprocess.CompletedProcess(list(argv), *C43A_RM_MISSING)
-            if call.verb == "run" and state["present"]:
+            if call.verb == "run" and self.existing is not None:
+                self.calls.append(call)
                 return subprocess.CompletedProcess(list(argv), *C43B_NAME_COLLISION)
-            return subprocess.CompletedProcess(list(argv), *self._all_succeed(call))
+            return super().__call__(argv, **kwargs)
 
-    docker = StoppedCollision()
+    docker = StoppedCollision(existing="exited")
     box = start_box(run, DEFENDER, docker=docker)
     assert box is not None
     assert docker.verbs.index("rm") < docker.verbs.index("run"), \
@@ -1325,17 +1329,15 @@ def test_a_colliding_run_id_refuses_rather_than_reaping_a_live_sibling(tmp_path)
     run = _clean_run_dir(tmp_path)
     name = container_name(run.name)
 
-    class LiveSibling(FakeDocker):
-        def __call__(self, argv, **kwargs):
-            call = _DockerCall(list(argv))
-            self.calls.append(call)
-            if call.verb == "inspect":
-                return subprocess.CompletedProcess(list(argv), 0, "running\n", "")
-            if call.verb == "run":
-                return subprocess.CompletedProcess(list(argv), *C43B_NAME_COLLISION)
-            return subprocess.CompletedProcess(list(argv), 0, "", "")
-
-    docker = LiveSibling()
+    # `existing="running"` rather than a subclass answering every inspect with the state word:
+    # the state query and the START-TOKEN query are different questions down one verb, and a
+    # double that answers both with `running` hands `_start_token` a token no `uuid4().hex`
+    # can equal — so `_reap_on_fault` would silently skip its reap and this test's "no rm for
+    # that name" assertion would pass for the double's reason instead of production's.
+    docker = FakeDocker(
+        lambda verb: C43B_NAME_COLLISION if verb == "run" else (0, "", ""),
+        existing="running",
+    )
     with pytest.raises(BoxFault) as e:
         start_box(run, DEFENDER, docker=docker)
     assert name in str(e.value) or run.name in str(e.value)

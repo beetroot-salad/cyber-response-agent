@@ -16,9 +16,14 @@ from pathlib import Path
 #: through to `cur_argv` and crosses as a literal argv word. `parse('echo $(whoami)')` is
 #: `['echo', '$', '(', 'whoami', ')']` and `parse('cat <(id)')` is `['cat','<(','id',')']`,
 #: both accepted, and `test_540_exec_seam.py` pins that shape deliberately. What keeps them
-#: off an authorised argv is `permission/bash.py::_stage_unsafe`, which refuses any stage
-#: carrying `(`, `)`, `$(` or a backtick — a layer up, not here. Nothing expands either way,
-#: because no shell re-parses downstream.
+#: off an authorised argv is `permission/bash.py::_stage_unsafe` — a layer up, not here — but
+#: read what it actually tests before relying on it: `t in ("(", ")")` is EXACT equality, so a
+#: paren FUSED into a wider operator run is not refused by it. `cat <(id)` is caught by its
+#: own trailing `)` token; `cat <(id)|grep y` is not — the `|` is swallowed into a `)|` token
+#: that neither this module's `set(t) <= _OPERATOR_CHARS` refusal nor `_stage_unsafe` rejects,
+#: and the pipeline separator disappears. It fails closed at `_claim`/`_in_scope` today (no
+#: grant pattern admits a `)|` operand), which is a second gate and not this claim. Nothing
+#: expands either way, because no shell re-parses downstream.
 _OPERATOR_CHARS = frozenset("<>|&;")
 _PIPELINE_SEPARATORS = frozenset({"||", "&&", ";"})
 
@@ -50,6 +55,34 @@ _SHLEX_PUNCTUATION = frozenset("();<>|&")
 #: one) one character class over, so the oracle here has to be bash and not the lexer this
 #: scanner replaced. `test_955_bash_fd_prefix.py::_NOT_SHELL_BLANKS` pins every member.
 _BLANKS = frozenset(" \t\n")
+
+#: `_BLANKS` as a string, built ONCE — for `shlex.whitespace`, and for `str.strip`.
+#:
+#: PUBLIC, and that is the point rather than a convenience. Every defect in #955 is two rules
+#: where the code needs one: an fd read off the token stream vs the raw text, a word boundary
+#: read off `str.isspace()` vs bash's set, a trim in the gate that undid the scanner's own
+#: narrowing one call before it ran. A private name reached across a module boundary is how
+#: the NEXT copy gets written instead of imported, so anything in this tree that has to know
+#: where a bash word ends imports this and does not spell it again.
+#:
+#: `sorted` rather than a literal because `frozenset` iteration order is not a guaranteed
+#: property; hoisted out of `_word_value` because building it per WORD put a `sorted()` on the
+#: slow path of every quoted argument the gate sees.
+BLANKS = "".join(sorted(_BLANKS))
+
+#: Bash's comment character. It begins a comment only where a WORD begins — at the start of
+#: the line, after a blank, or after an operator run — and only unquoted: `a#b` is the word
+#: `a#b`, `'#'` and `\#` are the character. Everything from there to the end of the line is
+#: not part of the command at all.
+#:
+#: Decided against the raw text for the same reason the fd prefix is (#955 F-50): by the time
+#: `shlex` has resolved a word to its value, a `#` that stood for itself and a `#` that opened
+#: a comment are one token. Reading it off the token stream is what made
+#: `cat run/a.json # ; rm -rf run/b` TWO stages here and ONE command plus a comment in bash —
+#: the executor running an argv the model's own text says is commented out, and the gate
+#: authorising that one. `_word_value` still clears `commenters`: a `#` INSIDE a word is an
+#: ordinary character and the default would truncate the word at it.
+_COMMENT = "#"
 
 #: The only fd this executor knows how to route. Bash's IO_NUMBER admits any digit run; every
 #: other one is refused, so the scan only has to recognise this one.
@@ -123,7 +156,7 @@ def _word_value(span: str) -> str | None:
     if not ("'" in span or '"' in span or "\\" in span):
         return span
     lex = shlex.shlex(span, posix=True)
-    lex.whitespace = "".join(sorted(_BLANKS))
+    lex.whitespace = BLANKS
     lex.whitespace_split = True
     lex.commenters = ""
     try:
@@ -163,6 +196,14 @@ def _scan(line: str) -> tuple[list[str], frozenset[int], frozenset[int]] | None:
         if mask[i] and line[i] in _BLANKS:
             i += 1
             continue
+        if mask[i] and line[i] == _COMMENT:
+            # A word STARTS here (blanks are consumed above, and every other arm consumes its
+            # whole token), so an unquoted `#` at this position is bash's comment and the rest
+            # of the line is not command text. Dropping it here rather than refusing the line
+            # is what bash does, and it keeps the operator that PRECEDES a comment answerable
+            # by the arms that already handle it: `A |` / `A &&` / `2>` left dangling by the
+            # comment still fail, as they do in bash, because the token they need is gone.
+            break
         if mask[i] and line[i] in _SHLEX_PUNCTUATION:
             j = i
             while j < n and mask[j] and line[j] in _SHLEX_PUNCTUATION:
@@ -198,7 +239,12 @@ def _is_fd_prefix(line: str, mask: list[bool], at: int, toks: list[str]) -> bool
     if at == 1:
         return True
     before = line[at - 2]
-    return mask[at - 2] and (before in _BLANKS or before in _SHLEX_PUNCTUATION)
+    # `_OPERATOR_CHARS`, NOT `_SHLEX_PUNCTUATION`: the wider set carries `(`/`)`, which end a
+    # word for the scanner but are not characters an IO_NUMBER may follow in any line bash
+    # will run. Reading them as one made `w a)2>/dev/null` an fd-2 redirect — the `2` popped
+    # off argv and stderr rerouted — on a line `bash -n` refuses outright, which is the
+    # accept-what-bash-rejects direction `test_bash_differential_897.py` exists to close.
+    return mask[at - 2] and (before in _BLANKS or before in _OPERATOR_CHARS)
 
 
 class BashExecError(Exception):

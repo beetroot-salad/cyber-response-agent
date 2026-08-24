@@ -64,10 +64,13 @@ run; a SIEM-free worker drains it with `python3 defender/learning/loop.py --lear
 (running this LEARN stage + re-rendering each transcript). `python3
 defender/learning/loop.py <run_dir>` runs LEARN directly for a single run (re-processing).
 
-Exit codes: 0 success / 0 skipped (no direction, or actor SKIP) / 2 StageAbort (systemic
-fault — fix the deployment) / 2 RunUnprocessable on a direct single run (bad run data) /
-1 usage. On a drain, a RunUnprocessable is a bug (the per-item guards should have caught
-it), so it propagates uncaught rather than masquerading as a clean exit 2.
+Exit codes: 0 success / 0 skipped (no direction, or actor SKIP) / 0 REFUSED because another
+pass already holds this run's lock (`RunAlreadyLive` — nothing ran; the stderr line is the
+only signal, because blocking would hang the terminal behind a full learning cycle and a
+non-zero code would fail a wrapper over a condition that is nobody's error) / 2 StageAbort
+(systemic fault — fix the deployment) / 2 RunUnprocessable on a direct single run (bad run
+data) / 1 usage. On a drain, a RunUnprocessable is a bug (the per-item guards should have
+caught it), so it propagates uncaught rather than masquerading as a clean exit 2.
 """
 
 
