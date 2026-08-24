@@ -1,0 +1,14 @@
+{
+  "acceptance_condition": "Establish demand D15 with evidence.",
+  "content_sha256": "c63b60742108a5627760487657dad3280b9b724cdef7fd8f2f8b22e469072dc3",
+  "demand_ids": [
+    "D15"
+  ],
+  "id": "question:demand:D15",
+  "node_id": null,
+  "rationale": "Stated verbatim in the request.",
+  "tags": [
+    "evidence"
+  ],
+  "text": "Important limitations and unresolved questions are stated."
+}

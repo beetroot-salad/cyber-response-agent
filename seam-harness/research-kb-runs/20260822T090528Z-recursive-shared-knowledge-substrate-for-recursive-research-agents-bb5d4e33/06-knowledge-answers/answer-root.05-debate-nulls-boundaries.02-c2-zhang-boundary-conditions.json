@@ -1,0 +1,28 @@
+{
+  "claim_ids": [
+    "root.05-debate-nulls-boundaries.02-c2-zhang-boundary-conditions:C001",
+    "root.05-debate-nulls-boundaries.02-c2-zhang-boundary-conditions:C002",
+    "root.05-debate-nulls-boundaries.02-c2-zhang-boundary-conditions:C003",
+    "root.05-debate-nulls-boundaries.02-c2-zhang-boundary-conditions:C004",
+    "root.05-debate-nulls-boundaries.02-c2-zhang-boundary-conditions:C005",
+    "root.05-debate-nulls-boundaries.02-c2-zhang-boundary-conditions:C006",
+    "root.05-debate-nulls-boundaries.02-c2-zhang-boundary-conditions:C007",
+    "root.05-debate-nulls-boundaries.02-c2-zhang-boundary-conditions:C008"
+  ],
+  "content_sha256": "cc063e22c209427c0194994639d108373930003f9bfde04418c9b6a0dff65710",
+  "id": "answer:root.05-debate-nulls-boundaries.02-c2-zhang-boundary-conditions",
+  "node_id": "root.05-debate-nulls-boundaries.02-c2-zhang-boundary-conditions",
+  "packet_id": "packet:root.05-debate-nulls-boundaries.02-c2-zhang-boundary-conditions",
+  "sufficiency": "ready_to_synthesize",
+  "summary": "Zhang et al. 2025 supply the corpus's boundary-condition evidence: a systematic evaluation across 4 models, 9 benchmarks, and 5 MAD methods finds MAD generally fails to beat simple single-agent baselines CoT and SC, with the failures varying by task type (worse on programming, better on math) and unaffected by hyperparameter tuning. The authors identify model heterogeneity (Heter-MAD) as a consistently effective remedy, improving all tested MAD frameworks, with gains attributed to correcting CW/WC questions. Findings are anchored to PDF pages 1, 3, 7, 9, 11, and 12.",
+  "tags": [
+    "counterexample",
+    "evidence",
+    "measurement",
+    "uncertainty"
+  ],
+  "unresolved": [
+    "Whether Zhang et al.'s null results are specific to the 9 benchmarks or extend to more complex reasoning tasks (they themselves note benchmarks may be too simple).",
+    "The exact compute parity conditions (LLM calls vs tokens) across MAD and baselines are not fully specified in this extraction."
+  ]
+}

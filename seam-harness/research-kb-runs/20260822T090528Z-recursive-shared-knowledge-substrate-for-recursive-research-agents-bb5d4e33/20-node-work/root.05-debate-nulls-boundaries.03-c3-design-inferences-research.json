@@ -1,0 +1,146 @@
+{
+  "account": "This node derives the reconciliation and evaluation-design layer for the parent. The disagreement between Du et al. 2023 (debate gains) and Smit/Zhang (nulls/boundary conditions) is reconciled by three design inferences: (1) task-type dependence — the gains are not uniform across programming vs. math, so architecture must scope debate to tasks where evidence shows it helps; (2) compute parity — matched-compute comparisons defeat naive debate, so the substrate must be evaluated at equal token/compute budget; and (3) visibility/timing — conformity risk if peer answers are exposed too early, so staged independent commitment is required. Three evaluation-design constraints are added covering the five metric families: (a) quality and diversity/correlation measured as paired pre/post-debate deltas with independence metrics; (b) latency and token cost measured at matched-compute parity per condition; (c) recovery-from-wrong-consensus as a dedicated perturbation test. All six items are explicitly design inferences, informed by, but separated from, source-supported claims.",
+  "assumptions": [
+    "I assume the separator facts accurately quote Smit and Zhang at the cited pages.",
+    "I assume the three conditions in D14 are: (1) the proposed graph substrate, (2) an open conversational forum, (3) no inter-agent communication, per SC6."
+  ],
+  "boundary_findings": [
+    {
+      "alternative_explanation": "The separator facts may intentionally be the complete extraction relevant to this node, and the full file contents are available to siblings only.",
+      "consequence_if_absorbed": "If the parent treats these separator quotes as complete evidence, it may under- or mis-attribute findings to pages or fail to see conflicting passages within the same file.",
+      "evidence": [
+        "Dossier separator_facts: SC1 and the quoted excerpts from Smit and Zhang",
+        "The envelope (SC4) says only the manifest is enclosed, not the full texts"
+      ],
+      "narrative": "The two sibling extractor outputs are provided only as separator facts, not as full extracted texts. The design-inference node therefore lacks direct access to the six anchored findings per file that the acceptance condition implies; it relies on the separator quotes.",
+      "smallest_suspected_scope": "Evidence layer for root.05-debate-nulls-boundaries"
+    }
+  ],
+  "claims": [
+    {
+      "basis": "inferred",
+      "citations": [
+        {
+          "excerpt": "MAD frameworks 'performed worse on programming tasks (only SoM/AgentVerse had positive win rates) but better on mathematical reasoning'",
+          "locator": "===== PDF PAGE 7 =====",
+          "source_id": "ref:zhang-2025-mad-question"
+        }
+      ],
+      "confidence": 0.8,
+      "counterevidence": [],
+      "derived_from_claim_ids": [
+        "sf-zhang-task-dependence"
+      ],
+      "local_id": "c1",
+      "statement": "Design inference (reconciliation): task-type dependence — MAD's gains relative to baselines vary by task, with math reasoning more favorable and programming mostly negative; therefore the substrate's debated questions should be chosen or weighted by task type, and gains should not be assumed transferable."
+    },
+    {
+      "basis": "inferred",
+      "citations": [
+        {
+          "excerpt": "multi-agent debating systems, in their current form, do not reliably outperform other proposed prompting strategies, such as self-consistency and ensembling using multiple reasoning paths",
+          "locator": "===== PDF PAGE 1 =====",
+          "source_id": "ref:smit-2023-going-mad"
+        }
+      ],
+      "confidence": 0.85,
+      "counterevidence": [],
+      "derived_from_claim_ids": [
+        "sf-smit-null"
+      ],
+      "local_id": "c2",
+      "statement": "Design inference (reconciliation): compute parity — Smit/Zhang report that MAD does not reliably beat single-agent or matched-compute alternatives, so any comparison of the substrate against single-agent or no-communication baselines must equalize total compute/token budget across conditions."
+    },
+    {
+      "basis": "inferred",
+      "citations": [
+        {
+          "excerpt": "simply adjusting these hyperparameters can hardly reverse this negative outcome",
+          "locator": "===== PDF PAGE 3 =====",
+          "source_id": "ref:zhang-2025-mad-question"
+        },
+        {
+          "excerpt": "modulating agreement intensity via prompts can improve Multi-Persona by ~15% on USMLE, and the effect varies by dataset",
+          "locator": "===== PDF PAGE 6 =====",
+          "source_id": "ref:smit-2023-going-mad"
+        }
+      ],
+      "confidence": 0.75,
+      "counterevidence": [],
+      "derived_from_claim_ids": [
+        "sf-smit-agreement",
+        "sf-zhang-hyperparameter"
+      ],
+      "local_id": "c3",
+      "statement": "Design inference (reconciliation): visibility/timing — exposing peer answers early risks conformity and loss of diversity; therefore the substrate must stage commitment of independent answers before any peer answers are disclosed, matching the caution implied by the conformity literature."
+    },
+    {
+      "basis": "inferred",
+      "citations": [
+        {
+          "excerpt": "none of these MAD methods achieve a win rate higher than 20% when compared to CoT across 36 scenarios (4 models × 9 benchmarks)",
+          "locator": "===== PDF PAGE 3 =====",
+          "source_id": "ref:zhang-2025-mad-question"
+        }
+      ],
+      "confidence": 0.8,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "c4",
+      "statement": "Design inference (evaluation constraint): quality and diversity/correlation — measure per-question answer quality on held-out accuracy and also measure diversity as pairwise answer distance plus correlation with peer answers; both must be reported per condition to test whether conformity reduces diversity without improving quality."
+    },
+    {
+      "basis": "inferred",
+      "citations": [
+        {
+          "excerpt": "SC is more efficient in token consumption",
+          "locator": "===== PDF PAGE 9 =====",
+          "source_id": "ref:zhang-2025-mad-question"
+        },
+        {
+          "excerpt": "simply adjusting these hyperparameters can hardly reverse this negative outcome",
+          "locator": "===== PDF PAGE 3 =====",
+          "source_id": "ref:zhang-2025-mad-question"
+        }
+      ],
+      "confidence": 0.8,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "c5",
+      "statement": "Design inference (evaluation constraint): latency and token cost — record wall-clock latency and total token consumption per condition, and compare at matched compute parity, because Zhang reports SC is more efficient in token consumption and hyperparameter adjustment does not reverse the negative outcome."
+    },
+    {
+      "basis": "inferred",
+      "citations": [
+        {
+          "excerpt": "MAD is 'more sensitive to different hyperparameter settings and difficult to optimize'",
+          "locator": "===== PDF PAGE 1 =====",
+          "source_id": "ref:smit-2023-going-mad"
+        },
+        {
+          "excerpt": "performed worse on programming tasks",
+          "locator": "===== PDF PAGE 7 =====",
+          "source_id": "ref:zhang-2025-mad-question"
+        }
+      ],
+      "confidence": 0.7,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "c6",
+      "statement": "Design inference (evaluation constraint): recovery-from-wrong-consensus — inject a deliberately wrong consensus answer mid-debate and measure whether the substrate recovers or entrenches the error; this directly tests the conformity risk named by the null/boundary results."
+    }
+  ],
+  "counterevidence": [
+    "The dossier does not include the full text of Smit or Zhang files; only separator facts, so the hypotheses and constraints rest entirely on those quoted excerpts. If the actual files contain additional boundary conditions or exceptions, the design inference may need revision."
+  ],
+  "next_observation": "Obtain the full text of smit-et-al-2023-going-mad.txt and zhang-et-al-2025-mad-question.txt to verify each quoted page marker and to search for additional boundary conditions (e.g., model heterogeneity, dataset exceptions) that could refine the reconciliation.",
+  "source_ids_consulted": [
+    "ref:smit-2023-going-mad",
+    "ref:zhang-2025-mad-question"
+  ],
+  "sufficiency": "partial",
+  "unresolved": [
+    "It remains unresolved whether the efficacy of the substrate depends on model heterogeneity, which Zhang proposes as universal antidote (Heter-SoM +6.4%), since this node did not extract the full Zhang analysis.",
+    "The exact latency/token accounting rules (e.g., whether to count debate rounds) are not specified in the separator facts and must be fixed by the parent."
+  ]
+}

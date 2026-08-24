@@ -7,7 +7,12 @@ from collections.abc import Callable
 from defender.learning.core.config import RunUnprocessable
 from defender.learning.core.drains import author_drain, lead_author_drain
 from defender.learning.core.faults import SYSTEMIC_FAULTS
-from defender.learning.core.run_cycle import learn_drain, run_one
+from defender.learning.core.run_cycle import (
+    NOT_LEARNED,
+    UNLEARNABLE,
+    learn_drain,
+    run_one,
+)
 
 
 _HELP_EPILOG = """\
@@ -158,4 +163,15 @@ def main(argv: list[str]) -> int:
     if not run_dir.is_dir():
         print(f"not a directory: {run_dir}", file=sys.stderr)
         return 1
-    return _run_stage(lambda: run_one(run_dir), allow_run_error=True)
+    # A TRANSIENT REFUSAL IS NOT A PROCESS ERROR. `run_one`'s refusal codes exist so the learn
+    # drain can tell "learned" from "left for another pass"; a hand-run pass on a run another
+    # lane holds has done nothing wrong and must not exit non-zero.
+    #
+    # `UNLEARNABLE` is the other half and does NOT map to 0. It means "no pass will ever learn
+    # this run" — today a run id failing the grammar its lock file and container name are both
+    # derived from — which is bad run data, the case this command's own exit-code contract
+    # already spells 2. Reported as success, a CI step or a wrapper gating on `$?` treats a
+    # permanently unprocessable run as processed; the drain's own arm QUARANTINES it, and the
+    # two lanes must not disagree about whether that is a failure.
+    outcome = _run_stage(lambda: run_one(run_dir), allow_run_error=True)
+    return {NOT_LEARNED: 0, UNLEARNABLE: 2}.get(outcome, outcome)

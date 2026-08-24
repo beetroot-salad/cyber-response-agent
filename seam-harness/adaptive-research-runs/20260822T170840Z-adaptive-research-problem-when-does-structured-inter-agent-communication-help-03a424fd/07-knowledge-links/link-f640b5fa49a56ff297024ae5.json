@@ -1,0 +1,10 @@
+{
+  "content_sha256": "f640b5fa49a56ff297024ae517eea82f7b2c4c51ce2fce5873e17fe0e009226b",
+  "id": "link:f640b5fa49a56ff297024ae5",
+  "origin": "runtime",
+  "proposed_by_node_id": null,
+  "rationale": null,
+  "relation": "refines",
+  "source_id": "question:work:001-w1-formal-theory",
+  "target_id": "question:demand:D3"
+}

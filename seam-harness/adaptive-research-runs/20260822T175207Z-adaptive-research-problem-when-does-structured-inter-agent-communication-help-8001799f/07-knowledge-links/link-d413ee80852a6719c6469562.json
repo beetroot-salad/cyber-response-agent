@@ -1,0 +1,10 @@
+{
+  "content_sha256": "d413ee80852a6719c6469562e0ec0cafb7dca5b3f78a8e220cfc77156d6be494",
+  "id": "link:d413ee80852a6719c6469562",
+  "origin": "runtime",
+  "proposed_by_node_id": null,
+  "rationale": null,
+  "relation": "depends_on",
+  "source_id": "question:raised:92a7343df8a6:rq-shapiro-merge",
+  "target_id": "question:demand:D3"
+}

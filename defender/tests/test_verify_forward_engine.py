@@ -26,7 +26,7 @@ from defender.learning.author.verify_forward.engine import (  # noqa: E402
 )
 from defender.learning.core import config  # noqa: E402
 from defender.learning.core.config import RunUnprocessable  # noqa: E402
-from defender.learning.pipeline import _pydantic_stage  # noqa: E402
+from defender.learning import _pydantic_stage  # noqa: E402
 from defender.runtime import observe, permission  # noqa: E402
 from defender.runtime.agent_definition import bind  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402

@@ -1,0 +1,29 @@
+{
+  "claim_ids": [
+    "work:006-lower-bound-v5-compact:C001",
+    "work:006-lower-bound-v5-compact:C002",
+    "work:006-lower-bound-v5-compact:C003",
+    "work:006-lower-bound-v5-compact:C004"
+  ],
+  "content_sha256": "cec2e75143393dc160311f054a4461fcaf4ebaba35f1a838e31fa9f8001efca0",
+  "id": "answer:work:006-lower-bound-v5-compact",
+  "node_id": "work:006-lower-bound-v5-compact",
+  "packet_id": "packet:work:006-lower-bound-v5-compact",
+  "sufficiency": "ready_to_synthesize",
+  "summary": "Frozen facts used: tree rooted at v0; non-root children are mutations of a,b,c; child max ≤4d³ (answer:work:003-struct-core-v2, answer:work:004-upper-depth-v3).\nL1. For j≥1, d0=1,d1=3,c_j=d_{j-1}; v0=(1,1,1,1), v_j=(1,1,c_j,d_j). Induction/mutation gives 2+c_j²+d_j²=4c_jd_j and d_{j+1}=4d_j−d_{j−1}. λ=2+√3; d_j=Aλ^j+Bλ^{−j}, A=(3+√3)/6, B=(3−√3)/6. Since A+Bλ^{−2j}≤A+B=1, d_j≤λ^j; d_j strictly increases, so N(H)≥⌊log_λH⌋+1.\nL2. Child maximum f(x)=4abcd/x−x is strictly decreasing, so distinct values among a,b,c give distinct children. If a=b=c=x, d²=x²(4xd−3), so x|d; d=kx gives k²+3=4kx², hence k|3. k=1→v0; k=3→v1=(1,1,1,3). Thus depth≥2⇒≥2 distinct children.\nL3. From v2=(1,1,3,11), A=log₂11+1. Each edge gives L+1≤3(L+1), so after t edges log₂d≤3^tA. If 3^tA≤log₂H, the 2^t level-t vertices below v2 have d≤H. Take t=⌊log₃(log₂H/A)⌋, β=log₃2=0.6309, c′=1/(2A^β)≈0.194, H≥32; then N(H)≥2^t≥c′(log₂H)^β.\nFINAL: N(H)≥max{⌊log_{2+√3}H⌋+1, c′(log₂H)^0.6309} for H≥32. Correction: the first term is asymptotically dominant (1>0.6309). CONJECTURE stronger than Θ(log H): missing positive-density branching/typical-growth lemma.",
+  "tags": [
+    "method",
+    "measurement",
+    "constraint",
+    "synthesis",
+    "counterexample",
+    "uncertainty"
+  ],
+  "unresolved": [
+    "Any lower bound stronger than Theta(log H), e.g. N(H)>=(log H)^{1+delta}, remains conjectural; the exact missing lemma is positive-density two-child branching with average log-growth slope strictly below 3 over Omega(depth) levels.",
+    "The gap to the proved upper bound N(H)=O(H^{ln3/ln11}) remains large and is not addressed by this lower-bound packet.",
+    "Runtime discarded unknown citation sources from C1: ['answer:work:003-struct-core-v2', 'answer:work:004-upper-depth-v3']",
+    "Runtime discarded unknown citation sources from C3: ['answer:work:003-struct-core-v2']",
+    "Runtime discarded unknown citation sources from C4: ['answer:work:004-upper-depth-v3']"
+  ]
+}

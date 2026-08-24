@@ -1,0 +1,126 @@
+{
+  "account": "All four definitions requested by child-1 (argumentation framework, acceptability, conflict-free set, admissible set) are present verbatim in papers/text/dung-1995-argumentation.txt and each can be anchored to a specific `===== PDF PAGE N =====` marker. Definition 2 (argumentation framework) and Definition 5 (conflict-free) appear on PDF PAGE 6; the acceptability and admissible-set definitions (Definition 6, parts 1 and 2) also appear on PDF PAGE 6. The informal description that motivates admissibility is on PDF PAGE 6 as well. The only caveat is that the argumentation-framework intro text straddles the PDF PAGE 5/6 boundary: the narrative 'Our theory of argumentation is based on a notion of argumentation framework defined as a pair of a set of arguments, and a binary relation representing the attack relationship between arguments' ends PDF PAGE 5, while the formal Definition 2 and the rest of the definitions begin on PDF PAGE 6. I therefore recommend citing the framework definition to both markers or primarily to page 6, but anchoring conflict-free, acceptability, and admissibility pages 6 only. No countervailing text contradicts the extracted definitions; the source's presentation is internally consistent. Because content beyond the two displayed pages was not enclosed at intake, the only workspace-relative evidence I can certify is the one file whose full content is present; I verified citations directly against the inline copy of papers/text/dung-1995-argumentation.txt.",
+  "assumptions": [
+    "The dossier's workspace copy of papers/text/dung-1995-argumentation.txt is the authoritative extracted text; quotes are taken verbatim from the provided content, normalizing the 'w' character that the OCR inserts between words."
+  ],
+  "boundary_findings": [
+    {
+      "alternative_explanation": "The extracted text simply ends a paragraph at the bottom of page 5 and continues on page 6; the formal definition belongs on page 6 in the original paper.",
+      "consequence_if_absorbed": "A child or synthesis step that anchors 'argumentation framework = (AR, attacks)' solely to PDF PAGE 5 would miss the formal tuple notation and the 'attacks ⊆ AR × AR' condition, which are the load-bearing parts for later design inference about conflict edges.",
+      "evidence": [
+        "ref:dung-1995-argumentation at ===== PDF PAGE 5 =====: 'Our theory of argumentation is based on a notion of argumentation framework defined as a pair of a set of arguments, and a binary relation representing the attack relationship between arguments.'",
+        "ref:dung-1995-argumentation at ===== PDF PAGE 6 =====: 'Definition 2. An argumentation framework is a pair AF = (AR, attacks) ...'"
+      ],
+      "narrative": "The introduction to Definition 2 (the 'pair of a set of arguments, and a binary relation representing the attack relationship') closes the section beginning on PDF PAGE 5, but the formal Definition 2 statement itself appears on PDF PAGE 6. A parent that cites only one marker could split intuitive/conceptual framing from the formal definition.",
+      "smallest_suspected_scope": "single-page boundary between the two markers"
+    }
+  ],
+  "child_packet_ids": [],
+  "claims": [
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "Definition 2. An argumentationwframeworkwis a pair AF= (AR, attacks) where AR is a set of arguments, and attacks is a binary relation on AR i.e. attacks ⊆ AR × AR. For two arguments A and B the meaning of attacks(A, B) is that A represents an attack against B.",
+          "locator": "===== PDF PAGE 6 =====",
+          "source_id": "ref:dung-1995-argumentation"
+        }
+      ],
+      "confidence": 1.0,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "id": "root.01-arg-semantics.01-child-1:C001",
+      "statement": "Dung 1995, Definition 2 defines an argumentation framework as a pair AF = (AR, attacks) where AR is a set of arguments and attacks is a binary relation on AR, i.e., attacks ⊆ AR × AR; 'For two arguments A and B the meaning of attacks(A, B) is that A represents an attack against B.'"
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "Here, an argument is an abstract entity whose role is solely determined by its relations to other arguments. No special attention is paid to the internal structure of the arguments.",
+          "locator": "===== PDF PAGE 6 =====",
+          "source_id": "ref:dung-1995-argumentation"
+        }
+      ],
+      "confidence": 1.0,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "id": "root.01-arg-semantics.01-child-1:C002",
+      "statement": "Dung 1995, Section 2.1 states that 'an argument is an abstract entity whose role is solely determined by its relations to other arguments. No special attention is paid to the internal structure of the arguments.'"
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "Definition 5. A set S of arguments is said to be conflict-free if there are no arguments A and B in S such that A attacks B.",
+          "locator": "===== PDF PAGE 6 =====",
+          "source_id": "ref:dung-1995-argumentation"
+        }
+      ],
+      "confidence": 1.0,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "id": "root.01-arg-semantics.01-child-1:C003",
+      "statement": "Dung 1995, Definition 5 defines a conflict-free set: 'A set S of arguments is said to be conflict-free if there are no arguments A and B in S such that A attacks B.'"
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "Definition 6. (1) An argument A ∈ AR is acceptable with respect to a set S of arguments iff for each argument B ∈ AR: if B attacks A then B is attacked by S.",
+          "locator": "===== PDF PAGE 6 =====",
+          "source_id": "ref:dung-1995-argumentation"
+        }
+      ],
+      "confidence": 1.0,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "id": "root.01-arg-semantics.01-child-1:C004",
+      "statement": "Dung 1995, Definition 6(1) defines acceptability: 'An argument A ∈ AR is acceptable with respect to a set S of arguments iff for each argument B ∈ AR: if B attacks A then B is attacked by S.'"
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "Definition 6. (2) A conflict-free set of arguments S is admissible iff each argument in S is acceptable with respect to S.",
+          "locator": "===== PDF PAGE 6 =====",
+          "source_id": "ref:dung-1995-argumentation"
+        }
+      ],
+      "confidence": 1.0,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "id": "root.01-arg-semantics.01-child-1:C005",
+      "statement": "Dung 1995, Definition 6(2) defines admissibility: 'A conflict-free set of arguments S is admissible iff each argument in S is acceptable with respect to S.'"
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "Further, it is reasonable to assume that a rational agent accepts an argument only if it is acceptable. That means that the set of all arguments accepted by a rational agent is a set of arguments which can defend itself against all attacks on it.",
+          "locator": "===== PDF PAGE 6 =====",
+          "source_id": "ref:dung-1995-argumentation"
+        }
+      ],
+      "confidence": 1.0,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "id": "root.01-arg-semantics.01-child-1:C006",
+      "statement": "Dung 1995 motivates admissibility by stating that a rational agent accepts an argument only if it is acceptable: 'a rational agent accepts an argument only if it is acceptable. That means that the set of all arguments accepted by a rational agent is a set of arguments which can defend itself against all attacks on it.'"
+    }
+  ],
+  "content_sha256": "c2ec83ac3143a362d18c3c8aea90b22b142e2b4f2570079eab355edd4df48d95",
+  "counterevidence": [
+    "No counterevidence found in the displayed content of papers/text/dung-1995-argumentation.txt. The formal definitions are presented as a coherent sequence (Definitions 2, 5, 6), and the later text (e.g., Definition 7 on preferred extensions, Definition 13 on stable extensions) consistently builds on these definitions."
+  ],
+  "id": "packet:root.01-arg-semantics.01-child-1",
+  "next_observation": null,
+  "node_id": "root.01-arg-semantics.01-child-1",
+  "objective": "Extract from papers/text/dung-1995-argumentation.txt, each anchored to the exact `===== PDF PAGE N =====` marker(s) where it appears, the definitions of: (a) argumentation framework (set of arguments plus binary attack relation), (b) acceptability of an argument, (c) conflict-free set, and (d) admissible set. For each concept, provide a direct quote or close paraphrase from the source text and note the page marker(s).",
+  "source_ids_consulted": [
+    "ref:dung-1995-argumentation"
+  ],
+  "sufficiency": "ready_to_synthesize",
+  "unresolved": [
+    "Intake did not enclose the full seven-file corpus, only the manifest; current verification of citations is limited to the inline copy of the Dung file. Verification that the other six files exist in the workspace is based on SC4/SC1 assertions, not on their contents."
+  ]
+}

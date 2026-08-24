@@ -1,0 +1,17 @@
+{
+  "acceptance_condition": "A structured report covering (a)-(d) with effect directions and statistics and explicit PDF page markers from papers/text/lorenz-et-al-2011-social-influence.txt.",
+  "content_sha256": "5b859afbc48fc23fa61cc92b6f86b2f8ac4e9deeb2d9508d0c9a51239d0304c6",
+  "demand_ids": [
+    "D3",
+    "D4"
+  ],
+  "id": "question:work:001-w1-lorenz2011",
+  "node_id": "work:001-w1-lorenz2011",
+  "rationale": "This is the causal-mechanism keystone for the 'open shared transcript destroys diversity' pathway in the D3 causal model; it is human evidence, so it must be flagged as cross-domain inference when applied to LLM agents.",
+  "tags": [
+    "evidence",
+    "method",
+    "measurement"
+  ],
+  "text": "What does Lorenz et al. 2011 'How Social Influence Can Undermine the Wisdom of Crowd Effect' establish? Extract: (a) experimental design (estimation tasks, subjects, information conditions: no information, aggregate information, full information); (b) the quantified effects of social influence on accuracy, on diversity/range reduction, and on confidence, with numbers; (c) the mechanism by which social influence narrows diversity without improving collective accuracy; (d) conditions under which influence helped versus hurt. Record every claim with its explicit ===== PDF PAGE N ===== marker."
+}

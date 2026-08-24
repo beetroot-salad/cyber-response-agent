@@ -1,0 +1,10 @@
+{
+  "content_sha256": "52561cdacc7fbc15627693ece7f85869ed92646a194447b66686e2c763fc3b6c",
+  "id": "link:52561cdacc7fbc15627693ec",
+  "origin": "runtime",
+  "proposed_by_node_id": null,
+  "rationale": null,
+  "relation": "refines",
+  "source_id": "question:work:004-synthesis",
+  "target_id": "question:demand:D8"
+}

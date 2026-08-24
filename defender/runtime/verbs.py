@@ -63,6 +63,15 @@ class VerbContext:
     run_dir: Path
     env: Mapping[str, str]
     capture: Any = None
+    #: Which branched world this call is being served for, when it is being served for one.
+    #: `None` is the ordinary run and the base world alike — both read the corpus itself.
+    #:
+    #: Set by the estate registry, never by a model: it declares to the adapter that this
+    #: call's staged reads are in bounds, and it is per world, so a sibling's views stay out
+    #: of bounds here. A defaulted field rather than a new seam because every one of the
+    #: twenty-odd `VerbContext(...)` sites builds an unbranched run and should keep reading
+    #: as one.
+    world_id: str | None = None
 
 
 Verb = Callable[..., Any]

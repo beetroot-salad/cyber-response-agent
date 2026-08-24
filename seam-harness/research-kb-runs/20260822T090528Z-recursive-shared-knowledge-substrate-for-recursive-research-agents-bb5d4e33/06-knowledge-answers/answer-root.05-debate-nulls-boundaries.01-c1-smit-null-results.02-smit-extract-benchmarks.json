@@ -1,0 +1,23 @@
+{
+  "claim_ids": [
+    "root.05-debate-nulls-boundaries.01-c1-smit-null-results.02-smit-extract-benchmarks:C001",
+    "root.05-debate-nulls-boundaries.01-c1-smit-null-results.02-smit-extract-benchmarks:C002",
+    "root.05-debate-nulls-boundaries.01-c1-smit-null-results.02-smit-extract-benchmarks:C003",
+    "root.05-debate-nulls-boundaries.01-c1-smit-null-results.02-smit-extract-benchmarks:C004"
+  ],
+  "content_sha256": "13bec8aa8ffaec677a14f96d2a0536df47775b8b0017dae2e8e064ba3c8d35d0",
+  "id": "answer:root.05-debate-nulls-boundaries.01-c1-smit-null-results.02-smit-extract-benchmarks",
+  "node_id": "root.05-debate-nulls-boundaries.01-c1-smit-null-results.02-smit-extract-benchmarks",
+  "packet_id": "packet:root.05-debate-nulls-boundaries.01-c1-smit-null-results.02-smit-extract-benchmarks",
+  "sufficiency": "ready_to_synthesize",
+  "summary": "Benchmark-specific evidence from Smit et al. 2023: Table 2 lists best scores across seven datasets showing MAD systems do not dominate; single-agent and other baselines beat or match MAD on multiple benchmarks, and no protocol dominates on all datasets (PDF page 5). Specific numbers anchor the comparison.",
+  "tags": [
+    "evidence",
+    "measurement",
+    "counterexample",
+    "uncertainty"
+  ],
+  "unresolved": [
+    "The dossier does not provide the exact method used to compute the parenthetical median scores in Table 2, only that they are 'median performance over the datasets shown in parentheses.'"
+  ]
+}

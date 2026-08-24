@@ -1,0 +1,14 @@
+{
+  "acceptance_condition": "Establish demand D12 with evidence.",
+  "content_sha256": "70610c0e88a285479759ef950cb1fa33e28da10095af537fb19e5ee24c60fdc7",
+  "demand_ids": [
+    "D12"
+  ],
+  "id": "question:demand:D12",
+  "node_id": null,
+  "rationale": "Grounding scope, citation count, and page-marker requirement are stated in the request; marker format and corpus enumeration come from the manifest.",
+  "tags": [
+    "evidence"
+  ],
+  "text": "All evidentiary claims are grounded only in the supplied workspace corpus, with at least five distinct source files cited and citations carrying PDF page markers from the extracted text."
+}

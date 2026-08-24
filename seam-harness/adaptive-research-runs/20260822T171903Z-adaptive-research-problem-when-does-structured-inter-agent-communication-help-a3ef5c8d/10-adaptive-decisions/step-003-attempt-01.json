@@ -1,0 +1,33 @@
+{
+  "account": "All seven corpus papers are now extracted as page-cited, ready_to_synthesize answers: Du 2023 (positive pole), Lorenz 2011 (human diversity-collapse mechanism), Smit 2023 (null/adverse pole with agreement-modulation contingency), Zhang 2025 (matched-compute negative vs CoT/SC plus heterogeneity gains, with the decisive heterogeneous-SC control missing), Choi 2025 (capability-dominated conformity on ground-truth-free topics, no answer-only condition), Dung 1995 (adjudication semantics with no evidential weight, so symmetric answer conflicts are formally undecidable), Shapiro 2011 (truth-neutral merge conditions that LLM synthesis likely violates). The four open raised questions (rz1 heterogeneous-SC control, rz2 task-topology interaction, rq-choi-1 conformity on verifiable tasks, rq-shapiro-merge aggregation-operator variance) are not corpus-answerable; they are exactly the non-identifiability content for D6 and the design targets for the D7 experiment, so further source investigation has low marginal value and run_experiment is inapplicable (the only adapter, text_statistics, serves a later word-count check, not theory building). The binding constraint on D2-D8 is integration: the Du-vs-Smit-vs-Zhang contradiction (already linked as contradicts in the graph) must be reconciled into one causal model before discriminating predictions and a preregistered design can be derived without silently selecting the preferred outcome. The highest-information bounded action is one synthesis over the seven named answers, producing the thesis, causal model, reconciliation, discriminating predictions, identifiability limits, and experiment skeleton the final note will assemble.",
+  "action": {
+    "acceptance_condition": "The synthesis answer contains: (1) a single-sentence mechanistic thesis with explicit scope conditions; (2) a causal model listing nodes, edges, and sign conditions; (3) a reconciliation mapping each of the seven papers to model variables with file paths and PDF page markers, distinguishing reported findings from cross-paper inference and from the note's new hypothesis; (4) at least four discriminating predictions, each tagged with the alternative (compute-only, diversity-only, deliberation-only) it excludes; (5) a limits section naming each raised question and why existing evidence cannot settle it; (6) an experiment skeleton covering units, strata, conditions, randomization, estimands, power inputs, exclusion rules, multiple-testing control, and stopping/failure criteria; (7) a closing paragraph with the strongest warranted conclusion and the single most falsifying observation.",
+    "answer_ids": [
+      "answer:work:001-inv-du-debate",
+      "answer:work:001-inv-lorenz-influence",
+      "answer:work:002-inv-smit-mad-r2",
+      "answer:work:002-inv-zhang-when-r2",
+      "answer:work:002-inv-choi-r2",
+      "answer:work:002-inv-dung-r2",
+      "answer:work:002-inv-shapiro-r2"
+    ],
+    "conflict_policy": "Do not resolve the Du-vs-Smit-vs-Zhang contradiction by selecting a preferred outcome. Preserve every reported result and attribute discrepancies to named moderators (baseline strength, compute accounting, task topology, hyperparameter/agreement-intensity sensitivity, model capability mix); where attribution itself is uncertain, record it as an identifiability limit feeding D6 and the D7 design rather than resolving it by fiat.",
+    "kind": "synthesize",
+    "objective": "Integrate the seven extraction answers into the note's core: (a) one original mechanistic thesis stating when staged retrieval-mediated Q/A beats both independent sampling with final aggregation and an open shared transcript under matched inference compute (D2); (b) an explicit causal model over initial error correlation, evidence diversity, social influence/conformity, retrieval selectivity, synthesis competence, and task topology, with directed pathways and sign conditions (D3); (c) a reconciliation of Du 2023's positive results, Smit 2023's null/hyperparameter-contingent results, and Zhang 2025's matched-compute negative plus heterogeneity result, using Lorenz 2011 and Choi 2025 for the social-influence pathway and Dung 1995 and Shapiro 2011 for the synthesis/merge stage (D4); (d) at least four directional or interaction predictions, each labeled with which alternative it discriminates against among compute-only, diversity-only, and deliberation-only (D5); (e) an explicit non-identifiability, measurement, and external-validity limits section built from rz1, rz2, rq-choi-1, rq1, and rq-shapiro-merge (D6); (f) a preregisterable experiment skeleton (conditions, randomization, estimands, power inputs, failure criteria, analysis plan) that instantiates rz1 and rz2 (D7); and (g) a draft of the strongest warranted conclusion and the single most likely falsifying observation (D8).",
+    "question_ids": [
+      "question:demand:D2",
+      "question:demand:D3",
+      "question:demand:D4",
+      "question:demand:D5",
+      "question:demand:D6",
+      "question:demand:D7",
+      "question:demand:D8",
+      "question:raised:24ba60001ffb:rz1",
+      "question:raised:24ba60001ffb:rz2",
+      "question:raised:92a7343df8a6:rq-shapiro-merge",
+      "question:raised:eaee61611e26:rq-choi-1",
+      "question:raised:784a683dbe8a:rq1"
+    ],
+    "rationale": "Synthesis is the correct action because the raw materials now exist as named answers and the remaining open questions are corpus-unanswerable gaps that the synthesis should convert into identifiability limits and experimental design rather than investigate further. The reconciliation must explain, not adjudicate by preference: Du's positives were measured against the weakest baselines (Zhang's reconciliation claim), Smit's nulls are hyperparameter- and dataset-contingent (agreement-intensity result), and Zhang's negatives hold under matched calls/tokens but leave heterogeneity's debate-specific value unidentified; a causal model in which error correlation, diversity preservation, selective exposure, and adjudication competence interact with task topology can absorb all three without discarding any. The formal papers sharpen this: Dung shows conflict between agent answers is undecidable without external evidence (motivating retrieval as tie-breaker), and Shapiro shows agreement after merging certifies nothing about truth (grounding the constraint that consensus is not evidence)."
+  }
+}

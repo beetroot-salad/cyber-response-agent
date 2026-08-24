@@ -120,6 +120,18 @@ class LoopPaths(DefenderPaths):
     def lead_author_drain_lock_file(self) -> Path:
         return self.state_root / ".lead-author-drain.lock"
 
+    def run_cycle_lock_file(self, run_id: str) -> Path:
+        """One lock per RUN, held across the run cycle's box.
+
+        The learn drain's own lease keeps two drainers apart, but it is not the only way into
+        `run_one`: the single-run CLI stage calls it directly, holding no lease, and the
+        run-cycle box REUSES its container name across starts (`defender-runcycle-{run_id}`).
+        So a hand-run pass on a run the drain worker already picked up put two lanes on one
+        container name — the collision #955 F-49's ownership check makes honest, and this
+        makes not happen. Per run id rather than one global lock: two DIFFERENT runs share
+        nothing and must still learn concurrently."""
+        return self.state_root / "run-cycle-locks" / f"{run_id}.lock"
+
     @property
     def learn_drain_lock_file(self) -> Path:
         """The learn drain's own single-drainer lease. Load-bearing since the drain began

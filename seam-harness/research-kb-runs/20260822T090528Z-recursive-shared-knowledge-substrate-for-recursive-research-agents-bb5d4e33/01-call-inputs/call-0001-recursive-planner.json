@@ -1,0 +1,760 @@
+{
+  "call_id": "call-0001-recursive-planner",
+  "context": {
+    "ancestor_decisions": [
+      "SC1: The evidentiary corpus is exactly seven extracted-text files under papers/text: dung-1995-argumentation.txt (Dung 1995, Artificial Intelligence 77), shapiro-et-al-2011-crdts.txt (Shapiro et al., SSS 2011), lorenz-et-al-2011-social-influence.txt (Lorenz et al., PNAS 108, 2011), du-et-al-2023-multiagent-debate.txt (Du et al. 2023, arXiv 2305.14325), smit-et-al-2023-going-mad.txt (Smit et al. 2023, arXiv 2311.17371), zhang-et-al-2025-mad-question.txt (Zhang et al. 2025, arXiv 2502.08788), choi-et-al-2025-conformity.txt (Choi et al., Findings of ACL 2025).",
+      "SC2: Page boundaries in the extracted texts are marked with lines of the form `===== PDF PAGE N =====`, and these markers are the citation anchors required by D12/C3.",
+      "SC3: The corpus intentionally contains conflicting empirical conclusions — multi-agent debate gains (Du et al. 2023) versus matched-compute null results and conformity findings (Smit et al. 2023; Zhang et al. 2025; Choi et al. 2025; Lorenz et al. 2011 on social influence undermining crowd wisdom) — and the manifest requires preserving and reconciling these conflicts.",
+      "SC4: The envelope's single conversation decision asserts that the seven full extracted texts are present in the solve workspace under papers/text with explicit PDF page markers; the intake envelope itself encloses only the manifest, not the full texts.",
+      "SC5: The manifest (material:001) is located at /workspace/seam-harness/research-kb-workspace/CORPUS.md, indicating a benchmark-style workspace named research-kb-workspace under a seam-harness directory.",
+      "SC6: The proposed substrate plus the two baselines named in D4 (open conversational forum; no inter-agent communication) naturally supply the three or more conditions required by D14."
+    ],
+    "assigned_demands": [
+      {
+        "id": "D1",
+        "rationale": "Format and length bound stated verbatim in the request.",
+        "statement": "The deliverable is a single architecture decision memo of 1,400–1,800 words."
+      },
+      {
+        "id": "D2",
+        "rationale": "The request explicitly forbids a survey-only outcome.",
+        "statement": "The memo makes one concrete, implementable recommendation rather than merely surveying the literature."
+      },
+      {
+        "id": "D3",
+        "rationale": "All five capabilities are enumerated verbatim in the request.",
+        "statement": "The recommended design treats questions and answers as first-class many-to-many graph objects, supporting: multiple competing answers per question; one answer addressing multiple questions; question-to-question relations; answer-to-answer provenance or conflict relations; and controlled tags."
+      },
+      {
+        "id": "D4",
+        "rationale": "Both comparison targets are named verbatim in the request.",
+        "statement": "The design is compared against two named baselines: an open conversational forum and no inter-agent communication."
+      },
+      {
+        "id": "D5",
+        "rationale": "First of six specification areas listed in the request.",
+        "statement": "The data model and its invariants are specified."
+      },
+      {
+        "id": "D6",
+        "rationale": "Second of six specification areas listed in the request.",
+        "statement": "Staged visibility and the communication protocol are specified."
+      },
+      {
+        "id": "D7",
+        "rationale": "Third of six specification areas listed in the request.",
+        "statement": "Persistence and concurrent-update semantics are specified."
+      },
+      {
+        "id": "D8",
+        "rationale": "Fourth of six specification areas listed in the request.",
+        "statement": "Contradiction and belief-revision behavior is specified."
+      },
+      {
+        "id": "D9",
+        "rationale": "Fifth of six specification areas listed in the request.",
+        "statement": "Retrieval and ranking are specified."
+      },
+      {
+        "id": "D10",
+        "rationale": "Sixth specification area; the request says 'the exact role of model versus runtime.'",
+        "statement": "The exact division of responsibility between model and runtime is specified."
+      },
+      {
+        "id": "D11",
+        "rationale": "Required by the request and reinforced by the manifest's instruction not to select papers by desired outcome.",
+        "statement": "The memo reconciles — rather than hides — the tension between papers reporting multi-agent debate gains and papers reporting matched-compute null results or conformity."
+      },
+      {
+        "id": "D12",
+        "rationale": "Grounding scope, citation count, and page-marker requirement are stated in the request; marker format and corpus enumeration come from the manifest.",
+        "statement": "All evidentiary claims are grounded only in the supplied workspace corpus, with at least five distinct source files cited and citations carrying PDF page markers from the extracted text."
+      },
+      {
+        "id": "D13",
+        "rationale": "Stated verbatim in the request.",
+        "statement": "Source-supported claims are clearly distinguished from design inferences."
+      },
+      {
+        "id": "D14",
+        "rationale": "Condition count and all five metric families are enumerated in the request.",
+        "statement": "A falsifiable evaluation plan compares at least three conditions and defines metrics for quality, diversity/correlation, latency, token cost, and recovery-from-wrong-consensus."
+      },
+      {
+        "id": "D15",
+        "rationale": "Stated verbatim in the request.",
+        "statement": "Important limitations and unresolved questions are stated."
+      }
+    ],
+    "constraints": [
+      "C1: Total length must be 1,400–1,800 words.",
+      "C2: No evidence outside the seven corpus files may be used; the request restricts grounding to the supplied workspace corpus and the manifest declares these files the only evidentiary corpus for the benchmark.",
+      "C3: Citations must reference at least five distinct source files and include PDF page markers as they appear in the extracted texts (page boundaries marked `===== PDF PAGE N =====`).",
+      "C4: Papers must not be selected or weighted by desired outcome; the corpus's conflicting empirical conclusions must be preserved and reconciled."
+    ],
+    "expansion_required": true,
+    "knowledge_board": {
+      "answer_ids_by_question": {},
+      "answers_by_id": {},
+      "content_sha256": "6ec39720d33581624e1ecdf717424d8924d3d964f06456db7707e4e025a0554c",
+      "entry_ids_by_tag": {
+        "counterexample": [
+          "question:demand:D14",
+          "question:root"
+        ],
+        "decision": [
+          "question:demand:D1",
+          "question:demand:D2",
+          "question:demand:D3"
+        ],
+        "definition": [
+          "question:demand:D14"
+        ],
+        "evidence": [
+          "question:demand:D10",
+          "question:demand:D11",
+          "question:demand:D12",
+          "question:demand:D13",
+          "question:demand:D15",
+          "question:demand:D4",
+          "question:demand:D5",
+          "question:demand:D7",
+          "question:demand:D8",
+          "question:demand:D9"
+        ],
+        "measurement": [
+          "question:demand:D14",
+          "question:root"
+        ],
+        "method": [
+          "question:demand:D6",
+          "question:root"
+        ]
+      },
+      "incoming_link_ids_by_entry": {
+        "question:root": [
+          "link:088e1a7cfea6dde8ac04eab3",
+          "link:1e97bab1f415d57cbc837a88",
+          "link:2395134f0213cf5cee3f1947",
+          "link:48a3d569758cae1eb71a2043",
+          "link:541766fc32e4d84c2fd63c44",
+          "link:561e0fcd22b650ab4cc0fd61",
+          "link:709f42e6e4da8b14cdf82243",
+          "link:7a79aa5755f5b9590ce191cb",
+          "link:815a52c06ab01fa3052d160f",
+          "link:9dc3c1ef66fc5dbb330f0173",
+          "link:9e16c1c1dacc451174870ea4",
+          "link:ad2d4893bb4dadfa6cec4d51",
+          "link:dbcff4ec9d62472bedb7ee52",
+          "link:e5a9bece7311def890467b91",
+          "link:f7b3972e183578733d308198"
+        ]
+      },
+      "links_by_id": {
+        "link:088e1a7cfea6dde8ac04eab3": {
+          "content_sha256": "088e1a7cfea6dde8ac04eab354d79aadb3b99bdfe714c1e70ee16af4ac5294d0",
+          "id": "link:088e1a7cfea6dde8ac04eab3",
+          "relation": "refines",
+          "source_id": "question:demand:D5",
+          "target_id": "question:root"
+        },
+        "link:1e97bab1f415d57cbc837a88": {
+          "content_sha256": "1e97bab1f415d57cbc837a88883226a5539b431d3810d7ee0268b965646a5d6f",
+          "id": "link:1e97bab1f415d57cbc837a88",
+          "relation": "refines",
+          "source_id": "question:demand:D2",
+          "target_id": "question:root"
+        },
+        "link:2395134f0213cf5cee3f1947": {
+          "content_sha256": "2395134f0213cf5cee3f1947b0c2d057b3d7f586083bbad7eb028a4e1cb94466",
+          "id": "link:2395134f0213cf5cee3f1947",
+          "relation": "refines",
+          "source_id": "question:demand:D3",
+          "target_id": "question:root"
+        },
+        "link:48a3d569758cae1eb71a2043": {
+          "content_sha256": "48a3d569758cae1eb71a204319e430a0e2b17bbc10631decec88626d38dc50ca",
+          "id": "link:48a3d569758cae1eb71a2043",
+          "relation": "refines",
+          "source_id": "question:demand:D6",
+          "target_id": "question:root"
+        },
+        "link:541766fc32e4d84c2fd63c44": {
+          "content_sha256": "541766fc32e4d84c2fd63c44d39b887384e9693d9c10a19e869a69b53453f7ea",
+          "id": "link:541766fc32e4d84c2fd63c44",
+          "relation": "refines",
+          "source_id": "question:demand:D4",
+          "target_id": "question:root"
+        },
+        "link:561e0fcd22b650ab4cc0fd61": {
+          "content_sha256": "561e0fcd22b650ab4cc0fd61392437d8f3e7ca904a6e6b7e7839642ba210692d",
+          "id": "link:561e0fcd22b650ab4cc0fd61",
+          "relation": "refines",
+          "source_id": "question:demand:D1",
+          "target_id": "question:root"
+        },
+        "link:709f42e6e4da8b14cdf82243": {
+          "content_sha256": "709f42e6e4da8b14cdf82243f398085db7de30b6558d5ee57c30811a4bbb707f",
+          "id": "link:709f42e6e4da8b14cdf82243",
+          "relation": "refines",
+          "source_id": "question:demand:D7",
+          "target_id": "question:root"
+        },
+        "link:7a79aa5755f5b9590ce191cb": {
+          "content_sha256": "7a79aa5755f5b9590ce191cb65a36bfac312cd7011b4339d02a7b22f29e67a35",
+          "id": "link:7a79aa5755f5b9590ce191cb",
+          "relation": "refines",
+          "source_id": "question:demand:D8",
+          "target_id": "question:root"
+        },
+        "link:815a52c06ab01fa3052d160f": {
+          "content_sha256": "815a52c06ab01fa3052d160f517b7436a84926a916c938a154527f6ad9f63fe6",
+          "id": "link:815a52c06ab01fa3052d160f",
+          "relation": "refines",
+          "source_id": "question:demand:D13",
+          "target_id": "question:root"
+        },
+        "link:9dc3c1ef66fc5dbb330f0173": {
+          "content_sha256": "9dc3c1ef66fc5dbb330f0173535d446c45af5188095bf062d2f8de4e0707a33e",
+          "id": "link:9dc3c1ef66fc5dbb330f0173",
+          "relation": "refines",
+          "source_id": "question:demand:D15",
+          "target_id": "question:root"
+        },
+        "link:9e16c1c1dacc451174870ea4": {
+          "content_sha256": "9e16c1c1dacc451174870ea4511dc149959278b7f7237d7a2755f0a8820b1171",
+          "id": "link:9e16c1c1dacc451174870ea4",
+          "relation": "refines",
+          "source_id": "question:demand:D11",
+          "target_id": "question:root"
+        },
+        "link:ad2d4893bb4dadfa6cec4d51": {
+          "content_sha256": "ad2d4893bb4dadfa6cec4d5140baa6fa9767b2438aafa6411ce349e9e4ecc616",
+          "id": "link:ad2d4893bb4dadfa6cec4d51",
+          "relation": "refines",
+          "source_id": "question:demand:D9",
+          "target_id": "question:root"
+        },
+        "link:dbcff4ec9d62472bedb7ee52": {
+          "content_sha256": "dbcff4ec9d62472bedb7ee5294e35b526a4cde4fadd713d11e33f955d20f5328",
+          "id": "link:dbcff4ec9d62472bedb7ee52",
+          "relation": "refines",
+          "source_id": "question:demand:D14",
+          "target_id": "question:root"
+        },
+        "link:e5a9bece7311def890467b91": {
+          "content_sha256": "e5a9bece7311def890467b9156fcc92d2fec9948bcc4ff14bd2ab4b30bc4e243",
+          "id": "link:e5a9bece7311def890467b91",
+          "relation": "refines",
+          "source_id": "question:demand:D12",
+          "target_id": "question:root"
+        },
+        "link:f7b3972e183578733d308198": {
+          "content_sha256": "f7b3972e183578733d308198b9f3de5fda8854126c6aa66264d14afa484ff56a",
+          "id": "link:f7b3972e183578733d308198",
+          "relation": "refines",
+          "source_id": "question:demand:D10",
+          "target_id": "question:root"
+        }
+      },
+      "outgoing_link_ids_by_entry": {
+        "question:demand:D1": [
+          "link:561e0fcd22b650ab4cc0fd61"
+        ],
+        "question:demand:D10": [
+          "link:f7b3972e183578733d308198"
+        ],
+        "question:demand:D11": [
+          "link:9e16c1c1dacc451174870ea4"
+        ],
+        "question:demand:D12": [
+          "link:e5a9bece7311def890467b91"
+        ],
+        "question:demand:D13": [
+          "link:815a52c06ab01fa3052d160f"
+        ],
+        "question:demand:D14": [
+          "link:dbcff4ec9d62472bedb7ee52"
+        ],
+        "question:demand:D15": [
+          "link:9dc3c1ef66fc5dbb330f0173"
+        ],
+        "question:demand:D2": [
+          "link:1e97bab1f415d57cbc837a88"
+        ],
+        "question:demand:D3": [
+          "link:2395134f0213cf5cee3f1947"
+        ],
+        "question:demand:D4": [
+          "link:541766fc32e4d84c2fd63c44"
+        ],
+        "question:demand:D5": [
+          "link:088e1a7cfea6dde8ac04eab3"
+        ],
+        "question:demand:D6": [
+          "link:48a3d569758cae1eb71a2043"
+        ],
+        "question:demand:D7": [
+          "link:709f42e6e4da8b14cdf82243"
+        ],
+        "question:demand:D8": [
+          "link:7a79aa5755f5b9590ce191cb"
+        ],
+        "question:demand:D9": [
+          "link:ad2d4893bb4dadfa6cec4d51"
+        ]
+      },
+      "question_ids_by_answer": {},
+      "questions_by_id": {
+        "question:demand:D1": {
+          "acceptance_condition": "Establish demand D1 with evidence.",
+          "content_sha256": "358b8c8d2ee8dcbcd62f92e95fcfeb759f5784e13dd5bd756c15e8ad80406fad",
+          "demand_ids": [
+            "D1"
+          ],
+          "id": "question:demand:D1",
+          "node_id": null,
+          "rationale": "Format and length bound stated verbatim in the request.",
+          "tags": [
+            "decision"
+          ],
+          "text": "The deliverable is a single architecture decision memo of 1,400–1,800 words."
+        },
+        "question:demand:D10": {
+          "acceptance_condition": "Establish demand D10 with evidence.",
+          "content_sha256": "42c24ef84552b31fbec60cb25073a16b7d0d6ae637909b5aaa0649e671486bc9",
+          "demand_ids": [
+            "D10"
+          ],
+          "id": "question:demand:D10",
+          "node_id": null,
+          "rationale": "Sixth specification area; the request says 'the exact role of model versus runtime.'",
+          "tags": [
+            "evidence"
+          ],
+          "text": "The exact division of responsibility between model and runtime is specified."
+        },
+        "question:demand:D11": {
+          "acceptance_condition": "Establish demand D11 with evidence.",
+          "content_sha256": "b48aa66909c810d05ced3a63029ee4d813e20b8bd7343488b183f69dac4e2b40",
+          "demand_ids": [
+            "D11"
+          ],
+          "id": "question:demand:D11",
+          "node_id": null,
+          "rationale": "Required by the request and reinforced by the manifest's instruction not to select papers by desired outcome.",
+          "tags": [
+            "evidence"
+          ],
+          "text": "The memo reconciles — rather than hides — the tension between papers reporting multi-agent debate gains and papers reporting matched-compute null results or conformity."
+        },
+        "question:demand:D12": {
+          "acceptance_condition": "Establish demand D12 with evidence.",
+          "content_sha256": "70610c0e88a285479759ef950cb1fa33e28da10095af537fb19e5ee24c60fdc7",
+          "demand_ids": [
+            "D12"
+          ],
+          "id": "question:demand:D12",
+          "node_id": null,
+          "rationale": "Grounding scope, citation count, and page-marker requirement are stated in the request; marker format and corpus enumeration come from the manifest.",
+          "tags": [
+            "evidence"
+          ],
+          "text": "All evidentiary claims are grounded only in the supplied workspace corpus, with at least five distinct source files cited and citations carrying PDF page markers from the extracted text."
+        },
+        "question:demand:D13": {
+          "acceptance_condition": "Establish demand D13 with evidence.",
+          "content_sha256": "e4e6151f4fb92956ae2d8e295acd8c66fb86a3b7aa8512390bd8da1b78cda6ea",
+          "demand_ids": [
+            "D13"
+          ],
+          "id": "question:demand:D13",
+          "node_id": null,
+          "rationale": "Stated verbatim in the request.",
+          "tags": [
+            "evidence"
+          ],
+          "text": "Source-supported claims are clearly distinguished from design inferences."
+        },
+        "question:demand:D14": {
+          "acceptance_condition": "Establish demand D14 with evidence.",
+          "content_sha256": "89489912e05f5dae6a67e4300048e4863d654b8355bd1892d03970cecd421850",
+          "demand_ids": [
+            "D14"
+          ],
+          "id": "question:demand:D14",
+          "node_id": null,
+          "rationale": "Condition count and all five metric families are enumerated in the request.",
+          "tags": [
+            "counterexample",
+            "measurement",
+            "definition"
+          ],
+          "text": "A falsifiable evaluation plan compares at least three conditions and defines metrics for quality, diversity/correlation, latency, token cost, and recovery-from-wrong-consensus."
+        },
+        "question:demand:D15": {
+          "acceptance_condition": "Establish demand D15 with evidence.",
+          "content_sha256": "c63b60742108a5627760487657dad3280b9b724cdef7fd8f2f8b22e469072dc3",
+          "demand_ids": [
+            "D15"
+          ],
+          "id": "question:demand:D15",
+          "node_id": null,
+          "rationale": "Stated verbatim in the request.",
+          "tags": [
+            "evidence"
+          ],
+          "text": "Important limitations and unresolved questions are stated."
+        },
+        "question:demand:D2": {
+          "acceptance_condition": "Establish demand D2 with evidence.",
+          "content_sha256": "a1e8e73a66a88854b181cd8e700ee47c190021995492e4c13a7f3f2480683936",
+          "demand_ids": [
+            "D2"
+          ],
+          "id": "question:demand:D2",
+          "node_id": null,
+          "rationale": "The request explicitly forbids a survey-only outcome.",
+          "tags": [
+            "decision"
+          ],
+          "text": "The memo makes one concrete, implementable recommendation rather than merely surveying the literature."
+        },
+        "question:demand:D3": {
+          "acceptance_condition": "Establish demand D3 with evidence.",
+          "content_sha256": "2b4510f300813f4c6d054088afcdeb580e129c09c780589126e578caad7f1cb3",
+          "demand_ids": [
+            "D3"
+          ],
+          "id": "question:demand:D3",
+          "node_id": null,
+          "rationale": "All five capabilities are enumerated verbatim in the request.",
+          "tags": [
+            "decision"
+          ],
+          "text": "The recommended design treats questions and answers as first-class many-to-many graph objects, supporting: multiple competing answers per question; one answer addressing multiple questions; question-to-question relations; answer-to-answer provenance or conflict relations; and controlled tags."
+        },
+        "question:demand:D4": {
+          "acceptance_condition": "Establish demand D4 with evidence.",
+          "content_sha256": "495d059579b7faeff7b7c3dea23a59e4beecd9d2061aa750429abe0bdc2fd29e",
+          "demand_ids": [
+            "D4"
+          ],
+          "id": "question:demand:D4",
+          "node_id": null,
+          "rationale": "Both comparison targets are named verbatim in the request.",
+          "tags": [
+            "evidence"
+          ],
+          "text": "The design is compared against two named baselines: an open conversational forum and no inter-agent communication."
+        },
+        "question:demand:D5": {
+          "acceptance_condition": "Establish demand D5 with evidence.",
+          "content_sha256": "04efdfb487681553676fbfc02e1e0eba20f7638dcd990d68fffd3b7e56f7324a",
+          "demand_ids": [
+            "D5"
+          ],
+          "id": "question:demand:D5",
+          "node_id": null,
+          "rationale": "First of six specification areas listed in the request.",
+          "tags": [
+            "evidence"
+          ],
+          "text": "The data model and its invariants are specified."
+        },
+        "question:demand:D6": {
+          "acceptance_condition": "Establish demand D6 with evidence.",
+          "content_sha256": "16aa3a487c4a63da4bd967a8004443a36ebbea7ca9716b65b773f14e6af5e164",
+          "demand_ids": [
+            "D6"
+          ],
+          "id": "question:demand:D6",
+          "node_id": null,
+          "rationale": "Second of six specification areas listed in the request.",
+          "tags": [
+            "method"
+          ],
+          "text": "Staged visibility and the communication protocol are specified."
+        },
+        "question:demand:D7": {
+          "acceptance_condition": "Establish demand D7 with evidence.",
+          "content_sha256": "e9aace925c8874d470e5e66f133e5698e954d9c79c85ac15d05a6b1be90f8648",
+          "demand_ids": [
+            "D7"
+          ],
+          "id": "question:demand:D7",
+          "node_id": null,
+          "rationale": "Third of six specification areas listed in the request.",
+          "tags": [
+            "evidence"
+          ],
+          "text": "Persistence and concurrent-update semantics are specified."
+        },
+        "question:demand:D8": {
+          "acceptance_condition": "Establish demand D8 with evidence.",
+          "content_sha256": "be321eb0feda8aa2c452bdc5b58cd0c2d3a82e7337259f185b4b495784e0d94b",
+          "demand_ids": [
+            "D8"
+          ],
+          "id": "question:demand:D8",
+          "node_id": null,
+          "rationale": "Fourth of six specification areas listed in the request.",
+          "tags": [
+            "evidence"
+          ],
+          "text": "Contradiction and belief-revision behavior is specified."
+        },
+        "question:demand:D9": {
+          "acceptance_condition": "Establish demand D9 with evidence.",
+          "content_sha256": "fbacaee35ff37b6cdf07a99f4704b78e431674fb8d042f8604710966157351f4",
+          "demand_ids": [
+            "D9"
+          ],
+          "id": "question:demand:D9",
+          "node_id": null,
+          "rationale": "Fifth of six specification areas listed in the request.",
+          "tags": [
+            "evidence"
+          ],
+          "text": "Retrieval and ranking are specified."
+        },
+        "question:root": {
+          "acceptance_condition": "Satisfy every assigned whole-task demand and explicit constraint.",
+          "content_sha256": "4ce436fa1c007db64fdec92524d279656612f912b3191f3b4454fb209e9fb892",
+          "demand_ids": [
+            "D1",
+            "D2",
+            "D3",
+            "D4",
+            "D5",
+            "D6",
+            "D7",
+            "D8",
+            "D9",
+            "D10",
+            "D11",
+            "D12",
+            "D13",
+            "D14",
+            "D15"
+          ],
+          "id": "question:root",
+          "node_id": "root",
+          "rationale": "The whole task submitted after intake.",
+          "tags": [
+            "counterexample",
+            "method",
+            "measurement"
+          ],
+          "text": "Produce a 1,400–1,800 word architecture decision memo that commits to one concrete, implementable design for a shared knowledge substrate serving recursively decomposing AI research agents: questions and answers modeled as first-class many-to-many graph objects; the design compared against an open conversational forum and against no inter-agent communication; full specification of the data model and invariants, staged visibility and communication protocol, persistence and concurrent-update semantics, contradiction and belief-revision behavior, retrieval/ranking, and the exact role of model versus runtime; evidence restricted to the seven-file workspace corpus with at least five distinct source files cited via PDF page markers; the corpus's conflicting empirical conclusions reconciled rather than hidden; source-supported claims distinguished from design inferences; and a falsifiable evaluation plan (at least three conditions, five named metric families) plus explicit limitations and unresolved questions."
+        }
+      },
+      "standard_tags": [
+        "definition",
+        "constraint",
+        "evidence",
+        "method",
+        "counterexample",
+        "risk",
+        "assumption",
+        "uncertainty",
+        "decision",
+        "interface",
+        "measurement",
+        "synthesis"
+      ],
+      "version": 31
+    },
+    "max_children": 5,
+    "node": {
+      "acceptance_condition": "Satisfy every assigned whole-task demand and explicit constraint.",
+      "demand_ids": [
+        "D1",
+        "D2",
+        "D3",
+        "D4",
+        "D5",
+        "D6",
+        "D7",
+        "D8",
+        "D9",
+        "D10",
+        "D11",
+        "D12",
+        "D13",
+        "D14",
+        "D15"
+      ],
+      "depth": 0,
+      "expected_contribution": "The evidence basis for the final deliverable.",
+      "id": "root",
+      "knowledge_tags": [
+        "counterexample",
+        "method",
+        "measurement"
+      ],
+      "objective": "Produce a 1,400–1,800 word architecture decision memo that commits to one concrete, implementable design for a shared knowledge substrate serving recursively decomposing AI research agents: questions and answers modeled as first-class many-to-many graph objects; the design compared against an open conversational forum and against no inter-agent communication; full specification of the data model and invariants, staged visibility and communication protocol, persistence and concurrent-update semantics, contradiction and belief-revision behavior, retrieval/ranking, and the exact role of model versus runtime; evidence restricted to the seven-file workspace corpus with at least five distinct source files cited via PDF page markers; the corpus's conflicting empirical conclusions reconciled rather than hidden; source-supported claims distinguished from design inferences; and a falsifiable evaluation plan (at least three conditions, five named metric families) plus explicit limitations and unresolved questions.",
+      "parent_id": null,
+      "rationale": "The whole task submitted after intake.",
+      "separator_facts": [
+        "SC1: The evidentiary corpus is exactly seven extracted-text files under papers/text: dung-1995-argumentation.txt (Dung 1995, Artificial Intelligence 77), shapiro-et-al-2011-crdts.txt (Shapiro et al., SSS 2011), lorenz-et-al-2011-social-influence.txt (Lorenz et al., PNAS 108, 2011), du-et-al-2023-multiagent-debate.txt (Du et al. 2023, arXiv 2305.14325), smit-et-al-2023-going-mad.txt (Smit et al. 2023, arXiv 2311.17371), zhang-et-al-2025-mad-question.txt (Zhang et al. 2025, arXiv 2502.08788), choi-et-al-2025-conformity.txt (Choi et al., Findings of ACL 2025).",
+        "SC2: Page boundaries in the extracted texts are marked with lines of the form `===== PDF PAGE N =====`, and these markers are the citation anchors required by D12/C3.",
+        "SC3: The corpus intentionally contains conflicting empirical conclusions — multi-agent debate gains (Du et al. 2023) versus matched-compute null results and conformity findings (Smit et al. 2023; Zhang et al. 2025; Choi et al. 2025; Lorenz et al. 2011 on social influence undermining crowd wisdom) — and the manifest requires preserving and reconciling these conflicts.",
+        "SC4: The envelope's single conversation decision asserts that the seven full extracted texts are present in the solve workspace under papers/text with explicit PDF page markers; the intake envelope itself encloses only the manifest, not the full texts.",
+        "SC5: The manifest (material:001) is located at /workspace/seam-harness/research-kb-workspace/CORPUS.md, indicating a benchmark-style workspace named research-kb-workspace under a seam-harness directory.",
+        "SC6: The proposed substrate plus the two baselines named in D4 (open conversational forum; no inter-agent communication) naturally supply the three or more conditions required by D14."
+      ],
+      "source_ids": [
+        "request",
+        "decision:1",
+        "material:001",
+        "ref:corpus-manifest",
+        "ref:dung-1995-argumentation",
+        "ref:shapiro-2011-crdts",
+        "ref:lorenz-2011-social-influence",
+        "ref:du-2023-multiagent-debate",
+        "ref:smit-2023-going-mad",
+        "ref:zhang-2025-mad-question",
+        "ref:choi-2025-conformity"
+      ],
+      "source_paths": []
+    },
+    "product_intent": "The memo exists to commit the agent system to a single defensible substrate architecture — and to justify that commitment strictly from the supplied corpus — so that recursively decomposing research agents can share, contest, and reuse questions and answers as structured state, capturing the gains reported for multi-agent debate while structurally guarding against the matched-compute null results and conformity failure modes documented in the same corpus.",
+    "remaining_depth": 3,
+    "remaining_node_budget": 19,
+    "source_materials": [
+      {
+        "content": "Write a 1,400–1,800 word architecture decision memo for a shared knowledge substrate used by recursively decomposing AI research agents. The memo must make a concrete implementable recommendation, not merely survey the literature. Treat questions and answers as first-class many-to-many graph objects: allow multiple competing answers per question, one answer to address multiple questions, question-to-question relations, answer-to-answer provenance or conflict relations, and controlled tags. Compare this design against an open conversational forum and against no inter-agent communication. Specify the data model and invariants, staged visibility and communication protocol, persistence and concurrent-update semantics, contradiction and belief-revision behavior, retrieval/ranking, and the exact role of model versus runtime. Reconcile rather than hide the tension between papers reporting multi-agent debate gains and papers reporting matched-compute null results or conformity. Ground the memo only in the supplied workspace corpus; cite at least five distinct source files with PDF page markers from the extracted text. Clearly distinguish source-supported claims from design inferences. Include a falsifiable evaluation plan comparing at least three conditions, with quality, diversity/correlation, latency, token cost, and recovery-from-wrong-consensus metrics. State important limitations and unresolved questions.",
+        "id": "request",
+        "kind": "natural_request",
+        "label": "Original task request",
+        "locator": null
+      },
+      {
+        "content": "The compact corpus manifest is attached to intake, and the seven full extracted source texts it enumerates are present in the solve workspace under papers/text with explicit PDF page markers.",
+        "id": "decision:1",
+        "kind": "user_decision",
+        "label": "Explicit user decision 1",
+        "locator": null
+      },
+      {
+        "content": "# Research corpus manifest\n\nThe full extracted texts are available under `papers/text/`. Page boundaries are marked as `===== PDF PAGE N =====`. These source files are the only evidentiary corpus for the benchmark.\n\n- `papers/text/dung-1995-argumentation.txt` — Phan Minh Dung, \"On the Acceptability of Arguments and its Fundamental Role in Nonmonotonic Reasoning, Logic Programming and n-Person Games\" (Artificial Intelligence 77, 1995). Source: https://cse-robotics.engr.tamu.edu/dshell/cs631/papers/dung95acceptability.pdf\n- `papers/text/shapiro-et-al-2011-crdts.txt` — Marc Shapiro, Nuno Preguiça, Carlos Baquero, Marek Zawirski, \"Conflict-Free Replicated Data Types\" (SSS 2011). Source: https://perso.lip6.fr/Marc.Shapiro/papers/2011/CRDTs_SSS-2011.pdf\n- `papers/text/lorenz-et-al-2011-social-influence.txt` — Jan Lorenz et al., \"How Social Influence Can Undermine the Wisdom of Crowd Effect\" (PNAS 108, 2011). Source: https://doi.org/10.1073/pnas.1008636108\n- `papers/text/du-et-al-2023-multiagent-debate.txt` — Yilun Du et al., \"Improving Factuality and Reasoning in Language Models through Multiagent Debate\" (2023). Source: https://arxiv.org/abs/2305.14325\n- `papers/text/smit-et-al-2023-going-mad.txt` — Andries Smit et al., \"Should We Be Going MAD? A Look at Multi-Agent Debate Strategies for LLMs\" (2023). Source: https://arxiv.org/abs/2311.17371\n- `papers/text/zhang-et-al-2025-mad-question.txt` — Hangfan Zhang et al., \"If Multi-Agent Debate Is the Answer, What Is the Question?\" (2025). Source: https://arxiv.org/abs/2502.08788\n- `papers/text/choi-et-al-2025-conformity.txt` — Min Choi et al., \"An Empirical Study of Group Conformity in Multi-Agent Systems\" (Findings of ACL 2025). Source: https://aclanthology.org/2025.findings-acl.265/\n\nThe corpus intentionally contains conflicting empirical conclusions. The memo must preserve and reconcile those conflicts rather than select papers by desired outcome.\n",
+        "id": "material:001",
+        "kind": "file",
+        "label": "CORPUS.md",
+        "locator": "/workspace/seam-harness/research-kb-workspace/CORPUS.md"
+      },
+      {
+        "content": "Full content enclosed in the intake envelope as material:001.",
+        "id": "ref:corpus-manifest",
+        "kind": "referent:file",
+        "label": "CORPUS.md — research corpus manifest enumerating the seven extracted source texts, their paths, bibliographic details, source URLs, and the page-marker convention; declares them the only evidentiary corpus.",
+        "locator": "/workspace/seam-harness/research-kb-workspace/CORPUS.md"
+      },
+      {
+        "content": "Enumerated in material:001; asserted present in the solve workspace by the conversation decision; content not enclosed at intake.",
+        "id": "ref:dung-1995-argumentation",
+        "kind": "referent:file",
+        "label": "Extracted text of Dung 1995, 'On the Acceptability of Arguments and its Fundamental Role in Nonmonotonic Reasoning, Logic Programming and n-Person Games' (Artificial Intelligence 77).",
+        "locator": "papers/text/dung-1995-argumentation.txt"
+      },
+      {
+        "content": "Enumerated in material:001; asserted present in the solve workspace by the conversation decision; content not enclosed at intake.",
+        "id": "ref:shapiro-2011-crdts",
+        "kind": "referent:file",
+        "label": "Extracted text of Shapiro, Preguiça, Baquero, Zawirski, 'Conflict-Free Replicated Data Types' (SSS 2011).",
+        "locator": "papers/text/shapiro-et-al-2011-crdts.txt"
+      },
+      {
+        "content": "Enumerated in material:001; asserted present in the solve workspace by the conversation decision; content not enclosed at intake.",
+        "id": "ref:lorenz-2011-social-influence",
+        "kind": "referent:file",
+        "label": "Extracted text of Lorenz et al., 'How Social Influence Can Undermine the Wisdom of Crowd Effect' (PNAS 108, 2011).",
+        "locator": "papers/text/lorenz-et-al-2011-social-influence.txt"
+      },
+      {
+        "content": "Enumerated in material:001; asserted present in the solve workspace by the conversation decision; content not enclosed at intake.",
+        "id": "ref:du-2023-multiagent-debate",
+        "kind": "referent:file",
+        "label": "Extracted text of Du et al., 'Improving Factuality and Reasoning in Language Models through Multiagent Debate' (2023).",
+        "locator": "papers/text/du-et-al-2023-multiagent-debate.txt"
+      },
+      {
+        "content": "Enumerated in material:001; asserted present in the solve workspace by the conversation decision; content not enclosed at intake.",
+        "id": "ref:smit-2023-going-mad",
+        "kind": "referent:file",
+        "label": "Extracted text of Smit et al., 'Should We Be Going MAD? A Look at Multi-Agent Debate Strategies for LLMs' (2023).",
+        "locator": "papers/text/smit-et-al-2023-going-mad.txt"
+      },
+      {
+        "content": "Enumerated in material:001; asserted present in the solve workspace by the conversation decision; content not enclosed at intake.",
+        "id": "ref:zhang-2025-mad-question",
+        "kind": "referent:file",
+        "label": "Extracted text of Zhang et al., 'If Multi-Agent Debate Is the Answer, What Is the Question?' (2025).",
+        "locator": "papers/text/zhang-et-al-2025-mad-question.txt"
+      },
+      {
+        "content": "Enumerated in material:001; asserted present in the solve workspace by the conversation decision; content not enclosed at intake.",
+        "id": "ref:choi-2025-conformity",
+        "kind": "referent:file",
+        "label": "Extracted text of Choi et al., 'An Empirical Study of Group Conformity in Multi-Agent Systems' (Findings of ACL 2025).",
+        "locator": "papers/text/choi-et-al-2025-conformity.txt"
+      }
+    ],
+    "stable_context": [
+      "SC1: The evidentiary corpus is exactly seven extracted-text files under papers/text: dung-1995-argumentation.txt (Dung 1995, Artificial Intelligence 77), shapiro-et-al-2011-crdts.txt (Shapiro et al., SSS 2011), lorenz-et-al-2011-social-influence.txt (Lorenz et al., PNAS 108, 2011), du-et-al-2023-multiagent-debate.txt (Du et al. 2023, arXiv 2305.14325), smit-et-al-2023-going-mad.txt (Smit et al. 2023, arXiv 2311.17371), zhang-et-al-2025-mad-question.txt (Zhang et al. 2025, arXiv 2502.08788), choi-et-al-2025-conformity.txt (Choi et al., Findings of ACL 2025).",
+      "SC2: Page boundaries in the extracted texts are marked with lines of the form `===== PDF PAGE N =====`, and these markers are the citation anchors required by D12/C3.",
+      "SC3: The corpus intentionally contains conflicting empirical conclusions — multi-agent debate gains (Du et al. 2023) versus matched-compute null results and conformity findings (Smit et al. 2023; Zhang et al. 2025; Choi et al. 2025; Lorenz et al. 2011 on social influence undermining crowd wisdom) — and the manifest requires preserving and reconciling these conflicts.",
+      "SC4: The envelope's single conversation decision asserts that the seven full extracted texts are present in the solve workspace under papers/text with explicit PDF page markers; the intake envelope itself encloses only the manifest, not the full texts.",
+      "SC5: The manifest (material:001) is located at /workspace/seam-harness/research-kb-workspace/CORPUS.md, indicating a benchmark-style workspace named research-kb-workspace under a seam-harness directory.",
+      "SC6: The proposed substrate plus the two baselines named in D4 (open conversational forum; no inter-agent communication) naturally supply the three or more conditions required by D14."
+    ],
+    "workspace_documents": [],
+    "workspace_index": [
+      {
+        "content_sha256": "f6605c2b9bb68dd7906b2881ec1f0b48b32f607c7b768cd3ec8ab5a9ca46afaa",
+        "path": "CORPUS.md",
+        "size_bytes": 1937
+      },
+      {
+        "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+        "path": "papers/text/choi-et-al-2025-conformity.txt",
+        "size_bytes": 60691
+      },
+      {
+        "content_sha256": "0674b1614409c389ff275c78c696138a9453e321fee21b90ea1e4354700be7e2",
+        "path": "papers/text/du-et-al-2023-multiagent-debate.txt",
+        "size_bytes": 97256
+      },
+      {
+        "content_sha256": "8731efeb90375496d5dc1ea00840bc54e28f908021deff777966babcbc797f6f",
+        "path": "papers/text/dung-1995-argumentation.txt",
+        "size_bytes": 93057
+      },
+      {
+        "content_sha256": "10d6e61835ae38ecc32c345b6c18f5d4259ef40874694d12f60c4dd6162e160f",
+        "path": "papers/text/lorenz-et-al-2011-social-influence.txt",
+        "size_bytes": 46369
+      },
+      {
+        "content_sha256": "5363f488d988a892dd33e2cbba81c87e558deda9efdd190bc608ef9a8d4ba26a",
+        "path": "papers/text/shapiro-et-al-2011-crdts.txt",
+        "size_bytes": 42422
+      },
+      {
+        "content_sha256": "a1263656cb4d7e298c289b4ee44368fe9f38c1c2efc4ce88f0d54d60a62a3d1c",
+        "path": "papers/text/smit-et-al-2023-going-mad.txt",
+        "size_bytes": 80205
+      },
+      {
+        "content_sha256": "41e1d26db346207d4be0ec393e7bed983875ae417ca7aa5a530d390dca72e06e",
+        "path": "papers/text/zhang-et-al-2025-mad-question.txt",
+        "size_bytes": 95563
+      }
+    ]
+  },
+  "dependency_type": "PlanningDeps",
+  "input_sha256": "edc38f2e537ef1e69f0faf15d6c73131242d06e5ab2dea94606eb0e973206a09",
+  "model": "fireworks:accounts/fireworks/routers/kimi-k3-fast",
+  "role": "recursive_planner"
+}

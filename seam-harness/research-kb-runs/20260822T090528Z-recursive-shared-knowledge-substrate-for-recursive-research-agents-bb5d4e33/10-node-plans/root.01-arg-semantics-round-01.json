@@ -1,0 +1,175 @@
+{
+  "account": "The node's objective requires both extracting formal definitions from the Dung file and deriving design constraints for the many-to-many Q/A graph. These two tasks are analytically distinct and can be pursued in parallel: one child focuses on faithful source extraction with page markers, the other on the derivation of design constraints grounded in those definitions. The extraction child can be further decomposed to cover different definition families, and the derivation child can be structured to cover conflict/provenance and belief-revision separately. Each child is self-contained, uses the same frozen dossier, and does not depend on sibling outputs; the parent will synthesize the findings into a coherent node contribution.",
+  "children": [
+    {
+      "acceptance_condition": "Returns at least four findings, each with a quote or close paraphrase from the source text, the exact `===== PDF PAGE N =====` marker(s) where it appears, and a clear label of which definition it covers.",
+      "demand_ids": [
+        "D3",
+        "D8",
+        "D12",
+        "D13"
+      ],
+      "expected_contribution": "A set of four source-anchored findings covering the foundational definitions of the argumentation framework, acceptability, conflict-free, and admissible sets, ready for citation in the synthesis.",
+      "knowledge_tags": [
+        "definition",
+        "evidence"
+      ],
+      "local_id": "child-1",
+      "no_future_sibling_dependency": "All required source text is in the dossier; no sibling output is needed to extract the definitions.",
+      "objective": "Extract from papers/text/dung-1995-argumentation.txt, each anchored to the exact `===== PDF PAGE N =====` marker(s) where it appears, the definitions of: (a) argumentation framework (set of arguments plus binary attack relation), (b) acceptability of an argument, (c) conflict-free set, and (d) admissible set. For each concept, provide a direct quote or close paraphrase from the source text and note the page marker(s).",
+      "rationale": "These four core definitions are the foundation for all subsequent semantics and design derivations. Isolating them into a dedicated extraction child ensures the source evidence is gathered precisely before any design inference is made.",
+      "separator_facts": [
+        "SC1: The evidentiary corpus is exactly seven extracted-text files under papers/text: dung-1995-argumentation.txt (Dung 1995, Artificial Intelligence 77), shapiro-et-al-2011-crdts.txt (Shapiro et al., SSS 2011), lorenz-et-al-2011-social-influence.txt (Lorenz et al., PNAS 108, 2011), du-et-al-2023-multiagent-debate.txt (Du et al. 2023, arXiv 2305.14325), smit-et-al-2023-going-mad.txt (Smit et al. 2023, arXiv 2311.17371), zhang-et-al-2025-mad-question.txt (Zhang et al. 2025, arXiv 2502.08788), choi-et-al-2025-conformity.txt (Choi et al., Findings of ACL 2025).",
+        "SC2: Page boundaries in the extracted texts are marked with lines of the form `===== PDF PAGE N =====`, and these markers are the citation anchors required by D12/C3.",
+        "SC3: The corpus intentionally contains conflicting empirical conclusions — multi-agent debate gains (Du et al. 2023) versus matched-compute null results and conformity findings (Smit et al. 2023; Zhang et al. 2025; Choi et al. 2025; Lorenz et al. 2011 on social influence undermining crowd wisdom) — and the manifest requires preserving and reconciling these conflicts.",
+        "SC4: The envelope's single conversation decision asserts that the seven full extracted texts are present in the solve workspace under papers/text with explicit PDF page markers; the intake envelope itself encloses only the manifest, not the full texts.",
+        "SC5: The manifest (material:001) is located at /workspace/seam-harness/research-kb-workspace/CORPUS.md, indicating a benchmark-style workspace named research-kb-workspace under a seam-harness directory.",
+        "SC6: The proposed substrate plus the two baselines named in D4 (open conversational forum; no inter-agent communication) naturally supply the three or more conditions required by D14.",
+        "Evidence is restricted to the seven workspace corpus files; no outside sources may be used (C2).",
+        "Source-supported claims must be clearly distinguished from design inferences in everything returned (D13)."
+      ],
+      "source_ids": [
+        "ref:dung-1995-argumentation"
+      ],
+      "source_paths": [
+        "papers/text/dung-1995-argumentation.txt"
+      ]
+    },
+    {
+      "acceptance_condition": "Returns at least four findings, each with a quote or close paraphrase, the exact `===== PDF PAGE N =====` marker(s), and an explicit label of the semantics or link.",
+      "demand_ids": [
+        "D3",
+        "D8",
+        "D12",
+        "D13"
+      ],
+      "expected_contribution": "A set of four or more source-anchored findings covering the characteristic function, grounded/preferred/stable extensions, and the connections to nonmonotonic reasoning and logic programming.",
+      "knowledge_tags": [
+        "definition",
+        "evidence",
+        "method"
+      ],
+      "local_id": "child-2",
+      "no_future_sibling_dependency": "All relevant text is in the dossier, including Sections 2.2, 2.3, and 4; no sibling output is needed.",
+      "objective": "Extract from papers/text/dung-1995-argumentation.txt, each anchored to the exact `===== PDF PAGE N =====` marker(s) where it appears, the definitions of the characteristic function F_AF, the grounded (skeptical) extension, the preferred (credulous) extension, and the stable extension. For each, provide a direct quote or close paraphrase and the page marker(s). Also note any stated links to nonmonotonic reasoning or logic programming, citing the relevant pages.",
+      "rationale": "These semantics define the different ways to select acceptable sets of arguments, which will later be used to model mutually consistent answer sets. The links to nonmonotonic reasoning and logic programming are essential for the design rationale.",
+      "separator_facts": [
+        "SC1: The evidentiary corpus is exactly seven extracted-text files under papers/text: dung-1995-argumentation.txt (Dung 1995, Artificial Intelligence 77), shapiro-et-al-2011-crdts.txt (Shapiro et al., SSS 2011), lorenz-et-al-2011-social-influence.txt (Lorenz et al., PNAS 108, 2011), du-et-al-2023-multiagent-debate.txt (Du et al. 2023, arXiv 2305.14325), smit-et-al-2023-going-mad.txt (Smit et al. 2023, arXiv 2311.17371), zhang-et-al-2025-mad-question.txt (Zhang et al. 2025, arXiv 2502.08788), choi-et-al-2025-conformity.txt (Choi et al., Findings of ACL 2025).",
+        "SC2: Page boundaries in the extracted texts are marked with lines of the form `===== PDF PAGE N =====`, and these markers are the citation anchors required by D12/C3.",
+        "SC3: The corpus intentionally contains conflicting empirical conclusions — multi-agent debate gains (Du et al. 2023) versus matched-compute null results and conformity findings (Smit et al. 2023; Zhang et al. 2025; Choi et al. 2025; Lorenz et al. 2011 on social influence undermining crowd wisdom) — and the manifest requires preserving and reconciling these conflicts.",
+        "SC4: The envelope's single conversation decision asserts that the seven full extracted texts are present in the solve workspace under papers/text with explicit PDF page markers; the intake envelope itself encloses only the manifest, not the full texts.",
+        "SC5: The manifest (material:001) is located at /workspace/seam-harness/research-kb-workspace/CORPUS.md, indicating a benchmark-style workspace named research-kb-workspace under a seam-harness directory.",
+        "SC6: The proposed substrate plus the two baselines named in D4 (open conversational forum; no inter-agent communication) naturally supply the three or more conditions required by D14.",
+        "Evidence is restricted to the seven workspace corpus files; no outside sources may be used (C2).",
+        "Source-supported claims must be clearly distinguished from design inferences in everything returned (D13)."
+      ],
+      "source_ids": [
+        "ref:dung-1995-argumentation"
+      ],
+      "source_paths": [
+        "papers/text/dung-1995-argumentation.txt"
+      ]
+    },
+    {
+      "acceptance_condition": "Returns at least three design constraints, each explicitly labeled as 'design inference', that specify how the Dung notions map to the Q/A graph, including concrete edge types and semantics. Each must be grounded in the extracted definitions but must not be presented as source claims.",
+      "demand_ids": [
+        "D3",
+        "D8",
+        "D13"
+      ],
+      "expected_contribution": "A set of three or more design constraints for the graph data model, clarifying how conflicts and provenance are represented and how consistency is defined, ready for integration into the synthesis.",
+      "knowledge_tags": [
+        "constraint",
+        "method"
+      ],
+      "local_id": "child-3",
+      "no_future_sibling_dependency": "This derivation relies only on the definitions from the source file (which are in the dossier) and does not require sibling outputs to proceed.",
+      "objective": "Derive, each explicitly labeled as design inference, how Dung's notions of argumentation framework, acceptability, conflict-free sets, and admissible sets can anchor answer-to-answer conflict and provenance relations in a many-to-many question/answer graph. Specifically, produce at least three design constraints: (1) how to model answers as arguments and conflicts as attack edges; (2) how to represent provenance relations (e.g., answer-addresses-question) as additional graph edges that do not alter conflict semantics; and (3) how admissible sets can define mutually consistent answer sets for a given question.",
+      "rationale": "This child directly addresses D3 (answer-to-answer conflict/provenance relations) and D8 (contradiction behavior) by translating the formal definitions into design constraints for the graph substrate.",
+      "separator_facts": [
+        "SC1: The evidentiary corpus is exactly seven extracted-text files under papers/text: dung-1995-argumentation.txt (Dung 1995, Artificial Intelligence 77), shapiro-et-al-2011-crdts.txt (Shapiro et al., SSS 2011), lorenz-et-al-2011-social-influence.txt (Lorenz et al., PNAS 108, 2011), du-et-al-2023-multiagent-debate.txt (Du et al. 2023, arXiv 2305.14325), smit-et-al-2023-going-mad.txt (Smit et al. 2023, arXiv 2311.17371), zhang-et-al-2025-mad-question.txt (Zhang et al. 2025, arXiv 2502.08788), choi-et-al-2025-conformity.txt (Choi et al., Findings of ACL 2025).",
+        "SC2: Page boundaries in the extracted texts are marked with lines of the form `===== PDF PAGE N =====`, and these markers are the citation anchors required by D12/C3.",
+        "SC3: The corpus intentionally contains conflicting empirical conclusions — multi-agent debate gains (Du et al. 2023) versus matched-compute null results and conformity findings (Smit et al. 2023; Zhang et al. 2025; Choi et al. 2025; Lorenz et al. 2011 on social influence undermining crowd wisdom) — and the manifest requires preserving and reconciling these conflicts.",
+        "SC4: The envelope's single conversation decision asserts that the seven full extracted texts are present in the solve workspace under papers/text with explicit PDF page markers; the intake envelope itself encloses only the manifest, not the full texts.",
+        "SC5: The manifest (material:001) is located at /workspace/seam-harness/research-kb-workspace/CORPUS.md, indicating a benchmark-style workspace named research-kb-workspace under a seam-harness directory.",
+        "SC6: The proposed substrate plus the two baselines named in D4 (open conversational forum; no inter-agent communication) naturally supply the three or more conditions required by D14.",
+        "Evidence is restricted to the seven workspace corpus files; no outside sources may be used (C2).",
+        "Source-supported claims must be clearly distinguished from design inferences in everything returned (D13)."
+      ],
+      "source_ids": [
+        "ref:dung-1995-argumentation"
+      ],
+      "source_paths": [
+        "papers/text/dung-1995-argumentation.txt"
+      ]
+    },
+    {
+      "acceptance_condition": "Returns at least three design constraints, each explicitly labeled as 'design inference', that specify how the extension semantics map to contradiction handling and belief revision, including which extension type is used for which purpose. Must not present these as source claims.",
+      "demand_ids": [
+        "D8",
+        "D13"
+      ],
+      "expected_contribution": "A set of three or more design constraints for the belief-revision behavior of the substrate, specifying the semantics of acceptance and how revision is triggered, ready for synthesis.",
+      "knowledge_tags": [
+        "method",
+        "decision",
+        "constraint"
+      ],
+      "local_id": "child-4",
+      "no_future_sibling_dependency": "This derivation relies only on the definitions from the source file (in the dossier) and does not require sibling outputs.",
+      "objective": "Derive, each explicitly labeled as design inference, how Dung's extension semantics (grounded, preferred, stable) can specify contradiction and belief-revision behavior in a many-to-many question/answer graph. Specifically, produce at least three design constraints: (1) how to use preferred extensions to define credulous acceptance of answers, allowing multiple competing answers to coexist; (2) how to use the grounded extension to define a skeptical set of answers that are accepted regardless of conflict; and (3) how belief revision can be modeled as updating the attack relation or the set of arguments and recomputing extensions.",
+      "rationale": "This child directly addresses D8 (contradiction and belief-revision behavior) by translating the extension semantics into a design for how the system handles conflicting answers and updates its state.",
+      "separator_facts": [
+        "SC1: The evidentiary corpus is exactly seven extracted-text files under papers/text: dung-1995-argumentation.txt (Dung 1995, Artificial Intelligence 77), shapiro-et-al-2011-crdts.txt (Shapiro et al., SSS 2011), lorenz-et-al-2011-social-influence.txt (Lorenz et al., PNAS 108, 2011), du-et-al-2023-multiagent-debate.txt (Du et al. 2023, arXiv 2305.14325), smit-et-al-2023-going-mad.txt (Smit et al. 2023, arXiv 2311.17371), zhang-et-al-2025-mad-question.txt (Zhang et al. 2025, arXiv 2502.08788), choi-et-al-2025-conformity.txt (Choi et al., Findings of ACL 2025).",
+        "SC2: Page boundaries in the extracted texts are marked with lines of the form `===== PDF PAGE N =====`, and these markers are the citation anchors required by D12/C3.",
+        "SC3: The corpus intentionally contains conflicting empirical conclusions — multi-agent debate gains (Du et al. 2023) versus matched-compute null results and conformity findings (Smit et al. 2023; Zhang et al. 2025; Choi et al. 2025; Lorenz et al. 2011 on social influence undermining crowd wisdom) — and the manifest requires preserving and reconciling these conflicts.",
+        "SC4: The envelope's single conversation decision asserts that the seven full extracted texts are present in the solve workspace under papers/text with explicit PDF page markers; the intake envelope itself encloses only the manifest, not the full texts.",
+        "SC5: The manifest (material:001) is located at /workspace/seam-harness/research-kb-workspace/CORPUS.md, indicating a benchmark-style workspace named research-kb-workspace under a seam-harness directory.",
+        "SC6: The proposed substrate plus the two baselines named in D4 (open conversational forum; no inter-agent communication) naturally supply the three or more conditions required by D14.",
+        "Evidence is restricted to the seven workspace corpus files; no outside sources may be used (C2).",
+        "Source-supported claims must be clearly distinguished from design inferences in everything returned (D13)."
+      ],
+      "source_ids": [
+        "ref:dung-1995-argumentation"
+      ],
+      "source_paths": [
+        "papers/text/dung-1995-argumentation.txt"
+      ]
+    }
+  ],
+  "decidability": {
+    "acceptance_mechanical": false,
+    "account": "The source file content is fully embedded in the dossier, so all extraction and derivation can be performed now. The acceptance conditions (at least four anchored findings, at least three design constraints) are clear, though some judgment is needed to decide what counts as a close paraphrase, so the acceptance is not fully mechanical.",
+    "context_complete": true,
+    "grounded_referents": [
+      "ref:dung-1995-argumentation",
+      "papers/text/dung-1995-argumentation.txt"
+    ],
+    "independent_of_future_siblings": true,
+    "missing_context": []
+  },
+  "disposition": "expand",
+  "irreducible_core": null,
+  "requested_source_ids": [
+    "ref:dung-1995-argumentation"
+  ],
+  "requested_source_paths": [
+    "papers/text/dung-1995-argumentation.txt"
+  ],
+  "synthesis_contract": {
+    "acceptance_condition": "The synthesized node contribution includes at least four source-anchored findings (with page markers) and at least three distinct design constraints for conflict/belief-revision semantics, all correctly labeled, satisfying the node's acceptance condition and contributing to demands D3, D8, D12, and D13.",
+    "conflict_policy": "If a child's extraction conflicts with another (e.g., differing page markers or paraphrase interpretation), resolve by referring to the original text in the dossier; the most precise quote from the source takes precedence. Design constraints are independent and should not be merged unless they are complementary.",
+    "parent_question": "Combine the source-anchored definitions from children 1 and 2 with the design derivations from children 3 and 4 to produce a coherent node contribution that: (a) presents at least four anchored findings on the Dung semantics, and (b) presents at least three design constraints for conflict/provenance and belief-revision, each clearly labeled as design inference. The synthesis must ensure that source claims are distinguished from design inferences and that all citations carry the exact page markers. It must also support the parent memo's demands D3, D8, D12, and D13.",
+    "required_contributions": [
+      "child-1: Four findings on AF, acceptability, conflict-free, admissible, with page markers",
+      "child-2: Four findings on characteristic function, grounded/preferred/stable extensions, links to nonmonotonic reasoning/LP, with page markers",
+      "child-3: Three design constraints mapping AF notions to conflict/provenance in Q/A graph",
+      "child-4: Three design constraints mapping extension semantics to contradiction/belief-revision"
+    ],
+    "shared_invariants": [
+      "All findings must carry the exact `===== PDF PAGE N =====` marker(s).",
+      "All design constraints must be explicitly labeled as 'design inference'.",
+      "No evidence outside the seven corpus files may be used (C2)."
+    ]
+  }
+}

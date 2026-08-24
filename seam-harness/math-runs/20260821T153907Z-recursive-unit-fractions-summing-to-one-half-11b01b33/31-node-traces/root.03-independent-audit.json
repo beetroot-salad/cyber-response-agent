@@ -1,0 +1,11 @@
+{
+  "child_ids": [],
+  "depth": 1,
+  "effective_disposition": "solve",
+  "node_id": "root.03-independent-audit",
+  "packet_id": "packet:root.03-independent-audit",
+  "packet_sha256": "087351431491f78da1b4a10ea6605bd6882e663b3cd434d2b5cc5874eb4583ad",
+  "parent_id": "root",
+  "proposed_disposition": "solve",
+  "stop_reason": null
+}

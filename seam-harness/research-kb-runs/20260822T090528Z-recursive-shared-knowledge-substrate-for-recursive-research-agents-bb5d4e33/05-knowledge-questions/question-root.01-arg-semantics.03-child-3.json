@@ -1,0 +1,17 @@
+{
+  "acceptance_condition": "Returns at least three design constraints, each explicitly labeled as 'design inference', that specify how the Dung notions map to the Q/A graph, including concrete edge types and semantics. Each must be grounded in the extracted definitions but must not be presented as source claims.",
+  "content_sha256": "7b4d005f9b5150fc374220fecf6139e2e1a403769f6ebf456be6bd20b1c774b9",
+  "demand_ids": [
+    "D3",
+    "D8",
+    "D13"
+  ],
+  "id": "question:root.01-arg-semantics.03-child-3",
+  "node_id": "root.01-arg-semantics.03-child-3",
+  "rationale": "This child directly addresses D3 (answer-to-answer conflict/provenance relations) and D8 (contradiction behavior) by translating the formal definitions into design constraints for the graph substrate.",
+  "tags": [
+    "constraint",
+    "method"
+  ],
+  "text": "Derive, each explicitly labeled as design inference, how Dung's notions of argumentation framework, acceptability, conflict-free sets, and admissible sets can anchor answer-to-answer conflict and provenance relations in a many-to-many question/answer graph. Specifically, produce at least three design constraints: (1) how to model answers as arguments and conflicts as attack edges; (2) how to represent provenance relations (e.g., answer-addresses-question) as additional graph edges that do not alter conflict semantics; and (3) how admissible sets can define mutually consistent answer sets for a given question."
+}

@@ -1,0 +1,17 @@
+{
+  "acceptance_condition": "A structured report covering (a)-(f) with specific numeric results and explicit PDF page markers from papers/text/du-et-al-2023-multiagent-debate.txt, clearly separating what the paper reports from the extractor's inferences.",
+  "content_sha256": "6fc90269ee0ec555be7cb27f2db68e010b4b5f0c37e00299caaf0866111a6504",
+  "demand_ids": [
+    "D4",
+    "D2"
+  ],
+  "id": "question:work:001-w1-du2023",
+  "node_id": "work:001-w1-du2023",
+  "rationale": "This is the corpus's central positive result for open-transcript-style debate; the note must represent it precisely, including its unmatched-compute baseline structure, before reconciling it with skeptical replications.",
+  "tags": [
+    "evidence",
+    "method",
+    "measurement"
+  ],
+  "text": "What exactly does Du et al. 2023 'Improving Factuality and Reasoning in Language Models through Multiagent Debate' claim and show? Extract: (a) tasks and datasets; (b) all baselines (single agent, reflection, majority voting) and whether total inference compute (agents x rounds x tokens) is matched across conditions; (c) headline quantitative results with numbers; (d) the consensus/convergence and 'ease of persuasion' analyses; (e) effects of agent count, rounds, and summarization; (f) stated limitations. Record every claim with its explicit ===== PDF PAGE N ===== marker."
+}

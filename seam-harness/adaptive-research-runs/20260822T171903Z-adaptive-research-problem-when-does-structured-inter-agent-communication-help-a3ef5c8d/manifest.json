@@ -1,0 +1,2725 @@
+{
+  "created_at": "2026-08-22T17:19:03.798153+00:00",
+  "events": [
+    {
+      "event_hash": "e4642ebd179fedbfdbc6c45807977210ce9ce2e02e27bdd8d6f7449b84ca667f",
+      "index": 0,
+      "metadata": {},
+      "name": "adaptive-run",
+      "path": "00-input/adaptive-run.json",
+      "previous_event_hash": null,
+      "record_sha256": "d1d6e3f94c1f76aed8fb5860cdca15d263e0768753c3c0627c4eb9ae18c6a55d",
+      "stage": "00-input",
+      "timestamp": "2026-08-22T17:19:03.802177+00:00"
+    },
+    {
+      "event_hash": "9854592729a9cfbf3e0ee4d7202c031486a2444fa1caf8d4af6a515b0a80c8a1",
+      "index": 1,
+      "metadata": {},
+      "name": "workspace-index",
+      "path": "00-input/workspace-index.json",
+      "previous_event_hash": "e4642ebd179fedbfdbc6c45807977210ce9ce2e02e27bdd8d6f7449b84ca667f",
+      "record_sha256": "f499036b2a6c96c995bd70b7ff1b5c4439c77ea2861b742e36d96a9869a403b0",
+      "stage": "00-input",
+      "timestamp": "2026-08-22T17:19:03.842144+00:00"
+    },
+    {
+      "event_hash": "3c89bf60539d55594b44443dee950cfad52c249df1572b2455a089691e75f979",
+      "index": 2,
+      "metadata": {},
+      "name": "question:root",
+      "path": "05-knowledge-questions/question-root.json",
+      "previous_event_hash": "9854592729a9cfbf3e0ee4d7202c031486a2444fa1caf8d4af6a515b0a80c8a1",
+      "record_sha256": "b223acf02ef68d75b973b21577a5ece87d4062ff59f2f0996c7aa6936384a09a",
+      "stage": "05-knowledge-questions",
+      "timestamp": "2026-08-22T17:19:03.845705+00:00"
+    },
+    {
+      "event_hash": "f20812f96e78c8be2e1273fe978dce3f31c559957d951389598ee9ca16652c3c",
+      "index": 3,
+      "metadata": {},
+      "name": "question:demand:D1",
+      "path": "05-knowledge-questions/question-demand-D1.json",
+      "previous_event_hash": "3c89bf60539d55594b44443dee950cfad52c249df1572b2455a089691e75f979",
+      "record_sha256": "0bb1b290c13479ef550e4e10ad80bda32d25650ef61e3700f0866a9465d00afd",
+      "stage": "05-knowledge-questions",
+      "timestamp": "2026-08-22T17:19:03.848625+00:00"
+    },
+    {
+      "event_hash": "7ccdfdce7eef489c0c41c1d8aea6985ca1389e155a8fc8192d51fc20fd448d61",
+      "index": 4,
+      "metadata": {},
+      "name": "link:4ce2ba5a93817627f0348fd2",
+      "path": "07-knowledge-links/link-4ce2ba5a93817627f0348fd2.json",
+      "previous_event_hash": "f20812f96e78c8be2e1273fe978dce3f31c559957d951389598ee9ca16652c3c",
+      "record_sha256": "2ae72f01313ef93c419852ad2c00a0f7b2eb4a6cdce2e726f1e2c9f67eb31588",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:19:03.851445+00:00"
+    },
+    {
+      "event_hash": "87d051f61ed4443adcc6c9d6e3a00e2f220e20dd6147053015ad107db9db87e0",
+      "index": 5,
+      "metadata": {},
+      "name": "question:demand:D2",
+      "path": "05-knowledge-questions/question-demand-D2.json",
+      "previous_event_hash": "7ccdfdce7eef489c0c41c1d8aea6985ca1389e155a8fc8192d51fc20fd448d61",
+      "record_sha256": "5bd48fe9e24c5328ad6b161e07d89627c0cc2fdfada19e6b47c82c26f3c85fe9",
+      "stage": "05-knowledge-questions",
+      "timestamp": "2026-08-22T17:19:03.854316+00:00"
+    },
+    {
+      "event_hash": "4b5da6abfa6e466ed35916125855898adbd6ffac27bec4f61fcde5684f48ff5b",
+      "index": 6,
+      "metadata": {},
+      "name": "link:8b8ec12e3704592b1bd24f8c",
+      "path": "07-knowledge-links/link-8b8ec12e3704592b1bd24f8c.json",
+      "previous_event_hash": "87d051f61ed4443adcc6c9d6e3a00e2f220e20dd6147053015ad107db9db87e0",
+      "record_sha256": "88057bcab2bfad15ce94edc35635f65afcaf1525a85cfabc357571856e20ffca",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:19:03.856724+00:00"
+    },
+    {
+      "event_hash": "8df9711d1edac6388199122a7addc3904d2032c3aafdb3165f5cdb9ddb1e1af5",
+      "index": 7,
+      "metadata": {},
+      "name": "question:demand:D3",
+      "path": "05-knowledge-questions/question-demand-D3.json",
+      "previous_event_hash": "4b5da6abfa6e466ed35916125855898adbd6ffac27bec4f61fcde5684f48ff5b",
+      "record_sha256": "3d213aa8dfbc42fcd48ad9e4421cd8bf5a2974089fdcc7af6c55f452286e6ce3",
+      "stage": "05-knowledge-questions",
+      "timestamp": "2026-08-22T17:19:03.858406+00:00"
+    },
+    {
+      "event_hash": "0f35c2cf5b802b61a372f59366adc8eddebf761932cd49b1048e8fd41fb656f9",
+      "index": 8,
+      "metadata": {},
+      "name": "link:6b2280746888e8832e699d82",
+      "path": "07-knowledge-links/link-6b2280746888e8832e699d82.json",
+      "previous_event_hash": "8df9711d1edac6388199122a7addc3904d2032c3aafdb3165f5cdb9ddb1e1af5",
+      "record_sha256": "be4fb321fabf04aca94f09892f0291c79b8542a4855c769175ca95d0f67dfcdb",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:19:03.860149+00:00"
+    },
+    {
+      "event_hash": "b293ee2723b6815cff6f96d4fcdcc3d4be75159e0224af14385d0bd6010acfad",
+      "index": 9,
+      "metadata": {},
+      "name": "question:demand:D4",
+      "path": "05-knowledge-questions/question-demand-D4.json",
+      "previous_event_hash": "0f35c2cf5b802b61a372f59366adc8eddebf761932cd49b1048e8fd41fb656f9",
+      "record_sha256": "e905d6abe1b42e853cc0014a04fa273211e932ea4444c707aa50b0c0ea69a45a",
+      "stage": "05-knowledge-questions",
+      "timestamp": "2026-08-22T17:19:03.862707+00:00"
+    },
+    {
+      "event_hash": "f89c5b680600e0cd11350f4466609b0eff61c1b04508f6403b6e79b03f11b9dc",
+      "index": 10,
+      "metadata": {},
+      "name": "link:41f8e5a167dc96997efd2bfd",
+      "path": "07-knowledge-links/link-41f8e5a167dc96997efd2bfd.json",
+      "previous_event_hash": "b293ee2723b6815cff6f96d4fcdcc3d4be75159e0224af14385d0bd6010acfad",
+      "record_sha256": "8ef51b538e12714374e097429797f25431587d01ea02f40fc6781b64de480fed",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:19:03.864858+00:00"
+    },
+    {
+      "event_hash": "c19f1c66fa9b1927d2a66b2e23da2aba10d9cd3163c75c54b33f2feaaae2b173",
+      "index": 11,
+      "metadata": {},
+      "name": "question:demand:D5",
+      "path": "05-knowledge-questions/question-demand-D5.json",
+      "previous_event_hash": "f89c5b680600e0cd11350f4466609b0eff61c1b04508f6403b6e79b03f11b9dc",
+      "record_sha256": "969f788691808dcfb83a4a2ac6a77047ea8ec2c481a23260b68ad668e4f9f5ed",
+      "stage": "05-knowledge-questions",
+      "timestamp": "2026-08-22T17:19:03.867202+00:00"
+    },
+    {
+      "event_hash": "04301724d788c4ab307998df5419759bffb31cf9e44c2a2790928b8419398c42",
+      "index": 12,
+      "metadata": {},
+      "name": "link:21a0c2186ad97f0e5acc2635",
+      "path": "07-knowledge-links/link-21a0c2186ad97f0e5acc2635.json",
+      "previous_event_hash": "c19f1c66fa9b1927d2a66b2e23da2aba10d9cd3163c75c54b33f2feaaae2b173",
+      "record_sha256": "60972ad97233fd40e9d160b6eba213261ef40c0c78ebf9cd9e83dfedb9041e7e",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:19:03.869220+00:00"
+    },
+    {
+      "event_hash": "4dfc9814b6c099d1bc680f955a4a769cc2113b519537116109642ec862b58f04",
+      "index": 13,
+      "metadata": {},
+      "name": "question:demand:D6",
+      "path": "05-knowledge-questions/question-demand-D6.json",
+      "previous_event_hash": "04301724d788c4ab307998df5419759bffb31cf9e44c2a2790928b8419398c42",
+      "record_sha256": "9701b42fc1a67872dcf5f4fab53c20b4fc7e495ee2babf2148353af9f2d39182",
+      "stage": "05-knowledge-questions",
+      "timestamp": "2026-08-22T17:19:03.870963+00:00"
+    },
+    {
+      "event_hash": "fb75d108e933b6ac339e42859f52faf677192498f32c2e4cd9302e7459dee9d7",
+      "index": 14,
+      "metadata": {},
+      "name": "link:655c770188faf7d055783355",
+      "path": "07-knowledge-links/link-655c770188faf7d055783355.json",
+      "previous_event_hash": "4dfc9814b6c099d1bc680f955a4a769cc2113b519537116109642ec862b58f04",
+      "record_sha256": "35f2a3c6ef3b64e4f14bc0cbb34c0d42391f3ff05ae46e74f278ff9022b98ff1",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:19:03.872602+00:00"
+    },
+    {
+      "event_hash": "83d1c3579986dd7fb354306251f44bb6eb5e8028882e17f2cba8b37f954ed2fb",
+      "index": 15,
+      "metadata": {},
+      "name": "question:demand:D7",
+      "path": "05-knowledge-questions/question-demand-D7.json",
+      "previous_event_hash": "fb75d108e933b6ac339e42859f52faf677192498f32c2e4cd9302e7459dee9d7",
+      "record_sha256": "7aa7f2fa2c6e6a85b750c32af585e867c9a8e4500ea93e6968d1238e77ab7cb7",
+      "stage": "05-knowledge-questions",
+      "timestamp": "2026-08-22T17:19:03.874236+00:00"
+    },
+    {
+      "event_hash": "d96053b6efc0312d6afa32442ca5a6e420bf6a3df12f7a03756929389f2d5e27",
+      "index": 16,
+      "metadata": {},
+      "name": "link:0d585c6ea896929e7a4f876c",
+      "path": "07-knowledge-links/link-0d585c6ea896929e7a4f876c.json",
+      "previous_event_hash": "83d1c3579986dd7fb354306251f44bb6eb5e8028882e17f2cba8b37f954ed2fb",
+      "record_sha256": "9072f7fcc7cefcfe6fae19da405eb0791c03712418eebed9911ca6aba39bea40",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:19:03.875879+00:00"
+    },
+    {
+      "event_hash": "e775248d827e86ed0b3c11f81e6222bb0dbbf18d77eee81eef9d0c20b758e1af",
+      "index": 17,
+      "metadata": {},
+      "name": "question:demand:D8",
+      "path": "05-knowledge-questions/question-demand-D8.json",
+      "previous_event_hash": "d96053b6efc0312d6afa32442ca5a6e420bf6a3df12f7a03756929389f2d5e27",
+      "record_sha256": "28278e7de88827c5b89cef3a1af47841b83bea736ee7dcfa3f37978cf5391a0e",
+      "stage": "05-knowledge-questions",
+      "timestamp": "2026-08-22T17:19:03.877990+00:00"
+    },
+    {
+      "event_hash": "11f064572b97376ec610fab61df4d6ec651728057c56eefada3fe20c40d97014",
+      "index": 18,
+      "metadata": {},
+      "name": "link:6ad0705c2dd8bd36d641ab50",
+      "path": "07-knowledge-links/link-6ad0705c2dd8bd36d641ab50.json",
+      "previous_event_hash": "e775248d827e86ed0b3c11f81e6222bb0dbbf18d77eee81eef9d0c20b758e1af",
+      "record_sha256": "b6f9ab9f3b7de60b70a9920177cda75732b9f6136c3af02ef9910b6da009ec21",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:19:03.881482+00:00"
+    },
+    {
+      "event_hash": "8fa6ec44fd1f71ead9cd550a7e111e4693abdab383f258817e2c603e313a049e",
+      "index": 19,
+      "metadata": {
+        "model": "fireworks:accounts/fireworks/models/kimi-k3",
+        "role": "adaptive_controller"
+      },
+      "name": "call-0001-adaptive-controller",
+      "path": "01-call-inputs/call-0001-adaptive-controller.json",
+      "previous_event_hash": "11f064572b97376ec610fab61df4d6ec651728057c56eefada3fe20c40d97014",
+      "record_sha256": "ff9b61827d0adb1f36e1d0fbd0043fef2513f65b8ead00539bf4d27f153cde65",
+      "stage": "01-call-inputs",
+      "timestamp": "2026-08-22T17:19:03.887694+00:00"
+    },
+    {
+      "event_hash": "c9734083633d19e4b3ba728da8bf3ef09ffab8fd449977eeed09f6b6f5793de9",
+      "index": 20,
+      "metadata": {},
+      "name": "call-0001-adaptive-controller",
+      "path": "04-knowledge-queries/call-0001-adaptive-controller.json",
+      "previous_event_hash": "8fa6ec44fd1f71ead9cd550a7e111e4693abdab383f258817e2c603e313a049e",
+      "record_sha256": "4e6d00d1734a3319eea1914393101727aad65b3cfef23a9bdc7525fbcbff350d",
+      "stage": "04-knowledge-queries",
+      "timestamp": "2026-08-22T17:20:28.920581+00:00"
+    },
+    {
+      "event_hash": "682c6b4a9619578298377d6f31b683967991c77fb808a2e6a70556ca21043380",
+      "index": 21,
+      "metadata": {
+        "call_id": "call-0001-adaptive-controller",
+        "elapsed_ms": 85033,
+        "input_sha256": "bf43d47b2915347e424208b9bb01853a5f3d3dbcc9b8d91bc020f918f8cbd668",
+        "model": "fireworks:accounts/fireworks/models/kimi-k3",
+        "role": "adaptive_controller",
+        "usage": {
+          "cache_read_tokens": 4144,
+          "details": {
+            "reasoning_tokens": 2024
+          },
+          "input_tokens": 14252,
+          "output_tokens": 4263,
+          "requests": 2,
+          "tool_calls": 2
+        }
+      },
+      "name": "step-001-attempt-01",
+      "path": "10-adaptive-decisions/step-001-attempt-01.json",
+      "previous_event_hash": "c9734083633d19e4b3ba728da8bf3ef09ffab8fd449977eeed09f6b6f5793de9",
+      "record_sha256": "b83d802aa455686a4dfce489f7dabe371395ac473a07b446f5309a840aa0af55",
+      "stage": "10-adaptive-decisions",
+      "timestamp": "2026-08-22T17:20:28.923619+00:00"
+    },
+    {
+      "event_hash": "d2fa3d5501c6241ba80d2122b6d0255524326426dcd3eae0b33093f97a3c7a78",
+      "index": 22,
+      "metadata": {},
+      "name": "question:work:001-inv-du-debate",
+      "path": "05-knowledge-questions/question-work-001-inv-du-debate.json",
+      "previous_event_hash": "682c6b4a9619578298377d6f31b683967991c77fb808a2e6a70556ca21043380",
+      "record_sha256": "680a6e66800d9f3cb0393160ab3624c558dd14a37a844ab780b2ed4a49a99d87",
+      "stage": "05-knowledge-questions",
+      "timestamp": "2026-08-22T17:20:28.926359+00:00"
+    },
+    {
+      "event_hash": "828503b5a5e7de649a8526de380d51ebdd4a7fa0ab92380c58a7a4821cbb1808",
+      "index": 23,
+      "metadata": {},
+      "name": "link:ef8fe3b4cbd781dfb82b3eef",
+      "path": "07-knowledge-links/link-ef8fe3b4cbd781dfb82b3eef.json",
+      "previous_event_hash": "d2fa3d5501c6241ba80d2122b6d0255524326426dcd3eae0b33093f97a3c7a78",
+      "record_sha256": "cd204bac44118c6d0e8c5b26e108d480e6b19529295c157be4fbf12b5c9ae5d8",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:20:28.928624+00:00"
+    },
+    {
+      "event_hash": "5f3f5b9ea897cdd52bc7ed6cd7420a7ede88ec3d5e74af8f94e3d0f3a3044879",
+      "index": 24,
+      "metadata": {},
+      "name": "link:611c5085a683006054ad09d9",
+      "path": "07-knowledge-links/link-611c5085a683006054ad09d9.json",
+      "previous_event_hash": "828503b5a5e7de649a8526de380d51ebdd4a7fa0ab92380c58a7a4821cbb1808",
+      "record_sha256": "ebcd9c7b1e295874cc47255f36c77f2f77d5b76f8dd827269378ab3d204770f1",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:20:28.930427+00:00"
+    },
+    {
+      "event_hash": "ae983ce268b1d92cec3e3b0f01c90b6438167a03f1db75846797c2179fdddf53",
+      "index": 25,
+      "metadata": {},
+      "name": "question:work:001-inv-smit-mad",
+      "path": "05-knowledge-questions/question-work-001-inv-smit-mad.json",
+      "previous_event_hash": "5f3f5b9ea897cdd52bc7ed6cd7420a7ede88ec3d5e74af8f94e3d0f3a3044879",
+      "record_sha256": "97b6ea5fe053d21422c4741b9e10120ebccf0404489c77a7c107421a32cc894a",
+      "stage": "05-knowledge-questions",
+      "timestamp": "2026-08-22T17:20:28.932071+00:00"
+    },
+    {
+      "event_hash": "c4e842e1ae8652031c403afbb832667517977cba5cae2be2bb5e7d39e40489b1",
+      "index": 26,
+      "metadata": {},
+      "name": "link:352600e4d48c69b91769d741",
+      "path": "07-knowledge-links/link-352600e4d48c69b91769d741.json",
+      "previous_event_hash": "ae983ce268b1d92cec3e3b0f01c90b6438167a03f1db75846797c2179fdddf53",
+      "record_sha256": "fc5f1414304d2a965c7d3413509d44b58b58b6cdb9c49f5d9190d12764331af7",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:20:28.933544+00:00"
+    },
+    {
+      "event_hash": "a49b9f2e979e84a26d3616039d8a89f81c9f6d22264df1b7125f915715ef4c6d",
+      "index": 27,
+      "metadata": {},
+      "name": "link:8373f5e63bb99dc188f60bba",
+      "path": "07-knowledge-links/link-8373f5e63bb99dc188f60bba.json",
+      "previous_event_hash": "c4e842e1ae8652031c403afbb832667517977cba5cae2be2bb5e7d39e40489b1",
+      "record_sha256": "bb8872ec31695f2c3a6b2e51f35b9baad305c0ec9e858eb34466702b4a5be844",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:20:28.935071+00:00"
+    },
+    {
+      "event_hash": "b2ae00e86058ba1388eb7a989e405b17ca192d7e30f958a959c29c1079f34873",
+      "index": 28,
+      "metadata": {},
+      "name": "question:work:001-inv-zhang-when",
+      "path": "05-knowledge-questions/question-work-001-inv-zhang-when.json",
+      "previous_event_hash": "a49b9f2e979e84a26d3616039d8a89f81c9f6d22264df1b7125f915715ef4c6d",
+      "record_sha256": "54cd2bdb3027fd70492a38e52df4b9e56282c56a3d616d6b2e540dfa69be56d6",
+      "stage": "05-knowledge-questions",
+      "timestamp": "2026-08-22T17:20:28.936690+00:00"
+    },
+    {
+      "event_hash": "71a3e64c8e4db8a69c504c4833cac56c340fef0168be070e4fed18d54f84c53b",
+      "index": 29,
+      "metadata": {},
+      "name": "link:078ffa273b94db6e2b8315d8",
+      "path": "07-knowledge-links/link-078ffa273b94db6e2b8315d8.json",
+      "previous_event_hash": "b2ae00e86058ba1388eb7a989e405b17ca192d7e30f958a959c29c1079f34873",
+      "record_sha256": "8a5bd046b7246297371b690289d59f3754863d9ff62264bc0b293e4f9f09bc69",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:20:28.938836+00:00"
+    },
+    {
+      "event_hash": "8d7f1b0ec82744eba6b2d217aa03048db16376953979d12050e37be205adf0d1",
+      "index": 30,
+      "metadata": {},
+      "name": "link:99329ddb49b2a45de390dfda",
+      "path": "07-knowledge-links/link-99329ddb49b2a45de390dfda.json",
+      "previous_event_hash": "71a3e64c8e4db8a69c504c4833cac56c340fef0168be070e4fed18d54f84c53b",
+      "record_sha256": "2fb04075e5cc06fd1a655c64b5a983f1f67e4327eef7b5cc19360fb1a3b6677f",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:20:28.941095+00:00"
+    },
+    {
+      "event_hash": "6b853d7fcf16e00a09e0682c7b136b608876c2653d1d31151229bf6dc4c6b6aa",
+      "index": 31,
+      "metadata": {},
+      "name": "question:work:001-inv-lorenz-influence",
+      "path": "05-knowledge-questions/question-work-001-inv-lorenz-influence.json",
+      "previous_event_hash": "8d7f1b0ec82744eba6b2d217aa03048db16376953979d12050e37be205adf0d1",
+      "record_sha256": "81522c447b4a6e1b7c91fa6614e2d298af8226c9eff04fc84603a1f6b2d75ec2",
+      "stage": "05-knowledge-questions",
+      "timestamp": "2026-08-22T17:20:28.943710+00:00"
+    },
+    {
+      "event_hash": "373d63198817d77434804c86d192eae31800fa315271488cc6ec76bcb8ce151a",
+      "index": 32,
+      "metadata": {},
+      "name": "link:d58ddb16c851643a663476fa",
+      "path": "07-knowledge-links/link-d58ddb16c851643a663476fa.json",
+      "previous_event_hash": "6b853d7fcf16e00a09e0682c7b136b608876c2653d1d31151229bf6dc4c6b6aa",
+      "record_sha256": "cd1980b74ef704100c0defbaec048d52c6cfff7c76bbefa00aac3f867bc26eea",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:20:28.945962+00:00"
+    },
+    {
+      "event_hash": "12537f946cc815d398aeec47d92d5d794e881f701a3605adf6f0e9aa3f4db523",
+      "index": 33,
+      "metadata": {},
+      "name": "link:280d9983dcd9ca8734ec6c01",
+      "path": "07-knowledge-links/link-280d9983dcd9ca8734ec6c01.json",
+      "previous_event_hash": "373d63198817d77434804c86d192eae31800fa315271488cc6ec76bcb8ce151a",
+      "record_sha256": "742073616c0ec29c1980b0fa0cdc9de9f61155f3be1dfc79236b3d5b210a0cdf",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:20:28.948410+00:00"
+    },
+    {
+      "event_hash": "34ec3e45caf1ffd8a243b3fbc07d9b437b057a5cf7a7ed21f21ceb46420fda52",
+      "index": 34,
+      "metadata": {},
+      "name": "question:work:001-inv-choi-conformity",
+      "path": "05-knowledge-questions/question-work-001-inv-choi-conformity.json",
+      "previous_event_hash": "12537f946cc815d398aeec47d92d5d794e881f701a3605adf6f0e9aa3f4db523",
+      "record_sha256": "083e235de02b33bb16780f1ceda38807b4bca2ce90a07e28ed2c30ece7e3ba15",
+      "stage": "05-knowledge-questions",
+      "timestamp": "2026-08-22T17:20:28.951044+00:00"
+    },
+    {
+      "event_hash": "46ac2120f993ce7f775bd153e5e154c09b244c362ddd513e9ecb7a3a48072b71",
+      "index": 35,
+      "metadata": {},
+      "name": "link:c02d798f3a07ede554911f64",
+      "path": "07-knowledge-links/link-c02d798f3a07ede554911f64.json",
+      "previous_event_hash": "34ec3e45caf1ffd8a243b3fbc07d9b437b057a5cf7a7ed21f21ceb46420fda52",
+      "record_sha256": "4f5f805ac227926a38dbc76bb4e29da821e49db9f1d3f753ecc2e3280b77b673",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:20:28.953368+00:00"
+    },
+    {
+      "event_hash": "d130dde3910d3ba39629e8dd963df13ec91cbe15a55ce9f52f14118f2744e21b",
+      "index": 36,
+      "metadata": {},
+      "name": "link:7ddf0fb952788e828bd51fac",
+      "path": "07-knowledge-links/link-7ddf0fb952788e828bd51fac.json",
+      "previous_event_hash": "46ac2120f993ce7f775bd153e5e154c09b244c362ddd513e9ecb7a3a48072b71",
+      "record_sha256": "354e7df088537e7c5d7e225728ffb854fb5cfef93e7342db591c8fff0bc1908d",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:20:28.955861+00:00"
+    },
+    {
+      "event_hash": "5451bbb2e30498d76326a8af99fe40108a04d2de8047ce8fece617c5475f3a6d",
+      "index": 37,
+      "metadata": {},
+      "name": "question:work:001-inv-formal-tools",
+      "path": "05-knowledge-questions/question-work-001-inv-formal-tools.json",
+      "previous_event_hash": "d130dde3910d3ba39629e8dd963df13ec91cbe15a55ce9f52f14118f2744e21b",
+      "record_sha256": "644332cb4450948050fa3ff861eb496aae4bc5f81ff966b903670ca47202f070",
+      "stage": "05-knowledge-questions",
+      "timestamp": "2026-08-22T17:20:28.958309+00:00"
+    },
+    {
+      "event_hash": "7388f95eedd43692958b348237878d4d9fd66bcf4023dea28ab94f39a9f7025e",
+      "index": 38,
+      "metadata": {},
+      "name": "link:405fe8cbac17f661a6dff775",
+      "path": "07-knowledge-links/link-405fe8cbac17f661a6dff775.json",
+      "previous_event_hash": "5451bbb2e30498d76326a8af99fe40108a04d2de8047ce8fece617c5475f3a6d",
+      "record_sha256": "c17bae62f2332224b0d761158b6aad6c6a23a894be6040c15376934bd1c06ca7",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:20:28.959961+00:00"
+    },
+    {
+      "event_hash": "7f5ca33d27a195b527992dded4656d6aa133a55c6df7b8c578fadc8353971e52",
+      "index": 39,
+      "metadata": {},
+      "name": "link:1ec53f9ced7e308cf7f99b1e",
+      "path": "07-knowledge-links/link-1ec53f9ced7e308cf7f99b1e.json",
+      "previous_event_hash": "7388f95eedd43692958b348237878d4d9fd66bcf4023dea28ab94f39a9f7025e",
+      "record_sha256": "782279945772cddc46bf3981f791c0842b2501b7d1ce63a826151e008dfaf8df",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:20:28.961631+00:00"
+    },
+    {
+      "event_hash": "3c836795840c97641bffa1354cbe28e83915e5699b0b4fffaf871f9b8a29d8e1",
+      "index": 40,
+      "metadata": {
+        "model": "fireworks:accounts/fireworks/models/kimi-k3",
+        "role": "adaptive_investigator"
+      },
+      "name": "call-0002-adaptive-investigator",
+      "path": "01-call-inputs/call-0002-adaptive-investigator.json",
+      "previous_event_hash": "7f5ca33d27a195b527992dded4656d6aa133a55c6df7b8c578fadc8353971e52",
+      "record_sha256": "24ab11bc51c28988782ef818747195c43e243b97b65ff08ca0241b0ca2c0db3d",
+      "stage": "01-call-inputs",
+      "timestamp": "2026-08-22T17:20:28.966341+00:00"
+    },
+    {
+      "event_hash": "e87a6c7606d688ba16e72c353b0844a21ebd179a144024fd5fe45b7115f6ecf8",
+      "index": 41,
+      "metadata": {
+        "model": "fireworks:accounts/fireworks/models/kimi-k3",
+        "role": "adaptive_investigator"
+      },
+      "name": "call-0003-adaptive-investigator",
+      "path": "01-call-inputs/call-0003-adaptive-investigator.json",
+      "previous_event_hash": "3c836795840c97641bffa1354cbe28e83915e5699b0b4fffaf871f9b8a29d8e1",
+      "record_sha256": "c5c455e34727e7ed2dd75ebcfbc8b4c2874f6f96af85260e85ac69b062eb80e2",
+      "stage": "01-call-inputs",
+      "timestamp": "2026-08-22T17:20:28.993574+00:00"
+    },
+    {
+      "event_hash": "55b652b676b9aeadc88fb876725449075499b0f5052793a568d2b5bb1aa123df",
+      "index": 42,
+      "metadata": {
+        "model": "fireworks:accounts/fireworks/models/kimi-k3",
+        "role": "adaptive_investigator"
+      },
+      "name": "call-0004-adaptive-investigator",
+      "path": "01-call-inputs/call-0004-adaptive-investigator.json",
+      "previous_event_hash": "e87a6c7606d688ba16e72c353b0844a21ebd179a144024fd5fe45b7115f6ecf8",
+      "record_sha256": "636c091c442c0c652f094264592dedd3f1677eb0a8d40dbc7d126095c24912dd",
+      "stage": "01-call-inputs",
+      "timestamp": "2026-08-22T17:20:29.026355+00:00"
+    },
+    {
+      "event_hash": "4e912017cbb0fb46476ff34a2ad6f280fdba72455d84c006f29b6c8085a60538",
+      "index": 43,
+      "metadata": {
+        "model": "fireworks:accounts/fireworks/models/kimi-k3",
+        "role": "adaptive_investigator"
+      },
+      "name": "call-0005-adaptive-investigator",
+      "path": "01-call-inputs/call-0005-adaptive-investigator.json",
+      "previous_event_hash": "55b652b676b9aeadc88fb876725449075499b0f5052793a568d2b5bb1aa123df",
+      "record_sha256": "8069f01774cfaef6e7b81579d97a342a41f43f4ba2c9c3965c729cc21c20eea1",
+      "stage": "01-call-inputs",
+      "timestamp": "2026-08-22T17:20:29.062231+00:00"
+    },
+    {
+      "event_hash": "886e3838c7d330a05e1de54f326c89361936e85a6a0776173f6205d329210236",
+      "index": 44,
+      "metadata": {
+        "model": "fireworks:accounts/fireworks/models/kimi-k3",
+        "role": "adaptive_investigator"
+      },
+      "name": "call-0006-adaptive-investigator",
+      "path": "01-call-inputs/call-0006-adaptive-investigator.json",
+      "previous_event_hash": "4e912017cbb0fb46476ff34a2ad6f280fdba72455d84c006f29b6c8085a60538",
+      "record_sha256": "840aa504781def4cc9360617c4afb8aedd30f3cb03fe4e456e0f510c7def7d86",
+      "stage": "01-call-inputs",
+      "timestamp": "2026-08-22T17:20:29.101919+00:00"
+    },
+    {
+      "event_hash": "7afd5d374159ea93ba7b1cd1b5fa0dfa2bb436b37adfcb8e8e9d392a1afa47b3",
+      "index": 45,
+      "metadata": {
+        "model": "fireworks:accounts/fireworks/models/kimi-k3",
+        "role": "adaptive_investigator"
+      },
+      "name": "call-0007-adaptive-investigator",
+      "path": "01-call-inputs/call-0007-adaptive-investigator.json",
+      "previous_event_hash": "886e3838c7d330a05e1de54f326c89361936e85a6a0776173f6205d329210236",
+      "record_sha256": "f81239cca59cc78d185d587a46a1d8ba3e5c5e62dce592450d438c7f81aec31e",
+      "stage": "01-call-inputs",
+      "timestamp": "2026-08-22T17:20:29.145616+00:00"
+    },
+    {
+      "event_hash": "18fe828242dd414576b3e2806b48c098e16bfdf3b538eda2fd9298e6129674a4",
+      "index": 46,
+      "metadata": {},
+      "name": "call-0002-adaptive-investigator",
+      "path": "04-knowledge-queries/call-0002-adaptive-investigator.json",
+      "previous_event_hash": "7afd5d374159ea93ba7b1cd1b5fa0dfa2bb436b37adfcb8e8e9d392a1afa47b3",
+      "record_sha256": "bfc4c4bf5cac13057c7a63becda2e6f4b0c634bba3d49c4e8379f6a06dc99c40",
+      "stage": "04-knowledge-queries",
+      "timestamp": "2026-08-22T17:23:41.177413+00:00"
+    },
+    {
+      "event_hash": "4ac9421ed929a7837fc642e2e2fc4bb2297d9d7cadd64ac1f7222e64aeeee12f",
+      "index": 47,
+      "metadata": {
+        "call_id": "call-0002-adaptive-investigator",
+        "elapsed_ms": 192213,
+        "input_sha256": "d94d513f9f36b86893b677fb196b7ce20cde88760ff4122a4068250e7639148a",
+        "model": "fireworks:accounts/fireworks/models/kimi-k3",
+        "role": "adaptive_investigator",
+        "usage": {
+          "cache_read_tokens": 120917,
+          "details": {
+            "reasoning_tokens": 3955
+          },
+          "input_tokens": 149511,
+          "output_tokens": 10641,
+          "requests": 8,
+          "tool_calls": 12
+        }
+      },
+      "name": "work:001-inv-du-debate",
+      "path": "20-adaptive-work/work-001-inv-du-debate.json",
+      "previous_event_hash": "18fe828242dd414576b3e2806b48c098e16bfdf3b538eda2fd9298e6129674a4",
+      "record_sha256": "090ebe2ae0c8dc08e49f354e3208917c2878dfc32633db5ca833ba804c96aaad",
+      "stage": "20-adaptive-work",
+      "timestamp": "2026-08-22T17:23:41.184349+00:00"
+    },
+    {
+      "event_hash": "bd028b89fe1e52857a8ed77416e8c56f63647cc485d6c11f53b215c8a25c48ef",
+      "index": 48,
+      "metadata": {},
+      "name": "work:001-inv-du-debate",
+      "path": "30-evidence-packets/work-001-inv-du-debate.json",
+      "previous_event_hash": "4ac9421ed929a7837fc642e2e2fc4bb2297d9d7cadd64ac1f7222e64aeeee12f",
+      "record_sha256": "01761e7df71c5a41d759ab35a356526a5bbc2734cd5b5e63cdff8877118c6c91",
+      "stage": "30-evidence-packets",
+      "timestamp": "2026-08-22T17:23:41.194961+00:00"
+    },
+    {
+      "event_hash": "e945fa42e4430a783699145171871c77b6570cb51dd70b2e7aca16f969a84cfe",
+      "index": 49,
+      "metadata": {},
+      "name": "answer:work:001-inv-du-debate",
+      "path": "06-knowledge-answers/answer-work-001-inv-du-debate.json",
+      "previous_event_hash": "bd028b89fe1e52857a8ed77416e8c56f63647cc485d6c11f53b215c8a25c48ef",
+      "record_sha256": "08153425e27bb46d7bc192fa773909be63e3728b98e53e392e534c4ed1e9a0ee",
+      "stage": "06-knowledge-answers",
+      "timestamp": "2026-08-22T17:23:41.200545+00:00"
+    },
+    {
+      "event_hash": "fdba5cbcb1f928bd1c3b2d49f8928835536ffdd11c6d5284dfc392699f75c171",
+      "index": 50,
+      "metadata": {},
+      "name": "link:a5a9ebe3e3d24f9d3734d20b",
+      "path": "07-knowledge-links/link-a5a9ebe3e3d24f9d3734d20b.json",
+      "previous_event_hash": "e945fa42e4430a783699145171871c77b6570cb51dd70b2e7aca16f969a84cfe",
+      "record_sha256": "663cf7cd4c19b9ab2c522f9481b025b2c494d098f555d158efaf36e0524535e6",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:23:41.204823+00:00"
+    },
+    {
+      "event_hash": "abfdc7b7f9b70617c2fee87084eacd34bc06568a38c679cdc898adb6f659ed24",
+      "index": 51,
+      "metadata": {},
+      "name": "link:0f1b3ecf410d133d8935dbe4",
+      "path": "07-knowledge-links/link-0f1b3ecf410d133d8935dbe4.json",
+      "previous_event_hash": "fdba5cbcb1f928bd1c3b2d49f8928835536ffdd11c6d5284dfc392699f75c171",
+      "record_sha256": "5bff666be0924fbe251d04e10546aff5751b102f1f0e64e92c9090edb90f1cbf",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:23:41.208971+00:00"
+    },
+    {
+      "event_hash": "d4a24a679ba99040c045ffb8d66bc5912b0fe4764fc7e92949b50b41dcb5f84f",
+      "index": 52,
+      "metadata": {},
+      "name": "link:148c7ad93c3eb9176b710d5b",
+      "path": "07-knowledge-links/link-148c7ad93c3eb9176b710d5b.json",
+      "previous_event_hash": "abfdc7b7f9b70617c2fee87084eacd34bc06568a38c679cdc898adb6f659ed24",
+      "record_sha256": "17411de14980c5aa11f02552115bb78d10f63ee679291e56dc36bb6b5a8d904d",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:23:41.213675+00:00"
+    },
+    {
+      "event_hash": "99ae40f36f0b637e8655b332a1a0edb9ff3298e49100fb94cb1f49013ffd7d34",
+      "index": 53,
+      "metadata": {},
+      "name": "link:75d83c430ebf29a844262bdd",
+      "path": "07-knowledge-links/link-75d83c430ebf29a844262bdd.json",
+      "previous_event_hash": "d4a24a679ba99040c045ffb8d66bc5912b0fe4764fc7e92949b50b41dcb5f84f",
+      "record_sha256": "3b7ac048e2e597bf86245d474599da39fb519add681d6de838d6b10c379dfade",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:23:41.218243+00:00"
+    },
+    {
+      "event_hash": "1cbcf7cf824825957b1da704a88ce1ae9943b62fcf1eb8df428cec18cead8fde",
+      "index": 54,
+      "metadata": {},
+      "name": "link:91fed8583b4535a14aa6a337",
+      "path": "07-knowledge-links/link-91fed8583b4535a14aa6a337.json",
+      "previous_event_hash": "99ae40f36f0b637e8655b332a1a0edb9ff3298e49100fb94cb1f49013ffd7d34",
+      "record_sha256": "d536759d87518446f43c20010cc1fb8e08f4aef804c2da79e5261920f0334ffb",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:23:41.223383+00:00"
+    },
+    {
+      "event_hash": "90795d6360afffe60bce9439daa8c058201160c4134aaf7baab7364aa3b6180f",
+      "index": 55,
+      "metadata": {},
+      "name": "call-0005-adaptive-investigator",
+      "path": "04-knowledge-queries/call-0005-adaptive-investigator.json",
+      "previous_event_hash": "1cbcf7cf824825957b1da704a88ce1ae9943b62fcf1eb8df428cec18cead8fde",
+      "record_sha256": "728b78d1b5d21dab0e305b94f1dbf7b93ffcfcc53784be2e3d70f1d36738b2ea",
+      "stage": "04-knowledge-queries",
+      "timestamp": "2026-08-22T17:24:07.907075+00:00"
+    },
+    {
+      "event_hash": "660717226f93f9766ac7fdbfcff861a4b58e9f6b5980e4630aedebaf552902c1",
+      "index": 56,
+      "metadata": {
+        "call_id": "call-0005-adaptive-investigator",
+        "elapsed_ms": 218847,
+        "input_sha256": "9397866860d3096bcd9e2f068208f799f1b4d6a92452293704a64acf225ce37e",
+        "model": "fireworks:accounts/fireworks/models/kimi-k3",
+        "role": "adaptive_investigator",
+        "usage": {
+          "cache_read_tokens": 101444,
+          "details": {
+            "reasoning_tokens": 6450
+          },
+          "input_tokens": 133215,
+          "output_tokens": 12557,
+          "requests": 7,
+          "tool_calls": 9
+        }
+      },
+      "name": "work:001-inv-lorenz-influence",
+      "path": "20-adaptive-work/work-001-inv-lorenz-influence.json",
+      "previous_event_hash": "90795d6360afffe60bce9439daa8c058201160c4134aaf7baab7364aa3b6180f",
+      "record_sha256": "aeaf34a3cacc7e5adbc7f95d60f48331a0912558a9bcd0675aa22dc17646a45d",
+      "stage": "20-adaptive-work",
+      "timestamp": "2026-08-22T17:24:07.913875+00:00"
+    },
+    {
+      "event_hash": "b1811a06f10e892c0fa61f0c92872ee2765f97b470d8e49bd1bb348862c7e9c9",
+      "index": 57,
+      "metadata": {},
+      "name": "work:001-inv-lorenz-influence",
+      "path": "30-evidence-packets/work-001-inv-lorenz-influence.json",
+      "previous_event_hash": "660717226f93f9766ac7fdbfcff861a4b58e9f6b5980e4630aedebaf552902c1",
+      "record_sha256": "967fd976b577220a2ff22274f8578ed7149a521ffe0a5f3dfc24ab42b664b045",
+      "stage": "30-evidence-packets",
+      "timestamp": "2026-08-22T17:24:07.919874+00:00"
+    },
+    {
+      "event_hash": "e526e63ba6cf0edca514730877395bfe2a0b1112ad22f635462aafc1b22e596a",
+      "index": 58,
+      "metadata": {},
+      "name": "answer:work:001-inv-lorenz-influence",
+      "path": "06-knowledge-answers/answer-work-001-inv-lorenz-influence.json",
+      "previous_event_hash": "b1811a06f10e892c0fa61f0c92872ee2765f97b470d8e49bd1bb348862c7e9c9",
+      "record_sha256": "4a9e0d41dc9904222f1f90104bd4c8253f6585ba17f443e468b25d4b3bb2fef8",
+      "stage": "06-knowledge-answers",
+      "timestamp": "2026-08-22T17:24:07.923539+00:00"
+    },
+    {
+      "event_hash": "6d273cc5d79afe56c24c4faa2346645b3a51e3af11fff974cfb49969b638cf6d",
+      "index": 59,
+      "metadata": {},
+      "name": "link:6f0f2ea35816b9a5ab1db04f",
+      "path": "07-knowledge-links/link-6f0f2ea35816b9a5ab1db04f.json",
+      "previous_event_hash": "e526e63ba6cf0edca514730877395bfe2a0b1112ad22f635462aafc1b22e596a",
+      "record_sha256": "8a6740f71e0d3f57e3bd1bda61795009c8ae3a9584f8246ad6af750a9e7f25f0",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:24:07.928633+00:00"
+    },
+    {
+      "event_hash": "5c0afaf914792b1f6318e7bbfa754890da4902b55adede594bbd889c0d910df7",
+      "index": 60,
+      "metadata": {},
+      "name": "link:db2a2e59d709139dc09a856f",
+      "path": "07-knowledge-links/link-db2a2e59d709139dc09a856f.json",
+      "previous_event_hash": "6d273cc5d79afe56c24c4faa2346645b3a51e3af11fff974cfb49969b638cf6d",
+      "record_sha256": "e96abb1abb214d4e2bacbbc36b7dcd816635f25370d9aae3c72c1d52793efb70",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:24:07.934290+00:00"
+    },
+    {
+      "event_hash": "0c50b2bc9b8192fe7b139e62b620181e3310553c7eca48ef25cd4c14d725d4b1",
+      "index": 61,
+      "metadata": {},
+      "name": "link:3e4f2ca79c7363fd5426fc2c",
+      "path": "07-knowledge-links/link-3e4f2ca79c7363fd5426fc2c.json",
+      "previous_event_hash": "5c0afaf914792b1f6318e7bbfa754890da4902b55adede594bbd889c0d910df7",
+      "record_sha256": "c799162ba4b6609c8f24bf0bfb51b1c1bc2d16bcdcfad2f7b444c71ddeb7b8fd",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:24:07.939739+00:00"
+    },
+    {
+      "event_hash": "2320b043bff937a3b9ebe7bb8573716b37bfcfcd06d04b926b2b01e3c599a597",
+      "index": 62,
+      "metadata": {},
+      "name": "link:6ec0bc27d6470d957b127e45",
+      "path": "07-knowledge-links/link-6ec0bc27d6470d957b127e45.json",
+      "previous_event_hash": "0c50b2bc9b8192fe7b139e62b620181e3310553c7eca48ef25cd4c14d725d4b1",
+      "record_sha256": "d66c4c578db3eed60921f2385dbf840917ee911075d85618be39d08b36faa32a",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:24:07.946844+00:00"
+    },
+    {
+      "event_hash": "9f2e73a84d8650c7def19b139b6281ede84f67e68e69745c0acd0b3ba1f352fc",
+      "index": 63,
+      "metadata": {},
+      "name": "question:raised:784a683dbe8a:rq1",
+      "path": "05-knowledge-questions/question-raised-784a683dbe8a-rq1.json",
+      "previous_event_hash": "2320b043bff937a3b9ebe7bb8573716b37bfcfcd06d04b926b2b01e3c599a597",
+      "record_sha256": "3cc3c96527836fe2cf96e83ffbbf796dc44e0bf5a94614dcf86cb2371f1c9d49",
+      "stage": "05-knowledge-questions",
+      "timestamp": "2026-08-22T17:24:07.952133+00:00"
+    },
+    {
+      "event_hash": "dc3138230918790a5289e7a70bb9b4b42d79d35db72fb6ef85522449774fb636",
+      "index": 64,
+      "metadata": {},
+      "name": "link:9e1d1de7ea09495bb59f849b",
+      "path": "07-knowledge-links/link-9e1d1de7ea09495bb59f849b.json",
+      "previous_event_hash": "9f2e73a84d8650c7def19b139b6281ede84f67e68e69745c0acd0b3ba1f352fc",
+      "record_sha256": "2c0124688dbdad72646e6a26be47c24d302763ed87d1347e2fb7a8e38c98c412",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:24:07.957238+00:00"
+    },
+    {
+      "event_hash": "039cf0ae92a53ef0ff8beb58038c3aca3dbf907e3e47d59877c49e87a7c211ee",
+      "index": 65,
+      "metadata": {},
+      "name": "link:21310bccbc0d563490e75b8b",
+      "path": "07-knowledge-links/link-21310bccbc0d563490e75b8b.json",
+      "previous_event_hash": "dc3138230918790a5289e7a70bb9b4b42d79d35db72fb6ef85522449774fb636",
+      "record_sha256": "4fbb1b949543447b5d11c2fffed870003558f2cb0fef69601488481f07303a83",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:24:07.962512+00:00"
+    },
+    {
+      "event_hash": "a6934c7420433e3e964464ebff6fc9da977e4ca1c00adee790ab0284975f0724",
+      "index": 66,
+      "metadata": {},
+      "name": "link:9dc7a8079266011859d33733",
+      "path": "07-knowledge-links/link-9dc7a8079266011859d33733.json",
+      "previous_event_hash": "039cf0ae92a53ef0ff8beb58038c3aca3dbf907e3e47d59877c49e87a7c211ee",
+      "record_sha256": "c5e6c93233f3aea302f0e0f24643c8873467114ce67d46e02c1c5c099c8aaaee",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:24:07.968462+00:00"
+    },
+    {
+      "event_hash": "76b38cd81737deade8cc9ac6d772c228b5e133ef8fece42143e9f31ad1c7df89",
+      "index": 67,
+      "metadata": {},
+      "name": "call-0003-adaptive-investigator",
+      "path": "04-knowledge-queries/call-0003-adaptive-investigator.json",
+      "previous_event_hash": "a6934c7420433e3e964464ebff6fc9da977e4ca1c00adee790ab0284975f0724",
+      "record_sha256": "cc64897eafe4b406698368bab68d2ede913c803571474e0b16b0fa3edbf7e36d",
+      "stage": "04-knowledge-queries",
+      "timestamp": "2026-08-22T17:24:49.331954+00:00"
+    },
+    {
+      "event_hash": "76dfc887918f9f2f420391dc929e492808f097453c6ba11c18ebf95ba8e5588b",
+      "index": 68,
+      "metadata": {
+        "call_id": "call-0003-adaptive-investigator",
+        "input_sha256": "519dbdf61d65faa83d526eda06193d478655a2502e04799912a4ce78aa6c64f0",
+        "model": "fireworks:accounts/fireworks/models/kimi-k3",
+        "role": "adaptive_investigator"
+      },
+      "name": "call-0003-adaptive-investigator",
+      "path": "02-call-errors/call-0003-adaptive-investigator.json",
+      "previous_event_hash": "76b38cd81737deade8cc9ac6d772c228b5e133ef8fece42143e9f31ad1c7df89",
+      "record_sha256": "628e7560b492c5f6e9d0e52af279df7aed87798cf3a4bd43198273afb1c61a52",
+      "stage": "02-call-errors",
+      "timestamp": "2026-08-22T17:24:49.337465+00:00"
+    },
+    {
+      "event_hash": "e68f6b995d1b7695415e78b09843f42160b41a5f0b8d831efb731ca216cab1f8",
+      "index": 69,
+      "metadata": {},
+      "name": "call-0007-adaptive-investigator",
+      "path": "04-knowledge-queries/call-0007-adaptive-investigator.json",
+      "previous_event_hash": "76dfc887918f9f2f420391dc929e492808f097453c6ba11c18ebf95ba8e5588b",
+      "record_sha256": "49a2f92b5ad2d518a33ec11df09556a5a02fe2cae300139c532e50fdd27ab4d1",
+      "stage": "04-knowledge-queries",
+      "timestamp": "2026-08-22T17:24:59.197709+00:00"
+    },
+    {
+      "event_hash": "367abf6e4bb47d2bb443ddeec047348cd92efa9e9a57352d740e7e80ea906421",
+      "index": 70,
+      "metadata": {
+        "call_id": "call-0007-adaptive-investigator",
+        "input_sha256": "74f493051ef3b6dd9bcc49118fb0663cdcd7b885012a6303548b6dc097dc587f",
+        "model": "fireworks:accounts/fireworks/models/kimi-k3",
+        "role": "adaptive_investigator"
+      },
+      "name": "call-0007-adaptive-investigator",
+      "path": "02-call-errors/call-0007-adaptive-investigator.json",
+      "previous_event_hash": "e68f6b995d1b7695415e78b09843f42160b41a5f0b8d831efb731ca216cab1f8",
+      "record_sha256": "628e7560b492c5f6e9d0e52af279df7aed87798cf3a4bd43198273afb1c61a52",
+      "stage": "02-call-errors",
+      "timestamp": "2026-08-22T17:24:59.206036+00:00"
+    },
+    {
+      "event_hash": "fc1f328a71e3d8f2c221bbe8e1d2a9eac2a8dfec002ab3dee3386ef2354d8e41",
+      "index": 71,
+      "metadata": {},
+      "name": "call-0006-adaptive-investigator",
+      "path": "04-knowledge-queries/call-0006-adaptive-investigator.json",
+      "previous_event_hash": "367abf6e4bb47d2bb443ddeec047348cd92efa9e9a57352d740e7e80ea906421",
+      "record_sha256": "4305d77bf47bf2247ad3069aea4049f2c8b7a9b58e80a22643fe3186117d9f28",
+      "stage": "04-knowledge-queries",
+      "timestamp": "2026-08-22T17:24:59.306884+00:00"
+    },
+    {
+      "event_hash": "f0e9ec520bf76977f66e4bb3eeef8ece43f58d22d02b3234cf9e9cf4c9f36967",
+      "index": 72,
+      "metadata": {
+        "call_id": "call-0006-adaptive-investigator",
+        "input_sha256": "68e7fcfaadee7f10b33a0242424fe4a03b9a1ddbdd469c22ddecf0f1b753b036",
+        "model": "fireworks:accounts/fireworks/models/kimi-k3",
+        "role": "adaptive_investigator"
+      },
+      "name": "call-0006-adaptive-investigator",
+      "path": "02-call-errors/call-0006-adaptive-investigator.json",
+      "previous_event_hash": "fc1f328a71e3d8f2c221bbe8e1d2a9eac2a8dfec002ab3dee3386ef2354d8e41",
+      "record_sha256": "628e7560b492c5f6e9d0e52af279df7aed87798cf3a4bd43198273afb1c61a52",
+      "stage": "02-call-errors",
+      "timestamp": "2026-08-22T17:24:59.312316+00:00"
+    },
+    {
+      "event_hash": "58d42eb9997e79384e44bc1cfd31fde1cd9639adcd0cd4ddd8f1b7c861ac837a",
+      "index": 73,
+      "metadata": {},
+      "name": "call-0004-adaptive-investigator",
+      "path": "04-knowledge-queries/call-0004-adaptive-investigator.json",
+      "previous_event_hash": "f0e9ec520bf76977f66e4bb3eeef8ece43f58d22d02b3234cf9e9cf4c9f36967",
+      "record_sha256": "011ff0308fd15480fd356e4bade7c44ce58e9ec256fc2e88ea8fa4f538866c01",
+      "stage": "04-knowledge-queries",
+      "timestamp": "2026-08-22T17:26:14.216859+00:00"
+    },
+    {
+      "event_hash": "002a12d6a976ef59d6acfc8c12bd8141ba8c8d439354aa756b1afc96b5d6bef8",
+      "index": 74,
+      "metadata": {
+        "call_id": "call-0004-adaptive-investigator",
+        "input_sha256": "a66757784d0254e56c7629c2ccd885830e96f95b26896f1c5b1e079a4ef0920d",
+        "model": "fireworks:accounts/fireworks/models/kimi-k3",
+        "role": "adaptive_investigator"
+      },
+      "name": "call-0004-adaptive-investigator",
+      "path": "02-call-errors/call-0004-adaptive-investigator.json",
+      "previous_event_hash": "58d42eb9997e79384e44bc1cfd31fde1cd9639adcd0cd4ddd8f1b7c861ac837a",
+      "record_sha256": "628e7560b492c5f6e9d0e52af279df7aed87798cf3a4bd43198273afb1c61a52",
+      "stage": "02-call-errors",
+      "timestamp": "2026-08-22T17:26:14.221084+00:00"
+    },
+    {
+      "event_hash": "7ccdaa6b4ce737adb4f6823be5c94bc31172c21610627b8196d75c3eef4f2649",
+      "index": 75,
+      "metadata": {},
+      "name": "work:001-inv-smit-mad",
+      "path": "30-evidence-packets/work-001-inv-smit-mad.json",
+      "previous_event_hash": "002a12d6a976ef59d6acfc8c12bd8141ba8c8d439354aa756b1afc96b5d6bef8",
+      "record_sha256": "97981196c787395afb68c50e5ea5a90e59238f973b5e3d3e766be52c1891be8d",
+      "stage": "30-evidence-packets",
+      "timestamp": "2026-08-22T17:26:14.225419+00:00"
+    },
+    {
+      "event_hash": "9a25b2a3b87f6c03067e560ed18153881d067e3e794e28b1540bfdc8cd4e0a0f",
+      "index": 76,
+      "metadata": {},
+      "name": "answer:work:001-inv-smit-mad",
+      "path": "06-knowledge-answers/answer-work-001-inv-smit-mad.json",
+      "previous_event_hash": "7ccdaa6b4ce737adb4f6823be5c94bc31172c21610627b8196d75c3eef4f2649",
+      "record_sha256": "352948e812d74b8b8c4228c22ea2aee115fec3898c10d65cbf2e45066383ffc6",
+      "stage": "06-knowledge-answers",
+      "timestamp": "2026-08-22T17:26:14.229028+00:00"
+    },
+    {
+      "event_hash": "ae8ca906f9310196ad46b386cb31039c211ce64540131c672c2ad2a66c43b243",
+      "index": 77,
+      "metadata": {},
+      "name": "link:8002ed467d210288a797dc22",
+      "path": "07-knowledge-links/link-8002ed467d210288a797dc22.json",
+      "previous_event_hash": "9a25b2a3b87f6c03067e560ed18153881d067e3e794e28b1540bfdc8cd4e0a0f",
+      "record_sha256": "ee585fd3a6a57036ccfa9ec0dad4ced4b0516ec9b2f39d0b13603eadf43433b8",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:26:14.231577+00:00"
+    },
+    {
+      "event_hash": "36683608d8b5db9a4a6518c43bcda9c0d84a9deaedc77b04799c2c558c5f53e8",
+      "index": 78,
+      "metadata": {},
+      "name": "link:58065e7c74975d3ac600f823",
+      "path": "07-knowledge-links/link-58065e7c74975d3ac600f823.json",
+      "previous_event_hash": "ae8ca906f9310196ad46b386cb31039c211ce64540131c672c2ad2a66c43b243",
+      "record_sha256": "02403642204643bac367a4180d0a58e272afbcde2553dadc57951b021ba64cf4",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:26:14.236197+00:00"
+    },
+    {
+      "event_hash": "2407073f2237b23aaf665b6bcdaaf4d25f1a2a9997f7087d57a4b8b4639608e7",
+      "index": 79,
+      "metadata": {},
+      "name": "link:8e82ae805e7034671634167b",
+      "path": "07-knowledge-links/link-8e82ae805e7034671634167b.json",
+      "previous_event_hash": "36683608d8b5db9a4a6518c43bcda9c0d84a9deaedc77b04799c2c558c5f53e8",
+      "record_sha256": "e946adad9c3bf87ea79ed1dfd37983af93d6ab267c33c05362a98894f273d1ea",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:26:14.240842+00:00"
+    },
+    {
+      "event_hash": "b887eee327270f4a11658b4fb95c58bef5e193a6b0890742eb9034e15370dfdb",
+      "index": 80,
+      "metadata": {},
+      "name": "work:001-inv-smit-mad",
+      "path": "22-adaptive-work-failures/work-001-inv-smit-mad.json",
+      "previous_event_hash": "2407073f2237b23aaf665b6bcdaaf4d25f1a2a9997f7087d57a4b8b4639608e7",
+      "record_sha256": "fbcec22477b99f63b68c3bbc6a861b7f9c1606014b1ab907946d6ac1a42069c1",
+      "stage": "22-adaptive-work-failures",
+      "timestamp": "2026-08-22T17:26:14.245287+00:00"
+    },
+    {
+      "event_hash": "93696a57e1c313e26ce3ae0b7535a3f2f6d2373670e88dbc6fbf42f5b602b853",
+      "index": 81,
+      "metadata": {},
+      "name": "work:001-inv-zhang-when",
+      "path": "30-evidence-packets/work-001-inv-zhang-when.json",
+      "previous_event_hash": "b887eee327270f4a11658b4fb95c58bef5e193a6b0890742eb9034e15370dfdb",
+      "record_sha256": "2e6877585ad9aeb97dd5c42b187aa761b036294a61420423ac451aebdd9cdae9",
+      "stage": "30-evidence-packets",
+      "timestamp": "2026-08-22T17:26:14.251886+00:00"
+    },
+    {
+      "event_hash": "7af346ed81aff61c30cf6b91f646bfeaf032a05591fd8f17781d5714b93cead1",
+      "index": 82,
+      "metadata": {},
+      "name": "answer:work:001-inv-zhang-when",
+      "path": "06-knowledge-answers/answer-work-001-inv-zhang-when.json",
+      "previous_event_hash": "93696a57e1c313e26ce3ae0b7535a3f2f6d2373670e88dbc6fbf42f5b602b853",
+      "record_sha256": "b61af78f0eebc8b65fe6c758edd70eb0c9bc45618907478b480269d14520bdc4",
+      "stage": "06-knowledge-answers",
+      "timestamp": "2026-08-22T17:26:14.256321+00:00"
+    },
+    {
+      "event_hash": "5903c50c0aca2b2f22417456e868e4ef10904ce64e7f5b41fc17092cfa1819aa",
+      "index": 83,
+      "metadata": {},
+      "name": "link:f565e033e49ffac65cb3a157",
+      "path": "07-knowledge-links/link-f565e033e49ffac65cb3a157.json",
+      "previous_event_hash": "7af346ed81aff61c30cf6b91f646bfeaf032a05591fd8f17781d5714b93cead1",
+      "record_sha256": "9ac44d9f398e8be01df4d20cb6b13e13f36d10b75d9c4f08e5bbdbf8c8d0bd21",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:26:14.260415+00:00"
+    },
+    {
+      "event_hash": "1f642de8f2d45915faf7e604c389e8abcc66352f2e48a0478640d61b791fc9d7",
+      "index": 84,
+      "metadata": {},
+      "name": "link:15bfe77e48f87f41c8b14ce0",
+      "path": "07-knowledge-links/link-15bfe77e48f87f41c8b14ce0.json",
+      "previous_event_hash": "5903c50c0aca2b2f22417456e868e4ef10904ce64e7f5b41fc17092cfa1819aa",
+      "record_sha256": "cf26569865386b811ede75bee9f2e1784db14852cc114d6de6737e9e9454b950",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:26:14.264442+00:00"
+    },
+    {
+      "event_hash": "551733f043bab035a5ec4c749557fc28d1936dab8c58b8f23c3b4387f288abfc",
+      "index": 85,
+      "metadata": {},
+      "name": "link:62f98f4fb0b16e3fec071ee0",
+      "path": "07-knowledge-links/link-62f98f4fb0b16e3fec071ee0.json",
+      "previous_event_hash": "1f642de8f2d45915faf7e604c389e8abcc66352f2e48a0478640d61b791fc9d7",
+      "record_sha256": "bac301df62c71b23a65e1d9bf44b9cee1c451015c58fd047d30e6352b330fcf4",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:26:14.267599+00:00"
+    },
+    {
+      "event_hash": "2c015cadf859f1ded5882f4c90defc7a74ebe431ad6a77bde6c5b2215e7a03c9",
+      "index": 86,
+      "metadata": {},
+      "name": "work:001-inv-zhang-when",
+      "path": "22-adaptive-work-failures/work-001-inv-zhang-when.json",
+      "previous_event_hash": "551733f043bab035a5ec4c749557fc28d1936dab8c58b8f23c3b4387f288abfc",
+      "record_sha256": "da523709f9e11fc9eefc20153420a69fde009bdb1166448803a326101e6ac341",
+      "stage": "22-adaptive-work-failures",
+      "timestamp": "2026-08-22T17:26:14.270933+00:00"
+    },
+    {
+      "event_hash": "6ced566ebbbe1500853c49d9549075576392205977cfd38bca06be1f9d58e21c",
+      "index": 87,
+      "metadata": {},
+      "name": "work:001-inv-choi-conformity",
+      "path": "30-evidence-packets/work-001-inv-choi-conformity.json",
+      "previous_event_hash": "2c015cadf859f1ded5882f4c90defc7a74ebe431ad6a77bde6c5b2215e7a03c9",
+      "record_sha256": "8759a6fb2f4eec6030363ba7fe92a1e1a122c2f2a74d1af03d0cd5f8171ebb3c",
+      "stage": "30-evidence-packets",
+      "timestamp": "2026-08-22T17:26:14.275857+00:00"
+    },
+    {
+      "event_hash": "cd40ab9def140852398f97d48d3a9aa745596f6bf78d7207a62e90cf4d778546",
+      "index": 88,
+      "metadata": {},
+      "name": "answer:work:001-inv-choi-conformity",
+      "path": "06-knowledge-answers/answer-work-001-inv-choi-conformity.json",
+      "previous_event_hash": "6ced566ebbbe1500853c49d9549075576392205977cfd38bca06be1f9d58e21c",
+      "record_sha256": "cfad6eeda58b8d7241769cf315fe5d9b064f24e3881d7b17669b2ca075e8a436",
+      "stage": "06-knowledge-answers",
+      "timestamp": "2026-08-22T17:26:14.280880+00:00"
+    },
+    {
+      "event_hash": "9337ee4953da53983e78b605403c0b5fade17ede3c81efedc5ee7d46fa0d2eb8",
+      "index": 89,
+      "metadata": {},
+      "name": "link:9418559a4e9306cfa6b95b9f",
+      "path": "07-knowledge-links/link-9418559a4e9306cfa6b95b9f.json",
+      "previous_event_hash": "cd40ab9def140852398f97d48d3a9aa745596f6bf78d7207a62e90cf4d778546",
+      "record_sha256": "281a8276cdcd1e4e5f09fa9b1152957d394bb77e765414cb9b9854383806a20b",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:26:14.285747+00:00"
+    },
+    {
+      "event_hash": "56c346f8d8b79d76f7048d342086334a5b85878b454474a5c60d4f0a7db6b624",
+      "index": 90,
+      "metadata": {},
+      "name": "link:1805377e3d565e4be1f6401d",
+      "path": "07-knowledge-links/link-1805377e3d565e4be1f6401d.json",
+      "previous_event_hash": "9337ee4953da53983e78b605403c0b5fade17ede3c81efedc5ee7d46fa0d2eb8",
+      "record_sha256": "799f385ea0d9dc09e3af3ea51ecd77a1757fcdf847a00920357e61172fb6722b",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:26:14.289774+00:00"
+    },
+    {
+      "event_hash": "9dfa232a9033a71e35401ca64e1c06d36fa64700e316aae4774bd02d58e65391",
+      "index": 91,
+      "metadata": {},
+      "name": "link:772749946038d2484b79f643",
+      "path": "07-knowledge-links/link-772749946038d2484b79f643.json",
+      "previous_event_hash": "56c346f8d8b79d76f7048d342086334a5b85878b454474a5c60d4f0a7db6b624",
+      "record_sha256": "400e0491f196f7823bbde8905300f76b3e067c9cf1a72729d8d2cd8939d34734",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:26:14.292852+00:00"
+    },
+    {
+      "event_hash": "048dcc6f537a0e69b626021de72c2f870d6a58e0dee762e516e11a76f33912e8",
+      "index": 92,
+      "metadata": {},
+      "name": "work:001-inv-choi-conformity",
+      "path": "22-adaptive-work-failures/work-001-inv-choi-conformity.json",
+      "previous_event_hash": "9dfa232a9033a71e35401ca64e1c06d36fa64700e316aae4774bd02d58e65391",
+      "record_sha256": "d5fb816bf62fb03fc1f88118da4c1215f21512f9380fad8757ce65d559bb9304",
+      "stage": "22-adaptive-work-failures",
+      "timestamp": "2026-08-22T17:26:14.296515+00:00"
+    },
+    {
+      "event_hash": "646ac47c50d3d7049485e3cb36e1ce80a88e22b7ddacf9a2947786d7c54e1c69",
+      "index": 93,
+      "metadata": {},
+      "name": "work:001-inv-formal-tools",
+      "path": "30-evidence-packets/work-001-inv-formal-tools.json",
+      "previous_event_hash": "048dcc6f537a0e69b626021de72c2f870d6a58e0dee762e516e11a76f33912e8",
+      "record_sha256": "675e4c6c22ecd51d6d0e500d870d1111cff158579d5bdefeb3a5be8b64a909c2",
+      "stage": "30-evidence-packets",
+      "timestamp": "2026-08-22T17:26:14.299824+00:00"
+    },
+    {
+      "event_hash": "1b97b149f116048a16e3746a6be655783435c362dae9cfd28e899dae35a5c32c",
+      "index": 94,
+      "metadata": {},
+      "name": "answer:work:001-inv-formal-tools",
+      "path": "06-knowledge-answers/answer-work-001-inv-formal-tools.json",
+      "previous_event_hash": "646ac47c50d3d7049485e3cb36e1ce80a88e22b7ddacf9a2947786d7c54e1c69",
+      "record_sha256": "6233a192253fdf01d38a2cd181b1abb0ddd0fc03968dfe2377b66d474846f3ec",
+      "stage": "06-knowledge-answers",
+      "timestamp": "2026-08-22T17:26:14.304038+00:00"
+    },
+    {
+      "event_hash": "37882264c21b8fffaa0110ccb19615ee85157189759630fa091c58abfed6ec01",
+      "index": 95,
+      "metadata": {},
+      "name": "link:a76a8b4eae256a31a1c86a00",
+      "path": "07-knowledge-links/link-a76a8b4eae256a31a1c86a00.json",
+      "previous_event_hash": "1b97b149f116048a16e3746a6be655783435c362dae9cfd28e899dae35a5c32c",
+      "record_sha256": "6fbf448cc051e5ca75db2b880ffb843556ec4d62c35b500494e4ae88439f4b1a",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:26:14.309294+00:00"
+    },
+    {
+      "event_hash": "713f35506b0482b075019d10587337c1f5f894e1c555a8e0d18ccc4690b68807",
+      "index": 96,
+      "metadata": {},
+      "name": "link:7451010973278645c4710b44",
+      "path": "07-knowledge-links/link-7451010973278645c4710b44.json",
+      "previous_event_hash": "37882264c21b8fffaa0110ccb19615ee85157189759630fa091c58abfed6ec01",
+      "record_sha256": "5f87fb94a327480c997c7fd3d048dda986e8b240b28a90d7c9b5e7cd0e89a7a1",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:26:14.313610+00:00"
+    },
+    {
+      "event_hash": "30bec7a9e6df9298a0035b95865763748dd87b0f50fa9f867b3d4624cb7fad34",
+      "index": 97,
+      "metadata": {},
+      "name": "link:f838f1dcc90c5afc677c14ed",
+      "path": "07-knowledge-links/link-f838f1dcc90c5afc677c14ed.json",
+      "previous_event_hash": "713f35506b0482b075019d10587337c1f5f894e1c555a8e0d18ccc4690b68807",
+      "record_sha256": "defb70b2e76813e8512644b6f2e25cbf77d889056469c1f6e346c47ad15965ca",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:26:14.317037+00:00"
+    },
+    {
+      "event_hash": "b688419f7c7d75a65fd6b431a867b61e9026c7effaef9b8fd26bb8de12e7414d",
+      "index": 98,
+      "metadata": {},
+      "name": "work:001-inv-formal-tools",
+      "path": "22-adaptive-work-failures/work-001-inv-formal-tools.json",
+      "previous_event_hash": "30bec7a9e6df9298a0035b95865763748dd87b0f50fa9f867b3d4624cb7fad34",
+      "record_sha256": "7db59881d0be3c3616dcc7f238c78040062e1a148f5975219433993990399389",
+      "stage": "22-adaptive-work-failures",
+      "timestamp": "2026-08-22T17:26:14.321295+00:00"
+    },
+    {
+      "event_hash": "41b643dd33396d3b6f2fcb9557b494c98aec36505963027c2ad175b6d737bb1a",
+      "index": 99,
+      "metadata": {},
+      "name": "action:001",
+      "path": "12-adaptive-actions/action-001.json",
+      "previous_event_hash": "b688419f7c7d75a65fd6b431a867b61e9026c7effaef9b8fd26bb8de12e7414d",
+      "record_sha256": "b23d6799772ef1e5d1e1b4f1675c3d4e1bf7a10cf556a2efb1f6a1ae70fad3d5",
+      "stage": "12-adaptive-actions",
+      "timestamp": "2026-08-22T17:26:14.327689+00:00"
+    },
+    {
+      "event_hash": "1856eee0538bb43cb58f6984f29c30d48eedbf248f56f8db61dceab43af6581e",
+      "index": 100,
+      "metadata": {
+        "model": "fireworks:accounts/fireworks/models/kimi-k3",
+        "role": "adaptive_controller"
+      },
+      "name": "call-0008-adaptive-controller",
+      "path": "01-call-inputs/call-0008-adaptive-controller.json",
+      "previous_event_hash": "41b643dd33396d3b6f2fcb9557b494c98aec36505963027c2ad175b6d737bb1a",
+      "record_sha256": "13b829c71fd0f12f80c8fb8a875fb84065e432a1f88c67be1cc31971f260898f",
+      "stage": "01-call-inputs",
+      "timestamp": "2026-08-22T17:26:14.334665+00:00"
+    },
+    {
+      "event_hash": "f4319d6e3287a8b8ca6d8bdb0627890cbd4b3f6f991d0c67e68e64bc25f4f368",
+      "index": 101,
+      "metadata": {},
+      "name": "call-0008-adaptive-controller",
+      "path": "04-knowledge-queries/call-0008-adaptive-controller.json",
+      "previous_event_hash": "1856eee0538bb43cb58f6984f29c30d48eedbf248f56f8db61dceab43af6581e",
+      "record_sha256": "8c47d3766adb804b8c042a702d95cbe3b456337bf6f74dee05d4b719575e6c9d",
+      "stage": "04-knowledge-queries",
+      "timestamp": "2026-08-22T17:28:43.703661+00:00"
+    },
+    {
+      "event_hash": "b14a1e255d9b65ee50ab899081ed0a043f1aedb7abe64429daab81187583d6d4",
+      "index": 102,
+      "metadata": {
+        "call_id": "call-0008-adaptive-controller",
+        "elapsed_ms": 149376,
+        "input_sha256": "e9ac2f4ac831db9edaf037fc7574151671b9b51ec7a0ce9bc385d8dad0d3ee17",
+        "model": "fireworks:accounts/fireworks/models/kimi-k3",
+        "role": "adaptive_controller",
+        "usage": {
+          "cache_read_tokens": 234875,
+          "details": {
+            "reasoning_tokens": 1834
+          },
+          "input_tokens": 285541,
+          "output_tokens": 8130,
+          "requests": 9,
+          "tool_calls": 12
+        }
+      },
+      "name": "step-002-attempt-01",
+      "path": "10-adaptive-decisions/step-002-attempt-01.json",
+      "previous_event_hash": "f4319d6e3287a8b8ca6d8bdb0627890cbd4b3f6f991d0c67e68e64bc25f4f368",
+      "record_sha256": "5bce49ee985d7c00211fbb9aa93333931902f61e1129ee9b8daff06644718175",
+      "stage": "10-adaptive-decisions",
+      "timestamp": "2026-08-22T17:28:43.715928+00:00"
+    },
+    {
+      "event_hash": "8cd9566522349f52fe3a38155fc121e60545a419c28671b7008c71f3d1e531af",
+      "index": 103,
+      "metadata": {},
+      "name": "question:work:002-inv-smit-mad-r2",
+      "path": "05-knowledge-questions/question-work-002-inv-smit-mad-r2.json",
+      "previous_event_hash": "b14a1e255d9b65ee50ab899081ed0a043f1aedb7abe64429daab81187583d6d4",
+      "record_sha256": "02f78153695723aa19421f47a6a570253cbb1ace5b2bf6b9b1179d515ab0ec38",
+      "stage": "05-knowledge-questions",
+      "timestamp": "2026-08-22T17:28:43.726045+00:00"
+    },
+    {
+      "event_hash": "87290f131f8791ca576f14beae018d618c585956b998af79a35eafd61fc9641b",
+      "index": 104,
+      "metadata": {},
+      "name": "link:4c24a6de3f03201bab2ae5c4",
+      "path": "07-knowledge-links/link-4c24a6de3f03201bab2ae5c4.json",
+      "previous_event_hash": "8cd9566522349f52fe3a38155fc121e60545a419c28671b7008c71f3d1e531af",
+      "record_sha256": "09aba34688323244c0023017e2bbc89c46c28d0b6ba376535d570ead7f283295",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:28:43.734667+00:00"
+    },
+    {
+      "event_hash": "8a0e3555c7121dd42b0de23270808be9445d17b0c1ecc59967520796faf6fdf6",
+      "index": 105,
+      "metadata": {},
+      "name": "link:f1f5ff8adfac83b6181206de",
+      "path": "07-knowledge-links/link-f1f5ff8adfac83b6181206de.json",
+      "previous_event_hash": "87290f131f8791ca576f14beae018d618c585956b998af79a35eafd61fc9641b",
+      "record_sha256": "a23ba1fd450bcf47c12101050169fe48fb48ee36769a734e9a8e62e4b899bf8f",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:28:43.743185+00:00"
+    },
+    {
+      "event_hash": "9624c651aada92bdfdbedb139b515a3c8ada20656915c7680f39e60ae6d1c5f9",
+      "index": 106,
+      "metadata": {},
+      "name": "question:work:002-inv-zhang-when-r2",
+      "path": "05-knowledge-questions/question-work-002-inv-zhang-when-r2.json",
+      "previous_event_hash": "8a0e3555c7121dd42b0de23270808be9445d17b0c1ecc59967520796faf6fdf6",
+      "record_sha256": "d7be9c15734e5838bf8db4ba653621b01a746135184d445899ad30b1c577137a",
+      "stage": "05-knowledge-questions",
+      "timestamp": "2026-08-22T17:28:43.752699+00:00"
+    },
+    {
+      "event_hash": "43f3485d8b6eed3c067dc75bc3646189fdae39c026ae4bd867a31919ce3bfb9e",
+      "index": 107,
+      "metadata": {},
+      "name": "link:5a8867b4df54941542b1c162",
+      "path": "07-knowledge-links/link-5a8867b4df54941542b1c162.json",
+      "previous_event_hash": "9624c651aada92bdfdbedb139b515a3c8ada20656915c7680f39e60ae6d1c5f9",
+      "record_sha256": "b35c06bf01a8a1ddc308fcf051fe871862a2201ded48f6c7108c67d8b3676a52",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:28:43.761674+00:00"
+    },
+    {
+      "event_hash": "1b6048749b636441ae92334550d022d15e91b953ca6aaf980cb9fb5247047425",
+      "index": 108,
+      "metadata": {},
+      "name": "link:662fbd720542334013cb9b5b",
+      "path": "07-knowledge-links/link-662fbd720542334013cb9b5b.json",
+      "previous_event_hash": "43f3485d8b6eed3c067dc75bc3646189fdae39c026ae4bd867a31919ce3bfb9e",
+      "record_sha256": "56375cefbaada8df04fb0d217cb97edb4632a3ea2685ad46f1cab306e78e5f9d",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:28:43.770105+00:00"
+    },
+    {
+      "event_hash": "39006648e1e2dec6efd7a6f28b6acb213f291d8829c0e7249fad3ee722ae00c4",
+      "index": 109,
+      "metadata": {},
+      "name": "link:cfd0646aa19f5d782519952c",
+      "path": "07-knowledge-links/link-cfd0646aa19f5d782519952c.json",
+      "previous_event_hash": "1b6048749b636441ae92334550d022d15e91b953ca6aaf980cb9fb5247047425",
+      "record_sha256": "29cb6d1ea0c2b1a84a4aa065c3ea3717fd5c340053d760a049e4a97c7ef549a5",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:28:43.779245+00:00"
+    },
+    {
+      "event_hash": "489c8c402b333b85a32169798ee918c289a9a359a571750a7bd7ad6f7e69cabb",
+      "index": 110,
+      "metadata": {},
+      "name": "question:work:002-inv-choi-r2",
+      "path": "05-knowledge-questions/question-work-002-inv-choi-r2.json",
+      "previous_event_hash": "39006648e1e2dec6efd7a6f28b6acb213f291d8829c0e7249fad3ee722ae00c4",
+      "record_sha256": "4cd4d3b9990fd3adc7478aaec891bfb1f00c09062e7b5fa52b7c818ec2b7e2ea",
+      "stage": "05-knowledge-questions",
+      "timestamp": "2026-08-22T17:28:43.790372+00:00"
+    },
+    {
+      "event_hash": "a2b5eca6f88f8fb3fd4f9a195ce5706c3c713b3dfe1d4d2c3d7eaf6bb04ee849",
+      "index": 111,
+      "metadata": {},
+      "name": "link:13af7f85ce9bb36578866455",
+      "path": "07-knowledge-links/link-13af7f85ce9bb36578866455.json",
+      "previous_event_hash": "489c8c402b333b85a32169798ee918c289a9a359a571750a7bd7ad6f7e69cabb",
+      "record_sha256": "751a2df134fa8858b2a3d3a69afe0e23c091f69645d435125e2fcb1b0ad24317",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:28:43.800883+00:00"
+    },
+    {
+      "event_hash": "10bf0c548bd0c3e93116e31496ffd645ee4698baea0164c1bd2132c68b4b2ec2",
+      "index": 112,
+      "metadata": {},
+      "name": "link:7b2bdfc7bbf1e3973970ad7e",
+      "path": "07-knowledge-links/link-7b2bdfc7bbf1e3973970ad7e.json",
+      "previous_event_hash": "a2b5eca6f88f8fb3fd4f9a195ce5706c3c713b3dfe1d4d2c3d7eaf6bb04ee849",
+      "record_sha256": "947f060c1ff1a9fc42164b7e1c2a196a86906d0a1984d5c59a9c6a62e2eda0ac",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:28:43.811637+00:00"
+    },
+    {
+      "event_hash": "f4eec548089864168df540d958c9af5315ab87df59f7cf47c046c0d6bbabcf98",
+      "index": 113,
+      "metadata": {},
+      "name": "link:e69efaafcdbc7b47e78e9651",
+      "path": "07-knowledge-links/link-e69efaafcdbc7b47e78e9651.json",
+      "previous_event_hash": "10bf0c548bd0c3e93116e31496ffd645ee4698baea0164c1bd2132c68b4b2ec2",
+      "record_sha256": "48ea08fab1245c51d6110db4b7c1b854d531556c795bb9c2d9f37a0212edfa2b",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:28:43.820876+00:00"
+    },
+    {
+      "event_hash": "4308b94071f89cd2aee7ec402c74e88dfab96fea520b690b3ae2911bd7baf715",
+      "index": 114,
+      "metadata": {},
+      "name": "question:work:002-inv-dung-r2",
+      "path": "05-knowledge-questions/question-work-002-inv-dung-r2.json",
+      "previous_event_hash": "f4eec548089864168df540d958c9af5315ab87df59f7cf47c046c0d6bbabcf98",
+      "record_sha256": "4ec06ab31366a46f1b7c0dad99092e2da40c2079faff5b2c10d332667cf2c729",
+      "stage": "05-knowledge-questions",
+      "timestamp": "2026-08-22T17:28:43.831637+00:00"
+    },
+    {
+      "event_hash": "458d1f2db459d967a88d878a1247f2cc63949aa66d791bcf3bcb0f97355e06c5",
+      "index": 115,
+      "metadata": {},
+      "name": "link:f3598a3cb0832aebffcaef5c",
+      "path": "07-knowledge-links/link-f3598a3cb0832aebffcaef5c.json",
+      "previous_event_hash": "4308b94071f89cd2aee7ec402c74e88dfab96fea520b690b3ae2911bd7baf715",
+      "record_sha256": "3b5c58e894e1ef3fd21c79165a2657eb5f2738f6c0ba2108cdff8d26ab88d913",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:28:43.842547+00:00"
+    },
+    {
+      "event_hash": "7b5fc7f22aee83df345e882be755cb8564338ab744c5f77a80db2ac500c369b3",
+      "index": 116,
+      "metadata": {},
+      "name": "link:79ddab23e2026f7a8b010945",
+      "path": "07-knowledge-links/link-79ddab23e2026f7a8b010945.json",
+      "previous_event_hash": "458d1f2db459d967a88d878a1247f2cc63949aa66d791bcf3bcb0f97355e06c5",
+      "record_sha256": "6e40f95530765328dde082831fc50cb0d557f4146712d3499a5be9bbecad8b5e",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:28:43.854181+00:00"
+    },
+    {
+      "event_hash": "8b00564366a471a2e2887cb33357f352dccb35e730519b84e103f6135b32f719",
+      "index": 117,
+      "metadata": {},
+      "name": "link:b4d550767c0d0db1b1f81d5c",
+      "path": "07-knowledge-links/link-b4d550767c0d0db1b1f81d5c.json",
+      "previous_event_hash": "7b5fc7f22aee83df345e882be755cb8564338ab744c5f77a80db2ac500c369b3",
+      "record_sha256": "3fe7553cf50fdf7fb91ab6f8fe9fb03f4facc3817b7036a65b35632a18fefd4f",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:28:43.865844+00:00"
+    },
+    {
+      "event_hash": "71597449db1e54f655ec3ff6368a5cc961a2a0cf1e432fac360c49418c663a89",
+      "index": 118,
+      "metadata": {},
+      "name": "question:work:002-inv-shapiro-r2",
+      "path": "05-knowledge-questions/question-work-002-inv-shapiro-r2.json",
+      "previous_event_hash": "8b00564366a471a2e2887cb33357f352dccb35e730519b84e103f6135b32f719",
+      "record_sha256": "957cd2d130115582021cb37128076eddfc10aef0f4c6073f036e2b9b59161316",
+      "stage": "05-knowledge-questions",
+      "timestamp": "2026-08-22T17:28:43.874930+00:00"
+    },
+    {
+      "event_hash": "e808e2875fc397029fa3d632b8e2901ba93506162b7c6d9d6f1335ec44af9f9c",
+      "index": 119,
+      "metadata": {},
+      "name": "link:d7912acba6d3c2b8c4eccd10",
+      "path": "07-knowledge-links/link-d7912acba6d3c2b8c4eccd10.json",
+      "previous_event_hash": "71597449db1e54f655ec3ff6368a5cc961a2a0cf1e432fac360c49418c663a89",
+      "record_sha256": "9dcd73ed181656ade9e062180347fd217474b320a699d03b90d376ee4f310f96",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:28:43.885484+00:00"
+    },
+    {
+      "event_hash": "66bc5e2f4e6103b12c31b50b3e92c5eec696c2df6bd213e07c4d99cf3c39332e",
+      "index": 120,
+      "metadata": {},
+      "name": "link:c15f4cbbc28179eede05be54",
+      "path": "07-knowledge-links/link-c15f4cbbc28179eede05be54.json",
+      "previous_event_hash": "e808e2875fc397029fa3d632b8e2901ba93506162b7c6d9d6f1335ec44af9f9c",
+      "record_sha256": "9071a39bfa2055bc7772e090611ebde44208f0229a1d4e0b8880a0f01044cafb",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:28:43.896446+00:00"
+    },
+    {
+      "event_hash": "7c046de8c2352c4f58cd6f2e4892965ff31da458d12f544ebeb06d2929a2beeb",
+      "index": 121,
+      "metadata": {},
+      "name": "link:6e79dd8f0b7ca4d78ecb3a66",
+      "path": "07-knowledge-links/link-6e79dd8f0b7ca4d78ecb3a66.json",
+      "previous_event_hash": "66bc5e2f4e6103b12c31b50b3e92c5eec696c2df6bd213e07c4d99cf3c39332e",
+      "record_sha256": "e7866bef4b8b9bb65b8f52452bd8afaed78ba8d49591325a616cb5ce3ef53f60",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:28:43.908746+00:00"
+    },
+    {
+      "event_hash": "7e19c28f4b2769aaa348a2f3449d0d7994ff30fe89b932c55be56fe7c17b14d4",
+      "index": 122,
+      "metadata": {
+        "model": "fireworks:accounts/fireworks/models/kimi-k3",
+        "role": "adaptive_investigator"
+      },
+      "name": "call-0009-adaptive-investigator",
+      "path": "01-call-inputs/call-0009-adaptive-investigator.json",
+      "previous_event_hash": "7c046de8c2352c4f58cd6f2e4892965ff31da458d12f544ebeb06d2929a2beeb",
+      "record_sha256": "af40d884efee17637f3a7932fd7a766569bfaa2ce07b56c3cdd5d176d6c8b190",
+      "stage": "01-call-inputs",
+      "timestamp": "2026-08-22T17:28:43.930486+00:00"
+    },
+    {
+      "event_hash": "f459faba0eb46d3ceaedfd04bc4dcf6ac52a5271a1f744f18e1accbf843500a0",
+      "index": 123,
+      "metadata": {
+        "model": "fireworks:accounts/fireworks/models/kimi-k3",
+        "role": "adaptive_investigator"
+      },
+      "name": "call-0010-adaptive-investigator",
+      "path": "01-call-inputs/call-0010-adaptive-investigator.json",
+      "previous_event_hash": "7e19c28f4b2769aaa348a2f3449d0d7994ff30fe89b932c55be56fe7c17b14d4",
+      "record_sha256": "8a168ad7769af1d0c9fdd193e632b89414d00ddd8e182ef0d8b2a466b0a2bf15",
+      "stage": "01-call-inputs",
+      "timestamp": "2026-08-22T17:28:43.986920+00:00"
+    },
+    {
+      "event_hash": "02ba9c98004f6b9b63c67f899627c6ad96e1fef4d9c3d901c434d0bc1a013400",
+      "index": 124,
+      "metadata": {
+        "model": "fireworks:accounts/fireworks/models/kimi-k3",
+        "role": "adaptive_investigator"
+      },
+      "name": "call-0011-adaptive-investigator",
+      "path": "01-call-inputs/call-0011-adaptive-investigator.json",
+      "previous_event_hash": "f459faba0eb46d3ceaedfd04bc4dcf6ac52a5271a1f744f18e1accbf843500a0",
+      "record_sha256": "3f224f0ebcdf2b20620537d3921c2cc4a55ad9a0555b5283ac63fb2462244713",
+      "stage": "01-call-inputs",
+      "timestamp": "2026-08-22T17:28:44.038456+00:00"
+    },
+    {
+      "event_hash": "2cef8d50f18b845e7c0b6e5a08e9153696f6b30358fcb7cf7d577d3f1c4de4cc",
+      "index": 125,
+      "metadata": {
+        "model": "fireworks:accounts/fireworks/models/kimi-k3",
+        "role": "adaptive_investigator"
+      },
+      "name": "call-0012-adaptive-investigator",
+      "path": "01-call-inputs/call-0012-adaptive-investigator.json",
+      "previous_event_hash": "02ba9c98004f6b9b63c67f899627c6ad96e1fef4d9c3d901c434d0bc1a013400",
+      "record_sha256": "0621f9bd39fb6b3f7db1eae3211ebd72352e3f7be5f2262cb5e11b6658ed4f09",
+      "stage": "01-call-inputs",
+      "timestamp": "2026-08-22T17:28:44.090892+00:00"
+    },
+    {
+      "event_hash": "a34b99d70e113b7f0a7a9e4cf7658e91be0d1b3342491f3344f7a460c2f58fd5",
+      "index": 126,
+      "metadata": {
+        "model": "fireworks:accounts/fireworks/models/kimi-k3",
+        "role": "adaptive_investigator"
+      },
+      "name": "call-0013-adaptive-investigator",
+      "path": "01-call-inputs/call-0013-adaptive-investigator.json",
+      "previous_event_hash": "2cef8d50f18b845e7c0b6e5a08e9153696f6b30358fcb7cf7d577d3f1c4de4cc",
+      "record_sha256": "ab0ea6ca61cd448b529d34b2ee4e5d2c4a01017d53aa9b7d8df55d03f649b9a9",
+      "stage": "01-call-inputs",
+      "timestamp": "2026-08-22T17:28:44.145031+00:00"
+    },
+    {
+      "event_hash": "fe993e7a81788f9cda638a2ef3fdbf6fb7510d771005d62edc84a3935d7221c8",
+      "index": 127,
+      "metadata": {},
+      "name": "call-0013-adaptive-investigator",
+      "path": "04-knowledge-queries/call-0013-adaptive-investigator.json",
+      "previous_event_hash": "a34b99d70e113b7f0a7a9e4cf7658e91be0d1b3342491f3344f7a460c2f58fd5",
+      "record_sha256": "d6fe766870b00c6459611394a59e8f6ffb05ef0db6a2add9ad81f7a8c93067e2",
+      "stage": "04-knowledge-queries",
+      "timestamp": "2026-08-22T17:30:57.616755+00:00"
+    },
+    {
+      "event_hash": "78efdbf4c70b0b764d9cf16f889a3eb3507f2b5b682860c9637cd916b5c53927",
+      "index": 128,
+      "metadata": {
+        "call_id": "call-0013-adaptive-investigator",
+        "elapsed_ms": 133467,
+        "input_sha256": "3b554a4309d5ce16eeebefdf207f0e5aaa83ab8f5a059d3b1e1bec8c8364e8d8",
+        "model": "fireworks:accounts/fireworks/models/kimi-k3",
+        "role": "adaptive_investigator",
+        "usage": {
+          "cache_read_tokens": 35108,
+          "details": {
+            "reasoning_tokens": 3700
+          },
+          "input_tokens": 57611,
+          "output_tokens": 7900,
+          "requests": 4,
+          "tool_calls": 5
+        }
+      },
+      "name": "work:002-inv-shapiro-r2",
+      "path": "20-adaptive-work/work-002-inv-shapiro-r2.json",
+      "previous_event_hash": "fe993e7a81788f9cda638a2ef3fdbf6fb7510d771005d62edc84a3935d7221c8",
+      "record_sha256": "359311edc49819a2ca2aa444470f1c29e342c3087b0f929c5ff10c2ed7bc5775",
+      "stage": "20-adaptive-work",
+      "timestamp": "2026-08-22T17:30:57.622550+00:00"
+    },
+    {
+      "event_hash": "63179941c0dc5f59b0ae52c0853d6cd23f766315390af6f6495d190eaa4010ec",
+      "index": 129,
+      "metadata": {},
+      "name": "work:002-inv-shapiro-r2",
+      "path": "30-evidence-packets/work-002-inv-shapiro-r2.json",
+      "previous_event_hash": "78efdbf4c70b0b764d9cf16f889a3eb3507f2b5b682860c9637cd916b5c53927",
+      "record_sha256": "b195242292864622c7e802a22674cac9a3683cc0d87efc44620e828947d39447",
+      "stage": "30-evidence-packets",
+      "timestamp": "2026-08-22T17:30:57.629275+00:00"
+    },
+    {
+      "event_hash": "593c93da0f3205a2fd1d46b367043e5ac4ecb0214a260d60aadbd841498fd61c",
+      "index": 130,
+      "metadata": {},
+      "name": "answer:work:002-inv-shapiro-r2",
+      "path": "06-knowledge-answers/answer-work-002-inv-shapiro-r2.json",
+      "previous_event_hash": "63179941c0dc5f59b0ae52c0853d6cd23f766315390af6f6495d190eaa4010ec",
+      "record_sha256": "f98b8c9201c063b80e7ea5d30d51acd6175020145b77c20c68bf3e73147e027e",
+      "stage": "06-knowledge-answers",
+      "timestamp": "2026-08-22T17:30:57.633920+00:00"
+    },
+    {
+      "event_hash": "2f79fe2adfac91d252b0a70608d3246c86efa516cb4473f3ad1aa2b8bcfe8bba",
+      "index": 131,
+      "metadata": {},
+      "name": "link:14bacc0d7ce507d807ce6ff5",
+      "path": "07-knowledge-links/link-14bacc0d7ce507d807ce6ff5.json",
+      "previous_event_hash": "593c93da0f3205a2fd1d46b367043e5ac4ecb0214a260d60aadbd841498fd61c",
+      "record_sha256": "026527d6ef1cc5d6f70cee9c646e49d64e9a4935a9c87c29a45e772c5f361c92",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:30:57.639341+00:00"
+    },
+    {
+      "event_hash": "47f3d00ed1bc03497a9307fdf94a4366db352971dd39130592bdf2d2e924d3ce",
+      "index": 132,
+      "metadata": {},
+      "name": "link:06c613360d894443325f5709",
+      "path": "07-knowledge-links/link-06c613360d894443325f5709.json",
+      "previous_event_hash": "2f79fe2adfac91d252b0a70608d3246c86efa516cb4473f3ad1aa2b8bcfe8bba",
+      "record_sha256": "7cb3f31c279edc4b26aee3bd1685e62482d192d6aa1a06a5550bbd6cdd914a0d",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:30:57.644810+00:00"
+    },
+    {
+      "event_hash": "9cbfe4fb79750c222d0df4a2cc8be9ddd1bc9e56c0f93012e5affcc1ac645464",
+      "index": 133,
+      "metadata": {},
+      "name": "link:234ec0fd2d21549fd986d951",
+      "path": "07-knowledge-links/link-234ec0fd2d21549fd986d951.json",
+      "previous_event_hash": "47f3d00ed1bc03497a9307fdf94a4366db352971dd39130592bdf2d2e924d3ce",
+      "record_sha256": "e8a06165737655cbed2889ad24cf59330199583aa8db1acbb40cbd880f9381be",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:30:57.650484+00:00"
+    },
+    {
+      "event_hash": "93b78e066b1ca3ae9d403c1ddf1a43fa1073559c7baf8b9db10f5cb306c3bbb2",
+      "index": 134,
+      "metadata": {},
+      "name": "link:a48e50528bce5ade9ce2bcac",
+      "path": "07-knowledge-links/link-a48e50528bce5ade9ce2bcac.json",
+      "previous_event_hash": "9cbfe4fb79750c222d0df4a2cc8be9ddd1bc9e56c0f93012e5affcc1ac645464",
+      "record_sha256": "c041d61b15ce20b4966a87e6ea763b915d951b34e3dde0f9459d320dfb9e879b",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:30:57.655949+00:00"
+    },
+    {
+      "event_hash": "d67e2b0e3817861993546aad2c59c4bf4f5f25940df03e5c5e53499c902891b6",
+      "index": 135,
+      "metadata": {},
+      "name": "link:2d366dfc3512d0cc672ed2d8",
+      "path": "07-knowledge-links/link-2d366dfc3512d0cc672ed2d8.json",
+      "previous_event_hash": "93b78e066b1ca3ae9d403c1ddf1a43fa1073559c7baf8b9db10f5cb306c3bbb2",
+      "record_sha256": "1eea70067d6f81fe17b1e83129025a2478fb2f7ffe0d472996e304c63a1b8329",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:30:57.660668+00:00"
+    },
+    {
+      "event_hash": "eb17b280abbc1a2f516f2bf3e0784ac6257c3422fad70ac3ac49317649c27ce0",
+      "index": 136,
+      "metadata": {},
+      "name": "question:raised:92a7343df8a6:rq-shapiro-merge",
+      "path": "05-knowledge-questions/question-raised-92a7343df8a6-rq-shapiro-merge.json",
+      "previous_event_hash": "d67e2b0e3817861993546aad2c59c4bf4f5f25940df03e5c5e53499c902891b6",
+      "record_sha256": "6577fd7addf23285c274a8366992ca8cf854123849ed24b91f4181eb71bec605",
+      "stage": "05-knowledge-questions",
+      "timestamp": "2026-08-22T17:30:57.665094+00:00"
+    },
+    {
+      "event_hash": "45fc2fb2bc5582abe6aa5d31ffda6cfa4de4e76032fb498932904b20524c678b",
+      "index": 137,
+      "metadata": {},
+      "name": "link:2cd2c5ae89ed3bbafb0ffad7",
+      "path": "07-knowledge-links/link-2cd2c5ae89ed3bbafb0ffad7.json",
+      "previous_event_hash": "eb17b280abbc1a2f516f2bf3e0784ac6257c3422fad70ac3ac49317649c27ce0",
+      "record_sha256": "ed77ba379b74aa857855fed20ae807a639da921a16e8981b98e7ee5bdb1b7084",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:30:57.669834+00:00"
+    },
+    {
+      "event_hash": "dda2cbd2932c55a30db38421b8c5a35dfd711a05a230c773148e3d2cc4b41f33",
+      "index": 138,
+      "metadata": {},
+      "name": "link:d413ee80852a6719c6469562",
+      "path": "07-knowledge-links/link-d413ee80852a6719c6469562.json",
+      "previous_event_hash": "45fc2fb2bc5582abe6aa5d31ffda6cfa4de4e76032fb498932904b20524c678b",
+      "record_sha256": "87585151fb6da1049bfafb4a8604cdb56ad88136c564bbbbedb245315878fbb3",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:30:57.674432+00:00"
+    },
+    {
+      "event_hash": "d24544b5e66674eabeb71b2522950458e7d56f62d0446b19affe92891e725294",
+      "index": 139,
+      "metadata": {},
+      "name": "link:57601de82665a4811ad5b2e2",
+      "path": "07-knowledge-links/link-57601de82665a4811ad5b2e2.json",
+      "previous_event_hash": "dda2cbd2932c55a30db38421b8c5a35dfd711a05a230c773148e3d2cc4b41f33",
+      "record_sha256": "fb71c7491b5803274be46410028f8bfb5f83650741c839c1a6c45d62fff32c4d",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:30:57.681799+00:00"
+    },
+    {
+      "event_hash": "5b462f6220cfee5cb8b752edfa6b274e53226267d8aaeff790bd353026c4149c",
+      "index": 140,
+      "metadata": {},
+      "name": "link:7e0f2059cb26b338ebda38eb",
+      "path": "07-knowledge-links/link-7e0f2059cb26b338ebda38eb.json",
+      "previous_event_hash": "d24544b5e66674eabeb71b2522950458e7d56f62d0446b19affe92891e725294",
+      "record_sha256": "1bc019e4d1f8a0fc24f0de93337c3a00ec15968bbe30741719a1af6c71378597",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:30:57.688951+00:00"
+    },
+    {
+      "event_hash": "baf444242b1ee03650c40cd985325d002462d0e3b151ed4ebf91548dfa1aefa5",
+      "index": 141,
+      "metadata": {},
+      "name": "call-0012-adaptive-investigator",
+      "path": "04-knowledge-queries/call-0012-adaptive-investigator.json",
+      "previous_event_hash": "5b462f6220cfee5cb8b752edfa6b274e53226267d8aaeff790bd353026c4149c",
+      "record_sha256": "fdc9ddb5f789a9097833803d6a23c08db23a817cdd26218996c6cba47f86a5cb",
+      "stage": "04-knowledge-queries",
+      "timestamp": "2026-08-22T17:31:08.798402+00:00"
+    },
+    {
+      "event_hash": "d2a7bde9d924031706f1c02ec30c95c0d42619e9267965580d9b92dc44d17fcd",
+      "index": 142,
+      "metadata": {
+        "call_id": "call-0012-adaptive-investigator",
+        "elapsed_ms": 144702,
+        "input_sha256": "ab423286aa4724bb30065013bb9db9d230310d1907db0e9be15693e4bb7422a7",
+        "model": "fireworks:accounts/fireworks/models/kimi-k3",
+        "role": "adaptive_investigator",
+        "usage": {
+          "cache_read_tokens": 61531,
+          "details": {
+            "reasoning_tokens": 3668
+          },
+          "input_tokens": 85383,
+          "output_tokens": 8059,
+          "requests": 5,
+          "tool_calls": 6
+        }
+      },
+      "name": "work:002-inv-dung-r2",
+      "path": "20-adaptive-work/work-002-inv-dung-r2.json",
+      "previous_event_hash": "baf444242b1ee03650c40cd985325d002462d0e3b151ed4ebf91548dfa1aefa5",
+      "record_sha256": "ba4777df9d8c86ec380d51244536f1b8421d15a737cf2f94297f706bbdfece98",
+      "stage": "20-adaptive-work",
+      "timestamp": "2026-08-22T17:31:08.802868+00:00"
+    },
+    {
+      "event_hash": "d7e7d9c2fe2b460e3a385762a00718c28b841db256cb3d36b61d23488eb8564d",
+      "index": 143,
+      "metadata": {},
+      "name": "work:002-inv-dung-r2",
+      "path": "30-evidence-packets/work-002-inv-dung-r2.json",
+      "previous_event_hash": "d2a7bde9d924031706f1c02ec30c95c0d42619e9267965580d9b92dc44d17fcd",
+      "record_sha256": "2a656881c6afea0246bbe9aaa31ace171098d98513594319ac8421b11029134a",
+      "stage": "30-evidence-packets",
+      "timestamp": "2026-08-22T17:31:08.807605+00:00"
+    },
+    {
+      "event_hash": "9985e0603d6a59a9654c79402c005d5b727c7e9e7be744ebf93f78b38b7a2cd5",
+      "index": 144,
+      "metadata": {},
+      "name": "answer:work:002-inv-dung-r2",
+      "path": "06-knowledge-answers/answer-work-002-inv-dung-r2.json",
+      "previous_event_hash": "d7e7d9c2fe2b460e3a385762a00718c28b841db256cb3d36b61d23488eb8564d",
+      "record_sha256": "0e2929d5ed3943ee0bc4ecb0482d9b137df59467b7f4b9f5040ad9344f4f1f2d",
+      "stage": "06-knowledge-answers",
+      "timestamp": "2026-08-22T17:31:08.811750+00:00"
+    },
+    {
+      "event_hash": "997954642885cd09a7cfa8385c3761dfd67f91fb60f42887ada0bca90eff2461",
+      "index": 145,
+      "metadata": {},
+      "name": "link:a830ad7e9e16aabcd3715a4b",
+      "path": "07-knowledge-links/link-a830ad7e9e16aabcd3715a4b.json",
+      "previous_event_hash": "9985e0603d6a59a9654c79402c005d5b727c7e9e7be744ebf93f78b38b7a2cd5",
+      "record_sha256": "cba2ebed6240931affd06357ec0ec669e37467c74491349aa3416258e1feb913",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:31:08.815786+00:00"
+    },
+    {
+      "event_hash": "c3731e8893e05502164a47a15511db75ec30549549074cf3fb9625c8c5c32e9e",
+      "index": 146,
+      "metadata": {},
+      "name": "link:459199d59277be73e428f857",
+      "path": "07-knowledge-links/link-459199d59277be73e428f857.json",
+      "previous_event_hash": "997954642885cd09a7cfa8385c3761dfd67f91fb60f42887ada0bca90eff2461",
+      "record_sha256": "ad9a99decc375eebe12d8ee8e1f72536c814598d9f860fb0d874b9aa3b8a4e14",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:31:08.819458+00:00"
+    },
+    {
+      "event_hash": "6f5ad656e4950001056bd67a3c2a37db1b24bc3794d8e89cfbd6c44dfac46c45",
+      "index": 147,
+      "metadata": {},
+      "name": "link:f8c8463f9bb80c6873156479",
+      "path": "07-knowledge-links/link-f8c8463f9bb80c6873156479.json",
+      "previous_event_hash": "c3731e8893e05502164a47a15511db75ec30549549074cf3fb9625c8c5c32e9e",
+      "record_sha256": "c0b01de4d1c8448072127d006af46ba1d6768dbf8fa5e884a56a2018e612af59",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:31:08.823151+00:00"
+    },
+    {
+      "event_hash": "e2fd2a8e3fffcffe3fdffe26fba12996a42baec7f318a17e7c1371a0c517e3fb",
+      "index": 148,
+      "metadata": {},
+      "name": "link:c868c91b621feb2a33d05b1b",
+      "path": "07-knowledge-links/link-c868c91b621feb2a33d05b1b.json",
+      "previous_event_hash": "6f5ad656e4950001056bd67a3c2a37db1b24bc3794d8e89cfbd6c44dfac46c45",
+      "record_sha256": "6bbebea7f989ce2d31b966717d2ccb7a1bd04f55ddd1b67197ae9722cf43700a",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:31:08.826904+00:00"
+    },
+    {
+      "event_hash": "260cffbb8ea5d63ecbf88a4d4dae1674bf2f4206683d9a29c1701eb1f694e39f",
+      "index": 149,
+      "metadata": {},
+      "name": "link:42ce05a1c294020fcad18c96",
+      "path": "07-knowledge-links/link-42ce05a1c294020fcad18c96.json",
+      "previous_event_hash": "e2fd2a8e3fffcffe3fdffe26fba12996a42baec7f318a17e7c1371a0c517e3fb",
+      "record_sha256": "f64cd6c61ec533f29f853b37568ae8873556c94d0a4adfb40df609a7c2aa245b",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:31:08.830864+00:00"
+    },
+    {
+      "event_hash": "6f9745608e810d8b01a43c648449c019286c65c3be1f5d5d16f1dcf7ce6d9e5b",
+      "index": 150,
+      "metadata": {},
+      "name": "link:7af810b2bc6d85cb2ac7b710",
+      "path": "07-knowledge-links/link-7af810b2bc6d85cb2ac7b710.json",
+      "previous_event_hash": "260cffbb8ea5d63ecbf88a4d4dae1674bf2f4206683d9a29c1701eb1f694e39f",
+      "record_sha256": "f1c7d6fa40bc11b0981568a7e79b77496e73f3c9c0f20b942b3abda096bf036f",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:31:08.836339+00:00"
+    },
+    {
+      "event_hash": "df80394a3c879c1d063f55676b8615c8afc4cf29fd713f238e5ecfe97cc3fcad",
+      "index": 151,
+      "metadata": {},
+      "name": "link:66b793db0867fd02a7aedbec",
+      "path": "07-knowledge-links/link-66b793db0867fd02a7aedbec.json",
+      "previous_event_hash": "6f9745608e810d8b01a43c648449c019286c65c3be1f5d5d16f1dcf7ce6d9e5b",
+      "record_sha256": "cebaab3837374ad2821d5cc5e4bd463d92f909674452524becb6d7d5084fa6c0",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:31:08.843754+00:00"
+    },
+    {
+      "event_hash": "5b9fe35e91e72c2d40c99c390edc84c2fc53524130935ccadad4a04619f116d4",
+      "index": 152,
+      "metadata": {},
+      "name": "link:4d421f38c8c0f1da518c0466",
+      "path": "07-knowledge-links/link-4d421f38c8c0f1da518c0466.json",
+      "previous_event_hash": "df80394a3c879c1d063f55676b8615c8afc4cf29fd713f238e5ecfe97cc3fcad",
+      "record_sha256": "3242edc97d7f227b49f4b53c3c27591771ab62b11cdd68c3f8691599b40a2b0c",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:31:08.850272+00:00"
+    },
+    {
+      "event_hash": "f4e903a486fff924170ec50fde483c3abb5518227d58b005636602875a33a1ba",
+      "index": 153,
+      "metadata": {},
+      "name": "call-0011-adaptive-investigator",
+      "path": "04-knowledge-queries/call-0011-adaptive-investigator.json",
+      "previous_event_hash": "5b9fe35e91e72c2d40c99c390edc84c2fc53524130935ccadad4a04619f116d4",
+      "record_sha256": "a88b5fc98da5c3edec5adb84567388cd53b810d53f90977a5a1e1f0d6abc7e35",
+      "stage": "04-knowledge-queries",
+      "timestamp": "2026-08-22T17:32:52.901968+00:00"
+    },
+    {
+      "event_hash": "36c7df5f51ed8321c22ceebf92f2e7f9ed51636e3bdd66225c4dc3531d510429",
+      "index": 154,
+      "metadata": {
+        "call_id": "call-0011-adaptive-investigator",
+        "elapsed_ms": 248859,
+        "input_sha256": "06d24703ae14ab19655f05a3d0c88774e1a969d25a6d55c79e1a186b4c6f62b4",
+        "model": "fireworks:accounts/fireworks/models/kimi-k3",
+        "role": "adaptive_investigator",
+        "usage": {
+          "cache_read_tokens": 107419,
+          "details": {
+            "reasoning_tokens": 4682
+          },
+          "input_tokens": 139535,
+          "output_tokens": 14951,
+          "requests": 7,
+          "tool_calls": 7
+        }
+      },
+      "name": "work:002-inv-choi-r2",
+      "path": "20-adaptive-work/work-002-inv-choi-r2.json",
+      "previous_event_hash": "f4e903a486fff924170ec50fde483c3abb5518227d58b005636602875a33a1ba",
+      "record_sha256": "c4c94091aa7e571a0b142c3bf7f715838d9e9f96262c212837ecbb00a57d220b",
+      "stage": "20-adaptive-work",
+      "timestamp": "2026-08-22T17:32:52.906658+00:00"
+    },
+    {
+      "event_hash": "33fbe2268d80edb20bc0e1a1e6560d2877949ec46579ef782203e0bf8c599161",
+      "index": 155,
+      "metadata": {},
+      "name": "work:002-inv-choi-r2",
+      "path": "30-evidence-packets/work-002-inv-choi-r2.json",
+      "previous_event_hash": "36c7df5f51ed8321c22ceebf92f2e7f9ed51636e3bdd66225c4dc3531d510429",
+      "record_sha256": "abfbaa1cf9cffc7549b649dffe8a76ad58026935b3f16d616fe382146a4d779f",
+      "stage": "30-evidence-packets",
+      "timestamp": "2026-08-22T17:32:52.911903+00:00"
+    },
+    {
+      "event_hash": "3c604ee44ac8552dc56977d1da57c0d1a996970afabc624ea169278181f91281",
+      "index": 156,
+      "metadata": {},
+      "name": "answer:work:002-inv-choi-r2",
+      "path": "06-knowledge-answers/answer-work-002-inv-choi-r2.json",
+      "previous_event_hash": "33fbe2268d80edb20bc0e1a1e6560d2877949ec46579ef782203e0bf8c599161",
+      "record_sha256": "28ee6dc5fd6190fdd7f35acb1c3ec61c0c2f34f19ffbab6040d5cc69bc8650a9",
+      "stage": "06-knowledge-answers",
+      "timestamp": "2026-08-22T17:32:52.915711+00:00"
+    },
+    {
+      "event_hash": "c580f89fc502458184ae75fcc326575ab3ab999e925f3b93b5a48b9d0a1f1f79",
+      "index": 157,
+      "metadata": {},
+      "name": "link:4fadb725a9096059848f3b1c",
+      "path": "07-knowledge-links/link-4fadb725a9096059848f3b1c.json",
+      "previous_event_hash": "3c604ee44ac8552dc56977d1da57c0d1a996970afabc624ea169278181f91281",
+      "record_sha256": "1c149612daff879077ed71efbbaf95ca97f100d97f77afbe76ceab636eb59c24",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:32:52.918945+00:00"
+    },
+    {
+      "event_hash": "a616971a219a3b4b5d954bc84cfc4f7d0b3e2cc91e1f0c50083a807e60770f8b",
+      "index": 158,
+      "metadata": {},
+      "name": "link:0f9fc0308ef38a57765ee25c",
+      "path": "07-knowledge-links/link-0f9fc0308ef38a57765ee25c.json",
+      "previous_event_hash": "c580f89fc502458184ae75fcc326575ab3ab999e925f3b93b5a48b9d0a1f1f79",
+      "record_sha256": "676da57f3421eedb66bc72624f8f9667e62aa5a968c751d1de518240882d5222",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:32:52.921863+00:00"
+    },
+    {
+      "event_hash": "7eb8cb445332b4ad37b2703bcf04c89bc580118e00cdedb56dd88a7feb8c4b43",
+      "index": 159,
+      "metadata": {},
+      "name": "link:6b37d7ae2fdb360af7c01c4d",
+      "path": "07-knowledge-links/link-6b37d7ae2fdb360af7c01c4d.json",
+      "previous_event_hash": "a616971a219a3b4b5d954bc84cfc4f7d0b3e2cc91e1f0c50083a807e60770f8b",
+      "record_sha256": "bdde1a9f015d35e32ad54a75d7820c51197e30469ef4be314aaaf4d060eeedc2",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:32:52.924717+00:00"
+    },
+    {
+      "event_hash": "b3fa425ae8b11ae5d236fc49f5d9399ec5275b4e96881f29074466940df72fd7",
+      "index": 160,
+      "metadata": {},
+      "name": "link:a93de044c436005a99b36973",
+      "path": "07-knowledge-links/link-a93de044c436005a99b36973.json",
+      "previous_event_hash": "7eb8cb445332b4ad37b2703bcf04c89bc580118e00cdedb56dd88a7feb8c4b43",
+      "record_sha256": "762fa4e9a850210bb838c6593e31025a19a7e70d6c206343aa18e78255a94d93",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:32:52.928206+00:00"
+    },
+    {
+      "event_hash": "b50b57248182b9716a2a251bdce92128b7f9f3530076e47b4abc2764e6a91710",
+      "index": 161,
+      "metadata": {},
+      "name": "link:5f35ac12612a9a81fbaaf377",
+      "path": "07-knowledge-links/link-5f35ac12612a9a81fbaaf377.json",
+      "previous_event_hash": "b3fa425ae8b11ae5d236fc49f5d9399ec5275b4e96881f29074466940df72fd7",
+      "record_sha256": "3ed7d77b5ea4cfec9b2734586bb2ac8ff9c363f378c93a80f6b002fcfaf7405b",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:32:52.931260+00:00"
+    },
+    {
+      "event_hash": "ebef78f7bb42b4f6539b746db679208aa533478d47ef88e043c9ca8f89e06d8c",
+      "index": 162,
+      "metadata": {},
+      "name": "link:66ab6f115c25de52ea0cf849",
+      "path": "07-knowledge-links/link-66ab6f115c25de52ea0cf849.json",
+      "previous_event_hash": "b50b57248182b9716a2a251bdce92128b7f9f3530076e47b4abc2764e6a91710",
+      "record_sha256": "3c4f2d81f2b1664cd4acff0d3573e00c4eee9296fc3f5b85799bcde96c54b472",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:32:52.934334+00:00"
+    },
+    {
+      "event_hash": "99faca4b4d6c52b2b45eaee52b11a2f241ef967e560e7405b41f1d0bcd76c5f4",
+      "index": 163,
+      "metadata": {},
+      "name": "link:35ae2a9b2cfc3ecb2685517f",
+      "path": "07-knowledge-links/link-35ae2a9b2cfc3ecb2685517f.json",
+      "previous_event_hash": "ebef78f7bb42b4f6539b746db679208aa533478d47ef88e043c9ca8f89e06d8c",
+      "record_sha256": "cb429444cdc5b19ce23e360af93ca6e75cf499cc0aefad97ac5451481105271e",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:32:52.937339+00:00"
+    },
+    {
+      "event_hash": "cb9619f81da365b15b2701c99402224a2c4d4c81edee13f6186540cf8b30a97f",
+      "index": 164,
+      "metadata": {},
+      "name": "link:2ad6fc53e16bfb6544d7c60a",
+      "path": "07-knowledge-links/link-2ad6fc53e16bfb6544d7c60a.json",
+      "previous_event_hash": "99faca4b4d6c52b2b45eaee52b11a2f241ef967e560e7405b41f1d0bcd76c5f4",
+      "record_sha256": "441494f364b347cc78c10674508b432b4d42de31b0d9e95f9b7adc4f7a5bf3d5",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:32:52.940513+00:00"
+    },
+    {
+      "event_hash": "a27c7e8c2dfabd68aeea629b32cac8093e37dfe407688ff001eb57457aaa8f0f",
+      "index": 165,
+      "metadata": {},
+      "name": "link:42b32143f0d9d3ca8acec80b",
+      "path": "07-knowledge-links/link-42b32143f0d9d3ca8acec80b.json",
+      "previous_event_hash": "cb9619f81da365b15b2701c99402224a2c4d4c81edee13f6186540cf8b30a97f",
+      "record_sha256": "9e5f1c0812b50b0928c39d42688aaf6030825bf43d7f8e360ee47e16397067da",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:32:52.943793+00:00"
+    },
+    {
+      "event_hash": "3d183af92d9f08b7935fbebd45c25a430eb27b8ab456eff6c9f2fb9ac1a41a4a",
+      "index": 166,
+      "metadata": {},
+      "name": "question:raised:eaee61611e26:rq-choi-1",
+      "path": "05-knowledge-questions/question-raised-eaee61611e26-rq-choi-1.json",
+      "previous_event_hash": "a27c7e8c2dfabd68aeea629b32cac8093e37dfe407688ff001eb57457aaa8f0f",
+      "record_sha256": "8be4280aec7b6de91d5d2c24fb82af833d0668795d80d872d98ef62c19cf1fa9",
+      "stage": "05-knowledge-questions",
+      "timestamp": "2026-08-22T17:32:52.947315+00:00"
+    },
+    {
+      "event_hash": "689b830c1587913296d92548432e5aaed140db93163d400750182c33c4b87beb",
+      "index": 167,
+      "metadata": {},
+      "name": "link:f23072940496f6160d6c92de",
+      "path": "07-knowledge-links/link-f23072940496f6160d6c92de.json",
+      "previous_event_hash": "3d183af92d9f08b7935fbebd45c25a430eb27b8ab456eff6c9f2fb9ac1a41a4a",
+      "record_sha256": "5c9fac4e908c198c84f4037b7011e1287ab3326417c330ac948acf442b7fda80",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:32:52.950831+00:00"
+    },
+    {
+      "event_hash": "2e258caad291edae47297bed60dc2f2f269ae13192dc396fdcce55922474a282",
+      "index": 168,
+      "metadata": {},
+      "name": "link:9290b14d54aa2da1e071ede9",
+      "path": "07-knowledge-links/link-9290b14d54aa2da1e071ede9.json",
+      "previous_event_hash": "689b830c1587913296d92548432e5aaed140db93163d400750182c33c4b87beb",
+      "record_sha256": "309409b4adbae904ad136e24308d1693d9d854306835ddbaa03dc38d4cdfc1f4",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:32:52.954416+00:00"
+    },
+    {
+      "event_hash": "e68dfb3bb4afa931185d3d9dd30e8ee1935c4718666177467812cfaa1ee6a4bb",
+      "index": 169,
+      "metadata": {},
+      "name": "link:3b7ec858154a4d6379baa0ea",
+      "path": "07-knowledge-links/link-3b7ec858154a4d6379baa0ea.json",
+      "previous_event_hash": "2e258caad291edae47297bed60dc2f2f269ae13192dc396fdcce55922474a282",
+      "record_sha256": "d00edb1fceaa833f59fa79c6d39882e99132d587bf65d1b75359e226dcfd6c29",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:32:52.957778+00:00"
+    },
+    {
+      "event_hash": "eb61a398209c7ed461133bcfc050435160ee3495781b00f37b2dd9ca5403312d",
+      "index": 170,
+      "metadata": {},
+      "name": "link:c8ab6d1bfa801fd99a93151c",
+      "path": "07-knowledge-links/link-c8ab6d1bfa801fd99a93151c.json",
+      "previous_event_hash": "e68dfb3bb4afa931185d3d9dd30e8ee1935c4718666177467812cfaa1ee6a4bb",
+      "record_sha256": "fa8a883f86a7ededa0ad9af37203deff821b03c3d121afaad309bfa86ebaea39",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:32:52.961066+00:00"
+    },
+    {
+      "event_hash": "df3c47b0083626e7651d3791ca848bae918bd939310b094ea2572053d400feb6",
+      "index": 171,
+      "metadata": {},
+      "name": "call-0009-adaptive-investigator",
+      "path": "04-knowledge-queries/call-0009-adaptive-investigator.json",
+      "previous_event_hash": "eb61a398209c7ed461133bcfc050435160ee3495781b00f37b2dd9ca5403312d",
+      "record_sha256": "6fb4efe18d103d2d4cc010217bf98aade6db05362e95f414641c7fd63170fafb",
+      "stage": "04-knowledge-queries",
+      "timestamp": "2026-08-22T17:33:07.245542+00:00"
+    },
+    {
+      "event_hash": "7bfdb45d9571b2973ebb363ac52c3c2ae0eb9561f42b6ac82efd3652b04ef1a7",
+      "index": 172,
+      "metadata": {
+        "call_id": "call-0009-adaptive-investigator",
+        "elapsed_ms": 263308,
+        "input_sha256": "0be545a8f5ea7d1f924af8f6dac5ae19eb77ce56f076d334242137f09399177d",
+        "model": "fireworks:accounts/fireworks/models/kimi-k3",
+        "role": "adaptive_investigator",
+        "usage": {
+          "cache_read_tokens": 286834,
+          "details": {
+            "reasoning_tokens": 3875
+          },
+          "input_tokens": 324394,
+          "output_tokens": 13641,
+          "requests": 15,
+          "tool_calls": 15
+        }
+      },
+      "name": "work:002-inv-smit-mad-r2",
+      "path": "20-adaptive-work/work-002-inv-smit-mad-r2.json",
+      "previous_event_hash": "df3c47b0083626e7651d3791ca848bae918bd939310b094ea2572053d400feb6",
+      "record_sha256": "44c444432c28f40beca54726394bb05fcb38d169c05d8463d71241a4356db3ea",
+      "stage": "20-adaptive-work",
+      "timestamp": "2026-08-22T17:33:07.248687+00:00"
+    },
+    {
+      "event_hash": "60dcd470da870b68f7412a4d9325477895ee54b98b4058ab1a28a56b89319760",
+      "index": 173,
+      "metadata": {},
+      "name": "work:002-inv-smit-mad-r2",
+      "path": "30-evidence-packets/work-002-inv-smit-mad-r2.json",
+      "previous_event_hash": "7bfdb45d9571b2973ebb363ac52c3c2ae0eb9561f42b6ac82efd3652b04ef1a7",
+      "record_sha256": "4f69625f60a757524a85ed40606c952cd94170bd65137f09d5ccb2dde236b200",
+      "stage": "30-evidence-packets",
+      "timestamp": "2026-08-22T17:33:07.252026+00:00"
+    },
+    {
+      "event_hash": "65e1690d4cd7b1091681250f1f3e052d822eb5559482f02b500594eb1836a385",
+      "index": 174,
+      "metadata": {},
+      "name": "answer:work:002-inv-smit-mad-r2",
+      "path": "06-knowledge-answers/answer-work-002-inv-smit-mad-r2.json",
+      "previous_event_hash": "60dcd470da870b68f7412a4d9325477895ee54b98b4058ab1a28a56b89319760",
+      "record_sha256": "e12d4b3a90cf1b2e6e0504bb4649abba36fcd2ad261acd117be0559955ee6928",
+      "stage": "06-knowledge-answers",
+      "timestamp": "2026-08-22T17:33:07.254987+00:00"
+    },
+    {
+      "event_hash": "90a9f10bdc7b65aa846d477a09253e58f3308db9f93206ac8ee47950cab3a31a",
+      "index": 175,
+      "metadata": {},
+      "name": "link:175e10b1d30f2df7448e0f51",
+      "path": "07-knowledge-links/link-175e10b1d30f2df7448e0f51.json",
+      "previous_event_hash": "65e1690d4cd7b1091681250f1f3e052d822eb5559482f02b500594eb1836a385",
+      "record_sha256": "6aa15ef15e7b3a0f88c7e075f4c1238e93e654ff6be84c59cb228dc2522919f0",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:33:07.257746+00:00"
+    },
+    {
+      "event_hash": "0837e67f57367544ae9f4d6ae615d35c6cb2d788ca2f2ccebd8f6f727e5c4d02",
+      "index": 176,
+      "metadata": {},
+      "name": "link:2e35b1e58e19a3b967e827b8",
+      "path": "07-knowledge-links/link-2e35b1e58e19a3b967e827b8.json",
+      "previous_event_hash": "90a9f10bdc7b65aa846d477a09253e58f3308db9f93206ac8ee47950cab3a31a",
+      "record_sha256": "e001fec284246603d8a876c82036c2dd0098dd7d3548cf7db407394125b0e697",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:33:07.260784+00:00"
+    },
+    {
+      "event_hash": "d2ecc72aac9db1df3480a1d4dd9efefdb3c2ea43418a8d0652d767da739889ab",
+      "index": 177,
+      "metadata": {},
+      "name": "link:6600a3f720ef148fc76720ed",
+      "path": "07-knowledge-links/link-6600a3f720ef148fc76720ed.json",
+      "previous_event_hash": "0837e67f57367544ae9f4d6ae615d35c6cb2d788ca2f2ccebd8f6f727e5c4d02",
+      "record_sha256": "ffcb324499e32bcfa67fb3860b7f5c645cf41a92b1526234016af67af55f6b5e",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:33:07.263264+00:00"
+    },
+    {
+      "event_hash": "69562350a88b3a72d9d22c05c092ee9262484015048f71f1877367cc6356775e",
+      "index": 178,
+      "metadata": {},
+      "name": "link:ec42bebe2d633190d9f87c4b",
+      "path": "07-knowledge-links/link-ec42bebe2d633190d9f87c4b.json",
+      "previous_event_hash": "d2ecc72aac9db1df3480a1d4dd9efefdb3c2ea43418a8d0652d767da739889ab",
+      "record_sha256": "f9c80c82ac82c73aca60c8c42313601854774e3cb2cb458c4aedbd1e9ed8b379",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:33:07.265718+00:00"
+    },
+    {
+      "event_hash": "91b5510dd6c60b6c61208c8ef8b6e6089fe441c29791cbcbe4c829c8d30e4eb2",
+      "index": 179,
+      "metadata": {},
+      "name": "link:9810ae342d43b454979b67c5",
+      "path": "07-knowledge-links/link-9810ae342d43b454979b67c5.json",
+      "previous_event_hash": "69562350a88b3a72d9d22c05c092ee9262484015048f71f1877367cc6356775e",
+      "record_sha256": "f3e5b79fb68303ceac09a474a2294576b7c227d9fe0fcbc68450ea5e597a2d03",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:33:07.268655+00:00"
+    },
+    {
+      "event_hash": "46ca0fd16c3b0dade8b386c8a42132bc241906cd0d4da505f79f40cb02721da3",
+      "index": 180,
+      "metadata": {},
+      "name": "link:24408332bd58b127fc90ffb5",
+      "path": "07-knowledge-links/link-24408332bd58b127fc90ffb5.json",
+      "previous_event_hash": "91b5510dd6c60b6c61208c8ef8b6e6089fe441c29791cbcbe4c829c8d30e4eb2",
+      "record_sha256": "8926876c826a20b59ca551b3595ca46363d79805d671accd0f3cd1bb6154a7f4",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:33:07.271251+00:00"
+    },
+    {
+      "event_hash": "a61614594bcad2bc1e16f31108a70dc3c2b005c20a9f0dde6a2ef4ecbb9c57e9",
+      "index": 181,
+      "metadata": {},
+      "name": "link:0c936dba991dd647423d5929",
+      "path": "07-knowledge-links/link-0c936dba991dd647423d5929.json",
+      "previous_event_hash": "46ca0fd16c3b0dade8b386c8a42132bc241906cd0d4da505f79f40cb02721da3",
+      "record_sha256": "87fe61fe04a45477a1a9b0c79433d8ab014c1a9480782786787eeea469996927",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:33:07.273838+00:00"
+    },
+    {
+      "event_hash": "9f14b608598ea47bfa358d3d459c95277e129e365ff76de93001c4a997d47303",
+      "index": 182,
+      "metadata": {},
+      "name": "link:bc9d547dac3d9d08399523ca",
+      "path": "07-knowledge-links/link-bc9d547dac3d9d08399523ca.json",
+      "previous_event_hash": "a61614594bcad2bc1e16f31108a70dc3c2b005c20a9f0dde6a2ef4ecbb9c57e9",
+      "record_sha256": "ca360fa74b146279d8741a10f4e4e223080bab866e3f3f1c932d476f844306b6",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:33:07.276448+00:00"
+    },
+    {
+      "event_hash": "51d3de4e39d41c9e6bf6adb051caed12d8f15a6cc2daed3072daff3146478816",
+      "index": 183,
+      "metadata": {},
+      "name": "call-0010-adaptive-investigator",
+      "path": "04-knowledge-queries/call-0010-adaptive-investigator.json",
+      "previous_event_hash": "9f14b608598ea47bfa358d3d459c95277e129e365ff76de93001c4a997d47303",
+      "record_sha256": "869b69ea123278e2e57a3abf1fb0ab543277465c16b70bbb2c1b7eea7a86d6c2",
+      "stage": "04-knowledge-queries",
+      "timestamp": "2026-08-22T17:33:13.443623+00:00"
+    },
+    {
+      "event_hash": "f566a60f754482e6f948efc8086fd86b890140ed87eee45c6934b454a33bd033",
+      "index": 184,
+      "metadata": {
+        "call_id": "call-0010-adaptive-investigator",
+        "elapsed_ms": 269451,
+        "input_sha256": "544760cb85a54eb4a76144510e7dff549ac91df96ed49fdd3da0d0a7c462b6e3",
+        "model": "fireworks:accounts/fireworks/models/kimi-k3",
+        "role": "adaptive_investigator",
+        "usage": {
+          "cache_read_tokens": 378994,
+          "details": {
+            "reasoning_tokens": 8482
+          },
+          "input_tokens": 432998,
+          "output_tokens": 15585,
+          "requests": 13,
+          "tool_calls": 18
+        }
+      },
+      "name": "work:002-inv-zhang-when-r2",
+      "path": "20-adaptive-work/work-002-inv-zhang-when-r2.json",
+      "previous_event_hash": "51d3de4e39d41c9e6bf6adb051caed12d8f15a6cc2daed3072daff3146478816",
+      "record_sha256": "e4a214b607f21e542b68eb4fc2193922708ddfcd9b936bfb4257fb0680668fc0",
+      "stage": "20-adaptive-work",
+      "timestamp": "2026-08-22T17:33:13.447266+00:00"
+    },
+    {
+      "event_hash": "0bc0d0376494d0b1eb05ff0bdd84e32592a7d8d2f143ad2fe1ff3b2d70467738",
+      "index": 185,
+      "metadata": {},
+      "name": "work:002-inv-zhang-when-r2",
+      "path": "30-evidence-packets/work-002-inv-zhang-when-r2.json",
+      "previous_event_hash": "f566a60f754482e6f948efc8086fd86b890140ed87eee45c6934b454a33bd033",
+      "record_sha256": "e6ed2f56586a3fc9d3d2398e82342fbde7f286e49cad5acc8614e4a5b8da7a1c",
+      "stage": "30-evidence-packets",
+      "timestamp": "2026-08-22T17:33:13.450912+00:00"
+    },
+    {
+      "event_hash": "6f70fa8a13be09a8de1a4e82ca7ba78d6f6328f16dca845f3caac64a7eef1078",
+      "index": 186,
+      "metadata": {},
+      "name": "answer:work:002-inv-zhang-when-r2",
+      "path": "06-knowledge-answers/answer-work-002-inv-zhang-when-r2.json",
+      "previous_event_hash": "0bc0d0376494d0b1eb05ff0bdd84e32592a7d8d2f143ad2fe1ff3b2d70467738",
+      "record_sha256": "262d7fd30644566c7d292c95204cd1fe2afcf181bbdda968598546630da336ec",
+      "stage": "06-knowledge-answers",
+      "timestamp": "2026-08-22T17:33:13.453890+00:00"
+    },
+    {
+      "event_hash": "956ab9d86ffc403bc3f3d4e1f94a11b2e6d655acb7ed901f12ce74699244c775",
+      "index": 187,
+      "metadata": {},
+      "name": "link:3d48d2dd078875ecccd01e4d",
+      "path": "07-knowledge-links/link-3d48d2dd078875ecccd01e4d.json",
+      "previous_event_hash": "6f70fa8a13be09a8de1a4e82ca7ba78d6f6328f16dca845f3caac64a7eef1078",
+      "record_sha256": "df1676ccae702f27cb7b2643aa7645a1c2986946ca96737b0dce590944abae37",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:33:13.456803+00:00"
+    },
+    {
+      "event_hash": "73f1c1a2cc5394eea9e862828012d5345e89d07961da770c283fc767f21c944b",
+      "index": 188,
+      "metadata": {},
+      "name": "link:9171d74603d31ac03f8c9758",
+      "path": "07-knowledge-links/link-9171d74603d31ac03f8c9758.json",
+      "previous_event_hash": "956ab9d86ffc403bc3f3d4e1f94a11b2e6d655acb7ed901f12ce74699244c775",
+      "record_sha256": "bb9923a3357b40d661a3af0b3e05e85e2766f7a170fa7c59ace96ec0c2aca819",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:33:13.459881+00:00"
+    },
+    {
+      "event_hash": "59eeb21306e0421648e87d706b2a673088c1952e530caf7258ecfcc596d42da6",
+      "index": 189,
+      "metadata": {},
+      "name": "link:381ebb5517c4669e51a6969b",
+      "path": "07-knowledge-links/link-381ebb5517c4669e51a6969b.json",
+      "previous_event_hash": "73f1c1a2cc5394eea9e862828012d5345e89d07961da770c283fc767f21c944b",
+      "record_sha256": "60b2f0f9bbc84b3cfc2124f1f8332f76b38d518a38f771bed7853e7bd56e563c",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:33:13.462695+00:00"
+    },
+    {
+      "event_hash": "39b720c6b58487c822b9202902f73ef7ce6113aa6e0ff8b5271e1bbb12a3e09c",
+      "index": 190,
+      "metadata": {},
+      "name": "link:07f1022d37dfd56499cdd707",
+      "path": "07-knowledge-links/link-07f1022d37dfd56499cdd707.json",
+      "previous_event_hash": "59eeb21306e0421648e87d706b2a673088c1952e530caf7258ecfcc596d42da6",
+      "record_sha256": "bea74d4f5b39ecc4dd82ab3a4e83299fcd435dffdbf2bad2ed12b7646a230ffd",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:33:13.465505+00:00"
+    },
+    {
+      "event_hash": "8691a5d6438c173d1f42aca7791656cc485efc4a748027d529dca4c420550696",
+      "index": 191,
+      "metadata": {},
+      "name": "question:raised:24ba60001ffb:rz1",
+      "path": "05-knowledge-questions/question-raised-24ba60001ffb-rz1.json",
+      "previous_event_hash": "39b720c6b58487c822b9202902f73ef7ce6113aa6e0ff8b5271e1bbb12a3e09c",
+      "record_sha256": "9d41b64a0dc0656104973b4c111911093434f9ba0b4f7e63585972ed70e4e75c",
+      "stage": "05-knowledge-questions",
+      "timestamp": "2026-08-22T17:33:13.468363+00:00"
+    },
+    {
+      "event_hash": "d2efef0209a0f535dfc1d17212809710374c2799a91fd465d01bb15be981509c",
+      "index": 192,
+      "metadata": {},
+      "name": "link:3037579925e77482c5550a96",
+      "path": "07-knowledge-links/link-3037579925e77482c5550a96.json",
+      "previous_event_hash": "8691a5d6438c173d1f42aca7791656cc485efc4a748027d529dca4c420550696",
+      "record_sha256": "066699c879bbe6501d0156c2ce4a961b2a1a720346ce96a9dd80a73606beb65c",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:33:13.471320+00:00"
+    },
+    {
+      "event_hash": "c1ad7ae908712e6e37f46f971b7d63f03de26e6f35f4c9d408a4a5f9086f0fc2",
+      "index": 193,
+      "metadata": {},
+      "name": "link:f510c3c4c26f930298249626",
+      "path": "07-knowledge-links/link-f510c3c4c26f930298249626.json",
+      "previous_event_hash": "d2efef0209a0f535dfc1d17212809710374c2799a91fd465d01bb15be981509c",
+      "record_sha256": "39c3a2b570fea3c73e1f53039f018de343856519a13841d0fd82983fec341481",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:33:13.474704+00:00"
+    },
+    {
+      "event_hash": "261a4775a6ce13ebab066287e2100d4fb639944604b915b66110b1683cfa898a",
+      "index": 194,
+      "metadata": {},
+      "name": "question:raised:24ba60001ffb:rz2",
+      "path": "05-knowledge-questions/question-raised-24ba60001ffb-rz2.json",
+      "previous_event_hash": "c1ad7ae908712e6e37f46f971b7d63f03de26e6f35f4c9d408a4a5f9086f0fc2",
+      "record_sha256": "b3d90fdce1f1b409b6ec1799ebdda1d3d582c53536ab697f9ce07eed43f3f18e",
+      "stage": "05-knowledge-questions",
+      "timestamp": "2026-08-22T17:33:13.477702+00:00"
+    },
+    {
+      "event_hash": "e6f48782a275b6f523361d260aa362bd12586179a67de318c54aacc595af58d0",
+      "index": 195,
+      "metadata": {},
+      "name": "link:513e7ecd7528db2736fa1f52",
+      "path": "07-knowledge-links/link-513e7ecd7528db2736fa1f52.json",
+      "previous_event_hash": "261a4775a6ce13ebab066287e2100d4fb639944604b915b66110b1683cfa898a",
+      "record_sha256": "9dc5c2b97c37286a8b7f6c889bf604e772c240c851b5b0b383c47229b82c38cd",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:33:13.480674+00:00"
+    },
+    {
+      "event_hash": "8c1d2d952700dd3c1d2d38114905a47c2e962bf9c4b7f626a021041f1d9ce9f2",
+      "index": 196,
+      "metadata": {},
+      "name": "link:b94c02ee6cc3908a169a2598",
+      "path": "07-knowledge-links/link-b94c02ee6cc3908a169a2598.json",
+      "previous_event_hash": "e6f48782a275b6f523361d260aa362bd12586179a67de318c54aacc595af58d0",
+      "record_sha256": "933d2459a99cfc86f38b3ee6b78e2988381ce63637822e059c6faa70cc5ccbcc",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:33:13.483627+00:00"
+    },
+    {
+      "event_hash": "9002863e6001c618937427a0d54369726b81eb999e4515ed5474639cc2615273",
+      "index": 197,
+      "metadata": {},
+      "name": "link:68d1db4f793a473de8dff713",
+      "path": "07-knowledge-links/link-68d1db4f793a473de8dff713.json",
+      "previous_event_hash": "8c1d2d952700dd3c1d2d38114905a47c2e962bf9c4b7f626a021041f1d9ce9f2",
+      "record_sha256": "b5baad7bca6def96a571e18d9c192b6a99d9ce0d52a16dd7a678a7ecc2291b67",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:33:13.486521+00:00"
+    },
+    {
+      "event_hash": "be7031ffd7aced2df90b598a65bbe7d1aa8134b487e849ae8b47687f66f42701",
+      "index": 198,
+      "metadata": {},
+      "name": "action:002",
+      "path": "12-adaptive-actions/action-002.json",
+      "previous_event_hash": "9002863e6001c618937427a0d54369726b81eb999e4515ed5474639cc2615273",
+      "record_sha256": "3d6ec4b579ae8498c0aa3f91f1dc3533a2d3e65196a5a73d51069961d0288a44",
+      "stage": "12-adaptive-actions",
+      "timestamp": "2026-08-22T17:33:13.491853+00:00"
+    },
+    {
+      "event_hash": "64fb7d3b1eb51912abd95ba1d013ac0bb090ce8ba71058c086f24f2b8641c6b0",
+      "index": 199,
+      "metadata": {
+        "model": "fireworks:accounts/fireworks/models/kimi-k3",
+        "role": "adaptive_controller"
+      },
+      "name": "call-0014-adaptive-controller",
+      "path": "01-call-inputs/call-0014-adaptive-controller.json",
+      "previous_event_hash": "be7031ffd7aced2df90b598a65bbe7d1aa8134b487e849ae8b47687f66f42701",
+      "record_sha256": "15d1021e41551993be8265d7de383c30b9fd60204aa297dd1e70cc6c13433784",
+      "stage": "01-call-inputs",
+      "timestamp": "2026-08-22T17:33:13.498726+00:00"
+    },
+    {
+      "event_hash": "84e646246daf8f98ad90a583860889db0132ebee730e7cc54896e973702b7d3f",
+      "index": 200,
+      "metadata": {},
+      "name": "call-0014-adaptive-controller",
+      "path": "04-knowledge-queries/call-0014-adaptive-controller.json",
+      "previous_event_hash": "64fb7d3b1eb51912abd95ba1d013ac0bb090ce8ba71058c086f24f2b8641c6b0",
+      "record_sha256": "60a4b4461e3d785d0b9813c57444f211c3832066a0a2854c77f32cf65127d6bd",
+      "stage": "04-knowledge-queries",
+      "timestamp": "2026-08-22T17:34:38.545869+00:00"
+    },
+    {
+      "event_hash": "2b881bf5d64cb4821200ac5f74b23cb9817abcc27cf8e3de7dea377fe96b4189",
+      "index": 201,
+      "metadata": {
+        "call_id": "call-0014-adaptive-controller",
+        "elapsed_ms": 85048,
+        "input_sha256": "e97a8d751d4eea1b3cac30057e40926ed6597549d3254207ed46306fac51b221",
+        "model": "fireworks:accounts/fireworks/models/kimi-k3",
+        "role": "adaptive_controller",
+        "usage": {
+          "cache_read_tokens": 43256,
+          "details": {
+            "reasoning_tokens": 2486
+          },
+          "input_tokens": 84296,
+          "output_tokens": 4905,
+          "requests": 3,
+          "tool_calls": 5
+        }
+      },
+      "name": "step-003-attempt-01",
+      "path": "10-adaptive-decisions/step-003-attempt-01.json",
+      "previous_event_hash": "84e646246daf8f98ad90a583860889db0132ebee730e7cc54896e973702b7d3f",
+      "record_sha256": "b7a0c80e2adf4d619d3d55c78a354571c7a4898047da28fecd53ea29ef821879",
+      "stage": "10-adaptive-decisions",
+      "timestamp": "2026-08-22T17:34:38.550876+00:00"
+    },
+    {
+      "event_hash": "14adea379e6431a54f57bc9f0a2294e40517fa05c06153d5a291fceb9f686d01",
+      "index": 202,
+      "metadata": {},
+      "name": "question:work:003-synthesis",
+      "path": "05-knowledge-questions/question-work-003-synthesis.json",
+      "previous_event_hash": "2b881bf5d64cb4821200ac5f74b23cb9817abcc27cf8e3de7dea377fe96b4189",
+      "record_sha256": "ef0ec8288fae5b744825bd1568cb34bbac0ab710e684696012cf4223f918a1ef",
+      "stage": "05-knowledge-questions",
+      "timestamp": "2026-08-22T17:34:38.555835+00:00"
+    },
+    {
+      "event_hash": "ac10855a0b47c6509a4947a52e3c1f44d27587ff7b0c6446d61f22db7e5c8b40",
+      "index": 203,
+      "metadata": {},
+      "name": "link:24b550d184d051fed60da0ea",
+      "path": "07-knowledge-links/link-24b550d184d051fed60da0ea.json",
+      "previous_event_hash": "14adea379e6431a54f57bc9f0a2294e40517fa05c06153d5a291fceb9f686d01",
+      "record_sha256": "9565297803c404525b0d27c907c8b3bf69627780df4dffca614314c43826072a",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:34:38.560679+00:00"
+    },
+    {
+      "event_hash": "2479de86e11d681a7f4bc077a0c5a6189306d1f69c4f136806d2942375ecac51",
+      "index": 204,
+      "metadata": {},
+      "name": "link:b20591c479cb15e597321390",
+      "path": "07-knowledge-links/link-b20591c479cb15e597321390.json",
+      "previous_event_hash": "ac10855a0b47c6509a4947a52e3c1f44d27587ff7b0c6446d61f22db7e5c8b40",
+      "record_sha256": "762f70f8a5a1ede441e92bcf92686de91b3b4d4d1b3ded44eec95262115aa667",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:34:38.565018+00:00"
+    },
+    {
+      "event_hash": "03b892b5b28242d2825a7d6398df17b95bd5c5429f66113be456d922a8b35851",
+      "index": 205,
+      "metadata": {},
+      "name": "link:4684709de7c2eca17e3913a4",
+      "path": "07-knowledge-links/link-4684709de7c2eca17e3913a4.json",
+      "previous_event_hash": "2479de86e11d681a7f4bc077a0c5a6189306d1f69c4f136806d2942375ecac51",
+      "record_sha256": "2561efcdcb267ae21b31c09b2a23d060d581a02d5e7dabaed56fa27d20b98103",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:34:38.568854+00:00"
+    },
+    {
+      "event_hash": "7c676f33b3ecc8504ceb768de00df9ef9c8bb6084984f4672188b3ccd3f59eef",
+      "index": 206,
+      "metadata": {},
+      "name": "link:c37336323356f55e3a96299e",
+      "path": "07-knowledge-links/link-c37336323356f55e3a96299e.json",
+      "previous_event_hash": "03b892b5b28242d2825a7d6398df17b95bd5c5429f66113be456d922a8b35851",
+      "record_sha256": "315bdcc2009d21340b1ad73e5ac2571234173131e1bd9629b84a37f7e57bb786",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:34:38.573160+00:00"
+    },
+    {
+      "event_hash": "76db6cb5e52ccea83c1ba4a7a69adbe4d275e2d60bed955417e8c3f442829ef4",
+      "index": 207,
+      "metadata": {},
+      "name": "link:83915eb727131cb87e3cf2b3",
+      "path": "07-knowledge-links/link-83915eb727131cb87e3cf2b3.json",
+      "previous_event_hash": "7c676f33b3ecc8504ceb768de00df9ef9c8bb6084984f4672188b3ccd3f59eef",
+      "record_sha256": "7a2ad9f848b4aa327761e716813078b44a6b8b57722399cfd5be9ecc91dac873",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:34:38.577582+00:00"
+    },
+    {
+      "event_hash": "cb6d1b23e5fb11f159714afbf7ae457f1bfe2306b8dea84a970dccf35c14915e",
+      "index": 208,
+      "metadata": {},
+      "name": "link:b76718fed416c4250d12f8cf",
+      "path": "07-knowledge-links/link-b76718fed416c4250d12f8cf.json",
+      "previous_event_hash": "76db6cb5e52ccea83c1ba4a7a69adbe4d275e2d60bed955417e8c3f442829ef4",
+      "record_sha256": "6ffcd00374877e8352f15aab9ed97315c403086456e5916e551b4b5d5fe3e99d",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:34:38.582662+00:00"
+    },
+    {
+      "event_hash": "f1e0dab46129bf7e90b00d7a6172e20093a0c6c37dc7bfc2812279bc958b9886",
+      "index": 209,
+      "metadata": {},
+      "name": "link:1f3027abd5ef4532456cf2e2",
+      "path": "07-knowledge-links/link-1f3027abd5ef4532456cf2e2.json",
+      "previous_event_hash": "cb6d1b23e5fb11f159714afbf7ae457f1bfe2306b8dea84a970dccf35c14915e",
+      "record_sha256": "2ed93f65e4634aac3120f433625098ae87e8ee34eff16fcc55b394e665436c57",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:34:38.590163+00:00"
+    },
+    {
+      "event_hash": "9ae39a667a5175e5b59c410bc65fc0ec7b65a7948f3fc83fe84993ab8bf183a7",
+      "index": 210,
+      "metadata": {},
+      "name": "link:5eadd0b5c406ad79f6337158",
+      "path": "07-knowledge-links/link-5eadd0b5c406ad79f6337158.json",
+      "previous_event_hash": "f1e0dab46129bf7e90b00d7a6172e20093a0c6c37dc7bfc2812279bc958b9886",
+      "record_sha256": "01ed1c744d530a566e45f8af86bd7dd17ea5a5d5a09516d2c7b240c76b6307d3",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:34:38.597774+00:00"
+    },
+    {
+      "event_hash": "940aa74a78f9efc11bd793d70b151f2b43dc03ac26ff0b09847dc5a38bb0a861",
+      "index": 211,
+      "metadata": {},
+      "name": "link:60a38dcd17badc69666b02f4",
+      "path": "07-knowledge-links/link-60a38dcd17badc69666b02f4.json",
+      "previous_event_hash": "9ae39a667a5175e5b59c410bc65fc0ec7b65a7948f3fc83fe84993ab8bf183a7",
+      "record_sha256": "c4f931a4fc719e5fb20ae5eccc843b4dd8479b9ac5421d9625bd4dfc851bd8f4",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:34:38.605256+00:00"
+    },
+    {
+      "event_hash": "dacf95e5891254ff0f27ab31df43cc2d41b6d8eaaf800f1fd13d1785f438165b",
+      "index": 212,
+      "metadata": {},
+      "name": "link:13839d2f47522a9835acaef3",
+      "path": "07-knowledge-links/link-13839d2f47522a9835acaef3.json",
+      "previous_event_hash": "940aa74a78f9efc11bd793d70b151f2b43dc03ac26ff0b09847dc5a38bb0a861",
+      "record_sha256": "f7e7e477660c4cf6436cea31a575d9b65cac0487154eb0a6be267b28ca7682de",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:34:38.615652+00:00"
+    },
+    {
+      "event_hash": "103d5a263cd24e5f615f13e17a63e0fdf854b581ad1ca08178ad58c34e7b74b7",
+      "index": 213,
+      "metadata": {},
+      "name": "link:66ccc9591a09d96de3a7952c",
+      "path": "07-knowledge-links/link-66ccc9591a09d96de3a7952c.json",
+      "previous_event_hash": "dacf95e5891254ff0f27ab31df43cc2d41b6d8eaaf800f1fd13d1785f438165b",
+      "record_sha256": "bde8122d016996034786e7c1898db86f0c7ac8acea8b3dd546d7e983bc0d7296",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:34:38.620921+00:00"
+    },
+    {
+      "event_hash": "c2da8091f5510ec073592b7c6530e682a2bc601bfe389a9f1637de4fbda988a2",
+      "index": 214,
+      "metadata": {},
+      "name": "link:c4be443ee06ce1afb57731df",
+      "path": "07-knowledge-links/link-c4be443ee06ce1afb57731df.json",
+      "previous_event_hash": "103d5a263cd24e5f615f13e17a63e0fdf854b581ad1ca08178ad58c34e7b74b7",
+      "record_sha256": "94548f3fbb3ca9762ba6d1aadac3cb7e25c8e1db6b2004fbdc340446f7ad74d8",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:34:38.626055+00:00"
+    },
+    {
+      "event_hash": "974796c35ef76e0ea90aedcd13db744a65e9d45453e00f9500d82cc544f436b0",
+      "index": 215,
+      "metadata": {},
+      "name": "link:3ef31fe4b7d542fba966ed7f",
+      "path": "07-knowledge-links/link-3ef31fe4b7d542fba966ed7f.json",
+      "previous_event_hash": "c2da8091f5510ec073592b7c6530e682a2bc601bfe389a9f1637de4fbda988a2",
+      "record_sha256": "9b5fb94bd7ee60f275f10474f5c0e08b8e1c15d0678ef68014c206bb04f1c433",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:34:38.631392+00:00"
+    },
+    {
+      "event_hash": "ca4c5dc3bc9b9b9d66990342fc7e30d7022d51666d38456bd53a97143b79706e",
+      "index": 216,
+      "metadata": {},
+      "name": "link:178693b8e76b50ee468d5612",
+      "path": "07-knowledge-links/link-178693b8e76b50ee468d5612.json",
+      "previous_event_hash": "974796c35ef76e0ea90aedcd13db744a65e9d45453e00f9500d82cc544f436b0",
+      "record_sha256": "07772b92b6e0887f3001bebc26516d35145e167227de6431ef79cc02701a950e",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:34:38.636475+00:00"
+    },
+    {
+      "event_hash": "c25a225c4f5dc56557ce3d69e8b0fe897d47c9c7fec9f94e813653ef79f1060b",
+      "index": 217,
+      "metadata": {},
+      "name": "link:a47e997e8e17d37453b60a23",
+      "path": "07-knowledge-links/link-a47e997e8e17d37453b60a23.json",
+      "previous_event_hash": "ca4c5dc3bc9b9b9d66990342fc7e30d7022d51666d38456bd53a97143b79706e",
+      "record_sha256": "5540993d99d46d4fcdd1d235b277d399dbf0adcd964c77325341ac6a3ca53e26",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:34:38.641820+00:00"
+    },
+    {
+      "event_hash": "7517c7e36ca2445804c3de469edb618e0b6cb2a5d8065fdb6ef0293e34a937bd",
+      "index": 218,
+      "metadata": {},
+      "name": "link:60ace8cb6ae858b3c74da623",
+      "path": "07-knowledge-links/link-60ace8cb6ae858b3c74da623.json",
+      "previous_event_hash": "c25a225c4f5dc56557ce3d69e8b0fe897d47c9c7fec9f94e813653ef79f1060b",
+      "record_sha256": "391f7605f1ed13082afc6f9464451d22c1749d222581a4d4864d411841ae3710",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:34:38.646891+00:00"
+    },
+    {
+      "event_hash": "6c13ca96d42590e4b92ee2fb6fa8611f1b04ffd67ed430765e54ab85bb75d0a1",
+      "index": 219,
+      "metadata": {},
+      "name": "link:923dadec474adfee7d3bfc49",
+      "path": "07-knowledge-links/link-923dadec474adfee7d3bfc49.json",
+      "previous_event_hash": "7517c7e36ca2445804c3de469edb618e0b6cb2a5d8065fdb6ef0293e34a937bd",
+      "record_sha256": "6188c0036b98b84f0fed5f40fa611bfc73c71d9bb7cd4663d97e0cf2dc6010f4",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:34:38.652835+00:00"
+    },
+    {
+      "event_hash": "c429d777d6aaf09762bca1ad07ad6b3107067b03c942a47b348594f66c6cfd1b",
+      "index": 220,
+      "metadata": {},
+      "name": "link:3d4c9a7744b8d91ec7b83e5c",
+      "path": "07-knowledge-links/link-3d4c9a7744b8d91ec7b83e5c.json",
+      "previous_event_hash": "6c13ca96d42590e4b92ee2fb6fa8611f1b04ffd67ed430765e54ab85bb75d0a1",
+      "record_sha256": "9824c4a7c25d5e1ab7eedf6983cf0e9eca15c29973fcfba998a07a670355d41b",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:34:38.660086+00:00"
+    },
+    {
+      "event_hash": "dfd1ce5b11a3ce335f429a6c19b07263263f32c898bcfd347ed7746c38be73f2",
+      "index": 221,
+      "metadata": {},
+      "name": "link:9e3193b62cba30a20ba88c27",
+      "path": "07-knowledge-links/link-9e3193b62cba30a20ba88c27.json",
+      "previous_event_hash": "c429d777d6aaf09762bca1ad07ad6b3107067b03c942a47b348594f66c6cfd1b",
+      "record_sha256": "cc5090ae5078bc9363858da7415d444c978af504a3023ace0bdc77db2e41f0c0",
+      "stage": "07-knowledge-links",
+      "timestamp": "2026-08-22T17:34:38.669370+00:00"
+    },
+    {
+      "event_hash": "8a1134997d52d3f95ffad39bd11f455635bb9cbcdecf8fbd4f3c6e087524da66",
+      "index": 222,
+      "metadata": {
+        "model": "fireworks:accounts/fireworks/models/kimi-k3",
+        "role": "adaptive_synthesizer"
+      },
+      "name": "call-0015-adaptive-synthesizer",
+      "path": "01-call-inputs/call-0015-adaptive-synthesizer.json",
+      "previous_event_hash": "dfd1ce5b11a3ce335f429a6c19b07263263f32c898bcfd347ed7746c38be73f2",
+      "record_sha256": "34e653a12c1d0baff110f21e8ac84511ea7f5c9701622888ae266d83e36c2a0b",
+      "stage": "01-call-inputs",
+      "timestamp": "2026-08-22T17:34:38.703660+00:00"
+    },
+    {
+      "event_hash": "dfa7d051b2e31843f43b05ec9229d1fcb9d6a3403487edf871cee00996d342fc",
+      "index": 223,
+      "metadata": {},
+      "name": "call-0015-adaptive-synthesizer",
+      "path": "04-knowledge-queries/call-0015-adaptive-synthesizer.json",
+      "previous_event_hash": "8a1134997d52d3f95ffad39bd11f455635bb9cbcdecf8fbd4f3c6e087524da66",
+      "record_sha256": "e01798ebec397381f350e1a2643683d91c300059b43d2d79d72d42c5b56e4e23",
+      "stage": "04-knowledge-queries",
+      "timestamp": "2026-08-22T17:37:52.516117+00:00"
+    },
+    {
+      "event_hash": "7a171ec1d18ea11bdb7943b62d92a3ed2e7591ef657523788639e6e6626a659a",
+      "index": 224,
+      "metadata": {
+        "call_id": "call-0015-adaptive-synthesizer",
+        "input_sha256": "bf6d0f0b8949e9ff2d6ac5ff4b76b694b8f72eec31575cc9bcfe3b3ac7b4e83b",
+        "model": "fireworks:accounts/fireworks/models/kimi-k3",
+        "role": "adaptive_synthesizer"
+      },
+      "name": "call-0015-adaptive-synthesizer",
+      "path": "02-call-errors/call-0015-adaptive-synthesizer.json",
+      "previous_event_hash": "dfa7d051b2e31843f43b05ec9229d1fcb9d6a3403487edf871cee00996d342fc",
+      "record_sha256": "628e7560b492c5f6e9d0e52af279df7aed87798cf3a4bd43198273afb1c61a52",
+      "stage": "02-call-errors",
+      "timestamp": "2026-08-22T17:37:52.519077+00:00"
+    },
+    {
+      "event_hash": "6e1572527ce2539cd83028be87b7403244c35e9b7f7edff7dd0ced2465c15cf8",
+      "index": 225,
+      "metadata": {},
+      "name": "failure",
+      "path": "99-result/failure.json",
+      "previous_event_hash": "7a171ec1d18ea11bdb7943b62d92a3ed2e7591ef657523788639e6e6626a659a",
+      "record_sha256": "628e7560b492c5f6e9d0e52af279df7aed87798cf3a4bd43198273afb1c61a52",
+      "stage": "99-result",
+      "timestamp": "2026-08-22T17:37:52.521901+00:00"
+    }
+  ],
+  "finished_at": "2026-08-22T17:37:52.525252+00:00",
+  "run_id": "20260822T171903Z-adaptive-research-problem-when-does-structured-inter-agent-communication-help-a3ef5c8d",
+  "schema_version": 1,
+  "status": "failed"
+}

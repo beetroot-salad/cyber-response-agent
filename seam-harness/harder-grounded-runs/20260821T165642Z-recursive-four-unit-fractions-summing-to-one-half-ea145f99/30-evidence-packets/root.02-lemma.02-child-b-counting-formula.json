@@ -1,0 +1,65 @@
+{
+  "account": "The dossier contains no source materials, workspace documents, or sibling/child contributions, so there is no observed content from which to derive the factor-pair counting formula or the z >= y filter. The node's acceptance condition specifies the formula and the filter equivalence (u >= py - q) as targets, but these are task requirements, not evidence. I therefore cannot produce observed claims about the formula's derivation or application; the contribution must be constructed by the parent from the algebraic bijection, and this node is blocked pending a citation to that bijection or to an existing enumeration lemma.",
+  "assumptions": [
+    "The formula's notation (p, q, u, v, z) is interpreted as in the acceptance condition: p = xy - x - y, q = x + y, and z = (u+q)/p.",
+    "The parent expects this node to specialize a bijection that has already been proved elsewhere, even though that proof is not present in this dossier."
+  ],
+  "boundary_findings": [
+    {
+      "alternative_explanation": "The parent may intentionally defer all derivation to this node, but then the dossier should have included the bijection statement or a reference.",
+      "consequence_if_absorbed": "The formula would remain unproven or require re-derivation from scratch, risking circularity or duplication of the parent's proof.",
+      "evidence": [],
+      "narrative": "The node is expected to derive the counting formula from the parent's bijection proof, but the parent's bijection proof (root.02-lemma) is absent from the dossier. Without that boundary artifact, the node cannot specialize or justify the formula independently.",
+      "smallest_suspected_scope": "root.02-lemma"
+    },
+    {
+      "alternative_explanation": "The worked example may be intended for the parent's final table, not this lemma.",
+      "consequence_if_absorbed": "The parent's table might misapply the filter for boundary cases near u = py - q, especially when divisibility and congruence interact.",
+      "evidence": [],
+      "narrative": "The acceptance condition references a filter 'z >= y' with equivalence 'u >= py - q' but provides no example or numeric case showing the filter's application. This missing worked example would be necessary to audit the mechanical procedure.",
+      "smallest_suspected_scope": "root.02-lemma.02-child-b-counting-formula"
+    }
+  ],
+  "child_packet_ids": [],
+  "claims": [
+    {
+      "basis": "hypothesis",
+      "citations": [],
+      "confidence": 0.95,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "id": "root.02-lemma.02-child-b-counting-formula:C001",
+      "statement": "The task requires counting ordered factor pairs (u,v) of q^2 with u <= v and u ≡ v ≡ -q (mod p), where p = xy - x - y and q = x + y under the substitution derived from 1/z + 1/w = (x+y)/(xy) - 1/2; the acceptance condition further requires z = (u+q)/p and the filter z >= y equivalent to u >= py - q."
+    },
+    {
+      "basis": "hypothesis",
+      "citations": [],
+      "confidence": 0.99,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "id": "root.02-lemma.02-child-b-counting-formula:C002",
+      "statement": "No evidence in the dossier demonstrates the claimed bijection that maps each admissible factor pair to exactly one solution (z,w), because no source material, sibling proof, or workspace document is supplied."
+    }
+  ],
+  "content_sha256": "9dbf64b9fc1da76187d7c96e120ddd1e068d67580474d189392f5369ef1357e1",
+  "counterevidence": [
+    "The acceptance condition states what the formula must be but provides no derivation or supporting arithmetic that would allow this node to independently justify it.",
+    "No sibling or parent lemma (e.g., the bijection proof) is included in the dossier, so the node cannot infer the formula from established results."
+  ],
+  "id": "packet:root.02-lemma.02-child-b-counting-formula",
+  "next_observation": "Request the parent's bijection proof (root.02-lemma) or a sibling lemma that establishes the factor-pair bijection and the congruence conditions, plus at least one fully worked (x,y) example.",
+  "node_id": "root.02-lemma.02-child-b-counting-formula",
+  "objective": "State and justify the exact counting formula for the number of positive integer solutions (z,w) with 1/z + 1/w = p/q, z <= w, and optionally z >= y, expressed in terms of factor pairs of q^2 congruent to -q mod p, including the filtering condition for z >= y.",
+  "source_ids_consulted": [],
+  "sufficiency": "blocked",
+  "unresolved": [
+    "How the factor-pair congruence u ≡ v ≡ -q (mod p) arises from the equation transformation.",
+    "Why the condition u >= py - q is exactly equivalent to z >= y given z = (u+q)/p.",
+    "Whether the count of admissible factor pairs must exclude pairs where p does not divide u+q, although the congruence condition may imply divisibility.",
+    "Whether the order constraint z <= w is equivalent to u <= v under the factor-pair bijection.",
+    "Runtime discarded unknown citation sources from claim-1: ['root.02-lemma.02-child-b-counting-formula']",
+    "Runtime downgraded unsupported observed claim claim-1 to hypothesis",
+    "Runtime discarded unknown citation sources from claim-2: ['root.02-lemma.02-child-b-counting-formula']",
+    "Runtime downgraded unsupported observed claim claim-2 to hypothesis"
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "account": "The Zhang et al. text is provided in full within the workspace_documents, with explicit PDF page markers. The acceptance condition asks for at least three anchored findings covering (1) MAD failing to outperform single-agent baselines, (2) task dependence, and (3) the role of model heterogeneity. Each required finding is directly present in the provided text with page markers. The task is bounded and locally decidable: I can quote or closely paraphrase the source with markers, satisfying the acceptance condition without needing additional evidence or sibling output.",
+  "children": [],
+  "decidability": {
+    "acceptance_mechanical": true,
+    "account": "The full Zhang et al. text is embedded in the dossier. I can extract the required findings directly from it, each with its page marker. No other files or sibling outputs are needed.",
+    "context_complete": true,
+    "grounded_referents": [
+      "papers/text/zhang-et-al-2025-mad-question.txt",
+      "===== PDF PAGE 1 =====",
+      "===== PDF PAGE 3 =====",
+      "===== PDF PAGE 4 =====",
+      "===== PDF PAGE 7 =====",
+      "===== PDF PAGE 8 =====",
+      "===== PDF PAGE 9 =====",
+      "===== PDF PAGE 11 =====",
+      "===== PDF PAGE 12 ====="
+    ],
+    "independent_of_future_siblings": true,
+    "missing_context": []
+  },
+  "disposition": "solve",
+  "irreducible_core": null,
+  "requested_source_ids": [],
+  "requested_source_paths": [],
+  "synthesis_contract": null
+}

@@ -1,0 +1,101 @@
+{
+  "created_at": "2026-08-21T14:09:35.828708+00:00",
+  "events": [
+    {
+      "event_hash": "20471d13af0c71d4d5b00926cc4dcf36589bd388e531f8f41cb67de09705ef74",
+      "index": 0,
+      "metadata": {},
+      "name": "recursive-run",
+      "path": "00-input/recursive-run.json",
+      "previous_event_hash": null,
+      "record_sha256": "1a9c73c931633b390733f903b9d82ab809546d3e6498080bbf623639caca5c67",
+      "stage": "00-input",
+      "timestamp": "2026-08-21T14:09:35.831805+00:00"
+    },
+    {
+      "event_hash": "93c43de3b868d2085cf7bbdac9aa378461ff3fd6db7ce5b03812d75b64ad4f06",
+      "index": 1,
+      "metadata": {
+        "model": "fireworks:accounts/fireworks/models/kimi-k3",
+        "role": "recursive_planner"
+      },
+      "name": "call-0001-recursive-planner",
+      "path": "01-call-inputs/call-0001-recursive-planner.json",
+      "previous_event_hash": "20471d13af0c71d4d5b00926cc4dcf36589bd388e531f8f41cb67de09705ef74",
+      "record_sha256": "ccdd7269e733baf69c635361c0a7208f44723dfc0d00613baa4d5c5eabae58af",
+      "stage": "01-call-inputs",
+      "timestamp": "2026-08-21T14:09:35.833964+00:00"
+    },
+    {
+      "event_hash": "684a2a9e341ee7a8f3c7db68a4d5b473de09ec16e6fe73babe4a4d9309d13727",
+      "index": 2,
+      "metadata": {
+        "call_id": "call-0001-recursive-planner",
+        "elapsed_ms": 28073,
+        "input_sha256": "9f69dc8bee486c2a497d2120f154f7c65c0750a819c5a3bc3c0cf15cbfa5d200",
+        "model": "fireworks:accounts/fireworks/models/kimi-k3",
+        "role": "recursive_planner",
+        "usage": {
+          "cache_read_tokens": 0,
+          "details": {
+            "reasoning_tokens": 487
+          },
+          "input_tokens": 2349,
+          "output_tokens": 1225,
+          "requests": 1
+        }
+      },
+      "name": "root-round-01",
+      "path": "10-node-plans/root-round-01.json",
+      "previous_event_hash": "93c43de3b868d2085cf7bbdac9aa378461ff3fd6db7ce5b03812d75b64ad4f06",
+      "record_sha256": "834d3440da1d19d76670ecfff5404397738d98bba30518631d2c18c009a0b108",
+      "stage": "10-node-plans",
+      "timestamp": "2026-08-21T14:10:03.908484+00:00"
+    },
+    {
+      "event_hash": "39a21be703a2e27dd4322c2ce6ba7905dca380868beab89f9fc8c791fe9229d2",
+      "index": 3,
+      "metadata": {
+        "model": "fireworks:accounts/fireworks/models/qwen3-30b-a3b-instruct-2507",
+        "role": "frontier_researcher"
+      },
+      "name": "call-0002-frontier-researcher",
+      "path": "01-call-inputs/call-0002-frontier-researcher.json",
+      "previous_event_hash": "684a2a9e341ee7a8f3c7db68a4d5b473de09ec16e6fe73babe4a4d9309d13727",
+      "record_sha256": "629d067da0bcf09d9d02510dfa269df48053f71f0a1a524bbcbd1eb91b92b05e",
+      "stage": "01-call-inputs",
+      "timestamp": "2026-08-21T14:10:03.911133+00:00"
+    },
+    {
+      "event_hash": "1e3b4034a0181aea2d61e014c3ac51c7e7cc510ff946a5e2d7e8a4e265125538",
+      "index": 4,
+      "metadata": {
+        "call_id": "call-0002-frontier-researcher",
+        "input_sha256": "870ec76303c8f8282c87bd0efeeb0d370de6dab5ceb2e60267aeffa8fab45cb8",
+        "model": "fireworks:accounts/fireworks/models/qwen3-30b-a3b-instruct-2507",
+        "role": "frontier_researcher"
+      },
+      "name": "call-0002-frontier-researcher",
+      "path": "02-call-errors/call-0002-frontier-researcher.json",
+      "previous_event_hash": "39a21be703a2e27dd4322c2ce6ba7905dca380868beab89f9fc8c791fe9229d2",
+      "record_sha256": "1c50877eef21a59026035f99b0bea536a2b3d21d6ad032b10cc49156880157fa",
+      "stage": "02-call-errors",
+      "timestamp": "2026-08-21T14:10:04.171914+00:00"
+    },
+    {
+      "event_hash": "cbbc542f7623b0d002267e6c927a610278dc4edf94c1a56d09ec7713d1b5a10e",
+      "index": 5,
+      "metadata": {},
+      "name": "failure",
+      "path": "99-result/failure.json",
+      "previous_event_hash": "1e3b4034a0181aea2d61e014c3ac51c7e7cc510ff946a5e2d7e8a4e265125538",
+      "record_sha256": "1c50877eef21a59026035f99b0bea536a2b3d21d6ad032b10cc49156880157fa",
+      "stage": "99-result",
+      "timestamp": "2026-08-21T14:10:04.172935+00:00"
+    }
+  ],
+  "finished_at": "2026-08-21T14:10:04.173534+00:00",
+  "run_id": "20260821T140935Z-recursive-ai-art-and-kitsch-a-600-word-thesis-driven-essay-bfbebdad",
+  "schema_version": 1,
+  "status": "failed"
+}

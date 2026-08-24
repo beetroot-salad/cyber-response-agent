@@ -19,7 +19,7 @@ from pydantic_ai.models import override_allow_model_requests  # noqa: E402
 
 from defender.learning.core.config import StageWiring  # noqa: E402
 from defender.learning.core import config, subagents  # noqa: E402
-from defender.learning.pipeline import _pydantic_stage  # noqa: E402
+from defender.learning import _pydantic_stage  # noqa: E402
 from defender.learning.pipeline import actor_engine  # noqa: E402
 from defender.learning.pipeline.actor_engine import ActorDeps, _ActorScope, _run_actor_pydantic  # noqa: E402
 from defender.learning.pipeline.actor_engine import ACTOR_DEF  # noqa: E402

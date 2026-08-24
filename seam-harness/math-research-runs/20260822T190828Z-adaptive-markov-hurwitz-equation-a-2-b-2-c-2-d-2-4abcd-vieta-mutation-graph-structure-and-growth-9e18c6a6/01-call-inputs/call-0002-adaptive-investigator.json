@@ -1,0 +1,206 @@
+{
+  "call_id": "call-0002-adaptive-investigator",
+  "context": {
+    "assignment": {
+      "acceptance_condition": "Answer contains: proved T1-T3 with explicit constants (O(H) bound, two-sided depth relation); proved dichotomy (i)-(iii); and either the full sublinear bound N(H)=O(H^rho), rho=log3/log11 with an explicit or effective constant (rq1 Outcome A), or a precisely stated proved partial result plus labeled conjecture with the exact gap; total under 700 words.",
+      "demand_ids": [
+        "D4",
+        "D6"
+      ],
+      "id": "work:004-upper-depth-v3",
+      "objective": "D4+D6+rq1: Prove the strongest rigorous upper bound for N(H) and the two-sided depth-vs-log-H relation for the rooted tree of sorted solutions of a^2+b^2+c^2+d^2=4abcd. REQUIRED SKELETON (terse lemma-proof, HARD CAP 700 words, no tables, no digressions): Restate in one line each, citing as proved: mutation at max d strictly lowers d; mutations at a,b,c raise max to >= (4ab-1)d >= 3d; quotient graph is a tree rooted at (1,1,1,1); every vertex has <= 3 children, root has 1. (T1, depth upper) d >= 3^depth so depth <= log_3 d. (T2, crude upper) N(H) <= sum_{k<=log_3 H} 3^k <= (3H-1)/2 = O(H), explicit constant. (T3, depth lower) child max <= 4 d^3, so inductively log2(max at depth k) <= 3^k - 1, giving depth >= log_3(log2 d + 1); state the two-sided relation log_3(log_2 d+1) <= depth <= log_3 d. (T4, rq1 dichotomy — the main sharpening) Prove: (i) a=b=1 forces the vertex onto the chain: (1,1,c,d) satisfies c^2+d^2+2=4cd, and by the same descent argument all its solutions form the single chain v_0=(1,1,1,1), v_1=(1,1,1,3), v_{j+1}=(1,1,d_j,4d_j-c_j); chain ratio tends to 2+sqrt(3), so #chain vertices with d<=H is <= log_{2+sqrt3}(H)+O(1) = O(log H). (ii) Along any child-path (height-increasing), the product ab of the two smallest coordinates is nondecreasing (mutating a,b,or c replaces one of them by a larger value; check the three cases in one line each). (iii) The unique off-chain child of chain vertex v_j (j>=2, i.e. c_j>=3) is u_j=(1,c_j,d_j,4c_jd_j-1) with max m_j=4c_jd_j-1 >= 3 d_j; it has ab=c_j>=3, so by (ii) every descendant edge multiplies the max by >= 4*3-1=11. (iv) Subtree of u_j down to max<=H has depth <= log_{11}(H/m_j) and <= 3 children per vertex, hence size <= (3/2)*(H/m_j)^rho with rho=log 3/log 11 (=ln3/ln11, approx 0.458 < 1/2). (v) Sum over j>=2: since d_j >= 11(2+sqrt3)^{j-2}, sum_j m_j^{-rho} converges to an explicit constant; conclude N(H) <= C*H^rho + O(log H) with rho=log3/log11, i.e. N(H)=O(H^rho) sublinear — state C explicitly if cheap, else as an effective constant. If any step resists, prove what holds and label the rest CONJECTURE with the exact gap. STRICT BREVITY: symbol-dense lemma-proof style; omit prose motivation entirely.",
+      "rationale": "D4 and D6 failed twice on output length; this packet supplies the complete proof skeleton (including the rq1 dichotomy that yields the sublinear exponent rho=log3/log11) so the investigator only verifies and compacts. Coupling rq1 here is exact: rq1 asks precisely for the slow/fast dichotomy that upgrades the O(H) bound.",
+      "tags": [
+        "method",
+        "measurement",
+        "constraint",
+        "synthesis"
+      ],
+      "target_question_ids": [
+        "question:demand:D4",
+        "question:demand:D6",
+        "question:raised:e19298af7323:rq1"
+      ]
+    },
+    "available_experiments": [
+      {
+        "argument_schema": {
+          "source_id": "string"
+        },
+        "description": "Deterministically count lines, words, characters, and unique lexical tokens in one source material or snapshotted workspace file.",
+        "executes_workspace_code": false,
+        "name": "text_statistics"
+      }
+    ],
+    "constraints": [
+      "C1: First-principles, self-contained treatment only: there is no external paper corpus, and a literature survey is explicitly not wanted (raw request; decision 1).",
+      "C2: No code execution or external corpus may be exposed in this run; any finite enumeration must give explicit bounds and a reproducible, hand-checkable procedure (decision 5).",
+      "C3: 'Height-decreasing' means strictly decreasing the maximum coordinate d, matching the cutoff in N(H); coordinate sum may be discussed only as an auxiliary measure (decision 4).",
+      "C4: Kimi K3 must be used for all mathematical roles; the smaller investigator model failed the preceding research stress test (decision 3).",
+      "C5: For the open asymptotic component, no predetermined growth law may be assumed; rigor and honest partial progress is the acceptance criterion (decision 6; request).",
+      "C6: Permutations are identified: vertices are sorted quadruples 1 <= a <= b <= c <= d and each mutation includes re-sorting (raw request)."
+    ],
+    "controller_feedback": [],
+    "demands": [
+      {
+        "id": "D1",
+        "rationale": "First structural claim of the request.",
+        "statement": "Prove or refute, with a complete proof or a verified counterexample: every solution in S is connected to (1,1,1,1) by a path of Vieta mutations."
+      },
+      {
+        "id": "D2",
+        "rationale": "Second structural claim; height semantics fixed by decision 4.",
+        "statement": "Prove or refute: every non-root vertex has a unique height-decreasing mutation, where height-decreasing means strictly decreasing the maximum coordinate d (decision 4); coordinate sum may be used only as an auxiliary measure."
+      },
+      {
+        "id": "D3",
+        "rationale": "The request's 'hence' clause; the deduction itself must be checked.",
+        "statement": "Establish whether the quotient mutation graph is a rooted tree as a consequence of D1 and D2 — and if any of D1-D3 fails, exhibit and verify the failure structure (disconnected component, cycle, or multiple parents)."
+      },
+      {
+        "id": "D4",
+        "rationale": "Open asymptotic component, upper side.",
+        "statement": "Prove the strongest rigorous upper growth bound attainable for N(H), the number of sorted solutions with maximum coordinate at most H."
+      },
+      {
+        "id": "D5",
+        "rationale": "Open asymptotic component, lower side; independent obligation from D4.",
+        "statement": "Prove the strongest rigorous lower growth bound attainable for N(H)."
+      },
+      {
+        "id": "D6",
+        "rationale": "Explicit request item bridging the structural and asymptotic parts.",
+        "statement": "Analyze rigorously how mutation depth (distance from the root, when well-defined) relates to log H."
+      },
+      {
+        "id": "D7",
+        "rationale": "Explicit request item; protects against premature proof commitment (decision 2).",
+        "statement": "Actively search for and report exceptional small solutions, hidden cycles, vertices with multiple parents, and failure modes in any proposed induction; include counterexamples or sanity checks."
+      },
+      {
+        "id": "D8",
+        "rationale": "Explicit request item; no literature survey.",
+        "statement": "Generate and attack intermediate conjectures; formulate sharper asymptotic conjectures only when supported by explicit reasoning, and keep speculation strictly separated from proved results."
+      },
+      {
+        "id": "D9",
+        "rationale": "Explicit request item strengthened by decision 5.",
+        "statement": "Label every computational or hand-enumerated observation, stating explicit enumeration bounds and a reproducible, hand-checkable procedure."
+      },
+      {
+        "id": "D10",
+        "rationale": "Deliverable specification and acceptance posture from the request and decision 6.",
+        "statement": "Produce a self-contained research memorandum with definitions, proved lemmas/theorems, counterexamples or sanity checks, quantitative bounds, conjectures, and the most informative next mathematical step; a meaningful partial result with clear obstructions is preferable to any pretense of settling an unproved asymptotic."
+      }
+    ],
+    "knowledge_summary": {
+      "answer_count": 9,
+      "contradicted_question_count": 0,
+      "focus_question_ids": [
+        "question:raised:e19298af7323:rq1",
+        "question:demand:D10",
+        "question:demand:D8",
+        "question:work:004-exception-search-v3",
+        "question:work:004-lower-bound-v3",
+        "question:work:004-upper-depth-v3"
+      ],
+      "link_count": 75,
+      "question_count": 24,
+      "snapshot_sha256": "155fda6789134df12fb1e7d920cbac0b109504dec919ee6a4b3a1565bda6740a",
+      "snapshot_version": 108,
+      "unanswered_question_count": 6
+    },
+    "max_parallel_investigations": 4,
+    "max_query_results": 10,
+    "max_source_chunk_chars": 8000,
+    "product_intent": "This run tests mathematical discovery and proof, not research composition: the memorandum exists to establish from first principles, with complete proofs, what is true about the Markov-Hurwitz n=4 mutation graph and the growth of solution counts N(H), with theorems cleanly separated from labeled, reproducible observations and from conjecture. Honest partial progress with clearly stated obstructions — and no assumed growth law — is the explicit acceptance standard, so the product's value lies in rigor and in identifying the most informative next mathematical step.",
+    "recent_actions": [
+      {
+        "account": "Step 1 with an empty knowledge state (0 answers, 11 open questions, 7 steps left, 4 parallel slots). The structural core (D1-D3), the upper bound with the depth-vs-log-H relation (D4+D6), the lower bound (D5), and the active exception search (D7, also feeding D9 labeling) are four genuinely independent first-principles threads: each can be completed from the stable definitions SC1-SC6 alone, re-deriving any elementary descent or growth lemmas it needs, so a frozen parallel wave is appropriate. D4 and D6 are coupled because the depth-height relation is precisely the engine of the strongest tree-counting upper bound, so they are kept together rather than split across the wave. D8 (conjecture generation) and D10 (memorandum) depend on these results and are deferred to later steps; no experiment adapter (only text_statistics) is relevant to this mathematical task. The elementary descent facts (non-root implies d^2 > a^2+b^2+c^2 via a mod-3 Pell obstruction, c=d only at the root, child max at least 3x parent max) appear provable, so I commit the full structural investigation now rather than scouting first.",
+        "action_id": "action:001",
+        "input_entry_ids": [
+          "question:demand:D1",
+          "question:demand:D2",
+          "question:demand:D3",
+          "question:demand:D4",
+          "question:demand:D6",
+          "question:demand:D5",
+          "question:demand:D7"
+        ],
+        "kind": "investigate",
+        "output_entry_ids": [
+          "answer:work:001-exception-search",
+          "answer:work:001-lower-bound",
+          "answer:work:001-struct-core",
+          "answer:work:001-upper-bound-depth",
+          "question:work:001-exception-search",
+          "question:work:001-lower-bound",
+          "question:work:001-struct-core",
+          "question:work:001-upper-bound-depth"
+        ]
+      },
+      {
+        "account": "Step 2: the wave from action:001 returned four answers covering D1-D7. Before choosing the next action I must inspect the actual posterior state: read the four answers' content, check which of the 15 questions remain unanswered, and see whether the structural proof, bounds, and exception search actually closed their demands or raised new questions. Querying in parallel.",
+        "action_id": "action:002",
+        "input_entry_ids": [
+          "question:root"
+        ],
+        "kind": "investigate",
+        "output_entry_ids": [
+          "answer:work:002-noop",
+          "question:work:002-noop"
+        ]
+      },
+      {
+        "account": "Inspection of the posterior state shows all four investigations from action:001 failed before producing any evidence (UnexpectedModelBehavior: Exceeded maximum output retries (2); zero claims, sufficiency=blocked). The only unanswered questions are D8 and D10, which depend on D1-D7/D9 and cannot start. The failure mode is output overruns, so I re-issue the same four genuinely independent threads (each rests only on stable definitions SC1-SC6 and re-derives its own lemmas) with tightened acceptance conditions, explicit brevity directives, and sharper proof-route guidance (e.g., a cleaner descent argument: d' >= d forces 2ab <= 3, hence a=b=1, d <= 3c/2, then c=1 and the root) to shorten search and output. D4+D6 stay coupled (same per-edge growth engine); D5 (constructive lower bounds) and D7/D9 (bounded hand enumeration) remain independent of the structural proof and of each other. D8/D10 are deferred to the remaining steps after evidence lands.",
+        "action_id": "action:003",
+        "input_entry_ids": [
+          "question:work:001-struct-core",
+          "question:demand:D1",
+          "question:demand:D2",
+          "question:demand:D3",
+          "question:work:001-upper-bound-depth",
+          "question:demand:D4",
+          "question:demand:D6",
+          "question:work:001-lower-bound",
+          "question:demand:D5",
+          "question:work:001-exception-search",
+          "question:demand:D7",
+          "question:demand:D9"
+        ],
+        "kind": "investigate",
+        "output_entry_ids": [
+          "answer:work:003-exception-search-v2",
+          "answer:work:003-lower-bound-v2",
+          "answer:work:003-struct-core-v2",
+          "answer:work:003-upper-depth-v2",
+          "question:raised:e19298af7323:rq1",
+          "question:work:003-exception-search-v2",
+          "question:work:003-lower-bound-v2",
+          "question:work:003-struct-core-v2",
+          "question:work:003-upper-depth-v2"
+        ]
+      }
+    ],
+    "remaining_steps": 5,
+    "remaining_work_items": 2,
+    "role": "investigator",
+    "selected_packets": [],
+    "stable_context": [
+      "SC1: S is the set of sorted positive-integer quadruples (a,b,c,d), 1 <= a <= b <= c <= d, satisfying a^2+b^2+c^2+d^2 = 4abcd (raw request).",
+      "SC2: A Vieta mutation replaces one coordinate x_i by 4 times the product of the other three coordinates minus x_i, followed by sorting; permutations are identified (raw request).",
+      "SC3: The request designates (1,1,1,1) as the root; substitution gives 4 = 4, so it lies in S.",
+      "SC4: N(H) denotes the number of sorted solutions with maximum coordinate at most H (raw request).",
+      "SC5: Directly from SC1-SC2: mutating (1,1,1,1) at any coordinate gives 3, and (1,1,1,3) satisfies the equation (1+1+1+9 = 12 = 4*3), so the root has at least one neighbor; such immediate arithmetic may seed sanity checks but must be labeled as observation in the memo (inferred from stated definitions).",
+      "SC6: The materials list is empty: no external artifacts, papers, or data accompany this run (source envelope)."
+    ],
+    "step": 4,
+    "task": "Investigate the mutation graph of sorted positive-integer solutions of a^2+b^2+c^2+d^2 = 4abcd under Vieta mutation. First prove or refute the structural claims — connectivity of every solution to (1,1,1,1), uniqueness of a height-decreasing mutation at every non-root vertex, and the consequent rooted-tree structure of the quotient graph — then pursue the open asymptotic part: strongest attainable rigorous upper and lower bounds for N(H), the relation between mutation depth and log H, an active search for exceptional small solutions, hidden cycles, multiple parents, and induction failure modes, and sharply separated conjectures. Deliver a self-contained research memorandum.",
+    "title": "Markov-Hurwitz equation a^2+b^2+c^2+d^2=4abcd: Vieta-mutation graph structure and growth of N(H)",
+    "workspace_index": []
+  },
+  "dependency_type": "AdaptiveDeps",
+  "input_sha256": "941f3e3a9f0082bb3b212e0733102579a06f1c6efb2f9e80199cc6b4bde32307",
+  "model": "fireworks:accounts/fireworks/models/kimi-k3",
+  "role": "adaptive_investigator"
+}

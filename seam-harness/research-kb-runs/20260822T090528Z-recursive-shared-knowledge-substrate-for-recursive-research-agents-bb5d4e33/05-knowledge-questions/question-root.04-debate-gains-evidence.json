@@ -1,0 +1,19 @@
+{
+  "acceptance_condition": "Returns (a) at least four anchored findings from the Du file covering claimed gains, experimental setup (agents, rounds, tasks, consensus mechanism), and stated limitations, each carrying the file-relative citation and the exact `===== PDF PAGE N =====` marker(s), and (b) at least two design constraints and one evaluation-replication requirement, each explicitly labeled as design inference.",
+  "content_sha256": "2be78886a3947f382843991a648c9946b59844f7afbc180ae5d035bf173143b2",
+  "demand_ids": [
+    "D4",
+    "D11",
+    "D12",
+    "D13",
+    "D14"
+  ],
+  "id": "question:root.04-debate-gains-evidence",
+  "node_id": "root.04-debate-gains-evidence",
+  "rationale": "Du et al. 2023 is the corpus's positive evidence for multi-agent debate; it grounds one side of the required reconciliation (D11), informs the baseline comparison (D4), and defines the replication arm of the evaluation plan (D14).",
+  "tags": [
+    "evidence",
+    "measurement"
+  ],
+  "text": "Read papers/text/du-et-al-2023-multiagent-debate.txt and extract, each anchored to the exact `===== PDF PAGE N =====` marker(s): the improvements in factuality and reasoning the paper claims for multiagent debate, the experimental setup (number of agents, number of debate rounds, tasks used, and how consensus or a final answer is reached), and any limitations the authors state. Then derive, each explicitly labeled as design inference: which debate behaviors a shared question/answer substrate must capture to retain these gains, and what an evaluation condition replicating the paper's setup would require."
+}

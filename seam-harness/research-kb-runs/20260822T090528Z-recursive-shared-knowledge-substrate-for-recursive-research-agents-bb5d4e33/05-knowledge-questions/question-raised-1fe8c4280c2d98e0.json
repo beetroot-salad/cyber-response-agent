@@ -1,0 +1,13 @@
+{
+  "acceptance_condition": "Resolve the observation with grounded evidence.",
+  "content_sha256": "03926e3918654f876b5bb02e1340153c075821cb224097e6ee415dde3f70c6a3",
+  "demand_ids": [],
+  "id": "question:raised:1fe8c4280c2d98e0",
+  "node_id": "root.05-debate-nulls-boundaries.01-c1-smit-null-results.02-smit-extract-benchmarks#raised",
+  "rationale": "An answer identified a discriminating next observation.",
+  "tags": [
+    "uncertainty",
+    "evidence"
+  ],
+  "text": "Consider extracting from the same file the specific hyperparameters for the best configurations that produced Table 2 numbers, if needed for matched-compute planning."
+}

@@ -1,0 +1,54 @@
+{
+  "call_id": "call-0014-frontier-researcher",
+  "context": {
+    "ancestor_decisions": [
+      "Problem statement: count quadruples of positive integers x ≤ y ≤ z ≤ w with 1/x + 1/y + 1/z + 1/w = 1/2.",
+      "The deliverable is a mathematical document (proof plus table), not a program; a reader must be able to audit and reproduce the count unaided.",
+      "A factor-pair / divisor-enumeration lemma for the final two denominators z and w is explicitly welcomed by the requester, but phrased as optional ('is welcome').",
+      "Problem statement: count quadruples of positive integers x <= y <= z <= w with 1/x + 1/y + 1/z + 1/w = 1/2.",
+      "Claimed bounds to stress-test: 3 <= x <= 8; y-intervals [7,18] for x=3, [5,12] for x=4, [5,10] for x=5, [6,9] for x=6, [7,8] for x=7, {8} for x=8; z-interval max(y, floor(1/R)+1) <= z <= floor(2/R).",
+      "Exact arithmetic only; no floating-point approximation or unverified numeric claims."
+    ],
+    "assigned_demands": [],
+    "constraints": [
+      "Variables are positive integers with x ≤ y ≤ z ≤ w.",
+      "The equation must equal exactly 1/2.",
+      "The proof must be self-contained and must demonstrate completeness (via derived finite bounds), not cite or rely on an opaque computation.",
+      "Exact arithmetic only; no approximate numerical methods.",
+      "The table must cover every feasible pair (x,y), not just a sample."
+    ],
+    "node": {
+      "acceptance_condition": "Each cell is decided exactly: the solution set is listed (or shown empty) with a full residue congruence computation using reduced a/b and all factor pairs; no floating point is used.",
+      "demand_ids": [],
+      "depth": 2,
+      "expected_contribution": "Exact verification of four edge cells, including the residue solution for each nonempty case.",
+      "id": "root.04-completeness-audit.03-edge-cells",
+      "objective": "Hand-verify with exact arithmetic and full residue computation the four named edge cells: (x,y)=(8,8) has unique solution (8,8,8,8); (3,18) yields (3,18,18,18); (7,7) yields exactly one solution with w=14; (7,8) yields zero solutions.",
+      "parent_id": "root.04-completeness-audit",
+      "rationale": "These boundary cells are the most likely places for off-by-one or filtering errors; explicit hand-checking supplies the counterargument evidence demanded by D2.",
+      "separator_facts": [
+        "Problem statement: count quadruples of positive integers x ≤ y ≤ z ≤ w with 1/x + 1/y + 1/z + 1/w = 1/2.",
+        "The deliverable is a mathematical document (proof plus table), not a program; a reader must be able to audit and reproduce the count unaided.",
+        "A factor-pair / divisor-enumeration lemma for the final two denominators z and w is explicitly welcomed by the requester, but phrased as optional ('is welcome').",
+        "Problem statement: count quadruples of positive integers x <= y <= z <= w with 1/x + 1/y + 1/z + 1/w = 1/2.",
+        "Claimed bounds to stress-test: 3 <= x <= 8; y-intervals [7,18] for x=3, [5,12] for x=4, [5,10] for x=5, [6,9] for x=6, [7,8] for x=7, {8} for x=8; z-interval max(y, floor(1/R)+1) <= z <= floor(2/R).",
+        "Exact arithmetic only; no floating-point approximation or unverified numeric claims."
+      ],
+      "source_ids": [],
+      "source_paths": []
+    },
+    "product_intent": "A self-contained, auditable mathematical enumeration document: it states the exact count and enables a reader to verify and reproduce that count by hand-checkable reasoning — derived finite bounds, exact arithmetic, and a complete table — without trusting a brute-force program.",
+    "source_materials": [],
+    "stable_context": [
+      "Problem statement: count quadruples of positive integers x ≤ y ≤ z ≤ w with 1/x + 1/y + 1/z + 1/w = 1/2.",
+      "The deliverable is a mathematical document (proof plus table), not a program; a reader must be able to audit and reproduce the count unaided.",
+      "A factor-pair / divisor-enumeration lemma for the final two denominators z and w is explicitly welcomed by the requester, but phrased as optional ('is welcome')."
+    ],
+    "stop_reason": null,
+    "workspace_documents": []
+  },
+  "dependency_type": "ResearchDeps",
+  "input_sha256": "fac9106fbce2f380e9b0d2503f98ebdcdaedd0ca1695f13ee37664e89028582a",
+  "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+  "role": "frontier_researcher"
+}

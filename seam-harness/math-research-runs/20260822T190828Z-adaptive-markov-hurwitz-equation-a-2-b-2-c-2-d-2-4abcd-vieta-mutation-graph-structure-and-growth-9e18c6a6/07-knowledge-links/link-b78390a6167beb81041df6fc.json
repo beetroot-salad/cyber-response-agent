@@ -1,0 +1,10 @@
+{
+  "content_sha256": "b78390a6167beb81041df6fcfd7aa77f9072780a4cdb60675f8b827ff90a1db5",
+  "id": "link:b78390a6167beb81041df6fc",
+  "origin": "runtime",
+  "proposed_by_node_id": null,
+  "rationale": null,
+  "relation": "refines",
+  "source_id": "question:work:001-upper-bound-depth",
+  "target_id": "question:demand:D4"
+}

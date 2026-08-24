@@ -1,0 +1,27 @@
+{
+  "claim_ids": [
+    "work:002-inv-dung-r2:C001",
+    "work:002-inv-dung-r2:C002",
+    "work:002-inv-dung-r2:C003",
+    "work:002-inv-dung-r2:C004",
+    "work:002-inv-dung-r2:C005",
+    "work:002-inv-dung-r2:C006"
+  ],
+  "content_sha256": "87969e3a276cc2416e6d45df89706ee79af74c05098c9de2c797bbcefd6cbabb",
+  "id": "answer:work:002-inv-dung-r2",
+  "node_id": "work:002-inv-dung-r2",
+  "packet_id": "packet:work:002-inv-dung-r2",
+  "sufficiency": "ready_to_synthesize",
+  "summary": "Dung 1995 supplies exactly the formal vocabulary for the 'synthesis competence' node: an argumentation framework AF = (AR, attacks) treats answers as abstract atoms linked by a binary attack relation, with no internal structure, weight, or truth value. Admissibility (a conflict-free set that defends every member against all attackers) is the core rationality constraint; on top of it Dung defines a lattice of semantics with different guarantees: preferred extensions (maximal admissible sets; always at least one exists, but symmetric conflicts like the Nixon diamond yield several, so credulous justification is non-unique), stable extensions (conflict-free sets attacking every outside argument; strictly stronger than preferred and may fail to exist at all), and the grounded extension (least fixed point of the characteristic function F_AF(S) = {A | A acceptable wrt S}; always unique, but can be empty — the skeptical adjudicator may justifiably endorse nothing when two agent answers attack each other symmetrically). Complete extensions bridge the two: every preferred extension is complete, and the grounded extension is the least complete one. The key coincidence result for adjudication design: well-founded frameworks (no infinite attack chains) have exactly one extension that is simultaneously grounded, preferred, and stable — the formal condition under which conflict adjudication is unambiguous. Equally important for the note: the framework deliberately does NOT model evidential weight, attack strength, truth, or probabilistic confidence — Dung himself lists differentiating attack strength as necessary future work. Consequence for the research problem: Dung-style adjudication can tell a synthesizer which set of conflicting agent answers is defensible, but it cannot break symmetric ties (two mutually attacking answers produce two preferred extensions and an empty grounded one); whatever breaks the tie — retrieval of external evidence, in our mechanism — is precisely what the formalism lacks and what retrieval-mediated Q/A supplies. The wave-1 combined Dung+Shapiro packet failed with zero evidence (blocked, 'Exceeded maximum output retries'), so this packet is the sole source for the Dung half.",
+  "tags": [
+    "definition",
+    "method",
+    "counterexample",
+    "uncertainty"
+  ],
+  "unresolved": [
+    "How to operationalize admissibility/grounded-extension computation inside an LLM synthesizer prompt for the preregistered experiment (D7) — the formalism specifies what is justified, not an algorithm an LLM can reliably execute; a computational check (e.g., encoding the debate graph and computing GE externally) is a design decision for the synthesis phase.",
+    "Whether any of the three empirical debate papers (Du 2023, Smit 2023, Zhang 2025) implement aggregation protocols isomorphic to any Dung semantics — cross-referencing belongs to the synthesis phase once all extraction packets are in.",
+    "Runtime rejected knowledge-link proposal outside the frozen board or with invalid endpoint types: self refines question:work:001-inv-formal-tools"
+  ]
+}

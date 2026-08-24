@@ -1,0 +1,18 @@
+{
+  "claim_ids": [],
+  "content_sha256": "295f11723910533837c996b233ea7eed8425846de93f741b8188fa9137594497",
+  "id": "answer:work:001-lower-bound",
+  "node_id": "work:001-lower-bound",
+  "packet_id": "packet:work:001-lower-bound",
+  "sufficiency": "blocked",
+  "summary": "Investigation failed before producing evidence: UnexpectedModelBehavior: Exceeded maximum output retries (2)",
+  "tags": [
+    "method",
+    "evidence",
+    "measurement",
+    "uncertainty"
+  ],
+  "unresolved": [
+    "Investigation failed before producing evidence: UnexpectedModelBehavior: Exceeded maximum output retries (2)"
+  ]
+}

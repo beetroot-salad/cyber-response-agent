@@ -1,0 +1,13 @@
+{
+  "packet_ids": [
+    "packet:root.03-enum-x34",
+    "packet:root.04-enum-x5678",
+    "packet:root.01-bounds",
+    "packet:root.02-lemma.01-child-a-bijection-proof",
+    "packet:root.02-lemma.02-child-b-counting-formula",
+    "packet:root.02-lemma.03-child-c-validation-example",
+    "packet:root.02-lemma"
+  ],
+  "root_plan_sha256": "78de6de2c059bd384f8dfef88bce147709ef231502a025682ab2a6b37b1fb301",
+  "source_run": "/workspace/seam-harness/harder-grounded-runs/20260821T165642Z-recursive-four-unit-fractions-summing-to-one-half-ea145f99"
+}

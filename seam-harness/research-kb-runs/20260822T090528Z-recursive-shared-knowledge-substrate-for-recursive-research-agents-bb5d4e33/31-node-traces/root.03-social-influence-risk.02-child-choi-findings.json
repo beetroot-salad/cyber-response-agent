@@ -1,0 +1,11 @@
+{
+  "child_ids": [],
+  "depth": 2,
+  "effective_disposition": "solve",
+  "node_id": "root.03-social-influence-risk.02-child-choi-findings",
+  "packet_id": "packet:root.03-social-influence-risk.02-child-choi-findings",
+  "packet_sha256": "f557a7575d9c1745e571bd58a76b287a42a469c72e6d5f7f439f04ed68a00b64",
+  "parent_id": "root.03-social-influence-risk",
+  "proposed_disposition": "solve",
+  "stop_reason": null
+}

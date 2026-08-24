@@ -1,0 +1,10 @@
+{
+  "content_sha256": "02a1a658880b812fc2bd1975135c4d26f60aa6c143779c1d5f01fcc54b6209be",
+  "id": "link:02a1a658880b812fc2bd1975",
+  "origin": "runtime",
+  "proposed_by_node_id": null,
+  "rationale": null,
+  "relation": "partially_answers",
+  "source_id": "answer:work:005-exception-search-v4",
+  "target_id": "question:demand:D9"
+}

@@ -1,0 +1,23 @@
+{
+  "account": "The dossier already contains every referent needed for a bounded, elementary proof task: the equation, the ordering convention x <= y <= z, the exact arithmetic requirement, and an explicit candidate list. I will solve this node directly rather than expanding it. The proof proceeds by bounding x, reducing each fixed x to a two-variable unit-fraction equation, proving the clearing-and-factoring correspondence is bijective, and then performing exact common-denominator substitution for every listed candidate. Note that the objective says 'nine' candidate triples but actually enumerates ten: (3,7,42), (3,8,24), (3,9,18), (3,10,15), (3,12,12), (4,5,20), (4,6,12), (4,8,8), (5,5,10), (6,6,6). I will treat the explicit list as authoritative, verify all ten exactly, and report the count discrepancy explicitly.",
+  "children": [],
+  "decidability": {
+    "acceptance_mechanical": true,
+    "account": "No additional source material is required. The solution is a finite elementary number-theoretic argument: bound x, reduce each fixed x to 1/y + 1/z = (x-2)/(2x), prove the factor-pair correspondence is a bijection, enumerate qualifying factor pairs by exact divisor checks, and verify each explicit candidate by exact substitution. No future sibling output is needed.",
+    "context_complete": true,
+    "grounded_referents": [
+      "1/x + 1/y + 1/z = 1/2",
+      "normalization x <= y <= z",
+      "exact arithmetic requirement",
+      "transformation (r y - s)(r z - s) = s^2 for r/s = 1/2 - 1/x",
+      "explicit candidate triple list"
+    ],
+    "independent_of_future_siblings": true,
+    "missing_context": []
+  },
+  "disposition": "solve",
+  "irreducible_core": null,
+  "requested_source_ids": [],
+  "requested_source_paths": [],
+  "synthesis_contract": null
+}

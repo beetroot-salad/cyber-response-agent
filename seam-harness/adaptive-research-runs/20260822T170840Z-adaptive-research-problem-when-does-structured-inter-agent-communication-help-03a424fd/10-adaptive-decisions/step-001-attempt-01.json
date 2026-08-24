@@ -1,0 +1,125 @@
+{
+  "account": "No answers exist yet and all nine demand questions are open. The thesis (D2), causal model (D3), reconciliation (D4), predictions (D5), limits (D6), and experiment (D7) all bottleneck on precise extraction of what each of the seven papers actually reports, with PDF page markers for later citation. Quick source probes confirm the corpus splits into positive debate evidence (Du 2023), skeptical re-evaluations (Smit 2023, Zhang 2025), social-influence/conformity mechanism evidence (Lorenz 2011, Choi 2025), and formal aggregation theory (Dung 1995, Shapiro 2011). These are six genuinely independent read-and-report tasks over disjoint files, so one frozen parallel wave maximizes expected information value this step; synthesis and thesis formation must wait for these results.",
+  "action": {
+    "investigations": [
+      {
+        "acceptance_condition": "A structured report covering (a)-(f) with specific numeric results and explicit PDF page markers from papers/text/du-et-al-2023-multiagent-debate.txt, clearly separating what the paper reports from the extractor's inferences.",
+        "demand_ids": [
+          "D4",
+          "D2"
+        ],
+        "independence_account": "Reads only papers/text/du-et-al-2023-multiagent-debate.txt; needs no result from any peer investigation.",
+        "local_id": "W1-du2023",
+        "question": "What exactly does Du et al. 2023 'Improving Factuality and Reasoning in Language Models through Multiagent Debate' claim and show? Extract: (a) tasks and datasets; (b) all baselines (single agent, reflection, majority voting) and whether total inference compute (agents x rounds x tokens) is matched across conditions; (c) headline quantitative results with numbers; (d) the consensus/convergence and 'ease of persuasion' analyses; (e) effects of agent count, rounds, and summarization; (f) stated limitations. Record every claim with its explicit ===== PDF PAGE N ===== marker.",
+        "rationale": "This is the corpus's central positive result for open-transcript-style debate; the note must represent it precisely, including its unmatched-compute baseline structure, before reconciling it with skeptical replications.",
+        "tags": [
+          "evidence",
+          "method",
+          "measurement"
+        ],
+        "target_question_ids": [
+          "question:demand:D4"
+        ]
+      },
+      {
+        "acceptance_condition": "A structured report covering (a)-(e) with numeric win/tie/lose rates, baseline definitions, and explicit PDF page markers from papers/text/zhang-et-al-2025-mad-question.txt, separating reported findings from the paper's conjectures.",
+        "demand_ids": [
+          "D4",
+          "D6"
+        ],
+        "independence_account": "Reads only papers/text/zhang-et-al-2025-mad-question.txt; needs no result from any peer investigation.",
+        "local_id": "W1-zhang2025",
+        "question": "What does Zhang et al. 2025 'If Multi-Agent Debate Is the Answer, What Is the Question?' find? Extract: (a) which MAD frameworks and which single-agent baselines (CoT, self-consistency) are compared and how compute or cost is accounted for; (b) the win/tie/lose results versus CoT with numbers; (c) task-type moderators (math vs programming vs knowledge tasks); (d) the paper's taxonomy of which questions or task conditions MAD is suited to; (e) acknowledged limitations and threats to validity. Record every claim with its explicit ===== PDF PAGE N ===== marker.",
+        "rationale": "This position paper directly conflicts with Du 2023 by finding MAD typically underperforms simple CoT; its task-moderator analysis is raw material for the causal model's task-topology variable and for demand D4's reconciliation.",
+        "tags": [
+          "evidence",
+          "counterexample",
+          "method"
+        ],
+        "target_question_ids": [
+          "question:demand:D4"
+        ]
+      },
+      {
+        "acceptance_condition": "A structured report covering (a)-(e) with numeric comparisons and explicit PDF page markers from papers/text/smit-et-al-2023-going-mad.txt, distinguishing reported findings from the extractor's inferences.",
+        "demand_ids": [
+          "D4",
+          "D6"
+        ],
+        "independence_account": "Reads only papers/text/smit-et-al-2023-going-mad.txt; needs no result from any peer investigation.",
+        "local_id": "W1-smit2023",
+        "question": "What does Smit et al. 2023 'Should We Be Going MAD? A Look at Multi-Agent Debate Strategies for LLMs' find? Extract: (a) the debate strategies and ensemble baselines compared and the domain scope; (b) whether debate reliably outperforms other ensembling strategies, with numeric results; (c) any compute or cost comparison across methods; (d) prompt-sensitivity or implementation findings; (e) stated limitations and generalizability caveats. Record every claim with its explicit ===== PDF PAGE N ===== marker.",
+        "rationale": "Second skeptical/null source: needed to avoid resolving the Du-versus-critics conflict by cherry-picking; its medical-domain scope is itself evidence about task-topology moderation relevant to D4 and D6.",
+        "tags": [
+          "evidence",
+          "counterexample",
+          "uncertainty"
+        ],
+        "target_question_ids": [
+          "question:demand:D4"
+        ]
+      },
+      {
+        "acceptance_condition": "A structured report covering (a)-(d) with effect directions and statistics and explicit PDF page markers from papers/text/lorenz-et-al-2011-social-influence.txt.",
+        "demand_ids": [
+          "D3",
+          "D4"
+        ],
+        "independence_account": "Reads only papers/text/lorenz-et-al-2011-social-influence.txt; needs no result from any peer investigation.",
+        "local_id": "W1-lorenz2011",
+        "question": "What does Lorenz et al. 2011 'How Social Influence Can Undermine the Wisdom of Crowd Effect' establish? Extract: (a) experimental design (estimation tasks, subjects, information conditions: no information, aggregate information, full information); (b) the quantified effects of social influence on accuracy, on diversity/range reduction, and on confidence, with numbers; (c) the mechanism by which social influence narrows diversity without improving collective accuracy; (d) conditions under which influence helped versus hurt. Record every claim with its explicit ===== PDF PAGE N ===== marker.",
+        "rationale": "This is the causal-mechanism keystone for the 'open shared transcript destroys diversity' pathway in the D3 causal model; it is human evidence, so it must be flagged as cross-domain inference when applied to LLM agents.",
+        "tags": [
+          "evidence",
+          "method",
+          "measurement"
+        ],
+        "target_question_ids": [
+          "question:demand:D3",
+          "question:demand:D4"
+        ]
+      },
+      {
+        "acceptance_condition": "A structured report covering (a)-(e) with quantitative results and explicit PDF page markers from papers/text/choi-et-al-2025-conformity.txt, distinguishing reported findings from inference.",
+        "demand_ids": [
+          "D3",
+          "D4"
+        ],
+        "independence_account": "Reads only papers/text/choi-et-al-2025-conformity.txt; needs no result from any peer investigation.",
+        "local_id": "W1-choi2025",
+        "question": "What does Choi et al. 2025 (conformity paper) establish about conformity in LLM agent groups? Extract: (a) experimental paradigm (discussion scenarios, proponent/opponent ratios such as 1:2 to 1:8, repetitions, models used); (b) headline findings on LLM conformity to majority pressure with quantitative results; (c) moderators (model provider, assigned persona, topic); (d) how conformity is measured; (e) stated limitations. Record every claim with its explicit ===== PDF PAGE N ===== marker.",
+        "rationale": "Direct LLM-domain evidence for the social-influence/conformity pathway; paired with Lorenz it grounds the claim that open transcripts induce conformity that contracts answer diversity, a load-bearing piece of the D3 causal model and the D4 reconciliation.",
+        "tags": [
+          "evidence",
+          "measurement",
+          "risk"
+        ],
+        "target_question_ids": [
+          "question:demand:D3",
+          "question:demand:D4"
+        ]
+      },
+      {
+        "acceptance_condition": "A structured report on both papers with the requested formal results, explicit PDF page markers from papers/text/dung-1995-argumentation.txt and papers/text/shapiro-et-al-2011-crdts.txt, and a short note on what each formalism can and cannot license about multi-agent answer synthesis.",
+        "demand_ids": [
+          "D3",
+          "D6"
+        ],
+        "independence_account": "Reads only the two theory files, which no peer investigation depends on or produces.",
+        "local_id": "W1-formal-theory",
+        "question": "What formal apparatus do Dung 1995 and Shapiro et al. 2011 supply for a synthesis/aggregation operator over conflicting agent outputs? From Dung 1995 extract: the abstract argumentation framework definition, admissible/preferred/grounded semantics, and how conflict among arguments is resolved without numeric confidence. From Shapiro et al. 2011 extract: CRDT definitions, state-based vs op-based convergence, the monotone semilattice join condition, and what convergence guarantees do and do not imply about the semantic quality of merged content. Record every claim with its explicit ===== PDF PAGE N ===== marker.",
+        "rationale": "The D3 causal model needs a formal grounding for 'synthesis competence' and aggregation that is not just folk intuition; Dung and Shapiro are the only theory sources and are orthogonal to the empirical papers, so they can be extracted in parallel.",
+        "tags": [
+          "definition",
+          "method",
+          "assumption"
+        ],
+        "target_question_ids": [
+          "question:demand:D3"
+        ]
+      }
+    ],
+    "kind": "investigate",
+    "wave_rationale": "All six investigations are pure extraction over disjoint source files with no sequential dependencies: none needs another's output to proceed, and together they cover the entire seven-paper corpus (six investigations, one covering both theory papers). Launching them in one frozen wave front-loads the evidentiary base so the next controller turn can synthesize the conflict map, formulate the mechanistic thesis, and derive discriminating predictions."
+  }
+}

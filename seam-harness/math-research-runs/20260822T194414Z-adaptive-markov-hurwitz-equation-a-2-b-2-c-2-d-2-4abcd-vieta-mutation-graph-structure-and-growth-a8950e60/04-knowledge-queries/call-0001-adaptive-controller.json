@@ -1,0 +1,445 @@
+{
+  "call_id": "call-0001-adaptive-controller",
+  "queries": [
+    {
+      "arguments": {
+        "entry_id": "question:raised:529a9c7e8677:rq-d5-stronger"
+      },
+      "result": {
+        "content": {
+          "acceptance_condition": "Either prove N(H)>=(log H)^{1+delta} for an explicit delta>0 with constants, or prove that along all but o(depth) levels the two-child branches have average log-growth slope 3, blocking this route.",
+          "answer_ids": [],
+          "content_sha256": "a090de72ad6e1ecd4b534dd504ac2e128d7f7dbd4c618829eefc32d826ea0707",
+          "demand_ids": [
+            "D5"
+          ],
+          "id": "question:raised:529a9c7e8677:rq-d5-stronger",
+          "node_id": "work:006-lower-bound-v5-compact#raised:rq-d5-stronger",
+          "rationale": "The binary-subtree argument is limited by the worst-case estimate child max<=4d^3, whose level-t height bound is 3^t A and yields only 2^t=(log H)^{log_3 2}; surpassing Theta(log H) requires typical, not worst-case, growth control.",
+          "tags": [
+            "method",
+            "measurement",
+            "uncertainty"
+          ],
+          "text": "Can the lower bound be pushed beyond Theta(log H)? Prove or refute that inside subtree(v2) a positive-density set of vertices has two children with average log-growth slope strictly below 3 over Omega(depth) consecutive levels, yielding N(H)>=(log H)^{1+delta} for some delta>0."
+        },
+        "id": "question:raised:529a9c7e8677:rq-d5-stronger",
+        "incoming_links": [
+          {
+            "content_sha256": "731c040c47e43dc22ffd93c7ef2b4fe55bdbaf08f2765186d1b870f5319319f5",
+            "id": "link:731c040c47e43dc22ffd93c7",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "raises",
+            "source_id": "answer:work:006-lower-bound-v5-compact",
+            "target_id": "question:raised:529a9c7e8677:rq-d5-stronger"
+          }
+        ],
+        "kind": "question",
+        "outgoing_links": [
+          {
+            "content_sha256": "485b1f2f2fcb99ae4ae3fafc61089f22887dc0c21384570a06e3168d8c04c3f2",
+            "id": "link:485b1f2f2fcb99ae4ae3fafc",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "depends_on",
+            "source_id": "question:raised:529a9c7e8677:rq-d5-stronger",
+            "target_id": "question:raised:07d805ce56d7:rq-sharp"
+          },
+          {
+            "content_sha256": "cc48608a33cf03933e6f5868dadb3de91934a4354a29a0f2e7c0abdfb038639d",
+            "id": "link:cc48608a33cf03933e6f5868",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "depends_on",
+            "source_id": "question:raised:529a9c7e8677:rq-d5-stronger",
+            "target_id": "question:demand:D5"
+          }
+        ]
+      },
+      "result_ids": [
+        "question:raised:529a9c7e8677:rq-d5-stronger"
+      ],
+      "result_sha256": "7c130e15426e4b6b2b3442621a67c6543fa5805c75df6f9e5fc7dc1fb1296932",
+      "sequence": 1,
+      "tool": "get_entry"
+    },
+    {
+      "arguments": {
+        "entry_id": "answer:work:006-lower-bound-v5-compact"
+      },
+      "result": {
+        "content": {
+          "claim_ids": [
+            "work:006-lower-bound-v5-compact:C001",
+            "work:006-lower-bound-v5-compact:C002",
+            "work:006-lower-bound-v5-compact:C003",
+            "work:006-lower-bound-v5-compact:C004"
+          ],
+          "content_sha256": "cec2e75143393dc160311f054a4461fcaf4ebaba35f1a838e31fa9f8001efca0",
+          "id": "answer:work:006-lower-bound-v5-compact",
+          "node_id": "work:006-lower-bound-v5-compact",
+          "packet": {
+            "account": "Frozen facts used: tree rooted at v0; non-root children are mutations of a,b,c; child max ≤4d³ (answer:work:003-struct-core-v2, answer:work:004-upper-depth-v3).\nL1. For j≥1, d0=1,d1=3,c_j=d_{j-1}; v0=(1,1,1,1), v_j=(1,1,c_j,d_j). Induction/mutation gives 2+c_j²+d_j²=4c_jd_j and d_{j+1}=4d_j−d_{j−1}. λ=2+√3; d_j=Aλ^j+Bλ^{−j}, A=(3+√3)/6, B=(3−√3)/6. Since A+Bλ^{−2j}≤A+B=1, d_j≤λ^j; d_j strictly increases, so N(H)≥⌊log_λH⌋+1.\nL2. Child maximum f(x)=4abcd/x−x is strictly decreasing, so distinct values among a,b,c give distinct children. If a=b=c=x, d²=x²(4xd−3), so x|d; d=kx gives k²+3=4kx², hence k|3. k=1→v0; k=3→v1=(1,1,1,3). Thus depth≥2⇒≥2 distinct children.\nL3. From v2=(1,1,3,11), A=log₂11+1. Each edge gives L+1≤3(L+1), so after t edges log₂d≤3^tA. If 3^tA≤log₂H, the 2^t level-t vertices below v2 have d≤H. Take t=⌊log₃(log₂H/A)⌋, β=log₃2=0.6309, c′=1/(2A^β)≈0.194, H≥32; then N(H)≥2^t≥c′(log₂H)^β.\nFINAL: N(H)≥max{⌊log_{2+√3}H⌋+1, c′(log₂H)^0.6309} for H≥32. Correction: the first term is asymptotically dominant (1>0.6309). CONJECTURE stronger than Θ(log H): missing positive-density branching/typical-growth lemma.",
+            "assumptions": [
+              "Vertices are sorted quadruples with permutations identified; height is the maximum coordinate d.",
+              "The structural tree/child facts are cited as frozen from answer:work:003-struct-core-v2 and answer:work:004-upper-depth-v3, not reproved here.",
+              "No blocked lower-bound answer is used as evidence."
+            ],
+            "boundary_findings": [
+              {
+                "alternative_explanation": null,
+                "consequence_if_absorbed": "The memorandum would state a false asymptotic comparison despite a correct two-term lower bound; the correction preserves the bound and separates the false dominance claim.",
+                "evidence": [
+                  "lambda=2+sqrt(3)>1 gives term Theta(log H)",
+                  "beta=log_3 2=0.6309<1"
+                ],
+                "narrative": "The assigned final-line clause asserts that the polylogarithmic term c'(log2 H)^0.6309 is asymptotically dominant, but the proved chain term is Theta(log H) and dominates it.",
+                "smallest_suspected_scope": "the dominance sentence in question:work:006-lower-bound-v5-compact"
+              }
+            ],
+            "child_packet_ids": [],
+            "claims": [
+              {
+                "basis": "inferred",
+                "citations": [],
+                "confidence": 0.99,
+                "counterevidence": [],
+                "derived_from_claim_ids": [],
+                "id": "work:006-lower-bound-v5-compact:C001",
+                "statement": "Frozen facts used without reproof: the sorted mutation graph is a tree rooted at (1,1,1,1); at a non-root the children are the distinct sorted mutations of a,b,c; every child maximum is at most 4d^3."
+              },
+              {
+                "basis": "inferred",
+                "citations": [],
+                "confidence": 0.99,
+                "counterevidence": [],
+                "derived_from_claim_ids": [
+                  "work:006-lower-bound-v5-compact:C001"
+                ],
+                "id": "work:006-lower-bound-v5-compact:C002",
+                "statement": "L1: the chain v_j=(1,1,d_{j-1},d_j), d0=1,d1=3,d_{j+1}=4d_j-d_{j-1}, consists of distinct solutions; with lambda=2+sqrt(3), d_j=A lambda^j+B lambda^{-j}, A=(3+sqrt3)/6, B=(3-sqrt3)/6, hence d_j<=lambda^j and N(H)>=floor(log_lambda H)+1."
+              },
+              {
+                "basis": "inferred",
+                "citations": [],
+                "confidence": 0.99,
+                "counterevidence": [],
+                "derived_from_claim_ids": [
+                  "work:006-lower-bound-v5-compact:C001"
+                ],
+                "id": "work:006-lower-bound-v5-compact:C003",
+                "statement": "L2: every vertex at depth at least 2 has at least two distinct children: f(x)=4abcd/x-x is strictly decreasing, and the equal case a=b=c=x forces x|d, d=kx, k^2+3=4kx^2, k|3, giving only the root or (1,1,1,3)."
+              },
+              {
+                "basis": "inferred",
+                "citations": [],
+                "confidence": 0.98,
+                "counterevidence": [
+                  "The assignment's clause that the (log H)^0.6309 term is asymptotically dominant is false: it is o(log H)."
+                ],
+                "derived_from_claim_ids": [
+                  "work:006-lower-bound-v5-compact:C001",
+                  "work:006-lower-bound-v5-compact:C002",
+                  "work:006-lower-bound-v5-compact:C003"
+                ],
+                "id": "work:006-lower-bound-v5-compact:C004",
+                "statement": "L3 and final bound: below v2=(1,1,3,11), with A=log2(11)+1, after t edges log2 d<=3^t A; for t=floor(log_3(log2(H)/A)), beta=log_3 2=0.6309, c'=1/(2A^beta) approximately 0.194, H>=32, N(H)>=c'(log2 H)^beta. Therefore N(H)>=max{floor(log_{2+sqrt3}H)+1, c'(log2 H)^0.6309}; the logarithmic chain term is asymptotically dominant."
+              }
+            ],
+            "content_sha256": "529a9c7e8677f27a85b3ab0caf69d2f1fbb18dddfbe301ef2191a7d1ab1f33c9",
+            "counterevidence": [
+              "Dominance clause in the packet is incorrect: floor(log_{2+sqrt3} H)+1 = Theta(log H), while c'(log2 H)^0.6309 = Theta((log H)^0.6309), and 1>0.6309.",
+              "The worst-case edge estimate child max <=4d^3 caps the proved binary-subtree exponent at log_3 2<1; exceeding Theta(log H) requires typical-growth control, not this worst-case estimate."
+            ],
+            "id": "packet:work:006-lower-bound-v5-compact",
+            "knowledge_links": [
+              {
+                "rationale": "Provides L1, L2, L3, the explicit constants lambda, beta, A, c', threshold H>=32, and the final two-term lower bound, while correcting the false dominance clause.",
+                "relation": "answers",
+                "source_id": "self",
+                "target_id": "question:work:006-lower-bound-v5-compact"
+              },
+              {
+                "rationale": "Establishes the strongest currently proved lower bound in this packet: N(H)>=max{floor(log_{2+sqrt3}H)+1, c'(log2 H)^0.6309} for H>=32.",
+                "relation": "answers",
+                "source_id": "self",
+                "target_id": "question:demand:D5"
+              },
+              {
+                "rationale": "Completes the same lower-bound demand independently; no blocked lower-bound answer is cited as evidence.",
+                "relation": "answers",
+                "source_id": "self",
+                "target_id": "question:work:004-lower-bound-v3"
+              },
+              {
+                "rationale": "Completes the retry demand with explicit proofs of L1-L3 and labels all stronger growth as conjectural.",
+                "relation": "answers",
+                "source_id": "self",
+                "target_id": "question:work:005-lower-bound-v4"
+              }
+            ],
+            "next_observation": null,
+            "node_id": "work:006-lower-bound-v5-compact",
+            "objective": "D5 RETRY, EVIDENCE-ONLY, HARD CAP 300 WORDS. Prove the strongest rigorous lower bound currently attainable for N(H), the number of sorted solutions (a,b,c,d), 1<=a<=b<=c<=d, of a^2+b^2+c^2+d^2=4abcd with d<=H. No introduction, no tables, no prose motivation. Cite as frozen facts, without reproving: the quotient graph is a tree rooted at v0=(1,1,1,1); children of a non-root are the distinct sorted vertices obtained by mutating a,b,c; child maximum is at most 4d^3 (answer:work:003-struct-core-v2, answer:work:004-upper-depth-v3). Prove exactly these lemmas. L1 CHAIN: with (c1,d1)=(1,3), c_{j+1}=d_j, d_{j+1}=4d_j-c_j, prove v_j=(1,1,c_j,d_j) are distinct solutions, d_{j+1}=4d_j-d_{j-1}, d0=1,d1=3, lambda=2+sqrt(3), and d_j = A lambda^j + B lambda^{-j} with A=(3+sqrt(3))/6, B=(3-sqrt(3))/6, hence d_j<=lambda^j and N(H)>=floor(log_lambda H)+1. L2 TWO CHILDREN BELOW DEPTH 2: at a vertex with at least two distinct values among a,b,c, the child maxima f(x)=4abcd/x-x are distinct because f is strictly decreasing; if a=b=c=x, prove from x|d and d=kx that k^2+3=4kx^2, k|3, and the only possibilities are the root or v1=(1,1,1,3). Therefore every vertex at depth >=2 has at least two distinct children. L3 BINARY SUBTREE: below v2=(1,1,3,11), use child max <=4d^3. If A=log2(11)+1, after t edges log2(d)<=3^t A. Thus whenever 3^t A<=log2(H), all 2^t vertices at that level below v2 have d<=H. Take t=floor(log_3(log2(H)/A)), beta=log_3 2=0.6309, c'=1/(2A^beta) (approximately 0.194), H>=32, and conclude N(H)>=c'(log2 H)^beta. FINAL LINE: N(H)>=max(floor(log_{2+sqrt3} H)+1, c'(log2 H)^0.6309) for H>=32, with the polylogarithmic term asymptotically dominant. Anything stronger must be labeled CONJECTURE with the exact missing lemma.",
+            "raised_questions": [
+              {
+                "acceptance_condition": "Either prove N(H)>=(log H)^{1+delta} for an explicit delta>0 with constants, or prove that along all but o(depth) levels the two-child branches have average log-growth slope 3, blocking this route.",
+                "discriminating_outcomes": [
+                  "Positive delta with explicit constants: the branching term exceeds Theta(log H).",
+                  "Average slope 3 on almost all levels: the 4d^3 worst case is typical for branching, so a new invariant or family is required."
+                ],
+                "local_id": "rq-d5-stronger",
+                "rationale": "The binary-subtree argument is limited by the worst-case estimate child max<=4d^3, whose level-t height bound is 3^t A and yields only 2^t=(log H)^{log_3 2}; surpassing Theta(log H) requires typical, not worst-case, growth control.",
+                "required_source_hints": [],
+                "tags": [
+                  "method",
+                  "measurement",
+                  "uncertainty"
+                ],
+                "target_question_ids": [
+                  "question:demand:D5",
+                  "question:raised:07d805ce56d7:rq-sharp"
+                ],
+                "text": "Can the lower bound be pushed beyond Theta(log H)? Prove or refute that inside subtree(v2) a positive-density set of vertices has two children with average log-growth slope strictly below 3 over Omega(depth) consecutive levels, yielding N(H)>=(log H)^{1+delta} for some delta>0."
+              }
+            ],
+            "source_ids_consulted": [],
+            "sufficiency": "ready_to_synthesize",
+            "unresolved": [
+              "Any lower bound stronger than Theta(log H), e.g. N(H)>=(log H)^{1+delta}, remains conjectural; the exact missing lemma is positive-density two-child branching with average log-growth slope strictly below 3 over Omega(depth) levels.",
+              "The gap to the proved upper bound N(H)=O(H^{ln3/ln11}) remains large and is not addressed by this lower-bound packet.",
+              "Runtime discarded unknown citation sources from C1: ['answer:work:003-struct-core-v2', 'answer:work:004-upper-depth-v3']",
+              "Runtime discarded unknown citation sources from C3: ['answer:work:003-struct-core-v2']",
+              "Runtime discarded unknown citation sources from C4: ['answer:work:004-upper-depth-v3']"
+            ]
+          },
+          "packet_id": "packet:work:006-lower-bound-v5-compact",
+          "question_ids": [
+            "question:demand:D5",
+            "question:work:004-lower-bound-v3",
+            "question:work:005-lower-bound-v4",
+            "question:work:006-lower-bound-v5-compact"
+          ],
+          "sufficiency": "ready_to_synthesize",
+          "summary": "Frozen facts used: tree rooted at v0; non-root children are mutations of a,b,c; child max ≤4d³ (answer:work:003-struct-core-v2, answer:work:004-upper-depth-v3).\nL1. For j≥1, d0=1,d1=3,c_j=d_{j-1}; v0=(1,1,1,1), v_j=(1,1,c_j,d_j). Induction/mutation gives 2+c_j²+d_j²=4c_jd_j and d_{j+1}=4d_j−d_{j−1}. λ=2+√3; d_j=Aλ^j+Bλ^{−j}, A=(3+√3)/6, B=(3−√3)/6. Since A+Bλ^{−2j}≤A+B=1, d_j≤λ^j; d_j strictly increases, so N(H)≥⌊log_λH⌋+1.\nL2. Child maximum f(x)=4abcd/x−x is strictly decreasing, so distinct values among a,b,c give distinct children. If a=b=c=x, d²=x²(4xd−3), so x|d; d=kx gives k²+3=4kx², hence k|3. k=1→v0; k=3→v1=(1,1,1,3). Thus depth≥2⇒≥2 distinct children.\nL3. From v2=(1,1,3,11), A=log₂11+1. Each edge gives L+1≤3(L+1), so after t edges log₂d≤3^tA. If 3^tA≤log₂H, the 2^t level-t vertices below v2 have d≤H. Take t=⌊log₃(log₂H/A)⌋, β=log₃2=0.6309, c′=1/(2A^β)≈0.194, H≥32; then N(H)≥2^t≥c′(log₂H)^β.\nFINAL: N(H)≥max{⌊log_{2+√3}H⌋+1, c′(log₂H)^0.6309} for H≥32. Correction: the first term is asymptotically dominant (1>0.6309). CONJECTURE stronger than Θ(log H): missing positive-density branching/typical-growth lemma.",
+          "tags": [
+            "method",
+            "measurement",
+            "constraint",
+            "synthesis",
+            "counterexample",
+            "uncertainty"
+          ],
+          "unresolved": [
+            "Any lower bound stronger than Theta(log H), e.g. N(H)>=(log H)^{1+delta}, remains conjectural; the exact missing lemma is positive-density two-child branching with average log-growth slope strictly below 3 over Omega(depth) levels.",
+            "The gap to the proved upper bound N(H)=O(H^{ln3/ln11}) remains large and is not addressed by this lower-bound packet.",
+            "Runtime discarded unknown citation sources from C1: ['answer:work:003-struct-core-v2', 'answer:work:004-upper-depth-v3']",
+            "Runtime discarded unknown citation sources from C3: ['answer:work:003-struct-core-v2']",
+            "Runtime discarded unknown citation sources from C4: ['answer:work:004-upper-depth-v3']"
+          ]
+        },
+        "id": "answer:work:006-lower-bound-v5-compact",
+        "incoming_links": [],
+        "kind": "answer",
+        "outgoing_links": [
+          {
+            "content_sha256": "5a36821217fdf237c2c1a3dfa1849aff6e1c52727945dd890f0169c091285571",
+            "id": "link:5a36821217fdf237c2c1a3df",
+            "origin": "agent",
+            "proposed_by_node_id": "work:006-lower-bound-v5-compact",
+            "rationale": "Establishes the strongest currently proved lower bound in this packet: N(H)>=max{floor(log_{2+sqrt3}H)+1, c'(log2 H)^0.6309} for H>=32.",
+            "relation": "answers",
+            "source_id": "answer:work:006-lower-bound-v5-compact",
+            "target_id": "question:demand:D5"
+          },
+          {
+            "content_sha256": "70b48ef98e705230b1a457a720aadc97cafa0901761633cd5470cd36aaa2ad65",
+            "id": "link:70b48ef98e705230b1a457a7",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:006-lower-bound-v5-compact",
+            "target_id": "question:demand:D5"
+          },
+          {
+            "content_sha256": "731c040c47e43dc22ffd93c7ef2b4fe55bdbaf08f2765186d1b870f5319319f5",
+            "id": "link:731c040c47e43dc22ffd93c7",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "raises",
+            "source_id": "answer:work:006-lower-bound-v5-compact",
+            "target_id": "question:raised:529a9c7e8677:rq-d5-stronger"
+          },
+          {
+            "content_sha256": "74a5eb9ec28341625ae050fdc1197548bd04543761ba733a253530f67127eebd",
+            "id": "link:74a5eb9ec28341625ae050fd",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "answers",
+            "source_id": "answer:work:006-lower-bound-v5-compact",
+            "target_id": "question:work:006-lower-bound-v5-compact"
+          },
+          {
+            "content_sha256": "8abd89bb0f0788b7744b178264264ab563cdb1d1eee79918289477a18a2e5fe0",
+            "id": "link:8abd89bb0f0788b7744b1782",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:006-lower-bound-v5-compact",
+            "target_id": "question:work:004-lower-bound-v3"
+          },
+          {
+            "content_sha256": "93408e307fb0b3ed94b351ba61044014b5de902b15d9288f35b2e4a70c180e4e",
+            "id": "link:93408e307fb0b3ed94b351ba",
+            "origin": "agent",
+            "proposed_by_node_id": "work:006-lower-bound-v5-compact",
+            "rationale": "Completes the retry demand with explicit proofs of L1-L3 and labels all stronger growth as conjectural.",
+            "relation": "answers",
+            "source_id": "answer:work:006-lower-bound-v5-compact",
+            "target_id": "question:work:005-lower-bound-v4"
+          },
+          {
+            "content_sha256": "ae5a6e4dd404e2c5b9f3bf406d24594bb2f57583acdf151810eb39152cdfa0a5",
+            "id": "link:ae5a6e4dd404e2c5b9f3bf40",
+            "origin": "agent",
+            "proposed_by_node_id": "work:006-lower-bound-v5-compact",
+            "rationale": "Completes the same lower-bound demand independently; no blocked lower-bound answer is cited as evidence.",
+            "relation": "answers",
+            "source_id": "answer:work:006-lower-bound-v5-compact",
+            "target_id": "question:work:004-lower-bound-v3"
+          },
+          {
+            "content_sha256": "b5410cc0846e462e3a6da7a76f0af148c620adf9ccc2136cf56dc32aa2ead488",
+            "id": "link:b5410cc0846e462e3a6da7a7",
+            "origin": "agent",
+            "proposed_by_node_id": "work:006-lower-bound-v5-compact",
+            "rationale": "Provides L1, L2, L3, the explicit constants lambda, beta, A, c', threshold H>=32, and the final two-term lower bound, while correcting the false dominance clause.",
+            "relation": "answers",
+            "source_id": "answer:work:006-lower-bound-v5-compact",
+            "target_id": "question:work:006-lower-bound-v5-compact"
+          },
+          {
+            "content_sha256": "fb6517a1f6925d3616d7e28fb0fcda0eee62dd36a541bc6a4a4b520e4360fcd6",
+            "id": "link:fb6517a1f6925d3616d7e28f",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:006-lower-bound-v5-compact",
+            "target_id": "question:work:005-lower-bound-v4"
+          }
+        ]
+      },
+      "result_ids": [
+        "answer:work:006-lower-bound-v5-compact"
+      ],
+      "result_sha256": "62e25ca029a1362dd61efb78f038007239c97f0246729bdae190a04767c5e407",
+      "sequence": 2,
+      "tool": "get_entry"
+    },
+    {
+      "arguments": {
+        "entry_id": "question:demand:D10"
+      },
+      "result": {
+        "content": {
+          "acceptance_condition": "Establish demand D10 with evidence.",
+          "answer_ids": [],
+          "content_sha256": "1a289dfe7163429d7494c7c28b175319d18cbd39fbb84e4c6d9d42f9ff612305",
+          "demand_ids": [
+            "D10"
+          ],
+          "id": "question:demand:D10",
+          "node_id": null,
+          "rationale": "Deliverable specification and acceptance posture from the request and decision 6.",
+          "tags": [
+            "counterexample",
+            "constraint",
+            "definition"
+          ],
+          "text": "Produce a self-contained research memorandum with definitions, proved lemmas/theorems, counterexamples or sanity checks, quantitative bounds, conjectures, and the most informative next mathematical step; a meaningful partial result with clear obstructions is preferable to any pretense of settling an unproved asymptotic."
+        },
+        "id": "question:demand:D10",
+        "incoming_links": [],
+        "kind": "question",
+        "outgoing_links": [
+          {
+            "content_sha256": "319c69c6d14f9e6b728e7278cb9bd36ddd9b5e499e73d13c6c949e40425af9d7",
+            "id": "link:319c69c6d14f9e6b728e7278",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "refines",
+            "source_id": "question:demand:D10",
+            "target_id": "question:root"
+          }
+        ]
+      },
+      "result_ids": [
+        "question:demand:D10"
+      ],
+      "result_sha256": "b5ea7fb17dddc56b9f000ee1dbc7ba458932065650471da6f92119926601687e",
+      "sequence": 3,
+      "tool": "get_entry"
+    },
+    {
+      "arguments": {
+        "limit": 10,
+        "query": "",
+        "tags": [],
+        "unanswered_only": true
+      },
+      "result": {
+        "hits": [
+          {
+            "answer_count": 0,
+            "id": "question:demand:D10",
+            "kind": "question",
+            "score": 0.1,
+            "sufficiency": null,
+            "tags": [
+              "counterexample",
+              "constraint",
+              "definition"
+            ],
+            "text": "Produce a self-contained research memorandum with definitions, proved lemmas/theorems, counterexamples or sanity checks, quantitative bounds, conjectures, and the most informative next mathematical step; a meaningful partial result with clear obstructions is preferable to any pretense of settling an unproved asymptotic.",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 0,
+            "id": "question:raised:529a9c7e8677:rq-d5-stronger",
+            "kind": "question",
+            "score": 0.1,
+            "sufficiency": null,
+            "tags": [
+              "method",
+              "measurement",
+              "uncertainty"
+            ],
+            "text": "Can the lower bound be pushed beyond Theta(log H)? Prove or refute that inside subtree(v2) a positive-density set of vertices has two children with average log-growth slope strictly below 3 over Omega(depth) consecutive levels, yielding N(H)>=(log H)^{1+delta} for some delta>0.",
+            "unresolved_count": null
+          }
+        ],
+        "query": "",
+        "snapshot_sha256": "63ddc552a25a8b574f10e0dcf8670b66cbe685bf25a81068272d5f2dec31f6c0",
+        "truncated": false
+      },
+      "result_ids": [
+        "question:demand:D10",
+        "question:raised:529a9c7e8677:rq-d5-stronger"
+      ],
+      "result_sha256": "0da4fafb7e2389787586e5b1ac95197bf311a41791b674c6cbb366eebc2d333c",
+      "sequence": 4,
+      "tool": "search_questions"
+    }
+  ],
+  "snapshot_sha256": "63ddc552a25a8b574f10e0dcf8670b66cbe685bf25a81068272d5f2dec31f6c0"
+}

@@ -1,0 +1,137 @@
+{
+  "account": "expansion_required is true, so this root node must decompose even though the task is a single bounded computation. The decomposition uses independent, reconcilable contributions rather than sequential drafting stages: (1) a theory child that proves the finite bounds and the factor-pair/divisor-enumeration lemma and emits the 33-pair table skeleton; (2) a child that computes the entire per-(x,y) table by divisor enumeration of b^2; (3) a child that independently computes the entire table by a direct exact scan of z over its finite interval, deliberately avoiding the divisor lemma so the two tables cross-validate; (4) an adversarial audit child that proves boundary tightness, hand-verifies edge cells, validates the methodology on the known 3-term analog (which has 10 solutions), and produces a completeness-pitfall checklist. No child needs a sibling's output: the derived bounds and formulas are duplicated as separator facts and each child re-verifies them from the problem statement. The parent reconciles the two independently computed tables cell-by-cell, folds in the theory and audit, and leaves prose integration to the finalizer.",
+  "children": [
+    {
+      "acceptance_condition": "Every bound is proved from the equation and ordering x <= y <= z <= w alone; each y-interval endpoint is shown tight; the factor-pair lemma is proved in both directions including the congruence condition d congruent -b (mod a), the order correspondence d <= e iff z <= w, and the z >= y filter; the emitted skeleton contains exactly 33 (x,y) pairs with correct reduced residuals; exact integer/rational arithmetic only.",
+      "demand_ids": [
+        "D2",
+        "D4",
+        "D5"
+      ],
+      "expected_contribution": "A self-contained theoretical foundation: proved finite bounds, the proved divisor-enumeration bijection, and the verified 33-pair table skeleton with residuals and z-intervals.",
+      "local_id": "theory-bounds-lemma",
+      "no_future_sibling_dependency": "All derivations start from the problem statement and the separator facts, which this child re-verifies; it needs no counts, tables, or audit results from any sibling.",
+      "objective": "From the problem statement alone, derive and rigorously prove the finite bounds that confine the search: (i) 3 <= x <= 8; (ii) the exact feasible y-interval per x (x=3: 7<=y<=18; x=4: 5<=y<=12; x=5: 5<=y<=10; x=6: 6<=y<=9; x=7: 7<=y<=8; x=8: y=8), proving each endpoint is tight; (iii) for each feasible (x,y) the reduced residual R = 1/2 - 1/x - 1/y = a/b in lowest terms and the finite z-interval max(y, floor(b/a)+1) <= z <= floor(2b/a). Then prove the factor-pair lemma: for reduced a/b, 1/z + 1/w = a/b with z <= w if and only if (a*z - b)(a*w - b) = b^2, yielding a bijection between solutions and factor pairs d*e = b^2 with d <= e and d congruent to -b mod a, with z = (d+b)/a and w = (e+b)/a, including the extra filter z >= y. Emit the complete table skeleton: all 33 feasible (x,y) pairs, each with its reduced residual a/b, the integer b^2, and its z-interval.",
+      "rationale": "Completeness (D2) and reproducibility (D5) require derived bounds and an explicit counting bijection; this child produces exactly that foundation and nothing else, so the parent can audit the skeleton independently of any computed counts.",
+      "separator_facts": [
+        "Problem statement: count quadruples of positive integers x <= y <= z <= w with 1/x + 1/y + 1/z + 1/w = 1/2.",
+        "The deliverable is a mathematical document (proof plus table), not a program; a reader must be able to audit and reproduce the count unaided.",
+        "A factor-pair / divisor-enumeration lemma for the final two denominators z and w is explicitly welcomed by the requester, but phrased as optional ('is welcome').",
+        "Claimed bounds to verify: 3 <= x <= 8; y-intervals [7,18] for x=3, [5,12] for x=4, [5,10] for x=5, [6,9] for x=6, [7,8] for x=7, {8} for x=8; 33 feasible pairs total; z-interval max(y, floor(1/R)+1) <= z <= floor(2/R) where R = 1/2 - 1/x - 1/y."
+      ],
+      "source_ids": [
+        "request"
+      ],
+      "source_paths": []
+    },
+    {
+      "acceptance_condition": "All 33 cells are computed; each cell's count is justified by an explicit exact factorization of b^2 and a displayed list of qualifying factor pairs with the congruence and z >= y checks shown; every row total equals the sum of its displayed cells; one grand total T1 is reported; all arithmetic is exact integer arithmetic.",
+      "demand_ids": [
+        "D1",
+        "D3",
+        "D4"
+      ],
+      "expected_contribution": "Candidate table T1: per-(x,y) solution counts with displayed factor-pair evidence, row totals per x, and a grand total, all obtained by divisor enumeration.",
+      "local_id": "table-divisor-method",
+      "no_future_sibling_dependency": "The child re-derives and verifies the bounds and lemma statement from the separator facts itself; it does not consume the theory child's prose, the sibling table T2, or the audit report.",
+      "objective": "Independently re-verify the bounds from the separator facts, then compute the complete solution table by the divisor-enumeration method: for each of the 33 feasible (x,y) pairs, write R = 1/2 - 1/x - 1/y = a/b in lowest terms, factor the integer b^2 exactly, enumerate all factor pairs d*e = b^2 with d <= e, keep exactly those with d congruent to -b (mod a) and z = (d+b)/a >= y, and count them, recording w = (e+b)/a implicitly via the pairing. For every pair, display b^2 and the qualifying factor pairs. Deliver the per-(x,y) counts, row totals for each x in {3,4,5,6,7,8}, and the grand total T1.",
+      "rationale": "D3 requires the auditable per-(x,y) table and D1 the exact grand total; computing the full table by the divisor lemma gives one complete, hand-checkable candidate table whose arithmetic (factorizations of b^2) can be displayed cell by cell.",
+      "separator_facts": [
+        "Problem statement: count quadruples of positive integers x <= y <= z <= w with 1/x + 1/y + 1/z + 1/w = 1/2.",
+        "The deliverable is a mathematical document (proof plus table), not a program; a reader must be able to audit and reproduce the count unaided.",
+        "Feasible region to verify: 3 <= x <= 8; y-intervals [7,18] for x=3, [5,12] for x=4, [5,10] for x=5, [6,9] for x=6, [7,8] for x=7, {8} for x=8; 33 feasible pairs total.",
+        "Factor-pair lemma to apply after verification: for R = a/b reduced, (a*z - b)(a*w - b) = b^2; solutions with z <= w correspond to factor pairs d*e = b^2, d <= e, d congruent -b (mod a), with z = (d+b)/a, w = (e+b)/a; additionally require z >= y.",
+        "Exact arithmetic only; no floating-point approximation or unverified numeric claims."
+      ],
+      "source_ids": [
+        "request"
+      ],
+      "source_paths": []
+    },
+    {
+      "acceptance_condition": "All 33 cells are computed; every scanned z-interval is displayed with its endpoints derived from the formula; each cell's count lists the z-values for which w = z/(R*z - 1) is integral; every row total equals the sum of its displayed cells; one grand total T2 is reported; only exact rational arithmetic is used; no divisor-enumeration lemma is invoked.",
+      "demand_ids": [
+        "D1",
+        "D3",
+        "D4",
+        "D5"
+      ],
+      "expected_contribution": "Candidate table T2: an independent per-(x,y) count table with row totals and grand total, obtained by exhaustive exact z-scan, suitable for cell-by-cell comparison against T1.",
+      "local_id": "table-direct-scan",
+      "no_future_sibling_dependency": "The scan method is self-contained: it re-verifies the bounds from the separator facts and never references the divisor-lemma table, the theory child's output, or the audit.",
+      "objective": "Independently re-verify the bounds from the separator facts, then compute the complete solution table by a direct denominator scan that deliberately avoids the divisor-enumeration lemma: for each of the 33 feasible (x,y) pairs, compute R = 1/2 - 1/x - 1/y as an exact rational, iterate z over the explicit finite interval max(y, floor(1/R)+1) <= z <= floor(2/R), compute w = z/(R*z - 1) as an exact rational, and count precisely those z yielding an integer w (w >= z then holds automatically). Display, for every pair, the scanned z-values and the resulting w values. Deliver the per-(x,y) counts, row totals for each x, and the grand total T2.",
+      "rationale": "An independent second computation of the same table by a different method (rational scan instead of divisor enumeration) is the cross-check that lets the parent certify the grand total (D1, D3) without trusting any single computation, matching the reproducibility demand D5.",
+      "separator_facts": [
+        "Problem statement: count quadruples of positive integers x <= y <= z <= w with 1/x + 1/y + 1/z + 1/w = 1/2.",
+        "The deliverable is a mathematical document (proof plus table), not a program; a reader must be able to audit and reproduce the count unaided.",
+        "Feasible region to verify: 3 <= x <= 8; y-intervals [7,18] for x=3, [5,12] for x=4, [5,10] for x=5, [6,9] for x=6, [7,8] for x=7, {8} for x=8; 33 feasible pairs total.",
+        "z-interval formula to verify: max(y, floor(1/R)+1) <= z <= floor(2/R) with R = 1/2 - 1/x - 1/y; integrality test: w = z/(R*z - 1) must be a positive integer.",
+        "Exact arithmetic only; no floating-point approximation or unverified numeric claims."
+      ],
+      "source_ids": [
+        "request"
+      ],
+      "source_paths": []
+    },
+    {
+      "acceptance_condition": "Every boundary claim is proved or refuted with exact arithmetic; each of the four named edge cells is hand-verified with the full residue computation shown; the 3-term analog is fully derived and totals 10; the pitfall checklist is explicit and each item is tied to a concrete failure mode of the enumeration; no claim relies on a sibling's output.",
+      "demand_ids": [
+        "D2",
+        "D4",
+        "D5"
+      ],
+      "expected_contribution": "An audit report: proofs of boundary tightness and impossibility at the edges, exact hand-verifications of four edge cells, methodology validation against the 3-term analog (total 10), and a completeness-pitfall checklist for the final document.",
+      "local_id": "completeness-audit",
+      "no_future_sibling_dependency": "The audit re-derives everything it checks from the problem statement and separator facts; it audits the method and boundaries, not the siblings' tables, so it finishes without any sibling output.",
+      "objective": "Perform an adversarial completeness audit from first principles, independent of any computed table: (a) prove x = 1 and x = 2 are impossible and x <= 8, and prove for each x that the claimed y-interval endpoints are tight (exhibit the inequality failure just outside each endpoint); (b) prove the z-interval formula max(y, floor(1/R)+1) <= z <= floor(2/R) and that w >= z is automatic within it; (c) hand-verify boundary cells exactly: (x,y) = (8,8) has the unique solution (8,8,8,8); (3,18) yields (3,18,18,18); (7,7) yields exactly one solution with w = 14; (7,8) yields zero solutions; (d) validate the overall methodology on the independent 3-term analog 1/x+1/y+1/z = 1/2 with x <= y <= z, deriving its count of 10 by the same bound-and-enumerate method (x=3 gives 5, x=4 gives 3, x=5 gives 1, x=6 gives 1); (e) produce a completeness-pitfall checklist the final proof must address (enforcing x <= y <= z <= w at every stage, the z >= y filter, use of reduced a/b in the congruence, inclusion of all factor pairs of b^2, correct handling when 1/R is an integer).",
+      "rationale": "D2 demands demonstrated completeness rather than asserted completeness; an independent audit that stress-tests the boundary logic and validates the method against a known small case supplies the counterargument evidence that catches off-by-one and filtering errors that table computation alone could hide.",
+      "separator_facts": [
+        "Problem statement: count quadruples of positive integers x <= y <= z <= w with 1/x + 1/y + 1/z + 1/w = 1/2.",
+        "The deliverable is a mathematical document (proof plus table), not a program; a reader must be able to audit and reproduce the count unaided.",
+        "Claimed bounds to stress-test: 3 <= x <= 8; y-intervals [7,18] for x=3, [5,12] for x=4, [5,10] for x=5, [6,9] for x=6, [7,8] for x=7, {8} for x=8; z-interval max(y, floor(1/R)+1) <= z <= floor(2/R).",
+        "Exact arithmetic only; no floating-point approximation or unverified numeric claims."
+      ],
+      "source_ids": [
+        "request"
+      ],
+      "source_paths": []
+    }
+  ],
+  "decidability": {
+    "acceptance_mechanical": true,
+    "account": "The problem is fully specified by the request: count quadruples of positive integers x <= y <= z <= w with 1/x+1/y+1/z+1/w = 1/2, with a completeness proof and an auditable per-(x,y) table. The search space is provably finite (3 <= x <= 8, at most 33 feasible (x,y) pairs, and a small finite z-interval per pair), so every contribution is decidable by exact finite arithmetic. Acceptance at this node reduces to mechanical checks: two independently computed tables must agree cell-by-cell, row totals must sum to the grand total, and the proofs of the bounds and the factor-pair lemma must be verifiable step by step. No external sources are needed; the workspace index is empty and the request itself is the only source, which is already in the envelope.",
+    "context_complete": true,
+    "grounded_referents": [
+      "request",
+      "D1",
+      "D2",
+      "D3",
+      "D4",
+      "D5"
+    ],
+    "independent_of_future_siblings": true,
+    "missing_context": []
+  },
+  "disposition": "expand",
+  "irreducible_core": null,
+  "requested_source_ids": [],
+  "requested_source_paths": [],
+  "synthesis_contract": {
+    "acceptance_condition": "The synthesized document states a single exact grand total for D1 that is confirmed by both independent tables; contains the full 33-cell per-(x,y) table with row totals per x matching cell sums (D3); includes self-contained proofs of the finite bounds and the factor-pair/divisor-enumeration lemma demonstrating completeness (D2); uses exact arithmetic throughout (D4); presents the method in enough hand-checkable detail (displayed factor pairs or scanned z-intervals per cell) for a reader to reproduce the count without trusting a brute-force program (D5); and addresses every item on the audit's pitfall checklist.",
+    "conflict_policy": "If T1 and T2 disagree on any cell, row total, or the grand total, the parent recomputes exactly that cell by both methods (explicit factorization of b^2 and explicit z-scan) and adopts only the value confirmed by both; the grand total is accepted only when the two independent tables agree on every cell. If the audit refutes any skeleton element (bound, interval, or filter), the affected rows are re-derived before reconciliation. If the theory child's lemma and the audit's boundary analysis conflict, the exact-arithmetic derivation in the audit governs and the lemma proof is corrected. Unreconciled cells may not enter the final table.",
+    "parent_question": "Determine the exact number of quadruples of positive integers x <= y <= z <= w with 1/x + 1/y + 1/z + 1/w = 1/2, and present a self-contained rigorous completeness proof with derived finite bounds, exact arithmetic, and an auditable per-(x,y) solution-count table with row totals per x and a grand total.",
+    "required_contributions": [
+      "Proved finite bounds (3 <= x <= 8; exact y-interval per x; z-interval per (x,y)) and the proved factor-pair lemma with its congruence and z >= y filter, plus the verified 33-pair skeleton (from theory-bounds-lemma).",
+      "Candidate table T1: per-(x,y) counts with displayed divisor-enumeration evidence, row totals, and grand total (from table-divisor-method).",
+      "Candidate table T2: per-(x,y) counts with displayed z-scan evidence, row totals, and grand total, computed by an independent method (from table-direct-scan).",
+      "Audit report: boundary-tightness proofs, four hand-verified edge cells, 3-term analog validation totaling 10, and the pitfall checklist (from completeness-audit)."
+    ],
+    "shared_invariants": [
+      "Solutions are positive integers with x <= y <= z <= w and the sum equals exactly 1/2.",
+      "The feasible skeleton has exactly 33 (x,y) pairs: x in {3,4,5,6,7,8} with y-intervals [7,18], [5,12], [5,10], [6,9], [7,8], {8} respectively; any deviation found by any child must be reconciled before synthesis.",
+      "For each pair, R = 1/2 - 1/x - 1/y = a/b is used in lowest terms, and z ranges over max(y, floor(b/a)+1) <= z <= floor(2b/a).",
+      "All arithmetic is exact integer or rational arithmetic; no floating point anywhere.",
+      "Every table cell count must be backed by a displayed finite enumeration (qualifying factor pairs or scanned z-values) that a reader can redo by hand."
+    ]
+  }
+}

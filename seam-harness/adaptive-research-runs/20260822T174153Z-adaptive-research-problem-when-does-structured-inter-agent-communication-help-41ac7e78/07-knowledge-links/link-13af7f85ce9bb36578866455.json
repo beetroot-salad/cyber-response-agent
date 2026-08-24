@@ -1,0 +1,10 @@
+{
+  "content_sha256": "13af7f85ce9bb36578866455069d31301d6367fbd978e4313b13266c684cfee7",
+  "id": "link:13af7f85ce9bb36578866455",
+  "origin": "runtime",
+  "proposed_by_node_id": null,
+  "rationale": null,
+  "relation": "refines",
+  "source_id": "question:work:002-inv-choi-r2",
+  "target_id": "question:demand:D4"
+}

@@ -1,0 +1,10 @@
+{
+  "content_sha256": "2d366dfc3512d0cc672ed2d847de26ee0ce6d6a0b0aee471d362cb6b95b0ee8a",
+  "id": "link:2d366dfc3512d0cc672ed2d8",
+  "origin": "agent",
+  "proposed_by_node_id": "work:002-inv-shapiro-r2",
+  "rationale": "The assignment was split from the wave-1 combined formal-tools packet; this covers the Shapiro half (Dung half is handled separately).",
+  "relation": "partially_answers",
+  "source_id": "answer:work:002-inv-shapiro-r2",
+  "target_id": "question:work:001-inv-formal-tools"
+}

@@ -1,0 +1,10 @@
+{
+  "content_sha256": "8f2d67414ee97f2a2d9116d728ea1cb6512455c7ee04b65857fd7fe9b58b7fe0",
+  "id": "link:8f2d67414ee97f2a2d9116d7",
+  "origin": "runtime",
+  "proposed_by_node_id": null,
+  "rationale": null,
+  "relation": "partially_answers",
+  "source_id": "answer:work:002-noop",
+  "target_id": "question:root"
+}

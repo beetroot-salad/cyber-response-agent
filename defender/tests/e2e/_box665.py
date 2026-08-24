@@ -113,7 +113,14 @@ class RecordingDocker:
         self, *, running: bool = False, create: DockerFault | None = None,
         sentinel: DockerFault | None = None, reap: DockerFault | None = None,
         exec_replies: list | None = None, existing_token: str | None = None,
+        status: str | None = None,
     ):
+        # What `docker inspect -f {{.State.Status}}` answers, when a test needs a state the
+        # `running` flag cannot spell. `created` is the one that matters (#955 F-49): it is
+        # where a concurrent lane's box sits for the whole window two lanes can collide on one
+        # name, and it is indistinguishable from our own box between create and start. Left
+        # `None`, the `running` flag decides, so every pre-#955 case reads as it always did.
+        self.status = status
         # What a `docker inspect` of the START-TOKEN LABEL finds under this name (#884 F-29's
         # ownership check). Three states, and the middle one is the whole point:
         #   None     no such container — the healthy path, and every create that left nothing
@@ -136,6 +143,8 @@ class RecordingDocker:
         format string is what separates them, exactly as it does on a real daemon."""
         fmt = argv[argv.index("-f") + 1] if "-f" in argv else ""
         if "Config.Labels" not in fmt:
+            if self.status is not None:
+                return _cp(0, f"{self.status}\n")
             return _cp(0, "running\n") if self.running else _cp(1, "", "No such object\n")
         if self.existing_token is None:
             return _cp(1, "", "No such object\n")
@@ -250,10 +259,11 @@ def reaped_after_create(calls) -> bool:
     """Whether the container CREATE ASKED FOR was reaped AFTER create — the only form of this
     assertion that says anything.
 
-    Both start paths open with an UNCONDITIONAL pre-create `docker rm -f <name>` (the
-    stale-same-name sweep in each of `_start_boxed`/`_start_boxed_request`), so on every path
-    through both functions — whether or not the fault arm reaps at all — BOTH of the obvious
-    spellings are already true: `any(c[:3] == [docker, rm, -f] for c in calls)`, and equally
+    Both start paths open with a pre-create `docker rm -f <name>` (the stale-same-name sweep
+    in each of `_start_boxed`/`_start_boxed_request`) whenever that name holds a FINISHED
+    container — unconditionally so before #955 F-49 put a state check in front of it, and
+    still so for every case that models a stale one. On those paths — whether or not the fault
+    arm reaps at all — BOTH of the obvious spellings are already true: `any(c[:3] == [docker, rm, -f] for c in calls)`, and equally
     `[docker, rm, -f, <the created name>] in calls`, since the pre-create reap names that same
     container. The first passed against the create-fault arm that provably did NOT reap
     (#884 F-29), which is how that leak survived a test suite that believed it pinned the reap;

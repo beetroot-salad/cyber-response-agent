@@ -1,0 +1,16 @@
+{
+  "child_ids": [
+    "root.01-def-of-kitsch",
+    "root.02-case-against",
+    "root.03-case-for",
+    "root.04-examples-stock"
+  ],
+  "depth": 0,
+  "effective_disposition": "synthesize",
+  "node_id": "root",
+  "packet_id": "packet:root",
+  "packet_sha256": "eba2d8cbd5b5fa7a69b0dbc44a020a00452b090758032c9e3327aba3f416a491",
+  "parent_id": null,
+  "proposed_disposition": "expand",
+  "stop_reason": null
+}

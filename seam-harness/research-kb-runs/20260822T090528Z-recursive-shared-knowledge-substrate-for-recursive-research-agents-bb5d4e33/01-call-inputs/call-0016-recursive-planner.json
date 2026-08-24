@@ -1,0 +1,1290 @@
+{
+  "call_id": "call-0016-recursive-planner",
+  "context": {
+    "ancestor_decisions": [
+      "SC1: The evidentiary corpus is exactly seven extracted-text files under papers/text: dung-1995-argumentation.txt (Dung 1995, Artificial Intelligence 77), shapiro-et-al-2011-crdts.txt (Shapiro et al., SSS 2011), lorenz-et-al-2011-social-influence.txt (Lorenz et al., PNAS 108, 2011), du-et-al-2023-multiagent-debate.txt (Du et al. 2023, arXiv 2305.14325), smit-et-al-2023-going-mad.txt (Smit et al. 2023, arXiv 2311.17371), zhang-et-al-2025-mad-question.txt (Zhang et al. 2025, arXiv 2502.08788), choi-et-al-2025-conformity.txt (Choi et al., Findings of ACL 2025).",
+      "SC2: Page boundaries in the extracted texts are marked with lines of the form `===== PDF PAGE N =====`, and these markers are the citation anchors required by D12/C3.",
+      "SC3: The corpus intentionally contains conflicting empirical conclusions — multi-agent debate gains (Du et al. 2023) versus matched-compute null results and conformity findings (Smit et al. 2023; Zhang et al. 2025; Choi et al. 2025; Lorenz et al. 2011 on social influence undermining crowd wisdom) — and the manifest requires preserving and reconciling these conflicts.",
+      "SC4: The envelope's single conversation decision asserts that the seven full extracted texts are present in the solve workspace under papers/text with explicit PDF page markers; the intake envelope itself encloses only the manifest, not the full texts.",
+      "SC5: The manifest (material:001) is located at /workspace/seam-harness/research-kb-workspace/CORPUS.md, indicating a benchmark-style workspace named research-kb-workspace under a seam-harness directory.",
+      "SC6: The proposed substrate plus the two baselines named in D4 (open conversational forum; no inter-agent communication) naturally supply the three or more conditions required by D14.",
+      "Corpus membership: papers/text/smit-et-al-2023-going-mad.txt is Smit et al. 2023, arXiv 2311.17371, and papers/text/zhang-et-al-2025-mad-question.txt is Zhang et al. 2025, arXiv 2502.08788; both are among the exactly seven extracted-text files under papers/text that constitute the only evidentiary corpus.",
+      "Page boundaries in the extracted texts are marked with lines of the form `===== PDF PAGE N =====`; citations must carry these markers (D12/C3).",
+      "The corpus intentionally contains conflicting empirical conclusions: debate gains (Du et al. 2023) versus matched-compute null results and conformity findings (Smit et al. 2023; Zhang et al. 2025; Choi et al. 2025; Lorenz et al. 2011); these must be preserved and reconciled, never hidden (C4).",
+      "The proposed substrate plus the two baselines named in D4 (open conversational forum; no inter-agent communication) naturally supply the three or more conditions required by D14.",
+      "Evidence is restricted to the seven workspace corpus files; no outside sources may be used (C2).",
+      "Source-supported claims must be clearly distinguished from design inferences in everything returned (D13).",
+      "Smit et al. state that 'multi-agent debating systems, in their current form, do not reliably outperform other proposed prompting strategies, such as self-consistency and ensembling using multiple reasoning paths' (===== PDF PAGE 1 =====).",
+      "Smit et al. report that with hyperparameter tuning, some MAD systems like Multi-Persona perform better, suggesting MAD is 'more sensitive to different hyperparameter settings and difficult to optimize' (===== PDF PAGE 1 =====).",
+      "Smit et al. find that modulating agreement intensity via prompts can improve Multi-Persona by ~15% on USMLE, and that the effect varies by dataset (===== PDF PAGE 6 =====).",
+      "Zhang et al. report that 'none of these MAD methods achieve a win rate higher than 20% when compared to CoT across 36 scenarios (4 models × 9 benchmarks)' (===== PDF PAGE 3 =====).",
+      "Zhang et al. analyze task dependence: MAD frameworks 'performed worse on programming tasks (only SoM/AgentVerse had positive win rates) but better on mathematical reasoning' (===== PDF PAGE 7 =====).",
+      "Zhang et al. find that 'simply adjusting these hyperparameters can hardly reverse this negative outcome' (===== PDF PAGE 3 =====) and that SC is more efficient in token consumption (===== PDF PAGE 9 =====).",
+      "Zhang et al. propose model heterogeneity as a universal antidote, with Heter-SoM improving SoM-average by 6.4% (===== PDF PAGE 11 =====)."
+    ],
+    "assigned_demands": [
+      {
+        "id": "D11",
+        "rationale": "Required by the request and reinforced by the manifest's instruction not to select papers by desired outcome.",
+        "statement": "The memo reconciles — rather than hides — the tension between papers reporting multi-agent debate gains and papers reporting matched-compute null results or conformity."
+      },
+      {
+        "id": "D13",
+        "rationale": "Stated verbatim in the request.",
+        "statement": "Source-supported claims are clearly distinguished from design inferences."
+      },
+      {
+        "id": "D14",
+        "rationale": "Condition count and all five metric families are enumerated in the request.",
+        "statement": "A falsifiable evaluation plan compares at least three conditions and defines metrics for quality, diversity/correlation, latency, token cost, and recovery-from-wrong-consensus."
+      },
+      {
+        "id": "D15",
+        "rationale": "Stated verbatim in the request.",
+        "statement": "Important limitations and unresolved questions are stated."
+      }
+    ],
+    "constraints": [
+      "C1: Total length must be 1,400–1,800 words.",
+      "C2: No evidence outside the seven corpus files may be used; the request restricts grounding to the supplied workspace corpus and the manifest declares these files the only evidentiary corpus for the benchmark.",
+      "C3: Citations must reference at least five distinct source files and include PDF page markers as they appear in the extracted texts (page boundaries marked `===== PDF PAGE N =====`).",
+      "C4: Papers must not be selected or weighted by desired outcome; the corpus's conflicting empirical conclusions must be preserved and reconciled."
+    ],
+    "expansion_required": false,
+    "knowledge_board": {
+      "answer_ids_by_question": {},
+      "answers_by_id": {},
+      "content_sha256": "21d197e637d3c9db7e9705acf66ffaf54e5eafb06576e258207d10057f7fc67f",
+      "entry_ids_by_tag": {
+        "constraint": [
+          "question:root.02-crdt-persistence"
+        ],
+        "counterexample": [
+          "question:demand:D14",
+          "question:root",
+          "question:root.03-social-influence-risk",
+          "question:root.05-debate-nulls-boundaries",
+          "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results",
+          "question:root.05-debate-nulls-boundaries.02-c2-zhang-boundary-conditions"
+        ],
+        "decision": [
+          "question:demand:D1",
+          "question:demand:D2",
+          "question:demand:D3"
+        ],
+        "definition": [
+          "question:demand:D14",
+          "question:root.01-arg-semantics"
+        ],
+        "evidence": [
+          "question:demand:D10",
+          "question:demand:D11",
+          "question:demand:D12",
+          "question:demand:D13",
+          "question:demand:D15",
+          "question:demand:D4",
+          "question:demand:D5",
+          "question:demand:D7",
+          "question:demand:D8",
+          "question:demand:D9",
+          "question:root.01-arg-semantics",
+          "question:root.02-crdt-persistence",
+          "question:root.03-social-influence-risk",
+          "question:root.04-debate-gains-evidence",
+          "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results",
+          "question:root.05-debate-nulls-boundaries.02-c2-zhang-boundary-conditions"
+        ],
+        "measurement": [
+          "question:demand:D14",
+          "question:root",
+          "question:root.04-debate-gains-evidence",
+          "question:root.05-debate-nulls-boundaries",
+          "question:root.05-debate-nulls-boundaries.02-c2-zhang-boundary-conditions",
+          "question:root.05-debate-nulls-boundaries.03-c3-design-inferences"
+        ],
+        "method": [
+          "question:demand:D6",
+          "question:root",
+          "question:root.01-arg-semantics",
+          "question:root.02-crdt-persistence"
+        ],
+        "risk": [
+          "question:root.03-social-influence-risk",
+          "question:root.05-debate-nulls-boundaries",
+          "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results",
+          "question:root.05-debate-nulls-boundaries.03-c3-design-inferences"
+        ],
+        "synthesis": [
+          "question:root.05-debate-nulls-boundaries.03-c3-design-inferences"
+        ]
+      },
+      "incoming_link_ids_by_entry": {
+        "question:demand:D10": [
+          "link:b39e9bd6e534d53587c33f92"
+        ],
+        "question:demand:D11": [
+          "link:7d78d3ba63d8f21b16592142",
+          "link:a8184056ad34b6459c3bcacb",
+          "link:c0525acb5ba38548b9c5ff19",
+          "link:d508e58a1c643d9abfe73da0",
+          "link:da16abdd94a5d34dd4b43e33",
+          "link:f87ac7b536be5b768b698c28"
+        ],
+        "question:demand:D12": [
+          "link:4694364cb7b8f08ed6b70438",
+          "link:4a3bba97c5e1b9cb782e3408",
+          "link:60e459cfffff32f8128208f8",
+          "link:b9ccd3ec073289680e72b9c5",
+          "link:dbc379c523a802d7234d668c",
+          "link:e5bfef49b3f76c9371b77861",
+          "link:ec67afe3731a822e2d0c2942"
+        ],
+        "question:demand:D13": [
+          "link:018c1bfba9c89f886979e58a",
+          "link:3e163e5b6c87fe659c9c8b95",
+          "link:5ecc297a5272dee784b1b751",
+          "link:95a52b650d408c309a8140ee",
+          "link:9e148f747df068b5a106ef78",
+          "link:c263d292340d252299a711d8",
+          "link:c39a34a9d3f6dc908746a7b0",
+          "link:da969a151f6b08095623e758"
+        ],
+        "question:demand:D14": [
+          "link:54ace6aa7dbc682ce36b1598",
+          "link:5539b2e5fa996893c265aec7",
+          "link:5fbb61d2e80f257b289c0591",
+          "link:9f307b082e580d3f1768454b",
+          "link:e7976f175a8a1a130ad2d1e7",
+          "link:fe2451f9c9508933a87405ee"
+        ],
+        "question:demand:D15": [
+          "link:6018f82dcea4e7b30c3a5022",
+          "link:c86042ed89783103116c72b1",
+          "link:ceba8d1721ebe07093387a83",
+          "link:e5b001edf93c1fbe4904692c"
+        ],
+        "question:demand:D3": [
+          "link:a83bc0e755e8fd359c4a6e60"
+        ],
+        "question:demand:D4": [
+          "link:7c6b34c58d2a7a2bcc9f5e5f"
+        ],
+        "question:demand:D5": [
+          "link:b02788fef9fd73ad10830bc3"
+        ],
+        "question:demand:D6": [
+          "link:f63ca17b95f176b627952fd3"
+        ],
+        "question:demand:D7": [
+          "link:79a9672c7c764f123cad7df4"
+        ],
+        "question:demand:D8": [
+          "link:960009408650bf4b3e01a852"
+        ],
+        "question:root": [
+          "link:088e1a7cfea6dde8ac04eab3",
+          "link:1709dd7fbf8587de0c575188",
+          "link:1e97bab1f415d57cbc837a88",
+          "link:2395134f0213cf5cee3f1947",
+          "link:48a3d569758cae1eb71a2043",
+          "link:4f798cb83c7582c38cfb88bd",
+          "link:52aaf440a0cfa52148fd0e0a",
+          "link:541766fc32e4d84c2fd63c44",
+          "link:561e0fcd22b650ab4cc0fd61",
+          "link:5b751584b8c43c9e15d281fe",
+          "link:5e97df7da6a94755d85a5407",
+          "link:709f42e6e4da8b14cdf82243",
+          "link:7a79aa5755f5b9590ce191cb",
+          "link:815a52c06ab01fa3052d160f",
+          "link:9dc3c1ef66fc5dbb330f0173",
+          "link:9e16c1c1dacc451174870ea4",
+          "link:ad2d4893bb4dadfa6cec4d51",
+          "link:dbcff4ec9d62472bedb7ee52",
+          "link:e5a9bece7311def890467b91",
+          "link:f7b3972e183578733d308198"
+        ],
+        "question:root.05-debate-nulls-boundaries": [
+          "link:9c8f85fa9b668b832df212c2",
+          "link:b6b80273c764e1e3f59df888",
+          "link:b9d7a3cfb93623e545210f92"
+        ]
+      },
+      "links_by_id": {
+        "link:018c1bfba9c89f886979e58a": {
+          "content_sha256": "018c1bfba9c89f886979e58a9631b6ef6020a5ed12294f6a1c4c676e582196bd",
+          "id": "link:018c1bfba9c89f886979e58a",
+          "relation": "refines",
+          "source_id": "question:root.04-debate-gains-evidence",
+          "target_id": "question:demand:D13"
+        },
+        "link:088e1a7cfea6dde8ac04eab3": {
+          "content_sha256": "088e1a7cfea6dde8ac04eab354d79aadb3b99bdfe714c1e70ee16af4ac5294d0",
+          "id": "link:088e1a7cfea6dde8ac04eab3",
+          "relation": "refines",
+          "source_id": "question:demand:D5",
+          "target_id": "question:root"
+        },
+        "link:1709dd7fbf8587de0c575188": {
+          "content_sha256": "1709dd7fbf8587de0c57518805fdc68ed1e83353f3c151db8647dedebbe0f474",
+          "id": "link:1709dd7fbf8587de0c575188",
+          "relation": "refines",
+          "source_id": "question:root.02-crdt-persistence",
+          "target_id": "question:root"
+        },
+        "link:1e97bab1f415d57cbc837a88": {
+          "content_sha256": "1e97bab1f415d57cbc837a88883226a5539b431d3810d7ee0268b965646a5d6f",
+          "id": "link:1e97bab1f415d57cbc837a88",
+          "relation": "refines",
+          "source_id": "question:demand:D2",
+          "target_id": "question:root"
+        },
+        "link:2395134f0213cf5cee3f1947": {
+          "content_sha256": "2395134f0213cf5cee3f1947b0c2d057b3d7f586083bbad7eb028a4e1cb94466",
+          "id": "link:2395134f0213cf5cee3f1947",
+          "relation": "refines",
+          "source_id": "question:demand:D3",
+          "target_id": "question:root"
+        },
+        "link:3e163e5b6c87fe659c9c8b95": {
+          "content_sha256": "3e163e5b6c87fe659c9c8b952fc8449114bfac7f5eaa1df8d326258e6a7b3d50",
+          "id": "link:3e163e5b6c87fe659c9c8b95",
+          "relation": "refines",
+          "source_id": "question:root.02-crdt-persistence",
+          "target_id": "question:demand:D13"
+        },
+        "link:4694364cb7b8f08ed6b70438": {
+          "content_sha256": "4694364cb7b8f08ed6b704380e475b1b267eef0480f37fe42f282740828ea040",
+          "id": "link:4694364cb7b8f08ed6b70438",
+          "relation": "refines",
+          "source_id": "question:root.01-arg-semantics",
+          "target_id": "question:demand:D12"
+        },
+        "link:48a3d569758cae1eb71a2043": {
+          "content_sha256": "48a3d569758cae1eb71a204319e430a0e2b17bbc10631decec88626d38dc50ca",
+          "id": "link:48a3d569758cae1eb71a2043",
+          "relation": "refines",
+          "source_id": "question:demand:D6",
+          "target_id": "question:root"
+        },
+        "link:4a3bba97c5e1b9cb782e3408": {
+          "content_sha256": "4a3bba97c5e1b9cb782e34084ea62b3db7ad3f1a02216a806173b7e662bf7ff0",
+          "id": "link:4a3bba97c5e1b9cb782e3408",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries.02-c2-zhang-boundary-conditions",
+          "target_id": "question:demand:D12"
+        },
+        "link:4f798cb83c7582c38cfb88bd": {
+          "content_sha256": "4f798cb83c7582c38cfb88bdfd835c99a0dc601b856720119fe64365ae22c42a",
+          "id": "link:4f798cb83c7582c38cfb88bd",
+          "relation": "refines",
+          "source_id": "question:root.04-debate-gains-evidence",
+          "target_id": "question:root"
+        },
+        "link:52aaf440a0cfa52148fd0e0a": {
+          "content_sha256": "52aaf440a0cfa52148fd0e0a8b15fa3f4ceca2d9fe1d0d3675835f8b82c24bb7",
+          "id": "link:52aaf440a0cfa52148fd0e0a",
+          "relation": "refines",
+          "source_id": "question:root.03-social-influence-risk",
+          "target_id": "question:root"
+        },
+        "link:541766fc32e4d84c2fd63c44": {
+          "content_sha256": "541766fc32e4d84c2fd63c44d39b887384e9693d9c10a19e869a69b53453f7ea",
+          "id": "link:541766fc32e4d84c2fd63c44",
+          "relation": "refines",
+          "source_id": "question:demand:D4",
+          "target_id": "question:root"
+        },
+        "link:54ace6aa7dbc682ce36b1598": {
+          "content_sha256": "54ace6aa7dbc682ce36b15989cdd24cf38992ead6108329a60b48ba7f74178c9",
+          "id": "link:54ace6aa7dbc682ce36b1598",
+          "relation": "refines",
+          "source_id": "question:root.03-social-influence-risk",
+          "target_id": "question:demand:D14"
+        },
+        "link:5539b2e5fa996893c265aec7": {
+          "content_sha256": "5539b2e5fa996893c265aec71197bb0044244f4d44cc7e448ec044db4ded9322",
+          "id": "link:5539b2e5fa996893c265aec7",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries.03-c3-design-inferences",
+          "target_id": "question:demand:D14"
+        },
+        "link:561e0fcd22b650ab4cc0fd61": {
+          "content_sha256": "561e0fcd22b650ab4cc0fd61392437d8f3e7ca904a6e6b7e7839642ba210692d",
+          "id": "link:561e0fcd22b650ab4cc0fd61",
+          "relation": "refines",
+          "source_id": "question:demand:D1",
+          "target_id": "question:root"
+        },
+        "link:5b751584b8c43c9e15d281fe": {
+          "content_sha256": "5b751584b8c43c9e15d281fecd110c27cec4e2ff68b62909aecadf66ffec777f",
+          "id": "link:5b751584b8c43c9e15d281fe",
+          "relation": "refines",
+          "source_id": "question:root.01-arg-semantics",
+          "target_id": "question:root"
+        },
+        "link:5e97df7da6a94755d85a5407": {
+          "content_sha256": "5e97df7da6a94755d85a5407cb21fe71750a2eca9df79c7bbac4d680689fc42e",
+          "id": "link:5e97df7da6a94755d85a5407",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries",
+          "target_id": "question:root"
+        },
+        "link:5ecc297a5272dee784b1b751": {
+          "content_sha256": "5ecc297a5272dee784b1b7519dc0b15b4464cd484190bf3de02879a3f667a502",
+          "id": "link:5ecc297a5272dee784b1b751",
+          "relation": "refines",
+          "source_id": "question:root.03-social-influence-risk",
+          "target_id": "question:demand:D13"
+        },
+        "link:5fbb61d2e80f257b289c0591": {
+          "content_sha256": "5fbb61d2e80f257b289c0591a887616bbe55c8e7f85593092ba47b199a267ece",
+          "id": "link:5fbb61d2e80f257b289c0591",
+          "relation": "refines",
+          "source_id": "question:root.04-debate-gains-evidence",
+          "target_id": "question:demand:D14"
+        },
+        "link:6018f82dcea4e7b30c3a5022": {
+          "content_sha256": "6018f82dcea4e7b30c3a50227a5bbde2d9842609c4f66b0c1b1b7933d6a7a18a",
+          "id": "link:6018f82dcea4e7b30c3a5022",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries",
+          "target_id": "question:demand:D15"
+        },
+        "link:60e459cfffff32f8128208f8": {
+          "content_sha256": "60e459cfffff32f8128208f88b575ddd7a34c364263b91af2e1616f385670857",
+          "id": "link:60e459cfffff32f8128208f8",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results",
+          "target_id": "question:demand:D12"
+        },
+        "link:709f42e6e4da8b14cdf82243": {
+          "content_sha256": "709f42e6e4da8b14cdf82243f398085db7de30b6558d5ee57c30811a4bbb707f",
+          "id": "link:709f42e6e4da8b14cdf82243",
+          "relation": "refines",
+          "source_id": "question:demand:D7",
+          "target_id": "question:root"
+        },
+        "link:79a9672c7c764f123cad7df4": {
+          "content_sha256": "79a9672c7c764f123cad7df46a777bdbe38ef67bc5bca2231fe605d3970331ce",
+          "id": "link:79a9672c7c764f123cad7df4",
+          "relation": "refines",
+          "source_id": "question:root.02-crdt-persistence",
+          "target_id": "question:demand:D7"
+        },
+        "link:7a79aa5755f5b9590ce191cb": {
+          "content_sha256": "7a79aa5755f5b9590ce191cb65a36bfac312cd7011b4339d02a7b22f29e67a35",
+          "id": "link:7a79aa5755f5b9590ce191cb",
+          "relation": "refines",
+          "source_id": "question:demand:D8",
+          "target_id": "question:root"
+        },
+        "link:7c6b34c58d2a7a2bcc9f5e5f": {
+          "content_sha256": "7c6b34c58d2a7a2bcc9f5e5f0bce4c8a056e5bb10f00717a604aaa79136145cf",
+          "id": "link:7c6b34c58d2a7a2bcc9f5e5f",
+          "relation": "refines",
+          "source_id": "question:root.04-debate-gains-evidence",
+          "target_id": "question:demand:D4"
+        },
+        "link:7d78d3ba63d8f21b16592142": {
+          "content_sha256": "7d78d3ba63d8f21b1659214267dcdf3726209cbd846802823b6bee7c773fafd9",
+          "id": "link:7d78d3ba63d8f21b16592142",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries.02-c2-zhang-boundary-conditions",
+          "target_id": "question:demand:D11"
+        },
+        "link:815a52c06ab01fa3052d160f": {
+          "content_sha256": "815a52c06ab01fa3052d160f517b7436a84926a916c938a154527f6ad9f63fe6",
+          "id": "link:815a52c06ab01fa3052d160f",
+          "relation": "refines",
+          "source_id": "question:demand:D13",
+          "target_id": "question:root"
+        },
+        "link:95a52b650d408c309a8140ee": {
+          "content_sha256": "95a52b650d408c309a8140ee8c6ebca2fef1ce6a298affcd77e68b2c5e9698bd",
+          "id": "link:95a52b650d408c309a8140ee",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries",
+          "target_id": "question:demand:D13"
+        },
+        "link:960009408650bf4b3e01a852": {
+          "content_sha256": "960009408650bf4b3e01a8526773683245ec77daf9cd3d401176b91e3d2c5d60",
+          "id": "link:960009408650bf4b3e01a852",
+          "relation": "refines",
+          "source_id": "question:root.01-arg-semantics",
+          "target_id": "question:demand:D8"
+        },
+        "link:9c8f85fa9b668b832df212c2": {
+          "content_sha256": "9c8f85fa9b668b832df212c250d329fa496797bc5122b379c82e19a137865cef",
+          "id": "link:9c8f85fa9b668b832df212c2",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries.03-c3-design-inferences",
+          "target_id": "question:root.05-debate-nulls-boundaries"
+        },
+        "link:9dc3c1ef66fc5dbb330f0173": {
+          "content_sha256": "9dc3c1ef66fc5dbb330f0173535d446c45af5188095bf062d2f8de4e0707a33e",
+          "id": "link:9dc3c1ef66fc5dbb330f0173",
+          "relation": "refines",
+          "source_id": "question:demand:D15",
+          "target_id": "question:root"
+        },
+        "link:9e148f747df068b5a106ef78": {
+          "content_sha256": "9e148f747df068b5a106ef7855e07d89cf45cd6f352308627d4460c862c9e2b9",
+          "id": "link:9e148f747df068b5a106ef78",
+          "relation": "refines",
+          "source_id": "question:root.01-arg-semantics",
+          "target_id": "question:demand:D13"
+        },
+        "link:9e16c1c1dacc451174870ea4": {
+          "content_sha256": "9e16c1c1dacc451174870ea4511dc149959278b7f7237d7a2755f0a8820b1171",
+          "id": "link:9e16c1c1dacc451174870ea4",
+          "relation": "refines",
+          "source_id": "question:demand:D11",
+          "target_id": "question:root"
+        },
+        "link:9f307b082e580d3f1768454b": {
+          "content_sha256": "9f307b082e580d3f1768454bde85ab9516764862ddd3e20b7688a0060f590870",
+          "id": "link:9f307b082e580d3f1768454b",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries",
+          "target_id": "question:demand:D14"
+        },
+        "link:a8184056ad34b6459c3bcacb": {
+          "content_sha256": "a8184056ad34b6459c3bcacba8bf4a16d92e99b3f23f38cc44724e447115c287",
+          "id": "link:a8184056ad34b6459c3bcacb",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results",
+          "target_id": "question:demand:D11"
+        },
+        "link:a83bc0e755e8fd359c4a6e60": {
+          "content_sha256": "a83bc0e755e8fd359c4a6e60e1429a2524d3b9f114eafad89e022184a5d223cd",
+          "id": "link:a83bc0e755e8fd359c4a6e60",
+          "relation": "refines",
+          "source_id": "question:root.01-arg-semantics",
+          "target_id": "question:demand:D3"
+        },
+        "link:ad2d4893bb4dadfa6cec4d51": {
+          "content_sha256": "ad2d4893bb4dadfa6cec4d5140baa6fa9767b2438aafa6411ce349e9e4ecc616",
+          "id": "link:ad2d4893bb4dadfa6cec4d51",
+          "relation": "refines",
+          "source_id": "question:demand:D9",
+          "target_id": "question:root"
+        },
+        "link:b02788fef9fd73ad10830bc3": {
+          "content_sha256": "b02788fef9fd73ad10830bc3e9d81dcb10ab065dd7cb0854743a1a9ff757ebb6",
+          "id": "link:b02788fef9fd73ad10830bc3",
+          "relation": "refines",
+          "source_id": "question:root.02-crdt-persistence",
+          "target_id": "question:demand:D5"
+        },
+        "link:b39e9bd6e534d53587c33f92": {
+          "content_sha256": "b39e9bd6e534d53587c33f923f5010b29d4e1d076282274cb24f7efef425bb04",
+          "id": "link:b39e9bd6e534d53587c33f92",
+          "relation": "refines",
+          "source_id": "question:root.02-crdt-persistence",
+          "target_id": "question:demand:D10"
+        },
+        "link:b6b80273c764e1e3f59df888": {
+          "content_sha256": "b6b80273c764e1e3f59df888c780bae1e2c94e9580e201de791a578df4d4cf94",
+          "id": "link:b6b80273c764e1e3f59df888",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries.02-c2-zhang-boundary-conditions",
+          "target_id": "question:root.05-debate-nulls-boundaries"
+        },
+        "link:b9ccd3ec073289680e72b9c5": {
+          "content_sha256": "b9ccd3ec073289680e72b9c51fe29849bd5f0a857121c6ccbf09d130cc2e3ac2",
+          "id": "link:b9ccd3ec073289680e72b9c5",
+          "relation": "refines",
+          "source_id": "question:root.02-crdt-persistence",
+          "target_id": "question:demand:D12"
+        },
+        "link:b9d7a3cfb93623e545210f92": {
+          "content_sha256": "b9d7a3cfb93623e545210f92c5b73dc1624e7fa60edae18b5341a7f0f611c135",
+          "id": "link:b9d7a3cfb93623e545210f92",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results",
+          "target_id": "question:root.05-debate-nulls-boundaries"
+        },
+        "link:c0525acb5ba38548b9c5ff19": {
+          "content_sha256": "c0525acb5ba38548b9c5ff191f7515142f60365966e0df4035197e2f190a8644",
+          "id": "link:c0525acb5ba38548b9c5ff19",
+          "relation": "refines",
+          "source_id": "question:root.04-debate-gains-evidence",
+          "target_id": "question:demand:D11"
+        },
+        "link:c263d292340d252299a711d8": {
+          "content_sha256": "c263d292340d252299a711d87153504ad73f549a135701386915075780646444",
+          "id": "link:c263d292340d252299a711d8",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results",
+          "target_id": "question:demand:D13"
+        },
+        "link:c39a34a9d3f6dc908746a7b0": {
+          "content_sha256": "c39a34a9d3f6dc908746a7b00a61c4bba98b7330907889d3baecbfc028cb3544",
+          "id": "link:c39a34a9d3f6dc908746a7b0",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries.02-c2-zhang-boundary-conditions",
+          "target_id": "question:demand:D13"
+        },
+        "link:c86042ed89783103116c72b1": {
+          "content_sha256": "c86042ed89783103116c72b16964569e1da076f3df7508c3a2be9cf410cc290e",
+          "id": "link:c86042ed89783103116c72b1",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results",
+          "target_id": "question:demand:D15"
+        },
+        "link:ceba8d1721ebe07093387a83": {
+          "content_sha256": "ceba8d1721ebe07093387a834eeadfe709ff9b65988bb6e917c27d0d77b3bead",
+          "id": "link:ceba8d1721ebe07093387a83",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries.03-c3-design-inferences",
+          "target_id": "question:demand:D15"
+        },
+        "link:d508e58a1c643d9abfe73da0": {
+          "content_sha256": "d508e58a1c643d9abfe73da06ff8d2166070d8bf0177c3bb003e03a99924621c",
+          "id": "link:d508e58a1c643d9abfe73da0",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries",
+          "target_id": "question:demand:D11"
+        },
+        "link:da16abdd94a5d34dd4b43e33": {
+          "content_sha256": "da16abdd94a5d34dd4b43e339ef70cc20006be22ca37348780d87f35595d0e1d",
+          "id": "link:da16abdd94a5d34dd4b43e33",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries.03-c3-design-inferences",
+          "target_id": "question:demand:D11"
+        },
+        "link:da969a151f6b08095623e758": {
+          "content_sha256": "da969a151f6b08095623e758015d076cc285b00d83a192363fbb372f5fe12bf8",
+          "id": "link:da969a151f6b08095623e758",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries.03-c3-design-inferences",
+          "target_id": "question:demand:D13"
+        },
+        "link:dbc379c523a802d7234d668c": {
+          "content_sha256": "dbc379c523a802d7234d668c3e454859f9aa203d2a2e546f530980165cc90d8f",
+          "id": "link:dbc379c523a802d7234d668c",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries",
+          "target_id": "question:demand:D12"
+        },
+        "link:dbcff4ec9d62472bedb7ee52": {
+          "content_sha256": "dbcff4ec9d62472bedb7ee5294e35b526a4cde4fadd713d11e33f955d20f5328",
+          "id": "link:dbcff4ec9d62472bedb7ee52",
+          "relation": "refines",
+          "source_id": "question:demand:D14",
+          "target_id": "question:root"
+        },
+        "link:e5a9bece7311def890467b91": {
+          "content_sha256": "e5a9bece7311def890467b9156fcc92d2fec9948bcc4ff14bd2ab4b30bc4e243",
+          "id": "link:e5a9bece7311def890467b91",
+          "relation": "refines",
+          "source_id": "question:demand:D12",
+          "target_id": "question:root"
+        },
+        "link:e5b001edf93c1fbe4904692c": {
+          "content_sha256": "e5b001edf93c1fbe4904692c23bc3465cf787852c943d1604d06deb98f1fd296",
+          "id": "link:e5b001edf93c1fbe4904692c",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries.02-c2-zhang-boundary-conditions",
+          "target_id": "question:demand:D15"
+        },
+        "link:e5bfef49b3f76c9371b77861": {
+          "content_sha256": "e5bfef49b3f76c9371b77861e45ee1d512f019aef67172fd18c7132135626f34",
+          "id": "link:e5bfef49b3f76c9371b77861",
+          "relation": "refines",
+          "source_id": "question:root.03-social-influence-risk",
+          "target_id": "question:demand:D12"
+        },
+        "link:e7976f175a8a1a130ad2d1e7": {
+          "content_sha256": "e7976f175a8a1a130ad2d1e78c842b200752fab790d5659f858a141cd9274c2f",
+          "id": "link:e7976f175a8a1a130ad2d1e7",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results",
+          "target_id": "question:demand:D14"
+        },
+        "link:ec67afe3731a822e2d0c2942": {
+          "content_sha256": "ec67afe3731a822e2d0c29420bb7d4b2f11e3ec8cb83837b645384f34bcf5d18",
+          "id": "link:ec67afe3731a822e2d0c2942",
+          "relation": "refines",
+          "source_id": "question:root.04-debate-gains-evidence",
+          "target_id": "question:demand:D12"
+        },
+        "link:f63ca17b95f176b627952fd3": {
+          "content_sha256": "f63ca17b95f176b627952fd3651d46f56dfec6c8994b0b0df30d2fc331ace8a9",
+          "id": "link:f63ca17b95f176b627952fd3",
+          "relation": "refines",
+          "source_id": "question:root.03-social-influence-risk",
+          "target_id": "question:demand:D6"
+        },
+        "link:f7b3972e183578733d308198": {
+          "content_sha256": "f7b3972e183578733d308198b9f3de5fda8854126c6aa66264d14afa484ff56a",
+          "id": "link:f7b3972e183578733d308198",
+          "relation": "refines",
+          "source_id": "question:demand:D10",
+          "target_id": "question:root"
+        },
+        "link:f87ac7b536be5b768b698c28": {
+          "content_sha256": "f87ac7b536be5b768b698c28521f264405bf959a3d7cc8591192a09721ce5721",
+          "id": "link:f87ac7b536be5b768b698c28",
+          "relation": "refines",
+          "source_id": "question:root.03-social-influence-risk",
+          "target_id": "question:demand:D11"
+        },
+        "link:fe2451f9c9508933a87405ee": {
+          "content_sha256": "fe2451f9c9508933a87405eef605293ea6393e7fed413850941fee1e033df272",
+          "id": "link:fe2451f9c9508933a87405ee",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries.02-c2-zhang-boundary-conditions",
+          "target_id": "question:demand:D14"
+        }
+      },
+      "outgoing_link_ids_by_entry": {
+        "question:demand:D1": [
+          "link:561e0fcd22b650ab4cc0fd61"
+        ],
+        "question:demand:D10": [
+          "link:f7b3972e183578733d308198"
+        ],
+        "question:demand:D11": [
+          "link:9e16c1c1dacc451174870ea4"
+        ],
+        "question:demand:D12": [
+          "link:e5a9bece7311def890467b91"
+        ],
+        "question:demand:D13": [
+          "link:815a52c06ab01fa3052d160f"
+        ],
+        "question:demand:D14": [
+          "link:dbcff4ec9d62472bedb7ee52"
+        ],
+        "question:demand:D15": [
+          "link:9dc3c1ef66fc5dbb330f0173"
+        ],
+        "question:demand:D2": [
+          "link:1e97bab1f415d57cbc837a88"
+        ],
+        "question:demand:D3": [
+          "link:2395134f0213cf5cee3f1947"
+        ],
+        "question:demand:D4": [
+          "link:541766fc32e4d84c2fd63c44"
+        ],
+        "question:demand:D5": [
+          "link:088e1a7cfea6dde8ac04eab3"
+        ],
+        "question:demand:D6": [
+          "link:48a3d569758cae1eb71a2043"
+        ],
+        "question:demand:D7": [
+          "link:709f42e6e4da8b14cdf82243"
+        ],
+        "question:demand:D8": [
+          "link:7a79aa5755f5b9590ce191cb"
+        ],
+        "question:demand:D9": [
+          "link:ad2d4893bb4dadfa6cec4d51"
+        ],
+        "question:root.01-arg-semantics": [
+          "link:4694364cb7b8f08ed6b70438",
+          "link:5b751584b8c43c9e15d281fe",
+          "link:960009408650bf4b3e01a852",
+          "link:9e148f747df068b5a106ef78",
+          "link:a83bc0e755e8fd359c4a6e60"
+        ],
+        "question:root.02-crdt-persistence": [
+          "link:1709dd7fbf8587de0c575188",
+          "link:3e163e5b6c87fe659c9c8b95",
+          "link:79a9672c7c764f123cad7df4",
+          "link:b02788fef9fd73ad10830bc3",
+          "link:b39e9bd6e534d53587c33f92",
+          "link:b9ccd3ec073289680e72b9c5"
+        ],
+        "question:root.03-social-influence-risk": [
+          "link:52aaf440a0cfa52148fd0e0a",
+          "link:54ace6aa7dbc682ce36b1598",
+          "link:5ecc297a5272dee784b1b751",
+          "link:e5bfef49b3f76c9371b77861",
+          "link:f63ca17b95f176b627952fd3",
+          "link:f87ac7b536be5b768b698c28"
+        ],
+        "question:root.04-debate-gains-evidence": [
+          "link:018c1bfba9c89f886979e58a",
+          "link:4f798cb83c7582c38cfb88bd",
+          "link:5fbb61d2e80f257b289c0591",
+          "link:7c6b34c58d2a7a2bcc9f5e5f",
+          "link:c0525acb5ba38548b9c5ff19",
+          "link:ec67afe3731a822e2d0c2942"
+        ],
+        "question:root.05-debate-nulls-boundaries": [
+          "link:5e97df7da6a94755d85a5407",
+          "link:6018f82dcea4e7b30c3a5022",
+          "link:95a52b650d408c309a8140ee",
+          "link:9f307b082e580d3f1768454b",
+          "link:d508e58a1c643d9abfe73da0",
+          "link:dbc379c523a802d7234d668c"
+        ],
+        "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results": [
+          "link:60e459cfffff32f8128208f8",
+          "link:a8184056ad34b6459c3bcacb",
+          "link:b9d7a3cfb93623e545210f92",
+          "link:c263d292340d252299a711d8",
+          "link:c86042ed89783103116c72b1",
+          "link:e7976f175a8a1a130ad2d1e7"
+        ],
+        "question:root.05-debate-nulls-boundaries.02-c2-zhang-boundary-conditions": [
+          "link:4a3bba97c5e1b9cb782e3408",
+          "link:7d78d3ba63d8f21b16592142",
+          "link:b6b80273c764e1e3f59df888",
+          "link:c39a34a9d3f6dc908746a7b0",
+          "link:e5b001edf93c1fbe4904692c",
+          "link:fe2451f9c9508933a87405ee"
+        ],
+        "question:root.05-debate-nulls-boundaries.03-c3-design-inferences": [
+          "link:5539b2e5fa996893c265aec7",
+          "link:9c8f85fa9b668b832df212c2",
+          "link:ceba8d1721ebe07093387a83",
+          "link:da16abdd94a5d34dd4b43e33",
+          "link:da969a151f6b08095623e758"
+        ]
+      },
+      "question_ids_by_answer": {},
+      "questions_by_id": {
+        "question:demand:D1": {
+          "acceptance_condition": "Establish demand D1 with evidence.",
+          "content_sha256": "358b8c8d2ee8dcbcd62f92e95fcfeb759f5784e13dd5bd756c15e8ad80406fad",
+          "demand_ids": [
+            "D1"
+          ],
+          "id": "question:demand:D1",
+          "node_id": null,
+          "rationale": "Format and length bound stated verbatim in the request.",
+          "tags": [
+            "decision"
+          ],
+          "text": "The deliverable is a single architecture decision memo of 1,400–1,800 words."
+        },
+        "question:demand:D10": {
+          "acceptance_condition": "Establish demand D10 with evidence.",
+          "content_sha256": "42c24ef84552b31fbec60cb25073a16b7d0d6ae637909b5aaa0649e671486bc9",
+          "demand_ids": [
+            "D10"
+          ],
+          "id": "question:demand:D10",
+          "node_id": null,
+          "rationale": "Sixth specification area; the request says 'the exact role of model versus runtime.'",
+          "tags": [
+            "evidence"
+          ],
+          "text": "The exact division of responsibility between model and runtime is specified."
+        },
+        "question:demand:D11": {
+          "acceptance_condition": "Establish demand D11 with evidence.",
+          "content_sha256": "b48aa66909c810d05ced3a63029ee4d813e20b8bd7343488b183f69dac4e2b40",
+          "demand_ids": [
+            "D11"
+          ],
+          "id": "question:demand:D11",
+          "node_id": null,
+          "rationale": "Required by the request and reinforced by the manifest's instruction not to select papers by desired outcome.",
+          "tags": [
+            "evidence"
+          ],
+          "text": "The memo reconciles — rather than hides — the tension between papers reporting multi-agent debate gains and papers reporting matched-compute null results or conformity."
+        },
+        "question:demand:D12": {
+          "acceptance_condition": "Establish demand D12 with evidence.",
+          "content_sha256": "70610c0e88a285479759ef950cb1fa33e28da10095af537fb19e5ee24c60fdc7",
+          "demand_ids": [
+            "D12"
+          ],
+          "id": "question:demand:D12",
+          "node_id": null,
+          "rationale": "Grounding scope, citation count, and page-marker requirement are stated in the request; marker format and corpus enumeration come from the manifest.",
+          "tags": [
+            "evidence"
+          ],
+          "text": "All evidentiary claims are grounded only in the supplied workspace corpus, with at least five distinct source files cited and citations carrying PDF page markers from the extracted text."
+        },
+        "question:demand:D13": {
+          "acceptance_condition": "Establish demand D13 with evidence.",
+          "content_sha256": "e4e6151f4fb92956ae2d8e295acd8c66fb86a3b7aa8512390bd8da1b78cda6ea",
+          "demand_ids": [
+            "D13"
+          ],
+          "id": "question:demand:D13",
+          "node_id": null,
+          "rationale": "Stated verbatim in the request.",
+          "tags": [
+            "evidence"
+          ],
+          "text": "Source-supported claims are clearly distinguished from design inferences."
+        },
+        "question:demand:D14": {
+          "acceptance_condition": "Establish demand D14 with evidence.",
+          "content_sha256": "89489912e05f5dae6a67e4300048e4863d654b8355bd1892d03970cecd421850",
+          "demand_ids": [
+            "D14"
+          ],
+          "id": "question:demand:D14",
+          "node_id": null,
+          "rationale": "Condition count and all five metric families are enumerated in the request.",
+          "tags": [
+            "counterexample",
+            "measurement",
+            "definition"
+          ],
+          "text": "A falsifiable evaluation plan compares at least three conditions and defines metrics for quality, diversity/correlation, latency, token cost, and recovery-from-wrong-consensus."
+        },
+        "question:demand:D15": {
+          "acceptance_condition": "Establish demand D15 with evidence.",
+          "content_sha256": "c63b60742108a5627760487657dad3280b9b724cdef7fd8f2f8b22e469072dc3",
+          "demand_ids": [
+            "D15"
+          ],
+          "id": "question:demand:D15",
+          "node_id": null,
+          "rationale": "Stated verbatim in the request.",
+          "tags": [
+            "evidence"
+          ],
+          "text": "Important limitations and unresolved questions are stated."
+        },
+        "question:demand:D2": {
+          "acceptance_condition": "Establish demand D2 with evidence.",
+          "content_sha256": "a1e8e73a66a88854b181cd8e700ee47c190021995492e4c13a7f3f2480683936",
+          "demand_ids": [
+            "D2"
+          ],
+          "id": "question:demand:D2",
+          "node_id": null,
+          "rationale": "The request explicitly forbids a survey-only outcome.",
+          "tags": [
+            "decision"
+          ],
+          "text": "The memo makes one concrete, implementable recommendation rather than merely surveying the literature."
+        },
+        "question:demand:D3": {
+          "acceptance_condition": "Establish demand D3 with evidence.",
+          "content_sha256": "2b4510f300813f4c6d054088afcdeb580e129c09c780589126e578caad7f1cb3",
+          "demand_ids": [
+            "D3"
+          ],
+          "id": "question:demand:D3",
+          "node_id": null,
+          "rationale": "All five capabilities are enumerated verbatim in the request.",
+          "tags": [
+            "decision"
+          ],
+          "text": "The recommended design treats questions and answers as first-class many-to-many graph objects, supporting: multiple competing answers per question; one answer addressing multiple questions; question-to-question relations; answer-to-answer provenance or conflict relations; and controlled tags."
+        },
+        "question:demand:D4": {
+          "acceptance_condition": "Establish demand D4 with evidence.",
+          "content_sha256": "495d059579b7faeff7b7c3dea23a59e4beecd9d2061aa750429abe0bdc2fd29e",
+          "demand_ids": [
+            "D4"
+          ],
+          "id": "question:demand:D4",
+          "node_id": null,
+          "rationale": "Both comparison targets are named verbatim in the request.",
+          "tags": [
+            "evidence"
+          ],
+          "text": "The design is compared against two named baselines: an open conversational forum and no inter-agent communication."
+        },
+        "question:demand:D5": {
+          "acceptance_condition": "Establish demand D5 with evidence.",
+          "content_sha256": "04efdfb487681553676fbfc02e1e0eba20f7638dcd990d68fffd3b7e56f7324a",
+          "demand_ids": [
+            "D5"
+          ],
+          "id": "question:demand:D5",
+          "node_id": null,
+          "rationale": "First of six specification areas listed in the request.",
+          "tags": [
+            "evidence"
+          ],
+          "text": "The data model and its invariants are specified."
+        },
+        "question:demand:D6": {
+          "acceptance_condition": "Establish demand D6 with evidence.",
+          "content_sha256": "16aa3a487c4a63da4bd967a8004443a36ebbea7ca9716b65b773f14e6af5e164",
+          "demand_ids": [
+            "D6"
+          ],
+          "id": "question:demand:D6",
+          "node_id": null,
+          "rationale": "Second of six specification areas listed in the request.",
+          "tags": [
+            "method"
+          ],
+          "text": "Staged visibility and the communication protocol are specified."
+        },
+        "question:demand:D7": {
+          "acceptance_condition": "Establish demand D7 with evidence.",
+          "content_sha256": "e9aace925c8874d470e5e66f133e5698e954d9c79c85ac15d05a6b1be90f8648",
+          "demand_ids": [
+            "D7"
+          ],
+          "id": "question:demand:D7",
+          "node_id": null,
+          "rationale": "Third of six specification areas listed in the request.",
+          "tags": [
+            "evidence"
+          ],
+          "text": "Persistence and concurrent-update semantics are specified."
+        },
+        "question:demand:D8": {
+          "acceptance_condition": "Establish demand D8 with evidence.",
+          "content_sha256": "be321eb0feda8aa2c452bdc5b58cd0c2d3a82e7337259f185b4b495784e0d94b",
+          "demand_ids": [
+            "D8"
+          ],
+          "id": "question:demand:D8",
+          "node_id": null,
+          "rationale": "Fourth of six specification areas listed in the request.",
+          "tags": [
+            "evidence"
+          ],
+          "text": "Contradiction and belief-revision behavior is specified."
+        },
+        "question:demand:D9": {
+          "acceptance_condition": "Establish demand D9 with evidence.",
+          "content_sha256": "fbacaee35ff37b6cdf07a99f4704b78e431674fb8d042f8604710966157351f4",
+          "demand_ids": [
+            "D9"
+          ],
+          "id": "question:demand:D9",
+          "node_id": null,
+          "rationale": "Fifth of six specification areas listed in the request.",
+          "tags": [
+            "evidence"
+          ],
+          "text": "Retrieval and ranking are specified."
+        },
+        "question:root": {
+          "acceptance_condition": "Satisfy every assigned whole-task demand and explicit constraint.",
+          "content_sha256": "4ce436fa1c007db64fdec92524d279656612f912b3191f3b4454fb209e9fb892",
+          "demand_ids": [
+            "D1",
+            "D2",
+            "D3",
+            "D4",
+            "D5",
+            "D6",
+            "D7",
+            "D8",
+            "D9",
+            "D10",
+            "D11",
+            "D12",
+            "D13",
+            "D14",
+            "D15"
+          ],
+          "id": "question:root",
+          "node_id": "root",
+          "rationale": "The whole task submitted after intake.",
+          "tags": [
+            "counterexample",
+            "method",
+            "measurement"
+          ],
+          "text": "Produce a 1,400–1,800 word architecture decision memo that commits to one concrete, implementable design for a shared knowledge substrate serving recursively decomposing AI research agents: questions and answers modeled as first-class many-to-many graph objects; the design compared against an open conversational forum and against no inter-agent communication; full specification of the data model and invariants, staged visibility and communication protocol, persistence and concurrent-update semantics, contradiction and belief-revision behavior, retrieval/ranking, and the exact role of model versus runtime; evidence restricted to the seven-file workspace corpus with at least five distinct source files cited via PDF page markers; the corpus's conflicting empirical conclusions reconciled rather than hidden; source-supported claims distinguished from design inferences; and a falsifiable evaluation plan (at least three conditions, five named metric families) plus explicit limitations and unresolved questions."
+        },
+        "question:root.01-arg-semantics": {
+          "acceptance_condition": "Returns (a) at least four findings from the Dung file, each a quote or close paraphrase carrying the file-relative citation and the exact `===== PDF PAGE N =====` marker(s) of the page where it appears, and (b) at least three design constraints for conflict/belief-revision semantics, each explicitly labeled as design inference rather than source claim.",
+          "content_sha256": "1cda59f1ebda0deba5fd22d60e9e1bdf079a900c1c0be6105aeac164ebc3d3ec",
+          "demand_ids": [
+            "D3",
+            "D8",
+            "D12",
+            "D13"
+          ],
+          "id": "question:root.01-arg-semantics",
+          "node_id": "root.01-arg-semantics",
+          "rationale": "Dung 1995 is the corpus's only formal treatment of conflict and acceptability; it grounds the conflict-relation capability of D3 and the contradiction/belief-revision specification of D8 with citable formal definitions.",
+          "tags": [
+            "definition",
+            "evidence",
+            "method"
+          ],
+          "text": "Read papers/text/dung-1995-argumentation.txt and extract, each anchored to the exact `===== PDF PAGE N =====` marker(s) where it appears: the definition of an argumentation framework (set of arguments plus binary attack relation), acceptability of an argument, conflict-free and admissible sets, the characteristic function, and the grounded/preferred/stable extension semantics, including any stated links to nonmonotonic reasoning or logic programming. Then derive, each explicitly labeled as design inference, how these notions can anchor answer-to-answer conflict/provenance relations and contradiction and belief-revision behavior in a many-to-many question/answer graph (e.g., answers as arguments, attack edges as conflicts, extensions as mutually consistent answer sets)."
+        },
+        "question:root.02-crdt-persistence": {
+          "acceptance_condition": "Returns (a) at least four findings from the Shapiro file, each a quote or close paraphrase carrying the file-relative citation and the exact `===== PDF PAGE N =====` marker(s), and (b) at least three design constraints for persistence/concurrency (including at least one explicit split between CRDT-enforced and runtime-enforced invariants), each labeled as design inference.",
+          "content_sha256": "9708f3549586149eb68c3673c506178691fb9804268b1639f230c6784a9e2085",
+          "demand_ids": [
+            "D5",
+            "D7",
+            "D10",
+            "D12",
+            "D13"
+          ],
+          "id": "question:root.02-crdt-persistence",
+          "node_id": "root.02-crdt-persistence",
+          "rationale": "Shapiro et al. 2011 is the corpus's only distributed-systems treatment; it grounds the persistence and concurrent-update specification (D7), the merge-safe portion of the data model's invariants (D5), and the runtime-versus-model enforcement boundary (D10).",
+          "tags": [
+            "evidence",
+            "method",
+            "constraint"
+          ],
+          "text": "Read papers/text/shapiro-et-al-2011-crdts.txt and extract, each anchored to the exact `===== PDF PAGE N =====` marker(s) where it appears: the distinction between state-based and operation-based CRDTs, the strong eventual consistency guarantee and its conditions, the semilattice/monotonicity requirements for convergence, and at least two concrete reusable data types (e.g., grow-only set, observed-remove set, last-writer-wins register). Then derive, each explicitly labeled as design inference, concurrent-update semantics for a many-to-many question/answer graph substrate (e.g., add-only question and answer objects, add-wins tag sets) and identify which invariants CRDTs cannot enforce (e.g., uniqueness, schema validity, tag-vocabulary control) so that the runtime must enforce them."
+        },
+        "question:root.03-social-influence-risk": {
+          "acceptance_condition": "Returns (a) at least three anchored findings per file (at least six total), each a quote or close paraphrase carrying the file-relative citation and the exact `===== PDF PAGE N =====` marker(s), and (b) at least three staged-visibility or diversity-measurement design constraints, each explicitly labeled as design inference.",
+          "content_sha256": "2f332a3b5c9f0b6fd719848ae59287e9e0a5c4fbe833be72bbf5567676c75d50",
+          "demand_ids": [
+            "D6",
+            "D11",
+            "D12",
+            "D13",
+            "D14"
+          ],
+          "id": "question:root.03-social-influence-risk",
+          "node_id": "root.03-social-influence-risk",
+          "rationale": "Lorenz 2011 and Choi 2025 are the corpus's evidence that unstructured information sharing degrades collective accuracy; they ground the staged-visibility protocol (D6), the conformity side of the reconciliation (D11), and the diversity/correlation metric family (D14).",
+          "tags": [
+            "evidence",
+            "risk",
+            "counterexample"
+          ],
+          "text": "Read papers/text/lorenz-et-al-2011-social-influence.txt and papers/text/choi-et-al-2025-conformity.txt. Extract, each anchored to the exact `===== PDF PAGE N =====` marker(s): Lorenz et al.'s core experimental findings on how social influence affects the wisdom of crowds (effects on estimate diversity, accuracy, and confidence, as stated in the text) and Choi et al.'s empirical findings on group conformity in multi-agent systems (the conditions under which agents conform to peer or majority answers, as stated in the text). Then derive, each explicitly labeled as design inference, staged-visibility constraints for the substrate (e.g., committing independent answers before exposing peers' answers, delayed or partial disclosure) and implications for measuring answer diversity and correlation."
+        },
+        "question:root.04-debate-gains-evidence": {
+          "acceptance_condition": "Returns (a) at least four anchored findings from the Du file covering claimed gains, experimental setup (agents, rounds, tasks, consensus mechanism), and stated limitations, each carrying the file-relative citation and the exact `===== PDF PAGE N =====` marker(s), and (b) at least two design constraints and one evaluation-replication requirement, each explicitly labeled as design inference.",
+          "content_sha256": "2be78886a3947f382843991a648c9946b59844f7afbc180ae5d035bf173143b2",
+          "demand_ids": [
+            "D4",
+            "D11",
+            "D12",
+            "D13",
+            "D14"
+          ],
+          "id": "question:root.04-debate-gains-evidence",
+          "node_id": "root.04-debate-gains-evidence",
+          "rationale": "Du et al. 2023 is the corpus's positive evidence for multi-agent debate; it grounds one side of the required reconciliation (D11), informs the baseline comparison (D4), and defines the replication arm of the evaluation plan (D14).",
+          "tags": [
+            "evidence",
+            "measurement"
+          ],
+          "text": "Read papers/text/du-et-al-2023-multiagent-debate.txt and extract, each anchored to the exact `===== PDF PAGE N =====` marker(s): the improvements in factuality and reasoning the paper claims for multiagent debate, the experimental setup (number of agents, number of debate rounds, tasks used, and how consensus or a final answer is reached), and any limitations the authors state. Then derive, each explicitly labeled as design inference: which debate behaviors a shared question/answer substrate must capture to retain these gains, and what an evaluation condition replicating the paper's setup would require."
+        },
+        "question:root.05-debate-nulls-boundaries": {
+          "acceptance_condition": "Returns (a) at least three anchored findings per file (at least six total), each a quote or close paraphrase carrying the file-relative citation and the exact `===== PDF PAGE N =====` marker(s), and (b) at least three reconciliation hypotheses and at least three evaluation-design constraints (together covering the five named metric families), each explicitly labeled as design inference.",
+          "content_sha256": "89203749570be368520298607541a4b6b5c225a2bc75e8bdbf69bacd54a5bc66",
+          "demand_ids": [
+            "D11",
+            "D12",
+            "D13",
+            "D14",
+            "D15"
+          ],
+          "id": "question:root.05-debate-nulls-boundaries",
+          "node_id": "root.05-debate-nulls-boundaries",
+          "rationale": "Smit et al. 2023 and Zhang et al. 2025 are the corpus's null-result and boundary-condition evidence; they ground the reconciliation (D11) without hiding it, the falsifiable evaluation plan (D14), and the limitations and unresolved questions (D15).",
+          "tags": [
+            "counterexample",
+            "measurement",
+            "risk"
+          ],
+          "text": "Read papers/text/smit-et-al-2023-going-mad.txt and papers/text/zhang-et-al-2025-mad-question.txt. Extract, each anchored to the exact `===== PDF PAGE N =====` marker(s): Smit et al.'s critical or null results on multi-agent debate (including any comparisons against single-agent or matched-compute baselines, as stated in the text) and Zhang et al.'s analysis of when and why multi-agent debate helps or fails (task dependence and boundary conditions, as stated in the text). Then derive, each explicitly labeled as design inference: at least three reconciliation hypotheses attributing the disagreement with Du et al. 2023 to named conditions (task type, compute parity, visibility or timing of peer answers), and constraints for a falsifiable evaluation plan covering quality, diversity/correlation, latency, token cost, and recovery-from-wrong-consensus."
+        },
+        "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results": {
+          "acceptance_condition": "Returns at least three findings, each a quote or close paraphrase from the Smit file, each with the exact `===== PDF PAGE N =====` marker(s) where it appears. The findings must collectively cover: (1) MAD not reliably outperforming other prompting strategies, (2) performance comparisons on specific benchmarks, and (3) any stated limitations or sensitivity to hyperparameters.",
+          "content_sha256": "f5d173113e035041358a6ba0738cd3d997d33f6a3518040414b66c584142546c",
+          "demand_ids": [
+            "D11",
+            "D12",
+            "D13",
+            "D14",
+            "D15"
+          ],
+          "id": "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results",
+          "node_id": "root.05-debate-nulls-boundaries.01-c1-smit-null-results",
+          "rationale": "Smit et al. is the corpus's null-result evidence; its findings are a distinct evidence question that can be answered independently from the Zhang file and the design-derivation child.",
+          "tags": [
+            "counterexample",
+            "evidence",
+            "risk"
+          ],
+          "text": "Extract from papers/text/smit-et-al-2023-going-mad.txt at least three anchored findings on Smit et al.'s critical or null results regarding multi-agent debate, including any comparisons against single-agent or matched-compute baselines, each quoted or closely paraphrased and carrying the exact `===== PDF PAGE N =====` marker(s)."
+        },
+        "question:root.05-debate-nulls-boundaries.02-c2-zhang-boundary-conditions": {
+          "acceptance_condition": "Returns at least three findings, each a quote or close paraphrase from the Zhang file, each with the exact `===== PDF PAGE N =====` marker(s) where it appears. The findings must collectively cover: (1) MAD often failing to outperform single-agent baselines like CoT and Self-Consistency, (2) task dependence (e.g., performance differences across programming, math, general knowledge), and (3) the role of model heterogeneity or other factors in improving or failing to improve MAD.",
+          "content_sha256": "7cc06f30a14ed1bd6831aaec777cec53aac4917b32a585ab629675a04dc5d449",
+          "demand_ids": [
+            "D11",
+            "D12",
+            "D13",
+            "D14",
+            "D15"
+          ],
+          "id": "question:root.05-debate-nulls-boundaries.02-c2-zhang-boundary-conditions",
+          "node_id": "root.05-debate-nulls-boundaries.02-c2-zhang-boundary-conditions",
+          "rationale": "Zhang et al. is the corpus's boundary-condition and negative-result evidence; its analysis of when debate helps or fails is a distinct evidence question independent from the Smit extraction.",
+          "tags": [
+            "counterexample",
+            "evidence",
+            "measurement"
+          ],
+          "text": "Extract from papers/text/zhang-et-al-2025-mad-question.txt at least three anchored findings on Zhang et al.'s analysis of when and why multi-agent debate helps or fails, including task dependence and boundary conditions, each quoted or closely paraphrased and carrying the exact `===== PDF PAGE N =====` marker(s)."
+        },
+        "question:root.05-debate-nulls-boundaries.03-c3-design-inferences": {
+          "acceptance_condition": "Returns at least three reconciliation hypotheses and at least three evaluation-design constraints, each explicitly labeled as design inference. The hypotheses must name at least one of: task type, compute parity, visibility/timing of peer answers. The constraints together must cover quality, diversity/correlation, latency, token cost, and recovery-from-wrong-consensus.",
+          "content_sha256": "5414bbc03bd73029ae03928b13e781d973356ae84bf3d5c089d27b3eeea91873",
+          "demand_ids": [
+            "D11",
+            "D13",
+            "D14",
+            "D15"
+          ],
+          "id": "question:root.05-debate-nulls-boundaries.03-c3-design-inferences",
+          "node_id": "root.05-debate-nulls-boundaries.03-c3-design-inferences",
+          "rationale": "The reconciliation and evaluation design is the analytical product of this node; it builds on the evidence extracted by the two sibling children, but can be derived in parallel because the required findings are provided as separator facts.",
+          "tags": [
+            "synthesis",
+            "risk",
+            "measurement"
+          ],
+          "text": "Using the anchored findings from the two sibling extractors (provided below as separator facts), derive at least three reconciliation hypotheses attributing the disagreement with Du et al. 2023 to named conditions (task type, compute parity, visibility or timing of peer answers), and at least three evaluation-design constraints covering the five metric families (quality, diversity/correlation, latency, token cost, recovery-from-wrong-consensus). Each derived item must be explicitly labeled as a design inference."
+        }
+      },
+      "standard_tags": [
+        "definition",
+        "constraint",
+        "evidence",
+        "method",
+        "counterexample",
+        "risk",
+        "assumption",
+        "uncertainty",
+        "decision",
+        "interface",
+        "measurement",
+        "synthesis"
+      ],
+      "version": 120
+    },
+    "max_children": 5,
+    "node": {
+      "acceptance_condition": "Returns at least three reconciliation hypotheses and at least three evaluation-design constraints, each explicitly labeled as design inference. The hypotheses must name at least one of: task type, compute parity, visibility/timing of peer answers. The constraints together must cover quality, diversity/correlation, latency, token cost, and recovery-from-wrong-consensus.",
+      "demand_ids": [
+        "D11",
+        "D13",
+        "D14",
+        "D15"
+      ],
+      "depth": 2,
+      "expected_contribution": "The design-inference layer that the parent will use to ground the reconciliation (D11) and the falsifiable evaluation plan (D14).",
+      "id": "root.05-debate-nulls-boundaries.03-c3-design-inferences",
+      "knowledge_tags": [
+        "synthesis",
+        "risk",
+        "measurement"
+      ],
+      "objective": "Using the anchored findings from the two sibling extractors (provided below as separator facts), derive at least three reconciliation hypotheses attributing the disagreement with Du et al. 2023 to named conditions (task type, compute parity, visibility or timing of peer answers), and at least three evaluation-design constraints covering the five metric families (quality, diversity/correlation, latency, token cost, recovery-from-wrong-consensus). Each derived item must be explicitly labeled as a design inference.",
+      "parent_id": "root.05-debate-nulls-boundaries",
+      "rationale": "The reconciliation and evaluation design is the analytical product of this node; it builds on the evidence extracted by the two sibling children, but can be derived in parallel because the required findings are provided as separator facts.",
+      "separator_facts": [
+        "SC1: The evidentiary corpus is exactly seven extracted-text files under papers/text: dung-1995-argumentation.txt (Dung 1995, Artificial Intelligence 77), shapiro-et-al-2011-crdts.txt (Shapiro et al., SSS 2011), lorenz-et-al-2011-social-influence.txt (Lorenz et al., PNAS 108, 2011), du-et-al-2023-multiagent-debate.txt (Du et al. 2023, arXiv 2305.14325), smit-et-al-2023-going-mad.txt (Smit et al. 2023, arXiv 2311.17371), zhang-et-al-2025-mad-question.txt (Zhang et al. 2025, arXiv 2502.08788), choi-et-al-2025-conformity.txt (Choi et al., Findings of ACL 2025).",
+        "SC2: Page boundaries in the extracted texts are marked with lines of the form `===== PDF PAGE N =====`, and these markers are the citation anchors required by D12/C3.",
+        "SC3: The corpus intentionally contains conflicting empirical conclusions — multi-agent debate gains (Du et al. 2023) versus matched-compute null results and conformity findings (Smit et al. 2023; Zhang et al. 2025; Choi et al. 2025; Lorenz et al. 2011 on social influence undermining crowd wisdom) — and the manifest requires preserving and reconciling these conflicts.",
+        "SC4: The envelope's single conversation decision asserts that the seven full extracted texts are present in the solve workspace under papers/text with explicit PDF page markers; the intake envelope itself encloses only the manifest, not the full texts.",
+        "SC5: The manifest (material:001) is located at /workspace/seam-harness/research-kb-workspace/CORPUS.md, indicating a benchmark-style workspace named research-kb-workspace under a seam-harness directory.",
+        "SC6: The proposed substrate plus the two baselines named in D4 (open conversational forum; no inter-agent communication) naturally supply the three or more conditions required by D14.",
+        "Corpus membership: papers/text/smit-et-al-2023-going-mad.txt is Smit et al. 2023, arXiv 2311.17371, and papers/text/zhang-et-al-2025-mad-question.txt is Zhang et al. 2025, arXiv 2502.08788; both are among the exactly seven extracted-text files under papers/text that constitute the only evidentiary corpus.",
+        "Page boundaries in the extracted texts are marked with lines of the form `===== PDF PAGE N =====`; citations must carry these markers (D12/C3).",
+        "The corpus intentionally contains conflicting empirical conclusions: debate gains (Du et al. 2023) versus matched-compute null results and conformity findings (Smit et al. 2023; Zhang et al. 2025; Choi et al. 2025; Lorenz et al. 2011); these must be preserved and reconciled, never hidden (C4).",
+        "The proposed substrate plus the two baselines named in D4 (open conversational forum; no inter-agent communication) naturally supply the three or more conditions required by D14.",
+        "Evidence is restricted to the seven workspace corpus files; no outside sources may be used (C2).",
+        "Source-supported claims must be clearly distinguished from design inferences in everything returned (D13).",
+        "Smit et al. state that 'multi-agent debating systems, in their current form, do not reliably outperform other proposed prompting strategies, such as self-consistency and ensembling using multiple reasoning paths' (===== PDF PAGE 1 =====).",
+        "Smit et al. report that with hyperparameter tuning, some MAD systems like Multi-Persona perform better, suggesting MAD is 'more sensitive to different hyperparameter settings and difficult to optimize' (===== PDF PAGE 1 =====).",
+        "Smit et al. find that modulating agreement intensity via prompts can improve Multi-Persona by ~15% on USMLE, and that the effect varies by dataset (===== PDF PAGE 6 =====).",
+        "Zhang et al. report that 'none of these MAD methods achieve a win rate higher than 20% when compared to CoT across 36 scenarios (4 models × 9 benchmarks)' (===== PDF PAGE 3 =====).",
+        "Zhang et al. analyze task dependence: MAD frameworks 'performed worse on programming tasks (only SoM/AgentVerse had positive win rates) but better on mathematical reasoning' (===== PDF PAGE 7 =====).",
+        "Zhang et al. find that 'simply adjusting these hyperparameters can hardly reverse this negative outcome' (===== PDF PAGE 3 =====) and that SC is more efficient in token consumption (===== PDF PAGE 9 =====).",
+        "Zhang et al. propose model heterogeneity as a universal antidote, with Heter-SoM improving SoM-average by 6.4% (===== PDF PAGE 11 =====)."
+      ],
+      "source_ids": [
+        "ref:smit-2023-going-mad",
+        "ref:zhang-2025-mad-question"
+      ],
+      "source_paths": []
+    },
+    "product_intent": "The memo exists to commit the agent system to a single defensible substrate architecture — and to justify that commitment strictly from the supplied corpus — so that recursively decomposing research agents can share, contest, and reuse questions and answers as structured state, capturing the gains reported for multi-agent debate while structurally guarding against the matched-compute null results and conformity failure modes documented in the same corpus.",
+    "remaining_depth": 1,
+    "remaining_node_budget": 7,
+    "source_materials": [
+      {
+        "content": "Enumerated in material:001; asserted present in the solve workspace by the conversation decision; content not enclosed at intake.",
+        "id": "ref:smit-2023-going-mad",
+        "kind": "referent:file",
+        "label": "Extracted text of Smit et al., 'Should We Be Going MAD? A Look at Multi-Agent Debate Strategies for LLMs' (2023).",
+        "locator": "papers/text/smit-et-al-2023-going-mad.txt"
+      },
+      {
+        "content": "Enumerated in material:001; asserted present in the solve workspace by the conversation decision; content not enclosed at intake.",
+        "id": "ref:zhang-2025-mad-question",
+        "kind": "referent:file",
+        "label": "Extracted text of Zhang et al., 'If Multi-Agent Debate Is the Answer, What Is the Question?' (2025).",
+        "locator": "papers/text/zhang-et-al-2025-mad-question.txt"
+      }
+    ],
+    "stable_context": [
+      "SC1: The evidentiary corpus is exactly seven extracted-text files under papers/text: dung-1995-argumentation.txt (Dung 1995, Artificial Intelligence 77), shapiro-et-al-2011-crdts.txt (Shapiro et al., SSS 2011), lorenz-et-al-2011-social-influence.txt (Lorenz et al., PNAS 108, 2011), du-et-al-2023-multiagent-debate.txt (Du et al. 2023, arXiv 2305.14325), smit-et-al-2023-going-mad.txt (Smit et al. 2023, arXiv 2311.17371), zhang-et-al-2025-mad-question.txt (Zhang et al. 2025, arXiv 2502.08788), choi-et-al-2025-conformity.txt (Choi et al., Findings of ACL 2025).",
+      "SC2: Page boundaries in the extracted texts are marked with lines of the form `===== PDF PAGE N =====`, and these markers are the citation anchors required by D12/C3.",
+      "SC3: The corpus intentionally contains conflicting empirical conclusions — multi-agent debate gains (Du et al. 2023) versus matched-compute null results and conformity findings (Smit et al. 2023; Zhang et al. 2025; Choi et al. 2025; Lorenz et al. 2011 on social influence undermining crowd wisdom) — and the manifest requires preserving and reconciling these conflicts.",
+      "SC4: The envelope's single conversation decision asserts that the seven full extracted texts are present in the solve workspace under papers/text with explicit PDF page markers; the intake envelope itself encloses only the manifest, not the full texts.",
+      "SC5: The manifest (material:001) is located at /workspace/seam-harness/research-kb-workspace/CORPUS.md, indicating a benchmark-style workspace named research-kb-workspace under a seam-harness directory.",
+      "SC6: The proposed substrate plus the two baselines named in D4 (open conversational forum; no inter-agent communication) naturally supply the three or more conditions required by D14."
+    ],
+    "workspace_documents": [],
+    "workspace_index": [
+      {
+        "content_sha256": "f6605c2b9bb68dd7906b2881ec1f0b48b32f607c7b768cd3ec8ab5a9ca46afaa",
+        "path": "CORPUS.md",
+        "size_bytes": 1937
+      },
+      {
+        "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+        "path": "papers/text/choi-et-al-2025-conformity.txt",
+        "size_bytes": 60691
+      },
+      {
+        "content_sha256": "0674b1614409c389ff275c78c696138a9453e321fee21b90ea1e4354700be7e2",
+        "path": "papers/text/du-et-al-2023-multiagent-debate.txt",
+        "size_bytes": 97256
+      },
+      {
+        "content_sha256": "8731efeb90375496d5dc1ea00840bc54e28f908021deff777966babcbc797f6f",
+        "path": "papers/text/dung-1995-argumentation.txt",
+        "size_bytes": 93057
+      },
+      {
+        "content_sha256": "10d6e61835ae38ecc32c345b6c18f5d4259ef40874694d12f60c4dd6162e160f",
+        "path": "papers/text/lorenz-et-al-2011-social-influence.txt",
+        "size_bytes": 46369
+      },
+      {
+        "content_sha256": "5363f488d988a892dd33e2cbba81c87e558deda9efdd190bc608ef9a8d4ba26a",
+        "path": "papers/text/shapiro-et-al-2011-crdts.txt",
+        "size_bytes": 42422
+      },
+      {
+        "content_sha256": "a1263656cb4d7e298c289b4ee44368fe9f38c1c2efc4ce88f0d54d60a62a3d1c",
+        "path": "papers/text/smit-et-al-2023-going-mad.txt",
+        "size_bytes": 80205
+      },
+      {
+        "content_sha256": "41e1d26db346207d4be0ec393e7bed983875ae417ca7aa5a530d390dca72e06e",
+        "path": "papers/text/zhang-et-al-2025-mad-question.txt",
+        "size_bytes": 95563
+      }
+    ]
+  },
+  "dependency_type": "PlanningDeps",
+  "input_sha256": "6df480f850eff258d6351a1e74ec526e0f3d7a71073031015a9ef5cfef2ef96e",
+  "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+  "role": "recursive_planner"
+}

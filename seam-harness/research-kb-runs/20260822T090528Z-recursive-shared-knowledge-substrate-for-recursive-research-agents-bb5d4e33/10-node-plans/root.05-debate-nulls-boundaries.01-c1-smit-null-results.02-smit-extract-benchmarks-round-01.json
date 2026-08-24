@@ -1,0 +1,21 @@
+{
+  "account": "The node's objective and acceptance condition are fully satisfiable from the workspace document content already provided in the dossier: the full text of papers/text/smit-et-al-2023-going-mad.txt is included in the workspace_documents entry. The acceptance condition asks for at least one anchored finding comparing MAD systems against single-agent or other prompting baselines on specific benchmarks, with quote/close paraphrase and exact PDF page markers. The text contains Table 2 on PDF PAGE 5 with best performance scores across seven datasets including MedQA, PubMedQA, MMLU, CosmosQA, CIAR, GPQA, and Chess, and the accompanying sentence 'Table 2 indicates that no protocol dominates on all datasets.' This directly satisfies the acceptance condition: it reports performance numbers on at least two named benchmarks (indeed seven) comparing MAD systems (e.g., Society of Mind, ChatEval, Multi-Persona) against non-debate baselines (Medprompt, Ensemble Refinement, Self-Consistency, Single Agent). No further evidence or expansion is needed; a single bounded extraction suffices.",
+  "children": [],
+  "decidability": {
+    "acceptance_mechanical": true,
+    "account": "The complete Smit et al. file content is present in the workspace_documents field of this dossier. The exact page marker '===== PDF PAGE 5 =====' and the Table 2 numbers are directly observable. Acceptance is mechanical: the finding must contain a quote/close paraphrase of the table or the 'no protocol dominates' sentence, carry the page marker, and mention at least two benchmarks with a MAD system vs a non-debate baseline. No sibling output is required.",
+    "context_complete": true,
+    "grounded_referents": [
+      "papers/text/smit-et-al-2023-going-mad.txt",
+      "===== PDF PAGE 5 ===== in papers/text/smit-et-al-2023-going-mad.txt",
+      "Table 2 in papers/text/smit-et-al-2023-going-mad.txt"
+    ],
+    "independent_of_future_siblings": true,
+    "missing_context": []
+  },
+  "disposition": "solve",
+  "irreducible_core": null,
+  "requested_source_ids": [],
+  "requested_source_paths": [],
+  "synthesis_contract": null
+}

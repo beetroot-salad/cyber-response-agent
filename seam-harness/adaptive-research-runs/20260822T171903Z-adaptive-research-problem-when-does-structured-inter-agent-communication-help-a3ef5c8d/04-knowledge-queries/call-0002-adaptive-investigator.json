@@ -1,0 +1,529 @@
+{
+  "call_id": "call-0002-adaptive-investigator",
+  "queries": [
+    {
+      "arguments": {
+        "limit": 10,
+        "query": "Du et al 2023 multiagent debate",
+        "tags": [],
+        "unanswered_only": false
+      },
+      "result": {
+        "hits": [
+          {
+            "answer_count": 0,
+            "id": "question:work:001-inv-du-debate",
+            "kind": "question",
+            "score": 13.102499355774647,
+            "sufficiency": null,
+            "tags": [
+              "evidence"
+            ],
+            "text": "What exactly does Du et al. 2023 (papers/text/du-et-al-2023-multiagent-debate.txt) claim and show about multiagent debate: which tasks and baselines (single-agent, self-consistency/majority voting over independent samples), what were the quantitative effects, how do agents and rounds scale, what does the paper report about consensus/convergence and about cases where debate does not help, and what compute does the procedure consume relative to baselines? Record every key claim with its `===== PDF PAGE N =====` marker.",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 0,
+            "id": "question:work:001-inv-smit-mad",
+            "kind": "question",
+            "score": 9.375278407684165,
+            "sufficiency": null,
+            "tags": [
+              "evidence",
+              "counterexample"
+            ],
+            "text": "What exactly does Smit et al. 2023 (papers/text/smit-et-al-2023-going-mad.txt) find when re-examining multi-agent debate strategies: which debate variants and tasks were tested, which baselines (e.g., single-agent with equivalent sampling) were used, where did debate fail to beat or underperform simpler baselines, what role do model capability/size and judge aggregation play, and what matched-compute or cost comparisons does the paper make? Record key claims with `===== PDF PAGE N =====` markers.",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 0,
+            "id": "question:work:001-inv-zhang-when",
+            "kind": "question",
+            "score": 8.564348191467836,
+            "sufficiency": null,
+            "tags": [
+              "evidence",
+              "synthesis"
+            ],
+            "text": "What does Zhang et al. 2025 (papers/text/zhang-et-al-2025-mad-question.txt, 'If Multi-Agent Debate Is the Answer, What Is the Question?') establish about the conditions under which multi-agent debate helps or fails: what taxonomy of factors (task type/difficulty, model heterogeneity, number of agents/rounds, topology, judge) is proposed, what are the headline empirical results and interactions, how does the paper position itself relative to Du et al. and other positive reports, and what does it say about compute costs? Record key claims with `===== PDF PAGE N =====` markers.",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 0,
+            "id": "question:work:001-inv-choi-conformity",
+            "kind": "question",
+            "score": 5.8903717578961645,
+            "sufficiency": null,
+            "tags": [
+              "evidence"
+            ],
+            "text": "What does Choi et al. 2025 (papers/text/choi-et-al-2025-conformity.txt) show about conformity in LLM multi-agent debate: the simulation design (proponent/opponent/neutral agents, majority vs minority sizes, intelligence levels, topics), the main quantitative findings on majority effects and intelligence disparities, how persuasion quality vs quantity matters, and what this implies about when exposure to other agents' outputs shifts vs fails to shift an agent? Record key claims with `===== PDF PAGE N =====` markers.",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 0,
+            "id": "question:work:001-inv-formal-tools",
+            "kind": "question",
+            "score": 4.197224577336219,
+            "sufficiency": null,
+            "tags": [
+              "definition",
+              "method"
+            ],
+            "text": "What formal machinery do Dung 1995 (papers/text/dung-1995-argumentation.txt) and Shapiro et al. 2011 (papers/text/shapiro-et-al-2011-crdts.txt) provide that is relevant to agent communication design: for Dung, the definitions of argumentation frameworks, attack relations, admissible/preferred/stable/grounded extensions and what they guarantee about justified conclusions; for Shapiro, the definitions of CRDTs, strong eventual consistency, commutativity/idempotence and what they guarantee about merging concurrent updates without coordination. Note what each framework does NOT model (e.g., evidential weight, truth) since that limits their direct application. Record key definitions with `===== PDF PAGE N =====` markers.",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 0,
+            "id": "question:work:001-inv-lorenz-influence",
+            "kind": "question",
+            "score": 4.197224577336219,
+            "sufficiency": null,
+            "tags": [
+              "evidence"
+            ],
+            "text": "What does Lorenz et al. 2011 (papers/text/lorenz-et-al-2011-social-influence.txt) show about how social influence affects the wisdom of crowds: the experimental design (tasks, rounds, information conditions), the measured effects of seeing others' estimates on individual accuracy, diversity of estimates, and confidence, the distinction between full information and aggregated-information conditions, and the quantitative pattern of when social influence helped vs undermined the crowd? Record key claims with `===== PDF PAGE N =====` markers.",
+            "unresolved_count": null
+          }
+        ],
+        "query": "Du et al 2023 multiagent debate",
+        "snapshot_sha256": "64f22e4def6506758f4d42d87a55f95161e7997884433c26ab3a759c4a839292",
+        "truncated": false
+      },
+      "result_ids": [
+        "question:work:001-inv-du-debate",
+        "question:work:001-inv-smit-mad",
+        "question:work:001-inv-zhang-when",
+        "question:work:001-inv-choi-conformity",
+        "question:work:001-inv-formal-tools",
+        "question:work:001-inv-lorenz-influence"
+      ],
+      "result_sha256": "03a6121ee4ecfaac2f4ff638a234f257f12b1d5117bbd8ff1ab9cd848b2a716e",
+      "sequence": 1,
+      "tool": "search_questions"
+    },
+    {
+      "arguments": {
+        "limit": 8,
+        "query": "multiagent debate majority vote arithmetic GSM8K",
+        "source_ids": [
+          "papers/text/du-et-al-2023-multiagent-debate.txt"
+        ]
+      },
+      "result": {
+        "hits": [
+          {
+            "content_sha256": "0674b1614409c389ff275c78c696138a9453e321fee21b90ea1e4354700be7e2",
+            "excerpt": "(1) To what extent does multiagent debate improve reasoning? (2) To what extent does multiagent\ndebate improve factual validity? (3) What design choices enable multiagent debate to improve\nlanguage generation performance?\n3.1 Improving Reasoning with Multiagent Debate\nWe first evaluate the extent to which multiagent debate improves the underlying reasoning process in\nlanguage models.\nTasks. We evaluate our approach on three reasoning tasks of increasing difficulty:\n4\n\n===== PDF PAGE 5 =====\n\nQuestion: What is the result of 10+20*23+3-11*18? Agent 2: 369Agent 1: 269✗Agent 2: 275Agent 1: 275 ✓✓Round 1Round 2 ✗ Agent 2: -351Agent 1: 378Question: What is the result of 3+7*9+19-21*18?✗Agent 3: -357Agent 2: -293✓✓ Agent 3: 19✗ ✗✗Agent 1: -293\nRound 2Round 1Question: What is the result of 4+23*6+24-24*12?\nAgent 1: -146Agent 1: -244✗Agent 2: -122Agent 2: -146✓✗Agent 2: -122Agent 1: -122✓\n✗\n✓Round 3\nQuestion: What is the result of 8+14*15+20-3*26?Agent 2: -214Agent 1: 236 ✗Agent 3: 210Agent 2: 160✓✓ Agent 3: 160✗ ✗Agent 1: 160Agent 2: 160✓✓ Agent 3: 160Agent 1: 160 ✓✓\nFigure 4: Illustration of Solving Math. Reasoning between agents is omitted.\nQuestion: Regina wrote 9 novels last year. If this is 3 quarters of the number of novelsshe has written this year, how many novels has she written this year?Agent 2: 30Agent 1: 18\nQuestion: Dennis uses 1 pound of butter for every dozen croissants that he makes. He needs to make 6 dozen croissants. The grocery store currently has a promotion for buy one pound of butter get one half off. If the butter costs $4.00 a pound, how much will it cost h",
+            "locator": "lines 193-224",
+            "score": 10.35610766069589,
+            "source_id": "papers/text/du-et-al-2023-multiagent-debate.txt"
+          },
+          {
+            "content_sha256": "0674b1614409c389ff275c78c696138a9453e321fee21b90ea1e4354700be7e2",
+            "excerpt": "• GSM8K. Next, we consider harder mathematical reasoning tasks. Using the GSM8K dataset [ 3],\nthe models must correctly solve grade school mathematical reasoning tasks.\n• Chess Move Prediction. Finally, we consider the strategic reasoning of the ability of models,\nand ask models to predict the best next move in a game of chess, given the first 14 moves of a chess\ngame between two chess grand-masters described in PGN notation [6].\nWe report the accuracy of final answers in arithmetic and GSM8K tasks and report the pawn score\n(advantage) of predicted moves, as estimated by Stockfish in the Chess move prediction tasks.\nAdditional details may be found in the Appendix.\nGSM8K Task Accuracy\n70%\n75%\n80%\n85%\n90%\nNo Chain of \nThought\nWith Chain of \nThought\nSingle Agent Multi-Agent Debate\nFigure 6: Synergy with Other Methods. Per-\nformance of debate increases with use of Chain\nof Thought prompting.\nBaselines. We compare our approach to three alter-\nnative approaches to generate responses for reasoning\nproblems. First, we ask agents to directly generate\nresponses (single agent). Next, we consider asking lan-\nguage models to generate and then \"self-reflect\" on the\nresponses generated [26, 18]. Finally, we consider gen-\nerating responses using multiple agents and performing\nmajority voting [ 15, 3]. As the focus of our experi-\nments is to verify the effectiveness of multiagent agent\ndebate, we run both baselines and our approach, using",
+            "locator": "lines 217-248",
+            "score": 10.075173815233828,
+            "source_id": "papers/text/du-et-al-2023-multiagent-debate.txt"
+          },
+          {
+            "content_sha256": "0674b1614409c389ff275c78c696138a9453e321fee21b90ea1e4354700be7e2",
+            "excerpt": "problems. First, we ask agents to directly generate\nresponses (single agent). Next, we consider asking lan-\nguage models to generate and then \"self-reflect\" on the\nresponses generated [26, 18]. Finally, we consider gen-\nerating responses using multiple agents and performing\nmajority voting [ 15, 3]. As the focus of our experi-\nments is to verify the effectiveness of multiagent agent\ndebate, we run both baselines and our approach, using\nthe identical starting prompt and language model across\nall evaluations. We evaluate models in a zero-shot set-\nting, with prompts found in the Appendix of the paper.\nWe use chatGPT-based language model [21] in all our experiments except those in Figure 11 where\nwe compare multiple language models.\nDue to computational expense, we evaluate our approach across benchmarks mainly using three\nagents with two rounds of debates, although we found further gains with both more agents and rounds\nof debate (Figure 10). Additional evaluation details are found in the Appendix.\nQuantitative Results. In Table 1, we report the results of each approach on arithmetic, grade school\nmath, and chess reasoning task. In each task, we observe that utilizing multiple different agents to\ngenerate solutions improves performance over using a single language model agent to generate a\nsolution. Simultaneously, we also see that reflection, where a language model is asked to critique\nits early generation, generally gives a modest boost in performance. Multiagent debate, which may\nbe seen as a combination of both reflection and multiagent generation, gives a substantial boo",
+            "locator": "lines 241-272",
+            "score": 9.19295685089021,
+            "source_id": "papers/text/du-et-al-2023-multiagent-debate.txt"
+          },
+          {
+            "content_sha256": "0674b1614409c389ff275c78c696138a9453e321fee21b90ea1e4354700be7e2",
+            "excerpt": "Results. We analyze the performance of each method in Table 2. We found that approaches\nbased on reflection led to poor performance in the factuality setting. In contrast, debate gives the\nbest performance in this setting also, and significantly outperforms each baseline. We illustrate a\ndebate between agents on the biography task in Figure 7 and on MMLU in Figure 8. We found that\nmultiagent debate improved and settled on bullets that were more consistent across agents.\nWe found that different language agents tended to give different answers when the underlying\nlanguage model was uncertain about the question. However, directly asking each agent about their\nconfidence [ 10] of the answer led to high confidence assessments on each answer. However, when\nthese different language agents were asked to communicate with each other, each agent would quickly\nchange their opinion to a consensus answer which was more accurate. We illustrate this in Figure 9.\nInterestingly, we found that on facts that the language model was confident in (i.e. many instances of\nthe same model all gave the same answer), it was very difficult to convince an agent to change their\nopinion, suggesting that “ease of persuasion” may be a method to assess factual confidence.\n3.3 Analysis: Understanding Multiagent Debate\nFinally, we analyze how multiagent debate improves the underlying language generation procedure\nin language models.\nNumber of Agents. First, we analyze the impact of agents number in debate. In Figure 10(a), we\nincrease the number of agents used in debate, while fixing the debate length to be two",
+            "locator": "lines 337-368",
+            "score": 8.48063892334199,
+            "source_id": "papers/text/du-et-al-2023-multiagent-debate.txt"
+          },
+          {
+            "content_sha256": "0674b1614409c389ff275c78c696138a9453e321fee21b90ea1e4354700be7e2",
+            "excerpt": "\n===== PDF PAGE 6 =====\n\nModel Arithmetic (%) ↑ Grade School Math (%)↑ Chess (∆PS)↑\nSingle Agent 67.0 ± 4.7 77.0 ± 4.2 91.4 ± 10.6\nSingle Agent (Reflection) 72.1 ± 4.5 75.0 ± 4.3 102.1 ± 11.9\nMulti-Agent (Majority) 69.0 ± 4.6 81.0 ± 3.9 102.2 ± 6.2\nMulti-Agent (Debate) 81.8± 2.3 85.0 ± 3.5 122.9 ± 7.6\nTable 1: Multiagent Debate Improves Reasoning Multi-agent debate improves the reasoning abilities of\nlanguage models. Multi-agent results in the table are run with 3 agents and two rounds of debate.\nPrompt: Give a bullet point biography of David S. Johnson highlighting their contributions and achievements as a computer scientist, with each fact separated with a new line character.\nAgent 2: --David S. Johnson is an American computer scientist and mathematician.--Johnson was elected to the National Academy of Engineering in 2006.--He has been awarded numerous honors and awards for his contributions to computer science, including the ACM SIGMOD Innovations Awardand the Knuth Prize. \nAgent 1: --He earned his bachelor's degree from Dartmouth Collegein 1967 and his Ph.D. from MIT in 1973.--Johnson has received numerous awards for his research and contributions to computer science, including the ACM Turing Awardin 2013.--Johnson's research interests include optimization, algorithms, and complexity theory.\n✓Round 1\n✗\n✗✓\nAgent 2: --David S. Johnson is an American computer scientist and mathematician.--He has worked at several prestigious universities, including Columbia University, A T&T Bell Laboratories, and Cornell University.--Johnson is known for his work in the field of algorithm",
+            "locator": "lines 265-296",
+            "score": 8.158883083359672,
+            "source_id": "papers/text/du-et-al-2023-multiagent-debate.txt"
+          },
+          {
+            "content_sha256": "0674b1614409c389ff275c78c696138a9453e321fee21b90ea1e4354700be7e2",
+            "excerpt": "4 Related Work\nReasoning and Factuality in Language Models. A wide range of work has explored how to\nenable reasoning and factuality in language models. To improve reasoning, approaches have relied on\nprompting techniques such as scratchpads [20], verification [3], chain-of-thought demonstrations [30,\n11, 25], and intermediate self-reflection [ 26, 18] and finetuning [13, 24, 31]. To improve factuality,\napproaches have relied on training techniques such as RLHF [33, 16, 2], pruning truthful datasets [12],\nexternal knowledge retrieval [7] and training-free methods based off likelihood estimation [10].\nOur work provides an alternative way to obtain reasoning and factuality in language models using\nmultiagent debates, which only requires black-box access to a language generator. Prior work also\nhas explored how to take the majority vote across different models [ 15, 3, 29, 28] while in this work,\nwe use the power of a language model to combine different answers. Most similar to our work, Irving\net al. [9] also proposes a debate procedure to verify the accuracy and safety of powerful AI agents. In\ncontrast to our approach, in their work, agents are asked to alternatively provide proof of a input, and\nhumans are tasked with assessing these debates and determining safety.\nCompositional Generation. Our work is also related to existing works that focus on text generation\nby combining different models [4, 17, 32, 1, 5]. Most similar to our work, [14, 32] propose to combine\nmultiple different large pretrained models together for multimodal reasoning. In contrast, in our work,\nwe aim ",
+            "locator": "lines 457-488",
+            "score": 8.094344562222101,
+            "source_id": "papers/text/du-et-al-2023-multiagent-debate.txt"
+          },
+          {
+            "content_sha256": "0674b1614409c389ff275c78c696138a9453e321fee21b90ea1e4354700be7e2",
+            "excerpt": "75\n80\n85\n90\n95Consensus\nConsensus vs Number of Debating Agents\nShort Debate Prompt\nLong Debate Prompt\nFigure 14: Effect of Prompts on Consensus.\nUsing a short debate prompt induces faster con-\nsensus between agents\nConsensus Between Agents. In Figure 14, we illus-\ntrate the consensus between agents using either short or\nlong consensus prompts discussed in Figure 3. The use\nof debate prompts that encourage agents to adapt more\nto the opinions of other agents improves consensus.\nAdditional Qualitative Visualizations. We added\nadditional qualitative visualizations of the debate pro-\ncess. In Figure 16, Figure 17, Figure 18, Figure 19,\nFigure 20, we illustrate debates between agents in the\nGSM8K dataset which result in the correct answer. In\nFigure 21, Figure 22, Figure 23, we further illustrate\ndebates in GSM8K which lead to the incorrect answer.\nWe further provide an example illustration of debate in\narithmetic in Figure 24, arithmetic with summarization of individual responses of agents in Figure 25,\nMMLU in Figure 26, a debate with the full contents biographies in Figure 27, and debate in chess in\nFigure 28. In general, we found that debate improved the performance of final generated answers,\nthough sometimes answers would converge to the incorrect value.\nA.2 Evaluation Details\nWe provided detailed evaluation details for each setting in the paper. We run all experiments using\nthe gpt-3.5-turbo-0301 model. We provide a table listing the prompts used to prompt models\nand initialize debate in Table 15.",
+            "locator": "lines 601-632",
+            "score": 7.595119850134589,
+            "source_id": "papers/text/du-et-al-2023-multiagent-debate.txt"
+          },
+          {
+            "content_sha256": "0674b1614409c389ff275c78c696138a9453e321fee21b90ea1e4354700be7e2",
+            "excerpt": "6\n\n===== PDF PAGE 7 =====\n\nQuestion: Yo u  s u s p e c t  t h a t  y o u r  p a t i e n t  h a s  a n  enlarged submandibular salivary gland. Y ou expect the enlarged gland: A) to be palpable intraorally. B) to be palpable extraorally. C) to be palpable both intra-and extraorally. D) only to be detectable by radiographical examination.Agent 2: BAgent 1: C ✗✓Round 1Round 2 Agent 3: CAgent 2: CAgent 1: C ✓✓ Agent 3: C✓✓Agent 2: CAgent 1: A ✗Agent 3: DAgent 2: D✓✓ Agent 3: D✗Agent 1: D\nQuestion: Six positive integers are written on the faces of a cube. Each vertex is labeled with the product of the three numbers on the faces adjacent to the vertex. If the sum of the numbers on the vertices is equal to 1001, then what is the sum of the numbers written on the faces? A) 18. B) 13. C) 1001. D) 31. \n✓✓\nFigure 8: Illustration of MMLU. Illustration of debate when answering factual tasks. Reasoning omitted.\nModel Biographies MMLU Chess Move Validity\nSingle Agent 66.0 ± 2.2 63.9 ± 4.8 29.3 ± 2.6\nSingle Agent (Reflection) 68.3 ± 2.9 57.7 ± 5.0 38.8 ± 2.9\nMulti-Agent (Debate) 73.8± 2.3 71.1 ± 4.6 45.2 ± 2.9\nTable 2: Multiagent Debate Improves Factual Accuracy Multi-agent debate improves the factual accuracy.\n• MMLU. Next, we assess the factuality of language models in responding to different factual knowl-\nedge questions typically learned and assessed in different exams. We utilize the existing MMLU\ndataset [8] to benchmark the accuracy of responses.\n• Chess Move Validity. Lastly, we study the hallucinations in language models when planning\nunder to the given rules of an existing environ",
+            "locator": "lines 313-344",
+            "score": 7.564348191467836,
+            "source_id": "papers/text/du-et-al-2023-multiagent-debate.txt"
+          }
+        ],
+        "query": "multiagent debate majority vote arithmetic GSM8K",
+        "truncated": true
+      },
+      "result_ids": [
+        "papers/text/du-et-al-2023-multiagent-debate.txt",
+        "papers/text/du-et-al-2023-multiagent-debate.txt",
+        "papers/text/du-et-al-2023-multiagent-debate.txt",
+        "papers/text/du-et-al-2023-multiagent-debate.txt",
+        "papers/text/du-et-al-2023-multiagent-debate.txt",
+        "papers/text/du-et-al-2023-multiagent-debate.txt",
+        "papers/text/du-et-al-2023-multiagent-debate.txt",
+        "papers/text/du-et-al-2023-multiagent-debate.txt"
+      ],
+      "result_sha256": "7fecc9f4045d484dc2f81c41de70146ba35e2fffca60f2cd1cf7229a34bc8e08",
+      "sequence": 2,
+      "tool": "search_sources"
+    },
+    {
+      "arguments": {
+        "line_count": 130,
+        "source_id": "papers/text/du-et-al-2023-multiagent-debate.txt",
+        "start_line": 1
+      },
+      "result": {
+        "content": "===== PDF PAGE 1 =====\n\nImproving Factuality and Reasoning in Language\nModels through Multiagent Debate\nYilun Du\nMIT CSAIL\nyilundu@mit.edu\nShuang Li\nMIT CSAIL\nlishuang@mit.edu\nAntonio Torralba\nMIT CSAIL\ntorralba@mit.edu\nJoshua B. Tenenbaum\nMIT CSAIL, BCS, CBMM\njbt@mit.edu\nIgor Mordatch\nGoogle Brain\nimordatch@google.com\nAbstract\nLarge language models (LLMs) have demonstrated remarkable capabilities in\nlanguage generation, understanding, and few-shot learning in recent years. An\nextensive body of work has explored how their performance may be further im-\nproved through the tools of prompting, ranging from verification, self-consistency,\nor intermediate scratchpads. In this paper, we present a complementary approach\nto improve language responses where multiple language model instances propose\nand debate their individual responses and reasoning processes over multiple rounds\nto arrive at a common final answer. Our findings indicate that this approach\nsignificantly enhances mathematical and strategic reasoning across a number of\ntasks. We also demonstrate that our approach improves the factual validity of\ngenerated content, reducing fallacious answers and hallucinations that contem-\nporary models are prone to. Our approach may be directly applied to existing\nblack-box models and uses identical procedure and prompts for all tasks we inves-\ntigate. Overall, our findings suggest that such \"society of minds\" approach has the\npotential to significantly advance the capabilities of LLMs and pave the way for\nfurther breakthroughs in language generation and understanding. Project website\nat https://composable-models.github.io/llm_debate/.\n1 Introduction\nLarge language models (LLMs) have demonstrated remarkable language generation, understanding,\nand few-shot learning capabilities in recent years. These methods are trained on a massive corpus of\ntext on the internet, where the quality and accuracy of extracted natural language may not be ensured.\nThus, current models may suffer from confidently hallucinating facts or making implausible jumps in\nchains of reasoning. An extensive body of recent work has focused on improving factual accuracy\nand reasoning in language models. These range from prompting models with few or zero-shot\nchain-of-thought demonstrations, use of verification, self-consistency, or intermediate scratchpads.\nWe note that these techniques are applied over a single model instance. Instead, we propose a\ncomplementary approach inspired by The Society of Mind [19] and multi-agent settings, where\nmultiple language model instances (or agents) individually propose and jointly debate their responses\nand reasoning processes to arrive at a single common answer. More specifically, given a query,\nmultiple instances of a language model first generate individual candidate answers to a query. Then\neach individual model instance reads and critiques the responses of all other models and uses this\ncontent to update its own answer. This step is then repeated over several rounds. This process induces\nmodels to construct answers that are consistent with both their internal critic as well as sensible in\nPreprint. Under review.\narXiv:2305.14325v1  [cs.CL]  23 May 2023\n\n===== PDF PAGE 2 =====\n\nAccuracy\n0\n25\n50\n75\n100\nBiographies MMLU Chess Move \nValidity\nArithmetic Grade School \nMath\nChess Move \nOptimality\nSingle Model Multi-Model Debate\nFigure 1: Multiagent Debate Improves Reasoning and Factual Accuracy. Accuracy of traditional inference\nand our multi-agent debate over six benchmarks (chess move optimality reported as a normalized score)\nlight of the responses of other agents. The resulting quorum of models can hold and maintain multiple\nchains of reasoning and possible answers simultaneously before proposing the final answer.\nWe find that our debate approach outperforms single model baselines such as zero-shot chain of\nthought [ 11] and reflection [ 26, 18] on a variety of six reasoning, factuality, and question-answering\ntasks. Using both multiple model agents and multiple rounds of debate are important to achieve\nthe best performance. Given an initial query, we find that individual model instances propose a\ndiverse range of answers despite being the same model class (although we also investigate the case of\nmixing different model types, such as chatGPT [ 21] and Bard [ 23]). After debating and examining\nthe responses of other model instances, we find that the population almost always converges on a\nsingle and more accurate common answer. Debate results are also less likely to include false facts\nthat models are internally uncertain of. This is because as the debate progresses, individual model\ninstances tend to disagree on uncertain facts and omit them from the answer (Figure 7). Lastly, we\nfind that debate does not just act to amplify one correct answer in a model quorum - we find many\ncases where all the models initially make incorrect predictions, but then arrive at the correct answer\nas debate progresses (Figure 4,11).\nWe use the same methodology and prompt templates for all our tasks and require only black-box\naccess to language model generations – no model-internal information such as likelihoods or gradients\nis needed. This allows our method to be used with common public models serving interfaces. The\nmethod is also orthogonal to other model generation improvements such as retrieval or prompt\nengineering (in fact, we combine our debate method with zero-shot chain of thought). While the\ndebate process is more costly, requiring multiple model instances and rounds, it arrives at significantly\nimproved answers and may be used to generate additional model training data, effectively creating a\nmodel self-improvement loop.\nTo help evaluate the effect of our approach on factual accuracy, we introduce a new benchmark\nand dataset evaluating factual accuracy of famous computer scientist biographies. We find that\ncontemporary language models have an especially high tendency to hallucinate factually incorrect\nbiographies, often misrepresenting the relevant institutions and dates. Moreover, these facts often\ninconsistent across different language model instances. By asking models to come to a consensus\nacross their answers, such inconsistent facts may be either removed or corrected.\nIn summary, our work contributes the following. First, we present a novel approach to improving\nfactual correctness and reasoning accuracy in contemporary language models, leveraging a multi-\nagent debate process between models. Second, we introduce a new benchmark of factual correctness\nwhich contemporary language models struggle with. Finally, we evaluate the performance of our\ndebate procedure in language generation, both in terms of the number of agents, the underlying\nrounds of debate, and the prompts that elicit such behavior across a set of six different reasoning and\nfactual accuracy tasks.\n2 Language Generation through Multiagent Debate\nWe present an approach to generate language responses through multiagent debate. We provide an\noverview of our approach in Section 2.1. We further discuss convergence to consensus in the debate\nprocess in Section 2.2. The overall overview of our approach is shown in Figure 2.\n2\n\n===== PDF PAGE 3 =====\n\nRound 1Agent 2: If there were 175 diamonds, then the number of rubies is 35 fewer, or 175 -35 = 140 rubies. And since there were twice as many emeralds as rubies, we can represent the number of emeralds as 2 * 140 = 280 emeralds. To find the total number of gems in the chest, we can add up the number of diamonds, rubies, and emeralds: 175 + 140 + 280 = 595. Therefore, there were 595 gems in the chest.\nAgent 1: Let x be the number of rubies. Then the number of diamonds is 175. And the number of emeralds is 2(x-35), since there are twice as many emeralds as rubies and there are 35 fewer rubies than diamonds. To find the total number of gems, we add the number of diamonds, rubies, and emeralds: Total gems = 175 + x + 2(x-35) = 3x + 105.We don't know the exac",
+        "content_sha256": "0674b1614409c389ff275c78c696138a9453e321fee21b90ea1e4354700be7e2",
+        "locator": "lines 1-130",
+        "source_id": "papers/text/du-et-al-2023-multiagent-debate.txt",
+        "truncated": true
+      },
+      "result_ids": [
+        "papers/text/du-et-al-2023-multiagent-debate.txt"
+      ],
+      "result_sha256": "f8304f4b715755861fbf2ff6b6ff9535f5e67e8e1d609b8128de38a68aca804f",
+      "sequence": 3,
+      "tool": "read_source"
+    },
+    {
+      "arguments": {
+        "line_count": 95,
+        "source_id": "papers/text/du-et-al-2023-multiagent-debate.txt",
+        "start_line": 368
+      },
+      "result": {
+        "content": "Round 1Round 2\nFigure 9: Expressing Uncertainty with Multiple Answers. For facts that a language model is uncertain about,\ndifferent language agents generate different facts. Debate causes agents to converge to one fact that is more\naccurate, but not necessarily always factually correct.\n(b)(a)\nFigure 10: (a) Performance with Increased Agents. Performance improves as the number of underlying agents\ninvolved in debate increases. (b) Performance with Increased Rounds. Performance rises as the number of\nrounds of underlying debate increases.\n1.0 1.5 2.0 2.5 3.0 3.5 4.0\nDebate Rounds\n70.0\n72.5\n75.0\n77.5\n80.0\n82.5\n85.0Performance\nPerformance vs Number of Debating Agents\nShort Debate Prompt\nLong Debate Prompt\nFigure 12: Performance vs Debate Length.\nPrompts which induce longer debate improve\nperformance.\nEffect of Debate Length on Accuracy As discussed\nin Section 2.2, the underlying convergence time in the\ndebate between agents can be controlled by the extent\nto which agents are encouraged to maintain their opin-\nions. In Figure 12, we consider the effect of short\nand long-form prompts discussed in Figure 3. We find\nthat debates using longer prompts lead to slower con-\nvergence to correct answers, but also lead to a better\nfinal consensus on the correct answer. We provide an\nanalysis of consensus between agents in Figure 14.\nUsing Different Initialization Prompts In our ex-\nperiments we use the same prompts for all agents. We\nalso consider the effect of using different questions, where we first instruct each language model to\nbehave like a different persona (professor, doctor, mathematician) on the MMLU dataset. We found\nthat improved performance on MMLU from 71.1 to 74.2 with different agents, suggesting further\ngains can be obtained with different initialization prompts.\n1 2 3 4 5\nAgents\n70\n75\n80\n85\n90Performance\nPerformance vs Number of Debating Agents\nConcat\nSummarize\nFigure 13: Effect of Summarization. When\nthere are many agents in a debate, responses\nfrom other agents may be first summarized and\nthen given as context, reducing context length.\nThis operation improves performance.\nSummarization. While in the majority of experi-\nments in the paper we directly concatenate the re-\nsponses of other agents as context for an agent to gener-\nate a new response, this is expensive when the number\nof agents involved in debate gets large. We may alter-\nnatively first summarize the responses from all other\nagents into a single response that we provide to agent\nat each round for more efficient debate. We apply this\nstrategy in Figure 10 to enable the use of five or more\nagents in debate. In Figure 13, we analyze the effect\ncompared to directly concatenating the responses of\nother agents. We find this improves the performance of\ndebate, suggesting that summarization is another tool\nthat can further improve multiagent debate.\nUtilizing Different Language Models Our existing\ndebate results are reported using multiple instances of a chatGPT language model. We further assess\n8\n\n===== PDF PAGE 9 =====\n\nRound 1Bard: Carla is downloading a 200 GB file at a speed of 2 GB/minute. This means that it will take her 200 / 2 = 100 minutes to download the file.However, Windows forces a restart to install updates, which takes 20 minutes. This means that Carla will have to restart the download from the beginning. Since Carla has already downloaded 40% of the file, she only needs to download 200 -40 = 160 GB. At a speed of 2 GB/minute, it will take Carla 160 / 2 = 80 minutes to download the file.Adding the time for the Windows restart, it will take Carla 80 + 20 = 100 minutesto download the file.\nChatGPT: Before the restart, Carla was able to download 40% of the file, which is 0.4 * 200 GB = 80 GB. At a rate of 2 GB/minute, it would take her: time = 80 GB ÷2 GB/minute = 40 minutes. Because of the restart, Carla had to start over. This means she had to download the entire 200 GB file. The time it takes to download the remaining 120 GB is: time = 120 GB ÷2 GB/minute = 60 minutes.But Carla also had to wait 20 minutes for the Windows update to install, so the total time it took to download the file is: total time = 40 minutes + 60 minutes + 20 minutes = 120 minutes.\nQuestion: Carla is downloading a 200 GB file. Normally she can download 2 GB/minute, but 40% of the way through the download, Windows forces a restart to install updates, which takes 20 minutes. Then Carla has torestart the download from the beginning. How load does it take to download the file?\n✗ChatGPT: Based on the calculations provided by the other agent, the correct answer is: Before the restart, Carla was able to download 40% of the file, which is 0.4 * 200 GB = 80 GB. At a rate of 2 GB/minute, it would take her: time = 80 GB ÷2 GB/minute = 40 minutesHowever, because of the restart, Carla had to start over. This means she had to download the entire 200 GB file. The time it takes to download the entire 200 GB file is: time = 200 GB ÷2 GB/minute = 100 minutesAnd since Carla had to wait 20 minutes for the Windows update to install, the total time it took to download the file is: total time = 40 minutes + 100 minutes + 20 minutes = 160 minutes.\nRound 2\n✓\n✗\nFigure 11: Debate Between chatGPT and Bard Illustration of debate between different models.\nthe impact of using two different language models, where we ask chatGPT and Bard [23] language\nmodels to debate with each other on a set of 20 GSM8K math problems. In this set, we find that\nmulti-agent debate improves the performance of both agents, with Bard solving 11 problems, chatGPT\nsolving 14 problems, and joint multi-agent debate solving 17 problems. We qualitatively illustrate\na debate between agents in Figure 11. While both agents initially provide incorrect answers to the\nproblem, chatGPT is able to utilize the incorrect response given by Bard to generate the final correct\nanswer.\n4 Related Work\nReasoning and Factuality in Language Models. A wide range of work has explored how to\nenable reasoning and factuality in language models. To improve reasoning, approaches have relied on\nprompting techniques such as scratchpads [20], verification [3], chain-of-thought demonstrations [30,\n11, 25], and intermediate self-reflection [ 26, 18] and finetuning [13, 24, 31]. To improve factuality,\napproaches have relied on training techniques such as RLHF [33, 16, 2], pruning truthful datasets [12],",
+        "content_sha256": "0674b1614409c389ff275c78c696138a9453e321fee21b90ea1e4354700be7e2",
+        "locator": "lines 368-462",
+        "source_id": "papers/text/du-et-al-2023-multiagent-debate.txt",
+        "truncated": true
+      },
+      "result_ids": [
+        "papers/text/du-et-al-2023-multiagent-debate.txt"
+      ],
+      "result_sha256": "5952c88e26009c1e7472e907c6923be0b03d4784fd48d80e7c1487f5b0630635",
+      "sequence": 3,
+      "tool": "read_source"
+    },
+    {
+      "arguments": {
+        "line_count": 65,
+        "source_id": "papers/text/du-et-al-2023-multiagent-debate.txt",
+        "start_line": 130
+      },
+      "result": {
+        "content": "Figure 2: Illustration of Debate. Illustration of the debate procedure.\n2.1 Multiagent Language Generation\nConsider your work process when solving the following math question on an exam: “What is the\narea of a triangle with side lengths of 3, 4, 5?\". In one thread of work, you may recognize that the\ntriangle side-lengths directly correspond to a right triangle, and thus directly compute the area as\n0.5 × 3 × 4 = 64 . To make sure that you have the right answer, you may then try to solve the problem\ndifferently by estimating an angleθ in the triangle using the Law of Cosines, and then obtain the area\nby using the formula 0.5 × 3 × 4 × sin(θ), arriving at another answer to the given exam problem.\nWhen these lines of work give the same answer, your confidence about the answer increases. In\ncontrast, when these answers are different, individual lines of work may engage in a mental “debate\"\nprocedure, where you closely cross-examine the reasoning and assumptions of each line of work and\nrefine solutions until a consistent answer.\nSimilarly, consider writing a biography of a historical figure. To ensure the factuality of the biography,\nyou may consult multiple different sources on each fact. Facts that are consistent in each source\nincrease your confidence about the fact. In contrast, facts that are inconsistent require careful\ncross-examination between sources to determine the final consistent data.\n3\n\n===== PDF PAGE 4 =====\n\nDebate Length Prompt\nShort \" These are the solutions to the problem from other agents: [other answers]\nBased off the opinion of other agents, can you give an updated response. . .\"\nLong \" These are the solutions to the problem from other agents: [other answers]\nUsing the opinion of other agents as additional advice, can you give an updated response. . .\"\nFigure 3: Prompts to induce long and short form debate. Responses of other agents to questions are are\ninserted in the middle of the prompt (indicated with [other answers])\nTo mimic the above multi-threaded reasoning process and multi-source factuality checking processes,\nwe propose to generate answers subject to a multi-agent debate procedure between multiple instances\nof large language models. Given a question, multiple agents represented as copies of a large language\nmodel, generate answers to the question. Each response serves as a possible thought process or source\nof information which agents may re-examine to find consistent final answers.\nAfter initial responses are generated from different agents, we initiate a round of debate between\nagents. Individual responses from other agents are concatenated and given as context to each agent,\nwith each agent instructed to construct a new response based on such responses. Each language agent\nis thus responsible for both verifying the collection of responses given by other agents, and refining\nits own response based on other agents’ responses. We iteratively repeat this debate procedure over\nmultiple rounds for improved performance.\nConcretely, we first prompt each agent to independently solve the given problem or task. After\neach agent generates a response, we feed each agent a consensus prompt, illustrated in Figure 3,\nwhere each agent is instructed to update their responses based on the responses of other agents. This\nresultant consensus prompt may then be repeatedly given, using the updated responses of each agent.\nWe illustrate an overview of this multiagent debate procedure in Figure 2.\nNote that our proposed approach operates in an orthogonal manner to existing approaches to prompt\nlanguage models. Given a question, we may apply additional techniques for prompting language\nmodels to further improve our debate procedure by eliciting additional more detailed responses\nfrom language models. We illustrate the synergy of our approach with existing approaches to\nprompting language models in Figure 6 and directly apply zero-shot chain-of-thought reasoning in\nour evaluations.\n2.2 Consensus in Debates\nGiven multiple rounds of debate, how can we ensure that a set of language model agents will converge\nto a final consensus answer? In general, debate can be seen as a multi-agent game, where convergence\nis not guaranteed. Empirically, however, we find that language models are able to converge on a\nsingle shared answer after multiple rounds of debate (Figure 4).\nWe found that we could control the duration of debates by how changing how much a language model\ntrusts its own outputs over those generated by other models through different prompts. We illustrate\ntwo prompts below in Figure 3, which we use to induce different debate durations between language\nmodels, and illustrate the effect of such prompts in Figure 12. In general, we found that prompts that\nencouraged models to be more “stubborn’ based on their own solutions led to longer debates and\nbetter final solutions. Overall, we observed that language model agents were relatively \"agreeable\",\nperhaps as a result of instruction tuning or reinforcement learning based on human feedback [22].\n3 Experiments\nIn our experiments, we evaluate our multiagent debate procedure and answer the following questions:\n(1) To what extent does multiagent debate improve reasoning? (2) To what extent does multiagent\ndebate improve factual validity? (3) What design choices enable multiagent debate to improve",
+        "content_sha256": "0674b1614409c389ff275c78c696138a9453e321fee21b90ea1e4354700be7e2",
+        "locator": "lines 130-194",
+        "source_id": "papers/text/du-et-al-2023-multiagent-debate.txt",
+        "truncated": true
+      },
+      "result_ids": [
+        "papers/text/du-et-al-2023-multiagent-debate.txt"
+      ],
+      "result_sha256": "b5edcc2c2cc65ba92a5e1503213b84f4d067cc9e9a4ec7f9a74dd12222a55496",
+      "sequence": 5,
+      "tool": "read_source"
+    },
+    {
+      "arguments": {
+        "limit": 8,
+        "query": "cost compute expensive computational tokens limitation",
+        "source_ids": [
+          "papers/text/du-et-al-2023-multiagent-debate.txt"
+        ]
+      },
+      "result": {
+        "hits": [
+          {
+            "content_sha256": "0674b1614409c389ff275c78c696138a9453e321fee21b90ea1e4354700be7e2",
+            "excerpt": "User Input: Using the solutions from other agents as additional information, can you give an updated response....✓✗\nAgent 2: After reviewing the solutions provided by other agents, I agree with the second agent who found that the number of rubies is 140 and the total number of gems in the chest is 595. Therefore, my answer to the math problem is 595.\nAgent 1: Given the information provided in other agents' solutions, we have two answers: One agent found that the number of rubies is 40 and the total number of gems is 225. Another agent found that the number of rubies is 140 and the total number of gems is 595. We know that the number of rubies is 35 fewer than the number of diamonds, which is 175. Sothe number of rubies should be 175 -35 = 140, as the second agent found. However, the agent who found 225 gems assumed that the number of emeralds is twice the number of rubies minus 35, rather than twice the number of rubies. If we use this assumption, we get: Number of rubies = 140. Number of emeralds = 2 * 140 -35 = 245. Total number of gems = 175 + 140 + 245 = 560. Our final answer is 560.\nRound 2(Copy Agent 2’s reply) (Copy Agent 1’s reply)\n✓✗Agent 2: After reviewing the solutions provided by other agents, I also agree that the number of rubies is 140 and the total number of gems in the chest is 595. Therefore, my answer to the math problem is also 595.\nAgent 1: After reviewing the solutions provided by other agents, I agree with the second agent who found that the number of rubies is 140 and the total number of gems in the chest is 595. Therefore, my answer to the math prob",
+            "locator": "lines 121-152",
+            "score": 1.6931471805599454,
+            "source_id": "papers/text/du-et-al-2023-multiagent-debate.txt"
+          },
+          {
+            "content_sha256": "0674b1614409c389ff275c78c696138a9453e321fee21b90ea1e4354700be7e2",
+            "excerpt": "(1) To what extent does multiagent debate improve reasoning? (2) To what extent does multiagent\ndebate improve factual validity? (3) What design choices enable multiagent debate to improve\nlanguage generation performance?\n3.1 Improving Reasoning with Multiagent Debate\nWe first evaluate the extent to which multiagent debate improves the underlying reasoning process in\nlanguage models.\nTasks. We evaluate our approach on three reasoning tasks of increasing difficulty:\n4\n\n===== PDF PAGE 5 =====\n\nQuestion: What is the result of 10+20*23+3-11*18? Agent 2: 369Agent 1: 269✗Agent 2: 275Agent 1: 275 ✓✓Round 1Round 2 ✗ Agent 2: -351Agent 1: 378Question: What is the result of 3+7*9+19-21*18?✗Agent 3: -357Agent 2: -293✓✓ Agent 3: 19✗ ✗✗Agent 1: -293\nRound 2Round 1Question: What is the result of 4+23*6+24-24*12?\nAgent 1: -146Agent 1: -244✗Agent 2: -122Agent 2: -146✓✗Agent 2: -122Agent 1: -122✓\n✗\n✓Round 3\nQuestion: What is the result of 8+14*15+20-3*26?Agent 2: -214Agent 1: 236 ✗Agent 3: 210Agent 2: 160✓✓ Agent 3: 160✗ ✗Agent 1: 160Agent 2: 160✓✓ Agent 3: 160Agent 1: 160 ✓✓\nFigure 4: Illustration of Solving Math. Reasoning between agents is omitted.\nQuestion: Regina wrote 9 novels last year. If this is 3 quarters of the number of novelsshe has written this year, how many novels has she written this year?Agent 2: 30Agent 1: 18\nQuestion: Dennis uses 1 pound of butter for every dozen croissants that he makes. He needs to make 6 dozen croissants. The grocery store currently has a promotion for buy one pound of butter get one half off. If the butter costs $4.00 a pound, how much will it cost h",
+            "locator": "lines 193-224",
+            "score": 1.6931471805599454,
+            "source_id": "papers/text/du-et-al-2023-multiagent-debate.txt"
+          },
+          {
+            "content_sha256": "0674b1614409c389ff275c78c696138a9453e321fee21b90ea1e4354700be7e2",
+            "excerpt": "problems. First, we ask agents to directly generate\nresponses (single agent). Next, we consider asking lan-\nguage models to generate and then \"self-reflect\" on the\nresponses generated [26, 18]. Finally, we consider gen-\nerating responses using multiple agents and performing\nmajority voting [ 15, 3]. As the focus of our experi-\nments is to verify the effectiveness of multiagent agent\ndebate, we run both baselines and our approach, using\nthe identical starting prompt and language model across\nall evaluations. We evaluate models in a zero-shot set-\nting, with prompts found in the Appendix of the paper.\nWe use chatGPT-based language model [21] in all our experiments except those in Figure 11 where\nwe compare multiple language models.\nDue to computational expense, we evaluate our approach across benchmarks mainly using three\nagents with two rounds of debates, although we found further gains with both more agents and rounds\nof debate (Figure 10). Additional evaluation details are found in the Appendix.\nQuantitative Results. In Table 1, we report the results of each approach on arithmetic, grade school\nmath, and chess reasoning task. In each task, we observe that utilizing multiple different agents to\ngenerate solutions improves performance over using a single language model agent to generate a\nsolution. Simultaneously, we also see that reflection, where a language model is asked to critique\nits early generation, generally gives a modest boost in performance. Multiagent debate, which may\nbe seen as a combination of both reflection and multiagent generation, gives a substantial boo",
+            "locator": "lines 241-272",
+            "score": 1.6931471805599454,
+            "source_id": "papers/text/du-et-al-2023-multiagent-debate.txt"
+          },
+          {
+            "content_sha256": "0674b1614409c389ff275c78c696138a9453e321fee21b90ea1e4354700be7e2",
+            "excerpt": "70\n75\n80\n85\n90Performance\nPerformance vs Number of Debating Agents\nConcat\nSummarize\nFigure 13: Effect of Summarization. When\nthere are many agents in a debate, responses\nfrom other agents may be first summarized and\nthen given as context, reducing context length.\nThis operation improves performance.\nSummarization. While in the majority of experi-\nments in the paper we directly concatenate the re-\nsponses of other agents as context for an agent to gener-\nate a new response, this is expensive when the number\nof agents involved in debate gets large. We may alter-\nnatively first summarize the responses from all other\nagents into a single response that we provide to agent\nat each round for more efficient debate. We apply this\nstrategy in Figure 10 to enable the use of five or more\nagents in debate. In Figure 13, we analyze the effect\ncompared to directly concatenating the responses of\nother agents. We find this improves the performance of\ndebate, suggesting that summarization is another tool\nthat can further improve multiagent debate.\nUtilizing Different Language Models Our existing\ndebate results are reported using multiple instances of a chatGPT language model. We further assess\n8\n\n===== PDF PAGE 9 =====",
+            "locator": "lines 409-440",
+            "score": 1.6931471805599454,
+            "source_id": "papers/text/du-et-al-2023-multiagent-debate.txt"
+          },
+          {
+            "content_sha256": "0674b1614409c389ff275c78c696138a9453e321fee21b90ea1e4354700be7e2",
+            "excerpt": "4 Related Work\nReasoning and Factuality in Language Models. A wide range of work has explored how to\nenable reasoning and factuality in language models. To improve reasoning, approaches have relied on\nprompting techniques such as scratchpads [20], verification [3], chain-of-thought demonstrations [30,\n11, 25], and intermediate self-reflection [ 26, 18] and finetuning [13, 24, 31]. To improve factuality,\napproaches have relied on training techniques such as RLHF [33, 16, 2], pruning truthful datasets [12],\nexternal knowledge retrieval [7] and training-free methods based off likelihood estimation [10].\nOur work provides an alternative way to obtain reasoning and factuality in language models using\nmultiagent debates, which only requires black-box access to a language generator. Prior work also\nhas explored how to take the majority vote across different models [ 15, 3, 29, 28] while in this work,\nwe use the power of a language model to combine different answers. Most similar to our work, Irving\net al. [9] also proposes a debate procedure to verify the accuracy and safety of powerful AI agents. In\ncontrast to our approach, in their work, agents are asked to alternatively provide proof of a input, and\nhumans are tasked with assessing these debates and determining safety.\nCompositional Generation. Our work is also related to existing works that focus on text generation\nby combining different models [4, 17, 32, 1, 5]. Most similar to our work, [14, 32] propose to combine\nmultiple different large pretrained models together for multimodal reasoning. In contrast, in our work,\nwe aim ",
+            "locator": "lines 457-488",
+            "score": 1.6931471805599454,
+            "source_id": "papers/text/du-et-al-2023-multiagent-debate.txt"
+          },
+          {
+            "content_sha256": "0674b1614409c389ff275c78c696138a9453e321fee21b90ea1e4354700be7e2",
+            "excerpt": "In this paper, we present an orthogonal approach to improve the performance of language models\nusing multi-agent debate. We find that the approach is simple and effective across a wide set of\ndifferent reasoning and validity language modeling tasks.\nLimitations. In comparison to other prompting techniques, our multiagent debate procedure is\nmore computationally expensive, as it requires both multiple language generations, and an underlying\ndebate procedure. However, we believe that this approach may be seen as a method to generate\nadditional data that may be distilled back to self-improve the original base model.\nFurther, we observed that as debates became longer in duration, current language models sometimes\nstruggled to fully process the entire debate input, and typically only focused on the most recent\ngenerations. We believe that this performance will be alleviated with longer-context and improved\nlanguage models or by summarizing early portions of the debate.\nFinally, we found that while debates typically converged into single final answers, these answers were\nnot necessarily correct. Despite answers being incorrect, language models would confidently affirm\nthat their answer is correct and consistent with all other agent responses. We believe this result is in\npart due to the fact that LMs do not correctly express their uncertainty when generating responses,\nand believe that other orthogonal approaches to improve this performance would improve the results\nof multiagent debate.\nReferences\n[1] J.-B. Alayrac, J. Donahue, P. Luc, A. Miech, I. Barr, Y . Hasson, K. Lenc, A. ",
+            "locator": "lines 481-512",
+            "score": 1.6931471805599454,
+            "source_id": "papers/text/du-et-al-2023-multiagent-debate.txt"
+          },
+          {
+            "content_sha256": "0674b1614409c389ff275c78c696138a9453e321fee21b90ea1e4354700be7e2",
+            "excerpt": "User Input: These are the solutions to the problem from other agents: One agent solution: (Copy Agent 2’s reply)                                                                       (Copy Agent 1’s reply)Using the solutions from other agents as additional information, can you provide your answer to the math problem?Please update and respond to other agents. Y our final answer should be a single numerical number, in the form \\boxed{answer}, at the end of your response.\n✓\nFigure 18: Example of Correct GSM8K Debate.\n17\n\n===== PDF PAGE 18 =====\n\nRound 1Agent 2: Lori needs to earn a total of $352.00 ($320.00 for shoes + $32.00 for belt) to make her purchase. She earns $8.00 per hour at her job.To find out how many hours she needs to work, we can set up an equation:$8.00/hour \\times x hours = $352.00Solving for x, we can divide both sides by $8.00/hour:x hours = $352.00 / $8.00/hourx hours = 44 hoursTherefore, Lori needs to work 44 hours before she can make her purchase.\\boxed{44}\nAgent 1: To find out how many hours Lori will need to work to make her purchase, we need to first calculate the total cost of both the shoes and belt:$320.00 (shoes) + $32.00 (belt) = $352.00Next, we need to figure out how much money Lori will earn from her part-time job. We can set up a proportion:$8.00/hour = X/total hoursWe can solve for X by cross-multiplying:$8.00/hour = X/total hours$8.00 * total hours = XX = $352.00This means that Lori will need to work a total of:$352.00 ÷$8.00/hour = 44 hoursTherefore, Lori will need to work 44 hours before she can make her purchase. Answer: \\boxed{44}.\nUser I",
+            "locator": "lines 769-800",
+            "score": 1.6931471805599454,
+            "source_id": "papers/text/du-et-al-2023-multiagent-debate.txt"
+          }
+        ],
+        "query": "cost compute expensive computational tokens limitation",
+        "truncated": false
+      },
+      "result_ids": [
+        "papers/text/du-et-al-2023-multiagent-debate.txt",
+        "papers/text/du-et-al-2023-multiagent-debate.txt",
+        "papers/text/du-et-al-2023-multiagent-debate.txt",
+        "papers/text/du-et-al-2023-multiagent-debate.txt",
+        "papers/text/du-et-al-2023-multiagent-debate.txt",
+        "papers/text/du-et-al-2023-multiagent-debate.txt",
+        "papers/text/du-et-al-2023-multiagent-debate.txt"
+      ],
+      "result_sha256": "d95c4ba91f947edc0a30459aa9a803a9ecc2d78d6b776888bc5d1db979f86748",
+      "sequence": 6,
+      "tool": "search_sources"
+    },
+    {
+      "arguments": {
+        "line_count": 45,
+        "source_id": "papers/text/du-et-al-2023-multiagent-debate.txt",
+        "start_line": 296
+      },
+      "result": {
+        "content": "the purpose of our debate isn’t just to amplify a correct answer – all models can initially be wrong\nbut arrive at the correct answer through the debate process.\nCompatibility with other reasoning methods. Our multiagent generation procedure operates\northogonally approach to other prompting methods which focus on single-agent generation. In\nFigure 6, we illustrate the performance of multi-agent debate with and without zero-shot chain-of-\nthought prompting [11] on GSM8K. In both settings, multiagent generation is beneficial.\n3.2 Extracting Factual Information from Multiagent Debate\nWe next evaluate the extent to which multiagent debate improves the underlying factuality in language\nmodels.\nTasks. We evaluate the factuality of language models in three different settings:\n• Biographies. To evaluate the factuality of language models, we introduce a novel task of\naccurately generating historical biographies of people. In preliminary testing, we found that\nexisting language models had a tendency to hallucinate many facts on this task. We constructed\nground truth bullet point biographies of 524 well-known computer scientists. We then asked\nlanguage models to generate bullet point biographies for each person, and evaluated the accuracy at\nwhich each ground truth bullet point agreed with generated bullets. We report additional evaluation\ndetails in the Appendix.\n6\n\n===== PDF PAGE 7 =====\n\nQuestion: Yo u  s u s p e c t  t h a t  y o u r  p a t i e n t  h a s  a n  enlarged submandibular salivary gland. Y ou expect the enlarged gland: A) to be palpable intraorally. B) to be palpable extraorally. C) to be palpable both intra-and extraorally. D) only to be detectable by radiographical examination.Agent 2: BAgent 1: C ✗✓Round 1Round 2 Agent 3: CAgent 2: CAgent 1: C ✓✓ Agent 3: C✓✓Agent 2: CAgent 1: A ✗Agent 3: DAgent 2: D✓✓ Agent 3: D✗Agent 1: D\nQuestion: Six positive integers are written on the faces of a cube. Each vertex is labeled with the product of the three numbers on the faces adjacent to the vertex. If the sum of the numbers on the vertices is equal to 1001, then what is the sum of the numbers written on the faces? A) 18. B) 13. C) 1001. D) 31. \n✓✓\nFigure 8: Illustration of MMLU. Illustration of debate when answering factual tasks. Reasoning omitted.\nModel Biographies MMLU Chess Move Validity\nSingle Agent 66.0 ± 2.2 63.9 ± 4.8 29.3 ± 2.6\nSingle Agent (Reflection) 68.3 ± 2.9 57.7 ± 5.0 38.8 ± 2.9\nMulti-Agent (Debate) 73.8± 2.3 71.1 ± 4.6 45.2 ± 2.9\nTable 2: Multiagent Debate Improves Factual Accuracy Multi-agent debate improves the factual accuracy.\n• MMLU. Next, we assess the factuality of language models in responding to different factual knowl-\nedge questions typically learned and assessed in different exams. We utilize the existing MMLU\ndataset [8] to benchmark the accuracy of responses.\n• Chess Move Validity. Lastly, we study the hallucinations in language models when planning\nunder to the given rules of an existing environment or game. Specifically, we measure the validity\nof possible moves in a game of Chess given by BIG-Bench Chess-State Tracking Benchmark [ 27]\ntask of chess-move prediction. In this task, an agent is given a set of next moves, and must make a\nvalid next move of a piece on a board.\nBaselines. We use the same baselines as in Section 3.1. The multiagent (majority) is not directly\napplicable in this setting as individual responses are not easily comparable, and so we omit baseline\ncomparison with the majority voting in this setting.\nResults. We analyze the performance of each method in Table 2. We found that approaches\nbased on reflection led to poor performance in the factuality setting. In contrast, debate gives the\nbest performance in this setting also, and significantly outperforms each baseline. We illustrate a\ndebate between agents on the biography task in Figure 7 and on MMLU in Figure 8. We found that",
+        "content_sha256": "0674b1614409c389ff275c78c696138a9453e321fee21b90ea1e4354700be7e2",
+        "locator": "lines 296-340",
+        "source_id": "papers/text/du-et-al-2023-multiagent-debate.txt",
+        "truncated": true
+      },
+      "result_ids": [
+        "papers/text/du-et-al-2023-multiagent-debate.txt"
+      ],
+      "result_sha256": "833928cd4c94234b1b40d6feed883afebd474d0458ba2abee7f3c8052aaa40c1",
+      "sequence": 7,
+      "tool": "read_source"
+    },
+    {
+      "arguments": {
+        "limit": 6,
+        "query": "evaluation details examples human evaluation accuracy measured appendix",
+        "source_ids": [
+          "papers/text/du-et-al-2023-multiagent-debate.txt"
+        ]
+      },
+      "result": {
+        "hits": [
+          {
+            "content_sha256": "0674b1614409c389ff275c78c696138a9453e321fee21b90ea1e4354700be7e2",
+            "excerpt": "arithmetic in Figure 24, arithmetic with summarization of individual responses of agents in Figure 25,\nMMLU in Figure 26, a debate with the full contents biographies in Figure 27, and debate in chess in\nFigure 28. In general, we found that debate improved the performance of final generated answers,\nthough sometimes answers would converge to the incorrect value.\nA.2 Evaluation Details\nWe provided detailed evaluation details for each setting in the paper. We run all experiments using\nthe gpt-3.5-turbo-0301 model. We provide a table listing the prompts used to prompt models\nand initialize debate in Table 15.\nArithmetic. To evaluate the arithmetic task, we generated six random integers for each task between\n0 and 30. We then evaluated the extent to which the correct integer answer was correctly obtained.\nWe evaluated models on one hundred generated arithmetic tasks.\nGrade School Math. To evaluate the GSM8K task, we evaluated the accuracy at which models\nwere able to obtain the final correct answer, as extracted from a box. We evaluated models on one\nhundred grade school math problems.\nChess. To evaluate the chess reasoning task, we used chess games fromhttps://www.pgnmentor.\ncom/players/Adams.zip. We asked chatGPT to predict the next move for white to move at turn\n14 and reported the relative Stockfish pawn score with search depth 20 after executing the suggested\nmove from chatGPT. We evaluated models on three hundred selected chess games.\nBiographies. To evaluate the biographies task, we compare each generated bullet point biography\nfor a person with a ground truth set of fact",
+            "locator": "lines 625-656",
+            "score": 8.787491742782047,
+            "source_id": "papers/text/du-et-al-2023-multiagent-debate.txt"
+          },
+          {
+            "content_sha256": "0674b1614409c389ff275c78c696138a9453e321fee21b90ea1e4354700be7e2",
+            "excerpt": "✓\n✗\nFigure 7: Illustration of Generating Biographies. Illustration of generating bullet biographies of computer\nscientists. For brevity, only the first 3 generated bullets are shown.\nQualitative Results. In Figure 4, 5, we provide qualitative illustrations of the debate procedure\nbetween models. Interestingly, we find cases in which all models initially give an incorrect response,\nyet the result of debate still obtains the correct answer as agents critique each others’ reasoning. Thus,\nthe purpose of our debate isn’t just to amplify a correct answer – all models can initially be wrong\nbut arrive at the correct answer through the debate process.\nCompatibility with other reasoning methods. Our multiagent generation procedure operates\northogonally approach to other prompting methods which focus on single-agent generation. In\nFigure 6, we illustrate the performance of multi-agent debate with and without zero-shot chain-of-\nthought prompting [11] on GSM8K. In both settings, multiagent generation is beneficial.\n3.2 Extracting Factual Information from Multiagent Debate\nWe next evaluate the extent to which multiagent debate improves the underlying factuality in language\nmodels.\nTasks. We evaluate the factuality of language models in three different settings:\n• Biographies. To evaluate the factuality of language models, we introduce a novel task of\naccurately generating historical biographies of people. In preliminary testing, we found that\nexisting language models had a tendency to hallucinate many facts on this task. We constructed\nground truth bullet point biographies of 524 well",
+            "locator": "lines 289-320",
+            "score": 6.772588722239782,
+            "source_id": "papers/text/du-et-al-2023-multiagent-debate.txt"
+          },
+          {
+            "content_sha256": "0674b1614409c389ff275c78c696138a9453e321fee21b90ea1e4354700be7e2",
+            "excerpt": "the percentage of ground bullets that chatGPT returns either yes or no on. We ignored ground truth\nbullets that chatGPT returns returned uncertain.\nWe found this evaluation metric provided a fast way to evaluate how relatively correct a generated\nbullet point biography is. However, we found that generated facts could contain incorrect information\nthat was not captured in the ground truth bullet and thus could not be validated through this metric.\nNevertheless, we believe this evaluation scheme estimates the relative accuracy of a generated\nbiography.\nMMLU. To evaluate MMLU, we measured the accuracy in which models were able to select the\ncorrect multiple-choice answer in each problem. We evaluated models on one hundred selected\nMMLU questions randomly distributed across each of the subject areas.\n13\n\n===== PDF PAGE 14 =====\n\nTask Type Prompt\nArithmetic\nStarting What is the result of {}+{}*{}+{}-{}*{}? Make sure to state your answer at the end of the response.\nDebate\nThese are the recent/updated opinions from other agents: <other agent responses> Use these opinions\ncarefully as additional advice, can you provide an updated answer? Make sure to state your answer\nat the end of the response.\nGSM8K\nStarting Can you solve the following math problem? <Problem> Explain your reasoning. Your final answer\nshould be a single numerical number, in the form \\boxed{{answer}}, at the end of your response.\nDebate\nThese are the solutions to the problem from other agents: <other agent responses> Using the solutions\nfrom other agents as additional information, can you provide your answer to the",
+            "locator": "lines 649-680",
+            "score": 5.8903717578961645,
+            "source_id": "papers/text/du-et-al-2023-multiagent-debate.txt"
+          },
+          {
+            "content_sha256": "0674b1614409c389ff275c78c696138a9453e321fee21b90ea1e4354700be7e2",
+            "excerpt": "• GSM8K. Next, we consider harder mathematical reasoning tasks. Using the GSM8K dataset [ 3],\nthe models must correctly solve grade school mathematical reasoning tasks.\n• Chess Move Prediction. Finally, we consider the strategic reasoning of the ability of models,\nand ask models to predict the best next move in a game of chess, given the first 14 moves of a chess\ngame between two chess grand-masters described in PGN notation [6].\nWe report the accuracy of final answers in arithmetic and GSM8K tasks and report the pawn score\n(advantage) of predicted moves, as estimated by Stockfish in the Chess move prediction tasks.\nAdditional details may be found in the Appendix.\nGSM8K Task Accuracy\n70%\n75%\n80%\n85%\n90%\nNo Chain of \nThought\nWith Chain of \nThought\nSingle Agent Multi-Agent Debate\nFigure 6: Synergy with Other Methods. Per-\nformance of debate increases with use of Chain\nof Thought prompting.\nBaselines. We compare our approach to three alter-\nnative approaches to generate responses for reasoning\nproblems. First, we ask agents to directly generate\nresponses (single agent). Next, we consider asking lan-\nguage models to generate and then \"self-reflect\" on the\nresponses generated [26, 18]. Finally, we consider gen-\nerating responses using multiple agents and performing\nmajority voting [ 15, 3]. As the focus of our experi-\nments is to verify the effectiveness of multiagent agent\ndebate, we run both baselines and our approach, using",
+            "locator": "lines 217-248",
+            "score": 5.484906649788,
+            "source_id": "papers/text/du-et-al-2023-multiagent-debate.txt"
+          },
+          {
+            "content_sha256": "0674b1614409c389ff275c78c696138a9453e321fee21b90ea1e4354700be7e2",
+            "excerpt": "problems. First, we ask agents to directly generate\nresponses (single agent). Next, we consider asking lan-\nguage models to generate and then \"self-reflect\" on the\nresponses generated [26, 18]. Finally, we consider gen-\nerating responses using multiple agents and performing\nmajority voting [ 15, 3]. As the focus of our experi-\nments is to verify the effectiveness of multiagent agent\ndebate, we run both baselines and our approach, using\nthe identical starting prompt and language model across\nall evaluations. We evaluate models in a zero-shot set-\nting, with prompts found in the Appendix of the paper.\nWe use chatGPT-based language model [21] in all our experiments except those in Figure 11 where\nwe compare multiple language models.\nDue to computational expense, we evaluate our approach across benchmarks mainly using three\nagents with two rounds of debates, although we found further gains with both more agents and rounds\nof debate (Figure 10). Additional evaluation details are found in the Appendix.\nQuantitative Results. In Table 1, we report the results of each approach on arithmetic, grade school\nmath, and chess reasoning task. In each task, we observe that utilizing multiple different agents to\ngenerate solutions improves performance over using a single language model agent to generate a\nsolution. Simultaneously, we also see that reflection, where a language model is asked to critique\nits early generation, generally gives a modest boost in performance. Multiagent debate, which may\nbe seen as a combination of both reflection and multiagent generation, gives a substantial boo",
+            "locator": "lines 241-272",
+            "score": 5.484906649788,
+            "source_id": "papers/text/du-et-al-2023-multiagent-debate.txt"
+          },
+          {
+            "content_sha256": "0674b1614409c389ff275c78c696138a9453e321fee21b90ea1e4354700be7e2",
+            "excerpt": "\n===== PDF PAGE 12 =====\n\n[31] E. Zelikman, Y . Wu, J. Mu, and N. Goodman. Star: Bootstrapping reasoning with reasoning.\nAdvances in Neural Information Processing Systems, 35:15476–15488, 2022. 9\n[32] A. Zeng, A. Wong, S. Welker, K. Choromanski, F. Tombari, A. Purohit, M. Ryoo, V . Sindhwani,\nJ. Lee, V . Vanhoucke, et al. Socratic models: Composing zero-shot multimodal reasoning with\nlanguage. arXiv preprint arXiv:2204.00598, 2022. URL https://arxiv.org/abs/2204.\n00598. 9\n[33] D. M. Ziegler, N. Stiennon, J. Wu, T. B. Brown, A. Radford, D. Amodei, P. Christiano, and G. Irv-\ning. Fine-tuning language models from human preferences. arXiv preprint arXiv:1909.08593,\n2019. 9\n12\n\n===== PDF PAGE 13 =====\n\nA Appendix\nIn this appendix, we provide additional analysis and visualizations of the debates used in the main\npaper in Section A.1. We further provide detailed experimental details on each dataset in Section A.2.\nA.1 Additional Results\n1.0 1.5 2.0 2.5 3.0 3.5 4.0\nDebate Rounds\n65\n70\n75\n80\n85\n90\n95Consensus\nConsensus vs Number of Debating Agents\nShort Debate Prompt\nLong Debate Prompt",
+            "locator": "lines 577-608",
+            "score": 5.484906649788,
+            "source_id": "papers/text/du-et-al-2023-multiagent-debate.txt"
+          }
+        ],
+        "query": "evaluation details examples human evaluation accuracy measured appendix",
+        "truncated": true
+      },
+      "result_ids": [
+        "papers/text/du-et-al-2023-multiagent-debate.txt",
+        "papers/text/du-et-al-2023-multiagent-debate.txt",
+        "papers/text/du-et-al-2023-multiagent-debate.txt",
+        "papers/text/du-et-al-2023-multiagent-debate.txt",
+        "papers/text/du-et-al-2023-multiagent-debate.txt",
+        "papers/text/du-et-al-2023-multiagent-debate.txt"
+      ],
+      "result_sha256": "d17b7cc1c1f8a7ac3472d3d7b89f61394268bc0c3947c599020f4dd3521922b6",
+      "sequence": 8,
+      "tool": "search_sources"
+    },
+    {
+      "arguments": {
+        "line_count": 22,
+        "source_id": "papers/text/du-et-al-2023-multiagent-debate.txt",
+        "start_line": 270
+      },
+      "result": {
+        "content": "Single Agent (Reflection) 72.1 ± 4.5 75.0 ± 4.3 102.1 ± 11.9\nMulti-Agent (Majority) 69.0 ± 4.6 81.0 ± 3.9 102.2 ± 6.2\nMulti-Agent (Debate) 81.8± 2.3 85.0 ± 3.5 122.9 ± 7.6\nTable 1: Multiagent Debate Improves Reasoning Multi-agent debate improves the reasoning abilities of\nlanguage models. Multi-agent results in the table are run with 3 agents and two rounds of debate.\nPrompt: Give a bullet point biography of David S. Johnson highlighting their contributions and achievements as a computer scientist, with each fact separated with a new line character.\nAgent 2: --David S. Johnson is an American computer scientist and mathematician.--Johnson was elected to the National Academy of Engineering in 2006.--He has been awarded numerous honors and awards for his contributions to computer science, including the ACM SIGMOD Innovations Awardand the Knuth Prize. \nAgent 1: --He earned his bachelor's degree from Dartmouth Collegein 1967 and his Ph.D. from MIT in 1973.--Johnson has received numerous awards for his research and contributions to computer science, including the ACM Turing Awardin 2013.--Johnson's research interests include optimization, algorithms, and complexity theory.\n✓Round 1\n✗\n✗✓\nAgent 2: --David S. Johnson is an American computer scientist and mathematician.--He has worked at several prestigious universities, including Columbia University, A T&T Bell Laboratories, and Cornell University.--Johnson is known for his work in the field of algorithms, particularly in the areas of network optimization, combinatorial optimization, and scheduling theory.\nAgent 1: --David S. Johnson is a computer scientist and mathematician.--Johnson was elected to the National Academy of Engineering in 2006.--He has received numerous awards for his contributions to computer science, including the ACM Turing Awardin 2013 and the Knuth Prize.\n✓Round 2\n✗\n✓\n✗\n✓\n✓\n✓\n✗\nFigure 7: Illustration of Generating Biographies. Illustration of generating bullet biographies of computer",
+        "content_sha256": "0674b1614409c389ff275c78c696138a9453e321fee21b90ea1e4354700be7e2",
+        "locator": "lines 270-291",
+        "source_id": "papers/text/du-et-al-2023-multiagent-debate.txt",
+        "truncated": true
+      },
+      "result_ids": [
+        "papers/text/du-et-al-2023-multiagent-debate.txt"
+      ],
+      "result_sha256": "13e17296f08dad51e52cabc248d34a3533bce658effcad80853ece8ef8855434",
+      "sequence": 9,
+      "tool": "read_source"
+    },
+    {
+      "arguments": {
+        "line_count": 22,
+        "source_id": "papers/text/du-et-al-2023-multiagent-debate.txt",
+        "start_line": 632
+      },
+      "result": {
+        "content": "and initialize debate in Table 15.\nArithmetic. To evaluate the arithmetic task, we generated six random integers for each task between\n0 and 30. We then evaluated the extent to which the correct integer answer was correctly obtained.\nWe evaluated models on one hundred generated arithmetic tasks.\nGrade School Math. To evaluate the GSM8K task, we evaluated the accuracy at which models\nwere able to obtain the final correct answer, as extracted from a box. We evaluated models on one\nhundred grade school math problems.\nChess. To evaluate the chess reasoning task, we used chess games fromhttps://www.pgnmentor.\ncom/players/Adams.zip. We asked chatGPT to predict the next move for white to move at turn\n14 and reported the relative Stockfish pawn score with search depth 20 after executing the suggested\nmove from chatGPT. We evaluated models on three hundred selected chess games.\nBiographies. To evaluate the biographies task, we compare each generated bullet point biography\nfor a person with a ground truth set of facts about the person extracted from Wikipedia. We iteratively\nloop through each ground truth fact, and validate the extent to which the generated biography matches\na particular bullet by prompting chatGPT with the prompt: Consider the following biography of\n<person>: <generated biography> Is the above biography above consistent with the fact below?\n<ground truth bullet> Give a single-word answer, yes, no, or uncertain.We then evaluate and report\nthe percentage of ground bullets that chatGPT returns either yes or no on. We ignored ground truth\nbullets that chatGPT returns returned uncertain.\nWe found this evaluation metric provided a fast way to evaluate how relatively correct a generated\nbullet point biography is. However, we found that generated facts could contain incorrect information\nthat was not captured in the ground truth bullet and thus could not be validated through this metric.",
+        "content_sha256": "0674b1614409c389ff275c78c696138a9453e321fee21b90ea1e4354700be7e2",
+        "locator": "lines 632-653",
+        "source_id": "papers/text/du-et-al-2023-multiagent-debate.txt",
+        "truncated": true
+      },
+      "result_ids": [
+        "papers/text/du-et-al-2023-multiagent-debate.txt"
+      ],
+      "result_sha256": "9f970fd021a2ed57bafd00e93bb2ab6f5da2981960055601972094087ff4ca3a",
+      "sequence": 10,
+      "tool": "read_source"
+    },
+    {
+      "arguments": {
+        "line_count": 25,
+        "source_id": "papers/text/du-et-al-2023-multiagent-debate.txt",
+        "start_line": 462
+      },
+      "result": {
+        "content": "approaches have relied on training techniques such as RLHF [33, 16, 2], pruning truthful datasets [12],\nexternal knowledge retrieval [7] and training-free methods based off likelihood estimation [10].\nOur work provides an alternative way to obtain reasoning and factuality in language models using\nmultiagent debates, which only requires black-box access to a language generator. Prior work also\nhas explored how to take the majority vote across different models [ 15, 3, 29, 28] while in this work,\nwe use the power of a language model to combine different answers. Most similar to our work, Irving\net al. [9] also proposes a debate procedure to verify the accuracy and safety of powerful AI agents. In\ncontrast to our approach, in their work, agents are asked to alternatively provide proof of a input, and\nhumans are tasked with assessing these debates and determining safety.\nCompositional Generation. Our work is also related to existing works that focus on text generation\nby combining different models [4, 17, 32, 1, 5]. Most similar to our work, [14, 32] propose to combine\nmultiple different large pretrained models together for multimodal reasoning. In contrast, in our work,\nwe aim to use communication between different language models to enable more effective reasoning\nand factuality in language models.\n9\n\n===== PDF PAGE 10 =====\n\n5 Limitations and Discussion\nIn this paper, we present an orthogonal approach to improve the performance of language models\nusing multi-agent debate. We find that the approach is simple and effective across a wide set of\ndifferent reasoning and validity language modeling tasks.\nLimitations. In comparison to other prompting techniques, our multiagent debate procedure is\nmore computationally expensive, as it requires both multiple language generations, and an underlying\ndebate procedure. However, we believe that this approach may be seen as a method to generate",
+        "content_sha256": "0674b1614409c389ff275c78c696138a9453e321fee21b90ea1e4354700be7e2",
+        "locator": "lines 462-486",
+        "source_id": "papers/text/du-et-al-2023-multiagent-debate.txt",
+        "truncated": true
+      },
+      "result_ids": [
+        "papers/text/du-et-al-2023-multiagent-debate.txt"
+      ],
+      "result_sha256": "eaeccce5cb51f8d6906e1dae28cc10cab9e06192ed88680d220d420842ed6a87",
+      "sequence": 11,
+      "tool": "read_source"
+    },
+    {
+      "arguments": {
+        "entry_id": "question:work:001-inv-smit-mad"
+      },
+      "result": {
+        "content": {
+          "acceptance_condition": "An answer listing: debate variants and tasks tested; baselines and whether compute was matched; tasks/metrics where debate did not help or hurt; the paper's own explanation of when debate helps; stated limitations; each with PDF page markers.",
+          "answer_ids": [],
+          "content_sha256": "f2898fc0e9cfd03ff455f68e3bb9ce6195ed56c11c863f9c6f8275dec43ddf33",
+          "demand_ids": [
+            "D4"
+          ],
+          "id": "question:work:001-inv-smit-mad",
+          "node_id": "work:001-inv-smit-mad",
+          "rationale": "This is the principal null/adverse evidence against debate; its exact baselines and negative results define the conflict the note must reconcile rather than silently select between.",
+          "tags": [
+            "evidence",
+            "counterexample"
+          ],
+          "text": "What exactly does Smit et al. 2023 (papers/text/smit-et-al-2023-going-mad.txt) find when re-examining multi-agent debate strategies: which debate variants and tasks were tested, which baselines (e.g., single-agent with equivalent sampling) were used, where did debate fail to beat or underperform simpler baselines, what role do model capability/size and judge aggregation play, and what matched-compute or cost comparisons does the paper make? Record key claims with `===== PDF PAGE N =====` markers."
+        },
+        "id": "question:work:001-inv-smit-mad",
+        "incoming_links": [],
+        "kind": "question",
+        "outgoing_links": [
+          {
+            "content_sha256": "352600e4d48c69b91769d74105461261a52917fd5bb094e87509ae806462e0c9",
+            "id": "link:352600e4d48c69b91769d741",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "refines",
+            "source_id": "question:work:001-inv-smit-mad",
+            "target_id": "question:demand:D4"
+          },
+          {
+            "content_sha256": "8373f5e63bb99dc188f60bba245096bcc5bff1b5305d351c6e65c5e745b0c64b",
+            "id": "link:8373f5e63bb99dc188f60bba",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "refines",
+            "source_id": "question:work:001-inv-smit-mad",
+            "target_id": "question:root"
+          }
+        ]
+      },
+      "result_ids": [
+        "question:work:001-inv-smit-mad"
+      ],
+      "result_sha256": "fb9d963c049d2dbd8d07ccc88a4bf60b133341ed5af2c7776bbc5b17eee64227",
+      "sequence": 12,
+      "tool": "get_entry"
+    }
+  ],
+  "snapshot_sha256": "64f22e4def6506758f4d42d87a55f95161e7997884433c26ab3a759c4a839292"
+}

@@ -1,0 +1,10 @@
+{
+  "content_sha256": "9171d74603d31ac03f8c9758b27435225dd054a72f47015747c00ecbc7163b2e",
+  "id": "link:9171d74603d31ac03f8c9758",
+  "origin": "runtime",
+  "proposed_by_node_id": null,
+  "rationale": null,
+  "relation": "partially_answers",
+  "source_id": "answer:work:002-inv-zhang-when-r2",
+  "target_id": "question:demand:D4"
+}

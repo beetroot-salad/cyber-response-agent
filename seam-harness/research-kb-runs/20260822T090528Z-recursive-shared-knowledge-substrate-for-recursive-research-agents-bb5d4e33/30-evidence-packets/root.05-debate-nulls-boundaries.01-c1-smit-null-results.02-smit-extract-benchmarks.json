@@ -1,0 +1,85 @@
+{
+  "account": "Benchmark-specific evidence from Smit et al. 2023: Table 2 lists best scores across seven datasets showing MAD systems do not dominate; single-agent and other baselines beat or match MAD on multiple benchmarks, and no protocol dominates on all datasets (PDF page 5). Specific numbers anchor the comparison.",
+  "assumptions": [
+    "Table 2 numbers are best configuration scores out of 1.0 as published; no external normalization applied."
+  ],
+  "boundary_findings": [],
+  "child_packet_ids": [],
+  "claims": [
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "Medprompt 0.65 (0.63) ... Society of Mind 0.64 (0.61) ... Ensemble Refinement 0.64 (0.60) ... ChatEval 0.60 (0.60) ... Self-Consistency 0.60 (0.60) ... Single Agent 0.60 (0.59) ... Multi-Persona 0.58 (0.57)",
+          "locator": "workspace-relative path papers/text/smit-et-al-2023-going-mad.txt, line after marker '===== PDF PAGE 5 =====' in Table 2",
+          "source_id": "ref:smit-2023-going-mad"
+        }
+      ],
+      "confidence": 0.97,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "id": "root.05-debate-nulls-boundaries.01-c1-smit-null-results.02-smit-extract-benchmarks:C001",
+      "statement": "Smit et al.'s Table 2 reports best performance scores out of 1.0 for seven systems across MedQA, PubMedQA, MMLU, CosmosQA, CIAR, GPQA, and Chess; e.g., Medprompt (non-debate) scores 0.65 on MedQA, Society of Mind 0.64, Ensemble Refinement 0.64, ChatEval 0.60, Self-Consistency 0.60, Single Agent 0.60, Multi-Persona 0.58."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "Table 2 indicates that no protocol dominates on all datasets. Medprompt seems to perform the best overall. Interestingly enough the debating protocols do not outperform the other protocols on the reasoning datasets. ... We see the highest performing debating strategy ... is SoM with multiple different configurations achieving 61% on MedQA. However, the recently introduced Medprompt strategy ..., which does not use debate, performs the best overall.",
+          "locator": "===== PDF PAGE 4 ===== and ===== PDF PAGE 5 ===== in Section 3, paragraphs 'Results' and 'The utility of debate'",
+          "source_id": "ref:smit-2023-going-mad"
+        }
+      ],
+      "confidence": 0.96,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "id": "root.05-debate-nulls-boundaries.01-c1-smit-null-results.02-smit-extract-benchmarks:C002",
+      "statement": "Across all seven benchmarks, no protocol dominates on all datasets; the highest-performing debating strategy on MedQA was SoM at 61% accuracy, while Medprompt (non-debate) performed best overall, with debating protocols not outperforming others on the reasoning datasets."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "Medprompt ... 0.27 (0.25) ... GPQA ... Chess 0.32 (0.30); ... Multi-Persona 0.29 (0.29) ... 0.33 (0.29); ... Single Agent 0.33 (0.28) ... 0.27 (0.18)",
+          "locator": "===== PDF PAGE 5 =====, Table 2 under columns GPQA and Chess",
+          "source_id": "ref:smit-2023-going-mad"
+        }
+      ],
+      "confidence": 0.95,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "id": "root.05-debate-nulls-boundaries.01-c1-smit-null-results.02-smit-extract-benchmarks:C003",
+      "statement": "On the non-medical benchmarks, MAD systems do not consistently beat the single-agent baseline: on GPQA single-agent scores 0.33 versus Ensemble Refinement 0.32, Medprompt 0.27, and SoM 0.27; on Chess Multi-Persona and ChatEval reach 0.32-0.33 versus Medprompt 0.32, SoM 0.26, and Single Agent 0.27."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "within medical datasets, every evaluated system outperforms single-agent methods, with the exception of Multi-Persona. ... Conversely, in the context of non-medical datasets, single-agent methods surpass all evaluated systems except for Multi-Persona and Self-Consistency.",
+          "locator": "===== PDF PAGE 5 =====, Section 3, paragraph 'Is MAD simply sensitive to hyperparameters?'",
+          "source_id": "ref:smit-2023-going-mad"
+        }
+      ],
+      "confidence": 0.94,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "id": "root.05-debate-nulls-boundaries.01-c1-smit-null-results.02-smit-extract-benchmarks:C004",
+      "statement": "Smit et al. report that in their K-fold analysis, on medical datasets every evaluated system outperformed single-agent methods except Multi-Persona, whereas on non-medical datasets single-agent methods surpassed all evaluated systems except Multi-Persona and Self-Consistency."
+    }
+  ],
+  "content_sha256": "1fe8c4280c2d98e0d66b66cbd0d3118dde06de7eb4aa6adf444672082ed49ffd",
+  "counterevidence": [
+    "Table 2 shows SoM (MAD) ties Medprompt on CIAR at 0.56 vs 0.54 and Multi-Persona exceeds Medprompt on Chess (0.33 vs 0.32), indicating MAD does not uniformly lose. The paper also reports that tuning agreement intensity can make Multi-Persona beat Medprompt and Self-Consistency (PDF page 5 after Figure 4, and Section 4)."
+  ],
+  "id": "packet:root.05-debate-nulls-boundaries.01-c1-smit-null-results.02-smit-extract-benchmarks",
+  "next_observation": "Consider extracting from the same file the specific hyperparameters for the best configurations that produced Table 2 numbers, if needed for matched-compute planning.",
+  "node_id": "root.05-debate-nulls-boundaries.01-c1-smit-null-results.02-smit-extract-benchmarks",
+  "objective": "Extract from papers/text/smit-et-al-2023-going-mad.txt at least one anchored finding that compares performance of MAD systems against single-agent or other prompting baselines on specific benchmarks (e.g., MedQA, PubMedQA, MMLU, CosmosQA, CIAR, GPQA, Chess), quoting or closely paraphrasing the relevant table or sentence and carrying the exact `===== PDF PAGE N =====` marker(s).",
+  "source_ids_consulted": [
+    "ref:smit-2023-going-mad"
+  ],
+  "sufficiency": "ready_to_synthesize",
+  "unresolved": [
+    "The dossier does not provide the exact method used to compute the parenthetical median scores in Table 2, only that they are 'median performance over the datasets shown in parentheses.'"
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "content_sha256": "4774ea267512e7c9886c1ee044b87afa367b33a70571d0e4689e26c562f3f5fa",
+  "id": "link:4774ea267512e7c9886c1ee0",
+  "origin": "runtime",
+  "proposed_by_node_id": null,
+  "rationale": null,
+  "relation": "refines",
+  "source_id": "question:work:001-w1-social-influence",
+  "target_id": "question:demand:D3"
+}

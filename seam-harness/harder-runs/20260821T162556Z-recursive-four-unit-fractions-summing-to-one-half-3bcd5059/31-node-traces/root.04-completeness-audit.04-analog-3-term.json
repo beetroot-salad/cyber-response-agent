@@ -1,0 +1,11 @@
+{
+  "child_ids": [],
+  "depth": 2,
+  "effective_disposition": "solve",
+  "node_id": "root.04-completeness-audit.04-analog-3-term",
+  "packet_id": "packet:root.04-completeness-audit.04-analog-3-term",
+  "packet_sha256": "6a73ae5cee1513e3f07f9dc1dc0880c84acab22cc9d2072bc22c76f139618979",
+  "parent_id": "root.04-completeness-audit",
+  "proposed_disposition": "solve",
+  "stop_reason": null
+}

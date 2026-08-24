@@ -1,0 +1,10 @@
+{
+  "content_sha256": "66ab6f115c25de52ea0cf84988be4c1fb2693bb62ccfd1a6e7eb9739be4b8c5c",
+  "id": "link:66ab6f115c25de52ea0cf849",
+  "origin": "agent",
+  "proposed_by_node_id": "work:002-inv-choi-r2",
+  "rationale": "Same underlying question as the r2 retry; all acceptance items (design, quantitative findings, quality-vs-quantity, limitations) are covered with page markers.",
+  "relation": "answers",
+  "source_id": "answer:work:002-inv-choi-r2",
+  "target_id": "question:work:001-inv-choi-conformity"
+}

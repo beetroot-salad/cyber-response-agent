@@ -1,0 +1,159 @@
+{
+  "account": "Zhang et al. 2025 supply the corpus's boundary-condition evidence: a systematic evaluation across 4 models, 9 benchmarks, and 5 MAD methods finds MAD generally fails to beat simple single-agent baselines CoT and SC, with the failures varying by task type (worse on programming, better on math) and unaffected by hyperparameter tuning. The authors identify model heterogeneity (Heter-MAD) as a consistently effective remedy, improving all tested MAD frameworks, with gains attributed to correcting CW/WC questions. Findings are anchored to PDF pages 1, 3, 7, 9, 11, and 12.",
+  "assumptions": [
+    "The '===== PDF PAGE N =====' markers in the dossier text correspond to the extraction page boundaries as specified by SC2.",
+    "The numbers 6.4% and 8.2% in the account are copied from the dossier's Table 4 text."
+  ],
+  "boundary_findings": [
+    {
+      "alternative_explanation": "The intake procedure intentionally does not enclose full texts; only the manifest, while the workspace holds the files.",
+      "consequence_if_absorbed": "If absorbed, the parent might wrongly believe the Zhang file was unavailable, omitting the boundary-condition evidence.",
+      "evidence": [
+        "source_materials list says 'content not enclosed at intake'",
+        "workspace_documents includes full text with sha256"
+      ],
+      "narrative": "The dossier's 'source_materials' entry for ref:zhang-2025-mad-question says 'content not enclosed at intake', yet the 'workspace_documents' provides the full text. The manifest (SC4, SC5) indicates the seven files are present in the workspace, so the text is available.",
+      "smallest_suspected_scope": "Intake envelope vs workspace"
+    }
+  ],
+  "claims": [
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "Surprisingly, our findings reveal that MAD often fail to outperform simple single-agent baselines such as Chain-of-Thought and Self-Consistency, even when consuming significantly more inference-time computation.",
+          "locator": "===== PDF PAGE 1 =====",
+          "source_id": "ref:zhang-2025-mad-question"
+        }
+      ],
+      "confidence": 0.97,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "zhang-c1",
+      "statement": "Zhang et al. report that 'current MAD research suffers from critical limitations in evaluation practices' and that 'MAD often fail to outperform simple single-agent baselines such as Chain-of-Thought and Self-Consistency, even when consuming significantly more inference-time computation.'"
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "As summarized in Figure 1, none of these MAD methods achieve a win rate higher than 20% when compared to CoT across 36 scenarios (4 models × 9 benchmarks). Further experiments varying the number of agents and debate rounds show that simply adjusting these hyperparameters can hardly reverse this negative outcome.",
+          "locator": "===== PDF PAGE 3 =====",
+          "source_id": "ref:zhang-2025-mad-question"
+        }
+      ],
+      "confidence": 0.98,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "zhang-c2",
+      "statement": "Across 36 configurations (4 models × 9 benchmarks), none of the MAD methods achieve a win rate higher than 20% against CoT, and the negative result persists when varying agents and debate rounds."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "When examining performance by task type, MAD frameworks performed worse on programming tasks (only SoM/AgentVerse had positive win rates) but better on mathematical reasoning, surpassing their overall performance levels.",
+          "locator": "===== PDF PAGE 7 =====",
+          "source_id": "ref:zhang-2025-mad-question"
+        }
+      ],
+      "confidence": 0.97,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "zhang-c3",
+      "statement": "Task type is a boundary condition: MAD performed worse on programming tasks, with only SoM/AgentVerse having positive win rates, but better on mathematical reasoning."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "The sole notable exception is observed with EoT on the GSM8K benchmark, where increasing the number of agents from 3 to 9 leads to a continuous improvement in performance, ultimately surpassing CoT. ... increasing the number of agents or debate rounds often results in either stagnation or even a decline in performance.",
+          "locator": "===== PDF PAGE 9 =====",
+          "source_id": "ref:zhang-2025-mad-question"
+        }
+      ],
+      "confidence": 0.95,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "zhang-c4",
+      "statement": "Increasing agents or debate rounds generally yields stagnation or decline, except EoT on GSM8K, ruling out hyperparameter tuning as a universal explanation for MAD's inferiority to CoT."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "We observe that SC effectively utilizes the increased inference budget. However, MAD frameworks either: (i) show no positive trend in achieving stable performance improvements ... or (ii) continue to underperform SC while consuming a comparable number of tokens ... These observations indicate that, in comparison to SC, MAD is generally a less efficient method for leveraging token consumption.",
+          "locator": "===== PDF PAGE 9 =====",
+          "source_id": "ref:zhang-2025-mad-question"
+        }
+      ],
+      "confidence": 0.94,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "zhang-c5",
+      "statement": "Beyond performance, MAD is generally a less efficient method for leveraging token consumption than Self-Consistency, which positively scales with budget while MAD often shows no stable gains."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "Notably, we find that Heter-MAD consistently improves the performance of all considered MAD frameworks. Specifically, ... Heter-SoM improves SoM-average ... by 6.4%, and Heter-EoT improves EoT-average by 8.2%.",
+          "locator": "===== PDF PAGE 11 =====",
+          "source_id": "ref:zhang-2025-mad-question"
+        },
+        {
+          "excerpt": "The primary booster of Heter-MAD's performance gains is its ability to effectively handle CW and WC questions, which together account for a significant portion of the dataset.",
+          "locator": "===== PDF PAGE 12 =====",
+          "source_id": "ref:zhang-2025-mad-question"
+        }
+      ],
+      "confidence": 0.97,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "zhang-c6",
+      "statement": "Model heterogeneity (Heter-MAD) consistently improves all tested MAD frameworks; for example Heter-SoM improves SoM-average by 6.4% and Heter-EoT by 8.2%, and gains are attributed to handling questions only one model solves (CW/WC)."
+    },
+    {
+      "basis": "inferred",
+      "citations": [
+        {
+          "excerpt": "We hypothesize that the significant performance gain of Heter-SoM and Heter-EoT stems from the rather simple design of SoM and EoT, and thus they are more compatible with heterogeneous models. Conversely, more complex frameworks ... struggle with compatibility.",
+          "locator": "===== PDF PAGE 11-12 =====",
+          "source_id": "ref:zhang-2025-mad-question"
+        }
+      ],
+      "confidence": 0.9,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "zhang-c7",
+      "statement": "Complex MAD frameworks (ChatEval, AgentVerse) benefit less from heterogeneity than simple ones (SoM, EoT), likely due to compatibility issues in aggregating heterogeneous models."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "we observe that, in general, these MAD frameworks are able to outperform single-agent (SA) that are instructed to directly generate their answers. Specifically, we observe that MAD frameworks outperform SA in most conditions (34 out of 45 conditions utilizing GPT-4o-mini), which perfectly aligns with previous findings in the field.",
+          "locator": "===== PDF PAGE 7-8 =====",
+          "source_id": "ref:zhang-2025-mad-question"
+        }
+      ],
+      "confidence": 0.95,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "zhang-c8",
+      "statement": "Zhang et al. also find that MAD can outperform direct single-agent prompting (SA) in most conditions, replicating prior positive findings, which qualifies the negative result."
+    }
+  ],
+  "counterevidence": [
+    "Positive MAD results (Du et al. 2023) exist in the corpus; Zhang et al.'s null is limited to the evaluated conditions and may not generalize to all setups.",
+    "The heterogeneity gains in Zhang et al. are for GPT-4o-mini + Llama3.1-70b pair; gains for other model pairs are untested in the dossier."
+  ],
+  "next_observation": null,
+  "source_ids_consulted": [
+    "ref:zhang-2025-mad-question"
+  ],
+  "sufficiency": "ready_to_synthesize",
+  "unresolved": [
+    "Whether Zhang et al.'s null results are specific to the 9 benchmarks or extend to more complex reasoning tasks (they themselves note benchmarks may be too simple).",
+    "The exact compute parity conditions (LLM calls vs tokens) across MAD and baselines are not fully specified in this extraction."
+  ]
+}

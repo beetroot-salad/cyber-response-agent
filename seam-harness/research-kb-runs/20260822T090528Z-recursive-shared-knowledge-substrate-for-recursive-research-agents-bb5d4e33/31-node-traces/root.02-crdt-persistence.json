@@ -1,0 +1,11 @@
+{
+  "child_ids": [],
+  "depth": 1,
+  "effective_disposition": "solve",
+  "node_id": "root.02-crdt-persistence",
+  "packet_id": "packet:root.02-crdt-persistence",
+  "packet_sha256": "d92ea514b5bc77607452600fa90847773ac1972a174f538b31def08cc8012f35",
+  "parent_id": "root",
+  "proposed_disposition": "solve",
+  "stop_reason": null
+}

@@ -1,0 +1,14 @@
+{
+  "acceptance_condition": "Establish demand D1 with evidence.",
+  "content_sha256": "358b8c8d2ee8dcbcd62f92e95fcfeb759f5784e13dd5bd756c15e8ad80406fad",
+  "demand_ids": [
+    "D1"
+  ],
+  "id": "question:demand:D1",
+  "node_id": null,
+  "rationale": "Format and length bound stated verbatim in the request.",
+  "tags": [
+    "decision"
+  ],
+  "text": "The deliverable is a single architecture decision memo of 1,400–1,800 words."
+}

@@ -1,0 +1,11 @@
+{
+  "child_ids": [],
+  "depth": 1,
+  "effective_disposition": "solve",
+  "node_id": "root.01-theory-bounds-lemma",
+  "packet_id": "packet:root.01-theory-bounds-lemma",
+  "packet_sha256": "e5fa0b8f043e3862345d1227c06181aaf307400d8275fe24f8d7f5fed6108086",
+  "parent_id": "root",
+  "proposed_disposition": "solve",
+  "stop_reason": null
+}

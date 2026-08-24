@@ -1,0 +1,18 @@
+{
+  "account": "Investigating current knowledge state to determine what this placeholder assignment should contribute.",
+  "assumptions": [],
+  "boundary_findings": [],
+  "child_packet_ids": [],
+  "claims": [],
+  "content_sha256": "b0e4a9ab462b4dcfb850781c1a3a32527d809fe1047490e46d643f53fa3657b1",
+  "counterevidence": [],
+  "id": "packet:work:002-noop",
+  "knowledge_links": [],
+  "next_observation": null,
+  "node_id": "work:002-noop",
+  "objective": "placeholder",
+  "raised_questions": [],
+  "source_ids_consulted": [],
+  "sufficiency": "partial",
+  "unresolved": []
+}

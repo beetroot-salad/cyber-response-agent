@@ -1,0 +1,14 @@
+{
+  "acceptance_condition": "Establish demand D6 with evidence.",
+  "content_sha256": "b84e8306fcda7db346169f6a5194e5b57f9b5ecde7d78a29434b17ca978c1ac7",
+  "demand_ids": [
+    "D6"
+  ],
+  "id": "question:demand:D6",
+  "node_id": null,
+  "rationale": "Explicit request item bridging the structural and asymptotic parts.",
+  "tags": [
+    "definition"
+  ],
+  "text": "Analyze rigorously how mutation depth (distance from the root, when well-defined) relates to log H."
+}

@@ -1,0 +1,7 @@
+{
+  "content_sha256": "26244575ede02498aab3fd63c65ec16bce568205e6d9aab1fb6e15d00fbd3592",
+  "id": "link:26244575ede02498aab3fd63",
+  "relation": "depends_on",
+  "source_id": "question:raised:35666573343548a3",
+  "target_id": "question:root.01-arg-semantics.03-child-3"
+}

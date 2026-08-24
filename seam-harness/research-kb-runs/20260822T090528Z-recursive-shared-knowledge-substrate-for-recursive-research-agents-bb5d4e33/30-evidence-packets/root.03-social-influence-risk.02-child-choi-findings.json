@@ -1,0 +1,136 @@
+{
+  "account": "Choi et al. (2025) report multi-agent debate simulations (2,500+ debates across five contentious topics) in which a GPT-4o neutral moderator evaluates proponent/opponent LLM agents and picks the most persuasive side each turn. Three anchored findings satisfy the node: (1) neutral agents significantly conform to the numerically dominant group (χ2=164.839, p<0.001), (2) neutral agents significantly conform to higher-intelligence agents even when outnumbered (χ2=142.285, p<0.001; e.g., scenario g, 2 superior proponents CR 83.17 vs scenario h, 2 inferior opponents 25.67), and (3) a single high-intelligence agent outperforms a larger lower-intelligence group (CR 74.33 vs 63.53–72.11 for equivalent-intelligence majorities; stated explicitly in the paper). These are empirical claims from the supplied workspace file, each anchored to specific PDF page markers (pages 6 and 7 primarily).",
+  "assumptions": [
+    "I treated 'conformity' as the neutral agent's choice of the side/agent it selects as most persuasive, consistent with the paper's CR and FCR metrics (PDF PAGE 5)."
+  ],
+  "boundary_findings": [
+    {
+      "alternative_explanation": "The paper's robustness check (reframed topics, PDF PAGE 15) and consistent conformity patterns suggest conformity is genuine, but the paper does not manipulate visibility.",
+      "consequence_if_absorbed": "A design inference that anonymity or staged visibility can mitigate conformity would be treated as source-supported when the source only shows conformity under full visibility of both sides.",
+      "evidence": [
+        "===== PDF PAGE 5 ===== 'The neutral agent is consistently modeled using GPT-4o'",
+        "===== PDF PAGE 3 ===== 'The experiment manipulates both the number of agents (minority vs. majority groups) and intelligence levels (superior vs. inferior groups)'"
+      ],
+      "narrative": "The Choi et al. file describes the neutral agent as 'GPT-4o', a single model, while proponent/opponent agents vary across GPT, Claude, Qwen families. In downstream design inferencing about diversity/anonymity (parent node), one might assume all agents have equal visibility of peer answers; the paper does not explicitly test a visibility/anonymity manipulation. This is a boundary between the source's experimental conditions and any design claim about staged visibility.",
+      "smallest_suspected_scope": "The multi-agent debate protocol in Choi et al. (neutral moderator sees all proponent/opponent arguments each turn; no visibility control)."
+    }
+  ],
+  "child_packet_ids": [],
+  "claims": [
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "Scenarios (a–d) confirm that neutral agents are significantly more likely to conform to the major group (χ2 = 164.839,p < 0.001,df = 1 )",
+          "locator": "===== PDF PAGE 6 =====",
+          "source_id": "ref:choi-2025-conformity"
+        },
+        {
+          "excerpt": "Table 2: Conformity results based on majority size and intelligence levels... a 2 Equivalent Proponent (H1) 63.53 33.60; b 0.5 Equivalent Opponent (H1) 39.40 10.40",
+          "locator": "===== PDF PAGE 6 =====",
+          "source_id": "ref:choi-2025-conformity"
+        }
+      ],
+      "confidence": 0.97,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "id": "root.03-social-influence-risk.02-child-choi-findings:C001",
+      "statement": "Neutral LLM agents (GPT-4o moderators) significantly conform to the numerically dominant group in debates when group size is varied and intelligence is held equivalent (H1 supported; chi-square χ2=164.839, p<0.001, df=1)."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "scenarios (e-f) show that higher-intelligence agents, who present more logical and persuasive arguments, significantly increasing the likelihood of neutral agents conforming to their stance (χ2 = 142.285,p< 0.001,df = 1)",
+          "locator": "===== PDF PAGE 6 =====",
+          "source_id": "ref:choi-2025-conformity"
+        },
+        {
+          "excerpt": "Table 2 ... e 1 Superior Proponent (H2) 74.33 52.50; f 1 Inferior Opponent (H2) 39.83 16.00",
+          "locator": "===== PDF PAGE 6 =====",
+          "source_id": "ref:choi-2025-conformity"
+        }
+      ],
+      "confidence": 0.97,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "id": "root.03-social-influence-risk.02-child-choi-findings:C002",
+      "statement": "Neutral agents significantly conform to higher-intelligence agents even when outnumbered (H2 supported; chi-square χ2=142.285, p<0.001, df=1)."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "(c) a single high-intelligence agent exerts more influence than a larger group with lower intelligence.",
+          "locator": "===== PDF PAGE 7 =====",
+          "source_id": "ref:choi-2025-conformity"
+        },
+        {
+          "excerpt": "Although the majority size shows a moderate effect (η2p ≈ 0.068), intelligence has a significantly larger impact (η2p ≈ 0.1665), categorized as a large effect",
+          "locator": "===== PDF PAGE 7 =====",
+          "source_id": "ref:choi-2025-conformity"
+        },
+        {
+          "excerpt": "a single high-intelligence agent, powered by a large-scale LLM, can influence a neutral agent more effectively than a group of lower-intelligence agents",
+          "locator": "===== PDF PAGE 2 =====",
+          "source_id": "ref:choi-2025-conformity"
+        }
+      ],
+      "confidence": 0.95,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "id": "root.03-social-influence-risk.02-child-choi-findings:C003",
+      "statement": "A single high-intelligence agent exerts more influence on a neutral agent than a larger group of lower-intelligence agents; intelligence effect size (η²p≈0.1665) is large and larger than majority size effect (η²p≈0.068)."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "Table 2 ... (g,h,i,j) ... g 2 Superior Proponent (H1, H2) 83.17 64.00; h 0.5 Inferior Opponent (H1, H2) 25.67 5.50; i 2 Inferior Undetermined (H1, H2) 42.17 15.50; j 0.5 Superior Undetermined (H1, H2) 66.33 40.50",
+          "locator": "===== PDF PAGE 6 =====",
+          "source_id": "ref:choi-2025-conformity"
+        }
+      ],
+      "confidence": 0.98,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "id": "root.03-social-influence-risk.02-child-choi-findings:C004",
+      "statement": "Intelligence condition dominates: for a given majority ratio, superior-intelligence groups yield markedly higher conformity than inferior-intelligence groups (e.g., scenario g CR 83.17 vs scenario i CR 42.17; scenario j CR 66.33 vs scenario h CR 25.67)."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "The results indicate a steady increase in conformity as the ratio grows ... This effect is most evident in GPT-3.5-turbo, where conformity rates scale proportionally with majority size, whereas GPT-4o-mini, with higher intelligence, exhibits a weaker relation between numerical advantage and conformity.",
+          "locator": "===== PDF PAGE 7 =====",
+          "source_id": "ref:choi-2025-conformity"
+        },
+        {
+          "excerpt": "Figure 5 shows how CR increases with numerical dominance, with the trend being more pronounced in lower-intelligence models.",
+          "locator": "===== PDF PAGE 14 =====",
+          "source_id": "ref:choi-2025-conformity"
+        }
+      ],
+      "confidence": 0.95,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "id": "root.03-social-influence-risk.02-child-choi-findings:C005",
+      "statement": "Increasing the majority-minority ratio beyond 2:1 (to 4:1 and 8:1) strengthens conformity overall, but the relationship is more pronounced in a lower-intelligence model (GPT-3.5-turbo) than in a higher-intelligence model (GPT-4o-mini)."
+    }
+  ],
+  "content_sha256": "f557a7575d9c1745e571bd58a76b287a42a469c72e6d5f7f439f04ed68a00b64",
+  "counterevidence": [
+    "The paper's own proxy test (Appendix C, PDF PAGE 12) shows the neutral agent has topic-specific baseline leanings (e.g., death penalty 7% pro vs 38% con; gender wage gap 80% pro), so observed conformity could partly reflect pre-existing stance bias; the authors mitigate via paired comparisons but this limits the strength of the claims about pure group effects."
+  ],
+  "id": "packet:root.03-social-influence-risk.02-child-choi-findings",
+  "next_observation": null,
+  "node_id": "root.03-social-influence-risk.02-child-choi-findings",
+  "objective": "Extract from papers/text/choi-et-al-2025-conformity.txt at least three anchored findings on group conformity in multi-agent systems, specifically the conditions under which agents conform to peer or majority answers, each anchored to the exact `===== PDF PAGE N =====` marker(s).",
+  "source_ids_consulted": [
+    "ref:choi-2025-conformity"
+  ],
+  "sufficiency": "ready_to_synthesize",
+  "unresolved": [
+    "I did not extract Choi et al.'s qualitative 'spiral of silence' examples as a separate finding; they are documented on PDF PAGE 8 and 17, but they are less central to the majority/intelligence conformity conditions that the node asks for."
+  ]
+}

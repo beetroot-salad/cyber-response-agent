@@ -1,0 +1,14 @@
+{
+  "acceptance_condition": "An answer listing: tasks used; baselines compared; direction and approximate magnitude of debate's effect per task; scaling with agents/rounds; consensus/convergence observations; any stated failure modes or limitations; each item tagged with a PDF page marker from the file.",
+  "content_sha256": "daa22d10684d739a3e92f757d944ca8432d7b15d7e6d0b95be921fb37ad479f9",
+  "demand_ids": [
+    "D4"
+  ],
+  "id": "question:work:001-inv-du-debate",
+  "node_id": "work:001-inv-du-debate",
+  "rationale": "This is the principal positive evidence that communication between agents helps; the note must represent it precisely, including its convergence-to-consensus dynamics and any compute asymmetry, before it can be reconciled with null results.",
+  "tags": [
+    "evidence"
+  ],
+  "text": "What exactly does Du et al. 2023 (papers/text/du-et-al-2023-multiagent-debate.txt) claim and show about multiagent debate: which tasks and baselines (single-agent, self-consistency/majority voting over independent samples), what were the quantitative effects, how do agents and rounds scale, what does the paper report about consensus/convergence and about cases where debate does not help, and what compute does the procedure consume relative to baselines? Record every key claim with its `===== PDF PAGE N =====` marker."
+}

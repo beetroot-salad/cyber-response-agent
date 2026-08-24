@@ -1,0 +1,18 @@
+{
+  "acceptance_condition": "A proved dichotomy (growth factor 3 only on an explicitly bounded sub-family; factor >= 7 elsewhere) together with a proved sublinear or improved-constant upper bound for N(H), or a verified counterexample vertex off the slow family with a child of factor < 7.",
+  "content_sha256": "0a5c45ae4e9c75e136ff407c7768de7948e238faab0d4f27f4f3b2abe8891338",
+  "demand_ids": [
+    "D1",
+    "D2",
+    "D3"
+  ],
+  "id": "question:raised:e19298af7323:rq1",
+  "node_id": "work:003-struct-core-v2#raised:rq1",
+  "rationale": "The tree proof shows chain vertices with a=b have only 2 children and slowest growth factor 3, while ab >= 2 forces factor >= 7; quantifying the rare-slow-versus-common-fast split is the exact lever the O(H) bound needs, and the structural lemmas here make the split well-defined.",
+  "tags": [
+    "method",
+    "measurement",
+    "uncertainty"
+  ],
+  "text": "For the D4 sharpening: prove that any vertex with a >= 2 (equivalently, off the (1,1,c,d)-chain and its immediate children) has every child growing by factor >= 4ab-1 >= 7, and bound the number of vertices with d <= H that have a = b = 1 or ab <= 2; conclude whether N(H) = O(H^alpha) for some alpha < 1."
+}

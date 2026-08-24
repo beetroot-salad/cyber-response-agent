@@ -1,0 +1,305 @@
+{
+  "deepest_level": 1,
+  "final_artifact": {
+    "content": "# Four unit fractions summing to 1/2: the exact count is 108\n\n**Theorem.** There are exactly **108** quadruples of positive integers x ≤ y ≤ z ≤ w with 1/x + 1/y + 1/z + 1/w = 1/2.\n\n## 1. Finite bounds confining the search\n\n**Lower bound on x.** If x ≤ 2, then 1/x ≥ 1/2 and the other three terms are positive, so the sum exceeds 1/2. Hence x ≥ 3.\n\n**Upper bound on x.** Since x ≤ y, z, w, each term is at most 1/x, so 1/2 = sum ≤ 4/x, giving x ≤ 8.\n\n**Bounds on y for fixed x.** Write the residual r = 1/2 − 1/x − 1/y = 1/z + 1/w. Since z, w ≥ y, we have 0 < r ≤ 2/y. The left inequality gives y > 2x/(x−2); the right gives 1/2 − 1/x ≤ 3/y, i.e. y ≤ 6x/(x−2). Combined with y ≥ x, the exact candidate ranges are:\n\n- x=3: y = 7..18 (r > 0 forces y > 6)\n- x=4: y = 5..12 (r > 0 forces y > 4)\n- x=5: y = 5..10\n- x=6: y = 6..9\n- x=7: y = 7..8\n- x=8: y = 8\n\nThat is 33 candidate pairs. (The packet's 38-pair list also contained (3,3), (3,4), (3,5), (3,6), (4,4); these have r ≤ 0 — for (3,6) and (4,4) the first two terms already sum to 1/2 — so they cannot occur and are excluded.)\n\n## 2. Divisor lemma (exact bijection for the (z,w) count)\n\nFor a candidate (x,y), reduce r = (xy − 2x − 2y)/(2xy) = p/q with gcd(p,q)=1. For z ≤ w, 1/z + 1/w = p/q ⟺ pzw = q(z+w). Set u = pz − q, v = pw − q. Since p/q > 1/z, u ≥ 1, and uv = p²zw − pq(z+w) + q² = q². Thus u | q², u ≡ −q (mod p), and u ≤ v ⟺ u ≤ q. Conversely, given u | q² with 1 ≤ u ≤ q and u ≡ −q (mod p), the cofactor v = q²/u automatically satisfies v ≡ −q (mod p) (q is invertible mod p), so z = (u+q)/p and w = (v+q)/p are positive integers solving the equation with z ≤ w. The constraint z ≥ y is exactly u ≥ py − q. Sanity check: r = 1/2 (p,q)=(1,2) gives u ∈ {1,2}, i.e. (z,w) = (3,6),(4,4), count 2.\n\nSo the number of (z,w) for each (x,y) equals the number of divisors u of q² with u ≤ q, u ≡ −q (mod p), u ≥ py − q. All arithmetic below is exact integer arithmetic.\n\n## 3. Complete per-(x,y) table\n\nEach entry is `y: (p,q), admissible u, count n`. The admissible-u lists make every count independently checkable: factor q², list divisors ≤ q, apply the congruence and the threshold.\n\n**x = 3 (row total 57)**\n- y=7: (1,42), u ∈ {1,2,3,4,6,7,9,12,14,18,21,28,36,42}, n=14\n- y=8: (1,24), u ∈ {1,2,3,4,6,8,9,12,16,18,24}, n=11\n- y=9: (1,18), u ∈ {1,2,3,4,6,9,12,18}, n=8\n- y=10: (1,15), u ∈ {1,3,5,9,15}, n=5\n- y=11: (5,66), u ∈ {4,9,44}, n=3\n- y=12: (1,12), u ∈ {1,2,3,4,6,8,9,12}, n=8\n- y=13: (7,78), u ∈ {13} (u=6 fails z ≥ 13), n=1\n- y=14: (2,21), u ∈ {7,9,21}, n=3\n- y=15: (1,10), u ∈ {5,10}, n=2\n- y=16: (5,48), u ∈ {32}, n=1\n- y=17: (11,102), no divisor of 102² below 102 is ≡ 8 (mod 11) and ≥ 85, n=0\n- y=18: (1,9), u ∈ {9}, n=1\n\n**x = 4 (row total 28)**\n- y=5: (1,20), u ∈ {1,2,4,5,8,10,16,20}, n=8\n- y=6: (1,12), u ∈ {1,2,3,4,6,8,9,12}, n=8\n- y=7: (3,28), u ∈ {2,8,14}, n=3\n- y=8: (1,8), u ∈ {1,2,4,8}, n=4\n- y=9: (5,36), u ∈ {9,24}, n=2\n- y=10: (3,20), u ∈ {10,16}, n=2\n- y=11: (7,44), divisors {1,2,4,8,11,16,22,44}, none ≡ 5 (mod 7), n=0\n- y=12: (1,6), u ∈ {6}, n=1\n\n**x = 5 (row total 13)**\n- y=5: (1,10), u ∈ {1,2,4,5,10}, n=5\n- y=6: (2,15), u ∈ {1,3,5,9,15}, n=5\n- y=7: (11,70), u ∈ {7}, n=1\n- y=8: (7,40), u ∈ {16}, n=1\n- y=9: (17,90), divisors of 90² in [63,90] are 75, 81, 90, none ≡ 12 (mod 17), n=0\n- y=10: (1,5), u ∈ {5}, n=1\n\n**x = 6 (row total 8)**\n- y=6: (1,6), u ∈ {1,2,3,4,6}, n=5\n- y=7: (4,21), u ∈ {7}, n=1\n- y=8: (5,24), u ∈ {16}, n=1\n- y=9: (2,9), u ∈ {9}, n=1\n\n**x = 7 (row total 1)**\n- y=7: (3,14), u ∈ {7}, n=1\n- y=8: (13,56), divisors ≤ 56 are {1,2,4,7,8,14,16,28,32,49,56}, none ≡ 9 (mod 13), n=0\n\n**x = 8 (row total 1)**\n- y=8: (1,4), u ∈ {4}, n=1\n\n## 4. Grand total and completeness\n\nGrand total: 57 + 28 + 13 + 8 + 1 + 1 = **108**.\n\nCompleteness: any solution has 3 ≤ x ≤ 8 by §1, its (x,y) is among the 33 candidate pairs, and for that pair §2's bijection shows its (z,w) appears among the listed admissible u. Zero rows are verified explicitly above. Each quadruple is recoverable as z = (u+q)/p, w = (q²/u + q)/p; e.g. (7,7) with u=7 gives (z,w) = (7,14), and (8,8) with u=4 gives (8,8).",
+    "evidence_claim_ids_used": [
+      "root:C001",
+      "root:C003",
+      "root:C004",
+      "root:C005",
+      "root:C006",
+      "root:C007",
+      "root:C008"
+    ],
+    "format": "markdown",
+    "limitations": [
+      "The dossier's 38-pair feasible list (root:C002) was corrected to 33 pairs: (3,3), (3,4), (3,5), (3,6), (4,4) have residual r ≤ 0 and are provably impossible; the row totals and grand total are unaffected because those pairs can contribute nothing.",
+      "The dossier flagged that counts rested on certificate.json; the final table independently re-derives every count by listing the admissible divisors u for each (x,y), so the result no longer depends on the untrusted certificate.",
+      "Individual quadruples are not printed (not required by D5); each is reconstructible from a listed u via z = (u+q)/p, w = (q²/u + q)/p."
+    ],
+    "unresolved": []
+  },
+  "node_count": 5,
+  "node_traces": [
+    {
+      "child_ids": [
+        "root.01-bounds",
+        "root.02-lemma",
+        "root.03-enum-x34",
+        "root.04-enum-x5678"
+      ],
+      "depth": 0,
+      "effective_disposition": "synthesize",
+      "node_id": "root",
+      "packet_id": "packet:root",
+      "packet_sha256": "9e6b67facae6902d16e65e6ad3a36064cd0a90c7575a73e592c23c80352452c0",
+      "parent_id": null,
+      "proposed_disposition": "expand",
+      "stop_reason": null
+    },
+    {
+      "child_ids": [],
+      "depth": 1,
+      "effective_disposition": "solve",
+      "node_id": "root.01-bounds",
+      "packet_id": "packet:root.01-bounds",
+      "packet_sha256": "78f559a3c592530c540784648a9b05ae8ce1fd7433ea7b90a1ecb8a55874f8b8",
+      "parent_id": "root",
+      "proposed_disposition": "solve",
+      "stop_reason": null
+    },
+    {
+      "child_ids": [
+        "root.02-lemma.01-child-a-bijection-proof",
+        "root.02-lemma.02-child-b-counting-formula",
+        "root.02-lemma.03-child-c-validation-example"
+      ],
+      "depth": 1,
+      "effective_disposition": "synthesize",
+      "node_id": "root.02-lemma",
+      "packet_id": "packet:root.02-lemma",
+      "packet_sha256": "0fc052ec5e03c6c463c310ae614393acc707f88e8acf94bf13a16fbf374a7b42",
+      "parent_id": "root",
+      "proposed_disposition": "expand",
+      "stop_reason": null
+    },
+    {
+      "child_ids": [],
+      "depth": 1,
+      "effective_disposition": "solve",
+      "node_id": "root.03-enum-x34",
+      "packet_id": "packet:root.03-enum-x34",
+      "packet_sha256": "a58bf3ac9015e466e3001cf2a14f025e34c9d809de45131b7aeaa5ef68387826",
+      "parent_id": "root",
+      "proposed_disposition": "solve",
+      "stop_reason": null
+    },
+    {
+      "child_ids": [],
+      "depth": 1,
+      "effective_disposition": "solve",
+      "node_id": "root.04-enum-x5678",
+      "packet_id": "packet:root.04-enum-x5678",
+      "packet_sha256": "8fb3428faeb36217c0064710becf142905ea46900cac400dafefcf8f3b9ea9fa",
+      "parent_id": "root",
+      "proposed_disposition": "solve",
+      "stop_reason": null
+    }
+  ],
+  "root_packet": {
+    "account": "The exact grand total is 108. The feasibility bounds are proven exactly: since 1/z+1/w ≤ 2/y and 1/z+1/w > 0, from 1/x+1/y+1/z+1/w = 1/2 we get 1/x+3/y ≥ 1/x+1/y+2/y > 1/2? More carefully, use y ≤ z ≤ w so 1/z+1/w ≤ 2/y, hence 1/x+3/y ≥ 1/2, yielding y ≤ 6x/(x−2) after 1/y ≥? and x ≤ 8. Also 1/z+1/w > 1/y? Because z,w ≥ y but at least one is > y except possibly z=w=y; exact derivation: 1/x+1/y+1/z+1/w > 1/x+4/w? A clean exact proof: from z,w ≥ y, 1/z+1/w ≤ 2/y gives 1/x+2/y ≥ 1/2, so x ≤ 8. From z,w ≥ y, 1/z+1/w > 0 gives 1/x+1/y < 1/2, so 2/x < 1/2, hence x > 4? That is wrong as a lower bound; the correct proof of x ≥ 3 is: if x ≤ 2 then 1/x ≥ 1/2, making the sum ≥ 1/2 + positive > 1/2, contradiction. The hand-derived feasible pairs are exactly the 38 pairs: x=3 with y=3..18 (16); x=4 with y=4..12 (9); x=5 with y=5..10 (6); x=6 with y=6..9 (4); x=7 with y=7..8 (2); x=8 with y=8 (1). Per the divisor lemma, with r = 1/2−1/x−1/y = p/q in lowest terms, solutions (z,w) correspond to factor pairs (u,v) of q^2 with u ≡ −q mod p, u ≤ q, and z=(u+q)/p ≥ y. Applying this exact divisor scan to every feasible pair yields the per-x row totals: x=3: 57, x=4: 28, x=5: 13, x=6: 8, x=7: 1, x=8: 1; grand total 108.",
+    "assumptions": [
+      "The divisor arithmetic in certificate.json is faithful to the proved lemma; this must be independently re-checked before the final document is issued.",
+      "The per-(x,y) counts for x=3..6 not explicitly listed in the child claims are included within the certificate's row totals.",
+      "gcd reductions of each residual (xy−2x−2y)/(2xy) are computed exactly and used in the divisor scan."
+    ],
+    "boundary_findings": [
+      {
+        "alternative_explanation": "The certificate may include those rows but the child summary omitted them; verify directly from certificate.json.",
+        "consequence_if_absorbed": "The final table would omit 5+1 feasible pairs and distort the row totals and grand total.",
+        "evidence": [
+          "root.03-enum-x34:C001",
+          "root.01-bounds:C004"
+        ],
+        "narrative": "Enumeration children report counts only for y starting at 7 (x=3) and 5 (x=4), while the bounds child's feasible list includes y=3..6 for x=3 and y=4 for x=4. The certificate's rows appear to cover only a subset of the feasible y-range, so the per-(x,y) table would miss those pairs.",
+        "smallest_suspected_scope": "root.03-enum-x34 feasible y-range definition"
+      },
+      {
+        "alternative_explanation": "The arithmetic could be generated mechanically from the proved lemma without source support.",
+        "consequence_if_absorbed": "The answer would fail the reproducibility requirement (D5) because a reader cannot audit the exact factor enumeration.",
+        "evidence": [
+          "root.03-enum-x34:C007",
+          "root.04-enum-x5678:unresolved"
+        ],
+        "narrative": "No source material contains the explicit divisor arithmetic tables (divisors u, congruences, z/w values) required for D5; children only cite certificate.json's witness arrays.",
+        "smallest_suspected_scope": "Final document's divisor-listing subsection"
+      }
+    ],
+    "child_packet_ids": [
+      "packet:root.01-bounds",
+      "packet:root.02-lemma",
+      "packet:root.03-enum-x34",
+      "packet:root.04-enum-x5678"
+    ],
+    "claims": [
+      {
+        "basis": "inferred",
+        "citations": [
+          {
+            "excerpt": "1/x+1/y+1/z+1/w=1/2",
+            "locator": "equation",
+            "source_id": "request"
+          }
+        ],
+        "confidence": 0.85,
+        "counterevidence": [],
+        "derived_from_claim_ids": [
+          "root.01-bounds:C003"
+        ],
+        "id": "root:C001",
+        "statement": "Any solution has 3 ≤ x ≤ 8; if x ≤ 2 then 1/x ≥ 1/2 and the left side exceeds 1/2, and from y,z,w ≥ x we get 4/x > 1/2? The exact bound x ≤ 8 follows from 1/x + 3/y ≥ 1/x + 3/w? Using 1/z+1/w ≤ 2/y and 1/y ≤ 1/x gives 4/x ≥ 1/2, so x ≤ 8."
+      },
+      {
+        "basis": "inferred",
+        "citations": [
+          {
+            "excerpt": "prove the exact feasible y-range",
+            "locator": "objective",
+            "source_id": "request"
+          }
+        ],
+        "confidence": 0.75,
+        "counterevidence": [],
+        "derived_from_claim_ids": [
+          "root.01-bounds:C001",
+          "root.01-bounds:C004"
+        ],
+        "id": "root:C002",
+        "statement": "For each feasible x, the exact y-range is x ≤ y ≤ 6x/(x−2) with 1/y < 1/2 − 1/x; this yields exactly 38 feasible (x,y) pairs: x=3 y=3..18; x=4 y=4..12; x=5 y=5..10; x=6 y=6..9; x=7 y=7..8; x=8 y=8."
+      },
+      {
+        "basis": "inferred",
+        "citations": [],
+        "confidence": 0.97,
+        "counterevidence": [],
+        "derived_from_claim_ids": [
+          "root.02-lemma:C001",
+          "root.02-lemma:C002",
+          "root.02-lemma:C003",
+          "root.02-lemma:C004",
+          "root.02-lemma:C005"
+        ],
+        "id": "root:C003",
+        "statement": "The divisor lemma is proved: for coprime p,q, solutions of 1/z+1/w=p/q with z≤w are in bijection with u|q^2, 1≤u≤q, u≡−q (mod p), giving z=(u+q)/p, w=(q^2/u+q)/p; the congruence on v is automatic, and filtering z≥y is exactly u ≥ py−q."
+      },
+      {
+        "basis": "inferred",
+        "citations": [],
+        "confidence": 0.99,
+        "counterevidence": [],
+        "derived_from_claim_ids": [
+          "root.02-lemma:C006"
+        ],
+        "id": "root:C004",
+        "statement": "The validated worked example confirms the lemma: for 1/z+1/w=1/2, the two solutions are (3,6) and (4,4), count 2."
+      },
+      {
+        "basis": "observed",
+        "citations": [
+          {
+            "excerpt": "count values",
+            "locator": "rows x=3",
+            "source_id": "certificate.json"
+          }
+        ],
+        "confidence": 0.8,
+        "counterevidence": [],
+        "derived_from_claim_ids": [
+          "root.03-enum-x34:C003"
+        ],
+        "id": "root:C005",
+        "statement": "Per-(x,y) solution counts for x=3: y=7:14, y=8:11, y=9:8, y=10:5, y=11:3, y=12:8, y=13:1, y=14:3, y=15:2, y=16:1, y=17:0, y=18:1, plus y=3..6 counts that sum with these to row total 57 for x=3."
+      },
+      {
+        "basis": "observed",
+        "citations": [
+          {
+            "excerpt": "count values",
+            "locator": "rows x=4",
+            "source_id": "certificate.json"
+          }
+        ],
+        "confidence": 0.8,
+        "counterevidence": [],
+        "derived_from_claim_ids": [
+          "root.03-enum-x34:C004",
+          "root.03-enum-x34:C005"
+        ],
+        "id": "root:C006",
+        "statement": "Per-(x,y) solution counts for x=4: y=5:8, y=6:8, y=7:3, y=8:4, y=9:2, y=10:2, y=11:0, y=12:1, row total 28."
+      },
+      {
+        "basis": "observed",
+        "citations": [
+          {
+            "excerpt": "count values",
+            "locator": "rows x=5..8",
+            "source_id": "certificate.json"
+          }
+        ],
+        "confidence": 0.8,
+        "counterevidence": [],
+        "derived_from_claim_ids": [
+          "root.04-enum-x5678:C001"
+        ],
+        "id": "root:C007",
+        "statement": "Per-(x,y) solution counts for x=5..8: x=5: (5,5)=5,(5,6)=5,(5,7)=1,(5,8)=1,(5,9)=0,(5,10)=1, total 13; x=6: (6,6)=5,(6,7)=1,(6,8)=1,(6,9)=1, total 8; x=7: (7,7)=1,(7,8)=0, total 1; x=8: (8,8)=1, total 1."
+      },
+      {
+        "basis": "inferred",
+        "citations": [
+          {
+            "excerpt": "108",
+            "locator": "grand_total",
+            "source_id": "certificate.json"
+          }
+        ],
+        "confidence": 0.8,
+        "counterevidence": [],
+        "derived_from_claim_ids": [
+          "root.03-enum-x34:C005",
+          "root.04-enum-x5678:C002",
+          "root:C005",
+          "root:C006",
+          "root:C007"
+        ],
+        "id": "root:C008",
+        "statement": "The grand total is exactly 57+28+13+8+1+1 = 108, which equals the sum of all per-(x,y) counts in the divisor enumeration."
+      }
+    ],
+    "content_sha256": "9e6b67facae6902d16e65e6ad3a36064cd0a90c7575a73e592c23c80352452c0",
+    "counterevidence": [
+      "The bounds child's own internal claim C006 is self-contradictory; resolved by re-deriving the feasible list as 38 pairs, including (8,8).",
+      "The lemma child rejected child B's specialization p = xy−x−y, q = x+y; the correct reduction is p/q = (xy−2x−2y)/(2xy) in lowest terms.",
+      "All counts for x=3..8 currently trace to certificate.json, which the children explicitly flagged as untrusted cross-check data, not independent hand-derived arithmetic."
+    ],
+    "id": "packet:root",
+    "next_observation": "Independently compute, for each feasible (x,y), r = p/q reduced, factor q^2, list u divisors with u≡−q mod p and u ≥ py−q, and compare counts and witnesses with certificate.json; then reconcile the y-range discrepancy between the bounds and enumeration children.",
+    "node_id": "root",
+    "objective": "Determine the exact number of quadruples of positive integers x ≤ y ≤ z ≤ w with 1/x + 1/y + 1/z + 1/w = 1/2, and present the result as a self-contained rigorous proof of completeness, including an auditable per-(x,y) solution-count table with row totals per x and a grand total, using derived finite bounds and exact arithmetic.",
+    "source_ids_consulted": [
+      "request",
+      "certificate.json"
+    ],
+    "sufficiency": "partial",
+    "unresolved": [
+      "No fully hand-derived divisor enumeration (including the zero-count pairs (3,17), (4,11), (5,9), (7,8)) is present in the children's packets; the stated counts for those pairs rest on certificate.json.",
+      "The child y-ranges for x=3,4 (7..18 and 5..12) conflict with the bounds child's broader ranges (3..18 and 4..12); the parent's reconstructed list (3..18, 4..12) must be reconciled in the final table."
+    ]
+  },
+  "run_directory": "/workspace/seam-harness/harder-grounded-runs/20260821T170359Z-recursive-four-unit-fractions-summing-to-one-half-af83655a",
+  "run_id": "20260821T170359Z-recursive-four-unit-fractions-summing-to-one-half-af83655a",
+  "usage_by_role": {
+    "finalizer": {
+      "calls": 1,
+      "elapsed_ms": 151778,
+      "input_tokens": 20364,
+      "models": {
+        "fireworks:accounts/fireworks/routers/kimi-k3-fast": 1
+      },
+      "output_tokens": 16039,
+      "requests": 2
+    },
+    "synthesizer": {
+      "calls": 1,
+      "elapsed_ms": 35488,
+      "input_tokens": 13155,
+      "models": {
+        "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731": 1
+      },
+      "output_tokens": 2764,
+      "requests": 1
+    }
+  },
+  "workspace_root": "/workspace/seam-harness/harder-workspace"
+}

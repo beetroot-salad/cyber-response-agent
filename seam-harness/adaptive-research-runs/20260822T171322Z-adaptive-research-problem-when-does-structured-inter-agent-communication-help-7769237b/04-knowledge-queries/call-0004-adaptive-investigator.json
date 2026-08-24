@@ -1,0 +1,569 @@
+{
+  "call_id": "call-0004-adaptive-investigator",
+  "queries": [
+    {
+      "arguments": {
+        "limit": 10,
+        "query": "social influence conformity diversity accuracy Lorenz Choi",
+        "tags": [],
+        "unanswered_only": false
+      },
+      "result": {
+        "hits": [
+          {
+            "answer_count": 0,
+            "id": "question:work:001-w1-social-influence",
+            "kind": "question",
+            "score": 16.82184356349562,
+            "sufficiency": null,
+            "tags": [
+              "evidence",
+              "measurement"
+            ],
+            "text": "Extract from papers/text/lorenz-et-al-2011-social-influence.txt and papers/text/choi-et-al-2025-conformity.txt: (a) Lorenz et al.'s experimental design and quantitative findings on how social influence (full vs. aggregated information feedback) affects estimate diversity, collective accuracy, and confidence in human crowds; (b) Choi et al.'s findings on group conformity in LLM multi-agent systems — when agents conform, what drives conformity (e.g., majority pressure, model identity, task), and measured effects on accuracy; (c) any parameters or effect sizes usable as priors for modeling error-correlation collapse under shared information. Record each finding with file path and explicit `===== PDF PAGE N =====` markers.",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 0,
+            "id": "question:demand:D3",
+            "kind": "question",
+            "score": 6.772588722239782,
+            "sufficiency": null,
+            "tags": [
+              "evidence"
+            ],
+            "text": "Construct an explicit causal model connecting initial error correlation, evidence diversity, social influence or conformity, retrieval selectivity, synthesis competence, and task topology.",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 0,
+            "id": "question:root",
+            "kind": "question",
+            "score": 5.079441541679836,
+            "sufficiency": null,
+            "tags": [
+              "counterexample",
+              "risk"
+            ],
+            "text": "Write a 2,000–2,600 word research note that develops and defends a new mechanistic answer to this question: under a matched inference-compute budget, when should staged, retrieval-mediated question/answer communication among language-model agents outperform both independent sampling with final aggregation and an open shared transcript? Use the supplied seven-paper corpus as evidence, but do not merely survey it. Reconcile its conflicting empirical findings; formulate an explicit causal model of information diversity, social influence, retrieval, and synthesis; derive at least four discriminating predictions that separate your mechanism from plausible alternatives; identify what the existing literature cannot identify; and give a preregisterable experiment with conditions, randomization, estimands, power-analysis inputs, failure criteria, and an analysis plan. End with the strongest warranted conclusion and the observation most likely to falsify it.",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 0,
+            "id": "question:work:001-w1-methodology-limits",
+            "kind": "question",
+            "score": 5.079441541679836,
+            "sufficiency": null,
+            "tags": [
+              "risk",
+              "uncertainty",
+              "measurement"
+            ],
+            "text": "Read all seven files under papers/text with a methodology-critique lens and catalog: (a) for each empirical paper (du, smit, zhang, choi, lorenz), what its design cannot identify — confounds between communication structure and total inference compute, absence of matched-compute baselines, benchmark/data-contamination risks, model-generality limits, task-selection effects, and aggregation-rule sensitivity; (b) for the two formal papers (dung, shapiro), the gap between their formal guarantees and any empirical claim about LLM-agent communication; (c) external-validity limits for transferring published benchmark accuracy to new task topologies. Every catalog entry must name the file path and the explicit `===== PDF PAGE N =====` marker supporting it, and must distinguish what the paper reports from the critic's inference.",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 0,
+            "id": "question:demand:D5",
+            "kind": "question",
+            "score": 1.6931471805599454,
+            "sufficiency": null,
+            "tags": [
+              "evidence"
+            ],
+            "text": "Derive at least four directional or interaction predictions that discriminate the proposed mechanism from compute-only, diversity-only, and deliberation-only alternatives.",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 0,
+            "id": "question:work:001-w1-debate-positive",
+            "kind": "question",
+            "score": 1.6931471805599454,
+            "sufficiency": null,
+            "tags": [
+              "evidence",
+              "method"
+            ],
+            "text": "Extract from papers/text/du-et-al-2023-multiagent-debate.txt and papers/text/zhang-et-al-2025-mad-question.txt: (a) every reported empirical claim about when multi-agent debate or communication improves accuracy/factuality over single-agent or independent-sampling baselines, with the task, model, number of agents/rounds, and any compute or cost accounting; (b) every reported condition or moderator under which debate fails, degrades, or does not help (task type, answer aggregation rule, model heterogeneity); (c) whether either paper compares against a matched-inference-compute baseline or an open shared transcript, and exactly what they say about it. Record each finding with the workspace file path and the explicit `===== PDF PAGE N =====` marker where it appears, and flag findings that appear to conflict across the two papers.",
+            "unresolved_count": null
+          }
+        ],
+        "query": "social influence conformity diversity accuracy Lorenz Choi",
+        "snapshot_sha256": "2f09f1af182ab5775c6410b215da93d4ac44c117cd5bd0e3313ecc37272a2df6",
+        "truncated": false
+      },
+      "result_ids": [
+        "question:work:001-w1-social-influence",
+        "question:demand:D3",
+        "question:root",
+        "question:work:001-w1-methodology-limits",
+        "question:demand:D5",
+        "question:work:001-w1-debate-positive"
+      ],
+      "result_sha256": "440b21343adee42832a0fcccc95d88ba382d6928d0c9dca96fda48378e38ef55",
+      "sequence": 1,
+      "tool": "search_questions"
+    },
+    {
+      "arguments": {
+        "limit": 8,
+        "query": "Choi conformity LLM multi-agent majority pressure accuracy model identity",
+        "source_ids": [
+          "papers/text/choi-et-al-2025-conformity.txt"
+        ]
+      },
+      "result": {
+        "hits": [
+          {
+            "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+            "excerpt": "gence, hypothesizing that neutral agents consider\nboth the quantity and quality of arguments when\nforming their stance. By analyzing social dynamics\nin opinion formation, we aim to better understand\nthe broader impacts of LLM-driven discourse.\nWe empirically examine group conformity\namong LLM agents by analyzing the conditions\nunder which neutral agents, initially assigned a\ncentrist disposition, align with the majority. We\nsimulate debates using a multi-agent system com-\nposed of proponent, opponent, and neutral agents.\nWhile the proponent and opponent agents express\ntheir opinions, the neutral agent evaluates both\nsides at the end of each turn and adopts the stance\nmost aligned with its position. Across more than\n2,500 debate simulations, we quantify conformity\nby measuring both the frequency and extent to\nwhich neutral agents align with either the majority\nor the more persuasive stance. Our experimental re-\nsults, validated through statistical analysis, reveal a\nmajority effect in multi-agent systems. Specifically,\na single high-intelligence agent, powered by a large-\nscale LLM, can influence a neutral agent more ef-\nfectively than a group of lower-intelligence agents,\npowered by smaller-scale LLMs. This finding indi-\ncates that discourse dynamics in agent-based sys-\ntems are strongly influenced by intelligence dis-\nparities, with significant implications for public\nopinion formation and bias reinforcement.\nOur study contributes to the understanding of\nopinion dynamics in multi-agent systems by pro-\nviding empirical evidence of conformity. It demon-",
+            "locator": "lines 97-128",
+            "score": 12.6246189861594,
+            "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+          },
+          {
+            "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+            "excerpt": "powered by smaller-scale LLMs. This finding indi-\ncates that discourse dynamics in agent-based sys-\ntems are strongly influenced by intelligence dis-\nparities, with significant implications for public\nopinion formation and bias reinforcement.\nOur study contributes to the understanding of\nopinion dynamics in multi-agent systems by pro-\nviding empirical evidence of conformity. It demon-\nstrates that phenomena such as majority influence\nand minority suppression, extensively studied in\nhuman social dynamics (Asch, 1955), also emerge\nin LLM interactions. To the best of our knowledge,\nthis is the first study to show that LLM agents align\nnot only with the majority but also with higher-\nintelligence models, leading to more extreme out-\ncomes. These findings underscore the risk of bias\npropagation in LLM-generated discourse and high-\nlight the need for policy interventions to promote\ndiversity and transparency in public opinion forma-\ntion.\n2 Related Works\n2.1 Multi-agent with LLMs\nAs LLMs become capable of handling increasingly\ncomplex tasks (Kevian et al., 2024; Achiam et al.,\n2023; Team et al., 2024; Dubey et al., 2024), a\nsignificant body of research focuses on using a\nLLM as an agent for various tasks (Xi et al., 2023;\nKim and Lee, 2023; Mathur et al., 2024; Huang\net al., 2024). Moreover, recent studies have ex-\nplored multi-agent systems (Wang et al., 2024;\nGuo et al., 2024) where multiple agents interact,\nbuilding on prior work in world simulation, diver-",
+            "locator": "lines 121-152",
+            "score": 11.579251212010101,
+            "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+          },
+          {
+            "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+            "excerpt": "===== PDF PAGE 1 =====\n\nFindings of the Association for Computational Linguistics: ACL 2025 , pages 5123–5139\nJuly 27 - August 1, 2025 ©2025 Association for Computational Linguistics\nAn Empirical Study of Group Conformity in Multi-Agent Systems\nMin Choi Keonwoo Kim Sungwon Chae Sangyeob Baek\nKim & Chang AI&IT System Center\n{min.choi,keonwoo.kim,sungwon.chae,sangyeob.baek}@kimchang.com\nAbstract\nRecent advances in Large Language Mod-\nels (LLMs) have enabled multi-agent systems\nthat simulate real-world interactions with near-\nhuman reasoning. While previous studies have\nextensively examined biases related to pro-\ntected attributes such as race, the emergence\nand propagation of biases on socially con-\ntentious issues in multi-agent LLM interactions\nremain underexplored. This study explores how\nLLM agents shape public opinion through de-\nbates on five contentious topics. By simulating\nover 2,500 debates, we analyze how initially\nneutral agents, assigned a centrist disposition,\nadopt specific stances over time. Statistical\nanalyses reveal significant group conformity\nmirroring human behavior; LLM agents tend\nto align with numerically dominant groups or\nmore intelligent agents, exerting a greater in-\nfluence. These findings underscore the crucial\nrole of agent intelligence in shaping discourse\nand highlight the risks of bias amplification in\nonline interactions. Our results emphasize the\nneed for policy measures that promote diver-",
+            "locator": "lines 1-32",
+            "score": 11.5792512120101,
+            "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+          },
+          {
+            "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+            "excerpt": "baseline bias would be equally distributed across\nconditions. This design choice enables us to more\neffectively isolate the effects of group composition\nand intelligence, which are our primary variables\nof interest.\nExperiment A (Majority and Intelligence Ef-\nfects on Conformity) examines how differences\nin group size and intelligence levels affect neutral\nagent’s conformity, addressing H1 and H2. Exper-\niment B (The Impact of Majority-Minority Ra-\ntio on Conformity) isolates the influence of the\nmajority-minority ratio by keeping intelligence lev-\nels constant, thereby assessing whether a larger\ndisparity in group sizes amplifies conformity to-\nward the majority, addressing H3. Figure 1 outlines\nour simulation framework.\nExperiment A To test H1 and H2, we vary the\nnumber of agents and intelligence levels while mea-\nsuring conformity. We run ten discussion scenarios,\nlabeled (a) to (j), as shown in Table 1. For H1 (Ef-\nfect of Majority), intelligence levels are controlled\nby using the same LLM model for both groups,\nwhile the number of agents in the proponent and\nopponent groups is varied (e.g., 1 vs. 2). In this\nsetup, the conformity rate and full conformity ratio\nare compared, corresponding to the comparison of\nscenarios (a, c) versus (b, d). For H 2 (Effective\nAgent Intelligence Effect), we controll the number\nof agents and manipulate the intelligence superior-\nity by assigning models with different parameter\nsizes (large vs. small), corresponding to the com-\nparison of scenario (e) versus (f). Additionally,",
+            "locator": "lines 337-368",
+            "score": 11.35610766069589,
+            "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+          },
+          {
+            "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+            "excerpt": "group with lower intelligence.\nlarger, less intelligent one. Extreme cases of full\nconformity are also observed, aligning with prior\nresearch on human group behavior, which demon-\nstrates the power of majority influence in shaping\nindividual decisions (Asch, 1955; Milgram, 1963).\nTo statistically validate these visual observations,\nwe conduct Welch’s ANOV A to account for vio-\nlations of normality and homogeneity of variance\nassumptions. Although the majority size shows\na moderate effect (η2\np ≈ 0.068), intelligence has\na significantly larger impact (η2\np ≈ 0.1665), cat-\negorized as a large effect (Cohen, 2013). A post\nhoc power analysis confirms a statistical power\nabove 0.99 for detecting intelligence effects, under-\nscoring the robustness of these findings. For refer-\nence, detailed results from the two-way ANOV A\nand statistical significance tests across different\nLLM providers are included in Appendix C. These\nresults suggest that in LLM-based debates, logi-\ncal and persuasive arguments outweigh numerical\nadvantage, indicating that advanced models can\ndisproportionately shape discourse in multi-agent\nsystems.\nExtended Analysis of Majority-Minority Ratios\nWe further explore whether increasing the majority-\nminority ratio beyond 2:1 (e.g., 4:1, 8:1) strength-\nens conformity by Experiment B. The results in-\ndicate a steady increase in conformity as the ratio\ngrows, as shown in Fig 5 in Appendix. This effect",
+            "locator": "lines 577-608",
+            "score": 10.480638923341992,
+            "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+          },
+          {
+            "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+            "excerpt": "who opposites the \ngiven topic\nFigure 1: Overview of the LLM debate simulation framework. Proponent and opponent agents, using various models\nfrom GPT, Claude, and Qwen, debate five societal topics, such asuniversal basic income (UBI). The experiment\nmanipulates both the number of agents (minority vs. majority groups) and intelligence levels (superior vs. inferior\ngroups). A neutral agent evaluates the arguments and determines the more persuasive side, enabling the analysis of\nconformity dynamics.\nconformity dynamics unfold in debates by select-\ning five major social topics and analyzing whether\nagent bias is reinforced or alleviated under these\ninteraction scenarios.\n2.3 Group Dynamics and Conformity\nGroup conformity is well-documented phenom-\nena in social psychology, shaping human decision-\nmaking in various contexts (Asch, 1955; Milgram,\n1963; Kelman, 1958). Foundational studies have\ndemonstrated that individuals are often swayed by\nmajority opinions (Moscovici et al., 1969), as evi-\ndenced by classic experiments on bystander inter-\nvention (Darley and Latane, 1968) and group con-\nformity (Gerard et al., 1968). The emergence of\nphenomena such as the Spiral of Silence (Noelle-\nNeumann, 1974) and group polarization (Myers\nand Lamm, 1976; Isenberg, 1986; Turner and\nPratkanis, 1998) illustrates how social pressures\ncan suppress dissent and drive opinions to extremes.\nIn addition, investigations of social influence, com-\npliance, and comparison (Cialdini and Goldstein,\n2004; Bond and Smith, 1996; Latané, 1981; Ross\net al., 1977) provide a robust framework for un-\nderstanding",
+            "locator": "lines 241-272",
+            "score": 10.48063892334199,
+            "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+          },
+          {
+            "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+            "excerpt": "Pratkanis, 1998) illustrates how social pressures\ncan suppress dissent and drive opinions to extremes.\nIn addition, investigations of social influence, com-\npliance, and comparison (Cialdini and Goldstein,\n2004; Bond and Smith, 1996; Latané, 1981; Ross\net al., 1977) provide a robust framework for un-\nderstanding these dynamics. These insights are\nparticularly relevant in multi-agent systems, where\nLLM interactions can lead to conformity-driven\nbias amplification, reinforcing dominant perspec-\ntives while marginalizing minority viewpoints. Our\nwork applies these principles to analyze how con-\nformity effects emerge in LLM-based debates and\ntheir implications for bias propagation.\n3 Experimental Setup\n3.1 Objective and Hypotheses\nThe objective of this study is to analyze the con-\nformity in discussions among LLM agents. Specif-\nically, we examine how the number of agents in\nproponent and opponent groups, as well as their\nintelligence levels, influence the conformity of neu-\ntral agents. Our hypotheses are as follows:\n• H1: LLM agents would conform to the major-\nity opinion when one group has more agents.\n• H2: LLM agents tend to conform to the side\nwith relatively higher intelligence.\n• H3: The greater the difference in the number\nof agents between the two groups, the stronger\nthe conformity toward the majority side.\n5125\n\n===== PDF PAGE 4 =====",
+            "locator": "lines 265-296",
+            "score": 10.257495372027781,
+            "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+          },
+          {
+            "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+            "excerpt": "• H2: LLM agents tend to conform to the side\nwith relatively higher intelligence.\n• H3: The greater the difference in the number\nof agents between the two groups, the stronger\nthe conformity toward the majority side.\n5125\n\n===== PDF PAGE 4 =====\n\nTable 1: Discussion Scenarios for Experiment A. The Relative Condition-Majority column denotes the proponent-\nto-opponent ratio, and Relative Condition-Intelligence indicates whether proponents used a superior or equivalent\nmodel. Expected conformity is determined based on our hypothesis that LLM agents tend to conform to the majority\nand/or the side with superior intelligence.\nID Proponent Opponent Relative Condition (Pros) Expected Conformity\nCount Model Size Count Model Size Majority Intelligence (Related Hypothesis)\na 2 Large 1 Large 2 Equivalent Proponent (H1)\nb 1 Large 2 Large 0.5 Equivalent Opponent (H1)\nc 2 Small 1 Small 2 Equivalent Proponent (H1)\nd 1 Large 2 Large 0.5 Equivalent Opponent (H1)\ne 1 Large 1 Small 1 Superior Proponent (H2)\nf 1 Small 1 Large 1 Inferior Opponent (H2)\ng 2 Large 1 Small 2 Superior Proponent (H1, H2)\nh 1 Small 2 Large 0.5 Inferior Opponent (H1, H2)\ni 2 Small 1 Large 2 Inferior Undetermined (H1, H2)\nj 1 Large 2 Small 0.5 Superior Undetermined (H1, H2)\nSince this study focuses on debate simulations,\nwe operationalize intelligence as the model’s capa-\nbility for complex language understanding. Follow-\ning benchmark results such as MMLU (Hendrycks\net al., 2020), which consistently show that larger\nLLMs tend to perform better on complex language\ntasks, we use model parameter size as a practical",
+            "locator": "lines 289-320",
+            "score": 9.886104031450156,
+            "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+          }
+        ],
+        "query": "Choi conformity LLM multi-agent majority pressure accuracy model identity",
+        "truncated": true
+      },
+      "result_ids": [
+        "papers/text/choi-et-al-2025-conformity.txt",
+        "papers/text/choi-et-al-2025-conformity.txt",
+        "papers/text/choi-et-al-2025-conformity.txt",
+        "papers/text/choi-et-al-2025-conformity.txt",
+        "papers/text/choi-et-al-2025-conformity.txt",
+        "papers/text/choi-et-al-2025-conformity.txt",
+        "papers/text/choi-et-al-2025-conformity.txt",
+        "papers/text/choi-et-al-2025-conformity.txt"
+      ],
+      "result_sha256": "dd7bc345d57c4f0fcf87f28c735efe388e0ae089f09c02350915fc26aa53b6cb",
+      "sequence": 2,
+      "tool": "search_sources"
+    },
+    {
+      "arguments": {
+        "limit": 8,
+        "query": "Lorenz social influence estimate diversity collective accuracy confidence feedback",
+        "source_ids": [
+          "papers/text/lorenz-et-al-2011-social-influence.txt"
+        ]
+      },
+      "result": {
+        "hits": [
+          {
+            "content_sha256": "10d6e61835ae38ecc32c345b6c18f5d4259ef40874694d12f60c4dd6162e160f",
+            "excerpt": "===== PDF PAGE 1 =====\n\nHow social in ﬂuence can undermine the wisdom of\ncrowd effect\nJan Lorenz a,1,2, Heiko Rauhut b,1,2, Frank Schweitzer a, and Dirk Helbing b,c,d\naChair of Systems Design, ETH Zürich, CH-8032 Zurich, Switzerland; bChair of Sociology, in particular of Modeling and Simulation, ETH Zürich, CH-8092 Zurich,\nSwitzerland; cSanta Fe Institute, Santa Fe, NM 87501; and dCollegium Budapest –Institute for Advanced Study, 1014 Budapest, Hungary\nEdited by Burton H. Singer, University of Florida, Gainesville, FL, and approved April 13, 2011 (received for review June 23, 2010)\nSocial groups can be remarkably smart and knowledgeable when\ntheir averaged judgements are compared with the judgements\nof individuals. Already Galton [Galton F (1907) Nature 75:7] found\nevidence that the median estimate of a group can be more accu-\nrate than estimates of experts. This wisdom of crowd effect was\nrecently supported by examples from stock markets, political\nelections, and quiz shows [Surowiecki J (2004) The Wisdom of\nCrowds]. In contrast, we demonstrate by experimental evidence\n(N = 144) that even mild social in ﬂuence can undermine the\nwisdom of crowd effect in simple estimation tasks. In the exper-\niment, subjects could reconsider their response to factual ques-\ntions after having received average or full information of the\nresponses of other subjects. We compare subjects ’ convergence\nof estimates and improvements in accuracy over ﬁve consecutive\nestimation periods with a control condition, in which no informa-\ntion about others ’ responses was provided. Although groups are\ninit",
+            "locator": "lines 1-32",
+            "score": 11.480638923341992,
+            "source_id": "papers/text/lorenz-et-al-2011-social-influence.txt"
+          },
+          {
+            "content_sha256": "10d6e61835ae38ecc32c345b6c18f5d4259ef40874694d12f60c4dd6162e160f",
+            "excerpt": "\ncondition was to make an incredibly large estimate to test how much the\nmean of the group would increase. Analogously, under the full information\ncondition, the fun was to make incredibly high guesses to produce steep\nlines. The latter fun moves did not affect the rest of the information because\nthere was always also a list of estimates from the previous round. One zero\nestimate was removed only when logarithmic data were used for compu-\ntational reasons.\nMeasures. For a set of estimates x1, ... , xn and the true value, we took the\nfollowing measures to quantify the impact of social in ﬂuence on the wisdom\nof crowds effect: The mean is denoted by /C22x ¼ 1\nn\nXn\ni¼1 xi . The collective error is\nthe squared deviation of the average from the truth ðtruth −/C22xÞ2 , the group\ndiversity is the variance of estimates (average of squared deviations from the\naverage) 1\nn\nXn\ni¼1 ðxi −/C22xÞ2 . The diversity prediction theorem (see ref. 9, p. 211,\nand ref. 35) states that collective error plus group diversity equals the av-\nerage individual error, which is the average of the squared deviations from\nthe truth\n/C18 1\nn\nXn\ni¼1 ðtruth − xi Þ2\n/C19\n. The proof is elementary. The collective er-\nror is also called “population bias ” (6). A low collective error combined with\na high group diversity implies that the wisdom of crowd effect works well,\nbecause asking many instead of one drastically improves accuracy. Both",
+            "locator": "lines 601-632",
+            "score": 10.703782474656203,
+            "source_id": "papers/text/lorenz-et-al-2011-social-influence.txt"
+          },
+          {
+            "content_sha256": "10d6e61835ae38ecc32c345b6c18f5d4259ef40874694d12f60c4dd6162e160f",
+            "excerpt": "mean closer to the truth than the individual ﬁrst estimates. This\nis because the estimates of our type of questions are not normally\ndistributed but right-skewed. In other words, the majority of\nestimates are low and a minority of estimates are scattered in\na fat right tail, as it is the case for log-normal distributions.\nAs a large number of our subjects had problems choosing the\nright order of magnitude of their responses, they faced a problem\nof logarithmic nature (31). When using logarithms of estimates,\nthe arithmetic mean is closer to the logarithm of the truth than the\nindividuals’estimates in 77.1% of the cases. This conﬁrms that the\ngeometric mean (i.e., exponential of the mean of the logarith-\nmized data) is an accurate measure of the wisdom of crowds for\nour data (Table 1). In particular, log-normal distributions are\njustiﬁed for variables with high variance with a range of positive\nvalues only (32), which is the case for our data. † We further di-\nvided each estimate by the respective true value before taking the\nlogarithm to make the distributions of estimates comparable\nacross different questions. This yielded approximately normal\ndistributions and true values corresponding to zero.\nSocial In ﬂuence Effect. The ﬁrst kind of undermining of the wis-\ndom of crowds is a statistical effect, which we call social in ﬂuence\neffect. This effect denotes the fact that social in ﬂuence dimin-\nishes diversity in groups without improving its accuracy. This\nmeans that, on average, groups cannot make use of information\nexchange, but engage in a convergence process that does n",
+            "locator": "lines 265-296",
+            "score": 9.787491742782047,
+            "source_id": "papers/text/lorenz-et-al-2011-social-influence.txt"
+          },
+          {
+            "content_sha256": "10d6e61835ae38ecc32c345b6c18f5d4259ef40874694d12f60c4dd6162e160f",
+            "excerpt": "initially “wise,” knowledge about estimates of others narrows\nthe diversity of opinions to such an extent that it undermines\nthe wisdom of crowd effect in three different ways. The “social\ninﬂuence effect ” diminishes the diversity of the crowd without\nimprovements of its collective error. The “range reduction effect ”\nmoves the position of the truth to peripheral regions of the\nrange of estimates so that the crowd becomes less reliable in\nproviding expertise for external observers. The “conﬁdence ef-\nfect” boosts individuals ’ conﬁdence after convergence of their\nestimates despite lack of improved accuracy. Examples of the\nrevealed mechanism range from misled elites to the recent global\nﬁnancial crisis.\ncollective judgment | estimate aggregation | experimental social science |\nswarm intelligence | overconﬁdence\nU\nnder the right circumstances, the average of many individ-\nuals’ estimates can be surprisingly close to the truth, al-\nthough their separate values lie remarkably far from it. There is\nevidence from guessing tasks (1) and problem-solving experi-\nments (2–4) that the aggregate of many people ’s estimates tends\nto be closer to the true value than all of the separate individual\nor even expert guesses. This phenomenon is referred to as the\n“wisdom of crowd effect ” (5). Even individuals can apply this\nmechanism and improve their decisions by averaging multiple\nperspectives from their own reasoning (6 –8).\nIn the following, we will call an aggregate measure of a col-\nlection of individual estimates “wise” if it comes close to the true\nvalue, even though the individual ",
+            "locator": "lines 25-56",
+            "score": 9.68213122712422,
+            "source_id": "papers/text/lorenz-et-al-2011-social-influence.txt"
+          },
+          {
+            "content_sha256": "10d6e61835ae38ecc32c345b6c18f5d4259ef40874694d12f60c4dd6162e160f",
+            "excerpt": "such advice may be thoroughly misleading, because closely re-\nlated, seemingly independent advice may pretend certainty de-\nspite substantial deviations from the correct solution.\nPsychologically, however, the convergence of estimates sig-\nniﬁcantly boosts individuals ’ conﬁdence. This con ﬁdence gain\nhappens despite a lack of improvements, giving evidence for\na psychological trap whereby individuals are led into the false\nbelief of collective accuracy as a result of their convergence.\nNevertheless, the statistical effects of undermining are less se-\nvere for easier questions and if individuals are more con ﬁdent in\ntheir answers ( SI Appendix ). This gives weight to the conclusion\nthat the negative effects of social in ﬂuence occur especially in\na certain range of question dif ﬁculty and individuals ’conﬁdence,\na conjecture that should be explored in follow-up studies.\nOur results underpin the value of collecting individuals ’esti-\nmates in the absence of social in ﬂuence. However, in democratic\nsocieties, it is dif ﬁcult to accomplish such a collection of in-\ndependent estimates, because the loss of diversity in estimates\nappears to be a necessary byproduct of transparent decision-making\nprocesses. For example, opinion polls and the mass media largely\npromote information feedback and therefore trigger conver-\ngence of how we judge the facts. The wisdom of crowd effect is\nvaluable for society, but using it multiple times creates collective\noverconﬁdence in possibly false beliefs.\nPresumably, herding is even more pronounced for opinions or\nattitudes for which no prede ﬁned ",
+            "locator": "lines 529-560",
+            "score": 9.276666119016056,
+            "source_id": "papers/text/lorenz-et-al-2011-social-influence.txt"
+          },
+          {
+            "content_sha256": "10d6e61835ae38ecc32c345b6c18f5d4259ef40874694d12f60c4dd6162e160f",
+            "excerpt": "However, it is hardly feasible to receive independent opinions\nin society, because people are embedded in social networks and\ntypically inﬂuence each other to a certain extent. It is remarkable\nhow little social in ﬂuence is required to produce herding be-\nhavior and negative side effects for the mechanism underlying\nthe wisdom of crowds. In our experiment, we provided just the\nbare information of the estimates of others (in a similar way as\nthe previous stock price is known to traders trying to make\nmoney with their estimates of the fundamental value of a stock).\nWe did not allow for group leader effects, persuasion, or any\nother kind of social psychological in ﬂuence. We just provided\nnoncompetitive monetary incentives for the estimation of correct\nvalues. These incentives were designed such that the information\nof others could just be used to update the own knowledge. There\nwas no premium to coordinate with others ’opinions.\nOur experimental results show that social in ﬂuence triggers\nthe convergence of individual estimates and substantially reduces\nthe diversity of the group without improving its accuracy. The\nremaining diversity is often so small that the correct value shifts\nfrom the center to outer regions of the range of estimates. Thus,\nwhen taking committee decisions or following the advise of an\nexpert group that was exposed to social in ﬂuence, their opinions\nmay result in a set of predictions that does not even enclose the\ncorrect value anymore. From the perspective of decision-makers,\nsuch advice may be thoroughly misleading, because closely re-\nlated, seeming",
+            "locator": "lines 505-536",
+            "score": 8.68213122712422,
+            "source_id": "papers/text/lorenz-et-al-2011-social-influence.txt"
+          },
+          {
+            "content_sha256": "10d6e61835ae38ecc32c345b6c18f5d4259ef40874694d12f60c4dd6162e160f",
+            "excerpt": "The aggregate measures arithmetic mean, geometric mean, and median are computed on the set of all ﬁrst estimates regardless of\nthe information condition. Values in parentheses are deviations from the true value as percentages.\n†Note that the framework of the diversity prediction theorem (9) can also be applied to\nlogarithmically transformed data. For the case of logarithmically transformed data, the\ncollective error of the logarithms is the logarithm of the geometric mean and one SD is\nthe logarithm of the geometric SD. Considering the logarithmic nature of our data, one\nmay argue that the geometric mean would have been a better design choice than the\narithmetic mean for the information feedback in the aggregated information condition.\nHowever, this measure is hard to understand for most subjects because it necessitates\nconﬁdence with logarithmic transformations. As the simple average (i.e., arithmetic\nmean) is known from daily life, this information is more meaningful for subjects. Hence,\nwe decided for the arithmetic mean.\n‡The empirical measurement of the social in ﬂuence effect requires questions with mod-\nerate difﬁculty. In particular, subjects should not have a precise factual knowledge of an\nissue, because this would prevent adaption and social in ﬂuence. We can empirically\nconﬁrm that this was not the case for our questions and subjects: in only 1.5% of all\ncases, subjects responded at all ﬁve times in the most inner payment range of one\nparticular question. This means in absolute values that 13 of 864 consecutive response\nruns were responded in the full payment ra",
+            "locator": "lines 337-368",
+            "score": 8.682131227124218,
+            "source_id": "papers/text/lorenz-et-al-2011-social-influence.txt"
+          },
+          {
+            "content_sha256": "10d6e61835ae38ecc32c345b6c18f5d4259ef40874694d12f60c4dd6162e160f",
+            "excerpt": "perspectives from their own reasoning (6 –8).\nIn the following, we will call an aggregate measure of a col-\nlection of individual estimates “wise” if it comes close to the true\nvalue, even though the individual estimates are largely dispersed.\nIn this case, single estimates are likely to lie far away from the\ntruth, whereas its aggregate lies close to it. The wisdom of crowds\neffect works if estimation errors of individuals are large but\nunbiased such that they cancel each other out. Thus, the het-\nerogeneity of numerous decision-makers generates a more ac-\ncurate aggregate estimate than the estimates of single lay or\nexpert decision-makers. This can be quanti ﬁed by the “diversity\nprediction theorem ” (9), which states that the collective error is\nequal to the average individual error minus the group ’s diversity\n(Materials and Methods ).\nThe wisdom of crowd effect is a statistical phenomenon and not\na social psychological effect, because it is based on a mathematical\naggregation of individual estimates. Nevertheless, social inﬂuence\nplays a role in individual decision-making and affects individual\nestimating. Therefore, social inﬂuence can also have an impact on\nthe statistical aggregate and the resulting collective wisdom of the\nrespective crowd. As social in ﬂuence among human group mem-\nbers may trigger individuals to revise their estimates (10), it can\nhave a substantial impact on the statistical wisdom of crowd effect\nin societies. When individuals become aware of the estimates of\nothers, they may revise their own estimates for various reasons:\nPeople may suspect tha",
+            "locator": "lines 49-80",
+            "score": 8.682131227124218,
+            "source_id": "papers/text/lorenz-et-al-2011-social-influence.txt"
+          }
+        ],
+        "query": "Lorenz social influence estimate diversity collective accuracy confidence feedback",
+        "truncated": true
+      },
+      "result_ids": [
+        "papers/text/lorenz-et-al-2011-social-influence.txt",
+        "papers/text/lorenz-et-al-2011-social-influence.txt",
+        "papers/text/lorenz-et-al-2011-social-influence.txt",
+        "papers/text/lorenz-et-al-2011-social-influence.txt",
+        "papers/text/lorenz-et-al-2011-social-influence.txt",
+        "papers/text/lorenz-et-al-2011-social-influence.txt",
+        "papers/text/lorenz-et-al-2011-social-influence.txt",
+        "papers/text/lorenz-et-al-2011-social-influence.txt"
+      ],
+      "result_sha256": "4fa067ecce6244a42cb5773d854544f0dc36ec9b2d534653434aff96570b27e5",
+      "sequence": 2,
+      "tool": "search_sources"
+    },
+    {
+      "arguments": {
+        "line_count": 140,
+        "source_id": "papers/text/choi-et-al-2025-conformity.txt",
+        "start_line": 370
+      },
+      "result": {
+        "content": "ence and intelligence level, we conducte further\nexperiments with scenarios (g, h, i, j).\n5126\n\n===== PDF PAGE 5 =====\n\nExperiment B To verify H3, we conduct an ad-\nditional experiment extending Experiment A by\nincreasing the number of agents while keeping in-\ntelligence levels fixed. We use OpenAI’s GPT-\n4o-mini and GPT-3.5-turbo, scaling the number of\nagents in each scenario. Specifically, the proponent-\nopponent agent ratio is varied from 1:2 to 1:4 and\n1:8.\n3.3 LLM Agent Debate System Setup\nDiscussion Protocol In this study, LLM agents\nparticipate in discussions following a structured\nprotocol. For each discussion topic, proponent and\nopponent agents each have three opportunities to\nspeak per turn. The speaking order is randomized\nat the beginning of each debate which consists of\nthree turns. In each turn, a neutral agent, main-\ntaining a strictly neutral stance, evaluates the ar-\nguments presented by both sides and selects the\nmost persuasive agent to support. Based on the\nneutral agent’s selections across the three turns,\nraw data for calculating conformity is collected.\nThis turn-by-turn evaluation and subsequent scor-\ning mechanism enable a quantitative assessment\nof conformity within each debate. Based on the\nneutral agent’s selections across the three turns, we\nmeasure conformity using two key metrics:Confor-\nmity Rate (CR) and Full Conformity Ratio (FCR).\nCR represents the proportion of turns where\nthe neutral agent aligns with the proponent side.\nSince conformity to the opponent side equals\n1 − CRproponent, we report only the proponent-\nside rate, computed as CR = ProponentSupportedTurns\nTotalTurns ,\nwhere TotalTurnsis the total discussion turns, and\nProponentSupportedTurns is the number of turns\nthe neutral agent supports the proponent.\nFCR captures the percentage of discussions\nwhere the neutral agent consistently supports the\nproponent side in all turns (e.g., a 3:0 outcome),\ndefined as FCR = FullyProponentSupportedDiscussions\nTotalDiscussions ,\nwhere FullyProponentSupportedDiscussions refers\nto the number of discussions with full proponent\nsupport, and TotalDiscussions is the total number\nof discussions.\nAgent Configuration and Prompts We select\nproponent and opponent agents from three LLM\nfamilies: GPT (Hurst et al., 2024), Claude (An-\nthropic, 2024), and Qwen (Yang et al., 2024), as\ndetailed in Appendix A. The neutral agent is con-\nsistently modeled using GPT-4o, one of the most\nadvanced LLMs available. All agents are initialized\nwith predefined prompts and a fixed temperature\nof 0.7 to introduce controlled response variability.\nAgents follow their assigned stance and actively at-\ntempt to persuade their opponent. Response lengths\nare capped at 256 tokens for agents and 1024 tokens\nfor the neutral moderator. Detailed initialization\nprompts are provided in Appendix D.\nDiscussion Topics In this study, we select five\nmajor societal issues based on input from social\nscience researchers: basic income, gender wage\ngap, immigration policy, educational equality, and\nthe death penalty. Unlike fairness-related issues,\nwhich often have clear right or wrong stances, these\ntopics are chosen to create a rational framework\nwhere agents can engage in persuasion and confor-\nmity dynamics, aligning with the study’s objectives.\nThe topics and their corresponding proponent state-\nments are below:\n• Basic Income: \"Providing universal basic in-\ncome to all citizens is an essential measure to\nreduce inequality and strengthen social stabil-\nity.\"\n• Immigration Policy: \"To promote economic\ngrowth, immigration policies should be re-\nlaxed, and more opportunities should be pro-\nvided to immigrants.\"\n• Death Penalty: \"The death penalty should be\nmaintained and enforced to deter crime and\nrealize social justice.\"\n• Educational Equality: \"To achieve educa-\ntional equity, elite education should be re-\nduced, and the public school system should be\nstrengthened to ensure that all students have\nequal access to educational opportunities.\"\n• Gender Wage Gap: \"Governments should\nenforce comprehensive equal pay legislation\nto close the gender wage gap.\"\n3.4 Statistical Methods\nWe use the Chi-Square Test (Pearson, 1900) and\ntwo-way ANOV A (Fisher, 1941) to statistically val-\nidate the discussion simulations, applying a sig-\nnificance level of α = 0 .01 for all tests. This\nmethodological approach provides a rigorous anal-\nysis of how the number of agents and intelligence\ninfluence conformity in LLM agent interactions.\n5127\n\n===== PDF PAGE 6 =====\n\nTable 2: Conformity results based on majority size and intelligence levels.\nID Relative Condition (Pros) Expected Conformity Conformity Rate Full Conformity Ratio\nMajority Intelligence (Related Hypothesis)\na 2 Equivalent Proponent (H1) 63.53 33.60\nb 0.5 Equivalent Opponent (H1) 39.40 10.40\nc 2 Equivalent Proponent (H1) 72.11 41.33\nd 0.5 Equivalent Opponent (H1) 42.22 8.67\ne 1 Superior Proponent (H2) 74.33 52.50\nf 1 Inferior Opponent (H2) 39.83 16.00\ng 2 Superior Proponent (H1, H2) 83.17 64.00\nh 0.5 Inferior Opponent (H1, H2) 25.67 5.50\ni 2 Inferior Undetermined (H1, H2) 42.17 15.50\nj 0.5 Superior Undetermined (H1, H2) 66.33 40.50\nChi-square Test We apply the Chi-square test\nto assess the independence of categorical vari-\nables, specifically testing for significant differences\nin conformity rates between agent groups (e.g.,\nproponent-majority vs. opponent-majority). The\nhypotheses are defined as follows:\n• H0: Conformity rates do not significantly dif-\nfer across groups.\n• HA: Conformity rates significantly differ\nacross groups.\nThe test statistic is computed as:\nχ2 =\n∑ (Oij −Eij)2\nEij\n,\nwhere terms follow the standard Chi-square formu-\nlation (Pearson, 1900); further details are provided\nin Appendix B.\nTwo-Way ANOV A and Robust Alternatives To\nevaluate the main and interaction effects of the",
+        "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+        "locator": "lines 370-509",
+        "source_id": "papers/text/choi-et-al-2025-conformity.txt",
+        "truncated": true
+      },
+      "result_ids": [
+        "papers/text/choi-et-al-2025-conformity.txt"
+      ],
+      "result_sha256": "a9c4a3dbfdfdae88a3fbc3f2c4115af6e2b02228525053052ef2a417ab797ad6",
+      "sequence": 4,
+      "tool": "read_source"
+    },
+    {
+      "arguments": {
+        "line_count": 130,
+        "source_id": "papers/text/lorenz-et-al-2011-social-influence.txt",
+        "start_line": 295
+      },
+      "result": {
+        "content": "one question over the ﬁve time steps in one group. By comparing\nthe no information condition with the aggregated and full in-\nformation conditions, the typical effects of social in ﬂuence can\nclearly be seen. It is evident that social in ﬂuence promotes\na convergence of estimates. Fig. 1 B shows, for the same exem-\nplary sessions, core ranges of estimates and two types of aggre-\ngate measures: the arithmetic mean and the geometric mean.\nFig. 1 C provides the respective numbers for the exemplary ses-\nsions. We provide a test for the complete data in Fig. 1 D and E,\ndemonstrating that social in ﬂuence strongly reduces the group ’s\ndiversity§ without signi ﬁcantly reducing its collective errors. ¶\nThe robustness of the social in ﬂuence effect is supported by\nfurther statistical signi ﬁcance tests ( SI Appendix ). A Kolmo-\ngorov–Smirnov test con ﬁrms that the distribution of estimates\nchanges signi ﬁcantly if social in ﬂuence is allowed for. This\napplies particularly to the variance of the distribution, as an F\ntest shows. In addition, Kolmogorov –Smirnov and t tests for the\ngroup data demonstrate that the group diversity is signi ﬁcantly\nreduced under social in ﬂuence, whereas the collective error\nchanges only slightly. In the control condition without social\ninﬂuence, these effects are almost null.\nRange Reduction Effect. Let us take the perspective of a person\nwho, or government that, needs advice and requests expertise\nfrom different specialists. If all predictions are narrowly distrib-\nuted around a wrong value, a decision-maker would gain con ﬁ-\ndence in advice that is actually misleading. In fact, the close\nclustering around a wrong value makes the group less “wise” in\nthe sense that the group delivers a wrong hint regarding the lo-\ncation of the truth. This is the case because the truth would not\nbe located centrally but at outer regions of the range of esti-\nmates. We quantify this by a wisdom-of-crowd indicator, which\nTable 1. The wisdom of crowd effect exists with respect to the geometric mean but not with respect to the\narithmetic mean\nQuestion True value\nWisdom-of-crowd aggregation\nMedianArithmetic mean Geometric mean\n1. Population density of Switzerland 184 2,644 (+1,337.2%) 132 ( −28.1%) 130 ( −29.3%)\n2. Border length, Switzerland/Italy 734 1,959 (+166.9%) 338 ( −54%) 300 ( −59.1%)\n3. New immigrants to Zurich 10,067 26,773 (+165.9%) 8,178 ( −18.8%) 10,000 ( −0.7%)\n4. Murders, 2006, Switzerland 198 838 (+323.2%) 174 ( −11.9%) 170 ( −14.1%)\n5. Rapes, 2006, Switzerland 639 1,017 (+59.1%) 285 ( −55.4%) 250 ( −60.9%)\n6. Assaults, 2006, Switzerland 9,272 135,051 (+1,356.5%) 6,039 ( −34.9%) 4,000 ( −56.9%)\nThe aggregate measures arithmetic mean, geometric mean, and median are computed on the set of all ﬁrst estimates regardless of\nthe information condition. Values in parentheses are deviations from the true value as percentages.\n†Note that the framework of the diversity prediction theorem (9) can also be applied to\nlogarithmically transformed data. For the case of logarithmically transformed data, the\ncollective error of the logarithms is the logarithm of the geometric mean and one SD is\nthe logarithm of the geometric SD. Considering the logarithmic nature of our data, one\nmay argue that the geometric mean would have been a better design choice than the\narithmetic mean for the information feedback in the aggregated information condition.\nHowever, this measure is hard to understand for most subjects because it necessitates\nconﬁdence with logarithmic transformations. As the simple average (i.e., arithmetic\nmean) is known from daily life, this information is more meaningful for subjects. Hence,\nwe decided for the arithmetic mean.\n‡The empirical measurement of the social in ﬂuence effect requires questions with mod-\nerate difﬁculty. In particular, subjects should not have a precise factual knowledge of an\nissue, because this would prevent adaption and social in ﬂuence. We can empirically\nconﬁrm that this was not the case for our questions and subjects: in only 1.5% of all\ncases, subjects responded at all ﬁve times in the most inner payment range of one\nparticular question. This means in absolute values that 13 of 864 consecutive response\nruns were responded in the full payment range (144 subjects responded to six questions\nin a run of ﬁve consecutive responses). Three of these 13 “high-success runs ” were\nperformed by the same person and two from another person. All other high-success\nruns were performed by different persons.\n§It deserves to be mentioned that the initial diversity seems to be higher in the no in-\nformation condition. It could be that subjects anticipate to feel uneasy if their published\nestimates are too distant from those of others. This could foster that their initial esti-\nmates tend to be more “conservative” in the conditions with information feedback.\nInterestingly, this discrepancy in initial variance is mainly caused by the questions about\ncrime statistics and not about geographical facts.\n¶Note that the collective error slightly declines under social in ﬂuence, especially in the\naggregated information condition, which is partially supported by the signi ﬁcance tests\n(SI Appendix). This is a result of two empirical facts. First, the distributions of estimates are\nright-skewed. As a consequence, the arithmetic mean is usually much larger than most\nestimates and also much larger than the true value. Second, it is an empirical fact for our\nchoice of questions that the geometric mean (which is our aggregation measure to com-\npute the collective error) is always slightly lower than the true value (Table 1). The\nmechanism of presenting the arithmetic mean in the aggregated condition thus triggers\nan upward drift toward the true value. This issue is interesting but deserves future stud-\nies, as this effect may be different for different sets of questions.\n9022 | www.pnas.org/cgi/doi/10.1073/pnas.1008636108 Lorenz et al.\n\n===== PDF PAGE 4 =====\n\ngeneralizes the concept of “bracketing the truth ” (33) to more\nthan two persons. Our indicator considers a group to be maxi-\nmally wise if the truth lies between the two most central values of\nall estimates (in our case, between the sixth and the seventh\nlargest of 12 estimates). If the four most central values are\nneeded to enclose the true value, the level of wisdom is con-\nsidered to be lower, and if the six most central values are needed,\nit is even lower, and so forth. If it lies outside the range of\nestimates of all individuals, there is no wisdom of crowd effect at\nall (a precise de ﬁnition is provided in Methods and Materials ).\nFig. 2A shows bar plots of the wisdom-of-crowd indicator over\ntime for the three treatments for the same exemplary question as\nin Fig. 1. Furthermore, the corresponding core range of sorted\nestimates enclosing the true value is reported. The ﬁgure dem-\nonstrates that the wisdom-of-crowd indicator tends to decline\nover time under conditions of social in ﬂuence. This effect is\nsubstantial and statistically signi ﬁcant for all questions, which is\nconﬁrmed by the regression model in Fig. 2 B. It is revealed that\nthe wisdom of crowd indicator is about one unit lower in con-\nditions with information exchange compared with the control\ncondition. Note that the reduction is stronger under the aggre-\nA\nB\nC\nD E\nFig. 1. Social in ﬂuence effect: Social in ﬂuence diminishes group diversity\nwithout diminishing the collective error. (A) Typical examples of experimental ses-\nsions for all three information conditions, displaying theﬁve individual responses\nto the question, “How many murders were registered in Switzerland in\n2006?” In the no information condition, there is no convergence of esti-\nmates, whereas estimates converge in the aggregated and full information\nconditions. Each subject ’s decision over the ﬁve consecutive responses is\nrepresented by a different color. Black lines correspond to the true value;\nsurrounding gray zones represent the areas in which the subj",
+        "content_sha256": "10d6e61835ae38ecc32c345b6c18f5d4259ef40874694d12f60c4dd6162e160f",
+        "locator": "lines 295-424",
+        "source_id": "papers/text/lorenz-et-al-2011-social-influence.txt",
+        "truncated": true
+      },
+      "result_ids": [
+        "papers/text/lorenz-et-al-2011-social-influence.txt"
+      ],
+      "result_sha256": "81970e703d0f5b728ea94cdb823073f9c8d70d7c7286e9701c181011032ccac0",
+      "sequence": 5,
+      "tool": "read_source"
+    },
+    {
+      "arguments": {
+        "line_count": 130,
+        "source_id": "papers/text/choi-et-al-2025-conformity.txt",
+        "start_line": 508
+      },
+      "result": {
+        "content": "Two-Way ANOV A and Robust Alternatives To\nevaluate the main and interaction effects of the\nnumber of agents (A) and agent intelligence (B)\non the conformity rate (Y ), we initially considered\na two-way ANOV A modeled as:\nYijk =µ +αi +βj + (αβ)ij +ϵijk,\nwhere terms follow the standard ANOV A formu-\nlation (Scheffe, 1999); further details, including\nF-statistic computation, are provided in Appendix\nB.\nTo ensure the validity of the ANOV A results,\nwe assess normality and homogeneity of vari-\nances using the Shapiro-Wilk (Shaphiro and Wilk,\n1965) and Levene’s tests (Levene, 1960), respec-\ntively. When these assumptions are violated,\nwe employ robust alternatives, such as Welch’s\nANOV A (Welch, 1951) and the Games-Howell post\nhoc test (Games and Howell, 1976), for pairwise\ncomparisons. Additionally, we report effect sizes\n(e.g., η2\np) to quantify the magnitude of observed\neffects.\n4 Discussion\n4.1 Majority and Intelligence Impact on\nConformity\nWe test our hypotheses using chi-square tests on\ngrouped simulation results in Table 2. Scenar-\nios (a–d) confirm that neutral agents are signifi-\ncantly more likely to conform to the major group\n(χ2 = 164.839,p < 0.001,df = 1 ), while sce-\nnarios (e-f) show that higher-intelligence agents,\nwho present more logical and persuasive argu-\nments, significantly increasing the likelihood of\nneutral agents conforming to their stance (χ2 =\n142.285,p< 0.001,df = 1).\nWe visualize the relationship between majority,\nintelligence, and conformity to further explore the\nmagnitude of these effects. As illustrated in Fig-\nure 2, three key patterns are observed: First, con-\nformity clearly increases as both relative majority\nand intelligence conditions rise. Second, groups\nwith superior intelligence consistently elicit higher\nconformity compared to those with lower intelli-\ngence. Third, neutral agents are more likely to\nconform to a smaller but smarter group than to a\n5128\n\n===== PDF PAGE 7 =====\n\nConformity Rate(CR) by Relative Condition Full Conformity Ratio(FCR) by Relative Condition\nMajority (Proponent/Opponent) Majority (Proponent/Opponent)\nSuperior\nIntelligence\nEquivalent\nIntelligence\nInferior\nIntelligence\nSuperior\nIntelligence\nEquivalent\nIntelligence\nInferior\nIntelligence\n(a)            (b)                  (c)\nFigure 2: Conformity rate(CR) and full conformity ratio(FCR) in multi-agent simulations. The figures illustrate\nthe relationship between relative conditions and conformity: majority is defined by the proponent-to-opponent\nratio (x-axis), intelligence level (y-axis), and conformity metrics (bubble size and color). Key findings include: (a)\nconformity increases when both majority and intelligence are high, (b) neutral agents exhibit a strong tendency to\nconform to higher-intelligence groups, and (c) a single high-intelligence agent exerts more influence than a larger\ngroup with lower intelligence.\nlarger, less intelligent one. Extreme cases of full\nconformity are also observed, aligning with prior\nresearch on human group behavior, which demon-\nstrates the power of majority influence in shaping\nindividual decisions (Asch, 1955; Milgram, 1963).\nTo statistically validate these visual observations,\nwe conduct Welch’s ANOV A to account for vio-\nlations of normality and homogeneity of variance\nassumptions. Although the majority size shows\na moderate effect (η2\np ≈ 0.068), intelligence has\na significantly larger impact (η2\np ≈ 0.1665), cat-\negorized as a large effect (Cohen, 2013). A post\nhoc power analysis confirms a statistical power\nabove 0.99 for detecting intelligence effects, under-\nscoring the robustness of these findings. For refer-\nence, detailed results from the two-way ANOV A\nand statistical significance tests across different\nLLM providers are included in Appendix C. These\nresults suggest that in LLM-based debates, logi-\ncal and persuasive arguments outweigh numerical\nadvantage, indicating that advanced models can\ndisproportionately shape discourse in multi-agent\nsystems.\nExtended Analysis of Majority-Minority Ratios\nWe further explore whether increasing the majority-\nminority ratio beyond 2:1 (e.g., 4:1, 8:1) strength-\nens conformity by Experiment B. The results in-\ndicate a steady increase in conformity as the ratio\ngrows, as shown in Fig 5 in Appendix. This effect\nis most evident in GPT-3.5-turbo, where confor-\nmity rates scale proportionally with majority size,\nwhereas GPT-4o-mini, with higher intelligence, ex-\nhibits a weaker relation between numerical advan-\ntage and conformity.\n4.2 Conformity Patterns Across Debate Topics\nTo assess the robustness of our findings across dif-\nferent topics, we analyze the distribution of CR for\neach debate subject. Notably, the conformity trends\nremain consistent across all five debate topics, in-\ndicating that the observed effects are generalizable\npatterns of agent behavior.\nFigure 3 illustrates the distribution of CR for\nscenarios (a–d), which focus on the effects of ma-\njority. In this figure, blue bars represent proponent-\nmajority debates, while red bars correspond to\nopponent-majority scenarios. As expected, the blue\nbars skew to the left and the red bars to the right,\ncreating distinct crossover patterns that reflect neu-\ntral agents aligning with the prevailing majority.\nA similar pattern is observed in scenarios (e–f),\nwhich examined the influence of agent intelligence,\nas detailed in Fig 6 in Appendix.\nWhile some variations are evident, debates on\nthe death penalty exhibit a particularly pronounced\nleftward shift, suggesting a strong implicit bias of\nthe LLM toward the opponent’s perspective. This\nfinding aligns with prior research identifying sys-\ntematic biases in LLM-generated content on sensi-",
+        "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+        "locator": "lines 508-637",
+        "source_id": "papers/text/choi-et-al-2025-conformity.txt",
+        "truncated": true
+      },
+      "result_ids": [
+        "papers/text/choi-et-al-2025-conformity.txt"
+      ],
+      "result_sha256": "3c380f6aff43b989dd4d56f0e2cdaf02692686b34965f9cb4f03b75f9aee6d34",
+      "sequence": 6,
+      "tool": "read_source"
+    },
+    {
+      "arguments": {
+        "line_count": 130,
+        "source_id": "papers/text/lorenz-et-al-2011-social-influence.txt",
+        "start_line": 160
+      },
+      "result": {
+        "content": "were unlikely to know the exact answer but also avoided those\nfor which they did not have a clue at all. Each question was\nsimultaneously presented to all subjects in a computer labora-\ntory by using the z-tree software (24). Each subject sat in an\nisolated cubicle in front of a computer with no visual, verbal, or\nchat contact with each other and was asked to enter the esti-\nmates privately without communicating with other subjects. All\nsubjects were told all details of the experimental procedures\nand payments by printed instructions, which described the\npayment rules, the anonymity warranty, the obligation to adhere\nto the no-communication policy, and the obligation to make no\nuse of any auxiliary devices such as the Internet or mobile\nphones. A test in the beginning ensured that subjects un-\nderstood the payment rules.\nIn the ﬁrst estimation period, all subjects had to respond to\nthe ﬁrst knowledge question on their own. After all 12 group\nmembers made an estimate, everybody was asked to give another\nestimate. In total, we elicited ﬁve consecutive responses for each\nknowledge question. Additionally, we elicited after the ﬁrst and\nﬁnal estimate for each question subjects ’conﬁdence in their esti-\nmate on a six-point Likert scale (1, very uncertain; 6, very certain).\nThe conﬁdence values were not communicated to others. After the\nﬁfth (and ﬁnal) estimate of each question, an evaluation was\nprovided that included the true answer, the ﬁve estimates of the\nrespective subject, the payments for each of the ﬁve estimates, and\nthe total payment for all estimates for one question.\nWe tested three different information conditions regarding\nwhat each subject learned about the estimates of the other\nsubjects. Subjects could base their second, third, fourth, and ﬁfth\nestimate on either aggregated or nonaggregated information\nregarding other people ’s estimates. Two of our conditions were\ndifferent operationalizations of social in ﬂuence, and the third\ncondition served as a control condition without social in ﬂuence.\nThe reason to use two different kinds of social in ﬂuence was to\ndemonstrate the robustness of our effects with regard to the\nspeciﬁc kind of social in ﬂuence.\nIn the “aggregated information” condition, subjects could re-\nconsider their estimate after having received the average (arith-\nmetic mean) of all 12 estimates of the former round. Subjects were\nalso reminded about their last estimate from the previous round.\nIn the “full information” treatment, subjects received a ﬁgure of\nthe trajectories of all subjects’estimates from all previous rounds.\nIn this ﬁgure, the estimates of each of the 12 subjects over all\nprevious rounds were represented by one line, adding up to 12\nseparate lines (one for each subject). In addition, the numerical\nvalues of all subjects ’ estimates from the last round were pre-\nsented and subjects were reminded about their own last estimate.*\nThe “no information” treatment served as a control and revealed\nno information about the other subjects ’ estimates. In this con-\ndition, subjects had to answer the same question ﬁve times on\ntheir own. They were reminded about their latest estimate.\nIn each session, two questions were posed in the control, two\nin the aggregated, and two in the full information treatment. The\norder of questions and the order of treatments was randomized\nacross experimental sessions. This means that the same six\nknowledge questions were posed in each experimental session,\nbut in a different order and in different information treatments.\nThe allocation of subjects to a random sequence of questions and\ninformation treatments ruled out order effects with regard to\nquestions and treatments.\nSubjects received monetary payments for each good estimate.\nP o s s i b l er e w a r d sw e r e4 ,2 ,o r1p o i n t si ft h e i re s t i m a t e sf e l li n t ot h e\n10%, 20%, or 40% intervals around the truth; otherwise, they\nreceived no points. The rewards applied to all rounds to make sure\nthat individuals took all of their decisions seriously. The correct\nanswer and the rewards for all ﬁve estimates were only disclosed to\nthe subjects after the ﬁfth estimate. This reward structure in-\ntroduced incentives only toﬁnd the truth and avoided incentives to\nconform with others. Furthermore, there were no incentives for\nstrategic considerations. For example, there was no bene ﬁto fb e -\ning better than others or of misleading others, because this did not\naffect individuals’payments. There was also no possibility to help\nothers by deviating from the strategy to ﬁnd the best estimate.\nTherefore, our experimental design put subjects into a situation in\nwhich they would try to get as close to the truth as possible by using\ntheir own knowledge and the estimates of others.\nMaterials and Methods provides more in-depth information\nregarding the knowledge questions, payment rules, and data\nstructure. SI Appendix contains all the details of the experimental\nprocedures that were presented to the subjects. Dataset S1\ncontains the raw data.\nResults\nAggregation of the Wisdom of Crowds. The empirical analysis of\nthe wisdom of crowds requires an appropriate aggregation\nmeasure. [Already in reply to Galton ’s article (1), there was\na discussion of how to ﬁnd the best aggregation measure for the\nwisdom of crowds (25, 26). It is common to use the unweighted\n*In real-life situations with social in ﬂuence, there may be additional effects, from which\nour experiment has abstracted: this includes competition, group pressure, and authority\neffects. For example, a criminologist could say: “I know the number of victims. ” In\ncontrast to such possibilities, our comparably mild and parsimonious kind of information\nfeedback has the advantage that it enables a particularly controlled experimental set-\nting in which there is little ambiguity about which kind of information feedback and\nsocial in ﬂuence played a role.\nLorenz et al. PNAS | May 31, 2011 | vol. 108 | no. 22 | 9021\nSOCIAL SCIENCESPSYCHOLOGICAL AND\nCOGNITIVE SCIENCES\n\n===== PDF PAGE 3 =====\n\narithmetic mean, but there are many reasonable alternatives,\ngiving ample room for adjustments or “tuning” (27–30).] In our\ncase, the arithmetic mean performs poorly, as we have validated\nby comparing its distance to the truth with the individual dis-\ntances to the truth. In only 21.3% of the cases is the arithmetic\nmean closer to the truth than the individual ﬁrst estimates. This\nis because the estimates of our type of questions are not normally\ndistributed but right-skewed. In other words, the majority of\nestimates are low and a minority of estimates are scattered in\na fat right tail, as it is the case for log-normal distributions.\nAs a large number of our subjects had problems choosing the\nright order of magnitude of their responses, they faced a problem\nof logarithmic nature (31). When using logarithms of estimates,\nthe arithmetic mean is closer to the logarithm of the truth than the\nindividuals’estimates in 77.1% of the cases. This conﬁrms that the\ngeometric mean (i.e., exponential of the mean of the logarith-\nmized data) is an accurate measure of the wisdom of crowds for\nour data (Table 1). In particular, log-normal distributions are\njustiﬁed for variables with high variance with a range of positive\nvalues only (32), which is the case for our data. † We further di-\nvided each estimate by the respective true value before taking the\nlogarithm to make the distributions of estimates comparable\nacross different questions. This yielded approximately normal\ndistributions and true values corresponding to zero.\nSocial In ﬂuence Effect. The ﬁrst kind of undermining of the wis-\ndom of crowds is a statistical effect, which we call social in ﬂuence\neffect. This effect denotes the fact that social in ﬂuence dimin-\nishes diversity in groups without improving its accuracy. This\nmeans that, on average, groups cannot make use of information\nexchange, but engage in a convergence process that does not",
+        "content_sha256": "10d6e61835ae38ecc32c345b6c18f5d4259ef40874694d12f60c4dd6162e160f",
+        "locator": "lines 160-289",
+        "source_id": "papers/text/lorenz-et-al-2011-social-influence.txt",
+        "truncated": true
+      },
+      "result_ids": [
+        "papers/text/lorenz-et-al-2011-social-influence.txt"
+      ],
+      "result_sha256": "e3552129da379a2a0e9c6fa80c78c784e7cc81c7713309abff1a4811ed4ee58e",
+      "sequence": 7,
+      "tool": "read_source"
+    },
+    {
+      "arguments": {
+        "line_count": 90,
+        "source_id": "papers/text/lorenz-et-al-2011-social-influence.txt",
+        "start_line": 424
+      },
+      "result": {
+        "content": "on logarithms of estimates and normalized by the respective true value;\nerror-bars represent 10% con ﬁdence intervals). ( E) Average collective error\n(data and presentation analogous to D).\nA\nB\nFig. 2. Although the wisdom of the crowd diminishes over time, individuals\ngain con ﬁdence in their own estimates. ( A) Sorted estimates over successive\nrounds for the same exemplary sessions as displayed in Fig. 1. Boxes repre-\nsent the most inner estimates that still include the true value. The range of\nthe box depicts the wisdom-of-crowd indicator. The maximum value of 6\nrepresents the highest value for the wisdom of the crowd meaning, that 6\nvalues are below and 6 above the true value. A wisdom-of-crowd indicator\nof 0 denotes that the truth is outside of the range of estimates. The colors of\nthe boxes and bars for the wisdom-of-crowd indicator are analogous to B\n(for values 0 –5, aubergine is additionally introduced for the value of 6).\nColored numbers represent individuals (analogous to colors in Fig. 1 A). The\nright column shows the certainty of the estimate as reported by the re-\nspective individual after estimate 1 and estimate 5 (1, very uncertain; 6, very\ncertain). These values were not propagated to other subjects. ( B) Con ﬁr-\nmation of exemplary trends by regression models taking all questions into\naccount. Linear regressions on (model 1) the groups ’ wisdom-of-crowd in-\ndicator and (model 2) individuals ’change in the certainty of their estimates.\nThe predictors in both models are the experimental treatments, imple-\nmented as dummy variables and coded with 1 as the experimental condition\n(aggregated or full information) and 0 otherwise. The control condition is\nthe reference category, represented by the intercept of the respective re-\ngression model. In model 1, the wisdom-of-crowd indicator is calculated for\nthe pooled second, third, fourth, and ﬁfth time step. The ﬁrst time step is\nexcluded because the initial period had no information feedback and can\ntherefore not yield treatment differences. In model 2, individuals ’increase in\nconﬁdence is the outcome variable, which is the difference between the\ninitial and ﬁnal individuals ’ certainty in their estimates. Robust SEs are cal-\nculated, taking the clustering within subjects into account.\nLorenz et al. PNAS | May 31, 2011 | vol. 108 | no. 22 | 9023\nSOCIAL SCIENCESPSYCHOLOGICAL AND\nCOGNITIVE SCIENCES\n\n===== PDF PAGE 5 =====\n\ngated information condition compared with the “full information\ncondition. [This matches previous ﬁndings on the effects of social\ninﬂuence in terms of gossip on the behavior, which seems to be\nstronger if gossip comes from fewer sources (34).] An increase of\none unit means that one has to consider one additional person in\nthe upper range and one additional person in the lower range of\nsorted estimates so that the truth is included in the selected\nrange. This effect demonstrates that the truth becomes less\ncentral if social in ﬂuence is allowed for. Another interpretation\nof this effect is that the group becomes less reliable in estimating\nthe truth if it has been exposed to social in ﬂuence.\nConﬁdence Effect. The third kind of undermining of the wisdom\nof crowds concerns the psychological consequences of the two\naforementioned statistical effects. The con ﬁdence effect re ﬂects\nthat opinion convergence boosts individuals ’conﬁdence in their\nestimates despite a lack of collective improvements in accuracy.\nFig. 2A shows the individuals ’self-reported change in con ﬁdence\nregarding their initial and ﬁnal estimates for the same exemplary\nsessions as studied before. It can be seen that individuals in these\nexemplary sessions become more con ﬁdent in the full infor-\nmation condition and less con ﬁdent in the control condition. We\nanalyze the general effects over all sessions and questions with\nregression models in Fig. 2 B. This regression analysis demon-\nstrates that individuals ’ conﬁdence is substantially and signi ﬁ-\ncantly boosted in the aggregated and full information conditions\nin comparison with the control condition without social in ﬂuence.\nWe can interpret this psychological effect in comparison with\nthe statistical effects: the con ﬁdence measure can be regarded as\n“subjective”— and self-reported reliability of estimates and the\nwisdom of crowd indicator as “objective”— statistical measure of\nreliability. The comparison of both illustrates that social inﬂuence\nundermines the wisdom of crowds by boosting the subjective and\ndecreasing the objective reliability of the crowd.\nDiscussion\nBased on the wisdom of crowd effect, groups can be remarkably\naccurate in estimating vaguely known facts. From the perspective\nof decision-makers, it would be valuable to request multiple inde-\npendent opinions and aggregate these as the basis of their judge-\nments. Real-life examples are predictions of economic growth\nrates, market potentials, the increase of the world temperature, tax\nestimations, the assessment of the impact of new technologies, or\nestimating the amount of ﬁnite natural resources.\nHowever, it is hardly feasible to receive independent opinions\nin society, because people are embedded in social networks and\ntypically inﬂuence each other to a certain extent. It is remarkable\nhow little social in ﬂuence is required to produce herding be-\nhavior and negative side effects for the mechanism underlying\nthe wisdom of crowds. In our experiment, we provided just the\nbare information of the estimates of others (in a similar way as\nthe previous stock price is known to traders trying to make\nmoney with their estimates of the fundamental value of a stock).",
+        "content_sha256": "10d6e61835ae38ecc32c345b6c18f5d4259ef40874694d12f60c4dd6162e160f",
+        "locator": "lines 424-513",
+        "source_id": "papers/text/lorenz-et-al-2011-social-influence.txt",
+        "truncated": true
+      },
+      "result_ids": [
+        "papers/text/lorenz-et-al-2011-social-influence.txt"
+      ],
+      "result_sha256": "7f02bcbd28a4086e2c8517e1a1e89cadb58e405cbbafd1180808f4f9a37e411b",
+      "sequence": 8,
+      "tool": "read_source"
+    },
+    {
+      "arguments": {
+        "line_count": 90,
+        "source_id": "papers/text/lorenz-et-al-2011-social-influence.txt",
+        "start_line": 555
+      },
+      "result": {
+        "content": "ample, prospective research may investigate herding and con-\nsensus formation on predictions of climate change or election\noutcomes. However, long-term predictions may have short-term\nconsequences on the system itself: pessimistic predictions for\nclimate change may entail international political consequences,\nor election polls may change the popularity of parties that have\nbeen exposed as those with the least support. These feedback\nloops hinder the disentanglement of herding behavior from the\nwisdom of crowds.\nMaterials and Methods\nKnowledge Questions, Payment Rules, and Data Structure. The following\nquestions were used:\n1. What is the population density in Switzerland in inhabitants per\nsquare kilometer?\n2. What is the length of the border between Switzerland and Italy\nin kilometers?\n3. How many more inhabitants did Zurich gain in 2006?\n4. How many murders were of ﬁcially registered in Switzerland in 2006?\n5. How many rapes were of ﬁcially registered in Switzerland in 2006?\n6. How many assaults were of ﬁcially registered in Switzerland in 2006?\nAll questions imply nonnegative or positive numbers as answers. Note that\nquestion 3 may have also allowed a negative gain of inhabitants, but the\nquestion was phrased such that it implied a gain and not a loss. Furthermore,\nentering negative numbers was not supported by our program.\nSubjects received monetary payments in Swiss Francs (CHF) for each good\nestimate, taking the distance between the estimate and the true value into\naccount. Three different intervals for monetary payments were used: 0% to\n10% deviation (1.40 CHF), 11% to 20% deviation (0.70 CHF), and 21% to 40%\ndeviation (0.35 CHF). Estimates that were more than 40% away from the true\nvalue were not ﬁnancially rewarded. Rewards were communicated in ex-\nperimental points and paid in CHF without requiring a signature after\nthe experiment.\nOur data ( Dataset S1) comprise 12 groups in which 12 subjects responded\nﬁve times to six knowledge questions in separate cubicles. Two questions\nwere posed in the control, two in the aggregated, and two in the full in-\nformation treatment. Thus, for each treatment, we had 24 groups: four\ngroups for each of the six questions. The order of the questions and treat-\nments was randomized among the experimental sessions.\nTen values were removed from the statistical analysis of the data set. Five\nof them were dramatic outliers from the same person in the same run. They\nwere 1,000 times larger than the second largest estimate; thus, the subject\nseemed to have confused meters and kilometers. Four estimates were\ndetected as “fun moves. ” The “fun” under the aggregate information\n9024 | www.pnas.org/cgi/doi/10.1073/pnas.1008636108 Lorenz et al.\n\n===== PDF PAGE 6 =====\n\ncondition was to make an incredibly large estimate to test how much the\nmean of the group would increase. Analogously, under the full information\ncondition, the fun was to make incredibly high guesses to produce steep\nlines. The latter fun moves did not affect the rest of the information because\nthere was always also a list of estimates from the previous round. One zero\nestimate was removed only when logarithmic data were used for compu-\ntational reasons.\nMeasures. For a set of estimates x1, ... , xn and the true value, we took the\nfollowing measures to quantify the impact of social in ﬂuence on the wisdom\nof crowds effect: The mean is denoted by /C22x ¼ 1\nn\nXn\ni¼1 xi . The collective error is\nthe squared deviation of the average from the truth ðtruth −/C22xÞ2 , the group\ndiversity is the variance of estimates (average of squared deviations from the\naverage) 1\nn\nXn\ni¼1 ðxi −/C22xÞ2 . The diversity prediction theorem (see ref. 9, p. 211,\nand ref. 35) states that collective error plus group diversity equals the av-\nerage individual error, which is the average of the squared deviations from\nthe truth\n/C18 1\nn\nXn\ni¼1 ðtruth − xi Þ2\n/C19\n. The proof is elementary. The collective er-\nror is also called “population bias ” (6). A low collective error combined with\na high group diversity implies that the wisdom of crowd effect works well,\nbecause asking many instead of one drastically improves accuracy. Both\nmeasures are used in Fig. 1 D and E. Notice that xi ¼ logð~xi =truthÞ are log-\narithms of the raw data point ~xi normalized by the corresponding true\nvalues. The arithmetic mean of these logarithms corresponds to the geo-\nmetric mean. Logarithms transform the results from arithmetic mean to\ngeometric means, where a wisdom of crowd effect exists. Normalization of\nraw estimates by the truth makes different questions comparable.\nFor the de ﬁnition of the wisdom-of-crowd indicator (Fig. 2) let bx1; ... ; bxn\nbe the sorted estimates. Then, the wisdom of crowd indicator is\nmaxfijbxi ≤ truth ≤ bxn − iþ1g. The wisdom-of-crowd indicator achieves its\nmaximum at [ n / 2] when the truth lies between the most central estimates\n(or at the most central estimate). Its minimum of zero is achieved when the\ntruth lies below the minimal or above the maximal estimate. Notice, that",
+        "content_sha256": "10d6e61835ae38ecc32c345b6c18f5d4259ef40874694d12f60c4dd6162e160f",
+        "locator": "lines 555-644",
+        "source_id": "papers/text/lorenz-et-al-2011-social-influence.txt",
+        "truncated": true
+      },
+      "result_ids": [
+        "papers/text/lorenz-et-al-2011-social-influence.txt"
+      ],
+      "result_sha256": "97520476718e868ecfa8e02a8f76c8eefaae6540f616ce86cc71769ce2a325e6",
+      "sequence": 9,
+      "tool": "read_source"
+    },
+    {
+      "arguments": {
+        "line_count": 100,
+        "source_id": "papers/text/choi-et-al-2025-conformity.txt",
+        "start_line": 637
+      },
+      "result": {
+        "content": "tematic biases in LLM-generated content on sensi-\ntive topics (Taubenfeld et al., 2024). Despite these\n5129\n\n===== PDF PAGE 8 =====\n\ntopic-specific shifts, the consistent skewness of con-\nformity rates based on the majority group across all\nscenarios reinforces our hypothesis: both majority\nand intelligence exert a predictable influence on\nneutral agent conformity, regardless of the debate\ntopic. Given the known sensitivity of LLMs to\nprompt framing, we conducted an additional exper-\niment using reversed topic formulations designed\nto favor the opposite stance. As detailed in Ap-\npendix C, conformity patterns remained consistent,\nsuggesting that the observed effects are not arti-\nfacts of prompt wording but rather reflect genuine\ndynamics of group influence.\n0/3 1/3 2/3 3/30\n10\n20\n30\n40\n50\n60\n70Percentage (%)\nOverall Distribution\nproponent\nopponent\n0/3 1/3 2/3 3/3\nPercentage (%)\nUniversal Basic Income\nproponent\nopponent\n0/3 1/3 2/3 3/30\n10\n20\n30\n40\n50\n60\n70Percentage (%)\nDeath Penalty\nproponent\nopponent\n0/3 1/3 2/3 3/3\nPercentage (%)\nImmigration Policy\nproponent\nopponent\n0/3 1/3 2/3 3/30\n10\n20\n30\n40\n50\n60\n70Percentage (%)\nGender Wagegap\nproponent\nopponent\n0/3 1/3 2/3 3/3\nPercentage (%)\nEducational Equality\nproponent\nopponent\nFigure 3: The distribution of CR across debate topics is\nshown, based on data from scenarios (a–d) examining\nthe majority effect. The x-axis represents CR for each\ndiscussion, measured as 0/3, 1/3, 2/3, or 3/3.\n4.3 Qualitative Analysis\nFinally, we report on the conformity phenomena\nobserved in the agents’ debate processes, referenc-\ning well-documented social science theories such\nas group polarization and the spiral of silence.\nGroup Polarization Group polarization is the\ntendency for group discussions to amplify mem-\nbers’ initial views, resulting in more extreme posi-\ntions (Isenberg, 1986). In scenarios with a signifi-\ncant imbalance in the number of agents, with eight\nIn conclusion, we must focus on \ndismantling the existing inequities \nperpetuated by elite education. By \nreducing their influence (..)\n…\nThe resources and opportunities that \nelite institutions provide often draw \nfunding and attention away from \npublic schools, (..)\nThe existence of elite schools often \nleads to a disproportionate allocation \nof resources, creating a system where \naccess is (..)\n…\nRather than diminishing elite institutions, \nwe should look to replicate their \nsuccessful practices in public \neducation\nAgent #1",
+        "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+        "locator": "lines 637-736",
+        "source_id": "papers/text/choi-et-al-2025-conformity.txt",
+        "truncated": true
+      },
+      "result_ids": [
+        "papers/text/choi-et-al-2025-conformity.txt"
+      ],
+      "result_sha256": "f7045c842c29c10fe031bea9f306e3b336e0b25f04dbcf4a78c9001fd5ca0cb5",
+      "sequence": 10,
+      "tool": "read_source"
+    },
+    {
+      "arguments": {
+        "entry_id": "question:work:001-w1-social-influence",
+        "limit": 10,
+        "relations": []
+      },
+      "result": [
+        {
+          "content": {
+            "acceptance_condition": "Establish demand D3 with evidence.",
+            "answer_ids": [],
+            "content_sha256": "efbea2e0fa84ab48c5adb2fb1364b78167e1d4ed21107fd22013c788d75ac58a",
+            "demand_ids": [
+              "D3"
+            ],
+            "id": "question:demand:D3",
+            "node_id": null,
+            "rationale": "The model must expose variables and pathways that can be tested.",
+            "tags": [
+              "evidence"
+            ],
+            "text": "Construct an explicit causal model connecting initial error correlation, evidence diversity, social influence or conformity, retrieval selectivity, synthesis competence, and task topology."
+          },
+          "id": "question:demand:D3",
+          "incoming_links": [
+            {
+              "content_sha256": "4774ea267512e7c9886c1ee044b87afa367b33a70571d0e4689e26c562f3f5fa",
+              "id": "link:4774ea267512e7c9886c1ee0",
+              "origin": "runtime",
+              "proposed_by_node_id": null,
+              "rationale": null,
+              "relation": "refines",
+              "source_id": "question:work:001-w1-social-influence",
+              "target_id": "question:demand:D3"
+            },
+            {
+              "content_sha256": "97eb86d82e4699391a5e13449fc9e685541ded0069a66f319fa47c72e3ab0357",
+              "id": "link:97eb86d82e4699391a5e1344",
+              "origin": "runtime",
+              "proposed_by_node_id": null,
+              "rationale": null,
+              "relation": "refines",
+              "source_id": "question:work:001-w1-formal-models",
+              "target_id": "question:demand:D3"
+            }
+          ],
+          "kind": "question",
+          "outgoing_links": [
+            {
+              "content_sha256": "6b2280746888e8832e699d824242f0c3465b00d4b3f73fb8e447426aaa089956",
+              "id": "link:6b2280746888e8832e699d82",
+              "origin": "runtime",
+              "proposed_by_node_id": null,
+              "rationale": null,
+              "relation": "refines",
+              "source_id": "question:demand:D3",
+              "target_id": "question:root"
+            }
+          ]
+        },
+        {
+          "content": {
+            "acceptance_condition": "Establish demand D4 with evidence.",
+            "answer_ids": [],
+            "content_sha256": "810c52f70893043771bc89b31a0c5825cc64733a7033e17f054e6eac28718d0b",
+            "demand_ids": [
+              "D4"
+            ],
+            "id": "question:demand:D4",
+            "node_id": null,
+            "rationale": "The corpus was selected to contain incompatible-looking results.",
+            "tags": [
+              "evidence"
+            ],
+            "text": "Use and reconcile all relevant positive, null, and adverse findings in the seven-file corpus, with citations to file paths and PDF page markers."
+          },
+          "id": "question:demand:D4",
+          "incoming_links": [
+            {
+              "content_sha256": "3b05f2af30b12b8eee823934c43912cf0d49f9c6bd5fbf36256820dd97c7cd77",
+              "id": "link:3b05f2af30b12b8eee823934",
+              "origin": "runtime",
+              "proposed_by_node_id": null,
+              "rationale": null,
+              "relation": "refines",
+              "source_id": "question:work:001-w1-debate-positive",
+              "target_id": "question:demand:D4"
+            },
+            {
+              "content_sha256": "41f5a8be27407163c491cb85718f32f207d49a04cc8681ab9741db953965c822",
+              "id": "link:41f5a8be27407163c491cb85",
+              "origin": "runtime",
+              "proposed_by_node_id": null,
+              "rationale": null,
+              "relation": "refines",
+              "source_id": "question:work:001-w1-methodology-limits",
+              "target_id": "question:demand:D4"
+            },
+            {
+              "content_sha256": "4716be33a6da1ad887687234570ed8feb4eca8d93a07971a22332ef9fce80690",
+              "id": "link:4716be33a6da1ad887687234",
+              "origin": "runtime",
+              "proposed_by_node_id": null,
+              "rationale": null,
+              "relation": "refines",
+              "source_id": "question:work:001-w1-debate-critical",
+              "target_id": "question:demand:D4"
+            },
+            {
+              "content_sha256": "85a7a067d7d2dee2ccd89baece7111f1434e49e39c06fc84445a0641a408eecd",
+              "id": "link:85a7a067d7d2dee2ccd89bae",
+              "origin": "runtime",
+              "proposed_by_node_id": null,
+              "rationale": null,
+              "relation": "refines",
+              "source_id": "question:work:001-w1-formal-models",
+              "target_id": "question:demand:D4"
+            },
+            {
+              "content_sha256": "c30a8d69e222b141da18e4af02f79169d87c12c263f6642dd25a04e7b087bd8c",
+              "id": "link:c30a8d69e222b141da18e4af",
+              "origin": "runtime",
+              "proposed_by_node_id": null,
+              "rationale": null,
+              "relation": "refines",
+              "source_id": "question:work:001-w1-social-influence",
+              "target_id": "question:demand:D4"
+            }
+          ],
+          "kind": "question",
+          "outgoing_links": [
+            {
+              "content_sha256": "41f8e5a167dc96997efd2bfde757e54b3601f998755cebd215f21eeddc2f7d5f",
+              "id": "link:41f8e5a167dc96997efd2bfd",
+              "origin": "runtime",
+              "proposed_by_node_id": null,
+              "rationale": null,
+              "relation": "refines",
+              "source_id": "question:demand:D4",
+              "target_id": "question:root"
+            }
+          ]
+        }
+      ],
+      "result_ids": [
+        "question:demand:D3",
+        "question:demand:D4"
+      ],
+      "result_sha256": "b3b1035140f8f8a46171c8f97452f6ebedb25b0d784c7c9d9d75f5e40a27b5a9",
+      "sequence": 11,
+      "tool": "get_neighbors"
+    }
+  ],
+  "snapshot_sha256": "2f09f1af182ab5775c6410b215da93d4ac44c117cd5bd0e3313ecc37272a2df6"
+}

@@ -1,0 +1,10 @@
+{
+  "content_sha256": "66b793db0867fd02a7aedbecb4cce647e898b887a40165b3421a48947e928b52",
+  "id": "link:66b793db0867fd02a7aedbec",
+  "origin": "agent",
+  "proposed_by_node_id": "work:002-inv-dung-r2",
+  "rationale": "Provides the required corpus citation coverage for papers/text/dung-1995-argumentation.txt with explicit PDF PAGE markers.",
+  "relation": "partially_answers",
+  "source_id": "answer:work:002-inv-dung-r2",
+  "target_id": "question:demand:D4"
+}

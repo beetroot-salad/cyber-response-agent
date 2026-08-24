@@ -1,0 +1,17 @@
+{
+  "acceptance_condition": "An experiment or corpus-derived argument that compares answer-only exposure against answer-plus-rationale exposure in LLM groups and measures both output diversity and aggregate error, with matched total compute.",
+  "content_sha256": "4e50430c9677e553a9265d0258b647804c98722747b3f02003c893a893c08686",
+  "demand_ids": [
+    "D4",
+    "D3"
+  ],
+  "id": "question:raised:784a683dbe8a:rq1",
+  "node_id": "work:001-inv-lorenz-influence#raised:RQ1",
+  "rationale": "Lorenz shows the collapse happens with zero argumentative content in humans; Choi et al. 2025 examine persuasion in debate. Which channel dominates in LLMs determines whether retrieval-mediated staging should gate exposure volume (how many peer answers are seen) or exposure content (rationales vs bare answers) — these imply different designs and different predictions for D5.",
+  "tags": [
+    "uncertainty",
+    "method",
+    "evidence"
+  ],
+  "text": "In LLM ensembles under matched compute, does diversity collapse arise from mere exposure to peers' final answers (Lorenz-style scalar feedback) or does it require exposure to peers' reasoning/justifications?"
+}

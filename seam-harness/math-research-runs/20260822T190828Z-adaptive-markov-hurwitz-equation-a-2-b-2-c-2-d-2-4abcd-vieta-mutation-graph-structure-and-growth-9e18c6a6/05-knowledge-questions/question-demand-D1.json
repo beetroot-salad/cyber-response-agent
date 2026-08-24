@@ -1,0 +1,14 @@
+{
+  "acceptance_condition": "Establish demand D1 with evidence.",
+  "content_sha256": "857eacd97874ab83f43f17eb071fb2051f961d016c5ec59b6b988baaccbc5a4b",
+  "demand_ids": [
+    "D1"
+  ],
+  "id": "question:demand:D1",
+  "node_id": null,
+  "rationale": "First structural claim of the request.",
+  "tags": [
+    "counterexample"
+  ],
+  "text": "Prove or refute, with a complete proof or a verified counterexample: every solution in S is connected to (1,1,1,1) by a path of Vieta mutations."
+}

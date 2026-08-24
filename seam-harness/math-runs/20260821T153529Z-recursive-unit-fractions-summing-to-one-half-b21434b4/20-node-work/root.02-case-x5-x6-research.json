@@ -1,0 +1,168 @@
+{
+  "account": "For x=5, 1/y+1/z = 3/10 clears to (3y-10)(3z-10) = 100; of the five factor pairs of 100 with d1 ≤ d2, only (2,50) and (5,20) have both entries ≡ 2 (mod 3). Pair (2,50) gives y=4, z=20 and is rejected because x=5 > y; pair (5,20) gives y=5, z=10, yielding the triple (5,5,10), which checks exactly: 1/5+1/5+1/10 = 1/2. For x=6, 1/y+1/z = 1/3 clears to (y-3)(z-3) = 9; pairs (1,9) and (3,3) are the only candidates. (1,9) gives y=4 < 6 and is rejected; (3,3) gives (6,6,6), and 1/6+1/6+1/6 = 1/2. Final solution sets: x=5 → {(5,5,10)}, x=6 → {(6,6,6)}.",
+  "assumptions": [
+    "The global bound x ∈ {3,4,5,6} is taken as established from the parent's separator facts and is not re-derived in this node.",
+    "d1 ≤ d2 corresponds to y ≤ z because y=(d1+s)/r and z=(d2+s)/r are strictly increasing in d1 and d2 respectively with r > 0.",
+    "The factoring method is applied in lowest terms exactly as stated in the envelope, including the integrality requirement that r divide (d1+s) and (d2+s)."
+  ],
+  "boundary_findings": [
+    {
+      "alternative_explanation": "The duplication is fully resolved by the stated x <= y <= z normalization, so no actual discrepancy remains once the filter is applied; this is bookkeeping rather than a mathematical inconsistency.",
+      "consequence_if_absorbed": "If the ordering filter were dropped or the normalized union assembled naively, (5,4,20) and (6,4,12) would be double-counted with the x=4 solutions (4,5,20) and (4,6,12), breaking the invariant that each unordered solution appears once.",
+      "evidence": [
+        "local claim c4: (2,50) maps to y=4, rejected by x=5 ≤ 4 false",
+        "local claim c5: (1,9) maps to y=4, rejected by x=6 ≤ 4 false"
+      ],
+      "narrative": "The per-case enumeration naturally produces factor pairs whose y is smaller than the fixed x. For x=5, pair (2,50) gives the unordered triple (5,4,20); for x=6, pair (1,9) gives (6,4,12). These are only rejected by the x ≤ y filter, and their normalized forms (4,5,20) and (4,6,12) are legitimate solutions that must surface in the sibling x=4 case. This node therefore exports filtered, normalized triples only.",
+      "smallest_suspected_scope": "The parent root's union of the four case solutions, and specifically whether (4,5,20) and (4,6,12) are correctly attributed to the x=4 branch and not double-counted."
+    }
+  ],
+  "claims": [
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "1/y+1/z = 3/10 gives (3y-10)(3z-10) = 100, with the congruence filter d1 ≡ d2 ≡ -10 ≡ 2 (mod 3)",
+          "locator": "rationale",
+          "source_id": "root.02-case-x5-x6"
+        }
+      ],
+      "confidence": 1.0,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "c1",
+      "statement": "For x=5, the reduced equation is 1/y + 1/z = 3/10, which the factoring method converts to (3y-10)(3z-10) = 100 with the congruence filter d1 ≡ d2 ≡ 2 (mod 3)."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "1/y+1/z = 1/3 gives (y-3)(z-3) = 9",
+          "locator": "rationale",
+          "source_id": "root.02-case-x5-x6"
+        }
+      ],
+      "confidence": 1.0,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "c2",
+      "statement": "For x=6, the reduced equation is 1/y + 1/z = 1/3, which clears to (y-3)(z-3) = 9."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "Expected triples: x=5 yields (5,5,10); x=6 yields (6,6,6)",
+          "locator": "acceptance_condition",
+          "source_id": "root.02-case-x5-x6"
+        }
+      ],
+      "confidence": 1.0,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "c3",
+      "statement": "The envelope specifies the expected outcomes as x=5 yielding (5,5,10) and x=6 yielding (6,6,6)."
+    },
+    {
+      "basis": "inferred",
+      "citations": [
+        {
+          "excerpt": "enumerate factor pairs d1*d2 = s^2 with d1 <= d2, keep those with y = (d1+s)/r, z = (d2+s)/r positive integers and x <= y",
+          "locator": "separator_facts",
+          "source_id": "root.02-case-x5-x6"
+        }
+      ],
+      "confidence": 1.0,
+      "counterevidence": [],
+      "derived_from_claim_ids": [
+        "c1"
+      ],
+      "local_id": "c4",
+      "statement": "Complete divisor enumeration for x=5: 100 = 2^2·5^2 has positive factor pairs (1,100), (2,50), (4,25), (5,20), (10,10); only (2,50) and (5,20) satisfy the congruence d1 ≡ d2 ≡ 2 (mod 3). Pair (2,50) maps to y=(2+10)/3=4, z=20 and is rejected by ordering (5 ≤ 4 is false); pair (5,20) maps to y=5, z=10 and is kept, giving (5,5,10)."
+    },
+    {
+      "basis": "inferred",
+      "citations": [
+        {
+          "excerpt": "enumerate factor pairs d1*d2 = s^2 with d1 <= d2, keep those with y = (d1+s)/r, z = (d2+s)/r positive integers and x <= y",
+          "locator": "separator_facts",
+          "source_id": "root.02-case-x5-x6"
+        }
+      ],
+      "confidence": 1.0,
+      "counterevidence": [],
+      "derived_from_claim_ids": [
+        "c2"
+      ],
+      "local_id": "c5",
+      "statement": "Complete divisor enumeration for x=6: positive factor pairs of 9 with d1 ≤ d2 are (1,9) and (3,3); (1,9) maps to y=4, z=12 and is rejected by ordering (6 ≤ 4 is false); (3,3) maps to y=6, z=6 and is kept, giving (6,6,6)."
+    },
+    {
+      "basis": "inferred",
+      "citations": [
+        {
+          "excerpt": null,
+          "locator": null,
+          "source_id": "request"
+        }
+      ],
+      "confidence": 1.0,
+      "counterevidence": [],
+      "derived_from_claim_ids": [
+        "c4",
+        "c5"
+      ],
+      "local_id": "c6",
+      "statement": "Exact substitution checks: 1/5+1/5+1/10 = 4/10+1/10 = 1/2 and 1/6+1/6+1/6 = 3/6 = 1/2, so both retained triples solve the original equation in exact arithmetic."
+    },
+    {
+      "basis": "inferred",
+      "citations": [
+        {
+          "excerpt": "methods confined to bounds, factorization, and divisor enumeration",
+          "locator": "separator_facts",
+          "source_id": "root.02-case-x5-x6"
+        }
+      ],
+      "confidence": 0.99,
+      "counterevidence": [],
+      "derived_from_claim_ids": [
+        "c4",
+        "c5"
+      ],
+      "local_id": "c7",
+      "statement": "The lists {(5,5,10)} for x=5 and {(6,6,6)} for x=6 are exhaustive, because every positive factor pair of s^2 was enumerated and every rejection is by the stated deterministic integrality, congruence, and ordering filters."
+    },
+    {
+      "basis": "inferred",
+      "citations": [
+        {
+          "excerpt": null,
+          "locator": null,
+          "source_id": "request"
+        }
+      ],
+      "confidence": 0.95,
+      "counterevidence": [],
+      "derived_from_claim_ids": [
+        "c4",
+        "c5"
+      ],
+      "local_id": "c8",
+      "statement": "The ordering filter is what discards the unordered triples (5,4,20) and (6,4,12), which as normalized (4,5,20) and (4,6,12) are solutions belonging to the sibling x=4 case; after filtering, no overlap remains with this node's outputs."
+    }
+  ],
+  "counterevidence": [
+    "None found: the two rejected candidates (from pairs (2,50) and (1,9)) each fail only because they produce y < x, which is exactly the ordering condition the parent requires; no candidate that passed all filters failed substitution."
+  ],
+  "next_observation": "Confirm the sibling x=3 and x=4 enumerations produce the remaining triples (3,7,42), (3,8,24), (3,9,18), (3,10,15), (4,5,20), (4,6,12) so the parent can assemble the complete eight-triple solution set.",
+  "source_ids_consulted": [
+    "request",
+    "root.02-case-x5-x6"
+  ],
+  "sufficiency": "ready_to_synthesize",
+  "unresolved": [
+    "Sibling cases x=3 and x=4 are out of scope for this node; the parent must assemble the union across all four cases.",
+    "No conflict detected between this node's results and the acceptance condition."
+  ]
+}

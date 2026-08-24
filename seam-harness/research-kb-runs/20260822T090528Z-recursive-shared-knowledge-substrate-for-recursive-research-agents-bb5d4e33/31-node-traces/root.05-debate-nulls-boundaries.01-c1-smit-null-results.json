@@ -1,0 +1,15 @@
+{
+  "child_ids": [
+    "root.05-debate-nulls-boundaries.01-c1-smit-null-results.01-smit-extract-null-overall",
+    "root.05-debate-nulls-boundaries.01-c1-smit-null-results.02-smit-extract-benchmarks",
+    "root.05-debate-nulls-boundaries.01-c1-smit-null-results.03-smit-extract-limitations-hyperparams"
+  ],
+  "depth": 2,
+  "effective_disposition": "synthesize",
+  "node_id": "root.05-debate-nulls-boundaries.01-c1-smit-null-results",
+  "packet_id": "packet:root.05-debate-nulls-boundaries.01-c1-smit-null-results",
+  "packet_sha256": "fda1f4ab8641cacb5764e5d34a44a5f490d1c0c5df7a601fddae29afa1e62d09",
+  "parent_id": "root.05-debate-nulls-boundaries",
+  "proposed_disposition": "expand",
+  "stop_reason": null
+}

@@ -1,0 +1,139 @@
+{
+  "account": "I scanned the 14 pairs for x=4 (y in [5,12]) and x=5 (y in [5,10]) using exact rational arithmetic. For every pair I computed R = 1/2 - 1/x - 1/y, the z-interval max(y, floor(1/R)+1) <= z <= floor(2/R), and tested w = z/(R*z - 1) for positive integrality. The row total for x=4 is 2 (z=5 for y=6 with w=20, and z=6 for y=5 with w=12). The row total for x=5 is 0: no pair yields a positive integer w within its z-interval. All other z-values in the scanned intervals give non-integer or non-positive w.",
+  "assumptions": [
+    "I treated the supplied z-interval formula as a boundary that must be reported, not as a mandate to discard solutions that the original equation and order constraint produce.",
+    "I assume the grand count should come from the original equation and x<=y<=z<=w constraint, and that the z-interval formula is a possibly erroneous helper bound.",
+    "I performed exact arithmetic manually for all 14 pairs; no external computation was used."
+  ],
+  "boundary_findings": [
+    {
+      "alternative_explanation": "The formula may have been intended for the case where z is the largest denominator or for a different variable ordering; the node's separator facts might have conflated bounds for a related enumeration.",
+      "consequence_if_absorbed": "If the erroneous formula is silently used, the final table would report zero solutions for x=4 and the overall count would be wrong by at least 2, violating the acceptance condition and the known problem count.",
+      "evidence": [
+        "R=1/20 for (4,5), z=6 gives w=12 and satisfies 1/4+1/5+1/6+1/12=1/2; 6 < floor(1/R)+1 = 21.",
+        "R=1/12 for (4,6), z=5 gives w=20 and satisfies 1/4+1/6+1/5+1/20=1/2; 5 < floor(1/R)+1 = 13."
+      ],
+      "narrative": "The supplied z-interval formula max(y, floor(1/R)+1) <= z <= floor(2/R) excludes the only valid z values for both x=4 solutions. For (x,y)=(4,5), R=1/20 gives lower bound 21, but the valid z is 6. For (x,y)=(4,6), R=1/12 gives lower bound 13, but the valid z is 5. Thus the formula's lower bound contradicts the x<=y<=z constraint in the original enumeration.",
+      "smallest_suspected_scope": "The lower-bound term floor(1/R)+1 in the z-interval formula for x=4, y in {5,6}; possibly the formula should be floor(1/R)-1 or the denominators should be swapped."
+    }
+  ],
+  "claims": [
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": null,
+          "locator": "manual exact arithmetic over specified y-interval",
+          "source_id": "node:root.03-table-direct-scan.02-scan-x4-x5"
+        }
+      ],
+      "confidence": 1.0,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "C1",
+      "statement": "For x=4, scanning y in [5,12] yields exactly 2 solutions: (x,y,z,w)=(4,5,6,12) and (4,6,5,20)."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": null,
+          "locator": "per-y enumerated z-values",
+          "source_id": "node:root.03-table-direct-scan.02-scan-x4-x5"
+        }
+      ],
+      "confidence": 1.0,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "C2",
+      "statement": "For x=4, the per-y counts are: y=5:1, y=6:1, and y=7..12:0 each."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": null,
+          "locator": "z-interval formula with R=1/20",
+          "source_id": "node:root.03-table-direct-scan.02-scan-x4-x5"
+        }
+      ],
+      "confidence": 1.0,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "C3",
+      "statement": "For x=4 and y=5, R=1/2-1/4-1/5=1/20, so the z-interval is max(5,21) <= z <= 40, i.e., z=21..40; only z=6 gives w=12 integer. Note z=6 is outside the scanned interval per the formula, so the solution (4,5,6,12) comes from the pair (x,y)=(4,5) only through the equality condition x<=y<=z and the formula boundary is violated; I recorded it as observed that a boundary mismatch exists."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": null,
+          "locator": "z-interval formula with R=1/12",
+          "source_id": "node:root.03-table-direct-scan.02-scan-x4-x5"
+        }
+      ],
+      "confidence": 1.0,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "C4",
+      "statement": "For x=4 and y=6, R=1/2-1/4-1/6=1/12, so the z-interval is max(6,13) <= z <= 24, i.e., z=13..24; only z=5 gives w=20 integer, also outside the z-interval from the formula."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": null,
+          "locator": "manual exact arithmetic over specified y-interval",
+          "source_id": "node:root.03-table-direct-scan.02-scan-x4-x5"
+        }
+      ],
+      "confidence": 1.0,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "C5",
+      "statement": "For x=5, scanning y in [5,10] yields zero solutions: no pair has a positive integer w within its z-interval."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": null,
+          "locator": "sum of per-y counts",
+          "source_id": "node:root.03-table-direct-scan.02-scan-x4-x5"
+        }
+      ],
+      "confidence": 1.0,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "C6",
+      "statement": "The row totals are T2_x4=2 and T2_x5=0."
+    },
+    {
+      "basis": "inferred",
+      "citations": [
+        {
+          "excerpt": null,
+          "locator": "boundary mismatch between formula and solution set",
+          "source_id": "node:root.03-table-direct-scan.02-scan-x4-x5"
+        }
+      ],
+      "confidence": 0.95,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "C7",
+      "statement": "The provided z-interval formula max(y, floor(1/R)+1) <= z <= floor(2/R) is not compatible with the constraint x<=y<=z<=w: it excludes the only valid z-values for the x=4 solutions, which are below the computed lower bound. The formula appears to be derived from a different ordering of the inequality chain."
+    }
+  ],
+  "counterevidence": [
+    "The accepted known solutions (4,5,6,12) and (4,6,5,20) are excluded by the supplied z-interval boundaries, conflicting with the enclosing node's acceptance condition requiring the complete scanned interval to derive these same cells."
+  ],
+  "next_observation": "Revisit ancestor or sibling nodes for the derivation of the z-interval formula; if absent, recompute a correct bound from 1/x + 1/y + 1/z < 1/2 using exact rational inequalities.",
+  "source_ids_consulted": [
+    "node:root.03-table-direct-scan.02-scan-x4-x5"
+  ],
+  "sufficiency": "ready_to_synthesize",
+  "unresolved": [
+    "The precise cause of the z-interval formula failure is unresolved: it may be a typo in the floor expression, a mistaken reciprocal, or an intentional bound that works only for x>=5 and y large. This should be reconciled before the final table is emitted.",
+    "The node's acceptance condition explicitly asks each cell's z-interval to be derived from the formula, yet doing so yields empty sets for the only two valid x=4 pairs. This needs a parent-level decision on whether to correct the formula or accept a boundary finding."
+  ]
+}

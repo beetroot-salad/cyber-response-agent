@@ -730,15 +730,39 @@ def open_store_for_read(store_path: Path) -> StoreHandle:
     return StoreHandle(path=store_path, connection=conn, case_id="")
 
 
-def write_case_pointer(run_dir: Path, *, case_id: str, store_path: Path) -> None:
+def write_case_pointer(
+    run_dir: Path, *, case_id: str, store_path: Path, session_id: str | None = None,
+) -> None:
+    """Record which database holds this run's messages, and which session in it is the run's.
+
+    `session_id` is what makes the pointer answer for a RESUMED run. A sibling forks into the
+    source's database, so the store alone resolves to the ROOT of the lineage — a reader that
+    walks run_dir -> store -> `main_session_id` renders the SOURCE run's transcript for the
+    sibling. Recorded, the run says which session is its own; omitted (every fresh run, where
+    the two coincide), a reader falls back to the root and is right.
+    """
     run_dir = Path(run_dir)
-    body = {"case_id": case_id, "store_path": str(store_path)}
+    body: dict = {"case_id": case_id, "store_path": str(store_path)}
+    if session_id is not None:
+        body["session_id"] = session_id
     write_guarded(run_dir / POINTER_FILENAME, json.dumps(body))
 
 
 def resolve_store_path(run_dir: Path) -> Path:
     data = json.loads((Path(run_dir) / POINTER_FILENAME).read_text(encoding="utf-8"))
     return Path(data["store_path"])
+
+
+def resolve_session_id(run_dir: Path) -> str | None:
+    """The session this run OWNS, or `None` when the pointer names none.
+
+    `None` is the honest answer for every run written before the field existed and for every
+    fresh run, where the run's session is the store's only root — so a caller falls back to
+    `main_session_id` rather than being handed a guess.
+    """
+    data = json.loads((Path(run_dir) / POINTER_FILENAME).read_text(encoding="utf-8"))
+    session_id = data.get("session_id")
+    return session_id if isinstance(session_id, str) and session_id else None
 
 
 # --------------------------------------------------------------------------

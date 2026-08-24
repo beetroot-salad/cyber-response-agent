@@ -1,0 +1,13 @@
+{
+  "acceptance_condition": "A structured extraction with at least 6 distinct findings, each with file path + PDF page marker, including the paper's baseline comparisons, any cost/compute-parity analysis, and its stated moderators of debate benefit.",
+  "content_sha256": "ac15df8d7e090c382b6a2b0afacf2301cdcfdd8226de0d9f6d08fa9124b0f8e1",
+  "demand_ids": [],
+  "id": "question:work:001-w1-debate-critical",
+  "node_id": "work:001-w1-debate-critical",
+  "rationale": "Smit et al. is the corpus's main skeptical/null result; without its exact findings and compute accounting the note cannot honestly reconcile conflicting outcomes or rule out the compute-only alternative explanation (D4, D6, and later D5).",
+  "tags": [
+    "evidence",
+    "counterexample"
+  ],
+  "text": "Extract from papers/text/smit-et-al-2023-going-mad.txt: (a) all null, adverse, or critical findings about multi-agent debate strategies for LLMs — where debate underperforms simpler baselines such as self-consistency / independent sampling with aggregation, or single-agent chain-of-thought; (b) any analysis of cost, token budget, or compute parity between compared methods; (c) the authors' own stated explanations for when debate does and does not help, and any identified confounds (e.g., more inference compute rather than communication per se). Record each finding with file path and explicit `===== PDF PAGE N =====` markers, distinguishing reported results from the paper's interpretation."
+}

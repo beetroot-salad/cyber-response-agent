@@ -1,0 +1,18 @@
+{
+  "acceptance_condition": "Answer contains: proved T1-T3 with explicit constants (O(H) bound, two-sided depth relation); proved dichotomy (i)-(iii); and either the full sublinear bound N(H)=O(H^rho), rho=log3/log11 with an explicit or effective constant (rq1 Outcome A), or a precisely stated proved partial result plus labeled conjecture with the exact gap; total under 700 words.",
+  "content_sha256": "1c732340929707bbd89ee287b87b72db59662dcad5130a251724c4c46d13531d",
+  "demand_ids": [
+    "D4",
+    "D6"
+  ],
+  "id": "question:work:004-upper-depth-v3",
+  "node_id": "work:004-upper-depth-v3",
+  "rationale": "D4 and D6 failed twice on output length; this packet supplies the complete proof skeleton (including the rq1 dichotomy that yields the sublinear exponent rho=log3/log11) so the investigator only verifies and compacts. Coupling rq1 here is exact: rq1 asks precisely for the slow/fast dichotomy that upgrades the O(H) bound.",
+  "tags": [
+    "method",
+    "measurement",
+    "constraint",
+    "synthesis"
+  ],
+  "text": "D4+D6+rq1: Prove the strongest rigorous upper bound for N(H) and the two-sided depth-vs-log-H relation for the rooted tree of sorted solutions of a^2+b^2+c^2+d^2=4abcd. REQUIRED SKELETON (terse lemma-proof, HARD CAP 700 words, no tables, no digressions): Restate in one line each, citing as proved: mutation at max d strictly lowers d; mutations at a,b,c raise max to >= (4ab-1)d >= 3d; quotient graph is a tree rooted at (1,1,1,1); every vertex has <= 3 children, root has 1. (T1, depth upper) d >= 3^depth so depth <= log_3 d. (T2, crude upper) N(H) <= sum_{k<=log_3 H} 3^k <= (3H-1)/2 = O(H), explicit constant. (T3, depth lower) child max <= 4 d^3, so inductively log2(max at depth k) <= 3^k - 1, giving depth >= log_3(log2 d + 1); state the two-sided relation log_3(log_2 d+1) <= depth <= log_3 d. (T4, rq1 dichotomy — the main sharpening) Prove: (i) a=b=1 forces the vertex onto the chain: (1,1,c,d) satisfies c^2+d^2+2=4cd, and by the same descent argument all its solutions form the single chain v_0=(1,1,1,1), v_1=(1,1,1,3), v_{j+1}=(1,1,d_j,4d_j-c_j); chain ratio tends to 2+sqrt(3), so #chain vertices with d<=H is <= log_{2+sqrt3}(H)+O(1) = O(log H). (ii) Along any child-path (height-increasing), the product ab of the two smallest coordinates is nondecreasing (mutating a,b,or c replaces one of them by a larger value; check the three cases in one line each). (iii) The unique off-chain child of chain vertex v_j (j>=2, i.e. c_j>=3) is u_j=(1,c_j,d_j,4c_jd_j-1) with max m_j=4c_jd_j-1 >= 3 d_j; it has ab=c_j>=3, so by (ii) every descendant edge multiplies the max by >= 4*3-1=11. (iv) Subtree of u_j down to max<=H has depth <= log_{11}(H/m_j) and <= 3 children per vertex, hence size <= (3/2)*(H/m_j)^rho with rho=log 3/log 11 (=ln3/ln11, approx 0.458 < 1/2). (v) Sum over j>=2: since d_j >= 11(2+sqrt3)^{j-2}, sum_j m_j^{-rho} converges to an explicit constant; conclude N(H) <= C*H^rho + O(log H) with rho=log3/log11, i.e. N(H)=O(H^rho) sublinear — state C explicitly if cheap, else as an effective constant. If any step resists, prove what holds and label the rest CONJECTURE with the exact gap. STRICT BREVITY: symbol-dense lemma-proof style; omit prose motivation entirely."
+}

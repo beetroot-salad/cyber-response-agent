@@ -1,0 +1,14 @@
+{
+  "acceptance_condition": "Establish demand D8 with evidence.",
+  "content_sha256": "be321eb0feda8aa2c452bdc5b58cd0c2d3a82e7337259f185b4b495784e0d94b",
+  "demand_ids": [
+    "D8"
+  ],
+  "id": "question:demand:D8",
+  "node_id": null,
+  "rationale": "Fourth of six specification areas listed in the request.",
+  "tags": [
+    "evidence"
+  ],
+  "text": "Contradiction and belief-revision behavior is specified."
+}

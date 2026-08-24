@@ -1,0 +1,10 @@
+{
+  "content_sha256": "93408e307fb0b3ed94b351ba61044014b5de902b15d9288f35b2e4a70c180e4e",
+  "id": "link:93408e307fb0b3ed94b351ba",
+  "origin": "agent",
+  "proposed_by_node_id": "work:006-lower-bound-v5-compact",
+  "rationale": "Completes the retry demand with explicit proofs of L1-L3 and labels all stronger growth as conjectural.",
+  "relation": "answers",
+  "source_id": "answer:work:006-lower-bound-v5-compact",
+  "target_id": "question:work:005-lower-bound-v4"
+}

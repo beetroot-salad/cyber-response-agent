@@ -20,6 +20,7 @@ from defender.learning.core.config import (
     source_first_party_key,
 )
 from defender._paths import PATHS
+from defender._run_id import is_valid_run_id
 from defender.runtime import box as box_mod
 from defender.run_common import is_held_out_alert_copy
 from defender.learning.core.directions import (
@@ -232,6 +233,26 @@ def _stop_and_hold(stop_box: Callable[..., None], box: Any) -> BaseException | N
     return None
 
 
+#: `run_one`'s answer for "this pass learned nothing, and a later pass still could".
+#:
+#: DISTINCT FROM 0, because 0 is what `_serve_marker` reads as "learned" — it deletes the queue
+#: marker on any return at all, so a refusal reported as 0 drops the run from the queue and
+#: nothing ever learns it. Distinct from the SYSTEMIC exit 2 as well: a refusal is not an error,
+#: and the CLI maps it back to 0 so a hand-run pass on a busy run does not report failure.
+#:
+#: Only the TRANSIENT refusal returns it — another lane holds this run, and the next pass may
+#: not find it held. A held-out fixture is refused FOREVER by design and its marker should be
+#: consumed, so that arm still answers 0.
+NOT_LEARNED = 3
+
+#: `run_one`'s answer for "no pass will ever learn this run". Today that is a run id failing
+#: the grammar its lock file and container name are both derived from: leaving the marker
+#: would re-refuse it on every drain forever, and deleting it would drop a queued run without
+#: a word, so it is QUARANTINED — the same lane a poison run takes, which is where a human
+#: looking for what the queue could not process already looks.
+UNLEARNABLE = 4
+
+
 def run_one(
     run_dir: Path,
     *,
@@ -243,6 +264,36 @@ def run_one(
     if agents is None:
         agents = InProcessSubagents()
 
+    run_id = run_dir.name
+    if not is_valid_run_id(run_id):
+        _log(f"run_id={run_id!r} fails the run-id grammar — REFUSING (its lock file and its "
+             f"container name are both derived from it)")
+        return UNLEARNABLE
+    # One live pass per run. `learn_drain`'s lease keeps two DRAINERS apart and this is not
+    # about them: the single-run CLI stage reaches `run_one` holding no lease, and the
+    # run-cycle box reuses one container name per run id, so a hand-run pass on a run the
+    # worker already claimed put two lanes on one name (#955 F-49). Refusing is the whole
+    # behaviour — a second pass has nothing to add to a run already being learned.
+    from defender.learning.author import shared as _author_shared
+
+    with _author_shared.flock_or_skip(paths.run_cycle_lock_file(run_id)) as locked:
+        if not locked:
+            _log(f"run_id={run_id} another pass is already live on this run — REFUSING "
+                 f"(both would share the container name defender-runcycle-{run_id})")
+            return NOT_LEARNED
+        return _run_one_locked(
+            run_dir, paths=paths, agents=agents, start_box=start_box, stop_box=stop_box,
+        )
+
+
+def _run_one_locked(
+    run_dir: Path,
+    *,
+    paths: LoopPaths,
+    agents: Subagents,
+    start_box: Callable[..., Any],
+    stop_box: Callable[..., None],
+) -> int:
     run_id = run_dir.name
     src = RunPaths(run_dir)
     if is_held_out_alert_copy(src.alert, paths.held_out_fixtures):
@@ -319,9 +370,20 @@ def _serve_marker(
     render: Callable[[Path], None],
 ) -> bool:
     try:
-        run_one_fn(claim.run_dir)
+        outcome = run_one_fn(claim.run_dir)
     except Exception as e:  # noqa: BLE001 — one poison run must not wedge the worker
         quarantine_marker(claim.spec, claim.path, qdir, f"run-one-error: {e!r}")
+        return False
+    if outcome == UNLEARNABLE:
+        quarantine_marker(claim.spec, claim.path, qdir,
+                          f"run-one-refused: {claim.run_dir.name} can never be learned")
+        return False
+    if outcome == NOT_LEARNED:
+        # THE MARKER STAYS. This pass learned nothing and said so — another lane holds the run,
+        # or its id cannot carry a lock file — and the unlink below is unconditional, so
+        # without this the queue entry is dropped for a run nothing has learned. `claim.path`
+        # is left where the claim put it, which is the state a later drain re-claims from.
+        _log(f"learn_drain: {claim.run_dir.name} was not learned this pass; leaving its marker")
         return False
     try:
         render(claim.run_dir)

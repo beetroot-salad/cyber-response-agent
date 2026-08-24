@@ -1,0 +1,1812 @@
+{
+  "call_id": "call-0014-adaptive-controller",
+  "queries": [
+    {
+      "arguments": {
+        "entry_id": "answer:work:002-inv-smit-mad-r2"
+      },
+      "result": {
+        "content": {
+          "claim_ids": [
+            "work:002-inv-smit-mad-r2:C001",
+            "work:002-inv-smit-mad-r2:C002",
+            "work:002-inv-smit-mad-r2:C003",
+            "work:002-inv-smit-mad-r2:C004",
+            "work:002-inv-smit-mad-r2:C005",
+            "work:002-inv-smit-mad-r2:C006",
+            "work:002-inv-smit-mad-r2:C007",
+            "work:002-inv-smit-mad-r2:C008"
+          ],
+          "content_sha256": "1cd63e18b8159920874a7137a7dfcc036a524bf170062f814896fb1eb8c3f7fd",
+          "id": "answer:work:002-inv-smit-mad-r2",
+          "node_id": "work:002-inv-smit-mad-r2",
+          "packet": {
+            "account": "Smit et al. 2023 (ICML 2024, arXiv:2311.17371v3) benchmark three MAD protocols — Society of Mind (Du et al. 2023), Multi-Persona (Liang et al. 2023, angel/devil/judge), ChatEval's three modes (Chan et al. 2023) — against non-debate multi-call strategies (Self-Consistency, Ensemble Refinement, Medprompt without its kNN component) and Single Agent, crossed with five agent-level prompts, on seven multiple-choice datasets (MedQA 1273, PubMedQA 500, MMLU-clinical 123, CosmosQA 500, CIAR 50, GPQA 448, Chess-short 1000), primarily GPT-3.5-turbo with GPT-4/Mixtral-8x7B checks on MedQA. Cost is USD per question and average API calls per question (plus time and prompt length in appendices). Headline: with original implementations MAD does not reliably beat Self-Consistency or Medprompt (Medprompt best overall: MedQA 0.65, PubMedQA 0.77; Single Agent best on GPQA 0.33; no protocol dominates all datasets), and MAD uses more API calls/tokens/cost. A K-fold analysis (pick hyperparameters best on two held-out same-category datasets) flips the winner between medical and non-medical groups, showing optimal settings are dataset-specific and no protocol is assured to beat single-agent on new data. Debate-vs-first-answer gains are protocol-dependent: SoM gains substantially, ChatEval modestly, Multi-Persona loses accuracy because the devil agent disagrees even with correct first answers. The paper's own mechanism claim: prompting 'agreement intensity' modulates first-round agreement and accuracy, with dataset-dependent sign — high agreement helps MedQA/PubMedQA, disagreement helps counter-intuitive CIAR; tuning yields ~15% for Multi-Persona and ~5% for SoM on a 376-question USMLE subset, and 90%-agreement Multi-Persona sets a claimed GPT-3 state-of-the-art on full MedQA. Hyperparameters transfer GPT-3.5→GPT-4 but not to Mixtral-8x7B. Stated limitations: API nondeterminism/model updates; cost-limited scale.",
+            "assumptions": [
+              "Figure 1's cost axis (10-50) is interpreted as USD per the caption 'Accuracy vs average cost ($) per question'; the axis label reads 'Total cost', so the exact unit basis (per-question vs per-configuration) is slightly ambiguous in the extracted text.",
+              "The exact accuracy value of the 'Improved Multi-Persona' red-cross point on full MedQA is shown only graphically in Figure 1 and is not stated numerically in the extracted text."
+            ],
+            "boundary_findings": [],
+            "child_packet_ids": [],
+            "claims": [
+              {
+                "basis": "observed",
+                "citations": [
+                  {
+                    "excerpt": "Society of Minds (SoM) Du et al. (2023)... Multi-Persona (Liang et al., 2023)... ChatEval (Chan et al., 2023) propose three MAD modes... Self-consistency (Wang et al., 2023b)... Ensemble Refinement (ER) (Singhal et al., 2023).",
+                    "locator": "===== PDF PAGE 2 =====",
+                    "source_id": "papers/text/smit-et-al-2023-going-mad.txt"
+                  },
+                  {
+                    "excerpt": "we utilize GPT-3... with the 3.5-turbo engine... We evaluate each system using seven datasets: three medical datasets, and three more general datasets requiring reasoning.",
+                    "locator": "===== PDF PAGE 3 =====",
+                    "source_id": "papers/text/smit-et-al-2023-going-mad.txt"
+                  },
+                  {
+                    "excerpt": "GPQA... contains 448 multiple-choice questions... Chess... subtasks are further divided into Short, Medium, and Long... We use the Short setting in our study.",
+                    "locator": "===== PDF PAGE 4 =====",
+                    "source_id": "papers/text/smit-et-al-2023-going-mad.txt"
+                  }
+                ],
+                "confidence": 0.95,
+                "counterevidence": [],
+                "derived_from_claim_ids": [],
+                "id": "work:002-inv-smit-mad-r2:C001",
+                "statement": "SCOPE: Smit et al. benchmark three debate protocols — Society of Mind (Du et al. 2023), Multi-Persona (Liang et al. 2023; angel/devil agents plus judge that can end debate early), ChatEval in three modes (one-on-one, simultaneous-talk, simultaneous-talk-with-summarizer; Chan et al. 2023) — plus non-debate multi-call strategies Self-Consistency and Ensemble Refinement, Medprompt, and Single Agent, on seven datasets: MedQA (1273 USMLE 4-choice), PubMedQA (500), MMLU clinical topics (123), CosmosQA (500 subsampled of 7000 for cost), CIAR (50 counter-intuitive arithmetic), GPQA (448), and BIG-Bench Chess state-tracking (Short setting, 1000 games). Base model: GPT-3.5-turbo chosen for cost/performance balance; GPT-4 and Mixtral-8x7B additionally evaluated on MedQA only."
+              },
+              {
+                "basis": "observed",
+                "citations": [
+                  {
+                    "excerpt": "we do not employ the kNN approach as it requires a training and test set split. We believe this might provide Medprompt an unfair advantage... we only implement subcomponents of the full Medprompt, specifically, question randomization with few-shot chain-of-thought ensembling.",
+                    "locator": "===== PDF PAGE 2 =====",
+                    "source_id": "papers/text/smit-et-al-2023-going-mad.txt"
+                  }
+                ],
+                "confidence": 0.95,
+                "counterevidence": [],
+                "derived_from_claim_ids": [],
+                "id": "work:002-inv-smit-mad-r2:C002",
+                "statement": "BASELINES AND PROMPT LEVELS: each strategy is crossed with up to five agent-level prompts (zero-shot Q&A, zero-shot CoT, few-shot, Solo Performance Prompting, few-shot CoT). Medprompt is deliberately implemented WITHOUT its kNN few-shot retrieval component ('question randomization with few-shot chain-of-thought ensembling' only), because kNN requires a train/test split other protocols do not get and 'might provide Medprompt an unfair advantage'."
+              },
+              {
+                "basis": "observed",
+                "citations": [
+                  {
+                    "excerpt": "we show the accuracy vs cost (measured in USD), where the size of each point reflects the average number of API calls required per question... beyond a certain threshold, additional computing does not guarantee better results.",
+                    "locator": "===== PDF PAGE 4 =====",
+                    "source_id": "papers/text/smit-et-al-2023-going-mad.txt"
+                  },
+                  {
+                    "excerpt": "System Name Debate Prompt Agent prompt Debate Config MedQA PubMedQA MMLU ... Score Cost $ ... Society of Mind SoM MAD CoT 4 agents, 3 rounds, summarized 0.68 5.18 ... Medprompt ... 0.74 2.16 ...",
+                    "locator": "===== PDF PAGE 18 =====",
+                    "source_id": "papers/text/smit-et-al-2023-going-mad.txt"
+                  }
+                ],
+                "confidence": 0.9,
+                "counterevidence": [],
+                "derived_from_claim_ids": [],
+                "id": "work:002-inv-smit-mad-r2:C003",
+                "statement": "COST/COMPUTE MEASUREMENT: resource use is measured as accuracy vs cost in USD per question, with dot size encoding average API calls per question (~2.5-15 in Fig 1); accuracy-vs-time and accuracy-vs-prompt-length appear in Appendix A.1; Table 3 lists per-configuration Score/Cost$ for every dataset. Illustrative MedQA costs: Medprompt $2.16; Multi-Persona 2-4 rounds $1.47-1.57; SoM 2 agents/2 rounds $1.73 rising to 4 agents/3 rounds $5.18; Ensemble Refinement (3 reasoning, 9 aggregation) $5.87; MMLU configuration costs reach $19-55. The paper frames the benchmark as trading off 'cost, time, and accuracy' (not strictly compute-matched) and concludes the cost-accuracy relation is 'complex and highly dependent on specific hyperparameters', such that 'beyond a certain threshold, additional computing does not guarantee better results.'"
+              },
+              {
+                "basis": "observed",
+                "citations": [
+                  {
+                    "excerpt": "we find that multi-agent debating systems, in their current form, do not reliably outperform other proposed prompting strategies, such as self-consistency and ensembling using multiple reasoning paths.",
+                    "locator": "===== PDF PAGE 1 =====",
+                    "source_id": "papers/text/smit-et-al-2023-going-mad.txt"
+                  },
+                  {
+                    "excerpt": "Table 2... Medprompt 0.65 (0.63) 0.77 (0.77) 0.74 (0.73) 0.48 (0.47) 0.54 (0.50) 0.27 (0.25) 0.32 (0.30); Society of Mind 0.64 (0.61)... Self-Consistency 0.60... 0.78 (0.75)... Single Agent 0.60... 0.33 (0.28)...",
+                    "locator": "===== PDF PAGE 5 =====",
+                    "source_id": "papers/text/smit-et-al-2023-going-mad.txt"
+                  },
+                  {
+                    "excerpt": "no protocol dominates on all datasets. Medprompt seems to perform the best overall... the debating protocols do not outperform the other protocols on the reasoning datasets... Multi-Persona performs consistently about 7% worse than the Medprompt strategy.",
+                    "locator": "===== PDF PAGE 4 =====",
+                    "source_id": "papers/text/smit-et-al-2023-going-mad.txt"
+                  }
+                ],
+                "confidence": 0.95,
+                "counterevidence": [],
+                "derived_from_claim_ids": [],
+                "id": "work:002-inv-smit-mad-r2:C004",
+                "statement": "HEADLINE NULL/ADVERSE RESULT: 'multi-agent debating systems, in their current form, do not reliably outperform other proposed prompting strategies, such as self-consistency and ensembling using multiple reasoning paths' (Abstract). Best-configuration Table 2: no protocol dominates all datasets; Medprompt is best overall (MedQA 0.65 vs SoM/ER 0.64, ChatEval/SC/Single 0.60, Multi-Persona 0.58; PubMedQA 0.77; MMLU 0.74 vs Self-Consistency's 0.78). On the reasoning datasets 'the debating protocols do not outperform the other protocols': Single Agent is best on GPQA (0.33) and competitive on CosmosQA/CIAR; on Chess, Multi-Persona 0.33 barely exceeds Single/ER/ChatEval 0.32 while SoM 0.26 and Self-Consistency 0.27 fall below. Multi-Persona runs 'consistently about 7% worse than the Medprompt strategy', and single-agent plus self-consistency accuracy 'can be manipulated via prompts to achieve a high variance'."
+              },
+              {
+                "basis": "observed",
+                "citations": [
+                  {
+                    "excerpt": "we adopt a K-fold approach. We divide the medical and non-medical datasets into two groups... within medical datasets, every evaluated system outperforms single-agent methods, with the exception of Multi-Persona. Self-Consistency and Medprompt emerge as the top performers. Conversely... single-agent methods surpass all evaluated systems except for Multi-Persona and Self-Consistency.",
+                    "locator": "===== PDF PAGE 5 =====",
+                    "source_id": "papers/text/smit-et-al-2023-going-mad.txt"
+                  }
+                ],
+                "confidence": 0.95,
+                "counterevidence": [],
+                "derived_from_claim_ids": [],
+                "id": "work:002-inv-smit-mad-r2:C005",
+                "statement": "K-FOLD HYPERPARAMETER SENSITIVITY: datasets are divided into medical vs non-medical groups; for each method and dataset, the hyperparameter combination with the highest average accuracy on the two held-out same-category datasets is used to compute final accuracy (Fig 3). Result: within medical datasets every evaluated system outperforms single-agent methods except Multi-Persona, with Self-Consistency and Medprompt top; within non-medical datasets single-agent surpasses all systems except Multi-Persona and Self-Consistency. Authors' conclusion: 'hyperparameter choices significantly influence system performance, with optimal settings tending to be dataset-specific... superior performance of various protocols over a standard single-agent approach is not assured for new datasets.'"
+              },
+              {
+                "basis": "observed",
+                "citations": [
+                  {
+                    "excerpt": "ChatEval exhibits a modest enhancement, Society of Mind shows a substantial increase, and Multi-Persona, intriguingly, leads to a decrease in performance.",
+                    "locator": "===== PDF PAGE 5 =====",
+                    "source_id": "papers/text/smit-et-al-2023-going-mad.txt"
+                  },
+                  {
+                    "excerpt": "the Multi-Persona system reduces the overall performance compared to relying solely on the initial response of the first agent. This can be attributed to the role of the second agent (the 'devil'), which is deliberately designed to contradict or disagree, even if the initial response was correct.",
+                    "locator": "===== PDF PAGE 6 =====",
+                    "source_id": "papers/text/smit-et-al-2023-going-mad.txt"
+                  }
+                ],
+                "confidence": 0.95,
+                "counterevidence": [],
+                "derived_from_claim_ids": [],
+                "id": "work:002-inv-smit-mad-r2:C006",
+                "statement": "DEBATE-VS-FIRST-ANSWER IMPROVEMENT (Fig 4, averaged over all datasets): relative to the first agent's initial answer, ChatEval shows a modest enhancement, Society of Mind a substantial increase, and Multi-Persona a DECREASE — the debate process reduces accuracy relative to its own first answer. The authors attribute this to the devil agent being 'deliberately designed to contradict or disagree, even if the initial response was correct', concluding that agents' prior willingness to agree at the outset of a debate is a critical 'hyperparameter'."
+              },
+              {
+                "basis": "observed",
+                "citations": [
+                  {
+                    "excerpt": "while MedQA and PubMedQA directly benefit from a high agreement, CIAR follows a reverse pattern... a substantial (≈15%) improvement in performance for Multi-Persona, and (≈5%) for SoM on the USMLE dataset. ChatEval, on the contrary, is hardly affected.",
+                    "locator": "===== PDF PAGE 6 =====",
+                    "source_id": "papers/text/smit-et-al-2023-going-mad.txt"
+                  },
+                  {
+                    "excerpt": "we apply the 90% agreement intensity agent prompts to Multi-Persona on the full MedQA dataset and demonstrate (as far as we are aware) a new state-of-the-art result (for GPT-3), highlighted in Figure 1 by the red cross symbol.",
+                    "locator": "===== PDF PAGE 7 =====",
+                    "source_id": "papers/text/smit-et-al-2023-going-mad.txt"
+                  },
+                  {
+                    "excerpt": "hyperparameter settings can be effectively transferred to GPT-4. However, this transferability does not extend well to Mixtral 8x7B.",
+                    "locator": "===== PDF PAGE 9 =====",
+                    "source_id": "papers/text/smit-et-al-2023-going-mad.txt"
+                  }
+                ],
+                "confidence": 0.9,
+                "counterevidence": [],
+                "derived_from_claim_ids": [],
+                "id": "work:002-inv-smit-mad-r2:C007",
+                "statement": "PAPER'S OWN ACCOUNT OF WHEN DEBATE HELPS — AGREEMENT MODULATION: a new prompt ('you should agree with the other agents X% of the time') modulates first-round agreement, which drives final accuracy, but the sign is dataset-dependent: MedQA and PubMedQA directly benefit from HIGH agreement while counter-intuitive CIAR follows the reverse pattern (strong disagreement raises the chance of reaching the correct answer). On a 376-question USMLE subset, sweeping agreement intensity yields ~15% accuracy improvement for Multi-Persona and ~5% for SoM, while ChatEval is 'hardly affected'; applying 90% agreement Multi-Persona to the full MedQA dataset gives a claimed new GPT-3 state-of-the-art, surpassing Medprompt and Self-Consistency (red cross, Fig 1). Tuned hyperparameters transfer GPT-3.5→GPT-4 on MedQA but not to Mixtral-8x7B, attributed to architectural differences. Spider-plot analysis (Fig 7) shows SoM has the largest surface across debating metrics (consensus accuracy, any-correct-answer, answer changes, unique first answers)."
+              },
+              {
+                "basis": "observed",
+                "citations": [
+                  {
+                    "excerpt": "Limitations We utilize API calls to a publicly available LLM which... exposes us to variable inference time calls and unforeseen model updates... MAD approaches currently do not outperform other ensembling methods such as Medprompt and self-consistency using their original implementations. MAD typically requires a higher number of API calls... this might primarily be due to MAD protocols being more sensitive to hyperparameters.",
+                    "locator": "===== PDF PAGE 9 =====",
+                    "source_id": "papers/text/smit-et-al-2023-going-mad.txt"
+                  }
+                ],
+                "confidence": 0.9,
+                "counterevidence": [],
+                "derived_from_claim_ids": [],
+                "id": "work:002-inv-smit-mad-r2:C008",
+                "statement": "STATED LIMITATIONS AND CONCLUSION FRAMING: the authors concede that reliance on a public API 'exposes us to variable inference time calls and unforeseen model updates' and that 'large-scale API-based benchmarking incurs substantial financial and time costs, which both limit the experiment scales and provide a barrier of entry to replication'; they recommend open-source models for future work. Their stated conclusion is that MAD's deficit 'might primarily be due to MAD protocols being more sensitive to hyperparameters and not necessarily that debate inherently performs worse than single-agent methods', while noting 'MAD typically requires a higher number of API calls, increasing the number of tokens to produce and process and ultimately, the total running cost of the system.'"
+              }
+            ],
+            "content_sha256": "c262e8f28c4d1a5f94fd8ec1fc94927f6bd1752d82b9b427462e520c5a52825f",
+            "counterevidence": [
+              "The paper is not a pure null result: after agreement-intensity tuning, Multi-Persona moves from worst to best protocol and claims a GPT-3 state-of-the-art on MedQA (PDF p.6-7), so 'debate never helps' would misread it; the finding is that debate's benefit is hyperparameter- and dataset-contingent.",
+              "GPT-4 spot checks (Fig 8, PDF p.8) suggest conclusions may shift with model capability; the headline null is established mainly on GPT-3.5-turbo."
+            ],
+            "id": "packet:work:002-inv-smit-mad-r2",
+            "knowledge_links": [
+              {
+                "rationale": "The wave-1 answer is a blocked placeholder that failed with 'Exceeded maximum output retries' and contains no evidence; this packet performs the actual extraction.",
+                "relation": "supersedes",
+                "source_id": "self",
+                "target_id": "answer:work:001-inv-smit-mad"
+              },
+              {
+                "rationale": "Covers the target question's required content: variants, tasks, baselines, cost measurement, where MAD failed, K-fold sensitivity, debate-vs-first-answer gains, and the agreement-modulation account, each with page markers.",
+                "relation": "answers",
+                "source_id": "self",
+                "target_id": "question:work:001-inv-smit-mad"
+              },
+              {
+                "rationale": "Du et al. report debate beating majority voting on arithmetic/GSM8K/chess; Smit et al. find Du's own SoM protocol does not reliably beat self-consistency or Medprompt and can fall below single agent on chess, with no compute-matched win — the direct empirical counterweight needed for D4 reconciliation.",
+                "relation": "contradicts",
+                "source_id": "self",
+                "target_id": "answer:work:001-inv-du-debate"
+              },
+              {
+                "rationale": "The agreement-intensity result shows that prompting agents to agree more raises accuracy on MedQA/PubMedQA but lowers it on counter-intuitive CIAR, and that a forced-disagreeing devil agent degrades performance even when the first answer is correct — evidence that the effect of peer exposure on accuracy is moderated by task truth-topology, relevant to whether diversity collapse arises from mere answer exposure.",
+                "relation": "partially_answers",
+                "source_id": "self",
+                "target_id": "question:raised:784a683dbe8a:rq1"
+              },
+              {
+                "rationale": "Supplies the principal null/adverse corpus finding with page-level citations required for the note's reconciliation of conflicting results.",
+                "relation": "partially_answers",
+                "source_id": "self",
+                "target_id": "question:demand:D4"
+              }
+            ],
+            "next_observation": null,
+            "node_id": "work:002-inv-smit-mad-r2",
+            "objective": "What exactly does Smit et al. 2023 (papers/text/smit-et-al-2023-going-mad.txt) find when benchmarking multi-agent debate (MAD): which debate variants (ChatEval, Society of Mind, Ensemble Refinement, Multi-Persona, etc.) and tasks (MedQA, PubMedQA, MMLU, CosmosQA, CIAR, GPQA, chess) were tested; which single-agent baselines (CoT, self-consistency, Medprompt) were used and how cost/API-calls were measured; where MAD failed to beat or underperformed those baselines; the K-fold hyperparameter-sensitivity analysis; the debate-vs-first-answer improvement measurements; and the paper's own account of when debate helps (e.g., agreement modulation). Keep the answer compact: at most 8 claims, each with a `===== PDF PAGE N =====` marker.",
+            "raised_questions": [],
+            "source_ids_consulted": [
+              "papers/text/smit-et-al-2023-going-mad.txt"
+            ],
+            "sufficiency": "ready_to_synthesize",
+            "unresolved": [
+              "The optimal hyperparameter configuration per dataset (which K-fold selected) is in Appendix A.2/Table 3 but was not exhaustively transcribed; only representative rows were read.",
+              "Whether the agreement-modulation gain survives a strictly compute-matched comparison against self-consistency at equal API calls is not tested in the paper."
+            ]
+          },
+          "packet_id": "packet:work:002-inv-smit-mad-r2",
+          "question_ids": [
+            "question:demand:D4",
+            "question:raised:784a683dbe8a:rq1",
+            "question:work:001-inv-smit-mad",
+            "question:work:002-inv-smit-mad-r2"
+          ],
+          "sufficiency": "ready_to_synthesize",
+          "summary": "Smit et al. 2023 (ICML 2024, arXiv:2311.17371v3) benchmark three MAD protocols — Society of Mind (Du et al. 2023), Multi-Persona (Liang et al. 2023, angel/devil/judge), ChatEval's three modes (Chan et al. 2023) — against non-debate multi-call strategies (Self-Consistency, Ensemble Refinement, Medprompt without its kNN component) and Single Agent, crossed with five agent-level prompts, on seven multiple-choice datasets (MedQA 1273, PubMedQA 500, MMLU-clinical 123, CosmosQA 500, CIAR 50, GPQA 448, Chess-short 1000), primarily GPT-3.5-turbo with GPT-4/Mixtral-8x7B checks on MedQA. Cost is USD per question and average API calls per question (plus time and prompt length in appendices). Headline: with original implementations MAD does not reliably beat Self-Consistency or Medprompt (Medprompt best overall: MedQA 0.65, PubMedQA 0.77; Single Agent best on GPQA 0.33; no protocol dominates all datasets), and MAD uses more API calls/tokens/cost. A K-fold analysis (pick hyperparameters best on two held-out same-category datasets) flips the winner between medical and non-medical groups, showing optimal settings are dataset-specific and no protocol is assured to beat single-agent on new data. Debate-vs-first-answer gains are protocol-dependent: SoM gains substantially, ChatEval modestly, Multi-Persona loses accuracy because the devil agent disagrees even with correct first answers. The paper's own mechanism claim: prompting 'agreement intensity' modulates first-round agreement and accuracy, with dataset-dependent sign — high agreement helps MedQA/PubMedQA, disagreement helps counter-intuitive CIAR; tuning yields ~15% for Multi-Persona and ~5% for SoM on a 376-question USMLE subset, and 90%-agreement Multi-Persona sets a claimed GPT-3 state-of-the-art on full MedQA. Hyperparameters transfer GPT-3.5→GPT-4 but not to Mixtral-8x7B. Stated limitations: API nondeterminism/model updates; cost-limited scale.",
+          "tags": [
+            "evidence",
+            "counterexample",
+            "uncertainty"
+          ],
+          "unresolved": [
+            "The optimal hyperparameter configuration per dataset (which K-fold selected) is in Appendix A.2/Table 3 but was not exhaustively transcribed; only representative rows were read.",
+            "Whether the agreement-modulation gain survives a strictly compute-matched comparison against self-consistency at equal API calls is not tested in the paper."
+          ]
+        },
+        "id": "answer:work:002-inv-smit-mad-r2",
+        "incoming_links": [],
+        "kind": "answer",
+        "outgoing_links": [
+          {
+            "content_sha256": "0c936dba991dd647423d592958880df97598c7e8feb99918f7826295d51ce2cb",
+            "id": "link:0c936dba991dd647423d5929",
+            "origin": "agent",
+            "proposed_by_node_id": "work:002-inv-smit-mad-r2",
+            "rationale": "Supplies the principal null/adverse corpus finding with page-level citations required for the note's reconciliation of conflicting results.",
+            "relation": "partially_answers",
+            "source_id": "answer:work:002-inv-smit-mad-r2",
+            "target_id": "question:demand:D4"
+          },
+          {
+            "content_sha256": "175e10b1d30f2df7448e0f514b9365a65ef428d327d766001d59c529fc544792",
+            "id": "link:175e10b1d30f2df7448e0f51",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "answers",
+            "source_id": "answer:work:002-inv-smit-mad-r2",
+            "target_id": "question:work:002-inv-smit-mad-r2"
+          },
+          {
+            "content_sha256": "24408332bd58b127fc90ffb55138453182744111c9d37965784bab60722cedc9",
+            "id": "link:24408332bd58b127fc90ffb5",
+            "origin": "agent",
+            "proposed_by_node_id": "work:002-inv-smit-mad-r2",
+            "rationale": "The agreement-intensity result shows that prompting agents to agree more raises accuracy on MedQA/PubMedQA but lowers it on counter-intuitive CIAR, and that a forced-disagreeing devil agent degrades performance even when the first answer is correct — evidence that the effect of peer exposure on accuracy is moderated by task truth-topology, relevant to whether diversity collapse arises from mere answer exposure.",
+            "relation": "partially_answers",
+            "source_id": "answer:work:002-inv-smit-mad-r2",
+            "target_id": "question:raised:784a683dbe8a:rq1"
+          },
+          {
+            "content_sha256": "2e35b1e58e19a3b967e827b88a998776ad5d6ae9b0e6bb2a924ba149cc435ce6",
+            "id": "link:2e35b1e58e19a3b967e827b8",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:002-inv-smit-mad-r2",
+            "target_id": "question:demand:D4"
+          },
+          {
+            "content_sha256": "6600a3f720ef148fc76720edfa07c5e3b4bb42910267843c272710e809a6c7e9",
+            "id": "link:6600a3f720ef148fc76720ed",
+            "origin": "agent",
+            "proposed_by_node_id": "work:002-inv-smit-mad-r2",
+            "rationale": "The wave-1 answer is a blocked placeholder that failed with 'Exceeded maximum output retries' and contains no evidence; this packet performs the actual extraction.",
+            "relation": "supersedes",
+            "source_id": "answer:work:002-inv-smit-mad-r2",
+            "target_id": "answer:work:001-inv-smit-mad"
+          },
+          {
+            "content_sha256": "9810ae342d43b454979b67c528510ab80828a4dd59e189fe65c2462bfd70972e",
+            "id": "link:9810ae342d43b454979b67c5",
+            "origin": "agent",
+            "proposed_by_node_id": "work:002-inv-smit-mad-r2",
+            "rationale": "Du et al. report debate beating majority voting on arithmetic/GSM8K/chess; Smit et al. find Du's own SoM protocol does not reliably beat self-consistency or Medprompt and can fall below single agent on chess, with no compute-matched win — the direct empirical counterweight needed for D4 reconciliation.",
+            "relation": "contradicts",
+            "source_id": "answer:work:002-inv-smit-mad-r2",
+            "target_id": "answer:work:001-inv-du-debate"
+          },
+          {
+            "content_sha256": "bc9d547dac3d9d08399523ca5fe1f7e3c233c00e31fab32dd76539368167e31d",
+            "id": "link:bc9d547dac3d9d08399523ca",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:002-inv-smit-mad-r2",
+            "target_id": "question:work:001-inv-smit-mad"
+          },
+          {
+            "content_sha256": "ec42bebe2d633190d9f87c4b95710a8c891c2d7245287e6028cad4cdb9f9e404",
+            "id": "link:ec42bebe2d633190d9f87c4b",
+            "origin": "agent",
+            "proposed_by_node_id": "work:002-inv-smit-mad-r2",
+            "rationale": "Covers the target question's required content: variants, tasks, baselines, cost measurement, where MAD failed, K-fold sensitivity, debate-vs-first-answer gains, and the agreement-modulation account, each with page markers.",
+            "relation": "answers",
+            "source_id": "answer:work:002-inv-smit-mad-r2",
+            "target_id": "question:work:001-inv-smit-mad"
+          }
+        ]
+      },
+      "result_ids": [
+        "answer:work:002-inv-smit-mad-r2"
+      ],
+      "result_sha256": "15830287e429756c59ec36806470ecf5985b1900486312f705a821a230a5a401",
+      "sequence": 1,
+      "tool": "get_entry"
+    },
+    {
+      "arguments": {
+        "entry_id": "answer:work:002-inv-zhang-when-r2"
+      },
+      "result": {
+        "content": {
+          "claim_ids": [
+            "work:002-inv-zhang-when-r2:C001",
+            "work:002-inv-zhang-when-r2:C002",
+            "work:002-inv-zhang-when-r2:C003",
+            "work:002-inv-zhang-when-r2:C004",
+            "work:002-inv-zhang-when-r2:C005",
+            "work:002-inv-zhang-when-r2:C006",
+            "work:002-inv-zhang-when-r2:C007",
+            "work:002-inv-zhang-when-r2:C008"
+          ],
+          "content_sha256": "eb8ecfd266e3db6ce10f4251ce13db3b166c5ba2ac7640d53e8b8a40a7f1d6e6",
+          "id": "answer:work:002-inv-zhang-when-r2",
+          "node_id": "work:002-inv-zhang-when-r2",
+          "packet": {
+            "account": "Zhang et al. 2025 (arXiv:2502.08788v3; position paper subtitled 'Stop Overvaluing Multi-Agent Debate—We Must Rethink Evaluation and Embrace Model Heterogeneity') is the corpus's decisive matched-compute reappraisal. DESIGN: 5 MAD frameworks (SoM=Du et al. 2023, Multi-Persona, Exchange-of-Thoughts, ChatEval, AgentVerse) x 9 benchmarks (general knowledge: MMLU, MMLU-Pro, CommonsenseQA, ARC-Challenge, AGIEval; math: GSM8K, MATH; programming: HumanEval, MBPP) x 4 models (GPT-4o-mini, Claude-3.5-haiku, Llama3.1-8b, Llama3.1-70b), vs SA/CoT/SC baselines, debate rounds adjusted so every MAD method uses ~6 LLM calls; 3 repetitions with std (===== PDF PAGE 1, 6, 7 =====). HEADLINE: no MAD method exceeds a 20% win rate vs CoT across 36 scenarios; SoM/EoT/ChatEval/AgentVerse win ~15%, MP 0%; worse on programming, relatively better on math; the gap widens vs self-consistency at comparable LLM-call or token budgets (===== PDF PAGE 3, 7-8 =====). RECONCILIATION: MAD beats direct single-agent prompting in 34/45 GPT-4o-mini conditions—'perfectly aligns with previous findings'—but SoM and ChatEval were never compared to CoT in their original papers, so Du-style positives hold only against the weakest baseline (===== PDF PAGE 8 =====). HYPERPARAMETERS: agents 3->9, rounds 2->4 yield mostly stagnation or decline (sole exception EoT on GSM8K), ruling out misconfiguration as a universal explanation (===== PDF PAGE 8-9 =====). EFFICIENCY: SC converts extra tokens into accuracy; MAD is flat (SoM on MMLU) or trails SC at comparable tokens (EoT); per-question analysis shows aggressive methods (MP/ChatEval/AgentVerse) correct many errors but flip many correct answers, while conservative ones (SoM/EoT) avoid new errors but correct few—a correction/instability trade-off (===== PDF PAGE 9, 25 =====). HETEROGENEITY: Heter-MAD (each generation queries a random model from {GPT-4o-mini, Llama3.1-70b}, p=0.5) improves every tested framework (+6.4% SoM, +8.2% EoT vs single-model averages; up to +5.8% vs CoT-Average), with gains concentrated where models have complementary solvability and in simpler frameworks—'a universal antidote' (===== PDF PAGE 1, 4, 10-13 =====). POSITIONING: credits Du et al. 2023 as foundational but attributes MAD's overvaluation to fragmented, selective evaluation (Table 5 shows minimal benchmark overlap across prior MAD papers); aligns with Smit et al. 2024's null while dismissing its medical-only scope; flags that agents debate whole responses yet rebut final-answer differences rather than reasoning, and that current benchmarks need only single knowledge points (===== PDF PAGE 2, 5, 13, 14, 15 =====). Key identification gap for the root note: no heterogeneous self-consistency control, so the debate-specific value of heterogeneity over plain decorrelated sampling is not identified.",
+            "assumptions": [
+              "The text-extracted file's '===== PDF PAGE N =====' markers accurately delimit PDF pages; multi-column tables (e.g., Table 4) were parsed with some risk of cell misalignment, mitigated by cross-checking against the prose statements of the same numbers.",
+              "'36 scenarios' = 4 models x 9 benchmarks, as stated by the authors; SC is excluded from programming benchmarks because majority voting assumes a single correct answer (authors' footnote, '===== PDF PAGE 7 =====')."
+            ],
+            "boundary_findings": [
+              {
+                "alternative_explanation": "Heterogeneity gains are pure error-decorrelation of independent samples (Lorenz-style diversity preservation), with debate rounds contributing nothing or even harming via conformity — consistent with z3's matched-compute SC dominance.",
+                "consequence_if_absorbed": "The research note would overcredit staged communication/deliberation: if mixed-model SC matches Heter-MAD at matched compute, heterogeneity evidence supports a diversity-only mechanism and undercuts any claim that debate structure itself adds value.",
+                "evidence": [
+                  "papers/text/zhang-et-al-2025-mad-question.txt '===== PDF PAGE 11 =====': Heter-MAD gains reported only 'vs SoM-Average/EoT-Average' and 'vs CoT-Average'; no SC-based comparator in Table 4",
+                  "papers/text/zhang-et-al-2025-mad-question.txt '===== PDF PAGE 10 =====': Heter-MAD 'effectively reuses the prompts and architecture of any MAD method' — the only manipulation is which model generates, so any sampling-level diversity control would have been feasible but was omitted"
+                ],
+                "narrative": "Zhang et al. establish that model heterogeneity helps MAD but never run the decisive control: heterogeneous self-consistency (draw each SC sample from a different model, majority vote, zero communication). Heter-MAD is compared only to same-model MAD averages and CoT-Average. The communication channel's contribution beyond error decorrelation is therefore unidentified in this paper — the exact gap the root note's discriminating predictions must close.",
+                "smallest_suspected_scope": "Section 4 experimental design of Zhang et al. 2025 (Heter-MAD evaluation, PDF pages 10-13)."
+              }
+            ],
+            "child_packet_ids": [],
+            "claims": [
+              {
+                "basis": "observed",
+                "citations": [
+                  {
+                    "excerpt": "Table 1 benchmark configurations; Table 2 MAD framework comparison; 'we consider the number of LLM calls to be 6'; T=1, top-p=1",
+                    "locator": "===== PDF PAGE 6 =====",
+                    "source_id": "papers/text/zhang-et-al-2025-mad-question.txt"
+                  },
+                  {
+                    "excerpt": "ANOVA test... p-value greater than 0.05 as an indicator that no significant differences—a tie—exist",
+                    "locator": "===== PDF PAGE 3 =====",
+                    "source_id": "papers/text/zhang-et-al-2025-mad-question.txt"
+                  }
+                ],
+                "confidence": 0.97,
+                "counterevidence": [],
+                "derived_from_claim_ids": [],
+                "id": "work:002-inv-zhang-when-r2:C001",
+                "statement": "Zhang et al. 2025 evaluate 5 MAD frameworks (SoM, Multi-Persona, Exchange-of-Thoughts, ChatEval, AgentVerse) x 9 benchmarks spanning general knowledge (MMLU, MMLU-Pro, CommonsenseQA, ARC-Challenge, AGIEval), math (GSM8K, MATH), and programming (HumanEval, MBPP) x 4 foundation models (GPT-4o-mini, Claude-3.5-haiku, Llama3.1-8b, Llama3.1-70b), against SA/CoT/SC baselines; debate rounds are adjusted so all MAD methods align to ~6 LLM calls by default, T=1/top-p=1, win/tie/lose vs CoT decided by ANOVA with p>0.05 counted as a tie, and all experiments repeated three times with standard deviations ('===== PDF PAGE 1 =====', '===== PDF PAGE 6 =====', '===== PDF PAGE 7 =====')."
+              },
+              {
+                "basis": "observed",
+                "citations": [
+                  {
+                    "excerpt": "none of these MAD methods achieve a win rate higher than 20% when compared to CoT across 36 scenarios (4 models × 9 benchmarks)",
+                    "locator": "===== PDF PAGE 3 =====",
+                    "source_id": "papers/text/zhang-et-al-2025-mad-question.txt"
+                  },
+                  {
+                    "excerpt": "SoM, EoT, ChatEval, and AgentVerse only outperformed CoT in approximately 15% cases, while MP did not demonstrate significant improvement over CoT",
+                    "locator": "===== PDF PAGE 7 =====",
+                    "source_id": "papers/text/zhang-et-al-2025-mad-question.txt"
+                  }
+                ],
+                "confidence": 0.97,
+                "counterevidence": [],
+                "derived_from_claim_ids": [],
+                "id": "work:002-inv-zhang-when-r2:C002",
+                "statement": "Headline negative result: no MAD method achieves a win rate higher than 20% vs CoT across 36 scenarios (4 models x 9 benchmarks); SoM, EoT, ChatEval and AgentVerse outperform CoT in only ~15% of cases and MP in 0%; by task type, MAD performs worst on programming and relatively best on mathematical reasoning ('===== PDF PAGE 3 =====', '===== PDF PAGE 7 =====')."
+              },
+              {
+                "basis": "observed",
+                "citations": [
+                  {
+                    "excerpt": "the underperformance becomes even more pronounced when compared to SC, especially when using a comparable number of LLM calls or tokens",
+                    "locator": "===== PDF PAGE 3 =====",
+                    "source_id": "papers/text/zhang-et-al-2025-mad-question.txt"
+                  }
+                ],
+                "confidence": 0.96,
+                "counterevidence": [],
+                "derived_from_claim_ids": [],
+                "id": "work:002-inv-zhang-when-r2:C003",
+                "statement": "The matched-compute comparison is decisive: MAD's underperformance 'becomes even more pronounced when compared to SC, especially when using a comparable number of LLM calls or tokens' — i.e., independent sampling plus majority-vote aggregation dominates debate at equal inference budget ('===== PDF PAGE 3 =====')."
+              },
+              {
+                "basis": "observed",
+                "citations": [
+                  {
+                    "excerpt": "MAD frameworks outperform SA in most conditions (34 out of 45 conditions utilizing GPT-4o-mini), which perfectly aligns with previous findings in the field",
+                    "locator": "===== PDF PAGE 8 =====",
+                    "source_id": "papers/text/zhang-et-al-2025-mad-question.txt"
+                  }
+                ],
+                "confidence": 0.95,
+                "counterevidence": [],
+                "derived_from_claim_ids": [],
+                "id": "work:002-inv-zhang-when-r2:C004",
+                "statement": "Reconciliation with prior positives: MAD frameworks outperform direct single-agent prompting (SA) in 34 of 45 GPT-4o-mini conditions, 'which perfectly aligns with previous findings in the field', but ChatEval and SoM were never compared to CoT in their original papers, MP was compared to CoT only on the undisclosed CIAR dataset, EoT's CoT advantage replicates only on Claude-3.5-haiku, and AgentVerse's HumanEval edge relies on an extra execution-evaluation stage 'arguably beyond the scope of MAD designs' ('===== PDF PAGE 8 =====')."
+              },
+              {
+                "basis": "observed",
+                "citations": [
+                  {
+                    "excerpt": "increasing the number of agents or debate rounds often results in either stagnation or even a decline in performance... rules out suboptimal hyperparameter configurations as a universal explanation",
+                    "locator": "===== PDF PAGE 9 =====",
+                    "source_id": "papers/text/zhang-et-al-2025-mad-question.txt"
+                  }
+                ],
+                "confidence": 0.95,
+                "counterevidence": [],
+                "derived_from_claim_ids": [],
+                "id": "work:002-inv-zhang-when-r2:C005",
+                "statement": "Hyperparameter scaling does not rescue MAD: increasing debate rounds 2->4 or agents 3->9 leaves outcomes mostly unchanged or declining (e.g., SoM still underperforms CoT on MMLU and HumanEval at 4 rounds or 9 agents); the sole exception is EoT on GSM8K, which improves continuously from 3 to 9 agents and surpasses CoT — so suboptimal hyperparameters are ruled out as a universal explanation for MAD's inferiority ('===== PDF PAGE 8 =====', '===== PDF PAGE 9 =====')."
+              },
+              {
+                "basis": "observed",
+                "citations": [
+                  {
+                    "excerpt": "SC effectively utilizes the increased inference budget. However, MAD frameworks either: (i) show no positive trend... or (ii) continue to underperform SC while consuming a comparable number of tokens",
+                    "locator": "===== PDF PAGE 9 =====",
+                    "source_id": "papers/text/zhang-et-al-2025-mad-question.txt"
+                  },
+                  {
+                    "excerpt": "overly aggressive methods may introduce instability, while conservative methods may struggle to capitalize on opportunities for correction",
+                    "locator": "===== PDF PAGE 9 =====",
+                    "source_id": "papers/text/zhang-et-al-2025-mad-question.txt"
+                  }
+                ],
+                "confidence": 0.93,
+                "counterevidence": [],
+                "derived_from_claim_ids": [],
+                "id": "work:002-inv-zhang-when-r2:C006",
+                "statement": "Efficiency and mechanism: SC 'effectively utilizes the increased inference budget' while MAD either shows no positive scaling with tokens (SoM on MMLU) or improves yet still underperforms SC at comparable token counts (EoT on MMLU/GSM8K); per-question error analysis reveals a correction/instability trade-off — MP, ChatEval and AgentVerse correct many wrong answers but also erroneously flip many initially correct ones, whereas SoM and EoT are conservative, introducing few new errors but correcting few ('===== PDF PAGE 9 =====', Figure 6 on '===== PDF PAGE 25 =====')."
+              },
+              {
+                "basis": "observed",
+                "citations": [
+                  {
+                    "excerpt": "Heter-SoM improves SoM-average by 6.4%, and Heter-EoT improves EoT-average by 8.2%... all the considered MAD methods outperform CoT-Average by up to 5.8%",
+                    "locator": "===== PDF PAGE 11 =====",
+                    "source_id": "papers/text/zhang-et-al-2025-mad-question.txt"
+                  },
+                  {
+                    "excerpt": "Using identical agents from the same model undermines the very premise of debate—diverse knowledge and reasoning",
+                    "locator": "===== PDF PAGE 4 =====",
+                    "source_id": "papers/text/zhang-et-al-2025-mad-question.txt"
+                  }
+                ],
+                "confidence": 0.95,
+                "counterevidence": [
+                  "Gains are benchmarked against the AVERAGE of the two single-model MAD runs, not the best single model: e.g., on MMLU SoM-Llama (84.6) exceeds SoM-Heter (83.5), and vs CoT-Average several per-benchmark cells are negative (ARC-Challenge -1.4%, MBPP -2.0%) ('===== PDF PAGE 11 =====' Table 4) — 'universal antidote' holds on average, not per benchmark.",
+                  "No heterogeneous self-consistency control (mixed-model majority vote with no communication) was run, so the debate-specific contribution of heterogeneity beyond decorrelated sampling is not identified."
+                ],
+                "derived_from_claim_ids": [],
+                "id": "work:002-inv-zhang-when-r2:C007",
+                "statement": "Model heterogeneity as 'a universal antidote': Heter-MAD, where each agent generation queries a randomly drawn model from {GPT-4o-mini, Llama3.1-70b} with p=0.5, consistently improves all tested frameworks — Heter-SoM +6.4% and Heter-EoT +8.2% over the average of the two single-model runs, and all heterogeneous MAD variants beat CoT-Average by up to +5.8%; gains concentrate on questions where the two models have complementary solvability (CW/WC categories), simpler frameworks (SoM, EoT) benefit more than complex ones (ChatEval, AgentVerse), and the authors argue identical agents 'undermine the very premise of debate' ('===== PDF PAGE 1 =====', '===== PDF PAGE 4 =====', '===== PDF PAGE 10 =====', '===== PDF PAGE 11 =====', '===== PDF PAGE 12-13 =====')."
+              },
+              {
+                "basis": "observed",
+                "citations": [
+                  {
+                    "excerpt": "Smit et al. (2024) found that MAD methods do not reliably outperform other ensembling reasoning strategies. However, they specifically focus on medical prompting methods and medical benchmarks, which limits the generalizability",
+                    "locator": "===== PDF PAGE 5 =====",
+                    "source_id": "papers/text/zhang-et-al-2025-mad-question.txt"
+                  },
+                  {
+                    "excerpt": "rebuttals focus on outcome differences rather than analyzing the logic behind discrepancies",
+                    "locator": "===== PDF PAGE 13 =====",
+                    "source_id": "papers/text/zhang-et-al-2025-mad-question.txt"
+                  },
+                  {
+                    "excerpt": "Table 5: Evaluations details of previous MAD research. Overlapped benchmarks are marked out.",
+                    "locator": "===== PDF PAGE 15 =====",
+                    "source_id": "papers/text/zhang-et-al-2025-mad-question.txt"
+                  }
+                ],
+                "confidence": 0.93,
+                "counterevidence": [],
+                "derived_from_claim_ids": [],
+                "id": "work:002-inv-zhang-when-r2:C008",
+                "statement": "Positioning and self-identified limits: the paper credits Du et al. 2023's SoM as the foundational MAD design and replicates its MAD>SA result, but attributes MAD's overvaluation to fragmented, selective evaluation — Table 5 shows minimal benchmark overlap among prior MAD papers; it aligns with Smit et al. (2024)'s finding that MAD does not reliably outperform ensembling strategies while criticizing its medical-only scope as limiting generalizability, and notes Khan et al. 2024's single-agent comparison was calibrated and limited to three datasets; its future agenda flags that agents 'engage in debates based solely on their complete responses... rebuttals focus on outcome differences rather than analyzing the logic behind discrepancies', and that current benchmarks 'require only a single knowledge point', so scenarios needing genuinely distributed knowledge may better suit MAD ('===== PDF PAGE 2 =====', '===== PDF PAGE 5 =====', '===== PDF PAGE 13 =====', '===== PDF PAGE 14 =====', '===== PDF PAGE 15 =====')."
+              }
+            ],
+            "content_sha256": "24ba60001ffbfb1612153e0748e0d170b14a153d3583928b709761f02158670c",
+            "counterevidence": [
+              "The win/tie/lose classification counts ANOVA p>0.05 as a 'tie' with only 3 repetitions per condition, so the ~40-60% tie rates partly reflect low statistical power rather than proven equivalence; the direction of the effect, however, is corroborated by the raw accuracies in Table 3 (e.g., SoM below CoT on 6 of 9 GPT-4o-mini benchmarks) ('===== PDF PAGE 3 =====', '===== PDF PAGE 7 =====').",
+              "MAD does beat direct single-agent prompting in 34/45 conditions, and SoM beats CoT on GSM8K across all round variations; debate is not uniformly harmful — the negative result is specifically against CoT/SC as stronger baselines ('===== PDF PAGE 8-9 =====').",
+              "Default matching is by LLM-call count (6), but MAD prompts embed peers' full responses, inflating input tokens; the token-level efficiency comparison relies on Figure 6 (appendix), and proprietary-model token counts could not be precisely controlled ('===== PDF PAGE 9 =====')."
+            ],
+            "id": "packet:work:002-inv-zhang-when-r2",
+            "knowledge_links": [
+              {
+                "rationale": "Covers the full wave-1 objective: design, headline results and interactions (task type, heterogeneity), hyperparameter scaling, compute/efficiency accounting, positioning vs Du et al., and stated limitations, each with page markers.",
+                "relation": "answers",
+                "source_id": "self",
+                "target_id": "question:work:001-inv-zhang-when"
+              }
+            ],
+            "next_observation": null,
+            "node_id": "work:002-inv-zhang-when-r2",
+            "objective": "What does Zhang et al. 2025 (papers/text/zhang-et-al-2025-mad-question.txt, 'If Multi-Agent Debate Is the Answer, What Is the Question?') establish: the 5 MAD methods x 9 benchmarks x 4 models design; the headline negative result that MAD methods rarely beat CoT (win rates under 20% across 36 scenarios) and underperform self-consistency at comparable LLM-call/token budgets; the hyperparameter experiments (agents 3-9, rounds 2-4) showing stagnation/decline; efficiency findings on inference-budget utilization; the model-heterogeneity result as a 'universal antidote'; robustness findings; and how the paper positions itself against Du et al. 2023 and Smit et al. Keep the answer compact: at most 8 claims, each with a `===== PDF PAGE N =====` marker.",
+            "raised_questions": [
+              {
+                "acceptance_condition": "A matched-compute experiment crossing communication (none/SC vs SoM-style debate) x pool (homogeneous vs heterogeneous models) on >=3 task strata, reporting accuracy with CIs and a preregistered decision rule: if Heter-SC >= Heter-MAD, diversity-only is supported; if Heter-MAD > Heter-SC by a preregistered margin, communication adds identifiable value.",
+                "discriminating_outcomes": [
+                  "Heter-SC ≈ Heter-MAD at equal budget → communication contributes nothing beyond decorrelated sampling; staged retrieval-mediated designs must justify themselves on other grounds (e.g., token efficiency of selective exchange).",
+                  "Heter-MAD > Heter-SC only on multi-knowledge/compositional tasks → deliberation value is conditioned on task topology, supporting the root note's moderator structure.",
+                  "Heter-MAD > Heter-SC uniformly → a genuine deliberation effect exists and the note's mechanism must explain what communication adds beyond diversity."
+                ],
+                "local_id": "rz1",
+                "rationale": "Zhang's 'universal antidote' compares Heter-MAD only to same-model MAD averages and CoT-Average; without a heterogeneous-SC control, the heterogeneity result cannot distinguish a diversity-only mechanism (decorrelated errors suffice) from a deliberation mechanism (communication adds value given diversity). This is the pivotal discrimination for the root note's causal model and its predictions.",
+                "required_source_hints": [
+                  "papers/text/zhang-et-al-2025-mad-question.txt"
+                ],
+                "tags": [
+                  "method",
+                  "uncertainty",
+                  "evidence"
+                ],
+                "target_question_ids": [
+                  "question:work:001-inv-zhang-when"
+                ],
+                "text": "Under matched LLM-call and token budgets, does heterogeneous self-consistency (each sample drawn from a distinct model, majority vote, no inter-agent communication) match or exceed Heter-MAD, and does the answer interact with task type?"
+              },
+              {
+                "acceptance_condition": "Construct or select task strata scored by number of required complementary knowledge/fact units (verified by ablating information given to single agents), then test the communication-condition x stratum interaction at matched compute with adequate power for the interaction, not just main effects.",
+                "discriminating_outcomes": [
+                  "Ordering flips in favor of staged/debate conditions as knowledge-requirement grows → task topology is a real moderator; the corpus null is scope-limited.",
+                  "No interaction: SC dominates at all strata → the topology conjecture is falsified and the negative result generalizes."
+                ],
+                "local_id": "rz2",
+                "rationale": "Zhang's own boundary claim ('===== PDF PAGE 14 =====') is that current benchmarks need only a single knowledge point, so MAD may be unnecessary there; if true, the headline negative result is task-topology-confounded and the root note must stratify by knowledge-requirement rather than treat the null as universal.",
+                "required_source_hints": [
+                  "papers/text/zhang-et-al-2025-mad-question.txt",
+                  "papers/text/smit-et-al-2023-going-mad.txt"
+                ],
+                "tags": [
+                  "uncertainty",
+                  "method"
+                ],
+                "target_question_ids": [
+                  "question:work:001-inv-zhang-when"
+                ],
+                "text": "Does the MAD-vs-SC ordering reverse on tasks that genuinely require combining multiple, distributed knowledge points, as Zhang conjectures but never tests?"
+              }
+            ],
+            "source_ids_consulted": [
+              "papers/text/zhang-et-al-2025-mad-question.txt"
+            ],
+            "sufficiency": "ready_to_synthesize",
+            "unresolved": [
+              "Whether heterogeneous self-consistency (mixed-model sampling + majority vote, no communication) matches Heter-MAD at matched calls/tokens — the control needed to attribute heterogeneity gains to debate rather than to error decorrelation alone.",
+              "Why aggressive MAD variants flip initially correct answers: Zhang's corrected/erred analysis is behavioral and cannot distinguish social-influence conformity (Lorenz/Choi-style) from noise amplification or judge/aggregation failures.",
+              "Whether task topology (benchmarks requiring multiple, complementary knowledge points) reverses the MAD vs SC ordering — Zhang conjectures yes ('===== PDF PAGE 14 =====') but tests nothing.",
+              "Runtime rejected knowledge-link proposal outside the frozen board or with invalid endpoint types: self supports question:demand:D4",
+              "Runtime rejected knowledge-link proposal outside the frozen board or with invalid endpoint types: self supports question:demand:D3",
+              "Runtime rejected knowledge-link proposal outside the frozen board or with invalid endpoint types: self refines question:raised:784a683dbe8a:rq1",
+              "Runtime rejected knowledge-link proposal outside the frozen board or with invalid endpoint types: self refines answer:work:001-inv-du-debate",
+              "Runtime rejected knowledge-link proposal outside the frozen board or with invalid endpoint types: self supports question:work:001-inv-smit-mad"
+            ]
+          },
+          "packet_id": "packet:work:002-inv-zhang-when-r2",
+          "question_ids": [
+            "question:demand:D3",
+            "question:demand:D4",
+            "question:work:001-inv-zhang-when",
+            "question:work:002-inv-zhang-when-r2"
+          ],
+          "sufficiency": "ready_to_synthesize",
+          "summary": "Zhang et al. 2025 (arXiv:2502.08788v3; position paper subtitled 'Stop Overvaluing Multi-Agent Debate—We Must Rethink Evaluation and Embrace Model Heterogeneity') is the corpus's decisive matched-compute reappraisal. DESIGN: 5 MAD frameworks (SoM=Du et al. 2023, Multi-Persona, Exchange-of-Thoughts, ChatEval, AgentVerse) x 9 benchmarks (general knowledge: MMLU, MMLU-Pro, CommonsenseQA, ARC-Challenge, AGIEval; math: GSM8K, MATH; programming: HumanEval, MBPP) x 4 models (GPT-4o-mini, Claude-3.5-haiku, Llama3.1-8b, Llama3.1-70b), vs SA/CoT/SC baselines, debate rounds adjusted so every MAD method uses ~6 LLM calls; 3 repetitions with std (===== PDF PAGE 1, 6, 7 =====). HEADLINE: no MAD method exceeds a 20% win rate vs CoT across 36 scenarios; SoM/EoT/ChatEval/AgentVerse win ~15%, MP 0%; worse on programming, relatively better on math; the gap widens vs self-consistency at comparable LLM-call or token budgets (===== PDF PAGE 3, 7-8 =====). RECONCILIATION: MAD beats direct single-agent prompting in 34/45 GPT-4o-mini conditions—'perfectly aligns with previous findings'—but SoM and ChatEval were never compared to CoT in their original papers, so Du-style positives hold only against the weakest baseline (===== PDF PAGE 8 =====). HYPERPARAMETERS: agents 3->9, rounds 2->4 yield mostly stagnation or decline (sole exception EoT on GSM8K), ruling out misconfiguration as a universal explanation (===== PDF PAGE 8-9 =====). EFFICIENCY: SC converts extra tokens into accuracy; MAD is flat (SoM on MMLU) or trails SC at comparable tokens (EoT); per-question analysis shows aggressive methods (MP/ChatEval/AgentVerse) correct many errors but flip many correct answers, while conservative ones (SoM/EoT) avoid new errors but correct few—a correction/instability trade-off (===== PDF PAGE 9, 25 =====). HETEROGENEITY: Heter-MAD (each generation queries a random model from {GPT-4o-mini, Llama3.1-70b}, p=0.5) improves every tested framework (+6.4% SoM, +8.2% EoT vs single-model averages; up to +5.8% vs CoT-Average), with gains concentrated where models have complementary solvability and in simpler frameworks—'a universal antidote' (===== PDF PAGE 1, 4, 10-13 =====). POSITIONING: credits Du et al. 2023 as foundational but attributes MAD's overvaluation to fragmented, selective evaluation (Table 5 shows minimal benchmark overlap across prior MAD papers); aligns with Smit et al. 2024's null while dismissing its medical-only scope; flags that agents debate whole responses yet rebut final-answer differences rather than reasoning, and that current benchmarks need only single knowledge points (===== PDF PAGE 2, 5, 13, 14, 15 =====). Key identification gap for the root note: no heterogeneous self-consistency control, so the debate-specific value of heterogeneity over plain decorrelated sampling is not identified.",
+          "tags": [
+            "evidence",
+            "counterexample",
+            "uncertainty"
+          ],
+          "unresolved": [
+            "Whether heterogeneous self-consistency (mixed-model sampling + majority vote, no communication) matches Heter-MAD at matched calls/tokens — the control needed to attribute heterogeneity gains to debate rather than to error decorrelation alone.",
+            "Why aggressive MAD variants flip initially correct answers: Zhang's corrected/erred analysis is behavioral and cannot distinguish social-influence conformity (Lorenz/Choi-style) from noise amplification or judge/aggregation failures.",
+            "Whether task topology (benchmarks requiring multiple, complementary knowledge points) reverses the MAD vs SC ordering — Zhang conjectures yes ('===== PDF PAGE 14 =====') but tests nothing.",
+            "Runtime rejected knowledge-link proposal outside the frozen board or with invalid endpoint types: self supports question:demand:D4",
+            "Runtime rejected knowledge-link proposal outside the frozen board or with invalid endpoint types: self supports question:demand:D3",
+            "Runtime rejected knowledge-link proposal outside the frozen board or with invalid endpoint types: self refines question:raised:784a683dbe8a:rq1",
+            "Runtime rejected knowledge-link proposal outside the frozen board or with invalid endpoint types: self refines answer:work:001-inv-du-debate",
+            "Runtime rejected knowledge-link proposal outside the frozen board or with invalid endpoint types: self supports question:work:001-inv-smit-mad"
+          ]
+        },
+        "id": "answer:work:002-inv-zhang-when-r2",
+        "incoming_links": [],
+        "kind": "answer",
+        "outgoing_links": [
+          {
+            "content_sha256": "07f1022d37dfd56499cdd707e850cd934d60f0cf452793255171959cdbcd391c",
+            "id": "link:07f1022d37dfd56499cdd707",
+            "origin": "agent",
+            "proposed_by_node_id": "work:002-inv-zhang-when-r2",
+            "rationale": "Covers the full wave-1 objective: design, headline results and interactions (task type, heterogeneity), hyperparameter scaling, compute/efficiency accounting, positioning vs Du et al., and stated limitations, each with page markers.",
+            "relation": "answers",
+            "source_id": "answer:work:002-inv-zhang-when-r2",
+            "target_id": "question:work:001-inv-zhang-when"
+          },
+          {
+            "content_sha256": "3037579925e77482c5550a96ee64f6e5d1961c3b0b2081a5174850481267113a",
+            "id": "link:3037579925e77482c5550a96",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "raises",
+            "source_id": "answer:work:002-inv-zhang-when-r2",
+            "target_id": "question:raised:24ba60001ffb:rz1"
+          },
+          {
+            "content_sha256": "381ebb5517c4669e51a6969bde1854eddf1d2227dac7498d3429706e3becf9c9",
+            "id": "link:381ebb5517c4669e51a6969b",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:002-inv-zhang-when-r2",
+            "target_id": "question:demand:D3"
+          },
+          {
+            "content_sha256": "3d48d2dd078875ecccd01e4d9bddaf8d42d6af23ffbd6bf5de298558bb2cd477",
+            "id": "link:3d48d2dd078875ecccd01e4d",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "answers",
+            "source_id": "answer:work:002-inv-zhang-when-r2",
+            "target_id": "question:work:002-inv-zhang-when-r2"
+          },
+          {
+            "content_sha256": "513e7ecd7528db2736fa1f5233f7c2a92d2bdb31515a83a8ee5298228e378214",
+            "id": "link:513e7ecd7528db2736fa1f52",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "raises",
+            "source_id": "answer:work:002-inv-zhang-when-r2",
+            "target_id": "question:raised:24ba60001ffb:rz2"
+          },
+          {
+            "content_sha256": "68d1db4f793a473de8dff71309f13b0356a9e0afbc1366812b3e21c549de3173",
+            "id": "link:68d1db4f793a473de8dff713",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:002-inv-zhang-when-r2",
+            "target_id": "question:work:001-inv-zhang-when"
+          },
+          {
+            "content_sha256": "9171d74603d31ac03f8c9758b27435225dd054a72f47015747c00ecbc7163b2e",
+            "id": "link:9171d74603d31ac03f8c9758",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:002-inv-zhang-when-r2",
+            "target_id": "question:demand:D4"
+          }
+        ]
+      },
+      "result_ids": [
+        "answer:work:002-inv-zhang-when-r2"
+      ],
+      "result_sha256": "a37bbe91da35f200f95199d84a0ba90ec13342872e1329977e5e058061ed4dfa",
+      "sequence": 2,
+      "tool": "get_entry"
+    },
+    {
+      "arguments": {
+        "entry_id": "answer:work:002-inv-choi-r2"
+      },
+      "result": {
+        "content": {
+          "claim_ids": [
+            "work:002-inv-choi-r2:C001",
+            "work:002-inv-choi-r2:C002",
+            "work:002-inv-choi-r2:C003",
+            "work:002-inv-choi-r2:C004",
+            "work:002-inv-choi-r2:C005",
+            "work:002-inv-choi-r2:C006",
+            "work:002-inv-choi-r2:C007",
+            "work:002-inv-choi-r2:C008"
+          ],
+          "content_sha256": "e9df6e5efd5af5afe8bef9a6e5f63ca8c920db35e304db6a7c156e5a9039826c",
+          "id": "answer:work:002-inv-choi-r2",
+          "node_id": "work:002-inv-choi-r2",
+          "packet": {
+            "account": "Choi et al. 2025 (ACL Findings) ran >2,500 structured LLM debates on five ground-truth-free social topics with proponent, opponent, and neutral (always GPT-4o) agents, manipulating group size (1:2, 2:1, up to 1:8) and 'intelligence' (parameter size, large vs small models from GPT/Claude/Qwen). Neutral agents conform significantly to numerical majorities (chi2=164.839, p<0.001; CR 63.5-72.1% at 2:1 vs 39.4-42.2% at 1:2) and to higher-intelligence sides (chi2=142.285, p<0.001; CR 74.3% when the proponent is the large model vs 39.8% when it is small). Critically, intelligence dominates numbers: one large-model agent against two small-model agents still wins 66.3% of turns, while two small agents against one large win only 42.2%; effect size for intelligence (eta_p2~0.167, large) dwarfs majority size (~0.068, moderate), and more capable evaluators (GPT-4o-mini vs GPT-3.5-turbo) are less swayed by headcount as ratios scale to 1:8. Authors conclude argument quality outweighs quantity. However, every condition exposes the neutral to full 256-token persuasive arguments across 3 turns; there is no bare-answer condition, so the paper cannot discriminate answer-only exposure from rationale-mediated influence (rq1 remains open; Choi only bounds it from the rationale side). Conformity here is evaluator persuasion on opinion topics, not accuracy change on verifiable tasks.",
+            "assumptions": [
+              "The extraction's ===== PDF PAGE N ===== markers are accurate; Table 2 values were read from the extracted text of PDF PAGE 6.",
+              "Absence of an answer-only condition in the design, results, and discussion sections is treated as absence from the study; appendices (model lists, ANOVA details, prompt text) were only partially inspected.",
+              "Chi-square tests are on turns/discussions pooled across topics; per-scenario Ns and provider breakdowns (Appendix C) were not extracted, so claim confidence on exact magnitudes relies on the reported tables."
+            ],
+            "boundary_findings": [
+              {
+                "alternative_explanation": "An answer-only control could exist in an appendix not fully read; section 3's design description and Figure 1 make this unlikely.",
+                "consequence_if_absorbed": "The note would mis-cite Choi as evidence that mere answer exposure drives conformity/diversity collapse in LLMs, mis-specifying whether retrieval-mediated staging should gate how many peer answers are seen versus whether rationales are attached - the two designs yield different predictions.",
+                "evidence": [
+                  "papers/text/choi-et-al-2025-conformity.txt ===== PDF PAGE 5 ===== (protocol: neutral 'evaluates the arguments presented by both sides and selects the most persuasive agent')",
+                  "papers/text/choi-et-al-2025-conformity.txt ===== PDF PAGE 7 ===== (conclusion that 'logical and persuasive arguments outweigh numerical advantage', with no answer-only comparison)"
+                ],
+                "narrative": "Choi et al. provides only rationale-accompanied influence: all 2,500+ debates expose the neutral agent to full persuasive arguments, and no bare-answer or vote-only condition exists. The paper therefore cannot discriminate whether LLM conformity requires reasoning exposure or also arises from mere answer exposure - exactly the fork in raised question rq1.",
+                "smallest_suspected_scope": "The social-influence pathway of the causal model (D3) and the rq1-dependent D5 predictions about gating exposure content vs exposure volume."
+              }
+            ],
+            "child_packet_ids": [],
+            "claims": [
+              {
+                "basis": "observed",
+                "citations": [
+                  {
+                    "excerpt": "By simulating over 2,500 debates, we analyze how initially neutral agents, assigned a centrist disposition, adopt specific stances over time.",
+                    "locator": "===== PDF PAGE 1 =====, lines 1-30 (abstract)",
+                    "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+                  },
+                  {
+                    "excerpt": "proponent and opponent agents each have three opportunities to speak per turn. The speaking order is randomized... The neutral agent is consistently modeled using GPT-4o... fixed temperature of 0.7... Response lengths are capped at 256 tokens",
+                    "locator": "===== PDF PAGE 5 =====, lines 368-427",
+                    "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+                  }
+                ],
+                "confidence": 0.95,
+                "counterevidence": [],
+                "derived_from_claim_ids": [],
+                "id": "work:002-inv-choi-r2:C001",
+                "statement": "Design: Choi et al. simulate >2,500 multi-agent debates among proponent, opponent, and neutral agents on five socially contentious topics without definitive answers (basic income, immigration policy, death penalty, educational equality, gender wage gap); proponent/opponent agents are drawn from GPT, Claude, and Qwen families, the neutral agent is always GPT-4o, debates run 3 turns with 3 speaking opportunities per side per turn, randomized speaking order, temperature 0.7, and 256-token response caps."
+              },
+              {
+                "basis": "observed",
+                "citations": [
+                  {
+                    "excerpt": "H1: LLM agents would conform to the majority opinion when one group has more agents. H2: LLM agents tend to conform to the side with relatively higher intelligence.",
+                    "locator": "===== PDF PAGE 3 =====, lines 283-296",
+                    "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+                  },
+                  {
+                    "excerpt": "we use model parameter size as a practical [proxy]... e: 1 Large vs 1 Small (Superior); j: 1 Large vs 2 Small (Superior)",
+                    "locator": "===== PDF PAGE 4 =====, lines 291-336 (Table 1)",
+                    "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+                  }
+                ],
+                "confidence": 0.95,
+                "counterevidence": [],
+                "derived_from_claim_ids": [],
+                "id": "work:002-inv-choi-r2:C002",
+                "statement": "Design: hypotheses are H1 (agents conform to the numerical majority), H2 (agents conform to the side with relatively higher intelligence), H3 (larger group-size disparity strengthens majority conformity); intelligence is operationalized as model parameter size (large vs small), justified by MMLU-style benchmark correlations, and Experiment A uses ten scenarios (a-j) crossing proponent:opponent ratios (2, 0.5, 1) with superior/equivalent/inferior model size."
+              },
+              {
+                "basis": "observed",
+                "citations": [
+                  {
+                    "excerpt": "neutral agents are significantly more likely to conform to the major group (chi2 = 164.839, p < 0.001, df = 1); a: 63.53/33.60; b: 39.40/10.40; c: 72.11/41.33; d: 42.22/8.67",
+                    "locator": "===== PDF PAGE 6 =====, Table 2 and Discussion 4.1 (lines 429-545)",
+                    "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+                  }
+                ],
+                "confidence": 0.95,
+                "counterevidence": [],
+                "derived_from_claim_ids": [],
+                "id": "work:002-inv-choi-r2:C003",
+                "statement": "Majority effect (H1 supported): with intelligence held equal, neutral agents conform significantly more to the majority side (chi2 = 164.839, p < 0.001, df = 1); proponent-side conformity rates are 63.53% and 72.11% under a 2:1 proponent majority (scenarios a, c) versus 39.40% and 42.22% under a 1:2 proponent minority (b, d), with full-conformity ratios 33.60/41.33% vs 10.40/8.67%."
+              },
+              {
+                "basis": "observed",
+                "citations": [
+                  {
+                    "excerpt": "higher-intelligence agents, who present more logical and persuasive arguments, significantly increasing the likelihood of neutral agents conforming to their stance (chi2 = 142.285, p < 0.001, df = 1)",
+                    "locator": "===== PDF PAGE 6 =====, Table 2 and Discussion 4.1 (lines 429-545)",
+                    "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+                  }
+                ],
+                "confidence": 0.95,
+                "counterevidence": [],
+                "derived_from_claim_ids": [],
+                "id": "work:002-inv-choi-r2:C004",
+                "statement": "Intelligence effect (H2 supported): with group size held at 1:1, a large-model debater elicits significantly more neutral-agent conformity than a small-model debater (chi2 = 142.285, p < 0.001, df = 1): scenario e (1 large vs 1 small) yields CR 74.33% / FCR 52.50%, versus scenario f (1 small vs 1 large) CR 39.83% / FCR 16.00%."
+              },
+              {
+                "basis": "observed",
+                "citations": [
+                  {
+                    "excerpt": "g: 83.17/64.00; h: 25.67/5.50; i: 42.17/15.50; j: 66.33/40.50",
+                    "locator": "===== PDF PAGE 6 =====, Table 2",
+                    "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+                  },
+                  {
+                    "excerpt": "the majority size shows a moderate effect (eta_p2 ~ 0.068), intelligence has a significantly larger impact (eta_p2 ~ 0.1665)... a single high-intelligence agent exerts more influence than a larger group with lower intelligence",
+                    "locator": "===== PDF PAGE 7 =====, Discussion 4.1 (lines 556-600)",
+                    "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+                  }
+                ],
+                "confidence": 0.95,
+                "counterevidence": [],
+                "derived_from_claim_ids": [
+                  "work:002-inv-choi-r2:C003",
+                  "work:002-inv-choi-r2:C004"
+                ],
+                "id": "work:002-inv-choi-r2:C005",
+                "statement": "Intelligence outweighs numbers: a single high-intelligence agent defeats a larger lower-intelligence group - scenario j (1 large vs 2 small) yields CR 66.33% / FCR 40.50% while scenario i (2 small vs 1 large) yields only CR 42.17% / FCR 15.50%; combined superiority (g: 2 large vs 1 small) reaches CR 83.17% / FCR 64.00% against h (1 small vs 2 large) CR 25.67% / FCR 5.50%; Welch's ANOVA gives a large effect for intelligence (eta_p2 ~ 0.1665) versus moderate for majority size (eta_p2 ~ 0.068), with post hoc power > 0.99 for the intelligence effect."
+              },
+              {
+                "basis": "observed",
+                "citations": [
+                  {
+                    "excerpt": "the proponent-opponent agent ratio is varied from 1:2 to 1:4 and 1:8",
+                    "locator": "===== PDF PAGE 5 =====, Experiment B (lines 369-380)",
+                    "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+                  },
+                  {
+                    "excerpt": "This effect is most evident in GPT-3.5-turbo, where conformity rates scale proportionally with majority size, whereas GPT-4o-mini, with higher intelligence, exhibits a weaker relation between numerical advantage and conformity.",
+                    "locator": "===== PDF PAGE 7 =====, Extended Analysis (lines 596-606)",
+                    "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+                  }
+                ],
+                "confidence": 0.9,
+                "counterevidence": [],
+                "derived_from_claim_ids": [],
+                "id": "work:002-inv-choi-r2:C006",
+                "statement": "Ratio scaling is moderated by evaluator capability (Experiment B): as the majority:minority ratio grows from 1:2 to 1:4 to 1:8 (GPT-3.5-turbo and GPT-4o-mini debaters, fixed intelligence), conformity rises steadily, but the scaling is strong and proportional only for GPT-3.5-turbo; GPT-4o-mini shows a weak relation between numerical advantage and conformity - i.e., more capable evaluators are less moved by sheer headcount."
+              },
+              {
+                "basis": "observed",
+                "citations": [
+                  {
+                    "excerpt": "conformity trends remain consistent across all five debate topics... debates on the death penalty exhibit a particularly pronounced leftward shift... instances of 'complete agreement' are observed among agents in numerical or intelligence-based minority groups",
+                    "locator": "===== PDF PAGE 7 ===== and ===== PDF PAGE 8 =====, sections 4.2-4.3 (lines 606-770)",
+                    "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+                  }
+                ],
+                "confidence": 0.9,
+                "counterevidence": [],
+                "derived_from_claim_ids": [],
+                "id": "work:002-inv-choi-r2:C007",
+                "statement": "Robustness and qualitative dynamics: conformity trends are consistent across all five topics and survive reversed topic formulations (ruling out prompt-wording artifacts), though the death-penalty topic shows a pronounced baseline shift toward the opponent stance, indicating topic-level implicit model bias; qualitatively, 8:1 debates show group polarization (majority arguments grow more extreme across turns) and minority agents sometimes issue 'complete agreement' capitulations, which the authors interpret as a spiral-of-silence mechanism."
+              },
+              {
+                "basis": "inferred",
+                "citations": [
+                  {
+                    "excerpt": "hypothesizing that neutral agents consider both the quantity and quality of arguments when forming their stance",
+                    "locator": "===== PDF PAGE 2 =====, Introduction (lines 97-100)",
+                    "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+                  },
+                  {
+                    "excerpt": "in LLM-based debates, logical and persuasive arguments outweigh numerical advantage",
+                    "locator": "===== PDF PAGE 7 =====, Discussion 4.1 (lines 590-596)",
+                    "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+                  },
+                  {
+                    "excerpt": "a neutral agent, maintaining a strictly neutral stance, evaluates the arguments presented by both sides and selects the most persuasive agent to support",
+                    "locator": "===== PDF PAGE 5 =====, Discussion Protocol (lines 381-396)",
+                    "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+                  }
+                ],
+                "confidence": 0.85,
+                "counterevidence": [
+                  "Appendices A-E were not read line-by-line; it is remotely possible an unadvertised answer-only control exists there, though the design sections (3.1-3.3) and Figure 1 describe only full-argument debate."
+                ],
+                "derived_from_claim_ids": [
+                  "work:002-inv-choi-r2:C001",
+                  "work:002-inv-choi-r2:C005"
+                ],
+                "id": "work:002-inv-choi-r2:C008",
+                "statement": "Quality-vs-quantity and the rq1 gap: the authors hypothesize neutrals weigh both the quantity and quality of arguments and conclude that 'logical and persuasive arguments outweigh numerical advantage' - but every experimental condition exposes the neutral agent to full persuasive argumentation (three turns of 256-token arguments); no bare-answer / vote-only condition exists, so Choi et al. cannot identify whether LLM conformity requires rationale exposure or also occurs under mere answer exposure (raised question rq1). Conformity in this paper is therefore only evidence about rationale-accompanied influence, and only about stance adoption on ground-truth-free topics, not about error change on verifiable tasks."
+              }
+            ],
+            "content_sha256": "eaee61611e2649a829da16f7790a965c75374e7603a565825921645a6a75659f",
+            "counterevidence": [
+              "Topics have no ground truth by design ('inherently controversial and lack definitive answers', PDF PAGE 1), so 'conformity' is evaluator persuasion, not accuracy change; this paper alone cannot say whether majority/intelligence-driven shifts reduce or amplify error on verifiable tasks.",
+              "'Intelligence' is operationalized as parameter size and is confounded with model family/provider and tuning; the dominance of 'intelligence' may partly be a persuasion-style or verbosity artifact rather than reasoning quality (authors justify the proxy only via MMLU correlations, PDF PAGE 4).",
+              "The neutral evaluator is always GPT-4o (PDF PAGE 5); conformity rates may reflect GPT-4o's evaluative preferences rather than agent-population dynamics in general.",
+              "Topic-level baseline biases (e.g., death-penalty leftward shift, PDF PAGE 7-8) show measured conformity partly tracks prior model bias, not just social influence; the authors mitigate but do not eliminate this via reversed formulations."
+            ],
+            "id": "packet:work:002-inv-choi-r2",
+            "knowledge_links": [
+              {
+                "rationale": "Directly fulfills the retry objective with 8 page-marked claims covering design, majority/intelligence findings, quality-vs-quantity, and the answer-vs-rationale gap.",
+                "relation": "answers",
+                "source_id": "self",
+                "target_id": "question:work:002-inv-choi-r2"
+              },
+              {
+                "rationale": "The wave-1 answer is a blocked failure packet with no claims; this packet supplies the evidence it failed to produce.",
+                "relation": "supersedes",
+                "source_id": "self",
+                "target_id": "answer:work:001-inv-choi-conformity"
+              },
+              {
+                "rationale": "Same underlying question as the r2 retry; all acceptance items (design, quantitative findings, quality-vs-quantity, limitations) are covered with page markers.",
+                "relation": "answers",
+                "source_id": "self",
+                "target_id": "question:work:001-inv-choi-conformity"
+              },
+              {
+                "rationale": "Bounds rq1 from the rationale side: Choi shows conformity under full-argument exposure and provides no bare-answer condition, so answer-only sufficiency remains experimentally open.",
+                "relation": "partially_answers",
+                "source_id": "self",
+                "target_id": "question:raised:784a683dbe8a:rq1"
+              },
+              {
+                "rationale": "Supplies the LLM-side social-influence pathway parameters: majority pull is real but moderate (eta_p2~0.068) and is dominated by capability disparity (eta_p2~0.167), with evaluator capability moderating headcount effects.",
+                "relation": "partially_answers",
+                "source_id": "self",
+                "target_id": "question:demand:D3"
+              },
+              {
+                "rationale": "Provides the Choi portion of the seven-paper reconciliation with explicit PDF page markers, including the caveat that its topics lack ground truth (needed when reconciling with accuracy-based debate results).",
+                "relation": "partially_answers",
+                "source_id": "self",
+                "target_id": "question:demand:D4"
+              }
+            ],
+            "next_observation": null,
+            "node_id": "work:002-inv-choi-r2",
+            "objective": "What does Choi et al. 2025 (papers/text/choi-et-al-2025-conformity.txt) show about conformity in LLM multi-agent debate: the simulation design (proponent/opponent/neutral agents, majority vs minority sizes, intelligence levels, topics); quantitative findings on majority effects and intelligence disparities; whether persuasion quality vs quantity of arguments matters; and anything the paper shows about whether agents shift in response to bare answers versus reasoned arguments (relevant to raised question rq1). Keep the answer compact: at most 8 claims, each with a `===== PDF PAGE N =====` marker.",
+            "raised_questions": [
+              {
+                "acceptance_condition": "A study with ground-truth tasks, mixed-capability LLM agents at varied majority/minority and capability configurations, measuring both answer-shift rates (conformity) and group accuracy pre/post exposure, under matched total inference compute.",
+                "discriminating_outcomes": [
+                  "High-capability minority pulls groups toward the correct answer disproportionately often -> capability-weighted synthesis is warranted and conformity can be beneficial.",
+                  "High-capability minority pulls groups toward its answer regardless of correctness -> conformity is error-amplifying and staging must gate influence, not just exposure.",
+                  "No conformity on verifiable tasks (agents hold initial answers) -> Choi dynamics are opinion-topic-specific and the causal model's social-influence pathway is weak where it matters."
+                ],
+                "local_id": "rq-choi-1",
+                "rationale": "Choi's topics are deliberately ground-truth-free, so its conformity rates measure persuasion, not accuracy. The note's mechanism needs to know whether the capability-dominance effect (one strong agent outweighs a majority) is error-correcting (strong agent is right and pulls the group toward truth) or error-amplifying (strong agent is confidently wrong and collapses diversity) on verifiable tasks - this determines whether staged retrieval should amplify or dampen high-capability voices.",
+                "required_source_hints": [
+                  "papers/text/choi-et-al-2025-conformity.txt",
+                  "papers/text/zhang-et-al-2025-mad-question.txt",
+                  "papers/text/smit-et-al-2023-going-mad.txt"
+                ],
+                "tags": [
+                  "uncertainty",
+                  "evidence",
+                  "method"
+                ],
+                "target_question_ids": [
+                  "question:work:002-inv-choi-r2",
+                  "question:demand:D3"
+                ],
+                "text": "Do Choi-style conformity dynamics - majority pull dominated by single high-capability agents, and minority capitulation - reproduce on tasks with verifiable ground truth, and when they occur, do they reduce or increase aggregate error relative to independent sampling?"
+              }
+            ],
+            "source_ids_consulted": [
+              "papers/text/choi-et-al-2025-conformity.txt"
+            ],
+            "sufficiency": "ready_to_synthesize",
+            "unresolved": [
+              "Exact per-scenario sample sizes, per-provider breakdowns, and Appendix C ANOVA tables were not extracted; needed only if the note quotes provider-specific magnitudes.",
+              "Whether Choi-style conformity dynamics (majority pull, capability dominance, spiral-of-silence capitulation) occur on tasks with verifiable answers remains untested by this paper - the key external-validity bridge for the note's mechanism.",
+              "The 'complete agreement' capitulation frequency is reported only qualitatively (Appendix E example); no quantitative rate of minority silence is available in the extracted text."
+            ]
+          },
+          "packet_id": "packet:work:002-inv-choi-r2",
+          "question_ids": [
+            "question:demand:D3",
+            "question:demand:D4",
+            "question:raised:784a683dbe8a:rq1",
+            "question:work:001-inv-choi-conformity",
+            "question:work:002-inv-choi-r2"
+          ],
+          "sufficiency": "ready_to_synthesize",
+          "summary": "Choi et al. 2025 (ACL Findings) ran >2,500 structured LLM debates on five ground-truth-free social topics with proponent, opponent, and neutral (always GPT-4o) agents, manipulating group size (1:2, 2:1, up to 1:8) and 'intelligence' (parameter size, large vs small models from GPT/Claude/Qwen). Neutral agents conform significantly to numerical majorities (chi2=164.839, p<0.001; CR 63.5-72.1% at 2:1 vs 39.4-42.2% at 1:2) and to higher-intelligence sides (chi2=142.285, p<0.001; CR 74.3% when the proponent is the large model vs 39.8% when it is small). Critically, intelligence dominates numbers: one large-model agent against two small-model agents still wins 66.3% of turns, while two small agents against one large win only 42.2%; effect size for intelligence (eta_p2~0.167, large) dwarfs majority size (~0.068, moderate), and more capable evaluators (GPT-4o-mini vs GPT-3.5-turbo) are less swayed by headcount as ratios scale to 1:8. Authors conclude argument quality outweighs quantity. However, every condition exposes the neutral to full 256-token persuasive arguments across 3 turns; there is no bare-answer condition, so the paper cannot discriminate answer-only exposure from rationale-mediated influence (rq1 remains open; Choi only bounds it from the rationale side). Conformity here is evaluator persuasion on opinion topics, not accuracy change on verifiable tasks.",
+          "tags": [
+            "evidence",
+            "uncertainty",
+            "counterexample"
+          ],
+          "unresolved": [
+            "Exact per-scenario sample sizes, per-provider breakdowns, and Appendix C ANOVA tables were not extracted; needed only if the note quotes provider-specific magnitudes.",
+            "Whether Choi-style conformity dynamics (majority pull, capability dominance, spiral-of-silence capitulation) occur on tasks with verifiable answers remains untested by this paper - the key external-validity bridge for the note's mechanism.",
+            "The 'complete agreement' capitulation frequency is reported only qualitatively (Appendix E example); no quantitative rate of minority silence is available in the extracted text."
+          ]
+        },
+        "id": "answer:work:002-inv-choi-r2",
+        "incoming_links": [],
+        "kind": "answer",
+        "outgoing_links": [
+          {
+            "content_sha256": "0f9fc0308ef38a57765ee25c7246625fbf90087f09eaf4f1cf755f9477bfdf18",
+            "id": "link:0f9fc0308ef38a57765ee25c",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:002-inv-choi-r2",
+            "target_id": "question:demand:D4"
+          },
+          {
+            "content_sha256": "2ad6fc53e16bfb6544d7c60a7798bf1d890913fe56c3baddb1a6e64dc1c1a497",
+            "id": "link:2ad6fc53e16bfb6544d7c60a",
+            "origin": "agent",
+            "proposed_by_node_id": "work:002-inv-choi-r2",
+            "rationale": "Supplies the LLM-side social-influence pathway parameters: majority pull is real but moderate (eta_p2~0.068) and is dominated by capability disparity (eta_p2~0.167), with evaluator capability moderating headcount effects.",
+            "relation": "partially_answers",
+            "source_id": "answer:work:002-inv-choi-r2",
+            "target_id": "question:demand:D3"
+          },
+          {
+            "content_sha256": "35ae2a9b2cfc3ecb2685517f748e248f242dbf2dbd0d1796a538a2d1f0f111a8",
+            "id": "link:35ae2a9b2cfc3ecb2685517f",
+            "origin": "agent",
+            "proposed_by_node_id": "work:002-inv-choi-r2",
+            "rationale": "Bounds rq1 from the rationale side: Choi shows conformity under full-argument exposure and provides no bare-answer condition, so answer-only sufficiency remains experimentally open.",
+            "relation": "partially_answers",
+            "source_id": "answer:work:002-inv-choi-r2",
+            "target_id": "question:raised:784a683dbe8a:rq1"
+          },
+          {
+            "content_sha256": "42b32143f0d9d3ca8acec80b9f58fdd4bb8d823127466d5d1921a6bcb851d42a",
+            "id": "link:42b32143f0d9d3ca8acec80b",
+            "origin": "agent",
+            "proposed_by_node_id": "work:002-inv-choi-r2",
+            "rationale": "Provides the Choi portion of the seven-paper reconciliation with explicit PDF page markers, including the caveat that its topics lack ground truth (needed when reconciling with accuracy-based debate results).",
+            "relation": "partially_answers",
+            "source_id": "answer:work:002-inv-choi-r2",
+            "target_id": "question:demand:D4"
+          },
+          {
+            "content_sha256": "4fadb725a9096059848f3b1c7b1294fc5780880dc54af0ed1b70d2f38337a3da",
+            "id": "link:4fadb725a9096059848f3b1c",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "answers",
+            "source_id": "answer:work:002-inv-choi-r2",
+            "target_id": "question:work:002-inv-choi-r2"
+          },
+          {
+            "content_sha256": "5f35ac12612a9a81fbaaf37738efc8851854e81faebefe162f381f4501840c30",
+            "id": "link:5f35ac12612a9a81fbaaf377",
+            "origin": "agent",
+            "proposed_by_node_id": "work:002-inv-choi-r2",
+            "rationale": "The wave-1 answer is a blocked failure packet with no claims; this packet supplies the evidence it failed to produce.",
+            "relation": "supersedes",
+            "source_id": "answer:work:002-inv-choi-r2",
+            "target_id": "answer:work:001-inv-choi-conformity"
+          },
+          {
+            "content_sha256": "66ab6f115c25de52ea0cf84988be4c1fb2693bb62ccfd1a6e7eb9739be4b8c5c",
+            "id": "link:66ab6f115c25de52ea0cf849",
+            "origin": "agent",
+            "proposed_by_node_id": "work:002-inv-choi-r2",
+            "rationale": "Same underlying question as the r2 retry; all acceptance items (design, quantitative findings, quality-vs-quantity, limitations) are covered with page markers.",
+            "relation": "answers",
+            "source_id": "answer:work:002-inv-choi-r2",
+            "target_id": "question:work:001-inv-choi-conformity"
+          },
+          {
+            "content_sha256": "6b37d7ae2fdb360af7c01c4db59e0c08db96285010e08d7f74ecf2561745eebd",
+            "id": "link:6b37d7ae2fdb360af7c01c4d",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:002-inv-choi-r2",
+            "target_id": "question:demand:D3"
+          },
+          {
+            "content_sha256": "a93de044c436005a99b36973441a729349a023b13fae0a0a73541b49b979cede",
+            "id": "link:a93de044c436005a99b36973",
+            "origin": "agent",
+            "proposed_by_node_id": "work:002-inv-choi-r2",
+            "rationale": "Directly fulfills the retry objective with 8 page-marked claims covering design, majority/intelligence findings, quality-vs-quantity, and the answer-vs-rationale gap.",
+            "relation": "answers",
+            "source_id": "answer:work:002-inv-choi-r2",
+            "target_id": "question:work:002-inv-choi-r2"
+          },
+          {
+            "content_sha256": "c8ab6d1bfa801fd99a93151c2e6b417a2db2e095fdad4c0dd240fd73e47e171d",
+            "id": "link:c8ab6d1bfa801fd99a93151c",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:002-inv-choi-r2",
+            "target_id": "question:work:001-inv-choi-conformity"
+          },
+          {
+            "content_sha256": "f23072940496f6160d6c92de3cc7b3d632ac0d65fd25587d64d2f9f775a78405",
+            "id": "link:f23072940496f6160d6c92de",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "raises",
+            "source_id": "answer:work:002-inv-choi-r2",
+            "target_id": "question:raised:eaee61611e26:rq-choi-1"
+          }
+        ]
+      },
+      "result_ids": [
+        "answer:work:002-inv-choi-r2"
+      ],
+      "result_sha256": "04677ef1a2a3d2a924241677f8e2432e157cc48b9f7958f441076b47bc821d71",
+      "sequence": 3,
+      "tool": "get_entry"
+    },
+    {
+      "arguments": {
+        "entry_id": "answer:work:002-inv-dung-r2"
+      },
+      "result": {
+        "content": {
+          "claim_ids": [
+            "work:002-inv-dung-r2:C001",
+            "work:002-inv-dung-r2:C002",
+            "work:002-inv-dung-r2:C003",
+            "work:002-inv-dung-r2:C004",
+            "work:002-inv-dung-r2:C005",
+            "work:002-inv-dung-r2:C006"
+          ],
+          "content_sha256": "87969e3a276cc2416e6d45df89706ee79af74c05098c9de2c797bbcefd6cbabb",
+          "id": "answer:work:002-inv-dung-r2",
+          "node_id": "work:002-inv-dung-r2",
+          "packet": {
+            "account": "Dung 1995 supplies exactly the formal vocabulary for the 'synthesis competence' node: an argumentation framework AF = (AR, attacks) treats answers as abstract atoms linked by a binary attack relation, with no internal structure, weight, or truth value. Admissibility (a conflict-free set that defends every member against all attackers) is the core rationality constraint; on top of it Dung defines a lattice of semantics with different guarantees: preferred extensions (maximal admissible sets; always at least one exists, but symmetric conflicts like the Nixon diamond yield several, so credulous justification is non-unique), stable extensions (conflict-free sets attacking every outside argument; strictly stronger than preferred and may fail to exist at all), and the grounded extension (least fixed point of the characteristic function F_AF(S) = {A | A acceptable wrt S}; always unique, but can be empty — the skeptical adjudicator may justifiably endorse nothing when two agent answers attack each other symmetrically). Complete extensions bridge the two: every preferred extension is complete, and the grounded extension is the least complete one. The key coincidence result for adjudication design: well-founded frameworks (no infinite attack chains) have exactly one extension that is simultaneously grounded, preferred, and stable — the formal condition under which conflict adjudication is unambiguous. Equally important for the note: the framework deliberately does NOT model evidential weight, attack strength, truth, or probabilistic confidence — Dung himself lists differentiating attack strength as necessary future work. Consequence for the research problem: Dung-style adjudication can tell a synthesizer which set of conflicting agent answers is defensible, but it cannot break symmetric ties (two mutually attacking answers produce two preferred extensions and an empty grounded one); whatever breaks the tie — retrieval of external evidence, in our mechanism — is precisely what the formalism lacks and what retrieval-mediated Q/A supplies. The wave-1 combined Dung+Shapiro packet failed with zero evidence (blocked, 'Exceeded maximum output retries'), so this packet is the sole source for the Dung half.",
+            "assumptions": [
+              "Agent 'answers' in the communication experiment can be treated as abstract arguments and cross-agent contradictions/corrections as attack edges; this mapping is our operationalization, not something Dung sanctions.",
+              "The OCR garbling in the extracted text (e.g., 'Fo : P_,PR', 'GE,,,o') does not alter the definitional content; all cited definitions were cross-checked against multiple search hits.",
+              "Page markers refer to the journal pagination (321-357) as embedded in the extraction; Definition numbers (2, 5-7, 13-16, 20, 23, 29) are stable locators independent of marker placement."
+            ],
+            "boundary_findings": [
+              {
+                "alternative_explanation": "The failure could have been a transient model error rather than scope size; but the r2 split is the safe remedy either way.",
+                "consequence_if_absorbed": "If the failed wave-1 answer were silently treated as coverage, the D3 causal model's 'synthesis competence' node would lack any formal grounding and the note would cite no argumentation semantics at all.",
+                "evidence": [
+                  "answer:work:001-inv-formal-tools: 'Investigation failed before producing evidence: UnexpectedModelBehavior: Exceeded maximum output retries (1)', claim_ids: [], sufficiency: blocked"
+                ],
+                "narrative": "The wave-1 combined Dung+Shapiro investigation (answer:work:001-inv-formal-tools) failed with zero evidence ('UnexpectedModelBehavior: Exceeded maximum output retries (1)') and sufficiency 'blocked'; the split into single-paper packets (this one plus question:work:002-inv-shapiro-r2) confirms the assignment rationale that the two-paper scope produced oversized output. This packet therefore supersedes the failed answer for the Dung half only; the Shapiro CRDT half remains uncovered until the sibling packet lands.",
+                "smallest_suspected_scope": "Single-investigation output budget: two dense formal papers (Dung ~93KB, Shapiro ~42KB) in one packet exceeds reliable output size; single-paper packets succeed."
+              }
+            ],
+            "child_packet_ids": [],
+            "claims": [
+              {
+                "basis": "observed",
+                "citations": [
+                  {
+                    "excerpt": "an argument is an abstract entity whose role is solely determined by its relations to other arguments. No special attention is paid to the internal structure of the arguments. Definition 2. An argumentation framework is a pair AF = (AR, attacks) where AR is a set of arguments, and attacks is a binary relation on AR",
+                    "locator": "Definition 2, ===== PDF PAGE 6 =====",
+                    "source_id": "papers/text/dung-1995-argumentation.txt"
+                  }
+                ],
+                "confidence": 1.0,
+                "counterevidence": [],
+                "derived_from_claim_ids": [],
+                "id": "work:002-inv-dung-r2:C001",
+                "statement": "An argumentation framework is AF = (AR, attacks) with attacks ⊆ AR × AR; an argument is 'an abstract entity whose role is solely determined by its relations to other arguments' — the internal structure of arguments (premises, evidence, provenance) is deliberately not modeled (Definition 2, `===== PDF PAGE 6 =====`)."
+              },
+              {
+                "basis": "observed",
+                "citations": [
+                  {
+                    "excerpt": "Definition 5. A set S of arguments is said to be conflict-free if there are no arguments A and B in S such that A attacks B. ... Definition 6. (1) An argument A is acceptable with respect to a set S of arguments iff for each argument B: if B attacks A then B is attacked by S. (2) A conflict-free set of arguments S is admissible iff each argument in S is acceptable with respect to S.",
+                    "locator": "Definitions 5-6, ===== PDF PAGE 6 =====",
+                    "source_id": "papers/text/dung-1995-argumentation.txt"
+                  },
+                  {
+                    "excerpt": "Lemma 10 (Fundamental Lemma). Let S be an admissible set of arguments and A and A' be arguments which are acceptable with respect to S. Then (1) S' = S ∪ {A} is admissible ...",
+                    "locator": "Lemma 10, Theorem 11, ===== PDF PAGE 7 =====",
+                    "source_id": "papers/text/dung-1995-argumentation.txt"
+                  }
+                ],
+                "confidence": 0.98,
+                "counterevidence": [],
+                "derived_from_claim_ids": [],
+                "id": "work:002-inv-dung-r2:C002",
+                "statement": "Admissibility machinery: S is conflict-free iff no two arguments in S attack each other (Def 5, `===== PDF PAGE 6 =====`); A is acceptable wrt S iff every attacker of A is itself attacked by S, and a conflict-free S is admissible iff all its members are acceptable wrt S — i.e., a rational agent's accepted set must defend itself against all attacks (Def 6, `===== PDF PAGE 6 =====`). The Fundamental Lemma (adding an acceptable argument to an admissible set preserves admissibility) and Thm 11 (admissible sets form a complete partial order) follow (`===== PDF PAGE 7 =====`)."
+              },
+              {
+                "basis": "observed",
+                "citations": [
+                  {
+                    "excerpt": "Definition 7. A preferred extension of an argumentation framework AF is a maximal (with respect to set inclusion) admissible set of AF. ... This argumentation framework has two preferred extensions ... Corollary 12. Every argumentation framework possesses at least one preferred extension.",
+                    "locator": "Definition 7, Example 9, Corollary 12, ===== PDF PAGE 7 =====",
+                    "source_id": "papers/text/dung-1995-argumentation.txt"
+                  }
+                ],
+                "confidence": 0.98,
+                "counterevidence": [],
+                "derived_from_claim_ids": [],
+                "id": "work:002-inv-dung-r2:C003",
+                "statement": "Preferred extensions are maximal (w.r.t. set inclusion) admissible sets and define the credulous semantics (Def 7, `===== PDF PAGE 7 =====`). Existence is guaranteed — every argumentation framework possesses at least one preferred extension (Cor 12) — but uniqueness is not: the Nixon diamond ({A,B}, {(A,B),(B,A)}) has exactly two preferred extensions, so under symmetric mutual attack between two agents' answers the credulous semantics licenses either conclusion and cannot choose between them (`===== PDF PAGE 7 =====`)."
+              },
+              {
+                "basis": "observed",
+                "citations": [
+                  {
+                    "excerpt": "Definition 13. A conflict-free set of arguments S is called a stable extension iff S attacks each argument which does not belong to S. ... Lemma 15. Every stable extension is a preferred extension but not vice versa. ... the empty set is a preferred extension of AF which is clearly not stable.",
+                    "locator": "Definition 13, Lemmas 14-15, ===== PDF PAGE 8 =====",
+                    "source_id": "papers/text/dung-1995-argumentation.txt"
+                  }
+                ],
+                "confidence": 0.97,
+                "counterevidence": [],
+                "derived_from_claim_ids": [],
+                "id": "work:002-inv-dung-r2:C004",
+                "statement": "Stable extensions are conflict-free sets that attack every argument outside the set (Def 13, equivalently S = {A | A is not attacked by S}, Lemma 14, `===== PDF PAGE 8 =====`). Every stable extension is preferred but not conversely (Lemma 15: the self-attacking single-argument framework has the empty set as a preferred extension that is not stable), and stable extensions may fail to exist at all — Dung argues such 'anomalies' reflect the modeled world, not a bug, i.e., no adjudication guarantee is available in general (`===== PDF PAGE 8 =====`)."
+              },
+              {
+                "basis": "observed",
+                "citations": [
+                  {
+                    "excerpt": "Definition 20. The grounded extension of an argumentation framework AF, denoted by GE_AF, is the least fixed point of F_AF. ... Example 22 ... it follows immediately that the grounded extension is empty, i.e. a skeptical reasoner will not include anything.",
+                    "locator": "Definitions 16, 20, Example 22, ===== PDF PAGE 9 =====",
+                    "source_id": "papers/text/dung-1995-argumentation.txt"
+                  },
+                  {
+                    "excerpt": "Theorem 25. (1) Each preferred extension is a complete extension, but not vice versa. (2) The grounded extension is the least (with respect to set inclusion) complete extension.",
+                    "locator": "Theorem 25, ===== PDF PAGE 10 =====",
+                    "source_id": "papers/text/dung-1995-argumentation.txt"
+                  },
+                  {
+                    "excerpt": "Theorem 30. Every well-founded argumentation framework has exactly one complete extension which is grounded, preferred and stable.",
+                    "locator": "Definition 29, Theorem 30, ===== PDF PAGE 11 =====",
+                    "source_id": "papers/text/dung-1995-argumentation.txt"
+                  }
+                ],
+                "confidence": 0.97,
+                "counterevidence": [],
+                "derived_from_claim_ids": [],
+                "id": "work:002-inv-dung-r2:C005",
+                "statement": "Grounded (skeptical) semantics: the characteristic function F_AF(S) = {A | A acceptable wrt S} is monotonic, and the grounded extension GE is its least fixed point (Defs 16, 20, `===== PDF PAGE 9 =====`) — hence GE always exists and is unique, but may be empty: in the Nixon diamond 'a skeptical reasoner will not include anything' (Example 22). Complete extensions (admissible sets containing every argument acceptable wrt them, Def 23) link the two poles: each preferred extension is complete and GE is the least complete extension (Thm 25, `===== PDF PAGE 10 =====`). Coincidence condition: well-founded frameworks (no infinite attack sequence A_{i+1} attacks A_i) have exactly one complete extension which is simultaneously grounded, preferred, and stable (Thm 30, `===== PDF PAGE 11 =====`) — the formal condition under which adjudication of conflicting answers is unambiguous."
+              },
+              {
+                "basis": "observed",
+                "citations": [
+                  {
+                    "excerpt": "the idea of argumentational reasoning is that a statement is believable if it can be argued successfully against attacking arguments. In other words, whether or not a rational agent believes in a statement depends on whether or not the argument supporting this statement can be successfully defended against the counterarguments.",
+                    "locator": "===== PDF PAGE 3 =====",
+                    "source_id": "papers/text/dung-1995-argumentation.txt"
+                  },
+                  {
+                    "excerpt": "In general, we expect that the attacks against some arguments may have different strengths, one may be more 'deadly' than the others. So a study of how to differentiate the strength of arguments is necessary.",
+                    "locator": "Conclusions, ===== PDF PAGE 31 =====",
+                    "source_id": "papers/text/dung-1995-argumentation.txt"
+                  }
+                ],
+                "confidence": 0.92,
+                "counterevidence": [
+                  "The 'does not model truth/weight' reading is an absence-of-machinery claim: the paper's Definitions 2-31 contain no weight, probability, or truth-value constructs, and the PDF PAGE 31 passage is the author's own confirmation; it cannot be proven from the text beyond this."
+                ],
+                "derived_from_claim_ids": [],
+                "id": "work:002-inv-dung-r2:C006",
+                "statement": "What the framework does NOT model: evidential weight, attack strength, truth, or probabilistic confidence. Justification is purely relational 'external stability' — a statement is believable iff it can be successfully defended against counterarguments (`===== PDF PAGE 3 =====`); arguments carry no internal structure or truth status (Def 2, `===== PDF PAGE 6 =====`); and Dung explicitly concedes that 'the attacks against some arguments may have different strengths... a study of how to differentiate the strength of arguments is necessary' and leaves it to future work (`===== PDF PAGE 31 =====`). No probability, no degrees of belief, no aggregation of independent evidential support: two arguments with identical attack graphs are treated identically regardless of the evidence behind them — so symmetric conflicts between agent answers are formally undecidable inside the framework and must be broken by information the semantics does not represent."
+              }
+            ],
+            "content_sha256": "e195235d31502569bb35ba7e2cb2f964fe128edbe3d081b2150050062f9d67c9",
+            "counterevidence": [
+              "Dung does connect argumentation to logic programming, default logic, autoepistemic logic, and n-person games (Sections 3-4), so the framework is not purely syntax — but these reductions inherit the same attack-graph-only information; none adds evidential weight or truth.",
+              "The grounded extension being empty in the Nixon diamond is a feature (skeptical caution), not a defect, from Dung's perspective; using 'empty GE = adjudication failure' in the note is our task-specific interpretation, not Dung's claim."
+            ],
+            "id": "packet:work:002-inv-dung-r2",
+            "knowledge_links": [
+              {
+                "rationale": "This packet directly satisfies the work item's objective and acceptance condition: <=6 claims covering AF, attack, conflict-free/admissible, grounded/preferred/stable guarantees, and the explicit not-modeled list, each with PDF page markers.",
+                "relation": "answers",
+                "source_id": "self",
+                "target_id": "question:work:002-inv-dung-r2"
+              },
+              {
+                "rationale": "The wave-1 answer is a blocked failure with zero claims; this packet replaces it as the source of Dung formal machinery (Dung half only).",
+                "relation": "supersedes",
+                "source_id": "self",
+                "target_id": "answer:work:001-inv-formal-tools"
+              },
+              {
+                "rationale": "Grounds the 'synthesis competence' node of the causal model: admissibility/grounded semantics define what a justified synthesized conclusion is under conflict, and the not-modeled gap (no evidential weight) is where retrieval enters the mechanism.",
+                "relation": "partially_answers",
+                "source_id": "self",
+                "target_id": "question:demand:D3"
+              },
+              {
+                "rationale": "Provides the required corpus citation coverage for papers/text/dung-1995-argumentation.txt with explicit PDF PAGE markers.",
+                "relation": "partially_answers",
+                "source_id": "self",
+                "target_id": "question:demand:D4"
+              }
+            ],
+            "next_observation": null,
+            "node_id": "work:002-inv-dung-r2",
+            "objective": "From Dung 1995 (papers/text/dung-1995-argumentation.txt) only: extract the formal machinery relevant to adjudicating conflicting agent answers — argumentation frameworks, attack relations, conflict-free/admissible sets, and the grounded/preferred/stable extensions with what each guarantees about justified conclusions — and state explicitly what the framework does NOT model (evidential weight, truth, probabilistic confidence). Keep the answer compact: at most 6 claims, each with a `===== PDF PAGE N =====` marker.",
+            "raised_questions": [],
+            "source_ids_consulted": [
+              "papers/text/dung-1995-argumentation.txt"
+            ],
+            "sufficiency": "ready_to_synthesize",
+            "unresolved": [
+              "How to operationalize admissibility/grounded-extension computation inside an LLM synthesizer prompt for the preregistered experiment (D7) — the formalism specifies what is justified, not an algorithm an LLM can reliably execute; a computational check (e.g., encoding the debate graph and computing GE externally) is a design decision for the synthesis phase.",
+              "Whether any of the three empirical debate papers (Du 2023, Smit 2023, Zhang 2025) implement aggregation protocols isomorphic to any Dung semantics — cross-referencing belongs to the synthesis phase once all extraction packets are in.",
+              "Runtime rejected knowledge-link proposal outside the frozen board or with invalid endpoint types: self refines question:work:001-inv-formal-tools"
+            ]
+          },
+          "packet_id": "packet:work:002-inv-dung-r2",
+          "question_ids": [
+            "question:demand:D3",
+            "question:demand:D4",
+            "question:work:001-inv-formal-tools",
+            "question:work:002-inv-dung-r2"
+          ],
+          "sufficiency": "ready_to_synthesize",
+          "summary": "Dung 1995 supplies exactly the formal vocabulary for the 'synthesis competence' node: an argumentation framework AF = (AR, attacks) treats answers as abstract atoms linked by a binary attack relation, with no internal structure, weight, or truth value. Admissibility (a conflict-free set that defends every member against all attackers) is the core rationality constraint; on top of it Dung defines a lattice of semantics with different guarantees: preferred extensions (maximal admissible sets; always at least one exists, but symmetric conflicts like the Nixon diamond yield several, so credulous justification is non-unique), stable extensions (conflict-free sets attacking every outside argument; strictly stronger than preferred and may fail to exist at all), and the grounded extension (least fixed point of the characteristic function F_AF(S) = {A | A acceptable wrt S}; always unique, but can be empty — the skeptical adjudicator may justifiably endorse nothing when two agent answers attack each other symmetrically). Complete extensions bridge the two: every preferred extension is complete, and the grounded extension is the least complete one. The key coincidence result for adjudication design: well-founded frameworks (no infinite attack chains) have exactly one extension that is simultaneously grounded, preferred, and stable — the formal condition under which conflict adjudication is unambiguous. Equally important for the note: the framework deliberately does NOT model evidential weight, attack strength, truth, or probabilistic confidence — Dung himself lists differentiating attack strength as necessary future work. Consequence for the research problem: Dung-style adjudication can tell a synthesizer which set of conflicting agent answers is defensible, but it cannot break symmetric ties (two mutually attacking answers produce two preferred extensions and an empty grounded one); whatever breaks the tie — retrieval of external evidence, in our mechanism — is precisely what the formalism lacks and what retrieval-mediated Q/A supplies. The wave-1 combined Dung+Shapiro packet failed with zero evidence (blocked, 'Exceeded maximum output retries'), so this packet is the sole source for the Dung half.",
+          "tags": [
+            "definition",
+            "method",
+            "counterexample",
+            "uncertainty"
+          ],
+          "unresolved": [
+            "How to operationalize admissibility/grounded-extension computation inside an LLM synthesizer prompt for the preregistered experiment (D7) — the formalism specifies what is justified, not an algorithm an LLM can reliably execute; a computational check (e.g., encoding the debate graph and computing GE externally) is a design decision for the synthesis phase.",
+            "Whether any of the three empirical debate papers (Du 2023, Smit 2023, Zhang 2025) implement aggregation protocols isomorphic to any Dung semantics — cross-referencing belongs to the synthesis phase once all extraction packets are in.",
+            "Runtime rejected knowledge-link proposal outside the frozen board or with invalid endpoint types: self refines question:work:001-inv-formal-tools"
+          ]
+        },
+        "id": "answer:work:002-inv-dung-r2",
+        "incoming_links": [],
+        "kind": "answer",
+        "outgoing_links": [
+          {
+            "content_sha256": "42ce05a1c294020fcad18c96cee1b9ff3fce0011af69bfceadeaf9158c440ae6",
+            "id": "link:42ce05a1c294020fcad18c96",
+            "origin": "agent",
+            "proposed_by_node_id": "work:002-inv-dung-r2",
+            "rationale": "The wave-1 answer is a blocked failure with zero claims; this packet replaces it as the source of Dung formal machinery (Dung half only).",
+            "relation": "supersedes",
+            "source_id": "answer:work:002-inv-dung-r2",
+            "target_id": "answer:work:001-inv-formal-tools"
+          },
+          {
+            "content_sha256": "459199d59277be73e428f85787caea8802aa9d1dffd4e7876bc4e7e8e8e01ca2",
+            "id": "link:459199d59277be73e428f857",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:002-inv-dung-r2",
+            "target_id": "question:demand:D3"
+          },
+          {
+            "content_sha256": "4d421f38c8c0f1da518c046628025d83dc100987b513b033c1cb87a81c5bc5d9",
+            "id": "link:4d421f38c8c0f1da518c0466",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:002-inv-dung-r2",
+            "target_id": "question:work:001-inv-formal-tools"
+          },
+          {
+            "content_sha256": "66b793db0867fd02a7aedbecb4cce647e898b887a40165b3421a48947e928b52",
+            "id": "link:66b793db0867fd02a7aedbec",
+            "origin": "agent",
+            "proposed_by_node_id": "work:002-inv-dung-r2",
+            "rationale": "Provides the required corpus citation coverage for papers/text/dung-1995-argumentation.txt with explicit PDF PAGE markers.",
+            "relation": "partially_answers",
+            "source_id": "answer:work:002-inv-dung-r2",
+            "target_id": "question:demand:D4"
+          },
+          {
+            "content_sha256": "7af810b2bc6d85cb2ac7b710116feb5bc72108bc63912f1212187bb856c6ec10",
+            "id": "link:7af810b2bc6d85cb2ac7b710",
+            "origin": "agent",
+            "proposed_by_node_id": "work:002-inv-dung-r2",
+            "rationale": "Grounds the 'synthesis competence' node of the causal model: admissibility/grounded semantics define what a justified synthesized conclusion is under conflict, and the not-modeled gap (no evidential weight) is where retrieval enters the mechanism.",
+            "relation": "partially_answers",
+            "source_id": "answer:work:002-inv-dung-r2",
+            "target_id": "question:demand:D3"
+          },
+          {
+            "content_sha256": "a830ad7e9e16aabcd3715a4b029c9827397289d4b7351ab1633257f270932e0f",
+            "id": "link:a830ad7e9e16aabcd3715a4b",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "answers",
+            "source_id": "answer:work:002-inv-dung-r2",
+            "target_id": "question:work:002-inv-dung-r2"
+          },
+          {
+            "content_sha256": "c868c91b621feb2a33d05b1b9ad980901374a896334ca9bcb9d4c1dc28626ce9",
+            "id": "link:c868c91b621feb2a33d05b1b",
+            "origin": "agent",
+            "proposed_by_node_id": "work:002-inv-dung-r2",
+            "rationale": "This packet directly satisfies the work item's objective and acceptance condition: <=6 claims covering AF, attack, conflict-free/admissible, grounded/preferred/stable guarantees, and the explicit not-modeled list, each with PDF page markers.",
+            "relation": "answers",
+            "source_id": "answer:work:002-inv-dung-r2",
+            "target_id": "question:work:002-inv-dung-r2"
+          },
+          {
+            "content_sha256": "f8c8463f9bb80c6873156479f19e316c422241038ca0a6e2bc50911c6d55a0dc",
+            "id": "link:f8c8463f9bb80c6873156479",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:002-inv-dung-r2",
+            "target_id": "question:demand:D4"
+          }
+        ]
+      },
+      "result_ids": [
+        "answer:work:002-inv-dung-r2"
+      ],
+      "result_sha256": "c68e6c8d844e0b528bc214a399092ee445d88d629111ef69d507e1a7d367bc23",
+      "sequence": 4,
+      "tool": "get_entry"
+    },
+    {
+      "arguments": {
+        "entry_id": "answer:work:002-inv-shapiro-r2"
+      },
+      "result": {
+        "content": {
+          "claim_ids": [
+            "work:002-inv-shapiro-r2:C001",
+            "work:002-inv-shapiro-r2:C002",
+            "work:002-inv-shapiro-r2:C003",
+            "work:002-inv-shapiro-r2:C004",
+            "work:002-inv-shapiro-r2:C005",
+            "work:002-inv-shapiro-r2:C006"
+          ],
+          "content_sha256": "7cb45c23f1cbe785c7f4986fd677cda1dd70aad58a7e180444c8d0aaa58213a5",
+          "id": "answer:work:002-inv-shapiro-r2",
+          "node_id": "work:002-inv-shapiro-r2",
+          "packet": {
+            "account": "Shapiro et al. 2011 formalize exactly the merge/aggregation stage of any multi-agent pipeline: how concurrent contributions combine without central coordination. Core machinery: (1) A Conflict-free Replicated Data Type (CRDT) is a replicated data type whose design satisfies sufficient conditions for Strong Eventual Consistency (SEC); SEC = eventual consistency (eventual delivery, convergence, termination) plus Strong Convergence — correct replicas that have delivered the same updates have equivalent state immediately, with no consensus, no roll-back, and no waiting for quiescence (Defs. 2–3, page 4). (2) Two sufficient conditions: state-based CvRDT — payload forms a join semilattice, merge computes the least upper bound (commutative, idempotent, associative), and state is monotonically non-decreasing; Theorem 1 gives SEC assuming eventual delivery and termination (pages 4–5). Op-based CmRDT — updates split into a side-effect-free prepare step at the source and an effect-update delivered downstream; if all concurrent updates commute and delivery is reliable and causally ordered, Theorem 2 gives SEC (pages 5–6). (3) The two styles are mutually emulatable (Theorems 3–4, pages 7–8), so 'merge states' vs 'merge operations' is an implementation choice, not a difference in guarantee. (4) Scope and limits: SEC solves the CAP dilemma by staying available and partition-tolerant without consensus, tolerating n−1 crashes (page 6); but eventual delivery alone is insufficient (no-op merge counterexample, page 4), and SEC is incomparable with sequential consistency — the converged state need not correspond to any sequential execution (page 8). Crucially for the research note, the guarantees are truth-neutral: correctness is defined relative to a chosen concurrent specification, not relative to fact. Add-wins, remove-wins, highest-IP-wins, or reset-to-⊥ all satisfy strong convergence ('any of them may be reasonable for some application', page 8); LWW imposes a total order 'at the cost of losing concurrent updates' (page 13). Cross-paper inference for the note (not Shapiro's claim): both independent-sampling-plus-aggregation and staged Q/A must pick a merge rule for agent contributions, and CRDT theory shows that rule choice determines which contributions survive aggregation while saying nothing about whether the merged content is true — formally grounding the dossier constraint that agreement or merge success is not evidence of correctness. A further diagnostic for the note: LLM free-text synthesis is generally neither commutative nor idempotent, so it fails the CRDT sufficient conditions and inherits no convergence guarantee at all.",
+            "assumptions": [
+              "Page attribution verified against explicit markers: Definitions 2–3 and the semilattice/LUB properties lie between '===== PDF PAGE 4 =====' (line ~177) and '===== PDF PAGE 5 =====' (line ~234); Definition 6 and Theorem 2 between page-6 and page-7 markers; section 3.3 and Theorem 4 between page-8 and page-9 markers.",
+              "The dossier constraint 'agreement/merge success is not evidence of truth' is supported by mapping the paper's specification-relative correctness (page 8) onto agent-answer aggregation; this mapping is treated as inference, and claim sh6 is stated at the level of the paper's text only."
+            ],
+            "boundary_findings": [
+              {
+                "alternative_explanation": "An LLM synthesizer could be engineered to approximate idempotence (e.g., deterministic decoding over a fixed evidence union), partially restoring CRDT-like behavior; this is an empirical design question, not excluded by the paper.",
+                "consequence_if_absorbed": "The note would overclaim that a merged/agreed multi-agent answer is well-defined or reliable merely because contributions were combined, conflating convergence (a structural property) with correctness — exactly the constraint the dossier forbids.",
+                "evidence": [
+                  "papers/text/shapiro-et-al-2011-crdts.txt ===== PDF PAGE 5 ===== (Theorem 1 conditions: semilattice, LUB merge, monotonicity)",
+                  "papers/text/shapiro-et-al-2011-crdts.txt ===== PDF PAGE 6 ===== (Theorem 2 condition: all concurrent updates commute)"
+                ],
+                "narrative": "CRDT guarantees presuppose deterministic, mathematically constrained merge operators (LUB or commuting operations). LLM-based answer synthesis — the actual merge stage in both focal baseline conditions — is stochastic, non-idempotent, and non-commutative, so none of Shapiro's convergence theorems apply to it directly. CRDT theory functions as a diagnostic boundary (what properties a merge must have for agreement to be well-defined), not as an applicable guarantee.",
+                "smallest_suspected_scope": "Application of Shapiro et al. 2011 to the LLM-agent aggregation stage in the research note's causal model."
+              }
+            ],
+            "child_packet_ids": [],
+            "claims": [
+              {
+                "basis": "observed",
+                "citations": [
+                  {
+                    "excerpt": "Definition 3 (Strong eventual consistency (SEC)). An object is Strongly Eventually Consistent if it is Eventually Consistent and: Strong Convergence: Correct replicas that have delivered the same updates have equivalent state: ∀i,j : ci = cj ⇒ si ≡ sj.",
+                    "locator": "===== PDF PAGE 4 =====",
+                    "source_id": "papers/text/shapiro-et-al-2011-crdts.txt"
+                  },
+                  {
+                    "excerpt": "In our conflict-free replicated data types (CRDTs), an update does not require synchronisation, and CRDT replicas provably converge to a correct common state.",
+                    "locator": "===== PDF PAGE 2 =====",
+                    "source_id": "papers/text/shapiro-et-al-2011-crdts.txt"
+                  }
+                ],
+                "confidence": 0.98,
+                "counterevidence": [],
+                "derived_from_claim_ids": [],
+                "id": "work:002-inv-shapiro-r2:C001",
+                "statement": "Shapiro et al. define a CRDT as a data type satisfying sufficient conditions for Strong Eventual Consistency (SEC), where SEC is eventual consistency (eventual delivery, convergence, termination) plus Strong Convergence: correct replicas that have delivered the same updates have equivalent state (∀i,j: ci=cj ⇒ si≡sj), without consensus or roll-back."
+              },
+              {
+                "basis": "observed",
+                "citations": [
+                  {
+                    "excerpt": "Theorem 1 (Convergent Replicated Data Type (CvRDT)). Assuming eventual delivery and termination, any state-based object that satisfies the monotonic semilattice property is SEC.",
+                    "locator": "===== PDF PAGE 5 =====",
+                    "source_id": "papers/text/shapiro-et-al-2011-crdts.txt"
+                  },
+                  {
+                    "excerpt": "It follows that ⊔ is: commutative: x⊔y = y⊔x; idempotent: x⊔x = x; and associative: (x⊔y)⊔z = x⊔(y⊔z).",
+                    "locator": "===== PDF PAGE 4 =====",
+                    "source_id": "papers/text/shapiro-et-al-2011-crdts.txt"
+                  }
+                ],
+                "confidence": 0.98,
+                "counterevidence": [],
+                "derived_from_claim_ids": [],
+                "id": "work:002-inv-shapiro-r2:C002",
+                "statement": "State-based sufficient condition (CvRDT, Theorem 1): if the payload forms a join semilattice under ≤, merge computes the least upper bound (LUB), and state is monotonically non-decreasing across updates, then the object is SEC assuming eventual delivery and termination. The LUB is commutative, idempotent, and associative, so state-based merge is insensitive to message order and duplication."
+              },
+              {
+                "basis": "observed",
+                "citations": [
+                  {
+                    "excerpt": "Theorem 2 (Commutative Replicated Data Type (CmRDT)). Assuming causal delivery of updates and method termination, any op-based object that satisfies the commutativity property for all concurrent updates, and whose delivery precondition is satisfied by causal delivery, is SEC.",
+                    "locator": "===== PDF PAGE 6 =====",
+                    "source_id": "papers/text/shapiro-et-al-2011-crdts.txt"
+                  },
+                  {
+                    "excerpt": "An op-based object has no merge method; instead an update is split into a pair (t,u), where t is a side-effect-free prepare-update method and u is an effect-update method.",
+                    "locator": "===== PDF PAGE 5 =====",
+                    "source_id": "papers/text/shapiro-et-al-2011-crdts.txt"
+                  }
+                ],
+                "confidence": 0.97,
+                "counterevidence": [],
+                "derived_from_claim_ids": [],
+                "id": "work:002-inv-shapiro-r2:C003",
+                "statement": "Operation-based sufficient condition (CmRDT, Theorem 2): an update is split into a side-effect-free prepare-update at the source replica and an effect-update delivered to all replicas; if all concurrent updates commute (Def. 6) and the delivery precondition is satisfied by reliable causally-ordered broadcast, then the object is SEC assuming termination."
+              },
+              {
+                "basis": "observed",
+                "citations": [
+                  {
+                    "excerpt": "Theorem 3 (CmRDT emulation). Any SEC state-based object can be emulated by a SEC op-based object of a corresponding interface.",
+                    "locator": "===== PDF PAGE 7 =====",
+                    "source_id": "papers/text/shapiro-et-al-2011-crdts.txt"
+                  },
+                  {
+                    "excerpt": "Theorem 4 (CvRDT emulation). Any SEC op-based object can be emulated by a SEC state-based object of a corresponding interface.",
+                    "locator": "===== PDF PAGE 8 =====",
+                    "source_id": "papers/text/shapiro-et-al-2011-crdts.txt"
+                  }
+                ],
+                "confidence": 0.96,
+                "counterevidence": [],
+                "derived_from_claim_ids": [],
+                "id": "work:002-inv-shapiro-r2:C004",
+                "statement": "State-based and op-based CRDTs are equivalent in expressive power: any SEC state-based object can be emulated by a SEC op-based object (Theorem 3) and vice versa (Theorem 4), so the choice between shipping state and shipping operations is an implementation matter that does not change the convergence guarantee."
+              },
+              {
+                "basis": "observed",
+                "citations": [
+                  {
+                    "excerpt": "SEC provides an extreme form of fault tolerance, as a SEC object tolerates up to n−1 simultaneous crashes. Remarkably, SEC does not require to solve consensus.",
+                    "locator": "===== PDF PAGE 6 =====",
+                    "source_id": "papers/text/shapiro-et-al-2011-crdts.txt"
+                  },
+                  {
+                    "excerpt": "if the merge method m is a no-op, an update executed at some replica has no effect on other replicas, and they will never converge.",
+                    "locator": "===== PDF PAGE 4 =====",
+                    "source_id": "papers/text/shapiro-et-al-2011-crdts.txt"
+                  },
+                  {
+                    "excerpt": "Such a state would never occur in a sequentially-consistent execution... Therefore, SEC is incomparable with sequential consistency.",
+                    "locator": "===== PDF PAGE 8 =====",
+                    "source_id": "papers/text/shapiro-et-al-2011-crdts.txt"
+                  }
+                ],
+                "confidence": 0.96,
+                "counterevidence": [],
+                "derived_from_claim_ids": [],
+                "id": "work:002-inv-shapiro-r2:C005",
+                "statement": "The guarantees and their boundaries: SEC replicas remain available and converge under partitions without solving consensus, tolerating n−1 crashes (a proposed solution to CAP); but eventual delivery alone does not imply convergence (a no-op merge method never converges), and SEC is incomparable with sequential consistency — a converged SEC state may be unreachable in any sequential execution."
+              },
+              {
+                "basis": "observed",
+                "citations": [
+                  {
+                    "excerpt": "the add could win, or the remove could win, or the update of the replica with the highest IP address could win, or the state might be reset to a distinguished state ⊥, and so on. All these alternatives satisfy the strong convergence condition, and any of them may be reasonable for some application.",
+                    "locator": "===== PDF PAGE 8 =====",
+                    "source_id": "papers/text/shapiro-et-al-2011-crdts.txt"
+                  },
+                  {
+                    "excerpt": "LWW ensures a total order of operations, at the cost of losing concurrent updates.",
+                    "locator": "===== PDF PAGE 13 =====",
+                    "source_id": "papers/text/shapiro-et-al-2011-crdts.txt"
+                  },
+                  {
+                    "excerpt": "CRDTs are guaranteed to converge towards a common, correct state, without requiring any synchronisation.",
+                    "locator": "===== PDF PAGE 14 =====",
+                    "source_id": "papers/text/shapiro-et-al-2011-crdts.txt"
+                  }
+                ],
+                "confidence": 0.93,
+                "counterevidence": [
+                  "The paper's own wording 'correct common state' (pages 2, 14) could be misread as a content-truth guarantee; the surrounding formalism defines 'correct' strictly as conformance to the data type's concurrent specification, not as factual correctness of payload content."
+                ],
+                "derived_from_claim_ids": [
+                  "work:002-inv-shapiro-r2:C001",
+                  "work:002-inv-shapiro-r2:C002",
+                  "work:002-inv-shapiro-r2:C005"
+                ],
+                "id": "work:002-inv-shapiro-r2:C006",
+                "statement": "CRDT correctness is specification-relative, not truth-relative: for concurrent conflicting updates, add-wins, remove-wins, highest-IP-wins, or reset-to-⊥ all satisfy strong convergence and the paper states any of them may be reasonable for some application; LWW-style rules impose order only 'at the cost of losing concurrent updates'. Convergence and agreement therefore certify nothing about which merged content is true or even retained."
+              }
+            ],
+            "content_sha256": "92a7343df8a61e0463c9ccbd23d304312a42147cd0600fc2b9ef96f60ef15572",
+            "counterevidence": [
+              "Shapiro et al. themselves use 'correct state' language (===== PDF PAGE 2 =====, ===== PDF PAGE 14 =====); a careless reading could cite this as evidence that CRDT-style merging certifies content correctness, whereas the paper's own add-wins/remove-wins discussion (page 8) shows correctness is spec-relative.",
+              "All guarantees are asymptotic and conditional: eventual delivery over fair-lossy channels, method termination, and (op-based) causal-order broadcast; no timing, bandwidth, or staleness bounds are provided, and remove-style operations require tombstones or unique tags (pages 9–11), so naive set-union intuitions do not cover deletion/retraction of agent claims.",
+              "Mapping CRDT merge semantics onto LLM answer aggregation is the investigator's cross-domain inference, not a claim of the paper; the paper addresses deterministic replicated data types, not stochastic model outputs."
+            ],
+            "id": "packet:work:002-inv-shapiro-r2",
+            "knowledge_links": [
+              {
+                "rationale": "This packet performs exactly the assigned compact extraction of Shapiro 2011's CRDT/SEC machinery with page-marker citations.",
+                "relation": "answers",
+                "source_id": "self",
+                "target_id": "question:work:002-inv-shapiro-r2"
+              },
+              {
+                "rationale": "The assignment was split from the wave-1 combined formal-tools packet; this covers the Shapiro half (Dung half is handled separately).",
+                "relation": "partially_answers",
+                "source_id": "self",
+                "target_id": "question:work:001-inv-formal-tools"
+              }
+            ],
+            "next_observation": null,
+            "node_id": "work:002-inv-shapiro-r2",
+            "objective": "From Shapiro et al. 2011 (papers/text/shapiro-et-al-2011-crdts.txt) only: extract the formal machinery relevant to merging concurrent agent contributions without central coordination — CRDTs, strong eventual consistency, commutativity/idempotence, state- vs operation-based replication, and what these guarantees do and do not say about correctness or truth of merged content. Keep the answer compact: at most 6 claims, each with a `===== PDF PAGE N =====` marker.",
+            "raised_questions": [
+              {
+                "acceptance_condition": "For each candidate aggregation operator, a deterministic test (e.g., permuting input order, duplicating an input) establishes whether outputs are invariant (commutative/idempotent) or not, with effect sizes on final-answer variability reported for at least the operators used in the note's experiment.",
+                "discriminating_outcomes": [
+                  "If LLM synthesis output is invariant to input order and duplication, CRDT-style convergence reasoning transfers and merge design is not a confound.",
+                  "If output varies materially under order/duplication perturbation, aggregation is a variance source that must be controlled (fixed order, averaged over seeds) in the experiment, and union/vote aggregators gain a formal advantage over synthesis aggregators."
+                ],
+                "local_id": "rq-shapiro-merge",
+                "rationale": "Shapiro's theorems give convergence only when merge is a semilattice LUB or updates commute (pages 5–6). Both focal baselines (independent sampling + aggregation, staged Q/A) end in an aggregation step; if that step is a stochastic LLM call, it violates these conditions, so final answers may depend on agent ordering and sampling noise — a confound for the preregistered matched-compute experiment and a mechanistic distinction between aggregation designs.",
+                "required_source_hints": [
+                  "papers/text/shapiro-et-al-2011-crdts.txt"
+                ],
+                "tags": [
+                  "method",
+                  "uncertainty",
+                  "interface"
+                ],
+                "target_question_ids": [
+                  "question:demand:D3",
+                  "question:demand:D7"
+                ],
+                "text": "Which aggregation operators used in multi-agent LLM pipelines (majority vote, evidence union, LLM free-text synthesis) satisfy or violate the CRDT sufficient conditions for well-defined merging (commutativity, idempotence, monotonicity), and does order/non-determinism of the final aggregation step measurably change the merged answer?"
+              }
+            ],
+            "source_ids_consulted": [
+              "papers/text/shapiro-et-al-2011-crdts.txt"
+            ],
+            "sufficiency": "ready_to_synthesize",
+            "unresolved": [
+              "Whether any aggregation operator actually used in multi-agent LLM systems (majority vote, evidence-union, LLM free-text synthesis) satisfies commutativity/idempotence/monotonicity; LLM synthesis plausibly violates all three, meaning staged Q/A and independent+aggregation pipelines may have no convergence guarantee of the CRDT kind — a diagnostic the research note should exploit but this extraction cannot settle.",
+              "The paper gives no guidance on merging weighted, probabilistic, or natural-language content; adapting semilattice machinery to confidence-bearing claims is open.",
+              "Runtime rejected knowledge-link proposal outside the frozen board or with invalid endpoint types: self refines answer:work:001-inv-formal-tools"
+            ]
+          },
+          "packet_id": "packet:work:002-inv-shapiro-r2",
+          "question_ids": [
+            "question:demand:D3",
+            "question:demand:D4",
+            "question:work:001-inv-formal-tools",
+            "question:work:002-inv-shapiro-r2"
+          ],
+          "sufficiency": "ready_to_synthesize",
+          "summary": "Shapiro et al. 2011 formalize exactly the merge/aggregation stage of any multi-agent pipeline: how concurrent contributions combine without central coordination. Core machinery: (1) A Conflict-free Replicated Data Type (CRDT) is a replicated data type whose design satisfies sufficient conditions for Strong Eventual Consistency (SEC); SEC = eventual consistency (eventual delivery, convergence, termination) plus Strong Convergence — correct replicas that have delivered the same updates have equivalent state immediately, with no consensus, no roll-back, and no waiting for quiescence (Defs. 2–3, page 4). (2) Two sufficient conditions: state-based CvRDT — payload forms a join semilattice, merge computes the least upper bound (commutative, idempotent, associative), and state is monotonically non-decreasing; Theorem 1 gives SEC assuming eventual delivery and termination (pages 4–5). Op-based CmRDT — updates split into a side-effect-free prepare step at the source and an effect-update delivered downstream; if all concurrent updates commute and delivery is reliable and causally ordered, Theorem 2 gives SEC (pages 5–6). (3) The two styles are mutually emulatable (Theorems 3–4, pages 7–8), so 'merge states' vs 'merge operations' is an implementation choice, not a difference in guarantee. (4) Scope and limits: SEC solves the CAP dilemma by staying available and partition-tolerant without consensus, tolerating n−1 crashes (page 6); but eventual delivery alone is insufficient (no-op merge counterexample, page 4), and SEC is incomparable with sequential consistency — the converged state need not correspond to any sequential execution (page 8). Crucially for the research note, the guarantees are truth-neutral: correctness is defined relative to a chosen concurrent specification, not relative to fact. Add-wins, remove-wins, highest-IP-wins, or reset-to-⊥ all satisfy strong convergence ('any of them may be reasonable for some application', page 8); LWW imposes a total order 'at the cost of losing concurrent updates' (page 13). Cross-paper inference for the note (not Shapiro's claim): both independent-sampling-plus-aggregation and staged Q/A must pick a merge rule for agent contributions, and CRDT theory shows that rule choice determines which contributions survive aggregation while saying nothing about whether the merged content is true — formally grounding the dossier constraint that agreement or merge success is not evidence of correctness. A further diagnostic for the note: LLM free-text synthesis is generally neither commutative nor idempotent, so it fails the CRDT sufficient conditions and inherits no convergence guarantee at all.",
+          "tags": [
+            "definition",
+            "method",
+            "counterexample",
+            "uncertainty"
+          ],
+          "unresolved": [
+            "Whether any aggregation operator actually used in multi-agent LLM systems (majority vote, evidence-union, LLM free-text synthesis) satisfies commutativity/idempotence/monotonicity; LLM synthesis plausibly violates all three, meaning staged Q/A and independent+aggregation pipelines may have no convergence guarantee of the CRDT kind — a diagnostic the research note should exploit but this extraction cannot settle.",
+            "The paper gives no guidance on merging weighted, probabilistic, or natural-language content; adapting semilattice machinery to confidence-bearing claims is open.",
+            "Runtime rejected knowledge-link proposal outside the frozen board or with invalid endpoint types: self refines answer:work:001-inv-formal-tools"
+          ]
+        },
+        "id": "answer:work:002-inv-shapiro-r2",
+        "incoming_links": [],
+        "kind": "answer",
+        "outgoing_links": [
+          {
+            "content_sha256": "06c613360d894443325f5709f7b5319745bb920d3bc008864ff04b3a8eed0c96",
+            "id": "link:06c613360d894443325f5709",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:002-inv-shapiro-r2",
+            "target_id": "question:demand:D3"
+          },
+          {
+            "content_sha256": "14bacc0d7ce507d807ce6ff5249ff788e1e679b30f4c8da26b7196082bb937e2",
+            "id": "link:14bacc0d7ce507d807ce6ff5",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "answers",
+            "source_id": "answer:work:002-inv-shapiro-r2",
+            "target_id": "question:work:002-inv-shapiro-r2"
+          },
+          {
+            "content_sha256": "234ec0fd2d21549fd986d95102159c6b0c08126c738d778c18997788a73d9fed",
+            "id": "link:234ec0fd2d21549fd986d951",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:002-inv-shapiro-r2",
+            "target_id": "question:demand:D4"
+          },
+          {
+            "content_sha256": "2cd2c5ae89ed3bbafb0ffad7eb0957d469a6a02d9c3cb9707ebcafcf25262952",
+            "id": "link:2cd2c5ae89ed3bbafb0ffad7",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "raises",
+            "source_id": "answer:work:002-inv-shapiro-r2",
+            "target_id": "question:raised:92a7343df8a6:rq-shapiro-merge"
+          },
+          {
+            "content_sha256": "2d366dfc3512d0cc672ed2d847de26ee0ce6d6a0b0aee471d362cb6b95b0ee8a",
+            "id": "link:2d366dfc3512d0cc672ed2d8",
+            "origin": "agent",
+            "proposed_by_node_id": "work:002-inv-shapiro-r2",
+            "rationale": "The assignment was split from the wave-1 combined formal-tools packet; this covers the Shapiro half (Dung half is handled separately).",
+            "relation": "partially_answers",
+            "source_id": "answer:work:002-inv-shapiro-r2",
+            "target_id": "question:work:001-inv-formal-tools"
+          },
+          {
+            "content_sha256": "7e0f2059cb26b338ebda38ebe7f6ac7a0c513b217af0f4db4690117382135eed",
+            "id": "link:7e0f2059cb26b338ebda38eb",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:002-inv-shapiro-r2",
+            "target_id": "question:work:001-inv-formal-tools"
+          },
+          {
+            "content_sha256": "a48e50528bce5ade9ce2bcac2601a43ed0dd8099097f3f73e2af133d487029f9",
+            "id": "link:a48e50528bce5ade9ce2bcac",
+            "origin": "agent",
+            "proposed_by_node_id": "work:002-inv-shapiro-r2",
+            "rationale": "This packet performs exactly the assigned compact extraction of Shapiro 2011's CRDT/SEC machinery with page-marker citations.",
+            "relation": "answers",
+            "source_id": "answer:work:002-inv-shapiro-r2",
+            "target_id": "question:work:002-inv-shapiro-r2"
+          }
+        ]
+      },
+      "result_ids": [
+        "answer:work:002-inv-shapiro-r2"
+      ],
+      "result_sha256": "597c1b92636f44010975aa9c2ad85dc03a60bc293a16305c7f940f2ad4141b24",
+      "sequence": 5,
+      "tool": "get_entry"
+    }
+  ],
+  "snapshot_sha256": "62beaa3bfbd3ecf364333e34115557ce4da42010690587e359451d1524288754"
+}

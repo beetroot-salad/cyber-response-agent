@@ -1,0 +1,204 @@
+{
+  "frame": {
+    "title": "Unit fractions summing to one half",
+    "task": "Determine all triples of positive integers x <= y <= z satisfying 1/x + 1/y + 1/z = 1/2, and deliver a self-contained, rigorous mathematical argument that (a) gives the complete list of such triples, (b) verifies each listed triple directly against the equation using exact arithmetic, and (c) proves that no solutions are missing, using only elementary number-theoretic methods such as bounds, factorization, and divisor enumeration.",
+    "product_intent": "The product is a proof document that resolves the unit-fraction equation 1/x + 1/y + 1/z = 1/2 in positive integers with certainty and verifiability: a reader can check, line by line, that the listed triples satisfy the equation and that the argument excludes all others. It exists to provide a rigorous human-checkable resolution, not a computational trace or process report.",
+    "demands": [
+      {
+        "id": "D1",
+        "statement": "The artifact gives the complete list of triples of positive integers x <= y <= z satisfying 1/x + 1/y + 1/z = 1/2.",
+        "rationale": "Primary imperative of the request."
+      },
+      {
+        "id": "D2",
+        "statement": "The artifact contains a rigorous proof that the list is complete, i.e., that no solutions are missing.",
+        "rationale": "Explicitly required alongside the list."
+      },
+      {
+        "id": "D3",
+        "statement": "Each listed triple is verified directly by substitution into the equation.",
+        "rationale": "The request states the response should verify the listed triples directly."
+      },
+      {
+        "id": "D4",
+        "statement": "The response is a self-contained mathematical argument whose steps a reader can check without external computational evidence.",
+        "rationale": "The request specifies the form of the final response."
+      }
+    ],
+    "stable_context": [
+      "The problem equation is 1/x + 1/y + 1/z = 1/2, with x, y, z required to be positive integers.",
+      "Solutions are normalized by the ordering x <= y <= z, so each unordered solution is represented once.",
+      "The source envelope contains no conversation decisions and no materials; the raw request is the sole substantive input.",
+      "The envelope's title hint is 'Unit fractions summing to one half'."
+    ],
+    "referents": [],
+    "constraints": [
+      "Exact arithmetic must be used throughout; no approximate or floating-point computation.",
+      "The response must not be a report about agents or a brute-force program; computation cannot substitute for proof.",
+      "Methods are confined to elementary number-theoretic techniques such as bounds, factorization, and divisor enumeration."
+    ]
+  },
+  "source_envelope": {
+    "raw_request": "Determine all triples of positive integers \\(x \\le y \\le z\\) satisfying\n\n\\[\n\\frac1x+\\frac1y+\\frac1z=\\frac12.\n\\]\n\nGive the complete list and a rigorous proof that no solutions are missing. Use\nexact arithmetic. The final response should be a self-contained mathematical\nargument rather than a report about agents or a brute-force program. It may use\nbounds, factorization, divisor enumeration, or other elementary number-theoretic\nmethods, and it should verify the listed triples directly.\n\n",
+    "title_hint": "Unit fractions summing to one half",
+    "conversation_decisions": [],
+    "materials": []
+  },
+  "intake": {
+    "assessment": {
+      "readiness": "ready",
+      "derivations": [
+        {
+          "target": "title",
+          "source_ids": [
+            "request"
+          ],
+          "status": "explicit",
+          "account": "Taken verbatim from the envelope's title_hint, which accurately names the task."
+        },
+        {
+          "target": "task",
+          "source_ids": [
+            "request"
+          ],
+          "status": "explicit",
+          "account": "Restates the raw request's imperatives: determine all ordered triples, give the complete list, prove none are missing, verify directly, use exact arithmetic, in a self-contained elementary argument."
+        },
+        {
+          "target": "product_intent",
+          "source_ids": [
+            "request"
+          ],
+          "status": "explicit",
+          "account": "The request itself defines the final response's character ('a self-contained mathematical argument'), which fixes why the artifact exists: a line-by-line checkable, rigorous resolution of the equation rather than a computational report."
+        },
+        {
+          "target": "demand:D1",
+          "source_ids": [
+            "request"
+          ],
+          "status": "explicit",
+          "account": "'Determine all triples of positive integers x <= y <= z satisfying ... Give the complete list.'"
+        },
+        {
+          "target": "demand:D2",
+          "source_ids": [
+            "request"
+          ],
+          "status": "explicit",
+          "account": "'...and a rigorous proof that no solutions are missing.'"
+        },
+        {
+          "target": "demand:D3",
+          "source_ids": [
+            "request"
+          ],
+          "status": "explicit",
+          "account": "'...it should verify the listed triples directly.'"
+        },
+        {
+          "target": "demand:D4",
+          "source_ids": [
+            "request"
+          ],
+          "status": "explicit",
+          "account": "'The final response should be a self-contained mathematical argument.'"
+        },
+        {
+          "target": "constraint:1",
+          "source_ids": [
+            "request"
+          ],
+          "status": "explicit",
+          "account": "'Use exact arithmetic.'"
+        },
+        {
+          "target": "constraint:2",
+          "source_ids": [
+            "request"
+          ],
+          "status": "explicit",
+          "account": "'...rather than a report about agents or a brute-force program.'"
+        },
+        {
+          "target": "constraint:3",
+          "source_ids": [
+            "request"
+          ],
+          "status": "explicit",
+          "account": "'It may use bounds, factorization, divisor enumeration, or other elementary number-theoretic methods' — permissive in choice of technique but bounding the allowed method class to elementary number theory."
+        },
+        {
+          "target": "stable_context:1",
+          "source_ids": [
+            "request"
+          ],
+          "status": "explicit",
+          "account": "The equation and the positive-integer domain are stated directly in the request."
+        },
+        {
+          "target": "stable_context:2",
+          "source_ids": [
+            "request"
+          ],
+          "status": "explicit",
+          "account": "The ordering x <= y <= z is part of the problem statement, normalizing solutions up to permutation."
+        },
+        {
+          "target": "stable_context:3",
+          "source_ids": [
+            "request"
+          ],
+          "status": "explicit",
+          "account": "The envelope's conversation_decisions and materials arrays are empty; the raw request is the only substantive input."
+        },
+        {
+          "target": "stable_context:4",
+          "source_ids": [
+            "request"
+          ],
+          "status": "explicit",
+          "account": "The title hint is given in the envelope."
+        }
+      ],
+      "assumptions": [
+        "'Complete list' is read under the ordering normalization x <= y <= z: each equivalence class of solutions under permutation appears exactly once.",
+        "'Self-contained' is read as: every step is derived within the response from elementary principles, with no reliance on external non-elementary theorems or on computational output as evidence.",
+        "The permissive method sentence ('may use bounds, factorization, divisor enumeration, or other elementary number-theoretic methods') bounds the allowed method class; it does not mandate any particular technique.",
+        "No particular number of solutions is presupposed by the frame; establishing finiteness and the exact count is part of the task itself."
+      ],
+      "unresolved": [
+        "Presentation latitude — prose style, notation, and how much algebraic detail to show in the direct verifications — is unspecified; judged immaterial to the product and demands."
+      ],
+      "clarification_questions": [],
+      "framing_notes": "This is a single, fully specified mathematical task with no attached materials and no prior conversation decisions. Every frame element traces directly to the raw request, which is unusually explicit about both the mathematical obligation (complete list, completeness proof, direct verification) and the form of the deliverable (self-contained argument, exact arithmetic, elementary methods, no brute-force program, no agent narrative). No ambiguity was found whose resolution would materially change the product, the demands, the constraints, or the appropriateness of decomposition, so no clarification questions are posed and the intake is marked ready. The frame deliberately records no solution count and no candidate triples: solving is downstream work, and injecting results here would manufacture content the source does not contain."
+    },
+    "source_sha256": "314273480f4eed75b4a55794b8643e3aff39a03481e7c9d653662b32400025c8",
+    "frame_sha256": "d42b558817dba2ee1b4c261214ce95629d1776ade4a31337d78ee64ec2f44940",
+    "generated_by_model": "fireworks:accounts/fireworks/routers/kimi-k3-fast",
+    "elapsed_ms": 65904,
+    "usage": {
+      "details": {
+        "reasoning_tokens": 4910
+      },
+      "requests": 1,
+      "output_tokens": 8156,
+      "cache_read_tokens": 0,
+      "input_tokens": 1278
+    }
+  },
+  "questioner_lenses": [
+    "adversarial counterexample",
+    "environment and execution context",
+    "failure semantics",
+    "shared invariant hunting",
+    "artifact and referent inspection"
+  ],
+  "policy": {
+    "root_model": "fireworks:accounts/fireworks/models/kimi-k3",
+    "leaf_model": "fireworks:accounts/fireworks/models/kimi-k3",
+    "max_planning_rounds": 2,
+    "max_concurrency": 5,
+    "request_limit_per_role": 3
+  }
+}

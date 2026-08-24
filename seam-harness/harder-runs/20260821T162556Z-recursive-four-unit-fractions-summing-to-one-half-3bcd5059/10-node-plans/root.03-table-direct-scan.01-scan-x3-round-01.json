@@ -1,0 +1,24 @@
+{
+  "account": "The node's objective is a fully specified arithmetic enumeration for a single x value (x=3) with a fixed y-range [7,18] and explicit formulas for the z-interval and integrality test. All needed context (formulas, inequality constraints, exact-arithmetic requirement) is present in the dossier, the acceptance condition is mechanical (compute 12 cells, count integral w, sum), and no sibling output is required. The work is bounded and can be performed directly in this node.",
+  "children": [],
+  "decidability": {
+    "acceptance_mechanical": true,
+    "account": "All inputs are fixed constants and formulas; the acceptance condition is checkable by exact rational arithmetic over a finite list of pairs; no future sibling results are needed.",
+    "context_complete": true,
+    "grounded_referents": [
+      "x=3",
+      "y range 7..18",
+      "R = 1/2 - 1/x - 1/y",
+      "z interval max(y, floor(1/R)+1) <= z <= floor(2/R)",
+      "w = z/(R*z - 1) must be a positive integer",
+      "x <= y <= z <= w"
+    ],
+    "independent_of_future_siblings": true,
+    "missing_context": []
+  },
+  "disposition": "solve",
+  "irreducible_core": null,
+  "requested_source_ids": [],
+  "requested_source_paths": [],
+  "synthesis_contract": null
+}

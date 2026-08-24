@@ -1,0 +1,10 @@
+{
+  "content_sha256": "2aba7c57481ab497bddfd575f0c616f8c035a7d711b19b64297f469cc81df1e3",
+  "id": "link:2aba7c57481ab497bddfd575",
+  "origin": "runtime",
+  "proposed_by_node_id": null,
+  "rationale": null,
+  "relation": "raises",
+  "source_id": "answer:work:003-struct-core-v2",
+  "target_id": "question:raised:e19298af7323:rq1"
+}

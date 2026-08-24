@@ -1,0 +1,20 @@
+{
+  "account": "Investigation failed before producing evidence: UnexpectedModelBehavior: Exceeded maximum output retries (2)",
+  "assumptions": [],
+  "boundary_findings": [],
+  "child_packet_ids": [],
+  "claims": [],
+  "content_sha256": "574742d2d16b449fef7e1828b08365de3225c53978c41169cb3ca542fe0892e2",
+  "counterevidence": [],
+  "id": "packet:work:001-exception-search",
+  "knowledge_links": [],
+  "next_observation": null,
+  "node_id": "work:001-exception-search",
+  "objective": "D7 (with D9 labeling): Actively search for exceptional structure by explicit, hand-checkable enumeration with stated bounds and a reproducible procedure (e.g., systematically generate all sorted solutions reachable from (1,1,1,1) with maximum coordinate d <= 100 by breadth-first mutation, and independently verify by a direct bounded search over quadruples with d <= 100 using divisibility constraints from the equation). Report: (a) a complete table of small solutions within the stated bound, each verified by direct substitution; (b) any solution with c = d, or with a mutation that fixes the maximum; (c) any vertex with two distinct height-decreasing mutations (multiple parents); (d) any cycle not passing through the root or any solution not reachable from the root within the bound (cross-check the two enumeration methods against each other); (e) failure modes of the natural induction/descent proof (e.g., cases where d' = 4abc - d is not positive, not smaller than d, or where the re-sorting breaks a naive induction hypothesis). Report everything found as labeled observations with the enumeration bound explicit, distinguishing verified counterexamples from mere non-occurrences within the bound.",
+  "raised_questions": [],
+  "source_ids_consulted": [],
+  "sufficiency": "blocked",
+  "unresolved": [
+    "Investigation failed before producing evidence: UnexpectedModelBehavior: Exceeded maximum output retries (2)"
+  ]
+}

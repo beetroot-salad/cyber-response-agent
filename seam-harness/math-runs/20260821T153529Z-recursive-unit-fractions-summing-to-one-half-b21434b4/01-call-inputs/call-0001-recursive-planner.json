@@ -1,0 +1,87 @@
+{
+  "call_id": "call-0001-recursive-planner",
+  "context": {
+    "ancestor_decisions": [
+      "The problem equation is 1/x + 1/y + 1/z = 1/2, with x, y, z required to be positive integers.",
+      "Solutions are normalized by the ordering x <= y <= z, so each unordered solution is represented once.",
+      "The source envelope contains no conversation decisions and no materials; the raw request is the sole substantive input.",
+      "The envelope's title hint is 'Unit fractions summing to one half'.",
+      "The problem equation is 1/x + 1/y + 1/z = 1/2, with x, y, z positive integers.",
+      "Solutions are normalized by x <= y <= z.",
+      "Exact arithmetic only; methods confined to bounds, factorization, and divisor enumeration.",
+      "Global bound: x <= y <= z implies 1/2 <= 3/x so x <= 6; also 1/x < 1/2 so x >= 3. Hence x ∈ {3,4,5,6}.",
+      "Factoring method: from 1/y + 1/z = r/s in lowest terms, clear to (r y - s)(r z - s) = s^2, enumerate factor pairs d1*d2 = s^2 with d1 <= d2, keep those with y = (d1+s)/r, z = (d2+s)/r positive integers and x <= y."
+    ],
+    "assigned_demands": [
+      {
+        "id": "D1",
+        "rationale": "Primary imperative of the request.",
+        "statement": "The artifact gives the complete list of triples of positive integers x <= y <= z satisfying 1/x + 1/y + 1/z = 1/2."
+      },
+      {
+        "id": "D3",
+        "rationale": "The request states the response should verify the listed triples directly.",
+        "statement": "Each listed triple is verified directly by substitution into the equation."
+      }
+    ],
+    "constraints": [
+      "Exact arithmetic must be used throughout; no approximate or floating-point computation.",
+      "The response must not be a report about agents or a brute-force program; computation cannot substitute for proof.",
+      "Methods are confined to elementary number-theoretic techniques such as bounds, factorization, and divisor enumeration."
+    ],
+    "expansion_required": false,
+    "max_children": 4,
+    "node": {
+      "acceptance_condition": "Child returns, for each of x=5 and x=6: the factored equation, the complete factor-pair enumeration with integrality/congruence and ordering filters, the final triples, and exact substitution verification of each. Expected triples: x=5 yields (5,5,10); x=6 yields (6,6,6).",
+      "demand_ids": [
+        "D1",
+        "D3"
+      ],
+      "depth": 1,
+      "expected_contribution": "The complete solution sets for x=5 and x=6 with divisor-enumeration completeness tables and exact substitution verifications.",
+      "id": "root.02-case-x5-x6",
+      "objective": "Solve the equation 1/y + 1/z = 1/2 - 1/x with x <= y <= z, y,z positive integers, for x = 5 and x = 6, using clearing-and-factoring and complete divisor enumeration, and list every resulting triple with a direct exact substitution check of each.",
+      "parent_id": "root",
+      "rationale": "Completes the forced case split x ∈ {3,4,5,6}. For x=5: 1/y+1/z = 3/10 gives (3y-10)(3z-10) = 100, with the congruence filter d1 ≡ d2 ≡ -10 ≡ 2 (mod 3). For x=6: 1/y+1/z = 1/3 gives (y-3)(z-3) = 9.",
+      "separator_facts": [
+        "The problem equation is 1/x + 1/y + 1/z = 1/2, with x, y, z required to be positive integers.",
+        "Solutions are normalized by the ordering x <= y <= z, so each unordered solution is represented once.",
+        "The source envelope contains no conversation decisions and no materials; the raw request is the sole substantive input.",
+        "The envelope's title hint is 'Unit fractions summing to one half'.",
+        "The problem equation is 1/x + 1/y + 1/z = 1/2, with x, y, z positive integers.",
+        "Solutions are normalized by x <= y <= z.",
+        "Exact arithmetic only; methods confined to bounds, factorization, and divisor enumeration.",
+        "Global bound: x <= y <= z implies 1/2 <= 3/x so x <= 6; also 1/x < 1/2 so x >= 3. Hence x ∈ {3,4,5,6}.",
+        "Factoring method: from 1/y + 1/z = r/s in lowest terms, clear to (r y - s)(r z - s) = s^2, enumerate factor pairs d1*d2 = s^2 with d1 <= d2, keep those with y = (d1+s)/r, z = (d2+s)/r positive integers and x <= y."
+      ],
+      "source_ids": [
+        "request"
+      ],
+      "source_paths": []
+    },
+    "product_intent": "The product is a proof document that resolves the unit-fraction equation 1/x + 1/y + 1/z = 1/2 in positive integers with certainty and verifiability: a reader can check, line by line, that the listed triples satisfy the equation and that the argument excludes all others. It exists to provide a rigorous human-checkable resolution, not a computational trace or process report.",
+    "remaining_depth": 2,
+    "remaining_node_budget": 14,
+    "source_materials": [
+      {
+        "content": "Determine all triples of positive integers \\(x \\le y \\le z\\) satisfying\n\n\\[\n\\frac1x+\\frac1y+\\frac1z=\\frac12.\n\\]\n\nGive the complete list and a rigorous proof that no solutions are missing. Use\nexact arithmetic. The final response should be a self-contained mathematical\nargument rather than a report about agents or a brute-force program. It may use\nbounds, factorization, divisor enumeration, or other elementary number-theoretic\nmethods, and it should verify the listed triples directly.\n\n",
+        "id": "request",
+        "kind": "natural_request",
+        "label": "Original task request",
+        "locator": null
+      }
+    ],
+    "stable_context": [
+      "The problem equation is 1/x + 1/y + 1/z = 1/2, with x, y, z required to be positive integers.",
+      "Solutions are normalized by the ordering x <= y <= z, so each unordered solution is represented once.",
+      "The source envelope contains no conversation decisions and no materials; the raw request is the sole substantive input.",
+      "The envelope's title hint is 'Unit fractions summing to one half'."
+    ],
+    "workspace_documents": [],
+    "workspace_index": []
+  },
+  "dependency_type": "PlanningDeps",
+  "input_sha256": "f4a7d1d52de735b9621de4b11eae2ea90a1de7389ed32dee4cf54078b36be16e",
+  "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+  "role": "recursive_planner"
+}

@@ -1,0 +1,61 @@
+{
+  "created_at": "2026-08-21T15:21:11.213036+00:00",
+  "events": [
+    {
+      "event_hash": "0cfbe53e8099519cffffa1cc2a34375d28b92431b8cfea145b01a827d973da03",
+      "index": 0,
+      "metadata": {},
+      "name": "recursive-run",
+      "path": "00-input/recursive-run.json",
+      "previous_event_hash": null,
+      "record_sha256": "20de4ef10c03b9b85a9ed8c5425657b3eb395effee7b59d66456145e7acb39c9",
+      "stage": "00-input",
+      "timestamp": "2026-08-21T15:21:11.214702+00:00"
+    },
+    {
+      "event_hash": "61fb3bcfe06512033fd425d22ce13ee72c343c63ccb36b7953e0e15017426f8c",
+      "index": 1,
+      "metadata": {
+        "model": "fireworks:accounts/fireworks/models/kimi-k3",
+        "role": "recursive_planner"
+      },
+      "name": "call-0001-recursive-planner",
+      "path": "01-call-inputs/call-0001-recursive-planner.json",
+      "previous_event_hash": "0cfbe53e8099519cffffa1cc2a34375d28b92431b8cfea145b01a827d973da03",
+      "record_sha256": "01ce6156fadf299fd8340959a8cf25f047fbd4e54931440bc96b195f42fad6ac",
+      "stage": "01-call-inputs",
+      "timestamp": "2026-08-21T15:21:11.216054+00:00"
+    },
+    {
+      "event_hash": "8d6f17eb6cbce9f71ef87a8426bcfc9670146e509ebb6b791500af6d663c9f35",
+      "index": 2,
+      "metadata": {
+        "call_id": "call-0001-recursive-planner",
+        "input_sha256": "b3d60a9e8b0044da80fda5b84f79096d6640a6e291a6b9385ed7331fd41147d5",
+        "model": "fireworks:accounts/fireworks/models/kimi-k3",
+        "role": "recursive_planner"
+      },
+      "name": "call-0001-recursive-planner",
+      "path": "02-call-errors/call-0001-recursive-planner.json",
+      "previous_event_hash": "61fb3bcfe06512033fd425d22ce13ee72c343c63ccb36b7953e0e15017426f8c",
+      "record_sha256": "628e7560b492c5f6e9d0e52af279df7aed87798cf3a4bd43198273afb1c61a52",
+      "stage": "02-call-errors",
+      "timestamp": "2026-08-21T15:22:56.278635+00:00"
+    },
+    {
+      "event_hash": "e8066b7094dbb960f70ef496c0e15ac0b247e601b5b41ddfcbb68902a60f87d9",
+      "index": 3,
+      "metadata": {},
+      "name": "failure",
+      "path": "99-result/failure.json",
+      "previous_event_hash": "8d6f17eb6cbce9f71ef87a8426bcfc9670146e509ebb6b791500af6d663c9f35",
+      "record_sha256": "628e7560b492c5f6e9d0e52af279df7aed87798cf3a4bd43198273afb1c61a52",
+      "stage": "99-result",
+      "timestamp": "2026-08-21T15:22:56.279265+00:00"
+    }
+  ],
+  "finished_at": "2026-08-21T15:22:56.279548+00:00",
+  "run_id": "20260821T152111Z-recursive-unit-fractions-summing-to-one-half-38018792",
+  "schema_version": 1,
+  "status": "failed"
+}

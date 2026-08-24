@@ -1,0 +1,90 @@
+{
+  "account": "The knowledge state is empty (9 open questions, 0 answers), and every downstream deliverable — the mechanistic thesis (D2), causal model (D3), discriminating predictions (D5), and preregisterable experiment (D7) — must be built on extracted, citable evidence from the fixed seven-paper corpus (D4, D6). The highest-value first action is therefore a frozen parallel wave of five corpus-reading investigations that partition the papers (plus one cross-cutting methodological-limits lens over all files), so the whole corpus is covered with page-marker citations in one wave. The theory, predictions, and experiment design are deliberately deferred: they are sequential stages that depend on what the evidence extraction actually shows, so they must not be parallelized now.",
+  "action": {
+    "investigations": [
+      {
+        "acceptance_condition": "A structured extraction covering both files with at least 8 distinct findings, each tied to file path + PDF page marker, explicitly labeled as reported finding vs. the extractor's cross-paper inference, and a list of any stated moderators of the debate effect.",
+        "demand_ids": [],
+        "independence_account": "Reads only the two assigned debate papers; needs no output from the social-influence, formal-model, or methodology investigations to complete its extraction.",
+        "local_id": "w1-debate-positive",
+        "question": "Extract from papers/text/du-et-al-2023-multiagent-debate.txt and papers/text/zhang-et-al-2025-mad-question.txt: (a) every reported empirical claim about when multi-agent debate or communication improves accuracy/factuality over single-agent or independent-sampling baselines, with the task, model, number of agents/rounds, and any compute or cost accounting; (b) every reported condition or moderator under which debate fails, degrades, or does not help (task type, answer aggregation rule, model heterogeneity); (c) whether either paper compares against a matched-inference-compute baseline or an open shared transcript, and exactly what they say about it. Record each finding with the workspace file path and the explicit `===== PDF PAGE N =====` marker where it appears, and flag findings that appear to conflict across the two papers.",
+        "rationale": "These two papers are the core positive/conditional evidence that multi-agent communication helps; their exact claims, moderators, and baselines are the raw material for reconciling the corpus (D4) and for formulating the mechanism (D2) and task-topology predictions.",
+        "tags": [
+          "evidence",
+          "method"
+        ],
+        "target_question_ids": [
+          "question:demand:D4",
+          "question:demand:D2"
+        ]
+      },
+      {
+        "acceptance_condition": "A structured extraction with at least 6 distinct findings, each with file path + PDF page marker, including the paper's baseline comparisons, any cost/compute-parity analysis, and its stated moderators of debate benefit.",
+        "demand_ids": [],
+        "independence_account": "Reads only smit-et-al-2023-going-mad.txt; its extraction of null/adverse findings does not depend on any other wave member's output.",
+        "local_id": "w1-debate-critical",
+        "question": "Extract from papers/text/smit-et-al-2023-going-mad.txt: (a) all null, adverse, or critical findings about multi-agent debate strategies for LLMs — where debate underperforms simpler baselines such as self-consistency / independent sampling with aggregation, or single-agent chain-of-thought; (b) any analysis of cost, token budget, or compute parity between compared methods; (c) the authors' own stated explanations for when debate does and does not help, and any identified confounds (e.g., more inference compute rather than communication per se). Record each finding with file path and explicit `===== PDF PAGE N =====` markers, distinguishing reported results from the paper's interpretation.",
+        "rationale": "Smit et al. is the corpus's main skeptical/null result; without its exact findings and compute accounting the note cannot honestly reconcile conflicting outcomes or rule out the compute-only alternative explanation (D4, D6, and later D5).",
+        "tags": [
+          "evidence",
+          "counterexample"
+        ],
+        "target_question_ids": [
+          "question:demand:D4",
+          "question:demand:D6"
+        ]
+      },
+      {
+        "acceptance_condition": "A structured extraction covering both files with at least 8 findings total, each with file path + PDF page marker, including Lorenz's diversity/accuracy effects under each information condition and Choi's conformity measures and moderators.",
+        "demand_ids": [],
+        "independence_account": "Reads only the two assigned social-influence papers; completing the extraction requires no result from the debate or formal-model investigations.",
+        "local_id": "w1-social-influence",
+        "question": "Extract from papers/text/lorenz-et-al-2011-social-influence.txt and papers/text/choi-et-al-2025-conformity.txt: (a) Lorenz et al.'s experimental design and quantitative findings on how social influence (full vs. aggregated information feedback) affects estimate diversity, collective accuracy, and confidence in human crowds; (b) Choi et al.'s findings on group conformity in LLM multi-agent systems — when agents conform, what drives conformity (e.g., majority pressure, model identity, task), and measured effects on accuracy; (c) any parameters or effect sizes usable as priors for modeling error-correlation collapse under shared information. Record each finding with file path and explicit `===== PDF PAGE N =====` markers.",
+        "rationale": "These two papers supply the social-influence/conformity pathway of the causal model (D3): the mechanism by which open transcripts destroy the error independence that makes aggregation work, which is central to why staged retrieval-mediated Q/A might beat an open transcript.",
+        "tags": [
+          "evidence",
+          "measurement"
+        ],
+        "target_question_ids": [
+          "question:demand:D3",
+          "question:demand:D4"
+        ]
+      },
+      {
+        "acceptance_condition": "A structured extraction with the key definitions and at least 4 formal results across the two papers, each with file path + PDF page marker, plus a clearly labeled inferential mapping to communication-protocol synthesis/aggregation stages.",
+        "demand_ids": [],
+        "independence_account": "Reads only the two assigned formal papers; the extraction of definitions and theorems is independent of all other wave members.",
+        "local_id": "w1-formal-models",
+        "question": "Extract from papers/text/dung-1995-argumentation.txt and papers/text/shapiro-et-al-2011-crdts.txt: (a) from Dung, the formal apparatus relevant to synthesizing conflicting claims — argumentation frameworks, attack relations, admissible/grounded/preferred extensions — with precise definitions and the key theorems (e.g., existence/uniqueness of grounded extension); (b) from Shapiro et al., the CRDT conditions under which concurrent updates converge without coordination (commutativity/idempotency, monotonic semilattice joins), and the distinction between state-based and operation-based replication; (c) an assessment, labeled as the investigator's inference, of how each formalism could model the synthesis stage of staged retrieval-mediated Q/A (conflict resolution among agent answers) versus an open shared transcript (convergent replicated state). Record definitions/results with file path and explicit `===== PDF PAGE N =====` markers.",
+        "rationale": "These papers provide the formal vocabulary for the causal model's synthesis and aggregation components (D3): Dung gives principled conflict resolution over attack graphs; CRDTs characterize when shared-state merging is safe and what invariants an open transcript would need.",
+        "tags": [
+          "definition",
+          "method"
+        ],
+        "target_question_ids": [
+          "question:demand:D3",
+          "question:demand:D4"
+        ]
+      },
+      {
+        "acceptance_condition": "A catalog of at least 10 distinct limitation entries spanning all five empirical papers and both formal papers, each with file path + PDF page marker, each labeled reported vs. inferred, and each stating what comparison would be needed to identify the effect.",
+        "demand_ids": [],
+        "independence_account": "Applies a distinct methodological lens to files the other investigations read for content; it produces limitations, not content extraction, so it neither needs nor duplicates peer outputs.",
+        "local_id": "w1-methodology-limits",
+        "question": "Read all seven files under papers/text with a methodology-critique lens and catalog: (a) for each empirical paper (du, smit, zhang, choi, lorenz), what its design cannot identify — confounds between communication structure and total inference compute, absence of matched-compute baselines, benchmark/data-contamination risks, model-generality limits, task-selection effects, and aggregation-rule sensitivity; (b) for the two formal papers (dung, shapiro), the gap between their formal guarantees and any empirical claim about LLM-agent communication; (c) external-validity limits for transferring published benchmark accuracy to new task topologies. Every catalog entry must name the file path and the explicit `===== PDF PAGE N =====` marker supporting it, and must distinguish what the paper reports from the critic's inference.",
+        "rationale": "D6 requires identifying non-identifiability, measurement, and external-validity limits across the corpus; a dedicated critical sweep ensures the note does not overclaim and later lets the experiment design (D7) close the identified gaps (e.g., true compute matching).",
+        "tags": [
+          "risk",
+          "uncertainty",
+          "measurement"
+        ],
+        "target_question_ids": [
+          "question:demand:D6",
+          "question:demand:D4"
+        ]
+      }
+    ],
+    "kind": "investigate",
+    "wave_rationale": "All five investigations read from the same frozen corpus and can run concurrently: four partition the seven papers by theme (debate-positive, debate-critical, social influence, formal models) and the fifth applies a non-overlapping methodological-limits lens across all files. None consumes another's output. The outputs of this wave — citable findings and limits — are the required inputs for the later sequential stages: synthesizing the mechanistic thesis and causal model (D2/D3), deriving discriminating predictions (D5), and designing the preregisterable experiment (D7)."
+  }
+}

@@ -1,0 +1,641 @@
+{
+  "call_id": "call-0015-adaptive-synthesizer",
+  "queries": [
+    {
+      "arguments": {
+        "entry_id": "question:raised:24ba60001ffb:rz1"
+      },
+      "result": {
+        "content": {
+          "acceptance_condition": "A matched-compute experiment crossing communication (none/SC vs SoM-style debate) x pool (homogeneous vs heterogeneous models) on >=3 task strata, reporting accuracy with CIs and a preregistered decision rule: if Heter-SC >= Heter-MAD, diversity-only is supported; if Heter-MAD > Heter-SC by a preregistered margin, communication adds identifiable value.",
+          "answer_ids": [],
+          "content_sha256": "1e7232e99d11a4209cd6f488cc993b0a23ab702cc21465c9ee91bd179557077e",
+          "demand_ids": [
+            "D4",
+            "D3"
+          ],
+          "id": "question:raised:24ba60001ffb:rz1",
+          "node_id": "work:002-inv-zhang-when-r2#raised:rz1",
+          "rationale": "Zhang's 'universal antidote' compares Heter-MAD only to same-model MAD averages and CoT-Average; without a heterogeneous-SC control, the heterogeneity result cannot distinguish a diversity-only mechanism (decorrelated errors suffice) from a deliberation mechanism (communication adds value given diversity). This is the pivotal discrimination for the root note's causal model and its predictions.",
+          "tags": [
+            "method",
+            "uncertainty",
+            "evidence"
+          ],
+          "text": "Under matched LLM-call and token budgets, does heterogeneous self-consistency (each sample drawn from a distinct model, majority vote, no inter-agent communication) match or exceed Heter-MAD, and does the answer interact with task type?"
+        },
+        "id": "question:raised:24ba60001ffb:rz1",
+        "incoming_links": [
+          {
+            "content_sha256": "3037579925e77482c5550a96ee64f6e5d1961c3b0b2081a5174850481267113a",
+            "id": "link:3037579925e77482c5550a96",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "raises",
+            "source_id": "answer:work:002-inv-zhang-when-r2",
+            "target_id": "question:raised:24ba60001ffb:rz1"
+          },
+          {
+            "content_sha256": "a47e997e8e17d37453b60a23edf22e364ba36227c40a591ff7d5a3bdf27a83d5",
+            "id": "link:a47e997e8e17d37453b60a23",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "depends_on",
+            "source_id": "question:work:003-synthesis",
+            "target_id": "question:raised:24ba60001ffb:rz1"
+          }
+        ],
+        "kind": "question",
+        "outgoing_links": [
+          {
+            "content_sha256": "f510c3c4c26f930298249626be63714058d5fa068f931870426e23d2d18ea9ec",
+            "id": "link:f510c3c4c26f930298249626",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "depends_on",
+            "source_id": "question:raised:24ba60001ffb:rz1",
+            "target_id": "question:work:001-inv-zhang-when"
+          }
+        ]
+      },
+      "result_ids": [
+        "question:raised:24ba60001ffb:rz1"
+      ],
+      "result_sha256": "85fa7054768d38c299ee1afbe632042ca272f8f10232d49ce6972d7e30921897",
+      "sequence": 1,
+      "tool": "get_entry"
+    },
+    {
+      "arguments": {
+        "entry_id": "question:raised:92a7343df8a6:rq-shapiro-merge"
+      },
+      "result": {
+        "content": {
+          "acceptance_condition": "For each candidate aggregation operator, a deterministic test (e.g., permuting input order, duplicating an input) establishes whether outputs are invariant (commutative/idempotent) or not, with effect sizes on final-answer variability reported for at least the operators used in the note's experiment.",
+          "answer_ids": [],
+          "content_sha256": "c95b9d709e1173f22fdfb151b604c799c57e61e314e933a5fdd8babb1036ccb4",
+          "demand_ids": [
+            "D3",
+            "D4"
+          ],
+          "id": "question:raised:92a7343df8a6:rq-shapiro-merge",
+          "node_id": "work:002-inv-shapiro-r2#raised:rq-shapiro-merge",
+          "rationale": "Shapiro's theorems give convergence only when merge is a semilattice LUB or updates commute (pages 5–6). Both focal baselines (independent sampling + aggregation, staged Q/A) end in an aggregation step; if that step is a stochastic LLM call, it violates these conditions, so final answers may depend on agent ordering and sampling noise — a confound for the preregistered matched-compute experiment and a mechanistic distinction between aggregation designs.",
+          "tags": [
+            "method",
+            "uncertainty",
+            "interface"
+          ],
+          "text": "Which aggregation operators used in multi-agent LLM pipelines (majority vote, evidence union, LLM free-text synthesis) satisfy or violate the CRDT sufficient conditions for well-defined merging (commutativity, idempotence, monotonicity), and does order/non-determinism of the final aggregation step measurably change the merged answer?"
+        },
+        "id": "question:raised:92a7343df8a6:rq-shapiro-merge",
+        "incoming_links": [
+          {
+            "content_sha256": "2cd2c5ae89ed3bbafb0ffad7eb0957d469a6a02d9c3cb9707ebcafcf25262952",
+            "id": "link:2cd2c5ae89ed3bbafb0ffad7",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "raises",
+            "source_id": "answer:work:002-inv-shapiro-r2",
+            "target_id": "question:raised:92a7343df8a6:rq-shapiro-merge"
+          },
+          {
+            "content_sha256": "923dadec474adfee7d3bfc49310a35a706a48d9c0f291e05bd6c6f04d2bf2e01",
+            "id": "link:923dadec474adfee7d3bfc49",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "depends_on",
+            "source_id": "question:work:003-synthesis",
+            "target_id": "question:raised:92a7343df8a6:rq-shapiro-merge"
+          }
+        ],
+        "kind": "question",
+        "outgoing_links": [
+          {
+            "content_sha256": "57601de82665a4811ad5b2e24d7970cc2097094efad35744ca8f3e5cfef6f14e",
+            "id": "link:57601de82665a4811ad5b2e2",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "depends_on",
+            "source_id": "question:raised:92a7343df8a6:rq-shapiro-merge",
+            "target_id": "question:demand:D7"
+          },
+          {
+            "content_sha256": "d413ee80852a6719c6469562e0ec0cafb7dca5b3f78a8e220cfc77156d6be494",
+            "id": "link:d413ee80852a6719c6469562",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "depends_on",
+            "source_id": "question:raised:92a7343df8a6:rq-shapiro-merge",
+            "target_id": "question:demand:D3"
+          }
+        ]
+      },
+      "result_ids": [
+        "question:raised:92a7343df8a6:rq-shapiro-merge"
+      ],
+      "result_sha256": "8f0250d1dfcdf9636140f0fcc41e0d543cb6a7158d21cf6680b6a8b4413f3683",
+      "sequence": 2,
+      "tool": "get_entry"
+    },
+    {
+      "arguments": {
+        "limit": 10,
+        "query": "contradiction matched compute debate",
+        "tags": [],
+        "unanswered_only": false
+      },
+      "result": {
+        "hits": [
+          {
+            "answer_count": 2,
+            "id": "question:work:001-inv-smit-mad",
+            "kind": "question",
+            "score": 7.276666119016054,
+            "sufficiency": null,
+            "tags": [
+              "evidence",
+              "counterexample"
+            ],
+            "text": "What exactly does Smit et al. 2023 (papers/text/smit-et-al-2023-going-mad.txt) find when re-examining multi-agent debate strategies: which debate variants and tasks were tested, which baselines (e.g., single-agent with equivalent sampling) were used, where did debate fail to beat or underperform simpler baselines, what role do model capability/size and judge aggregation play, and what matched-compute or cost comparisons does the paper make? Record key claims with `===== PDF PAGE N =====` markers.",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 0,
+            "id": "question:work:003-synthesis",
+            "kind": "question",
+            "score": 6.688879454113937,
+            "sufficiency": null,
+            "tags": [
+              "synthesis",
+              "evidence"
+            ],
+            "text": "Integrate the seven extraction answers into the note's core: (a) one original mechanistic thesis stating when staged retrieval-mediated Q/A beats both independent sampling with final aggregation and an open shared transcript under matched inference compute (D2); (b) an explicit causal model over initial error correlation, evidence diversity, social influence/conformity, retrieval selectivity, synthesis competence, and task topology, with directed pathways and sign conditions (D3); (c) a reconciliation of Du 2023's positive results, Smit 2023's null/hyperparameter-contingent results, and Zhang 2025's matched-compute negative plus heterogeneity result, using Lorenz 2011 and Choi 2025 for the social-influence pathway and Dung 1995 and Shapiro 2011 for the synthesis/merge stage (D4); (d) at least four directional or interaction predictions, each labeled with which alternative it discriminates against among compute-only, diversity-only, and deliberation-only (D5); (e) an explicit non-identifiability, measurement, and external-validity limits section built from rz1, rz2, rq-choi-1, rq1, and rq-shapiro-merge (D6); (f) a preregisterable experiment skeleton (conditions, randomization, estimands, power inputs, failure criteria, analysis plan) that instantiates rz1 and rz2 (D7); and (g) a draft of the strongest warranted conclusion and the single most likely falsifying observation (D8).",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 2,
+            "id": "question:raised:784a683dbe8a:rq1",
+            "kind": "question",
+            "score": 5.8903717578961645,
+            "sufficiency": null,
+            "tags": [
+              "uncertainty",
+              "method",
+              "evidence"
+            ],
+            "text": "In LLM ensembles under matched compute, does diversity collapse arise from mere exposure to peers' final answers (Lorenz-style scalar feedback) or does it require exposure to peers' reasoning/justifications?",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 0,
+            "id": "question:raised:24ba60001ffb:rz1",
+            "kind": "question",
+            "score": 5.484906649788,
+            "sufficiency": null,
+            "tags": [
+              "method",
+              "uncertainty",
+              "evidence"
+            ],
+            "text": "Under matched LLM-call and token budgets, does heterogeneous self-consistency (each sample drawn from a distinct model, majority vote, no inter-agent communication) match or exceed Heter-MAD, and does the answer interact with task type?",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 1,
+            "id": "question:work:002-inv-zhang-when-r2",
+            "kind": "question",
+            "score": 5.484906649788,
+            "sufficiency": null,
+            "tags": [
+              "evidence",
+              "counterexample"
+            ],
+            "text": "What does Zhang et al. 2025 (papers/text/zhang-et-al-2025-mad-question.txt, 'If Multi-Agent Debate Is the Answer, What Is the Question?') establish: the 5 MAD methods x 9 benchmarks x 4 models design; the headline negative result that MAD methods rarely beat CoT (win rates under 20% across 36 scenarios) and underperform self-consistency at comparable LLM-call/token budgets; the hyperparameter experiments (agents 3-9, rounds 2-4) showing stagnation/decline; efficiency findings on inference-budget utilization; the model-heterogeneity result as a 'universal antidote'; robustness findings; and how the paper positions itself against Du et al. 2023 and Smit et al. Keep the answer compact: at most 8 claims, each with a `===== PDF PAGE N =====` marker.",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 1,
+            "id": "question:work:002-inv-smit-mad-r2",
+            "kind": "question",
+            "score": 4.772588722239782,
+            "sufficiency": null,
+            "tags": [
+              "evidence",
+              "counterexample"
+            ],
+            "text": "What exactly does Smit et al. 2023 (papers/text/smit-et-al-2023-going-mad.txt) find when benchmarking multi-agent debate (MAD): which debate variants (ChatEval, Society of Mind, Ensemble Refinement, Multi-Persona, etc.) and tasks (MedQA, PubMedQA, MMLU, CosmosQA, CIAR, GPQA, chess) were tested; which single-agent baselines (CoT, self-consistency, Medprompt) were used and how cost/API-calls were measured; where MAD failed to beat or underperformed those baselines; the K-fold hyperparameter-sensitivity analysis; the debate-vs-first-answer improvement measurements; and the paper's own account of when debate helps (e.g., agreement modulation). Keep the answer compact: at most 8 claims, each with a `===== PDF PAGE N =====` marker.",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 1,
+            "id": "question:work:001-inv-du-debate",
+            "kind": "question",
+            "score": 4.7080502011022105,
+            "sufficiency": null,
+            "tags": [
+              "evidence"
+            ],
+            "text": "What exactly does Du et al. 2023 (papers/text/du-et-al-2023-multiagent-debate.txt) claim and show about multiagent debate: which tasks and baselines (single-agent, self-consistency/majority voting over independent samples), what were the quantitative effects, how do agents and rounds scale, what does the paper report about consensus/convergence and about cases where debate does not help, and what compute does the procedure consume relative to baselines? Record every key claim with its `===== PDF PAGE N =====` marker.",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 2,
+            "id": "question:work:001-inv-zhang-when",
+            "kind": "question",
+            "score": 4.197224577336219,
+            "sufficiency": null,
+            "tags": [
+              "evidence",
+              "synthesis"
+            ],
+            "text": "What does Zhang et al. 2025 (papers/text/zhang-et-al-2025-mad-question.txt, 'If Multi-Agent Debate Is the Answer, What Is the Question?') establish about the conditions under which multi-agent debate helps or fails: what taxonomy of factors (task type/difficulty, model heterogeneity, number of agents/rounds, topology, judge) is proposed, what are the headline empirical results and interactions, how does the paper position itself relative to Du et al. and other positive reports, and what does it say about compute costs? Record key claims with `===== PDF PAGE N =====` markers.",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 0,
+            "id": "question:demand:D2",
+            "kind": "question",
+            "score": 3.386294361119891,
+            "sufficiency": null,
+            "tags": [
+              "evidence"
+            ],
+            "text": "State one original mechanistic thesis about when staged retrieval-mediated Q/A communication wins or loses under matched inference compute.",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 0,
+            "id": "question:demand:D7",
+            "kind": "question",
+            "score": 3.386294361119891,
+            "sufficiency": null,
+            "tags": [
+              "risk",
+              "measurement"
+            ],
+            "text": "Specify a preregisterable matched-compute experiment: units, task strata, conditions, randomization, intervention fidelity, primary and secondary estimands, outcome measures, power-analysis inputs, exclusion rules, multiple-testing control, and failure or stopping criteria.",
+            "unresolved_count": null
+          }
+        ],
+        "query": "contradiction matched compute debate",
+        "snapshot_sha256": "091522d1c29440b4a50ef00a5215b4cf2c9458f895879cd8ac24fcf1b85aaf8a",
+        "truncated": true
+      },
+      "result_ids": [
+        "question:work:001-inv-smit-mad",
+        "question:work:003-synthesis",
+        "question:raised:784a683dbe8a:rq1",
+        "question:raised:24ba60001ffb:rz1",
+        "question:work:002-inv-zhang-when-r2",
+        "question:work:002-inv-smit-mad-r2",
+        "question:work:001-inv-du-debate",
+        "question:work:001-inv-zhang-when",
+        "question:demand:D2",
+        "question:demand:D7"
+      ],
+      "result_sha256": "2d3fd17e818210e10615ea55c58738830443f532066256b78efd733db133c1ae",
+      "sequence": 3,
+      "tool": "search_questions"
+    },
+    {
+      "arguments": {
+        "entry_id": "question:raised:24ba60001ffb:rz2"
+      },
+      "result": {
+        "content": {
+          "acceptance_condition": "Construct or select task strata scored by number of required complementary knowledge/fact units (verified by ablating information given to single agents), then test the communication-condition x stratum interaction at matched compute with adequate power for the interaction, not just main effects.",
+          "answer_ids": [],
+          "content_sha256": "808c14df686bf1f6eddc7d4d1b6ad50f7d9447072d3ca0f2e3a2d295d8809538",
+          "demand_ids": [
+            "D4",
+            "D3"
+          ],
+          "id": "question:raised:24ba60001ffb:rz2",
+          "node_id": "work:002-inv-zhang-when-r2#raised:rz2",
+          "rationale": "Zhang's own boundary claim ('===== PDF PAGE 14 =====') is that current benchmarks need only a single knowledge point, so MAD may be unnecessary there; if true, the headline negative result is task-topology-confounded and the root note must stratify by knowledge-requirement rather than treat the null as universal.",
+          "tags": [
+            "uncertainty",
+            "method"
+          ],
+          "text": "Does the MAD-vs-SC ordering reverse on tasks that genuinely require combining multiple, distributed knowledge points, as Zhang conjectures but never tests?"
+        },
+        "id": "question:raised:24ba60001ffb:rz2",
+        "incoming_links": [
+          {
+            "content_sha256": "513e7ecd7528db2736fa1f5233f7c2a92d2bdb31515a83a8ee5298228e378214",
+            "id": "link:513e7ecd7528db2736fa1f52",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "raises",
+            "source_id": "answer:work:002-inv-zhang-when-r2",
+            "target_id": "question:raised:24ba60001ffb:rz2"
+          },
+          {
+            "content_sha256": "60ace8cb6ae858b3c74da6230439212e5b88b957bbf33e60b70fd11264b85b17",
+            "id": "link:60ace8cb6ae858b3c74da623",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "depends_on",
+            "source_id": "question:work:003-synthesis",
+            "target_id": "question:raised:24ba60001ffb:rz2"
+          }
+        ],
+        "kind": "question",
+        "outgoing_links": [
+          {
+            "content_sha256": "b94c02ee6cc3908a169a25985ca0062cd2d78d60fdbda690040f8f2c062c5832",
+            "id": "link:b94c02ee6cc3908a169a2598",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "depends_on",
+            "source_id": "question:raised:24ba60001ffb:rz2",
+            "target_id": "question:work:001-inv-zhang-when"
+          }
+        ]
+      },
+      "result_ids": [
+        "question:raised:24ba60001ffb:rz2"
+      ],
+      "result_sha256": "0c7e8d5e9ce5b0f6d97dcdd13252f2a9d1168d70d09499bb8a489a49c0e66fb8",
+      "sequence": 4,
+      "tool": "get_entry"
+    },
+    {
+      "arguments": {
+        "entry_id": "question:raised:784a683dbe8a:rq1"
+      },
+      "result": {
+        "content": {
+          "acceptance_condition": "An experiment or corpus-derived argument that compares answer-only exposure against answer-plus-rationale exposure in LLM groups and measures both output diversity and aggregate error, with matched total compute.",
+          "answer_ids": [
+            "answer:work:002-inv-choi-r2",
+            "answer:work:002-inv-smit-mad-r2"
+          ],
+          "content_sha256": "4e50430c9677e553a9265d0258b647804c98722747b3f02003c893a893c08686",
+          "demand_ids": [
+            "D4",
+            "D3"
+          ],
+          "id": "question:raised:784a683dbe8a:rq1",
+          "node_id": "work:001-inv-lorenz-influence#raised:RQ1",
+          "rationale": "Lorenz shows the collapse happens with zero argumentative content in humans; Choi et al. 2025 examine persuasion in debate. Which channel dominates in LLMs determines whether retrieval-mediated staging should gate exposure volume (how many peer answers are seen) or exposure content (rationales vs bare answers) — these imply different designs and different predictions for D5.",
+          "tags": [
+            "uncertainty",
+            "method",
+            "evidence"
+          ],
+          "text": "In LLM ensembles under matched compute, does diversity collapse arise from mere exposure to peers' final answers (Lorenz-style scalar feedback) or does it require exposure to peers' reasoning/justifications?"
+        },
+        "id": "question:raised:784a683dbe8a:rq1",
+        "incoming_links": [
+          {
+            "content_sha256": "24408332bd58b127fc90ffb55138453182744111c9d37965784bab60722cedc9",
+            "id": "link:24408332bd58b127fc90ffb5",
+            "origin": "agent",
+            "proposed_by_node_id": "work:002-inv-smit-mad-r2",
+            "rationale": "The agreement-intensity result shows that prompting agents to agree more raises accuracy on MedQA/PubMedQA but lowers it on counter-intuitive CIAR, and that a forced-disagreeing devil agent degrades performance even when the first answer is correct — evidence that the effect of peer exposure on accuracy is moderated by task truth-topology, relevant to whether diversity collapse arises from mere answer exposure.",
+            "relation": "partially_answers",
+            "source_id": "answer:work:002-inv-smit-mad-r2",
+            "target_id": "question:raised:784a683dbe8a:rq1"
+          },
+          {
+            "content_sha256": "35ae2a9b2cfc3ecb2685517f748e248f242dbf2dbd0d1796a538a2d1f0f111a8",
+            "id": "link:35ae2a9b2cfc3ecb2685517f",
+            "origin": "agent",
+            "proposed_by_node_id": "work:002-inv-choi-r2",
+            "rationale": "Bounds rq1 from the rationale side: Choi shows conformity under full-argument exposure and provides no bare-answer condition, so answer-only sufficiency remains experimentally open.",
+            "relation": "partially_answers",
+            "source_id": "answer:work:002-inv-choi-r2",
+            "target_id": "question:raised:784a683dbe8a:rq1"
+          },
+          {
+            "content_sha256": "9e1d1de7ea09495bb59f849b84f67baf512f7a5b860c146763c3cb7cbccf67a7",
+            "id": "link:9e1d1de7ea09495bb59f849b",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "raises",
+            "source_id": "answer:work:001-inv-lorenz-influence",
+            "target_id": "question:raised:784a683dbe8a:rq1"
+          },
+          {
+            "content_sha256": "9e3193b62cba30a20ba88c27a1a43c114a1fef8a424381e0cfe64a20ea71aa4c",
+            "id": "link:9e3193b62cba30a20ba88c27",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "depends_on",
+            "source_id": "question:work:003-synthesis",
+            "target_id": "question:raised:784a683dbe8a:rq1"
+          }
+        ],
+        "kind": "question",
+        "outgoing_links": [
+          {
+            "content_sha256": "21310bccbc0d563490e75b8b501f7c54e77bf3255c5e15dac143116685a2ef54",
+            "id": "link:21310bccbc0d563490e75b8b",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "depends_on",
+            "source_id": "question:raised:784a683dbe8a:rq1",
+            "target_id": "question:demand:D3"
+          },
+          {
+            "content_sha256": "9dc7a8079266011859d3373382ba1092ed351e0568636df0ac71492cf5e92a73",
+            "id": "link:9dc7a8079266011859d33733",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "depends_on",
+            "source_id": "question:raised:784a683dbe8a:rq1",
+            "target_id": "question:demand:D5"
+          }
+        ]
+      },
+      "result_ids": [
+        "question:raised:784a683dbe8a:rq1"
+      ],
+      "result_sha256": "625ef5d839c3fdecf4b359eed98d85c52395e91a8bc23dc7100ffbe705def253",
+      "sequence": 5,
+      "tool": "get_entry"
+    },
+    {
+      "arguments": {
+        "entry_id": "question:raised:eaee61611e26:rq-choi-1"
+      },
+      "result": {
+        "content": {
+          "acceptance_condition": "A study with ground-truth tasks, mixed-capability LLM agents at varied majority/minority and capability configurations, measuring both answer-shift rates (conformity) and group accuracy pre/post exposure, under matched total inference compute.",
+          "answer_ids": [],
+          "content_sha256": "98a46980a67d67c9c380d05199af4120496fa3d9b4dc109c26768d618b39daf2",
+          "demand_ids": [
+            "D4",
+            "D3"
+          ],
+          "id": "question:raised:eaee61611e26:rq-choi-1",
+          "node_id": "work:002-inv-choi-r2#raised:rq-choi-1",
+          "rationale": "Choi's topics are deliberately ground-truth-free, so its conformity rates measure persuasion, not accuracy. The note's mechanism needs to know whether the capability-dominance effect (one strong agent outweighs a majority) is error-correcting (strong agent is right and pulls the group toward truth) or error-amplifying (strong agent is confidently wrong and collapses diversity) on verifiable tasks - this determines whether staged retrieval should amplify or dampen high-capability voices.",
+          "tags": [
+            "uncertainty",
+            "evidence",
+            "method"
+          ],
+          "text": "Do Choi-style conformity dynamics - majority pull dominated by single high-capability agents, and minority capitulation - reproduce on tasks with verifiable ground truth, and when they occur, do they reduce or increase aggregate error relative to independent sampling?"
+        },
+        "id": "question:raised:eaee61611e26:rq-choi-1",
+        "incoming_links": [
+          {
+            "content_sha256": "3d4c9a7744b8d91ec7b83e5c179320f7477bde5bc33081746ff75394271612f4",
+            "id": "link:3d4c9a7744b8d91ec7b83e5c",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "depends_on",
+            "source_id": "question:work:003-synthesis",
+            "target_id": "question:raised:eaee61611e26:rq-choi-1"
+          },
+          {
+            "content_sha256": "f23072940496f6160d6c92de3cc7b3d632ac0d65fd25587d64d2f9f775a78405",
+            "id": "link:f23072940496f6160d6c92de",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "raises",
+            "source_id": "answer:work:002-inv-choi-r2",
+            "target_id": "question:raised:eaee61611e26:rq-choi-1"
+          }
+        ],
+        "kind": "question",
+        "outgoing_links": [
+          {
+            "content_sha256": "3b7ec858154a4d6379baa0ea71f7efdd0e647afb153adf1027992f73470534bd",
+            "id": "link:3b7ec858154a4d6379baa0ea",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "depends_on",
+            "source_id": "question:raised:eaee61611e26:rq-choi-1",
+            "target_id": "question:demand:D3"
+          },
+          {
+            "content_sha256": "9290b14d54aa2da1e071ede90a8811f9f7d06129419235c903e68cc171d40bb7",
+            "id": "link:9290b14d54aa2da1e071ede9",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "depends_on",
+            "source_id": "question:raised:eaee61611e26:rq-choi-1",
+            "target_id": "question:work:002-inv-choi-r2"
+          }
+        ]
+      },
+      "result_ids": [
+        "question:raised:eaee61611e26:rq-choi-1"
+      ],
+      "result_sha256": "02f9fe37017a1cfc02c9673086f2462cb6d8eef4a251a44c95c63297e413d911",
+      "sequence": 6,
+      "tool": "get_entry"
+    },
+    {
+      "arguments": {
+        "limit": 3,
+        "query": "MAD frameworks outperform SA in most conditions 34 out of 45 perfectly aligns",
+        "source_ids": [
+          "papers/text/zhang-et-al-2025-mad-question.txt"
+        ]
+      },
+      "result": {
+        "hits": [
+          {
+            "content_sha256": "41e1d26db346207d4be0ec393e7bed983875ae417ca7aa5a530d390dca72e06e",
+            "excerpt": "50\n75Accuracy (%)\nHumanEval\n(b) Number of Agents\nFigure 3: We explore the impact of hyperparameters on the performance of MAD frameworks by\nincreasing the debate rounds or number of agents, and compare the results to CoT.\nin most conditions (34 out of 45 conditions utilizing GPT-4o-mini), which perfectly aligns with\nprevious findings in the field.\nWe acknowledge that ChatEval and SoM were not compared to CoT though, EoT, AgentVerse,\nand MP were compared to CoT in their papers. However, MP was evaluated against CoT solely\non the CIAR dataset (Liang et al., 2024), which was initially proposed and has not been fully\ndisclosed. EoT was shown to outperform CoT (Yin et al., 2023). Our evaluation replicates that\nEoT can surpass CoT on the GSM8K and CommensenseQA benchmarks, but this advantage was\nobserved only when using Claude-3.5-haiku among the four models. Furthermore, as shown in\nTable 3, we also replicate that AgentVerse can achieve a superior performance on the HumanEval\nbenchmark, significantly outperforming other methods including CoT. However, note that when\nhandling programming tasks, AgentVerse incorporates an additional execution-evaluation stage so\nthat agents can utilize the execution results from the generated programs, which is usually absent\nin other MAD frameworks and arguably beyond the scope of MAD designs.\nHow do hyperparameters influence MAD performance? As mentioned earlier, we by\ndefault followed the conventional choice of hyperparameters (the number of agents and the number\nof debate rounds). That said, one might be interested in how varying the choices i",
+            "locator": "lines 361-392",
+            "score": 26.45048610566886,
+            "source_id": "papers/text/zhang-et-al-2025-mad-question.txt"
+          },
+          {
+            "content_sha256": "41e1d26db346207d4be0ec393e7bed983875ae417ca7aa5a530d390dca72e06e",
+            "excerpt": "Table 3: Performance results on GPT-4o-mini. We use lightred / lightblue to denote results\nhigher/lower than CoT.\nDatasetMMLU MMLU-Pro CommensenseQA ARC-Challenge AGIEval GSM8K MATH HumanEval MBPPSA 65.33±0.9358.07±0.50 79.47±0.25 88.27±0.41 63.87±1.0591.13±0.3471.67±1.3166.67±1.15 58.11±0.66CoT 80.73±0.34 62.80±0.99 82.87±0.25 93.53 ±0.41 66.40±1.30 93.60±0.82 72.87±1.20 78.05±1.49 62.26±0.84SC 82.13±0.6666.27±1.39 83.80±0.28 93.93±0.25 67.07±0.8495.67±0.1973.96±0.54 – –SoM 74.73±0.5262.80±1.02 80.73±0.93 90.80±0.43 64.33±0.3494.93±0.3475.40±0.7168.09±1.25 56.94±1.12MP 75.47±0.8460.53±1.27 68.07±1.57 90.27±0.25 61.67±1.4390.87±0.1951.87±0.6663.01±2.30 45.78±0.80EoT 67.87±0.4161.20±0.65 80.07±0.52 86.40±0.28 65.07±0.6691.40±0.5775.93±1.2373.78±2.17 56.16±0.49ChatEval79.13±0.9062.20±0.49 81.07±0.84 93.20±0.28 68.87±0.94 93.60±0.0069.36±1.5871.75±0.76 53.70±0.55AgentVerse80.40±0.0062.07±0.52 80.73±0.41 92.47±0.09 63.87±1.2392.73±0.5064.49±1.3885.57±1.25 58.88±0.18\n3.2 Experimental results\nDoes MAD outperform simple single-agent baselines? We first compare MAD frameworks\nto single-agent baselines to assess their relative performance. For robustness, we repeated the\nexperiments three times, reporting the standard deviations. Table 3 and Tables 6, 7, 8 in Appendix D\npresent empirical results on GPT-4o-mini, Llama3.1-8b, Llama3.1-70b, Claude-3.5-haiku, respectively.\nIn these tables, all methods are compared against CoT, with results higher or lower than CoT\ndenoted in lightred and lightblue , respectively. Our results indicate that MAD methods fail to\nconsistently outperform CoT ",
+            "locator": "lines 289-320",
+            "score": 21.492153436614977,
+            "source_id": "papers/text/zhang-et-al-2025-mad-question.txt"
+          },
+          {
+            "content_sha256": "41e1d26db346207d4be0ec393e7bed983875ae417ca7aa5a530d390dca72e06e",
+            "excerpt": "70\n80Accuracy (%)\nMMLU\n2 3 4 2 3 4\nDebate Rounds\n60\n80Accuracy (%)\nHumanEval\nCoT SoM CE AGV EoT\n(a) Debate Rounds\n3 6 9 3 6 9 3 6 9\nNumber of Agents\n85\n90\n95Accuracy (%)\nGSM8K\n3 6 9 3 6 9 3 6 9\nNumber of Agents\n40\n60\n80Accuracy (%)\nMMLU\n3 6 9 3 6 9 3 6 9\nNumber of Agents\n50\n75Accuracy (%)\nHumanEval\n(b) Number of Agents\nFigure 3: We explore the impact of hyperparameters on the performance of MAD frameworks by\nincreasing the debate rounds or number of agents, and compare the results to CoT.\nin most conditions (34 out of 45 conditions utilizing GPT-4o-mini), which perfectly aligns with\nprevious findings in the field.",
+            "locator": "lines 337-368",
+            "score": 20.939626599152007,
+            "source_id": "papers/text/zhang-et-al-2025-mad-question.txt"
+          }
+        ],
+        "query": "MAD frameworks outperform SA in most conditions 34 out of 45 perfectly aligns",
+        "truncated": true
+      },
+      "result_ids": [
+        "papers/text/zhang-et-al-2025-mad-question.txt",
+        "papers/text/zhang-et-al-2025-mad-question.txt",
+        "papers/text/zhang-et-al-2025-mad-question.txt"
+      ],
+      "result_sha256": "9b43ce609c3a5a717c3409f2ded86b944135bc6f4e9cfc4eba9d9c8c160dea3a",
+      "sequence": 7,
+      "tool": "search_sources"
+    },
+    {
+      "arguments": {
+        "limit": 3,
+        "query": "agreement intensity agree with the other agents CIAR reverse pattern MedQA",
+        "source_ids": [
+          "papers/text/smit-et-al-2023-going-mad.txt"
+        ]
+      },
+      "result": {
+        "hits": [
+          {
+            "content_sha256": "a1263656cb4d7e298c289b4ee44368fe9f38c1c2efc4ce88f0d54d60a62a3d1c",
+            "excerpt": "datasets, between the answer of the first agent given during the\nfirst and last round, as well as with the final answer.\nPersona system reduces the overall performance compared\nto relying solely on the initial response of the first agent.\nThis can be attributed to the role of the second agent (the\n“devil”), which is deliberately designed to contradict or dis-\nagree, even if the initial response was correct. We show\nin the next section that this prior willingness for different\nagents to agree with each other at the outset of a debate, is\nindeed a very important “hyperparameter”.\nImproving MAD via agreement modulation Our pre-\nvious experiments led us to hypothesise that the degree to\nwhich agents agree with one another during a debate may\nsignificantly affect debating performance. Here we test this\nhypothesis by developing a new MAD prompting strategy\nthat modulates (via prompts) the degree to which agents\nwithin a debate agree with each other at the outset. Our\nprompt takes the following simple form: “you should agree\nwith the other agents X% of the time ”. We call X in this\nprompt the agent’s agreement intensity.\nMulti-Persona is an ideal testbed for this method, as it uses\nonly two agents with different system prompts. Specifi-\ncally, we provide the “angel” agent with the question, and\nwe modulate the disagreement using the “devil”’s system\nprompt. Figure 5 shows the effect of modulating the agent’s\nagreement on the 6 datasets. We can see that this param-\neter has a significant effect on the performance and that\nmodulating the agreement in the prompt has the effect of\nmod",
+            "locator": "lines 577-608",
+            "score": 21.86489483133017,
+            "source_id": "papers/text/smit-et-al-2023-going-mad.txt"
+          },
+          {
+            "content_sha256": "a1263656cb4d7e298c289b4ee44368fe9f38c1c2efc4ce88f0d54d60a62a3d1c",
+            "excerpt": "prompt. Figure 5 shows the effect of modulating the agent’s\nagreement on the 6 datasets. We can see that this param-\neter has a significant effect on the performance and that\nmodulating the agreement in the prompt has the effect of\nmodifying the agreement on the first debate round, which\nin turn affects the outcome and the final accuracy. Strik-\ningly, the tendency is not always the same for each dataset:\nwhile MedQA and PubMedQA directly benefit from a high\nagreement, CIAR follows a reverse pattern. As CIAR was\ncreated to be counter-intuitive, it is therefore probable that\nprompting the second agent to strongly disagree raises the\nchance of arriving at the correct answer during the debate.\nTo investigate further, we select the highest performing con-\nfigurations of debating approaches from Figure 1, namely\nSoM, ChatEval and Multi-Persona, and a subset of MedQA\ndataset (376 multi-choice USMLE Q&A (Han et al., 2023)).\nWe opted for this subset due to its high-quality questions.\nIn Figure 6 (left), we plot the performance of each strategy\nas we increase the prompted agreement intensity from zero\nto 100%. Figure 6 (right) we plot the accuracy vs the ac-\ntual observed debate consensus, i.e. how frequently all the\nagents agree upon a final answer at the end of the debate.\nWe can see that modulating the agreement intensity in this\nway provides a substantial ( ≈15%) improvement in per-\nformance for Multi-Persona, and ( ≈5%) for SoM on the\nUSMLE dataset. ChatEval, on the contrary, is hardly af-\nfected by this prompting mechanism, suggesting that the\nagent’s agreement is not as easil",
+            "locator": "lines 601-632",
+            "score": 21.306750213283618,
+            "source_id": "papers/text/smit-et-al-2023-going-mad.txt"
+          },
+          {
+            "content_sha256": "a1263656cb4d7e298c289b4ee44368fe9f38c1c2efc4ce88f0d54d60a62a3d1c",
+            "excerpt": "that MAD approaches currently do not outperform other en-\nsembling methods such as Medprompt and self-consistency\nusing their original implementations. MAD typically re-\nquires a higher number of API calls, increasing the number\nof tokens to produce and process and ultimately, the total\nrunning cost of the system. Interestingly, we found that\nthis might primarily be due to MAD protocols being more\nsensitive to hyperparameters and not necessarily that de-\nbate inherently performs worse than single-agent methods.\nTo strengthen this claim, we demonstrated that a simple\nprompt-based manipulation of the degree to which agents\nagree with each other, referred to as the agreement intensity,\ncould provide significant performance gains. By tuning this\nagreement intensity for Multi-Persona, it went from being\nthe worst-performing protocol to the best-performing, beat-\ning out methods such as Medprompt and Self-Consistency.\nTherefore, while MAD systems currently trail behind other\nprompting strategies, we believe they hold significant poten-\ntial to transform the prompting landscape. To foster further\nexploration, we have made our code repository open-source,\nfor others to easily reproduce all our experiments and further\npursue interesting related research directions.\nLimitations We utilize API calls to a publicly available\nLLM (Brown et al., 2020) which, whilst sufficient in the\ncontext of our investigation, exposes us to variable inference\ntime calls and unforeseen model updates. Moreover, large-\nscale API-based benchmarking incurs substantial financial\nand time costs, which both lim",
+            "locator": "lines 889-920",
+            "score": 15.060855752934318,
+            "source_id": "papers/text/smit-et-al-2023-going-mad.txt"
+          }
+        ],
+        "query": "agreement intensity agree with the other agents CIAR reverse pattern MedQA",
+        "truncated": true
+      },
+      "result_ids": [
+        "papers/text/smit-et-al-2023-going-mad.txt",
+        "papers/text/smit-et-al-2023-going-mad.txt",
+        "papers/text/smit-et-al-2023-going-mad.txt"
+      ],
+      "result_sha256": "a4c0001437870e5a04e7894ad44bdc2febc37ce4ce471a34cfa942a147f4b1e4",
+      "sequence": 8,
+      "tool": "search_sources"
+    }
+  ],
+  "snapshot_sha256": "091522d1c29440b4a50ef00a5215b4cf2c9458f895879cd8ac24fcf1b85aaf8a"
+}

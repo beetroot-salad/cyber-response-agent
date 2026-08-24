@@ -1,0 +1,512 @@
+{
+  "call_id": "call-0009-adaptive-finalizer",
+  "queries": [
+    {
+      "arguments": {
+        "include_related_questions": false,
+        "max_answers": 4,
+        "question_id": "question:root"
+      },
+      "result": {
+        "answers": [
+          {
+            "content": {
+              "claim_ids": [],
+              "content_sha256": "f13ae160d20f1b33fd94e67f96c011cd4e2062cfe0379764b81d698c06a4dc99",
+              "id": "answer:work:002-noop",
+              "node_id": "work:002-noop",
+              "packet": {
+                "account": "Investigating current knowledge state to determine what this placeholder assignment should contribute.",
+                "assumptions": [],
+                "boundary_findings": [],
+                "child_packet_ids": [],
+                "claims": [],
+                "content_sha256": "b0e4a9ab462b4dcfb850781c1a3a32527d809fe1047490e46d643f53fa3657b1",
+                "counterevidence": [],
+                "id": "packet:work:002-noop",
+                "knowledge_links": [],
+                "next_observation": null,
+                "node_id": "work:002-noop",
+                "objective": "placeholder",
+                "raised_questions": [],
+                "source_ids_consulted": [],
+                "sufficiency": "partial",
+                "unresolved": []
+              },
+              "packet_id": "packet:work:002-noop",
+              "question_ids": [
+                "question:root",
+                "question:work:002-noop"
+              ],
+              "sufficiency": "partial",
+              "summary": "Investigating current knowledge state to determine what this placeholder assignment should contribute.",
+              "tags": [
+                "evidence",
+                "uncertainty"
+              ],
+              "unresolved": []
+            },
+            "id": "answer:work:002-noop",
+            "incoming_links": [],
+            "kind": "answer",
+            "outgoing_links": [
+              {
+                "content_sha256": "5a348ef05cf446abc8e887236b3138b597482586bd5d5917ddf829f7ba3fd056",
+                "id": "link:5a348ef05cf446abc8e88723",
+                "origin": "runtime",
+                "proposed_by_node_id": null,
+                "rationale": null,
+                "relation": "partially_answers",
+                "source_id": "answer:work:002-noop",
+                "target_id": "question:work:002-noop"
+              },
+              {
+                "content_sha256": "8f2d67414ee97f2a2d9116d728ea1cb6512455c7ee04b65857fd7fe9b58b7fe0",
+                "id": "link:8f2d67414ee97f2a2d9116d7",
+                "origin": "runtime",
+                "proposed_by_node_id": null,
+                "rationale": null,
+                "relation": "partially_answers",
+                "source_id": "answer:work:002-noop",
+                "target_id": "question:root"
+              }
+            ]
+          }
+        ],
+        "question": {
+          "content": {
+            "acceptance_condition": "Satisfy every assigned whole-task demand and explicit constraint.",
+            "answer_ids": [
+              "answer:work:002-noop"
+            ],
+            "content_sha256": "4e00c82efc494750a7c2dfe7d6853ea45785ed4938e6b36a7b2808624ab1a9c7",
+            "demand_ids": [
+              "D1",
+              "D2",
+              "D3",
+              "D4",
+              "D5",
+              "D6",
+              "D7",
+              "D8",
+              "D9",
+              "D10"
+            ],
+            "id": "question:root",
+            "node_id": "root",
+            "rationale": "The whole task submitted after intake.",
+            "tags": [
+              "risk",
+              "constraint"
+            ],
+            "text": "Investigate the mutation graph of sorted positive-integer solutions of a^2+b^2+c^2+d^2 = 4abcd under Vieta mutation. First prove or refute the structural claims — connectivity of every solution to (1,1,1,1), uniqueness of a height-decreasing mutation at every non-root vertex, and the consequent rooted-tree structure of the quotient graph — then pursue the open asymptotic part: strongest attainable rigorous upper and lower bounds for N(H), the relation between mutation depth and log H, an active search for exceptional small solutions, hidden cycles, multiple parents, and induction failure modes, and sharply separated conjectures. Deliver a self-contained research memorandum."
+          },
+          "id": "question:root",
+          "incoming_links": [
+            {
+              "content_sha256": "0d585c6ea896929e7a4f876ccf4fffbdbad0b15795e1aac40b1935aa61e08c3b",
+              "id": "link:0d585c6ea896929e7a4f876c",
+              "origin": "runtime",
+              "proposed_by_node_id": null,
+              "rationale": null,
+              "relation": "refines",
+              "source_id": "question:demand:D7",
+              "target_id": "question:root"
+            },
+            {
+              "content_sha256": "21a0c2186ad97f0e5acc26356e1111cacdc638c9e6098e4b44a92ff45bf493e2",
+              "id": "link:21a0c2186ad97f0e5acc2635",
+              "origin": "runtime",
+              "proposed_by_node_id": null,
+              "rationale": null,
+              "relation": "refines",
+              "source_id": "question:demand:D5",
+              "target_id": "question:root"
+            },
+            {
+              "content_sha256": "22d01c23b92fed2b1894d89a5e2f2a01ac78553cd4393fc7cfd435eeda63abfd",
+              "id": "link:22d01c23b92fed2b1894d89a",
+              "origin": "runtime",
+              "proposed_by_node_id": null,
+              "rationale": null,
+              "relation": "refines",
+              "source_id": "question:demand:D9",
+              "target_id": "question:root"
+            },
+            {
+              "content_sha256": "319c69c6d14f9e6b728e7278cb9bd36ddd9b5e499e73d13c6c949e40425af9d7",
+              "id": "link:319c69c6d14f9e6b728e7278",
+              "origin": "runtime",
+              "proposed_by_node_id": null,
+              "rationale": null,
+              "relation": "refines",
+              "source_id": "question:demand:D10",
+              "target_id": "question:root"
+            },
+            {
+              "content_sha256": "41f8e5a167dc96997efd2bfde757e54b3601f998755cebd215f21eeddc2f7d5f",
+              "id": "link:41f8e5a167dc96997efd2bfd",
+              "origin": "runtime",
+              "proposed_by_node_id": null,
+              "rationale": null,
+              "relation": "refines",
+              "source_id": "question:demand:D4",
+              "target_id": "question:root"
+            },
+            {
+              "content_sha256": "4ce2ba5a93817627f0348fd234b75dc3d4a5648265a7ed73ea115cd30b689716",
+              "id": "link:4ce2ba5a93817627f0348fd2",
+              "origin": "runtime",
+              "proposed_by_node_id": null,
+              "rationale": null,
+              "relation": "refines",
+              "source_id": "question:demand:D1",
+              "target_id": "question:root"
+            },
+            {
+              "content_sha256": "5f6f8e8d380aed69b4482db2b2e0e5e53f95c7af5f7c3b77b657031fb66fda24",
+              "id": "link:5f6f8e8d380aed69b4482db2",
+              "origin": "runtime",
+              "proposed_by_node_id": null,
+              "rationale": null,
+              "relation": "refines",
+              "source_id": "question:work:002-noop",
+              "target_id": "question:root"
+            },
+            {
+              "content_sha256": "655c770188faf7d055783355d861ecd18ed51c2a66e383671a431220fe2ac194",
+              "id": "link:655c770188faf7d055783355",
+              "origin": "runtime",
+              "proposed_by_node_id": null,
+              "rationale": null,
+              "relation": "refines",
+              "source_id": "question:demand:D6",
+              "target_id": "question:root"
+            },
+            {
+              "content_sha256": "6ad0705c2dd8bd36d641ab5059b107ddc8a665a3edc8f6a583f252e26af4e712",
+              "id": "link:6ad0705c2dd8bd36d641ab50",
+              "origin": "runtime",
+              "proposed_by_node_id": null,
+              "rationale": null,
+              "relation": "refines",
+              "source_id": "question:demand:D8",
+              "target_id": "question:root"
+            },
+            {
+              "content_sha256": "6b2280746888e8832e699d824242f0c3465b00d4b3f73fb8e447426aaa089956",
+              "id": "link:6b2280746888e8832e699d82",
+              "origin": "runtime",
+              "proposed_by_node_id": null,
+              "rationale": null,
+              "relation": "refines",
+              "source_id": "question:demand:D3",
+              "target_id": "question:root"
+            },
+            {
+              "content_sha256": "8b8ec12e3704592b1bd24f8c79fc94ee1f7b9628df02aa787550e8e538042f61",
+              "id": "link:8b8ec12e3704592b1bd24f8c",
+              "origin": "runtime",
+              "proposed_by_node_id": null,
+              "rationale": null,
+              "relation": "refines",
+              "source_id": "question:demand:D2",
+              "target_id": "question:root"
+            },
+            {
+              "content_sha256": "8f2d67414ee97f2a2d9116d728ea1cb6512455c7ee04b65857fd7fe9b58b7fe0",
+              "id": "link:8f2d67414ee97f2a2d9116d7",
+              "origin": "runtime",
+              "proposed_by_node_id": null,
+              "rationale": null,
+              "relation": "partially_answers",
+              "source_id": "answer:work:002-noop",
+              "target_id": "question:root"
+            }
+          ],
+          "kind": "question",
+          "outgoing_links": []
+        },
+        "related_questions": [],
+        "snapshot_sha256": "63ddc552a25a8b574f10e0dcf8670b66cbe685bf25a81068272d5f2dec31f6c0",
+        "truncated": false
+      },
+      "result_ids": [
+        "question:root",
+        "answer:work:002-noop"
+      ],
+      "result_sha256": "6e41a13506e0ccf7fe42d4697eb3087f9da5215ef7dae4c2dd21f0988caa91d4",
+      "sequence": 1,
+      "tool": "get_thread"
+    },
+    {
+      "arguments": {
+        "entry_id": "question:raised:07d805ce56d7:rq-sharp"
+      },
+      "result": {
+        "content": {
+          "acceptance_condition": "Either a proved improvement N(H) = O(H^{rho'}) with rho' < ln3/ln11, or a proved lower bound N(H) >= c*H^beta for some beta > 0 that brackets the exponent, or a rigorous statement that branching-3 with factor exactly 11 occurs along a positive-density set of branches (making rho sharp for this method).",
+          "answer_ids": [
+            "answer:work:005-rq-sharp-attack"
+          ],
+          "content_sha256": "84e814d61021a3c85f240330ad35fe441385bea9060d5aa777ebb675757abcf2",
+          "demand_ids": [
+            "D4",
+            "D6"
+          ],
+          "id": "question:raised:07d805ce56d7:rq-sharp",
+          "node_id": "work:004-upper-depth-v3#raised:rq-sharp",
+          "rationale": "The upper bound treats each fast subtree as a worst-case 3-ary tree with minimal factor 11; both assumptions are generically far from tight, so the exponent 0.4582 is an artifact of the method. The most informative next mathematical step is quantifying typical branching and typical factor inside one fast subtree.",
+          "tags": [
+            "method",
+            "measurement",
+            "uncertainty"
+          ],
+          "text": "Is the exponent rho = ln3/ln11 = 0.4582 improvable toward the true growth rate of N(H)? Specifically: inside subtree(u_j), bound how often vertices have the full 3 distinct children versus equal-coordinate coincidences, and how the per-edge factor (>= 11, typically much larger) distributes; combine with the lower-bound thread to decide whether N(H) = Theta(H^alpha) for some alpha or whether the true growth is polylogarithmic-times-subpower."
+        },
+        "id": "question:raised:07d805ce56d7:rq-sharp",
+        "incoming_links": [
+          {
+            "content_sha256": "1fb67419d9ef0b2539547a7b2f2d281690ab0a633a391e4c86a02de4a9452635",
+            "id": "link:1fb67419d9ef0b2539547a7b",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:005-rq-sharp-attack",
+            "target_id": "question:raised:07d805ce56d7:rq-sharp"
+          },
+          {
+            "content_sha256": "485b1f2f2fcb99ae4ae3fafc61089f22887dc0c21384570a06e3168d8c04c3f2",
+            "id": "link:485b1f2f2fcb99ae4ae3fafc",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "depends_on",
+            "source_id": "question:raised:529a9c7e8677:rq-d5-stronger",
+            "target_id": "question:raised:07d805ce56d7:rq-sharp"
+          },
+          {
+            "content_sha256": "a69e86741fdb6bbaacd1875ed917c9e7d4acddaba2f87990bf55707db3c9a160",
+            "id": "link:a69e86741fdb6bbaacd1875e",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "refines",
+            "source_id": "question:work:005-rq-sharp-attack",
+            "target_id": "question:raised:07d805ce56d7:rq-sharp"
+          },
+          {
+            "content_sha256": "c3f2cdafa86d0f53d6b4ed5ce26205eee0b6ba2e0b11ad9e896aebc09c228f6a",
+            "id": "link:c3f2cdafa86d0f53d6b4ed5c",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "raises",
+            "source_id": "answer:work:004-upper-depth-v3",
+            "target_id": "question:raised:07d805ce56d7:rq-sharp"
+          }
+        ],
+        "kind": "question",
+        "outgoing_links": [
+          {
+            "content_sha256": "77e74614a963735d364ada82404aca3fcd4f1a81df0291908c07b7446427d0d2",
+            "id": "link:77e74614a963735d364ada82",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "depends_on",
+            "source_id": "question:raised:07d805ce56d7:rq-sharp",
+            "target_id": "question:demand:D8"
+          },
+          {
+            "content_sha256": "a38d4ecfe5b32cd22ed95e358fa14a72e4d948b25d678dc86da9be0315beac7b",
+            "id": "link:a38d4ecfe5b32cd22ed95e35",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "depends_on",
+            "source_id": "question:raised:07d805ce56d7:rq-sharp",
+            "target_id": "question:demand:D4"
+          }
+        ]
+      },
+      "result_ids": [
+        "question:raised:07d805ce56d7:rq-sharp"
+      ],
+      "result_sha256": "e5dbff634acfa8e1c7f7180c91a425c96b95da5a4bce39a83934251b8d6c5651",
+      "sequence": 2,
+      "tool": "get_entry"
+    },
+    {
+      "arguments": {
+        "entry_id": "question:raised:529a9c7e8677:rq-d5-stronger"
+      },
+      "result": {
+        "content": {
+          "acceptance_condition": "Either prove N(H)>=(log H)^{1+delta} for an explicit delta>0 with constants, or prove that along all but o(depth) levels the two-child branches have average log-growth slope 3, blocking this route.",
+          "answer_ids": [],
+          "content_sha256": "a090de72ad6e1ecd4b534dd504ac2e128d7f7dbd4c618829eefc32d826ea0707",
+          "demand_ids": [
+            "D5"
+          ],
+          "id": "question:raised:529a9c7e8677:rq-d5-stronger",
+          "node_id": "work:006-lower-bound-v5-compact#raised:rq-d5-stronger",
+          "rationale": "The binary-subtree argument is limited by the worst-case estimate child max<=4d^3, whose level-t height bound is 3^t A and yields only 2^t=(log H)^{log_3 2}; surpassing Theta(log H) requires typical, not worst-case, growth control.",
+          "tags": [
+            "method",
+            "measurement",
+            "uncertainty"
+          ],
+          "text": "Can the lower bound be pushed beyond Theta(log H)? Prove or refute that inside subtree(v2) a positive-density set of vertices has two children with average log-growth slope strictly below 3 over Omega(depth) consecutive levels, yielding N(H)>=(log H)^{1+delta} for some delta>0."
+        },
+        "id": "question:raised:529a9c7e8677:rq-d5-stronger",
+        "incoming_links": [
+          {
+            "content_sha256": "731c040c47e43dc22ffd93c7ef2b4fe55bdbaf08f2765186d1b870f5319319f5",
+            "id": "link:731c040c47e43dc22ffd93c7",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "raises",
+            "source_id": "answer:work:006-lower-bound-v5-compact",
+            "target_id": "question:raised:529a9c7e8677:rq-d5-stronger"
+          }
+        ],
+        "kind": "question",
+        "outgoing_links": [
+          {
+            "content_sha256": "485b1f2f2fcb99ae4ae3fafc61089f22887dc0c21384570a06e3168d8c04c3f2",
+            "id": "link:485b1f2f2fcb99ae4ae3fafc",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "depends_on",
+            "source_id": "question:raised:529a9c7e8677:rq-d5-stronger",
+            "target_id": "question:raised:07d805ce56d7:rq-sharp"
+          },
+          {
+            "content_sha256": "cc48608a33cf03933e6f5868dadb3de91934a4354a29a0f2e7c0abdfb038639d",
+            "id": "link:cc48608a33cf03933e6f5868",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "depends_on",
+            "source_id": "question:raised:529a9c7e8677:rq-d5-stronger",
+            "target_id": "question:demand:D5"
+          }
+        ]
+      },
+      "result_ids": [
+        "question:raised:529a9c7e8677:rq-d5-stronger"
+      ],
+      "result_sha256": "7c130e15426e4b6b2b3442621a67c6543fa5805c75df6f9e5fc7dc1fb1296932",
+      "sequence": 3,
+      "tool": "get_entry"
+    },
+    {
+      "arguments": {
+        "entry_id": "answer:work:005-exception-search-v4"
+      },
+      "result": {
+        "content": {
+          "claim_ids": [],
+          "content_sha256": "ed11ae89d8520b3f24c29ed8f7bd87b82c19506e5c6db6f5b4e5eb527b26bfc6",
+          "id": "answer:work:005-exception-search-v4",
+          "node_id": "work:005-exception-search-v4",
+          "packet": {
+            "account": "Investigation failed before producing evidence: UnexpectedModelBehavior: Exceeded maximum output retries (2)",
+            "assumptions": [],
+            "boundary_findings": [],
+            "child_packet_ids": [],
+            "claims": [],
+            "content_sha256": "155827e0590e10301ba9174e9473ed5aa674e98d97ed98c121206da216495a4e",
+            "counterevidence": [],
+            "id": "packet:work:005-exception-search-v4",
+            "knowledge_links": [],
+            "next_observation": null,
+            "node_id": "work:005-exception-search-v4",
+            "objective": "Execute the frozen spec of question:work:004-exception-search-v3 verbatim: bounded hand-checkable enumeration, LABELED OBSERVATIONS ONLY, HARD CAP 450 words. Procedure (state explicitly for reproducibility): Method 1 (direct): for all sorted 1<=a<=b<=c<=20, test whether t^2 - 4abc t + (a^2+b^2+c^2) = 0 has an integer root d with c <= d <= 100, pruning via d | a^2+b^2+c^2 and d+d' = 4abc; list every hit. Method 2 (BFS from (1,1,1,1)): mutate all 4 coordinates, re-sort, discard d>100. Expected vertices, verify each by one-line substitution: (1,1,1,1) [4=4]; (1,1,1,3) [1+1+1+9=12=4*3]; (1,1,3,11) [1+1+9+121=132=4*33]; (1,1,11,41) [1+1+121+1681=1804=4*451]; check all children of (1,1,11,41) exceed 100 (mutate 11: 4*41-11=153; mutate a=1: 4*11*41-1=1803), so BFS stops. Report: (a) verified table; (b) any c=d within the bound? (expected none, consistent with proved L2); (c) any vertex with two height-decreasing mutations or two parents within the BFS tree? (expected none, consistent with proved D2/D3); (d) do Methods 1 and 2 agree exactly within d<=100? The a<=2 slice of Method 1 MUST be completed and explicitly cross-checked, since every proved vertex has a<=3; any Method-1 solution unreachable from the root would refute D1 - check and report. (e) For each non-root vertex compute d'=4abc-d and confirm 1<=d'<d, exhibiting the parent edge: (1,1,1,3): d'=1; (1,1,3,11): d'=1; (1,1,11,41): d'=3. (f) Report induction failure modes observed (e.g. re-sorting effects) or state their absence within the bound. Label EVERYTHING as OBSERVATION valid only within d<=100; non-occurrences prove nothing beyond the bound. If the full Method-1 sweep is too long, complete the a<=2 slice and label the truncation explicitly.",
+            "raised_questions": [],
+            "source_ids_consulted": [],
+            "sufficiency": "blocked",
+            "unresolved": [
+              "Investigation failed before producing evidence: UnexpectedModelBehavior: Exceeded maximum output retries (2)"
+            ]
+          },
+          "packet_id": "packet:work:005-exception-search-v4",
+          "question_ids": [
+            "question:demand:D7",
+            "question:demand:D9",
+            "question:work:004-exception-search-v3",
+            "question:work:005-exception-search-v4"
+          ],
+          "sufficiency": "blocked",
+          "summary": "Investigation failed before producing evidence: UnexpectedModelBehavior: Exceeded maximum output retries (2)",
+          "tags": [
+            "evidence",
+            "counterexample",
+            "measurement",
+            "method",
+            "uncertainty"
+          ],
+          "unresolved": [
+            "Investigation failed before producing evidence: UnexpectedModelBehavior: Exceeded maximum output retries (2)"
+          ]
+        },
+        "id": "answer:work:005-exception-search-v4",
+        "incoming_links": [],
+        "kind": "answer",
+        "outgoing_links": [
+          {
+            "content_sha256": "02a1a658880b812fc2bd1975135c4d26f60aa6c143779c1d5f01fcc54b6209be",
+            "id": "link:02a1a658880b812fc2bd1975",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:005-exception-search-v4",
+            "target_id": "question:demand:D9"
+          },
+          {
+            "content_sha256": "a59d5840996c33554ad099a057a3b340e496191eb5c7c22a7cc01f1d259cc709",
+            "id": "link:a59d5840996c33554ad099a0",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:005-exception-search-v4",
+            "target_id": "question:work:005-exception-search-v4"
+          },
+          {
+            "content_sha256": "ba1466c99e62b597a03fe3eeba38f71c49aba9d6d877ddbf8107cc0460e97930",
+            "id": "link:ba1466c99e62b597a03fe3ee",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:005-exception-search-v4",
+            "target_id": "question:demand:D7"
+          },
+          {
+            "content_sha256": "e7a1edfe5a62d8dd85b308c325b73882180f64ec53d3a70a2f5e846185c1e029",
+            "id": "link:e7a1edfe5a62d8dd85b308c3",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:005-exception-search-v4",
+            "target_id": "question:work:004-exception-search-v3"
+          }
+        ]
+      },
+      "result_ids": [
+        "answer:work:005-exception-search-v4"
+      ],
+      "result_sha256": "1660171ed5e8baeefac5b0c205a1f3ed81848e8659bab7a85573375fed5425c4",
+      "sequence": 4,
+      "tool": "get_entry"
+    }
+  ],
+  "snapshot_sha256": "63ddc552a25a8b574f10e0dcf8670b66cbe685bf25a81068272d5f2dec31f6c0"
+}

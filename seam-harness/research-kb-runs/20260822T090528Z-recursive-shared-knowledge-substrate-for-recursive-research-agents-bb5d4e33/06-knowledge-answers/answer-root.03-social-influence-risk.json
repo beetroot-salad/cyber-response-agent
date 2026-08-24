@@ -1,0 +1,31 @@
+{
+  "claim_ids": [
+    "root.03-social-influence-risk:C001",
+    "root.03-social-influence-risk:C002",
+    "root.03-social-influence-risk:C003",
+    "root.03-social-influence-risk:C004",
+    "root.03-social-influence-risk:C005",
+    "root.03-social-influence-risk:C006",
+    "root.03-social-influence-risk:C007",
+    "root.03-social-influence-risk:C008",
+    "root.03-social-influence-risk:C009"
+  ],
+  "content_sha256": "7633db0931607039b9f83852309cc2df7284c6a5da52068cd2711cb4224c59d9",
+  "id": "answer:root.03-social-influence-risk",
+  "node_id": "root.03-social-influence-risk",
+  "packet_id": "packet:root.03-social-influence-risk",
+  "sufficiency": "ready_to_synthesize",
+  "summary": "Lorenz et al. (2011) and Choi et al. (2025) jointly establish that both human and LLM collectives lose answer diversity and accuracy under social influence, particularly when peers' answers are visible. Lorenz's controlled experiments (N=144) show that social influence reduces group diversity without improving collective accuracy, moves the truth to peripheral regions, and boosts individual confidence despite accuracy deficits. Choi's multi-agent debates (2,500+ simulations) show LLM agents conform to numerically dominant groups and to higher-intelligence agents even when outnumbered, with intelligence effects dominating majority size. Together, these findings mandate staged visibility in the substrate: independent answers must be committed before peer exposure, peer answers should be disclosed only partially or after commitment to prevent convergence, and diversity/correlation metrics must capture conformity-driven collapse. The synthesis preserves both papers as complementary evidence for the same risk rather than as conflicting, in accordance with the conflict policy.",
+  "tags": [
+    "evidence",
+    "risk",
+    "counterexample",
+    "synthesis",
+    "uncertainty"
+  ],
+  "unresolved": [
+    "The exact magnitude and statistical details of the collective error decline under the aggregated condition in Lorenz et al. are only footnoted; the SI appendix is not in the corpus.",
+    "Choi et al. did not directly test a visibility/anonymity manipulation, so the causal link from staged visibility to reduced conformity is an inference, not an observed finding.",
+    "The interaction between majority size and intelligence in Choi et al. is reported as negligible (two-way ANOVA, PDF PAGE 12), but the paper does not fully explore scenarios where majority and intelligence conflict beyond the tested 10 scenarios."
+  ]
+}

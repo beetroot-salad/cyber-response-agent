@@ -1,0 +1,14 @@
+{
+  "child_ids": [
+    "root.03-social-influence-risk.01-child-lorenz-findings",
+    "root.03-social-influence-risk.02-child-choi-findings"
+  ],
+  "depth": 1,
+  "effective_disposition": "synthesize",
+  "node_id": "root.03-social-influence-risk",
+  "packet_id": "packet:root.03-social-influence-risk",
+  "packet_sha256": "f37681b14df7e02163c1d93f13e391a798f84e2f52a49eb9b5c3eae398f25a34",
+  "parent_id": "root",
+  "proposed_disposition": "expand",
+  "stop_reason": null
+}

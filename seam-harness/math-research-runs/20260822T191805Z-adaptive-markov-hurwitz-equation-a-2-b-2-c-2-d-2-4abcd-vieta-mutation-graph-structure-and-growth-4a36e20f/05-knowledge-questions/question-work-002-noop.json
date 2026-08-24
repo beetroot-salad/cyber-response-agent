@@ -1,0 +1,12 @@
+{
+  "acceptance_condition": "placeholder",
+  "content_sha256": "d56b083529f6ac675d2fed11c74e2447cab9019fe7221b1d48a4f0363fc6c62f",
+  "demand_ids": [],
+  "id": "question:work:002-noop",
+  "node_id": "work:002-noop",
+  "rationale": "placeholder",
+  "tags": [
+    "evidence"
+  ],
+  "text": "placeholder"
+}

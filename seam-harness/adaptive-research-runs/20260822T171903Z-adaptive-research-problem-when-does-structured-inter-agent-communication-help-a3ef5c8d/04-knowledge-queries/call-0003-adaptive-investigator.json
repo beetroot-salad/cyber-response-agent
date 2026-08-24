@@ -1,0 +1,548 @@
+{
+  "call_id": "call-0003-adaptive-investigator",
+  "queries": [
+    {
+      "arguments": {
+        "limit": 10,
+        "query": "Smit Going MAD debate baselines",
+        "tags": [],
+        "unanswered_only": false
+      },
+      "result": {
+        "hits": [
+          {
+            "answer_count": 0,
+            "id": "question:work:001-inv-smit-mad",
+            "kind": "question",
+            "score": 11.173786103901936,
+            "sufficiency": null,
+            "tags": [
+              "evidence",
+              "counterexample"
+            ],
+            "text": "What exactly does Smit et al. 2023 (papers/text/smit-et-al-2023-going-mad.txt) find when re-examining multi-agent debate strategies: which debate variants and tasks were tested, which baselines (e.g., single-agent with equivalent sampling) were used, where did debate fail to beat or underperform simpler baselines, what role do model capability/size and judge aggregation play, and what matched-compute or cost comparisons does the paper make? Record key claims with `===== PDF PAGE N =====` markers.",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 0,
+            "id": "question:work:001-inv-du-debate",
+            "kind": "question",
+            "score": 4.995732273553991,
+            "sufficiency": null,
+            "tags": [
+              "evidence"
+            ],
+            "text": "What exactly does Du et al. 2023 (papers/text/du-et-al-2023-multiagent-debate.txt) claim and show about multiagent debate: which tasks and baselines (single-agent, self-consistency/majority voting over independent samples), what were the quantitative effects, how do agents and rounds scale, what does the paper report about consensus/convergence and about cases where debate does not help, and what compute does the procedure consume relative to baselines? Record every key claim with its `===== PDF PAGE N =====` marker.",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 0,
+            "id": "question:work:001-inv-zhang-when",
+            "kind": "question",
+            "score": 4.484906649788,
+            "sufficiency": null,
+            "tags": [
+              "evidence",
+              "synthesis"
+            ],
+            "text": "What does Zhang et al. 2025 (papers/text/zhang-et-al-2025-mad-question.txt, 'If Multi-Agent Debate Is the Answer, What Is the Question?') establish about the conditions under which multi-agent debate helps or fails: what taxonomy of factors (task type/difficulty, model heterogeneity, number of agents/rounds, topology, judge) is proposed, what are the headline empirical results and interactions, how does the paper position itself relative to Du et al. and other positive reports, and what does it say about compute costs? Record key claims with `===== PDF PAGE N =====` markers.",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 0,
+            "id": "question:work:001-inv-choi-conformity",
+            "kind": "question",
+            "score": 1.6931471805599454,
+            "sufficiency": null,
+            "tags": [
+              "evidence"
+            ],
+            "text": "What does Choi et al. 2025 (papers/text/choi-et-al-2025-conformity.txt) show about conformity in LLM multi-agent debate: the simulation design (proponent/opponent/neutral agents, majority vs minority sizes, intelligence levels, topics), the main quantitative findings on majority effects and intelligence disparities, how persuasion quality vs quantity matters, and what this implies about when exposure to other agents' outputs shifts vs fails to shift an agent? Record key claims with `===== PDF PAGE N =====` markers.",
+            "unresolved_count": null
+          }
+        ],
+        "query": "Smit Going MAD debate baselines",
+        "snapshot_sha256": "64f22e4def6506758f4d42d87a55f95161e7997884433c26ab3a759c4a839292",
+        "truncated": false
+      },
+      "result_ids": [
+        "question:work:001-inv-smit-mad",
+        "question:work:001-inv-du-debate",
+        "question:work:001-inv-zhang-when",
+        "question:work:001-inv-choi-conformity"
+      ],
+      "result_sha256": "9c7b21f01e315c14675428f19d30013effc51a7f8e44e617d5a45d449eb6fdc6",
+      "sequence": 1,
+      "tool": "search_questions"
+    },
+    {
+      "arguments": {
+        "limit": 8,
+        "query": "baseline single agent sampling matched compute debate accuracy",
+        "source_ids": [
+          "papers/text/smit-et-al-2023-going-mad.txt"
+        ]
+      },
+      "result": {
+        "hits": [
+          {
+            "content_sha256": "a1263656cb4d7e298c289b4ee44368fe9f38c1c2efc4ce88f0d54d60a62a3d1c",
+            "excerpt": "seems that MAD protocols are more sensitive to hyperpa-\nrameters. We investigate this further in the next section.\nIs MAD simply sensitive to hyperparameters? To\nbenchmark MAD’s sensitivity to hyperparameter choices,\nwe adopt a K-fold approach. We divide the medical and\nnon-medical datasets into two groups. For each method and\neach dataset, we gather the hyperparameter combination\nwhich has the highest average accuracy on the two held-out\ndatasets of the same category, and use this combination to\ncompute the final accuracy.\nThe results are presented in Figure 3. Notably, within med-\nical datasets, every evaluated system outperforms single-\nagent methods, with the exception of Multi-Persona. Self-\nConsistency and Medprompt emerge as the top perform-\ners. Conversely, in the context of non-medical datasets,\nsingle-agent methods surpass all evaluated systems except\nfor Multi-Persona and Self-Consistency.\nThese findings indicate that hyperparameter choices signifi-\ncantly influence system performance, with optimal settings\ntending to be dataset-specific. Moreover, they underscore\nthat superior performance of various protocols over a stan-\ndard single-agent approach is not assured for new datasets.\nIt appears that dataset-specific fine-tuning is crucial for max-\nimizing performance.\nMeasuring the performance boost from debating In\nFigure 4, we observe the relative improvement in accuracy\nachieved by the debate process compared to the initial an-\nswer provided by the first agent. Notably, the performance\nvaries across the three systems: ChatEval exhibits a modest\nenhancement, Soci",
+            "locator": "lines 505-536",
+            "score": 10.768320995793772,
+            "source_id": "papers/text/smit-et-al-2023-going-mad.txt"
+          },
+          {
+            "content_sha256": "a1263656cb4d7e298c289b4ee44368fe9f38c1c2efc4ce88f0d54d60a62a3d1c",
+            "excerpt": "metrics include whether any agent involved in the debate\nprovided a correct answer and whether the agents came to a\nconsensus by the final round.\nResults First, we attempt to see whether various prompt-\ning protocols affect performance significantly enough to\njustify their API costs. In Figure 1, we present a scatter plot\nof the results of each experiment on the MedQA dataset,\nwhile equivalent analyses for the other datasets are given\nin Appendix A.1. In the left panel, we show the accuracy\nvs cost (measured in USD), where the size of each point\nreflects the average number of API calls required per ques-\ntion (we also plot accuracy vs time, and accuracy vs average\nprompt length in Appendix A.1). These variations, where\napplicable, include changing the number of agents, rounds,\nreasoning and aggregation steps, altering agent prompts,\nimplementing round summarization, adjusting sampling pa-\nrameters, and modifying other system-specific hyperparame-\nters. For a full breakdown of the experimental configurations\nused for each system, see Appendix A.2. In the right panel,\nwe summarize accuracy over all configurations per strategy.\nWe see the highest performing debating strategy from those\nintroduced in Section 2 is SoM with multiple different con-\nfigurations achieving 61% on MedQA. However, the re-\ncently introduced Medprompt strategy (Nori et al., 2023),\nwhich does not use debate, performs the best overall. It also\nhas lower costs associated with it. Somewhat concerning\nfor the domain of medical Q&A, is that the single agent’s\nperformance, along with self-consistency, can be ma",
+            "locator": "lines 337-368",
+            "score": 10.480638923341992,
+            "source_id": "papers/text/smit-et-al-2023-going-mad.txt"
+          },
+          {
+            "content_sha256": "a1263656cb4d7e298c289b4ee44368fe9f38c1c2efc4ce88f0d54d60a62a3d1c",
+            "excerpt": "10.0\n12.5\n15.0\n(c) Accuracy versus the total cost\nMedprompt\nSociety of Mind\nEnsemble Reﬁnement\nSelf-Consistency\nChatEval\nSingle Agent\nMulti-Persona\n0.20\n0.25\n0.30\nChess Accuracy (out of 1.0) (d) Accuracy by strategy\nFigure 16. Chess experimental results.\n15\n\n===== PDF PAGE 16 =====\n\nShould we be going MAD? A Look at Multi-Agent Debate Strategies for LLMs\nA.2. Table of Experiments\nA complete table of all configurations for each experiment is provided in Table 3. This includes the names of the debate and agent prompts\nused. A full description of each of these prompts can be found in Appendix A.6.\n16\n\n===== PDF PAGE 17 =====\n\nShould we be going MAD? A Look at Multi-Agent Debate Strategies for LLMs\nSystem Name Debate\nPrompt\nAgent",
+            "locator": "lines 1681-1712",
+            "score": 9.480638923341992,
+            "source_id": "papers/text/smit-et-al-2023-going-mad.txt"
+          },
+          {
+            "content_sha256": "a1263656cb4d7e298c289b4ee44368fe9f38c1c2efc4ce88f0d54d60a62a3d1c",
+            "excerpt": "another.\nIn this paper, we benchmark various prompting strategies,\nwhich include multi-agent debate (MAD), for answering\nmultiple-choice questions across a wide range of domains.\nWe explore the impact on, and trade-offs between, critical\nfactors such as factual accuracy, time and cost. We provide\nan open-source suite of single-agent and MAD implemen-\ntations for the research community to build upon, with a\nunified API to easily build and evaluate MAD systems. Fi-\nnally, we demonstrate that by utilizing specific prompting\nstrategies, LLMs exhibit improved reasoning abilities. Con-\ncretely, we provide a novel debate prompting strategy able\nto modulate the level of agreement between agents during a\ndebate and improve upon the state-of-the-art for Q&A for a\ngiven model class.\n1\narXiv:2311.17371v3  [cs.CL]  18 Jul 2024\n\n===== PDF PAGE 2 =====\n\nShould we be going MAD? A Look at Multi-Agent Debate Strategies for LLMs\n2. Multi-Agent Debate\nCurrent state-of-the-art models for Q&A are dominated by\ngenerative LLMs. To make them more truthful and reliable,\nthey are often fine-tuned for specific use cases. In medicine,\nfor example, such models include Med-PaLM (Singhal\net al., 2022), Med-PaLM2 (Singhal et al., 2023), MedAl-\npaca (Han et al., 2023), Galactica (Taylor et al., 2022), Clin-\nicalGPT (Wang et al., 2023a) and Medprompt (Nori et al.,\n2023). Furthermore, many single-agent prompting strate-\ngies have been investigated in the context of medical Q&A.\nFor example, Li´evin et al. (2022) applied CoT reasoning on",
+            "locator": "lines 73-104",
+            "score": 9.375278407684165,
+            "source_id": "papers/text/smit-et-al-2023-going-mad.txt"
+          },
+          {
+            "content_sha256": "a1263656cb4d7e298c289b4ee44368fe9f38c1c2efc4ce88f0d54d60a62a3d1c",
+            "excerpt": "Measuring the performance boost from debating In\nFigure 4, we observe the relative improvement in accuracy\nachieved by the debate process compared to the initial an-\nswer provided by the first agent. Notably, the performance\nvaries across the three systems: ChatEval exhibits a modest\nenhancement, Society of Mind shows a substantial increase,\nand Multi-Persona, intriguingly, leads to a decrease in per-\nformance. This divergence in outcomes, coupled with the\nfindings in Table 2 which reveal only minor differences in\nfinal accuracy among these systems, suggests that the initial\nquality of responses in the first round may vary significantly.\nAn unexpected aspect of this analysis is that the Multi-\n5\n\n===== PDF PAGE 6 =====\n\nShould we be going MAD? A Look at Multi-Agent Debate Strategies for LLMs\nSingle AgentSociety of MindMulti-PersonaSelf-ConsistencyEnsemble ReﬁnementChatEval Medprompt\n0.0\n0.1\n0.2\n0.3\n0.4\n0.5\n0.6\n0.7\nAccuracy (out of 1.0)\nSingle AgentSociety of MindMulti-PersonaSelf-ConsistencyEnsemble ReﬁnementChatEval Medprompt\n0.0\n0.1\n0.2\n0.3",
+            "locator": "lines 529-560",
+            "score": 8.68213122712422,
+            "source_id": "papers/text/smit-et-al-2023-going-mad.txt"
+          },
+          {
+            "content_sha256": "a1263656cb4d7e298c289b4ee44368fe9f38c1c2efc4ce88f0d54d60a62a3d1c",
+            "excerpt": "16\n\n===== PDF PAGE 17 =====\n\nShould we be going MAD? A Look at Multi-Agent Debate Strategies for LLMs\nSystem Name Debate\nPrompt\nAgent\nprompt\nDebate Config MedQA PubMedQA MMLU CosmosQA CIAR GPQA\nScore Cost $ Score Cost $ Score Cost $ Score Cost $ Score Cost $ Score Cost $\nSingle Agent CoT 0.68 0.43 0.74 1.50 0.57 3.82 0.42 1.50 0.48 0.15 0.25 1.35\nSingle Agent CoT 0.60 0.43 0.72 1.50 0.52 3.82 0.43 1.50 0.44 0.15 0.25 1.41\nSingle Agent FS +\nSIM-\nPLE\n0.72 0.43 0.66 2.08 0.59 5.10\nSingle Agent FS +\nCoT\n0.71 0.58 0.75 2.08 0.62 5.09\nSingle Agent SIMPLE 0.76 0.43 0.70 1.50 0.60 3.82 0.45 1.50 0.50 0.15 0.33 1.35\nSingle Agent SIMPLE 0.72 0.43 0.68 1.50 0.57 3.82 0.31 1.50 0.50 0.15 0.30 1.35\nChatEval CE MAD CoT 3 rounds, simultane-\nous, summarized\n0.67 3.48 0.72 12.02 0.60 31.10 0.43 12.01 0.42 1.21 0.25 11.19\nChatEval CE MAD CoT 3 rounds, simultane-\nous talk\n0.67 2.86 0.73 10.08 0.60 26.95 0.43 9.41 0.46 0.97 0.24 9.82\nChatEval CE MAD CoT 3 rounds, one by\none\n0.67 2.94 0.74 10.39 0.58 27.94 0.44 9.63 0.42 1.00 0.25 10.14\nChatEval CE MAD CoT 2 rounds, simultane-",
+            "locator": "lines 1705-1736",
+            "score": 8.529429087511424,
+            "source_id": "papers/text/smit-et-al-2023-going-mad.txt"
+          },
+          {
+            "content_sha256": "a1263656cb4d7e298c289b4ee44368fe9f38c1c2efc4ce88f0d54d60a62a3d1c",
+            "excerpt": "implementations. Medprompt seems to perform consistently\n4\n\n===== PDF PAGE 5 =====\n\nShould we be going MAD? A Look at Multi-Agent Debate Strategies for LLMs\nSystem MedQA PubMedQA MMLU CosmosQA CIAR GPQA Chess\nMedprompt 0.65 (0.63) 0.77 (0.77) 0.74 (0.73) 0.48 (0.47) 0.54 (0.50) 0.27 (0.25) 0.32 (0.30)\nSociety of Mind 0.64 (0.61) 0.74 (0.71) 0.73 (0.70) 0.44 (0.39) 0. 56 (0.46) 0.27 (0.25) 0.26 (0.25)\nEnsemble Refinement 0.64 (0.60) 0.74 (0.72) 0.76 (0.74) 0.45 (0.40) 0.48 (0.46) 0.32 (0.26) 0.32 (0.25)\nChatEval 0.60 (0.60) 0.75 (0.73) 0.71 (0.69) 0.45 (0.43) 0.48 (0.43) 0.26 (0.25) 0.32 (0.23)\nSelf-Consistency 0.60 (0.60) 0.74 (0.72) 0.78 (0.75) 0.46 (0.46) 0.56 (0.52) 0.24 (0.29) 0.27 (0.21)\nSingle Agent 0.60 (0.59) 0.75 (0.70) 0.76 (0.72) 0.45 (0.43) 0.50 (0.50) 0.33 (0.28) 0.27 (0.18)\nMulti-Persona 0.58 (0.57) 0.70 (0.69) 0.72 (0.69) 0.46 (0.42) 0.52 (0.50) 0.29 (0.29) 0.33 (0.29)\nTable 2. Best performance achieved by each system on various datasets. The highest score for each system on each dataset is listed, with\nthe median performance over the datasets shown in parentheses.\nMedprompt\nSociety of Mind\nEnsemble Reﬁnement\nSelf-Consistency\nChatEval\nSingle Agent\nMulti-Persona\n0.66\n0.68\n0.70\n0.72\n0.74\n0.76\nPubMedQA Accuracy (out of 1.0)\n(a) PubMedQA Total Accuracy\nMedprompt",
+            "locator": "lines 409-440",
+            "score": 8.276666119016054,
+            "source_id": "papers/text/smit-et-al-2023-going-mad.txt"
+          },
+          {
+            "content_sha256": "a1263656cb4d7e298c289b4ee44368fe9f38c1c2efc4ce88f0d54d60a62a3d1c",
+            "excerpt": "terization, and generalization. arXiv preprint arXiv:2305.19420,\n2023.\n11\n\n===== PDF PAGE 12 =====\n\nShould we be going MAD? A Look at Multi-Agent Debate Strategies for LLMs\nA. Appendix\nA.1. Extended results on additional datasets\nWe provide a comprehensive suite of GPT-3 results for each strategy on each dataset: MedQA, PubMedQA, MMLU, CIAR, GPQA,\nCosmosQA and Chess. For each scenario, we plot accuracy against average time used to answer each question, accuracy relative to average\ntokens used per question, and accuracy in comparison to the total USD cost. Additionally, a box plot to summarize the performance of\neach strategy. These results can be viewed in Figures 10, 11, 12, 13, 14, and 15.\n100 101\nAverage seconds per question (Log Scale)\n0.52\n0.54\n0.56\n0.58\n0.60\n0.62\n0.64\nMedQA Accuracy (out of 1.0)\nSystem name\nSociety of Mind\nEnsemble Reﬁnement\nChatEval\nSelf-Consistency\nSingle Agent\nMulti-Persona\nMedprompt\nAverage API calls",
+            "locator": "lines 1081-1112",
+            "score": 8.094344562222101,
+            "source_id": "papers/text/smit-et-al-2023-going-mad.txt"
+          }
+        ],
+        "query": "baseline single agent sampling matched compute debate accuracy",
+        "truncated": true
+      },
+      "result_ids": [
+        "papers/text/smit-et-al-2023-going-mad.txt",
+        "papers/text/smit-et-al-2023-going-mad.txt",
+        "papers/text/smit-et-al-2023-going-mad.txt",
+        "papers/text/smit-et-al-2023-going-mad.txt",
+        "papers/text/smit-et-al-2023-going-mad.txt",
+        "papers/text/smit-et-al-2023-going-mad.txt",
+        "papers/text/smit-et-al-2023-going-mad.txt",
+        "papers/text/smit-et-al-2023-going-mad.txt"
+      ],
+      "result_sha256": "596750f6bcebdf9641e1d3bf7422ea509b5faf9cc307e2b33339dc272828590e",
+      "sequence": 2,
+      "tool": "search_sources"
+    },
+    {
+      "arguments": {
+        "line_count": 120,
+        "source_id": "papers/text/smit-et-al-2023-going-mad.txt",
+        "start_line": 1
+      },
+      "result": {
+        "content": "===== PDF PAGE 1 =====\n\nShould we be going MAD?\nA Look at Multi-Agent Debate Strategies for LLMs\nAndries Smit * 1 Nathan Grinsztajn * 1 Paul Duckworth * 1 Thomas D. Barrett 1 Arnu Pretorius 1\nAbstract\nRecent advancements in large language models\n(LLMs) underscore their potential for responding\nto inquiries in various domains. However, ensur-\ning that generative agents provide accurate and\nreliable answers remains an ongoing challenge.\nIn this context, multi-agent debate (MAD) has\nemerged as a promising strategy for enhancing\nthe truthfulness of LLMs. We benchmark a range\nof debating and prompting strategies to explore\nthe trade-offs between cost, time, and accuracy.\nImportantly, we find that multi-agent debating sys-\ntems, in their current form, do not reliably outper-\nform other proposed prompting strategies, such\nas self-consistency and ensembling using mul-\ntiple reasoning paths. However, when perform-\ning hyperparameter tuning, several MAD systems,\nsuch as Multi-Persona, perform better. This sug-\ngests that MAD protocols might not be inherently\nworse than other approaches, but that they are\nmore sensitive to different hyperparameter set-\ntings and difficult to optimize. We build on these\nresults to offer insights into improving debating\nstrategies, such as adjusting agent agreement lev-\nels, which can significantly enhance performance\nand even surpass all other non-debate protocols\nwe evaluated. We provide an open-source repos-\nitory to the community with several state-of-the-\nart protocols together with evaluation scripts to\nbenchmark across popular research datasets.\n1. Introduction\nTruthful question-answering assistants require a plethora\nof skills that until recently were considered out-of-reach of\ngenerative language models. Such agents require advanced\nnatural language reading comprehension, along with accu-\n*Equal contribution 1InstaDeep, London UK. Correspondence\nto: Paul Duckworth <p.duckworth@instadeep.com>.\nProceedings of the 41 st International Conference on Machine\nLearning, Vienna, Austria. PMLR 235, 2024. Copyright 2024 by\nthe author(s).\nrate recall and manipulation of expert or technical knowl-\nedge. Following the increase in performance and popularity\nof large language models (LLMs) (Brown et al., 2020; Ope-\nnAI, 2023), there is a growing hope that these models could\nassist humans in various domains like medicine (Li ´evin\net al., 2022; Han et al., 2023; Nori et al., 2023; Wang et al.,\n2023a; Singhal et al., 2023), education (Pardos & Bhan-\ndari, 2023; Kumar et al., 2024), and law (Lai et al., 2023).\nAs a way to improve the reasoning abilities of these sys-\ntems, prompting strategies have received significant atten-\ntion, starting with few-shot (Brown et al., 2020), and chain-\nof-thought (CoT) (Wei et al., 2022; Kojima et al., 2022). To\nfurther improve performance, a wide variety of strategies\nhave been proposed to use interactive reasoning between\nmultiple LLMs, by either generating answers in parallel to\nmaintain a form of self-consistency (Wang et al., 2023b),\nor promoting models to simulate debate. These multi-agent\napproaches have recently seen an uptake in applications, e.g.\nlanguage generation (Chan et al., 2023), machine translation\nand arithmetic reasoning (Liang et al., 2023), mathematical\nand strategic reasoning (Du et al., 2023), negotiation and bar-\ngaining (Fu et al., 2023), and notably, medical Q&A (Anil\net al., 2023; Singhal et al., 2023; Nori et al., 2023). How to\nbest utilize multiple agents for effective interactive reason-\ning is a prescient research question. However, to the best\nof our knowledge, there is no work comparing strategies,\nand there is no consensus for selecting one strategy over\nanother.\nIn this paper, we benchmark various prompting strategies,\nwhich include multi-agent debate (MAD), for answering\nmultiple-choice questions across a wide range of domains.\nWe explore the impact on, and trade-offs between, critical\nfactors such as factual accuracy, time and cost. We provide\nan open-source suite of single-agent and MAD implemen-\ntations for the research community to build upon, with a\nunified API to easily build and evaluate MAD systems. Fi-\nnally, we demonstrate that by utilizing specific prompting\nstrategies, LLMs exhibit improved reasoning abilities. Con-\ncretely, we provide a novel debate prompting strategy able\nto modulate the level of agreement between agents during a\ndebate and improve upon the state-of-the-art for Q&A for a\ngiven model class.\n1\narXiv:2311.17371v3  [cs.CL]  18 Jul 2024\n\n===== PDF PAGE 2 =====\n\nShould we be going MAD? A Look at Multi-Agent Debate Strategies for LLMs\n2. Multi-Agent Debate\nCurrent state-of-the-art models for Q&A are dominated by\ngenerative LLMs. To make them more truthful and reliable,\nthey are often fine-tuned for specific use cases. In medicine,\nfor example, such models include Med-PaLM (Singhal\net al., 2022), Med-PaLM2 (Singhal et al., 2023), MedAl-\npaca (Han et al., 2023), Galactica (Taylor et al., 2022), Clin-\nicalGPT (Wang et al., 2023a) and Medprompt (Nori et al.,\n2023). Furthermore, many single-agent prompting strate-\ngies have been investigated in the context of medical Q&A.\nFor example, Li´evin et al. (2022) applied CoT reasoning on\ntop of Instruct GPT-3 (Ouyang et al., 2022), and achieves\nnoticeable performance improvements.\nRecently, several MAD strategies have been proposed to\nimprove upon the enhanced reasoning capabilities of single-\nagent prompting methods leading to improved performance\non challenging natural language tasks (Du et al., 2023;\nLiang et al., 2023; Chan et al., 2023). Likewise, Gener-\native agents (Park et al., 2023), multi-persona (Wang et al.,\n2023c), and CAMEL (Li et al., 2023) study the behaviour\nof agents taking on different roles or personas within multi-\nagent interactions. One major reason why debate strategies\ncan be an effective tool is the ability of LLMs to adapt to\nadditional information given in-context (Zhang et al., 2023).\nThis facilitates multiple LLMs to participate in multi-agent\nand/or multi-round debates entirely using in-context prompt-\ning. That is, the agents adapt their behaviour based on infor-",
+        "content_sha256": "a1263656cb4d7e298c289b4ee44368fe9f38c1c2efc4ce88f0d54d60a62a3d1c",
+        "locator": "lines 1-120",
+        "source_id": "papers/text/smit-et-al-2023-going-mad.txt",
+        "truncated": true
+      },
+      "result_ids": [
+        "papers/text/smit-et-al-2023-going-mad.txt"
+      ],
+      "result_sha256": "59ab49a0ba5b61a2a97a142a1a1d4a1c48ad8829b5e64ae674c8a8d22729b5fe",
+      "sequence": 3,
+      "tool": "read_source"
+    },
+    {
+      "arguments": {
+        "line_count": 120,
+        "source_id": "papers/text/smit-et-al-2023-going-mad.txt",
+        "start_line": 120
+      },
+      "result": {
+        "content": "ing. That is, the agents adapt their behaviour based on infor-\nmation provided by other agents at inference time, with no\ngradient-based parameter updates being required.\nIn our study, we investigate several prompting strategies for\nQ&A. Whilst we note that some of these strategies were\nintroduced specifically for the medical Q&A domain, each\nprovides novel perspectives on how to utilize multiple col-\nlaborative agents. We briefly introduce each strategy here.\nSociety of Minds (SoM) Du et al. (2023) propose a MAD\napproach where multiple agents each provide their answers\nto each other in order to effectively collaborate. Optionally,\nanswers are summarized before being added to the history\nthat is available to the agents in future rounds.\nMulti-Persona (Liang et al., 2023) propose a MAD strat-\negy to encourage divergent agent outcomes via prompting\ndifferent personalities, i.e. an affirmative agent (angel) and\na negative agent (devil) each provide an answer to a judge\nagent who manages the process and obtains a final solution.\nThe judge has additional agency to end the debate early if it\nis satisfied with the answers provided.\nChatEval (Chan et al., 2023) propose three MAD modes:\n(1) one-on-one, where each agent answers the provided ques-\ntion in turn, and each agent is provided with the history of\nall previous agents’ answers; (2) simultaneous-talk, where\nagents asynchronously generate responses in each round to\nnullify the effects of agent order; and (3) simultaneous-talk-\nwith-summarizer, which additionally summarizes answers\nprovided in each round and overwrites the history available\nto all agents in future rounds.\nSelf-consistency (Wang et al., 2023b) samples multiple\nreasoning paths given a fixed prompt and selects the most\nfrequent answer. Whilst this is not a debate per se, as sam-\nples are rolled out independently, it relies on multiple API\ncalls so we distinguish it from the single agent case that uses\na single API call.\nEnsemble Refinement (ER) (Singhal et al., 2023) extends\nself-consistency. After multiple reasoning paths are sam-\npled, a second stage concatenates them into a list of student\nreasonings, after which multiple rounds of aggregation are\nperformed conditioned on this list.\nMedprompt (Nori et al., 2023) enhances AI-driven medical\nquestion answering by combining few-shot exemplar selec-\ntion with a two-stage process: preprocessing correct GPT-4\ntraining set responses as few-shot examples, and an infer-\nence step employing a k-Nearest Neighbours (kNN) lookup\nand ensemble refinement for answer generation. This ap-\nproach ensures high accuracy and reliability by using only\nthe most relevant and validated examples. Medprompt’s\neffectiveness is demonstrated in its superior performance\non the MedQA benchmark, showcasing its potential for\nmedical diagnostics. In this work, we do not employ the\nkNN approach as it requires a training and test set split. We\nbelieve this might provide Medprompt an unfair advantage\nin this evaluation as other protocols do not use a training\nset. Therefore, we only implement subcomponents of the\nfull Medprompt, specifically, question randomization with\nfew-shot chain-of-thought ensembling (Nori et al., 2023).\nWe summarize the features of these various systems in\nTable 1. Each strategy determines the high-level debate\nprompts and how the agents share answers and histories to\ncollaborate. However, in each case, there are multiple possi-\nble agent-level prompts available, including: (1) zero-shot\nQ&A prompt, (2) zero-shot chain-of-thought (CoT) (Kojima\net al., 2022), (3) few-shot examples (Brown et al., 2020)\nwhich provides five Q&A examples but no reasoning, (4)\nSolo Performance Prompting (SPP) (or Multi-persona self-\ncollaboration) (Wang et al., 2023c) which utilizes a single\nagent that mimics an internal debate, and (5) few-shot chain-\nof-thought (FS-CoT) (Wei et al., 2022) which combines\nstep-by-step reasoning steps, along with five Q&A exam-\nples and explanations1. We provide the complete lists of all\ndebate and agent-level prompts in Appendices A.5 and A.6.\n1The few-shot Q&A examples with explanations are provided\nfor each medical dataset in Singhal et al. (2023). The step-by-step\nexplanations were generated by a panel of qualified clinicians who\nidentified the best examples and crafted the few-shot prompts as\npart of the Med-PaLM project.\n2\n\n===== PDF PAGE 3 =====\n\nShould we be going MAD? A Look at Multi-Agent Debate Strategies for LLMs\nSystem Flexible\nRound Numbers Judge Summarizer Sequential\nInteractions\nMulti API\nCalls\nAsymmetric\nAgents\nMedprompt ✓ ✓\nSociety of Minds ✓ ✓ ✓\nEnsemble Refinement ✓ ✓ ✓ ✓\nChatEval ✓ ✓ ✓ ✓ ✓\nSelf-consistency ✓\nSingle-agent\nSolo Performance Prompting ✓ ✓ ✓\nMulti-Persona ✓ ✓ ✓ ✓ ✓\nTable 1. Feature comparison of various debating systems. The presence of a feature is indicated by a checkmark.\n10 20 30 40 50\nTotal cost\n0.525\n0.550\n0.575\n0.600\n0.625\n0.650\nMedQA Accuracy (out of 1.0)\nSystem name\nSociety of Mind\nEnsemble Reﬁnement\nChatEval\nSelf-Consistency\nSingle Agent\nMulti-Persona\nMedprompt\nAverage API calls\n2.5\n5.0\n7.5\n10.0",
+        "content_sha256": "a1263656cb4d7e298c289b4ee44368fe9f38c1c2efc4ce88f0d54d60a62a3d1c",
+        "locator": "lines 120-239",
+        "source_id": "papers/text/smit-et-al-2023-going-mad.txt",
+        "truncated": true
+      },
+      "result_ids": [
+        "papers/text/smit-et-al-2023-going-mad.txt"
+      ],
+      "result_sha256": "e47dd0fd759beb37847e1e2c1548d4a4ea972309a81afd7c71732e24d036ae42",
+      "sequence": 4,
+      "tool": "read_source"
+    },
+    {
+      "arguments": {
+        "line_count": 120,
+        "source_id": "papers/text/smit-et-al-2023-going-mad.txt",
+        "start_line": 359
+      },
+      "result": {
+        "content": "figurations achieving 61% on MedQA. However, the re-\ncently introduced Medprompt strategy (Nori et al., 2023),\nwhich does not use debate, performs the best overall. It also\nhas lower costs associated with it. Somewhat concerning\nfor the domain of medical Q&A, is that the single agent’s\nperformance, along with self-consistency, can be manipu-\nlated via prompts to achieve a high variance. We also note\nthat Multi-Persona performs consistently about 7% worse\nthan the Medprompt strategy. We revisit this in Section 3.\nWhile there is a noticeable trend indicating improved perfor-\nmance with increased cost and API usage, our findings re-\nveal that the relationship between performance and resource\ninvestment is complex and highly dependent on specific hy-\nperparameters and dataset/system configurations. Notably,\nsome MAD strategies do not consistently outperform more\ncost-effective non-debating approaches like Medprompt,\neven with optimized prompting. This suggests that, beyond\na certain threshold, additional computing does not guarantee\nbetter results, and performance is both nuanced and con-\ntingent on the right combination of hyperparameters and\nsystem design. This variability underscores the need for\nfurther evaluations, as undertaken in the following section,\nto develop a clearer picture of these trends.\nThe utility of debate Next, we consider the utility of de-\nbate in prompting strategies. Recent protocols like Ensem-\nble Refinement (Singhal et al., 2023) and Medprompt (Nori\net al., 2023) have deviated away from debating altogether,\nraising questions about its efficacy. Recall that we include\nthree standard medical datasets (MedQA, PubMedQA and\nMMLU), while also including three other reasoning datasets\n(CosmosQA, CIAR and GPQA). These datasets are con-\nstructed in such a way as to require small amounts of logical\ndeduction to answer successfully. This might give debat-\ning protocols an advantage as there are multiple rounds of\noutputs between agents, which could be used to build on\nlogical arguments before concluding. We now evaluate all\nour system setups across these seven datasets. The scores\n(out of 1.0) for the best-performing configurations for each\nQA system can be found in Table 2.\nTable 2 indicates that no protocol dominates on all datasets.\nMedprompt seems to perform the best overall. Interestingly\nenough the debating protocols do not outperform the other\nprotocols on the reasoning datasets. To further investigate\nthis we provide box plots, in Figure 2, which show the\ndistribution of performances for each QA system across\nthe other datasets (MedQA’s results can be found in Figure\n1). These boxplots help to visualize the variability and\nrobustness of each system under different conditions.\nThe protocols with the most variance in performance seem to\nbe Ensemble Refinement, Self-Consistency and single-agent\nimplementations. Medprompt seems to perform consistently\n4\n\n===== PDF PAGE 5 =====\n\nShould we be going MAD? A Look at Multi-Agent Debate Strategies for LLMs\nSystem MedQA PubMedQA MMLU CosmosQA CIAR GPQA Chess\nMedprompt 0.65 (0.63) 0.77 (0.77) 0.74 (0.73) 0.48 (0.47) 0.54 (0.50) 0.27 (0.25) 0.32 (0.30)\nSociety of Mind 0.64 (0.61) 0.74 (0.71) 0.73 (0.70) 0.44 (0.39) 0. 56 (0.46) 0.27 (0.25) 0.26 (0.25)\nEnsemble Refinement 0.64 (0.60) 0.74 (0.72) 0.76 (0.74) 0.45 (0.40) 0.48 (0.46) 0.32 (0.26) 0.32 (0.25)\nChatEval 0.60 (0.60) 0.75 (0.73) 0.71 (0.69) 0.45 (0.43) 0.48 (0.43) 0.26 (0.25) 0.32 (0.23)\nSelf-Consistency 0.60 (0.60) 0.74 (0.72) 0.78 (0.75) 0.46 (0.46) 0.56 (0.52) 0.24 (0.29) 0.27 (0.21)\nSingle Agent 0.60 (0.59) 0.75 (0.70) 0.76 (0.72) 0.45 (0.43) 0.50 (0.50) 0.33 (0.28) 0.27 (0.18)\nMulti-Persona 0.58 (0.57) 0.70 (0.69) 0.72 (0.69) 0.46 (0.42) 0.52 (0.50) 0.29 (0.29) 0.33 (0.29)\nTable 2. Best performance achieved by each system on various datasets. The highest score for each system on each dataset is listed, with\nthe median performance over the datasets shown in parentheses.\nMedprompt\nSociety of Mind\nEnsemble Reﬁnement\nSelf-Consistency\nChatEval\nSingle Agent\nMulti-Persona\n0.66\n0.68\n0.70\n0.72\n0.74\n0.76\nPubMedQA Accuracy (out of 1.0)\n(a) PubMedQA Total Accuracy\nMedprompt\nSociety of Mind\nEnsemble Reﬁnement\nSelf-Consistency\nChatEval\nSingle Agent\nMulti-Persona\n0.60\n0.65\n0.70\n0.75\nMMLU Accuracy (out of 1.0)\n (b) MMLU Total Accuracy\nMedprompt\nSociety of Mind\nEnsemble Reﬁnement\nSelf-Consistency\nChatEval\nSingle Agent\nMulti-Persona\n0.35\n0.40\n0.45\nCosmosQA Accuracy (out of 1.0) (c) CosmosQA Total Accuracy\nMedprompt\nSociety of Mind\nEnsemble Reﬁnement\nSelf-Consistency\nChatEval\nSingle Agent\nMulti-Persona\n0.35\n0.40\n0.45\n0.50\n0.55\nCIAR Accuracy (out of 1.0)\n(d) CIAR Total Accuracy\nMedprompt",
+        "content_sha256": "a1263656cb4d7e298c289b4ee44368fe9f38c1c2efc4ce88f0d54d60a62a3d1c",
+        "locator": "lines 359-478",
+        "source_id": "papers/text/smit-et-al-2023-going-mad.txt",
+        "truncated": true
+      },
+      "result_ids": [
+        "papers/text/smit-et-al-2023-going-mad.txt"
+      ],
+      "result_sha256": "d44a4af5d0114f86a4eb0c5f6f3c2dd9bcea5a6437d62cac234cc66f04f2d3be",
+      "sequence": 5,
+      "tool": "read_source"
+    },
+    {
+      "arguments": {
+        "line_count": 120,
+        "source_id": "papers/text/smit-et-al-2023-going-mad.txt",
+        "start_line": 239
+      },
+      "result": {
+        "content": "10.0\n12.5\n15.0\nImproved Multi-Persona\nMedprompt\nSociety of Mind\nEnsemble Reﬁnement\nSelf-Consistency\nChatEval\nSingle Agent\nMulti-Persona\n0.525\n0.550\n0.575\n0.600\n0.625\n0.650\nMedQA Accuracy (out of 1.0)\nFigure 1. Benchmark of experiment configurations on MedQA dataset. Left: Accuracy vs average cost ($) per question. The size of the\ndots reflects the average number of API calls required per question. Right: Summarizes accuracy grouped by strategy, sorted by average\nperformance (black dot). The X represents improved performance using our proposed agreement modulation, described in Section 3.\n3. Experiments\nAs base agents for the MAD implementations, we uti-\nlize GPT-3 (Brown et al., 2020) with the 3.5-turbo en-\ngine. GPT-3 is a large-scale transformer-based generative\nLLM (Vaswani et al., 2017; Kaplan et al., 2020) available\nvia API calls. Although not the current most powerful model\navailable via API, we selected GPT-3.5 for its optimal bal-\nance between performance and cost efficiency, crucial for\nconducting a broad range of experiments, whereas more\npowerful models would’ve been prohibitively expensive.\nHowever, we informally note that some of our preliminary\nexperiments with more advanced models like GPT-4 sug-\ngested similar findings, although these tests were limited to\na smaller subset of data.\nWe evaluate each system using seven datasets: three medi-\ncal datasets, and three more general datasets requiring rea-\nsoning. For the medical tasks, we follow the evaluation\nprotocol in Med-PaLM2 (Singhal et al., 2023) and evalu-\nate the above strategies on the following multiple-choice\nquestion-answering datasets:\n• MedQA (Jin et al., 2021) comprising of 1273 general\nmedical knowledge questions from the US medical li-\ncensing exam (USMLE). Each question has 4-5 answer\nchoices. In this work, we focus on the 4-answer ver-\nsion of MedQA as used to evaluate Med-PaLM2 (Liang\net al., 2023) and Medprompt (Nori et al., 2023).\n• PubMedQA (Jin et al., 2019) containing 500 open\ndomain questions, context and answers.\n• MMLU (clinical topics only) (Hendrycks et al., 2021)\nconsisting of 123 medical questions covering anatomy,\nclinical knowledge, college medicine, medical genetics,\nprofessional medicine, and college biology.\nThe other datasets are difficult reasoning tasks, based on the\nassumptions that MAD strategies might particularly shine\non datasets requiring complex and commonsense reasoning\nand be better able to escape reasoning traps.\n• CosmosQA (Huang et al., 2019): A dataset of\n7,000 general knowledge questions focusing on\ncommonsense-based reading comprehension. It re-\nquires understanding narratives and interpreting causes\nand effects not explicitly mentioned. We subsampled\n500 questions for economic and time feasibility.\n• CIAR (Liang et al., 2023): The Counter-Intuitive\nArithmetic Reasoning (CIAR) dataset consists of 50\n3\n\n===== PDF PAGE 4 =====\n\nShould we be going MAD? A Look at Multi-Agent Debate Strategies for LLMs\nmultiple-choice questions. It is designed to evaluate\nreasoning abilities of LLMs, challenging them to use\nslow, logical thinking over intuitive responses. We\nadded at the end of the question the two suggested\nanswers to turn it into a multiple-choice question-\nanswering task.\n• GPQA (Rein et al., 2023): This dataset contains 448\nmultiple-choice questions written by domain experts\nin biology, physics, and chemistry. It tests the limits\nof both human experts and AI systems, with questions\nthat are ‘Google-proof’ and demand high-level under-\nstanding and reasoning.\n• Chess (bench Team, 2021): This benchmark task fo-\ncuses on the ability of AI systems to understand and\ntrack the state of a chess game based on natural lan-\nguage descriptions. The task is divided into subtasks\ncreated from real games played on Lichess and syn-\nthetic games generated by random search over the\nchess game tree. To account for the effect of con-\ntext length, the subtasks are further divided into Short,\nMedium, and Long. Each subtask consists of 1,000\ngames. We use the Short setting in our study.\nWe measure additional agent-level and debate-level metrics\n(comprehensive lists of all additional metrics are provided\nin Appendices A.3 and A.4). Examples of agent-level met-\nrics include whether an individual agent answered a given\nquestion correctly or not and the debate round in which it\nfirst provided the correct answer. Examples of debate-level\nmetrics include whether any agent involved in the debate\nprovided a correct answer and whether the agents came to a\nconsensus by the final round.\nResults First, we attempt to see whether various prompt-\ning protocols affect performance significantly enough to\njustify their API costs. In Figure 1, we present a scatter plot\nof the results of each experiment on the MedQA dataset,\nwhile equivalent analyses for the other datasets are given\nin Appendix A.1. In the left panel, we show the accuracy\nvs cost (measured in USD), where the size of each point\nreflects the average number of API calls required per ques-\ntion (we also plot accuracy vs time, and accuracy vs average\nprompt length in Appendix A.1). These variations, where\napplicable, include changing the number of agents, rounds,\nreasoning and aggregation steps, altering agent prompts,\nimplementing round summarization, adjusting sampling pa-\nrameters, and modifying other system-specific hyperparame-\nters. For a full breakdown of the experimental configurations\nused for each system, see Appendix A.2. In the right panel,\nwe summarize accuracy over all configurations per strategy.\nWe see the highest performing debating strategy from those\nintroduced in Section 2 is SoM with multiple different con-",
+        "content_sha256": "a1263656cb4d7e298c289b4ee44368fe9f38c1c2efc4ce88f0d54d60a62a3d1c",
+        "locator": "lines 239-358",
+        "source_id": "papers/text/smit-et-al-2023-going-mad.txt",
+        "truncated": true
+      },
+      "result_ids": [
+        "papers/text/smit-et-al-2023-going-mad.txt"
+      ],
+      "result_sha256": "b7b31bf0861f0855a41b2a028f470756542cefea02fa97f746f72fed32e9f8b6",
+      "sequence": 5,
+      "tool": "read_source"
+    },
+    {
+      "arguments": {
+        "line_count": 130,
+        "source_id": "papers/text/smit-et-al-2023-going-mad.txt",
+        "start_line": 478
+      },
+      "result": {
+        "content": "Medprompt\nSociety of Mind\nEnsemble Reﬁnement\nSelf-Consistency\nChatEval\nSingle Agent\nMulti-Persona\n0.24\n0.26\n0.28\n0.30\n0.32\nGPQA Accuracy (out of 1.0) (e) GPQA Total Accuracy\nMedprompt\nSociety of Mind\nEnsemble Reﬁnement\nSelf-Consistency\nChatEval\nSingle Agent\nMulti-Persona\n0.20\n0.25\n0.30\nChess Accuracy (out of 1.0) (f) Chess Total Accuracy\nFigure 2. Boxplots illustrating the distribution of total accuracy across different datasets for each QA system. These plots demonstrate the\nvariability and robustness of each system’s performance.\nwell, except on the GPQA dataset, with low variance. It\nseems that MAD protocols are more sensitive to hyperpa-\nrameters. We investigate this further in the next section.\nIs MAD simply sensitive to hyperparameters? To\nbenchmark MAD’s sensitivity to hyperparameter choices,\nwe adopt a K-fold approach. We divide the medical and\nnon-medical datasets into two groups. For each method and\neach dataset, we gather the hyperparameter combination\nwhich has the highest average accuracy on the two held-out\ndatasets of the same category, and use this combination to\ncompute the final accuracy.\nThe results are presented in Figure 3. Notably, within med-\nical datasets, every evaluated system outperforms single-\nagent methods, with the exception of Multi-Persona. Self-\nConsistency and Medprompt emerge as the top perform-\ners. Conversely, in the context of non-medical datasets,\nsingle-agent methods surpass all evaluated systems except\nfor Multi-Persona and Self-Consistency.\nThese findings indicate that hyperparameter choices signifi-\ncantly influence system performance, with optimal settings\ntending to be dataset-specific. Moreover, they underscore\nthat superior performance of various protocols over a stan-\ndard single-agent approach is not assured for new datasets.\nIt appears that dataset-specific fine-tuning is crucial for max-\nimizing performance.\nMeasuring the performance boost from debating In\nFigure 4, we observe the relative improvement in accuracy\nachieved by the debate process compared to the initial an-\nswer provided by the first agent. Notably, the performance\nvaries across the three systems: ChatEval exhibits a modest\nenhancement, Society of Mind shows a substantial increase,\nand Multi-Persona, intriguingly, leads to a decrease in per-\nformance. This divergence in outcomes, coupled with the\nfindings in Table 2 which reveal only minor differences in\nfinal accuracy among these systems, suggests that the initial\nquality of responses in the first round may vary significantly.\nAn unexpected aspect of this analysis is that the Multi-\n5\n\n===== PDF PAGE 6 =====\n\nShould we be going MAD? A Look at Multi-Agent Debate Strategies for LLMs\nSingle AgentSociety of MindMulti-PersonaSelf-ConsistencyEnsemble ReﬁnementChatEval Medprompt\n0.0\n0.1\n0.2\n0.3\n0.4\n0.5\n0.6\n0.7\nAccuracy (out of 1.0)\nSingle AgentSociety of MindMulti-PersonaSelf-ConsistencyEnsemble ReﬁnementChatEval Medprompt\n0.0\n0.1\n0.2\n0.3\n0.4\nAccuracy (out of 1.0)\nFigure 3. Comparing medical vs non-medical datasets. The red line indicates the average performance of single-agent systems. Left:\nAccuracy averaged over the three medical datasets. Right: Accuracy averaged over the three non-medical datasets.\nChatEval Multi-Persona Society of Mind\nSystem\n−2\n0\n2\n4\n6\n8\nRelative Accuracy Improvement (%)\nImprovement (ﬁrst round to last round)\nImprovement (ﬁrst round to ﬁnal answer)\nFigure 4. Relative accuracy improvements, averaged on all\ndatasets, between the answer of the first agent given during the\nfirst and last round, as well as with the final answer.\nPersona system reduces the overall performance compared\nto relying solely on the initial response of the first agent.\nThis can be attributed to the role of the second agent (the\n“devil”), which is deliberately designed to contradict or dis-\nagree, even if the initial response was correct. We show\nin the next section that this prior willingness for different\nagents to agree with each other at the outset of a debate, is\nindeed a very important “hyperparameter”.\nImproving MAD via agreement modulation Our pre-\nvious experiments led us to hypothesise that the degree to\nwhich agents agree with one another during a debate may\nsignificantly affect debating performance. Here we test this\nhypothesis by developing a new MAD prompting strategy\nthat modulates (via prompts) the degree to which agents\nwithin a debate agree with each other at the outset. Our\nprompt takes the following simple form: “you should agree\nwith the other agents X% of the time ”. We call X in this\nprompt the agent’s agreement intensity.\nMulti-Persona is an ideal testbed for this method, as it uses\nonly two agents with different system prompts. Specifi-\ncally, we provide the “angel” agent with the question, and\nwe modulate the disagreement using the “devil”’s system\nprompt. Figure 5 shows the effect of modulating the agent’s\nagreement on the 6 datasets. We can see that this param-\neter has a significant effect on the performance and that\nmodulating the agreement in the prompt has the effect of\nmodifying the agreement on the first debate round, which\nin turn affects the outcome and the final accuracy. Strik-\ningly, the tendency is not always the same for each dataset:",
+        "content_sha256": "a1263656cb4d7e298c289b4ee44368fe9f38c1c2efc4ce88f0d54d60a62a3d1c",
+        "locator": "lines 478-607",
+        "source_id": "papers/text/smit-et-al-2023-going-mad.txt",
+        "truncated": true
+      },
+      "result_ids": [
+        "papers/text/smit-et-al-2023-going-mad.txt"
+      ],
+      "result_sha256": "8cf84a0be3d974021cc5cd2174df447220a4c0a44f7354d1f49f92a4654408f9",
+      "sequence": 7,
+      "tool": "read_source"
+    },
+    {
+      "arguments": {
+        "line_count": 130,
+        "source_id": "papers/text/smit-et-al-2023-going-mad.txt",
+        "start_line": 608
+      },
+      "result": {
+        "content": "while MedQA and PubMedQA directly benefit from a high\nagreement, CIAR follows a reverse pattern. As CIAR was\ncreated to be counter-intuitive, it is therefore probable that\nprompting the second agent to strongly disagree raises the\nchance of arriving at the correct answer during the debate.\nTo investigate further, we select the highest performing con-\nfigurations of debating approaches from Figure 1, namely\nSoM, ChatEval and Multi-Persona, and a subset of MedQA\ndataset (376 multi-choice USMLE Q&A (Han et al., 2023)).\nWe opted for this subset due to its high-quality questions.\nIn Figure 6 (left), we plot the performance of each strategy\nas we increase the prompted agreement intensity from zero\nto 100%. Figure 6 (right) we plot the accuracy vs the ac-\ntual observed debate consensus, i.e. how frequently all the\nagents agree upon a final answer at the end of the debate.\nWe can see that modulating the agreement intensity in this\nway provides a substantial ( ≈15%) improvement in per-\nformance for Multi-Persona, and ( ≈5%) for SoM on the\nUSMLE dataset. ChatEval, on the contrary, is hardly af-\nfected by this prompting mechanism, suggesting that the\nagent’s agreement is not as easily modulable for every sys-\ntem. Building on this finding, we apply the 90% agreement\nintensity agent prompts to Multi-Persona on the full MedQA\n6\n\n===== PDF PAGE 7 =====\n\nShould we be going MAD? A Look at Multi-Agent Debate Strategies for LLMs\n0.3 0.4 0.5 0.6 0.7 0.8 0.9\nAgreement intensity (prompt)\n0.3\n0.4\n0.5\n0.6\n0.7\nAccuracy (out of 1.0)\nCIAR\nCosmosQA\nGPQA\nMMLU\nMedQA\nPubMedQA\n0.2 0.4 0.6 0.8 1.0\nAgreement at the ﬁrst round\n0.3\n0.4\n0.5\n0.6\n0.7\nAccuracy (out of 1.0)\nCIAR\nCosmosQA\nGPQA\nMMLU\nMedQA\nPubMedQA\nFigure 5. Left: Multi-Persona’s accuracy according to the agreement fixed by the prompt. Right: Multi-Persona’s accuracy according to\nthe averaged agreement during the first debate round.\n0.0 0.2 0.4 0.6 0.8 1.0\nAgreement intensity from the prompt\n0.50\n0.55\n0.60\n0.65\n0.70\nUSMLE Accuracy (out of 1.0)\nMulti-Persona\nSociety of Mind\nChatEval\n0.2 0.4 0.6 0.8 1.0\nConsensus at the ﬁnal debate round (out of 1.0)\n0.50\n0.55\n0.60\n0.65\n0.70\nUSMLE Accuracy (out of 1.0)\nFigure 6. Left: Accuracy on USMLE as we increase agreement intensity in our prompt. Right: Accuracy vs actual induced debate\nagreement.\ndataset and demonstrate (as far as we are aware) a new state-\nof-the-art result (for GPT-3), highlighted in Figure 1 by the\nred cross symbol.\nAnalysis of debating behaviour Our experiments sec-\ntion concludes with an exploration of the dynamics within\nMAD systems, specifically through their performance on\nthe MedQA test set. We assess Multi-Persona, ChatEval,\nand Society of Mind, focusing on key aspects such as con-\nsensus accuracy, independent correct answer identification,\nthe adaptability reflected in answer changes, and the breadth\nof initial perspectives. These facets are depicted in Figure\n7, offering insights into each system’s strategic approach to\ndebate and problem-solving.\nThe four spider plots offer a more detailed analysis of the de-\nbating behavior of MAD strategies, providing insights into\nthe effectiveness of each system through various metrics.\nThe initial plot compares the three systems, with Society\nof Mind (SoM) notably exhibiting the largest surface area,\nsuggesting it outperforms others across all debating metrics.\nThis is further supported in the subsequent plots, which\nanalyze the top three runs for each system and show that\nlarger areas are indicative of better performance. These vi-\nsualizations emphasize the importance of a balanced system,\nindicating that excellence in one aspect is not enough; a\nsystem must perform well across multiple dimensions of the\ndebate process. A full description of each of the metrics is\nprovided in Appendix A.3.\nFor example, when agents change their answers during a\ndebate, this reevaluation must lead to more accurate con-\nclusions. Arbitrary changes without a strategic basis could\nprevent consensus. This underlines the need for a balanced\napproach where agents not only reconsider their positions\nbut also enhance their decision-making accuracy, contribut-\ning to the system’s overall effectiveness.\nEvaluating using other APIs We assess the capability\nof GPT-4 (OpenAI et al., 2024) and Mixtral 8x7B (Jiang\net al., 2024) on the MedQA dataset, applying the optimal\nagreement modulation value identified for Multi-Persona\nwith GPT-3.5 on USMLE. Results shown in Figures 8 and 9.\n7\n\n===== PDF PAGE 8 =====\n\nShould we be going MAD? A Look at Multi-Agent Debate Strategies for LLMs\nAccuracy\n(Min: 0.56, Max: 0.64)\nFinal Round Consensus\n(Min: 0.37, Max: 0.92)\nAny Correct Answer\n(Min: 0.7, Max: 0.79)\nHow Many Agents Changed",
+        "content_sha256": "a1263656cb4d7e298c289b4ee44368fe9f38c1c2efc4ce88f0d54d60a62a3d1c",
+        "locator": "lines 608-737",
+        "source_id": "papers/text/smit-et-al-2023-going-mad.txt",
+        "truncated": true
+      },
+      "result_ids": [
+        "papers/text/smit-et-al-2023-going-mad.txt"
+      ],
+      "result_sha256": "50acc6338b4762c94ad6cbf046471ec80583e70fd5323e6d7520a999cae104bb",
+      "sequence": 7,
+      "tool": "read_source"
+    },
+    {
+      "arguments": {
+        "line_count": 140,
+        "source_id": "papers/text/smit-et-al-2023-going-mad.txt",
+        "start_line": 737
+      },
+      "result": {
+        "content": "How Many Agents Changed\n(Min: 0.038, Max: 1.7)\nUnique First Answers\n(Min: 1.3, Max: 1.7)\nMulti-Persona - 4 rounds max\nChatEval - 2 rounds, simultaneous talk with summarizer\nSociety of Mind - 4 agents, 3 rounds\n(a) Best system runs\nAccuracy\n(Min: 0.56, Max: 0.64)\nFinal Round Consensus\n(Min: 0.37, Max: 0.92)\nAny Correct Answer\n(Min: 0.7, Max: 0.79)\nHow Many Agents Changed\n(Min: 0.038, Max: 1.7)\nUnique First Answers\n(Min: 1.3, Max: 1.7)\n4 rounds max\n2 rounds max\n3 rounds max (b) Multi-Persona\nAccuracy\n(Min: 0.56, Max: 0.64)\nFinal Round Consensus\n(Min: 0.37, Max: 0.92)\nAny Correct Answer\n(Min: 0.7, Max: 0.79)\nHow Many Agents Changed\n(Min: 0.038, Max: 1.7)\nUnique First Answers\n(Min: 1.3, Max: 1.7)\n2 rounds, simultaneous talk with summarizer\n3 rounds, simultaneous talk with summarizer\n2 rounds, simultaneous talk\n(c) ChatEval\nAccuracy\n(Min: 0.56, Max: 0.64)\nFinal Round Consensus\n(Min: 0.37, Max: 0.92)\nAny Correct Answer\n(Min: 0.7, Max: 0.79)\nHow Many Agents Changed\n(Min: 0.038, Max: 1.7)\nUnique First Answers\n(Min: 1.3, Max: 1.7)\n4 agents, 3 rounds\n3 agents, 2 rounds\n3 agents, 3 rounds (d) Society of Mind\nFigure 7. Debating Behavior of MAD Strategies. The first plot compares the top runs for each of the systems, while the other three plots\ncompare the top three runs for each system. Each plot quantifies the performance on MedQA by measuring several factors: the accuracy\nof the final consensus among agents (scaled to 1.0), the instances of any agent identifying the correct answer independently (also scaled to\n1.0), the frequency of agents changing their answers during the debate, and the diversity of initial answers provided. The descriptions for\neach axis include the range of scores observed, from minimum to maximum.\n103\nTotal cost (Log Scale)\n0.76\n0.78\n0.80\n0.82\n0.84\n0.86\nMedQA Accuracy (out of 1.0)\nSystem name\nSociety of Mind\nEnsemble Reﬁnement\nChatEval\nSelf-Consistency\nSingle Agent\nMulti-Persona\nMedprompt\nAverage API calls\n2.5\n5.0\n7.5\n10.0\n12.5\n15.0\nMedprompt\nSociety of Mind\nEnsemble Reﬁnement\nSelf-Consistency\nChatEval\nSingle Agent\nMulti-Persona\n0.76\n0.78\n0.80\n0.82\n0.84\n0.86\nMedQA Accuracy (out of 1.0)\nFigure 8. Benchmark of experiment configurations of GPT-4 on MedQA dataset. Left: Accuracy vs average cost ($) per question. The size\nof the dots reflects the average number of API calls required per question. Right: Summarizes accuracy grouped by strategy, sorted by\naverage performance (black dot).\n8\n\n===== PDF PAGE 9 =====\n\nShould we be going MAD? A Look at Multi-Agent Debate Strategies for LLMs\n5 10 15 20\nTotal cost\n0.1\n0.2\n0.3\n0.4\n0.5\n0.6\nMedQA Accuracy (out of 1.0)\nSystem name\nSociety of Mind\nEnsemble Reﬁnement\nChatEval\nSelf-Consistency\nSingle Agent\nMulti-Persona\nMedprompt\nAverage API calls\n2.5\n5.0\n7.5\n10.0\n12.5\n15.0\nMedprompt\nSociety of Mind\nEnsemble Reﬁnement\nSelf-Consistency\nChatEval\nSingle Agent\nMulti-Persona\n0.1\n0.2\n0.3\n0.4\n0.5\n0.6\nMedQA Accuracy (out of 1.0)\nFigure 9. Benchmark of experiment configurations of Mixtral 8x7B on MedQA dataset. Left: Accuracy vs average cost ($) per question.\nThe size of the dots reflects the average number of API calls required per question. Right: Summarizes accuracy grouped by strategy,\nsorted by average performance (black dot).",
+        "content_sha256": "a1263656cb4d7e298c289b4ee44368fe9f38c1c2efc4ce88f0d54d60a62a3d1c",
+        "locator": "lines 737-876",
+        "source_id": "papers/text/smit-et-al-2023-going-mad.txt",
+        "truncated": true
+      },
+      "result_ids": [
+        "papers/text/smit-et-al-2023-going-mad.txt"
+      ],
+      "result_sha256": "eb35bdf10ad2280accbe6fd6c5b26ef2915c4d3600a5ba54202378c2252e715b",
+      "sequence": 9,
+      "tool": "read_source"
+    },
+    {
+      "arguments": {
+        "line_count": 130,
+        "source_id": "papers/text/smit-et-al-2023-going-mad.txt",
+        "start_line": 877
+      },
+      "result": {
+        "content": "The results from GPT-3.5 suggest that hyperparameter set-\ntings can be effectively transferred to GPT-4. However, this\ntransferability does not extend well to Mixtral 8x7B. This\ndiscrepancy might be attributed to architectural differences,\nwhich could affect how hyperparameters influence model\nperformance. We leave this for future research.\nCode availability Source code for this work, including\nall MAD implementations and configurations, is publicly\navailable at https://github.com/instadeepai/\nDebateLLM.\n4. Conclusions\nThe investigations detailed in this work have demonstrated\nthat MAD approaches currently do not outperform other en-\nsembling methods such as Medprompt and self-consistency\nusing their original implementations. MAD typically re-\nquires a higher number of API calls, increasing the number\nof tokens to produce and process and ultimately, the total\nrunning cost of the system. Interestingly, we found that\nthis might primarily be due to MAD protocols being more\nsensitive to hyperparameters and not necessarily that de-\nbate inherently performs worse than single-agent methods.\nTo strengthen this claim, we demonstrated that a simple\nprompt-based manipulation of the degree to which agents\nagree with each other, referred to as the agreement intensity,\ncould provide significant performance gains. By tuning this\nagreement intensity for Multi-Persona, it went from being\nthe worst-performing protocol to the best-performing, beat-\ning out methods such as Medprompt and Self-Consistency.\nTherefore, while MAD systems currently trail behind other\nprompting strategies, we believe they hold significant poten-\ntial to transform the prompting landscape. To foster further\nexploration, we have made our code repository open-source,\nfor others to easily reproduce all our experiments and further\npursue interesting related research directions.\nLimitations We utilize API calls to a publicly available\nLLM (Brown et al., 2020) which, whilst sufficient in the\ncontext of our investigation, exposes us to variable inference\ntime calls and unforeseen model updates. Moreover, large-\nscale API-based benchmarking incurs substantial financial\nand time costs, which both limit the experiment scales and\nprovide a barrier of entry to replication and extension efforts.\nFor these reasons, future works could extend this line of\nwork using open-source models and in-house infrastructure.\nImpact Statement\nThis study furthers the field of machine learning by evaluat-\ning multi-agent debate (MAD) strategies and other prompt-\ning methods within question-answering datasets. Our re-\nsults show that MAD approaches could be as effective as, or\neven superior to, other strategies like Medprompt and Self-\nConsistency. An open-source toolkit is provided to promote\nadditional research in this domain. While this research aims\nto improve the precision of large language models (LLMs)\nin answering questions, with a significant focus on health-\ncare applications, it is crucial to consider the potential risks\nassociated with these advancements. Specifically, medical\nquestion-answering systems can sometimes yield incorrect\npredictions in unforeseen ways, and there is a risk that these\nsystems may exhibit undue confidence in their erroneous\nresponses. Such inaccuracies, especially in the medical\ndomain, could lead to misinformation or misdiagnosis, po-\ntentially impacting patient care and outcomes. Therefore,\nwhile this work contributes valuable insights and tools for\nenhancing LLM capabilities, it is imperative to proceed with\ncaution, incorporating robust validation, transparency, and\nethical considerations to mitigate risks and ensure these tech-\nnologies are deployed in a manner that safeguards public\nhealth and trust.\n9\n\n===== PDF PAGE 10 =====\n\nShould we be going MAD? A Look at Multi-Agent Debate Strategies for LLMs\nReferences\nAnil, R., Dai, A. M., Firat, O., Johnson, M., Lepikhin, D., Passos,\nA., Shakeri, S., Taropa, E., Bailey, P., Chen, Z., et al. Palm 2\ntechnical report. arXiv preprint arXiv:2305.10403, 2023.\nbench Team, B. Chess state tracking, 2021. URL\nhttps://github.com/google/BIG-bench/\ntree/main/bigbench/benchmark_tasks/chess_\nstate_tracking. Accessed: 2024-05-27.\nBrown, T., Mann, B., Ryder, N., Subbiah, M., Kaplan, J. D.,\nDhariwal, P., Neelakantan, A., Shyam, P., Sastry, G., Askell,\nA., et al. Language models are few-shot learners. Advances in\nneural information processing systems, 33:1877–1901, 2020.\nChan, C.-M., Chen, W., Su, Y ., Yu, J., Xue, W., Zhang, S., Fu,\nJ., and Liu, Z. Chateval: Towards better llm-based evaluators\nthrough multi-agent debate. arXiv preprint arXiv:2308.07201,\n2023.\nDu, Y ., Li, S., Torralba, A., Tenenbaum, J. B., and Mordatch, I.\nImproving factuality and reasoning in language models through\nmultiagent debate. arXiv preprint arXiv:2305.14325, 2023.\nFu, Y ., Peng, H., Khot, T., and Lapata, M. Improving language\nmodel negotiation with self-play and in-context learning from\nai feedback. arXiv preprint arXiv:2305.10142, 2023.\nHan, T., Adams, L. C., Papaioannou, J.-M., Grundmann, P., Ober-\nhauser, T., L¨oser, A., Truhn, D., and Bressem, K. K. Medalpaca–\nan open-source collection of medical conversational ai models\nand training data. arXiv preprint arXiv:2304.08247, 2023.\nHendrycks, D., Burns, C., Basart, S., Zou, A., Mazeika, M., Song,\nD., and Steinhardt, J. Measuring massive multitask language\nunderstanding. In International conference on learning repre-\nsentations, 2021.\nHuang, L., Bras, R. L., Bhagavatula, C., and Choi, Y . Cosmos QA:\nmachine reading comprehension with contextual commonsense\nreasoning. CoRR, abs/1909.00277, 2019. URL http://\narxiv.org/abs/1909.00277.\nJiang, A. Q., Sablayrolles, A., Roux, A., Mensch, A., Savary, B.,\nBamford, C., Chaplot, D. S., de las Casas, D., Hanna, E. B.,\nBressand, F., Lengyel, G., Bour, G., Lample, G., Lavaud, L. R.,\nSaulnier, L., Lachaux, M.-A., Stock, P., Subramanian, S., Yang,\nS., Antoniak, S., Scao, T. L., Gervet, T., Lavril, T., Wang, T.,\nLacroix, T., and Sayed, W. E. Mixtral of experts, 2024.\nJin, D., Pan, E., Oufattole, N., Weng, W.-H., Fang, H., and\nSzolovits, P. What disease does this patient have? a large-\nscale open domain question answering dataset from medical\nexams. Applied Sciences, 11(14):6421, 2021.\nJin, Q., Dhingra, B., Liu, Z., Cohen, W. W., and Lu, X. Pubmedqa:\nA dataset for biomedical research question answering. arXiv\npreprint arXiv:1909.06146, 2019.\nKaplan, J., McCandlish, S., Henighan, T., Brown, T. B., Chess,\nB., Child, R., Gray, S., Radford, A., Wu, J., and Amodei,\nD. Scaling laws for neural language models. arXiv preprint\narXiv:2001.08361, 2020.\nKojima, T., Gu, S. S., Reid, M., Matsuo, Y ., and Iwasawa, Y . Large\nlanguage models are zero-shot reasoners. Advances in neural\ninformation processing systems, 35:22199–22213, 2022.\nKumar, H., Musabirov, I., Reza, M., Shi, J., Wang, X., Williams,\nJ. J., Kuzminykh, A., and Liut, M. Impact of guidance and\ninteraction strategies for llm use on learner performance and\nperception, 2024.",
+        "content_sha256": "a1263656cb4d7e298c289b4ee44368fe9f38c1c2efc4ce88f0d54d60a62a3d1c",
+        "locator": "lines 877-1006",
+        "source_id": "papers/text/smit-et-al-2023-going-mad.txt",
+        "truncated": true
+      },
+      "result_ids": [
+        "papers/text/smit-et-al-2023-going-mad.txt"
+      ],
+      "result_sha256": "4d502d278e305b2319cfbe9a3c326cc5c0fea0eb768ed75826f85cbb6332a563",
+      "sequence": 10,
+      "tool": "read_source"
+    },
+    {
+      "arguments": {
+        "limit": 6,
+        "query": "judge agent aggregation final answer majority vote consensus",
+        "source_ids": [
+          "papers/text/smit-et-al-2023-going-mad.txt"
+        ]
+      },
+      "result": {
+        "hits": [
+          {
+            "content_sha256": "a1263656cb4d7e298c289b4ee44368fe9f38c1c2efc4ce88f0d54d60a62a3d1c",
+            "excerpt": "0.71 3.89 0.69 13.50 0.61 34.38 0.41 13.50 0.34 1.35 0.27 12.14\nSociety of Mind SoM MAD CoT 4 agents, 3 rounds 0.72 5.19 0.71 18.22 0.64 48.63 0.38 18.03 0.38 1.87 0.27 17.77\nSociety of Mind SoM MAD CoT 4 agents, 2 rounds 0.73 3.46 0.71 12.02 0.62 32.27 0.38 12.01 0.46 1.25 0.23 11.87\nTable 3: Complete table of experiment configurations.\n18\n\n===== PDF PAGE 19 =====\n\nShould we be going MAD? A Look at Multi-Agent Debate Strategies for LLMs\nA.3. Additional Debate Metrics\nMetric Description\nFinal round consensus Percentage of agents in agreement with each other at the end of the final round.\nFinal round correctly parsed consensus Percentage of agents in agreement with each other at the end of the final round,\nwhere we exclude all agents with incorrectly parsed answers.\nAny Correct Answer Percentage of debates where any agent provided the correct answer at least\nonce.\nHow Many Agents Changed Number of agents that changed their answer during the debate.\nHow Many Agents Changed When Correctly Parsed Number of agents that changed their answer excluding any agents with incor-\nrectly parsed answers.\nNumber of Rounds Average number of rounds in the debate.\nUnique First Answers Average number of unique first answers given by the agents.\nUnique First Correctly Parsed Answers Average number of unique first answers excluding incorrectly parsed answers.\nA.4. Additional Agent Metrics\nMetric Description\nAgent Engine The LLM engine used by the agent.\nAgent Name Name of the agent.\nAnswered Correctly Percentage of questions answered correctly by the agent.\nAny Incorrectly Parsed Answer Percenta",
+            "locator": "lines 1873-1904",
+            "score": 10.984716320118265,
+            "source_id": "papers/text/smit-et-al-2023-going-mad.txt"
+          },
+          {
+            "content_sha256": "a1263656cb4d7e298c289b4ee44368fe9f38c1c2efc4ce88f0d54d60a62a3d1c",
+            "excerpt": "Agent Engine The LLM engine used by the agent.\nAgent Name Name of the agent.\nAnswered Correctly Percentage of questions answered correctly by the agent.\nAny Incorrectly Parsed Answer Percentage of questions where at least one of the answers were incorrectly parsed.\nAvg Messages Removed Average number of messages removed from the agent’s prompt input due to hitting\nthe prompt limit for the LLM model.\nAvg Prompt Tokens Average number of tokens in the prompts given to the agent.\nAvg Response Length Average length of the agent’s responses.\nAvg Response Tokens Average number of tokens in the agent’s responses.\nAvg Round Cost Average cost for each round of debate for the agent.\nBullied by Other Percentage of times the agent was bullied by others to change its answer.\nChanged Answer Percentage of times the agent changed its answer througout the debate.\nCost per Question Average cost incurred by the agent per question.\nFirst Correct Round When Correct The first round in which the agent gave a correct answer when it was correct.\nIncorrectly Parsed Final Answer Percentage of time when the final answer was parsed incorrectly.\nNum of Correct Rounds When Correct Number of rounds in which the agent was correct when it was correct.\nNumber of Answers Average number of unique answers given by the agent throughout a debate.\nPercentage of Correct Rounds When Correct Percentage of rounds in which the agent was correct when it was correct.\nRelied on Other Whether the agent took an answers from another agent in a previous round as its final\nanswer.\nTime per Question Average time taken by the age",
+            "locator": "lines 1897-1928",
+            "score": 9.761572768804056,
+            "source_id": "papers/text/smit-et-al-2023-going-mad.txt"
+          },
+          {
+            "content_sha256": "a1263656cb4d7e298c289b4ee44368fe9f38c1c2efc4ce88f0d54d60a62a3d1c",
+            "excerpt": "metrics include whether any agent involved in the debate\nprovided a correct answer and whether the agents came to a\nconsensus by the final round.\nResults First, we attempt to see whether various prompt-\ning protocols affect performance significantly enough to\njustify their API costs. In Figure 1, we present a scatter plot\nof the results of each experiment on the MedQA dataset,\nwhile equivalent analyses for the other datasets are given\nin Appendix A.1. In the left panel, we show the accuracy\nvs cost (measured in USD), where the size of each point\nreflects the average number of API calls required per ques-\ntion (we also plot accuracy vs time, and accuracy vs average\nprompt length in Appendix A.1). These variations, where\napplicable, include changing the number of agents, rounds,\nreasoning and aggregation steps, altering agent prompts,\nimplementing round summarization, adjusting sampling pa-\nrameters, and modifying other system-specific hyperparame-\nters. For a full breakdown of the experimental configurations\nused for each system, see Appendix A.2. In the right panel,\nwe summarize accuracy over all configurations per strategy.\nWe see the highest performing debating strategy from those\nintroduced in Section 2 is SoM with multiple different con-\nfigurations achieving 61% on MedQA. However, the re-\ncently introduced Medprompt strategy (Nori et al., 2023),\nwhich does not use debate, performs the best overall. It also\nhas lower costs associated with it. Somewhat concerning\nfor the domain of medical Q&A, is that the single agent’s\nperformance, along with self-consistency, can be ma",
+            "locator": "lines 337-368",
+            "score": 9.158883083359672,
+            "source_id": "papers/text/smit-et-al-2023-going-mad.txt"
+          },
+          {
+            "content_sha256": "a1263656cb4d7e298c289b4ee44368fe9f38c1c2efc4ce88f0d54d60a62a3d1c",
+            "excerpt": "mation provided by other agents at inference time, with no\ngradient-based parameter updates being required.\nIn our study, we investigate several prompting strategies for\nQ&A. Whilst we note that some of these strategies were\nintroduced specifically for the medical Q&A domain, each\nprovides novel perspectives on how to utilize multiple col-\nlaborative agents. We briefly introduce each strategy here.\nSociety of Minds (SoM) Du et al. (2023) propose a MAD\napproach where multiple agents each provide their answers\nto each other in order to effectively collaborate. Optionally,\nanswers are summarized before being added to the history\nthat is available to the agents in future rounds.\nMulti-Persona (Liang et al., 2023) propose a MAD strat-\negy to encourage divergent agent outcomes via prompting\ndifferent personalities, i.e. an affirmative agent (angel) and\na negative agent (devil) each provide an answer to a judge\nagent who manages the process and obtains a final solution.\nThe judge has additional agency to end the debate early if it\nis satisfied with the answers provided.\nChatEval (Chan et al., 2023) propose three MAD modes:\n(1) one-on-one, where each agent answers the provided ques-\ntion in turn, and each agent is provided with the history of\nall previous agents’ answers; (2) simultaneous-talk, where\nagents asynchronously generate responses in each round to\nnullify the effects of agent order; and (3) simultaneous-talk-\nwith-summarizer, which additionally summarizes answers\nprovided in each round and overwrites the history available\nto all agents in future rounds.\nSelf-consistency (",
+            "locator": "lines 121-152",
+            "score": 8.969813299576,
+            "source_id": "papers/text/smit-et-al-2023-going-mad.txt"
+          },
+          {
+            "content_sha256": "a1263656cb4d7e298c289b4ee44368fe9f38c1c2efc4ce88f0d54d60a62a3d1c",
+            "excerpt": "prompt. Figure 5 shows the effect of modulating the agent’s\nagreement on the 6 datasets. We can see that this param-\neter has a significant effect on the performance and that\nmodulating the agreement in the prompt has the effect of\nmodifying the agreement on the first debate round, which\nin turn affects the outcome and the final accuracy. Strik-\ningly, the tendency is not always the same for each dataset:\nwhile MedQA and PubMedQA directly benefit from a high\nagreement, CIAR follows a reverse pattern. As CIAR was\ncreated to be counter-intuitive, it is therefore probable that\nprompting the second agent to strongly disagree raises the\nchance of arriving at the correct answer during the debate.\nTo investigate further, we select the highest performing con-\nfigurations of debating approaches from Figure 1, namely\nSoM, ChatEval and Multi-Persona, and a subset of MedQA\ndataset (376 multi-choice USMLE Q&A (Han et al., 2023)).\nWe opted for this subset due to its high-quality questions.\nIn Figure 6 (left), we plot the performance of each strategy\nas we increase the prompted agreement intensity from zero\nto 100%. Figure 6 (right) we plot the accuracy vs the ac-\ntual observed debate consensus, i.e. how frequently all the\nagents agree upon a final answer at the end of the debate.\nWe can see that modulating the agreement intensity in this\nway provides a substantial ( ≈15%) improvement in per-\nformance for Multi-Persona, and ( ≈5%) for SoM on the\nUSMLE dataset. ChatEval, on the contrary, is hardly af-\nfected by this prompting mechanism, suggesting that the\nagent’s agreement is not as easil",
+            "locator": "lines 601-632",
+            "score": 8.499809670330265,
+            "source_id": "papers/text/smit-et-al-2023-going-mad.txt"
+          },
+          {
+            "content_sha256": "a1263656cb4d7e298c289b4ee44368fe9f38c1c2efc4ce88f0d54d60a62a3d1c",
+            "excerpt": "answers to turn it into a multiple-choice question-\nanswering task.\n• GPQA (Rein et al., 2023): This dataset contains 448\nmultiple-choice questions written by domain experts\nin biology, physics, and chemistry. It tests the limits\nof both human experts and AI systems, with questions\nthat are ‘Google-proof’ and demand high-level under-\nstanding and reasoning.\n• Chess (bench Team, 2021): This benchmark task fo-\ncuses on the ability of AI systems to understand and\ntrack the state of a chess game based on natural lan-\nguage descriptions. The task is divided into subtasks\ncreated from real games played on Lichess and syn-\nthetic games generated by random search over the\nchess game tree. To account for the effect of con-\ntext length, the subtasks are further divided into Short,\nMedium, and Long. Each subtask consists of 1,000\ngames. We use the Short setting in our study.\nWe measure additional agent-level and debate-level metrics\n(comprehensive lists of all additional metrics are provided\nin Appendices A.3 and A.4). Examples of agent-level met-\nrics include whether an individual agent answered a given\nquestion correctly or not and the debate round in which it\nfirst provided the correct answer. Examples of debate-level\nmetrics include whether any agent involved in the debate\nprovided a correct answer and whether the agents came to a\nconsensus by the final round.\nResults First, we attempt to see whether various prompt-\ning protocols affect performance significantly enough to\njustify their API costs. In Figure 1, we present a scatter plot\nof the results of each experiment on the MedQA",
+            "locator": "lines 313-344",
+            "score": 8.094344562222101,
+            "source_id": "papers/text/smit-et-al-2023-going-mad.txt"
+          }
+        ],
+        "query": "judge agent aggregation final answer majority vote consensus",
+        "truncated": true
+      },
+      "result_ids": [
+        "papers/text/smit-et-al-2023-going-mad.txt",
+        "papers/text/smit-et-al-2023-going-mad.txt",
+        "papers/text/smit-et-al-2023-going-mad.txt",
+        "papers/text/smit-et-al-2023-going-mad.txt",
+        "papers/text/smit-et-al-2023-going-mad.txt",
+        "papers/text/smit-et-al-2023-going-mad.txt"
+      ],
+      "result_sha256": "b2742730c5d79df8e40e22a6771f95f9beeb3ab11da47a8183e5aad480b74735",
+      "sequence": 11,
+      "tool": "search_sources"
+    },
+    {
+      "arguments": {
+        "limit": 6,
+        "query": "cost API calls tokens expensive debate rounds agents",
+        "source_ids": [
+          "papers/text/smit-et-al-2023-going-mad.txt"
+        ]
+      },
+      "result": {
+        "hits": [
+          {
+            "content_sha256": "a1263656cb4d7e298c289b4ee44368fe9f38c1c2efc4ce88f0d54d60a62a3d1c",
+            "excerpt": "Agent Engine The LLM engine used by the agent.\nAgent Name Name of the agent.\nAnswered Correctly Percentage of questions answered correctly by the agent.\nAny Incorrectly Parsed Answer Percentage of questions where at least one of the answers were incorrectly parsed.\nAvg Messages Removed Average number of messages removed from the agent’s prompt input due to hitting\nthe prompt limit for the LLM model.\nAvg Prompt Tokens Average number of tokens in the prompts given to the agent.\nAvg Response Length Average length of the agent’s responses.\nAvg Response Tokens Average number of tokens in the agent’s responses.\nAvg Round Cost Average cost for each round of debate for the agent.\nBullied by Other Percentage of times the agent was bullied by others to change its answer.\nChanged Answer Percentage of times the agent changed its answer througout the debate.\nCost per Question Average cost incurred by the agent per question.\nFirst Correct Round When Correct The first round in which the agent gave a correct answer when it was correct.\nIncorrectly Parsed Final Answer Percentage of time when the final answer was parsed incorrectly.\nNum of Correct Rounds When Correct Number of rounds in which the agent was correct when it was correct.\nNumber of Answers Average number of unique answers given by the agent throughout a debate.\nPercentage of Correct Rounds When Correct Percentage of rounds in which the agent was correct when it was correct.\nRelied on Other Whether the agent took an answers from another agent in a previous round as its final\nanswer.\nTime per Question Average time taken by the age",
+            "locator": "lines 1897-1928",
+            "score": 11.495541943884255,
+            "source_id": "papers/text/smit-et-al-2023-going-mad.txt"
+          },
+          {
+            "content_sha256": "a1263656cb4d7e298c289b4ee44368fe9f38c1c2efc4ce88f0d54d60a62a3d1c",
+            "excerpt": "metrics include whether any agent involved in the debate\nprovided a correct answer and whether the agents came to a\nconsensus by the final round.\nResults First, we attempt to see whether various prompt-\ning protocols affect performance significantly enough to\njustify their API costs. In Figure 1, we present a scatter plot\nof the results of each experiment on the MedQA dataset,\nwhile equivalent analyses for the other datasets are given\nin Appendix A.1. In the left panel, we show the accuracy\nvs cost (measured in USD), where the size of each point\nreflects the average number of API calls required per ques-\ntion (we also plot accuracy vs time, and accuracy vs average\nprompt length in Appendix A.1). These variations, where\napplicable, include changing the number of agents, rounds,\nreasoning and aggregation steps, altering agent prompts,\nimplementing round summarization, adjusting sampling pa-\nrameters, and modifying other system-specific hyperparame-\nters. For a full breakdown of the experimental configurations\nused for each system, see Appendix A.2. In the right panel,\nwe summarize accuracy over all configurations per strategy.\nWe see the highest performing debating strategy from those\nintroduced in Section 2 is SoM with multiple different con-\nfigurations achieving 61% on MedQA. However, the re-\ncently introduced Medprompt strategy (Nori et al., 2023),\nwhich does not use debate, performs the best overall. It also\nhas lower costs associated with it. Somewhat concerning\nfor the domain of medical Q&A, is that the single agent’s\nperformance, along with self-consistency, can be ma",
+            "locator": "lines 337-368",
+            "score": 11.375278407684164,
+            "source_id": "papers/text/smit-et-al-2023-going-mad.txt"
+          },
+          {
+            "content_sha256": "a1263656cb4d7e298c289b4ee44368fe9f38c1c2efc4ce88f0d54d60a62a3d1c",
+            "excerpt": "0.71 3.89 0.69 13.50 0.61 34.38 0.41 13.50 0.34 1.35 0.27 12.14\nSociety of Mind SoM MAD CoT 4 agents, 3 rounds 0.72 5.19 0.71 18.22 0.64 48.63 0.38 18.03 0.38 1.87 0.27 17.77\nSociety of Mind SoM MAD CoT 4 agents, 2 rounds 0.73 3.46 0.71 12.02 0.62 32.27 0.38 12.01 0.46 1.25 0.23 11.87\nTable 3: Complete table of experiment configurations.\n18\n\n===== PDF PAGE 19 =====\n\nShould we be going MAD? A Look at Multi-Agent Debate Strategies for LLMs\nA.3. Additional Debate Metrics\nMetric Description\nFinal round consensus Percentage of agents in agreement with each other at the end of the final round.\nFinal round correctly parsed consensus Percentage of agents in agreement with each other at the end of the final round,\nwhere we exclude all agents with incorrectly parsed answers.\nAny Correct Answer Percentage of debates where any agent provided the correct answer at least\nonce.\nHow Many Agents Changed Number of agents that changed their answer during the debate.\nHow Many Agents Changed When Correctly Parsed Number of agents that changed their answer excluding any agents with incor-\nrectly parsed answers.\nNumber of Rounds Average number of rounds in the debate.\nUnique First Answers Average number of unique first answers given by the agents.\nUnique First Correctly Parsed Answers Average number of unique first answers excluding incorrectly parsed answers.\nA.4. Additional Agent Metrics\nMetric Description\nAgent Engine The LLM engine used by the agent.\nAgent Name Name of the agent.\nAnswered Correctly Percentage of questions answered correctly by the agent.\nAny Incorrectly Parsed Answer Percenta",
+            "locator": "lines 1873-1904",
+            "score": 10.802394763324312,
+            "source_id": "papers/text/smit-et-al-2023-going-mad.txt"
+          },
+          {
+            "content_sha256": "a1263656cb4d7e298c289b4ee44368fe9f38c1c2efc4ce88f0d54d60a62a3d1c",
+            "excerpt": "15.0\nImproved Multi-Persona\nMedprompt\nSociety of Mind\nEnsemble Reﬁnement\nSelf-Consistency\nChatEval\nSingle Agent\nMulti-Persona\n0.525\n0.550\n0.575\n0.600\n0.625\n0.650\nMedQA Accuracy (out of 1.0)\nFigure 1. Benchmark of experiment configurations on MedQA dataset. Left: Accuracy vs average cost ($) per question. The size of the\ndots reflects the average number of API calls required per question. Right: Summarizes accuracy grouped by strategy, sorted by average\nperformance (black dot). The X represents improved performance using our proposed agreement modulation, described in Section 3.\n3. Experiments\nAs base agents for the MAD implementations, we uti-\nlize GPT-3 (Brown et al., 2020) with the 3.5-turbo en-\ngine. GPT-3 is a large-scale transformer-based generative\nLLM (Vaswani et al., 2017; Kaplan et al., 2020) available\nvia API calls. Although not the current most powerful model\navailable via API, we selected GPT-3.5 for its optimal bal-\nance between performance and cost efficiency, crucial for\nconducting a broad range of experiments, whereas more\npowerful models would’ve been prohibitively expensive.\nHowever, we informally note that some of our preliminary\nexperiments with more advanced models like GPT-4 sug-\ngested similar findings, although these tests were limited to",
+            "locator": "lines 241-272",
+            "score": 9.969813299576,
+            "source_id": "papers/text/smit-et-al-2023-going-mad.txt"
+          },
+          {
+            "content_sha256": "a1263656cb4d7e298c289b4ee44368fe9f38c1c2efc4ce88f0d54d60a62a3d1c",
+            "excerpt": "that MAD approaches currently do not outperform other en-\nsembling methods such as Medprompt and self-consistency\nusing their original implementations. MAD typically re-\nquires a higher number of API calls, increasing the number\nof tokens to produce and process and ultimately, the total\nrunning cost of the system. Interestingly, we found that\nthis might primarily be due to MAD protocols being more\nsensitive to hyperparameters and not necessarily that de-\nbate inherently performs worse than single-agent methods.\nTo strengthen this claim, we demonstrated that a simple\nprompt-based manipulation of the degree to which agents\nagree with each other, referred to as the agreement intensity,\ncould provide significant performance gains. By tuning this\nagreement intensity for Multi-Persona, it went from being\nthe worst-performing protocol to the best-performing, beat-\ning out methods such as Medprompt and Self-Consistency.\nTherefore, while MAD systems currently trail behind other\nprompting strategies, we believe they hold significant poten-\ntial to transform the prompting landscape. To foster further\nexploration, we have made our code repository open-source,\nfor others to easily reproduce all our experiments and further\npursue interesting related research directions.\nLimitations We utilize API calls to a publicly available\nLLM (Brown et al., 2020) which, whilst sufficient in the\ncontext of our investigation, exposes us to variable inference\ntime calls and unforeseen model updates. Moreover, large-\nscale API-based benchmarking incurs substantial financial\nand time costs, which both lim",
+            "locator": "lines 889-920",
+            "score": 9.852030263919618,
+            "source_id": "papers/text/smit-et-al-2023-going-mad.txt"
+          },
+          {
+            "content_sha256": "a1263656cb4d7e298c289b4ee44368fe9f38c1c2efc4ce88f0d54d60a62a3d1c",
+            "excerpt": "nullify the effects of agent order; and (3) simultaneous-talk-\nwith-summarizer, which additionally summarizes answers\nprovided in each round and overwrites the history available\nto all agents in future rounds.\nSelf-consistency (Wang et al., 2023b) samples multiple\nreasoning paths given a fixed prompt and selects the most\nfrequent answer. Whilst this is not a debate per se, as sam-\nples are rolled out independently, it relies on multiple API\ncalls so we distinguish it from the single agent case that uses\na single API call.\nEnsemble Refinement (ER) (Singhal et al., 2023) extends\nself-consistency. After multiple reasoning paths are sam-\npled, a second stage concatenates them into a list of student\nreasonings, after which multiple rounds of aggregation are\nperformed conditioned on this list.\nMedprompt (Nori et al., 2023) enhances AI-driven medical\nquestion answering by combining few-shot exemplar selec-\ntion with a two-stage process: preprocessing correct GPT-4\ntraining set responses as few-shot examples, and an infer-\nence step employing a k-Nearest Neighbours (kNN) lookup\nand ensemble refinement for answer generation. This ap-\nproach ensures high accuracy and reliability by using only\nthe most relevant and validated examples. Medprompt’s\neffectiveness is demonstrated in its superior performance\non the MedQA benchmark, showcasing its potential for\nmedical diagnostics. In this work, we do not employ the\nkNN approach as it requires a training and test set split. We\nbelieve this might provide Medprompt an unfair advantage\nin this evaluation as other protocols do not use a trainin",
+            "locator": "lines 145-176",
+            "score": 9.276666119016054,
+            "source_id": "papers/text/smit-et-al-2023-going-mad.txt"
+          }
+        ],
+        "query": "cost API calls tokens expensive debate rounds agents",
+        "truncated": true
+      },
+      "result_ids": [
+        "papers/text/smit-et-al-2023-going-mad.txt",
+        "papers/text/smit-et-al-2023-going-mad.txt",
+        "papers/text/smit-et-al-2023-going-mad.txt",
+        "papers/text/smit-et-al-2023-going-mad.txt",
+        "papers/text/smit-et-al-2023-going-mad.txt",
+        "papers/text/smit-et-al-2023-going-mad.txt"
+      ],
+      "result_sha256": "4d8f40d47248e1750021dbb29b7e54f7658225e05164c086962d16028b135a39",
+      "sequence": 12,
+      "tool": "search_sources"
+    },
+    {
+      "arguments": {
+        "line_count": 140,
+        "source_id": "papers/text/smit-et-al-2023-going-mad.txt",
+        "start_line": 1736
+      },
+      "result": {
+        "content": "ChatEval CE MAD CoT 2 rounds, simultane-\nous, summarized\n0.70 2.16 0.73 7.50 0.60 19.24 0.45 7.50 0.44 0.75 0.25 6.90\nChatEval CE MAD CoT 2 rounds, simultane-\nous talk\n0.71 1.75 0.75 6.18 0.60 16.48 0.41 6.01 0.48 0.60 0.26 5.95\nChatEval CE MAD CoT 2 rounds, one by\none\n0.71 1.81 0.73 6.43 0.58 16.97 0.44 6.10 0.36 0.62 0.24 6.15\nEnsemble\nRefinement\nER MAD FS +\nSIM-\nPLE\nreasoning=3, aggre-\ngation=9\n0.74 5.18 0.69 19.75 0.59 49.67\nEnsemble\nRefinement\nER MAD FS +\nSIM-\nPLE\nreasoning=3, aggre-\ngation=1\n0.76 1.73 0.69 7.75 0.59 19.11\nSelf-\nConsistency\nER MAD FS +\nSIM-\nPLE\n0.73 2.16 0.68 10.42 0.60 25.48\nEnsemble\nRefinement\nER MAD SIMPLE reasoning=3, aggre-\ngation=9\n0.74 5.18 0.72 18.00 0.60 45.85 0.35 18.00 0.48 1.80 0.28 16.24\nEnsemble\nRefinement\nER MAD SIMPLE reasoning=3, aggre-\ngation=1\n0.76 1.73 0.71 6.00 0.59 15.28 0.33 6.00 0.46 0.60 0.32 5.42\nSelf-\nConsistency\nER MAD SIMPLE 0.76 2.16 0.69 7.50 0.60 19.10 0.46 7.50 0.56 0.75 0.32 6.73\nEnsemble\nRefinement\nER MAD\nCoT\nCoT reasoning=3, aggre-\ngation=1\n0.67 1.80 0.71 6.35 0.61 16.38 0.44 6.07 0.46 0.63 0.23 6.18\nEnsemble\nRefinement\nER MAD\nCoT\nCoT reasoning=3, aggre-\ngation=9\n0.72 5.90 0.73 21.05 0.60 55.79 0.45 18.64 0.42 2.05 0.23 21.61\nSelf-\nConsistency\nER MAD\nCoT\nCoT 0.64 2.16 0.74 7.50 0.59 19.10 0.46 7.50 0.48 0.75 0.25 7.03\nContinued on next page\n17\n\n===== PDF PAGE 18 =====\n\nShould we be going MAD? A Look at Multi-Agent Debate Strategies for LLMs\nSystem Name Debate\nPrompt\nAgent\nprompt\nDebate Config MedQA PubMedQA MMLU CosmosQA CIAR GPQA\nScore Cost $ Score Cost $ Score Cost $ Score Cost $ Score Cost $ Score Cost $\nEnsemble\nRefinement\nER MAD\nCoT\nFS +\nCoT\nreasoning=3, aggre-\ngation=1\n0.71 2.19 0.73 8.01 0.64 19.17\nEnsemble\nRefinement\nER MAD\nCoT\nFS +\nCoT\nreasoning=3, aggre-\ngation=9\n0.74 5.87 0.74 22.20 0.64 50.30\nSelf-\nConsistency\nER MAD\nCoT\nFS +\nCoT\n0.78 2.88 0.74 10.40 0.63 25.47\nMulti-Persona MP MAD ANGEL\n+\nDEVIL\n2 rounds max 0.68 1.47 0.68 5.68 0.57 12.32 0.46 5.44 0.50 0.48 0.29 4.83\nMulti-Persona MP MAD ANGEL\n+\nDEVIL\n3 rounds max 0.71 1.47 0.70 6.88 0.56 12.83 0.39 6.15 0.46 0.47 0.28 5.23\nMulti-Persona MP MAD ANGEL\n+\nDEVIL\n4 rounds max 0.72 1.57 0.67 7.79 0.58 12.84 0.40 6.61 0.52 0.50 0.27 5.26\nMedprompt Medprompt CoT temp: 0.5, top p: 0.8 0.72 2.16 0.77 7.50 0.63 19.10 0.48 7.50 0.52 0.75 0.24 6.84\nMedprompt Medprompt CoT temp: 0.7, top p: 0.8 0.73 2.16 0.76 7.50 0.65 19.10 0.43 7.50 0.48 0.75 0.24 6.85\nMedprompt Medprompt CoT temp: 0.7, top p: 0.5 0.73 2.16 0.76 7.50 0.63 19.10 0.46 7.50 0.54 0.76 0.26 6.85\nMedprompt Medprompt CoT temp: 0.5, top p: 0.5 0.74 2.16 0.77 7.50 0.64 19.10 0.47 7.50 0.44 0.76 0.27 6.88\nSociety of Mind SoM MAD CoT 2 agents, 3 rounds,\nsummarized\n0.66 2.59 0.69 9.00 0.61 22.92 0.41 9.00 0.48 0.90 0.23 8.09\nSociety of Mind SoM MAD CoT 4 agents, 3 rounds,\nsummarized\n0.68 5.18 0.71 18.00 0.61 45.83 0.44 18.00 0.40 1.80 0.25 16.19\nSociety of Mind SoM MAD CoT 4 agents, 2 rounds,\nsummarized\n0.69 3.46 0.73 12.00 0.61 30.55 0.43 12.00 0.42 1.20 0.24 10.78\nSociety of Mind SoM MAD CoT 3 agents, 3 rounds 0.70 3.89 0.71 13.52 0.63 35.27 0.37 13.51 0.48 1.38 0.25 13.15\nSociety of Mind SoM MAD CoT 3 agents, 2 rounds 0.70 2.59 0.73 9.00 0.63 23.48 0.35 9.00 0.42 0.93 0.26 8.75\nSociety of Mind SoM MAD CoT 2 agents, 2 rounds 0.70 1.73 0.72 6.00 0.60 15.32 0.31 6.00 0.46 0.61 0.26 5.65\nSociety of Mind SoM MAD CoT 3 agents, 2 rounds,\nsummarized\n0.70 2.59 0.74 9.00 0.60 22.91 0.42 9.00 0.52 0.90 0.25 8.09\nSociety of Mind SoM MAD CoT 2 agents, 2 rounds,\nsummarized\n0.70 1.73 0.69 6.00 0.60 15.28 0.39 6.00 0.56 0.60 0.27 5.39\nSociety of Mind SoM MAD CoT 2 agents, 3 rounds 0.71 2.59 0.72 9.00 0.61 23.01 0.31 9.00 0.46 0.91 0.23 8.52\nSociety of Mind SoM MAD CoT 3 agents, 3 rounds,\nsummarized\n0.71 3.89 0.69 13.50 0.61 34.38 0.41 13.50 0.34 1.35 0.27 12.14\nSociety of Mind SoM MAD CoT 4 agents, 3 rounds 0.72 5.19 0.71 18.22 0.64 48.63 0.38 18.03 0.38 1.87 0.27 17.77\nSociety of Mind SoM MAD CoT 4 agents, 2 rounds 0.73 3.46 0.71 12.02 0.62 32.27 0.38 12.01 0.46 1.25 0.23 11.87",
+        "content_sha256": "a1263656cb4d7e298c289b4ee44368fe9f38c1c2efc4ce88f0d54d60a62a3d1c",
+        "locator": "lines 1736-1875",
+        "source_id": "papers/text/smit-et-al-2023-going-mad.txt",
+        "truncated": true
+      },
+      "result_ids": [
+        "papers/text/smit-et-al-2023-going-mad.txt"
+      ],
+      "result_sha256": "8905c6137d834f9cf50ae6cecd0a6913a47dff9b61b98fbac4d2ac8866163e4c",
+      "sequence": 13,
+      "tool": "read_source"
+    },
+    {
+      "arguments": {
+        "limit": 6,
+        "query": "state-of-the-art improved Multi-Persona agreement 90% MedQA GPT-4 transfer",
+        "source_ids": [
+          "papers/text/smit-et-al-2023-going-mad.txt"
+        ]
+      },
+      "result": {
+        "hits": [
+          {
+            "content_sha256": "a1263656cb4d7e298c289b4ee44368fe9f38c1c2efc4ce88f0d54d60a62a3d1c",
+            "excerpt": "USMLE Accuracy (out of 1.0)\nMulti-Persona\nSociety of Mind\nChatEval\n0.2 0.4 0.6 0.8 1.0\nConsensus at the ﬁnal debate round (out of 1.0)\n0.50\n0.55\n0.60\n0.65\n0.70\nUSMLE Accuracy (out of 1.0)\nFigure 6. Left: Accuracy on USMLE as we increase agreement intensity in our prompt. Right: Accuracy vs actual induced debate\nagreement.\ndataset and demonstrate (as far as we are aware) a new state-\nof-the-art result (for GPT-3), highlighted in Figure 1 by the\nred cross symbol.\nAnalysis of debating behaviour Our experiments sec-\ntion concludes with an exploration of the dynamics within\nMAD systems, specifically through their performance on\nthe MedQA test set. We assess Multi-Persona, ChatEval,\nand Society of Mind, focusing on key aspects such as con-\nsensus accuracy, independent correct answer identification,\nthe adaptability reflected in answer changes, and the breadth\nof initial perspectives. These facets are depicted in Figure\n7, offering insights into each system’s strategic approach to\ndebate and problem-solving.\nThe four spider plots offer a more detailed analysis of the de-\nbating behavior of MAD strategies, providing insights into\nthe effectiveness of each system through various metrics.\nThe initial plot compares the three systems, with Society\nof Mind (SoM) notably exhibiting the largest surface area,",
+            "locator": "lines 673-704",
+            "score": 22.039687428034576,
+            "source_id": "papers/text/smit-et-al-2023-going-mad.txt"
+          },
+          {
+            "content_sha256": "a1263656cb4d7e298c289b4ee44368fe9f38c1c2efc4ce88f0d54d60a62a3d1c",
+            "excerpt": "15.0\nImproved Multi-Persona\nMedprompt\nSociety of Mind\nEnsemble Reﬁnement\nSelf-Consistency\nChatEval\nSingle Agent\nMulti-Persona\n0.525\n0.550\n0.575\n0.600\n0.625\n0.650\nMedQA Accuracy (out of 1.0)\nFigure 1. Benchmark of experiment configurations on MedQA dataset. Left: Accuracy vs average cost ($) per question. The size of the\ndots reflects the average number of API calls required per question. Right: Summarizes accuracy grouped by strategy, sorted by average\nperformance (black dot). The X represents improved performance using our proposed agreement modulation, described in Section 3.\n3. Experiments\nAs base agents for the MAD implementations, we uti-\nlize GPT-3 (Brown et al., 2020) with the 3.5-turbo en-\ngine. GPT-3 is a large-scale transformer-based generative\nLLM (Vaswani et al., 2017; Kaplan et al., 2020) available\nvia API calls. Although not the current most powerful model\navailable via API, we selected GPT-3.5 for its optimal bal-\nance between performance and cost efficiency, crucial for\nconducting a broad range of experiments, whereas more\npowerful models would’ve been prohibitively expensive.\nHowever, we informally note that some of our preliminary\nexperiments with more advanced models like GPT-4 sug-\ngested similar findings, although these tests were limited to",
+            "locator": "lines 241-272",
+            "score": 20.549064511586103,
+            "source_id": "papers/text/smit-et-al-2023-going-mad.txt"
+          },
+          {
+            "content_sha256": "a1263656cb4d7e298c289b4ee44368fe9f38c1c2efc4ce88f0d54d60a62a3d1c",
+            "excerpt": "prompt. Figure 5 shows the effect of modulating the agent’s\nagreement on the 6 datasets. We can see that this param-\neter has a significant effect on the performance and that\nmodulating the agreement in the prompt has the effect of\nmodifying the agreement on the first debate round, which\nin turn affects the outcome and the final accuracy. Strik-\ningly, the tendency is not always the same for each dataset:\nwhile MedQA and PubMedQA directly benefit from a high\nagreement, CIAR follows a reverse pattern. As CIAR was\ncreated to be counter-intuitive, it is therefore probable that\nprompting the second agent to strongly disagree raises the\nchance of arriving at the correct answer during the debate.\nTo investigate further, we select the highest performing con-\nfigurations of debating approaches from Figure 1, namely\nSoM, ChatEval and Multi-Persona, and a subset of MedQA\ndataset (376 multi-choice USMLE Q&A (Han et al., 2023)).\nWe opted for this subset due to its high-quality questions.\nIn Figure 6 (left), we plot the performance of each strategy\nas we increase the prompted agreement intensity from zero\nto 100%. Figure 6 (right) we plot the accuracy vs the ac-\ntual observed debate consensus, i.e. how frequently all the\nagents agree upon a final answer at the end of the debate.\nWe can see that modulating the agreement intensity in this\nway provides a substantial ( ≈15%) improvement in per-\nformance for Multi-Persona, and ( ≈5%) for SoM on the\nUSMLE dataset. ChatEval, on the contrary, is hardly af-\nfected by this prompting mechanism, suggesting that the\nagent’s agreement is not as easil",
+            "locator": "lines 601-632",
+            "score": 19.81757583704961,
+            "source_id": "papers/text/smit-et-al-2023-going-mad.txt"
+          },
+          {
+            "content_sha256": "a1263656cb4d7e298c289b4ee44368fe9f38c1c2efc4ce88f0d54d60a62a3d1c",
+            "excerpt": "formance for Multi-Persona, and ( ≈5%) for SoM on the\nUSMLE dataset. ChatEval, on the contrary, is hardly af-\nfected by this prompting mechanism, suggesting that the\nagent’s agreement is not as easily modulable for every sys-\ntem. Building on this finding, we apply the 90% agreement\nintensity agent prompts to Multi-Persona on the full MedQA\n6\n\n===== PDF PAGE 7 =====\n\nShould we be going MAD? A Look at Multi-Agent Debate Strategies for LLMs\n0.3 0.4 0.5 0.6 0.7 0.8 0.9\nAgreement intensity (prompt)\n0.3\n0.4\n0.5\n0.6\n0.7\nAccuracy (out of 1.0)\nCIAR\nCosmosQA\nGPQA\nMMLU\nMedQA\nPubMedQA\n0.2 0.4 0.6 0.8 1.0\nAgreement at the ﬁrst round\n0.3\n0.4\n0.5\n0.6\n0.7",
+            "locator": "lines 625-656",
+            "score": 18.134599273499514,
+            "source_id": "papers/text/smit-et-al-2023-going-mad.txt"
+          },
+          {
+            "content_sha256": "a1263656cb4d7e298c289b4ee44368fe9f38c1c2efc4ce88f0d54d60a62a3d1c",
+            "excerpt": "of initial perspectives. These facets are depicted in Figure\n7, offering insights into each system’s strategic approach to\ndebate and problem-solving.\nThe four spider plots offer a more detailed analysis of the de-\nbating behavior of MAD strategies, providing insights into\nthe effectiveness of each system through various metrics.\nThe initial plot compares the three systems, with Society\nof Mind (SoM) notably exhibiting the largest surface area,\nsuggesting it outperforms others across all debating metrics.\nThis is further supported in the subsequent plots, which\nanalyze the top three runs for each system and show that\nlarger areas are indicative of better performance. These vi-\nsualizations emphasize the importance of a balanced system,\nindicating that excellence in one aspect is not enough; a\nsystem must perform well across multiple dimensions of the\ndebate process. A full description of each of the metrics is\nprovided in Appendix A.3.\nFor example, when agents change their answers during a\ndebate, this reevaluation must lead to more accurate con-\nclusions. Arbitrary changes without a strategic basis could\nprevent consensus. This underlines the need for a balanced\napproach where agents not only reconsider their positions\nbut also enhance their decision-making accuracy, contribut-\ning to the system’s overall effectiveness.\nEvaluating using other APIs We assess the capability\nof GPT-4 (OpenAI et al., 2024) and Mixtral 8x7B (Jiang\net al., 2024) on the MedQA dataset, applying the optimal\nagreement modulation value identified for Multi-Persona\nwith GPT-3.5 on USMLE. Results shown",
+            "locator": "lines 697-728",
+            "score": 17.882468185312057,
+            "source_id": "papers/text/smit-et-al-2023-going-mad.txt"
+          },
+          {
+            "content_sha256": "a1263656cb4d7e298c289b4ee44368fe9f38c1c2efc4ce88f0d54d60a62a3d1c",
+            "excerpt": "PubMedQA\n0.2 0.4 0.6 0.8 1.0\nAgreement at the ﬁrst round\n0.3\n0.4\n0.5\n0.6\n0.7\nAccuracy (out of 1.0)\nCIAR\nCosmosQA\nGPQA\nMMLU\nMedQA\nPubMedQA\nFigure 5. Left: Multi-Persona’s accuracy according to the agreement fixed by the prompt. Right: Multi-Persona’s accuracy according to\nthe averaged agreement during the first debate round.\n0.0 0.2 0.4 0.6 0.8 1.0\nAgreement intensity from the prompt\n0.50\n0.55\n0.60\n0.65\n0.70\nUSMLE Accuracy (out of 1.0)\nMulti-Persona\nSociety of Mind\nChatEval\n0.2 0.4 0.6 0.8 1.0\nConsensus at the ﬁnal debate round (out of 1.0)\n0.50\n0.55",
+            "locator": "lines 649-680",
+            "score": 17.373491181781866,
+            "source_id": "papers/text/smit-et-al-2023-going-mad.txt"
+          }
+        ],
+        "query": "state-of-the-art improved Multi-Persona agreement 90% MedQA GPT-4 transfer",
+        "truncated": true
+      },
+      "result_ids": [
+        "papers/text/smit-et-al-2023-going-mad.txt",
+        "papers/text/smit-et-al-2023-going-mad.txt",
+        "papers/text/smit-et-al-2023-going-mad.txt",
+        "papers/text/smit-et-al-2023-going-mad.txt",
+        "papers/text/smit-et-al-2023-going-mad.txt",
+        "papers/text/smit-et-al-2023-going-mad.txt"
+      ],
+      "result_sha256": "3c5444953a84562c08e664eafa1ccd04aa27be8f9d86bae444e55aeebd63b800",
+      "sequence": 14,
+      "tool": "search_sources"
+    }
+  ],
+  "snapshot_sha256": "64f22e4def6506758f4d42d87a55f95161e7997884433c26ab3a759c4a839292"
+}

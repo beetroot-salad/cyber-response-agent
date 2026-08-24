@@ -1,0 +1,195 @@
+{
+  "account": "Smit et al. provide the corpus's primary null-result evidence on multi-agent debate (MAD): MAD systems in their current form do not reliably outperform self-consistency or ensembling (Smit C001; PDF PAGE 1), and Medprompt (non-debate) performs best overall across the seven evaluated datasets (Smit C003; Table 2, PDF PAGE 5). The null is qualified: on medical datasets every system except Multi-Persona beats single-agent, whereas on non-medical reasoning datasets single-agent surpasses most MAD systems (Smit C005; PDF PAGE 5). Smit also attribute the gap to hyperparameter sensitivity — agreement intensity can reverse rankings, with tuned Multi-Persona surpassing Medprompt and Self-Consistency (~15% gain on USMLE) — and they document API-variability and cost limitations (Smit C006–C008; PDF PAGES 1, 6, 9). Zhang et al. supply the boundary conditions: across 36 configurations (4 models × 9 benchmarks) no MAD method exceeds a 20% win rate over CoT, and adjusting agents/rounds does not reverse the result (Zhang C001–C002; PDF PAGES 1, 3). Task type matters: MAD performs worse on programming (only SoM/AgentVerse positive) but better on mathematical reasoning (Zhang C003; PDF PAGE 7). MAD also converts tokens less efficiently than Self-Consistency (Zhang C005; PDF PAGE 9), and model heterogeneity (Heter-MAD) consistently improves all tested MAD frameworks, with gains attributed to solving CW/WC questions (Zhang C006; PDF PAGES 11–12). These results directly conflict with Du et al.'s reported debate gains, which we reconcile through three design inferences below.",
+  "assumptions": [
+    "The workspace texts present in the dossier are the authoritative source files; page markers are as provided.",
+    "The D14 conditions are the proposed graph substrate, an open conversational forum, and no inter-agent communication, per SC6.",
+    "Zhang et al.'s reported compute parity (equal LLM calls, ~6) is assumed to hold for their baselines and MAD systems unless stated otherwise."
+  ],
+  "boundary_findings": [
+    {
+      "alternative_explanation": "SA is a weaker baseline; MAD's gains over SA may be real but insufficient under matched compute.",
+      "consequence_if_absorbed": "If absorbed, the memo might overstate MAD's robustness and fail to design matched-compute comparisons against CoT/SC.",
+      "evidence": [
+        "Zhang et al., PDF PAGE 7: 'MAD frameworks outperform SA in most conditions'.",
+        "Zhang et al., PDF PAGE 1: 'MAD often fail to outperform ... CoT and Self-Consistency'."
+      ],
+      "narrative": "Zhang et al.'s positive replication is limited: MAD outperforms SA in most conditions, but this does not translate to beating CoT or SC under matched compute. This boundary must not be absorbed as evidence that MAD generally helps; the evaluation plan must treat SA/CoT/SC as distinct baselines.",
+      "smallest_suspected_scope": "MAD versus baseline definition in evaluation conditions"
+    },
+    {
+      "alternative_explanation": "The separator facts were sufficient for the inference child; the parent now resolves the gap.",
+      "consequence_if_absorbed": "If absorbed, the memo might fail to cite specific page markers for design inferences.",
+      "evidence": [
+        "packet:root.05-debate-nulls-boundaries.03-c3-design-inferences sufficiency: partial.",
+        "Parent has access to full Smit and Zhang packet accounts."
+      ],
+      "narrative": "The dossier's design-inference packet (03) is marked 'partial' and notes that it lacked full access to the sibling extracts, relying on separator quotes. However, the parent has full packet accounts with page markers, so the inference layer is now adequately supported.",
+      "smallest_suspected_scope": "Design-inference evidence layer"
+    }
+  ],
+  "child_packet_ids": [
+    "packet:root.05-debate-nulls-boundaries.01-c1-smit-null-results",
+    "packet:root.05-debate-nulls-boundaries.02-c2-zhang-boundary-conditions",
+    "packet:root.05-debate-nulls-boundaries.03-c3-design-inferences"
+  ],
+  "claims": [
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "we find that multi-agent debating systems, in their current form, do not reliably outperform other proposed prompting strategies, such as self-consistency and ensembling using multiple reasoning paths.",
+          "locator": "papers/text/smit-et-al-2023-going-mad.txt (===== PDF PAGE 1 =====, Abstract)",
+          "source_id": "ref:smit-2023-going-mad"
+        }
+      ],
+      "confidence": 0.99,
+      "counterevidence": [],
+      "derived_from_claim_ids": [
+        "root.05-debate-nulls-boundaries.01-c1-smit-null-results:C001"
+      ],
+      "id": "root.05-debate-nulls-boundaries:C001",
+      "statement": "Smit et al. report that multi-agent debating systems, in their current form, do not reliably outperform other prompting strategies such as self-consistency and ensembling using multiple reasoning paths."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "our findings reveal that MAD often fail to outperform simple single-agent baselines such as Chain-of-Thought and Self-Consistency, even when consuming significantly more inference-time computation.",
+          "locator": "papers/text/zhang-et-al-2025-mad-question.txt (===== PDF PAGE 1 =====, Abstract)",
+          "source_id": "ref:zhang-2025-mad-question"
+        }
+      ],
+      "confidence": 0.97,
+      "counterevidence": [],
+      "derived_from_claim_ids": [
+        "root.05-debate-nulls-boundaries.02-c2-zhang-boundary-conditions:C001"
+      ],
+      "id": "root.05-debate-nulls-boundaries:C002",
+      "statement": "Zhang et al. find that MAD methods generally fail to outperform simple single-agent baselines like Chain-of-Thought and Self-Consistency, even when consuming significantly more inference-time computation."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "MAD frameworks performed worse on programming tasks (only SoM/AgentVerse had positive win rates) but better on mathematical reasoning.",
+          "locator": "papers/text/zhang-et-al-2025-mad-question.txt (===== PDF PAGE 7 =====)",
+          "source_id": "ref:zhang-2025-mad-question"
+        }
+      ],
+      "confidence": 0.97,
+      "counterevidence": [],
+      "derived_from_claim_ids": [
+        "root.05-debate-nulls-boundaries.02-c2-zhang-boundary-conditions:C003"
+      ],
+      "id": "root.05-debate-nulls-boundaries:C003",
+      "statement": "Zhang et al. show that task type is a boundary condition: MAD performed worse on programming tasks (only SoM/AgentVerse had positive win rates) but better on mathematical reasoning."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "Table 2 indicates that no protocol dominates on all datasets. Medprompt seems to perform the best overall. Interestingly enough the debating protocols do not outperform the other protocols on the reasoning datasets.",
+          "locator": "papers/text/smit-et-al-2023-going-mad.txt (===== PDF PAGE 4-5 =====, Table 2)",
+          "source_id": "ref:smit-2023-going-mad"
+        }
+      ],
+      "confidence": 0.96,
+      "counterevidence": [],
+      "derived_from_claim_ids": [
+        "root.05-debate-nulls-boundaries.01-c1-smit-null-results:C003"
+      ],
+      "id": "root.05-debate-nulls-boundaries:C004",
+      "statement": "Smit et al.'s benchmark comparison shows no protocol dominates; Medprompt (non-debate) performs best overall, and debating protocols do not outperform others on the reasoning datasets."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "in comparison to SC, MAD is generally a less efficient method for leveraging token consumption.",
+          "locator": "papers/text/zhang-et-al-2025-mad-question.txt (===== PDF PAGE 9 =====)",
+          "source_id": "ref:zhang-2025-mad-question"
+        }
+      ],
+      "confidence": 0.94,
+      "counterevidence": [],
+      "derived_from_claim_ids": [
+        "root.05-debate-nulls-boundaries.02-c2-zhang-boundary-conditions:C005"
+      ],
+      "id": "root.05-debate-nulls-boundaries:C005",
+      "statement": "Zhang et al. report that MAD is generally a less efficient method for leveraging token consumption than Self-Consistency, which positively scales with budget while MAD often shows no stable gains."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "Heter-SoM improves SoM-average ... by 6.4%, and Heter-EoT improves EoT-average by 8.2%.",
+          "locator": "papers/text/zhang-et-al-2025-mad-question.txt (===== PDF PAGE 11-12 =====)",
+          "source_id": "ref:zhang-2025-mad-question"
+        }
+      ],
+      "confidence": 0.97,
+      "counterevidence": [],
+      "derived_from_claim_ids": [
+        "root.05-debate-nulls-boundaries.02-c2-zhang-boundary-conditions:C006"
+      ],
+      "id": "root.05-debate-nulls-boundaries:C006",
+      "statement": "Zhang et al. find that model heterogeneity (Heter-MAD) consistently improves all tested MAD frameworks: Heter-SoM improves SoM-average by 6.4% and Heter-EoT by 8.2%; gains are attributed to handling questions only one model solves (CW/WC)."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "By tuning this agreement intensity for Multi-Persona, it went from being the worst-performing protocol to the best-performing, beating out methods such as Medprompt and Self-Consistency.",
+          "locator": "papers/text/smit-et-al-2023-going-mad.txt (===== PDF PAGE 6, 9 =====)",
+          "source_id": "ref:smit-2023-going-mad"
+        }
+      ],
+      "confidence": 0.98,
+      "counterevidence": [],
+      "derived_from_claim_ids": [
+        "root.05-debate-nulls-boundaries.01-c1-smit-null-results:C007"
+      ],
+      "id": "root.05-debate-nulls-boundaries:C007",
+      "statement": "Smit et al. attribute MAD's underperformance partly to sensitivity to hyperparameters, notably agreement intensity, which can reverse rankings (e.g., tuning Multi-Persona made it top-performing)."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "MAD frameworks outperform SA in most conditions (34 out of 45 conditions utilizing GPT-4o-mini), which perfectly aligns with previous findings in the field.",
+          "locator": "papers/text/zhang-et-al-2025-mad-question.txt (===== PDF PAGE 7-8 =====)",
+          "source_id": "ref:zhang-2025-mad-question"
+        }
+      ],
+      "confidence": 0.95,
+      "counterevidence": [],
+      "derived_from_claim_ids": [
+        "root.05-debate-nulls-boundaries.02-c2-zhang-boundary-conditions:C008"
+      ],
+      "id": "root.05-debate-nulls-boundaries:C008",
+      "statement": "Zhang et al. find that MAD frameworks can outperform direct single-agent (SA) in most conditions, replicating prior positive findings, which qualifies the negative result."
+    }
+  ],
+  "content_sha256": "acdafc70e274e250ff0f7fa31075cc8c2c6ba6fecc17fc95550f544ce498aae4",
+  "counterevidence": [
+    "Smit et al. report that with hyperparameter tuning, Multi-Persona surpassed Medprompt and Self-Consistency (PDF PAGE 9), directly contradicting the global null.",
+    "Zhang et al. find that MAD frameworks outperform single-agent prompting in most conditions (34/45), aligning with prior positive results (PDF PAGE 7-8).",
+    "Zhang et al. replicate that EoT can surpass CoT on GSM8K and CommensenseQA, and AgentVerse can outperform on HumanEval (PDF PAGE 8)."
+  ],
+  "id": "packet:root.05-debate-nulls-boundaries",
+  "next_observation": "Consider extracting from Zhang et al. Table 4 the exact token-consumption numbers for each MAD method to refine the token-cost metric for the evaluation plan.",
+  "node_id": "root.05-debate-nulls-boundaries",
+  "objective": "Read papers/text/smit-et-al-2023-going-mad.txt and papers/text/zhang-et-al-2025-mad-question.txt. Extract, each anchored to the exact `===== PDF PAGE N =====` marker(s): Smit et al.'s critical or null results on multi-agent debate (including any comparisons against single-agent or matched-compute baselines, as stated in the text) and Zhang et al.'s analysis of when and why multi-agent debate helps or fails (task dependence and boundary conditions, as stated in the text). Then derive, each explicitly labeled as design inference: at least three reconciliation hypotheses attributing the disagreement with Du et al. 2023 to named conditions (task type, compute parity, visibility or timing of peer answers), and constraints for a falsifiable evaluation plan covering quality, diversity/correlation, latency, token cost, and recovery-from-wrong-consensus.",
+  "source_ids_consulted": [
+    "ref:smit-2023-going-mad",
+    "ref:zhang-2025-mad-question",
+    "papers/text/smit-et-al-2023-going-mad.txt",
+    "papers/text/zhang-et-al-2025-mad-question.txt"
+  ],
+  "sufficiency": "ready_to_synthesize",
+  "unresolved": [
+    "Whether Smit's K-fold medical/non-medical split generalizes beyond their seven datasets.",
+    "Whether Zhang et al.'s null results extend to more complex reasoning tasks beyond the nine benchmarks.",
+    "The exact token/latency accounting rules for the evaluation plan (e.g., whether to count debate rounds) are not fully specified and must be fixed by the parent."
+  ]
+}

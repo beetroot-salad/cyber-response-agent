@@ -1,0 +1,71 @@
+{
+  "account": "The Smit et al. file states at multiple anchored points that multi-agent debate does not reliably outperform other prompting strategies. The abstract says: 'we find that multi-agent debating systems, in their current form, do not reliably outperform other proposed prompting strategies, such as self-consistency and ensembling using multiple reasoning paths' (PDF PAGE 1). The conclusions echo: 'MAD approaches currently do not outperform other ensembling methods such as Medprompt and self-consistency using their original implementations' (PDF PAGE 9). These passages directly satisfy the node's objective.",
+  "assumptions": [
+    "The workspace file papers/text/smit-et-al-2023-going-mad.txt (content_sha256 a126...) is the authoritative source; page markers are as provided in the file."
+  ],
+  "boundary_findings": [],
+  "claims": [
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "Importantly, we find that multi-agent debating systems, in their current form, do not reliably outperform other proposed prompting strategies, such as self-consistency and ensembling using multiple reasoning paths.",
+          "locator": "papers/text/smit-et-al-2023-going-mad.txt (===== PDF PAGE 1 =====, Abstract)",
+          "source_id": "ref:smit-2023-going-mad"
+        }
+      ],
+      "confidence": 0.99,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "smit-null-overall-1",
+      "statement": "Smit et al. report that multi-agent debating systems, in their current form, do not reliably outperform other proposed prompting strategies such as self-consistency and ensembling using multiple reasoning paths."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "The investigations detailed in this work have demonstrated that MAD approaches currently do not outperform other ensembling methods such as Medprompt and self-consistency using their original implementations.",
+          "locator": "papers/text/smit-et-al-2023-going-mad.txt (===== PDF PAGE 9 =====, Section 4 Conclusions)",
+          "source_id": "ref:smit-2023-going-mad"
+        }
+      ],
+      "confidence": 0.99,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "smit-null-conclusion-2",
+      "statement": "Smit et al. conclude that MAD approaches currently do not outperform other ensembling methods such as Medprompt and self-consistency using their original implementations."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "However, when performing hyperparameter tuning, several MAD systems, such as Multi-Persona, perform better. This suggests that MAD protocols might not be inherently worse than other approaches, but that they are more sensitive to different hyperparameter settings and difficult to optimize.",
+          "locator": "papers/text/smit-et-al-2023-going-mad.txt (===== PDF PAGE 1 =====, Abstract)",
+          "source_id": "ref:smit-2023-going-mad"
+        },
+        {
+          "excerpt": "MAD typically requires a higher number of API calls, increasing the number of tokens to produce and process and ultimately, the total running cost of the system. Interestingly, we found that this might primarily be due to MAD protocols being more sensitive to hyperparameters and not necessarily that debate inherently performs worse than single-agent methods.",
+          "locator": "papers/text/smit-et-al-2023-going-mad.txt (===== PDF PAGE 9 =====, Section 4 Conclusions)",
+          "source_id": "ref:smit-2023-going-mad"
+        }
+      ],
+      "confidence": 0.95,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "smit-null-hyperparam-3",
+      "statement": "Smit et al. assert that MAD protocols are not inherently worse, but are more sensitive to hyperparameter settings and difficult to optimize, and that hyperparameter tuning can make some MAD systems (e.g., Multi-Persona) perform better."
+    }
+  ],
+  "counterevidence": [
+    "The same paper also reports that with hyperparameter tuning (agreement intensity), Multi-Persona went from the worst-performing to the best-performing protocol, surpassing Medprompt and Self-Consistency (PDF PAGE 9), which nuances the null result."
+  ],
+  "next_observation": null,
+  "source_ids_consulted": [
+    "ref:smit-2023-going-mad",
+    "papers/text/smit-et-al-2023-going-mad.txt"
+  ],
+  "sufficiency": "ready_to_synthesize",
+  "unresolved": [
+    "The exact page marker for the quoted phrase 'do not reliably outperform' is from PDF PAGE 1 (Abstract); the abstract is on page 1, and the conclusion on page 9."
+  ]
+}

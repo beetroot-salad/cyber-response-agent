@@ -1,0 +1,563 @@
+{
+  "call_id": "call-0005-adaptive-investigator",
+  "queries": [
+    {
+      "arguments": {
+        "limit": 10,
+        "query": "Lorenz social influence wisdom of crowds",
+        "tags": [],
+        "unanswered_only": false
+      },
+      "result": {
+        "hits": [
+          {
+            "answer_count": 0,
+            "id": "question:work:001-inv-lorenz-influence",
+            "kind": "question",
+            "score": 12.866933284461881,
+            "sufficiency": null,
+            "tags": [
+              "evidence"
+            ],
+            "text": "What does Lorenz et al. 2011 (papers/text/lorenz-et-al-2011-social-influence.txt) show about how social influence affects the wisdom of crowds: the experimental design (tasks, rounds, information conditions), the measured effects of seeing others' estimates on individual accuracy, diversity of estimates, and confidence, the distinction between full information and aggregated-information conditions, and the quantitative pattern of when social influence helped vs undermined the crowd? Record key claims with `===== PDF PAGE N =====` markers.",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 0,
+            "id": "question:root",
+            "kind": "question",
+            "score": 5.079441541679836,
+            "sufficiency": null,
+            "tags": [
+              "counterexample",
+              "risk"
+            ],
+            "text": "Write a 2,000–2,600 word research note that develops and defends a new mechanistic answer to this question: under a matched inference-compute budget, when should staged, retrieval-mediated question/answer communication among language-model agents outperform both independent sampling with final aggregation and an open shared transcript? Use the supplied seven-paper corpus as evidence, but do not merely survey it. Reconcile its conflicting empirical findings; formulate an explicit causal model of information diversity, social influence, retrieval, and synthesis; derive at least four discriminating predictions that separate your mechanism from plausible alternatives; identify what the existing literature cannot identify; and give a preregisterable experiment with conditions, randomization, estimands, power-analysis inputs, failure criteria, and an analysis plan. End with the strongest warranted conclusion and the observation most likely to falsify it.",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 0,
+            "id": "question:work:001-inv-formal-tools",
+            "kind": "question",
+            "score": 4.079441541679836,
+            "sufficiency": null,
+            "tags": [
+              "definition",
+              "method"
+            ],
+            "text": "What formal machinery do Dung 1995 (papers/text/dung-1995-argumentation.txt) and Shapiro et al. 2011 (papers/text/shapiro-et-al-2011-crdts.txt) provide that is relevant to agent communication design: for Dung, the definitions of argumentation frameworks, attack relations, admissible/preferred/stable/grounded extensions and what they guarantee about justified conclusions; for Shapiro, the definitions of CRDTs, strong eventual consistency, commutativity/idempotence and what they guarantee about merging concurrent updates without coordination. Note what each framework does NOT model (e.g., evidential weight, truth) since that limits their direct application. Record key definitions with `===== PDF PAGE N =====` markers.",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 0,
+            "id": "question:demand:D3",
+            "kind": "question",
+            "score": 3.386294361119891,
+            "sufficiency": null,
+            "tags": [
+              "evidence"
+            ],
+            "text": "Construct an explicit causal model connecting initial error correlation, evidence diversity, social influence or conformity, retrieval selectivity, synthesis competence, and task topology.",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 0,
+            "id": "question:work:001-inv-choi-conformity",
+            "kind": "question",
+            "score": 3.386294361119891,
+            "sufficiency": null,
+            "tags": [
+              "evidence"
+            ],
+            "text": "What does Choi et al. 2025 (papers/text/choi-et-al-2025-conformity.txt) show about conformity in LLM multi-agent debate: the simulation design (proponent/opponent/neutral agents, majority vs minority sizes, intelligence levels, topics), the main quantitative findings on majority effects and intelligence disparities, how persuasion quality vs quantity matters, and what this implies about when exposure to other agents' outputs shifts vs fails to shift an agent? Record key claims with `===== PDF PAGE N =====` markers.",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 0,
+            "id": "question:work:001-inv-zhang-when",
+            "kind": "question",
+            "score": 2.0986122886681096,
+            "sufficiency": null,
+            "tags": [
+              "evidence",
+              "synthesis"
+            ],
+            "text": "What does Zhang et al. 2025 (papers/text/zhang-et-al-2025-mad-question.txt, 'If Multi-Agent Debate Is the Answer, What Is the Question?') establish about the conditions under which multi-agent debate helps or fails: what taxonomy of factors (task type/difficulty, model heterogeneity, number of agents/rounds, topology, judge) is proposed, what are the headline empirical results and interactions, how does the paper position itself relative to Du et al. and other positive reports, and what does it say about compute costs? Record key claims with `===== PDF PAGE N =====` markers.",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 0,
+            "id": "question:demand:D1",
+            "kind": "question",
+            "score": 1.6931471805599454,
+            "sufficiency": null,
+            "tags": [
+              "evidence"
+            ],
+            "text": "Produce one coherent research note of 2,000–2,600 words.",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 0,
+            "id": "question:work:001-inv-du-debate",
+            "kind": "question",
+            "score": 1.6931471805599454,
+            "sufficiency": null,
+            "tags": [
+              "evidence"
+            ],
+            "text": "What exactly does Du et al. 2023 (papers/text/du-et-al-2023-multiagent-debate.txt) claim and show about multiagent debate: which tasks and baselines (single-agent, self-consistency/majority voting over independent samples), what were the quantitative effects, how do agents and rounds scale, what does the paper report about consensus/convergence and about cases where debate does not help, and what compute does the procedure consume relative to baselines? Record every key claim with its `===== PDF PAGE N =====` marker.",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 0,
+            "id": "question:work:001-inv-smit-mad",
+            "kind": "question",
+            "score": 1.6931471805599454,
+            "sufficiency": null,
+            "tags": [
+              "evidence",
+              "counterexample"
+            ],
+            "text": "What exactly does Smit et al. 2023 (papers/text/smit-et-al-2023-going-mad.txt) find when re-examining multi-agent debate strategies: which debate variants and tasks were tested, which baselines (e.g., single-agent with equivalent sampling) were used, where did debate fail to beat or underperform simpler baselines, what role do model capability/size and judge aggregation play, and what matched-compute or cost comparisons does the paper make? Record key claims with `===== PDF PAGE N =====` markers.",
+            "unresolved_count": null
+          }
+        ],
+        "query": "Lorenz social influence wisdom of crowds",
+        "snapshot_sha256": "64f22e4def6506758f4d42d87a55f95161e7997884433c26ab3a759c4a839292",
+        "truncated": false
+      },
+      "result_ids": [
+        "question:work:001-inv-lorenz-influence",
+        "question:root",
+        "question:work:001-inv-formal-tools",
+        "question:demand:D3",
+        "question:work:001-inv-choi-conformity",
+        "question:work:001-inv-zhang-when",
+        "question:demand:D1",
+        "question:work:001-inv-du-debate",
+        "question:work:001-inv-smit-mad"
+      ],
+      "result_sha256": "3c6c6904ca51c8c8583fcdc2accaef99fe515d99e584404161bb1b77cac9fe62",
+      "sequence": 1,
+      "tool": "search_questions"
+    },
+    {
+      "arguments": {
+        "limit": 8,
+        "query": "social influence wisdom of crowds diversity confidence aggregate information",
+        "source_ids": [
+          "papers/text/lorenz-et-al-2011-social-influence.txt"
+        ]
+      },
+      "result": {
+        "hits": [
+          {
+            "content_sha256": "10d6e61835ae38ecc32c345b6c18f5d4259ef40874694d12f60c4dd6162e160f",
+            "excerpt": "In this article, we will demonstrate that social in ﬂuence has\nthree effects that can undermine the wisdom of crowds. Two of\nthe effects are changes of statistical aggregates and one is psy-\nchological. The “social in ﬂuence effect ” describes the fact that\nsocial in ﬂuence diminishes the diversity of the group without\nimprovements in accuracy. The “range reduction effect ” moves\nthe position of the truth to peripheral regions. This corrupts the\nwisdom of the crowd from an observer ’s perspective in the sense\nthat the group becomes less reliable in guiding decision-makers.\nThe “conﬁdence effect” boosts individuals’conﬁdence. [A related\neffect is known as overcon ﬁdence (20 –22).] This boost in con ﬁ-\ndence subverts the wisdom of crowd effect psychologically, be-\ncause individuals’perceptions contradict the aggregate outcomes\nof a lack of improvements in accuracy and a decreased reliability\nof the group ’s range of estimates.\nRecent theoretical studies have analyzed the wisdom of crowd\neffect in the context of information diffusion in networks of\nsimulated agents in which too little and too much dissemination\nof information inhibits actors to ﬁnd optimal solutions, because\nthere is a need to maintain diversity on the one hand and in-\nformation ﬂow on the other (23). However, from an empirical\npoint of view, it is not clear whether the reduction of diversity is\nstrong enough to severely undermine the wisdom of crowd effect\nin reality. In the following, we demonstrate by means of labo-\nratory experiments that the wisdom of crowd effect is under-\nmined in all three of the afore",
+            "locator": "lines 121-152",
+            "score": 18.40596366794543,
+            "source_id": "papers/text/lorenz-et-al-2011-social-influence.txt"
+          },
+          {
+            "content_sha256": "10d6e61835ae38ecc32c345b6c18f5d4259ef40874694d12f60c4dd6162e160f",
+            "excerpt": "perspectives from their own reasoning (6 –8).\nIn the following, we will call an aggregate measure of a col-\nlection of individual estimates “wise” if it comes close to the true\nvalue, even though the individual estimates are largely dispersed.\nIn this case, single estimates are likely to lie far away from the\ntruth, whereas its aggregate lies close to it. The wisdom of crowds\neffect works if estimation errors of individuals are large but\nunbiased such that they cancel each other out. Thus, the het-\nerogeneity of numerous decision-makers generates a more ac-\ncurate aggregate estimate than the estimates of single lay or\nexpert decision-makers. This can be quanti ﬁed by the “diversity\nprediction theorem ” (9), which states that the collective error is\nequal to the average individual error minus the group ’s diversity\n(Materials and Methods ).\nThe wisdom of crowd effect is a statistical phenomenon and not\na social psychological effect, because it is based on a mathematical\naggregation of individual estimates. Nevertheless, social inﬂuence\nplays a role in individual decision-making and affects individual\nestimating. Therefore, social inﬂuence can also have an impact on\nthe statistical aggregate and the resulting collective wisdom of the\nrespective crowd. As social in ﬂuence among human group mem-\nbers may trigger individuals to revise their estimates (10), it can\nhave a substantial impact on the statistical wisdom of crowd effect\nin societies. When individuals become aware of the estimates of\nothers, they may revise their own estimates for various reasons:\nPeople may suspect tha",
+            "locator": "lines 49-80",
+            "score": 17.511076844734426,
+            "source_id": "papers/text/lorenz-et-al-2011-social-influence.txt"
+          },
+          {
+            "content_sha256": "10d6e61835ae38ecc32c345b6c18f5d4259ef40874694d12f60c4dd6162e160f",
+            "excerpt": "===== PDF PAGE 1 =====\n\nHow social in ﬂuence can undermine the wisdom of\ncrowd effect\nJan Lorenz a,1,2, Heiko Rauhut b,1,2, Frank Schweitzer a, and Dirk Helbing b,c,d\naChair of Systems Design, ETH Zürich, CH-8032 Zurich, Switzerland; bChair of Sociology, in particular of Modeling and Simulation, ETH Zürich, CH-8092 Zurich,\nSwitzerland; cSanta Fe Institute, Santa Fe, NM 87501; and dCollegium Budapest –Institute for Advanced Study, 1014 Budapest, Hungary\nEdited by Burton H. Singer, University of Florida, Gainesville, FL, and approved April 13, 2011 (received for review June 23, 2010)\nSocial groups can be remarkably smart and knowledgeable when\ntheir averaged judgements are compared with the judgements\nof individuals. Already Galton [Galton F (1907) Nature 75:7] found\nevidence that the median estimate of a group can be more accu-\nrate than estimates of experts. This wisdom of crowd effect was\nrecently supported by examples from stock markets, political\nelections, and quiz shows [Surowiecki J (2004) The Wisdom of\nCrowds]. In contrast, we demonstrate by experimental evidence\n(N = 144) that even mild social in ﬂuence can undermine the\nwisdom of crowd effect in simple estimation tasks. In the exper-\niment, subjects could reconsider their response to factual ques-\ntions after having received average or full information of the\nresponses of other subjects. We compare subjects ’ convergence\nof estimates and improvements in accuracy over ﬁve consecutive\nestimation periods with a control condition, in which no informa-\ntion about others ’ responses was provided. Although groups are\ninit",
+            "locator": "lines 1-32",
+            "score": 15.021598247379305,
+            "source_id": "papers/text/lorenz-et-al-2011-social-influence.txt"
+          },
+          {
+            "content_sha256": "10d6e61835ae38ecc32c345b6c18f5d4259ef40874694d12f60c4dd6162e160f",
+            "excerpt": "sessions as studied before. It can be seen that individuals in these\nexemplary sessions become more con ﬁdent in the full infor-\nmation condition and less con ﬁdent in the control condition. We\nanalyze the general effects over all sessions and questions with\nregression models in Fig. 2 B. This regression analysis demon-\nstrates that individuals ’ conﬁdence is substantially and signi ﬁ-\ncantly boosted in the aggregated and full information conditions\nin comparison with the control condition without social in ﬂuence.\nWe can interpret this psychological effect in comparison with\nthe statistical effects: the con ﬁdence measure can be regarded as\n“subjective”— and self-reported reliability of estimates and the\nwisdom of crowd indicator as “objective”— statistical measure of\nreliability. The comparison of both illustrates that social inﬂuence\nundermines the wisdom of crowds by boosting the subjective and\ndecreasing the objective reliability of the crowd.\nDiscussion\nBased on the wisdom of crowd effect, groups can be remarkably\naccurate in estimating vaguely known facts. From the perspective\nof decision-makers, it would be valuable to request multiple inde-\npendent opinions and aggregate these as the basis of their judge-\nments. Real-life examples are predictions of economic growth\nrates, market potentials, the increase of the world temperature, tax\nestimations, the assessment of the impact of new technologies, or\nestimating the amount of ﬁnite natural resources.\nHowever, it is hardly feasible to receive independent opinions\nin society, because people are embedded in social network",
+            "locator": "lines 481-512",
+            "score": 14.999619340660528,
+            "source_id": "papers/text/lorenz-et-al-2011-social-influence.txt"
+          },
+          {
+            "content_sha256": "10d6e61835ae38ecc32c345b6c18f5d4259ef40874694d12f60c4dd6162e160f",
+            "excerpt": "are often not rewarded with monetary incentives, which makes\ncorrect estimations less important and conformity costless. In\ncontrast, we study the interconnection between social in ﬂuence\nand the wisdom in groups by using factual questions and mone-\ntary incentives for good individual guesses. First, this allows dis-\nentanglement of social in ﬂuence from the wisdom of the group.\nSecond, the incentives trigger the ability to use information of\nothers only for improving own estimates and not for aligning\nwith others for the sake of conformity. This allows investigation\nof how social in ﬂuence affects the group ’s wisdom.\nAuthor contributions: J.L., H.R., F.S., and D.H. designed research; J.L. and H.R. performed\nresearch; J.L. and H.R. analyzed data; and J.L. and H.R. wrote the paper.\nThe authors declare no con ﬂict of interest.\nThis article is a PNAS Direct Submission.\nFreely available online through the PNAS open access option.\n1J.L. and H.R. contributed equally to this work.\n2To whom correspondence may be addressed. E-mail: post@janlo.de or rauhut@gess.\nethz.ch.\nThis article contains supporting information online at www.pnas.org/lookup/suppl/doi:10.\n1073/pnas.1008636108/-/DCSupplemental.\n9020–9025 | PNAS | May 31, 2011 | vol. 108 | no. 22 www.pnas.org/cgi/doi/10.1073/pnas.1008636108\n\n===== PDF PAGE 2 =====\n\nIn this article, we will demonstrate that social in ﬂuence has\nthree effects that can undermine the wisdom of crowds. Two of\nthe effects are changes of statistical aggregates and one is psy-\nchological. The “social in ﬂuence effect ” describes the fact that\nsocial in ﬂue",
+            "locator": "lines 97-128",
+            "score": 14.787525625532904,
+            "source_id": "papers/text/lorenz-et-al-2011-social-influence.txt"
+          },
+          {
+            "content_sha256": "10d6e61835ae38ecc32c345b6c18f5d4259ef40874694d12f60c4dd6162e160f",
+            "excerpt": "initially “wise,” knowledge about estimates of others narrows\nthe diversity of opinions to such an extent that it undermines\nthe wisdom of crowd effect in three different ways. The “social\ninﬂuence effect ” diminishes the diversity of the crowd without\nimprovements of its collective error. The “range reduction effect ”\nmoves the position of the truth to peripheral regions of the\nrange of estimates so that the crowd becomes less reliable in\nproviding expertise for external observers. The “conﬁdence ef-\nfect” boosts individuals ’ conﬁdence after convergence of their\nestimates despite lack of improved accuracy. Examples of the\nrevealed mechanism range from misled elites to the recent global\nﬁnancial crisis.\ncollective judgment | estimate aggregation | experimental social science |\nswarm intelligence | overconﬁdence\nU\nnder the right circumstances, the average of many individ-\nuals’ estimates can be surprisingly close to the truth, al-\nthough their separate values lie remarkably far from it. There is\nevidence from guessing tasks (1) and problem-solving experi-\nments (2–4) that the aggregate of many people ’s estimates tends\nto be closer to the true value than all of the separate individual\nor even expert guesses. This phenomenon is referred to as the\n“wisdom of crowd effect ” (5). Even individuals can apply this\nmechanism and improve their decisions by averaging multiple\nperspectives from their own reasoning (6 –8).\nIn the following, we will call an aggregate measure of a col-\nlection of individual estimates “wise” if it comes close to the true\nvalue, even though the individual ",
+            "locator": "lines 25-56",
+            "score": 14.658692753689936,
+            "source_id": "papers/text/lorenz-et-al-2011-social-influence.txt"
+          },
+          {
+            "content_sha256": "10d6e61835ae38ecc32c345b6c18f5d4259ef40874694d12f60c4dd6162e160f",
+            "excerpt": "mean closer to the truth than the individual ﬁrst estimates. This\nis because the estimates of our type of questions are not normally\ndistributed but right-skewed. In other words, the majority of\nestimates are low and a minority of estimates are scattered in\na fat right tail, as it is the case for log-normal distributions.\nAs a large number of our subjects had problems choosing the\nright order of magnitude of their responses, they faced a problem\nof logarithmic nature (31). When using logarithms of estimates,\nthe arithmetic mean is closer to the logarithm of the truth than the\nindividuals’estimates in 77.1% of the cases. This conﬁrms that the\ngeometric mean (i.e., exponential of the mean of the logarith-\nmized data) is an accurate measure of the wisdom of crowds for\nour data (Table 1). In particular, log-normal distributions are\njustiﬁed for variables with high variance with a range of positive\nvalues only (32), which is the case for our data. † We further di-\nvided each estimate by the respective true value before taking the\nlogarithm to make the distributions of estimates comparable\nacross different questions. This yielded approximately normal\ndistributions and true values corresponding to zero.\nSocial In ﬂuence Effect. The ﬁrst kind of undermining of the wis-\ndom of crowds is a statistical effect, which we call social in ﬂuence\neffect. This effect denotes the fact that social in ﬂuence dimin-\nishes diversity in groups without improving its accuracy. This\nmeans that, on average, groups cannot make use of information\nexchange, but engage in a convergence process that does n",
+            "locator": "lines 265-296",
+            "score": 14.616133139271142,
+            "source_id": "papers/text/lorenz-et-al-2011-social-influence.txt"
+          },
+          {
+            "content_sha256": "10d6e61835ae38ecc32c345b6c18f5d4259ef40874694d12f60c4dd6162e160f",
+            "excerpt": "However, it is hardly feasible to receive independent opinions\nin society, because people are embedded in social networks and\ntypically inﬂuence each other to a certain extent. It is remarkable\nhow little social in ﬂuence is required to produce herding be-\nhavior and negative side effects for the mechanism underlying\nthe wisdom of crowds. In our experiment, we provided just the\nbare information of the estimates of others (in a similar way as\nthe previous stock price is known to traders trying to make\nmoney with their estimates of the fundamental value of a stock).\nWe did not allow for group leader effects, persuasion, or any\nother kind of social psychological in ﬂuence. We just provided\nnoncompetitive monetary incentives for the estimation of correct\nvalues. These incentives were designed such that the information\nof others could just be used to update the own knowledge. There\nwas no premium to coordinate with others ’opinions.\nOur experimental results show that social in ﬂuence triggers\nthe convergence of individual estimates and substantially reduces\nthe diversity of the group without improving its accuracy. The\nremaining diversity is often so small that the correct value shifts\nfrom the center to outer regions of the range of estimates. Thus,\nwhen taking committee decisions or following the advise of an\nexpert group that was exposed to social in ﬂuence, their opinions\nmay result in a set of predictions that does not even enclose the\ncorrect value anymore. From the perspective of decision-makers,\nsuch advice may be thoroughly misleading, because closely re-\nlated, seeming",
+            "locator": "lines 505-536",
+            "score": 14.371010681238154,
+            "source_id": "papers/text/lorenz-et-al-2011-social-influence.txt"
+          }
+        ],
+        "query": "social influence wisdom of crowds diversity confidence aggregate information",
+        "truncated": true
+      },
+      "result_ids": [
+        "papers/text/lorenz-et-al-2011-social-influence.txt",
+        "papers/text/lorenz-et-al-2011-social-influence.txt",
+        "papers/text/lorenz-et-al-2011-social-influence.txt",
+        "papers/text/lorenz-et-al-2011-social-influence.txt",
+        "papers/text/lorenz-et-al-2011-social-influence.txt",
+        "papers/text/lorenz-et-al-2011-social-influence.txt",
+        "papers/text/lorenz-et-al-2011-social-influence.txt",
+        "papers/text/lorenz-et-al-2011-social-influence.txt"
+      ],
+      "result_sha256": "2d6bea2df93d5f1672e798382918d8967d0e50403060881518064bbb55da8373",
+      "sequence": 2,
+      "tool": "search_sources"
+    },
+    {
+      "arguments": {
+        "line_count": 115,
+        "source_id": "papers/text/lorenz-et-al-2011-social-influence.txt",
+        "start_line": 153
+      },
+      "result": {
+        "content": "total of 144 participants were recruited from a sample of more\nthan 8000 students at Eidgenössische Technische Hochschule\nZürich in Zurich, Switzerland. Twelve experimental sessions\nwere conducted, each consisting of 12 subjects.\nThe participants had to solve six different estimation tasks\ntesting their real-world knowledge regarding geographical facts\nand crime statistics. We selected questions for which subjects\nwere unlikely to know the exact answer but also avoided those\nfor which they did not have a clue at all. Each question was\nsimultaneously presented to all subjects in a computer labora-\ntory by using the z-tree software (24). Each subject sat in an\nisolated cubicle in front of a computer with no visual, verbal, or\nchat contact with each other and was asked to enter the esti-\nmates privately without communicating with other subjects. All\nsubjects were told all details of the experimental procedures\nand payments by printed instructions, which described the\npayment rules, the anonymity warranty, the obligation to adhere\nto the no-communication policy, and the obligation to make no\nuse of any auxiliary devices such as the Internet or mobile\nphones. A test in the beginning ensured that subjects un-\nderstood the payment rules.\nIn the ﬁrst estimation period, all subjects had to respond to\nthe ﬁrst knowledge question on their own. After all 12 group\nmembers made an estimate, everybody was asked to give another\nestimate. In total, we elicited ﬁve consecutive responses for each\nknowledge question. Additionally, we elicited after the ﬁrst and\nﬁnal estimate for each question subjects ’conﬁdence in their esti-\nmate on a six-point Likert scale (1, very uncertain; 6, very certain).\nThe conﬁdence values were not communicated to others. After the\nﬁfth (and ﬁnal) estimate of each question, an evaluation was\nprovided that included the true answer, the ﬁve estimates of the\nrespective subject, the payments for each of the ﬁve estimates, and\nthe total payment for all estimates for one question.\nWe tested three different information conditions regarding\nwhat each subject learned about the estimates of the other\nsubjects. Subjects could base their second, third, fourth, and ﬁfth\nestimate on either aggregated or nonaggregated information\nregarding other people ’s estimates. Two of our conditions were\ndifferent operationalizations of social in ﬂuence, and the third\ncondition served as a control condition without social in ﬂuence.\nThe reason to use two different kinds of social in ﬂuence was to\ndemonstrate the robustness of our effects with regard to the\nspeciﬁc kind of social in ﬂuence.\nIn the “aggregated information” condition, subjects could re-\nconsider their estimate after having received the average (arith-\nmetic mean) of all 12 estimates of the former round. Subjects were\nalso reminded about their last estimate from the previous round.\nIn the “full information” treatment, subjects received a ﬁgure of\nthe trajectories of all subjects’estimates from all previous rounds.\nIn this ﬁgure, the estimates of each of the 12 subjects over all\nprevious rounds were represented by one line, adding up to 12\nseparate lines (one for each subject). In addition, the numerical\nvalues of all subjects ’ estimates from the last round were pre-\nsented and subjects were reminded about their own last estimate.*\nThe “no information” treatment served as a control and revealed\nno information about the other subjects ’ estimates. In this con-\ndition, subjects had to answer the same question ﬁve times on\ntheir own. They were reminded about their latest estimate.\nIn each session, two questions were posed in the control, two\nin the aggregated, and two in the full information treatment. The\norder of questions and the order of treatments was randomized\nacross experimental sessions. This means that the same six\nknowledge questions were posed in each experimental session,\nbut in a different order and in different information treatments.\nThe allocation of subjects to a random sequence of questions and\ninformation treatments ruled out order effects with regard to\nquestions and treatments.\nSubjects received monetary payments for each good estimate.\nP o s s i b l er e w a r d sw e r e4 ,2 ,o r1p o i n t si ft h e i re s t i m a t e sf e l li n t ot h e\n10%, 20%, or 40% intervals around the truth; otherwise, they\nreceived no points. The rewards applied to all rounds to make sure\nthat individuals took all of their decisions seriously. The correct\nanswer and the rewards for all ﬁve estimates were only disclosed to\nthe subjects after the ﬁfth estimate. This reward structure in-\ntroduced incentives only toﬁnd the truth and avoided incentives to\nconform with others. Furthermore, there were no incentives for\nstrategic considerations. For example, there was no bene ﬁto fb e -\ning better than others or of misleading others, because this did not\naffect individuals’payments. There was also no possibility to help\nothers by deviating from the strategy to ﬁnd the best estimate.\nTherefore, our experimental design put subjects into a situation in\nwhich they would try to get as close to the truth as possible by using\ntheir own knowledge and the estimates of others.\nMaterials and Methods provides more in-depth information\nregarding the knowledge questions, payment rules, and data\nstructure. SI Appendix contains all the details of the experimental\nprocedures that were presented to the subjects. Dataset S1\ncontains the raw data.\nResults\nAggregation of the Wisdom of Crowds. The empirical analysis of\nthe wisdom of crowds requires an appropriate aggregation\nmeasure. [Already in reply to Galton ’s article (1), there was\na discussion of how to ﬁnd the best aggregation measure for the\nwisdom of crowds (25, 26). It is common to use the unweighted\n*In real-life situations with social in ﬂuence, there may be additional effects, from which\nour experiment has abstracted: this includes competition, group pressure, and authority\neffects. For example, a criminologist could say: “I know the number of victims. ” In\ncontrast to such possibilities, our comparably mild and parsimonious kind of information\nfeedback has the advantage that it enables a particularly controlled experimental set-\nting in which there is little ambiguity about which kind of information feedback and\nsocial in ﬂuence played a role.\nLorenz et al. PNAS | May 31, 2011 | vol. 108 | no. 22 | 9021\nSOCIAL SCIENCESPSYCHOLOGICAL AND\nCOGNITIVE SCIENCES\n\n===== PDF PAGE 3 =====\n\narithmetic mean, but there are many reasonable alternatives,\ngiving ample room for adjustments or “tuning” (27–30).] In our\ncase, the arithmetic mean performs poorly, as we have validated\nby comparing its distance to the truth with the individual dis-\ntances to the truth. In only 21.3% of the cases is the arithmetic\nmean closer to the truth than the individual ﬁrst estimates. This\nis because the estimates of our type of questions are not normally\ndistributed but right-skewed. In other words, the majority of",
+        "content_sha256": "10d6e61835ae38ecc32c345b6c18f5d4259ef40874694d12f60c4dd6162e160f",
+        "locator": "lines 153-267",
+        "source_id": "papers/text/lorenz-et-al-2011-social-influence.txt",
+        "truncated": true
+      },
+      "result_ids": [
+        "papers/text/lorenz-et-al-2011-social-influence.txt"
+      ],
+      "result_sha256": "1851624125ab6b023c6edb7faecb3d14c6ab8bd7a36d50e219d254342a3503a8",
+      "sequence": 3,
+      "tool": "read_source"
+    },
+    {
+      "arguments": {
+        "limit": 8,
+        "query": "subjects sessions questions incentives payment experimental design second third fourth fifth period",
+        "source_ids": [
+          "papers/text/lorenz-et-al-2011-social-influence.txt"
+        ]
+      },
+      "result": {
+        "hits": [
+          {
+            "content_sha256": "10d6e61835ae38ecc32c345b6c18f5d4259ef40874694d12f60c4dd6162e160f",
+            "excerpt": "ratory experiments that the wisdom of crowd effect is under-\nmined in all three of the aforementioned ways, even when social\ninﬂuence is relatively mild. Furthermore, the severity of statis-\ntical undermining is quanti ﬁed by a new indicator, which meas-\nures the centrality of the truth within a given set of estimates.\nExperimental Design\nTo identify how social in ﬂuence affects the wisdom of crowds, we\nconducted a laboratory experiment with real monetary stakes. A\ntotal of 144 participants were recruited from a sample of more\nthan 8000 students at Eidgenössische Technische Hochschule\nZürich in Zurich, Switzerland. Twelve experimental sessions\nwere conducted, each consisting of 12 subjects.\nThe participants had to solve six different estimation tasks\ntesting their real-world knowledge regarding geographical facts\nand crime statistics. We selected questions for which subjects\nwere unlikely to know the exact answer but also avoided those\nfor which they did not have a clue at all. Each question was\nsimultaneously presented to all subjects in a computer labora-\ntory by using the z-tree software (24). Each subject sat in an\nisolated cubicle in front of a computer with no visual, verbal, or\nchat contact with each other and was asked to enter the esti-\nmates privately without communicating with other subjects. All\nsubjects were told all details of the experimental procedures\nand payments by printed instructions, which described the\npayment rules, the anonymity warranty, the obligation to adhere\nto the no-communication policy, and the obligation to make no\nuse of any auxiliary devi",
+            "locator": "lines 145-176",
+            "score": 14.336936913707618,
+            "source_id": "papers/text/lorenz-et-al-2011-social-influence.txt"
+          },
+          {
+            "content_sha256": "10d6e61835ae38ecc32c345b6c18f5d4259ef40874694d12f60c4dd6162e160f",
+            "excerpt": "The allocation of subjects to a random sequence of questions and\ninformation treatments ruled out order effects with regard to\nquestions and treatments.\nSubjects received monetary payments for each good estimate.\nP o s s i b l er e w a r d sw e r e4 ,2 ,o r1p o i n t si ft h e i re s t i m a t e sf e l li n t ot h e\n10%, 20%, or 40% intervals around the truth; otherwise, they\nreceived no points. The rewards applied to all rounds to make sure\nthat individuals took all of their decisions seriously. The correct\nanswer and the rewards for all ﬁve estimates were only disclosed to\nthe subjects after the ﬁfth estimate. This reward structure in-\ntroduced incentives only toﬁnd the truth and avoided incentives to\nconform with others. Furthermore, there were no incentives for\nstrategic considerations. For example, there was no bene ﬁto fb e -\ning better than others or of misleading others, because this did not\naffect individuals’payments. There was also no possibility to help\nothers by deviating from the strategy to ﬁnd the best estimate.\nTherefore, our experimental design put subjects into a situation in\nwhich they would try to get as close to the truth as possible by using\ntheir own knowledge and the estimates of others.\nMaterials and Methods provides more in-depth information\nregarding the knowledge questions, payment rules, and data\nstructure. SI Appendix contains all the details of the experimental\nprocedures that were presented to the subjects. Dataset S1\ncontains the raw data.\nResults\nAggregation of the Wisdom of Crowds. The empirical analysis of\nthe wisdom of crowds requires a",
+            "locator": "lines 217-248",
+            "score": 13.049254841255836,
+            "source_id": "papers/text/lorenz-et-al-2011-social-influence.txt"
+          },
+          {
+            "content_sha256": "10d6e61835ae38ecc32c345b6c18f5d4259ef40874694d12f60c4dd6162e160f",
+            "excerpt": "payment rules, the anonymity warranty, the obligation to adhere\nto the no-communication policy, and the obligation to make no\nuse of any auxiliary devices such as the Internet or mobile\nphones. A test in the beginning ensured that subjects un-\nderstood the payment rules.\nIn the ﬁrst estimation period, all subjects had to respond to\nthe ﬁrst knowledge question on their own. After all 12 group\nmembers made an estimate, everybody was asked to give another\nestimate. In total, we elicited ﬁve consecutive responses for each\nknowledge question. Additionally, we elicited after the ﬁrst and\nﬁnal estimate for each question subjects ’conﬁdence in their esti-\nmate on a six-point Likert scale (1, very uncertain; 6, very certain).\nThe conﬁdence values were not communicated to others. After the\nﬁfth (and ﬁnal) estimate of each question, an evaluation was\nprovided that included the true answer, the ﬁve estimates of the\nrespective subject, the payments for each of the ﬁve estimates, and\nthe total payment for all estimates for one question.\nWe tested three different information conditions regarding\nwhat each subject learned about the estimates of the other\nsubjects. Subjects could base their second, third, fourth, and ﬁfth\nestimate on either aggregated or nonaggregated information\nregarding other people ’s estimates. Two of our conditions were\ndifferent operationalizations of social in ﬂuence, and the third\ncondition served as a control condition without social in ﬂuence.\nThe reason to use two different kinds of social in ﬂuence was to\ndemonstrate the robustness of our effects with regard to",
+            "locator": "lines 169-200",
+            "score": 12.761572768804056,
+            "source_id": "papers/text/lorenz-et-al-2011-social-influence.txt"
+          },
+          {
+            "content_sha256": "10d6e61835ae38ecc32c345b6c18f5d4259ef40874694d12f60c4dd6162e160f",
+            "excerpt": "the box depicts the wisdom-of-crowd indicator. The maximum value of 6\nrepresents the highest value for the wisdom of the crowd meaning, that 6\nvalues are below and 6 above the true value. A wisdom-of-crowd indicator\nof 0 denotes that the truth is outside of the range of estimates. The colors of\nthe boxes and bars for the wisdom-of-crowd indicator are analogous to B\n(for values 0 –5, aubergine is additionally introduced for the value of 6).\nColored numbers represent individuals (analogous to colors in Fig. 1 A). The\nright column shows the certainty of the estimate as reported by the re-\nspective individual after estimate 1 and estimate 5 (1, very uncertain; 6, very\ncertain). These values were not propagated to other subjects. ( B) Con ﬁr-\nmation of exemplary trends by regression models taking all questions into\naccount. Linear regressions on (model 1) the groups ’ wisdom-of-crowd in-\ndicator and (model 2) individuals ’change in the certainty of their estimates.\nThe predictors in both models are the experimental treatments, imple-\nmented as dummy variables and coded with 1 as the experimental condition\n(aggregated or full information) and 0 otherwise. The control condition is\nthe reference category, represented by the intercept of the respective re-\ngression model. In model 1, the wisdom-of-crowd indicator is calculated for\nthe pooled second, third, fourth, and ﬁfth time step. The ﬁrst time step is\nexcluded because the initial period had no information feedback and can\ntherefore not yield treatment differences. In model 2, individuals ’increase in\nconﬁdence is the outcome var",
+            "locator": "lines 433-464",
+            "score": 12.662960480135947,
+            "source_id": "papers/text/lorenz-et-al-2011-social-influence.txt"
+          },
+          {
+            "content_sha256": "10d6e61835ae38ecc32c345b6c18f5d4259ef40874694d12f60c4dd6162e160f",
+            "excerpt": "The reason to use two different kinds of social in ﬂuence was to\ndemonstrate the robustness of our effects with regard to the\nspeciﬁc kind of social in ﬂuence.\nIn the “aggregated information” condition, subjects could re-\nconsider their estimate after having received the average (arith-\nmetic mean) of all 12 estimates of the former round. Subjects were\nalso reminded about their last estimate from the previous round.\nIn the “full information” treatment, subjects received a ﬁgure of\nthe trajectories of all subjects’estimates from all previous rounds.\nIn this ﬁgure, the estimates of each of the 12 subjects over all\nprevious rounds were represented by one line, adding up to 12\nseparate lines (one for each subject). In addition, the numerical\nvalues of all subjects ’ estimates from the last round were pre-\nsented and subjects were reminded about their own last estimate.*\nThe “no information” treatment served as a control and revealed\nno information about the other subjects ’ estimates. In this con-\ndition, subjects had to answer the same question ﬁve times on\ntheir own. They were reminded about their latest estimate.\nIn each session, two questions were posed in the control, two\nin the aggregated, and two in the full information treatment. The\norder of questions and the order of treatments was randomized\nacross experimental sessions. This means that the same six\nknowledge questions were posed in each experimental session,\nbut in a different order and in different information treatments.\nThe allocation of subjects to a random sequence of questions and\ninformation treatments ruled ",
+            "locator": "lines 193-224",
+            "score": 10.068425588244109,
+            "source_id": "papers/text/lorenz-et-al-2011-social-influence.txt"
+          },
+          {
+            "content_sha256": "10d6e61835ae38ecc32c345b6c18f5d4259ef40874694d12f60c4dd6162e160f",
+            "excerpt": "question was phrased such that it implied a gain and not a loss. Furthermore,\nentering negative numbers was not supported by our program.\nSubjects received monetary payments in Swiss Francs (CHF) for each good\nestimate, taking the distance between the estimate and the true value into\naccount. Three different intervals for monetary payments were used: 0% to\n10% deviation (1.40 CHF), 11% to 20% deviation (0.70 CHF), and 21% to 40%\ndeviation (0.35 CHF). Estimates that were more than 40% away from the true\nvalue were not ﬁnancially rewarded. Rewards were communicated in ex-\nperimental points and paid in CHF without requiring a signature after\nthe experiment.\nOur data ( Dataset S1) comprise 12 groups in which 12 subjects responded\nﬁve times to six knowledge questions in separate cubicles. Two questions\nwere posed in the control, two in the aggregated, and two in the full in-\nformation treatment. Thus, for each treatment, we had 24 groups: four\ngroups for each of the six questions. The order of the questions and treat-\nments was randomized among the experimental sessions.\nTen values were removed from the statistical analysis of the data set. Five\nof them were dramatic outliers from the same person in the same run. They\nwere 1,000 times larger than the second largest estimate; thus, the subject\nseemed to have confused meters and kilometers. Four estimates were\ndetected as “fun moves. ” The “fun” under the aggregate information\n9024 | www.pnas.org/cgi/doi/10.1073/pnas.1008636108 Lorenz et al.\n\n===== PDF PAGE 6 =====\n\ncondition was to make an incredibly large estimate to test how mu",
+            "locator": "lines 577-608",
+            "score": 9.787491742782047,
+            "source_id": "papers/text/lorenz-et-al-2011-social-influence.txt"
+          },
+          {
+            "content_sha256": "10d6e61835ae38ecc32c345b6c18f5d4259ef40874694d12f60c4dd6162e160f",
+            "excerpt": "The aggregate measures arithmetic mean, geometric mean, and median are computed on the set of all ﬁrst estimates regardless of\nthe information condition. Values in parentheses are deviations from the true value as percentages.\n†Note that the framework of the diversity prediction theorem (9) can also be applied to\nlogarithmically transformed data. For the case of logarithmically transformed data, the\ncollective error of the logarithms is the logarithm of the geometric mean and one SD is\nthe logarithm of the geometric SD. Considering the logarithmic nature of our data, one\nmay argue that the geometric mean would have been a better design choice than the\narithmetic mean for the information feedback in the aggregated information condition.\nHowever, this measure is hard to understand for most subjects because it necessitates\nconﬁdence with logarithmic transformations. As the simple average (i.e., arithmetic\nmean) is known from daily life, this information is more meaningful for subjects. Hence,\nwe decided for the arithmetic mean.\n‡The empirical measurement of the social in ﬂuence effect requires questions with mod-\nerate difﬁculty. In particular, subjects should not have a precise factual knowledge of an\nissue, because this would prevent adaption and social in ﬂuence. We can empirically\nconﬁrm that this was not the case for our questions and subjects: in only 1.5% of all\ncases, subjects responded at all ﬁve times in the most inner payment range of one\nparticular question. This means in absolute values that 13 of 864 consecutive response\nruns were responded in the full payment ra",
+            "locator": "lines 337-368",
+            "score": 9.48063892334199,
+            "source_id": "papers/text/lorenz-et-al-2011-social-influence.txt"
+          },
+          {
+            "content_sha256": "10d6e61835ae38ecc32c345b6c18f5d4259ef40874694d12f60c4dd6162e160f",
+            "excerpt": "others, they may revise their own estimates for various reasons:\nPeople may suspect that others have better information (11, 12),\nthey may partially follow the wisdom of the crowd (13), there\nmay be peer pressure toward conformity (14 –17), or the group\nmay engage in a process of deliberation about the facts. An ex-\nample of deliberation about facts would be the task of the In-\ntergovernmental Panel on Climate Change.\nAlthough there is evidence from social psychology that humans\nhave an inclination to adjust their opinions to those of others so\nthat they gradually converge toward consensus (4, 18), many\nexisting studies have two drawbacks. First, consensus formation\nhas often been investigated for questions for which there are no\nwell de ﬁned correct answers. Typical examples are attitudes to-\nward abortion, nuclear power, war on terror, or election polls.\nAnother case are “cultural” markets of musical tastes, in which it\nhas been demonstrated that almost any song of average quality\nmay become a hit if social inﬂuence is introduced by publishing the\nnumber of downloads (19). In this case, the popularity of a song\nand its perceived quality emerge through the process of interactive\ndownloading and rating. The herding effects created in this way\nprevent an objective measurement of quality. Therefore, such\nsettings do not reveal whether social inﬂuence works in favor or to\nthe disadvantage of the wisdom of the group.\nThe second drawback of existing studies is that correct answers\nare often not rewarded with monetary incentives, which makes\ncorrect estimations less important and",
+            "locator": "lines 73-104",
+            "score": 6.583518938456109,
+            "source_id": "papers/text/lorenz-et-al-2011-social-influence.txt"
+          }
+        ],
+        "query": "subjects sessions questions incentives payment experimental design second third fourth fifth period",
+        "truncated": true
+      },
+      "result_ids": [
+        "papers/text/lorenz-et-al-2011-social-influence.txt",
+        "papers/text/lorenz-et-al-2011-social-influence.txt",
+        "papers/text/lorenz-et-al-2011-social-influence.txt",
+        "papers/text/lorenz-et-al-2011-social-influence.txt",
+        "papers/text/lorenz-et-al-2011-social-influence.txt",
+        "papers/text/lorenz-et-al-2011-social-influence.txt",
+        "papers/text/lorenz-et-al-2011-social-influence.txt",
+        "papers/text/lorenz-et-al-2011-social-influence.txt"
+      ],
+      "result_sha256": "ee019031a760f20a4f426059350099b29b44acb640dfcb9859fdf149f3c368dc",
+      "sequence": 4,
+      "tool": "search_sources"
+    },
+    {
+      "arguments": {
+        "limit": 8,
+        "query": "wisdom-of-crowd indicator range reduction truth peripheral Fig 2 regression significant coefficient",
+        "source_ids": [
+          "papers/text/lorenz-et-al-2011-social-influence.txt"
+        ]
+      },
+      "result": {
+        "hits": [
+          {
+            "content_sha256": "10d6e61835ae38ecc32c345b6c18f5d4259ef40874694d12f60c4dd6162e160f",
+            "excerpt": "the box depicts the wisdom-of-crowd indicator. The maximum value of 6\nrepresents the highest value for the wisdom of the crowd meaning, that 6\nvalues are below and 6 above the true value. A wisdom-of-crowd indicator\nof 0 denotes that the truth is outside of the range of estimates. The colors of\nthe boxes and bars for the wisdom-of-crowd indicator are analogous to B\n(for values 0 –5, aubergine is additionally introduced for the value of 6).\nColored numbers represent individuals (analogous to colors in Fig. 1 A). The\nright column shows the certainty of the estimate as reported by the re-\nspective individual after estimate 1 and estimate 5 (1, very uncertain; 6, very\ncertain). These values were not propagated to other subjects. ( B) Con ﬁr-\nmation of exemplary trends by regression models taking all questions into\naccount. Linear regressions on (model 1) the groups ’ wisdom-of-crowd in-\ndicator and (model 2) individuals ’change in the certainty of their estimates.\nThe predictors in both models are the experimental treatments, imple-\nmented as dummy variables and coded with 1 as the experimental condition\n(aggregated or full information) and 0 otherwise. The control condition is\nthe reference category, represented by the intercept of the respective re-\ngression model. In model 1, the wisdom-of-crowd indicator is calculated for\nthe pooled second, third, fourth, and ﬁfth time step. The ﬁrst time step is\nexcluded because the initial period had no information feedback and can\ntherefore not yield treatment differences. In model 2, individuals ’increase in\nconﬁdence is the outcome var",
+            "locator": "lines 433-464",
+            "score": 21.262830979348784,
+            "source_id": "papers/text/lorenz-et-al-2011-social-influence.txt"
+          },
+          {
+            "content_sha256": "10d6e61835ae38ecc32c345b6c18f5d4259ef40874694d12f60c4dd6162e160f",
+            "excerpt": "sidered to be lower, and if the six most central values are needed,\nit is even lower, and so forth. If it lies outside the range of\nestimates of all individuals, there is no wisdom of crowd effect at\nall (a precise de ﬁnition is provided in Methods and Materials ).\nFig. 2A shows bar plots of the wisdom-of-crowd indicator over\ntime for the three treatments for the same exemplary question as\nin Fig. 1. Furthermore, the corresponding core range of sorted\nestimates enclosing the true value is reported. The ﬁgure dem-\nonstrates that the wisdom-of-crowd indicator tends to decline\nover time under conditions of social in ﬂuence. This effect is\nsubstantial and statistically signi ﬁcant for all questions, which is\nconﬁrmed by the regression model in Fig. 2 B. It is revealed that\nthe wisdom of crowd indicator is about one unit lower in con-\nditions with information exchange compared with the control\ncondition. Note that the reduction is stronger under the aggre-\nA\nB\nC\nD E\nFig. 1. Social in ﬂuence effect: Social in ﬂuence diminishes group diversity\nwithout diminishing the collective error. (A) Typical examples of experimental ses-\nsions for all three information conditions, displaying theﬁve individual responses\nto the question, “How many murders were registered in Switzerland in\n2006?” In the no information condition, there is no convergence of esti-\nmates, whereas estimates converge in the aggregated and full information\nconditions. Each subject ’s decision over the ﬁve consecutive responses is\nrepresented by a different color. Black lines correspond to the true value;\nsurrounding gr",
+            "locator": "lines 385-416",
+            "score": 21.0317192583854,
+            "source_id": "papers/text/lorenz-et-al-2011-social-influence.txt"
+          },
+          {
+            "content_sha256": "10d6e61835ae38ecc32c345b6c18f5d4259ef40874694d12f60c4dd6162e160f",
+            "excerpt": "mates, whereas estimates converge in the aggregated and full information\nconditions. Each subject ’s decision over the ﬁve consecutive responses is\nrepresented by a different color. Black lines correspond to the true value;\nsurrounding gray zones represent the areas in which the subjects received\nmonetary payments (payments decrease from dark to light gray). ( B) Rep-\nresentation of the same data in aggregated form. The arithmetic mean is\nrepresented by a dotted line and the geometric mean by a dashed one. The\nranges of the 4, 6, 8, 10, and 12 inner estimates are represented by red, dark\norange, light orange, dark yellow, and light yellow colors. ( C) Values of the\ncollective error (squared deviation of group average from the truth) and\ngroup diversity (average squared deviation from the group average) for all\n12 estimates at each time step for the same exemplary session as in A and B\n(computed on logarithms of the estimates and normalized by true values).\n(D) Average group diversity for all information conditions over time (each\ndata point represents 24 groups, aggregated over all questions; computed\non logarithms of estimates and normalized by the respective true value;\nerror-bars represent 10% con ﬁdence intervals). ( E) Average collective error\n(data and presentation analogous to D).\nA\nB\nFig. 2. Although the wisdom of the crowd diminishes over time, individuals\ngain con ﬁdence in their own estimates. ( A) Sorted estimates over successive\nrounds for the same exemplary sessions as displayed in Fig. 1. Boxes repre-\nsent the most inner estimates that still include the true ",
+            "locator": "lines 409-440",
+            "score": 20.24221169214605,
+            "source_id": "papers/text/lorenz-et-al-2011-social-influence.txt"
+          },
+          {
+            "content_sha256": "10d6e61835ae38ecc32c345b6c18f5d4259ef40874694d12f60c4dd6162e160f",
+            "excerpt": "n\nXn\ni¼1 ðtruth − xi Þ2\n/C19\n. The proof is elementary. The collective er-\nror is also called “population bias ” (6). A low collective error combined with\na high group diversity implies that the wisdom of crowd effect works well,\nbecause asking many instead of one drastically improves accuracy. Both\nmeasures are used in Fig. 1 D and E. Notice that xi ¼ logð~xi =truthÞ are log-\narithms of the raw data point ~xi normalized by the corresponding true\nvalues. The arithmetic mean of these logarithms corresponds to the geo-\nmetric mean. Logarithms transform the results from arithmetic mean to\ngeometric means, where a wisdom of crowd effect exists. Normalization of\nraw estimates by the truth makes different questions comparable.\nFor the de ﬁnition of the wisdom-of-crowd indicator (Fig. 2) let bx1; ... ; bxn\nbe the sorted estimates. Then, the wisdom of crowd indicator is\nmaxfijbxi ≤ truth ≤ bxn − iþ1g. The wisdom-of-crowd indicator achieves its\nmaximum at [ n / 2] when the truth lies between the most central estimates\n(or at the most central estimate). Its minimum of zero is achieved when the\ntruth lies below the minimal or above the maximal estimate. Notice, that\na high wisdom-of-crowd indicator implies that the truth is close to the me-\ndian. Thus, it implicitly de ﬁnes the median as the appropriate measure of\naggregation. In our empirical case this is not in con ﬂict with the choice of\nthe geometric mean as can be seen by the similarity of the geometric mean\nand the median in Table 1. A theoretical reason is that the geometric mean\nand the median coincide for a log-normal distrib",
+            "locator": "lines 625-656",
+            "score": 19.898819746068778,
+            "source_id": "papers/text/lorenz-et-al-2011-social-influence.txt"
+          },
+          {
+            "content_sha256": "10d6e61835ae38ecc32c345b6c18f5d4259ef40874694d12f60c4dd6162e160f",
+            "excerpt": "In this article, we will demonstrate that social in ﬂuence has\nthree effects that can undermine the wisdom of crowds. Two of\nthe effects are changes of statistical aggregates and one is psy-\nchological. The “social in ﬂuence effect ” describes the fact that\nsocial in ﬂuence diminishes the diversity of the group without\nimprovements in accuracy. The “range reduction effect ” moves\nthe position of the truth to peripheral regions. This corrupts the\nwisdom of the crowd from an observer ’s perspective in the sense\nthat the group becomes less reliable in guiding decision-makers.\nThe “conﬁdence effect” boosts individuals’conﬁdence. [A related\neffect is known as overcon ﬁdence (20 –22).] This boost in con ﬁ-\ndence subverts the wisdom of crowd effect psychologically, be-\ncause individuals’perceptions contradict the aggregate outcomes\nof a lack of improvements in accuracy and a decreased reliability\nof the group ’s range of estimates.\nRecent theoretical studies have analyzed the wisdom of crowd\neffect in the context of information diffusion in networks of\nsimulated agents in which too little and too much dissemination\nof information inhibits actors to ﬁnd optimal solutions, because\nthere is a need to maintain diversity on the one hand and in-\nformation ﬂow on the other (23). However, from an empirical\npoint of view, it is not clear whether the reduction of diversity is\nstrong enough to severely undermine the wisdom of crowd effect\nin reality. In the following, we demonstrate by means of labo-\nratory experiments that the wisdom of crowd effect is under-\nmined in all three of the afore",
+            "locator": "lines 121-152",
+            "score": 19.811428776053596,
+            "source_id": "papers/text/lorenz-et-al-2011-social-influence.txt"
+          },
+          {
+            "content_sha256": "10d6e61835ae38ecc32c345b6c18f5d4259ef40874694d12f60c4dd6162e160f",
+            "excerpt": "===== PDF PAGE 1 =====\n\nHow social in ﬂuence can undermine the wisdom of\ncrowd effect\nJan Lorenz a,1,2, Heiko Rauhut b,1,2, Frank Schweitzer a, and Dirk Helbing b,c,d\naChair of Systems Design, ETH Zürich, CH-8032 Zurich, Switzerland; bChair of Sociology, in particular of Modeling and Simulation, ETH Zürich, CH-8092 Zurich,\nSwitzerland; cSanta Fe Institute, Santa Fe, NM 87501; and dCollegium Budapest –Institute for Advanced Study, 1014 Budapest, Hungary\nEdited by Burton H. Singer, University of Florida, Gainesville, FL, and approved April 13, 2011 (received for review June 23, 2010)\nSocial groups can be remarkably smart and knowledgeable when\ntheir averaged judgements are compared with the judgements\nof individuals. Already Galton [Galton F (1907) Nature 75:7] found\nevidence that the median estimate of a group can be more accu-\nrate than estimates of experts. This wisdom of crowd effect was\nrecently supported by examples from stock markets, political\nelections, and quiz shows [Surowiecki J (2004) The Wisdom of\nCrowds]. In contrast, we demonstrate by experimental evidence\n(N = 144) that even mild social in ﬂuence can undermine the\nwisdom of crowd effect in simple estimation tasks. In the exper-\niment, subjects could reconsider their response to factual ques-\ntions after having received average or full information of the\nresponses of other subjects. We compare subjects ’ convergence\nof estimates and improvements in accuracy over ﬁve consecutive\nestimation periods with a control condition, in which no informa-\ntion about others ’ responses was provided. Although groups are\ninit",
+            "locator": "lines 1-32",
+            "score": 19.149829953228572,
+            "source_id": "papers/text/lorenz-et-al-2011-social-influence.txt"
+          },
+          {
+            "content_sha256": "10d6e61835ae38ecc32c345b6c18f5d4259ef40874694d12f60c4dd6162e160f",
+            "excerpt": "initially “wise,” knowledge about estimates of others narrows\nthe diversity of opinions to such an extent that it undermines\nthe wisdom of crowd effect in three different ways. The “social\ninﬂuence effect ” diminishes the diversity of the crowd without\nimprovements of its collective error. The “range reduction effect ”\nmoves the position of the truth to peripheral regions of the\nrange of estimates so that the crowd becomes less reliable in\nproviding expertise for external observers. The “conﬁdence ef-\nfect” boosts individuals ’ conﬁdence after convergence of their\nestimates despite lack of improved accuracy. Examples of the\nrevealed mechanism range from misled elites to the recent global\nﬁnancial crisis.\ncollective judgment | estimate aggregation | experimental social science |\nswarm intelligence | overconﬁdence\nU\nnder the right circumstances, the average of many individ-\nuals’ estimates can be surprisingly close to the truth, al-\nthough their separate values lie remarkably far from it. There is\nevidence from guessing tasks (1) and problem-solving experi-\nments (2–4) that the aggregate of many people ’s estimates tends\nto be closer to the true value than all of the separate individual\nor even expert guesses. This phenomenon is referred to as the\n“wisdom of crowd effect ” (5). Even individuals can apply this\nmechanism and improve their decisions by averaging multiple\nperspectives from their own reasoning (6 –8).\nIn the following, we will call an aggregate measure of a col-\nlection of individual estimates “wise” if it comes close to the true\nvalue, even though the individual ",
+            "locator": "lines 25-56",
+            "score": 18.843494811027597,
+            "source_id": "papers/text/lorenz-et-al-2011-social-influence.txt"
+          },
+          {
+            "content_sha256": "10d6e61835ae38ecc32c345b6c18f5d4259ef40874694d12f60c4dd6162e160f",
+            "excerpt": "reduced under social in ﬂuence, whereas the collective error\nchanges only slightly. In the control condition without social\ninﬂuence, these effects are almost null.\nRange Reduction Effect. Let us take the perspective of a person\nwho, or government that, needs advice and requests expertise\nfrom different specialists. If all predictions are narrowly distrib-\nuted around a wrong value, a decision-maker would gain con ﬁ-\ndence in advice that is actually misleading. In fact, the close\nclustering around a wrong value makes the group less “wise” in\nthe sense that the group delivers a wrong hint regarding the lo-\ncation of the truth. This is the case because the truth would not\nbe located centrally but at outer regions of the range of esti-\nmates. We quantify this by a wisdom-of-crowd indicator, which\nTable 1. The wisdom of crowd effect exists with respect to the geometric mean but not with respect to the\narithmetic mean\nQuestion True value\nWisdom-of-crowd aggregation\nMedianArithmetic mean Geometric mean\n1. Population density of Switzerland 184 2,644 (+1,337.2%) 132 ( −28.1%) 130 ( −29.3%)\n2. Border length, Switzerland/Italy 734 1,959 (+166.9%) 338 ( −54%) 300 ( −59.1%)\n3. New immigrants to Zurich 10,067 26,773 (+165.9%) 8,178 ( −18.8%) 10,000 ( −0.7%)\n4. Murders, 2006, Switzerland 198 838 (+323.2%) 174 ( −11.9%) 170 ( −14.1%)\n5. Rapes, 2006, Switzerland 639 1,017 (+59.1%) 285 ( −55.4%) 250 ( −60.9%)\n6. Assaults, 2006, Switzerland 9,272 135,051 (+1,356.5%) 6,039 ( −34.9%) 4,000 ( −56.9%)\nThe aggregate measures arithmetic mean, geometric mean, and median are computed on the set of a",
+            "locator": "lines 313-344",
+            "score": 18.798758917186206,
+            "source_id": "papers/text/lorenz-et-al-2011-social-influence.txt"
+          }
+        ],
+        "query": "wisdom-of-crowd indicator range reduction truth peripheral Fig 2 regression significant coefficient",
+        "truncated": true
+      },
+      "result_ids": [
+        "papers/text/lorenz-et-al-2011-social-influence.txt",
+        "papers/text/lorenz-et-al-2011-social-influence.txt",
+        "papers/text/lorenz-et-al-2011-social-influence.txt",
+        "papers/text/lorenz-et-al-2011-social-influence.txt",
+        "papers/text/lorenz-et-al-2011-social-influence.txt",
+        "papers/text/lorenz-et-al-2011-social-influence.txt",
+        "papers/text/lorenz-et-al-2011-social-influence.txt",
+        "papers/text/lorenz-et-al-2011-social-influence.txt"
+      ],
+      "result_sha256": "188b6218fef1ba0995713012f87a24d312d9e23d285b95df53695b66556f9916",
+      "sequence": 5,
+      "tool": "search_sources"
+    },
+    {
+      "arguments": {
+        "line_count": 140,
+        "source_id": "papers/text/lorenz-et-al-2011-social-influence.txt",
+        "start_line": 296
+      },
+      "result": {
+        "content": "the no information condition with the aggregated and full in-\nformation conditions, the typical effects of social in ﬂuence can\nclearly be seen. It is evident that social in ﬂuence promotes\na convergence of estimates. Fig. 1 B shows, for the same exem-\nplary sessions, core ranges of estimates and two types of aggre-\ngate measures: the arithmetic mean and the geometric mean.\nFig. 1 C provides the respective numbers for the exemplary ses-\nsions. We provide a test for the complete data in Fig. 1 D and E,\ndemonstrating that social in ﬂuence strongly reduces the group ’s\ndiversity§ without signi ﬁcantly reducing its collective errors. ¶\nThe robustness of the social in ﬂuence effect is supported by\nfurther statistical signi ﬁcance tests ( SI Appendix ). A Kolmo-\ngorov–Smirnov test con ﬁrms that the distribution of estimates\nchanges signi ﬁcantly if social in ﬂuence is allowed for. This\napplies particularly to the variance of the distribution, as an F\ntest shows. In addition, Kolmogorov –Smirnov and t tests for the\ngroup data demonstrate that the group diversity is signi ﬁcantly\nreduced under social in ﬂuence, whereas the collective error\nchanges only slightly. In the control condition without social\ninﬂuence, these effects are almost null.\nRange Reduction Effect. Let us take the perspective of a person\nwho, or government that, needs advice and requests expertise\nfrom different specialists. If all predictions are narrowly distrib-\nuted around a wrong value, a decision-maker would gain con ﬁ-\ndence in advice that is actually misleading. In fact, the close\nclustering around a wrong value makes the group less “wise” in\nthe sense that the group delivers a wrong hint regarding the lo-\ncation of the truth. This is the case because the truth would not\nbe located centrally but at outer regions of the range of esti-\nmates. We quantify this by a wisdom-of-crowd indicator, which\nTable 1. The wisdom of crowd effect exists with respect to the geometric mean but not with respect to the\narithmetic mean\nQuestion True value\nWisdom-of-crowd aggregation\nMedianArithmetic mean Geometric mean\n1. Population density of Switzerland 184 2,644 (+1,337.2%) 132 ( −28.1%) 130 ( −29.3%)\n2. Border length, Switzerland/Italy 734 1,959 (+166.9%) 338 ( −54%) 300 ( −59.1%)\n3. New immigrants to Zurich 10,067 26,773 (+165.9%) 8,178 ( −18.8%) 10,000 ( −0.7%)\n4. Murders, 2006, Switzerland 198 838 (+323.2%) 174 ( −11.9%) 170 ( −14.1%)\n5. Rapes, 2006, Switzerland 639 1,017 (+59.1%) 285 ( −55.4%) 250 ( −60.9%)\n6. Assaults, 2006, Switzerland 9,272 135,051 (+1,356.5%) 6,039 ( −34.9%) 4,000 ( −56.9%)\nThe aggregate measures arithmetic mean, geometric mean, and median are computed on the set of all ﬁrst estimates regardless of\nthe information condition. Values in parentheses are deviations from the true value as percentages.\n†Note that the framework of the diversity prediction theorem (9) can also be applied to\nlogarithmically transformed data. For the case of logarithmically transformed data, the\ncollective error of the logarithms is the logarithm of the geometric mean and one SD is\nthe logarithm of the geometric SD. Considering the logarithmic nature of our data, one\nmay argue that the geometric mean would have been a better design choice than the\narithmetic mean for the information feedback in the aggregated information condition.\nHowever, this measure is hard to understand for most subjects because it necessitates\nconﬁdence with logarithmic transformations. As the simple average (i.e., arithmetic\nmean) is known from daily life, this information is more meaningful for subjects. Hence,\nwe decided for the arithmetic mean.\n‡The empirical measurement of the social in ﬂuence effect requires questions with mod-\nerate difﬁculty. In particular, subjects should not have a precise factual knowledge of an\nissue, because this would prevent adaption and social in ﬂuence. We can empirically\nconﬁrm that this was not the case for our questions and subjects: in only 1.5% of all\ncases, subjects responded at all ﬁve times in the most inner payment range of one\nparticular question. This means in absolute values that 13 of 864 consecutive response\nruns were responded in the full payment range (144 subjects responded to six questions\nin a run of ﬁve consecutive responses). Three of these 13 “high-success runs ” were\nperformed by the same person and two from another person. All other high-success\nruns were performed by different persons.\n§It deserves to be mentioned that the initial diversity seems to be higher in the no in-\nformation condition. It could be that subjects anticipate to feel uneasy if their published\nestimates are too distant from those of others. This could foster that their initial esti-\nmates tend to be more “conservative” in the conditions with information feedback.\nInterestingly, this discrepancy in initial variance is mainly caused by the questions about\ncrime statistics and not about geographical facts.\n¶Note that the collective error slightly declines under social in ﬂuence, especially in the\naggregated information condition, which is partially supported by the signi ﬁcance tests\n(SI Appendix). This is a result of two empirical facts. First, the distributions of estimates are\nright-skewed. As a consequence, the arithmetic mean is usually much larger than most\nestimates and also much larger than the true value. Second, it is an empirical fact for our\nchoice of questions that the geometric mean (which is our aggregation measure to com-\npute the collective error) is always slightly lower than the true value (Table 1). The\nmechanism of presenting the arithmetic mean in the aggregated condition thus triggers\nan upward drift toward the true value. This issue is interesting but deserves future stud-\nies, as this effect may be different for different sets of questions.\n9022 | www.pnas.org/cgi/doi/10.1073/pnas.1008636108 Lorenz et al.\n\n===== PDF PAGE 4 =====\n\ngeneralizes the concept of “bracketing the truth ” (33) to more\nthan two persons. Our indicator considers a group to be maxi-\nmally wise if the truth lies between the two most central values of\nall estimates (in our case, between the sixth and the seventh\nlargest of 12 estimates). If the four most central values are\nneeded to enclose the true value, the level of wisdom is con-\nsidered to be lower, and if the six most central values are needed,\nit is even lower, and so forth. If it lies outside the range of\nestimates of all individuals, there is no wisdom of crowd effect at\nall (a precise de ﬁnition is provided in Methods and Materials ).\nFig. 2A shows bar plots of the wisdom-of-crowd indicator over\ntime for the three treatments for the same exemplary question as\nin Fig. 1. Furthermore, the corresponding core range of sorted\nestimates enclosing the true value is reported. The ﬁgure dem-\nonstrates that the wisdom-of-crowd indicator tends to decline\nover time under conditions of social in ﬂuence. This effect is\nsubstantial and statistically signi ﬁcant for all questions, which is\nconﬁrmed by the regression model in Fig. 2 B. It is revealed that\nthe wisdom of crowd indicator is about one unit lower in con-\nditions with information exchange compared with the control\ncondition. Note that the reduction is stronger under the aggre-\nA\nB\nC\nD E\nFig. 1. Social in ﬂuence effect: Social in ﬂuence diminishes group diversity\nwithout diminishing the collective error. (A) Typical examples of experimental ses-\nsions for all three information conditions, displaying theﬁve individual responses\nto the question, “How many murders were registered in Switzerland in\n2006?” In the no information condition, there is no convergence of esti-\nmates, whereas estimates converge in the aggregated and full information\nconditions. Each subject ’s decision over the ﬁve consecutive responses is\nrepresented by a different color. Black lines correspond to the true value;\nsurrounding gray zones represent the areas in which the subjects received\nmonetary payments (payments decrease from dark to ",
+        "content_sha256": "10d6e61835ae38ecc32c345b6c18f5d4259ef40874694d12f60c4dd6162e160f",
+        "locator": "lines 296-435",
+        "source_id": "papers/text/lorenz-et-al-2011-social-influence.txt",
+        "truncated": true
+      },
+      "result_ids": [
+        "papers/text/lorenz-et-al-2011-social-influence.txt"
+      ],
+      "result_sha256": "d5e902abbf5b71d9c60ee12c362c9471261bb616c95785015f85b1ba852b945a",
+      "sequence": 6,
+      "tool": "read_source"
+    },
+    {
+      "arguments": {
+        "line_count": 110,
+        "source_id": "papers/text/lorenz-et-al-2011-social-influence.txt",
+        "start_line": 436
+      },
+      "result": {
+        "content": "of 0 denotes that the truth is outside of the range of estimates. The colors of\nthe boxes and bars for the wisdom-of-crowd indicator are analogous to B\n(for values 0 –5, aubergine is additionally introduced for the value of 6).\nColored numbers represent individuals (analogous to colors in Fig. 1 A). The\nright column shows the certainty of the estimate as reported by the re-\nspective individual after estimate 1 and estimate 5 (1, very uncertain; 6, very\ncertain). These values were not propagated to other subjects. ( B) Con ﬁr-\nmation of exemplary trends by regression models taking all questions into\naccount. Linear regressions on (model 1) the groups ’ wisdom-of-crowd in-\ndicator and (model 2) individuals ’change in the certainty of their estimates.\nThe predictors in both models are the experimental treatments, imple-\nmented as dummy variables and coded with 1 as the experimental condition\n(aggregated or full information) and 0 otherwise. The control condition is\nthe reference category, represented by the intercept of the respective re-\ngression model. In model 1, the wisdom-of-crowd indicator is calculated for\nthe pooled second, third, fourth, and ﬁfth time step. The ﬁrst time step is\nexcluded because the initial period had no information feedback and can\ntherefore not yield treatment differences. In model 2, individuals ’increase in\nconﬁdence is the outcome variable, which is the difference between the\ninitial and ﬁnal individuals ’ certainty in their estimates. Robust SEs are cal-\nculated, taking the clustering within subjects into account.\nLorenz et al. PNAS | May 31, 2011 | vol. 108 | no. 22 | 9023\nSOCIAL SCIENCESPSYCHOLOGICAL AND\nCOGNITIVE SCIENCES\n\n===== PDF PAGE 5 =====\n\ngated information condition compared with the “full information\ncondition. [This matches previous ﬁndings on the effects of social\ninﬂuence in terms of gossip on the behavior, which seems to be\nstronger if gossip comes from fewer sources (34).] An increase of\none unit means that one has to consider one additional person in\nthe upper range and one additional person in the lower range of\nsorted estimates so that the truth is included in the selected\nrange. This effect demonstrates that the truth becomes less\ncentral if social in ﬂuence is allowed for. Another interpretation\nof this effect is that the group becomes less reliable in estimating\nthe truth if it has been exposed to social in ﬂuence.\nConﬁdence Effect. The third kind of undermining of the wisdom\nof crowds concerns the psychological consequences of the two\naforementioned statistical effects. The con ﬁdence effect re ﬂects\nthat opinion convergence boosts individuals ’conﬁdence in their\nestimates despite a lack of collective improvements in accuracy.\nFig. 2A shows the individuals ’self-reported change in con ﬁdence\nregarding their initial and ﬁnal estimates for the same exemplary\nsessions as studied before. It can be seen that individuals in these\nexemplary sessions become more con ﬁdent in the full infor-\nmation condition and less con ﬁdent in the control condition. We\nanalyze the general effects over all sessions and questions with\nregression models in Fig. 2 B. This regression analysis demon-\nstrates that individuals ’ conﬁdence is substantially and signi ﬁ-\ncantly boosted in the aggregated and full information conditions\nin comparison with the control condition without social in ﬂuence.\nWe can interpret this psychological effect in comparison with\nthe statistical effects: the con ﬁdence measure can be regarded as\n“subjective”— and self-reported reliability of estimates and the\nwisdom of crowd indicator as “objective”— statistical measure of\nreliability. The comparison of both illustrates that social inﬂuence\nundermines the wisdom of crowds by boosting the subjective and\ndecreasing the objective reliability of the crowd.\nDiscussion\nBased on the wisdom of crowd effect, groups can be remarkably\naccurate in estimating vaguely known facts. From the perspective\nof decision-makers, it would be valuable to request multiple inde-\npendent opinions and aggregate these as the basis of their judge-\nments. Real-life examples are predictions of economic growth\nrates, market potentials, the increase of the world temperature, tax\nestimations, the assessment of the impact of new technologies, or\nestimating the amount of ﬁnite natural resources.\nHowever, it is hardly feasible to receive independent opinions\nin society, because people are embedded in social networks and\ntypically inﬂuence each other to a certain extent. It is remarkable\nhow little social in ﬂuence is required to produce herding be-\nhavior and negative side effects for the mechanism underlying\nthe wisdom of crowds. In our experiment, we provided just the\nbare information of the estimates of others (in a similar way as\nthe previous stock price is known to traders trying to make\nmoney with their estimates of the fundamental value of a stock).\nWe did not allow for group leader effects, persuasion, or any\nother kind of social psychological in ﬂuence. We just provided\nnoncompetitive monetary incentives for the estimation of correct\nvalues. These incentives were designed such that the information\nof others could just be used to update the own knowledge. There\nwas no premium to coordinate with others ’opinions.\nOur experimental results show that social in ﬂuence triggers\nthe convergence of individual estimates and substantially reduces\nthe diversity of the group without improving its accuracy. The\nremaining diversity is often so small that the correct value shifts\nfrom the center to outer regions of the range of estimates. Thus,\nwhen taking committee decisions or following the advise of an\nexpert group that was exposed to social in ﬂuence, their opinions\nmay result in a set of predictions that does not even enclose the\ncorrect value anymore. From the perspective of decision-makers,\nsuch advice may be thoroughly misleading, because closely re-\nlated, seemingly independent advice may pretend certainty de-\nspite substantial deviations from the correct solution.\nPsychologically, however, the convergence of estimates sig-\nniﬁcantly boosts individuals ’ conﬁdence. This con ﬁdence gain\nhappens despite a lack of improvements, giving evidence for\na psychological trap whereby individuals are led into the false\nbelief of collective accuracy as a result of their convergence.\nNevertheless, the statistical effects of undermining are less se-\nvere for easier questions and if individuals are more con ﬁdent in\ntheir answers ( SI Appendix ). This gives weight to the conclusion\nthat the negative effects of social in ﬂuence occur especially in\na certain range of question dif ﬁculty and individuals ’conﬁdence,\na conjecture that should be explored in follow-up studies.\nOur results underpin the value of collecting individuals ’esti-\nmates in the absence of social in ﬂuence. However, in democratic\nsocieties, it is dif ﬁcult to accomplish such a collection of in-",
+        "content_sha256": "10d6e61835ae38ecc32c345b6c18f5d4259ef40874694d12f60c4dd6162e160f",
+        "locator": "lines 436-545",
+        "source_id": "papers/text/lorenz-et-al-2011-social-influence.txt",
+        "truncated": true
+      },
+      "result_ids": [
+        "papers/text/lorenz-et-al-2011-social-influence.txt"
+      ],
+      "result_sha256": "4025d2a0d23190847a424ade31a3ed8b695961c67619835da277352b1f2671cc",
+      "sequence": 7,
+      "tool": "read_source"
+    },
+    {
+      "arguments": {
+        "line_count": 85,
+        "source_id": "papers/text/lorenz-et-al-2011-social-influence.txt",
+        "start_line": 545
+      },
+      "result": {
+        "content": "societies, it is dif ﬁcult to accomplish such a collection of in-\ndependent estimates, because the loss of diversity in estimates\nappears to be a necessary byproduct of transparent decision-making\nprocesses. For example, opinion polls and the mass media largely\npromote information feedback and therefore trigger conver-\ngence of how we judge the facts. The wisdom of crowd effect is\nvaluable for society, but using it multiple times creates collective\noverconﬁdence in possibly false beliefs.\nPresumably, herding is even more pronounced for opinions or\nattitudes for which no prede ﬁned correct answers exist. For ex-\nample, prospective research may investigate herding and con-\nsensus formation on predictions of climate change or election\noutcomes. However, long-term predictions may have short-term\nconsequences on the system itself: pessimistic predictions for\nclimate change may entail international political consequences,\nor election polls may change the popularity of parties that have\nbeen exposed as those with the least support. These feedback\nloops hinder the disentanglement of herding behavior from the\nwisdom of crowds.\nMaterials and Methods\nKnowledge Questions, Payment Rules, and Data Structure. The following\nquestions were used:\n1. What is the population density in Switzerland in inhabitants per\nsquare kilometer?\n2. What is the length of the border between Switzerland and Italy\nin kilometers?\n3. How many more inhabitants did Zurich gain in 2006?\n4. How many murders were of ﬁcially registered in Switzerland in 2006?\n5. How many rapes were of ﬁcially registered in Switzerland in 2006?\n6. How many assaults were of ﬁcially registered in Switzerland in 2006?\nAll questions imply nonnegative or positive numbers as answers. Note that\nquestion 3 may have also allowed a negative gain of inhabitants, but the\nquestion was phrased such that it implied a gain and not a loss. Furthermore,\nentering negative numbers was not supported by our program.\nSubjects received monetary payments in Swiss Francs (CHF) for each good\nestimate, taking the distance between the estimate and the true value into\naccount. Three different intervals for monetary payments were used: 0% to\n10% deviation (1.40 CHF), 11% to 20% deviation (0.70 CHF), and 21% to 40%\ndeviation (0.35 CHF). Estimates that were more than 40% away from the true\nvalue were not ﬁnancially rewarded. Rewards were communicated in ex-\nperimental points and paid in CHF without requiring a signature after\nthe experiment.\nOur data ( Dataset S1) comprise 12 groups in which 12 subjects responded\nﬁve times to six knowledge questions in separate cubicles. Two questions\nwere posed in the control, two in the aggregated, and two in the full in-\nformation treatment. Thus, for each treatment, we had 24 groups: four\ngroups for each of the six questions. The order of the questions and treat-\nments was randomized among the experimental sessions.\nTen values were removed from the statistical analysis of the data set. Five\nof them were dramatic outliers from the same person in the same run. They\nwere 1,000 times larger than the second largest estimate; thus, the subject\nseemed to have confused meters and kilometers. Four estimates were\ndetected as “fun moves. ” The “fun” under the aggregate information\n9024 | www.pnas.org/cgi/doi/10.1073/pnas.1008636108 Lorenz et al.\n\n===== PDF PAGE 6 =====\n\ncondition was to make an incredibly large estimate to test how much the\nmean of the group would increase. Analogously, under the full information\ncondition, the fun was to make incredibly high guesses to produce steep\nlines. The latter fun moves did not affect the rest of the information because\nthere was always also a list of estimates from the previous round. One zero\nestimate was removed only when logarithmic data were used for compu-\ntational reasons.\nMeasures. For a set of estimates x1, ... , xn and the true value, we took the\nfollowing measures to quantify the impact of social in ﬂuence on the wisdom\nof crowds effect: The mean is denoted by /C22x ¼ 1\nn\nXn\ni¼1 xi . The collective error is\nthe squared deviation of the average from the truth ðtruth −/C22xÞ2 , the group\ndiversity is the variance of estimates (average of squared deviations from the\naverage) 1\nn\nXn\ni¼1 ðxi −/C22xÞ2 . The diversity prediction theorem (see ref. 9, p. 211,\nand ref. 35) states that collective error plus group diversity equals the av-\nerage individual error, which is the average of the squared deviations from\nthe truth\n/C18 1\nn\nXn\ni¼1 ðtruth − xi Þ2\n/C19\n. The proof is elementary. The collective er-",
+        "content_sha256": "10d6e61835ae38ecc32c345b6c18f5d4259ef40874694d12f60c4dd6162e160f",
+        "locator": "lines 545-629",
+        "source_id": "papers/text/lorenz-et-al-2011-social-influence.txt",
+        "truncated": true
+      },
+      "result_ids": [
+        "papers/text/lorenz-et-al-2011-social-influence.txt"
+      ],
+      "result_sha256": "9cb6bf3e63dfb90229020abb20b890e77842410611ba9414597f841f48579114",
+      "sequence": 8,
+      "tool": "read_source"
+    },
+    {
+      "arguments": {
+        "entry_id": "question:demand:D3"
+      },
+      "result": {
+        "content": {
+          "acceptance_condition": "Establish demand D3 with evidence.",
+          "answer_ids": [],
+          "content_sha256": "efbea2e0fa84ab48c5adb2fb1364b78167e1d4ed21107fd22013c788d75ac58a",
+          "demand_ids": [
+            "D3"
+          ],
+          "id": "question:demand:D3",
+          "node_id": null,
+          "rationale": "The model must expose variables and pathways that can be tested.",
+          "tags": [
+            "evidence"
+          ],
+          "text": "Construct an explicit causal model connecting initial error correlation, evidence diversity, social influence or conformity, retrieval selectivity, synthesis competence, and task topology."
+        },
+        "id": "question:demand:D3",
+        "incoming_links": [
+          {
+            "content_sha256": "280d9983dcd9ca8734ec6c01d8418c8d5d72c1698789fbfd330dc69a4e122e2d",
+            "id": "link:280d9983dcd9ca8734ec6c01",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "refines",
+            "source_id": "question:work:001-inv-lorenz-influence",
+            "target_id": "question:demand:D3"
+          },
+          {
+            "content_sha256": "405fe8cbac17f661a6dff775fc19621528c5b5f265d2326b38ceaf27b52b29e5",
+            "id": "link:405fe8cbac17f661a6dff775",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "refines",
+            "source_id": "question:work:001-inv-formal-tools",
+            "target_id": "question:demand:D3"
+          },
+          {
+            "content_sha256": "7ddf0fb952788e828bd51fac45091053c0a0a0733fdfb88f0e8f33afde76a5c1",
+            "id": "link:7ddf0fb952788e828bd51fac",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "refines",
+            "source_id": "question:work:001-inv-choi-conformity",
+            "target_id": "question:demand:D3"
+          },
+          {
+            "content_sha256": "99329ddb49b2a45de390dfda7ce368956bebc8d1e6a7907849c547f692c3bc92",
+            "id": "link:99329ddb49b2a45de390dfda",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "refines",
+            "source_id": "question:work:001-inv-zhang-when",
+            "target_id": "question:demand:D3"
+          }
+        ],
+        "kind": "question",
+        "outgoing_links": [
+          {
+            "content_sha256": "6b2280746888e8832e699d824242f0c3465b00d4b3f73fb8e447426aaa089956",
+            "id": "link:6b2280746888e8832e699d82",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "refines",
+            "source_id": "question:demand:D3",
+            "target_id": "question:root"
+          }
+        ]
+      },
+      "result_ids": [
+        "question:demand:D3"
+      ],
+      "result_sha256": "8baaf5d8bb9302776314a53e0be9018c55154e39fd29ffd80b7a439d378e36de",
+      "sequence": 9,
+      "tool": "get_entry"
+    }
+  ],
+  "snapshot_sha256": "64f22e4def6506758f4d42d87a55f95161e7997884433c26ab3a759c4a839292"
+}

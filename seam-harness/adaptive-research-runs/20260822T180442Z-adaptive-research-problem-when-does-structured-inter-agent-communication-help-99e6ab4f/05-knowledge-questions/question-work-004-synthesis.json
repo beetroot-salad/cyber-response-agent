@@ -1,0 +1,21 @@
+{
+  "acceptance_condition": "Produces a synthesis answer that: (a) states one mechanistic thesis naming the conditions under which staged retrieval-mediated Q/A wins or loses at matched compute; (b) reconciles all three empirical poles with explicit page-marked citations inherited from the source answers, including the Smit contradicts Du link; (c) draws the six-variable causal model with per-edge epistemic status; (d) lists rz1, rz2, rq1, rq-choi-1, and rq-shapiro-merge as open identification gaps carried forward to D5/D6/D7 rather than treating them as resolved; (e) distinguishes reported findings, cross-paper inference, and new hypothesis throughout.",
+  "content_sha256": "2cab6d3012f11bcf47b5945da5aa40d77d7ff248e27a973beef3f44b44c28a68",
+  "demand_ids": [
+    "D2",
+    "D3",
+    "D4",
+    "D5",
+    "D6",
+    "D7",
+    "D8"
+  ],
+  "id": "question:work:004-synthesis",
+  "node_id": "work:004-synthesis",
+  "rationale": "The evidence base is complete and mutually contradictory exactly as the dossier intends: Du shows debate > majority but never matches compute; Zhang shows the ordering collapses against CoT/SC at matched ~6-call budgets yet replicates MAD > SA and shows model heterogeneity helps every framework; Smit shows the effect is hyperparameter- and dataset-contingent with sign flips (high agreement helps MedQA/PubMedQA, hurts counter-intuitive CIAR); Lorenz and Choi supply the conformity pathway from two sides (bare-answer sufficiency in humans; rationale-accompanied, capability-dominated persuasion in LLMs); Dung and Shapiro show that adjudication and merging are truth-neutral and that stochastic LLM synthesis violates CRDT convergence conditions. Only an integrative step can convert these into the single mechanistic thesis and causal model that D2/D3 demand and that D5 predictions and the D7 experiment must derive from.",
+  "tags": [
+    "synthesis",
+    "evidence"
+  ],
+  "text": "Integrate the seven corpus answers into (1) a reconciled evidence map that explains, without discarding any finding, how Du 2023's debate gains, Smit 2023's null and dataset-dependent agreement effects, and Zhang 2025's matched-compute self-consistency dominance plus heterogeneity gains can all be true at once; (2) one explicit mechanistic thesis for when staged retrieval-mediated question/answer communication beats both independent sampling plus final aggregation and an open shared transcript under matched total inference compute; and (3) an explicit causal model over initial error correlation, evidence diversity, social influence/conformity, retrieval selectivity, synthesis competence, and task topology, with each edge labeled as corpus-evidenced, cross-paper inference, or non-identified (mapping rz1, rz2, rq1, rq-choi-1, and rq-shapiro-merge onto the specific edges they leave open)."
+}

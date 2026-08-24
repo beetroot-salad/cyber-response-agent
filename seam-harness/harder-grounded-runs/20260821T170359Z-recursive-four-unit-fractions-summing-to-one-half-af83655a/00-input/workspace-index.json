@@ -1,0 +1,11 @@
+{
+  "files": [
+    {
+      "content_sha256": "8a2c8cc8ad27bf7facaf09f40cbe5c70b3a904330084e0be4ec37e5f9fc92a03",
+      "path": "certificate.json",
+      "size_bytes": 15769
+    }
+  ],
+  "index_sha256": "59d241132e275e9b7180fb6f8fc3cf24b08772732fa0792ac655784df14ca3b5",
+  "root": "/workspace/seam-harness/harder-workspace"
+}

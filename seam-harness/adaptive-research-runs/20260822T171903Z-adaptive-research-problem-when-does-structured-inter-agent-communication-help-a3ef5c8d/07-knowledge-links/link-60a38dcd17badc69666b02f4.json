@@ -1,0 +1,10 @@
+{
+  "content_sha256": "60a38dcd17badc69666b02f461777ae172369679b75b4a32d0e9aef3ef870181",
+  "id": "link:60a38dcd17badc69666b02f4",
+  "origin": "runtime",
+  "proposed_by_node_id": null,
+  "rationale": null,
+  "relation": "depends_on",
+  "source_id": "question:work:003-synthesis",
+  "target_id": "question:demand:D3"
+}

@@ -1,0 +1,22 @@
+{
+  "acceptance_condition": "Satisfy every assigned whole-task demand and explicit constraint.",
+  "content_sha256": "2f43eadff5e257919f0790d9624b190d3d600485a38a429a6f7e334ec116c20f",
+  "demand_ids": [
+    "D1",
+    "D2",
+    "D3",
+    "D4",
+    "D5",
+    "D6",
+    "D7",
+    "D8"
+  ],
+  "id": "question:root",
+  "node_id": "root",
+  "rationale": "The whole task submitted after intake.",
+  "tags": [
+    "counterexample",
+    "risk"
+  ],
+  "text": "Write a 2,000–2,600 word research note that develops and defends a new mechanistic answer to this question: under a matched inference-compute budget, when should staged, retrieval-mediated question/answer communication among language-model agents outperform both independent sampling with final aggregation and an open shared transcript? Use the supplied seven-paper corpus as evidence, but do not merely survey it. Reconcile its conflicting empirical findings; formulate an explicit causal model of information diversity, social influence, retrieval, and synthesis; derive at least four discriminating predictions that separate your mechanism from plausible alternatives; identify what the existing literature cannot identify; and give a preregisterable experiment with conditions, randomization, estimands, power-analysis inputs, failure criteria, and an analysis plan. End with the strongest warranted conclusion and the observation most likely to falsify it."
+}

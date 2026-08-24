@@ -1,0 +1,98 @@
+{
+  "account": "Wave 1 produced only two usable answers (Du et al. 2023 — the positive pole, and Lorenz et al. 2011 — the human diversity-collapse mechanism). The other four investigations (Smit null/critical reappraisal, Zhang 2025 matched-compute negative results, Choi 2025 conformity dynamics, and the Dung/Shapiro formal tools) are sufficiency='blocked' with zero claims due to a runtime failure ('Exceeded maximum output retries'), not due to missing evidence — I verified via source search that the Smit and Zhang files are fully readable and contain exactly the needed results (accuracy-vs-cost tables, MAD-vs-CoT win rates under 20%, heterogeneity findings). Synthesis is impossible and would violate constraints: without Smit and Zhang there is no conflicting evidence to reconcile for D4, and building the note on Du alone would silently select the preferred positive outcome. Without Choi, the conformity pathway of the D3 causal model and raised question rq1 (answer-only vs rationale exposure) are ungrounded. The highest-information bounded action is a retry wave: re-run the four blocked extractions with tightened scopes and explicit claim caps (the likely cause of the retry overflow was oversized output), splitting the combined two-paper formal investigation into two smaller single-paper investigations (5 total, within the 6-investigation limit). All five read disjoint files and can complete without any peer result, so they form a valid frozen parallel wave. rq1 and D2/D5-D8 are deliberately deferred: they depend on this evidence and will be addressed by synthesis once the wave lands.",
+  "action": {
+    "investigations": [
+      {
+        "acceptance_condition": "A compact answer (<=8 claims) covering: debate variants and tasks tested; baselines and how cost/compute was measured (USD, API calls); where MAD did not help or hurt relative to single-agent CoT/self-consistency/Medprompt; the hyperparameter-sensitivity (K-fold) finding; the paper's stated explanation of when debate helps; stated limitations; every claim tagged with an explicit `===== PDF PAGE N =====` marker.",
+        "demand_ids": [
+          "D4"
+        ],
+        "independence_account": "Reads only papers/text/smit-et-al-2023-going-mad.txt; its result does not depend on any other investigation in this wave.",
+        "local_id": "inv-smit-mad-r2",
+        "question": "What exactly does Smit et al. 2023 (papers/text/smit-et-al-2023-going-mad.txt) find when benchmarking multi-agent debate (MAD): which debate variants (ChatEval, Society of Mind, Ensemble Refinement, Multi-Persona, etc.) and tasks (MedQA, PubMedQA, MMLU, CosmosQA, CIAR, GPQA, chess) were tested; which single-agent baselines (CoT, self-consistency, Medprompt) were used and how cost/API-calls were measured; where MAD failed to beat or underperformed those baselines; the K-fold hyperparameter-sensitivity analysis; the debate-vs-first-answer improvement measurements; and the paper's own account of when debate helps (e.g., agreement modulation). Keep the answer compact: at most 8 claims, each with a `===== PDF PAGE N =====` marker.",
+        "rationale": "This is the principal null/adverse evidence against debate and the direct counterweight to Du et al. 2023; without it D4's reconciliation requirement cannot be met and the note would silently select the positive outcome. Retry with a claim cap because the wave-1 attempt failed on output retries, and the source (verified accessible) contains per-configuration accuracy/cost tables, the K-fold analysis, and the SoM agreement-modulation strategy.",
+        "tags": [
+          "evidence",
+          "counterexample"
+        ],
+        "target_question_ids": [
+          "question:work:001-inv-smit-mad"
+        ]
+      },
+      {
+        "acceptance_condition": "A compact answer (<=8 claims) covering: evaluation design; MAD-vs-CoT and MAD-vs-self-consistency results including the comparable-compute comparison; agent/round scaling results; efficiency; the heterogeneity finding; robustness; positioning vs Du 2023/Smit 2024; each claim with an explicit `===== PDF PAGE N =====` marker.",
+        "demand_ids": [
+          "D4",
+          "D3"
+        ],
+        "independence_account": "Reads only papers/text/zhang-et-al-2025-mad-question.txt; its result does not depend on any other investigation in this wave.",
+        "local_id": "inv-zhang-when-r2",
+        "question": "What does Zhang et al. 2025 (papers/text/zhang-et-al-2025-mad-question.txt, 'If Multi-Agent Debate Is the Answer, What Is the Question?') establish: the 5 MAD methods x 9 benchmarks x 4 models design; the headline negative result that MAD methods rarely beat CoT (win rates under 20% across 36 scenarios) and underperform self-consistency at comparable LLM-call/token budgets; the hyperparameter experiments (agents 3-9, rounds 2-4) showing stagnation/decline; efficiency findings on inference-budget utilization; the model-heterogeneity result as a 'universal antidote'; robustness findings; and how the paper positions itself against Du et al. 2023 and Smit et al. Keep the answer compact: at most 8 claims, each with a `===== PDF PAGE N =====` marker.",
+        "rationale": "Zhang et al. is the decisive matched-compute evidence (MAD vs self-consistency at comparable calls/tokens) and the source of the heterogeneity moderation, both essential to the causal model (D3) and to reconciling Du's positive results (D4). Retry with a claim cap because the wave-1 attempt failed on output retries; the source is verified accessible with the negative win-rate results and the heterogeneity antidote clearly present.",
+        "tags": [
+          "evidence",
+          "counterexample"
+        ],
+        "target_question_ids": [
+          "question:work:001-inv-zhang-when"
+        ]
+      },
+      {
+        "acceptance_condition": "A compact answer (<=8 claims) covering: simulation design; main quantitative conformity/majority findings; intelligence-disparity findings; quality-vs-quantity of persuasion; any evidence distinguishing answer-only vs rationale-mediated influence; each claim with an explicit `===== PDF PAGE N =====` marker.",
+        "demand_ids": [
+          "D4",
+          "D3"
+        ],
+        "independence_account": "Reads only papers/text/choi-et-al-2025-conformity.txt; its result does not depend on any other investigation in this wave.",
+        "local_id": "inv-choi-r2",
+        "question": "What does Choi et al. 2025 (papers/text/choi-et-al-2025-conformity.txt) show about conformity in LLM multi-agent debate: the simulation design (proponent/opponent/neutral agents, majority vs minority sizes, intelligence levels, topics); quantitative findings on majority effects and intelligence disparities; whether persuasion quality vs quantity of arguments matters; and anything the paper shows about whether agents shift in response to bare answers versus reasoned arguments (relevant to raised question rq1). Keep the answer compact: at most 8 claims, each with a `===== PDF PAGE N =====` marker.",
+        "rationale": "Choi et al. grounds the social-influence/conformity pathway of the causal model (D3) in LLM populations and bears directly on rq1 (whether diversity collapse needs rationales or mere answer exposure), which shapes the D5 predictions. Retry with a claim cap because the wave-1 attempt failed on output retries.",
+        "tags": [
+          "evidence",
+          "uncertainty"
+        ],
+        "target_question_ids": [
+          "question:work:001-inv-choi-conformity"
+        ]
+      },
+      {
+        "acceptance_condition": "A compact answer (<=6 claims) defining argumentation framework, attack, admissibility, and the grounded/preferred/stable extensions with their existence/uniqueness guarantees, plus an explicit note on what the framework cannot represent; each claim with an explicit `===== PDF PAGE N =====` marker.",
+        "demand_ids": [
+          "D3",
+          "D4"
+        ],
+        "independence_account": "Reads only papers/text/dung-1995-argumentation.txt; disjoint from the Shapiro probe and all others in this wave.",
+        "local_id": "inv-dung-r2",
+        "question": "From Dung 1995 (papers/text/dung-1995-argumentation.txt) only: extract the formal machinery relevant to adjudicating conflicting agent answers — argumentation frameworks, attack relations, conflict-free/admissible sets, and the grounded/preferred/stable extensions with what each guarantees about justified conclusions — and state explicitly what the framework does NOT model (evidential weight, truth, probabilistic confidence). Keep the answer compact: at most 6 claims, each with a `===== PDF PAGE N =====` marker.",
+        "rationale": "Dung provides the formal semantics for when a synthesized conclusion is justified under conflict — the 'synthesis competence' node of the D3 causal model. The wave-1 combined Dung+Shapiro investigation likely failed because two papers in one packet produced an oversized output; this single-paper split halves the scope.",
+        "tags": [
+          "definition",
+          "method"
+        ],
+        "target_question_ids": [
+          "question:work:001-inv-formal-tools"
+        ]
+      },
+      {
+        "acceptance_condition": "A compact answer (<=6 claims) defining CRDTs, strong eventual consistency, commutativity/idempotence conditions, and stating the guarantees and their truth-neutrality limits; each claim with an explicit `===== PDF PAGE N =====` marker.",
+        "demand_ids": [
+          "D3",
+          "D4"
+        ],
+        "independence_account": "Reads only papers/text/shapiro-et-al-2011-crdts.txt; disjoint from the Dung probe and all others in this wave.",
+        "local_id": "inv-shapiro-r2",
+        "question": "From Shapiro et al. 2011 (papers/text/shapiro-et-al-2011-crdts.txt) only: extract the formal machinery relevant to merging concurrent agent contributions without central coordination — CRDTs, strong eventual consistency, commutativity/idempotence, state- vs operation-based replication, and what these guarantees do and do not say about correctness or truth of merged content. Keep the answer compact: at most 6 claims, each with a `===== PDF PAGE N =====` marker.",
+        "rationale": "Shapiro's CRDT results formalize the merge/aggregation stage that both independent-sampling-plus-aggregation and staged Q/A must perform, and its explicit truth-neutrality supports the note's constraint that agreement/merge success is not evidence of correctness. Split from the wave-1 combined packet to avoid the output-retry failure.",
+        "tags": [
+          "definition",
+          "method"
+        ],
+        "target_question_ids": [
+          "question:work:001-inv-formal-tools"
+        ]
+      }
+    ],
+    "kind": "investigate",
+    "wave_rationale": "All five investigations are re-runs (or splits) of wave-1 investigations that failed with a runtime output-retry error before producing any evidence; the underlying sources are verified accessible and content-rich. They read five disjoint files (Smit, Zhang, Choi, Dung, Shapiro), each with a tightened scope and an explicit claim cap (6-8 claims) to prevent recurrence of the oversized-output failure, and none depends on any peer's result, so they can run as one frozen parallel wave. Together they complete the seven-paper evidentiary base required before any synthesis toward D2-D8 is defensible."
+  }
+}

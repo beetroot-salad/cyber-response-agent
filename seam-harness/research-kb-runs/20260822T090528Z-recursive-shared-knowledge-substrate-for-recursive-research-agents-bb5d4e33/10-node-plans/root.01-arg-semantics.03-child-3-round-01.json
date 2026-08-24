@@ -1,0 +1,22 @@
+{
+  "account": "This node is a derivation node whose purpose is to produce at least three design constraints explicitly labeled as 'design inference', grounded in the definitions already extracted by sibling nodes. The Dung source text is fully present in the workspace, and all core definitions (argumentation framework, acceptability, conflict-free, admissible, and semantics) are available in the provided dossier. The acceptance condition is mechanical: produce three or more design constraints with concrete edge types and semantics, each labeled as design inference, and not as source claims. No additional evidence or sibling output is required; the node can independently reason from the supplied definitions.",
+  "children": [],
+  "decidability": {
+    "acceptance_mechanical": true,
+    "account": "All required Dung definitions are quoted or paraphrased from the source file with page markers, so the node can ground its design inferences without further evidence retrieval. The three required design constraints can be fully specified from these definitions plus general graph-modeling reasoning. The acceptance test (labeled design inferences, concrete edge types and semantics) is mechanical and checkable without future sibling output.",
+    "context_complete": true,
+    "grounded_referents": [
+      "argumentation framework as a pair (AR, attacks) with attacks a binary relation (Dung PDF page 6)",
+      "acceptability: an argument A is acceptable w.r.t. S iff every attack on A is attacked by S (Dung PDF page 6)",
+      "conflict-free: no two arguments in S attack each other (Dung PDF page 6)",
+      "admissible: conflict-free and every argument in S is acceptable w.r.t. S (Dung PDF page 6)"
+    ],
+    "independent_of_future_siblings": true,
+    "missing_context": []
+  },
+  "disposition": "solve",
+  "irreducible_core": null,
+  "requested_source_ids": [],
+  "requested_source_paths": [],
+  "synthesis_contract": null
+}

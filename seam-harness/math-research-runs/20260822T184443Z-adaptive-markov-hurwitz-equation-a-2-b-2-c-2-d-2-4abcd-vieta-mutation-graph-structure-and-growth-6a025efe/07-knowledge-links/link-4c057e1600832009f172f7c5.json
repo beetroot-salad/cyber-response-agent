@@ -1,0 +1,10 @@
+{
+  "content_sha256": "4c057e1600832009f172f7c52a404501c345687d4aad95bca4587bd53d049f25",
+  "id": "link:4c057e1600832009f172f7c5",
+  "origin": "runtime",
+  "proposed_by_node_id": null,
+  "rationale": null,
+  "relation": "refines",
+  "source_id": "question:work:003-lower-bound-v2",
+  "target_id": "question:work:001-lower-bound"
+}
