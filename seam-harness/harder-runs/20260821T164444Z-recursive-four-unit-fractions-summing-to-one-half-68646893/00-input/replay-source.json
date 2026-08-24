@@ -1,0 +1,16 @@
+{
+  "packet_ids": [
+    "packet:root.01-theory-bounds-lemma",
+    "packet:root.02-table-divisor-method",
+    "packet:root.04-completeness-audit",
+    "packet:root.03-table-direct-scan.01-scan-x3",
+    "packet:root.03-table-direct-scan.02-scan-x4-x5",
+    "packet:root.03-table-direct-scan.04-crosscheck-bound-formula",
+    "packet:root.03-table-direct-scan.03-scan-x6-x7-x8.01-x6",
+    "packet:root.03-table-direct-scan.03-scan-x6-x7-x8.02-x7",
+    "packet:root.03-table-direct-scan.03-scan-x6-x7-x8.03-x8",
+    "packet:root.03-table-direct-scan.03-scan-x6-x7-x8"
+  ],
+  "root_plan_sha256": "e94b480571b9fb85258b93349bfcf6aaae9b0eccc8bbb94c86373bc2c7cc3523",
+  "source_run": "/workspace/seam-harness/harder-runs/20260821T163822Z-recursive-four-unit-fractions-summing-to-one-half-088ad5ee"
+}

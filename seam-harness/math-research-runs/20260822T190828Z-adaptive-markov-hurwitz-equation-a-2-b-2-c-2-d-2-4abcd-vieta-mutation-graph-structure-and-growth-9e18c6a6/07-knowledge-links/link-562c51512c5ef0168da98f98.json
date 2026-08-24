@@ -1,0 +1,10 @@
+{
+  "content_sha256": "562c51512c5ef0168da98f9839344cfc3140364116b4293264eef5d0732a80cb",
+  "id": "link:562c51512c5ef0168da98f98",
+  "origin": "runtime",
+  "proposed_by_node_id": null,
+  "rationale": null,
+  "relation": "refines",
+  "source_id": "question:work:001-struct-core",
+  "target_id": "question:demand:D1"
+}

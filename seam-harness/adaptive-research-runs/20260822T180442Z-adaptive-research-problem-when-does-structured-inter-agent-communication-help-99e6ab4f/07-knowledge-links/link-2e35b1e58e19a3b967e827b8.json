@@ -1,0 +1,10 @@
+{
+  "content_sha256": "2e35b1e58e19a3b967e827b88a998776ad5d6ae9b0e6bb2a924ba149cc435ce6",
+  "id": "link:2e35b1e58e19a3b967e827b8",
+  "origin": "runtime",
+  "proposed_by_node_id": null,
+  "rationale": null,
+  "relation": "partially_answers",
+  "source_id": "answer:work:002-inv-smit-mad-r2",
+  "target_id": "question:demand:D4"
+}

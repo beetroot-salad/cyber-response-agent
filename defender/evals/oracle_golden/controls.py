@@ -39,13 +39,15 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from defender.scripts.adapters.elastic_adapter import esql_payload  # noqa: E402
+# `split_commands` is a RE-EXPORT: `validate_cases` and `test_controls` reach it through the
+# CONTROLS module namespace, which is the interface it has always had. The splitter moved to
+# `esql_text` so the turn-N corpus stager could share it rather than grow the second copy this
+# module's own docstring warns about. The suppression has to sit on the imported NAME — ruff
+# attaches a `noqa` to the line carrying the diagnostic, so one on a comment line of its own
+# suppresses nothing and would leave the re-export failing F401 the day it is tidied.
 from defender.scripts.adapters.esql_text import (  # noqa: E402
-    separator_offsets,
-    # noqa: F401 — re-export: `validate_cases` and `test_controls` reach this through the
-    # CONTROLS module namespace, which is the interface it has always had. The splitter moved
-    # to `esql_text` so the turn-N corpus stager could share it rather than grow the second
-    # copy this module's own docstring warns about.
     split_commands,  # noqa: F401
+    split_first_command,
 )
 
 ES_SH = REPO_ROOT / "infra" / "bin" / "es.sh"
@@ -213,14 +215,14 @@ def add_esql_window(query: str, start: datetime, end: datetime) -> str:
               f'AND @timestamp < "{format_iso(end)}"')
     # Everything after the first separator is put back VERBATIM, separator included:
     # the clause is the only thing this may add, and re-joining parsed commands would
-    # let it reformat a predicate it has no business touching. The offset comes from
-    # `separator_offsets` rather than `partition`, so a `|` inside a string literal in
-    # the source command is not mistaken for the end of it.
-    offsets = separator_offsets(query)
-    if not offsets:
-        return f"{query.rstrip()}\n{clause}"
-    cut = offsets[0]
-    return f"{query[:cut].rstrip()}\n{clause}\n{query[cut:]}"
+    # let it reformat a predicate it has no business touching. The cut comes from
+    # `split_first_command` rather than `partition`, so a `|` inside a string literal in
+    # the source command is not mistaken for the end of it — and from THAT helper rather
+    # than from `separator_offsets[0]` re-sliced here, because "the source command and
+    # everything after it" is one boundary rule and `esql_text` exists so it has one home.
+    head, tail = split_first_command(query)
+    placed = f"{head.rstrip()}\n{clause}"
+    return f"{placed}\n{tail}" if tail else placed
 
 
 def shape_matched_windows(start: datetime, end: datetime,

@@ -1,0 +1,11 @@
+{
+  "child_ids": [],
+  "depth": 2,
+  "effective_disposition": "solve",
+  "node_id": "root.05-debate-nulls-boundaries.03-c3-design-inferences",
+  "packet_id": "packet:root.05-debate-nulls-boundaries.03-c3-design-inferences",
+  "packet_sha256": "d1c06c3b4c40383921d5b445cf228cbae887254a8d14fb16e70ef68ba35dcb0d",
+  "parent_id": "root.05-debate-nulls-boundaries",
+  "proposed_disposition": "solve",
+  "stop_reason": null
+}

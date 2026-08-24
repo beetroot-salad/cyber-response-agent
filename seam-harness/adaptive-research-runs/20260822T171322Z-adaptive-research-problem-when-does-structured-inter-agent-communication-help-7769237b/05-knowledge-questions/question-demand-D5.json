@@ -1,0 +1,14 @@
+{
+  "acceptance_condition": "Establish demand D5 with evidence.",
+  "content_sha256": "bf6a590ce69b3c9f06343ad4dea99cbc27caa40d60052788e26a5a310434c701",
+  "demand_ids": [
+    "D5"
+  ],
+  "id": "question:demand:D5",
+  "node_id": null,
+  "rationale": "Predictions are the bridge from explanation to falsification.",
+  "tags": [
+    "evidence"
+  ],
+  "text": "Derive at least four directional or interaction predictions that discriminate the proposed mechanism from compute-only, diversity-only, and deliberation-only alternatives."
+}

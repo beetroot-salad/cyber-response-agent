@@ -1,0 +1,10 @@
+{
+  "content_sha256": "923dadec474adfee7d3bfc49310a35a706a48d9c0f291e05bd6c6f04d2bf2e01",
+  "id": "link:923dadec474adfee7d3bfc49",
+  "origin": "runtime",
+  "proposed_by_node_id": null,
+  "rationale": null,
+  "relation": "depends_on",
+  "source_id": "question:work:003-synthesis",
+  "target_id": "question:raised:92a7343df8a6:rq-shapiro-merge"
+}

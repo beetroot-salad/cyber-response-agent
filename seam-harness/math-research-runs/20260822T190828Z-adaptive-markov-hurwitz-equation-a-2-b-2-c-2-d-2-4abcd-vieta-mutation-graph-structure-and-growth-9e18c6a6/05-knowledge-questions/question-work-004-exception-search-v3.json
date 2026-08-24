@@ -1,0 +1,17 @@
+{
+  "acceptance_condition": "A labeled observation table within explicit bounds (d<=100; state the a,b,c sweep bound), the two methods compared, parent-edge checks d'=4abc-d for every listed non-root vertex, and explicit statements on (b),(c),(d),(f); everything labeled OBSERVATION; under 500 words.",
+  "content_sha256": "a0886c4429bb955e359eb70ce5dbf9a21a748527c0d6d80dc5a6eed492d72339",
+  "demand_ids": [
+    "D7",
+    "D9"
+  ],
+  "id": "question:work:004-exception-search-v3",
+  "node_id": "work:004-exception-search-v3",
+  "rationale": "D7/D9 failed twice on output length; shrinking the direct-search bound (c<=20, d<=100) and capping at 500 words makes completion feasible while still cross-validating the proved D1-D3 within the bound and satisfying D9's reproducibility requirement.",
+  "tags": [
+    "evidence",
+    "counterexample",
+    "measurement"
+  ],
+  "text": "D7+D9: Bounded hand-checkable enumeration, LABELED OBSERVATIONS ONLY. HARD CAP 500 words. Procedure (state explicitly for reproducibility): Method 1 (direct): for all sorted 1<=a<=b<=c<=20, test whether t^2-4abc*t+(a^2+b^2+c^2)=0 has an integer root d>=c with d<=100, using d | a^2+b^2+c^2 and d+d'=4abc to prune; list every hit. Method 2 (BFS from (1,1,1,1)): mutate all coordinates, re-sort, discard d>100; list the tree. Expected (verify each by one-line substitution, e.g. 1+1+9+121=132=4*33): vertices (1,1,1,1), (1,1,1,3), (1,1,3,11), (1,1,11,41); check whether (1,1,11,41)'s children (mutate 11: 4*41-11=153>100; mutate a=1: 4*11*41-1=1803>100) and (1,3,11,131) all exceed 100, so BFS stops. Report: (a) verified table; (b) any c=d within bound? (expected none, consistent with proved L2); (c) any vertex with two height-decreasing mutations or two parents within the BFS tree? (expected none, consistent with proved D2/D3); (d) do Methods 1 and 2 agree exactly within d<=100? (any Method-1 solution unreachable from root would refute D1 — check and report); (e) for each non-root vertex compute d'=4abc-d and confirm 1<=d'<d exhibiting the parent edge; (f) report induction failure modes observed or state absence within the bound. Explicitly label everything as OBSERVATION valid only within d<=100, non-occurrences prove nothing beyond the bound. If the full Method-1 sweep is too long, do the a<=2 slice completely and label the truncation."
+}

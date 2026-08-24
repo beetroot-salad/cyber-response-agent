@@ -1,0 +1,86 @@
+{
+  "call_id": "call-0002-recursive-planner",
+  "context": {
+    "ancestor_decisions": [
+      "Problem statement: count quadruples of positive integers x ≤ y ≤ z ≤ w with 1/x + 1/y + 1/z + 1/w = 1/2.",
+      "The deliverable is a mathematical document (proof plus table), not a program; a reader must be able to audit and reproduce the count unaided.",
+      "A factor-pair / divisor-enumeration lemma for the final two denominators z and w is explicitly welcomed by the requester, but phrased as optional ('is welcome').",
+      "Problem statement: count quadruples of positive integers x <= y <= z <= w with 1/x + 1/y + 1/z + 1/w = 1/2.",
+      "Claimed bounds to verify: 3 <= x <= 8; y-intervals [7,18] for x=3, [5,12] for x=4, [5,10] for x=5, [6,9] for x=6, [7,8] for x=7, {8} for x=8; 33 feasible pairs total; z-interval max(y, floor(1/R)+1) <= z <= floor(2/R) where R = 1/2 - 1/x - 1/y."
+    ],
+    "assigned_demands": [
+      {
+        "id": "D2",
+        "rationale": "Completeness must be argued, not asserted; the request explicitly requires derived finite bounds.",
+        "statement": "Provide a self-contained rigorous proof that the count is complete, including derivation of finite bounds that confine the search space."
+      },
+      {
+        "id": "D4",
+        "rationale": "Stated verbatim in the request.",
+        "statement": "Use exact arithmetic throughout (no floating-point approximation or unverified numeric claims)."
+      },
+      {
+        "id": "D5",
+        "rationale": "Reproducibility/auditability is the stated acceptance bar for the proof and table.",
+        "statement": "Make the method detailed enough for a reader to reproduce the count without trusting a brute-force program; printing every quadruple is not required."
+      }
+    ],
+    "constraints": [
+      "Variables are positive integers with x ≤ y ≤ z ≤ w.",
+      "The equation must equal exactly 1/2.",
+      "The proof must be self-contained and must demonstrate completeness (via derived finite bounds), not cite or rely on an opaque computation.",
+      "Exact arithmetic only; no approximate numerical methods.",
+      "The table must cover every feasible pair (x,y), not just a sample."
+    ],
+    "expansion_required": false,
+    "max_children": 4,
+    "node": {
+      "acceptance_condition": "Every bound is proved from the equation and ordering x <= y <= z <= w alone; each y-interval endpoint is shown tight; the factor-pair lemma is proved in both directions including the congruence condition d congruent -b (mod a), the order correspondence d <= e iff z <= w, and the z >= y filter; the emitted skeleton contains exactly 33 (x,y) pairs with correct reduced residuals; exact integer/rational arithmetic only.",
+      "demand_ids": [
+        "D2",
+        "D4",
+        "D5"
+      ],
+      "depth": 1,
+      "expected_contribution": "A self-contained theoretical foundation: proved finite bounds, the proved divisor-enumeration bijection, and the verified 33-pair table skeleton with residuals and z-intervals.",
+      "id": "root.01-theory-bounds-lemma",
+      "objective": "From the problem statement alone, derive and rigorously prove the finite bounds that confine the search: (i) 3 <= x <= 8; (ii) the exact feasible y-interval per x (x=3: 7<=y<=18; x=4: 5<=y<=12; x=5: 5<=y<=10; x=6: 6<=y<=9; x=7: 7<=y<=8; x=8: y=8), proving each endpoint is tight; (iii) for each feasible (x,y) the reduced residual R = 1/2 - 1/x - 1/y = a/b in lowest terms and the finite z-interval max(y, floor(b/a)+1) <= z <= floor(2b/a). Then prove the factor-pair lemma: for reduced a/b, 1/z + 1/w = a/b with z <= w if and only if (a*z - b)(a*w - b) = b^2, yielding a bijection between solutions and factor pairs d*e = b^2 with d <= e and d congruent to -b mod a, with z = (d+b)/a and w = (e+b)/a, including the extra filter z >= y. Emit the complete table skeleton: all 33 feasible (x,y) pairs, each with its reduced residual a/b, the integer b^2, and its z-interval.",
+      "parent_id": "root",
+      "rationale": "Completeness (D2) and reproducibility (D5) require derived bounds and an explicit counting bijection; this child produces exactly that foundation and nothing else, so the parent can audit the skeleton independently of any computed counts.",
+      "separator_facts": [
+        "Problem statement: count quadruples of positive integers x ≤ y ≤ z ≤ w with 1/x + 1/y + 1/z + 1/w = 1/2.",
+        "The deliverable is a mathematical document (proof plus table), not a program; a reader must be able to audit and reproduce the count unaided.",
+        "A factor-pair / divisor-enumeration lemma for the final two denominators z and w is explicitly welcomed by the requester, but phrased as optional ('is welcome').",
+        "Problem statement: count quadruples of positive integers x <= y <= z <= w with 1/x + 1/y + 1/z + 1/w = 1/2.",
+        "Claimed bounds to verify: 3 <= x <= 8; y-intervals [7,18] for x=3, [5,12] for x=4, [5,10] for x=5, [6,9] for x=6, [7,8] for x=7, {8} for x=8; 33 feasible pairs total; z-interval max(y, floor(1/R)+1) <= z <= floor(2/R) where R = 1/2 - 1/x - 1/y."
+      ],
+      "source_ids": [
+        "request"
+      ],
+      "source_paths": []
+    },
+    "product_intent": "A self-contained, auditable mathematical enumeration document: it states the exact count and enables a reader to verify and reproduce that count by hand-checkable reasoning — derived finite bounds, exact arithmetic, and a complete table — without trusting a brute-force program.",
+    "remaining_depth": 2,
+    "remaining_node_budget": 19,
+    "source_materials": [
+      {
+        "content": "Determine the exact number of quadruples of positive integers\n\n\\[\nx \\le y \\le z \\le w\n\\]\n\nsatisfying\n\n\\[\n\\frac1x+\\frac1y+\\frac1z+\\frac1w=\\frac12.\n\\]\n\nGive a self-contained rigorous proof that the count is complete. Include an\nauditable table giving the number of solutions for every feasible pair\n\\((x,y)\\), together with row totals for each \\(x\\) and the grand total. Derive\nfinite bounds and use exact arithmetic throughout. A factor-pair or divisor\nenumeration lemma for the final two denominators is welcome. The final answer\nneed not print every quadruple, but its table and method must be detailed enough\nfor a reader to reproduce the count without trusting a brute-force program.\n\n",
+        "id": "request",
+        "kind": "natural_request",
+        "label": "Original task request",
+        "locator": null
+      }
+    ],
+    "stable_context": [
+      "Problem statement: count quadruples of positive integers x ≤ y ≤ z ≤ w with 1/x + 1/y + 1/z + 1/w = 1/2.",
+      "The deliverable is a mathematical document (proof plus table), not a program; a reader must be able to audit and reproduce the count unaided.",
+      "A factor-pair / divisor-enumeration lemma for the final two denominators z and w is explicitly welcomed by the requester, but phrased as optional ('is welcome')."
+    ],
+    "workspace_documents": [],
+    "workspace_index": []
+  },
+  "dependency_type": "PlanningDeps",
+  "input_sha256": "580fe74544e0762d300ed71a5aa6a6ac61866cc82f5c6d2aef10d8b2c7b79c58",
+  "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+  "role": "recursive_planner"
+}

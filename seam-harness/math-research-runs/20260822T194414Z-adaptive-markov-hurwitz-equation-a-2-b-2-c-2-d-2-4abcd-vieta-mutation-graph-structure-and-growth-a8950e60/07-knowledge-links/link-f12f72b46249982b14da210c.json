@@ -1,0 +1,10 @@
+{
+  "content_sha256": "f12f72b46249982b14da210cb4adb5c01191896bfc6380e0ad5c82dd20f8ab07",
+  "id": "link:f12f72b46249982b14da210c",
+  "origin": "runtime",
+  "proposed_by_node_id": null,
+  "rationale": null,
+  "relation": "refines",
+  "source_id": "question:work:003-exception-search-v2",
+  "target_id": "question:demand:D7"
+}

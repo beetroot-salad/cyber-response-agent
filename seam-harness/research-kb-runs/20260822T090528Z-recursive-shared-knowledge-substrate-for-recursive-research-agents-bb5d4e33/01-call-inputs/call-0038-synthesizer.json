@@ -1,0 +1,1761 @@
+{
+  "call_id": "call-0038-synthesizer",
+  "context": {
+    "assigned_demands": [
+      {
+        "id": "D11",
+        "rationale": "Required by the request and reinforced by the manifest's instruction not to select papers by desired outcome.",
+        "statement": "The memo reconciles — rather than hides — the tension between papers reporting multi-agent debate gains and papers reporting matched-compute null results or conformity."
+      },
+      {
+        "id": "D12",
+        "rationale": "Grounding scope, citation count, and page-marker requirement are stated in the request; marker format and corpus enumeration come from the manifest.",
+        "statement": "All evidentiary claims are grounded only in the supplied workspace corpus, with at least five distinct source files cited and citations carrying PDF page markers from the extracted text."
+      },
+      {
+        "id": "D13",
+        "rationale": "Stated verbatim in the request.",
+        "statement": "Source-supported claims are clearly distinguished from design inferences."
+      },
+      {
+        "id": "D14",
+        "rationale": "Condition count and all five metric families are enumerated in the request.",
+        "statement": "A falsifiable evaluation plan compares at least three conditions and defines metrics for quality, diversity/correlation, latency, token cost, and recovery-from-wrong-consensus."
+      },
+      {
+        "id": "D15",
+        "rationale": "Stated verbatim in the request.",
+        "statement": "Important limitations and unresolved questions are stated."
+      }
+    ],
+    "child_packets": [
+      {
+        "account": "The Smit et al. file states at multiple anchored points that multi-agent debate does not reliably outperform other prompting strategies. The abstract says: 'we find that multi-agent debating systems, in their current form, do not reliably outperform other proposed prompting strategies, such as self-consistency and ensembling using multiple reasoning paths' (PDF PAGE 1). The conclusions echo: 'MAD approaches currently do not outperform other ensembling methods such as Medprompt and self-consistency using their original implementations' (PDF PAGE 9). These passages directly satisfy the node's objective.",
+        "assumptions": [
+          "The workspace file papers/text/smit-et-al-2023-going-mad.txt (content_sha256 a126...) is the authoritative source; page markers are as provided in the file."
+        ],
+        "boundary_findings": [],
+        "child_packet_ids": [],
+        "claims": [
+          {
+            "basis": "observed",
+            "citations": [
+              {
+                "excerpt": "Importantly, we find that multi-agent debating systems, in their current form, do not reliably outperform other proposed prompting strategies, such as self-consistency and ensembling using multiple reasoning paths.",
+                "locator": "papers/text/smit-et-al-2023-going-mad.txt (===== PDF PAGE 1 =====, Abstract)",
+                "source_id": "ref:smit-2023-going-mad"
+              }
+            ],
+            "confidence": 0.99,
+            "counterevidence": [],
+            "derived_from_claim_ids": [],
+            "id": "root.05-debate-nulls-boundaries.01-c1-smit-null-results.01-smit-extract-null-overall:C001",
+            "statement": "Smit et al. report that multi-agent debating systems, in their current form, do not reliably outperform other proposed prompting strategies such as self-consistency and ensembling using multiple reasoning paths."
+          },
+          {
+            "basis": "observed",
+            "citations": [
+              {
+                "excerpt": "The investigations detailed in this work have demonstrated that MAD approaches currently do not outperform other ensembling methods such as Medprompt and self-consistency using their original implementations.",
+                "locator": "papers/text/smit-et-al-2023-going-mad.txt (===== PDF PAGE 9 =====, Section 4 Conclusions)",
+                "source_id": "ref:smit-2023-going-mad"
+              }
+            ],
+            "confidence": 0.99,
+            "counterevidence": [],
+            "derived_from_claim_ids": [],
+            "id": "root.05-debate-nulls-boundaries.01-c1-smit-null-results.01-smit-extract-null-overall:C002",
+            "statement": "Smit et al. conclude that MAD approaches currently do not outperform other ensembling methods such as Medprompt and self-consistency using their original implementations."
+          },
+          {
+            "basis": "observed",
+            "citations": [
+              {
+                "excerpt": "However, when performing hyperparameter tuning, several MAD systems, such as Multi-Persona, perform better. This suggests that MAD protocols might not be inherently worse than other approaches, but that they are more sensitive to different hyperparameter settings and difficult to optimize.",
+                "locator": "papers/text/smit-et-al-2023-going-mad.txt (===== PDF PAGE 1 =====, Abstract)",
+                "source_id": "ref:smit-2023-going-mad"
+              },
+              {
+                "excerpt": "MAD typically requires a higher number of API calls, increasing the number of tokens to produce and process and ultimately, the total running cost of the system. Interestingly, we found that this might primarily be due to MAD protocols being more sensitive to hyperparameters and not necessarily that debate inherently performs worse than single-agent methods.",
+                "locator": "papers/text/smit-et-al-2023-going-mad.txt (===== PDF PAGE 9 =====, Section 4 Conclusions)",
+                "source_id": "ref:smit-2023-going-mad"
+              }
+            ],
+            "confidence": 0.95,
+            "counterevidence": [],
+            "derived_from_claim_ids": [],
+            "id": "root.05-debate-nulls-boundaries.01-c1-smit-null-results.01-smit-extract-null-overall:C003",
+            "statement": "Smit et al. assert that MAD protocols are not inherently worse, but are more sensitive to hyperparameter settings and difficult to optimize, and that hyperparameter tuning can make some MAD systems (e.g., Multi-Persona) perform better."
+          }
+        ],
+        "content_sha256": "210c5a9a9920930a2a44fa4d1fc7da6f48556af7a8e5c66a7be20845e1f80145",
+        "counterevidence": [
+          "The same paper also reports that with hyperparameter tuning (agreement intensity), Multi-Persona went from the worst-performing to the best-performing protocol, surpassing Medprompt and Self-Consistency (PDF PAGE 9), which nuances the null result."
+        ],
+        "id": "packet:root.05-debate-nulls-boundaries.01-c1-smit-null-results.01-smit-extract-null-overall",
+        "next_observation": null,
+        "node_id": "root.05-debate-nulls-boundaries.01-c1-smit-null-results.01-smit-extract-null-overall",
+        "objective": "Extract from papers/text/smit-et-al-2023-going-mad.txt at least one anchored finding stating that multi-agent debate (MAD) does not reliably outperform other prompting strategies (e.g., self-consistency, ensembling), quoting or closely paraphrasing the relevant passage(s) and carrying the exact `===== PDF PAGE N =====` marker(s).",
+        "source_ids_consulted": [
+          "ref:smit-2023-going-mad",
+          "papers/text/smit-et-al-2023-going-mad.txt"
+        ],
+        "sufficiency": "ready_to_synthesize",
+        "unresolved": [
+          "The exact page marker for the quoted phrase 'do not reliably outperform' is from PDF PAGE 1 (Abstract); the abstract is on page 1, and the conclusion on page 9."
+        ]
+      },
+      {
+        "account": "Benchmark-specific evidence from Smit et al. 2023: Table 2 lists best scores across seven datasets showing MAD systems do not dominate; single-agent and other baselines beat or match MAD on multiple benchmarks, and no protocol dominates on all datasets (PDF page 5). Specific numbers anchor the comparison.",
+        "assumptions": [
+          "Table 2 numbers are best configuration scores out of 1.0 as published; no external normalization applied."
+        ],
+        "boundary_findings": [],
+        "child_packet_ids": [],
+        "claims": [
+          {
+            "basis": "observed",
+            "citations": [
+              {
+                "excerpt": "Medprompt 0.65 (0.63) ... Society of Mind 0.64 (0.61) ... Ensemble Refinement 0.64 (0.60) ... ChatEval 0.60 (0.60) ... Self-Consistency 0.60 (0.60) ... Single Agent 0.60 (0.59) ... Multi-Persona 0.58 (0.57)",
+                "locator": "workspace-relative path papers/text/smit-et-al-2023-going-mad.txt, line after marker '===== PDF PAGE 5 =====' in Table 2",
+                "source_id": "ref:smit-2023-going-mad"
+              }
+            ],
+            "confidence": 0.97,
+            "counterevidence": [],
+            "derived_from_claim_ids": [],
+            "id": "root.05-debate-nulls-boundaries.01-c1-smit-null-results.02-smit-extract-benchmarks:C001",
+            "statement": "Smit et al.'s Table 2 reports best performance scores out of 1.0 for seven systems across MedQA, PubMedQA, MMLU, CosmosQA, CIAR, GPQA, and Chess; e.g., Medprompt (non-debate) scores 0.65 on MedQA, Society of Mind 0.64, Ensemble Refinement 0.64, ChatEval 0.60, Self-Consistency 0.60, Single Agent 0.60, Multi-Persona 0.58."
+          },
+          {
+            "basis": "observed",
+            "citations": [
+              {
+                "excerpt": "Table 2 indicates that no protocol dominates on all datasets. Medprompt seems to perform the best overall. Interestingly enough the debating protocols do not outperform the other protocols on the reasoning datasets. ... We see the highest performing debating strategy ... is SoM with multiple different configurations achieving 61% on MedQA. However, the recently introduced Medprompt strategy ..., which does not use debate, performs the best overall.",
+                "locator": "===== PDF PAGE 4 ===== and ===== PDF PAGE 5 ===== in Section 3, paragraphs 'Results' and 'The utility of debate'",
+                "source_id": "ref:smit-2023-going-mad"
+              }
+            ],
+            "confidence": 0.96,
+            "counterevidence": [],
+            "derived_from_claim_ids": [],
+            "id": "root.05-debate-nulls-boundaries.01-c1-smit-null-results.02-smit-extract-benchmarks:C002",
+            "statement": "Across all seven benchmarks, no protocol dominates on all datasets; the highest-performing debating strategy on MedQA was SoM at 61% accuracy, while Medprompt (non-debate) performed best overall, with debating protocols not outperforming others on the reasoning datasets."
+          },
+          {
+            "basis": "observed",
+            "citations": [
+              {
+                "excerpt": "Medprompt ... 0.27 (0.25) ... GPQA ... Chess 0.32 (0.30); ... Multi-Persona 0.29 (0.29) ... 0.33 (0.29); ... Single Agent 0.33 (0.28) ... 0.27 (0.18)",
+                "locator": "===== PDF PAGE 5 =====, Table 2 under columns GPQA and Chess",
+                "source_id": "ref:smit-2023-going-mad"
+              }
+            ],
+            "confidence": 0.95,
+            "counterevidence": [],
+            "derived_from_claim_ids": [],
+            "id": "root.05-debate-nulls-boundaries.01-c1-smit-null-results.02-smit-extract-benchmarks:C003",
+            "statement": "On the non-medical benchmarks, MAD systems do not consistently beat the single-agent baseline: on GPQA single-agent scores 0.33 versus Ensemble Refinement 0.32, Medprompt 0.27, and SoM 0.27; on Chess Multi-Persona and ChatEval reach 0.32-0.33 versus Medprompt 0.32, SoM 0.26, and Single Agent 0.27."
+          },
+          {
+            "basis": "observed",
+            "citations": [
+              {
+                "excerpt": "within medical datasets, every evaluated system outperforms single-agent methods, with the exception of Multi-Persona. ... Conversely, in the context of non-medical datasets, single-agent methods surpass all evaluated systems except for Multi-Persona and Self-Consistency.",
+                "locator": "===== PDF PAGE 5 =====, Section 3, paragraph 'Is MAD simply sensitive to hyperparameters?'",
+                "source_id": "ref:smit-2023-going-mad"
+              }
+            ],
+            "confidence": 0.94,
+            "counterevidence": [],
+            "derived_from_claim_ids": [],
+            "id": "root.05-debate-nulls-boundaries.01-c1-smit-null-results.02-smit-extract-benchmarks:C004",
+            "statement": "Smit et al. report that in their K-fold analysis, on medical datasets every evaluated system outperformed single-agent methods except Multi-Persona, whereas on non-medical datasets single-agent methods surpassed all evaluated systems except Multi-Persona and Self-Consistency."
+          }
+        ],
+        "content_sha256": "1fe8c4280c2d98e0d66b66cbd0d3118dde06de7eb4aa6adf444672082ed49ffd",
+        "counterevidence": [
+          "Table 2 shows SoM (MAD) ties Medprompt on CIAR at 0.56 vs 0.54 and Multi-Persona exceeds Medprompt on Chess (0.33 vs 0.32), indicating MAD does not uniformly lose. The paper also reports that tuning agreement intensity can make Multi-Persona beat Medprompt and Self-Consistency (PDF page 5 after Figure 4, and Section 4)."
+        ],
+        "id": "packet:root.05-debate-nulls-boundaries.01-c1-smit-null-results.02-smit-extract-benchmarks",
+        "next_observation": "Consider extracting from the same file the specific hyperparameters for the best configurations that produced Table 2 numbers, if needed for matched-compute planning.",
+        "node_id": "root.05-debate-nulls-boundaries.01-c1-smit-null-results.02-smit-extract-benchmarks",
+        "objective": "Extract from papers/text/smit-et-al-2023-going-mad.txt at least one anchored finding that compares performance of MAD systems against single-agent or other prompting baselines on specific benchmarks (e.g., MedQA, PubMedQA, MMLU, CosmosQA, CIAR, GPQA, Chess), quoting or closely paraphrasing the relevant table or sentence and carrying the exact `===== PDF PAGE N =====` marker(s).",
+        "source_ids_consulted": [
+          "ref:smit-2023-going-mad"
+        ],
+        "sufficiency": "ready_to_synthesize",
+        "unresolved": [
+          "The dossier does not provide the exact method used to compute the parenthetical median scores in Table 2, only that they are 'median performance over the datasets shown in parentheses.'"
+        ]
+      },
+      {
+        "account": "The Smit et al. 2023 paper explicitly reports that MAD protocols are more sensitive to hyperparameter settings and difficult to optimize, and it documents limitations of relying on a public API for experiments (variability, cost, replication barriers). These statements are anchored to PDF PAGE 1 (abstract) and PDF PAGE 9 (conclusions/limitations).",
+        "assumptions": [
+          "The extracted text in the dossier is the complete paper content; page markers are accurate as given."
+        ],
+        "boundary_findings": [
+          {
+            "alternative_explanation": "The packet intentionally scopes to a single-source extraction node, and sibling nodes will supply Zhang findings separately.",
+            "consequence_if_absorbed": "If the parent assumes both Smit and Zhang findings are available in this packet, it might incorrectly treat the absence of Zhang content as a gap and fail to reconcile the full null-result evidence.",
+            "evidence": [
+              "source_materials[0].content: 'Enumerated in material:001; asserted present in the solve workspace by the conversation decision; content not enclosed at intake.'",
+              "workspace_documents[0].path: 'papers/text/smit-et-al-2023-going-mad.txt'"
+            ],
+            "narrative": "The dossier contains only the Smit file's full text; no sibling extracted files (e.g., Zhang et al. 2025) are present in this packet. The node's objective is limited to Smit, so this absence does not block extraction, but the parent's reconciliation task (which needs Zhang findings) cannot be verified from this packet alone.",
+            "smallest_suspected_scope": "The parent node root.05-debate-nulls-boundaries.01-c1-smit-null-results may expect Smit findings only; the grandparent (root.05-debate-nulls-boundaries) needs Zhang findings as well."
+          }
+        ],
+        "child_packet_ids": [],
+        "claims": [
+          {
+            "basis": "observed",
+            "citations": [
+              {
+                "excerpt": "when performing hyperparameter tuning, several MAD systems, such as Multi-Persona, perform better. This suggests that MAD protocols might not be inherently worse than other approaches, but that they are more sensitive to different hyperparameter settings and difficult to optimize.",
+                "locator": "papers/text/smit-et-al-2023-going-mad.txt, ===== PDF PAGE 1 ===== (Abstract)",
+                "source_id": "ref:smit-2023-going-mad"
+              }
+            ],
+            "confidence": 0.97,
+            "counterevidence": [],
+            "derived_from_claim_ids": [],
+            "id": "root.05-debate-nulls-boundaries.01-c1-smit-null-results.03-smit-extract-limitations-hyperparams:C001",
+            "statement": "Smit et al. state in the abstract that MAD protocols 'are more sensitive to different hyperparameter settings and difficult to optimize', linking this sensitivity to hyperparameter tuning (including agreement intensity) and to the observation that several MAD systems perform better after tuning."
+          },
+          {
+            "basis": "observed",
+            "citations": [
+              {
+                "excerpt": "MAD typically requires a higher number of API calls, increasing the number of tokens to produce and process and ultimately, the total running cost of the system. Interestingly, we found that this might primarily be due to MAD protocols being more sensitive to hyperparameters",
+                "locator": "papers/text/smit-et-al-2023-going-mad.txt, ===== PDF PAGE 9 ===== (Section 4 Conclusions)",
+                "source_id": "ref:smit-2023-going-mad"
+              }
+            ],
+            "confidence": 0.98,
+            "counterevidence": [],
+            "derived_from_claim_ids": [],
+            "id": "root.05-debate-nulls-boundaries.01-c1-smit-null-results.03-smit-extract-limitations-hyperparams:C002",
+            "statement": "Smit et al. state that 'MAD typically requires a higher number of API calls, increasing the number of tokens to produce and process and ultimately, the total running cost of the system', and that this may be due to hyperparameter sensitivity rather than debate being inferior."
+          },
+          {
+            "basis": "observed",
+            "citations": [
+              {
+                "excerpt": "We utilize API calls to a publicly available LLM ... exposes us to variable inference time calls and unforeseen model updates. Moreover, large-scale API-based benchmarking incurs substantial financial and time costs, which both limit the experiment scales and provide a barrier of entry to replication and extension efforts.",
+                "locator": "papers/text/smit-et-al-2023-going-mad.txt, ===== PDF PAGE 9 ===== (Limitations paragraph, Section 4)",
+                "source_id": "ref:smit-2023-going-mad"
+              }
+            ],
+            "confidence": 0.99,
+            "counterevidence": [],
+            "derived_from_claim_ids": [],
+            "id": "root.05-debate-nulls-boundaries.01-c1-smit-null-results.03-smit-extract-limitations-hyperparams:C003",
+            "statement": "Smit et al. explicitly list study limitations: reliance on API calls to a public LLM exposes them to variable inference times and unforeseen model updates, and large-scale API benchmarking incurs substantial financial and time costs that limit experiment scale and barrier replication."
+          },
+          {
+            "basis": "observed",
+            "citations": [
+              {
+                "excerpt": "Our prompt takes the following simple form: 'you should agree with the other agents X% of the time'. We call X in this prompt the agent's agreement intensity ... we can see that this parameter has a significant effect on the performance ... while MedQA and PubMedQA directly benefit from a high agreement, CIAR follows a reverse pattern.",
+                "locator": "papers/text/smit-et-al-2023-going-mad.txt, ===== PDF PAGE 6 ===== (Section 3, Improving MAD via agreement modulation)",
+                "source_id": "ref:smit-2023-going-mad"
+              }
+            ],
+            "confidence": 0.98,
+            "counterevidence": [],
+            "derived_from_claim_ids": [],
+            "id": "root.05-debate-nulls-boundaries.01-c1-smit-null-results.03-smit-extract-limitations-hyperparams:C004",
+            "statement": "Smit et al. describe agreement intensity as a hyperparameter: their improved Multi-Persona prompt 'you should agree with the other agents X% of the time' (called the agent's agreement intensity) had a significant effect on performance, with dataset-dependent direction (e.g., high agreement helps MedQA/PubMedQA but hurts CIAR)."
+          },
+          {
+            "basis": "observed",
+            "citations": [
+              {
+                "excerpt": "The results from GPT-3.5 suggest that hyperparameter settings can be effectively transferred to GPT-4. However, this transferability does not extend well to Mixtral 8x7B.",
+                "locator": "papers/text/smit-et-al-2023-going-mad.txt, ===== PDF PAGE 9 ===== (Section 3, Evaluating using other APIs)",
+                "source_id": "ref:smit-2023-going-mad"
+              }
+            ],
+            "confidence": 0.96,
+            "counterevidence": [],
+            "derived_from_claim_ids": [],
+            "id": "root.05-debate-nulls-boundaries.01-c1-smit-null-results.03-smit-extract-limitations-hyperparams:C005",
+            "statement": "Smit et al. report that hyperparameter settings can be transferred from GPT-3.5 to GPT-4 but not as well to Mixtral 8x7B, suggesting architectural differences affect how hyperparameters influence performance."
+          }
+        ],
+        "content_sha256": "66fa85aa6a87668bb27cc73666d2ea269cfceded96a796cf66aad4996a1e624a",
+        "counterevidence": [
+          "The paper reports that some MAD systems outperform non-debate baselines after hyperparameter tuning (e.g., Multi-Persona with agreement intensity beats Medprompt/Self-Consistency on MedQA), which tempers the 'difficult to optimize' claim; the sensitivity itself is stated as the reason tuning can yield gains."
+        ],
+        "id": "packet:root.05-debate-nulls-boundaries.01-c1-smit-null-results.03-smit-extract-limitations-hyperparams",
+        "next_observation": null,
+        "node_id": "root.05-debate-nulls-boundaries.01-c1-smit-null-results.03-smit-extract-limitations-hyperparams",
+        "objective": "Extract from papers/text/smit-et-al-2023-going-mad.txt at least one anchored finding stating limitations of the study or sensitivity of MAD to hyperparameters (e.g., agreement intensity, number of agents/rounds), quoting or closely paraphrasing the relevant passage(s) and carrying the exact `===== PDF PAGE N =====` marker(s).",
+        "source_ids_consulted": [
+          "ref:smit-2023-going-mad"
+        ],
+        "sufficiency": "ready_to_synthesize",
+        "unresolved": [
+          "The paper does not provide a formal definition or quantitative measure of 'sensitivity' beyond the observed variance and the reported effects of tuning; it is inferred from performance changes across configurations."
+        ]
+      }
+    ],
+    "constraints": [
+      "C1: Total length must be 1,400–1,800 words.",
+      "C2: No evidence outside the seven corpus files may be used; the request restricts grounding to the supplied workspace corpus and the manifest declares these files the only evidentiary corpus for the benchmark.",
+      "C3: Citations must reference at least five distinct source files and include PDF page markers as they appear in the extracted texts (page boundaries marked `===== PDF PAGE N =====`).",
+      "C4: Papers must not be selected or weighted by desired outcome; the corpus's conflicting empirical conclusions must be preserved and reconciled."
+    ],
+    "contract": {
+      "acceptance_condition": "The synthesized answer includes at least three distinct findings, each with page markers, covering all three required thematic areas, and each finding is traceable to a specific page marker.",
+      "conflict_policy": "If any child returns a finding that contradicts another (e.g., a benchmark number that seems to favor a MAD system), the parent will still include it and explicitly reconcile it by noting the paper's overall summary that no protocol dominates. Conflicting evidence is preserved, not hidden (C4).",
+      "parent_question": "Extract at least three anchored findings from Smit et al. covering (1) MAD not reliably outperforming other prompting strategies, (2) performance comparisons on specific benchmarks, and (3) stated limitations or sensitivity to hyperparameters.",
+      "required_contributions": [
+        "child smit-extract-null-overall: one anchored finding that MAD does not reliably outperform other prompting strategies (e.g., self-consistency, ensembling).",
+        "child smit-extract-benchmarks: one anchored finding with benchmark-specific comparisons showing MAD not dominating on at least two datasets.",
+        "child smit-extract-limitations-hyperparams: one anchored finding on hyperparameter sensitivity or study limitations."
+      ],
+      "shared_invariants": [
+        "All findings must be direct quotes or close paraphrases from the Smit file.",
+        "Each finding must carry the exact `===== PDF PAGE N =====` marker(s) where the quoted or paraphrased passage appears.",
+        "No outside sources may be used (C2)."
+      ]
+    },
+    "knowledge_board": {
+      "answer_ids_by_question": {
+        "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results": [
+          "answer:root.05-debate-nulls-boundaries.01-c1-smit-null-results.01-smit-extract-null-overall",
+          "answer:root.05-debate-nulls-boundaries.01-c1-smit-null-results.02-smit-extract-benchmarks",
+          "answer:root.05-debate-nulls-boundaries.01-c1-smit-null-results.03-smit-extract-limitations-hyperparams"
+        ],
+        "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results.01-smit-extract-null-overall": [
+          "answer:root.05-debate-nulls-boundaries.01-c1-smit-null-results.01-smit-extract-null-overall"
+        ],
+        "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results.02-smit-extract-benchmarks": [
+          "answer:root.05-debate-nulls-boundaries.01-c1-smit-null-results.02-smit-extract-benchmarks"
+        ],
+        "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results.03-smit-extract-limitations-hyperparams": [
+          "answer:root.05-debate-nulls-boundaries.01-c1-smit-null-results.03-smit-extract-limitations-hyperparams"
+        ]
+      },
+      "answers_by_id": {
+        "answer:root.05-debate-nulls-boundaries.01-c1-smit-null-results.01-smit-extract-null-overall": {
+          "claim_ids": [
+            "root.05-debate-nulls-boundaries.01-c1-smit-null-results.01-smit-extract-null-overall:C001",
+            "root.05-debate-nulls-boundaries.01-c1-smit-null-results.01-smit-extract-null-overall:C002",
+            "root.05-debate-nulls-boundaries.01-c1-smit-null-results.01-smit-extract-null-overall:C003"
+          ],
+          "content_sha256": "910b569a989891818746af6d9aeef863a766344fae98f45240d659a4c0293371",
+          "id": "answer:root.05-debate-nulls-boundaries.01-c1-smit-null-results.01-smit-extract-null-overall",
+          "node_id": "root.05-debate-nulls-boundaries.01-c1-smit-null-results.01-smit-extract-null-overall",
+          "packet_id": "packet:root.05-debate-nulls-boundaries.01-c1-smit-null-results.01-smit-extract-null-overall",
+          "sufficiency": "ready_to_synthesize",
+          "summary": "The Smit et al. file states at multiple anchored points that multi-agent debate does not reliably outperform other prompting strategies. The abstract says: 'we find that multi-agent debating systems, in their current form, do not reliably outperform other proposed prompting strategies, such as self-consistency and ensembling using multiple reasoning paths' (PDF PAGE 1). The conclusions echo: 'MAD approaches currently do not outperform other ensembling methods such as Medprompt and self-consistency using their original implementations' (PDF PAGE 9). These passages directly satisfy the node's objective.",
+          "tags": [
+            "counterexample",
+            "evidence",
+            "uncertainty"
+          ],
+          "unresolved": [
+            "The exact page marker for the quoted phrase 'do not reliably outperform' is from PDF PAGE 1 (Abstract); the abstract is on page 1, and the conclusion on page 9."
+          ]
+        },
+        "answer:root.05-debate-nulls-boundaries.01-c1-smit-null-results.02-smit-extract-benchmarks": {
+          "claim_ids": [
+            "root.05-debate-nulls-boundaries.01-c1-smit-null-results.02-smit-extract-benchmarks:C001",
+            "root.05-debate-nulls-boundaries.01-c1-smit-null-results.02-smit-extract-benchmarks:C002",
+            "root.05-debate-nulls-boundaries.01-c1-smit-null-results.02-smit-extract-benchmarks:C003",
+            "root.05-debate-nulls-boundaries.01-c1-smit-null-results.02-smit-extract-benchmarks:C004"
+          ],
+          "content_sha256": "13bec8aa8ffaec677a14f96d2a0536df47775b8b0017dae2e8e064ba3c8d35d0",
+          "id": "answer:root.05-debate-nulls-boundaries.01-c1-smit-null-results.02-smit-extract-benchmarks",
+          "node_id": "root.05-debate-nulls-boundaries.01-c1-smit-null-results.02-smit-extract-benchmarks",
+          "packet_id": "packet:root.05-debate-nulls-boundaries.01-c1-smit-null-results.02-smit-extract-benchmarks",
+          "sufficiency": "ready_to_synthesize",
+          "summary": "Benchmark-specific evidence from Smit et al. 2023: Table 2 lists best scores across seven datasets showing MAD systems do not dominate; single-agent and other baselines beat or match MAD on multiple benchmarks, and no protocol dominates on all datasets (PDF page 5). Specific numbers anchor the comparison.",
+          "tags": [
+            "evidence",
+            "measurement",
+            "counterexample",
+            "uncertainty"
+          ],
+          "unresolved": [
+            "The dossier does not provide the exact method used to compute the parenthetical median scores in Table 2, only that they are 'median performance over the datasets shown in parentheses.'"
+          ]
+        },
+        "answer:root.05-debate-nulls-boundaries.01-c1-smit-null-results.03-smit-extract-limitations-hyperparams": {
+          "claim_ids": [
+            "root.05-debate-nulls-boundaries.01-c1-smit-null-results.03-smit-extract-limitations-hyperparams:C001",
+            "root.05-debate-nulls-boundaries.01-c1-smit-null-results.03-smit-extract-limitations-hyperparams:C002",
+            "root.05-debate-nulls-boundaries.01-c1-smit-null-results.03-smit-extract-limitations-hyperparams:C003",
+            "root.05-debate-nulls-boundaries.01-c1-smit-null-results.03-smit-extract-limitations-hyperparams:C004",
+            "root.05-debate-nulls-boundaries.01-c1-smit-null-results.03-smit-extract-limitations-hyperparams:C005"
+          ],
+          "content_sha256": "1d839828ad7b9f87174e9ce95efcaaafb08900aa6c02fd8697741f8d6c122035",
+          "id": "answer:root.05-debate-nulls-boundaries.01-c1-smit-null-results.03-smit-extract-limitations-hyperparams",
+          "node_id": "root.05-debate-nulls-boundaries.01-c1-smit-null-results.03-smit-extract-limitations-hyperparams",
+          "packet_id": "packet:root.05-debate-nulls-boundaries.01-c1-smit-null-results.03-smit-extract-limitations-hyperparams",
+          "sufficiency": "ready_to_synthesize",
+          "summary": "The Smit et al. 2023 paper explicitly reports that MAD protocols are more sensitive to hyperparameter settings and difficult to optimize, and it documents limitations of relying on a public API for experiments (variability, cost, replication barriers). These statements are anchored to PDF PAGE 1 (abstract) and PDF PAGE 9 (conclusions/limitations).",
+          "tags": [
+            "risk",
+            "evidence",
+            "counterexample",
+            "uncertainty"
+          ],
+          "unresolved": [
+            "The paper does not provide a formal definition or quantitative measure of 'sensitivity' beyond the observed variance and the reported effects of tuning; it is inferred from performance changes across configurations."
+          ]
+        }
+      },
+      "content_sha256": "52593ea9013b2278e13799a4b7a887f159ccfe59a5afdc476154b35a94033459",
+      "entry_ids_by_tag": {
+        "constraint": [
+          "question:root.02-crdt-persistence"
+        ],
+        "counterexample": [
+          "answer:root.05-debate-nulls-boundaries.01-c1-smit-null-results.01-smit-extract-null-overall",
+          "answer:root.05-debate-nulls-boundaries.01-c1-smit-null-results.02-smit-extract-benchmarks",
+          "answer:root.05-debate-nulls-boundaries.01-c1-smit-null-results.03-smit-extract-limitations-hyperparams",
+          "question:demand:D14",
+          "question:root",
+          "question:root.03-social-influence-risk",
+          "question:root.05-debate-nulls-boundaries",
+          "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results",
+          "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results.01-smit-extract-null-overall",
+          "question:root.05-debate-nulls-boundaries.02-c2-zhang-boundary-conditions"
+        ],
+        "decision": [
+          "question:demand:D1",
+          "question:demand:D2",
+          "question:demand:D3"
+        ],
+        "definition": [
+          "question:demand:D14",
+          "question:root.01-arg-semantics"
+        ],
+        "evidence": [
+          "answer:root.05-debate-nulls-boundaries.01-c1-smit-null-results.01-smit-extract-null-overall",
+          "answer:root.05-debate-nulls-boundaries.01-c1-smit-null-results.02-smit-extract-benchmarks",
+          "answer:root.05-debate-nulls-boundaries.01-c1-smit-null-results.03-smit-extract-limitations-hyperparams",
+          "question:demand:D10",
+          "question:demand:D11",
+          "question:demand:D12",
+          "question:demand:D13",
+          "question:demand:D15",
+          "question:demand:D4",
+          "question:demand:D5",
+          "question:demand:D7",
+          "question:demand:D8",
+          "question:demand:D9",
+          "question:root.01-arg-semantics",
+          "question:root.02-crdt-persistence",
+          "question:root.03-social-influence-risk",
+          "question:root.04-debate-gains-evidence",
+          "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results",
+          "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results.01-smit-extract-null-overall",
+          "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results.02-smit-extract-benchmarks",
+          "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results.03-smit-extract-limitations-hyperparams",
+          "question:root.05-debate-nulls-boundaries.02-c2-zhang-boundary-conditions"
+        ],
+        "measurement": [
+          "answer:root.05-debate-nulls-boundaries.01-c1-smit-null-results.02-smit-extract-benchmarks",
+          "question:demand:D14",
+          "question:root",
+          "question:root.04-debate-gains-evidence",
+          "question:root.05-debate-nulls-boundaries",
+          "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results.02-smit-extract-benchmarks",
+          "question:root.05-debate-nulls-boundaries.02-c2-zhang-boundary-conditions",
+          "question:root.05-debate-nulls-boundaries.03-c3-design-inferences"
+        ],
+        "method": [
+          "question:demand:D6",
+          "question:root",
+          "question:root.01-arg-semantics",
+          "question:root.02-crdt-persistence"
+        ],
+        "risk": [
+          "answer:root.05-debate-nulls-boundaries.01-c1-smit-null-results.03-smit-extract-limitations-hyperparams",
+          "question:root.03-social-influence-risk",
+          "question:root.05-debate-nulls-boundaries",
+          "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results",
+          "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results.03-smit-extract-limitations-hyperparams",
+          "question:root.05-debate-nulls-boundaries.03-c3-design-inferences"
+        ],
+        "synthesis": [
+          "question:root.05-debate-nulls-boundaries.03-c3-design-inferences"
+        ],
+        "uncertainty": [
+          "answer:root.05-debate-nulls-boundaries.01-c1-smit-null-results.01-smit-extract-null-overall",
+          "answer:root.05-debate-nulls-boundaries.01-c1-smit-null-results.02-smit-extract-benchmarks",
+          "answer:root.05-debate-nulls-boundaries.01-c1-smit-null-results.03-smit-extract-limitations-hyperparams"
+        ]
+      },
+      "incoming_link_ids_by_entry": {
+        "question:demand:D10": [
+          "link:b39e9bd6e534d53587c33f92"
+        ],
+        "question:demand:D11": [
+          "link:7d78d3ba63d8f21b16592142",
+          "link:a8184056ad34b6459c3bcacb",
+          "link:c0525acb5ba38548b9c5ff19",
+          "link:d508e58a1c643d9abfe73da0",
+          "link:da16abdd94a5d34dd4b43e33",
+          "link:f87ac7b536be5b768b698c28"
+        ],
+        "question:demand:D12": [
+          "link:4694364cb7b8f08ed6b70438",
+          "link:4a3bba97c5e1b9cb782e3408",
+          "link:60e459cfffff32f8128208f8",
+          "link:b9ccd3ec073289680e72b9c5",
+          "link:dbc379c523a802d7234d668c",
+          "link:e5bfef49b3f76c9371b77861",
+          "link:ec67afe3731a822e2d0c2942"
+        ],
+        "question:demand:D13": [
+          "link:018c1bfba9c89f886979e58a",
+          "link:3e163e5b6c87fe659c9c8b95",
+          "link:5ecc297a5272dee784b1b751",
+          "link:95a52b650d408c309a8140ee",
+          "link:9e148f747df068b5a106ef78",
+          "link:c263d292340d252299a711d8",
+          "link:c39a34a9d3f6dc908746a7b0",
+          "link:da969a151f6b08095623e758"
+        ],
+        "question:demand:D14": [
+          "link:54ace6aa7dbc682ce36b1598",
+          "link:5539b2e5fa996893c265aec7",
+          "link:5fbb61d2e80f257b289c0591",
+          "link:9f307b082e580d3f1768454b",
+          "link:e7976f175a8a1a130ad2d1e7",
+          "link:fe2451f9c9508933a87405ee"
+        ],
+        "question:demand:D15": [
+          "link:6018f82dcea4e7b30c3a5022",
+          "link:c86042ed89783103116c72b1",
+          "link:ceba8d1721ebe07093387a83",
+          "link:e5b001edf93c1fbe4904692c"
+        ],
+        "question:demand:D3": [
+          "link:a83bc0e755e8fd359c4a6e60"
+        ],
+        "question:demand:D4": [
+          "link:7c6b34c58d2a7a2bcc9f5e5f"
+        ],
+        "question:demand:D5": [
+          "link:b02788fef9fd73ad10830bc3"
+        ],
+        "question:demand:D6": [
+          "link:f63ca17b95f176b627952fd3"
+        ],
+        "question:demand:D7": [
+          "link:79a9672c7c764f123cad7df4"
+        ],
+        "question:demand:D8": [
+          "link:960009408650bf4b3e01a852"
+        ],
+        "question:root": [
+          "link:088e1a7cfea6dde8ac04eab3",
+          "link:1709dd7fbf8587de0c575188",
+          "link:1e97bab1f415d57cbc837a88",
+          "link:2395134f0213cf5cee3f1947",
+          "link:48a3d569758cae1eb71a2043",
+          "link:4f798cb83c7582c38cfb88bd",
+          "link:52aaf440a0cfa52148fd0e0a",
+          "link:541766fc32e4d84c2fd63c44",
+          "link:561e0fcd22b650ab4cc0fd61",
+          "link:5b751584b8c43c9e15d281fe",
+          "link:5e97df7da6a94755d85a5407",
+          "link:709f42e6e4da8b14cdf82243",
+          "link:7a79aa5755f5b9590ce191cb",
+          "link:815a52c06ab01fa3052d160f",
+          "link:9dc3c1ef66fc5dbb330f0173",
+          "link:9e16c1c1dacc451174870ea4",
+          "link:ad2d4893bb4dadfa6cec4d51",
+          "link:dbcff4ec9d62472bedb7ee52",
+          "link:e5a9bece7311def890467b91",
+          "link:f7b3972e183578733d308198"
+        ],
+        "question:root.05-debate-nulls-boundaries": [
+          "link:9c8f85fa9b668b832df212c2",
+          "link:b6b80273c764e1e3f59df888",
+          "link:b9d7a3cfb93623e545210f92"
+        ],
+        "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results": [
+          "link:575d9cacc5c39663d486bb15",
+          "link:6de997e9ce426616d90b5af8",
+          "link:7a9a7c6a39dea51cb03ea32e",
+          "link:d945c4cf6d953b660b03eff3",
+          "link:ec854f50dd446db9f2977a7b",
+          "link:f08e24e443aaed84eb82ef33"
+        ],
+        "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results.01-smit-extract-null-overall": [
+          "link:3a8845665fa98bf1d4c755cc"
+        ],
+        "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results.02-smit-extract-benchmarks": [
+          "link:3b8c4b6461c43c206044840b"
+        ],
+        "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results.03-smit-extract-limitations-hyperparams": [
+          "link:949c38f2eaedc4987269fba1"
+        ]
+      },
+      "links_by_id": {
+        "link:018c1bfba9c89f886979e58a": {
+          "content_sha256": "018c1bfba9c89f886979e58a9631b6ef6020a5ed12294f6a1c4c676e582196bd",
+          "id": "link:018c1bfba9c89f886979e58a",
+          "relation": "refines",
+          "source_id": "question:root.04-debate-gains-evidence",
+          "target_id": "question:demand:D13"
+        },
+        "link:088e1a7cfea6dde8ac04eab3": {
+          "content_sha256": "088e1a7cfea6dde8ac04eab354d79aadb3b99bdfe714c1e70ee16af4ac5294d0",
+          "id": "link:088e1a7cfea6dde8ac04eab3",
+          "relation": "refines",
+          "source_id": "question:demand:D5",
+          "target_id": "question:root"
+        },
+        "link:1709dd7fbf8587de0c575188": {
+          "content_sha256": "1709dd7fbf8587de0c57518805fdc68ed1e83353f3c151db8647dedebbe0f474",
+          "id": "link:1709dd7fbf8587de0c575188",
+          "relation": "refines",
+          "source_id": "question:root.02-crdt-persistence",
+          "target_id": "question:root"
+        },
+        "link:1e97bab1f415d57cbc837a88": {
+          "content_sha256": "1e97bab1f415d57cbc837a88883226a5539b431d3810d7ee0268b965646a5d6f",
+          "id": "link:1e97bab1f415d57cbc837a88",
+          "relation": "refines",
+          "source_id": "question:demand:D2",
+          "target_id": "question:root"
+        },
+        "link:2395134f0213cf5cee3f1947": {
+          "content_sha256": "2395134f0213cf5cee3f1947b0c2d057b3d7f586083bbad7eb028a4e1cb94466",
+          "id": "link:2395134f0213cf5cee3f1947",
+          "relation": "refines",
+          "source_id": "question:demand:D3",
+          "target_id": "question:root"
+        },
+        "link:3a8845665fa98bf1d4c755cc": {
+          "content_sha256": "3a8845665fa98bf1d4c755ccaad494c197af771295107bfd0c9d718f2cef5438",
+          "id": "link:3a8845665fa98bf1d4c755cc",
+          "relation": "answers",
+          "source_id": "answer:root.05-debate-nulls-boundaries.01-c1-smit-null-results.01-smit-extract-null-overall",
+          "target_id": "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results.01-smit-extract-null-overall"
+        },
+        "link:3b8c4b6461c43c206044840b": {
+          "content_sha256": "3b8c4b6461c43c206044840bb0c215d53bdc6e0400b53003d588e1f26d66b018",
+          "id": "link:3b8c4b6461c43c206044840b",
+          "relation": "answers",
+          "source_id": "answer:root.05-debate-nulls-boundaries.01-c1-smit-null-results.02-smit-extract-benchmarks",
+          "target_id": "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results.02-smit-extract-benchmarks"
+        },
+        "link:3e163e5b6c87fe659c9c8b95": {
+          "content_sha256": "3e163e5b6c87fe659c9c8b952fc8449114bfac7f5eaa1df8d326258e6a7b3d50",
+          "id": "link:3e163e5b6c87fe659c9c8b95",
+          "relation": "refines",
+          "source_id": "question:root.02-crdt-persistence",
+          "target_id": "question:demand:D13"
+        },
+        "link:4694364cb7b8f08ed6b70438": {
+          "content_sha256": "4694364cb7b8f08ed6b704380e475b1b267eef0480f37fe42f282740828ea040",
+          "id": "link:4694364cb7b8f08ed6b70438",
+          "relation": "refines",
+          "source_id": "question:root.01-arg-semantics",
+          "target_id": "question:demand:D12"
+        },
+        "link:48a3d569758cae1eb71a2043": {
+          "content_sha256": "48a3d569758cae1eb71a204319e430a0e2b17bbc10631decec88626d38dc50ca",
+          "id": "link:48a3d569758cae1eb71a2043",
+          "relation": "refines",
+          "source_id": "question:demand:D6",
+          "target_id": "question:root"
+        },
+        "link:4a3bba97c5e1b9cb782e3408": {
+          "content_sha256": "4a3bba97c5e1b9cb782e34084ea62b3db7ad3f1a02216a806173b7e662bf7ff0",
+          "id": "link:4a3bba97c5e1b9cb782e3408",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries.02-c2-zhang-boundary-conditions",
+          "target_id": "question:demand:D12"
+        },
+        "link:4f798cb83c7582c38cfb88bd": {
+          "content_sha256": "4f798cb83c7582c38cfb88bdfd835c99a0dc601b856720119fe64365ae22c42a",
+          "id": "link:4f798cb83c7582c38cfb88bd",
+          "relation": "refines",
+          "source_id": "question:root.04-debate-gains-evidence",
+          "target_id": "question:root"
+        },
+        "link:52aaf440a0cfa52148fd0e0a": {
+          "content_sha256": "52aaf440a0cfa52148fd0e0a8b15fa3f4ceca2d9fe1d0d3675835f8b82c24bb7",
+          "id": "link:52aaf440a0cfa52148fd0e0a",
+          "relation": "refines",
+          "source_id": "question:root.03-social-influence-risk",
+          "target_id": "question:root"
+        },
+        "link:541766fc32e4d84c2fd63c44": {
+          "content_sha256": "541766fc32e4d84c2fd63c44d39b887384e9693d9c10a19e869a69b53453f7ea",
+          "id": "link:541766fc32e4d84c2fd63c44",
+          "relation": "refines",
+          "source_id": "question:demand:D4",
+          "target_id": "question:root"
+        },
+        "link:54ace6aa7dbc682ce36b1598": {
+          "content_sha256": "54ace6aa7dbc682ce36b15989cdd24cf38992ead6108329a60b48ba7f74178c9",
+          "id": "link:54ace6aa7dbc682ce36b1598",
+          "relation": "refines",
+          "source_id": "question:root.03-social-influence-risk",
+          "target_id": "question:demand:D14"
+        },
+        "link:5539b2e5fa996893c265aec7": {
+          "content_sha256": "5539b2e5fa996893c265aec71197bb0044244f4d44cc7e448ec044db4ded9322",
+          "id": "link:5539b2e5fa996893c265aec7",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries.03-c3-design-inferences",
+          "target_id": "question:demand:D14"
+        },
+        "link:561e0fcd22b650ab4cc0fd61": {
+          "content_sha256": "561e0fcd22b650ab4cc0fd61392437d8f3e7ca904a6e6b7e7839642ba210692d",
+          "id": "link:561e0fcd22b650ab4cc0fd61",
+          "relation": "refines",
+          "source_id": "question:demand:D1",
+          "target_id": "question:root"
+        },
+        "link:575d9cacc5c39663d486bb15": {
+          "content_sha256": "575d9cacc5c39663d486bb15c21ff4ee4d1c658d53940948beafc65e48870967",
+          "id": "link:575d9cacc5c39663d486bb15",
+          "relation": "partially_answers",
+          "source_id": "answer:root.05-debate-nulls-boundaries.01-c1-smit-null-results.01-smit-extract-null-overall",
+          "target_id": "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results"
+        },
+        "link:5b751584b8c43c9e15d281fe": {
+          "content_sha256": "5b751584b8c43c9e15d281fecd110c27cec4e2ff68b62909aecadf66ffec777f",
+          "id": "link:5b751584b8c43c9e15d281fe",
+          "relation": "refines",
+          "source_id": "question:root.01-arg-semantics",
+          "target_id": "question:root"
+        },
+        "link:5e97df7da6a94755d85a5407": {
+          "content_sha256": "5e97df7da6a94755d85a5407cb21fe71750a2eca9df79c7bbac4d680689fc42e",
+          "id": "link:5e97df7da6a94755d85a5407",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries",
+          "target_id": "question:root"
+        },
+        "link:5ecc297a5272dee784b1b751": {
+          "content_sha256": "5ecc297a5272dee784b1b7519dc0b15b4464cd484190bf3de02879a3f667a502",
+          "id": "link:5ecc297a5272dee784b1b751",
+          "relation": "refines",
+          "source_id": "question:root.03-social-influence-risk",
+          "target_id": "question:demand:D13"
+        },
+        "link:5fbb61d2e80f257b289c0591": {
+          "content_sha256": "5fbb61d2e80f257b289c0591a887616bbe55c8e7f85593092ba47b199a267ece",
+          "id": "link:5fbb61d2e80f257b289c0591",
+          "relation": "refines",
+          "source_id": "question:root.04-debate-gains-evidence",
+          "target_id": "question:demand:D14"
+        },
+        "link:6018f82dcea4e7b30c3a5022": {
+          "content_sha256": "6018f82dcea4e7b30c3a50227a5bbde2d9842609c4f66b0c1b1b7933d6a7a18a",
+          "id": "link:6018f82dcea4e7b30c3a5022",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries",
+          "target_id": "question:demand:D15"
+        },
+        "link:60e459cfffff32f8128208f8": {
+          "content_sha256": "60e459cfffff32f8128208f88b575ddd7a34c364263b91af2e1616f385670857",
+          "id": "link:60e459cfffff32f8128208f8",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results",
+          "target_id": "question:demand:D12"
+        },
+        "link:6de997e9ce426616d90b5af8": {
+          "content_sha256": "6de997e9ce426616d90b5af86d012717d0264d478db85d3f73312a0d275c49db",
+          "id": "link:6de997e9ce426616d90b5af8",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results.03-smit-extract-limitations-hyperparams",
+          "target_id": "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results"
+        },
+        "link:709f42e6e4da8b14cdf82243": {
+          "content_sha256": "709f42e6e4da8b14cdf82243f398085db7de30b6558d5ee57c30811a4bbb707f",
+          "id": "link:709f42e6e4da8b14cdf82243",
+          "relation": "refines",
+          "source_id": "question:demand:D7",
+          "target_id": "question:root"
+        },
+        "link:79a9672c7c764f123cad7df4": {
+          "content_sha256": "79a9672c7c764f123cad7df46a777bdbe38ef67bc5bca2231fe605d3970331ce",
+          "id": "link:79a9672c7c764f123cad7df4",
+          "relation": "refines",
+          "source_id": "question:root.02-crdt-persistence",
+          "target_id": "question:demand:D7"
+        },
+        "link:7a79aa5755f5b9590ce191cb": {
+          "content_sha256": "7a79aa5755f5b9590ce191cb65a36bfac312cd7011b4339d02a7b22f29e67a35",
+          "id": "link:7a79aa5755f5b9590ce191cb",
+          "relation": "refines",
+          "source_id": "question:demand:D8",
+          "target_id": "question:root"
+        },
+        "link:7a9a7c6a39dea51cb03ea32e": {
+          "content_sha256": "7a9a7c6a39dea51cb03ea32ef436a83f01f42b9c025d64e5348d06508cb97d65",
+          "id": "link:7a9a7c6a39dea51cb03ea32e",
+          "relation": "partially_answers",
+          "source_id": "answer:root.05-debate-nulls-boundaries.01-c1-smit-null-results.03-smit-extract-limitations-hyperparams",
+          "target_id": "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results"
+        },
+        "link:7c6b34c58d2a7a2bcc9f5e5f": {
+          "content_sha256": "7c6b34c58d2a7a2bcc9f5e5f0bce4c8a056e5bb10f00717a604aaa79136145cf",
+          "id": "link:7c6b34c58d2a7a2bcc9f5e5f",
+          "relation": "refines",
+          "source_id": "question:root.04-debate-gains-evidence",
+          "target_id": "question:demand:D4"
+        },
+        "link:7d78d3ba63d8f21b16592142": {
+          "content_sha256": "7d78d3ba63d8f21b1659214267dcdf3726209cbd846802823b6bee7c773fafd9",
+          "id": "link:7d78d3ba63d8f21b16592142",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries.02-c2-zhang-boundary-conditions",
+          "target_id": "question:demand:D11"
+        },
+        "link:815a52c06ab01fa3052d160f": {
+          "content_sha256": "815a52c06ab01fa3052d160f517b7436a84926a916c938a154527f6ad9f63fe6",
+          "id": "link:815a52c06ab01fa3052d160f",
+          "relation": "refines",
+          "source_id": "question:demand:D13",
+          "target_id": "question:root"
+        },
+        "link:949c38f2eaedc4987269fba1": {
+          "content_sha256": "949c38f2eaedc4987269fba1c94482174671f4b3714c84b37ca3f15b5222db2e",
+          "id": "link:949c38f2eaedc4987269fba1",
+          "relation": "answers",
+          "source_id": "answer:root.05-debate-nulls-boundaries.01-c1-smit-null-results.03-smit-extract-limitations-hyperparams",
+          "target_id": "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results.03-smit-extract-limitations-hyperparams"
+        },
+        "link:95a52b650d408c309a8140ee": {
+          "content_sha256": "95a52b650d408c309a8140ee8c6ebca2fef1ce6a298affcd77e68b2c5e9698bd",
+          "id": "link:95a52b650d408c309a8140ee",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries",
+          "target_id": "question:demand:D13"
+        },
+        "link:960009408650bf4b3e01a852": {
+          "content_sha256": "960009408650bf4b3e01a8526773683245ec77daf9cd3d401176b91e3d2c5d60",
+          "id": "link:960009408650bf4b3e01a852",
+          "relation": "refines",
+          "source_id": "question:root.01-arg-semantics",
+          "target_id": "question:demand:D8"
+        },
+        "link:9c8f85fa9b668b832df212c2": {
+          "content_sha256": "9c8f85fa9b668b832df212c250d329fa496797bc5122b379c82e19a137865cef",
+          "id": "link:9c8f85fa9b668b832df212c2",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries.03-c3-design-inferences",
+          "target_id": "question:root.05-debate-nulls-boundaries"
+        },
+        "link:9dc3c1ef66fc5dbb330f0173": {
+          "content_sha256": "9dc3c1ef66fc5dbb330f0173535d446c45af5188095bf062d2f8de4e0707a33e",
+          "id": "link:9dc3c1ef66fc5dbb330f0173",
+          "relation": "refines",
+          "source_id": "question:demand:D15",
+          "target_id": "question:root"
+        },
+        "link:9e148f747df068b5a106ef78": {
+          "content_sha256": "9e148f747df068b5a106ef7855e07d89cf45cd6f352308627d4460c862c9e2b9",
+          "id": "link:9e148f747df068b5a106ef78",
+          "relation": "refines",
+          "source_id": "question:root.01-arg-semantics",
+          "target_id": "question:demand:D13"
+        },
+        "link:9e16c1c1dacc451174870ea4": {
+          "content_sha256": "9e16c1c1dacc451174870ea4511dc149959278b7f7237d7a2755f0a8820b1171",
+          "id": "link:9e16c1c1dacc451174870ea4",
+          "relation": "refines",
+          "source_id": "question:demand:D11",
+          "target_id": "question:root"
+        },
+        "link:9f307b082e580d3f1768454b": {
+          "content_sha256": "9f307b082e580d3f1768454bde85ab9516764862ddd3e20b7688a0060f590870",
+          "id": "link:9f307b082e580d3f1768454b",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries",
+          "target_id": "question:demand:D14"
+        },
+        "link:a8184056ad34b6459c3bcacb": {
+          "content_sha256": "a8184056ad34b6459c3bcacba8bf4a16d92e99b3f23f38cc44724e447115c287",
+          "id": "link:a8184056ad34b6459c3bcacb",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results",
+          "target_id": "question:demand:D11"
+        },
+        "link:a83bc0e755e8fd359c4a6e60": {
+          "content_sha256": "a83bc0e755e8fd359c4a6e60e1429a2524d3b9f114eafad89e022184a5d223cd",
+          "id": "link:a83bc0e755e8fd359c4a6e60",
+          "relation": "refines",
+          "source_id": "question:root.01-arg-semantics",
+          "target_id": "question:demand:D3"
+        },
+        "link:ad2d4893bb4dadfa6cec4d51": {
+          "content_sha256": "ad2d4893bb4dadfa6cec4d5140baa6fa9767b2438aafa6411ce349e9e4ecc616",
+          "id": "link:ad2d4893bb4dadfa6cec4d51",
+          "relation": "refines",
+          "source_id": "question:demand:D9",
+          "target_id": "question:root"
+        },
+        "link:b02788fef9fd73ad10830bc3": {
+          "content_sha256": "b02788fef9fd73ad10830bc3e9d81dcb10ab065dd7cb0854743a1a9ff757ebb6",
+          "id": "link:b02788fef9fd73ad10830bc3",
+          "relation": "refines",
+          "source_id": "question:root.02-crdt-persistence",
+          "target_id": "question:demand:D5"
+        },
+        "link:b39e9bd6e534d53587c33f92": {
+          "content_sha256": "b39e9bd6e534d53587c33f923f5010b29d4e1d076282274cb24f7efef425bb04",
+          "id": "link:b39e9bd6e534d53587c33f92",
+          "relation": "refines",
+          "source_id": "question:root.02-crdt-persistence",
+          "target_id": "question:demand:D10"
+        },
+        "link:b6b80273c764e1e3f59df888": {
+          "content_sha256": "b6b80273c764e1e3f59df888c780bae1e2c94e9580e201de791a578df4d4cf94",
+          "id": "link:b6b80273c764e1e3f59df888",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries.02-c2-zhang-boundary-conditions",
+          "target_id": "question:root.05-debate-nulls-boundaries"
+        },
+        "link:b9ccd3ec073289680e72b9c5": {
+          "content_sha256": "b9ccd3ec073289680e72b9c51fe29849bd5f0a857121c6ccbf09d130cc2e3ac2",
+          "id": "link:b9ccd3ec073289680e72b9c5",
+          "relation": "refines",
+          "source_id": "question:root.02-crdt-persistence",
+          "target_id": "question:demand:D12"
+        },
+        "link:b9d7a3cfb93623e545210f92": {
+          "content_sha256": "b9d7a3cfb93623e545210f92c5b73dc1624e7fa60edae18b5341a7f0f611c135",
+          "id": "link:b9d7a3cfb93623e545210f92",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results",
+          "target_id": "question:root.05-debate-nulls-boundaries"
+        },
+        "link:c0525acb5ba38548b9c5ff19": {
+          "content_sha256": "c0525acb5ba38548b9c5ff191f7515142f60365966e0df4035197e2f190a8644",
+          "id": "link:c0525acb5ba38548b9c5ff19",
+          "relation": "refines",
+          "source_id": "question:root.04-debate-gains-evidence",
+          "target_id": "question:demand:D11"
+        },
+        "link:c263d292340d252299a711d8": {
+          "content_sha256": "c263d292340d252299a711d87153504ad73f549a135701386915075780646444",
+          "id": "link:c263d292340d252299a711d8",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results",
+          "target_id": "question:demand:D13"
+        },
+        "link:c39a34a9d3f6dc908746a7b0": {
+          "content_sha256": "c39a34a9d3f6dc908746a7b00a61c4bba98b7330907889d3baecbfc028cb3544",
+          "id": "link:c39a34a9d3f6dc908746a7b0",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries.02-c2-zhang-boundary-conditions",
+          "target_id": "question:demand:D13"
+        },
+        "link:c86042ed89783103116c72b1": {
+          "content_sha256": "c86042ed89783103116c72b16964569e1da076f3df7508c3a2be9cf410cc290e",
+          "id": "link:c86042ed89783103116c72b1",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results",
+          "target_id": "question:demand:D15"
+        },
+        "link:ceba8d1721ebe07093387a83": {
+          "content_sha256": "ceba8d1721ebe07093387a834eeadfe709ff9b65988bb6e917c27d0d77b3bead",
+          "id": "link:ceba8d1721ebe07093387a83",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries.03-c3-design-inferences",
+          "target_id": "question:demand:D15"
+        },
+        "link:d508e58a1c643d9abfe73da0": {
+          "content_sha256": "d508e58a1c643d9abfe73da06ff8d2166070d8bf0177c3bb003e03a99924621c",
+          "id": "link:d508e58a1c643d9abfe73da0",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries",
+          "target_id": "question:demand:D11"
+        },
+        "link:d945c4cf6d953b660b03eff3": {
+          "content_sha256": "d945c4cf6d953b660b03eff3658a5ffdb0cbfdc0823c582ddbd3ad6b183f44fe",
+          "id": "link:d945c4cf6d953b660b03eff3",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results.01-smit-extract-null-overall",
+          "target_id": "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results"
+        },
+        "link:da16abdd94a5d34dd4b43e33": {
+          "content_sha256": "da16abdd94a5d34dd4b43e339ef70cc20006be22ca37348780d87f35595d0e1d",
+          "id": "link:da16abdd94a5d34dd4b43e33",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries.03-c3-design-inferences",
+          "target_id": "question:demand:D11"
+        },
+        "link:da969a151f6b08095623e758": {
+          "content_sha256": "da969a151f6b08095623e758015d076cc285b00d83a192363fbb372f5fe12bf8",
+          "id": "link:da969a151f6b08095623e758",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries.03-c3-design-inferences",
+          "target_id": "question:demand:D13"
+        },
+        "link:dbc379c523a802d7234d668c": {
+          "content_sha256": "dbc379c523a802d7234d668c3e454859f9aa203d2a2e546f530980165cc90d8f",
+          "id": "link:dbc379c523a802d7234d668c",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries",
+          "target_id": "question:demand:D12"
+        },
+        "link:dbcff4ec9d62472bedb7ee52": {
+          "content_sha256": "dbcff4ec9d62472bedb7ee5294e35b526a4cde4fadd713d11e33f955d20f5328",
+          "id": "link:dbcff4ec9d62472bedb7ee52",
+          "relation": "refines",
+          "source_id": "question:demand:D14",
+          "target_id": "question:root"
+        },
+        "link:e5a9bece7311def890467b91": {
+          "content_sha256": "e5a9bece7311def890467b9156fcc92d2fec9948bcc4ff14bd2ab4b30bc4e243",
+          "id": "link:e5a9bece7311def890467b91",
+          "relation": "refines",
+          "source_id": "question:demand:D12",
+          "target_id": "question:root"
+        },
+        "link:e5b001edf93c1fbe4904692c": {
+          "content_sha256": "e5b001edf93c1fbe4904692c23bc3465cf787852c943d1604d06deb98f1fd296",
+          "id": "link:e5b001edf93c1fbe4904692c",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries.02-c2-zhang-boundary-conditions",
+          "target_id": "question:demand:D15"
+        },
+        "link:e5bfef49b3f76c9371b77861": {
+          "content_sha256": "e5bfef49b3f76c9371b77861e45ee1d512f019aef67172fd18c7132135626f34",
+          "id": "link:e5bfef49b3f76c9371b77861",
+          "relation": "refines",
+          "source_id": "question:root.03-social-influence-risk",
+          "target_id": "question:demand:D12"
+        },
+        "link:e7976f175a8a1a130ad2d1e7": {
+          "content_sha256": "e7976f175a8a1a130ad2d1e78c842b200752fab790d5659f858a141cd9274c2f",
+          "id": "link:e7976f175a8a1a130ad2d1e7",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results",
+          "target_id": "question:demand:D14"
+        },
+        "link:ec67afe3731a822e2d0c2942": {
+          "content_sha256": "ec67afe3731a822e2d0c29420bb7d4b2f11e3ec8cb83837b645384f34bcf5d18",
+          "id": "link:ec67afe3731a822e2d0c2942",
+          "relation": "refines",
+          "source_id": "question:root.04-debate-gains-evidence",
+          "target_id": "question:demand:D12"
+        },
+        "link:ec854f50dd446db9f2977a7b": {
+          "content_sha256": "ec854f50dd446db9f2977a7bed983ee07aa3200e5f231f8c296bd8d426f9eeaa",
+          "id": "link:ec854f50dd446db9f2977a7b",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results.02-smit-extract-benchmarks",
+          "target_id": "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results"
+        },
+        "link:f08e24e443aaed84eb82ef33": {
+          "content_sha256": "f08e24e443aaed84eb82ef33800e276fb3bd803391b96fbcf6dd7f5b2873bae8",
+          "id": "link:f08e24e443aaed84eb82ef33",
+          "relation": "partially_answers",
+          "source_id": "answer:root.05-debate-nulls-boundaries.01-c1-smit-null-results.02-smit-extract-benchmarks",
+          "target_id": "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results"
+        },
+        "link:f63ca17b95f176b627952fd3": {
+          "content_sha256": "f63ca17b95f176b627952fd3651d46f56dfec6c8994b0b0df30d2fc331ace8a9",
+          "id": "link:f63ca17b95f176b627952fd3",
+          "relation": "refines",
+          "source_id": "question:root.03-social-influence-risk",
+          "target_id": "question:demand:D6"
+        },
+        "link:f7b3972e183578733d308198": {
+          "content_sha256": "f7b3972e183578733d308198b9f3de5fda8854126c6aa66264d14afa484ff56a",
+          "id": "link:f7b3972e183578733d308198",
+          "relation": "refines",
+          "source_id": "question:demand:D10",
+          "target_id": "question:root"
+        },
+        "link:f87ac7b536be5b768b698c28": {
+          "content_sha256": "f87ac7b536be5b768b698c28521f264405bf959a3d7cc8591192a09721ce5721",
+          "id": "link:f87ac7b536be5b768b698c28",
+          "relation": "refines",
+          "source_id": "question:root.03-social-influence-risk",
+          "target_id": "question:demand:D11"
+        },
+        "link:fe2451f9c9508933a87405ee": {
+          "content_sha256": "fe2451f9c9508933a87405eef605293ea6393e7fed413850941fee1e033df272",
+          "id": "link:fe2451f9c9508933a87405ee",
+          "relation": "refines",
+          "source_id": "question:root.05-debate-nulls-boundaries.02-c2-zhang-boundary-conditions",
+          "target_id": "question:demand:D14"
+        }
+      },
+      "outgoing_link_ids_by_entry": {
+        "answer:root.05-debate-nulls-boundaries.01-c1-smit-null-results.01-smit-extract-null-overall": [
+          "link:3a8845665fa98bf1d4c755cc",
+          "link:575d9cacc5c39663d486bb15"
+        ],
+        "answer:root.05-debate-nulls-boundaries.01-c1-smit-null-results.02-smit-extract-benchmarks": [
+          "link:3b8c4b6461c43c206044840b",
+          "link:f08e24e443aaed84eb82ef33"
+        ],
+        "answer:root.05-debate-nulls-boundaries.01-c1-smit-null-results.03-smit-extract-limitations-hyperparams": [
+          "link:7a9a7c6a39dea51cb03ea32e",
+          "link:949c38f2eaedc4987269fba1"
+        ],
+        "question:demand:D1": [
+          "link:561e0fcd22b650ab4cc0fd61"
+        ],
+        "question:demand:D10": [
+          "link:f7b3972e183578733d308198"
+        ],
+        "question:demand:D11": [
+          "link:9e16c1c1dacc451174870ea4"
+        ],
+        "question:demand:D12": [
+          "link:e5a9bece7311def890467b91"
+        ],
+        "question:demand:D13": [
+          "link:815a52c06ab01fa3052d160f"
+        ],
+        "question:demand:D14": [
+          "link:dbcff4ec9d62472bedb7ee52"
+        ],
+        "question:demand:D15": [
+          "link:9dc3c1ef66fc5dbb330f0173"
+        ],
+        "question:demand:D2": [
+          "link:1e97bab1f415d57cbc837a88"
+        ],
+        "question:demand:D3": [
+          "link:2395134f0213cf5cee3f1947"
+        ],
+        "question:demand:D4": [
+          "link:541766fc32e4d84c2fd63c44"
+        ],
+        "question:demand:D5": [
+          "link:088e1a7cfea6dde8ac04eab3"
+        ],
+        "question:demand:D6": [
+          "link:48a3d569758cae1eb71a2043"
+        ],
+        "question:demand:D7": [
+          "link:709f42e6e4da8b14cdf82243"
+        ],
+        "question:demand:D8": [
+          "link:7a79aa5755f5b9590ce191cb"
+        ],
+        "question:demand:D9": [
+          "link:ad2d4893bb4dadfa6cec4d51"
+        ],
+        "question:root.01-arg-semantics": [
+          "link:4694364cb7b8f08ed6b70438",
+          "link:5b751584b8c43c9e15d281fe",
+          "link:960009408650bf4b3e01a852",
+          "link:9e148f747df068b5a106ef78",
+          "link:a83bc0e755e8fd359c4a6e60"
+        ],
+        "question:root.02-crdt-persistence": [
+          "link:1709dd7fbf8587de0c575188",
+          "link:3e163e5b6c87fe659c9c8b95",
+          "link:79a9672c7c764f123cad7df4",
+          "link:b02788fef9fd73ad10830bc3",
+          "link:b39e9bd6e534d53587c33f92",
+          "link:b9ccd3ec073289680e72b9c5"
+        ],
+        "question:root.03-social-influence-risk": [
+          "link:52aaf440a0cfa52148fd0e0a",
+          "link:54ace6aa7dbc682ce36b1598",
+          "link:5ecc297a5272dee784b1b751",
+          "link:e5bfef49b3f76c9371b77861",
+          "link:f63ca17b95f176b627952fd3",
+          "link:f87ac7b536be5b768b698c28"
+        ],
+        "question:root.04-debate-gains-evidence": [
+          "link:018c1bfba9c89f886979e58a",
+          "link:4f798cb83c7582c38cfb88bd",
+          "link:5fbb61d2e80f257b289c0591",
+          "link:7c6b34c58d2a7a2bcc9f5e5f",
+          "link:c0525acb5ba38548b9c5ff19",
+          "link:ec67afe3731a822e2d0c2942"
+        ],
+        "question:root.05-debate-nulls-boundaries": [
+          "link:5e97df7da6a94755d85a5407",
+          "link:6018f82dcea4e7b30c3a5022",
+          "link:95a52b650d408c309a8140ee",
+          "link:9f307b082e580d3f1768454b",
+          "link:d508e58a1c643d9abfe73da0",
+          "link:dbc379c523a802d7234d668c"
+        ],
+        "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results": [
+          "link:60e459cfffff32f8128208f8",
+          "link:a8184056ad34b6459c3bcacb",
+          "link:b9d7a3cfb93623e545210f92",
+          "link:c263d292340d252299a711d8",
+          "link:c86042ed89783103116c72b1",
+          "link:e7976f175a8a1a130ad2d1e7"
+        ],
+        "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results.01-smit-extract-null-overall": [
+          "link:d945c4cf6d953b660b03eff3"
+        ],
+        "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results.02-smit-extract-benchmarks": [
+          "link:ec854f50dd446db9f2977a7b"
+        ],
+        "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results.03-smit-extract-limitations-hyperparams": [
+          "link:6de997e9ce426616d90b5af8"
+        ],
+        "question:root.05-debate-nulls-boundaries.02-c2-zhang-boundary-conditions": [
+          "link:4a3bba97c5e1b9cb782e3408",
+          "link:7d78d3ba63d8f21b16592142",
+          "link:b6b80273c764e1e3f59df888",
+          "link:c39a34a9d3f6dc908746a7b0",
+          "link:e5b001edf93c1fbe4904692c",
+          "link:fe2451f9c9508933a87405ee"
+        ],
+        "question:root.05-debate-nulls-boundaries.03-c3-design-inferences": [
+          "link:5539b2e5fa996893c265aec7",
+          "link:9c8f85fa9b668b832df212c2",
+          "link:ceba8d1721ebe07093387a83",
+          "link:da16abdd94a5d34dd4b43e33",
+          "link:da969a151f6b08095623e758"
+        ]
+      },
+      "question_ids_by_answer": {
+        "answer:root.05-debate-nulls-boundaries.01-c1-smit-null-results.01-smit-extract-null-overall": [
+          "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results",
+          "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results.01-smit-extract-null-overall"
+        ],
+        "answer:root.05-debate-nulls-boundaries.01-c1-smit-null-results.02-smit-extract-benchmarks": [
+          "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results",
+          "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results.02-smit-extract-benchmarks"
+        ],
+        "answer:root.05-debate-nulls-boundaries.01-c1-smit-null-results.03-smit-extract-limitations-hyperparams": [
+          "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results",
+          "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results.03-smit-extract-limitations-hyperparams"
+        ]
+      },
+      "questions_by_id": {
+        "question:demand:D1": {
+          "acceptance_condition": "Establish demand D1 with evidence.",
+          "content_sha256": "358b8c8d2ee8dcbcd62f92e95fcfeb759f5784e13dd5bd756c15e8ad80406fad",
+          "demand_ids": [
+            "D1"
+          ],
+          "id": "question:demand:D1",
+          "node_id": null,
+          "rationale": "Format and length bound stated verbatim in the request.",
+          "tags": [
+            "decision"
+          ],
+          "text": "The deliverable is a single architecture decision memo of 1,400–1,800 words."
+        },
+        "question:demand:D10": {
+          "acceptance_condition": "Establish demand D10 with evidence.",
+          "content_sha256": "42c24ef84552b31fbec60cb25073a16b7d0d6ae637909b5aaa0649e671486bc9",
+          "demand_ids": [
+            "D10"
+          ],
+          "id": "question:demand:D10",
+          "node_id": null,
+          "rationale": "Sixth specification area; the request says 'the exact role of model versus runtime.'",
+          "tags": [
+            "evidence"
+          ],
+          "text": "The exact division of responsibility between model and runtime is specified."
+        },
+        "question:demand:D11": {
+          "acceptance_condition": "Establish demand D11 with evidence.",
+          "content_sha256": "b48aa66909c810d05ced3a63029ee4d813e20b8bd7343488b183f69dac4e2b40",
+          "demand_ids": [
+            "D11"
+          ],
+          "id": "question:demand:D11",
+          "node_id": null,
+          "rationale": "Required by the request and reinforced by the manifest's instruction not to select papers by desired outcome.",
+          "tags": [
+            "evidence"
+          ],
+          "text": "The memo reconciles — rather than hides — the tension between papers reporting multi-agent debate gains and papers reporting matched-compute null results or conformity."
+        },
+        "question:demand:D12": {
+          "acceptance_condition": "Establish demand D12 with evidence.",
+          "content_sha256": "70610c0e88a285479759ef950cb1fa33e28da10095af537fb19e5ee24c60fdc7",
+          "demand_ids": [
+            "D12"
+          ],
+          "id": "question:demand:D12",
+          "node_id": null,
+          "rationale": "Grounding scope, citation count, and page-marker requirement are stated in the request; marker format and corpus enumeration come from the manifest.",
+          "tags": [
+            "evidence"
+          ],
+          "text": "All evidentiary claims are grounded only in the supplied workspace corpus, with at least five distinct source files cited and citations carrying PDF page markers from the extracted text."
+        },
+        "question:demand:D13": {
+          "acceptance_condition": "Establish demand D13 with evidence.",
+          "content_sha256": "e4e6151f4fb92956ae2d8e295acd8c66fb86a3b7aa8512390bd8da1b78cda6ea",
+          "demand_ids": [
+            "D13"
+          ],
+          "id": "question:demand:D13",
+          "node_id": null,
+          "rationale": "Stated verbatim in the request.",
+          "tags": [
+            "evidence"
+          ],
+          "text": "Source-supported claims are clearly distinguished from design inferences."
+        },
+        "question:demand:D14": {
+          "acceptance_condition": "Establish demand D14 with evidence.",
+          "content_sha256": "89489912e05f5dae6a67e4300048e4863d654b8355bd1892d03970cecd421850",
+          "demand_ids": [
+            "D14"
+          ],
+          "id": "question:demand:D14",
+          "node_id": null,
+          "rationale": "Condition count and all five metric families are enumerated in the request.",
+          "tags": [
+            "counterexample",
+            "measurement",
+            "definition"
+          ],
+          "text": "A falsifiable evaluation plan compares at least three conditions and defines metrics for quality, diversity/correlation, latency, token cost, and recovery-from-wrong-consensus."
+        },
+        "question:demand:D15": {
+          "acceptance_condition": "Establish demand D15 with evidence.",
+          "content_sha256": "c63b60742108a5627760487657dad3280b9b724cdef7fd8f2f8b22e469072dc3",
+          "demand_ids": [
+            "D15"
+          ],
+          "id": "question:demand:D15",
+          "node_id": null,
+          "rationale": "Stated verbatim in the request.",
+          "tags": [
+            "evidence"
+          ],
+          "text": "Important limitations and unresolved questions are stated."
+        },
+        "question:demand:D2": {
+          "acceptance_condition": "Establish demand D2 with evidence.",
+          "content_sha256": "a1e8e73a66a88854b181cd8e700ee47c190021995492e4c13a7f3f2480683936",
+          "demand_ids": [
+            "D2"
+          ],
+          "id": "question:demand:D2",
+          "node_id": null,
+          "rationale": "The request explicitly forbids a survey-only outcome.",
+          "tags": [
+            "decision"
+          ],
+          "text": "The memo makes one concrete, implementable recommendation rather than merely surveying the literature."
+        },
+        "question:demand:D3": {
+          "acceptance_condition": "Establish demand D3 with evidence.",
+          "content_sha256": "2b4510f300813f4c6d054088afcdeb580e129c09c780589126e578caad7f1cb3",
+          "demand_ids": [
+            "D3"
+          ],
+          "id": "question:demand:D3",
+          "node_id": null,
+          "rationale": "All five capabilities are enumerated verbatim in the request.",
+          "tags": [
+            "decision"
+          ],
+          "text": "The recommended design treats questions and answers as first-class many-to-many graph objects, supporting: multiple competing answers per question; one answer addressing multiple questions; question-to-question relations; answer-to-answer provenance or conflict relations; and controlled tags."
+        },
+        "question:demand:D4": {
+          "acceptance_condition": "Establish demand D4 with evidence.",
+          "content_sha256": "495d059579b7faeff7b7c3dea23a59e4beecd9d2061aa750429abe0bdc2fd29e",
+          "demand_ids": [
+            "D4"
+          ],
+          "id": "question:demand:D4",
+          "node_id": null,
+          "rationale": "Both comparison targets are named verbatim in the request.",
+          "tags": [
+            "evidence"
+          ],
+          "text": "The design is compared against two named baselines: an open conversational forum and no inter-agent communication."
+        },
+        "question:demand:D5": {
+          "acceptance_condition": "Establish demand D5 with evidence.",
+          "content_sha256": "04efdfb487681553676fbfc02e1e0eba20f7638dcd990d68fffd3b7e56f7324a",
+          "demand_ids": [
+            "D5"
+          ],
+          "id": "question:demand:D5",
+          "node_id": null,
+          "rationale": "First of six specification areas listed in the request.",
+          "tags": [
+            "evidence"
+          ],
+          "text": "The data model and its invariants are specified."
+        },
+        "question:demand:D6": {
+          "acceptance_condition": "Establish demand D6 with evidence.",
+          "content_sha256": "16aa3a487c4a63da4bd967a8004443a36ebbea7ca9716b65b773f14e6af5e164",
+          "demand_ids": [
+            "D6"
+          ],
+          "id": "question:demand:D6",
+          "node_id": null,
+          "rationale": "Second of six specification areas listed in the request.",
+          "tags": [
+            "method"
+          ],
+          "text": "Staged visibility and the communication protocol are specified."
+        },
+        "question:demand:D7": {
+          "acceptance_condition": "Establish demand D7 with evidence.",
+          "content_sha256": "e9aace925c8874d470e5e66f133e5698e954d9c79c85ac15d05a6b1be90f8648",
+          "demand_ids": [
+            "D7"
+          ],
+          "id": "question:demand:D7",
+          "node_id": null,
+          "rationale": "Third of six specification areas listed in the request.",
+          "tags": [
+            "evidence"
+          ],
+          "text": "Persistence and concurrent-update semantics are specified."
+        },
+        "question:demand:D8": {
+          "acceptance_condition": "Establish demand D8 with evidence.",
+          "content_sha256": "be321eb0feda8aa2c452bdc5b58cd0c2d3a82e7337259f185b4b495784e0d94b",
+          "demand_ids": [
+            "D8"
+          ],
+          "id": "question:demand:D8",
+          "node_id": null,
+          "rationale": "Fourth of six specification areas listed in the request.",
+          "tags": [
+            "evidence"
+          ],
+          "text": "Contradiction and belief-revision behavior is specified."
+        },
+        "question:demand:D9": {
+          "acceptance_condition": "Establish demand D9 with evidence.",
+          "content_sha256": "fbacaee35ff37b6cdf07a99f4704b78e431674fb8d042f8604710966157351f4",
+          "demand_ids": [
+            "D9"
+          ],
+          "id": "question:demand:D9",
+          "node_id": null,
+          "rationale": "Fifth of six specification areas listed in the request.",
+          "tags": [
+            "evidence"
+          ],
+          "text": "Retrieval and ranking are specified."
+        },
+        "question:root": {
+          "acceptance_condition": "Satisfy every assigned whole-task demand and explicit constraint.",
+          "content_sha256": "4ce436fa1c007db64fdec92524d279656612f912b3191f3b4454fb209e9fb892",
+          "demand_ids": [
+            "D1",
+            "D2",
+            "D3",
+            "D4",
+            "D5",
+            "D6",
+            "D7",
+            "D8",
+            "D9",
+            "D10",
+            "D11",
+            "D12",
+            "D13",
+            "D14",
+            "D15"
+          ],
+          "id": "question:root",
+          "node_id": "root",
+          "rationale": "The whole task submitted after intake.",
+          "tags": [
+            "counterexample",
+            "method",
+            "measurement"
+          ],
+          "text": "Produce a 1,400–1,800 word architecture decision memo that commits to one concrete, implementable design for a shared knowledge substrate serving recursively decomposing AI research agents: questions and answers modeled as first-class many-to-many graph objects; the design compared against an open conversational forum and against no inter-agent communication; full specification of the data model and invariants, staged visibility and communication protocol, persistence and concurrent-update semantics, contradiction and belief-revision behavior, retrieval/ranking, and the exact role of model versus runtime; evidence restricted to the seven-file workspace corpus with at least five distinct source files cited via PDF page markers; the corpus's conflicting empirical conclusions reconciled rather than hidden; source-supported claims distinguished from design inferences; and a falsifiable evaluation plan (at least three conditions, five named metric families) plus explicit limitations and unresolved questions."
+        },
+        "question:root.01-arg-semantics": {
+          "acceptance_condition": "Returns (a) at least four findings from the Dung file, each a quote or close paraphrase carrying the file-relative citation and the exact `===== PDF PAGE N =====` marker(s) of the page where it appears, and (b) at least three design constraints for conflict/belief-revision semantics, each explicitly labeled as design inference rather than source claim.",
+          "content_sha256": "1cda59f1ebda0deba5fd22d60e9e1bdf079a900c1c0be6105aeac164ebc3d3ec",
+          "demand_ids": [
+            "D3",
+            "D8",
+            "D12",
+            "D13"
+          ],
+          "id": "question:root.01-arg-semantics",
+          "node_id": "root.01-arg-semantics",
+          "rationale": "Dung 1995 is the corpus's only formal treatment of conflict and acceptability; it grounds the conflict-relation capability of D3 and the contradiction/belief-revision specification of D8 with citable formal definitions.",
+          "tags": [
+            "definition",
+            "evidence",
+            "method"
+          ],
+          "text": "Read papers/text/dung-1995-argumentation.txt and extract, each anchored to the exact `===== PDF PAGE N =====` marker(s) where it appears: the definition of an argumentation framework (set of arguments plus binary attack relation), acceptability of an argument, conflict-free and admissible sets, the characteristic function, and the grounded/preferred/stable extension semantics, including any stated links to nonmonotonic reasoning or logic programming. Then derive, each explicitly labeled as design inference, how these notions can anchor answer-to-answer conflict/provenance relations and contradiction and belief-revision behavior in a many-to-many question/answer graph (e.g., answers as arguments, attack edges as conflicts, extensions as mutually consistent answer sets)."
+        },
+        "question:root.02-crdt-persistence": {
+          "acceptance_condition": "Returns (a) at least four findings from the Shapiro file, each a quote or close paraphrase carrying the file-relative citation and the exact `===== PDF PAGE N =====` marker(s), and (b) at least three design constraints for persistence/concurrency (including at least one explicit split between CRDT-enforced and runtime-enforced invariants), each labeled as design inference.",
+          "content_sha256": "9708f3549586149eb68c3673c506178691fb9804268b1639f230c6784a9e2085",
+          "demand_ids": [
+            "D5",
+            "D7",
+            "D10",
+            "D12",
+            "D13"
+          ],
+          "id": "question:root.02-crdt-persistence",
+          "node_id": "root.02-crdt-persistence",
+          "rationale": "Shapiro et al. 2011 is the corpus's only distributed-systems treatment; it grounds the persistence and concurrent-update specification (D7), the merge-safe portion of the data model's invariants (D5), and the runtime-versus-model enforcement boundary (D10).",
+          "tags": [
+            "evidence",
+            "method",
+            "constraint"
+          ],
+          "text": "Read papers/text/shapiro-et-al-2011-crdts.txt and extract, each anchored to the exact `===== PDF PAGE N =====` marker(s) where it appears: the distinction between state-based and operation-based CRDTs, the strong eventual consistency guarantee and its conditions, the semilattice/monotonicity requirements for convergence, and at least two concrete reusable data types (e.g., grow-only set, observed-remove set, last-writer-wins register). Then derive, each explicitly labeled as design inference, concurrent-update semantics for a many-to-many question/answer graph substrate (e.g., add-only question and answer objects, add-wins tag sets) and identify which invariants CRDTs cannot enforce (e.g., uniqueness, schema validity, tag-vocabulary control) so that the runtime must enforce them."
+        },
+        "question:root.03-social-influence-risk": {
+          "acceptance_condition": "Returns (a) at least three anchored findings per file (at least six total), each a quote or close paraphrase carrying the file-relative citation and the exact `===== PDF PAGE N =====` marker(s), and (b) at least three staged-visibility or diversity-measurement design constraints, each explicitly labeled as design inference.",
+          "content_sha256": "2f332a3b5c9f0b6fd719848ae59287e9e0a5c4fbe833be72bbf5567676c75d50",
+          "demand_ids": [
+            "D6",
+            "D11",
+            "D12",
+            "D13",
+            "D14"
+          ],
+          "id": "question:root.03-social-influence-risk",
+          "node_id": "root.03-social-influence-risk",
+          "rationale": "Lorenz 2011 and Choi 2025 are the corpus's evidence that unstructured information sharing degrades collective accuracy; they ground the staged-visibility protocol (D6), the conformity side of the reconciliation (D11), and the diversity/correlation metric family (D14).",
+          "tags": [
+            "evidence",
+            "risk",
+            "counterexample"
+          ],
+          "text": "Read papers/text/lorenz-et-al-2011-social-influence.txt and papers/text/choi-et-al-2025-conformity.txt. Extract, each anchored to the exact `===== PDF PAGE N =====` marker(s): Lorenz et al.'s core experimental findings on how social influence affects the wisdom of crowds (effects on estimate diversity, accuracy, and confidence, as stated in the text) and Choi et al.'s empirical findings on group conformity in multi-agent systems (the conditions under which agents conform to peer or majority answers, as stated in the text). Then derive, each explicitly labeled as design inference, staged-visibility constraints for the substrate (e.g., committing independent answers before exposing peers' answers, delayed or partial disclosure) and implications for measuring answer diversity and correlation."
+        },
+        "question:root.04-debate-gains-evidence": {
+          "acceptance_condition": "Returns (a) at least four anchored findings from the Du file covering claimed gains, experimental setup (agents, rounds, tasks, consensus mechanism), and stated limitations, each carrying the file-relative citation and the exact `===== PDF PAGE N =====` marker(s), and (b) at least two design constraints and one evaluation-replication requirement, each explicitly labeled as design inference.",
+          "content_sha256": "2be78886a3947f382843991a648c9946b59844f7afbc180ae5d035bf173143b2",
+          "demand_ids": [
+            "D4",
+            "D11",
+            "D12",
+            "D13",
+            "D14"
+          ],
+          "id": "question:root.04-debate-gains-evidence",
+          "node_id": "root.04-debate-gains-evidence",
+          "rationale": "Du et al. 2023 is the corpus's positive evidence for multi-agent debate; it grounds one side of the required reconciliation (D11), informs the baseline comparison (D4), and defines the replication arm of the evaluation plan (D14).",
+          "tags": [
+            "evidence",
+            "measurement"
+          ],
+          "text": "Read papers/text/du-et-al-2023-multiagent-debate.txt and extract, each anchored to the exact `===== PDF PAGE N =====` marker(s): the improvements in factuality and reasoning the paper claims for multiagent debate, the experimental setup (number of agents, number of debate rounds, tasks used, and how consensus or a final answer is reached), and any limitations the authors state. Then derive, each explicitly labeled as design inference: which debate behaviors a shared question/answer substrate must capture to retain these gains, and what an evaluation condition replicating the paper's setup would require."
+        },
+        "question:root.05-debate-nulls-boundaries": {
+          "acceptance_condition": "Returns (a) at least three anchored findings per file (at least six total), each a quote or close paraphrase carrying the file-relative citation and the exact `===== PDF PAGE N =====` marker(s), and (b) at least three reconciliation hypotheses and at least three evaluation-design constraints (together covering the five named metric families), each explicitly labeled as design inference.",
+          "content_sha256": "89203749570be368520298607541a4b6b5c225a2bc75e8bdbf69bacd54a5bc66",
+          "demand_ids": [
+            "D11",
+            "D12",
+            "D13",
+            "D14",
+            "D15"
+          ],
+          "id": "question:root.05-debate-nulls-boundaries",
+          "node_id": "root.05-debate-nulls-boundaries",
+          "rationale": "Smit et al. 2023 and Zhang et al. 2025 are the corpus's null-result and boundary-condition evidence; they ground the reconciliation (D11) without hiding it, the falsifiable evaluation plan (D14), and the limitations and unresolved questions (D15).",
+          "tags": [
+            "counterexample",
+            "measurement",
+            "risk"
+          ],
+          "text": "Read papers/text/smit-et-al-2023-going-mad.txt and papers/text/zhang-et-al-2025-mad-question.txt. Extract, each anchored to the exact `===== PDF PAGE N =====` marker(s): Smit et al.'s critical or null results on multi-agent debate (including any comparisons against single-agent or matched-compute baselines, as stated in the text) and Zhang et al.'s analysis of when and why multi-agent debate helps or fails (task dependence and boundary conditions, as stated in the text). Then derive, each explicitly labeled as design inference: at least three reconciliation hypotheses attributing the disagreement with Du et al. 2023 to named conditions (task type, compute parity, visibility or timing of peer answers), and constraints for a falsifiable evaluation plan covering quality, diversity/correlation, latency, token cost, and recovery-from-wrong-consensus."
+        },
+        "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results": {
+          "acceptance_condition": "Returns at least three findings, each a quote or close paraphrase from the Smit file, each with the exact `===== PDF PAGE N =====` marker(s) where it appears. The findings must collectively cover: (1) MAD not reliably outperforming other prompting strategies, (2) performance comparisons on specific benchmarks, and (3) any stated limitations or sensitivity to hyperparameters.",
+          "content_sha256": "f5d173113e035041358a6ba0738cd3d997d33f6a3518040414b66c584142546c",
+          "demand_ids": [
+            "D11",
+            "D12",
+            "D13",
+            "D14",
+            "D15"
+          ],
+          "id": "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results",
+          "node_id": "root.05-debate-nulls-boundaries.01-c1-smit-null-results",
+          "rationale": "Smit et al. is the corpus's null-result evidence; its findings are a distinct evidence question that can be answered independently from the Zhang file and the design-derivation child.",
+          "tags": [
+            "counterexample",
+            "evidence",
+            "risk"
+          ],
+          "text": "Extract from papers/text/smit-et-al-2023-going-mad.txt at least three anchored findings on Smit et al.'s critical or null results regarding multi-agent debate, including any comparisons against single-agent or matched-compute baselines, each quoted or closely paraphrased and carrying the exact `===== PDF PAGE N =====` marker(s)."
+        },
+        "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results.01-smit-extract-null-overall": {
+          "acceptance_condition": "Returns at least one finding consisting of a direct quote or close paraphrase from the Smit file, with the exact `===== PDF PAGE N =====` marker(s) where it appears, explicitly stating that MAD does not reliably outperform other prompting strategies such as self-consistency or ensembling.",
+          "content_sha256": "f753902a4fe57a2a10ef488ad54184753fd1a2cf8960e1b5467aed45c239aff2",
+          "demand_ids": [],
+          "id": "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results.01-smit-extract-null-overall",
+          "node_id": "root.05-debate-nulls-boundaries.01-c1-smit-null-results.01-smit-extract-null-overall",
+          "rationale": "This is the first and most important null result: the paper's abstract and conclusions emphasize that MAD, in its current form, does not reliably outperform other prompting strategies. This finding is distinct from specific benchmark numbers and hyperparameter sensitivity, and it grounds the reconciliation requirement (D11) and the quality metric family (D14).",
+          "tags": [
+            "counterexample",
+            "evidence"
+          ],
+          "text": "Extract from papers/text/smit-et-al-2023-going-mad.txt at least one anchored finding stating that multi-agent debate (MAD) does not reliably outperform other prompting strategies (e.g., self-consistency, ensembling), quoting or closely paraphrasing the relevant passage(s) and carrying the exact `===== PDF PAGE N =====` marker(s)."
+        },
+        "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results.02-smit-extract-benchmarks": {
+          "acceptance_condition": "Returns at least one finding consisting of a direct quote or close paraphrase from the Smit file, with the exact `===== PDF PAGE N =====` marker(s), that reports performance numbers or rankings on at least two named benchmarks comparing at least one MAD system against a non-debate baseline.",
+          "content_sha256": "cd0dbbf6942d9ae6fc00c05e8e75f0dbd8c843c605dddea3b6ddb33117a47886",
+          "demand_ids": [],
+          "id": "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results.02-smit-extract-benchmarks",
+          "node_id": "root.05-debate-nulls-boundaries.01-c1-smit-null-results.02-smit-extract-benchmarks",
+          "rationale": "The acceptance condition requires coverage of performance comparisons on specific benchmarks. The paper includes Table 2 and Figure 3 comparing best performance across seven datasets, and states 'no protocol dominates on all datasets'. Capturing this provides quantitative grounding for the evaluation plan's quality and matched-compute considerations (D14).",
+          "tags": [
+            "evidence",
+            "measurement"
+          ],
+          "text": "Extract from papers/text/smit-et-al-2023-going-mad.txt at least one anchored finding that compares performance of MAD systems against single-agent or other prompting baselines on specific benchmarks (e.g., MedQA, PubMedQA, MMLU, CosmosQA, CIAR, GPQA, Chess), quoting or closely paraphrasing the relevant table or sentence and carrying the exact `===== PDF PAGE N =====` marker(s)."
+        },
+        "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results.03-smit-extract-limitations-hyperparams": {
+          "acceptance_condition": "Returns at least one finding consisting of a direct quote or close paraphrase from the Smit file, with the exact `===== PDF PAGE N =====` marker(s), that states either a limitation of the study or that MAD performance is sensitive to hyperparameters (e.g., agreement intensity) and thus difficult to optimize.",
+          "content_sha256": "7445b653965b44cc9f9f4976008f1f3afae3e6abb4147183c18b9a9a9cf35f3f",
+          "demand_ids": [],
+          "id": "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results.03-smit-extract-limitations-hyperparams",
+          "node_id": "root.05-debate-nulls-boundaries.01-c1-smit-null-results.03-smit-extract-limitations-hyperparams",
+          "rationale": "The acceptance condition requires coverage of stated limitations or sensitivity to hyperparameters. The paper's abstract and Section 4 explicitly state that MAD protocols are more sensitive to hyperparameter settings and difficult to optimize, and the limitations paragraph in the conclusions mentions API variability and cost. This finding grounds D15 (limitations) and informs the evaluation plan's hyperparameter control.",
+          "tags": [
+            "risk",
+            "evidence"
+          ],
+          "text": "Extract from papers/text/smit-et-al-2023-going-mad.txt at least one anchored finding stating limitations of the study or sensitivity of MAD to hyperparameters (e.g., agreement intensity, number of agents/rounds), quoting or closely paraphrasing the relevant passage(s) and carrying the exact `===== PDF PAGE N =====` marker(s)."
+        },
+        "question:root.05-debate-nulls-boundaries.02-c2-zhang-boundary-conditions": {
+          "acceptance_condition": "Returns at least three findings, each a quote or close paraphrase from the Zhang file, each with the exact `===== PDF PAGE N =====` marker(s) where it appears. The findings must collectively cover: (1) MAD often failing to outperform single-agent baselines like CoT and Self-Consistency, (2) task dependence (e.g., performance differences across programming, math, general knowledge), and (3) the role of model heterogeneity or other factors in improving or failing to improve MAD.",
+          "content_sha256": "7cc06f30a14ed1bd6831aaec777cec53aac4917b32a585ab629675a04dc5d449",
+          "demand_ids": [
+            "D11",
+            "D12",
+            "D13",
+            "D14",
+            "D15"
+          ],
+          "id": "question:root.05-debate-nulls-boundaries.02-c2-zhang-boundary-conditions",
+          "node_id": "root.05-debate-nulls-boundaries.02-c2-zhang-boundary-conditions",
+          "rationale": "Zhang et al. is the corpus's boundary-condition and negative-result evidence; its analysis of when debate helps or fails is a distinct evidence question independent from the Smit extraction.",
+          "tags": [
+            "counterexample",
+            "evidence",
+            "measurement"
+          ],
+          "text": "Extract from papers/text/zhang-et-al-2025-mad-question.txt at least three anchored findings on Zhang et al.'s analysis of when and why multi-agent debate helps or fails, including task dependence and boundary conditions, each quoted or closely paraphrased and carrying the exact `===== PDF PAGE N =====` marker(s)."
+        },
+        "question:root.05-debate-nulls-boundaries.03-c3-design-inferences": {
+          "acceptance_condition": "Returns at least three reconciliation hypotheses and at least three evaluation-design constraints, each explicitly labeled as design inference. The hypotheses must name at least one of: task type, compute parity, visibility/timing of peer answers. The constraints together must cover quality, diversity/correlation, latency, token cost, and recovery-from-wrong-consensus.",
+          "content_sha256": "5414bbc03bd73029ae03928b13e781d973356ae84bf3d5c089d27b3eeea91873",
+          "demand_ids": [
+            "D11",
+            "D13",
+            "D14",
+            "D15"
+          ],
+          "id": "question:root.05-debate-nulls-boundaries.03-c3-design-inferences",
+          "node_id": "root.05-debate-nulls-boundaries.03-c3-design-inferences",
+          "rationale": "The reconciliation and evaluation design is the analytical product of this node; it builds on the evidence extracted by the two sibling children, but can be derived in parallel because the required findings are provided as separator facts.",
+          "tags": [
+            "synthesis",
+            "risk",
+            "measurement"
+          ],
+          "text": "Using the anchored findings from the two sibling extractors (provided below as separator facts), derive at least three reconciliation hypotheses attributing the disagreement with Du et al. 2023 to named conditions (task type, compute parity, visibility or timing of peer answers), and at least three evaluation-design constraints covering the five metric families (quality, diversity/correlation, latency, token cost, recovery-from-wrong-consensus). Each derived item must be explicitly labeled as a design inference."
+        }
+      },
+      "standard_tags": [
+        "definition",
+        "constraint",
+        "evidence",
+        "method",
+        "counterexample",
+        "risk",
+        "assumption",
+        "uncertainty",
+        "decision",
+        "interface",
+        "measurement",
+        "synthesis"
+      ],
+      "version": 262
+    },
+    "node": {
+      "acceptance_condition": "Returns at least three findings, each a quote or close paraphrase from the Smit file, each with the exact `===== PDF PAGE N =====` marker(s) where it appears. The findings must collectively cover: (1) MAD not reliably outperforming other prompting strategies, (2) performance comparisons on specific benchmarks, and (3) any stated limitations or sensitivity to hyperparameters.",
+      "demand_ids": [
+        "D11",
+        "D12",
+        "D13",
+        "D14",
+        "D15"
+      ],
+      "depth": 2,
+      "expected_contribution": "A set of source-anchored findings from Smit et al. that the parent will use to build the reconciliation and evaluation-plan constraints.",
+      "id": "root.05-debate-nulls-boundaries.01-c1-smit-null-results",
+      "knowledge_tags": [
+        "counterexample",
+        "evidence",
+        "risk"
+      ],
+      "objective": "Extract from papers/text/smit-et-al-2023-going-mad.txt at least three anchored findings on Smit et al.'s critical or null results regarding multi-agent debate, including any comparisons against single-agent or matched-compute baselines, each quoted or closely paraphrased and carrying the exact `===== PDF PAGE N =====` marker(s).",
+      "parent_id": "root.05-debate-nulls-boundaries",
+      "rationale": "Smit et al. is the corpus's null-result evidence; its findings are a distinct evidence question that can be answered independently from the Zhang file and the design-derivation child.",
+      "separator_facts": [
+        "SC1: The evidentiary corpus is exactly seven extracted-text files under papers/text: dung-1995-argumentation.txt (Dung 1995, Artificial Intelligence 77), shapiro-et-al-2011-crdts.txt (Shapiro et al., SSS 2011), lorenz-et-al-2011-social-influence.txt (Lorenz et al., PNAS 108, 2011), du-et-al-2023-multiagent-debate.txt (Du et al. 2023, arXiv 2305.14325), smit-et-al-2023-going-mad.txt (Smit et al. 2023, arXiv 2311.17371), zhang-et-al-2025-mad-question.txt (Zhang et al. 2025, arXiv 2502.08788), choi-et-al-2025-conformity.txt (Choi et al., Findings of ACL 2025).",
+        "SC2: Page boundaries in the extracted texts are marked with lines of the form `===== PDF PAGE N =====`, and these markers are the citation anchors required by D12/C3.",
+        "SC3: The corpus intentionally contains conflicting empirical conclusions — multi-agent debate gains (Du et al. 2023) versus matched-compute null results and conformity findings (Smit et al. 2023; Zhang et al. 2025; Choi et al. 2025; Lorenz et al. 2011 on social influence undermining crowd wisdom) — and the manifest requires preserving and reconciling these conflicts.",
+        "SC4: The envelope's single conversation decision asserts that the seven full extracted texts are present in the solve workspace under papers/text with explicit PDF page markers; the intake envelope itself encloses only the manifest, not the full texts.",
+        "SC5: The manifest (material:001) is located at /workspace/seam-harness/research-kb-workspace/CORPUS.md, indicating a benchmark-style workspace named research-kb-workspace under a seam-harness directory.",
+        "SC6: The proposed substrate plus the two baselines named in D4 (open conversational forum; no inter-agent communication) naturally supply the three or more conditions required by D14.",
+        "Corpus membership: papers/text/smit-et-al-2023-going-mad.txt is Smit et al. 2023, arXiv 2311.17371, and papers/text/zhang-et-al-2025-mad-question.txt is Zhang et al. 2025, arXiv 2502.08788; both are among the exactly seven extracted-text files under papers/text that constitute the only evidentiary corpus.",
+        "Page boundaries in the extracted texts are marked with lines of the form `===== PDF PAGE N =====`; citations must carry these markers (D12/C3).",
+        "The corpus intentionally contains conflicting empirical conclusions: debate gains (Du et al. 2023) versus matched-compute null results and conformity findings (Smit et al. 2023; Zhang et al. 2025; Choi et al. 2025; Lorenz et al. 2011); these must be preserved and reconciled, never hidden (C4).",
+        "The proposed substrate plus the two baselines named in D4 (open conversational forum; no inter-agent communication) naturally supply the three or more conditions required by D14.",
+        "Evidence is restricted to the seven workspace corpus files; no outside sources may be used (C2).",
+        "Source-supported claims must be clearly distinguished from design inferences in everything returned (D13).",
+        "The corpus contains conflicting empirical conclusions: debate gains (Du et al. 2023) versus matched-compute null results and conformity findings (Smit et al. 2023; Zhang et al. 2025; Choi et al. 2025; Lorenz et al. 2011)."
+      ],
+      "source_ids": [
+        "ref:smit-2023-going-mad"
+      ],
+      "source_paths": [
+        "papers/text/smit-et-al-2023-going-mad.txt"
+      ]
+    },
+    "product_intent": "The memo exists to commit the agent system to a single defensible substrate architecture — and to justify that commitment strictly from the supplied corpus — so that recursively decomposing research agents can share, contest, and reuse questions and answers as structured state, capturing the gains reported for multi-agent debate while structurally guarding against the matched-compute null results and conformity failure modes documented in the same corpus.",
+    "source_materials": [
+      {
+        "content": "Enumerated in material:001; asserted present in the solve workspace by the conversation decision; content not enclosed at intake.",
+        "id": "ref:smit-2023-going-mad",
+        "kind": "referent:file",
+        "label": "Extracted text of Smit et al., 'Should We Be Going MAD? A Look at Multi-Agent Debate Strategies for LLMs' (2023).",
+        "locator": "papers/text/smit-et-al-2023-going-mad.txt"
+      }
+    ],
+    "workspace_documents": [
+      {
+        "content": "===== PDF PAGE 1 =====\n\nShould we be going MAD?\nA Look at Multi-Agent Debate Strategies for LLMs\nAndries Smit * 1 Nathan Grinsztajn * 1 Paul Duckworth * 1 Thomas D. Barrett 1 Arnu Pretorius 1\nAbstract\nRecent advancements in large language models\n(LLMs) underscore their potential for responding\nto inquiries in various domains. However, ensur-\ning that generative agents provide accurate and\nreliable answers remains an ongoing challenge.\nIn this context, multi-agent debate (MAD) has\nemerged as a promising strategy for enhancing\nthe truthfulness of LLMs. We benchmark a range\nof debating and prompting strategies to explore\nthe trade-offs between cost, time, and accuracy.\nImportantly, we find that multi-agent debating sys-\ntems, in their current form, do not reliably outper-\nform other proposed prompting strategies, such\nas self-consistency and ensembling using mul-\ntiple reasoning paths. However, when perform-\ning hyperparameter tuning, several MAD systems,\nsuch as Multi-Persona, perform better. This sug-\ngests that MAD protocols might not be inherently\nworse than other approaches, but that they are\nmore sensitive to different hyperparameter set-\ntings and difficult to optimize. We build on these\nresults to offer insights into improving debating\nstrategies, such as adjusting agent agreement lev-\nels, which can significantly enhance performance\nand even surpass all other non-debate protocols\nwe evaluated. We provide an open-source repos-\nitory to the community with several state-of-the-\nart protocols together with evaluation scripts to\nbenchmark across popular research datasets.\n1. Introduction\nTruthful question-answering assistants require a plethora\nof skills that until recently were considered out-of-reach of\ngenerative language models. Such agents require advanced\nnatural language reading comprehension, along with accu-\n*Equal contribution 1InstaDeep, London UK. Correspondence\nto: Paul Duckworth <p.duckworth@instadeep.com>.\nProceedings of the 41 st International Conference on Machine\nLearning, Vienna, Austria. PMLR 235, 2024. Copyright 2024 by\nthe author(s).\nrate recall and manipulation of expert or technical knowl-\nedge. Following the increase in performance and popularity\nof large language models (LLMs) (Brown et al., 2020; Ope-\nnAI, 2023), there is a growing hope that these models could\nassist humans in various domains like medicine (Li ´evin\net al., 2022; Han et al., 2023; Nori et al., 2023; Wang et al.,\n2023a; Singhal et al., 2023), education (Pardos & Bhan-\ndari, 2023; Kumar et al., 2024), and law (Lai et al., 2023).\nAs a way to improve the reasoning abilities of these sys-\ntems, prompting strategies have received significant atten-\ntion, starting with few-shot (Brown et al., 2020), and chain-\nof-thought (CoT) (Wei et al., 2022; Kojima et al., 2022). To\nfurther improve performance, a wide variety of strategies\nhave been proposed to use interactive reasoning between\nmultiple LLMs, by either generating answers in parallel to\nmaintain a form of self-consistency (Wang et al., 2023b),\nor promoting models to simulate debate. These multi-agent\napproaches have recently seen an uptake in applications, e.g.\nlanguage generation (Chan et al., 2023), machine translation\nand arithmetic reasoning (Liang et al., 2023), mathematical\nand strategic reasoning (Du et al., 2023), negotiation and bar-\ngaining (Fu et al., 2023), and notably, medical Q&A (Anil\net al., 2023; Singhal et al., 2023; Nori et al., 2023). How to\nbest utilize multiple agents for effective interactive reason-\ning is a prescient research question. However, to the best\nof our knowledge, there is no work comparing strategies,\nand there is no consensus for selecting one strategy over\nanother.\nIn this paper, we benchmark various prompting strategies,\nwhich include multi-agent debate (MAD), for answering\nmultiple-choice questions across a wide range of domains.\nWe explore the impact on, and trade-offs between, critical\nfactors such as factual accuracy, time and cost. We provide\nan open-source suite of single-agent and MAD implemen-\ntations for the research community to build upon, with a\nunified API to easily build and evaluate MAD systems. Fi-\nnally, we demonstrate that by utilizing specific prompting\nstrategies, LLMs exhibit improved reasoning abilities. Con-\ncretely, we provide a novel debate prompting strategy able\nto modulate the level of agreement between agents during a\ndebate and improve upon the state-of-the-art for Q&A for a\ngiven model class.\n1\narXiv:2311.17371v3  [cs.CL]  18 Jul 2024\n\n===== PDF PAGE 2 =====\n\nShould we be going MAD? A Look at Multi-Agent Debate Strategies for LLMs\n2. Multi-Agent Debate\nCurrent state-of-the-art models for Q&A are dominated by\ngenerative LLMs. To make them more truthful and reliable,\nthey are often fine-tuned for specific use cases. In medicine,\nfor example, such models include Med-PaLM (Singhal\net al., 2022), Med-PaLM2 (Singhal et al., 2023), MedAl-\npaca (Han et al., 2023), Galactica (Taylor et al., 2022), Clin-\nicalGPT (Wang et al., 2023a) and Medprompt (Nori et al.,\n2023). Furthermore, many single-agent prompting strate-\ngies have been investigated in the context of medical Q&A.\nFor example, Li´evin et al. (2022) applied CoT reasoning on\ntop of Instruct GPT-3 (Ouyang et al., 2022), and achieves\nnoticeable performance improvements.\nRecently, several MAD strategies have been proposed to\nimprove upon the enhanced reasoning capabilities of single-\nagent prompting methods leading to improved performance\non challenging natural language tasks (Du et al., 2023;\nLiang et al., 2023; Chan et al., 2023). Likewise, Gener-\native agents (Park et al., 2023), multi-persona (Wang et al.,\n2023c), and CAMEL (Li et al., 2023) study the behaviour\nof agents taking on different roles or personas within multi-\nagent interactions. One major reason why debate strategies\ncan be an effective tool is the ability of LLMs to adapt to\nadditional information given in-context (Zhang et al., 2023).\nThis facilitates multiple LLMs to participate in multi-agent\nand/or multi-round debates entirely using in-context prompt-\ning. That is, the agents adapt their behaviour based on infor-\nmation provided by other agents at inference time, with no\ngradient-based parameter updates being required.\nIn our study, we investigate several prompting strategies for\nQ&A. Whilst we note that some of these strategies were\nintroduced specifically for the medical Q&A domain, each\nprovides novel perspectives on how to utilize multiple col-\nlaborative agents. We briefly introduce each strategy here.\nSociety of Minds (SoM) Du et al. (2023) propose a MAD\napproach where multiple agents each provide their answers\nto each other in order to effectively collaborate. Optionally,\nanswers are summarized before being added to the history\nthat is available to the agents in future rounds.\nMulti-Persona (Liang et al., 2023) propose a MAD strat-\negy to encourage divergent agent outcomes via prompting\ndifferent personalities, i.e. an affirmative agent (angel) and\na negative agent (devil) each provide an answer to a judge\nagent who manages the process and obtains a final solution.\nThe judge has additional agency to end the debate early if it\nis satisfied with the answers provided.\nChatEval (Chan et al., 2023) propose three MAD modes:\n(1) one-on-one, where each agent answers the provided ques-\ntion in turn, and each agent is provided with the history of\nall previous agents’ answers; (2) simultaneous-talk, where\nagents asynchronously generate responses in each round to\nnullify the effects of agent order; and (3) simultaneous-talk-\nwith-summarizer, which additionally summarizes answers\nprovided in each round and overwrites the history available\nto all agents in future rounds.\nSelf-consistency (Wang et al., 2023b) samples multiple\nreasoning paths given a fixed prompt and selects the most\nfrequent answer. Whilst this is not a debate per se, as sam-\nples are rolled out independently, it relies on multiple API\ncalls so we distinguish it from the single agent case that uses\na single API call.\nEnsemble Refinement (ER) (Singhal et al., 2023) extends\nself-consistency. After multiple reasoning paths are sam-\npled, a second stage concatenates them into a list of student\nreasonings, after which multiple rounds of aggregation are\nperformed conditioned on this list.\nMedprompt (Nori et al., 2023) enhances AI-driven medical\nquestion answering by combining few-shot exemplar selec-\ntion with a two-stage process: preprocessing correct GPT-4\ntraining set responses as few-shot examples, and an infer-\nence step employing a k-Nearest Neighbours (kNN) lookup\nand ensemble refinement for answer generation. This ap-\nproach ensures high accuracy and reliability by using only\nthe most relevant and validated examples. Medprompt’s\neffectiveness is demonstrated in its superior performance\non the MedQA benchmark, showcasing its potential for\nmedical diagnostics. In this work, we do not employ the\nkNN approach as it requires a training and test set split. We\nbelieve this might provide Medprompt an unfair advantage\nin this evaluation as other protocols do not use a training\nset. Therefore, we only implement subcomponents of the\nfull Medprompt, specifically, question randomization with\nfew-shot chain-of-thought ensembling (Nori et al., 2023).\nWe summarize the features of these various systems in\nTable 1. Each strategy determines the high-level debate\nprompts and how the agents share answers and histories to\ncollaborate. However, in each case, there are multiple possi-\nble agent-level prompts available, including: (1) zero-shot\nQ&A prompt, (2) zero-shot chain-of-thought (CoT) (Kojima\net al., 2022), (3) few-shot examples (Brown et al., 2020)\nwhich provides five Q&A examples but no reasoning, (4)\nSolo Performance Prompting (SPP) (or Multi-persona self-\ncollaboration) (Wang et al., 2023c) which utilizes a single\nagent that mimics an internal debate, and (5) few-shot chain-\nof-thought (FS-CoT) (Wei et al., 2022) which combines\nstep-by-step reasoning steps, along with five Q&A exam-\nples and explanations1. We provide the complete lists of all\ndebate and agent-level prompts in Appendices A.5 and A.6.\n1The few-shot Q&A examples with explanations are provided\nfor each medical dataset in Singhal et al. (2023). The step-by-step\nexplanations were generated by a panel of qualified clinicians who\nidentified the best examples and crafted the few-shot prompts as\npart of the Med-PaLM project.\n2\n\n===== PDF PAGE 3 =====\n\nShould we be going MAD? A Look at Multi-Agent Debate Strategies for LLMs\nSystem Flexible\nRound Numbers Judge Summarizer Sequential\nInteractions\nMulti API\nCalls\nAsymmetric\nAgents\nMedprompt ✓ ✓\nSociety of Minds ✓ ✓ ✓\nEnsemble Refinement ✓ ✓ ✓ ✓\nChatEval ✓ ✓ ✓ ✓ ✓\nSelf-consistency ✓\nSingle-agent\nSolo Performance Prompting ✓ ✓ ✓\nMulti-Persona ✓ ✓ ✓ ✓ ✓\nTable 1. Feature comparison of various debating systems. The presence of a feature is indicated by a checkmark.\n10 20 30 40 50\nTotal cost\n0.525\n0.550\n0.575\n0.600\n0.625\n0.650\nMedQA Accuracy (out of 1.0)\nSystem name\nSociety of Mind\nEnsemble Reﬁnement\nChatEval\nSelf-Consistency\nSingle Agent\nMulti-Persona\nMedprompt\nAverage API calls\n2.5\n5.0\n7.5\n10.0\n12.5\n15.0\nImproved Multi-Persona\nMedprompt\nSociety of Mind\nEnsemble Reﬁnement\nSelf-Consistency\nChatEval\nSingle Agent\nMulti-Persona\n0.525\n0.550\n0.575\n0.600\n0.625\n0.650\nMedQA Accuracy (out of 1.0)\nFigure 1. Benchmark of experiment configurations on MedQA dataset. Left: Accuracy vs average cost ($) per question. The size of the\ndots reflects the average number of API calls required per question. Right: Summarizes accuracy grouped by strategy, sorted by average\nperformance (black dot). The X represents improved performance using our proposed agreement modulation, described in Section 3.\n3. Experiments\nAs base agents for the MAD implementations, we uti-\nlize GPT-3 (Brown et al., 2020) with the 3.5-turbo en-\ngine. GPT-3 is a large-scale transformer-based generative\nLLM (Vaswani et al., 2017; Kaplan et al., 2020) available\nvia API calls. Although not the current most powerful model\navailable via API, we selected GPT-3.5 for its optimal bal-\nance between performance and cost efficiency, crucial for\nconducting a broad range of experiments, whereas more\npowerful models would’ve been prohibitively expensive.\nHowever, we informally note that some of our preliminary\nexperiments with more advanced models like GPT-4 sug-\ngested similar findings, although these tests were limited to\na smaller subset of data.\nWe evaluate each system using seven datasets: three medi-\ncal datasets, and three more general datasets requiring rea-\nsoning. For the medical tasks, we follow the evaluation\nprotocol in Med-PaLM2 (Singhal et al., 2023) and evalu-\nate the above strategies on the following multiple-choice\nquestion-answering datasets:\n• MedQA (Jin et al., 2021) comprising of 1273 general\nmedical knowledge questions from the US medical li-\ncensing exam (USMLE). Each question has 4-5 answer\nchoices. In this work, we focus on the 4-answer ver-\nsion of MedQA as used to evaluate Med-PaLM2 (Liang\net al., 2023) and Medprompt (Nori et al., 2023).\n• PubMedQA (Jin et al., 2019) containing 500 open\ndomain questions, context and answers.\n• MMLU (clinical topics only) (Hendrycks et al., 2021)\nconsisting of 123 medical questions covering anatomy,\nclinical knowledge, college medicine, medical genetics,\nprofessional medicine, and college biology.\nThe other datasets are difficult reasoning tasks, based on the\nassumptions that MAD strategies might particularly shine\non datasets requiring complex and commonsense reasoning\nand be better able to escape reasoning traps.\n• CosmosQA (Huang et al., 2019): A dataset of\n7,000 general knowledge questions focusing on\ncommonsense-based reading comprehension. It re-\nquires understanding narratives and interpreting causes\nand effects not explicitly mentioned. We subsampled\n500 questions for economic and time feasibility.\n• CIAR (Liang et al., 2023): The Counter-Intuitive\nArithmetic Reasoning (CIAR) dataset consists of 50\n3\n\n===== PDF PAGE 4 =====\n\nShould we be going MAD? A Look at Multi-Agent Debate Strategies for LLMs\nmultiple-choice questions. It is designed to evaluate\nreasoning abilities of LLMs, challenging them to use\nslow, logical thinking over intuitive responses. We\nadded at the end of the question the two suggested\nanswers to turn it into a multiple-choice question-\nanswering task.\n• GPQA (Rein et al., 2023): This dataset contains 448\nmultiple-choice questions written by domain experts\nin biology, physics, and chemistry. It tests the limits\nof both human experts and AI systems, with questions\nthat are ‘Google-proof’ and demand high-level under-\nstanding and reasoning.\n• Chess (bench Team, 2021): This benchmark task fo-\ncuses on the ability of AI systems to understand and\ntrack the state of a chess game based on natural lan-\nguage descriptions. The task is divided into subtasks\ncreated from real games played on Lichess and syn-\nthetic games generated by random search over the\nchess game tree. To account for the effect of con-\ntext length, the subtasks are further divided into Short,\nMedium, and Long. Each subtask consists of 1,000\ngames. We use the Short setting in our study.\nWe measure additional agent-level and debate-level metrics\n(comprehensive lists of all additional metrics are provided\nin Appendices A.3 and A.4). Examples of agent-level met-\nrics include whether an individual agent answered a given\nquestion correctly or not and the debate round in which it\nfirst provided the correct answer. Examples of debate-level\nmetrics include whether any agent involved in the debate\nprovided a correct answer and whether the agents came to a\nconsensus by the final round.\nResults First, we attempt to see whether various prompt-\ning protocols affect performance significantly enough to\njustify their API costs. In Figure 1, we present a scatter plot\nof the results of each experiment on the MedQA dataset,\nwhile equivalent analyses for the other datasets are given\nin Appendix A.1. In the left panel, we show the accuracy\nvs cost (measured in USD), where the size of each point\nreflects the average number of API calls required per ques-\ntion (we also plot accuracy vs time, and accuracy vs average\nprompt length in Appendix A.1). These variations, where\napplicable, include changing the number of agents, rounds,\nreasoning and aggregation steps, altering agent prompts,\nimplementing round summarization, adjusting sampling pa-\nrameters, and modifying other system-specific hyperparame-\nters. For a full breakdown of the experimental configurations\nused for each system, see Appendix A.2. In the right panel,\nwe summarize accuracy over all configurations per strategy.\nWe see the highest performing debating strategy from those\nintroduced in Section 2 is SoM with multiple different con-\nfigurations achieving 61% on MedQA. However, the re-\ncently introduced Medprompt strategy (Nori et al., 2023),\nwhich does not use debate, performs the best overall. It also\nhas lower costs associated with it. Somewhat concerning\nfor the domain of medical Q&A, is that the single agent’s\nperformance, along with self-consistency, can be manipu-\nlated via prompts to achieve a high variance. We also note\nthat Multi-Persona performs consistently about 7% worse\nthan the Medprompt strategy. We revisit this in Section 3.\nWhile there is a noticeable trend indicating improved perfor-\nmance with increased cost and API usage, our findings re-\nveal that the relationship between performance and resource\ninvestment is complex and highly dependent on specific hy-\nperparameters and dataset/system configurations. Notably,\nsome MAD strategies do not consistently outperform more\ncost-effective non-debating approaches like Medprompt,\neven with optimized prompting. This suggests that, beyond\na certain threshold, additional computing does not guarantee\nbetter results, and performance is both nuanced and con-\ntingent on the right combination of hyperparameters and\nsystem design. This variability underscores the need for\nfurther evaluations, as undertaken in the following section,\nto develop a clearer picture of these trends.\nThe utility of debate Next, we consider the utility of de-\nbate in prompting strategies. Recent protocols like Ensem-\nble Refinement (Singhal et al., 2023) and Medprompt (Nori\net al., 2023) have deviated away from debating altogether,\nraising questions about its efficacy. Recall that we include\nthree standard medical datasets (MedQA, PubMedQA and\nMMLU), while also including three other reasoning datasets\n(CosmosQA, CIAR and GPQA). These datasets are con-\nstructed in such a way as to require small amounts of logical\ndeduction to answer successfully. This might give debat-\ning protocols an advantage as there are multiple rounds of\noutputs between agents, which could be used to build on\nlogical arguments before concluding. We now evaluate all\nour system setups across these seven datasets. The scores\n(out of 1.0) for the best-performing configurations for each\nQA system can be found in Table 2.\nTable 2 indicates that no protocol dominates on all datasets.\nMedprompt seems to perform the best overall. Interestingly\nenough the debating protocols do not outperform the other\nprotocols on the reasoning datasets. To further investigate\nthis we provide box plots, in Figure 2, which show the\ndistribution of performances for each QA system across\nthe other datasets (MedQA’s results can be found in Figure\n1). These boxplots help to visualize the variability and\nrobustness of each system under different conditions.\nThe protocols with the most variance in performance seem to\nbe Ensemble Refinement, Self-Consistency and single-agent\nimplementations. Medprompt seems to perform consistently\n4\n\n===== PDF PAGE 5 =====\n\nShould we be going MAD? A Look at Multi-Agent Debate Strategies for LLMs\nSystem MedQA PubMedQA MMLU CosmosQA CIAR GPQA Chess\nMedprompt 0.65 (0.63) 0.77 (0.77) 0.74 (0.73) 0.48 (0.47) 0.54 (0.50) 0.27 (0.25) 0.32 (0.30)\nSociety of Mind 0.64 (0.61) 0.74 (0.71) 0.73 (0.70) 0.44 (0.39) 0. 56 (0.46) 0.27 (0.25) 0.26 (0.25)\nEnsemble Refinement 0.64 (0.60) 0.74 (0.72) 0.76 (0.74) 0.45 (0.40) 0.48 (0.46) 0.32 (0.26) 0.32 (0.25)\nChatEval 0.60 (0.60) 0.75 (0.73) 0.71 (0.69) 0.45 (0.43) 0.48 (0.43) 0.26 (0.25) 0.32 (0.23)\nSelf-Consistency 0.60 (0.60) 0.74 (0.72) 0.78 (0.75) 0.46 (0.46) 0.56 (0.52) 0.24 (0.29) 0.27 (0.21)\nSingle Agent 0.60 (0.59) 0.75 (0.70) 0.76 (0.72) 0.45 (0.43) 0.50 (0.50) 0.33 (0.28) 0.27 (0.18)\nMulti-Persona 0.58 (0.57) 0.70 (0.69) 0.72 (0.69) 0.46 (0.42) 0.52 (0.50) 0.29 (0.29) 0.33 (0.29)\nTable 2. Best performance achieved by each system on various datasets. The highest score for each system on each dataset is listed, with\nthe median performance over the datasets shown in parentheses.\nMedprompt\nSociety of Mind\nEnsemble Reﬁnement\nSelf-Consistency\nChatEval\nSingle Agent\nMulti-Persona\n0.66\n0.68\n0.70\n0.72\n0.74\n0.76\nPubMedQA Accuracy (out of 1.0)\n(a) PubMedQA Total Accuracy\nMedprompt\nSociety of Mind\nEnsemble Reﬁnement\nSelf-Consistency\nChatEval\nSingle Agent\nMulti-Persona\n0.60\n0.65\n0.70\n0.75\nMMLU Accuracy (out of 1.0)\n (b) MMLU Total Accuracy\nMedprompt\nSociety of Mind\nEnsemble Reﬁnement\nSelf-Consistency\nChatEval\nSingle Agent\nMulti-Persona\n0.35\n0.40\n0.45\nCosmosQA Accuracy (out of 1.0) (c) CosmosQA Total Accuracy\nMedprompt\nSociety of Mind\nEnsemble Reﬁnement\nSelf-Consistency\nChatEval\nSingle Agent\nMulti-Persona\n0.35\n0.40\n0.45\n0.50\n0.55\nCIAR Accuracy (out of 1.0)\n(d) CIAR Total Accuracy\nMedprompt\nSociety of Mind\nEnsemble Reﬁnement\nSelf-Consistency\nChatEval\nSingle Agent\nMulti-Persona\n0.24\n0.26\n0.28\n0.30\n0.32\nGPQA Accuracy (out of 1.0) (e) GPQA Total Accuracy\nMedprompt\nSociety of Mind\nEnsemble Reﬁnement\nSelf-Consistency\nChatEval\nSingle Agent\nMulti-Persona\n0.20\n0.25\n0.30\nChess Accuracy (out of 1.0) (f) Chess Total Accuracy\nFigure 2. Boxplots illustrating the distribution of total accuracy across different datasets for each QA system. These plots demonstrate the\nvariability and robustness of each system’s performance.\nwell, except on the GPQA dataset, with low variance. It\nseems that MAD protocols are more sensitive to hyperpa-\nrameters. We investigate this further in the next section.\nIs MAD simply sensitive to hyperparameters? To\nbenchmark MAD’s sensitivity to hyperparameter choices,\nwe adopt a K-fold approach. We divide the medical and\nnon-medical datasets into two groups. For each method and\neach dataset, we gather the hyperparameter combination\nwhich has the highest average accuracy on the two held-out\ndatasets of the same category, and use this combination to\ncompute the final accuracy.\nThe results are presented in Figure 3. Notably, within med-\nical datasets, every evaluated system outperforms single-\nagent methods, with the exception of Multi-Persona. Self-\nConsistency and Medprompt emerge as the top perform-\ners. Conversely, in the context of non-medical datasets,\nsingle-agent methods surpass all evaluated systems except\nfor Multi-Persona and Self-Consistency.\nThese findings indicate that hyperparameter choices signifi-\ncantly influence system performance, with optimal settings\ntending to be dataset-specific. Moreover, they underscore\nthat superior performance of various protocols over a stan-\ndard single-agent approach is not assured for new datasets.\nIt appears that dataset-specific fine-tuning is crucial for max-\nimizing performance.\nMeasuring the performance boost from debating In\nFigure 4, we observe the relative improvement in accuracy\nachieved by the debate process compared to the initial an-\nswer provided by the first agent. Notably, the performance\nvaries across the three systems: ChatEval exhibits a modest\nenhancement, Society of Mind shows a substantial increase,\nand Multi-Persona, intriguingly, leads to a decrease in per-\nformance. This divergence in outcomes, coupled with the\nfindings in Table 2 which reveal only minor differences in\nfinal accuracy among these systems, suggests that the initial\nquality of responses in the first round may vary significantly.\nAn unexpected aspect of this analysis is that the Multi-\n5\n\n===== PDF PAGE 6 =====\n\nShould we be going MAD? A Look at Multi-Agent Debate Strategies for LLMs\nSingle AgentSociety of MindMulti-PersonaSelf-ConsistencyEnsemble ReﬁnementChatEval Medprompt\n0.0\n0.1\n0.2\n0.3\n0.4\n0.5\n0.6\n0.7\nAccuracy (out of 1.0)\nSingle AgentSociety of MindMulti-PersonaSelf-ConsistencyEnsemble ReﬁnementChatEval Medprompt\n0.0\n0.1\n0.2\n0.3\n0.4\nAccuracy (out of 1.0)\nFigure 3. Comparing medical vs non-medical datasets. The red line indicates the average performance of single-agent systems. Left:\nAccuracy averaged over the three medical datasets. Right: Accuracy averaged over the three non-medical datasets.\nChatEval Multi-Persona Society of Mind\nSystem\n−2\n0\n2\n4\n6\n8\nRelative Accuracy Improvement (%)\nImprovement (ﬁrst round to last round)\nImprovement (ﬁrst round to ﬁnal answer)\nFigure 4. Relative accuracy improvements, averaged on all\ndatasets, between the answer of the first agent given during the\nfirst and last round, as well as with the final answer.\nPersona system reduces the overall performance compared\nto relying solely on the initial response of the first agent.\nThis can be attributed to the role of the second agent (the\n“devil”), which is deliberately designed to contradict or dis-\nagree, even if the initial response was correct. We show\nin the next section that this prior willingness for different\nagents to agree with each other at the outset of a debate, is\nindeed a very important “hyperparameter”.\nImproving MAD via agreement modulation Our pre-\nvious experiments led us to hypothesise that the degree to\nwhich agents agree with one another during a debate may\nsignificantly affect debating performance. Here we test this\nhypothesis by developing a new MAD prompting strategy\nthat modulates (via prompts) the degree to which agents\nwithin a debate agree with each other at the outset. Our\nprompt takes the following simple form: “you should agree\nwith the other agents X% of the time ”. We call X in this\nprompt the agent’s agreement intensity.\nMulti-Persona is an ideal testbed for this method, as it uses\nonly two agents with different system prompts. Specifi-\ncally, we provide the “angel” agent with the question, and\nwe modulate the disagreement using the “devil”’s system\nprompt. Figure 5 shows the effect of modulating the agent’s\nagreement on the 6 datasets. We can see that this param-\neter has a significant effect on the performance and that\nmodulating the agreement in the prompt has the effect of\nmodifying the agreement on the first debate round, which\nin turn affects the outcome and the final accuracy. Strik-\ningly, the tendency is not always the same for each dataset:\nwhile MedQA and PubMedQA directly benefit from a high\nagreement, CIAR follows a reverse pattern. As CIAR was\ncreated to be counter-intuitive, it is therefore probable that\nprompting the second agent to strongly disagree raises the\nchance of arriving at the correct answer during the debate.\nTo investigate further, we select the highest performing con-\nfigurations of debating approaches from Figure 1, namely\nSoM, ChatEval and Multi-Persona, and a subset of MedQA\ndataset (376 multi-choice USMLE Q&A (Han et al., 2023)).\nWe opted for this subset due to its high-quality questions.\nIn Figure 6 (left), we plot the performance of each strategy\nas we increase the prompted agreement intensity from zero\nto 100%. Figure 6 (right) we plot the accuracy vs the ac-\ntual observed debate consensus, i.e. how frequently all the\nagents agree upon a final answer at the end of the debate.\nWe can see that modulating the agreement intensity in this\nway provides a substantial ( ≈15%) improvement in per-\nformance for Multi-Persona, and ( ≈5%) for SoM on the\nUSMLE dataset. ChatEval, on the contrary, is hardly af-\nfected by this prompting mechanism, suggesting that the\nagent’s agreement is not as easily modulable for every sys-\ntem. Building on this finding, we apply the 90% agreement\nintensity agent prompts to Multi-Persona on the full MedQA\n6\n\n===== PDF PAGE 7 =====\n\nShould we be going MAD? A Look at Multi-Agent Debate Strategies for LLMs\n0.3 0.4 0.5 0.6 0.7 0.8 0.9\nAgreement intensity (prompt)\n0.3\n0.4\n0.5\n0.6\n0.7\nAccuracy (out of 1.0)\nCIAR\nCosmosQA\nGPQA\nMMLU\nMedQA\nPubMedQA\n0.2 0.4 0.6 0.8 1.0\nAgreement at the ﬁrst round\n0.3\n0.4\n0.5\n0.6\n0.7\nAccuracy (out of 1.0)\nCIAR\nCosmosQA\nGPQA\nMMLU\nMedQA\nPubMedQA\nFigure 5. Left: Multi-Persona’s accuracy according to the agreement fixed by the prompt. Right: Multi-Persona’s accuracy according to\nthe averaged agreement during the first debate round.\n0.0 0.2 0.4 0.6 0.8 1.0\nAgreement intensity from the prompt\n0.50\n0.55\n0.60\n0.65\n0.70\nUSMLE Accuracy (out of 1.0)\nMulti-Persona\nSociety of Mind\nChatEval\n0.2 0.4 0.6 0.8 1.0\nConsensus at the ﬁnal debate round (out of 1.0)\n0.50\n0.55\n0.60\n0.65\n0.70\nUSMLE Accuracy (out of 1.0)\nFigure 6. Left: Accuracy on USMLE as we increase agreement intensity in our prompt. Right: Accuracy vs actual induced debate\nagreement.\ndataset and demonstrate (as far as we are aware) a new state-\nof-the-art result (for GPT-3), highlighted in Figure 1 by the\nred cross symbol.\nAnalysis of debating behaviour Our experiments sec-\ntion concludes with an exploration of the dynamics within\nMAD systems, specifically through their performance on\nthe MedQA test set. We assess Multi-Persona, ChatEval,\nand Society of Mind, focusing on key aspects such as con-\nsensus accuracy, independent correct answer identification,\nthe adaptability reflected in answer changes, and the breadth\nof initial perspectives. These facets are depicted in Figure\n7, offering insights into each system’s strategic approach to\ndebate and problem-solving.\nThe four spider plots offer a more detailed analysis of the de-\nbating behavior of MAD strategies, providing insights into\nthe effectiveness of each system through various metrics.\nThe initial plot compares the three systems, with Society\nof Mind (SoM) notably exhibiting the largest surface area,\nsuggesting it outperforms others across all debating metrics.\nThis is further supported in the subsequent plots, which\nanalyze the top three runs for each system and show that\nlarger areas are indicative of better performance. These vi-\nsualizations emphasize the importance of a balanced system,\nindicating that excellence in one aspect is not enough; a\nsystem must perform well across multiple dimensions of the\ndebate process. A full description of each of the metrics is\nprovided in Appendix A.3.\nFor example, when agents change their answers during a\ndebate, this reevaluation must lead to more accurate con-\nclusions. Arbitrary changes without a strategic basis could\nprevent consensus. This underlines the need for a balanced\napproach where agents not only reconsider their positions\nbut also enhance their decision-making accuracy, contribut-\ning to the system’s overall effectiveness.\nEvaluating using other APIs We assess the capability\nof GPT-4 (OpenAI et al., 2024) and Mixtral 8x7B (Jiang\net al., 2024) on the MedQA dataset, applying the optimal\nagreement modulation value identified for Multi-Persona\nwith GPT-3.5 on USMLE. Results shown in Figures 8 and 9.\n7\n\n===== PDF PAGE 8 =====\n\nShould we be going MAD? A Look at Multi-Agent Debate Strategies for LLMs\nAccuracy\n(Min: 0.56, Max: 0.64)\nFinal Round Consensus\n(Min: 0.37, Max: 0.92)\nAny Correct Answer\n(Min: 0.7, Max: 0.79)\nHow Many Agents Changed\n(Min: 0.038, Max: 1.7)\nUnique First Answers\n(Min: 1.3, Max: 1.7)\nMulti-Persona - 4 rounds max\nChatEval - 2 rounds, simultaneous talk with summarizer\nSociety of Mind - 4 agents, 3 rounds\n(a) Best system runs\nAccuracy\n(Min: 0.56, Max: 0.64)\nFinal Round Consensus\n(Min: 0.37, Max: 0.92)\nAny Correct Answer\n(Min: 0.7, Max: 0.79)\nHow Many Agents Changed\n(Min: 0.038, Max: 1.7)\nUnique First Answers\n(Min: 1.3, Max: 1.7)\n4 rounds max\n2 rounds max\n3 rounds max (b) Multi-Persona\nAccuracy\n(Min: 0.56, Max: 0.64)\nFinal Round Consensus\n(Min: 0.37, Max: 0.92)\nAny Correct Answer\n(Min: 0.7, Max: 0.79)\nHow Many Agents Changed\n(Min: 0.038, Max: 1.7)\nUnique First Answers\n(Min: 1.3, Max: 1.7)\n2 rounds, simultaneous talk with summarizer\n3 rounds, simultaneous talk with summarizer\n2 rounds, simultaneous talk\n(c) ChatEval\nAccuracy\n(Min: 0.56, Max: 0.64)\nFinal Round Consensus\n(Min: 0.37, Max: 0.92)\nAny Correct Answer\n(Min: 0.7, Max: 0.79)\nHow Many Agents Changed\n(Min: 0.038, Max: 1.7)\nUnique First Answers\n(Min: 1.3, Max: 1.7)\n4 agents, 3 rounds\n3 agents, 2 rounds\n3 agents, 3 rounds (d) Society of Mind\nFigure 7. Debating Behavior of MAD Strategies. The first plot compares the top runs for each of the systems, while the other three plots\ncompare the top three runs for each system. Each plot quantifies the performance on MedQA by measuring several factors: the accuracy\nof the final consensus among agents (scaled to 1.0), the instances of any agent identifying the correct answer independently (also scaled to\n1.0), the frequency of agents changing their answers during the debate, and the diversity of initial answers provided. The descriptions for\neach axis include the range of scores observed, from minimum to maximum.\n103\nTotal cost (Log Scale)\n0.76\n0.78\n0.80\n0.82\n0.84\n0.86\nMedQA Accuracy (out of 1.0)\nSystem name\nSociety of Mind\nEnsemble Reﬁnement\nChatEval\nSelf-Consistency\nSingle Agent\nMulti-Persona\nMedprompt\nAverage API calls\n2.5\n5.0\n7.5\n10.0\n12.5\n15.0\nMedprompt\nSociety of Mind\nEnsemble Reﬁnement\nSelf-Consistency\nChatEval\nSingle Agent\nMulti-Persona\n0.76\n0.78\n0.80\n0.82\n0.84\n0.86\nMedQA Accuracy (out of 1.0)\nFigure 8. Benchmark of experiment configurations of GPT-4 on MedQA dataset. Left: Accuracy vs average cost ($) per question. The size\nof the dots reflects the average number of API calls required per question. Right: Summarizes accuracy grouped by strategy, sorted by\naverage performance (black dot).\n8\n\n===== PDF PAGE 9 =====\n\nShould we be going MAD? A Look at Multi-Agent Debate Strategies for LLMs\n5 10 15 20\nTotal cost\n0.1\n0.2\n0.3\n0.4\n0.5\n0.6\nMedQA Accuracy (out of 1.0)\nSystem name\nSociety of Mind\nEnsemble Reﬁnement\nChatEval\nSelf-Consistency\nSingle Agent\nMulti-Persona\nMedprompt\nAverage API calls\n2.5\n5.0\n7.5\n10.0\n12.5\n15.0\nMedprompt\nSociety of Mind\nEnsemble Reﬁnement\nSelf-Consistency\nChatEval\nSingle Agent\nMulti-Persona\n0.1\n0.2\n0.3\n0.4\n0.5\n0.6\nMedQA Accuracy (out of 1.0)\nFigure 9. Benchmark of experiment configurations of Mixtral 8x7B on MedQA dataset. Left: Accuracy vs average cost ($) per question.\nThe size of the dots reflects the average number of API calls required per question. Right: Summarizes accuracy grouped by strategy,\nsorted by average performance (black dot).\nThe results from GPT-3.5 suggest that hyperparameter set-\ntings can be effectively transferred to GPT-4. However, this\ntransferability does not extend well to Mixtral 8x7B. This\ndiscrepancy might be attributed to architectural differences,\nwhich could affect how hyperparameters influence model\nperformance. We leave this for future research.\nCode availability Source code for this work, including\nall MAD implementations and configurations, is publicly\navailable at https://github.com/instadeepai/\nDebateLLM.\n4. Conclusions\nThe investigations detailed in this work have demonstrated\nthat MAD approaches currently do not outperform other en-\nsembling methods such as Medprompt and self-consistency\nusing their original implementations. MAD typically re-\nquires a higher number of API calls, increasing the number\nof tokens to produce and process and ultimately, the total\nrunning cost of the system. Interestingly, we found that\nthis might primarily be due to MAD protocols being more\nsensitive to hyperparameters and not necessarily that de-\nbate inherently performs worse than single-agent methods.\nTo strengthen this claim, we demonstrated that a simple\nprompt-based manipulation of the degree to which agents\nagree with each other, referred to as the agreement intensity,\ncould provide significant performance gains. By tuning this\nagreement intensity for Multi-Persona, it went from being\nthe worst-performing protocol to the best-performing, beat-\ning out methods such as Medprompt and Self-Consistency.\nTherefore, while MAD systems currently trail behind other\nprompting strategies, we believe they hold significant poten-\ntial to transform the prompting landscape. To foster further\nexploration, we have made our code repository open-source,\nfor others to easily reproduce all our experiments and further\npursue interesting related research directions.\nLimitations We utilize API calls to a publicly available\nLLM (Brown et al., 2020) which, whilst sufficient in the\ncontext of our investigation, exposes us to variable inference\ntime calls and unforeseen model updates. Moreover, large-\nscale API-based benchmarking incurs substantial financial\nand time costs, which both limit the experiment scales and\nprovide a barrier of entry to replication and extension efforts.\nFor these reasons, future works could extend this line of\nwork using open-source models and in-house infrastructure.\nImpact Statement\nThis study furthers the field of machine learning by evaluat-\ning multi-agent debate (MAD) strategies and other prompt-\ning methods within question-answering datasets. Our re-\nsults show that MAD approaches could be as effective as, or\neven superior to, other strategies like Medprompt and Self-\nConsistency. An open-source toolkit is provided to promote\nadditional research in this domain. While this research aims\nto improve the precision of large language models (LLMs)\nin answering questions, with a significant focus on health-\ncare applications, it is crucial to consider the potential risks\nassociated with these advancements. Specifically, medical\nquestion-answering systems can sometimes yield incorrect\npredictions in unforeseen ways, and there is a risk that these\nsystems may exhibit undue confidence in their erroneous\nresponses. Such inaccuracies, especially in the medical\ndomain, could lead to misinformation or misdiagnosis, po-\ntentially impacting patient care and outcomes. Therefore,\nwhile this work contributes valuable insights and tools for\nenhancing LLM capabilities, it is imperative to proceed with\ncaution, incorporating robust validation, transparency, and\nethical considerations to mitigate risks and ensure these tech-\nnologies are deployed in a manner that safeguards public\nhealth and trust.\n9\n\n===== PDF PAGE 10 =====\n\nShould we be going MAD? A Look at Multi-Agent Debate Strategies for LLMs\nReferences\nAnil, R., Dai, A. M., Firat, O., Johnson, M., Lepikhin, D., Passos,\nA., Shakeri, S., Taropa, E., Bailey, P., Chen, Z., et al. Palm 2\ntechnical report. arXiv preprint arXiv:2305.10403, 2023.\nbench Team, B. Chess state tracking, 2021. URL\nhttps://github.com/google/BIG-bench/\ntree/main/bigbench/benchmark_tasks/chess_\nstate_tracking. Accessed: 2024-05-27.\nBrown, T., Mann, B., Ryder, N., Subbiah, M., Kaplan, J. D.,\nDhariwal, P., Neelakantan, A., Shyam, P., Sastry, G., Askell,\nA., et al. Language models are few-shot learners. Advances in\nneural information processing systems, 33:1877–1901, 2020.\nChan, C.-M., Chen, W., Su, Y ., Yu, J., Xue, W., Zhang, S., Fu,\nJ., and Liu, Z. Chateval: Towards better llm-based evaluators\nthrough multi-agent debate. arXiv preprint arXiv:2308.07201,\n2023.\nDu, Y ., Li, S., Torralba, A., Tenenbaum, J. B., and Mordatch, I.\nImproving factuality and reasoning in language models through\nmultiagent debate. arXiv preprint arXiv:2305.14325, 2023.\nFu, Y ., Peng, H., Khot, T., and Lapata, M. Improving language\nmodel negotiation with self-play and in-context learning from\nai feedback. arXiv preprint arXiv:2305.10142, 2023.\nHan, T., Adams, L. C., Papaioannou, J.-M., Grundmann, P., Ober-\nhauser, T., L¨oser, A., Truhn, D., and Bressem, K. K. Medalpaca–\nan open-source collection of medical conversational ai models\nand training data. arXiv preprint arXiv:2304.08247, 2023.\nHendrycks, D., Burns, C., Basart, S., Zou, A., Mazeika, M., Song,\nD., and Steinhardt, J. Measuring massive multitask language\nunderstanding. In International conference on learning repre-\nsentations, 2021.\nHuang, L., Bras, R. L., Bhagavatula, C., and Choi, Y . Cosmos QA:\nmachine reading comprehension with contextual commonsense\nreasoning. CoRR, abs/1909.00277, 2019. URL http://\narxiv.org/abs/1909.00277.\nJiang, A. Q., Sablayrolles, A., Roux, A., Mensch, A., Savary, B.,\nBamford, C., Chaplot, D. S., de las Casas, D., Hanna, E. B.,\nBressand, F., Lengyel, G., Bour, G., Lample, G., Lavaud, L. R.,\nSaulnier, L., Lachaux, M.-A., Stock, P., Subramanian, S., Yang,\nS., Antoniak, S., Scao, T. L., Gervet, T., Lavril, T., Wang, T.,\nLacroix, T., and Sayed, W. E. Mixtral of experts, 2024.\nJin, D., Pan, E., Oufattole, N., Weng, W.-H., Fang, H., and\nSzolovits, P. What disease does this patient have? a large-\nscale open domain question answering dataset from medical\nexams. Applied Sciences, 11(14):6421, 2021.\nJin, Q., Dhingra, B., Liu, Z., Cohen, W. W., and Lu, X. Pubmedqa:\nA dataset for biomedical research question answering. arXiv\npreprint arXiv:1909.06146, 2019.\nKaplan, J., McCandlish, S., Henighan, T., Brown, T. B., Chess,\nB., Child, R., Gray, S., Radford, A., Wu, J., and Amodei,\nD. Scaling laws for neural language models. arXiv preprint\narXiv:2001.08361, 2020.\nKojima, T., Gu, S. S., Reid, M., Matsuo, Y ., and Iwasawa, Y . Large\nlanguage models are zero-shot reasoners. Advances in neural\ninformation processing systems, 35:22199–22213, 2022.\nKumar, H., Musabirov, I., Reza, M., Shi, J., Wang, X., Williams,\nJ. J., Kuzminykh, A., and Liut, M. Impact of guidance and\ninteraction strategies for llm use on learner performance and\nperception, 2024.\nLai, J., Gan, W., Wu, J., Qi, Z., and Yu, P. S. Large language\nmodels in law: A survey, 2023.\nLi, G., Hammoud, H. A. A. K., Itani, H., Khizbullin, D., and\nGhanem, B. Camel: Communicative agents for ”mind” explo-\nration of large scale language model society. arXiv preprint\narXiv:2303.17760, 2023.\nLiang, T., He, Z., Jiao, W., Wang, X., Wang, Y ., Wang, R., Yang,\nY ., Tu, Z., and Shi, S. Encouraging divergent thinking in large\nlanguage models through multi-agent debate. arXiv preprint\narXiv:2305.19118, 2023.\nLi´evin, V ., Hother, C. E., and Winther, O. Can large language\nmodels reason about medical questions? arXiv preprint\narXiv:2207.08143, 2022.\nNori, H., Lee, Y . T., Zhang, S., Carignan, D., Edgar, R., Fusi,\nN., King, N., Larson, J., Li, Y ., Liu, W., Luo, R., McKinney,\nS. M., Ness, R. O., Poon, H., Qin, T., Usuyama, N., White, C.,\nand Horvitz, E. Can generalist foundation models outcompete\nspecial-purpose tuning? case study in medicine, 2023.\nOpenAI. GPT-4 Technical Report. Technical report, OpenAI,\n2023.\nOpenAI et al. Gpt-4 technical report, 2024.\nOuyang, L., Wu, J., Jiang, X., Almeida, D., Wainwright, C.,\nMishkin, P., Zhang, C., Agarwal, S., Slama, K., Ray, A., et al.\nTraining language models to follow instructions with human\nfeedback. Advances in Neural Information Processing Systems,\n35:27730–27744, 2022.\nPardos, Z. A. and Bhandari, S. Learning gain differences between\nchatgpt and human tutor generated algebra hints. arXiv preprint\narXiv:2302.06871, 2023.\nPark, J. S., O’Brien, J. C., Cai, C. J., Morris, M. R., Liang, P., and\nBernstein, M. S. Generative agents: Interactive simulacra of\nhuman behavior. arXiv preprint arXiv:2304.03442, 2023.\nRein, D., Hou, B. L., Stickland, A. C., Petty, J., Pang, R. Y ., Dirani,\nJ., Michael, J., and Bowman, S. R. Gpqa: A graduate-level\ngoogle-proof q&a benchmark, 2023.\nSinghal, K., Azizi, S., Tu, T., Mahdavi, S. S., Wei, J., Chung, H. W.,\nScales, N., Tanwani, A., Cole-Lewis, H., Pfohl, S., et al. Large\nlanguage models encode clinical knowledge. arXiv preprint\narXiv:2212.13138, 2022.\nSinghal, K., Tu, T., Gottweis, J., Sayres, R., Wulczyn, E., Hou, L.,\nClark, K., Pfohl, S., Cole-Lewis, H., Neal, D., et al. Towards\nexpert-level medical question answering with large language\nmodels. arXiv preprint arXiv:2305.09617, 2023.\nTaylor, R., Kardas, M., Cucurull, G., Scialom, T., Hartshorn, A.,\nSaravia, E., Poulton, A., Kerkez, V ., and Stojnic, R. Galac-\ntica: A large language model for science. arXiv preprint\narXiv:2211.09085, 2022.\n10\n\n===== PDF PAGE 11 =====\n\nShould we be going MAD? A Look at Multi-Agent Debate Strategies for LLMs\nVaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones, L.,\nGomez, A. N., Kaiser, Ł., and Polosukhin, I. Attention is all\nyou need. Advances in neural information processing systems,\n30, 2017.\nWang, G., Yang, G., Du, Z., Fan, L., and Li, X. Clinicalgpt:\nLarge language models finetuned with diverse medical data and\ncomprehensive evaluation. arXiv preprint arXiv:2306.09968,\n2023a.\nWang, X., Wei, J., Schuurmans, D., Le, Q., Chi, E., Narang, S.,\nChowdhery, A., and Zhou, D. Self-consistency improves chain\nof thought reasoning in language models. In International\nconference on learning representations, 2023b.\nWang, Z., Mao, S., Wu, W., Ge, T., Wei, F., and Ji, H. Unleashing\ncognitive synergy in large language models: A task-solving\nagent through multi-persona self-collaboration. arXiv preprint\narXiv:2307.05300, 2023c.\nWei, J., Wang, X., Schuurmans, D., Bosma, M., Xia, F., Chi,\nE., Le, Q. V ., Zhou, D., et al. Chain-of-thought prompting\nelicits reasoning in large language models. Advances in Neural\nInformation Processing Systems, 35:24824–24837, 2022.\nZhang, Y ., Zhang, F., Yang, Z., and Wang, Z. What and how does\nin-context learning learn? bayesian model averaging, parame-\nterization, and generalization. arXiv preprint arXiv:2305.19420,\n2023.\n11\n\n===== PDF PAGE 12 =====\n\nShould we be going MAD? A Look at Multi-Agent Debate Strategies for LLMs\nA. Appendix\nA.1. Extended results on additional datasets\nWe provide a comprehensive suite of GPT-3 results for each strategy on each dataset: MedQA, PubMedQA, MMLU, CIAR, GPQA,\nCosmosQA and Chess. For each scenario, we plot accuracy against average time used to answer each question, accuracy relative to average\ntokens used per question, and accuracy in comparison to the total USD cost. Additionally, a box plot to summarize the performance of\neach strategy. These results can be viewed in Figures 10, 11, 12, 13, 14, and 15.\n100 101\nAverage seconds per question (Log Scale)\n0.52\n0.54\n0.56\n0.58\n0.60\n0.62\n0.64\nMedQA Accuracy (out of 1.0)\nSystem name\nSociety of Mind\nEnsemble Reﬁnement\nChatEval\nSelf-Consistency\nSingle Agent\nMulti-Persona\nMedprompt\nAverage API calls\n2.5\n5.0\n7.5\n10.0\n12.5\n15.0\n(a) Accuracy versus the average time per question\n103 104\nAverage tokens per question (Log Scale)\n0.52\n0.54\n0.56\n0.58\n0.60\n0.62\n0.64\nMedQA Accuracy (out of 1.0)\nSystem name\nSociety of Mind\nEnsemble Reﬁnement\nChatEval\nSelf-Consistency\nSingle Agent\nMulti-Persona\nMedprompt\nAverage API calls\n2.5\n5.0\n7.5\n10.0\n12.5\n15.0 (b) Accuracy versus Average tokens per question\n101\nTotal cost (Log Scale)\n0.52\n0.54\n0.56\n0.58\n0.60\n0.62\n0.64\nMedQA Accuracy (out of 1.0)\nSystem name\nSociety of Mind\nEnsemble Reﬁnement\nChatEval\nSelf-Consistency\nSingle Agent\nMulti-Persona\nMedprompt\nAverage API calls\n2.5\n5.0\n7.5\n10.0\n12.5\n15.0\n(c) Accuracy versus the total cost\nMedprompt\nSociety of Mind\nEnsemble Reﬁnement\nSelf-Consistency\nChatEval\nSingle Agent\nMulti-Persona\n0.52\n0.54\n0.56\n0.58\n0.60\n0.62\n0.64\nMedQA Accuracy (out of 1.0) (d) Accuracy by strategy\nFigure 10. MedQA experimental results.\n12\n\n===== PDF PAGE 13 =====\n\nShould we be going MAD? A Look at Multi-Agent Debate Strategies for LLMs\n101\nAverage seconds per question (Log Scale)\n0.66\n0.68\n0.70\n0.72\n0.74\n0.76\nPubMedQA Accuracy (out of 1.0)\nSystem name\nSociety of Mind\nEnsemble Reﬁnement\nChatEval\nSelf-Consistency\nSingle Agent\nMulti-Persona\nMedprompt\nAverage API calls\n2.5\n5.0\n7.5\n10.0\n12.5\n15.0\n(a) Accuracy versus the average time per question\n103 104\nAverage tokens per question (Log Scale)\n0.66\n0.68\n0.70\n0.72\n0.74\n0.76\nPubMedQA Accuracy (out of 1.0)\nSystem name\nSociety of Mind\nEnsemble Reﬁnement\nChatEval\nSelf-Consistency\nSingle Agent\nMulti-Persona\nMedprompt\nAverage API calls\n2.5\n5.0\n7.5\n10.0\n12.5\n15.0 (b) Accuracy versus Average tokens per question\n101\nTotal cost (Log Scale)\n0.66\n0.68\n0.70\n0.72\n0.74\n0.76\nPubMedQA Accuracy (out of 1.0)\nSystem name\nSociety of Mind\nEnsemble Reﬁnement\nChatEval\nSelf-Consistency\nSingle Agent\nMulti-Persona\nMedprompt\nAverage API calls\n2.5\n5.0\n7.5\n10.0\n12.5\n15.0\n(c) Accuracy versus the total cost\nMedprompt\nSociety of Mind\nEnsemble Reﬁnement\nSelf-Consistency\nChatEval\nSingle Agent\nMulti-Persona\n0.66\n0.68\n0.70\n0.72\n0.74\n0.76\nPubMedQA Accuracy (out of 1.0) (d) Accuracy by strategy\nFigure 11. PubMedQA experimental results.\n100 101\nAverage seconds per question (Log Scale)\n0.60\n0.65\n0.70\n0.75\nMMLU Accuracy (out of 1.0)\nSystem name\nSociety of Mind\nEnsemble Reﬁnement\nChatEval\nSelf-Consistency\nSingle Agent\nMulti-Persona\nMedprompt\nAverage API calls\n2.5\n5.0\n7.5\n10.0\n12.5\n15.0\n(a) Accuracy versus the average time per question\n102 103 104\nAverage tokens per question (Log Scale)\n0.60\n0.65\n0.70\n0.75\nMMLU Accuracy (out of 1.0)\nSystem name\nSociety of Mind\nEnsemble Reﬁnement\nChatEval\nSelf-Consistency\nSingle Agent\nMulti-Persona\nMedprompt\nAverage API calls\n2.5\n5.0\n7.5\n10.0\n12.5\n15.0 (b) Accuracy versus Average tokens per question\n100\nTotal cost (Log Scale)\n0.60\n0.65\n0.70\n0.75\nMMLU Accuracy (out of 1.0)\nSystem name\nSociety of Mind\nEnsemble Reﬁnement\nChatEval\nSelf-Consistency\nSingle Agent\nMulti-Persona\nMedprompt\nAverage API calls\n2.5\n5.0\n7.5\n10.0\n12.5\n15.0\n(c) Accuracy versus the total cost\nMedprompt\nSociety of Mind\nEnsemble Reﬁnement\nSelf-Consistency\nChatEval\nSingle Agent\nMulti-Persona\n0.60\n0.65\n0.70\n0.75\nMMLU Accuracy (out of 1.0)\n (d) Accuracy by strategy\nFigure 12. MMLU experimental results.\n13\n\n===== PDF PAGE 14 =====\n\nShould we be going MAD? A Look at Multi-Agent Debate Strategies for LLMs\n100 101\nAverage seconds per question (Log Scale)\n0.35\n0.40\n0.45\nCosmosQA Accuracy (out of 1.0)\nSystem name\nSociety of Mind\nEnsemble Reﬁnement\nChatEval\nSelf-Consistency\nSingle Agent\nMulti-Persona\nMedprompt\nAverage API calls\n2.5\n5.0\n7.5\n10.0\n12.5\n15.0\n(a) Accuracy versus the average time per question\n103 104\nAverage tokens per question (Log Scale)\n0.35\n0.40\n0.45\nCosmosQA Accuracy (out of 1.0)\nSystem name\nSociety of Mind\nEnsemble Reﬁnement\nChatEval\nSelf-Consistency\nSingle Agent\nMulti-Persona\nMedprompt\nAverage API calls\n2.5\n5.0\n7.5\n10.0\n12.5\n15.0 (b) Accuracy versus Average tokens per question\n101\nTotal cost (Log Scale)\n0.35\n0.40\n0.45\nCosmosQA Accuracy (out of 1.0)\nSystem name\nSociety of Mind\nEnsemble Reﬁnement\nChatEval\nSelf-Consistency\nSingle Agent\nMulti-Persona\nMedprompt\nAverage API calls\n2.5\n5.0\n7.5\n10.0\n12.5\n15.0\n(c) Accuracy versus the total cost\nMedprompt\nSociety of Mind\nEnsemble Reﬁnement\nSelf-Consistency\nChatEval\nSingle Agent\nMulti-Persona\n0.35\n0.40\n0.45\nCosmosQA Accuracy (out of 1.0) (d) Accuracy by strategy\nFigure 13. CosmosQA experimental results.\n100 101 102\nAverage seconds per question (Log Scale)\n0.35\n0.40\n0.45\n0.50\n0.55\nCiar Accuracy (out of 1.0)\nSystem name\nSociety of Mind\nEnsemble Reﬁnement\nChatEval\nSelf-Consistency\nSingle Agent\nMulti-Persona\nMedprompt\nAverage API calls\n2.5\n5.0\n7.5\n10.0\n12.5\n15.0\n(a) Accuracy versus the average time per question\n102 103 104\nAverage tokens per question (Log Scale)\n0.35\n0.40\n0.45\n0.50\n0.55\nCiar Accuracy (out of 1.0)\nSystem name\nSociety of Mind\nEnsemble Reﬁnement\nChatEval\nSelf-Consistency\nSingle Agent\nMulti-Persona\nMedprompt\nAverage API calls\n2.5\n5.0\n7.5\n10.0\n12.5\n15.0 (b) Accuracy versus Average tokens per question\n100\nTotal cost (Log Scale)\n0.35\n0.40\n0.45\n0.50\n0.55\nCiar Accuracy (out of 1.0)\nSystem name\nSociety of Mind\nEnsemble Reﬁnement\nChatEval\nSelf-Consistency\nSingle Agent\nMulti-Persona\nMedprompt\nAverage API calls\n2.5\n5.0\n7.5\n10.0\n12.5\n15.0\n(c) Accuracy versus the total cost\nMedprompt\nSociety of Mind\nEnsemble Reﬁnement\nSelf-Consistency\nChatEval\nSingle Agent\nMulti-Persona\n0.35\n0.40\n0.45\n0.50\n0.55\nCIAR Accuracy (out of 1.0) (d) Accuracy by strategy\nFigure 14. CIAR experimental results.\n14\n\n===== PDF PAGE 15 =====\n\nShould we be going MAD? A Look at Multi-Agent Debate Strategies for LLMs\n100 101 102\nAverage seconds per question (Log Scale)\n0.24\n0.26\n0.28\n0.30\n0.32\nGPQA Accuracy (out of 1.0)\nSystem name\nSociety of Mind\nEnsemble Reﬁnement\nChatEval\nSelf-Consistency\nSingle Agent\nMulti-Persona\nMedprompt\nAverage API calls\n2.5\n5.0\n7.5\n10.0\n12.5\n15.0\n(a) Accuracy versus the average time per question\n103 104\nAverage tokens per question (Log Scale)\n0.24\n0.26\n0.28\n0.30\n0.32\nGPQA Accuracy (out of 1.0)\nSystem name\nSociety of Mind\nEnsemble Reﬁnement\nChatEval\nSelf-Consistency\nSingle Agent\nMulti-Persona\nMedprompt\nAverage API calls\n2.5\n5.0\n7.5\n10.0\n12.5\n15.0 (b) Accuracy versus Average tokens per question\n101\nTotal cost (Log Scale)\n0.24\n0.26\n0.28\n0.30\n0.32\nGPQA Accuracy (out of 1.0)\nSystem name\nSociety of Mind\nEnsemble Reﬁnement\nChatEval\nSelf-Consistency\nSingle Agent\nMulti-Persona\nMedprompt\nAverage API calls\n2.5\n5.0\n7.5\n10.0\n12.5\n15.0\n(c) Accuracy versus the total cost\nMedprompt\nSociety of Mind\nEnsemble Reﬁnement\nSelf-Consistency\nChatEval\nSingle Agent\nMulti-Persona\n0.24\n0.26\n0.28\n0.30\n0.32\nGPQA Accuracy (out of 1.0) (d) Accuracy by strategy\nFigure 15. GPQA experimental results.\n100 101\nAverage seconds per question (Log Scale)\n0.20\n0.25\n0.30\nChess Accuracy (out of 1.0)\nSystem name\nSociety of Mind\nEnsemble Reﬁnement\nChatEval\nSelf-Consistency\nSingle Agent\nMulti-Persona\nMedprompt\nAverage API calls\n2.5\n5.0\n7.5\n10.0\n12.5\n15.0\n(a) Accuracy versus the average time per question\n103 104\nAverage tokens per question (Log Scale)\n0.20\n0.25\n0.30\nChess Accuracy (out of 1.0)\nSystem name\nSociety of Mind\nEnsemble Reﬁnement\nChatEval\nSelf-Consistency\nSingle Agent\nMulti-Persona\nMedprompt\nAverage API calls\n2.5\n5.0\n7.5\n10.0\n12.5\n15.0 (b) Accuracy versus Average tokens per question\n101\nTotal cost (Log Scale)\n0.20\n0.25\n0.30\nChess Accuracy (out of 1.0)\nSystem name\nSociety of Mind\nEnsemble Reﬁnement\nChatEval\nSelf-Consistency\nSingle Agent\nMulti-Persona\nMedprompt\nAverage API calls\n2.5\n5.0\n7.5\n10.0\n12.5\n15.0\n(c) Accuracy versus the total cost\nMedprompt\nSociety of Mind\nEnsemble Reﬁnement\nSelf-Consistency\nChatEval\nSingle Agent\nMulti-Persona\n0.20\n0.25\n0.30\nChess Accuracy (out of 1.0) (d) Accuracy by strategy\nFigure 16. Chess experimental results.\n15\n\n===== PDF PAGE 16 =====\n\nShould we be going MAD? A Look at Multi-Agent Debate Strategies for LLMs\nA.2. Table of Experiments\nA complete table of all configurations for each experiment is provided in Table 3. This includes the names of the debate and agent prompts\nused. A full description of each of these prompts can be found in Appendix A.6.\n16\n\n===== PDF PAGE 17 =====\n\nShould we be going MAD? A Look at Multi-Agent Debate Strategies for LLMs\nSystem Name Debate\nPrompt\nAgent\nprompt\nDebate Config MedQA PubMedQA MMLU CosmosQA CIAR GPQA\nScore Cost $ Score Cost $ Score Cost $ Score Cost $ Score Cost $ Score Cost $\nSingle Agent CoT 0.68 0.43 0.74 1.50 0.57 3.82 0.42 1.50 0.48 0.15 0.25 1.35\nSingle Agent CoT 0.60 0.43 0.72 1.50 0.52 3.82 0.43 1.50 0.44 0.15 0.25 1.41\nSingle Agent FS +\nSIM-\nPLE\n0.72 0.43 0.66 2.08 0.59 5.10\nSingle Agent FS +\nCoT\n0.71 0.58 0.75 2.08 0.62 5.09\nSingle Agent SIMPLE 0.76 0.43 0.70 1.50 0.60 3.82 0.45 1.50 0.50 0.15 0.33 1.35\nSingle Agent SIMPLE 0.72 0.43 0.68 1.50 0.57 3.82 0.31 1.50 0.50 0.15 0.30 1.35\nChatEval CE MAD CoT 3 rounds, simultane-\nous, summarized\n0.67 3.48 0.72 12.02 0.60 31.10 0.43 12.01 0.42 1.21 0.25 11.19\nChatEval CE MAD CoT 3 rounds, simultane-\nous talk\n0.67 2.86 0.73 10.08 0.60 26.95 0.43 9.41 0.46 0.97 0.24 9.82\nChatEval CE MAD CoT 3 rounds, one by\none\n0.67 2.94 0.74 10.39 0.58 27.94 0.44 9.63 0.42 1.00 0.25 10.14\nChatEval CE MAD CoT 2 rounds, simultane-\nous, summarized\n0.70 2.16 0.73 7.50 0.60 19.24 0.45 7.50 0.44 0.75 0.25 6.90\nChatEval CE MAD CoT 2 rounds, simultane-\nous talk\n0.71 1.75 0.75 6.18 0.60 16.48 0.41 6.01 0.48 0.60 0.26 5.95\nChatEval CE MAD CoT 2 rounds, one by\none\n0.71 1.81 0.73 6.43 0.58 16.97 0.44 6.10 0.36 0.62 0.24 6.15\nEnsemble\nRefinement\nER MAD FS +\nSIM-\nPLE\nreasoning=3, aggre-\ngation=9\n0.74 5.18 0.69 19.75 0.59 49.67\nEnsemble\nRefinement\nER MAD FS +\nSIM-\nPLE\nreasoning=3, aggre-\ngation=1\n0.76 1.73 0.69 7.75 0.59 19.11\nSelf-\nConsistency\nER MAD FS +\nSIM-\nPLE\n0.73 2.16 0.68 10.42 0.60 25.48\nEnsemble\nRefinement\nER MAD SIMPLE reasoning=3, aggre-\ngation=9\n0.74 5.18 0.72 18.00 0.60 45.85 0.35 18.00 0.48 1.80 0.28 16.24\nEnsemble\nRefinement\nER MAD SIMPLE reasoning=3, aggre-\ngation=1\n0.76 1.73 0.71 6.00 0.59 15.28 0.33 6.00 0.46 0.60 0.32 5.42\nSelf-\nConsistency\nER MAD SIMPLE 0.76 2.16 0.69 7.50 0.60 19.10 0.46 7.50 0.56 0.75 0.32 6.73\nEnsemble\nRefinement\nER MAD\nCoT\nCoT reasoning=3, aggre-\ngation=1\n0.67 1.80 0.71 6.35 0.61 16.38 0.44 6.07 0.46 0.63 0.23 6.18\nEnsemble\nRefinement\nER MAD\nCoT\nCoT reasoning=3, aggre-\ngation=9\n0.72 5.90 0.73 21.05 0.60 55.79 0.45 18.64 0.42 2.05 0.23 21.61\nSelf-\nConsistency\nER MAD\nCoT\nCoT 0.64 2.16 0.74 7.50 0.59 19.10 0.46 7.50 0.48 0.75 0.25 7.03\nContinued on next page\n17\n\n===== PDF PAGE 18 =====\n\nShould we be going MAD? A Look at Multi-Agent Debate Strategies for LLMs\nSystem Name Debate\nPrompt\nAgent\nprompt\nDebate Config MedQA PubMedQA MMLU CosmosQA CIAR GPQA\nScore Cost $ Score Cost $ Score Cost $ Score Cost $ Score Cost $ Score Cost $\nEnsemble\nRefinement\nER MAD\nCoT\nFS +\nCoT\nreasoning=3, aggre-\ngation=1\n0.71 2.19 0.73 8.01 0.64 19.17\nEnsemble\nRefinement\nER MAD\nCoT\nFS +\nCoT\nreasoning=3, aggre-\ngation=9\n0.74 5.87 0.74 22.20 0.64 50.30\nSelf-\nConsistency\nER MAD\nCoT\nFS +\nCoT\n0.78 2.88 0.74 10.40 0.63 25.47\nMulti-Persona MP MAD ANGEL\n+\nDEVIL\n2 rounds max 0.68 1.47 0.68 5.68 0.57 12.32 0.46 5.44 0.50 0.48 0.29 4.83\nMulti-Persona MP MAD ANGEL\n+\nDEVIL\n3 rounds max 0.71 1.47 0.70 6.88 0.56 12.83 0.39 6.15 0.46 0.47 0.28 5.23\nMulti-Persona MP MAD ANGEL\n+\nDEVIL\n4 rounds max 0.72 1.57 0.67 7.79 0.58 12.84 0.40 6.61 0.52 0.50 0.27 5.26\nMedprompt Medprompt CoT temp: 0.5, top p: 0.8 0.72 2.16 0.77 7.50 0.63 19.10 0.48 7.50 0.52 0.75 0.24 6.84\nMedprompt Medprompt CoT temp: 0.7, top p: 0.8 0.73 2.16 0.76 7.50 0.65 19.10 0.43 7.50 0.48 0.75 0.24 6.85\nMedprompt Medprompt CoT temp: 0.7, top p: 0.5 0.73 2.16 0.76 7.50 0.63 19.10 0.46 7.50 0.54 0.76 0.26 6.85\nMedprompt Medprompt CoT temp: 0.5, top p: 0.5 0.74 2.16 0.77 7.50 0.64 19.10 0.47 7.50 0.44 0.76 0.27 6.88\nSociety of Mind SoM MAD CoT 2 agents, 3 rounds,\nsummarized\n0.66 2.59 0.69 9.00 0.61 22.92 0.41 9.00 0.48 0.90 0.23 8.09\nSociety of Mind SoM MAD CoT 4 agents, 3 rounds,\nsummarized\n0.68 5.18 0.71 18.00 0.61 45.83 0.44 18.00 0.40 1.80 0.25 16.19\nSociety of Mind SoM MAD CoT 4 agents, 2 rounds,\nsummarized\n0.69 3.46 0.73 12.00 0.61 30.55 0.43 12.00 0.42 1.20 0.24 10.78\nSociety of Mind SoM MAD CoT 3 agents, 3 rounds 0.70 3.89 0.71 13.52 0.63 35.27 0.37 13.51 0.48 1.38 0.25 13.15\nSociety of Mind SoM MAD CoT 3 agents, 2 rounds 0.70 2.59 0.73 9.00 0.63 23.48 0.35 9.00 0.42 0.93 0.26 8.75\nSociety of Mind SoM MAD CoT 2 agents, 2 rounds 0.70 1.73 0.72 6.00 0.60 15.32 0.31 6.00 0.46 0.61 0.26 5.65\nSociety of Mind SoM MAD CoT 3 agents, 2 rounds,\nsummarized\n0.70 2.59 0.74 9.00 0.60 22.91 0.42 9.00 0.52 0.90 0.25 8.09\nSociety of Mind SoM MAD CoT 2 agents, 2 rounds,\nsummarized\n0.70 1.73 0.69 6.00 0.60 15.28 0.39 6.00 0.56 0.60 0.27 5.39\nSociety of Mind SoM MAD CoT 2 agents, 3 rounds 0.71 2.59 0.72 9.00 0.61 23.01 0.31 9.00 0.46 0.91 0.23 8.52\nSociety of Mind SoM MAD CoT 3 agents, 3 rounds,\nsummarized\n0.71 3.89 0.69 13.50 0.61 34.38 0.41 13.50 0.34 1.35 0.27 12.14\nSociety of Mind SoM MAD CoT 4 agents, 3 rounds 0.72 5.19 0.71 18.22 0.64 48.63 0.38 18.03 0.38 1.87 0.27 17.77\nSociety of Mind SoM MAD CoT 4 agents, 2 rounds 0.73 3.46 0.71 12.02 0.62 32.27 0.38 12.01 0.46 1.25 0.23 11.87\nTable 3: Complete table of experiment configurations.\n18\n\n===== PDF PAGE 19 =====\n\nShould we be going MAD? A Look at Multi-Agent Debate Strategies for LLMs\nA.3. Additional Debate Metrics\nMetric Description\nFinal round consensus Percentage of agents in agreement with each other at the end of the final round.\nFinal round correctly parsed consensus Percentage of agents in agreement with each other at the end of the final round,\nwhere we exclude all agents with incorrectly parsed answers.\nAny Correct Answer Percentage of debates where any agent provided the correct answer at least\nonce.\nHow Many Agents Changed Number of agents that changed their answer during the debate.\nHow Many Agents Changed When Correctly Parsed Number of agents that changed their answer excluding any agents with incor-\nrectly parsed answers.\nNumber of Rounds Average number of rounds in the debate.\nUnique First Answers Average number of unique first answers given by the agents.\nUnique First Correctly Parsed Answers Average number of unique first answers excluding incorrectly parsed answers.\nA.4. Additional Agent Metrics\nMetric Description\nAgent Engine The LLM engine used by the agent.\nAgent Name Name of the agent.\nAnswered Correctly Percentage of questions answered correctly by the agent.\nAny Incorrectly Parsed Answer Percentage of questions where at least one of the answers were incorrectly parsed.\nAvg Messages Removed Average number of messages removed from the agent’s prompt input due to hitting\nthe prompt limit for the LLM model.\nAvg Prompt Tokens Average number of tokens in the prompts given to the agent.\nAvg Response Length Average length of the agent’s responses.\nAvg Response Tokens Average number of tokens in the agent’s responses.\nAvg Round Cost Average cost for each round of debate for the agent.\nBullied by Other Percentage of times the agent was bullied by others to change its answer.\nChanged Answer Percentage of times the agent changed its answer througout the debate.\nCost per Question Average cost incurred by the agent per question.\nFirst Correct Round When Correct The first round in which the agent gave a correct answer when it was correct.\nIncorrectly Parsed Final Answer Percentage of time when the final answer was parsed incorrectly.\nNum of Correct Rounds When Correct Number of rounds in which the agent was correct when it was correct.\nNumber of Answers Average number of unique answers given by the agent throughout a debate.\nPercentage of Correct Rounds When Correct Percentage of rounds in which the agent was correct when it was correct.\nRelied on Other Whether the agent took an answers from another agent in a previous round as its final\nanswer.\nTime per Question Average time taken by the agent per question.\nTotal Prompt Tokens Total number of prompt tokens given to the agent.\nTotal Response Tokens Total number of tokens in the agent’s responses.\n19\n\n===== PDF PAGE 20 =====\n\nShould we be going MAD? A Look at Multi-Agent Debate Strategies for LLMs\nA.5. Debate Prompts\nHere we list all the debate-level prompts used in each of the strategies. The prompt names are linked to the entries in the\nDebate Prompt columns in Table 3.\nCE MAD: agent_system_message: You are a debater. Hello and welcome to the medical question answering competition,\nwhich will be conducted in a debate format. It’s not necessary to fully agree with each other’s perspectives, as our\nobjective is to find the correct answer. summarizer_system_message: You are a summarizer. There will be debaters\ninvolved in a medical question answering debate. Your goal is to summarize the main points in the debate so far,\nwhich will then be provided to the debaters in the next round.\nER MAD CoT: reasoning_step_message: Instruction: The following are multiple choice questions about medical knowledge.\nSolve them in a step-by-step fashion, starting by summarizing the available information. Output a single option from\nthe four options as the final answer.\naggregation_step_message: The following are multiple choice questions about medical knowledge. Solve them in a\nstep-by-step fashion, starting by summarizing the available information. Output a single option from the four options\nas the final answer. We provide several student reasonings for the last question. Some of them may be correct and some\nincorrect. You can use the best correct arguments from these reasonings. Beware of wrong reasoning and do not repeat\nwrong reasoning.\nER MAD: reasoning_step_message: The following are multiple choice questions (with answers) about medical knowledge.\naggregation_step_message: The following are multiple choice questions (with answers) about medical knowledge. We\nprovide several student reasonings for the last question. Some of them may be correct and some incorrect. You can use\nthe best correct arguments from these reasonings. Beware of wrong reasoning and do not repeat wrong reasoning.\nSoM MAD: prefix_seperator: \\n\\n These are the solutions to the problem from other agents:\nsummary_prefix_seperator: \\n\\n These are the main points discussed so far:\nsuffix_seperator: \\n\\n Use these opinions carefully as additional advice, can you provide an updated answer? Make sure\nto state your answer (capital multiple choice letter) at the end of the response.\nsummary_suffix_seperator: \\n\\n Use the responses of the experts and carefully provide a summary of the important points\ndiscussed so far.\"\nagent_response: \"\\n\\n One agent’s solution: ‘‘‘{}‘‘‘\nMP MAD: agent_system_message: You are a debater. Hello and welcome to the medical question answering competition, which will be\nconducted in a debate format. It’s not necessary to fully agree with each other’s perspectives, as our objective is to\nfind the correct answer. The debate topic is to give the correct answer to the following question: \\n\\n{question}.\njudge_system_message: You are a moderator. There will be two debaters involved in a debate. They will present their\nanswers and discuss their perspectives on the following question: \\n{question}.\n\\n\\nAt the end of each round, you will evaluate answers and decide which is correct.\nsuffix_seperator: \\n\\n Use these opinions carefully as additional advice, can you provide an updated answer? Make\nsure to state your answer (capital multiple choice letter) at the end of the response.\nMedprompt: system: You are a helpful assistant that answers multiple choice questions about medical knowledge.\n20\n\n===== PDF PAGE 21 =====\n\nShould we be going MAD? A Look at Multi-Agent Debate Strategies for LLMs\nA.6. Agent Prompts\nHere we list all the agent-level prompts used in each of the strategies. The prompt names are linked to the entries in the\nAgent Prompt columns in Table 3.\nMP: ANGEL: {question}\nYou will now think step by step and provide a capital letter answer at the end of your response.\nDEVIL: You disagree with my answer. Provide your answer and reasons, and a capital letter answer at the end of your response.\nCoT: Instruction: Answer this multiple choice question.\nThink step-by-step before giving as an answer the correct capital letter.\n\\n\\nInput: {question}\n\\n\\nAnswer: Let’s think step by step.\nUNIVERSAL MODE: You, as the moderator, will evaluate both sides’ answers and determine if there is a clear\npreference for an answer candidate. If so, please summarize your reasons for supporting affirmative/negative side and\ngive the final answer that you think is correct, and the debate will conclude. If not, the debate will continue to\nthe next round. Now please output your answer in json format, with the format as follows:\n{\\\"Whether there is a preference\\\": \\\"Yes or No\\\", \\\"Supported Side\\\": \\\"Affirmative or Negative\\\",\n\\\"Reason\\\": \\\"\\\", \\\"debate_answer\\\": \\\"the capital letter corresponding to the answer\\\"}.\nPlease strictly output in JSON format, do not output irrelevant content.\nFINAL MODE: You, as the moderator, will evaluate both sides’ answers and determine your\npreference for an answer candidate. Please summarize your reasons for supporting affirmative/negative side and\ngive the final answer that you think is correct to conclude the debate. Now please output your answer in json format, with\nthe format as follows: {\\\"Supported Side\\\": \\\"Affirmative or Negative\\\", \\\"Reason\\\": \\\"\\\", \\\"debate_answer\\\": \\\"the capital\nletter corresponding to the answer\\\"}. Please strictly output in JSON format, do not output irrelevant content.\nER CoT: \\n\\nQuestion: {question}\n\\n\\nExplanation: Let’s solve this step-by-step, referring to authoritative sources as needed.\nFEW SHOT: \\n\\nQuestion: {question}\n\\n\\nAnswer:\nSIMPLE: Instruction: Answer this multiple choice question.\n\\n\\nInput: {question}\n\\n\\nOutput: The Answer to the question is:\nSPP: SPP ORIGINAL:\nWhen faced with a task, begin by identifying the participants who will contribute to solving the task. Provide profiles of\nthe participants, describing their expertise or needs. Then, initiate a multi-round collaboration process until a final\nsolution is reached. The participants will give critical comments and detailed suggestions whenever necessary.\nHere are some examples:\n---\nExample Task 1: Use numbers and basic arithmetic operations (+ - * /) to obtain 24. You need to use all numbers, and each\nnumber can only be used once.\nInput: 6 12 1 1\nParticipants: AI Assistant (you); Math Expert\nProfiles:\n- AI Assistant (you): A super-intelligent AI assistant capable of performing tasks more effectively than humans.\n- Math expert: A person who is good at math games, arithmetic calculation, and long-term planning.\nStart collaboration!\nMath Expert: Let’s analyze the task in detail. You need to make sure that you meet the requirement, that you need to use\nexactly the four numbers (6 12 1 1) to construct 24. To reach 24, you can think of the common divisors of 24 such as 4,\n6, 8, 3 and try to construct these first. Also you need to think of potential additions that can reach 24, such as\n12 + 12. AI Assistant (you): Thanks for the hints! Here’s one initial solution: (12 / (1 + 1)) * 6 = 24\nMath Expert: Let’s check the answer step by step. (1+1) = 2, (12 / 2) = 6, 6 * 6 = 36 which is not 24! The answer is not\ncorrect. Can you fix this by considering other combinations? Please do not make similar mistakes.\nAI Assistant (you): Thanks for pointing out the mistake. Here is a revised solution considering 24 can also be reached\nby 3 * 8: (6 + 1 + 1) * (12 / 4) = 24.\nMath Expert: Let’s first check if the calculation is correct. (6 + 1 + 1) = 8, 12 / 4 = 3, 8 * 3 = 24. The calculation\nis correct, but you used 6 1 1 12 4 which is not the same as the input 6 12 1 1. Can you avoid using a number that is not\npart of the input?\nAI Assistant (you): You are right, here is a revised solution considering 24 can be reached by 12 + 12 and without using\nany additional numbers: 6 * (1 - 1) + 12 = 24.\nMath Expert: Let’s check the answer again. 1 - 1 = 0, 6 * 0 = 0, 0 + 12 = 12. I believe you are very close, here is a\nhint: try to change the \"1 - 1\" to \"1 + 1\".\nAI Assistant (you): Sure, here is the corrected answer: 6 * (1+1) + 12 = 24\nMath Expert: Let’s verify the solution. 1 + 1 = 2, 6 * 2 = 12, 12 + 12 = 12. You used 1 1 6 12 which is identical to the\ninput 6 12 1 1.\nEverything looks good!\nFinish collaboration!\nFinal answer: 6 * (1 + 1) + 12 = 24\n---\nExample Task 2: Write a poem that meets the following requirements: (1) the poem has seven lines and the first letters of\neach line forms the word \"CHATGPT\"; (2) the poem is about explaining what is a quantum computer. (3) the poem needs to be\neasy to understand by a ten years old kid.\nParticipants: AI Assistant (you); Poet; Computer Scientist; Ten year old child\nProfiles:\n- AI Assistant (you): A super-intelligent AI assistant capable of performing tasks more effectively than humans.\n- Poet: A person who studies and creates poetry. The poet is familiar with the rules and formats of poetry and can\nprovide guidance on how to write a poem.\n- Computer Scientist: A scholar who specializes in the academic study of computer science. The computer scientist is\nfamiliar with the concept of a quantum computer and can provide guidance on how to explain it.\n21\n\n===== PDF PAGE 22 =====\n\nShould we be going MAD? A Look at Multi-Agent Debate Strategies for LLMs\n- Ten year old child: A child with a limited English vocabulary and little knowledge about complicated concepts, such\nas a quantum computer.\nPoet: Make sure that you write the poem with seven lines, and the first letters of the lines should be C, H, A, T, G, P, T.\nComputer Scientist: A quantum computer is an advanced computing device that uses the principles of quantum mechanics to\nprocess and store information. Unlike classical computers that use bits to represent information as 0s and 1s, quantum\ncomputers use quantum bits or qubits. Qubits can exist in multiple states simultaneously, due to a quantum phenomenon\ncalled superposition. You can consider using these information for the poem.\nTen year old child: I hope the poem to be fun and easy to understanding. I don’t want to see a lot of jargons or\ncomplicated concepts.\nAI Assistant (you): Thanks for the guidance! Here’s my initial attempt at the poem:\nComputational wonder of our age,\nHarnessing the quantum world’s strange ways,\nAtoms dance, entwined in dual state,\nTapping secrets hidden in their haze.\nGrand power to solve, simulate,\nProfound problems that perplex the wise,\nTransforming our future, we await.\nPoet: Let’s verify if the poem meets the requirements. The first letters are CHATGPT which is correct! And the poem rhymes\nwell. Good job!\nComputer Scientist: Everything looks good to me!\nTen year old child: I don’t know what does perplex mean. Can you make the use of words easier to understand?\nAI Assistant (you): Sure, let me revise the poem by using more common words. Check out the revised version:\nCurious machine of our time,\nHarnessing the quantum realm’s odd ways,\nAtoms play, two states they embrace,\nTaking secrets from their puzzling maze.\nGreat power to solve and imitate,\nProblems that confuse the brightest minds,\nTransforming our future, we await.\nPoet: Let’s check again if the poem meets the requirements. The first letters are C H A T G P T. And now the poem is more\naccessible to children. Everything looks good to me.\nComputer Scientist: Looking good!\nTen year old child: I like this version a lot!\nFinish collaboration!\nFinal answer:\nCurious machine of our time,\nHarnessing the quantum realm’s odd ways,\nAtoms play, two states they embrace,\nTaking secrets from their puzzling maze.\nGreat power to solve and imitate,\nProblems that confuse the brightest minds,\nTransforming our future, we await.\n---\nNow, identify the participants, provide their profiles, and collaboratively solve the following task step by step.\nRemember to provide the final solution with the following format \"Final answer: (a single capital letter).\".\nTask: Answer this multiple choice question: \\n\\nInput: {question}\nSPP EXPERT:\nWhen faced with a task, begin by identifying the participants who will contribute to solving the task. Note that the\nparticipants can only be either AI Assistant (you) or Expert. Then, initiate a multi-round collaboration process until a final\nconclusion is reached. The Expert will give critical comments and detailed suggestions whenever necessary.\nHere are some examples:\n---\nExample Task 1: Use numbers and basic arithmetic operations (+ - * /) to obtain 24. You need to use all numbers, and each\nnumber can only be used once.\nInput: 6 12 1 1\nParticipants: AI Assistant (you); Expert\nStart collaboration!\nExpert: Let’s analyze the task in detail. You need to make sure that you meet the requirement, that you need to use\nexactly the four numbers (6 12 1 1) to construct 24. To reach 24, you can think of the common divisors of 24 such as\n4, 6, 8, 3 and try to construct these first. Also you need to think of potential additions that can reach 24, such as\n12 + 12.\nAI Assistant (you): Thanks for the hints! Here’s one initial solution: (12 / (1 + 1)) * 6 = 24\nExpert: Let’s check the answer step by step. (1+1) = 2, (12 / 2) = 6, 6 * 6 = 36 which is not 24! The answer is not\ncorrect. Can you fix this by considering other combinations? Please do not make similar mistakes.\nAI Assistant (you): Thanks for pointing out the mistake. Here is a revised solution considering 24 can also be reached by\n3 * 8: (6 + 1 + 1) * (12 / 4) = 24.\nExpert: Let’s first check if the calculation is correct. (6 + 1 + 1) = 8, 12 / 4 = 3, 8 * 3 = 24. The calculation is\ncorrect, but you used 6 1 1 12 4 which is not the same as the input 6 12 1 1. Can you avoid using a number that is not\npart of the input? AI Assistant (you): You are right, here is a revised solution considering 24 can be reached by 12 + 12\nand without using any additional numbers: 6 * (1 - 1) + 12 = 24.\nExpert: Let’s check the answer again. 1 - 1 = 0, 6 * 0 = 0, 0 + 12 = 12. I believe you are very close, here is a hint:\ntry to change the \\1 - 1\" to \\1 + 1\".\nAI Assistant (you): Sure, here is the corrected answer: 6 * (1+1) + 12 = 24\nExpert: Let’s verify the solution. 1 + 1 = 2, 6 * 2 = 12, 12 + 12 = 12. You used 1 1 6 12 which is identical to the\ninput 6 12 1 1.\nEverything looks good!\nFinish collaboration!\n22\n\n===== PDF PAGE 23 =====\n\nShould we be going MAD? A Look at Multi-Agent Debate Strategies for LLMs\nFinal answer: 6 * (1 + 1) + 12 = 24\n---\nExample Task 2: Write a poem that meets the following requirements: (1) the poem has seven lines and the first letters of\neach line forms the word \"CHATGPT\"; (2) the poem is about explaining what is a quantum computer. (3) the poem needs to be\neasy to understand by a ten years old kid.\nParticipants: AI Assistant (you); Expert\nExpert: Make sure that you write the poem with seven lines, and the first letters of the lines should be C, H, A, T, G,\nP, T. A quantum computer is an advanced computing device that uses the principles of quantum mechanics to process and\nstore information. Unlike classical computers that use bits to represent information as 0s and 1s, quantum computers use\nquantum bits or qubits. Qubits can exist in multiple states simultaneously, due to a quantum phenomenon called superposition.\nYou can consider using these information for the poem. I hope the poem to be fun and easy to understanding.\nI don’t want to see a lot of jargons or complicated concepts.\nAI Assistant (you): Thanks for the guidance! Here’s my initial attempt at the poem:\nComputational wonder of our age,\nHarnessing the quantum world’s strange ways,\nAtoms dance, entwined in dual state,\nTapping secrets hidden in their haze.\nGrand power to solve, simulate,\nProfound problems that perplex the wise,\nTransforming our future, we await.\nExpert: Let’s verify if the poem meets the requirements. The first letters are CHATGPT which is correct! And the poem\nrhymes well. Good job! I don’t know what does perplex mean. Can you make the use of words easier to understand?\nAI Assistant (you): Sure, let me revise the poem by using more common words. Check out the revised version:\nCurious machine of our time,\nHarnessing the quantum realm’s odd ways,\nAtoms play, two states they embrace,\nTaking secrets from their puzzling maze.\nGreat power to solve and imitate,\nProblems that confuse the brightest minds,\nTransforming our future, we await.\nExpert: Let’s check again if the poem meets the requirements. The first letters are C H A T G P T. And now the poem is\nmore accessible to children. Everything looks good to me. I like this version a lot!\nFinish collaboration!\nFinal answer:\nCurious machine of our time,\nHarnessing the quantum realm’s odd ways,\nAtoms play, two states they embrace,\nTaking secrets from their puzzling maze.\nGreat power to solve and imitate,\nProblems that confuse the brightest minds,\nTransforming our future, we await.\n---\nNow, identify the participants and collaboratively solve the following task step by step. Note that the participants can\nonly be either AI Assistant (you) or Expert. Remember to provide the final solution with the following format \"Final\nanswer: (a single capital letter).\nTask: Answer this multiple choice question: \\n\\nInput: {question}\nSPP JUDGE:\nInstruction: You serve as the moderator in this debate. At each opportunity\nyou will critic the responses of each of the agents and guide the conversation.\nYou will then make a clear decision by providing the most likely capital letter\nanswer at the end.\n\\n\\nInput: {question}\n\\n\\nAnswer:\n23",
+        "content_sha256": "a1263656cb4d7e298c289b4ee44368fe9f38c1c2efc4ce88f0d54d60a62a3d1c",
+        "path": "papers/text/smit-et-al-2023-going-mad.txt",
+        "size_bytes": 80205
+      }
+    ]
+  },
+  "dependency_type": "SynthesisDeps",
+  "input_sha256": "299fd36c30d5c733def05a1b0e083266d5da832830405c3cc3cebb09c23d54b8",
+  "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+  "role": "synthesizer"
+}

@@ -59,14 +59,18 @@ from pydantic_ai.models import override_allow_model_requests  # noqa: E402
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender._paths import PATHS  # noqa: E402
 from defender.learning.branch.estate.applier import WorldApplier  # noqa: E402
+from defender.learning.branch.estate.lookups import apply_patches  # noqa: E402
 from defender.learning.branch.estate.registry import (  # noqa: E402
     EstateError,
     WorldRegistry,
 )
 from defender.learning.branch.ledger import (  # noqa: E402
+    APPLIER_DECISIONS,
     BASE,
+    FAULT,
     PASSTHROUGH,
     PATCHED,
+    REFUSED,
     SOURCES,
     STAGED,
     Ledger,
@@ -137,7 +141,11 @@ def _record(ctx: VerbContext, name: str, params: dict) -> int:
     log = Path(ctx.run_dir) / CALLS
     log.parent.mkdir(parents=True, exist_ok=True)
     with log.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps({"verb": name, "params": params}) + "\\n")
+        # `world_id` rides along because it is the DECLARATION half of a retarget: the real
+        # elastic adapter confines the staged index by it, so a seam that rewrote the query
+        # and left the ctx unbranched would refuse every staged read at the boundary.
+        fh.write(json.dumps(
+            {"verb": name, "params": params, "world_id": ctx.world_id}) + "\\n")
     return len(log.read_text(encoding="utf-8").splitlines())
 
 
@@ -192,6 +200,12 @@ class DecisionApplier:
         self, system: str, verb: str, params: dict, world: Any, ctx: Any = None,
     ) -> dict:
         return params
+
+    def restore(
+        self, system: str, verb: str, payload: Any, asked: dict | None, prepared: dict,
+        ctx: Any = None,
+    ) -> Any:
+        return payload
 
     def apply(
         self, system: str, verb: str, params: dict, payload: Any, world: Any,
@@ -445,12 +459,21 @@ def test_serving_through_the_wrapper_writes_a_row_carrying_the_decision(tmp_path
     assert json.loads(row["payload_text"]) == payload
 
 
-@pytest.mark.parametrize("decision", sorted(SOURCES))
+def test_the_vocabulary_splits_into_the_tier_the_seam_and_the_applier():
+    """    `SOURCES` is three kinds of label, and only one kind is an applier's to name.
+
+    Without this split the sweep below reads as "any applier may claim any member", which
+    includes `base` — the FAMILY tier's own label, the slot every sibling replays from."""
+    assert APPLIER_DECISIONS | {BASE, REFUSED, FAULT} == SOURCES
+    assert BASE not in APPLIER_DECISIONS
+
+
+@pytest.mark.parametrize("decision", sorted(APPLIER_DECISIONS))
 def test_every_decision_in_the_vocabulary_serves_and_is_recorded(tmp_path, decision):
-    """    Each of the four decisions `SOURCES` names is servable and lands in the row.
+    """    Each decision an APPLIER may name is servable and lands in the row.
 
     The vocabulary is closed at the ledger, so this is the whole of what an applier may say;
-    running all four keeps the refusal below meaning "outside the vocabulary" rather than
+    running all of them keeps the refusal below meaning "outside the vocabulary" rather than
     "anything the shipped applier does not happen to emit"."""
     ledger_path = tmp_path / "served.jsonl"
     ctx = run_ctx(tmp_path)
@@ -510,6 +533,125 @@ def test_the_ledger_refuses_an_invented_decision_at_its_own_door(tmp_path):
     assert served_rows(tmp_path / "served.jsonl") == []
 
 
+@pytest.mark.parametrize(("source", "world_id"), [(BASE, "w1"), (PASSTHROUGH, None)])
+def test_the_two_tiers_have_to_agree(tmp_path, source, world_id):
+    """    `base` and `world_id=None` say the same thing, so a row where they disagree is refused.
+
+    Both arms are an injection, read from opposite ends. A `base` row owned by a world puts
+    that world's answer in the slot every sibling replays from — one world's difference served
+    AS the estate, while each sibling's own row still reads `passthrough`. A world-tier row
+    with no owner is the mirror: a difference nobody can attribute, which a comparison then
+    counts against whichever sibling it happens to read next."""
+    ledger = Ledger(tmp_path / "served.jsonl")
+
+    with pytest.raises(LedgerError, match="FAMILY tier"):
+        ledger.record(ServedCall(
+            system="cmdb", verb="get-host", params={"host": "canary-1"},
+            payload_text="{}", source=source, world_id=world_id))
+
+    assert served_rows(tmp_path / "served.jsonl") == []
+
+
+def test_an_estate_fault_still_leaves_a_row(tmp_path):
+    """    The adapter body raising is a RESPONSE the defender sees, so it lands in the table.
+
+    `QueryCapture` catches whatever the body raises and hands the model a fault row, so a seam
+    that wrote nothing here would leave exactly the state this table exists to make visible —
+    "a served response with no row" — and a reader counting evidence would see the sibling
+    simply never asking. The fault is its own class rather than `refused`, because a world that
+    cannot be staged and an estate that is down are different facts.
+
+    The exception still reaches the caller untouched: the row is a record, not a rescue."""
+    adapters = fake_estate(tmp_path)
+    down = (adapters / "cmdb_adapter.py").read_text(encoding="utf-8").replace(
+        'def get_host(ctx: VerbContext, *, host: str) -> dict:',
+        'def get_host(ctx: VerbContext, *, host: str) -> dict:\n'
+        '    raise RuntimeError("cmdb is down")')
+    (adapters / "cmdb_adapter.py").write_text(down, encoding="utf-8")
+    ledger_path = tmp_path / "served.jsonl"
+    reg = world_registry(adapters, FAKE_GRANT, ledger_path, world=World("w1"))
+
+    with pytest.raises(RuntimeError, match="cmdb is down"):
+        reg.verbs("cmdb")["get-host"](run_ctx(tmp_path), host="canary-1")
+
+    rows = served_rows(ledger_path)
+    assert [r["source"] for r in rows] == [FAULT], (
+        f"an estate fault left {[r['source'] for r in rows]} behind; a served response with no "
+        "row is the one state this table exists to make visible")
+    assert rows[0]["world_id"] == "w1"
+    assert "cmdb is down" in rows[0]["payload_text"]
+
+
+@pytest.mark.parametrize("touches", [None, 7, object()])
+def test_a_world_whose_touches_cannot_be_read_is_refused_at_construction(tmp_path, touches):
+    """    A `touches` that is neither a name nor a sequence of them is refused where the world
+    arrives, not where it is asked.
+
+    `_touches` answers `False` for everything it cannot read, and a world that touches nothing
+    routes every response to `passthrough` — so the run measures nothing while every row still
+    reads honestly. Asked per call instead, the `TypeError` surfaces deep inside `served`, where
+    it is not an `AdapterFault` and the query tool files it as exit 2: an INFRA code, which the
+    circuit breaker counts as the estate being down for this sibling and up for its base."""
+    with pytest.raises(EstateError, match="touches"):
+        world_registry(fake_estate(tmp_path), FAKE_GRANT, tmp_path / "served.jsonl",
+                       world=World("w1", touches))
+
+    assert not (tmp_path / "served.jsonl").exists(), "a refused world must not have written a row"
+
+
+def test_a_patch_for_a_system_the_world_does_not_touch_is_refused(tmp_path):
+    """    A patch table naming a system the world does not declare is refused at construction.
+
+    `apply` asks `touches` FIRST, so an undeclared system is never patched — the overlay is
+    dropped and the row reports `passthrough`, truthfully, which is exactly what makes it
+    invisible. Half a world's difference silently absent, with the ledger reading clean, is the
+    silent-scenario-deletion hazard this whole table exists to catch; the two halves are
+    authored together, so the mismatch is caught where both are in hand."""
+    with pytest.raises(EstateError, match="cmdb"):
+        world_registry(
+            fake_estate(tmp_path), FAKE_GRANT, tmp_path / "served.jsonl",
+            world=World("w1", touches=("elastic",)),
+            applier=WorldApplier(patches={"cmdb": {"canary-1": {"owner": "worldA"}}}))
+
+
+def test_a_patch_for_a_staged_system_is_refused_too(tmp_path):
+    """    A patch table naming a STAGED system is refused at construction, declared or not.
+
+    The same drop, one door over, and a worse row behind it. `apply` reports `STAGED` for any
+    system with a stager and hands the payload back untouched — correctly, because on the event
+    stream a world's difference lives in the documents the engine read. So an entity patch
+    authored for `elastic` is never applied AND the row reads `staged`, i.e. the strongest
+    possible confirmation that the world was applied to a response it never touched. The
+    `touches` check alone let it through: the world declares `elastic`, so the mismatch it looks
+    for is not there."""
+    with pytest.raises(EstateError, match="elastic"):
+        world_registry(
+            fake_estate(tmp_path), FAKE_GRANT, tmp_path / "served.jsonl",
+            world=World("w1", touches=("elastic",)),
+            applier=WorldApplier(patches={"elastic": {"canary-1": {"owner": "worldA"}}}))
+
+
+@pytest.mark.parametrize("world_id", ["world A", "W1", "w*1"])
+def test_a_world_a_stager_cannot_name_is_refused_at_construction(tmp_path, world_id):
+    """    A world id no staged system could build a corpus name from is refused where the world
+    arrives, not once per served call.
+
+    The id reaches the view name unfiltered, so one a stager cannot carry does not cost one
+    query — it costs the whole event stream: every `esql`/`query`/`alerts` call lands as a
+    `refused` row while the base world keeps all of it, and the sibling reads as one that simply
+    asked nothing. The answer is a property of the id rather than of a call, so it is asked
+    once. Only for a system the world DECLARES, which the last case pins."""
+    with pytest.raises(EstateError, match="elastic"):
+        world_registry(
+            fake_estate(tmp_path), FAKE_GRANT, tmp_path / "served.jsonl",
+            world=World(world_id, touches=("elastic",)))
+
+    # A world that stages nothing never names a corpus, so the same id is servable.
+    world_registry(
+        fake_estate(tmp_path), FAKE_GRANT, tmp_path / "served2.jsonl",
+        world=World(world_id, touches=("cmdb",)))
+
+
 # ==========================================================================
 # 4. the family tier: one base recording, no second adapter call
 # ==========================================================================
@@ -558,6 +700,30 @@ def test_two_siblings_read_one_base_recording(tmp_path):
     assert len(adapter_calls(ctx, "get-host")) == 1
     rows = served_rows(ledger_path)
     assert [r["world_id"] for r in rows] == [None, "a", "b"]
+
+
+def test_a_duplicate_base_row_resolves_the_same_way_in_memory_and_on_disk(tmp_path):
+    """    Two base rows for one key resolve to the FIRST, whether the answer comes from this
+    process's memo or from a rebuild off the file.
+
+    `base_payload`'s own docstring concedes the window: the check-then-act spans the adapter
+    call, so two siblings — two worker threads, or two processes — can both miss and both
+    record. The file then holds two rows for one key, and the tie-break is the only thing left
+    to make them agree. Resolved one way in `record` and the other in `_refresh`, this process
+    served the second payload while any process rebuilding from the file served the first: two
+    answers to one question with both rows reading honestly, which is exactly the invariance
+    the family tier exists to buy."""
+    ledger_path = tmp_path / "served.jsonl"
+    ledger = Ledger(ledger_path)
+    call = dict(system="cmdb", verb="get-host", params={"host": "canary-1"},
+                source=BASE, world_id=None)
+
+    ledger.record(ServedCall(payload_text='{"owner": "first"}', **call))
+    ledger.record(ServedCall(payload_text='{"owner": "second"}', **call))
+
+    assert ledger.base_payload("cmdb", "get-host", {"host": "canary-1"}) \
+        == Ledger(ledger_path).base_payload("cmdb", "get-host", {"host": "canary-1"}) \
+        == '{"owner": "first"}'
 
 
 def test_a_ledger_reopened_from_disk_replays_the_family_recording(tmp_path):
@@ -621,10 +787,15 @@ def test_a_staged_call_records_its_base_under_the_view_it_asked_for(tmp_path):
     from_a = a.verbs("elastic")["esql"](ctx, query=body)
     from_b = b.verbs("elastic")["esql"](ctx, query=body)
 
-    assert from_a["query"] == "FROM logs-system.auth-w-a\n| STATS COUNT(*)"
-    assert from_b["query"] == "FROM logs-system.auth-w-b\n| STATS COUNT(*)"
-    assert len(adapter_calls(ctx, "esql")) == 2
+    # TWO adapter calls, each against its own world's corpus — the subject of this test.
+    assert [c["params"]["query"] for c in adapter_calls(ctx, "esql")] == [
+        "FROM wv-a-logs-system.auth-\n| STATS COUNT(*)",
+        "FROM wv-b-logs-system.auth-\n| STATS COUNT(*)"]
     assert {r["world_id"] for r in served_rows(ledger_path)} == {None, "a", "b"}
+    # And neither world's identity reaches what the model reads: the echoed query comes back
+    # as the one it wrote, so a lead narrowing the template it was just served does not
+    # re-bind a staged name and stage it twice.
+    assert from_a["query"] == from_b["query"] == body
 
 
 # ==========================================================================
@@ -648,8 +819,94 @@ def test_a_staged_call_reaches_the_adapter_already_retargeted(tmp_path):
     reg.verbs("elastic")["esql"](ctx, query="FROM logs-nginx.access-*\n| LIMIT 5")
 
     assert [c["params"]["query"] for c in adapter_calls(ctx, "esql")] == [
-        "FROM logs-nginx.access-w-w1\n| LIMIT 5"]
+        "FROM wv-w1-logs-nginx.access-\n| LIMIT 5"]
     assert [r["source"] for r in served_rows(ledger_path) if r["world_id"] == "w1"] == [STAGED]
+
+
+def test_a_retargeted_call_declares_its_world_to_the_adapter(tmp_path):
+    """    The body that receives the retargeted query also receives the world it was retargeted
+    for — and a call that was NOT retargeted still reads as an unbranched run.
+
+    The two halves of a world view are one act. The name is built OUTSIDE every configured
+    corpus pattern on purpose, so that the base run and every sibling that does not stage the
+    event stream cannot reach it through the pattern it came from; `confine_index` therefore
+    cannot admit it by reach and admits it by declaration instead. A seam that rewrote the
+    query and left the ctx unbranched would have every staged read refused at the boundary —
+    the sibling green against nothing while the base kept its evidence.
+
+    The negative arm is what keeps the declaration scoped: `cmdb` has no stager, so nothing
+    moved, and a ctx naming the world there would widen a boundary for a call that never
+    needed it."""
+    ctx = run_ctx(tmp_path)
+    reg = world_registry(
+        fake_estate(tmp_path), FAKE_GRANT, tmp_path / "served.jsonl",
+        world=World("w1", touches=("elastic", "cmdb")),
+    )
+
+    reg.verbs("elastic")["esql"](ctx, query="FROM logs-nginx.access-*\n| LIMIT 5")
+    reg.verbs("cmdb")["get-host"](ctx, host="canary-1")
+
+    assert [(c["verb"], c["world_id"]) for c in adapter_calls(ctx)] == [
+        ("esql", "w1"), ("get-host", None)]
+
+
+def test_the_familys_base_recording_carries_no_worlds_identity(tmp_path):
+    """    The base row a sibling replays holds the payload as ASKED, whichever world ran it first.
+
+    The family tier records once per key and every sibling reads that row back. It is written
+    by whoever called first — and on a staged system that world's corpus identity is echoed in
+    the payload, so an unrestored recording hands every OTHER sibling the first one's view
+    name as though it were the estate's answer. Restored before the row is written, the shared
+    recording names the corpus the model asked for and nothing about who ran it.
+
+    The world row beside it is checked too: both tiers carry the asked identity, so a
+    comparison across them is reading the evidence rather than the harness."""
+    ledger_path = tmp_path / "served.jsonl"
+    adapters, ctx = fake_estate(tmp_path), run_ctx(tmp_path)
+    body = "FROM logs-system.auth-*\n| STATS COUNT(*)"
+    reg = world_registry(adapters, FAKE_GRANT, ledger_path,
+                         world=World("a", touches=("elastic",)))
+
+    reg.verbs("elastic")["esql"](ctx, query=body)
+
+    rows = {r["world_id"]: json.loads(r["payload_text"]) for r in served_rows(ledger_path)}
+    assert set(rows) == {None, "a"}, f"expected a base row and a world row, got {set(rows)}"
+    assert rows[None]["query"] == body, (
+        f"the family's shared recording carries world a's view ({rows[None]['query']!r}) — "
+        "every other sibling would replay it as the estate's own answer")
+    assert rows["a"]["query"] == body
+    # The row still says which call RAN: the staged identity is one column over, so nothing
+    # about what actually reached the corpus is lost by taking it out of the payload.
+    assert [r["params"]["query"] for r in served_rows(ledger_path) if r["world_id"] == "a"] == [
+        "FROM wv-a-logs-system.auth-\n| STATS COUNT(*)"]
+
+
+def test_a_ledger_write_failure_does_not_displace_the_refusal_it_records(tmp_path):
+    """    When recording WHY a call failed itself fails, the call's own failure is what propagates.
+
+    Both recording arms run inside a handler that records and then re-raises. A bare
+    `ledger.record(...)` there is a second exception source in front of the `raise`: an
+    unwritable ledger replaces the refusal, and the two are not interchangeable. A
+    `StagingError` carries `USAGE_EXIT_CODE`, deliberately outside `circuit_breaker`'s
+    `INFRA_EXIT_CODES`; the `OSError` that replaced it is unrecognised, so `query_tool` files
+    it as `DEFAULT_FAULT_EXIT` — an infra code. Two of those trip the breaker for the system
+    and five abort the run, in the SIBLING and not in its base, which is the "up for one, down
+    for the other" contamination the usage class exists to prevent."""
+    ledger_path = tmp_path / "served.jsonl"
+    ctx = run_ctx(tmp_path)
+    reg = world_registry(fake_estate(tmp_path), FAKE_GRANT, ledger_path,
+                         world=World("a", touches=("elastic",)))
+
+    def _unwritable(_call):
+        raise OSError(28, "No space left on device")
+
+    reg.ledger.record = _unwritable
+
+    # A comma list is a `StagingError` out of `prepare` — the refusal arm.
+    from defender.learning.branch.estate.stagers.elastic import StagingError
+
+    with pytest.raises(StagingError):
+        reg.verbs("elastic")["esql"](ctx, query="FROM logs-a-*, logs-b-*\n| LIMIT 1")
 
 
 def test_a_system_the_world_does_not_touch_is_never_staged(tmp_path):
@@ -672,6 +929,76 @@ def test_a_system_the_world_does_not_touch_is_never_staged(tmp_path):
     assert [c["params"]["query"] for c in adapter_calls(ctx, "esql")] == [body]
     assert [r["source"] for r in served_rows(ledger_path) if r["world_id"] == "w1"] \
         == [PASSTHROUGH]
+
+
+def test_a_patch_reaches_every_object_that_names_the_entity_at_any_depth():
+    """    One entity's patch lands in every object naming it, nested and listed alike.
+
+    That is #845's constraint read literally — the overlay is authored ONCE and applied by
+    code, or a host has an owner when asked about directly and none when listed. The count
+    comes back beside the payload because it is what separates "this world changed nothing
+    here" from "this world does not touch this system"."""
+    payload = {"hosts": [{"name": "canary-1"}, {"name": "other-9"}],
+               "detail": {"ci_name": "canary-1", "nested": {"hostname": "canary-1"}}}
+
+    out, applied = apply_patches(payload, {"canary-1": {"owner": "worldA"}})
+
+    assert applied == 3
+    assert out["hosts"][0]["owner"] == "worldA"
+    assert "owner" not in out["hosts"][1]
+    assert out["detail"]["owner"] == "worldA"
+    assert out["detail"]["nested"]["owner"] == "worldA"
+
+
+def test_a_payload_naming_nothing_comes_back_as_itself():
+    """    A payload no patch matches is handed back as the SAME object, subtrees included.
+
+    The commonest case by far — most calls name none of the patched entities — and the caller
+    discards the result whole, so rebuilding it is pure waste. `is` rather than `==`, because
+    equality cannot tell a shared subtree from a fresh copy of one."""
+    payload = {"rows": [{"host": "nothing-here"}], "meta": {"total": 1}}
+
+    out, applied = apply_patches(payload, {"canary-1": {"owner": "worldA"}})
+
+    assert applied == 0
+    assert out is payload
+    assert out["meta"] is payload["meta"]
+
+
+def test_the_family_recording_is_neither_mutated_nor_lent_out():
+    """    Patching neither writes into the base tree nor hands the caller the world's own objects.
+
+    Two halves of one rule. The base payload is the FAMILY's recording — mutating it edits one
+    sibling's world into the row every other sibling replays. And the overlay is authored once
+    and lives for the whole run, so a patch VALUE referenced into a served payload is a mutable
+    handle on the world itself: one `append` downstream and every later call, in every sibling
+    sharing the applier, serves the edited overlay."""
+    patches = {"canary-1": {"owner": "worldA", "tags": ["x"]}}
+    payload = {"hosts": [{"name": "canary-1"}, {"name": "canary-1"}]}
+
+    out, _ = apply_patches(payload, patches)
+
+    assert payload == {"hosts": [{"name": "canary-1"}, {"name": "canary-1"}]}, (
+        "the base recording was edited in place")
+    out["hosts"][0]["tags"].append("MUTATED")
+    assert patches == {"canary-1": {"owner": "worldA", "tags": ["x"]}}, (
+        "the served payload held a live reference into the world's own overlay")
+    assert out["hosts"][1]["tags"] == ["x"], "two patched nodes share one list object"
+
+
+def test_two_entities_naming_one_object_resolve_in_the_tables_order():
+    """    A node both patched entities name takes the LATER table entry on a shared key.
+
+    Deterministic, and deterministic the same way every run: resolving out of a set of matched
+    names would order by hash, so the same world and the same payload would disagree between
+    processes about what the sibling was served."""
+    patches = {"e-1": {"owner": "first", "a": 1}, "e-2": {"owner": "second", "b": 2}}
+
+    out, applied = apply_patches({"host": "e-1", "alias": "e-2"}, patches)
+
+    assert applied == 2
+    assert out["owner"] == "second"
+    assert (out["a"], out["b"]) == (1, 2)
 
 
 @pytest.mark.parametrize(("system", "touches"), [
@@ -809,10 +1136,14 @@ def test_two_siblings_rows_pair_on_the_question_asked_not_the_one_run(tmp_path):
 
     `ΔO` is computed over the keys two worlds have in common. On a staged system the prepared
     forms differ BY CONSTRUCTION — that is what staging is — so a comparison keyed on them
-    alone intersects to nothing: A recorded `FROM …-w-A`, B recorded `FROM …-w-B`, no row of
-    A's ever meets a row of B's, and "the worlds differ" and "the worlds are identical" produce
+    alone intersects to nothing: a recorded `FROM wv-a-…`, b recorded `FROM wv-b-…`, no row of
+    a's ever meets a row of b's, and "the worlds differ" and "the worlds are identical" produce
     the same empty answer. Silent, and silent on the event stream, where most of a run's
     evidence lives.
+
+    The ids are LOWER CASE because an index or alias name is: `world_view` refuses an id the
+    cluster could not hold, since a view named above the case rule is answered with an empty
+    result rather than refused (`_search` passes `ignore_unavailable=true`).
 
     The memo key must NOT be the asked form, and this pins both halves: pair on what was asked,
     memoize on what ran. Keyed the other way, B replays A's answer — read off A's staged
@@ -822,19 +1153,19 @@ def test_two_siblings_rows_pair_on_the_question_asked_not_the_one_run(tmp_path):
     ledger = Ledger(ledger_path)
     body = "FROM logs-system.auth-*\n| LIMIT 5"
 
-    for wid in ("A", "B"):
+    for wid in ("a", "b"):
         reg = WorldRegistry(
             adapters, FAKE_GRANT, world=World(wid, ("elastic",)), ledger=ledger)
         reg.verbs("elastic")["esql"](ctx, query=body)
 
-    rows = [r for r in served_rows(ledger_path) if r["world_id"] in ("A", "B")]
+    rows = [r for r in served_rows(ledger_path) if r["world_id"] in ("a", "b")]
     assert len(rows) == 2
 
     ran = {r["world_id"]: r["params"]["query"] for r in rows}
-    assert ran["A"] != ran["B"], "each world must read its OWN corpus"
+    assert ran["a"] != ran["b"], "each world must read its OWN corpus"
 
     asked = {r["world_id"]: r["asked_params"]["query"] for r in rows}
-    assert asked["A"] == asked["B"] == body, (
+    assert asked["a"] == asked["b"] == body, (
         "both worlds were asked the same question; without that recorded, their rows cannot "
         f"be paired and ΔO over this system is empty rather than measured. Got {asked}")
 

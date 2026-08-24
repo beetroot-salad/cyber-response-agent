@@ -1,0 +1,19 @@
+{
+  "acceptance_condition": "Returns at least three reconciliation hypotheses and at least three evaluation-design constraints, each explicitly labeled as design inference. The hypotheses must name at least one of: task type, compute parity, visibility/timing of peer answers. The constraints together must cover quality, diversity/correlation, latency, token cost, and recovery-from-wrong-consensus.",
+  "content_sha256": "5414bbc03bd73029ae03928b13e781d973356ae84bf3d5c089d27b3eeea91873",
+  "demand_ids": [
+    "D11",
+    "D13",
+    "D14",
+    "D15"
+  ],
+  "id": "question:root.05-debate-nulls-boundaries.03-c3-design-inferences",
+  "node_id": "root.05-debate-nulls-boundaries.03-c3-design-inferences",
+  "rationale": "The reconciliation and evaluation design is the analytical product of this node; it builds on the evidence extracted by the two sibling children, but can be derived in parallel because the required findings are provided as separator facts.",
+  "tags": [
+    "synthesis",
+    "risk",
+    "measurement"
+  ],
+  "text": "Using the anchored findings from the two sibling extractors (provided below as separator facts), derive at least three reconciliation hypotheses attributing the disagreement with Du et al. 2023 to named conditions (task type, compute parity, visibility or timing of peer answers), and at least three evaluation-design constraints covering the five metric families (quality, diversity/correlation, latency, token cost, recovery-from-wrong-consensus). Each derived item must be explicitly labeled as a design inference."
+}

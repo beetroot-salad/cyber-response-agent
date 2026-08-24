@@ -1,0 +1,120 @@
+{
+  "account": "This node must supply the working definition and 3–5 test marks of kitsch that the parent essay will apply to AI art. The dossier, however, contains no substantive source defining kitsch: the four listed source_materials are only the original one-line request and three procedural user decisions (audience, stance, form). There are no workspace documents and no separated facts that supply a definition, examples, or criteria. The content of the brief therefore cannot be extracted or observed — any definition and marks I offer are hypotheses reconstructed from general knowledge, explicitly uncontracted by the dossier. I flag this as a boundary mismatch: the parent expects a criteria-fixing artifact \"extracted\" from the packet, but the packet holds no kitsch content. To prevent silently fabricating authority, I present my best candidate criteria as clearly-marked hypotheses with guarded confidence, and I note that the parent should either (a) treat these as draft criteria to be validated/adjusted in the essay's own argumentative framing, or (b) feed this child one canonical working statement of kitsch before synthesis treats them as settled.",
+  "assumptions": [
+    "Definitional criteria may be drafted from general knowledge and validated later because the packet is silent (flagged as hypotheses at 0.3–0.4 confidence).",
+    "The four candidate marks (pre-digested emotion, formula over risk, flattery of existing taste, effect without effort) are jointly sufficient for the parent's test purposes, subject to parent adjustment.",
+    "The parent thesis frame is out of scope here; this brief only sets criteria."
+  ],
+  "boundary_findings": [
+    {
+      "alternative_explanation": "The design may intend this leaf to be authored from general knowledge and validated during synthesis, in which case the marks above are a reasonable point of departure; but that intent is stated nowhere in the dossier.",
+      "consequence_if_absorbed": "If the parent absorbs the hypotheses as observed/extracted criteria, the essay silently presents general-knowledge reconstructions as if they were established by the packet, inventing the authority the brief explicitly forbids ('no invented authorities'); the thesis would rest on un-validated standards.",
+      "evidence": [],
+      "narrative": "The parent demands a brief that 'extracts 3–5 explicit, applicable marks of kitsch' from the dossier, but the dossier contains no source material defining or discussing kitsch at all — only the request line and three procedural decisions about audience, stance, and format. The artifact the parent expects (a criteria-fixer) has no evidential substrate to draw from.",
+      "smallest_suspected_scope": "root.01-def-of-kitsch (this node and anything downstream that relies on these criteria as extracted fact)"
+    }
+  ],
+  "claims": [
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "Write an approximately 600-word essay on AI art and kitsch.",
+          "locator": null,
+          "source_id": "request"
+        },
+        {
+          "excerpt": null,
+          "locator": null,
+          "source_id": "decision:1"
+        },
+        {
+          "excerpt": null,
+          "locator": null,
+          "source_id": "decision:2"
+        },
+        {
+          "excerpt": null,
+          "locator": null,
+          "source_id": "decision:3"
+        }
+      ],
+      "confidence": 1.0,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "c1",
+      "statement": "The dossier provides no source text that defines, exemplifies, or analyzes kitsch; every substantive definitional claim in this brief is therefore reconstructed from general knowledge and not directly evidenced by the packet."
+    },
+    {
+      "basis": "hypothesis",
+      "citations": [],
+      "confidence": 0.4,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "c2",
+      "statement": "Working definition (hypothesis): kitsch is art-like output that trades on ready-made, pre-digested feeling and a flattering short-cut to beauty or profundity, aiming to please the viewer with the least possible demand rather than to challenge or repay close attention."
+    },
+    {
+      "basis": "hypothesis",
+      "citations": [],
+      "confidence": 0.35,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "c3",
+      "statement": "Mark 1 (hypothesis) — pre-digested emotion: kitsch activates an emotion that the viewer already knows how to feel, so the feeling arrives without genuine engagement; it trades in sentimental shorthand rather than complex or uncomfortable states."
+    },
+    {
+      "basis": "hypothesis",
+      "citations": [],
+      "confidence": 0.35,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "c4",
+      "statement": "Mark 2 (hypothesis) — formula over risk: kitsch follows a proven, reproducible recipe instead of venturing into formal or conceptual risk; success is scheduling a beloved template rather than attempting something that can fail."
+    },
+    {
+      "basis": "hypothesis",
+      "citations": [],
+      "confidence": 0.35,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "c5",
+      "statement": "Mark 3 (hypothesis) — flattery of the viewer's existing taste: kitsch confirms what the viewer already believes is good or beautiful, delivering confirmation instead of disturbing settled preferences; it tells the viewer they are right to like the easy thing."
+    },
+    {
+      "basis": "hypothesis",
+      "citations": [],
+      "confidence": 0.35,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "c6",
+      "statement": "Mark 4 (hypothesis) — effect without effort: kitsch produces an immediate, pleasing surface effect while requiring no work from the maker or the viewer; the payoff is instant and the demand on either side is minimal."
+    },
+    {
+      "basis": "inferred",
+      "citations": [],
+      "confidence": 0.3,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "c7",
+      "statement": "Stated criteria remain artifact-neutral regardless of how the item was made: each of the above marks is testable on the finished output (emotional route, formulaicity, flattery, effort/effect ratio), so the parent can apply them to AI-generated work without needing to know provenance."
+    }
+  ],
+  "counterevidence": [
+    "The dossier offers no counterexample to any proposed mark (and no support either); no observed evidence constrains whether kitsch requires viewer 'distance' from sentiment (a strand of the common definition the packet does not settle).",
+    "A critic could object that 'effect without effort' is not a definitional mark of kitsch but a separable observation about some easy art; without a source, this remains an open ambiguity."
+  ],
+  "next_observation": "Feed this node (or its parent) one canonical working statement of kitsch — e.g., a short source passage, an agreed definition, or the parent's own stipulated definition — so the marks can move from hypothesis to observed/negotiated criteria before synthesis. Alternatively, explicitly task this leaf as an authored (general-knowledge) brief so hypotheses can be promoted deliberately rather than silently.",
+  "source_ids_consulted": [
+    "request",
+    "decision:1",
+    "decision:2",
+    "decision:3"
+  ],
+  "sufficiency": "blocked",
+  "unresolved": [
+    "Which marks, if any, are necessary (individually required) versus merely indicative — no source resolves this.",
+    "Whether one mark (e.g., formula over risk) is the most decisive test, or whether the set should be weighted.",
+    "Whether 'kitsch' in this essay means a pejorative evaluative category or a neutral descriptive one — the packet's stance demands 'nuanced thesis' but does not fix the valence of the term."
+  ]
+}

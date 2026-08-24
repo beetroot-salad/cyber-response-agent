@@ -1,0 +1,20 @@
+{
+  "account": "Investigation failed before producing evidence: UnexpectedModelBehavior: Exceeded maximum output retries (2)",
+  "assumptions": [],
+  "boundary_findings": [],
+  "child_packet_ids": [],
+  "claims": [],
+  "content_sha256": "b23812a3e5d809c8dead9c6818d861afd4b0a35a81a51a34cd976a4d1c19f91b",
+  "counterevidence": [],
+  "id": "packet:work:001-struct-core",
+  "knowledge_links": [],
+  "next_observation": null,
+  "node_id": "work:001-struct-core",
+  "objective": "Prove or refute the structural claims D1-D3 for S = {sorted positive-integer quadruples with a^2+b^2+c^2+d^2 = 4abcd} under Vieta mutation (replace one coordinate x_i by 4 times the product of the other three minus x_i, then re-sort): (D1) every solution is connected to the root (1,1,1,1) by a mutation path; (D2) every non-root vertex has a unique height-decreasing mutation, where height-decreasing means strictly decreasing the maximum coordinate d (coordinate sum only auxiliary); (D3) consequently the quotient mutation graph is a rooted tree. Suggested route, to be verified rigorously: at a non-root vertex show d^2 > a^2+b^2+c^2 (equivalently the Vieta conjugate d' = (a^2+b^2+c^2)/d = 4abc - d satisfies 1 <= d' < d), e.g. by showing d' >= d forces a=b=1 and then c^2 - 4cd + d^2 = -2, whose integer solutions are excluded by m^2 = 3c^2 + 2 being impossible mod 3 except at the root; show c = d occurs only at the root; show mutation at any coordinate < d strictly increases the maximum; conclude strict descent, termination at the root, uniqueness of the parent, and the tree property (a cycle would give its maximum-height vertex two distinct height-decreasing mutations). If any claim fails, exhibit and verify the failure structure.",
+  "raised_questions": [],
+  "source_ids_consulted": [],
+  "sufficiency": "blocked",
+  "unresolved": [
+    "Investigation failed before producing evidence: UnexpectedModelBehavior: Exceeded maximum output retries (2)"
+  ]
+}

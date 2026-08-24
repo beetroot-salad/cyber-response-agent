@@ -1,0 +1,23 @@
+{
+  "account": "The node's objective is a bounded, well-specified arithmetic enumeration over a finite set of (x,y) pairs with x in {5,6,7,8}. The feasible y-ranges are stated in the objective and are small (total 10 pairs), and the divisor-enumeration method is fully specified in the separator facts. I can perform the exact arithmetic here directly: for each pair, compute r = 1/2 - 1/x - 1/y, reduce to p/q, factor q^2, enumerate divisor pairs satisfying the congruence and the z >= y filter, count them, and sum row totals. The certificate.json is optional and untrusted, so no external evidence is needed. Thus the node is locally decidable with the supplied dossier.",
+  "children": [],
+  "decidability": {
+    "acceptance_mechanical": true,
+    "account": "All inputs are present in the dossier: the exact set of feasible pairs, the divisor-enumeration procedure, and the acceptance criteria (exact per-pair counts, row totals, no approximate arithmetic). The computation is finite and mechanical; no further evidence is required.",
+    "context_complete": true,
+    "grounded_referents": [
+      "x values 5,6,7,8",
+      "feasible y-ranges: x=5: 5..10; x=6: 6..9; x=7: 7..8; x=8: 8",
+      "divisor-enumeration lemma for final two denominators",
+      "bound formulas for feasible y",
+      "r = 1/2 - 1/x - 1/y"
+    ],
+    "independent_of_future_siblings": true,
+    "missing_context": []
+  },
+  "disposition": "solve",
+  "irreducible_core": null,
+  "requested_source_ids": [],
+  "requested_source_paths": [],
+  "synthesis_contract": null
+}

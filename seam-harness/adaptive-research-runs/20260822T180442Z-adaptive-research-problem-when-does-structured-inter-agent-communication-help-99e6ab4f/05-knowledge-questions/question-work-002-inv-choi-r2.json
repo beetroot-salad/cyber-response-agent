@@ -1,0 +1,16 @@
+{
+  "acceptance_condition": "A compact answer (<=8 claims) covering: simulation design; main quantitative conformity/majority findings; intelligence-disparity findings; quality-vs-quantity of persuasion; any evidence distinguishing answer-only vs rationale-mediated influence; each claim with an explicit `===== PDF PAGE N =====` marker.",
+  "content_sha256": "a93173946e5530d5f6a7c49c6fb227ee7edd77cee9fc956472bba49475b8baf9",
+  "demand_ids": [
+    "D4",
+    "D3"
+  ],
+  "id": "question:work:002-inv-choi-r2",
+  "node_id": "work:002-inv-choi-r2",
+  "rationale": "Choi et al. grounds the social-influence/conformity pathway of the causal model (D3) in LLM populations and bears directly on rq1 (whether diversity collapse needs rationales or mere answer exposure), which shapes the D5 predictions. Retry with a claim cap because the wave-1 attempt failed on output retries.",
+  "tags": [
+    "evidence",
+    "uncertainty"
+  ],
+  "text": "What does Choi et al. 2025 (papers/text/choi-et-al-2025-conformity.txt) show about conformity in LLM multi-agent debate: the simulation design (proponent/opponent/neutral agents, majority vs minority sizes, intelligence levels, topics); quantitative findings on majority effects and intelligence disparities; whether persuasion quality vs quantity of arguments matters; and anything the paper shows about whether agents shift in response to bare answers versus reasoned arguments (relevant to raised question rq1). Keep the answer compact: at most 8 claims, each with a `===== PDF PAGE N =====` marker."
+}

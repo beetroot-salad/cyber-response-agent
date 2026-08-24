@@ -1,0 +1,4 @@
+{
+  "message": "Model token limit (3000) exceeded before any response was generated. Increase the `max_tokens` model setting, or simplify the prompt to result in a shorter response that will fit within the limit.",
+  "type": "UnexpectedModelBehavior"
+}

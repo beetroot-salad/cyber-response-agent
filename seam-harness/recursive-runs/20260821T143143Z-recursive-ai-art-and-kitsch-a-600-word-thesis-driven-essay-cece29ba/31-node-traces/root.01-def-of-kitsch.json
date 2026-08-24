@@ -1,0 +1,11 @@
+{
+  "child_ids": [],
+  "depth": 1,
+  "effective_disposition": "solve",
+  "node_id": "root.01-def-of-kitsch",
+  "packet_id": "packet:root.01-def-of-kitsch",
+  "packet_sha256": "7e2673818fa655e5af17e9eaecff464d44bddcadedce98bda69c7df8fd048bb6",
+  "parent_id": "root",
+  "proposed_disposition": "solve",
+  "stop_reason": null
+}

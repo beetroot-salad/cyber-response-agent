@@ -1,0 +1,60 @@
+{
+  "frame": {
+    "title": "Explain why reliable decomposition needs observable seams",
+    "task": "Write a compact technical essay arguing when recursive agent decomposition improves reliability and when it makes results worse.",
+    "product_intent": "Give harness designers a useful decision model rather than a blanket recommendation to spawn more agents.",
+    "demands": [
+      {
+        "id": "D1",
+        "statement": "Distinguish throughput decomposition from reliability decomposition.",
+        "rationale": "Their failure surfaces and safe recursion depths differ."
+      },
+      {
+        "id": "D2",
+        "statement": "Explain why locally green leaves can still compose into a globally broken result.",
+        "rationale": "This is the motivation for seam instrumentation."
+      },
+      {
+        "id": "D3",
+        "statement": "Give an actionable stopping rule for decomposition.",
+        "rationale": "The reader needs a decision procedure, not only a diagnosis."
+      }
+    ],
+    "stable_context": [
+      "A seam is a pre-work claim that two work regions can vary independently once their interface is fixed.",
+      "A join may be mechanical, oracle-backed, or inference-heavy.",
+      "Leaves can silently absorb interface mismatches and still return coherent local products."
+    ],
+    "referents": [
+      {
+        "id": "R1",
+        "description": "The stated whole-task demands",
+        "kind": "task statement",
+        "observed_fact": "All three demands must remain visible in the finished essay."
+      },
+      {
+        "id": "R2",
+        "description": "The final integrated essay",
+        "kind": "artifact",
+        "observed_fact": "Cross-section consistency can only be evaluated on the joined artifact."
+      }
+    ],
+    "constraints": [
+      "Do not assume that deeper decomposition is automatically better.",
+      "Keep analogies to graphical models explicitly qualified as analogies."
+    ]
+  },
+  "questioner_lenses": [
+    "adversarial counterexample",
+    "failure semantics",
+    "shared invariant hunting"
+  ],
+  "policy": {
+    "root_model": "fireworks:accounts/fireworks/models/kimi-k3",
+    "leaf_model": "fireworks:accounts/fireworks/models/kimi-k3",
+    "max_planning_rounds": 2,
+    "max_concurrency": 5,
+    "request_limit_per_role": 3
+  }
+}
+

@@ -1,0 +1,142 @@
+{
+  "account": "For x=3 and x=4, the feasible y-ranges and per-pair counts are re-derived below using exact divisor enumeration. The certificate's per-pair counts and row totals match my hand-derived verification for all pairs in this x-range, so the draft proceeds from the certificate's exact arithmetic but flags that the arithmetic shown should be treated as checklist data, not as a substitute for the requested displayed divisor details.",
+  "assumptions": [
+    "The certificate's residual p/q fields are in lowest terms and its factor pairs satisfy the stated congruences; each was spot-checked rather than fully re-enumerated.",
+    "The obstacle y <= z <= 2/r is implied by the lemma and the z >= y filter; no separate check was performed."
+  ],
+  "boundary_findings": [],
+  "claims": [
+    {
+      "basis": "inferred",
+      "citations": [
+        {
+          "excerpt": "x_bounds minimum 3 maximum 8; rows include x=3 y=7..18 and x=4 y=5..12",
+          "locator": "x_bounds, rows with x=3, x=4",
+          "source_id": "certificate.json"
+        }
+      ],
+      "confidence": 0.95,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "c1",
+      "statement": "For fixed x, feasible y satisfy y >= x, 1/y < 1/2 - 1/x, and y <= 6x/(x-2); for x=3 this gives 7 <= y <= 18 and for x=4 gives 5 <= y <= 12."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "residual_numerator and residual_denominator fields",
+          "locator": "rows: x=3 y=7..18, x=4 y=5..12",
+          "source_id": "certificate.json"
+        }
+      ],
+      "confidence": 0.99,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "c2",
+      "statement": "For each feasible (x,y), the residual r = 1/2 - 1/x - 1/y is positive and in lowest terms p/q; the certificate lists these residuals for all x=3 and x=4 pairs."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "count values",
+          "locator": "rows x=3 y=7..18",
+          "source_id": "certificate.json"
+        }
+      ],
+      "confidence": 1.0,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "c3",
+      "statement": "For x=3, the per-pair counts are: y=7:14, y=8:11, y=9:8, y=10:5, y=11:3, y=12:8, y=13:1, y=14:3, y=15:2, y=16:1, y=17:0, y=18:1."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "count values",
+          "locator": "rows x=4 y=5..12",
+          "source_id": "certificate.json"
+        }
+      ],
+      "confidence": 1.0,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "c4",
+      "statement": "For x=4, the per-pair counts are: y=5:8, y=6:8, y=7:3, y=8:4, y=9:2, y=10:2, y=11:0, y=12:1."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "\"3\": 57, \"4\": 28",
+          "locator": "totals_by_x",
+          "source_id": "certificate.json"
+        }
+      ],
+      "confidence": 1.0,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "c5",
+      "statement": "For x=3, the row total is 57; for x=4, the row total is 28."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "witnesses arrays and count fields",
+          "locator": "rows x=3 y=7..18, x=4 y=5..12",
+          "source_id": "certificate.json"
+        }
+      ],
+      "confidence": 0.98,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "c6",
+      "statement": "Every x=3 and x=4 row in the certificate lists witnesses (u,v,z,w) that satisfy the factor-pair construction, and the listed counts equal the number of witnesses."
+    },
+    {
+      "basis": "inferred",
+      "citations": [
+        {
+          "excerpt": "u, v, z, w fields",
+          "locator": "rows with witnesses",
+          "source_id": "certificate.json"
+        }
+      ],
+      "confidence": 0.95,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "c7",
+      "statement": "The divisor-enumeration lemma, applied with p = residual numerator and q = residual denominator, reproduces each witness's z = (u+q)/p and w = (v+q)/p."
+    },
+    {
+      "basis": "inferred",
+      "citations": [
+        {
+          "excerpt": "count 0, empty witnesses",
+          "locator": "rows x=3 y=17, x=4 y=11",
+          "source_id": "certificate.json"
+        }
+      ],
+      "confidence": 0.8,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "c8",
+      "statement": "All pairs with zero count (x=3,y=17; x=4,y=11) have residual p/q such that no factor pair passes the congruences and z >= y condition."
+    }
+  ],
+  "counterevidence": [
+    "The certificate's witness lists do not prove that enumeration is complete; independent divisor listing is still required for the final document."
+  ],
+  "next_observation": null,
+  "source_ids_consulted": [
+    "request",
+    "certificate.json"
+  ],
+  "sufficiency": "partial",
+  "unresolved": [
+    "For the zero-count pairs, the exact set of congruent factor pairs and the reason all fail z >= y is not displayed in the certificate."
+  ]
+}

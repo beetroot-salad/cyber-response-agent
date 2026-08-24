@@ -1,0 +1,94 @@
+{
+  "call_id": "call-0010-recursive-planner",
+  "context": {
+    "ancestor_decisions": [
+      "Audience: general educated reader (decision:1).",
+      "Genre/register: standalone cultural criticism (decision:1).",
+      "Stance posture: the writer selects and defends a clear, nuanced thesis; a neutral survey is explicitly out of scope (decision:2).",
+      "Form expectations: plain essay prose with a title; citations and named theorists are not required (decision:3).",
+      "Suggested title from the envelope: 'AI Art and Kitsch' (title_hint).",
+      "No source materials are provided; the essay draws on the writer's own reasoning about AI art and kitsch.",
+      "Stance posture: clear, nuanced defended thesis; neutral survey out of scope (decision:2).",
+      "Form expectations: plain essay prose with a title; no citations or named theorists required (decision:3).",
+      "No source materials are provided; reasoning only.",
+      "Stance posture: defended, nuanced thesis; neutral survey out of scope (decision:2).",
+      "Plain essay prose, no citations or named theorists required (decision:3).",
+      "No source materials provided; reasoning only.",
+      "Provisional thesis anchor: whether AI art is kitsch is not settled by the medium — intent, use, and specific qualities decide it.",
+      "Counterargument domain: kitsch requires sincerity AI can only simulate; much AI output is not sentimental or formulaic."
+    ],
+    "assigned_demands": [],
+    "constraints": [
+      "Total length must land within roughly 550–650 words.",
+      "The essay must be standalone: comprehensible without external context or companion materials.",
+      "A title must be present.",
+      "Plain essay prose — no citation apparatus or academic formatting required by the brief."
+    ],
+    "expansion_required": false,
+    "max_children": 4,
+    "node": {
+      "acceptance_condition": "Returns a three-part write-up labeled (a) strongest plain form, (b) honest concession, (c) surviving rebuttal, in essay-register prose, addressing why the sincerity requirement does and does not apply and how the non-sentimental range of AI output supports the thesis.",
+      "demand_ids": [],
+      "depth": 2,
+      "expected_contribution": "A finished, reusable steelman block on the sincerity/category-misfit objection (plus the non-formulaic range) with its concession and rebuttal, ready for synthesis.",
+      "id": "root.03-steelman.03-counter-sincerity",
+      "objective": "Develop the counterargument that kitsch requires sincerity that AI can only simulate, so the category itself misfits AI art — folding in the supporting point that much AI output is not sentimental or formulaic. Produce (a) its strongest plain-language form, (b) the honest concession, and (c) the rebuttal that remains available to the thesis.",
+      "parent_id": "root.03-steelman",
+      "rationale": "This is the third independent strong objection, revolving on the definitional boundary of kitsch (sentimentality, formula, sincerity) and the observable range of AI output. It is analytically separate from the gatekeeping and intention threads.",
+      "separator_facts": [
+        "Audience: general educated reader (decision:1).",
+        "Genre/register: standalone cultural criticism (decision:1).",
+        "Stance posture: the writer selects and defends a clear, nuanced thesis; a neutral survey is explicitly out of scope (decision:2).",
+        "Form expectations: plain essay prose with a title; citations and named theorists are not required (decision:3).",
+        "Suggested title from the envelope: 'AI Art and Kitsch' (title_hint).",
+        "No source materials are provided; the essay draws on the writer's own reasoning about AI art and kitsch.",
+        "Stance posture: clear, nuanced defended thesis; neutral survey out of scope (decision:2).",
+        "Form expectations: plain essay prose with a title; no citations or named theorists required (decision:3).",
+        "No source materials are provided; reasoning only.",
+        "Stance posture: defended, nuanced thesis; neutral survey out of scope (decision:2).",
+        "Plain essay prose, no citations or named theorists required (decision:3).",
+        "No source materials provided; reasoning only.",
+        "Provisional thesis anchor: whether AI art is kitsch is not settled by the medium — intent, use, and specific qualities decide it.",
+        "Counterargument domain: kitsch requires sincerity AI can only simulate; much AI output is not sentimental or formulaic."
+      ],
+      "source_ids": [
+        "request",
+        "decision:2"
+      ],
+      "source_paths": []
+    },
+    "product_intent": "The essay exists to give a general educated reader a self-contained piece of cultural criticism on AI art and kitsch — one that argues a defensible, nuanced thesis in accessible prose rather than neutrally surveying the topic.",
+    "remaining_depth": 1,
+    "remaining_node_budget": 10,
+    "source_materials": [
+      {
+        "content": "Write an approximately 600-word essay on AI art and kitsch.",
+        "id": "request",
+        "kind": "natural_request",
+        "label": "Original task request",
+        "locator": null
+      },
+      {
+        "content": "The writer should choose and defend a clear, nuanced thesis rather than produce a neutral survey.",
+        "id": "decision:2",
+        "kind": "user_decision",
+        "label": "Explicit user decision 2",
+        "locator": null
+      }
+    ],
+    "stable_context": [
+      "Audience: general educated reader (decision:1).",
+      "Genre/register: standalone cultural criticism (decision:1).",
+      "Stance posture: the writer selects and defends a clear, nuanced thesis; a neutral survey is explicitly out of scope (decision:2).",
+      "Form expectations: plain essay prose with a title; citations and named theorists are not required (decision:3).",
+      "Suggested title from the envelope: 'AI Art and Kitsch' (title_hint).",
+      "No source materials are provided; the essay draws on the writer's own reasoning about AI art and kitsch."
+    ],
+    "workspace_documents": [],
+    "workspace_index": []
+  },
+  "dependency_type": "PlanningDeps",
+  "input_sha256": "c73b3dd7591e1ca181ccfb6fe12c742554c83ef6be5879d4be8bfff3f04e9f4b",
+  "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+  "role": "recursive_planner"
+}

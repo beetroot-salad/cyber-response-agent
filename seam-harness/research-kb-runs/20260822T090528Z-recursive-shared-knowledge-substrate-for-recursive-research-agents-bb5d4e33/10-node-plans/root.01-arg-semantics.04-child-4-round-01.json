@@ -1,0 +1,23 @@
+{
+  "account": "The dossier provides the full extracted text of Dung 1995 with page markers, which is the only source needed to derive the three design constraints. The sibling children (child-1, child-2, child-3) have already extracted the core definitions and derived the mapping of argumentation frameworks to answer/conflict graphs, but their outputs are not required for this node's bounded work, which is to derive extension-semantics-driven acceptance and revision constraints. The acceptance condition is mechanical: produce at least three design inferences, each explicitly labeled, covering preferred-extension credulous acceptance, grounded-extension skeptical acceptance, and revision via updating attacks/arguments and recomputing extensions. All referents (Dung's definitions of preferred, grounded, stable extensions; characteristic function; complete extensions) are available in the supplied source text, so the node is locally decidable.",
+  "children": [],
+  "decidability": {
+    "acceptance_mechanical": true,
+    "account": "All source definitions needed to derive the three design constraints are present in the dossier's workspace document for dung-1995-argumentation.txt, with page markers. The child's objective is purely inferential, not requiring additional evidence or sibling outputs. The acceptance condition is a bounded checklist of three labeled design inferences.",
+    "context_complete": true,
+    "grounded_referents": [
+      "papers/text/dung-1995-argumentation.txt: PDF PAGE 7 (Definition 7: preferred extension = maximal admissible set)",
+      "papers/text/dung-1995-argumentation.txt: PDF PAGE 9 (Definition 20: grounded extension = least fixed point of characteristic function; Definition 23: complete extension)",
+      "papers/text/dung-1995-argumentation.txt: PDF PAGE 8 (Definition 13: stable extension = conflict-free set that attacks all outside arguments)",
+      "papers/text/dung-1995-argumentation.txt: PDF PAGE 8 (Definition 16: characteristic function F_AF)",
+      "papers/text/dung-1995-argumentation.txt: PDF PAGE 10 (Theorem 25: preferred extensions are complete extensions; grounded is least complete extension)"
+    ],
+    "independent_of_future_siblings": true,
+    "missing_context": []
+  },
+  "disposition": "solve",
+  "irreducible_core": null,
+  "requested_source_ids": [],
+  "requested_source_paths": [],
+  "synthesis_contract": null
+}

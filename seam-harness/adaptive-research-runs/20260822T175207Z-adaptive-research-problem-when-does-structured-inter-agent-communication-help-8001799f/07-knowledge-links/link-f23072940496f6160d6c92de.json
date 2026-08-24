@@ -1,0 +1,10 @@
+{
+  "content_sha256": "f23072940496f6160d6c92de3cc7b3d632ac0d65fd25587d64d2f9f775a78405",
+  "id": "link:f23072940496f6160d6c92de",
+  "origin": "runtime",
+  "proposed_by_node_id": null,
+  "rationale": null,
+  "relation": "raises",
+  "source_id": "answer:work:002-inv-choi-r2",
+  "target_id": "question:raised:eaee61611e26:rq-choi-1"
+}

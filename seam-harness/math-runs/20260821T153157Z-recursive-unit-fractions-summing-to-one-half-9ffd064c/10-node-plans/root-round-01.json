@@ -1,0 +1,106 @@
+{
+  "account": "expansion_required is true, so this run must decompose. The problem admits a genuinely parallel decomposition: the equation 1/x+1/y+1/z=1/2 with x<=y<=z forces 1/x >= 1/6, so x ∈ {3,4,5,6} (x=2 gives 1/x=1/2 leaving 1/y+1/z=0, impossible; x>=7 gives sum <= 3/7 < 1/2). Each value of x yields an independent two-variable Egyptian-fraction subproblem solvable by the factoring trick ((2y-x)(2z-x) = x^2 after clearing denominators for the equation 1/y+1/z = 1/2-1/x), and the case analyses can be carried out and verified independently, then merged by the parent. A fourth child independently audits the bounds argument and re-verifies every candidate triple by exact substitution, providing the D3/D4 check independently of the enumeration children.",
+  "children": [
+    {
+      "acceptance_condition": "Child returns, for each of x=3 and x=4: the derived factored equation, the complete enumeration of factor pairs with the integrality and x <= y <= z filters applied, the final list of triples, and an exact substitution verification (common-denominator arithmetic) for every triple. Expected triples: x=3 yields (3,7,42),(3,8,24),(3,9,18),(3,10,15),(3,12,12); x=4 yields (4,5,20),(4,6,12),(4,8,8).",
+      "demand_ids": [
+        "D1",
+        "D3"
+      ],
+      "expected_contribution": "The complete solution sets for x=3 and x=4, each triple verified by exact substitution, plus the divisor-enumeration tables proving completeness within each case.",
+      "local_id": "case_x3_x4",
+      "no_future_sibling_dependency": "The cases x=3 and x=4 depend only on the fixed equation and the shared bounds fact, both supplied in this dossier; the divisor enumeration is self-contained and requires no output from the x=5,6 sibling or the audit sibling.",
+      "objective": "Solve the equation 1/y + 1/z = 1/2 - 1/x with x <= y <= z, y,z positive integers, for x = 3 and x = 4, using the clearing-and-factoring method (Simon's Favorite Factoring Trick), enumerating all divisor pairs exactly, and list every resulting triple (x,y,z) with a direct exact substitution check of each.",
+      "rationale": "The bounds argument forces x ∈ {3,4,5,6}; grouping the two smallest x values balances workload across siblings. For x=3: 1/y+1/z = 1/6 gives (y-6)(z-6)=36. For x=4: 1/y+1/z = 1/4 gives (y-4)(z-4)=16. Both are clean divisor enumerations.",
+      "separator_facts": [
+        "The problem equation is 1/x + 1/y + 1/z = 1/2, with x, y, z positive integers.",
+        "Solutions are normalized by x <= y <= z.",
+        "Exact arithmetic only; methods confined to bounds, factorization, and divisor enumeration.",
+        "Global bound: x <= y <= z implies 1/2 = 1/x+1/y+1/z <= 3/x, so x <= 6; also 1/x < 1/2 so x >= 3. Hence x ∈ {3,4,5,6}.",
+        "Factoring method: from 1/y + 1/z = r/s in lowest terms with s = r y - ... clear to (r y - s)(r z - s) = s^2, then enumerate factor pairs d1*d2 = s^2 with d1 <= d2 and check y = (d1+s)/r, z = (d2+s)/r are integers with x <= y."
+      ],
+      "source_ids": [
+        "request"
+      ],
+      "source_paths": []
+    },
+    {
+      "acceptance_condition": "Child returns, for each of x=5 and x=6: the factored equation, the complete factor-pair enumeration with integrality/congruence and ordering filters, the final triples, and exact substitution verification of each. Expected triples: x=5 yields (5,5,10); x=6 yields (6,6,6).",
+      "demand_ids": [
+        "D1",
+        "D3"
+      ],
+      "expected_contribution": "The complete solution sets for x=5 and x=6 with divisor-enumeration completeness tables and exact substitution verifications.",
+      "local_id": "case_x5_x6",
+      "no_future_sibling_dependency": "The cases x=5 and x=6 depend only on the fixed equation and the shared bounds fact; enumeration is self-contained and needs no sibling output.",
+      "objective": "Solve the equation 1/y + 1/z = 1/2 - 1/x with x <= y <= z, y,z positive integers, for x = 5 and x = 6, using clearing-and-factoring and complete divisor enumeration, and list every resulting triple with a direct exact substitution check of each.",
+      "rationale": "Completes the forced case split x ∈ {3,4,5,6}. For x=5: 1/y+1/z = 3/10 gives (3y-10)(3z-10) = 100, with the congruence filter d1 ≡ d2 ≡ -10 ≡ 2 (mod 3). For x=6: 1/y+1/z = 1/3 gives (y-3)(z-3) = 9.",
+      "separator_facts": [
+        "The problem equation is 1/x + 1/y + 1/z = 1/2, with x, y, z positive integers.",
+        "Solutions are normalized by x <= y <= z.",
+        "Exact arithmetic only; methods confined to bounds, factorization, and divisor enumeration.",
+        "Global bound: x <= y <= z implies 1/2 <= 3/x so x <= 6; also 1/x < 1/2 so x >= 3. Hence x ∈ {3,4,5,6}.",
+        "Factoring method: from 1/y + 1/z = r/s in lowest terms, clear to (r y - s)(r z - s) = s^2, enumerate factor pairs d1*d2 = s^2 with d1 <= d2, keep those with y = (d1+s)/r, z = (d2+s)/r positive integers and x <= y."
+      ],
+      "source_ids": [
+        "request"
+      ],
+      "source_paths": []
+    },
+    {
+      "acceptance_condition": "Child returns: (i) a rigorous derivation that 3 <= x <= 6 and that fixing x reduces the problem to 1/y+1/z = 1/2 - 1/x with y >= x; (ii) a proof that the clearing-and-factoring correspondence is a bijection between solutions and qualifying factor pairs (so divisor enumeration cannot miss solutions); (iii) an exact substitution verification for each of the nine candidate triples listed in the objective; (iv) an explicit statement of whether the candidate set is confirmed complete and correct, noting any discrepancy.",
+      "demand_ids": [
+        "D2",
+        "D3",
+        "D4"
+      ],
+      "expected_contribution": "An independent soundness certificate: bounds proof, bijection/completeness argument for the divisor-enumeration method, and independent exact verifications of all nine triples.",
+      "local_id": "independent_audit",
+      "no_future_sibling_dependency": "The audit re-derives bounds from the raw equation and re-verifies the candidate triples (supplied in this dossier) by direct arithmetic; it does not need the enumeration children's outputs, and any mismatch between its independent enumeration and the candidates will be reported for the parent to reconcile.",
+      "objective": "Independently (re)derive the global bounds proving x ∈ {3,4,5,6} and that for each fixed x the two-variable reduction captures all solutions; and independently re-verify, by exact common-denominator substitution, the nine candidate triples (3,7,42), (3,8,24), (3,9,18), (3,10,15), (3,12,12), (4,5,20), (4,6,12), (4,8,8), (5,5,10), (6,6,6), confirming each satisfies the equation and flagging any candidate that fails or any gap in the bounds logic.",
+      "rationale": "An independent audit child provides the D2/D4 soundness check without relying on the enumeration children's own arithmetic, guarding against missed factor pairs (e.g., forgetting d1=d2 cases or congruence filters) and against verification errors. It also double-checks the completeness logic: that the bounds are tight and the factoring transformation is reversible (bijective between solutions and qualifying factor pairs).",
+      "separator_facts": [
+        "The problem equation is 1/x + 1/y + 1/z = 1/2, with x, y, z positive integers.",
+        "Solutions are normalized by x <= y <= z.",
+        "Exact arithmetic only; the audit must not use approximate computation.",
+        "The factoring transformation must be shown reversible: every solution (y,z) of 1/y+1/z = r/s corresponds to exactly one factor pair (r y - s)(r z - s) = s^2, and conversely every qualifying factor pair yields a solution."
+      ],
+      "source_ids": [
+        "request"
+      ],
+      "source_paths": []
+    }
+  ],
+  "decidability": {
+    "acceptance_mechanical": true,
+    "account": "The raw request fully specifies the task; no external sources are needed since only elementary number theory is permitted. The decomposition into x-cases is mathematically forced and each case is independently decidable by divisor enumeration, so children need no sibling output.",
+    "context_complete": true,
+    "grounded_referents": [
+      "The equation 1/x + 1/y + 1/z = 1/2 in positive integers with x <= y <= z.",
+      "Demands D1 (complete list), D2 (completeness proof), D3 (direct verification), D4 (self-contained argument).",
+      "Standard elementary lemma: from 1/y + 1/z = (x-2)/(2x), clearing gives (2(x-2)y - 2x)(2(x-2)z - 2x) = 4x^2 or equivalent factored form enabling divisor enumeration."
+    ],
+    "independent_of_future_siblings": true,
+    "missing_context": []
+  },
+  "disposition": "expand",
+  "irreducible_core": null,
+  "requested_source_ids": [],
+  "requested_source_paths": [],
+  "synthesis_contract": {
+    "acceptance_condition": "The synthesized document states the final list of triples; verifies each listed triple by exact common-denominator substitution; proves completeness via the bounds 3 <= x <= 6, the per-case factored equations, and full divisor-pair enumerations with all filters justified; uses only elementary methods and exact arithmetic; and contains no reference to agents, process, or brute-force computation — satisfying D1, D2, D3, and D4.",
+    "conflict_policy": "If the audit child and an enumeration child disagree on the candidate set or on any verification, the parent recomputes the contested divisor enumeration or substitution directly by exact hand arithmetic and adopts the result that survives direct recomputation; the final document silently presents only the reconciled, correct mathematics.",
+    "parent_question": "What is the complete, rigorously verified list of triples x <= y <= z of positive integers with 1/x + 1/y + 1/z = 1/2, and what is the self-contained elementary proof that no solutions are missing?",
+    "required_contributions": [
+      "From case_x3_x4: complete solution sets for x=3 and x=4 with divisor-enumeration completeness tables and exact verifications.",
+      "From case_x5_x6: complete solution sets for x=5 and x=6 with divisor-enumeration completeness tables and exact verifications.",
+      "From independent_audit: the global bounds proof (3 <= x <= 6), the proof that the factoring correspondence is a bijection between solutions and qualifying factor pairs, and independent exact re-verification of every candidate triple."
+    ],
+    "shared_invariants": [
+      "All arithmetic is exact; no floating-point or approximation anywhere.",
+      "Methods are limited to bounds, factorization, and divisor enumeration (elementary number theory).",
+      "The final list is the union of the case children, expected to be exactly the nine triples: (3,7,42), (3,8,24), (3,9,18), (3,10,15), (3,12,12), (4,5,20), (4,6,12), (4,8,8), (5,5,10), (6,6,6) — note this is nine unordered triples counting (3,12,12) through (6,6,6) as listed: verify count carefully at synthesis (the expected set is {(3,7,42),(3,8,24),(3,9,18),(3,10,15),(3,12,12),(4,5,20),(4,6,12),(4,8,8),(5,5,10),(6,6,6)}, ten triples total).",
+      "Completeness argument structure: x >= 3 (since x <= 2 forces 1/x >= 1/2 and 1/y+1/z <= 0 or sum > ... precisely x=2 gives 1/y+1/z = 0, impossible; x=1 gives sum > 1/2 trivially impossible since 1/1+positive > 1/2 means remaining sum negative) — parent will present the clean form: x=1 impossible (sum > 1/2 with nothing to subtract... actually 1/1 = 1 > 1/2 forces 1/y+1/z = -1/2, impossible), x=2 forces 1/y+1/z = 0, impossible, and x >= 7 gives sum <= 3/x <= 3/7 < 1/2."
+    ]
+  }
+}

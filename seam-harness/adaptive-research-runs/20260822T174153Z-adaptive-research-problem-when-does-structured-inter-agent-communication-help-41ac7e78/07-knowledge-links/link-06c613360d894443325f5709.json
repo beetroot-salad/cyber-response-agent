@@ -1,0 +1,10 @@
+{
+  "content_sha256": "06c613360d894443325f5709f7b5319745bb920d3bc008864ff04b3a8eed0c96",
+  "id": "link:06c613360d894443325f5709",
+  "origin": "runtime",
+  "proposed_by_node_id": null,
+  "rationale": null,
+  "relation": "partially_answers",
+  "source_id": "answer:work:002-inv-shapiro-r2",
+  "target_id": "question:demand:D3"
+}

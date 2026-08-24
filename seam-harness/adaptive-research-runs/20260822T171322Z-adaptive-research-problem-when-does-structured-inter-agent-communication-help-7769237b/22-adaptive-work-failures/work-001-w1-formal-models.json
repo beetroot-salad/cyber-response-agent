@@ -1,0 +1,6 @@
+{
+  "disposition": "Leave the question unanswered so the next controller turn can retry, narrow, reroute, or proceed without it.",
+  "message": "Model token limit (3000) exceeded before any response was generated. Increase the `max_tokens` model setting, or simplify the prompt to result in a shorter response that will fit within the limit.",
+  "node_id": "work:001-w1-formal-models",
+  "type": "UnexpectedModelBehavior"
+}

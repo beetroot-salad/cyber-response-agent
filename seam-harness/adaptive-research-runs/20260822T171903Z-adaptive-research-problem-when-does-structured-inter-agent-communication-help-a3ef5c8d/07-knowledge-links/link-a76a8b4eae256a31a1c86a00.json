@@ -1,0 +1,10 @@
+{
+  "content_sha256": "a76a8b4eae256a31a1c86a00fbeae718d33313f27db6ca58b7b74d7b0a5981db",
+  "id": "link:a76a8b4eae256a31a1c86a00",
+  "origin": "runtime",
+  "proposed_by_node_id": null,
+  "rationale": null,
+  "relation": "partially_answers",
+  "source_id": "answer:work:001-inv-formal-tools",
+  "target_id": "question:work:001-inv-formal-tools"
+}

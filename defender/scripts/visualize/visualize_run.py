@@ -355,9 +355,13 @@ def _main_session_analysis(run_dir: Path) -> list[tuple[Any, str]]:
     store_path = ss.resolve_store_path(run_dir)
     store = ss.open_store_for_read(store_path)
     try:
-        # The ROOT-OF-LINEAGE main session — `session_store.main_session_id` owns the schema
-        # knowledge (`agent_id`/`parent_session_id`), so it is never restated as inline SQL.
-        session_id = ss.main_session_id(store)
+        # THE RUN'S OWN main session. A resumed run forks into the SOURCE's database, so the
+        # root of the lineage is the source's session and rendering it here would show a
+        # sibling the transcript of the run it branched from. The pointer names the run's own
+        # session when they differ; `main_session_id` — which owns the schema knowledge
+        # (`agent_id`/`parent_session_id`), never restated as inline SQL — is the fallback for
+        # every run where they do not.
+        session_id = ss.resolve_session_id(run_dir) or ss.main_session_id(store)
         messages = ss.hydrate(store, session_id, role="analysis")
         coords = ss.hydrate(store, session_id, role="actor")
         return list(zip(messages, [c["coord"] for c in coords], strict=True))

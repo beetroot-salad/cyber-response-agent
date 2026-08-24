@@ -1,0 +1,62 @@
+{
+  "call_id": "call-0010-recursive-planner",
+  "context": {
+    "ancestor_decisions": [
+      "Problem statement: count quadruples of positive integers x ≤ y ≤ z ≤ w with 1/x + 1/y + 1/z + 1/w = 1/2.",
+      "The deliverable is a mathematical document (proof plus table), not a program; a reader must be able to audit and reproduce the count unaided.",
+      "A factor-pair / divisor-enumeration lemma for the final two denominators z and w is explicitly welcomed by the requester, but phrased as optional ('is welcome').",
+      "Problem statement: count quadruples of positive integers x <= y <= z <= w with 1/x + 1/y + 1/z + 1/w = 1/2.",
+      "Exact arithmetic only; no floating-point or unverified numeric claims."
+    ],
+    "assigned_demands": [],
+    "constraints": [
+      "Variables are positive integers with x ≤ y ≤ z ≤ w.",
+      "The equation must equal exactly 1/2.",
+      "The proof must be self-contained and must demonstrate completeness (via derived finite bounds), not cite or rely on an opaque computation.",
+      "Exact arithmetic only; no approximate numerical methods.",
+      "The table must cover every feasible pair (x,y), not just a sample."
+    ],
+    "expansion_required": false,
+    "max_children": 4,
+    "node": {
+      "acceptance_condition": "The formula counts factor pairs (u,v) of q^2 with u <= v, u ≡ v ≡ -q (mod p), and for the z >= y filter, additionally z = (u+q)/p >= y. The derivation shows each admissible factor pair contributes exactly one solution and that the filter is equivalent to u >= py - q. The formula is mechanical to apply.",
+      "demand_ids": [],
+      "depth": 2,
+      "expected_contribution": "A precise, mechanically applicable counting and filtering procedure for the parent table, ready to be applied to each (x,y).",
+      "id": "root.02-lemma.02-child-b-counting-formula",
+      "objective": "State and justify the exact counting formula for the number of positive integer solutions (z,w) with 1/z + 1/w = p/q, z <= w, and optionally z >= y, expressed in terms of factor pairs of q^2 congruent to -q mod p, including the filtering condition for z >= y.",
+      "parent_id": "root.02-lemma",
+      "rationale": "This contribution specializes the bijection into a precise enumeration procedure with explicit handling of the order constraint z <= w and the extra lower bound z >= y, which is needed for the parent's per-(x,y) table. It can be reasoned independently from the bijection proof.",
+      "separator_facts": [
+        "Problem statement: count quadruples of positive integers x ≤ y ≤ z ≤ w with 1/x + 1/y + 1/z + 1/w = 1/2.",
+        "The deliverable is a mathematical document (proof plus table), not a program; a reader must be able to audit and reproduce the count unaided.",
+        "A factor-pair / divisor-enumeration lemma for the final two denominators z and w is explicitly welcomed by the requester, but phrased as optional ('is welcome').",
+        "Problem statement: count quadruples of positive integers x <= y <= z <= w with 1/x + 1/y + 1/z + 1/w = 1/2.",
+        "Exact arithmetic only; no floating-point or unverified numeric claims."
+      ],
+      "source_ids": [],
+      "source_paths": []
+    },
+    "product_intent": "A self-contained, auditable mathematical enumeration document: it states the exact count and enables a reader to verify and reproduce that count by hand-checkable reasoning — derived finite bounds, exact arithmetic, and a complete table — without trusting a brute-force program.",
+    "remaining_depth": 0,
+    "remaining_node_budget": 4,
+    "source_materials": [],
+    "stable_context": [
+      "Problem statement: count quadruples of positive integers x ≤ y ≤ z ≤ w with 1/x + 1/y + 1/z + 1/w = 1/2.",
+      "The deliverable is a mathematical document (proof plus table), not a program; a reader must be able to audit and reproduce the count unaided.",
+      "A factor-pair / divisor-enumeration lemma for the final two denominators z and w is explicitly welcomed by the requester, but phrased as optional ('is welcome')."
+    ],
+    "workspace_documents": [],
+    "workspace_index": [
+      {
+        "content_sha256": "8a2c8cc8ad27bf7facaf09f40cbe5c70b3a904330084e0be4ec37e5f9fc92a03",
+        "path": "certificate.json",
+        "size_bytes": 15769
+      }
+    ]
+  },
+  "dependency_type": "PlanningDeps",
+  "input_sha256": "bb56227fd648e77383b7b71b3fe6492e3da28ceea299956ec508bd10cec53082",
+  "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+  "role": "recursive_planner"
+}

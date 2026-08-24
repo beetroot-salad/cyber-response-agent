@@ -1,0 +1,14 @@
+{
+  "acceptance_condition": "Establish demand D5 with evidence.",
+  "content_sha256": "6d0679a9438b9cc3d9274fc55b81529210d46ac0bc82a89a53a65979cfe12cb1",
+  "demand_ids": [
+    "D5"
+  ],
+  "id": "question:demand:D5",
+  "node_id": null,
+  "rationale": "Open asymptotic component, lower side; independent obligation from D4.",
+  "tags": [
+    "constraint"
+  ],
+  "text": "Prove the strongest rigorous lower growth bound attainable for N(H)."
+}

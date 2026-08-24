@@ -1,0 +1,7 @@
+{
+  "content_sha256": "93fb720bbe2b5ce5ef4f05b54435b1251ec91c5b6edd6d97bad5157833fc2003",
+  "id": "link:93fb720bbe2b5ce5ef4f05b5",
+  "relation": "answers",
+  "source_id": "answer:root.02-crdt-persistence",
+  "target_id": "question:root.02-crdt-persistence"
+}

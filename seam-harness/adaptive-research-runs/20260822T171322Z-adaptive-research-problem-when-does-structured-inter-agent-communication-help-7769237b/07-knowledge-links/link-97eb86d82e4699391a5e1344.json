@@ -1,0 +1,10 @@
+{
+  "content_sha256": "97eb86d82e4699391a5e13449fc9e685541ded0069a66f319fa47c72e3ab0357",
+  "id": "link:97eb86d82e4699391a5e1344",
+  "origin": "runtime",
+  "proposed_by_node_id": null,
+  "rationale": null,
+  "relation": "refines",
+  "source_id": "question:work:001-w1-formal-models",
+  "target_id": "question:demand:D3"
+}

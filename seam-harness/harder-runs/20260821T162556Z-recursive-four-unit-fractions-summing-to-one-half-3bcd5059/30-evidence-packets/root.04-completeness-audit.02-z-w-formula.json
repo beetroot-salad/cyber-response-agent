@@ -1,0 +1,30 @@
+{
+  "account": "The dossier contains no source materials, workspace documents, or intermediate derivations; the z-interval lemma cannot be verified or independently re-derived here. I can only assert the claimed formulas as reported task data, not as evidence-backed findings. Sufficiency is blocked.",
+  "assumptions": [
+    "The dossier's separator_facts and ancestor_decisions accurately reflect the intended problem statement and claimed bounds.",
+    "The node's objective is to prove the z-interval and w>=z implication, not to compute the full table."
+  ],
+  "boundary_findings": [
+    {
+      "alternative_explanation": "The parent may intend this node to generate the proof from first principles using only the problem statement and claimed bounds, but no prior lemma (e.g., bounds on x and y) is included to build on.",
+      "consequence_if_absorbed": "If treated as sufficient, the final document would state the z-interval formula and w>=z implication without any auditable derivation, violating the product intent of self-contained, hand-checkable reasoning.",
+      "evidence": [],
+      "narrative": "The dossier declares source_materials and workspace_documents as empty, yet the node's proof obligation requires a derivation from exact rational arithmetic. This is a boundary mismatch: the parent expects a proved lemma, while no proof artifacts were supplied.",
+      "smallest_suspected_scope": "The node's source/demand boundary: the node carries no source_ids, no demands, and no working notes from the parent's earlier stages."
+    }
+  ],
+  "child_packet_ids": [],
+  "claims": [],
+  "content_sha256": "d893f182cdca1ef2215c5d31dec71099af2001c470ee05b5c7693a5ab036707d",
+  "counterevidence": [],
+  "id": "packet:root.04-completeness-audit.02-z-w-formula",
+  "next_observation": "Request or reconstruct the prior-stage derivation that establishes 3 <= x <= 8 and the specific y-intervals for each x, plus at least one worked exact-arithmetic example of the z-interval bounds.",
+  "node_id": "root.04-completeness-audit.02-z-w-formula",
+  "objective": "Prove that for each feasible (x,y) with R = 1/2 - 1/x - 1/y, the z-interval is max(y, floor(1/R)+1) <= z <= floor(2/R) and that within that interval any z satisfying the equation yields w >= z automatically.",
+  "source_ids_consulted": [],
+  "sufficiency": "blocked",
+  "unresolved": [
+    "No actual derivation or source document exists in the dossier, so the z-interval formula and w>=z implication have no evidentiary backing.",
+    "The claimed y-intervals and z-interval cannot be stress-tested without exact arithmetic derivations or at least a worked example."
+  ]
+}

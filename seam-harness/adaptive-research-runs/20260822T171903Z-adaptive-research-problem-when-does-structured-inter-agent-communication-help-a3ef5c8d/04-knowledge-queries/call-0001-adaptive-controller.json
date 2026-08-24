@@ -1,0 +1,227 @@
+{
+  "call_id": "call-0001-adaptive-controller",
+  "queries": [
+    {
+      "arguments": {
+        "limit": 10,
+        "query": "demand research note mechanistic thesis causal model predictions experiment",
+        "tags": [],
+        "unanswered_only": false
+      },
+      "result": {
+        "hits": [
+          {
+            "answer_count": 0,
+            "id": "question:root",
+            "kind": "question",
+            "score": 13.950642552587727,
+            "sufficiency": null,
+            "tags": [
+              "counterexample",
+              "risk"
+            ],
+            "text": "Write a 2,000–2,600 word research note that develops and defends a new mechanistic answer to this question: under a matched inference-compute budget, when should staged, retrieval-mediated question/answer communication among language-model agents outperform both independent sampling with final aggregation and an open shared transcript? Use the supplied seven-paper corpus as evidence, but do not merely survey it. Reconcile its conflicting empirical findings; formulate an explicit causal model of information diversity, social influence, retrieval, and synthesis; derive at least four discriminating predictions that separate your mechanism from plausible alternatives; identify what the existing literature cannot identify; and give a preregisterable experiment with conditions, randomization, estimands, power-analysis inputs, failure criteria, and an analysis plan. End with the strongest warranted conclusion and the observation most likely to falsify it.",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 0,
+            "id": "question:demand:D2",
+            "kind": "question",
+            "score": 6.772588722239782,
+            "sufficiency": null,
+            "tags": [
+              "evidence"
+            ],
+            "text": "State one original mechanistic thesis about when staged retrieval-mediated Q/A communication wins or loses under matched inference compute.",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 0,
+            "id": "question:demand:D3",
+            "kind": "question",
+            "score": 5.484906649788,
+            "sufficiency": null,
+            "tags": [
+              "evidence"
+            ],
+            "text": "Construct an explicit causal model connecting initial error correlation, evidence diversity, social influence or conformity, retrieval selectivity, synthesis competence, and task topology.",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 0,
+            "id": "question:demand:D1",
+            "kind": "question",
+            "score": 5.079441541679836,
+            "sufficiency": null,
+            "tags": [
+              "evidence"
+            ],
+            "text": "Produce one coherent research note of 2,000–2,600 words.",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 0,
+            "id": "question:demand:D5",
+            "kind": "question",
+            "score": 3.791759469228055,
+            "sufficiency": null,
+            "tags": [
+              "evidence"
+            ],
+            "text": "Derive at least four directional or interaction predictions that discriminate the proposed mechanism from compute-only, diversity-only, and deliberation-only alternatives.",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 0,
+            "id": "question:demand:D6",
+            "kind": "question",
+            "score": 3.386294361119891,
+            "sufficiency": null,
+            "tags": [
+              "measurement"
+            ],
+            "text": "Identify non-identifiability, measurement, and external-validity limits in the existing evidence.",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 0,
+            "id": "question:demand:D7",
+            "kind": "question",
+            "score": 3.386294361119891,
+            "sufficiency": null,
+            "tags": [
+              "risk",
+              "measurement"
+            ],
+            "text": "Specify a preregisterable matched-compute experiment: units, task strata, conditions, randomization, intervention fidelity, primary and secondary estimands, outcome measures, power-analysis inputs, exclusion rules, multiple-testing control, and failure or stopping criteria.",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 0,
+            "id": "question:demand:D8",
+            "kind": "question",
+            "score": 3.386294361119891,
+            "sufficiency": null,
+            "tags": [
+              "counterexample"
+            ],
+            "text": "End with the strongest warranted conclusion, material unresolved questions, and the single observation most likely to falsify the thesis.",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 0,
+            "id": "question:demand:D4",
+            "kind": "question",
+            "score": 1.6931471805599454,
+            "sufficiency": null,
+            "tags": [
+              "evidence"
+            ],
+            "text": "Use and reconcile all relevant positive, null, and adverse findings in the seven-file corpus, with citations to file paths and PDF page markers.",
+            "unresolved_count": null
+          }
+        ],
+        "query": "demand research note mechanistic thesis causal model predictions experiment",
+        "snapshot_sha256": "50fc83eccb49a771047e44f1c8523a065272feb957d28692a785e9df1df6d0e4",
+        "truncated": false
+      },
+      "result_ids": [
+        "question:root",
+        "question:demand:D2",
+        "question:demand:D3",
+        "question:demand:D1",
+        "question:demand:D5",
+        "question:demand:D6",
+        "question:demand:D7",
+        "question:demand:D8",
+        "question:demand:D4"
+      ],
+      "result_sha256": "44cd4d0919d624c81cdb5fc9f1870ae79619be964e85238e8cb6d4c1fc6e43a0",
+      "sequence": 1,
+      "tool": "search_questions"
+    },
+    {
+      "arguments": {
+        "limit": 8,
+        "query": "corpus overview seven papers multi-agent debate social influence communication",
+        "source_ids": []
+      },
+      "result": {
+        "hits": [
+          {
+            "content_sha256": "f6605c2b9bb68dd7906b2881ec1f0b48b32f607c7b768cd3ec8ab5a9ca46afaa",
+            "excerpt": "# Research corpus manifest\n\nThe full extracted texts are available under `papers/text/`. Page boundaries are marked as `===== PDF PAGE N =====`. These source files are the only evidentiary corpus for the benchmark.\n\n- `papers/text/dung-1995-argumentation.txt` — Phan Minh Dung, \"On the Acceptability of Arguments and its Fundamental Role in Nonmonotonic Reasoning, Logic Programming and n-Person Games\" (Artificial Intelligence 77, 1995). Source: https://cse-robotics.engr.tamu.edu/dshell/cs631/papers/dung95acceptability.pdf\n- `papers/text/shapiro-et-al-2011-crdts.txt` — Marc Shapiro, Nuno Preguiça, Carlos Baquero, Marek Zawirski, \"Conflict-Free Replicated Data Types\" (SSS 2011). Source: https://perso.lip6.fr/Marc.Shapiro/papers/2011/CRDTs_SSS-2011.pdf\n- `papers/text/lorenz-et-al-2011-social-influence.txt` — Jan Lorenz et al., \"How Social Influence Can Undermine the Wisdom of Crowd Effect\" (PNAS 108, 2011). Source: https://doi.org/10.1073/pnas.1008636108\n- `papers/text/du-et-al-2023-multiagent-debate.txt` — Yilun Du et al., \"Improving Factuality and Reasoning in Language Models through Multiagent Debate\" (2023). Source: https://arxiv.org/abs/2305.14325\n- `papers/text/smit-et-al-2023-going-mad.txt` — Andries Smit et al., \"Should We Be Going MAD? A Look at Multi-Agent Debate Strategies for LLMs\" (2023). Source: https://arxiv.org/abs/2311.17371\n- `papers/text/zhang-et-al-2025-mad-question.txt` — Hangfan Zhang et al., \"If Multi-Agent Debate Is the Answer, What Is the Question?\" (2025). Source: https://arxiv.org/abs/2502.08788\n- `papers/text/choi-et-al-2025-conformity.txt` — Min Choi",
+            "locator": "lines 1-13",
+            "score": 17.450452222917992,
+            "source_id": "CORPUS.md"
+          },
+          {
+            "content_sha256": "41e1d26db346207d4be0ec393e7bed983875ae417ca7aa5a530d390dca72e06e",
+            "excerpt": "2 Background\nMAD methods have garnered significant attention in recent years due to their potential to enhance\nthe reasoning and decision-making capabilities of LLMs. At their core, MAD methods share several\ncommon principles. In the initial design proposed by SoM (Du et al., 2023), MAD typically involves\nmultiple agents following three steps to generate the final response: (1) Response Generation, where\neach agent produces an initial solution based on its unique perspective; (2) Debate, where agents\ndebate to identify logical inconsistencies or knowledge gaps; and (3) Consensus Building, where the\nconsensus is determined by majority voting or a judge agent.\nA series of following works explored enhancing the reasoning capabilities of MAD by assigning\ndifferent roles to agents, enabling agents to debate from various perspectives. Zhang et al. (2024)\nexplores the behavioral logic of MAD from the perspective of social psychology. The authors found\nthat certain combinations of individual traits can enhance the overall performance of the MAD\nsystem. Multi-Persona (MP) (Liang et al., 2024) incorporates an affirmative agent (angel) and a\nnegative agent (devil) presenting their answer to a judge agent, which ultimately determines the\nfinal solution. Exchange-of-Thoughts (EoT) (Yin et al., 2023) assigns three diverse roles to\nagents: detail-oriented nature, diligence, and problem-solving abilities. Additionally, it implements\na confidence evaluation mechanism designed to reduce the adverse effects of erroneous reasoning\nprocesses. COMM (Chen et al., 2024b) encourage diverse thinking",
+            "locator": "lines 169-200",
+            "score": 12.5792512120101,
+            "source_id": "papers/text/zhang-et-al-2025-mad-question.txt"
+          },
+          {
+            "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+            "excerpt": "who opposites the \ngiven topic\nFigure 1: Overview of the LLM debate simulation framework. Proponent and opponent agents, using various models\nfrom GPT, Claude, and Qwen, debate five societal topics, such asuniversal basic income (UBI). The experiment\nmanipulates both the number of agents (minority vs. majority groups) and intelligence levels (superior vs. inferior\ngroups). A neutral agent evaluates the arguments and determines the more persuasive side, enabling the analysis of\nconformity dynamics.\nconformity dynamics unfold in debates by select-\ning five major social topics and analyzing whether\nagent bias is reinforced or alleviated under these\ninteraction scenarios.\n2.3 Group Dynamics and Conformity\nGroup conformity is well-documented phenom-\nena in social psychology, shaping human decision-\nmaking in various contexts (Asch, 1955; Milgram,\n1963; Kelman, 1958). Foundational studies have\ndemonstrated that individuals are often swayed by\nmajority opinions (Moscovici et al., 1969), as evi-\ndenced by classic experiments on bystander inter-\nvention (Darley and Latane, 1968) and group con-\nformity (Gerard et al., 1968). The emergence of\nphenomena such as the Spiral of Silence (Noelle-\nNeumann, 1974) and group polarization (Myers\nand Lamm, 1976; Isenberg, 1986; Turner and\nPratkanis, 1998) illustrates how social pressures\ncan suppress dissent and drive opinions to extremes.\nIn addition, investigations of social influence, com-\npliance, and comparison (Cialdini and Goldstein,\n2004; Bond and Smith, 1996; Latané, 1981; Ross\net al., 1977) provide a robust framework for un-\nderstanding",
+            "locator": "lines 241-272",
+            "score": 12.173786103901937,
+            "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+          },
+          {
+            "content_sha256": "41e1d26db346207d4be0ec393e7bed983875ae417ca7aa5a530d390dca72e06e",
+            "excerpt": "different roles to agents, enabling agents to debate from various perspectives. Zhang et al. (2024)\nexplores the behavioral logic of MAD from the perspective of social psychology. The authors found\nthat certain combinations of individual traits can enhance the overall performance of the MAD\nsystem. Multi-Persona (MP) (Liang et al., 2024) incorporates an affirmative agent (angel) and a\nnegative agent (devil) presenting their answer to a judge agent, which ultimately determines the\nfinal solution. Exchange-of-Thoughts (EoT) (Yin et al., 2023) assigns three diverse roles to\nagents: detail-oriented nature, diligence, and problem-solving abilities. Additionally, it implements\na confidence evaluation mechanism designed to reduce the adverse effects of erroneous reasoning\nprocesses. COMM (Chen et al., 2024b) encourage diverse thinking in the debate by assigning\ndifferent reasoning paths to agents with different roles.\nA part of the research focused on improving communication topology. IoA (Chen et al., 2024d)\norganizes agents in a network structure, splitting agents into blocks for better collaboration. In (Li\net al., 2024), agents communicate through a sparse topological structure. In AgentVerse (Chen\net al., 2024c), the verifier can dynamically determine the subsequent execution of MAD processing,\nallowing dynamic adjustment of communication topology. MacNet Qian et al. (2024) investigated\nthe scaling effects of MAD systems with more agents using varied communication structures, and\nfound that MAD systems can achieve consistent performance improvements with more agents\ninvolved.",
+            "locator": "lines 721-752",
+            "score": 11.396929655216145,
+            "source_id": "papers/text/zhang-et-al-2025-mad-question.txt"
+          },
+          {
+            "content_sha256": "41e1d26db346207d4be0ec393e7bed983875ae417ca7aa5a530d390dca72e06e",
+            "excerpt": "answering challenge targeting commonsense knowledge. In Proceedings of the 2019 Conference of\nthe North American Chapter of the Association for Computational Linguistics: Human Language\nTechnologies, Volume 1 (Long and Short Papers) (J. Burstein, C. Doran and T. Solorio, eds.).\nAssociation for Computational Linguistics, Minneapolis, Minnesota.\nWang, Q., Wang, Z., Su, Y., Tong, H. and Song, Y. (2024a). Rethinking the bounds of llm\nreasoning: Are multi-agent discussions the key? arXiv preprint arXiv:2402.18272 .\nWang, X., Wei, J., Schuurmans, D., Le, Q. V., Chi, E. H., Narang, S., Chowdhery, A.\nand Zhou, D. (2023). Self-consistency improves chain of thought reasoning in language models.\nIn The Eleventh International Conference on Learning Representations .\nWang, Y., Ma, X., Zhang, G., Ni, Y., Chandra, A., Guo, S., Ren, W., Arulraj, A., He, X.,\nJiang, Z., Li, T., Ku, M., Wang, K., Zhuang, A., Fan, R., Yue, X. and Chen, W. (2024b).\nMMLU-pro: A more robust and challenging multi-task language understanding benchmark. In\nThe Thirty-eight Conference on Neural Information Processing Systems Datasets and Benchmarks\nTrack.\nWei, J., Wang, X., Schuurmans, D., Bosma, M., Xia, F., Chi, E., Le, Q. V. , Zhou, D.\net al. (2022). Chain-of-thought prompting elicits reasoning in large language models. Advances\nin neural information processing systems 35 24824–24837.\n32\n\n===== PDF PAGE 33 =====\n\nXiong, K., Ding, X., Cao, Y., Liu, T. and Qin, B. (2023). Examining inter-consistency of large\nlanguage models collaboration: An in-depth analysis via debate. In Findings of the Association for\nComputatio",
+            "locator": "lines 1441-1472",
+            "score": 10.564348191467836,
+            "source_id": "papers/text/zhang-et-al-2025-mad-question.txt"
+          },
+          {
+            "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+            "excerpt": "gence, hypothesizing that neutral agents consider\nboth the quantity and quality of arguments when\nforming their stance. By analyzing social dynamics\nin opinion formation, we aim to better understand\nthe broader impacts of LLM-driven discourse.\nWe empirically examine group conformity\namong LLM agents by analyzing the conditions\nunder which neutral agents, initially assigned a\ncentrist disposition, align with the majority. We\nsimulate debates using a multi-agent system com-\nposed of proponent, opponent, and neutral agents.\nWhile the proponent and opponent agents express\ntheir opinions, the neutral agent evaluates both\nsides at the end of each turn and adopts the stance\nmost aligned with its position. Across more than\n2,500 debate simulations, we quantify conformity\nby measuring both the frequency and extent to\nwhich neutral agents align with either the majority\nor the more persuasive stance. Our experimental re-\nsults, validated through statistical analysis, reveal a\nmajority effect in multi-agent systems. Specifically,\na single high-intelligence agent, powered by a large-\nscale LLM, can influence a neutral agent more ef-\nfectively than a group of lower-intelligence agents,\npowered by smaller-scale LLMs. This finding indi-\ncates that discourse dynamics in agent-based sys-\ntems are strongly influenced by intelligence dis-\nparities, with significant implications for public\nopinion formation and bias reinforcement.\nOur study contributes to the understanding of\nopinion dynamics in multi-agent systems by pro-\nviding empirical evidence of conformity. It demon-",
+            "locator": "lines 97-128",
+            "score": 10.545177444479563,
+            "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+          },
+          {
+            "content_sha256": "0674b1614409c389ff275c78c696138a9453e321fee21b90ea1e4354700be7e2",
+            "excerpt": "cross-examination between sources to determine the final consistent data.\n3\n\n===== PDF PAGE 4 =====\n\nDebate Length Prompt\nShort \" These are the solutions to the problem from other agents: [other answers]\nBased off the opinion of other agents, can you give an updated response. . .\"\nLong \" These are the solutions to the problem from other agents: [other answers]\nUsing the opinion of other agents as additional advice, can you give an updated response. . .\"\nFigure 3: Prompts to induce long and short form debate. Responses of other agents to questions are are\ninserted in the middle of the prompt (indicated with [other answers])\nTo mimic the above multi-threaded reasoning process and multi-source factuality checking processes,\nwe propose to generate answers subject to a multi-agent debate procedure between multiple instances\nof large language models. Given a question, multiple agents represented as copies of a large language\nmodel, generate answers to the question. Each response serves as a possible thought process or source\nof information which agents may re-examine to find consistent final answers.\nAfter initial responses are generated from different agents, we initiate a round of debate between\nagents. Individual responses from other agents are concatenated and given as context to each agent,\nwith each agent instructed to construct a new response based on such responses. Each language agent\nis thus responsible for both verifying the collection of responses given by other agents, and refining\nits own response based on other agents’ responses. We iteratively repeat this debate p",
+            "locator": "lines 145-176",
+            "score": 10.461468176353717,
+            "source_id": "papers/text/du-et-al-2023-multiagent-debate.txt"
+          },
+          {
+            "content_sha256": "0674b1614409c389ff275c78c696138a9453e321fee21b90ea1e4354700be7e2",
+            "excerpt": "To help evaluate the effect of our approach on factual accuracy, we introduce a new benchmark\nand dataset evaluating factual accuracy of famous computer scientist biographies. We find that\ncontemporary language models have an especially high tendency to hallucinate factually incorrect\nbiographies, often misrepresenting the relevant institutions and dates. Moreover, these facts often\ninconsistent across different language model instances. By asking models to come to a consensus\nacross their answers, such inconsistent facts may be either removed or corrected.\nIn summary, our work contributes the following. First, we present a novel approach to improving\nfactual correctness and reasoning accuracy in contemporary language models, leveraging a multi-\nagent debate process between models. Second, we introduce a new benchmark of factual correctness\nwhich contemporary language models struggle with. Finally, we evaluate the performance of our\ndebate procedure in language generation, both in terms of the number of agents, the underlying\nrounds of debate, and the prompts that elicit such behavior across a set of six different reasoning and\nfactual accuracy tasks.\n2 Language Generation through Multiagent Debate\nWe present an approach to generate language responses through multiagent debate. We provide an\noverview of our approach in Section 2.1. We further discuss convergence to consensus in the debate\nprocess in Section 2.2. The overall overview of our approach is shown in Figure 2.\n2\n\n===== PDF PAGE 3 =====\n\nRound 1Agent 2: If there were 175 diamonds, then the number of rubies is 35 fe",
+            "locator": "lines 97-128",
+            "score": 10.445719819385578,
+            "source_id": "papers/text/du-et-al-2023-multiagent-debate.txt"
+          }
+        ],
+        "query": "corpus overview seven papers multi-agent debate social influence communication",
+        "truncated": true
+      },
+      "result_ids": [
+        "CORPUS.md",
+        "papers/text/zhang-et-al-2025-mad-question.txt",
+        "papers/text/choi-et-al-2025-conformity.txt",
+        "papers/text/zhang-et-al-2025-mad-question.txt",
+        "papers/text/zhang-et-al-2025-mad-question.txt",
+        "papers/text/choi-et-al-2025-conformity.txt",
+        "papers/text/du-et-al-2023-multiagent-debate.txt",
+        "papers/text/du-et-al-2023-multiagent-debate.txt"
+      ],
+      "result_sha256": "bbafb0e05ac4798a21d2daca68a43cafcf48c14890790e215782b8821ee363b5",
+      "sequence": 2,
+      "tool": "search_sources"
+    }
+  ],
+  "snapshot_sha256": "50fc83eccb49a771047e44f1c8523a065272feb957d28692a785e9df1df6d0e4"
+}

@@ -15,9 +15,13 @@ would be a scenario that silently measures nothing.
 
 Redirection is TWO PATHS, because elastic's index targeting is not uniform: `query` and
 `alerts` carry an `index` PARAM, while `esql` carries its corpus in a `FROM` clause inside the
-query body. Both are pinned, as is the refusal — a `query` call with no explicit `index` is
-addressing the run's configured default, which this frame cannot see, and guessing wrong would
-stage a world into an index nobody reads.
+query body. Both are pinned, as are the two refusals around the param path. A call that OMITS
+`index` is addressing the run's configured default, and with a `ctx` in hand the stager reads
+that same key from that same file (#946) rather than dropping a shipped template's whole
+evidence class from the sibling; with no `ctx` there is nothing to read and it refuses, because
+guessing wrong stages a world into an index nobody reads. A call whose `index` is PRESENT and
+unusable is a different fact — a broken call, refused outright, since quietly substituting the
+default would serve the sibling a corpus the model never named while the base took the fault.
 
 The base world (`world_id=None`) is the null case that makes a sibling comparison readable: it
 stages nothing, so its payloads ARE the estate's and a base-versus-sibling difference is
@@ -36,12 +40,22 @@ import pytest
 
 from defender._paths import PATHS
 from defender.learning.branch.estate.stagers import elastic
+from defender.scripts.adapters import confinement
 from defender.learning.branch.estate.stagers.dispatch import STAGERS
+from defender.runtime.verbs import VerbContext
+
+#: The run context the stager reads config through — the SHIPPED tree, because the keys it
+#: resolves (`ELASTIC_EVENTS_INDEX`/`ELASTIC_ALERTS_INDEX`) are the ones the adapter falls back
+#: to, and a fixture of our own would pin the stager against a file no run ever reads.
+_CTX = VerbContext(defender_dir=PATHS.defender_dir, run_dir=PATHS.defender_dir, env={})
 
 #: The committed elastic catalog: 15 templates, 12 of them ES|QL. Both numbers are asserted
 #: below rather than merely derived, because a corpus that shrank to one template would make
 #: every parametrized case below pass over less and stay green.
-CATALOG = PATHS.defender_dir / "skills" / "gather" / "queries" / "elastic"
+#: Off `PATHS.catalog_dir`, not a fifth hand-spelling of the four segments it already owns:
+#: a catalog relocation would otherwise leave this glob empty, `COMMITTED` empty, and every
+#: parametrized case below silently collecting zero.
+CATALOG = PATHS.catalog_dir / "elastic"
 TEMPLATE_FILES = 15
 ESQL_TEMPLATES = 12
 
@@ -134,19 +148,42 @@ def test_the_catalog_spans_more_than_one_corpus():
 # ==========================================================================
 
 @pytest.mark.parametrize(("pattern", "world_id", "expected"), [
-    ("logs-system.auth-*", "b", "logs-system.auth-w-b"),
-    ("logs-*", "a", "logs-w-a"),
-    (".internal.alerts-security.alerts-default-*", "z", ".internal.alerts-security.alerts-default-w-z"),
-    ("logs-zeek.connection", "a", "logs-zeek.connection-w-a"),
+    ("logs-system.auth-*", "b", "wv-b-logs-system.auth-"),
+    ("logs-*", "a", "wv-a-logs-"),
+    (".internal.alerts-security.alerts-default-*", "z",
+     "wv-z-.internal.alerts-security.alerts-default-"),
+    ("logs-zeek.connection", "a", "wv-a-logs-zeek.connection"),
 ])
 def test_a_view_name_trims_the_pattern_and_carries_the_world(pattern, world_id, expected):
     """    The alias a world's queries read: the pattern's trailing wildcard and separator trimmed,
-    then the world id appended.
+    then prefixed with the namespace and the world id.
 
     Spelled as literals so the rule is legible here rather than only in the code — the sweep
     above uses `view_name` to build its expectation, and this is what keeps that from being
     circular."""
     assert elastic.view_name(pattern, world_id) == expected
+
+
+@pytest.mark.parametrize("pattern", [
+    "logs-*", ".internal.alerts-security.alerts-default-*", "logs-system.auth-*",
+])
+def test_a_world_view_falls_outside_the_pattern_it_was_derived_from(pattern):
+    """    No configured pattern reaches the view built from it.
+
+    THE reason the namespace is a prefix. A view SUFFIXED onto its own corpus — `logs-*` ->
+    `logs-w-a` — is still matched by `logs-*`, and the callers that issue the base pattern
+    verbatim are not siblings of each other: the BASE world stages nothing, so `redirect`
+    hands its params back untouched, and so does any sibling whose `touches` omits the event
+    stream. Both would read `wv-a-…` and `wv-b-…` alongside the estate's own documents —
+    every world's staged difference in one answer, which is the pair measuring contamination
+    rather than a difference, and it is the one thing the per-world view exists to prevent.
+
+    Asserted through the SAME reach model `confine_index` evaluates a pattern with, so this
+    cannot pass against a laxer notion of matching than the adapter's."""
+    for world_id in ("a", "b"):
+        view = elastic.view_name(pattern, world_id)
+
+        assert not confinement._reach_ok(view, pattern), view
 
 
 def test_two_siblings_never_share_a_view():
@@ -174,10 +211,10 @@ def test_a_metadata_clause_survives_with_its_following_newline():
     would pass on the joined query too."""
     body = 'FROM logs-system.auth-* METADATA _id, _index\n| WHERE user.name == "root"\n| LIMIT 5'
 
-    out = elastic.rewrite_from(body, "logs-system.auth-w-b")
+    out = elastic.rewrite_from(body, "wv-b-logs-system.auth-")
 
     assert out == (
-        'FROM logs-system.auth-w-b METADATA _id, _index\n'
+        'FROM wv-b-logs-system.auth- METADATA _id, _index\n'
         '| WHERE user.name == "root"\n| LIMIT 5'
     )
 
@@ -192,7 +229,7 @@ def test_a_metadata_clause_is_not_mistaken_for_the_corpus():
 
     assert elastic.source_pattern("esql", {"query": body}) == "logs-system.auth-*"
     assert elastic.redirect("esql", {"query": body}, "b")["query"].splitlines()[0] \
-        == "FROM logs-system.auth-w-b METADATA _id"
+        == "FROM wv-b-logs-system.auth- METADATA _id"
 
 
 def test_only_the_leading_from_moves_even_when_a_pipe_stage_names_one():
@@ -207,7 +244,7 @@ def test_only_the_leading_from_moves_even_when_a_pipe_stage_names_one():
 
     out = elastic.redirect("esql", {"query": body}, "w1")["query"]
 
-    assert out == 'FROM logs-w-w1\n| EVAL note = "read FROM logs-* earlier"\n| LIMIT 1'
+    assert out == 'FROM wv-w1-logs-\n| EVAL note = "read FROM logs-* earlier"\n| LIMIT 1'
 
 
 def test_a_multi_source_from_is_not_left_half_staged():
@@ -220,7 +257,7 @@ def test_a_multi_source_from_is_not_left_half_staged():
 
     The demand is the REFUSAL, not the absence of the first source. Asserting only
     `"logs-system.auth-*" not in out` is satisfied by the very output this test is named after:
-    `FROM logs-system.auth-w-b, logs-nginx.access-*` drops the first spelling and leaves the
+    `FROM wv-b-logs-system.auth-, logs-nginx.access-*` drops the first spelling and leaves the
     second reading the unstaged base. Swallowing the refusal into `out = ""` made it weaker
     still — any unrelated `StagingError`, including a regression that refused every ES|QL body,
     passed."""
@@ -243,7 +280,7 @@ def test_a_lowercased_from_still_retargets():
     where refusing means the sibling cannot run, is the expensive direction to be wrong in."""
     out = elastic.redirect("esql", {"query": "from logs-*\n| LIMIT 1"}, "w1")["query"]
 
-    assert out == "from logs-w-w1\n| LIMIT 1"
+    assert out == "from wv-w1-logs-\n| LIMIT 1"
 
 
 @pytest.mark.parametrize("body", [
@@ -288,7 +325,7 @@ def test_the_param_indexed_verbs_retarget_through_the_index_param(verb):
 
     prepared = elastic.redirect(verb, dict(params), "w1")
 
-    assert prepared == {**params, "index": "logs-system.auth-w-w1"}
+    assert prepared == {**params, "index": "wv-w1-logs-system.auth-"}
     assert params["index"] == "logs-system.auth-*"
 
 
@@ -304,14 +341,201 @@ def test_a_param_indexed_call_with_no_index_is_refused_not_guessed(verb):
         elastic.redirect(verb, {"q": "*"}, "w1")
 
 
-@pytest.mark.parametrize("index", ["", None, 42])
-def test_an_index_that_is_not_a_real_pattern_is_refused(index):
-    """    An empty, absent or non-string `index` is the same case as a missing one.
+def test_an_index_that_is_not_a_real_pattern_is_refused():
+    """    An `index` that is PRESENT, truthy and not a string is refused, with or without a `ctx`.
 
-    `source_pattern` returns `None` for each, so all three land on the refusal rather than on a
-    view name built out of `''` or `'42'`."""
+    Not the same case as a missing one, and that is the whole point. An omitted `index` names
+    the run's configured default and the stager reads it (#946); a present-but-junk one names
+    nothing, and quietly reading the default for it would serve the sibling a staged view of a
+    corpus the model never asked for while the base handed `index=42` to the adapter and took
+    the fault — a base-vs-sibling difference belonging to the STAGER, which is the one kind
+    this seam must never create."""
     with pytest.raises(elastic.StagingError, match="explicit index"):
-        elastic.redirect("query", {"index": index}, "w1")
+        elastic.redirect("query", {"index": 42}, "w1")
+
+    with pytest.raises(elastic.StagingError, match="explicit index"):
+        elastic.redirect("query", {"index": 42}, "w1", _CTX)
+
+
+@pytest.mark.parametrize("index", ["", None])
+def test_a_falsy_index_addresses_the_default_the_way_the_adapter_reads_it(index):
+    """    `index=""` and an explicit `index=None` are OMITTED, because that is what the adapter
+    makes of them.
+
+    `elastic_adapter._search_verb` resolves `index or config[index_key]`, and `index` is
+    declared `str | None = None`, so `validate_params` admits both spellings and the base run
+    answers them in full off the configured corpus. A stager that called them malformed would
+    record a `refused` row on every sibling for a call the base served — the harness-owned
+    base-vs-sibling difference this seam exists not to manufacture, arriving through the door
+    the `42` case above holds shut."""
+    prepared = elastic.redirect("query", {"index": index, "native_query": "*"}, "w1", _CTX)
+
+    from defender.scripts.adapters.elastic_adapter import load_config
+
+    assert prepared["index"] == elastic.view_name(
+        load_config(_CTX)["ELASTIC_EVENTS_INDEX"], "w1")
+
+    # Without a ctx there is no config to read the default through, which is the one refusal
+    # that remains — and it is the SAME refusal an omitted `index` gets, not a malformed one.
+    with pytest.raises(elastic.StagingError, match="configured default"):
+        elastic.redirect("query", {"index": index, "native_query": "*"}, "w1")
+
+
+@pytest.mark.parametrize("verb", ["query", "alerts"])
+def test_an_omitted_index_resolves_through_the_runs_own_config(verb):
+    """    With a `ctx` in hand, an omitted `index` is read from the run's config, not refused.
+
+    `elastic_adapter.query`/`alerts` declare `index: str | None = None` on purpose and a shipped
+    template relies on it — `correlate-alerts-by-entity.md` is `params: [end, start]`. Refusing
+    that call would drop a whole evidence class from the sibling while the base kept it. The
+    view is derived from the SAME key the adapter would have fallen back to, so the staged
+    corpus is the one the call was really addressing.
+
+    Production always passes a `ctx` (`WorldApplier.prepare` threads it), so this is the live
+    path; the `ctx=None` refusal above is the one that remains for a frame with nothing to read
+    the config through."""
+    key = {"query": "ELASTIC_EVENTS_INDEX", "alerts": "ELASTIC_ALERTS_INDEX"}[verb]
+    from defender.scripts.adapters.elastic_adapter import load_config
+
+    expected = elastic.view_name(load_config(_CTX)[key], "w1")
+
+    prepared = elastic.redirect(verb, {"native_query": "*"}, "w1", _CTX)
+
+    assert prepared == {"native_query": "*", "index": expected}
+    assert expected.startswith("wv-w1-")
+
+
+# ==========================================================================
+# the inverse: what the payload echoes back
+# ==========================================================================
+
+@pytest.mark.parametrize(("verb", "asked"), [
+    ("esql", {"query": "FROM logs-falco.alerts-*\n| STATS events = COUNT(*)"}),
+    ("query", {"index": "logs-*", "native_query": "*"}),
+    ("alerts", {"index": ".internal.alerts-security.alerts-default-*", "native_query": "*"}),
+])
+def test_the_restored_payload_matches_the_base_it_is_compared_against(verb, asked):
+    """    A staged call's payload, restored, is byte-identical to the base's over identical evidence.
+
+    THE demand behind `restore`, and it is asserted against payloads the REAL adapter builds —
+    `search_envelope` and `esql_payload`, called here the way the verbs call them — rather than
+    against a shape this test restates. An echo field that moves, or a new one, then fails here
+    instead of silently leaving ΔO non-zero on every row of the event stream forever.
+
+    Identical wire data for both worlds, so the two payloads have no honest reason to differ:
+    anything left over is the harness's own identity leaking into the measurement."""
+    # provenance: `search_envelope`'s docstring ("the contract a lead reads and a payload on
+    # disk keeps"); `esql_payload` returns the query text because `sql.py`'s idiom reads it.
+    from defender.scripts.adapters.elastic_adapter import esql_payload, search_envelope
+
+    wire = {"columns": [{"name": "events"}], "values": [[3]]}
+    docs = [{"host": "office-ws-1"}]
+
+    def payload_for(world_id):
+        prepared = elastic.redirect(verb, asked, world_id, _CTX)
+        if verb == "esql":
+            return prepared, esql_payload(prepared["query"], wire)
+        return prepared, search_envelope(prepared["index"], docs, 1, False, "desc")
+
+    _base_prepared, base = payload_for(None)
+    prepared, staged = payload_for("w1")
+
+    assert staged != base, (
+        "the staged payload does not echo its corpus at all, so this pins nothing — the "
+        "parametrized verb no longer carries the identity `restore` exists to take back")
+    assert elastic.restore(verb, staged, asked, prepared, _CTX) == base
+
+
+def test_restore_leaves_a_payload_it_did_not_stage_alone():
+    """    A payload whose echo does not hold what we sent is returned untouched.
+
+    The rule that keeps the inverse from corrupting EVIDENCE. A detection alert carries its own
+    rule's parameters, and this environment's `v2-sshd-failed-auth-burst.json` declares
+    `index: ["logs-system.auth-*"]` — so a textual replace over a payload would rewrite a field
+    inside a document. Only the field the verb is known to echo is touched, and only when it
+    still holds the staged identity this module put there.
+
+    The cost of the rule is the failure it cannot catch — an echo field nobody listed stays
+    un-restored — which is why the test above derives its shape from the adapter."""
+    asked = {"index": "logs-*", "native_query": "*"}
+    prepared = elastic.redirect("query", asked, "w1", _CTX)
+    evidence = {"index": "somewhere-else", "hits": [{"rule": {"index": ["logs-*"]}}]}
+
+    assert elastic.restore("query", evidence, asked, prepared, _CTX) == evidence
+
+
+@pytest.mark.parametrize(("a", "b"), [("logs-*", "logs.*"), ("logs-*", "logs*"),
+                                      ("logs.*", "logs*")])
+def test_two_corpora_that_differ_only_in_their_separator_get_two_views(a, b):
+    """    Patterns differing only by the character before the wildcard do not share one view.
+
+    The stem was trimmed of its separator as well as its wildcard, so `logs-*`, `logs.*` and
+    `logs*` all reduced to `logs`: three distinct corpora on one alias and — because the ledger
+    memoizes on the prepared params — one base recording answering for all three. A world
+    staging two of them would stage into one view, and a query for the narrow corpus would read
+    the wide one's documents, which is the contamination the per-world name exists to prevent
+    arriving through the corpus half of the name instead."""
+    assert elastic.view_name(a, "w1") != elastic.view_name(b, "w1")
+
+
+def test_a_world_id_carrying_the_delimiter_is_refused():
+    """    A world id holding `-` is refused where the world is named, not resolved by a parse.
+
+    `wv-{id}-{stem}` is written by `view_name` and read back by `confine_index`. With the
+    delimiter free to appear in an id, that read is ambiguous exactly where it must not be:
+    world `a-logs-nginx`'s view of `logs-*` is `wv-a-logs-nginx-logs-`, which parses equally
+    well as world `a`'s view of `logs-nginx-logs-*` — so the boundary that keeps siblings apart
+    hands A a name B staged into."""
+    with pytest.raises(elastic.StagingError, match="delimiter"):
+        elastic.view_name("logs-*", "a-logs-nginx")
+
+
+@pytest.mark.parametrize("clause", ["METADATA _index", "METADATA _id, _index",
+                                    "METADATA _index, _id"])
+def test_a_query_whose_rows_would_carry_the_corpus_identity_is_refused(clause):
+    """    An ES|QL query selecting `_index` is refused rather than staged.
+
+    `restore` puts the asked identity back into the fields a verb ECHOES — never into
+    `values`, because those are the documents and rewriting them is editing evidence. A
+    `METADATA _index` clause puts the index name in a COLUMN, so the sibling's rows would
+    differ from the base's by this seam's own naming with nothing able to undo it, and ΔO would
+    read a difference in every row that no reader could tell from the world's.
+
+    The comma form is parametrized because the field named first in a list tokenizes with the
+    comma attached — `_index,` — and a bare `split()` would not match it against itself."""
+    with pytest.raises(elastic.StagingError, match="METADATA"):
+        elastic.redirect("esql", {"query": f"FROM logs-* {clause}\n| LIMIT 1"}, "w1")
+
+    # The clause itself is not the problem: one that names no corpus identity still stages.
+    assert elastic.redirect(
+        "esql", {"query": "FROM logs-* METADATA _id\n| LIMIT 1"}, "w1")["query"].startswith(
+            "FROM wv-w1-logs- METADATA _id")
+
+
+def test_a_pattern_that_reaches_into_the_view_namespace_is_refused(tmp_path):
+    """    A corpus pattern that would still reach the view built from it is refused, not staged.
+
+    The prefix buys disjointness for every pattern that names a corpus, and a pattern reaching
+    into the namespace itself takes it back — `wv-*` derives `wv-a-wv`, which `wv-*` matches.
+    That is the finding-2 shape exactly, one config away, so the property is CHECKED where the
+    name is built rather than assumed from the spelling. A refusal here costs a sibling this
+    system's evidence and says so; the alternative costs the base run its isolation and says
+    nothing."""
+    with pytest.raises(elastic.StagingError, match="still reaches"):
+        elastic.view_name(f"{confinement.VIEW_NAMESPACE}-*", "a")
+
+
+@pytest.mark.parametrize("pattern", ['logs|weird', 'my logs-*', 'a"b', "a<b"])
+def test_a_pattern_that_is_not_a_legal_name_is_refused_rather_than_spliced(pattern):
+    """    A corpus whose name an alias cannot carry is refused, not suffixed.
+
+    `_one_source` strips the quotes a source needs when its name carries a space or a `|`, and
+    the view is written back UNQUOTED — a view is a name this module builds, and `"logs-*"-w-A`
+    answers to nothing. So `FROM "logs|weird"` would come back as `FROM logs|weird-w-A`, where
+    the `|` is now a COMMAND SEPARATOR and the query is cut in half: the exact case the
+    quote-aware splitter exists to read correctly, corrupted one step after it read it."""
+    with pytest.raises(elastic.StagingError, match="cannot hold"):
+        elastic.view_name(pattern, "a")
 
 
 def test_source_pattern_reads_the_route_each_verb_carries():

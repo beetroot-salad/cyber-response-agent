@@ -1,0 +1,13 @@
+{
+  "acceptance_condition": "Returns at least one finding consisting of a direct quote or close paraphrase from the Smit file, with the exact `===== PDF PAGE N =====` marker(s) where it appears, explicitly stating that MAD does not reliably outperform other prompting strategies such as self-consistency or ensembling.",
+  "content_sha256": "f753902a4fe57a2a10ef488ad54184753fd1a2cf8960e1b5467aed45c239aff2",
+  "demand_ids": [],
+  "id": "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results.01-smit-extract-null-overall",
+  "node_id": "root.05-debate-nulls-boundaries.01-c1-smit-null-results.01-smit-extract-null-overall",
+  "rationale": "This is the first and most important null result: the paper's abstract and conclusions emphasize that MAD, in its current form, does not reliably outperform other prompting strategies. This finding is distinct from specific benchmark numbers and hyperparameter sensitivity, and it grounds the reconciliation requirement (D11) and the quality metric family (D14).",
+  "tags": [
+    "counterexample",
+    "evidence"
+  ],
+  "text": "Extract from papers/text/smit-et-al-2023-going-mad.txt at least one anchored finding stating that multi-agent debate (MAD) does not reliably outperform other prompting strategies (e.g., self-consistency, ensembling), quoting or closely paraphrasing the relevant passage(s) and carrying the exact `===== PDF PAGE N =====` marker(s)."
+}

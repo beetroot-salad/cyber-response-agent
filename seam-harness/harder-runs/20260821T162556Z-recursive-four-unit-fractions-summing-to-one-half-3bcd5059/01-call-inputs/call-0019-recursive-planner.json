@@ -1,0 +1,60 @@
+{
+  "call_id": "call-0019-recursive-planner",
+  "context": {
+    "ancestor_decisions": [
+      "Problem statement: count quadruples of positive integers x ≤ y ≤ z ≤ w with 1/x + 1/y + 1/z + 1/w = 1/2.",
+      "The deliverable is a mathematical document (proof plus table), not a program; a reader must be able to audit and reproduce the count unaided.",
+      "A factor-pair / divisor-enumeration lemma for the final two denominators z and w is explicitly welcomed by the requester, but phrased as optional ('is welcome').",
+      "Problem statement: count quadruples of positive integers x <= y <= z <= w with 1/x + 1/y + 1/z + 1/w = 1/2.",
+      "Feasible region to verify: 3 <= x <= 8; y-intervals [7,18] for x=3, [5,12] for x=4, [5,10] for x=5, [6,9] for x=6, [7,8] for x=7, {8} for x=8; 33 feasible pairs total.",
+      "z-interval formula to verify: max(y, floor(1/R)+1) <= z <= floor(2/R) with R = 1/2 - 1/x - 1/y; integrality test: w = z/(R*z - 1) must be a positive integer.",
+      "Exact arithmetic only; no floating-point approximation or unverified numeric claims."
+    ],
+    "assigned_demands": [],
+    "constraints": [
+      "Variables are positive integers with x ≤ y ≤ z ≤ w.",
+      "The equation must equal exactly 1/2.",
+      "The proof must be self-contained and must demonstrate completeness (via derived finite bounds), not cite or rely on an opaque computation.",
+      "Exact arithmetic only; no approximate numerical methods.",
+      "The table must cover every feasible pair (x,y), not just a sample."
+    ],
+    "expansion_required": false,
+    "max_children": 4,
+    "node": {
+      "acceptance_condition": "The child proves, using exact arithmetic and inequalities, that for R=1/2-1/x-1/y > 0, any positive integer z with w=z/(R*z-1) integer and w >= z must satisfy max(y, floor(1/R)+1) <= z <= floor(2/R); and it lists the derived endpoints for all 33 feasible (x,y) pairs, matching the separator-fact formula exactly.",
+      "demand_ids": [],
+      "depth": 2,
+      "expected_contribution": "A rigorous proof of the z-interval bounds plus a verified endpoint table for all 33 pairs, enabling the reader to reproduce every scanned interval without trusting a program.",
+      "id": "root.03-table-direct-scan.04-crosscheck-bound-formula",
+      "objective": "Independently re-derive and verify, for each feasible (x,y) pair in the 33-pair region, the finite z-interval lower bound max(y, floor(1/R)+1) and upper bound floor(2/R) using exact rational inequalities, confirming that all such z satisfy w >= z and that no integer solution can lie outside the interval. Present the derivation for the general formula and a spot-check table of endpoint values for all 33 pairs.",
+      "parent_id": "root.03-table-direct-scan",
+      "rationale": "The direct-scan method's completeness relies on the z-interval formula. This child supplies a separate verification of that bound, making the final document auditable and independent of a brute-force program, directly serving D5.",
+      "separator_facts": [
+        "Problem statement: count quadruples of positive integers x ≤ y ≤ z ≤ w with 1/x + 1/y + 1/z + 1/w = 1/2.",
+        "The deliverable is a mathematical document (proof plus table), not a program; a reader must be able to audit and reproduce the count unaided.",
+        "A factor-pair / divisor-enumeration lemma for the final two denominators z and w is explicitly welcomed by the requester, but phrased as optional ('is welcome').",
+        "Problem statement: count quadruples of positive integers x <= y <= z <= w with 1/x + 1/y + 1/z + 1/w = 1/2.",
+        "Feasible region to verify: 3 <= x <= 8; y-intervals [7,18] for x=3, [5,12] for x=4, [5,10] for x=5, [6,9] for x=6, [7,8] for x=7, {8} for x=8; 33 feasible pairs total.",
+        "z-interval formula to verify: max(y, floor(1/R)+1) <= z <= floor(2/R) with R = 1/2 - 1/x - 1/y; integrality test: w = z/(R*z - 1) must be a positive integer.",
+        "Exact arithmetic only; no floating-point approximation or unverified numeric claims."
+      ],
+      "source_ids": [],
+      "source_paths": []
+    },
+    "product_intent": "A self-contained, auditable mathematical enumeration document: it states the exact count and enables a reader to verify and reproduce that count by hand-checkable reasoning — derived finite bounds, exact arithmetic, and a complete table — without trusting a brute-force program.",
+    "remaining_depth": 1,
+    "remaining_node_budget": 11,
+    "source_materials": [],
+    "stable_context": [
+      "Problem statement: count quadruples of positive integers x ≤ y ≤ z ≤ w with 1/x + 1/y + 1/z + 1/w = 1/2.",
+      "The deliverable is a mathematical document (proof plus table), not a program; a reader must be able to audit and reproduce the count unaided.",
+      "A factor-pair / divisor-enumeration lemma for the final two denominators z and w is explicitly welcomed by the requester, but phrased as optional ('is welcome')."
+    ],
+    "workspace_documents": [],
+    "workspace_index": []
+  },
+  "dependency_type": "PlanningDeps",
+  "input_sha256": "bce148893a572da158f302802751c77049b3d85616450e4b3dd09df830148a0e",
+  "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+  "role": "recursive_planner"
+}

@@ -1,0 +1,10 @@
+{
+  "content_sha256": "6af771109e3315ca5adbc152177bcb320ce7f07a3a9e298e6230848afd5251f8",
+  "id": "link:6af771109e3315ca5adbc152",
+  "origin": "runtime",
+  "proposed_by_node_id": null,
+  "rationale": null,
+  "relation": "refines",
+  "source_id": "question:work:001-w1-choi2025",
+  "target_id": "question:demand:D3"
+}

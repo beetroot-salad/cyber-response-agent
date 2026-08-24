@@ -1,0 +1,10 @@
+{
+  "content_sha256": "3128efa05222adba20d8f46092c5f1c75566392e7ad02f7ee5b0b19d807f9a5f",
+  "id": "link:3128efa05222adba20d8f460",
+  "origin": "runtime",
+  "proposed_by_node_id": null,
+  "rationale": null,
+  "relation": "refines",
+  "source_id": "question:work:006-lower-bound-v5-compact",
+  "target_id": "question:demand:D5"
+}

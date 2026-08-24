@@ -1,0 +1,20 @@
+{
+  "acceptance_condition": "Returns at least three findings, each a quote or close paraphrase from the Zhang file, each with the exact `===== PDF PAGE N =====` marker(s) where it appears. The findings must collectively cover: (1) MAD often failing to outperform single-agent baselines like CoT and Self-Consistency, (2) task dependence (e.g., performance differences across programming, math, general knowledge), and (3) the role of model heterogeneity or other factors in improving or failing to improve MAD.",
+  "content_sha256": "7cc06f30a14ed1bd6831aaec777cec53aac4917b32a585ab629675a04dc5d449",
+  "demand_ids": [
+    "D11",
+    "D12",
+    "D13",
+    "D14",
+    "D15"
+  ],
+  "id": "question:root.05-debate-nulls-boundaries.02-c2-zhang-boundary-conditions",
+  "node_id": "root.05-debate-nulls-boundaries.02-c2-zhang-boundary-conditions",
+  "rationale": "Zhang et al. is the corpus's boundary-condition and negative-result evidence; its analysis of when debate helps or fails is a distinct evidence question independent from the Smit extraction.",
+  "tags": [
+    "counterexample",
+    "evidence",
+    "measurement"
+  ],
+  "text": "Extract from papers/text/zhang-et-al-2025-mad-question.txt at least three anchored findings on Zhang et al.'s analysis of when and why multi-agent debate helps or fails, including task dependence and boundary conditions, each quoted or closely paraphrased and carrying the exact `===== PDF PAGE N =====` marker(s)."
+}

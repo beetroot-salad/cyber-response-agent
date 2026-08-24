@@ -1,0 +1,18 @@
+{
+  "acceptance_condition": "Resolve the observation with grounded evidence.",
+  "content_sha256": "43ced1dcbae5a198711388130f41378c2db8f9bc03833427c3cadb8211af555e",
+  "demand_ids": [
+    "D11",
+    "D13",
+    "D14",
+    "D15"
+  ],
+  "id": "question:raised:d1c06c3b4c403839",
+  "node_id": "root.05-debate-nulls-boundaries.03-c3-design-inferences#raised",
+  "rationale": "An answer identified a discriminating next observation.",
+  "tags": [
+    "uncertainty",
+    "evidence"
+  ],
+  "text": "Obtain the full text of smit-et-al-2023-going-mad.txt and zhang-et-al-2025-mad-question.txt to verify each quoted page marker and to search for additional boundary conditions (e.g., model heterogeneity, dataset exceptions) that could refine the reconciliation."
+}

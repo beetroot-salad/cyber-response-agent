@@ -1,0 +1,18 @@
+{
+  "acceptance_condition": "Resolve the observation with grounded evidence.",
+  "content_sha256": "09f76c0f9770e3f7f5cf665ce9bb11da28c309c801d1867a10d8b387c42548b5",
+  "demand_ids": [
+    "D4",
+    "D11",
+    "D13",
+    "D14"
+  ],
+  "id": "question:raised:02321ad0fccdf448",
+  "node_id": "root.04-debate-gains-evidence.02-derive-design-and-eval#raised",
+  "rationale": "An answer identified a discriminating next observation.",
+  "tags": [
+    "uncertainty",
+    "evidence"
+  ],
+  "text": "The design inferences are sufficient for this node, but the full evaluation plan requires the same replication requirements to be fused with the null-result and conformity conditions from sibling nodes (root.05, root.03); I did not read those files here."
+}

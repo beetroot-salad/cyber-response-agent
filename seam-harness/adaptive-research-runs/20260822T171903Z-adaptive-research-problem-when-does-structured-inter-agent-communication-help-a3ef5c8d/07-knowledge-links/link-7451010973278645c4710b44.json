@@ -1,0 +1,10 @@
+{
+  "content_sha256": "7451010973278645c4710b44ef9a52a3188bffc2a7c14c25c39cfe678ececa24",
+  "id": "link:7451010973278645c4710b44",
+  "origin": "runtime",
+  "proposed_by_node_id": null,
+  "rationale": null,
+  "relation": "partially_answers",
+  "source_id": "answer:work:001-inv-formal-tools",
+  "target_id": "question:demand:D3"
+}

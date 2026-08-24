@@ -1,0 +1,11 @@
+{
+  "child_ids": [],
+  "depth": 2,
+  "effective_disposition": "solve",
+  "node_id": "root.03-table-direct-scan.01-scan-x3",
+  "packet_id": "packet:root.03-table-direct-scan.01-scan-x3",
+  "packet_sha256": "6eb5324a93039a58e8d90e17e93259471386f81192e2f4bcc20bf95c58461929",
+  "parent_id": "root.03-table-direct-scan",
+  "proposed_disposition": "solve",
+  "stop_reason": null
+}

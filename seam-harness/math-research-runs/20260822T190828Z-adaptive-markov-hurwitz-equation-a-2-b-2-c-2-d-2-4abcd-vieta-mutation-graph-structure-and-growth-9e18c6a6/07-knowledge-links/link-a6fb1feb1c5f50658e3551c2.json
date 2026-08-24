@@ -1,0 +1,10 @@
+{
+  "content_sha256": "a6fb1feb1c5f50658e3551c2c6179c474b1759e1b5f9c7b01935e667a55f4451",
+  "id": "link:a6fb1feb1c5f50658e3551c2",
+  "origin": "agent",
+  "proposed_by_node_id": "work:003-struct-core-v2",
+  "rationale": "Proves the quotient mutation graph is a rooted tree; cycles and multiple parents excluded via D2 plus the no-height-preserving-mutation corollary.",
+  "relation": "answers",
+  "source_id": "answer:work:003-struct-core-v2",
+  "target_id": "question:demand:D3"
+}

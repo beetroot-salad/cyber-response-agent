@@ -209,8 +209,13 @@ def _search_verb(  # noqa: PLR0913 — the two search verbs' shared body, one pa
 ) -> dict:
     config = load_config(ctx)
     resolved = index or config[index_key]
+    # `world_id` rides through so a BRANCHED run's staged read is confined rather than
+    # refused. A world view is named outside every configured pattern on purpose, so reach
+    # alone cannot admit it; passing the world declares the two names it may carry, and no
+    # sibling's. `None` on every ordinary run, which is the whole of the behaviour there.
     resolved = confine_index(
         resolved, (config["ELASTIC_EVENTS_INDEX"], config["ELASTIC_ALERTS_INDEX"]),
+        world_id=getattr(ctx, "world_id", None),
     )
     docs, total, truncated = _search(
         ctx, config, resolved, native_query, start, end,

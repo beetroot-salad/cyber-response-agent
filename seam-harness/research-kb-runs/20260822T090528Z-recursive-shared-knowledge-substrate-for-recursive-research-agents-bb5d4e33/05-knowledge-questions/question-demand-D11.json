@@ -1,0 +1,14 @@
+{
+  "acceptance_condition": "Establish demand D11 with evidence.",
+  "content_sha256": "b48aa66909c810d05ced3a63029ee4d813e20b8bd7343488b183f69dac4e2b40",
+  "demand_ids": [
+    "D11"
+  ],
+  "id": "question:demand:D11",
+  "node_id": null,
+  "rationale": "Required by the request and reinforced by the manifest's instruction not to select papers by desired outcome.",
+  "tags": [
+    "evidence"
+  ],
+  "text": "The memo reconciles — rather than hides — the tension between papers reporting multi-agent debate gains and papers reporting matched-compute null results or conformity."
+}

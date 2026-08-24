@@ -1,0 +1,753 @@
+{
+  "call_id": "call-0013-adaptive-controller",
+  "queries": [
+    {
+      "arguments": {
+        "entry_id": "question:raised:e19298af7323:rq1"
+      },
+      "result": {
+        "content": {
+          "acceptance_condition": "A proved dichotomy (growth factor 3 only on an explicitly bounded sub-family; factor >= 7 elsewhere) together with a proved sublinear or improved-constant upper bound for N(H), or a verified counterexample vertex off the slow family with a child of factor < 7.",
+          "answer_ids": [],
+          "content_sha256": "0a5c45ae4e9c75e136ff407c7768de7948e238faab0d4f27f4f3b2abe8891338",
+          "demand_ids": [
+            "D1",
+            "D2",
+            "D3"
+          ],
+          "id": "question:raised:e19298af7323:rq1",
+          "node_id": "work:003-struct-core-v2#raised:rq1",
+          "rationale": "The tree proof shows chain vertices with a=b have only 2 children and slowest growth factor 3, while ab >= 2 forces factor >= 7; quantifying the rare-slow-versus-common-fast split is the exact lever the O(H) bound needs, and the structural lemmas here make the split well-defined.",
+          "tags": [
+            "method",
+            "measurement",
+            "uncertainty"
+          ],
+          "text": "For the D4 sharpening: prove that any vertex with a >= 2 (equivalently, off the (1,1,c,d)-chain and its immediate children) has every child growing by factor >= 4ab-1 >= 7, and bound the number of vertices with d <= H that have a = b = 1 or ab <= 2; conclude whether N(H) = O(H^alpha) for some alpha < 1."
+        },
+        "id": "question:raised:e19298af7323:rq1",
+        "incoming_links": [
+          {
+            "content_sha256": "2aba7c57481ab497bddfd575f0c616f8c035a7d711b19b64297f469cc81df1e3",
+            "id": "link:2aba7c57481ab497bddfd575",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "raises",
+            "source_id": "answer:work:003-struct-core-v2",
+            "target_id": "question:raised:e19298af7323:rq1"
+          }
+        ],
+        "kind": "question",
+        "outgoing_links": [
+          {
+            "content_sha256": "b7b36e55b2f2ef75bffe2f9dc7d3fd41afc1099a118e6957503b38c81b2e459b",
+            "id": "link:b7b36e55b2f2ef75bffe2f9d",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "depends_on",
+            "source_id": "question:raised:e19298af7323:rq1",
+            "target_id": "question:work:003-upper-depth-v2"
+          }
+        ]
+      },
+      "result_ids": [
+        "question:raised:e19298af7323:rq1"
+      ],
+      "result_sha256": "6aaeb4b7c0449fec93674ceb238b92846a17f75b0bc645fbbac0b62a5a989695",
+      "sequence": 1,
+      "tool": "get_entry"
+    },
+    {
+      "arguments": {
+        "entry_id": "answer:work:003-upper-depth-v2"
+      },
+      "result": {
+        "content": {
+          "claim_ids": [],
+          "content_sha256": "31021f0aeadc41c63397cf45a81d97ab359b2fc5fba9ea906d1ac00922d45a43",
+          "id": "answer:work:003-upper-depth-v2",
+          "node_id": "work:003-upper-depth-v2",
+          "packet": {
+            "account": "Investigation failed before producing evidence: UnexpectedModelBehavior: Exceeded maximum output retries (2)",
+            "assumptions": [],
+            "boundary_findings": [],
+            "child_packet_ids": [],
+            "claims": [],
+            "content_sha256": "d25f0085bf202ac4a5a35466974a12cf1128a650fa2e292c9e6d26c488e0ed65",
+            "counterevidence": [],
+            "id": "packet:work:003-upper-depth-v2",
+            "knowledge_links": [],
+            "next_observation": null,
+            "node_id": "work:003-upper-depth-v2",
+            "objective": "From first principles, prove the strongest rigorous upper bound for N(H) = #{sorted solutions with d <= H} and the two-sided depth-vs-log-H relation, ASSUMING the tree structure (prove the per-edge growth and branching lemmas directly so the thread is self-contained where cheap). Compact plan: (i) at a non-root vertex, mutating any of the three non-maximal coordinates x gives a child with new maximum 4*(product of three others) - x >= (4ab-1)d >= 3d; hence max(v) >= 3^{depth(v)} and depth(v) <= log_3(max(v)); the root has exactly one child (1,1,1,3) - verify. (ii) Each non-root vertex has at most 3 children and the root exactly 1, so N(H) <= sum_{k=0}^{floor(log_3 H)} 3^k = (3^{floor(log_3 H)+1}-1)/2 <= (3H-1)/2 = O(H) with explicit constant. (iii) Two-sided depth relation: upper depth bound log_3 H from (i); lower bound from the coarse child estimate d_child <= 4*d^3 (since a,b,c <= d), giving log max(v) <= 3^{depth(v)} * C for an explicit constant C, hence depth(v) >= log_3(log max(v)) - O(1) along every branch; identify along which branches each extreme is approached. (iv) Attempt to sharpen the O(H) constant or exponent rigorously (e.g., exploit that the (1,1,c,d)-chain is the unique slowest branch and off-chain children grow by factor >= 4ab-1 with ab >= 2, so most of the tree grows much faster; try to prove N(H) = O(H^alpha) for some alpha < 1); if a sharper bound cannot be fully proved, state exactly what is proved, and label any improvement as CONJECTURE with the precise gap. KEEP COMPACT (well under 1200 words): theorems with terse proofs, explicit constants, no tables.",
+            "raised_questions": [],
+            "source_ids_consulted": [],
+            "sufficiency": "blocked",
+            "unresolved": [
+              "Investigation failed before producing evidence: UnexpectedModelBehavior: Exceeded maximum output retries (2)"
+            ]
+          },
+          "packet_id": "packet:work:003-upper-depth-v2",
+          "question_ids": [
+            "question:demand:D4",
+            "question:demand:D6",
+            "question:work:001-upper-bound-depth",
+            "question:work:003-upper-depth-v2"
+          ],
+          "sufficiency": "blocked",
+          "summary": "Investigation failed before producing evidence: UnexpectedModelBehavior: Exceeded maximum output retries (2)",
+          "tags": [
+            "method",
+            "measurement",
+            "constraint",
+            "uncertainty"
+          ],
+          "unresolved": [
+            "Investigation failed before producing evidence: UnexpectedModelBehavior: Exceeded maximum output retries (2)"
+          ]
+        },
+        "id": "answer:work:003-upper-depth-v2",
+        "incoming_links": [],
+        "kind": "answer",
+        "outgoing_links": [
+          {
+            "content_sha256": "2b8e5594ec24e5ca1c583d1fcd41f6c35cf2a3907e42274e15d5703302c48fec",
+            "id": "link:2b8e5594ec24e5ca1c583d1f",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:003-upper-depth-v2",
+            "target_id": "question:work:001-upper-bound-depth"
+          },
+          {
+            "content_sha256": "6876a7aff54a29a7b0a2e129ec2cdbdd6cb352762c9b2a8fc0497b24c76d960a",
+            "id": "link:6876a7aff54a29a7b0a2e129",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:003-upper-depth-v2",
+            "target_id": "question:demand:D6"
+          },
+          {
+            "content_sha256": "6ac934daf7fa611dad5e61ddb1cdb7bb55b8c5808b4dae2b156deac86a3ed5dc",
+            "id": "link:6ac934daf7fa611dad5e61dd",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:003-upper-depth-v2",
+            "target_id": "question:demand:D4"
+          },
+          {
+            "content_sha256": "76a9df90e87e6b6fe2b87ab1e01480111706dadd8c8a777f460be67febb77b13",
+            "id": "link:76a9df90e87e6b6fe2b87ab1",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:003-upper-depth-v2",
+            "target_id": "question:work:003-upper-depth-v2"
+          }
+        ]
+      },
+      "result_ids": [
+        "answer:work:003-upper-depth-v2"
+      ],
+      "result_sha256": "bfc8cffa683b10e07b62b59b634e766ac61d5a43a4848efbb398fdb7a80a92d1",
+      "sequence": 2,
+      "tool": "get_entry"
+    },
+    {
+      "arguments": {
+        "entry_id": "answer:work:003-lower-bound-v2"
+      },
+      "result": {
+        "content": {
+          "claim_ids": [],
+          "content_sha256": "0e758ec3e5f804999a8875c03f289ccfa025a6c710476ae1f6331f4f53784528",
+          "id": "answer:work:003-lower-bound-v2",
+          "node_id": "work:003-lower-bound-v2",
+          "packet": {
+            "account": "Investigation failed before producing evidence: UnexpectedModelBehavior: Exceeded maximum output retries (2)",
+            "assumptions": [],
+            "boundary_findings": [],
+            "child_packet_ids": [],
+            "claims": [],
+            "content_sha256": "37515b8e3f22c447f24ec64e6e80add076e128a64df1573976a0ac98aa42d5ab",
+            "counterevidence": [],
+            "id": "packet:work:003-lower-bound-v2",
+            "knowledge_links": [],
+            "next_observation": null,
+            "node_id": "work:003-lower-bound-v2",
+            "objective": "From first principles, prove the strongest rigorous lower bound for N(H). Compact plan: (A) The chain: define (c_0,d_0) = (1,3) and d_{n+1} = 4 d_n - c_n, c_{n+1} = d_n; prove by induction that (1,1,c_n,d_n) satisfies the equation (verify n=0: 1+1+1+9=12=4*3, and the induction step via the Vieta quadratic: if (1,1,c,d) is a solution then mutating c gives (1,1,d,4d-c), a solution by the Vieta root property - prove this root-swap lemma once) and that d_n strictly increases; solve the recurrence exactly (characteristic roots 2 +/- sqrt(3); compute the closed form for d_n correctly) and conclude N(H) >= log_{2+sqrt(3)}(H) - O(1), an explicit c*log(H) lower bound. (B) Power/super-log bound attack: at (1,1,c,d) with c >= 3 the child obtained by mutating a (=1) is (1,c,d,4cd-1) while mutating c gives (1,1,d,4d-c); prove these two children are distinct and that 4cd-1 <= 4*max^2; then consider the subtree generated by repeatedly taking either child, bound the depth reachable within max <= H (growth per edge <= 4*max^2 gives log-log type depth), and compute honestly what lower bound this delivers (e.g. N(H) >= c'(log H)^beta for the largest provable beta, or only c log H). Prove whichever is rigorously attainable with explicit constants; for anything stronger, state the precise obstruction as a labeled conjecture. All family members must be proved solutions (the Vieta-root lemma suffices) and proved distinct. KEEP COMPACT (well under 1200 words), no tables beyond 3 one-line checks.",
+            "raised_questions": [],
+            "source_ids_consulted": [],
+            "sufficiency": "blocked",
+            "unresolved": [
+              "Investigation failed before producing evidence: UnexpectedModelBehavior: Exceeded maximum output retries (2)"
+            ]
+          },
+          "packet_id": "packet:work:003-lower-bound-v2",
+          "question_ids": [
+            "question:demand:D5",
+            "question:work:001-lower-bound",
+            "question:work:003-lower-bound-v2"
+          ],
+          "sufficiency": "blocked",
+          "summary": "Investigation failed before producing evidence: UnexpectedModelBehavior: Exceeded maximum output retries (2)",
+          "tags": [
+            "method",
+            "evidence",
+            "measurement",
+            "uncertainty"
+          ],
+          "unresolved": [
+            "Investigation failed before producing evidence: UnexpectedModelBehavior: Exceeded maximum output retries (2)"
+          ]
+        },
+        "id": "answer:work:003-lower-bound-v2",
+        "incoming_links": [],
+        "kind": "answer",
+        "outgoing_links": [
+          {
+            "content_sha256": "00bdba97e18d70bd74f113cb2a4fcf286e09b00bd1131ae469b4db583689611b",
+            "id": "link:00bdba97e18d70bd74f113cb",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:003-lower-bound-v2",
+            "target_id": "question:work:001-lower-bound"
+          },
+          {
+            "content_sha256": "61aad5d2c451b5ca6757662601a4f388c44ad24342e197dbe5713ff942bcb024",
+            "id": "link:61aad5d2c451b5ca67576626",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:003-lower-bound-v2",
+            "target_id": "question:demand:D5"
+          },
+          {
+            "content_sha256": "ce6391186fd10175e62cba97717505750e976e5cd7d434d44da98bcc299f266c",
+            "id": "link:ce6391186fd10175e62cba97",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:003-lower-bound-v2",
+            "target_id": "question:work:003-lower-bound-v2"
+          }
+        ]
+      },
+      "result_ids": [
+        "answer:work:003-lower-bound-v2"
+      ],
+      "result_sha256": "1f21efa2be955396003f7f1d8bec3f1ec762fc2ef9d7143410953c347cb6c977",
+      "sequence": 3,
+      "tool": "get_entry"
+    },
+    {
+      "arguments": {
+        "entry_id": "answer:work:003-struct-core-v2"
+      },
+      "result": {
+        "content": {
+          "claim_ids": [
+            "work:003-struct-core-v2:C001",
+            "work:003-struct-core-v2:C002",
+            "work:003-struct-core-v2:C003",
+            "work:003-struct-core-v2:C004",
+            "work:003-struct-core-v2:C005",
+            "work:003-struct-core-v2:C006",
+            "work:003-struct-core-v2:C007",
+            "work:003-struct-core-v2:C008",
+            "work:003-struct-core-v2:C009"
+          ],
+          "content_sha256": "8425e817484ec302055c7f9c1444428fa4b2f71f420ea7e84a42d9cc921c8a27",
+          "id": "answer:work:003-struct-core-v2",
+          "node_id": "work:003-struct-core-v2",
+          "packet": {
+            "account": "MEMORANDUM — structural core (D1–D3) for S = {sorted 1≤a≤b≤c≤d, a²+b²+c²+d²=4abcd}, mutation x↦4·(product of others)−x then re-sort; root (1,1,1,1); height h(v)=d (decision 4). All proved from definitions SC1–SC2; no external materials exist (SC6).\n\nLEMMA V (Vieta conjugate). If (a,b,c,d)∈S then d′=4abc−d is an integer ≥1 and (a,b,c,d′), re-sorted, lies in S. Proof: d is a root of t²−4abc·t+(a²+b²+c²)=0; the other root d′ has d+d′=4abc∈ℤ and dd′=a²+b²+c²>0, so d′∈ℤ and d′≥1; the equation gives a²+b²+c²+d′²=4abc·d′. ∎\n\nLEMMA L2 (top tie only at root). If c=d then v=(1,1,1,1). Proof: the equation gives a²+b²=(4ab−2)d². Since ab≥1, RHS≥2d²; since a,b≤d, LHS≤2d². Equality: 4ab−2=2 ⇒ ab=1 ⇒ a=b=1, and 2=2d² ⇒ d=1. (Same as the suggested route: d² | a²+b² forces a²+b²∈{d²,2d²}; the first gives 4ab=3, impossible; the second is above.) Hence at every non-root vertex c<d: the maximum coordinate is unique; also a=d⇒c=d⇒root. ∎\n\nLEMMA L1 (descent). At every non-root v: 1≤d′<d. Proof: d′≥1 by Lemma V. Assume d′≥d. Then d²≤dd′=a²+b²+c²≤3c², so d≤c√3. Then 4abc²≤4abcd=a²+b²+c²+d²≤2(a²+b²+c²)≤6c², hence 4ab≤6, i.e. 2ab≤3, so ab=1 and a=b=1. Now d²≤a²+b²+c²=c²+2<(c+1)² (since 2<2c+1 for c≥1), so d≤c; with d≥c, d=c. The equation becomes 2+2c²=4c², so c=1 and v=(1,1,1,1) — contradiction. ∎ Note: no Pell/mod-3 step is needed; the previously suggested exclusion of m²=3c²−2 mod 3 is invalid as stated (m²≡1 mod 3 occurs, e.g. c=1), and this route avoids it entirely.\n\nLEMMA L3 (mutating below the max grows, factor ≥3). At non-root v, mutate x∈{a,b,c}: x′=4(abcd/x)−x≥4d−d=3d>d, because the other three coordinates include d (product ≥d) and x≤d. After re-sorting the new maximum is x′ (other entries ≤d<x′). So every mutation not at d strictly increases height, by factor ≥3 (for x=c the factor is ≥4ab−1). ∎\n\nCOROLLARY (no height-preserving mutation; the d-mutation lowers height). At non-root v: mutating d yields re-sorted (a,b,c,d′) with max=max(c,d′)<d (d′<d by L1, c<d by L2); mutating a,b,c yields max≥3d>d by L3. Hence every mutation strictly changes height. At the root the unique mutated vertex is (1,1,1,3), height 3>1. ∎\n\nTHEOREM D2 (unique height-decreasing mutation). At every non-root v exactly one mutated vertex has height<h(v): the one from mutating the maximum coordinate d; all other coordinate-mutations raise height to ≥3d. Uniqueness is at the level of vertices of the quotient (sorted) graph: if a=b or b=c, some of the four coordinate-mutations coincide after sorting (mutating a vs b when a=b gives the same multiset), but all such coincidences lie among height-increasing mutations, so the height-decreasing vertex is unique; since c<d (L2) it also comes from a unique coordinate index. No mutation fixes height. ∎\n\nTHEOREM D1 (connectivity). Define parent(v), v≠root: mutate at d, re-sort. By the Corollary h(parent(v))=max(c,d′)<d=h(v); by Lemma V parent(v)∈S. Iterating, height is a strictly decreasing positive integer, reaching 1 within d−1 steps; height 1 forces (1,1,1,1) (since 1≤a≤b≤c≤d=1), and (1,1,1,1)∈S as 1+1+1+1=4=4·1·1·1·1. So every v∈S is joined to the root by a mutation path. ∎\n\nTHEOREM D3 (rooted tree). The mutation relation on S is symmetric — coordinate mutation x↦M−x is an involution — so the quotient graph on sorted vertices is undirected. It is connected (D1). It is acyclic: in any cycle take a vertex v of maximal height; its two distinct cycle-neighbors have height≤h(v), cannot exceed h(v) (maximality), and cannot equal it (Corollary), so both are height-decreasing mutations of v — contradicting D2. Connected and acyclic ⇒ tree, rooted at (1,1,1,1) with parent as in D1; a multiple parent (a second lower-height neighbor) would contradict D2 identically. ∎\n\nLABELED OBSERVATIONS (hand-checkable spot checks, reproducible by direct substitution; not an enumeration): O1: (1,1,1,3): 1+1+1+9=12=4·3; d′=4−3=1, parent is root; all four root-mutations give 3, so the root has exactly one child. O2: (1,1,3,11): 1+1+9+121=132=4·33; d′=4·3−11=1, parent (1,1,1,3); mutating c=3 gives 41: (1,1,11,41), max 41≥3·11 (L3 confirmed). O3: (1,3,11,131): 1+9+121+17161=17292=4·4323, from (1,1,3,11) by mutating a 1 (4·1·3·11−1=131); d′=4·3·11−131=1, parent (1,1,3,11). Hence (1,1,3,11) has exactly two children (mutating a vs b coincide since a=b): branching exists and the equal-coordinate subtlety is realized already at depth 2.\n\nSTATUS: D1, D2, D3 PROVED, no counterexamples, no induction failure modes (L1 covers every non-root vertex; termination uses only that height is a positive integer). No growth law is assumed or implied; D4–D8 belong to the sibling threads.",
+            "assumptions": [
+              "Definitions taken from stable context SC1-SC2 as task data: S = sorted quadruples with a^2+b^2+c^2+d^2=4abcd; mutation x -> 4*(product of others) - x followed by re-sorting; permutations identified (C6).",
+              "Height means the maximum coordinate d (decision 4 / C3); coordinate sum is not used as the descent measure.",
+              "No external corpus or materials exist (SC6), so no source-tool citations are possible; every claim is a first-principles derivation included in full in the account, and the three spot checks are hand-verifiable arithmetic.",
+              "The graph is taken as undirected via the involution property of coordinate mutation; under any directed convention the same parent map yields an in-arborescence to the root."
+            ],
+            "boundary_findings": [
+              {
+                "alternative_explanation": null,
+                "consequence_if_absorbed": "The memorandum would silently lack empirical corroboration beyond depth-2 spot checks; mitigated by routing bounded hand-enumeration (d <= 100) to the exception-search thread and by labeling the three substitution checks as observations.",
+                "evidence": [
+                  "SC6: materials list is empty",
+                  "workspace_index: []",
+                  "available_experiments contains only text_statistics"
+                ],
+                "narrative": "This run has no source corpus, no workspace files, and no code execution (SC6, C2; workspace_index empty; only a text_statistics tool exists). All evidence is therefore derivational proof plus hand-checkable arithmetic; independent empirical cross-validation (e.g., brute-force enumeration to d <= 10^4) is impossible inside this interface.",
+                "smallest_suspected_scope": "tooling of this run"
+              },
+              {
+                "alternative_explanation": null,
+                "consequence_if_absorbed": "Downstream synthesis might cite the blocked v1 answers as if they contained results, inflating confidence; the supersedes link from this answer prevents that.",
+                "evidence": [
+                  "answer:work:001-struct-core",
+                  "answer:work:001-exception-search",
+                  "answer:work:001-upper-bound-depth"
+                ],
+                "narrative": "All four v1 answers on the board (struct-core, upper-bound-depth, lower-bound, exception-search) failed with output retries and contain zero evidence; this packet is the first substantive content for D1-D3.",
+                "smallest_suspected_scope": "knowledge-board provenance for this task"
+              }
+            ],
+            "child_packet_ids": [],
+            "claims": [
+              {
+                "basis": "inferred",
+                "citations": [],
+                "confidence": 1.0,
+                "counterevidence": [],
+                "derived_from_claim_ids": [],
+                "id": "work:003-struct-core-v2:C001",
+                "statement": "Vieta conjugate lemma: for (a,b,c,d) in S, d' = 4abc-d is an integer >= 1 and the re-sorted tuple (a,b,c,d') is again in S; mutation is an involution at the coordinate level, so the sorted mutation graph is undirected."
+              },
+              {
+                "basis": "inferred",
+                "citations": [],
+                "confidence": 0.99,
+                "counterevidence": [],
+                "derived_from_claim_ids": [
+                  "work:003-struct-core-v2:C001"
+                ],
+                "id": "work:003-struct-core-v2:C002",
+                "statement": "L2: c=d occurs only at the root (1,1,1,1). Proof: a^2+b^2=(4ab-2)d^2 is simultaneously >= 2d^2 (ab>=1) and <= 2d^2 (a,b<=d), forcing ab=1, a=b=1, then 2=2d^2, d=1. Consequently every non-root vertex has a unique maximum coordinate (c<d), and a=d only at the root."
+              },
+              {
+                "basis": "inferred",
+                "citations": [],
+                "confidence": 0.99,
+                "counterevidence": [
+                  "The mod-3/Pell obstruction suggested in the work:001 prompt (m^2=3c^2-2 impossible mod 3) is false as stated: m^2 = 3c^2-2 ≡ 1 (mod 3), which is a possible residue (c=1 gives m=1). The present route needs no such exclusion."
+                ],
+                "derived_from_claim_ids": [
+                  "work:003-struct-core-v2:C001"
+                ],
+                "id": "work:003-struct-core-v2:C003",
+                "statement": "L1 (descent): at every non-root vertex, 1 <= d' = 4abc-d < d. Proof: d'>=1 by cV; assuming d'>=d gives d^2<=a^2+b^2+c^2<=3c^2, then 4abc^2<=4abcd<=2(a^2+b^2+c^2)<=6c^2, so 2ab<=3, a=b=1; then d^2<=c^2+2<(c+1)^2 forces d=c, and 2+2c^2=4c^2 gives c=1, i.e. the root — contradiction."
+              },
+              {
+                "basis": "inferred",
+                "citations": [],
+                "confidence": 0.99,
+                "counterevidence": [],
+                "derived_from_claim_ids": [
+                  "work:003-struct-core-v2:C001"
+                ],
+                "id": "work:003-struct-core-v2:C004",
+                "statement": "L3: at a non-root vertex, mutating any coordinate x in {a,b,c} gives x' = 4(abcd/x) - x >= 4d - d = 3d > d (the other three coordinates include d, so their product is >= d, and x <= d); after re-sorting the new maximum is x' >= 3d. For x=c the factor is >= 4ab-1."
+              },
+              {
+                "basis": "inferred",
+                "citations": [],
+                "confidence": 0.99,
+                "counterevidence": [],
+                "derived_from_claim_ids": [
+                  "work:003-struct-core-v2:C003",
+                  "work:003-struct-core-v2:C002",
+                  "work:003-struct-core-v2:C004"
+                ],
+                "id": "work:003-struct-core-v2:C005",
+                "statement": "Corollary: no mutation preserves the maximum. At a non-root vertex, mutating d strictly lowers the maximum to max(c,d') < d (by cL1 and cL2); mutating a, b, or c raises it to >= 3d (by cL3). At the root the unique mutation raises height 1 to 3."
+              },
+              {
+                "basis": "inferred",
+                "citations": [],
+                "confidence": 0.99,
+                "counterevidence": [],
+                "derived_from_claim_ids": [
+                  "work:003-struct-core-v2:C005",
+                  "work:003-struct-core-v2:C002",
+                  "work:003-struct-core-v2:C004"
+                ],
+                "id": "work:003-struct-core-v2:C006",
+                "statement": "D2 PROVED: every non-root vertex has a unique height-decreasing mutation as a vertex of the sorted (quotient) graph — the mutation at the maximum coordinate d; all other coordinate-mutations raise the height to >= 3d, and none preserves it. Equal coordinates (a=b or b=c) can make height-increasing coordinate-mutations coincide after sorting, but never affect uniqueness of the height-decreasing one; since c<d at non-roots, that mutation also comes from a unique coordinate index."
+              },
+              {
+                "basis": "inferred",
+                "citations": [],
+                "confidence": 0.99,
+                "counterevidence": [],
+                "derived_from_claim_ids": [
+                  "work:003-struct-core-v2:C005",
+                  "work:003-struct-core-v2:C001"
+                ],
+                "id": "work:003-struct-core-v2:C007",
+                "statement": "D1 PROVED: iterating parent(v) = (mutate at d, re-sort) strictly decreases the positive integer height, so it reaches height 1 within d-1 steps; the only sorted quadruple with d=1 is (1,1,1,1), which satisfies the equation (4=4). Hence every solution is connected to the root by a mutation path."
+              },
+              {
+                "basis": "inferred",
+                "citations": [],
+                "confidence": 0.99,
+                "counterevidence": [],
+                "derived_from_claim_ids": [
+                  "work:003-struct-core-v2:C007",
+                  "work:003-struct-core-v2:C006",
+                  "work:003-struct-core-v2:C005",
+                  "work:003-struct-core-v2:C001"
+                ],
+                "id": "work:003-struct-core-v2:C008",
+                "statement": "D3 PROVED: the quotient mutation graph is a rooted tree. Undirected by the involution property (cV); connected by D1; acyclic because a cycle's maximal-height vertex would have two distinct height-decreasing neighbors, contradicting D2 (heights equal to the maximum are excluded by cCor); multiple parents excluded by the same argument. Parent map as in D1 makes the tree canonical."
+              },
+              {
+                "basis": "inferred",
+                "citations": [],
+                "confidence": 0.98,
+                "counterevidence": [],
+                "derived_from_claim_ids": [],
+                "id": "work:003-struct-core-v2:C009",
+                "statement": "Labeled observations (hand-checkable substitution spot checks, not an enumeration): (1,1,1,3): 1+1+1+9=12=4*3, d'=1 so parent is the root, and the root has exactly one child; (1,1,3,11): 1+1+9+121=132=4*33, d'=1, mutating c gives (1,1,11,41) with 41>=3*11; (1,3,11,131): 1+9+121+17161=17292=4*4323, child of (1,1,3,11) via mutating a 1, d'=1. So (1,1,3,11) has exactly two children: branching exists, and the a=b mutation-coincidence occurs already at depth 2."
+              }
+            ],
+            "content_sha256": "e19298af732337cb855dd1f23c860f32f34066cec94b9368cd9e81559f623d30",
+            "counterevidence": [
+              "The previously suggested mod-3 exclusion route (m^2 = 3c^2 - 2 impossible mod 3) is false as stated — m^2 ≡ 1 (mod 3) is possible; recorded so the flawed route is not resurrected. The proof here bypasses it.",
+              "Re-sorting concern checked: the conjugate d' may exceed c (parent's remaining entries reorder), but max(parent) = max(c, d') < d regardless, so descent is unaffected.",
+              "No counterexample to D1, D2, or D3 was found; all three are proved, so the failure-structure branch of the demand (exhibit a component, cycle, or multiple parent) is vacuous."
+            ],
+            "id": "packet:work:003-struct-core-v2",
+            "knowledge_links": [
+              {
+                "rationale": "Provides the required compact proofs of L1, L2, L3 and the deductions D1, D2, D3 with the equal-coordinate subtlety addressed.",
+                "relation": "answers",
+                "source_id": "self",
+                "target_id": "question:work:003-struct-core-v2"
+              },
+              {
+                "rationale": "Same demands; the v1 attempt produced no evidence, this packet completes it via a corrected elementary route.",
+                "relation": "answers",
+                "source_id": "self",
+                "target_id": "question:work:001-struct-core"
+              },
+              {
+                "rationale": "Proves connectivity of every solution to (1,1,1,1) by strict height descent with termination at the unique d=1 vertex.",
+                "relation": "answers",
+                "source_id": "self",
+                "target_id": "question:demand:D1"
+              },
+              {
+                "rationale": "Proves uniqueness of the height-decreasing mutation (maximum-coordinate semantics) including the equal-coordinate vertex-level subtlety.",
+                "relation": "answers",
+                "source_id": "self",
+                "target_id": "question:demand:D2"
+              },
+              {
+                "rationale": "Proves the quotient mutation graph is a rooted tree; cycles and multiple parents excluded via D2 plus the no-height-preserving-mutation corollary.",
+                "relation": "answers",
+                "source_id": "self",
+                "target_id": "question:demand:D3"
+              },
+              {
+                "rationale": "The v1 answer is blocked with no claims; this packet supplies the complete proofs it failed to produce.",
+                "relation": "supersedes",
+                "source_id": "self",
+                "target_id": "answer:work:001-struct-core"
+              }
+            ],
+            "next_observation": null,
+            "node_id": "work:003-struct-core-v2",
+            "objective": "Prove D1-D3 compactly for S = {sorted quadruples 1<=a<=b<=c<=d, a^2+b^2+c^2+d^2=4abcd} under Vieta mutation (x_i -> 4*(product of others) - x_i, then re-sort), with root (1,1,1,1). REQUIRED ROUTE (verify, fix, or replace, but keep it elementary): (L1, descent) at any non-root vertex the conjugate d' = 4abc - d = (a^2+b^2+c^2)/d is an integer >= 1; prove d' < d by contradiction: d' >= d gives a^2+b^2+c^2 >= d^2, and combined with a^2+b^2+c^2 <= 3c^2 gives d <= c*sqrt(3); feeding into the equation gives 2ab <= 3, hence a=b=1; then 2+c^2+d^2 = 4cd with c <= d <= 3c/2 forces c=1 and d=1, i.e. the root - contradiction. (L2) c = d only at the root: from a^2+b^2+2d^2 = 4abd^2 deduce d^2 | a^2+b^2 and a^2+b^2 <= 2d^2, so a^2+b^2 in {d^2, 2d^2}; the first gives 3=4ab (impossible), the second gives ab=1 and then d=1. (L3) mutating any coordinate strictly below the maximum strictly increases the maximum: new value >= 4ab d - d >= 3d > d since ab >= 1 (and a=d only at root by L2-type argument). Conclude: (D2) the mutation at the unique maximal coordinate is the unique height-decreasing mutation, i.e. strictly decreases d; (D1) iterating it strictly decreases the positive integer d, so every vertex descends to d=1, and the only vertex with d=1 is (1,1,1,1) - verify this endpoint claim; (D3) the quotient graph is a rooted tree: a cycle's maximal-height vertex would have two distinct height-decreasing mutations, contradicting D2; multiple parents likewise. Address explicitly the subtlety that equal coordinates (a=b or b=c) make some of the 4 coordinate-mutations coincide after sorting, so 'unique height-decreasing mutation' is a statement about distinct mutated vertices, not coordinate indices. KEEP THE ANSWER COMPACT (target well under 1200 words): lemma - proof format, no digressions, no worked tables beyond at most 3 one-line substitution checks. If any lemma fails, stop and report the verified counterexample instead.",
+            "raised_questions": [
+              {
+                "acceptance_condition": "A proved dichotomy (growth factor 3 only on an explicitly bounded sub-family; factor >= 7 elsewhere) together with a proved sublinear or improved-constant upper bound for N(H), or a verified counterexample vertex off the slow family with a child of factor < 7.",
+                "discriminating_outcomes": [
+                  "Outcome A: slow-growth vertices with d <= H are O(log H), yielding N(H) = O(H^alpha), alpha < 1 — the O(H) bound is improvable.",
+                  "Outcome B: a verified infinite family of slow-growth vertices beyond the (1,1,c,d)-chain exists — the O(H) linear bound is essentially sharp and alpha = 1."
+                ],
+                "local_id": "rq1",
+                "rationale": "The tree proof shows chain vertices with a=b have only 2 children and slowest growth factor 3, while ab >= 2 forces factor >= 7; quantifying the rare-slow-versus-common-fast split is the exact lever the O(H) bound needs, and the structural lemmas here make the split well-defined.",
+                "required_source_hints": [],
+                "tags": [
+                  "method",
+                  "measurement",
+                  "uncertainty"
+                ],
+                "target_question_ids": [
+                  "question:work:003-upper-depth-v2"
+                ],
+                "text": "For the D4 sharpening: prove that any vertex with a >= 2 (equivalently, off the (1,1,c,d)-chain and its immediate children) has every child growing by factor >= 4ab-1 >= 7, and bound the number of vertices with d <= H that have a = b = 1 or ab <= 2; conclude whether N(H) = O(H^alpha) for some alpha < 1."
+              }
+            ],
+            "source_ids_consulted": [],
+            "sufficiency": "ready_to_synthesize",
+            "unresolved": [
+              "Nothing within D1-D3 remains open. Quantitative sharpening for the counting threads (e.g., how often a<b so vertices have the full 3 children, versus the a=b coincidence that drops chain vertices to 2 children) belongs to question:work:003-upper-depth-v2; bounded hand-enumeration corroboration belongs to question:work:003-exception-search-v2.",
+              "Runtime rejected knowledge-link proposal outside the frozen board or with invalid endpoint types: self supports question:work:003-upper-depth-v2",
+              "Runtime rejected knowledge-link proposal outside the frozen board or with invalid endpoint types: self supports question:work:003-lower-bound-v2"
+            ]
+          },
+          "packet_id": "packet:work:003-struct-core-v2",
+          "question_ids": [
+            "question:demand:D1",
+            "question:demand:D2",
+            "question:demand:D3",
+            "question:work:001-struct-core",
+            "question:work:003-struct-core-v2"
+          ],
+          "sufficiency": "ready_to_synthesize",
+          "summary": "MEMORANDUM — structural core (D1–D3) for S = {sorted 1≤a≤b≤c≤d, a²+b²+c²+d²=4abcd}, mutation x↦4·(product of others)−x then re-sort; root (1,1,1,1); height h(v)=d (decision 4). All proved from definitions SC1–SC2; no external materials exist (SC6).\n\nLEMMA V (Vieta conjugate). If (a,b,c,d)∈S then d′=4abc−d is an integer ≥1 and (a,b,c,d′), re-sorted, lies in S. Proof: d is a root of t²−4abc·t+(a²+b²+c²)=0; the other root d′ has d+d′=4abc∈ℤ and dd′=a²+b²+c²>0, so d′∈ℤ and d′≥1; the equation gives a²+b²+c²+d′²=4abc·d′. ∎\n\nLEMMA L2 (top tie only at root). If c=d then v=(1,1,1,1). Proof: the equation gives a²+b²=(4ab−2)d². Since ab≥1, RHS≥2d²; since a,b≤d, LHS≤2d². Equality: 4ab−2=2 ⇒ ab=1 ⇒ a=b=1, and 2=2d² ⇒ d=1. (Same as the suggested route: d² | a²+b² forces a²+b²∈{d²,2d²}; the first gives 4ab=3, impossible; the second is above.) Hence at every non-root vertex c<d: the maximum coordinate is unique; also a=d⇒c=d⇒root. ∎\n\nLEMMA L1 (descent). At every non-root v: 1≤d′<d. Proof: d′≥1 by Lemma V. Assume d′≥d. Then d²≤dd′=a²+b²+c²≤3c², so d≤c√3. Then 4abc²≤4abcd=a²+b²+c²+d²≤2(a²+b²+c²)≤6c², hence 4ab≤6, i.e. 2ab≤3, so ab=1 and a=b=1. Now d²≤a²+b²+c²=c²+2<(c+1)² (since 2<2c+1 for c≥1), so d≤c; with d≥c, d=c. The equation becomes 2+2c²=4c², so c=1 and v=(1,1,1,1) — contradiction. ∎ Note: no Pell/mod-3 step is needed; the previously suggested exclusion of m²=3c²−2 mod 3 is invalid as stated (m²≡1 mod 3 occurs, e.g. c=1), and this route avoids it entirely.\n\nLEMMA L3 (mutating below the max grows, factor ≥3). At non-root v, mutate x∈{a,b,c}: x′=4(abcd/x)−x≥4d−d=3d>d, because the other three coordinates include d (product ≥d) and x≤d. After re-sorting the new maximum is x′ (other entries ≤d<x′). So every mutation not at d strictly increases height, by factor ≥3 (for x=c the factor is ≥4ab−1). ∎\n\nCOROLLARY (no height-preserving mutation; the d-mutation lowers height). At non-root v: mutating d yields re-sorted (a,b,c,d′) with max=max(c,d′)<d (d′<d by L1, c<d by L2); mutating a,b,c yields max≥3d>d by L3. Hence every mutation strictly changes height. At the root the unique mutated vertex is (1,1,1,3), height 3>1. ∎\n\nTHEOREM D2 (unique height-decreasing mutation). At every non-root v exactly one mutated vertex has height<h(v): the one from mutating the maximum coordinate d; all other coordinate-mutations raise height to ≥3d. Uniqueness is at the level of vertices of the quotient (sorted) graph: if a=b or b=c, some of the four coordinate-mutations coincide after sorting (mutating a vs b when a=b gives the same multiset), but all such coincidences lie among height-increasing mutations, so the height-decreasing vertex is unique; since c<d (L2) it also comes from a unique coordinate index. No mutation fixes height. ∎\n\nTHEOREM D1 (connectivity). Define parent(v), v≠root: mutate at d, re-sort. By the Corollary h(parent(v))=max(c,d′)<d=h(v); by Lemma V parent(v)∈S. Iterating, height is a strictly decreasing positive integer, reaching 1 within d−1 steps; height 1 forces (1,1,1,1) (since 1≤a≤b≤c≤d=1), and (1,1,1,1)∈S as 1+1+1+1=4=4·1·1·1·1. So every v∈S is joined to the root by a mutation path. ∎\n\nTHEOREM D3 (rooted tree). The mutation relation on S is symmetric — coordinate mutation x↦M−x is an involution — so the quotient graph on sorted vertices is undirected. It is connected (D1). It is acyclic: in any cycle take a vertex v of maximal height; its two distinct cycle-neighbors have height≤h(v), cannot exceed h(v) (maximality), and cannot equal it (Corollary), so both are height-decreasing mutations of v — contradicting D2. Connected and acyclic ⇒ tree, rooted at (1,1,1,1) with parent as in D1; a multiple parent (a second lower-height neighbor) would contradict D2 identically. ∎\n\nLABELED OBSERVATIONS (hand-checkable spot checks, reproducible by direct substitution; not an enumeration): O1: (1,1,1,3): 1+1+1+9=12=4·3; d′=4−3=1, parent is root; all four root-mutations give 3, so the root has exactly one child. O2: (1,1,3,11): 1+1+9+121=132=4·33; d′=4·3−11=1, parent (1,1,1,3); mutating c=3 gives 41: (1,1,11,41), max 41≥3·11 (L3 confirmed). O3: (1,3,11,131): 1+9+121+17161=17292=4·4323, from (1,1,3,11) by mutating a 1 (4·1·3·11−1=131); d′=4·3·11−131=1, parent (1,1,3,11). Hence (1,1,3,11) has exactly two children (mutating a vs b coincide since a=b): branching exists and the equal-coordinate subtlety is realized already at depth 2.\n\nSTATUS: D1, D2, D3 PROVED, no counterexamples, no induction failure modes (L1 covers every non-root vertex; termination uses only that height is a positive integer). No growth law is assumed or implied; D4–D8 belong to the sibling threads.",
+          "tags": [
+            "method",
+            "evidence",
+            "constraint",
+            "counterexample",
+            "uncertainty"
+          ],
+          "unresolved": [
+            "Nothing within D1-D3 remains open. Quantitative sharpening for the counting threads (e.g., how often a<b so vertices have the full 3 children, versus the a=b coincidence that drops chain vertices to 2 children) belongs to question:work:003-upper-depth-v2; bounded hand-enumeration corroboration belongs to question:work:003-exception-search-v2.",
+            "Runtime rejected knowledge-link proposal outside the frozen board or with invalid endpoint types: self supports question:work:003-upper-depth-v2",
+            "Runtime rejected knowledge-link proposal outside the frozen board or with invalid endpoint types: self supports question:work:003-lower-bound-v2"
+          ]
+        },
+        "id": "answer:work:003-struct-core-v2",
+        "incoming_links": [],
+        "kind": "answer",
+        "outgoing_links": [
+          {
+            "content_sha256": "0b5077e0a97acc33c77d711fd289147e8deda2fcb92b9969418f44346ad5027c",
+            "id": "link:0b5077e0a97acc33c77d711f",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:003-struct-core-v2",
+            "target_id": "question:demand:D1"
+          },
+          {
+            "content_sha256": "0b919d6570ae78ddc10da79d1e0021f4ac570c474276617e6e3e2d453729731a",
+            "id": "link:0b919d6570ae78ddc10da79d",
+            "origin": "agent",
+            "proposed_by_node_id": "work:003-struct-core-v2",
+            "rationale": "The v1 answer is blocked with no claims; this packet supplies the complete proofs it failed to produce.",
+            "relation": "supersedes",
+            "source_id": "answer:work:003-struct-core-v2",
+            "target_id": "answer:work:001-struct-core"
+          },
+          {
+            "content_sha256": "24d8ee8c18c9e342645aff1995c2a853496a9a8e62fd905d185763c063ea94a3",
+            "id": "link:24d8ee8c18c9e342645aff19",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "answers",
+            "source_id": "answer:work:003-struct-core-v2",
+            "target_id": "question:work:003-struct-core-v2"
+          },
+          {
+            "content_sha256": "2aba7c57481ab497bddfd575f0c616f8c035a7d711b19b64297f469cc81df1e3",
+            "id": "link:2aba7c57481ab497bddfd575",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "raises",
+            "source_id": "answer:work:003-struct-core-v2",
+            "target_id": "question:raised:e19298af7323:rq1"
+          },
+          {
+            "content_sha256": "446dfa425d0c7be8f0e36599153ede71dbf2b3af4a5271bd95e5b93c899a414c",
+            "id": "link:446dfa425d0c7be8f0e36599",
+            "origin": "agent",
+            "proposed_by_node_id": "work:003-struct-core-v2",
+            "rationale": "Provides the required compact proofs of L1, L2, L3 and the deductions D1, D2, D3 with the equal-coordinate subtlety addressed.",
+            "relation": "answers",
+            "source_id": "answer:work:003-struct-core-v2",
+            "target_id": "question:work:003-struct-core-v2"
+          },
+          {
+            "content_sha256": "473e1aaadaa53de12a6d4bd69d68fca8a5e16d395cff609c6a74170b89e03413",
+            "id": "link:473e1aaadaa53de12a6d4bd6",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:003-struct-core-v2",
+            "target_id": "question:demand:D2"
+          },
+          {
+            "content_sha256": "51f0bdec2000df1b3086afb613d35239e5a51a4e15f8a38dbdaeb87865db059f",
+            "id": "link:51f0bdec2000df1b3086afb6",
+            "origin": "agent",
+            "proposed_by_node_id": "work:003-struct-core-v2",
+            "rationale": "Proves uniqueness of the height-decreasing mutation (maximum-coordinate semantics) including the equal-coordinate vertex-level subtlety.",
+            "relation": "answers",
+            "source_id": "answer:work:003-struct-core-v2",
+            "target_id": "question:demand:D2"
+          },
+          {
+            "content_sha256": "82856e58db425e7d27c1438cd4a05535933ce17cd876156179b2750d73fa921e",
+            "id": "link:82856e58db425e7d27c1438c",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:003-struct-core-v2",
+            "target_id": "question:demand:D3"
+          },
+          {
+            "content_sha256": "92096e0e356c6f248d8db95449bab73a2d9fbadb9bebfac89cac8e38d1de47d2",
+            "id": "link:92096e0e356c6f248d8db954",
+            "origin": "agent",
+            "proposed_by_node_id": "work:003-struct-core-v2",
+            "rationale": "Proves connectivity of every solution to (1,1,1,1) by strict height descent with termination at the unique d=1 vertex.",
+            "relation": "answers",
+            "source_id": "answer:work:003-struct-core-v2",
+            "target_id": "question:demand:D1"
+          },
+          {
+            "content_sha256": "a6fb1feb1c5f50658e3551c2c6179c474b1759e1b5f9c7b01935e667a55f4451",
+            "id": "link:a6fb1feb1c5f50658e3551c2",
+            "origin": "agent",
+            "proposed_by_node_id": "work:003-struct-core-v2",
+            "rationale": "Proves the quotient mutation graph is a rooted tree; cycles and multiple parents excluded via D2 plus the no-height-preserving-mutation corollary.",
+            "relation": "answers",
+            "source_id": "answer:work:003-struct-core-v2",
+            "target_id": "question:demand:D3"
+          },
+          {
+            "content_sha256": "ad3e0f6a8fc36fd6ad98e6a649e85f045173cb270196ad897abcdf973218d3f0",
+            "id": "link:ad3e0f6a8fc36fd6ad98e6a6",
+            "origin": "agent",
+            "proposed_by_node_id": "work:003-struct-core-v2",
+            "rationale": "Same demands; the v1 attempt produced no evidence, this packet completes it via a corrected elementary route.",
+            "relation": "answers",
+            "source_id": "answer:work:003-struct-core-v2",
+            "target_id": "question:work:001-struct-core"
+          },
+          {
+            "content_sha256": "d08be85c1bd1614c6d2db8ab251e8bdd60358b0151e9a90d1eefa90b2d9d4dbc",
+            "id": "link:d08be85c1bd1614c6d2db8ab",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:003-struct-core-v2",
+            "target_id": "question:work:001-struct-core"
+          }
+        ]
+      },
+      "result_ids": [
+        "answer:work:003-struct-core-v2"
+      ],
+      "result_sha256": "ae66ed583374560465f9fe37315affe4d8e76ef6dcefa4109cdeeb78f12d2df0",
+      "sequence": 2,
+      "tool": "get_entry"
+    },
+    {
+      "arguments": {
+        "entry_id": "answer:work:003-exception-search-v2"
+      },
+      "result": {
+        "content": {
+          "claim_ids": [],
+          "content_sha256": "57c2dd395c406fbbd639c495c9a1bfd8fd5f73ed312bac7025eb07b9b91ccdb9",
+          "id": "answer:work:003-exception-search-v2",
+          "node_id": "work:003-exception-search-v2",
+          "packet": {
+            "account": "Investigation failed before producing evidence: UnexpectedModelBehavior: Exceeded maximum output retries (2)",
+            "assumptions": [],
+            "boundary_findings": [],
+            "child_packet_ids": [],
+            "claims": [],
+            "content_sha256": "446ab8e9a3cd6c89de18b19102494e0ae3cbc54b236b22cffa13828eaf89fc07",
+            "counterevidence": [],
+            "id": "packet:work:003-exception-search-v2",
+            "knowledge_links": [],
+            "next_observation": null,
+            "node_id": "work:003-exception-search-v2",
+            "objective": "D7+D9: Perform a BOUNDED, hand-checkable enumeration and report labeled observations only. Procedure (state it explicitly so it is reproducible by hand): (Method 1, direct search) enumerate all candidate solutions with d <= 100 by looping over sorted triples 1 <= a <= b <= c <= 100 and solving d^2 - (4abc) d + (a^2+b^2+c^2) = 0 for integer d >= c, using the cheap necessary condition d | a^2+b^2+c^2 to prune; (Method 2, BFS) list all vertices reachable from (1,1,1,1) by breadth-first mutation, mutating all 4 coordinates, re-sorting, discarding d > 100. Expected reachable set (verify each by direct substitution, one line each): (1,1,1,1), (1,1,1,3), (1,1,3,11), (1,1,11,41) - check whether anything else with d <= 100 appears (e.g. from (1,1,3,11), mutating a gives 131 > 100; from (1,1,11,41), mutating 11 gives 153 > 100, mutating 1 gives 1803 > 100). Report as LABELED OBSERVATIONS (enumeration bound d <= 100): (a) the complete verified table with one-line substitution checks; (b) whether any solution with c = d occurs; (c) whether any vertex has two distinct height-decreasing mutations / multiple parents (within the BFS check each vertex's parent is unique); (d) whether the two methods agree exactly (any direct-search solution not reachable from the root would locally refute D1); (e) descent sanity: for each non-root vertex compute d' = 4abc - d and confirm 1 <= d' < d, exhibiting the parent edge; (f) note any induction failure modes observed (e.g. re-sorting effects) or state their absence within the bound. STRICT BREVITY: total well under 900 words; distinguish verified facts within the bound from non-occurrences (which prove nothing beyond d <= 100).",
+            "raised_questions": [],
+            "source_ids_consulted": [],
+            "sufficiency": "blocked",
+            "unresolved": [
+              "Investigation failed before producing evidence: UnexpectedModelBehavior: Exceeded maximum output retries (2)"
+            ]
+          },
+          "packet_id": "packet:work:003-exception-search-v2",
+          "question_ids": [
+            "question:demand:D7",
+            "question:demand:D9",
+            "question:work:001-exception-search",
+            "question:work:003-exception-search-v2"
+          ],
+          "sufficiency": "blocked",
+          "summary": "Investigation failed before producing evidence: UnexpectedModelBehavior: Exceeded maximum output retries (2)",
+          "tags": [
+            "counterexample",
+            "evidence",
+            "risk",
+            "measurement",
+            "uncertainty"
+          ],
+          "unresolved": [
+            "Investigation failed before producing evidence: UnexpectedModelBehavior: Exceeded maximum output retries (2)"
+          ]
+        },
+        "id": "answer:work:003-exception-search-v2",
+        "incoming_links": [],
+        "kind": "answer",
+        "outgoing_links": [
+          {
+            "content_sha256": "0dcd52c6530a1f0af6e102b5ba51088ffcd08d5c577f4166443448cc736707de",
+            "id": "link:0dcd52c6530a1f0af6e102b5",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:003-exception-search-v2",
+            "target_id": "question:work:001-exception-search"
+          },
+          {
+            "content_sha256": "1496110f801e2239f42fc88c4e0087ae6302df667882afa3b700b94b6a2e10d0",
+            "id": "link:1496110f801e2239f42fc88c",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:003-exception-search-v2",
+            "target_id": "question:work:003-exception-search-v2"
+          },
+          {
+            "content_sha256": "16b88c4205b858e07e2cfdf2beeedd9559db216ef1662d14e1bb2f100689e312",
+            "id": "link:16b88c4205b858e07e2cfdf2",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:003-exception-search-v2",
+            "target_id": "question:demand:D7"
+          },
+          {
+            "content_sha256": "e2c596341241436663ab5d2737d72fc62a4b12d6c9339e058ccd104b9e22ea85",
+            "id": "link:e2c596341241436663ab5d27",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:003-exception-search-v2",
+            "target_id": "question:demand:D9"
+          }
+        ]
+      },
+      "result_ids": [
+        "answer:work:003-exception-search-v2"
+      ],
+      "result_sha256": "c275a48bc76b49db923e3afa3184aa6d0813a9e1da8fa5e9dae168b330255e3d",
+      "sequence": 5,
+      "tool": "get_entry"
+    }
+  ],
+  "snapshot_sha256": "070f660b77ad7af57c26a9cbafbe3ed1b1442fc7437f1d103cd06996edf37651"
+}

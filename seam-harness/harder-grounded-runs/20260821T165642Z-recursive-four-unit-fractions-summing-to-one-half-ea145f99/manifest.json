@@ -1,0 +1,826 @@
+{
+  "created_at": "2026-08-21T16:56:42.884831+00:00",
+  "events": [
+    {
+      "event_hash": "66a00517aeab8582f70638aec6029dbbb0abbd381b3da09747bd92590a2e00c6",
+      "index": 0,
+      "metadata": {},
+      "name": "recursive-run",
+      "path": "00-input/recursive-run.json",
+      "previous_event_hash": null,
+      "record_sha256": "cc8420ee1a7affde810815b364b494fe480885d8da0a1272a3479176dfd00f06",
+      "stage": "00-input",
+      "timestamp": "2026-08-21T16:56:42.915851+00:00"
+    },
+    {
+      "event_hash": "8763cb72b72b99736b5eaf6961a5d64262e1aad3ab22cd4a6126dab4194958a1",
+      "index": 1,
+      "metadata": {},
+      "name": "workspace-index",
+      "path": "00-input/workspace-index.json",
+      "previous_event_hash": "66a00517aeab8582f70638aec6029dbbb0abbd381b3da09747bd92590a2e00c6",
+      "record_sha256": "0715d712e1eab2deae25867dd4e11005bbd6e8c4833e2d9bc7f7525b6284b403",
+      "stage": "00-input",
+      "timestamp": "2026-08-21T16:56:42.933057+00:00"
+    },
+    {
+      "event_hash": "00e0b938aa396ebdb7b2ec1c2c506a21c93b9d20f0e17954dfdfdb8f7bcf0597",
+      "index": 2,
+      "metadata": {
+        "model": "fireworks:accounts/fireworks/routers/kimi-k3-fast",
+        "role": "recursive_planner"
+      },
+      "name": "call-0001-recursive-planner",
+      "path": "01-call-inputs/call-0001-recursive-planner.json",
+      "previous_event_hash": "8763cb72b72b99736b5eaf6961a5d64262e1aad3ab22cd4a6126dab4194958a1",
+      "record_sha256": "78073f9b3a9bd6e189f9807d082fa0ef645ec4fdc89966357cb15116c8df65cb",
+      "stage": "01-call-inputs",
+      "timestamp": "2026-08-21T16:56:42.941987+00:00"
+    },
+    {
+      "event_hash": "d1a1243318df6e096c5dc112d9a807be2586e1d2fc85e9fcae68589bea2f800d",
+      "index": 3,
+      "metadata": {
+        "call_id": "call-0001-recursive-planner",
+        "elapsed_ms": 125586,
+        "input_sha256": "d55da492d5e40b6474d949f9228db2d8f8e92e9c1d09ac5a992575f714d3d81e",
+        "model": "fireworks:accounts/fireworks/routers/kimi-k3-fast",
+        "role": "recursive_planner",
+        "usage": {
+          "cache_read_tokens": 2678,
+          "details": {
+            "reasoning_tokens": 2803
+          },
+          "input_tokens": 11442,
+          "output_tokens": 9326,
+          "requests": 2
+        }
+      },
+      "name": "root-round-01",
+      "path": "10-node-plans/root-round-01.json",
+      "previous_event_hash": "00e0b938aa396ebdb7b2ec1c2c506a21c93b9d20f0e17954dfdfdb8f7bcf0597",
+      "record_sha256": "de14ed6cf4f4414ecab2c69457704b5dceb2814b0a0f81e5bc72727b213b1ad5",
+      "stage": "10-node-plans",
+      "timestamp": "2026-08-21T16:58:48.620010+00:00"
+    },
+    {
+      "event_hash": "80df585a9102e5e438461cd27ed17d4615b8ad7bff865f15bafc1c9c4b6e5013",
+      "index": 4,
+      "metadata": {
+        "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+        "role": "recursive_planner"
+      },
+      "name": "call-0002-recursive-planner",
+      "path": "01-call-inputs/call-0002-recursive-planner.json",
+      "previous_event_hash": "d1a1243318df6e096c5dc112d9a807be2586e1d2fc85e9fcae68589bea2f800d",
+      "record_sha256": "e3e229563e2ebfeabd1e9ae35f9aec21509e73a48c15c142dc1fd67a3a6e0ecc",
+      "stage": "01-call-inputs",
+      "timestamp": "2026-08-21T16:58:48.649928+00:00"
+    },
+    {
+      "event_hash": "7f8478e171e052f5e1abe2fa036d0e2f069a02285d51ea5f644c5e5ad42e93ca",
+      "index": 5,
+      "metadata": {
+        "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+        "role": "recursive_planner"
+      },
+      "name": "call-0003-recursive-planner",
+      "path": "01-call-inputs/call-0003-recursive-planner.json",
+      "previous_event_hash": "80df585a9102e5e438461cd27ed17d4615b8ad7bff865f15bafc1c9c4b6e5013",
+      "record_sha256": "8981f7cdd058ec93031116d51b6d03a9b7d1942c6ef7ea70b8ff2a8d2d3b2be1",
+      "stage": "01-call-inputs",
+      "timestamp": "2026-08-21T16:58:48.768884+00:00"
+    },
+    {
+      "event_hash": "596b975c78711ec52996868583dc1eb9c8f0054cad54fa11297333c373fa058c",
+      "index": 6,
+      "metadata": {
+        "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+        "role": "recursive_planner"
+      },
+      "name": "call-0004-recursive-planner",
+      "path": "01-call-inputs/call-0004-recursive-planner.json",
+      "previous_event_hash": "7f8478e171e052f5e1abe2fa036d0e2f069a02285d51ea5f644c5e5ad42e93ca",
+      "record_sha256": "7f7d38cef0f26b2a691b7ea6ff702ef511dbe27b787862d2b019894e7f0160d7",
+      "stage": "01-call-inputs",
+      "timestamp": "2026-08-21T16:58:48.958902+00:00"
+    },
+    {
+      "event_hash": "b4f68d5682f1a6be0b52aa2b30f28ff994001d101115823480fa9608772de208",
+      "index": 7,
+      "metadata": {
+        "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+        "role": "recursive_planner"
+      },
+      "name": "call-0005-recursive-planner",
+      "path": "01-call-inputs/call-0005-recursive-planner.json",
+      "previous_event_hash": "596b975c78711ec52996868583dc1eb9c8f0054cad54fa11297333c373fa058c",
+      "record_sha256": "b24d1428d111004d434eec2844ac0ca40b2752db35acf35885b9de6ac3288b2e",
+      "stage": "01-call-inputs",
+      "timestamp": "2026-08-21T16:58:49.147537+00:00"
+    },
+    {
+      "event_hash": "fd2bfdf0b2ad41649e47e6c8325b7b56d0227904c9ad6a3eb0f0dfa8c68a9e8a",
+      "index": 8,
+      "metadata": {
+        "call_id": "call-0004-recursive-planner",
+        "elapsed_ms": 6471,
+        "input_sha256": "665b1c3de5368aefeca0a93d2691321fc0924e9b162118018a534716f92c2a74",
+        "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+        "role": "recursive_planner",
+        "usage": {
+          "cache_read_tokens": 0,
+          "details": {
+            "reasoning_tokens": 0
+          },
+          "input_tokens": 9916,
+          "output_tokens": 364,
+          "requests": 1
+        }
+      },
+      "name": "root.03-enum-x34-round-01",
+      "path": "10-node-plans/root.03-enum-x34-round-01.json",
+      "previous_event_hash": "b4f68d5682f1a6be0b52aa2b30f28ff994001d101115823480fa9608772de208",
+      "record_sha256": "32d7899561204f8de03faa2c9cd688ad5bd785deb78174f06cceaed2469e7a35",
+      "stage": "10-node-plans",
+      "timestamp": "2026-08-21T16:58:55.494666+00:00"
+    },
+    {
+      "event_hash": "73ea003508538689297086fe7fdea1b81963839e35729b279ef3bf370a0f3f24",
+      "index": 9,
+      "metadata": {
+        "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+        "role": "frontier_researcher"
+      },
+      "name": "call-0006-frontier-researcher",
+      "path": "01-call-inputs/call-0006-frontier-researcher.json",
+      "previous_event_hash": "fd2bfdf0b2ad41649e47e6c8325b7b56d0227904c9ad6a3eb0f0dfa8c68a9e8a",
+      "record_sha256": "5ebfd561bce1bf8cdb65bc5eb90c01f20c6e7c13002295760c4b1f8bfc13ea86",
+      "stage": "01-call-inputs",
+      "timestamp": "2026-08-21T16:58:55.564805+00:00"
+    },
+    {
+      "event_hash": "e897d1f14b353388e1d2e10e221e51a4b96661d58e95f70d9194832c653bf77b",
+      "index": 10,
+      "metadata": {
+        "call_id": "call-0005-recursive-planner",
+        "elapsed_ms": 7699,
+        "input_sha256": "4f07e69e823c9ee823b1efb1bb953f498c9a5945dbc5e30d8c480e95f7d5f5af",
+        "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+        "role": "recursive_planner",
+        "usage": {
+          "cache_read_tokens": 0,
+          "details": {
+            "reasoning_tokens": 0
+          },
+          "input_tokens": 9902,
+          "output_tokens": 422,
+          "requests": 1
+        }
+      },
+      "name": "root.04-enum-x5678-round-01",
+      "path": "10-node-plans/root.04-enum-x5678-round-01.json",
+      "previous_event_hash": "73ea003508538689297086fe7fdea1b81963839e35729b279ef3bf370a0f3f24",
+      "record_sha256": "f838da3e3029eb0f30a91d5f7cd7a90be18404d4a56331f4c38d4790209435ad",
+      "stage": "10-node-plans",
+      "timestamp": "2026-08-21T16:58:56.850662+00:00"
+    },
+    {
+      "event_hash": "baf89c1594c91e0b5c69c557084c32acadb9998176115d2dd05aceb8f5a0da36",
+      "index": 11,
+      "metadata": {
+        "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+        "role": "frontier_researcher"
+      },
+      "name": "call-0007-frontier-researcher",
+      "path": "01-call-inputs/call-0007-frontier-researcher.json",
+      "previous_event_hash": "e897d1f14b353388e1d2e10e221e51a4b96661d58e95f70d9194832c653bf77b",
+      "record_sha256": "b302a3038308dfa5b146c518e5ea18a20d1dd5d2e078ffce6a8deb779652133d",
+      "stage": "01-call-inputs",
+      "timestamp": "2026-08-21T16:58:56.856544+00:00"
+    },
+    {
+      "event_hash": "6e1c9ccc6fcfe22e815ca8b7f58dc7469b99333bf50e7c2c1bc3a23e2302aca7",
+      "index": 12,
+      "metadata": {
+        "call_id": "call-0002-recursive-planner",
+        "elapsed_ms": 8314,
+        "input_sha256": "7da5d86961cd08cccdecd9db8e3bbf9f007409faf0a442d807a58a17d16aa383",
+        "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+        "role": "recursive_planner",
+        "usage": {
+          "cache_read_tokens": 0,
+          "details": {
+            "reasoning_tokens": 0
+          },
+          "input_tokens": 2815,
+          "output_tokens": 652,
+          "requests": 1
+        }
+      },
+      "name": "root.01-bounds-round-01",
+      "path": "10-node-plans/root.01-bounds-round-01.json",
+      "previous_event_hash": "baf89c1594c91e0b5c69c557084c32acadb9998176115d2dd05aceb8f5a0da36",
+      "record_sha256": "87ef5ee8ea1f68cfc50c22b3d23f0393abdeeec446757c9a9babdfd55747831c",
+      "stage": "10-node-plans",
+      "timestamp": "2026-08-21T16:58:56.974588+00:00"
+    },
+    {
+      "event_hash": "cd5ff82777f4cd78933830216d3b75e44d5a8531ee31db36f2c9721c34473ae6",
+      "index": 13,
+      "metadata": {
+        "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+        "role": "frontier_researcher"
+      },
+      "name": "call-0008-frontier-researcher",
+      "path": "01-call-inputs/call-0008-frontier-researcher.json",
+      "previous_event_hash": "6e1c9ccc6fcfe22e815ca8b7f58dc7469b99333bf50e7c2c1bc3a23e2302aca7",
+      "record_sha256": "1c214865ae7ba9556ddadf5f7b136e9e9a7d1ddb5d4609b8f973b266755e2b6d",
+      "stage": "01-call-inputs",
+      "timestamp": "2026-08-21T16:58:57.042258+00:00"
+    },
+    {
+      "event_hash": "eaaecae15a608d686752e0860a74d684c7064c75c1ce1554d33f3abd6e975bcd",
+      "index": 14,
+      "metadata": {
+        "call_id": "call-0003-recursive-planner",
+        "elapsed_ms": 19263,
+        "input_sha256": "c3f62ec3c89f7c0fe13b593250bb69c01ff2c922ed51d88b7a21dad1532f532a",
+        "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+        "role": "recursive_planner",
+        "usage": {
+          "cache_read_tokens": 0,
+          "details": {
+            "reasoning_tokens": 0
+          },
+          "input_tokens": 2761,
+          "output_tokens": 1766,
+          "requests": 1
+        }
+      },
+      "name": "root.02-lemma-round-01",
+      "path": "10-node-plans/root.02-lemma-round-01.json",
+      "previous_event_hash": "cd5ff82777f4cd78933830216d3b75e44d5a8531ee31db36f2c9721c34473ae6",
+      "record_sha256": "ebb55e4acdad9fe796186e11c91e88ef55f7c99e4b4835c9b2b21ee3e818f698",
+      "stage": "10-node-plans",
+      "timestamp": "2026-08-21T16:59:08.142483+00:00"
+    },
+    {
+      "event_hash": "6f361b28d2b7f346f0476facb18af63d0714055f05bc9360d4ebce87956eed99",
+      "index": 15,
+      "metadata": {
+        "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+        "role": "recursive_planner"
+      },
+      "name": "call-0009-recursive-planner",
+      "path": "01-call-inputs/call-0009-recursive-planner.json",
+      "previous_event_hash": "eaaecae15a608d686752e0860a74d684c7064c75c1ce1554d33f3abd6e975bcd",
+      "record_sha256": "74cb4446eeb20416084f48c5ca12015d2244fbf6b0da8fe82d6d24494e2619c3",
+      "stage": "01-call-inputs",
+      "timestamp": "2026-08-21T16:59:08.213699+00:00"
+    },
+    {
+      "event_hash": "e7cee6d08ecb5b7e530a10702886de27bbe6d02c2af57ee077b11f3730a15968",
+      "index": 16,
+      "metadata": {
+        "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+        "role": "recursive_planner"
+      },
+      "name": "call-0010-recursive-planner",
+      "path": "01-call-inputs/call-0010-recursive-planner.json",
+      "previous_event_hash": "6f361b28d2b7f346f0476facb18af63d0714055f05bc9360d4ebce87956eed99",
+      "record_sha256": "188cb6cb2897634bb59edcf414664b60deb999907663f0acf0b6463b18737a57",
+      "stage": "01-call-inputs",
+      "timestamp": "2026-08-21T16:59:09.801250+00:00"
+    },
+    {
+      "event_hash": "151401d8d67a4887621f06b1c1a6ae51099f6d80872f16b5fba20c8f90072ab4",
+      "index": 17,
+      "metadata": {
+        "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+        "role": "recursive_planner"
+      },
+      "name": "call-0011-recursive-planner",
+      "path": "01-call-inputs/call-0011-recursive-planner.json",
+      "previous_event_hash": "e7cee6d08ecb5b7e530a10702886de27bbe6d02c2af57ee077b11f3730a15968",
+      "record_sha256": "d46f5e151ec90cc631a638f40abd709bfb6e3e706cb56543110500d6b9fc962a",
+      "stage": "01-call-inputs",
+      "timestamp": "2026-08-21T16:59:10.391278+00:00"
+    },
+    {
+      "event_hash": "1be902b165902086ff87e79e71b5dd1a82b0b107b1c2891eca50828876216499",
+      "index": 18,
+      "metadata": {
+        "call_id": "call-0006-frontier-researcher",
+        "elapsed_ms": 14858,
+        "input_sha256": "241c19ef9a0692fe91ca534dd236561fd29937ebe236c324d865fbca9723903f",
+        "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+        "role": "frontier_researcher",
+        "usage": {
+          "cache_read_tokens": 0,
+          "details": {
+            "reasoning_tokens": 0
+          },
+          "input_tokens": 9686,
+          "output_tokens": 1407,
+          "requests": 1
+        }
+      },
+      "name": "root.03-enum-x34-research",
+      "path": "20-node-work/root.03-enum-x34-research.json",
+      "previous_event_hash": "151401d8d67a4887621f06b1c1a6ae51099f6d80872f16b5fba20c8f90072ab4",
+      "record_sha256": "6cfdff391c913f3d43a13efc3501d665e05dcee00d93c70dfa4ef9eee3d7ddc5",
+      "stage": "20-node-work",
+      "timestamp": "2026-08-21T16:59:10.489181+00:00"
+    },
+    {
+      "event_hash": "2fe68ba04cddfa4a93999d5d4e70fcf1079ca43e057cc0ba3dd75b4420d1b0b7",
+      "index": 19,
+      "metadata": {},
+      "name": "root.03-enum-x34",
+      "path": "30-evidence-packets/root.03-enum-x34.json",
+      "previous_event_hash": "1be902b165902086ff87e79e71b5dd1a82b0b107b1c2891eca50828876216499",
+      "record_sha256": "6b56b6ccab4731b38f846eab4fbed682e2b27cd6307b9534ca258e7a0e53d445",
+      "stage": "30-evidence-packets",
+      "timestamp": "2026-08-21T16:59:10.495359+00:00"
+    },
+    {
+      "event_hash": "de05383f7fe851034b1b001883dbdfd1d71e9c88637378927ff027a2aa7e02c8",
+      "index": 20,
+      "metadata": {},
+      "name": "root.03-enum-x34",
+      "path": "31-node-traces/root.03-enum-x34.json",
+      "previous_event_hash": "2fe68ba04cddfa4a93999d5d4e70fcf1079ca43e057cc0ba3dd75b4420d1b0b7",
+      "record_sha256": "460a803e9f0d36a872512e69d0436a03ecb59cafe93116d459eb739970bc5f47",
+      "stage": "31-node-traces",
+      "timestamp": "2026-08-21T16:59:10.499516+00:00"
+    },
+    {
+      "event_hash": "608317be8d1b013904a854967fb705250123f7f0ceeb5f6c70e1c7820eb3e998",
+      "index": 21,
+      "metadata": {
+        "call_id": "call-0007-frontier-researcher",
+        "elapsed_ms": 15518,
+        "input_sha256": "1cbf5393754a35d143217304b429a7d010646990eb0be62fb44f816bdfed7f7a",
+        "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+        "role": "frontier_researcher",
+        "usage": {
+          "cache_read_tokens": 0,
+          "details": {
+            "reasoning_tokens": 0
+          },
+          "input_tokens": 9672,
+          "output_tokens": 1633,
+          "requests": 1
+        }
+      },
+      "name": "root.04-enum-x5678-research",
+      "path": "20-node-work/root.04-enum-x5678-research.json",
+      "previous_event_hash": "de05383f7fe851034b1b001883dbdfd1d71e9c88637378927ff027a2aa7e02c8",
+      "record_sha256": "a89015b8eb954790bb747c36ebdc54ecc136644855b8a6eceee4ac40232260be",
+      "stage": "20-node-work",
+      "timestamp": "2026-08-21T16:59:12.378886+00:00"
+    },
+    {
+      "event_hash": "a0f3b87308a136d7c3c972687473e151d0300c9b87dc6e0b42d0a464941a42f8",
+      "index": 22,
+      "metadata": {},
+      "name": "root.04-enum-x5678",
+      "path": "30-evidence-packets/root.04-enum-x5678.json",
+      "previous_event_hash": "608317be8d1b013904a854967fb705250123f7f0ceeb5f6c70e1c7820eb3e998",
+      "record_sha256": "25d4bfd5031c3f7c95944d668ae125a809209a982ebdeabe703e5c2b0ada5745",
+      "stage": "30-evidence-packets",
+      "timestamp": "2026-08-21T16:59:12.388201+00:00"
+    },
+    {
+      "event_hash": "b11824bcc7cfd4f3c966b58c34773f7da632593f76141ab0d794248f8c10fa43",
+      "index": 23,
+      "metadata": {},
+      "name": "root.04-enum-x5678",
+      "path": "31-node-traces/root.04-enum-x5678.json",
+      "previous_event_hash": "a0f3b87308a136d7c3c972687473e151d0300c9b87dc6e0b42d0a464941a42f8",
+      "record_sha256": "0de8dc0162f32423b200a3a9c52d5fce47cc5cfd0020d029cf893d4004fa73bc",
+      "stage": "31-node-traces",
+      "timestamp": "2026-08-21T16:59:12.392087+00:00"
+    },
+    {
+      "event_hash": "0ecc297c71dc59214222880eb1fd4ee71b4688679317f031bff7e561a25a00f9",
+      "index": 24,
+      "metadata": {
+        "call_id": "call-0009-recursive-planner",
+        "elapsed_ms": 6091,
+        "input_sha256": "42316594558ba053eecf2bc72a289feefb11f8994a90801c58a6e1d025da1aaa",
+        "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+        "role": "recursive_planner",
+        "usage": {
+          "cache_read_tokens": 0,
+          "details": {
+            "reasoning_tokens": 0
+          },
+          "input_tokens": 2293,
+          "output_tokens": 323,
+          "requests": 1
+        }
+      },
+      "name": "root.02-lemma.01-child-a-bijection-proof-round-01",
+      "path": "10-node-plans/root.02-lemma.01-child-a-bijection-proof-round-01.json",
+      "previous_event_hash": "b11824bcc7cfd4f3c966b58c34773f7da632593f76141ab0d794248f8c10fa43",
+      "record_sha256": "dcba99cd6b475e1b37b8ca2764f73d6bd341d236444ebaccd33ddf2cd320f7e6",
+      "stage": "10-node-plans",
+      "timestamp": "2026-08-21T16:59:14.407646+00:00"
+    },
+    {
+      "event_hash": "4663fc3c03ae7c829dbbc66e7c96bd6922eac88b2b129b99f60348fdda95b766",
+      "index": 25,
+      "metadata": {
+        "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+        "role": "frontier_researcher"
+      },
+      "name": "call-0012-frontier-researcher",
+      "path": "01-call-inputs/call-0012-frontier-researcher.json",
+      "previous_event_hash": "0ecc297c71dc59214222880eb1fd4ee71b4688679317f031bff7e561a25a00f9",
+      "record_sha256": "59417333da54113ef2e8a475ada8a7b256257227e09c35b7f360f6d08895ab1c",
+      "stage": "01-call-inputs",
+      "timestamp": "2026-08-21T16:59:14.415257+00:00"
+    },
+    {
+      "event_hash": "09be0858f4651cd228eb55b1961caec9be6ef051534bf61d91d65a1fe4ca2d22",
+      "index": 26,
+      "metadata": {
+        "call_id": "call-0011-recursive-planner",
+        "elapsed_ms": 6440,
+        "input_sha256": "6c78d601ee9ebe0a636669ae2dab307bc8e41cb87701b18db21ff267f31f1b1c",
+        "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+        "role": "recursive_planner",
+        "usage": {
+          "cache_read_tokens": 0,
+          "details": {
+            "reasoning_tokens": 0
+          },
+          "input_tokens": 2297,
+          "output_tokens": 348,
+          "requests": 1
+        }
+      },
+      "name": "root.02-lemma.03-child-c-validation-example-round-01",
+      "path": "10-node-plans/root.02-lemma.03-child-c-validation-example-round-01.json",
+      "previous_event_hash": "4663fc3c03ae7c829dbbc66e7c96bd6922eac88b2b129b99f60348fdda95b766",
+      "record_sha256": "4ee9a872ffb3624f809f86463e5282a79cde8de11b0a438211bfddd9d0a12965",
+      "stage": "10-node-plans",
+      "timestamp": "2026-08-21T16:59:16.850095+00:00"
+    },
+    {
+      "event_hash": "e9c364be658fc43523ea757c35ba4f40c7d181537442bf0defe2faa9892de7a0",
+      "index": 27,
+      "metadata": {
+        "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+        "role": "frontier_researcher"
+      },
+      "name": "call-0013-frontier-researcher",
+      "path": "01-call-inputs/call-0013-frontier-researcher.json",
+      "previous_event_hash": "09be0858f4651cd228eb55b1961caec9be6ef051534bf61d91d65a1fe4ca2d22",
+      "record_sha256": "30025f86d98ceafcd545ff0ef244edc30771041956f2dc07c60224a5c980c4b9",
+      "stage": "01-call-inputs",
+      "timestamp": "2026-08-21T16:59:16.879068+00:00"
+    },
+    {
+      "event_hash": "65f769f85f255bee306996944ac1867632f9f3400812a08d773624259953c672",
+      "index": 28,
+      "metadata": {
+        "call_id": "call-0010-recursive-planner",
+        "elapsed_ms": 7472,
+        "input_sha256": "bb56227fd648e77383b7b71b3fe6492e3da28ceea299956ec508bd10cec53082",
+        "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+        "role": "recursive_planner",
+        "usage": {
+          "cache_read_tokens": 0,
+          "details": {
+            "reasoning_tokens": 0
+          },
+          "input_tokens": 2288,
+          "output_tokens": 407,
+          "requests": 1
+        }
+      },
+      "name": "root.02-lemma.02-child-b-counting-formula-round-01",
+      "path": "10-node-plans/root.02-lemma.02-child-b-counting-formula-round-01.json",
+      "previous_event_hash": "e9c364be658fc43523ea757c35ba4f40c7d181537442bf0defe2faa9892de7a0",
+      "record_sha256": "fb7d8731c9ad99b850adfba36236380dee1b9912004e56c1b12f071b16f5703f",
+      "stage": "10-node-plans",
+      "timestamp": "2026-08-21T16:59:17.398614+00:00"
+    },
+    {
+      "event_hash": "d1ba1243476b7fce0d61114f40a7c5b8e250d20f7789a19535131618b7cd3a73",
+      "index": 29,
+      "metadata": {
+        "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+        "role": "frontier_researcher"
+      },
+      "name": "call-0014-frontier-researcher",
+      "path": "01-call-inputs/call-0014-frontier-researcher.json",
+      "previous_event_hash": "65f769f85f255bee306996944ac1867632f9f3400812a08d773624259953c672",
+      "record_sha256": "1038de8ed2f713741135336e889b11544d4a1c67ef60386f8a956d980be9660e",
+      "stage": "01-call-inputs",
+      "timestamp": "2026-08-21T16:59:17.404549+00:00"
+    },
+    {
+      "event_hash": "83b96a2a19e345510f95ddbfb792d1b5d25cab27e79f00523d1650dd448a28bf",
+      "index": 30,
+      "metadata": {
+        "call_id": "call-0008-frontier-researcher",
+        "elapsed_ms": 20480,
+        "input_sha256": "ce4b28812b484553093c962a899961f3e8ea0f65ddb379e71a44d755cd78fb04",
+        "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+        "role": "frontier_researcher",
+        "usage": {
+          "cache_read_tokens": 0,
+          "details": {
+            "reasoning_tokens": 0
+          },
+          "input_tokens": 2585,
+          "output_tokens": 2345,
+          "requests": 1
+        }
+      },
+      "name": "root.01-bounds-research",
+      "path": "20-node-work/root.01-bounds-research.json",
+      "previous_event_hash": "d1ba1243476b7fce0d61114f40a7c5b8e250d20f7789a19535131618b7cd3a73",
+      "record_sha256": "f75031e479c7458b703390e0cac2476187cd24fe5b452742e785d2e845961d55",
+      "stage": "20-node-work",
+      "timestamp": "2026-08-21T16:59:17.661491+00:00"
+    },
+    {
+      "event_hash": "312d8b64892f0121f4404d8a4ca8ef38a3fab16fb1764f26dc0b6624f9608dff",
+      "index": 31,
+      "metadata": {},
+      "name": "root.01-bounds",
+      "path": "30-evidence-packets/root.01-bounds.json",
+      "previous_event_hash": "83b96a2a19e345510f95ddbfb792d1b5d25cab27e79f00523d1650dd448a28bf",
+      "record_sha256": "10c2a781820e744112b4f26c27d1c6642cb9227afd07b5ea4fc9a9df1eecba6b",
+      "stage": "30-evidence-packets",
+      "timestamp": "2026-08-21T16:59:17.723598+00:00"
+    },
+    {
+      "event_hash": "9d2331bbfe9bb2481c28ea95e4e0b8b8f64f535ea0600099096cf1e224fc3c82",
+      "index": 32,
+      "metadata": {},
+      "name": "root.01-bounds",
+      "path": "31-node-traces/root.01-bounds.json",
+      "previous_event_hash": "312d8b64892f0121f4404d8a4ca8ef38a3fab16fb1764f26dc0b6624f9608dff",
+      "record_sha256": "97b27e5c10f87d5cc85888d8bd01e533cc11c0a645dd9ebd6bdcfd4280d0f11f",
+      "stage": "31-node-traces",
+      "timestamp": "2026-08-21T16:59:17.738254+00:00"
+    },
+    {
+      "event_hash": "ec4c8661153ac03c9bad230ab88f2c85b0858615197a305f3e14592433ef8982",
+      "index": 33,
+      "metadata": {
+        "call_id": "call-0012-frontier-researcher",
+        "elapsed_ms": 9873,
+        "input_sha256": "330311e62b0a592b41ff8dde200d780b945948d7c1054a767e8601cf3e708788",
+        "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+        "role": "frontier_researcher",
+        "usage": {
+          "cache_read_tokens": 0,
+          "details": {
+            "reasoning_tokens": 0
+          },
+          "input_tokens": 2063,
+          "output_tokens": 1203,
+          "requests": 1
+        }
+      },
+      "name": "root.02-lemma.01-child-a-bijection-proof-research",
+      "path": "20-node-work/root.02-lemma.01-child-a-bijection-proof-research.json",
+      "previous_event_hash": "9d2331bbfe9bb2481c28ea95e4e0b8b8f64f535ea0600099096cf1e224fc3c82",
+      "record_sha256": "ad838ca9f80b995a7c49efd40a43feea89ac2425c7fd24fc47abaa69eb27eb5b",
+      "stage": "20-node-work",
+      "timestamp": "2026-08-21T16:59:24.345880+00:00"
+    },
+    {
+      "event_hash": "f1b76264d773916920d9065cc8d9b937b8d41adf8201d6eb0bb1fb3d1692bc8e",
+      "index": 34,
+      "metadata": {},
+      "name": "root.02-lemma.01-child-a-bijection-proof",
+      "path": "30-evidence-packets/root.02-lemma.01-child-a-bijection-proof.json",
+      "previous_event_hash": "ec4c8661153ac03c9bad230ab88f2c85b0858615197a305f3e14592433ef8982",
+      "record_sha256": "874bce1d36cd32a7b29893b70c229ccb1de03dc489e3c52b7a069984116d21da",
+      "stage": "30-evidence-packets",
+      "timestamp": "2026-08-21T16:59:24.405375+00:00"
+    },
+    {
+      "event_hash": "b9c28df8a949bc7e7edf4342677036062af165f6c959ef88da2121a1b6e10b7f",
+      "index": 35,
+      "metadata": {},
+      "name": "root.02-lemma.01-child-a-bijection-proof",
+      "path": "31-node-traces/root.02-lemma.01-child-a-bijection-proof.json",
+      "previous_event_hash": "f1b76264d773916920d9065cc8d9b937b8d41adf8201d6eb0bb1fb3d1692bc8e",
+      "record_sha256": "722d0e72b8eeca700633c5fc9435d3f29b5b590c6085ff976d23dff8a59e88f2",
+      "stage": "31-node-traces",
+      "timestamp": "2026-08-21T16:59:24.428103+00:00"
+    },
+    {
+      "event_hash": "975de434d585c2771ecfaf33d1132da5c04f3cddb6fcbc442ef501d48f31a0b2",
+      "index": 36,
+      "metadata": {
+        "call_id": "call-0014-frontier-researcher",
+        "elapsed_ms": 12256,
+        "input_sha256": "21f7cf8300161039118b9f8cfeb8ca71d9459388d93d653b8f69295604059fbe",
+        "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+        "role": "frontier_researcher",
+        "usage": {
+          "cache_read_tokens": 0,
+          "details": {
+            "reasoning_tokens": 0
+          },
+          "input_tokens": 2058,
+          "output_tokens": 1166,
+          "requests": 1
+        }
+      },
+      "name": "root.02-lemma.02-child-b-counting-formula-research",
+      "path": "20-node-work/root.02-lemma.02-child-b-counting-formula-research.json",
+      "previous_event_hash": "b9c28df8a949bc7e7edf4342677036062af165f6c959ef88da2121a1b6e10b7f",
+      "record_sha256": "c22f4422e2f556a6b2c9596107c080cdbf2c0933a1cace47f2d1e410228868a4",
+      "stage": "20-node-work",
+      "timestamp": "2026-08-21T16:59:29.669315+00:00"
+    },
+    {
+      "event_hash": "cde19494b5ab8679c7c43133b1a10f2b26447b4b9e7da1f0032939ebd7aaeeb5",
+      "index": 37,
+      "metadata": {},
+      "name": "root.02-lemma.02-child-b-counting-formula",
+      "path": "30-evidence-packets/root.02-lemma.02-child-b-counting-formula.json",
+      "previous_event_hash": "975de434d585c2771ecfaf33d1132da5c04f3cddb6fcbc442ef501d48f31a0b2",
+      "record_sha256": "893e1a72e99ab11c6d4996b6b48feaefb679f05d97e4b029ccf04c0459e62167",
+      "stage": "30-evidence-packets",
+      "timestamp": "2026-08-21T16:59:29.675916+00:00"
+    },
+    {
+      "event_hash": "4df976c54f1ca28ba9703f0b185627d49cf7044e4fce1d299378fd1129a841e7",
+      "index": 38,
+      "metadata": {},
+      "name": "root.02-lemma.02-child-b-counting-formula",
+      "path": "31-node-traces/root.02-lemma.02-child-b-counting-formula.json",
+      "previous_event_hash": "cde19494b5ab8679c7c43133b1a10f2b26447b4b9e7da1f0032939ebd7aaeeb5",
+      "record_sha256": "162b22814df0c1de0992ecabe8783bb2d609d4ad0a44da7f4926ffba3a9dbdf1",
+      "stage": "31-node-traces",
+      "timestamp": "2026-08-21T16:59:29.703685+00:00"
+    },
+    {
+      "event_hash": "6273ea10df671b3aec1cfaebd9b655485db81ef0688adb1b32b1b5e9b71546df",
+      "index": 39,
+      "metadata": {
+        "call_id": "call-0013-frontier-researcher",
+        "elapsed_ms": 13392,
+        "input_sha256": "e4b6bf7c7b7ef9774522d1ee243510e7c03a3da1cdf91a5e62fe5d649d23b0db",
+        "model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+        "role": "frontier_researcher",
+        "usage": {
+          "cache_read_tokens": 0,
+          "details": {
+            "reasoning_tokens": 0
+          },
+          "input_tokens": 2067,
+          "output_tokens": 1000,
+          "requests": 1
+        }
+      },
+      "name": "root.02-lemma.03-child-c-validation-example-research",
+      "path": "20-node-work/root.02-lemma.03-child-c-validation-example-research.json",
+      "previous_event_hash": "4df976c54f1ca28ba9703f0b185627d49cf7044e4fce1d299378fd1129a841e7",
+      "record_sha256": "0c147dffe50a639739a025aa12f1afc0b608122d50e08eb73450745c23f177fe",
+      "stage": "20-node-work",
+      "timestamp": "2026-08-21T16:59:30.283552+00:00"
+    },
+    {
+      "event_hash": "6ef4baabce835a8f34eb72820d47ba7a25105fc831a83af791be29712a9037a2",
+      "index": 40,
+      "metadata": {},
+      "name": "root.02-lemma.03-child-c-validation-example",
+      "path": "30-evidence-packets/root.02-lemma.03-child-c-validation-example.json",
+      "previous_event_hash": "6273ea10df671b3aec1cfaebd9b655485db81ef0688adb1b32b1b5e9b71546df",
+      "record_sha256": "78ed285758a529ebeb19017750b933e9b1e58b921e0fcb319f2fee6e8787b21b",
+      "stage": "30-evidence-packets",
+      "timestamp": "2026-08-21T16:59:30.293429+00:00"
+    },
+    {
+      "event_hash": "c253b8f4f225346fd041cb727f5e545cf6554bdac80f8c92897a663b870f4555",
+      "index": 41,
+      "metadata": {},
+      "name": "root.02-lemma.03-child-c-validation-example",
+      "path": "31-node-traces/root.02-lemma.03-child-c-validation-example.json",
+      "previous_event_hash": "6ef4baabce835a8f34eb72820d47ba7a25105fc831a83af791be29712a9037a2",
+      "record_sha256": "0244cbc47f6c7120aee507effccdcf37af7b322c439a398558a2b012e2240e08",
+      "stage": "31-node-traces",
+      "timestamp": "2026-08-21T16:59:30.301134+00:00"
+    },
+    {
+      "event_hash": "e51553efc9fa6a18b11f130297393e6e15c52ac8d8b0f221818377014375ac4a",
+      "index": 42,
+      "metadata": {
+        "model": "fireworks:accounts/fireworks/routers/kimi-k3-fast",
+        "role": "synthesizer"
+      },
+      "name": "call-0015-synthesizer",
+      "path": "01-call-inputs/call-0015-synthesizer.json",
+      "previous_event_hash": "c253b8f4f225346fd041cb727f5e545cf6554bdac80f8c92897a663b870f4555",
+      "record_sha256": "0871337d402a7f3823b3cd7d7563161d3744bbc4f81657b91d7b4764d77f6626",
+      "stage": "01-call-inputs",
+      "timestamp": "2026-08-21T16:59:30.316408+00:00"
+    },
+    {
+      "event_hash": "87a7b457367646b9761e766d5bb79b12923925f1785727603f740814b461ef50",
+      "index": 43,
+      "metadata": {
+        "call_id": "call-0015-synthesizer",
+        "elapsed_ms": 101729,
+        "input_sha256": "4d576c8064b7cc71afe3c08e9afafcac16a63e62831b0f3858d984c8480aba0a",
+        "model": "fireworks:accounts/fireworks/routers/kimi-k3-fast",
+        "role": "synthesizer",
+        "usage": {
+          "cache_read_tokens": 6813,
+          "details": {
+            "reasoning_tokens": 6090
+          },
+          "input_tokens": 21712,
+          "output_tokens": 11209,
+          "requests": 2
+        }
+      },
+      "name": "root.02-lemma-synthesis",
+      "path": "20-node-work/root.02-lemma-synthesis.json",
+      "previous_event_hash": "e51553efc9fa6a18b11f130297393e6e15c52ac8d8b0f221818377014375ac4a",
+      "record_sha256": "b970f327fe1fb5bdca560a273baba3faa1c9635568af689068d5b076ecd2a726",
+      "stage": "20-node-work",
+      "timestamp": "2026-08-21T17:01:12.062703+00:00"
+    },
+    {
+      "event_hash": "23baee13e5a3c92abc494f247d042a5e9795f5ca3462649dbe9eccf6a21c6a48",
+      "index": 44,
+      "metadata": {},
+      "name": "root.02-lemma",
+      "path": "30-evidence-packets/root.02-lemma.json",
+      "previous_event_hash": "87a7b457367646b9761e766d5bb79b12923925f1785727603f740814b461ef50",
+      "record_sha256": "57bf90d50d87724a9ca68ceb4c5a92b6acc4550b18c1ab9d04875bea857d9afc",
+      "stage": "30-evidence-packets",
+      "timestamp": "2026-08-21T17:01:12.073766+00:00"
+    },
+    {
+      "event_hash": "0fa54480af195eb414911c57d1e4dde2972d004e0c6ec3e108c774711aa759dc",
+      "index": 45,
+      "metadata": {},
+      "name": "root.02-lemma",
+      "path": "31-node-traces/root.02-lemma.json",
+      "previous_event_hash": "23baee13e5a3c92abc494f247d042a5e9795f5ca3462649dbe9eccf6a21c6a48",
+      "record_sha256": "66e383ee5ca12fa22248786c62a9d587220de8006581411a9bbab161408c5758",
+      "stage": "31-node-traces",
+      "timestamp": "2026-08-21T17:01:12.080957+00:00"
+    },
+    {
+      "event_hash": "9ddc08099d122b5e8a2b6fae29770c1bbc21bcef34454109ad7b3bb767938602",
+      "index": 46,
+      "metadata": {
+        "model": "fireworks:accounts/fireworks/routers/kimi-k3-fast",
+        "role": "synthesizer"
+      },
+      "name": "call-0016-synthesizer",
+      "path": "01-call-inputs/call-0016-synthesizer.json",
+      "previous_event_hash": "0fa54480af195eb414911c57d1e4dde2972d004e0c6ec3e108c774711aa759dc",
+      "record_sha256": "3a9c0e0e65eb166530154fdea7e28928847a127d9c4b681da41e0d702cd4c6f1",
+      "stage": "01-call-inputs",
+      "timestamp": "2026-08-21T17:01:12.102275+00:00"
+    },
+    {
+      "event_hash": "6020e5ee1bda4e3c323c98f746a0ffc5658ac93c7b41c47f398990e92aff37d4",
+      "index": 47,
+      "metadata": {
+        "call_id": "call-0016-synthesizer",
+        "input_sha256": "6c8a21e24dc2510dd92093ea00a3a91bb7352629ae649cc42eec7f40ec1a2725",
+        "model": "fireworks:accounts/fireworks/routers/kimi-k3-fast",
+        "role": "synthesizer"
+      },
+      "name": "call-0016-synthesizer",
+      "path": "02-call-errors/call-0016-synthesizer.json",
+      "previous_event_hash": "9ddc08099d122b5e8a2b6fae29770c1bbc21bcef34454109ad7b3bb767938602",
+      "record_sha256": "628e7560b492c5f6e9d0e52af279df7aed87798cf3a4bd43198273afb1c61a52",
+      "stage": "02-call-errors",
+      "timestamp": "2026-08-21T17:03:07.641073+00:00"
+    },
+    {
+      "event_hash": "463c8053c46e5b3d5db8b49336ee84bf6849503dd4c0de165de752014be6b8f4",
+      "index": 48,
+      "metadata": {},
+      "name": "failure",
+      "path": "99-result/failure.json",
+      "previous_event_hash": "6020e5ee1bda4e3c323c98f746a0ffc5658ac93c7b41c47f398990e92aff37d4",
+      "record_sha256": "628e7560b492c5f6e9d0e52af279df7aed87798cf3a4bd43198273afb1c61a52",
+      "stage": "99-result",
+      "timestamp": "2026-08-21T17:03:07.647352+00:00"
+    }
+  ],
+  "finished_at": "2026-08-21T17:03:07.651848+00:00",
+  "run_id": "20260821T165642Z-recursive-four-unit-fractions-summing-to-one-half-ea145f99",
+  "schema_version": 1,
+  "status": "failed"
+}

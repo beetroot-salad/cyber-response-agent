@@ -1,0 +1,21 @@
+{
+  "account": "The dossier provides the complete feasible region (33 pairs), the exact factorization lemma, and an explicit acceptance condition requiring exact per-cell arithmetic with displayed factor pairs. This node can be solved locally: all referents (the 33 pairs, the lemma, and the acceptance criteria) are grounded, and the computation is deterministic exact integer arithmetic. No additional evidence or sibling decomposition is needed beyond the already-supplied context.",
+  "children": [],
+  "decidability": {
+    "acceptance_mechanical": true,
+    "account": "All inputs needed to compute and check the table are present: the finite pair list, the divisor-enumeration rule, and the mechanical acceptance checks (congruence, z>=y, row sums). The node does not depend on any future sibling output.",
+    "context_complete": true,
+    "grounded_referents": [
+      "feasible pair set (33 pairs, x in 3..8, y intervals)",
+      "factor-pair lemma with R=a/b, d*e=b^2, d<=e, d ≡ -b (mod a), z=(d+b)/a >= y",
+      "exact integer arithmetic requirement"
+    ],
+    "independent_of_future_siblings": true,
+    "missing_context": []
+  },
+  "disposition": "solve",
+  "irreducible_core": null,
+  "requested_source_ids": [],
+  "requested_source_paths": [],
+  "synthesis_contract": null
+}

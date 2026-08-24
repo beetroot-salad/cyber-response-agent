@@ -1,0 +1,10 @@
+{
+  "content_sha256": "a47e997e8e17d37453b60a23edf22e364ba36227c40a591ff7d5a3bdf27a83d5",
+  "id": "link:a47e997e8e17d37453b60a23",
+  "origin": "runtime",
+  "proposed_by_node_id": null,
+  "rationale": null,
+  "relation": "depends_on",
+  "source_id": "question:work:003-synthesis",
+  "target_id": "question:raised:24ba60001ffb:rz1"
+}

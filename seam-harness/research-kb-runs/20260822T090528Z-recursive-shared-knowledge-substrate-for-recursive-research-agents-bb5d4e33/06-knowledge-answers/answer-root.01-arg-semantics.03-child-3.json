@@ -1,0 +1,28 @@
+{
+  "claim_ids": [
+    "root.01-arg-semantics.03-child-3:C001",
+    "root.01-arg-semantics.03-child-3:C002",
+    "root.01-arg-semantics.03-child-3:C003",
+    "root.01-arg-semantics.03-child-3:C004",
+    "root.01-arg-semantics.03-child-3:C005",
+    "root.01-arg-semantics.03-child-3:C006",
+    "root.01-arg-semantics.03-child-3:C007",
+    "root.01-arg-semantics.03-child-3:C008"
+  ],
+  "content_sha256": "ff6f600ab465f943dac3927b1b41a05b38fa530d98920eacea547f32e8aae87a",
+  "id": "answer:root.01-arg-semantics.03-child-3",
+  "node_id": "root.01-arg-semantics.03-child-3",
+  "packet_id": "packet:root.01-arg-semantics.03-child-3",
+  "sufficiency": "ready_to_synthesize",
+  "summary": "Derived three explicit design inferences mapping Dung's argumentation framework to a many-to-many Q/A graph, embedding the three requested constraints (answers as arguments with attacks; provenance as foreign edges; admissible sets as consistency), all grounded in the Dung text definitions but labeled as design inferences per D13.",
+  "tags": [
+    "constraint",
+    "method",
+    "counterexample",
+    "uncertainty"
+  ],
+  "unresolved": [
+    "The exact syntax for specifying attack edges (e.g., is an attack always bidirectional or is it directional?) is not resolved by Dung's text; design must choose a directionality convention.",
+    "The mapping from natural-language answer conflict to a machine-checkable attack relation is not specified by the source; this is a model-level inference task."
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "claim_ids": [
+    "root.05-debate-nulls-boundaries.01-c1-smit-null-results.01-smit-extract-null-overall:C001",
+    "root.05-debate-nulls-boundaries.01-c1-smit-null-results.01-smit-extract-null-overall:C002",
+    "root.05-debate-nulls-boundaries.01-c1-smit-null-results.01-smit-extract-null-overall:C003"
+  ],
+  "content_sha256": "910b569a989891818746af6d9aeef863a766344fae98f45240d659a4c0293371",
+  "id": "answer:root.05-debate-nulls-boundaries.01-c1-smit-null-results.01-smit-extract-null-overall",
+  "node_id": "root.05-debate-nulls-boundaries.01-c1-smit-null-results.01-smit-extract-null-overall",
+  "packet_id": "packet:root.05-debate-nulls-boundaries.01-c1-smit-null-results.01-smit-extract-null-overall",
+  "sufficiency": "ready_to_synthesize",
+  "summary": "The Smit et al. file states at multiple anchored points that multi-agent debate does not reliably outperform other prompting strategies. The abstract says: 'we find that multi-agent debating systems, in their current form, do not reliably outperform other proposed prompting strategies, such as self-consistency and ensembling using multiple reasoning paths' (PDF PAGE 1). The conclusions echo: 'MAD approaches currently do not outperform other ensembling methods such as Medprompt and self-consistency using their original implementations' (PDF PAGE 9). These passages directly satisfy the node's objective.",
+  "tags": [
+    "counterexample",
+    "evidence",
+    "uncertainty"
+  ],
+  "unresolved": [
+    "The exact page marker for the quoted phrase 'do not reliably outperform' is from PDF PAGE 1 (Abstract); the abstract is on page 1, and the conclusion on page 9."
+  ]
+}

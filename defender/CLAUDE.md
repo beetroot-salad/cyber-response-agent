@@ -33,6 +33,7 @@ defender/
   agents.py         # agent registry
   run_common.py     # shared run-dir + post-step helpers
   runtime/          # in-process PydanticAI engine: driver, tools, permission/, providers/, bash_exec, observe, orient, compaction
+                    #   branch.py — the turn-N resume (#920): which message may be branched from, and where the fork lands
                     #   close_tool.py + challenge_gate.py + review/ — the write-time review gate on every confident close
   hooks/            # gate LOGIC imported as libraries (lead claim, descriptors, budget, lesson-load) — no longer Claude Code hooks
   skills/           # invlang, gather, handbook, advisory + per-system references (elastic/ identity/ cmdb/ ticket/ change-mgmt/ threat-intel/ host-state/)

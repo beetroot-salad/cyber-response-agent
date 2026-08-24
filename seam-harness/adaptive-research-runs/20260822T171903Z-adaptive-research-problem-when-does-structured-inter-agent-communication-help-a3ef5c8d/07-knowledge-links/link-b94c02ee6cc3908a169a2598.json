@@ -1,0 +1,10 @@
+{
+  "content_sha256": "b94c02ee6cc3908a169a25985ca0062cd2d78d60fdbda690040f8f2c062c5832",
+  "id": "link:b94c02ee6cc3908a169a2598",
+  "origin": "runtime",
+  "proposed_by_node_id": null,
+  "rationale": null,
+  "relation": "depends_on",
+  "source_id": "question:raised:24ba60001ffb:rz2",
+  "target_id": "question:work:001-inv-zhang-when"
+}

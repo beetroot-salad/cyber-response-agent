@@ -1,0 +1,20 @@
+{
+  "account": "Investigation failed before producing evidence: UnexpectedModelBehavior: Exceeded maximum output retries (1)",
+  "assumptions": [],
+  "boundary_findings": [],
+  "child_packet_ids": [],
+  "claims": [],
+  "content_sha256": "65711e45e2d00b2d456ff71d3f76b20dfab3a315eb4e7be072711bba811c0dff",
+  "counterevidence": [],
+  "id": "packet:work:001-inv-formal-tools",
+  "knowledge_links": [],
+  "next_observation": null,
+  "node_id": "work:001-inv-formal-tools",
+  "objective": "What formal machinery do Dung 1995 (papers/text/dung-1995-argumentation.txt) and Shapiro et al. 2011 (papers/text/shapiro-et-al-2011-crdts.txt) provide that is relevant to agent communication design: for Dung, the definitions of argumentation frameworks, attack relations, admissible/preferred/stable/grounded extensions and what they guarantee about justified conclusions; for Shapiro, the definitions of CRDTs, strong eventual consistency, commutativity/idempotence and what they guarantee about merging concurrent updates without coordination. Note what each framework does NOT model (e.g., evidential weight, truth) since that limits their direct application. Record key definitions with `===== PDF PAGE N =====` markers.",
+  "raised_questions": [],
+  "source_ids_consulted": [],
+  "sufficiency": "blocked",
+  "unresolved": [
+    "Investigation failed before producing evidence: UnexpectedModelBehavior: Exceeded maximum output retries (1)"
+  ]
+}

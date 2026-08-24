@@ -1,0 +1,20 @@
+{
+  "acceptance_condition": "Returns at least three findings, each a quote or close paraphrase from the Smit file, each with the exact `===== PDF PAGE N =====` marker(s) where it appears. The findings must collectively cover: (1) MAD not reliably outperforming other prompting strategies, (2) performance comparisons on specific benchmarks, and (3) any stated limitations or sensitivity to hyperparameters.",
+  "content_sha256": "f5d173113e035041358a6ba0738cd3d997d33f6a3518040414b66c584142546c",
+  "demand_ids": [
+    "D11",
+    "D12",
+    "D13",
+    "D14",
+    "D15"
+  ],
+  "id": "question:root.05-debate-nulls-boundaries.01-c1-smit-null-results",
+  "node_id": "root.05-debate-nulls-boundaries.01-c1-smit-null-results",
+  "rationale": "Smit et al. is the corpus's null-result evidence; its findings are a distinct evidence question that can be answered independently from the Zhang file and the design-derivation child.",
+  "tags": [
+    "counterexample",
+    "evidence",
+    "risk"
+  ],
+  "text": "Extract from papers/text/smit-et-al-2023-going-mad.txt at least three anchored findings on Smit et al.'s critical or null results regarding multi-agent debate, including any comparisons against single-agent or matched-compute baselines, each quoted or closely paraphrased and carrying the exact `===== PDF PAGE N =====` marker(s)."
+}

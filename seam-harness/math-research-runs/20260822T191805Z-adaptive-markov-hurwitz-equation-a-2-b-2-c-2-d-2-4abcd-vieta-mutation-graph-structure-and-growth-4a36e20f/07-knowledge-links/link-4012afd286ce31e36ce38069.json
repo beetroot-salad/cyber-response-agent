@@ -1,0 +1,10 @@
+{
+  "content_sha256": "4012afd286ce31e36ce380697843a5586c63b5111f80541f594eba3e26271ad6",
+  "id": "link:4012afd286ce31e36ce38069",
+  "origin": "agent",
+  "proposed_by_node_id": "work:004-upper-depth-v3",
+  "rationale": "Proves the slow/fast dichotomy: slow growth confined to the explicit chain (O(log H) vertices), all other branches grow by factor >= 11 per edge; concludes sublinear exponent, rq1 Outcome A.",
+  "relation": "answers",
+  "source_id": "answer:work:004-upper-depth-v3",
+  "target_id": "question:raised:e19298af7323:rq1"
+}

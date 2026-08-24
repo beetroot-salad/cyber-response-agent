@@ -1,0 +1,15 @@
+{
+  "child_ids": [
+    "root.03-table-direct-scan.03-scan-x6-x7-x8.01-x6",
+    "root.03-table-direct-scan.03-scan-x6-x7-x8.02-x7",
+    "root.03-table-direct-scan.03-scan-x6-x7-x8.03-x8"
+  ],
+  "depth": 2,
+  "effective_disposition": "synthesize",
+  "node_id": "root.03-table-direct-scan.03-scan-x6-x7-x8",
+  "packet_id": "packet:root.03-table-direct-scan.03-scan-x6-x7-x8",
+  "packet_sha256": "689f13aee70840e2d136fd0e4be6ebd10bb480dab543d996eca3ddcc720a9dd8",
+  "parent_id": "root.03-table-direct-scan",
+  "proposed_disposition": "expand",
+  "stop_reason": null
+}

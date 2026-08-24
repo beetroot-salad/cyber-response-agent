@@ -1,0 +1,10 @@
+{
+  "content_sha256": "2b8e5594ec24e5ca1c583d1fcd41f6c35cf2a3907e42274e15d5703302c48fec",
+  "id": "link:2b8e5594ec24e5ca1c583d1f",
+  "origin": "runtime",
+  "proposed_by_node_id": null,
+  "rationale": null,
+  "relation": "partially_answers",
+  "source_id": "answer:work:003-upper-depth-v2",
+  "target_id": "question:work:001-upper-bound-depth"
+}

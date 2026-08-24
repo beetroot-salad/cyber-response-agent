@@ -1,0 +1,223 @@
+{
+  "account": "Lorenz et al. (2011) and Choi et al. (2025) jointly establish that both human and LLM collectives lose answer diversity and accuracy under social influence, particularly when peers' answers are visible. Lorenz's controlled experiments (N=144) show that social influence reduces group diversity without improving collective accuracy, moves the truth to peripheral regions, and boosts individual confidence despite accuracy deficits. Choi's multi-agent debates (2,500+ simulations) show LLM agents conform to numerically dominant groups and to higher-intelligence agents even when outnumbered, with intelligence effects dominating majority size. Together, these findings mandate staged visibility in the substrate: independent answers must be committed before peer exposure, peer answers should be disclosed only partially or after commitment to prevent convergence, and diversity/correlation metrics must capture conformity-driven collapse. The synthesis preserves both papers as complementary evidence for the same risk rather than as conflicting, in accordance with the conflict policy.",
+  "assumptions": [
+    "The extracted texts are faithful representations of the original PNAS and ACL papers; page markers correspond to the PDF pages in the provided extraction.",
+    "In Choi et al., 'conformity' is operationalized as the neutral agent's choice of side/agent it selects as most persuasive, consistent with the paper's CR and FCR metrics (PDF PAGE 5)."
+  ],
+  "boundary_findings": [
+    {
+      "alternative_explanation": "The paper's robustness check (reframed topics, PDF PAGE 15) and consistent conformity patterns suggest conformity is genuine, but the paper does not manipulate visibility.",
+      "consequence_if_absorbed": "A design inference that staged visibility reduces conformity would be misattributed as directly source-supported, when the source only shows conformity under full visibility.",
+      "evidence": [
+        "===== PDF PAGE 5 ===== 'The neutral agent is consistently modeled using GPT-4o'",
+        "===== PDF PAGE 3 ===== 'The experiment manipulates both the number of agents (minority vs. majority groups) and intelligence levels (superior vs. inferior groups)'"
+      ],
+      "narrative": "Choi et al.'s experimental setup lacks a visibility/anonymity manipulation: the neutral moderator sees all proponent/opponent arguments each turn, and proponent/opponent agents see conversation history. This limits the generalizability of the conformity findings to conditions of full visibility; the staged-visibility design inference extrapolates beyond the observed settings.",
+      "smallest_suspected_scope": "Choi et al.'s debate protocol with full visibility of peer arguments."
+    }
+  ],
+  "claims": [
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "social influence strongly reduces the group's diversity … without significantly reducing its collective errors.",
+          "locator": "papers/text/lorenz-et-al-2011-social-influence.txt:===== PDF PAGE 3 =====",
+          "source_id": "ref:lorenz-2011-social-influence"
+        }
+      ],
+      "confidence": 0.97,
+      "counterevidence": [],
+      "derived_from_claim_ids": [
+        "root.03-social-influence-risk.01-child-lorenz-findings:C001"
+      ],
+      "local_id": "SYN-C001",
+      "statement": "Lorenz et al. (2011) empirically demonstrate the 'social influence effect': providing aggregate or full information about peers' estimates significantly reduces group diversity without significantly improving collective accuracy, across five estimation rounds (N=144)."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "The 'range reduction effect' moves the position of the truth to peripheral regions of the range of estimates so that the crowd becomes less reliable in providing expertise for external observers.",
+          "locator": "papers/text/lorenz-et-al-2011-social-influence.txt:===== PDF PAGE 1 =====",
+          "source_id": "ref:lorenz-2011-social-influence"
+        },
+        {
+          "excerpt": "the wisdom-of-crowd indicator tends to decline over time under conditions of social influence.",
+          "locator": "papers/text/lorenz-et-al-2011-social-influence.txt:===== PDF PAGE 4 =====",
+          "source_id": "ref:lorenz-2011-social-influence"
+        }
+      ],
+      "confidence": 0.96,
+      "counterevidence": [],
+      "derived_from_claim_ids": [
+        "root.03-social-influence-risk.01-child-lorenz-findings:C002"
+      ],
+      "local_id": "SYN-C002",
+      "statement": "Lorenz et al. (2011) show that social influence produces a 'range reduction effect' where the truth moves to peripheral regions of the estimate distribution, and the wisdom-of-crowd indicator declines significantly under information exchange compared to the control condition."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "The confidence effect reflects that opinion convergence boosts individuals' confidence in their estimates despite a lack of collective improvements in accuracy.",
+          "locator": "papers/text/lorenz-et-al-2011-social-influence.txt:===== PDF PAGE 5 =====",
+          "source_id": "ref:lorenz-2011-social-influence"
+        }
+      ],
+      "confidence": 0.97,
+      "counterevidence": [],
+      "derived_from_claim_ids": [
+        "root.03-social-influence-risk.01-child-lorenz-findings:C003"
+      ],
+      "local_id": "SYN-C003",
+      "statement": "Lorenz et al. (2011) document a 'confidence effect' whereby individuals' self-reported confidence in their estimates is substantially and significantly boosted under aggregated and full information conditions compared to control, despite the lack of improved accuracy."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "neutral agents are significantly more likely to conform to the major group (χ2 = 164.839,p < 0.001,df = 1)",
+          "locator": "===== PDF PAGE 6 =====",
+          "source_id": "ref:choi-2025-conformity"
+        }
+      ],
+      "confidence": 0.97,
+      "counterevidence": [],
+      "derived_from_claim_ids": [
+        "root.03-social-influence-risk.02-child-choi-findings:C001"
+      ],
+      "local_id": "SYN-C004",
+      "statement": "Choi et al. (2025) show that neutral LLM agents (GPT-4o) significantly conform to the numerically dominant group when intelligence is held equivalent (χ²=164.839, p<0.001), indicating majority influence in multi-agent debates."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "higher-intelligence agents, who present more logical and persuasive arguments, significantly increasing the likelihood of neutral agents conforming to their stance (χ2 = 142.285,p< 0.001,df = 1)",
+          "locator": "===== PDF PAGE 6 =====",
+          "source_id": "ref:choi-2025-conformity"
+        },
+        {
+          "excerpt": "a single high-intelligence agent exerts more influence than a larger group with lower intelligence.",
+          "locator": "===== PDF PAGE 7 =====",
+          "source_id": "ref:choi-2025-conformity"
+        }
+      ],
+      "confidence": 0.95,
+      "counterevidence": [],
+      "derived_from_claim_ids": [
+        "root.03-social-influence-risk.02-child-choi-findings:C002",
+        "root.03-social-influence-risk.02-child-choi-findings:C003"
+      ],
+      "local_id": "SYN-C005",
+      "statement": "Choi et al. (2025) find that neutral agents significantly conform to higher-intelligence agents even when outnumbered (χ²=142.285, p<0.001); a single high-intelligence agent exerts more influence than a larger lower-intelligence group (CR 74.33 vs 63.53–72.11)."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "This effect is most evident in GPT-3.5-turbo, where conformity rates scale proportionally with majority size, whereas GPT-4o-mini, with higher intelligence, exhibits a weaker relation between numerical advantage and conformity.",
+          "locator": "===== PDF PAGE 7 =====",
+          "source_id": "ref:choi-2025-conformity"
+        }
+      ],
+      "confidence": 0.95,
+      "counterevidence": [],
+      "derived_from_claim_ids": [
+        "root.03-social-influence-risk.02-child-choi-findings:C005"
+      ],
+      "local_id": "SYN-C006",
+      "statement": "Choi et al. (2025) show that conformity increases with the majority-minority ratio, but this effect is more pronounced in lower-intelligence models (GPT-3.5-turbo) than in higher-intelligence models (GPT-4o-mini), suggesting intelligence modulates susceptibility to numerical influence."
+    },
+    {
+      "basis": "inferred",
+      "citations": [
+        {
+          "excerpt": "social influence promotes a convergence of estimates.",
+          "locator": "papers/text/lorenz-et-al-2011-social-influence.txt:===== PDF PAGE 3 =====",
+          "source_id": "ref:lorenz-2011-social-influence"
+        },
+        {
+          "excerpt": "neutral agents are significantly more likely to conform to the major group",
+          "locator": "===== PDF PAGE 6 =====",
+          "source_id": "ref:choi-2025-conformity"
+        }
+      ],
+      "confidence": 0.9,
+      "counterevidence": [],
+      "derived_from_claim_ids": [
+        "root.03-social-influence-risk.01-child-lorenz-findings:C001",
+        "root.03-social-influence-risk.01-child-lorenz-findings:C004",
+        "root.03-social-influence-risk.02-child-choi-findings:C001"
+      ],
+      "local_id": "SYN-DI01",
+      "statement": "Design inference (staged visibility): The substrate must require each agent to commit its independent answer to a question before exposing any peer answers, because both human (Lorenz) and LLM (Choi) results show that pre-disclosure of peer estimates strongly reduces answer diversity and can push the collective away from truth."
+    },
+    {
+      "basis": "inferred",
+      "citations": [
+        {
+          "excerpt": "subjects could base their second, third, fourth, and fifth estimate on either aggregated or nonaggregated information regarding other people's estimates.",
+          "locator": "papers/text/lorenz-et-al-2011-social-influence.txt:===== PDF PAGE 2 =====",
+          "source_id": "ref:lorenz-2011-social-influence"
+        },
+        {
+          "excerpt": "the neutral agent, maintaining a strictly neutral stance, evaluates the arguments presented by both sides and selects the most persuasive agent to support.",
+          "locator": "===== PDF PAGE 5 =====",
+          "source_id": "ref:choi-2025-conformity"
+        }
+      ],
+      "confidence": 0.88,
+      "counterevidence": [],
+      "derived_from_claim_ids": [
+        "root.03-social-influence-risk.01-child-lorenz-findings:C001",
+        "root.03-social-influence-risk.01-child-lorenz-findings:C004",
+        "root.03-social-influence-risk.02-child-choi-findings:C001",
+        "root.03-social-influence-risk.02-child-choi-findings:C003"
+      ],
+      "local_id": "SYN-DI02",
+      "statement": "Design inference (delayed/partial disclosure): After initial answers are committed, peer answers must be disclosed either with a delay or only as an aggregate (e.g., mean or summary) rather than as full individual values, because Lorenz et al. show that even minimal aggregated information triggers convergence and reduces diversity without accuracy gains, and Choi et al. show that full visibility of peers' arguments drives conformity."
+    },
+    {
+      "basis": "inferred",
+      "citations": [
+        {
+          "excerpt": "the group diversity is the variance of estimates",
+          "locator": "papers/text/lorenz-et-al-2011-social-influence.txt:===== PDF PAGE 6 =====",
+          "source_id": "ref:lorenz-2011-social-influence"
+        },
+        {
+          "excerpt": "Conformity Rate (CR) and Full Conformity Ratio (FCR).",
+          "locator": "===== PDF PAGE 5 =====",
+          "source_id": "ref:choi-2025-conformity"
+        }
+      ],
+      "confidence": 0.85,
+      "counterevidence": [],
+      "derived_from_claim_ids": [
+        "root.03-social-influence-risk.01-child-lorenz-findings:C001",
+        "root.03-social-influence-risk.01-child-lorenz-findings:C005",
+        "root.03-social-influence-risk.02-child-choi-findings:C001",
+        "root.03-social-influence-risk.02-child-choi-findings:C002"
+      ],
+      "local_id": "SYN-DI03",
+      "statement": "Design inference (diversity/correlation metrics): The substrate's evaluation must include metrics for answer diversity (e.g., variance or entropy of answers) and peer-correlation (e.g., average pairwise agreement or a conformity index) computed on the final answer sets, because both Lorenz and Choi show that diversity collapse and conformity are the primary failure modes of unstructured information sharing, and these metrics must capture that collapse to detect it."
+    }
+  ],
+  "counterevidence": [
+    "Lorenz et al. report that collective error slightly declines under social influence, especially in the aggregated information condition, which partially runs against the headline 'no accuracy improvement' claim; this is attributed to right-skewed distributions and an upward drift from arithmetic-mean feedback (PDF PAGE 3, footnote ¶).",
+    "Choi et al.'s proxy test (Appendix C, PDF PAGE 12) shows the neutral agent has topic-specific baseline leanings (e.g., death penalty 7% pro vs 38% con), so observed conformity could partly reflect pre-existing stance bias; the authors mitigate via paired comparisons but this limits the strength of claims about pure group effects."
+  ],
+  "next_observation": null,
+  "source_ids_consulted": [
+    "ref:lorenz-2011-social-influence",
+    "ref:choi-2025-conformity"
+  ],
+  "sufficiency": "ready_to_synthesize",
+  "unresolved": [
+    "The exact magnitude and statistical details of the collective error decline under the aggregated condition in Lorenz et al. are only footnoted; the SI appendix is not in the corpus.",
+    "Choi et al. did not directly test a visibility/anonymity manipulation, so the causal link from staged visibility to reduced conformity is an inference, not an observed finding.",
+    "The interaction between majority size and intelligence in Choi et al. is reported as negligible (two-way ANOVA, PDF PAGE 12), but the paper does not fully explore scenarios where majority and intelligence conflict beyond the tested 10 scenarios."
+  ]
+}

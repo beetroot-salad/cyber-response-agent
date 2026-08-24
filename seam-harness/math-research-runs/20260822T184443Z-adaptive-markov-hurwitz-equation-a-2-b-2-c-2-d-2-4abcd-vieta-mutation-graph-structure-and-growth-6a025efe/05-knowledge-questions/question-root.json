@@ -1,0 +1,24 @@
+{
+  "acceptance_condition": "Satisfy every assigned whole-task demand and explicit constraint.",
+  "content_sha256": "4e00c82efc494750a7c2dfe7d6853ea45785ed4938e6b36a7b2808624ab1a9c7",
+  "demand_ids": [
+    "D1",
+    "D2",
+    "D3",
+    "D4",
+    "D5",
+    "D6",
+    "D7",
+    "D8",
+    "D9",
+    "D10"
+  ],
+  "id": "question:root",
+  "node_id": "root",
+  "rationale": "The whole task submitted after intake.",
+  "tags": [
+    "risk",
+    "constraint"
+  ],
+  "text": "Investigate the mutation graph of sorted positive-integer solutions of a^2+b^2+c^2+d^2 = 4abcd under Vieta mutation. First prove or refute the structural claims — connectivity of every solution to (1,1,1,1), uniqueness of a height-decreasing mutation at every non-root vertex, and the consequent rooted-tree structure of the quotient graph — then pursue the open asymptotic part: strongest attainable rigorous upper and lower bounds for N(H), the relation between mutation depth and log H, an active search for exceptional small solutions, hidden cycles, multiple parents, and induction failure modes, and sharply separated conjectures. Deliver a self-contained research memorandum."
+}

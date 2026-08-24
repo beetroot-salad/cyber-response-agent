@@ -1,0 +1,25 @@
+{
+  "account": "This node is a fully bounded two-case divisor enumeration. For x=3 the equation reduces to (y-6)(z-6)=36; for x=4 it reduces to (y-4)(z-4)=16. Both factor sets are finite and small, the x <= y <= z filtering is mechanical, and every proposed triple can be checked by exact common-denominator substitution. The dossier already supplies the required method, the global bound, and the factoring identity, so no additional evidence or parallel analysis is needed.",
+  "children": [],
+  "decidability": {
+    "acceptance_mechanical": true,
+    "account": "The node has the equation, the ordering constraint, the specific case reductions, the factoring identity, and a clearly mechanical acceptance condition: enumerate divisors of 36 and 16, apply integrality and x <= y <= z filters, then verify each survivor triple by exact substitution. No future sibling output is required.",
+    "context_complete": true,
+    "grounded_referents": [
+      "1/x+1/y+1/z=1/2",
+      "x <= y <= z",
+      "x ∈ {3,4}",
+      "(y-6)(z-6)=36 for x=3",
+      "(y-4)(z-4)=16 for x=4",
+      "divisor pair enumeration with integrality and ordering filters",
+      "exact substitution verification"
+    ],
+    "independent_of_future_siblings": true,
+    "missing_context": []
+  },
+  "disposition": "solve",
+  "irreducible_core": null,
+  "requested_source_ids": [],
+  "requested_source_paths": [],
+  "synthesis_contract": null
+}

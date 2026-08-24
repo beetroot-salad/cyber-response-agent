@@ -1,0 +1,10 @@
+{
+  "content_sha256": "75d83c430ebf29a844262bddf16c0b8e547dd308f1cbf35577f16f2b7963dd12",
+  "id": "link:75d83c430ebf29a844262bdd",
+  "origin": "agent",
+  "proposed_by_node_id": "work:001-inv-du-debate",
+  "rationale": "Provides the positive-pole evidence with precise page citations that D4 requires the note to reconcile against null/adverse findings from Smit et al. and Zhang et al.",
+  "relation": "partially_answers",
+  "source_id": "answer:work:001-inv-du-debate",
+  "target_id": "question:demand:D4"
+}

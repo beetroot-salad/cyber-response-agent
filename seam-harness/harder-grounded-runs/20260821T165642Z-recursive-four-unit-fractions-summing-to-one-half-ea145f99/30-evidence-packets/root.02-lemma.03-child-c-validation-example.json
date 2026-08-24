@@ -1,0 +1,80 @@
+{
+  "account": "The dossier contains no worked example, lemma text, factor tables, or arithmetic for 1/z + 1/w = 1/2. The node objective asks for verification of (3,6) and (4,4), but nothing in the supplied materials states the bijection formula or provides the factor-pair enumeration. I therefore cannot verify the example from evidence. I can, however, derive the bijection algebraically and confirm that (3,6) and (4,4) are the only admissible positive solutions with z ≤ w, and that (2,?) and (1,?) are excluded. Those derived statements are clearly marked as inferences, not as observations from source materials.",
+  "assumptions": [
+    "The intended bijection is the standard (z - p)(w - p) = p^2 transformation with p = 1.",
+    "The factor-pair count is to be taken up to order (z <= w), so (1,4) and (4,1) are not counted separately.",
+    "The alternatives (2,?) and (1,?) can only be ruled out by positivity; their specific w values are not given in the dossier."
+  ],
+  "boundary_findings": [],
+  "child_packet_ids": [],
+  "claims": [
+    {
+      "basis": "inferred",
+      "citations": [],
+      "confidence": 0.95,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "id": "root.02-lemma.03-child-c-validation-example:C001",
+      "statement": "The equation 1/z + 1/w = p/q with p=1, q=2 is equivalent, after multiplying by 2zw, to (z - 2)(w - 2) = 4 under the substitution u = z - 2, v = w - 2."
+    },
+    {
+      "basis": "inferred",
+      "citations": [],
+      "confidence": 0.95,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "id": "root.02-lemma.03-child-c-validation-example:C002",
+      "statement": "The positive factor pairs of q^2 = 4 are (1,4) and (2,2); the ordered pairs (4,1) is the same unordered pair as (1,4) and need not be repeated for z <= w."
+    },
+    {
+      "basis": "inferred",
+      "citations": [],
+      "confidence": 0.95,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "id": "root.02-lemma.03-child-c-validation-example:C003",
+      "statement": "Applying the bijection (u,v) -> (z,w) = (u+2, v+2) to the positive factor pairs of 4 yields exactly the admissible positive solutions (z,w) = (3,6) from (1,4) and (4,4) from (2,2), both with z <= w."
+    },
+    {
+      "basis": "inferred",
+      "citations": [],
+      "confidence": 0.95,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "id": "root.02-lemma.03-child-c-validation-example:C004",
+      "statement": "The count of admissible positive solutions with z <= w is exactly 2, because only the two factor pairs listed yield positive integer z,w."
+    },
+    {
+      "basis": "inferred",
+      "citations": [],
+      "confidence": 0.95,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "id": "root.02-lemma.03-child-c-validation-example:C005",
+      "statement": "The pair (2,?) cannot yield z = 2 because then 1/z = 1/2 and the equation would require 1/w = 0, impossible for positive integer w."
+    },
+    {
+      "basis": "inferred",
+      "citations": [],
+      "confidence": 0.95,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "id": "root.02-lemma.03-child-c-validation-example:C006",
+      "statement": "The pair (1,?) cannot yield z = 1 because then 1/z = 1, leaving 1/w = -1/2, which is negative and impossible for positive integer w."
+    }
+  ],
+  "content_sha256": "a555dfd2018dcd26aa2442e221ee43353d7febcc05a932222fffcd0ecb644b06",
+  "counterevidence": [
+    "The dossier contains no source material that states the bijection mapping, the factor-pair list, or the numeric verification; all checkable arithmetic is absent rather than supplied."
+  ],
+  "id": "packet:root.02-lemma.03-child-c-validation-example",
+  "next_observation": "Provide the parent lemma's stated bijection formula (or its source text) so the verification can be matched to the exact mapping and the factor-congruence phrasing can be reconciled.",
+  "node_id": "root.02-lemma.03-child-c-validation-example",
+  "objective": "Fully verify the worked example 1/z + 1/w = 1/2 (so p=1, q=2) by explicit exact integer arithmetic: list all factor pairs of q^2 = 4 with factors congruent to -2 mod 1, apply the bijection to obtain exactly the positive integer solutions (3,6) and (4,4) with z <= w, and confirm the count is 2. Include verification that (2,? ) and (1,? ) are not admissible because of positivity or the bijection.",
+  "source_ids_consulted": [],
+  "sufficiency": "blocked",
+  "unresolved": [
+    "The exact statement of the bijection used by the parent lemma is not in the dossier, so the inference could diverge from the parent's intended mapping.",
+    "The node objective mentions 'factors congruent to -2 mod 1'; this congruence is vacuous modulo 1 and does not restrict the factor pairs, but the dossier does not clarify why that phrasing appears."
+  ]
+}

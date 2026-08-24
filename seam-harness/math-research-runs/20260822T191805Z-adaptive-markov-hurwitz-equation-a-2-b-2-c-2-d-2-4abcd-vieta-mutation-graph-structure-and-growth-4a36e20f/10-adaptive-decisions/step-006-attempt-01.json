@@ -1,0 +1,30 @@
+{
+  "account": "The current posterior has two substantive pillars: answer:work:003-struct-core-v2 proves D1-D3, and answer:work:004-upper-depth-v3 proves the D4 upper bound and D6 depth relation. The entire last wave failed with zero-evidence output overruns, including answer:work:005-lower-bound-v4, answer:work:005-exception-search-v4, and answer:work:005-rq-sharp-attack. With three steps remaining, the best bounded move is to recover D5 with a much narrower proof packet now, leave the bounded D7/D9 enumeration for the next step, and reserve the final step for synthesis of the memorandum. D5 is chosen first because it is a core independent demand and a concise complete proof is available from the frozen tree facts. Only one investigation is launched because remaining_work_items is 1 and the repeated failure mode was overlong output.",
+  "action": {
+    "investigations": [
+      {
+        "acceptance_condition": "The answer is <=300 words, proves L1, L2, and L3 with no gap in the triple-equal case, states explicit lambda, beta, A, c', and the threshold H>=32, and gives the final two-term lower bound. It must not cite the blocked answers answer:work:001-lower-bound, answer:work:003-lower-bound-v2, answer:work:004-lower-bound-v3, or answer:work:005-lower-bound-v4 as evidence, and must label any stronger growth claim as conjecture with its obstruction.",
+        "demand_ids": [
+          "D5"
+        ],
+        "independence_account": "This investigation is independent: it uses only the frozen proved structural and upper-growth results in answer:work:003-struct-core-v2 and answer:work:004-upper-depth-v3, re-derives the small branching and recurrence lemmas it needs, and requires no result from any peer investigation in this wave.",
+        "local_id": "lower-bound-v5-compact",
+        "question": "D5 RETRY, EVIDENCE-ONLY, HARD CAP 300 WORDS. Prove the strongest rigorous lower bound currently attainable for N(H), the number of sorted solutions (a,b,c,d), 1<=a<=b<=c<=d, of a^2+b^2+c^2+d^2=4abcd with d<=H. No introduction, no tables, no prose motivation. Cite as frozen facts, without reproving: the quotient graph is a tree rooted at v0=(1,1,1,1); children of a non-root are the distinct sorted vertices obtained by mutating a,b,c; child maximum is at most 4d^3 (answer:work:003-struct-core-v2, answer:work:004-upper-depth-v3). Prove exactly these lemmas. L1 CHAIN: with (c1,d1)=(1,3), c_{j+1}=d_j, d_{j+1}=4d_j-c_j, prove v_j=(1,1,c_j,d_j) are distinct solutions, d_{j+1}=4d_j-d_{j-1}, d0=1,d1=3, lambda=2+sqrt(3), and d_j = A lambda^j + B lambda^{-j} with A=(3+sqrt(3))/6, B=(3-sqrt(3))/6, hence d_j<=lambda^j and N(H)>=floor(log_lambda H)+1. L2 TWO CHILDREN BELOW DEPTH 2: at a vertex with at least two distinct values among a,b,c, the child maxima f(x)=4abcd/x-x are distinct because f is strictly decreasing; if a=b=c=x, prove from x|d and d=kx that k^2+3=4kx^2, k|3, and the only possibilities are the root or v1=(1,1,1,3). Therefore every vertex at depth >=2 has at least two distinct children. L3 BINARY SUBTREE: below v2=(1,1,3,11), use child max <=4d^3. If A=log2(11)+1, after t edges log2(d)<=3^t A. Thus whenever 3^t A<=log2(H), all 2^t vertices at that level below v2 have d<=H. Take t=floor(log_3(log2(H)/A)), beta=log_3 2=0.6309, c'=1/(2A^beta) (approximately 0.194), H>=32, and conclude N(H)>=c'(log2 H)^beta. FINAL LINE: N(H)>=max(floor(log_{2+sqrt3} H)+1, c'(log2 H)^0.6309) for H>=32, with the polylogarithmic term asymptotically dominant. Anything stronger must be labeled CONJECTURE with the exact missing lemma.",
+        "rationale": "This isolates the missing lower-bound theorem in the smallest complete packet. The two-child lemma and binary-subtree count follow directly from the proved tree and growth facts, while the chain gives an independent logarithmic bound; together they close D5 without touching the separate enumeration or sharpness questions.",
+        "tags": [
+          "method",
+          "measurement",
+          "constraint",
+          "synthesis"
+        ],
+        "target_question_ids": [
+          "question:demand:D5",
+          "question:work:004-lower-bound-v3",
+          "question:work:005-lower-bound-v4"
+        ]
+      }
+    ],
+    "kind": "investigate",
+    "wave_rationale": "A single ultra-compact D5 proof has the highest expected information value: it fills the largest remaining mathematical gap, directly complements the proved sublinear upper bound, and preserves the remaining steps for enumeration and final synthesis. Narrowing scope and imposing a 300-word cap targets the observed output-overrun failure mode."
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "claim_ids": [
+    "work:002-inv-smit-mad-r2:C001",
+    "work:002-inv-smit-mad-r2:C002",
+    "work:002-inv-smit-mad-r2:C003",
+    "work:002-inv-smit-mad-r2:C004",
+    "work:002-inv-smit-mad-r2:C005",
+    "work:002-inv-smit-mad-r2:C006",
+    "work:002-inv-smit-mad-r2:C007",
+    "work:002-inv-smit-mad-r2:C008"
+  ],
+  "content_sha256": "1cd63e18b8159920874a7137a7dfcc036a524bf170062f814896fb1eb8c3f7fd",
+  "id": "answer:work:002-inv-smit-mad-r2",
+  "node_id": "work:002-inv-smit-mad-r2",
+  "packet_id": "packet:work:002-inv-smit-mad-r2",
+  "sufficiency": "ready_to_synthesize",
+  "summary": "Smit et al. 2023 (ICML 2024, arXiv:2311.17371v3) benchmark three MAD protocols — Society of Mind (Du et al. 2023), Multi-Persona (Liang et al. 2023, angel/devil/judge), ChatEval's three modes (Chan et al. 2023) — against non-debate multi-call strategies (Self-Consistency, Ensemble Refinement, Medprompt without its kNN component) and Single Agent, crossed with five agent-level prompts, on seven multiple-choice datasets (MedQA 1273, PubMedQA 500, MMLU-clinical 123, CosmosQA 500, CIAR 50, GPQA 448, Chess-short 1000), primarily GPT-3.5-turbo with GPT-4/Mixtral-8x7B checks on MedQA. Cost is USD per question and average API calls per question (plus time and prompt length in appendices). Headline: with original implementations MAD does not reliably beat Self-Consistency or Medprompt (Medprompt best overall: MedQA 0.65, PubMedQA 0.77; Single Agent best on GPQA 0.33; no protocol dominates all datasets), and MAD uses more API calls/tokens/cost. A K-fold analysis (pick hyperparameters best on two held-out same-category datasets) flips the winner between medical and non-medical groups, showing optimal settings are dataset-specific and no protocol is assured to beat single-agent on new data. Debate-vs-first-answer gains are protocol-dependent: SoM gains substantially, ChatEval modestly, Multi-Persona loses accuracy because the devil agent disagrees even with correct first answers. The paper's own mechanism claim: prompting 'agreement intensity' modulates first-round agreement and accuracy, with dataset-dependent sign — high agreement helps MedQA/PubMedQA, disagreement helps counter-intuitive CIAR; tuning yields ~15% for Multi-Persona and ~5% for SoM on a 376-question USMLE subset, and 90%-agreement Multi-Persona sets a claimed GPT-3 state-of-the-art on full MedQA. Hyperparameters transfer GPT-3.5→GPT-4 but not to Mixtral-8x7B. Stated limitations: API nondeterminism/model updates; cost-limited scale.",
+  "tags": [
+    "evidence",
+    "counterexample",
+    "uncertainty"
+  ],
+  "unresolved": [
+    "The optimal hyperparameter configuration per dataset (which K-fold selected) is in Appendix A.2/Table 3 but was not exhaustively transcribed; only representative rows were read.",
+    "Whether the agreement-modulation gain survives a strictly compute-matched comparison against self-consistency at equal API calls is not tested in the paper."
+  ]
+}

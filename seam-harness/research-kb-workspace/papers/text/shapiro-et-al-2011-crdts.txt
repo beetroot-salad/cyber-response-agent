@@ -1,0 +1,761 @@
+===== PDF PAGE 1 =====
+
+Conﬂict-free Replicated Data Types⋆
+Marc Shapiro1,5, Nuno Preguiça2,1, Carlos Baquero3, and Marek Zawirski1,4
+1 INRIA, Paris, France
+2 CITI, Universidade Nova de Lisboa, Portugal
+3 Universidade do Minho, Portugal
+4 UPMC, Paris, France
+5 LIP6, Paris, France
+Keywords: Eventual Consistency, Replicated Shared Objects, Large-Scale Dis-
+tributed Systems
+Abstract. Replicating data under Eventual Consistency (EC) allows
+any replica to accept updates without remote synchronisation. This en-
+sures performance and scalability in large-scale distributed systems (e.g.,
+clouds). However, published EC approaches are ad-hoc and error-prone.
+Under a formal Strong Eventual Consistency (SEC) model, we study suf-
+ﬁcient conditions for convergence. A data type that satisﬁes these con-
+ditions is called a Conﬂict-free Replicated Data Type (CRDT). Replicas
+of any CRDT are guaranteed to converge in a self-stabilising manner,
+despite any number of failures. This paper formalises two popular ap-
+proaches (state- and operation-based) and their relevant suﬃcient con-
+ditions. We study a number of useful CRDTs, such as sets with clean
+semantics, supporting bothadd and remove operations, and consider in
+depth the more complex Graph data type. CRDT types can be composed
+to develop large-scale distributed applications, and have interesting the-
+oretical properties.
+1 Introduction
+Replicationandconsistencyareessentialfeaturesofanylargedistributedsystem,
+such as the WWW, peer-to-peer, or cloud computing platforms. The standard
+“strong consistency” approach serialises updates in a global total order [10].
+This constitutes a performance and scalability bottleneck. Furthermore, strong
+consistency conﬂicts with availability and partition-tolerance [8].
+When network delays are large or partitioning is an issue, as in delay-tolerant
+networks, disconnected operation, cloud computing, or P2P systems,eventual
+consistency promises better availability and performance [17,21]. An update ex-
+ecutes at some replica, without synchronisation; later, it is sent to the other
+⋆ This research is supported in part by ANR project ConcoRDanT (ANR-10-BLAN
+0208). Marek Zawirski is supported in part by his Google Europe Fellowship in
+Distributed Computing 2010. Nuno Preguiça is partially supported by CITI (PEst-
+OE/EEI/UI0527/2011). Carlos Baquero is partially supported by FCT project Cas-
+tor (PTDC/EIA-EIA/104022/2008).
+
+===== PDF PAGE 2 =====
+
+2
+replicas. All updates eventually take eﬀect at all replicas, asynchronously and
+possibly in diﬀerent orders. Concurrent updates may conﬂict; conﬂict arbitration
+may require a consensus and a roll-back.6
+This weaker consistency is considered acceptable for some classes of applica-
+tions. However, conﬂict resolution is hard. The literature oﬀers little guidance on
+designing a correct optimistic system. Ad-hoc approaches are brittle and error-
+prone; witness for instance the concurrency anomalies of the Amazon Shopping
+Cart [3].
+We propose a simple, theoretically-sound approach to eventual consistency.
+Our system model, Strong Eventual Consistency or SEC, avoids the complex-
+ity of conﬂict resolution and of roll-back.Conﬂict-freedomensures safety and
+liveness despite any number of failures. It leverages simple mathematical prop-
+erties that ensure absence of conﬂict, i.e., monotonicity in a semi-lattice and/or
+commutativity. A trivial example is a replicated counter, which (assuming no
+overﬂow) converges because its increment and decrement operations commute.
+In our conﬂict-free replicated data types(CRDTs), an update does not require
+synchronisation, and CRDT replicas provably converge to a correct common
+state. CRDTs remain responsive, available and scalable despite high network
+latency, faults, or disconnection.
+Non-trivial CRDTs are known to exist: for instance, we previously published
+Treedoc, a sequence CRDT for co-operative text editing [14]. Our aim here is to
+expand our knowledge of the principles and practice of CRDTs. We claim the
+following contributions for this paper:
+– A solution to the CAP problem, Strong Eventual Consistency (SEC).
+– Formal deﬁnitions of Strong Eventual Consistency (SEC) and of CRDTs.
+– Two suﬃcient conditions for SEC.
+– A strong equivalence between the two conditions.
+– We show that SEC is incomparable to sequential consistency.
+– Description of basic CRDTs, including integer vectors and counters.
+– More advanced CRDTs, including sets and graphs.
+We refer the interested reader to a separate technical report [18] for further
+detail and for a comprehensive portfolio of CRDT designs.
+2 System model
+We consider a system of processes interconnected by an asynchronous net-
+work. The network can partition and recover. We assume a ﬁnite setΠ =
+{p0,...,p n−1}of non-byzantine processes. Processes inΠmay crash silently;
+a crashed process may remain crashed forever, or may recover with its memory
+intact. A non-crashed process is saidcorrect.
+6 Aconﬂictisacombinationofconcurrentupdates,whichmaybeindividuallycorrect,
+but that, taken together, would violate some invariant.
+
+===== PDF PAGE 3 =====
+
+3
+D
+s2.m(s1)
+s3.m(s2)
+D
+s2.u(b)
+S
+S
+s1.u(a) s1.m(s2)
+D
+s3
+s
+1
+s2
+s
+s1
+s2
+s2
+Fig. 1. State-based replication
+s1.t(a); s1.u(a')
+s2.t(b); 
+s2.u(b')
+D
+s3.u(a')
+s1.u(b')
+D
+s3.u(b')
+D
+S
+S
+D
+s2.u(a')
+s3
+s
+1
+s2
+s
+b' a'
+b' Fig. 2. Operation-based replication
+2.1 State-based object
+In this section we specify replicated objects in the so-calledstate-based style.
+The intuition is illustrated in Figure 1. Executing an update modiﬁes the state
+of a single replica. Every replica occasionally sends its local state to some other
+replica, which merges the state thus received into its own state. In this way,
+every update eventually reaches every replica, either directly or indirectly.
+With no loss of generality, we consider a single object with one replica at each
+process. An object is a tuple(S,s 0,q,u,m ). The replica at processpi has state
+si∈S, called itspayload; the initial state iss0. A client of the object may read
+the state of the object viaquery method q and modify it viaupdate method u.
+Method m serves tomerge the state from a remote replica. A method (whether
+q,u or m) executes at a single replica.
+Systems that deliver every update to every replica eventually in a fault-
+tolerant manner are well-known in the literature, for instance gossip or anti-
+entropy approaches [5,13]. For simplicity, we will assume hereafter a fully con-
+nected communication graph, where every arc is a fair-lossy channel. Inﬁnitely
+often, the replica atpi sends (if it is correct) its current state topj; replicapj (if
+it is correct)merges the received state into its local state by executing method
+m.
+A method whose precondition is satisﬁed is saidenabled. We assume that an
+enabled method executes as soon as it is invoked. Method executions at some
+replica are numbered sequentially from1. Thekth method execution at replica
+i will be notedf k
+i (a), wheref is eitherq,u orm, anda denotes the arguments.
+We noteKi(f ) the ordinal of executionf at replicai, i.e.,Ki(f k
+j (a)) = k for
+i = j, and is undeﬁned otherwise. (Abusing notation somewhat, we may drop
+subscripts, superscripts and/or arguments when there is no ambiguity.)
+The states of a replica are numbered sequentially incrementing with each
+method execution. Thus, replicai has initial states0
+i = s0. Before itskth exe-
+cution of a method it has statesk−1
+i , andsk
+i afterwards. We note the transition
+sk−1
+i •f k
+i (a) = sk
+i.
+We deﬁne state equivalences≡s′if all queries return the same result fors
+and s′. A query has no side-eﬀects, i.e.,(s•q)≡s.
+Deﬁnition 1 (Causal History (state-based)). We deﬁne the object’s
+causal history C = [ c1,...,c n] (where ci goes through a sequence of states
+c0
+i,...,c k
+i,...) as follows. Initially,c0
+i = ∅, for alli. If thekth method execution
+at i is: (i) a queryq: the causal history does not change, i.e.,ck
+i =ck−1
+i ; (ii) an
+
+===== PDF PAGE 4 =====
+
+4
+update (noteduk
+i (a)): it is added to the causal history, i.e.,ck
+i =ck−1
+i ∪{uk
+i (a)};
+(iii) a mergemk
+i (sk′
+i′ ), then the local and remote histories are unioned together:
+ck
+i =ck−1
+i ∪ck′
+i′ .
+We say that an update isdelivered at some replica when it is included in the
+causal history at that replica. An updateu happened-beforeu′iﬀu is deliv-
+ered when u′executes: u→u′def
+= u∈ck−1
+j , where u′executes at replica pj
+and Kj(u′) = k. Updates areconcurrent if neither happened-before the other:
+u‖u′def
+= u⁄→u′∧u′⁄→u. Note that the causal history is a formal reasoning
+device, which is normally not needed in a concrete implementation.
+Given our communication assumptions, we can conclude that, in a state-
+based object, every update is eventually delivered to all replicas. However, this is
+not suﬃcient to ensure that replicas converge. For instance, if the merge method
+m is a no-op, an update executed at some replica has no eﬀect on other replicas,
+and they will never converge.
+2.2 Strong Eventual Consistency
+Informally, eventual consistency means that replicas eventually reach the same
+ﬁnalvalueifclientsstopsubmittingupdates.Wecapturethisintuitionasfollows:
+Deﬁnition 2 (Eventual Consistency (EC)).
+Eventual delivery:An update delivered at some correct replica is eventually
+delivered to all correct replicas:∀i,j :f∈ci⇒♦f∈cj.
+Convergence: Correct replicas that have delivered the same updates eventually
+reach equivalent state:∀i,j : □ci =cj⇒♦□si≡sj.
+Termination: All method executions terminate.
+Several EC systems will execute an update immediately, only to discover later
+that it conﬂicts with another, and to roll back to resolve this conﬂict [20]. This
+constitutes a waste of resources, and in general requires a consensus to ensure
+that all replicas arbitrate conﬂicts in the same way. To avoid this, we require a
+stronger condition:
+Deﬁnition 3 (Strong eventual consistency (SEC)).An object is Strongly
+Eventually Consistent if it is Eventually Consistent and:
+Strong Convergence:Correct replicas that have delivered the same updates
+have equivalent state:∀i,j :ci =cj⇒si≡sj.
+2.3 State-based Convergent Replicated Data Type (CvRDT)
+We now propose a suﬃcient condition for strong convergence in state-based
+objects. A join semilattice (or just semilattice hereafter) is a partial order≤
+equipped with aleast upper bound(LUB)⊔for all pairs:m = x⊔y is a Least
+Upper Bound of{x,y}under≤iﬀ∀m′,x≤m′∧y≤m′⇒x≤m∧y≤m∧m≤
+m′. It follows that⊔is: commutative:x⊔y =y⊔x; idempotent:x⊔x =x; and
+associative: (x⊔y)⊔z =x⊔(y⊔z).
+
+===== PDF PAGE 5 =====
+
+5
+Deﬁnition 4 (Monotonic semilattice object). A state-based object,
+equipped with partial order≤, noted (S,≤,s 0,q,u,m ), that has the following
+properties, is called a monotonic semi-lattice:(i) Set S of payload values forms
+a semilattice ordered by≤. (ii) Merging states with remote states′computes
+the LUB of the two states, i.e.,s•m(s′) = s⊔s′. (iii) State is monotonically
+non-decreasing across updates, i.e.,s≤s•u.
+Theorem 1 (Convergent Replicated Data Type (CvRDT)).Assuming
+eventual delivery and termination, any state-based object that satisﬁes the mono-
+tonic semilattice property is SEC.
+Forlackofspace,weomittheproofthatispresentedinacompaniontechnical
+report [19]. A CvRDT converges towards the LUB of the most recent updates.
+We require thatx≤y∧y≤x⇒x≡y.
+2.4 Op-based Commutative Replicated Data Type (CmRDT)
+Alternatively to the state-based style, a replicated object may be speciﬁed
+in the operation-based (or op-based) style. An op-based object is a tuple
+(S,s 0,q,t,u,P ), whereS,s 0 andq have the same meaning as above (respectively
+state domain, initial state and query method). An op-based object has no merge
+method; instead an update is split into a pair(t,u ), wheret is a side-eﬀect-free
+prepare-updatemethod and u is an eﬀect-updatemethod. The prepare-update
+executes at the single replica where the operation is invoked (itssource). At
+the source, prepare-update methodt is followed immediately by eﬀect-update
+method u, i.e.,f k−1
+i = t⇒f k
+i = u. (If this were not true, there would be no
+causality between successive updates.)
+The eﬀect-update method executes at all replicas (saiddownstream). The
+source replica delivers the eﬀect-update to downstream replicas using a commu-
+nication protocol speciﬁed by the delivery relationP, explained below.
+We use the same notations for states and causal history as above, except that
+now f can refer to any ofq,t or u. Both queries and prepare-update methods
+are side-eﬀect-free, i.e.,s•q≡s•t≡s.
+Deﬁnition 5 (Causal History (op-based)).An object’scausal historyC =
+{c1,...,c n}is deﬁned as follows. Initially,c0
+i = ∅, for alli. If thekth method
+execution ati is: (i) a queryq or a prepare-updatet, the causal history does not
+change, i.e.,ck
+i =ck−1
+i ; (ii) an eﬀect-updateuk
+i (a), thenck
+i =ck−1
+i ∪{uk
+i (a)}.
+An update is said delivered at a replica when the update is included in the
+replica’s causal history. Update(t,u ) happened-before (t′,u′) iﬀ the former is
+delivered when the latter executes:(t,u )→(t′,u′)⇔u∈ck−1
+j , wheret′executes
+at pj and k =Kj(t′). The deﬁnition of concurrent updates remains as above.
+We assume an underlying reliable causally-ordered broadcast communication
+protocol, i.e., one that delivers every message to every recipient exactly once
+and in an order consistent with happened-before. Such protocols are a standard
+feature of distributed systems; they do not require consensus and they deliver
+
+===== PDF PAGE 6 =====
+
+6
+to all correct processes as long as any network partition eventually recovers (as
+we assumed earlier). It follows that two updates that are related by happened-
+before execute at all replicas in the same sequential order:(t,u )→(t′,u′)⇒
+∀i,K i(u)<K i(u′). However, concurrent updates may be delivered in any order.
+Deﬁnition 6 (Commutativity).Updates (t,u ) and (t′,u′) commute, iﬀ for
+any reachable replica states where bothu andu′are enabled,u (resp.u′) remains
+enabled in states•u′(resp.s•u), ands•u•u′≡s•u′•u.
+Clearly, a suﬃcient condition for convergence of an op-based object is that all
+its concurrent operations commute. An object satisfying this condition is called
+a Commutative Replicated Data Type (CmRDT).
+P is a delivery precondition, i.e., eﬀect-update methodu is enabled only if
+the precondition is satisﬁed. We interpret this temporally, i.e., delivery ofu at
+replicai may delayed, untilP (si,u ) is true. Therefore, for liveness, we now have
+the added obligation to prove that delivery is eventually enabled. Therefore
+we restrict our scope to preconditions for which causally-ordered broadcast is
+suﬃcient to ensureP.
+Theorem 2 (Commutative Replicated Data Type (CmRDT)).Assum-
+ing causal delivery of updates and method termination, any op-based object that
+satisﬁes the commutativity property for all concurrent updates, and whose deliv-
+ery precondition is satisﬁed by causal delivery, is SEC.
+The proof is presented in [19].
+3 Some results
+3.1 Fault-tolerance and the CAP theorem
+The CAP theorem states that it is impossible to simultaneously ensure strong
+consistency (C), availability (A) and tolerate network partition (P) [8]. As, net-
+work faults unavoidably occur in a large-scale environment, a real system must
+sacriﬁce either consistency or availability. Availability is often the top priority in
+practice [3]: does this mean giving up all consistency guarantees?
+No: SEC provides a solution. A SEC replica is always available for both reads
+and writes, independently of network conditions. Any communicating subset of
+replicas of a SEC object eventually converges, even if partitioned from the rest
+of the network. SEC is weaker than strong consistency but nonetheless provides
+the well-deﬁned guarantee of strong eventual convergence.
+SEC provides an extreme form of fault tolerance, as a SEC object tolerates
+up ton−1 simultaneous crashes. Remarkably, SEC does not require to solve
+consensus.
+
+===== PDF PAGE 7 =====
+
+7
+3.2 CvRDTs and CmRDTs are equivalent
+Operation-based emulation of a state-based object
+Theorem 3 (CmRDT emulation).Any SEC state-based object can be emu-
+lated by a SEC op-based object of a corresponding interface.
+Proof. Given a CvRDT represented by tuple(S,≤,s 0,q,u,m ), we emulate it by
+a CmRDT object(S,s 0,q,t,u ′,P ), which we specify hereby.
+State and query of CvRDT can be directly stored and processed by emulating
+CmRDTusingthesamedeﬁnitions.Aprepare-update t(a)hasthesameinterface
+(accepts the same domain of arguments and returns the same domain of value)
+as an updateu(a). It records the result of applying updateu(a) on a copy of
+current replica states:s′=s•u(a); return value ofu(a) is passed to the client.
+Recorded states′is used as an argument of an actual eﬀect-updateu′(s′), which
+is delivered to all replicas by the underlying protocol of CmRDT. Precondition
+P is unrestricted and enables delivery at any time. Eﬀect-updateu′(s′) merges
+received state using original CvRDT method:s•u′(s′)
+def
+= s•m(s′).
+Since merge always commutes, then updatesu′(s′) commute and since the
+communication is reliable, we have a CmRDT with strong eventual consistency,
+which propagates all updates of emulated CvRDT.
+State-based emulation of an operation-based object State-based emu-
+lation of an operation-based object essentially formalises the mechanics of an
+epidemic reliable causal broadcast.
+Theorem 4 (CvRDT emulation).Any SEC op-based object can be emulated
+by a SEC state-based object of a corresponding interface.
+Proof. Given a CmRDT represented by tuple(S,s 0,q,t,u,P ), we emulate it by
+a CvRDT object((S×U×U ),≤, (s0, ∅, ∅),q′,u′,m ), which we specify hereby.
+Without loss of generality, we assume that each invocationuk
+i is unique across
+replicas and setU denotes all possible updates. CvRDT’s state is then deﬁned
+as a triple(sm,M,D ), wheresm is a state of emulated CmRDT,M and D are
+two add-only sets of, respectively, known and delivered updates. A relation≤is
+deﬁned as following:(sm,M,D )≤(s′
+m,M′,D′)
+def
+= M⊆M′∧D⊆D′.
+Aquery q′(a)hasthesameinterfaceas q(a);wedeﬁneitasatrivialdelegation
+to q(a) on the CmRDT,sm•q(a). An updateu′(a) has the same interface as
+prepare-update t(a). It ﬁrst delegates the invocation to prepare-updatet(a) of
+the CmRDT that in turn triggers eﬀect-updateu(a), which becomes a locally
+known update. Finally,u′(a) uses a recursive functiond to process updates:
+d(sm,M,D )
+def
+=
+{
+d(sm•u(a),M,D ∪{u(a)}) if∃u(a)∈M\D :P (sm,u (a))
+(sm,M,D ) otherwise
+Hence, u′(a) is deﬁned as:(sm,M,D )•u′(a)
+def
+= d(sm•t(a),M∪{u(a)},D ).
+
+===== PDF PAGE 8 =====
+
+8
+Finally, mergem takes a union of known messages and processes available
+updates: (sm,M,D )•m(s′
+m,M′,D′)
+def
+= d(sm,M∪M′,D ).
+Since the emulation ensures that messages are delivered exactly once to each
+replica’s embedded object, in the appropriate order, and since the CvRDT con-
+forms to SEC criteria, the embedded CmRDT instance is also SEC.
+Note that the emulating object forms a monotonic semilattice over domain
+S×U×U. Calling or delivering an operation adds it to the relevant message
+set, and therefore advances the state in the partial order. The merge methodm
+is deﬁned to take the union of theM sets and (possibly) updatingD, and is
+thus a LUB operation. This construction is similar to Wuu and Bernstein’s log
+covered in Section 4.2.
+3.3 SEC is incomparable to sequential consistency
+A state-based replica executes a sequence of query, update, and merge methods.
+In addition to its sequential behaviour, a CRDT speciﬁes concurrent behaviours
+that must satisfy the strong convergence property. As we show now, this permits
+executions that would be impossible in a sequentially-consistent system.
+Consider a Set CRDTS with operations add(e) and remove(e). Immediately
+after add(e), the state will satisfye∈S; afterremove(e) the state satisﬁese /∈S.
+In a sequential execution, the last update wins, e.g., afterremove(e)→add(e)
+the state satisﬁese∈S. Concurrent adds or removes of diﬀerent elements are
+independent, e.g., afteradd(e)‖remove(e′) the state satisﬁese∈S∧e′/∈S.
+There is a choice of alternative semantics for concurrent updates of the same
+element. When concurrently adding and removing the same element, the add
+could win, or the remove could win, or the update of the replica with the highest
+IP address could win, or the state might be reset to a distinguished state⊥, and
+so on. All these alternatives satisfy the strong convergence condition, and any
+of them may be reasonable for some application.
+Let us consider the add-wins alternative: afteradd(e)‖remove(e) the state
+satisﬁese∈S. Now consider the following scenario. Replicap0 executes the se-
+quence add(e); remove(e′). Concurrently, replicap1 executes add(e′); remove(e).
+Then, replicap3 merges the state fromp0 and p1. According to the concurrent
+speciﬁcation, the ﬁnal state atp3 satisﬁese∈S∧e′∈S. Such a state would
+never occur in a sequentially-consistent execution, in which eitherremove(e) or
+remove(e′) must be last. Thus, there is a SEC object that is not sequentially
+consistent.
+Nowconsidertheconverse.Intheabsenceofcrashes,asequentially-consistent
+object is SEC. Indeed, sequential consistency is deﬁned by a single order of
+operations, after which all replicas must terminate with the same state. However,
+in the general case, sequential consistency requires consensus, which cannot be
+solved in the presence ofn−1 crashes. Therefore, SEC is incomparable with
+sequential consistency.
+
+===== PDF PAGE 9 =====
+
+9
+4 Example CRDTs
+We now recall some basic CRDTs that are known in the existing literature,
+which we will later compose to build higher-level objects. We will use state- or
+op-based speciﬁcations as most convenient. Generally, we ﬁnd the state-based
+style more compact and easier to reason about formally, whereas the op-based
+style is often convenient for implementation.
+4.1 Integer vectors and counters
+Consider the state-oriented speciﬁcation of a vector-of-integers object:
+(Nn, [0,..., 0],≤n, [0,..., 0], value, inc, maxn). Vectorsv,v′∈Nn are (partially)
+ordered byv≤n v′⇔∀j∈[0..n−1],v [i]≤v′[i]. A query invocation value()
+returns a copy of the local payload. An updateinc(i) increments the payload
+entry at indexi, that is,s•inc(i) = [s′[0],...,s′[n−1]] where s′[j] = s[j] + 1 if
+i =j and s′[j] = s[j] otherwise. Merging two vectors takes the per-index maxi-
+mum, i.e.,s•maxn(s′) = [max(s[0],s′[0]),..., max(s[n−1],s′[n−1])]. We omit
+the proof that it is a CRDT.
+If each processpi is restricted to incrementing its own indexinc(i), this is
+the well-known vector clock [11].
+An increment-only integer counter is very similar; the only diﬀerence being
+that query invocation value() of a vector in statev returns|v|
+def
+= ∑
+jv[j]. We
+construct an integer counter that can be both incremented and decremented, by
+basically associating two increment-only countersI and D, where incrementing
+incrementsI and decrementing incrementsD, whereas value() returns|I|−|D|.
+The ordering method≤is deﬁned as(I,D )≤(I′,D′)
+def
+= I≤n I′∧D≤n D′.
+4.2 U-Set, map and log
+Another simple CRDT construct is an add-only set object (S,⊆
+, ∅, value, add(e),∪). The payload is any set; sets are ordered by inclu-
+sion. A query value() returns a copy of the local payload. Updateadd(e) adds
+elemente to the set, i.e.,s•add(e) = s∪{e}. It is well-known that sets ordered
+by⊆form a semi-lattice with∪as the LUB operator. It is clearly monotonic
+by the deﬁnition ofadd. Therefore, the add-only set is a CRDT.
+Wuu and Bernstein build further CRDTs by combination of these basic com-
+ponents [23]. They propose a set with bothadd and remove operations by asso-
+ciating two add-only setsA andR; adding an element adds it toA, removing it
+adds it toR; queryvalue() returns the set diﬀerenceA\R. (R is often called the
+tombstone set. A client is allowed to remove only an element that is currently in
+A). Note that they assume that every element is unique and added only once;
+we call their construct U-Set [18]. Wuu and Bernstein derive their Dictionary
+data type from U-Set in the obvious way.
+A Log is a replicated object, whose payload contains a set (initially empty) of
+(event,timestamp) pairs. It assumes that each process maintains a vector clock
+
+===== PDF PAGE 10 =====
+
+10
+in the usual manner [11]. When an eventeoccurs at processi, the process invokes
+update add(e); the update method updates the vector clock (say, to statev) and
+adds the pair(e,v ) to the set. The timestamp ensures that each entry is unique.
+The merge method takes the union of the local and a remote set.
+To avoid unbounded growth, Wuu and Bernstein propose a distributed
+garbage collection algorithm that discards unneeded entries. In order to tol-
+erate n−1 crashes, only an entry that has been delivered to all processes may
+be discarded. If vector clock entryvi[j] = k, this implies that process i has
+delivered allk ﬁrst events of processpj. Each replica maintains in its payload
+a copy of all remote vector clocks; for each remote site, the merge procedure
+keeps the largest version. Then, a replica may discard a log entry as soon as
+its timestamp is less than all the remote vector clocks. This algorithm does not
+require a consensus, but it is live only if no process is crashed. However, this
+may be acceptable, since the liveness of garbage collection does not impact the
+correctness of the main algorithm.
+This algorithm may be adapted to other data types, for instance to discarding
+the A and R entries of a removed element in the U-Set.
+5 Directed Graph CRDT
+Now let us examine how one would design a more complex data type: a Directed
+Graph CRDT. Graphs are an important general-purpose data structure. Some
+important applications and algorithms work on graphs, e.g., shortest-path or
+web page-rank.
+5.1 Thought experiment
+To motivate our graph design, consider the “thought experiment” of designing
+a web search engine. The search engine uses a directed graph representing the
+web structure. This graph may be used, among other things, to compute page
+rank. Such an application processes large amounts of data and performs many
+updates. For eﬃciency and scalability, processing should be asynchronous; for
+responsiveness, processing should be incremental, as fast as each page is crawled.
+Processing should not require any synchronisation, e.g., transactions. A CRDT
+could be ideal.
+We start with a Set CRDT containing some initial URLs to be crawled. A
+number of crawler processes run in parallel; each one removes some URL from
+the set and downloads it. (It might happen that the same page is downloaded
+twice but this does not impact correctness.)
+When a crawler ﬁnds a new page, it executes the correspondingaddVertex.
+For every page, it parses the links that it contains, comparing it with the page’s
+previous version, if any, and executes the correspondingaddArc and removeArc
+invocations. Finally, the URLs of the linked pages are added to the set to be
+crawled. Note thataddArc must work even if the page at the tail of the arc has
+not yet been found (it might not even exist), but such an arc is not functional; a
+
+===== PDF PAGE 11 =====
+
+11
+payload set V, A -- sets of pairs { (element e, unique-tag w), ...}
+initial ∅,∅ -- V : vertices; A: arcs
+query lookup (vertex v) : boolean b
+let b = (∃w : (v, w) ∈ V )
+query lookup (arc (v′, v′′)) : boolean b
+let b = (lookup(v′) ∧ lookup(v′′) ∧ (∃w : ((v′, v′′), w) ∈ A)
+update addVertex (vertex v)
+prepare (v) : w
+let w = unique() -- unique() returns a unique value
+eﬀect(v, w)
+V := V ∪ {(v, w)} -- v + unique tag
+update removeVertex(vertex v)
+prepare (v) : R
+pre lookup(v) -- precondition
+pre ⁄ ∃v′ : lookup((v, v′)) -- v is not the head of an existing arc
+let R = {(v, w)|∃w : (v, w) ∈ V } -- Collect all unique pairs in V containing v
+eﬀect(R)
+V := V \R
+update addArc (vertex v′, vertex v′′)
+prepare (v′, v′′) : w
+pre lookup(v′) -- head node must exist
+let w = unique() -- unique() returns a unique value
+eﬀect(v′, v′′, w)
+A := A ∪ {((v′, v′′), w)} -- (v′, v′′) + unique tag
+update removeArc(vertex v′, vertex v′′)
+prepare (v′, v′′) : R
+pre lookup((v′, v′′)) -- arc(v′, v′′) exists
+let R = {((v′, v′′), w)|∃w : ((v′, v′′), w) ∈ A}
+eﬀect(R) -- Collect all unique pairs in A containing arc (v′, v′′)
+A := A \R
+Fig. 3. Directed Graph Speciﬁcation (op-based)
+lookup of the corresponding arc should fail. Similarly if a node has been removed,
+all arcs incident to the node disappear. In this way, the behaviour of our CRDT
+will be consistent with that of web pages, which are allowed to contain non-
+functional URLs. Once the linked page is created, the link become relevant, e.g.,
+for navigation and for page-rank computation.
+In the web application, the graph is very large; sending the state between
+replicas and merging would be very costly. Therefore, we choose an op-based
+approach.
+5.2 Design alternatives for arc removal
+A directed graph is a pair of sets(V,A ), called vertices and arcs respectively,
+such thatA⊆V×V. Updates must maintain the invariant that the head and
+
+===== PDF PAGE 12 =====
+
+12
+tail vertices of an arc both exist. Therefore, adding an arc toA has the precon-
+dition that its two vertices are inV; conversely, a vertex may be removed only
+if it supports no arc; these are preconditions to prepare-update. Furthermore,
+the system must ensure that concurrentaddArc(v′,v′′)‖removeVertex(v′) do
+not violate the invariant. Several alternatives may be considered:(i) Give prece-
+dence to removeVertex(v′): all edges to or fromv′are removed as a side eﬀect.
+This is easy to implement, by hiding any arc that includes a removed vertex.
+(ii) Give precedence to addArc(v′,v′′): if eitherv′or v′′has been removed, it
+is restored. This requires recreating nodes that have being explicitly deleted.
+(iii) removeVertex(v′) is delayed until all concurrent addArc operations have
+executed. This requires synchronisation which violates the goals of asynchrony
+and fault tolerance. There is no perfect choice. Hereafter, we choose Option(i)
+because it is adequate in our application scenario.
+5.3 Graph speciﬁcation
+Figure 3 shows our speciﬁcation for a Directed-Graph CRDT. We prove that
+this object is indeed a CmRDT in [19].
+This CRDT maintains two sets internally, one for the vertices and one for the
+arcs. To add a vertexv, the prepare-update method creates a unique identiﬁer,
+w, and the eﬀect-update method adds the pair(v,w ) to the set of vertices.
+With this approach, each vertex has an unique internal identiﬁer. If the same
+vertex is added twice, the two additions will be distinguished by their two unique
+identiﬁers. A lookup will mask the duplicates.
+To remove vertexv, the prepare-update computes the setR of pairs that
+containv, i.e., all copies known in the source replica; the eﬀect-update method
+removes this same setR from the set of vertices in all replicas. As operations
+are delivered in causal order, when the eﬀect-update method executes in some
+replica, for each pair inR, the correspondentaddVertex operations has already
+executed. Thus, unlike the state-based solution of Section 4.2, a set need not
+keep tombstones.
+If the same vertex is removed and added concurrently, theaddVertex wins,
+as the new unique identiﬁer is not included in the set computed by the remove’s
+prepare-update. This approach is consistent with a sequential execution, as the
+a vertex can removed only if it is observed. The same approach is used for arcs.
+To remove a vertex, the source replica checks that the vertex is observed,
+and also that it is not the head of any existing arc. Conversely, to add an arc, its
+head node must exist, but there is no check for existence of the tail. The lookup
+method will mask the existence of such an arc. However, if the tail is added
+later, then the arc becomes visible. Similarly, concurrent updates may remove a
+vertex that is the head of an arc. However, the lookup method will mask such
+an arc.
+
+===== PDF PAGE 13 =====
+
+13
+6 Comparison with previous work
+Eventual consistency has been an active topic of research in highly-available,
+large-scale asynchronous systems [17,21]. Contrary to much previous work [3, for
+instance], we take a formal approach grounded in the theory of commutativity
+and semilattices.
+The state-based approach was invented for register-like objects, where the
+only update operation is assignment. It is in wide use in ﬁle systems such as
+NFS, AFS or Coda, and in key-value stores such as Dynamo [3] and Riak. Op-
+based approaches are used when the cost of transferring state is too high, e.g.,
+databases, and when operation semantics are important, e.g., cooperative sys-
+tems such as Bayou [13] or IceCube [15].
+Although the CRDT concept was identiﬁed only recently, related designs
+have been published before. Johnson et. al. invented the LWW-Register [9]. They
+propose a database of registers that can be created, updated and deleted, using
+the last-writer-wins (LWW) rule to arbitrate between concurrent changes. LWW
+ensures a total order of operations, at the cost of losing concurrent updates.
+Concurrent editing uses the related concept of Operational Transformation
+(OT), due to Ellis and Gibbs [7]. To ensure responsiveness, a local operation ex-
+ecutes immediately. Operations are not designed to commute; however, a replica
+receiving an update transforms it against previously-executed concurrent up-
+dates to achieve a similar result. OT algorithms for a decentralised architecture
+have been proposed; Oster et al. show that most of them are incorrect [12]. We
+believe that designing for commutativity from the start is cleaner and simpler.
+The foundations of CvRDTs were introduced by Baquero and Moura [1]. We
+extend their work with CmRDTs and with a number of new results. The CRDT
+concept was invented by Shapiro and Preguiça on their work on Treedoc, a
+Sequence CRDT for concurrent editing [14]. Logoot is another Sequence CRDT
+that supports anundo mechanism based on a CRDT Counter [22].
+Roh et al. [16] independently developed the related concept of Replicated
+Abstract Data Type. They generalise LWW to a partial order of updates, which
+they leverage to build several LWW-style classes.
+Burckhardt and Leijen propose the Concurrent Revisions programming
+model for shared abstract data types, in which a forked revision runs in iso-
+lation until it joins again. Join is based on a three-way merge function [2]. They
+show that simple sequential merge functions exist for ADTs built upon Abelian
+groups. We have also demonstrated the relation between CRDTs and sequential
+consistency in a similar, but more loosely-coupled, replication model.
+Ducourthial et al. study algebraic structures with speciﬁc properties in order
+to solve self-stabilisation problems [6]. They propose the so-called r-operator for
+“silent” tasks [4]. Strong convergence can be seen as as a silent task, given a
+limited number of disturbing updates. However, there are diﬀerences between
+the two approaches. Whereas a self-stabilising system must tolerate arbitrary
+memory corruption, a shared mutable object should change state durably only
+by executing update operations. Furthermore, whereas CvRDT states constitute
+a monotonic semi-lattice, ther-operator requries a total order.
+
+===== PDF PAGE 14 =====
+
+14
+7 Conclusion
+We presented the concept of a CRDT, a replicated data type for which some sim-
+ple mathematical properties guarantee eventual consistency. In the state-based
+style, the successive states of an object should form a monotonic semilattice,
+with merge computing a least upper bound. In the op-based style, concurrent
+operations should commute. Assuming only that the communication subsystem
+ensures eventual delivery (in causal order for op-based objects), CRDTs are
+guaranteed to converge towards a common, correct state, without requiring any
+synchronisation.
+We presented some simple CRDT examples, such as sets, and detailed how
+to create a directed Graph CRDT, which might be used in a large-scale web
+search engine. Our data types have a clean and deterministic semantics in the
+presence of concurrent updates.
+Eventual consistency is a critical technique in many large-scale distributed
+systems, including delay-tolerant networks, sensor networks, peer-to-peer net-
+works, collaborative computing, cloud computing, and so on. However, work on
+eventual consistency was mostly ad-hoc so far. Although some of our CRDTs
+were known before in the literature or in the folklore, this is the ﬁrst work to
+engage in a systematic study. We believe this is required if eventual consistency
+is to gain a solid theoretical and practical foundation.
+Future work is both theoretical and practical. On the theory side, this will
+include understanding the class of computations that can be accomplished by
+CRDTs, the complexity classes of CRDTs, the classes of invariants that can
+be supported by a CRDT, the relations between CRDTs and concepts such as
+self-stabilisation and aggregation, and so on. On the practical side, we plan to
+implement the data types speciﬁed herein as a library, to use them in practical
+applications, and to evaluate their performance analytically and experimentally.
+Another direction is to support infrequent, non-critical synchronous operations,
+such as committing a state or performing a global reset. We will also look into
+stronger global invariants, possibly using probabilistic or heuristic techniques.
+References
+1. Baquero, C., Moura, F.: Speciﬁcation of convergent abstract data types for au-
+tonomous mobile computing. Tech. rep., Departamento de Informática, Universi-
+dade do Minho (Oct 1997)
+2. Burckhardt, S., Leijen, D.: Semantics of concurrent revisions. Programming Lan-
+guages and Systems pp. 116–135 (2011)
+3. DeCandia, G., Hastorun, D., Jampani, M., Kakulapati, G., Lakshman, A., Pilchin,
+A., Sivasubramanian, S., Vosshall, P., Vogels, W.: Dynamo: Amazon’s highly avail-
+able key-value store. In: Symp. on Op. Sys. Principles (SOSP). Operating Systems
+Review, vol. 41, pp. 205–220 (Oct 2007)
+4. Delaët, S., Ducourthial, B., Tixeuil, S.: Self-stabilization with R-operators revis-
+ited. Self-Stabilizing Systems pp. 68–80 (2005)
+
+===== PDF PAGE 15 =====
+
+15
+5. Demers, A.J., Greene, D.H., Hauser, C., Irish, W., Larson, J.: Epidemic algo-
+rithms for replicated database maintenance. In: Symp. on Principles of Dist. Comp.
+(PODC). pp. 1–12 (Aug 1987), also appears Op. Sys. Review 22(1): 8-32 (1988)
+6. Ducourthial, B.: R-semi-groups: a generic approach for designing stabilizing silent
+tasks. In: Int. Conf. on Stabilization, Safety, and Security of Distributed Systems
+(SSS). pp. 281–295 (2007)
+7. Ellis, C.A., Gibbs, S.J.: Concurrency control in groupware systems. In: Int. Conf.
+on the Mgt. of Data (SIGMOD). pp. 399–407 (1989)
+8. Gilbert, S., Lynch, N.: Brewer’s conjecture and the feasibility of consistent, avail-
+able, partition-tolerant web services. SIGACT News 33(2), 51–59 (2002)
+9. Johnson, P.R., Thomas, R.H.: The maintenance of duplicate databases. Internet
+Request for Comments RFC 677, Information Sciences Institute (Jan 1976)
+10. Lamport, L.: Time, clocks, and the ordering of events in a distributed system.
+Communications of the ACM 21(7), 558–565 (Jul 1978)
+11. Mattern, F.: Virtual time and global states of distributed systems. In: Int. W. on
+Parallel and Distributed Algorithms. pp. 215–226 (1989)
+12. Oster, G., Urso, P., Molli, P., Imine, A.: Proving correctness of transformation
+functions in collaborative editing systems. Rapport de recherche RR-5795, LORIA
+– INRIA Lorraine (Dec 2005)
+13. Petersen, K., Spreitzer, M.J., Terry, D.B., Theimer, M.M., Demers, A.J.: Flexi-
+ble update propagation for weakly consistent replication. In: Symp. on Op. Sys.
+Principles (SOSP). pp. 288–301 (Oct 1997)
+14. Preguiça, N., Marquès, J.M., Shapiro, M., Leţia, M.: A commutative replicated
+data type for cooperative editing. In: Int. Conf. on Distributed Comp. Sys.
+(ICDCS). pp. 395–403 (Jun 2009)
+15. Preguiça, N., Shapiro, M., Matheson, C.: Semantics-based reconciliation for col-
+laborative and mobile environments. In: Int. Conf. on Coop. Info. Sys. (CoopIS).
+Lecture Notes in Comp. Sc., vol. 2888, pp. 38–55 (Nov 2003)
+16. Roh, H.G., Jeon, M., Kim, J.S., Lee, J.: Replicated abstract data types: Building
+blocks for collaborative applications. Journal of Parallel and Dist. Comp. ((To
+appear) 2011)
+17. Saito, Y., Shapiro, M.: Optimistic replication. ACM Comput. Surv. 37(1), 42–81
+(Mar 2005)
+18. Shapiro, M., Preguiça, N., Baquero, C., Zawirski, M.: A comprehensive study of
+Convergent and Commutative Replicated Data Types. Rapport de recherche 7506,
+Institut Nat. de la Recherche en Informatique et Automatique (INRIA), Rocquen-
+court, France (Jan 2011)
+19. Shapiro, M., Preguiça, N., Baquero, C., Zawirski, M.: Conﬂict-free Replicated Data
+Types. Rapport de recherche 7686, Institut Nat. de la Recherche en Informatique
+et Automatique (INRIA), Rocquencourt, France (Jul 2011)
+20. Terry, D.B., Theimer, M.M., Petersen, K., Demers, A.J., Spreitzer, M.J., Hauser,
+C.H.: Managing update conﬂicts in Bayou, a weakly connected replicated storage
+system. In: 15th Symp. on Op. Sys. Principles (SOSP). pp. 172–182 (Dec 1995)
+21. Vogels, W.: Eventually consistent. ACM Queue 6(6), 14–19 (Oct 2008)
+22. Weiss,S.,Urso,P.,Molli,P.:Logoot-undo:Distributedcollaborativeeditingsystem
+on P2P networks. IEEE Trans. on Parallel and Dist. Sys. (TPDS) 21, 1162–1174
+(2010)
+23. Wuu, G.T.J., Bernstein, A.J.: Eﬃcient solutions to the replicated log and dictio-
+nary problems. In: Symp. on Principles of Dist. Comp. (PODC). pp. 233–242 (Aug
+1984)

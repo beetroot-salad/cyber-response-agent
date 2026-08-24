@@ -1,0 +1,11 @@
+{
+  "child_ids": [],
+  "depth": 3,
+  "effective_disposition": "solve",
+  "node_id": "root.05-debate-nulls-boundaries.01-c1-smit-null-results.02-smit-extract-benchmarks",
+  "packet_id": "packet:root.05-debate-nulls-boundaries.01-c1-smit-null-results.02-smit-extract-benchmarks",
+  "packet_sha256": "1fe8c4280c2d98e0d66b66cbd0d3118dde06de7eb4aa6adf444672082ed49ffd",
+  "parent_id": "root.05-debate-nulls-boundaries.01-c1-smit-null-results",
+  "proposed_disposition": "solve",
+  "stop_reason": null
+}

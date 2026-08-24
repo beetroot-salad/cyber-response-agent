@@ -1,0 +1,22 @@
+{
+  "account": "The node's objective is a self-contained mathematical lemma: derive and prove the z-interval formula and the automatic w>=z inside it, using only exact rational arithmetic and the given separator facts. No external sources are demanded and the derivation is fully checkable from the equation 1/x+1/y+1/z+1/w=1/2 with x<=y<=z<=w. I can perform all required steps locally and mechanically verify the bounds.",
+  "children": [],
+  "decidability": {
+    "acceptance_mechanical": true,
+    "account": "All needed mathematical objects (variables, equation, R, the proposed interval) are present in the dossier. The proof uses only algebra and integer floor arithmetic, and the tightness and w>=z implication are mechanical consequences of the equation rearranged as 1/z + 1/w = R.",
+    "context_complete": true,
+    "grounded_referents": [
+      "x, y, z, w positive integers with x ≤ y ≤ z ≤ w",
+      "1/x + 1/y + 1/z + 1/w = 1/2",
+      "R = 1/2 − 1/x − 1/y",
+      "proposed z-interval: max(y, floor(1/R)+1) ≤ z ≤ floor(2/R)"
+    ],
+    "independent_of_future_siblings": true,
+    "missing_context": []
+  },
+  "disposition": "solve",
+  "irreducible_core": null,
+  "requested_source_ids": [],
+  "requested_source_paths": [],
+  "synthesis_contract": null
+}

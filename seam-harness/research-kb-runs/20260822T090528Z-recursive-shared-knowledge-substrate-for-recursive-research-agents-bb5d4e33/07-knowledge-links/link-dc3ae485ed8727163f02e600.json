@@ -1,0 +1,7 @@
+{
+  "content_sha256": "dc3ae485ed8727163f02e6002383dd2f41de10730c098fc92d490ca266235a96",
+  "id": "link:dc3ae485ed8727163f02e600",
+  "relation": "depends_on",
+  "source_id": "question:raised:acdafc70e274e250",
+  "target_id": "question:root.05-debate-nulls-boundaries"
+}

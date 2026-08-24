@@ -1,0 +1,11 @@
+{
+  "child_ids": [],
+  "depth": 2,
+  "effective_disposition": "solve",
+  "node_id": "root.01-arg-semantics.04-child-4",
+  "packet_id": "packet:root.01-arg-semantics.04-child-4",
+  "packet_sha256": "44a814d219de057cc85dbc09895b2069f57017ff2af304bf110746643fb962cb",
+  "parent_id": "root.01-arg-semantics",
+  "proposed_disposition": "solve",
+  "stop_reason": null
+}

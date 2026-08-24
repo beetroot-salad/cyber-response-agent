@@ -1,0 +1,110 @@
+{
+  "created_at": "2026-08-21T15:48:41.488409+00:00",
+  "events": [
+    {
+      "event_hash": "47364d0f9ee93952c0b98860a3eaa04ddea5446a2954f49734d9bd8a5ea3e851",
+      "index": 0,
+      "metadata": {},
+      "name": "recursive-run",
+      "path": "00-input/recursive-run.json",
+      "previous_event_hash": null,
+      "record_sha256": "d611c76484cabbf7dca3139b64f05908b1bbb97332dfe9642bb5d1629e7a9322",
+      "stage": "00-input",
+      "timestamp": "2026-08-21T15:48:41.493471+00:00"
+    },
+    {
+      "event_hash": "c16b1ce88f263ce49aa38fbb3b9c776b513c750ea2fdc0db9cc74c333409a67e",
+      "index": 1,
+      "metadata": {},
+      "name": "replay-source",
+      "path": "00-input/replay-source.json",
+      "previous_event_hash": "47364d0f9ee93952c0b98860a3eaa04ddea5446a2954f49734d9bd8a5ea3e851",
+      "record_sha256": "c6cf9e22dd9c17de12120fba66bfcc57aa8d7d929d39df2d5fba8713029add4b",
+      "stage": "00-input",
+      "timestamp": "2026-08-21T15:48:41.497484+00:00"
+    },
+    {
+      "event_hash": "28987ca5779be73a7097317b1288dec46f85def48952a7b65ecd7cc04c3eff72",
+      "index": 2,
+      "metadata": {
+        "original_packet_sha256": "38b94992b41fb974dc764ed56cc5bc3042a15a57a3af3ccaaf300cb079185567",
+        "replayed_from": "/workspace/seam-harness/math-runs/20260821T153907Z-recursive-unit-fractions-summing-to-one-half-11b01b33"
+      },
+      "name": "root",
+      "path": "30-evidence-packets/root.json",
+      "previous_event_hash": "c16b1ce88f263ce49aa38fbb3b9c776b513c750ea2fdc0db9cc74c333409a67e",
+      "record_sha256": "e88eb728fe2f57ab3db94bd21bb84667178e8deab075c14f856c0dab186cef01",
+      "stage": "30-evidence-packets",
+      "timestamp": "2026-08-21T15:48:41.502275+00:00"
+    },
+    {
+      "event_hash": "4e44d66c22392aacea6286d52dfd0fc165cf76d3f6f6192a80bdcae6e96d1b6f",
+      "index": 3,
+      "metadata": {
+        "original_packet_sha256": "38b94992b41fb974dc764ed56cc5bc3042a15a57a3af3ccaaf300cb079185567",
+        "replayed_from": "/workspace/seam-harness/math-runs/20260821T153907Z-recursive-unit-fractions-summing-to-one-half-11b01b33"
+      },
+      "name": "root",
+      "path": "31-node-traces/root.json",
+      "previous_event_hash": "28987ca5779be73a7097317b1288dec46f85def48952a7b65ecd7cc04c3eff72",
+      "record_sha256": "cd6386f75fd3bcd92fb7fa6e2490231f551d121e97c6244c646f9061b6d379a1",
+      "stage": "31-node-traces",
+      "timestamp": "2026-08-21T15:48:41.504962+00:00"
+    },
+    {
+      "event_hash": "e1bfb3504e36d3110a90a2d821579bcfff24de20a0407cf4fe10808c20190b78",
+      "index": 4,
+      "metadata": {
+        "model": "fireworks:accounts/fireworks/models/kimi-k3",
+        "role": "finalizer"
+      },
+      "name": "call-0001-finalizer",
+      "path": "01-call-inputs/call-0001-finalizer.json",
+      "previous_event_hash": "4e44d66c22392aacea6286d52dfd0fc165cf76d3f6f6192a80bdcae6e96d1b6f",
+      "record_sha256": "17964ab85691e2443263caf69d9a6bcba2313305e675b5efd70615fc3ee9ccc9",
+      "stage": "01-call-inputs",
+      "timestamp": "2026-08-21T15:48:41.511216+00:00"
+    },
+    {
+      "event_hash": "e3b6b312554692845655a226135185a69c634bea7241ece3cfd650da160f2dd4",
+      "index": 5,
+      "metadata": {
+        "call_id": "call-0001-finalizer",
+        "elapsed_ms": 131498,
+        "input_sha256": "b96456a12703844b69ec3ada831b3a6fb4eed27fe1324866cdea07433d36ee1b",
+        "model": "fireworks:accounts/fireworks/models/kimi-k3",
+        "role": "finalizer",
+        "usage": {
+          "cache_read_tokens": 0,
+          "details": {
+            "reasoning_tokens": 5126
+          },
+          "input_tokens": 5354,
+          "output_tokens": 7301,
+          "requests": 1
+        }
+      },
+      "name": "artifact",
+      "path": "40-finalization/artifact.json",
+      "previous_event_hash": "e1bfb3504e36d3110a90a2d821579bcfff24de20a0407cf4fe10808c20190b78",
+      "record_sha256": "aaaa99dcbc85e7154b1ade4a3a163bba6f7f23ec095bd9a9330774f471b9ac0e",
+      "stage": "40-finalization",
+      "timestamp": "2026-08-21T15:50:53.012388+00:00"
+    },
+    {
+      "event_hash": "0c26474694c06f727980ac67f578173fc726793a119dc13f9e6a62d11f1b55bf",
+      "index": 6,
+      "metadata": {},
+      "name": "recursive-result",
+      "path": "99-result/recursive-result.json",
+      "previous_event_hash": "e3b6b312554692845655a226135185a69c634bea7241ece3cfd650da160f2dd4",
+      "record_sha256": "6e9786a17ac7b168c2d9544a8e4a7e03e3acf4923ea997211c5d879a6c99a8cc",
+      "stage": "99-result",
+      "timestamp": "2026-08-21T15:50:53.019749+00:00"
+    }
+  ],
+  "finished_at": "2026-08-21T15:50:53.021637+00:00",
+  "run_id": "20260821T154841Z-recursive-unit-fractions-summing-to-one-half-6e25521b",
+  "schema_version": 1,
+  "status": "completed"
+}

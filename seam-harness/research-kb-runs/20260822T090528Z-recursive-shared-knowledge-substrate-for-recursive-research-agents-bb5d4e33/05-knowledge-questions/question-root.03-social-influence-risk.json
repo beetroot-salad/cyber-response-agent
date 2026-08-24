@@ -1,0 +1,20 @@
+{
+  "acceptance_condition": "Returns (a) at least three anchored findings per file (at least six total), each a quote or close paraphrase carrying the file-relative citation and the exact `===== PDF PAGE N =====` marker(s), and (b) at least three staged-visibility or diversity-measurement design constraints, each explicitly labeled as design inference.",
+  "content_sha256": "2f332a3b5c9f0b6fd719848ae59287e9e0a5c4fbe833be72bbf5567676c75d50",
+  "demand_ids": [
+    "D6",
+    "D11",
+    "D12",
+    "D13",
+    "D14"
+  ],
+  "id": "question:root.03-social-influence-risk",
+  "node_id": "root.03-social-influence-risk",
+  "rationale": "Lorenz 2011 and Choi 2025 are the corpus's evidence that unstructured information sharing degrades collective accuracy; they ground the staged-visibility protocol (D6), the conformity side of the reconciliation (D11), and the diversity/correlation metric family (D14).",
+  "tags": [
+    "evidence",
+    "risk",
+    "counterexample"
+  ],
+  "text": "Read papers/text/lorenz-et-al-2011-social-influence.txt and papers/text/choi-et-al-2025-conformity.txt. Extract, each anchored to the exact `===== PDF PAGE N =====` marker(s): Lorenz et al.'s core experimental findings on how social influence affects the wisdom of crowds (effects on estimate diversity, accuracy, and confidence, as stated in the text) and Choi et al.'s empirical findings on group conformity in multi-agent systems (the conditions under which agents conform to peer or majority answers, as stated in the text). Then derive, each explicitly labeled as design inference, staged-visibility constraints for the substrate (e.g., committing independent answers before exposing peers' answers, delayed or partial disclosure) and implications for measuring answer diversity and correlation."
+}

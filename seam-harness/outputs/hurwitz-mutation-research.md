@@ -1,0 +1,146 @@
+I have confirmed:
+- question:root has only a noop answer.
+- rq-sharp has one "answer" answer:work:005-rq-sharp-attack which "partially_answers" it — but per recent_actions, that answer failed with zero evidence (output overrun). Let me quickly verify answer:work:005-rq-sharp-attack is blocked. The dossier says so, and its presence as "partially_answers" is consistent with a blocked stub. The unanswered_question_count is 2: rq-d5-stronger and question:demand:D10. rq-sharp has a blocked answer so it's technically "answered" in count but zero-evidence. For the memo, I should state rq-sharp remains open (its only answer was blocked, zero claims).
+
+Let me verify answer:work:005-rq-sharp-attack quickly to be accurate. Also, the exception-search-v4 answer contains the full frozen enumeration spec in its objective — very useful for the memo (I can reproduce the spec verbatim-ish and note it was never executed). One detail: the spec's expected vertices list omits (1,3,11,131) because 131 > 100 — correct, BFS with d<=100 discards it. And it expects (1,1,11,41) at depth 3, with children (1,11,41,153) and (1,11,41,1803) — wait, mutating 11 in (1,1,11,41): 4*1*1*41 - 11 = 164 - 11 = 153 → (1,1,41,153), d=153 > 100. Mutating a=1: 4*1*11*41 - 1 = 1804-1 = 1803 → (1,11,41,1803). Mutating c=41 is the parent direction: 4*1*1*11 - 41 = 44-41 = 3 → (1,1,3,11). So within d<=100, BFS tree is: root → (1,1,1,3) → (1,1,3,11) → (1,1,11,41), and stops. Good.
+
+Also note the spec item (e) says "(1,1,11,41): d'=3" — check: d' = 4abc - d = 4*1*1*11 - 41 = 44 - 41 = 3. Yes, parent (1,1,3,11). Good.
+
+I have everything I need. I don't think I need to check answer:work:005-rq-sharp-attack separately — the dossier recent_actions explicitly says it failed with zero-evidence output overrun, and the answer:work:005-exception-search-v4 I fetched confirms the pattern ("Investigation failed before producing evidence"). But to be precise about rq-sharp's status in the memo, one quick check is cheap. Actually, the dossier action:006 account says "The entire last wave failed with zero-evidence output overruns, including answer:work:005-lower-bound-v4, answer:work:005-exception-search-v4, and answer:work:005-rq-sharp-attack." That's sufficient evidence. The unanswered_question_count = 2 counts questions with no answers at all (rq-d5-stronger, D10); rq-sharp has a blocked stub. I'll describe it accurately: open, with its only attempted answer blocked (zero evidence); the product-jump dichotomy idea was sketched in the assignment rationale but never executed.
+
+Now write the memorandum. Target: self-contained, complete proofs, labeled observations, explicit bounds, conjectures separated, obstructions, next step. Length: this is the final deliverable; it should be thorough but not bloated. Aim for something like 1800-2600 words. Plain text, no code fences. Use ASCII-friendly notation with some unicode where it helps (the dossier itself uses ², ≤, √, Θ, λ, ρ). I'll use unicode sparingly: a^2 or a²? The packets use superscripts; plain text deliverable — I'll use a mix: x², ≤, ≥, √, λ, ρ, Θ, ⌊⌋. That's fine for plain text.
+
+Structure:
+
+RESEARCH MEMORANDUM
+Title, status line.
+
+1. Definitions and setup (S, mutation, quotient graph, height, root, N(H), depth). Note involution → undirected.
+
+2. Structural results (D1–D3), all proved:
+   Lemma V, Lemma L2, Lemma L1, Lemma L3, Corollary NHM, Theorem D2, Theorem D1, Theorem D3. Complete proofs.
+
+3. Labeled observations O1–O3 (D7/D9 partial), each hand-checkable.
+
+4. Upper bound and depth (D4, D6): T1, T2, T3 with proofs; T4 dichotomy (i)–(v) with proofs; main upper-bound theorem with explicit constants; depth-extremes discussion.
+
+5. Lower bound (D5): L1 chain with closed form; L2 two children below depth 2; L3 binary subtree; final two-term bound; correction of dominance clause.
+
+6. Depth vs log H summary (D6): two-sided relation, chain as slowest branch.
+
+7. Exception search and failure modes (D7, D9): observations; the frozen d ≤ 100 enumeration spec (reproducible procedure) and the report that it was never executed (three attempts, output-length overruns); two caught mathematical failure modes (mod-3 route false; skeleton inequality false) plus the corrected dominance clause; statement that no exceptional solutions, hidden cycles, or multiple parents exist — proved unconditionally, so the enumeration is corroboration only.
+
+8. Conjectures and open problems, strictly separated (D8): rq-sharp, rq-d5-stronger; what is NOT conjectured (no Theta law); the proved bracket.
+
+9. Obstructions and gaps.
+
+10. Most informative next mathematical step.
+
+Make sure to include the arithmetic checks inline so the memo is self-contained. Include explicit constants: ρ = ln3/ln11 ≈ 0.4582, C ≤ 0.372, λ = 2+√3, A = (3+√3)/6, B = (3−√3)/6, A₂ = log₂11 + 1 ≈ 4.459, β = log₃2 ≈ 0.6309, c′ = 1/(2A₂^β) ≈ 0.194, threshold H ≥ 32.
+
+Also state N(H) ≥ 2 for H ≥ 3 etc.? Not needed.
+
+Also mention: root has exactly one child; chain vertices v_j (j≥2) have exactly two children; every vertex has ≤3 children.
+
+For T4(i) proof, need: the a=b=1 locus is the chain. Proof sketch: equation 2 + c² + d² = 4cd; parent via d' = (c²+2)/d stays in locus and has smaller height; induction down to root; invert: children within locus satisfy d_{j+1} = 4d_j − c_j with c_{j+1} = d_j. Also every v_j (j≥2, c_j ≥ 3) has exactly two children: mutating a vs b coincide (a=b=1) giving u_j; mutating c gives v_{j+1}; mutating d is parent. For v_1 = (1,1,1,3): mutating any of the three 1's gives (1,1,3,11) — wait: mutating a=1 in (1,1,1,3): 4*1*1*3 − 1 = 11 → (1,1,3,11). Mutating c=1 (the third coordinate): same, 4*1*1*3−1 = 11. So all three non-parent mutations coincide → v_1 has exactly one child. Good — matches "u_1 coincides with the chain child at j=1".
+
+Ratio r_j = d_{j+1}/d_j = 4 − d_{j−1}/d_j = 4 − 1/r_{j−1}; r_1 = d_2/d_1 = 11/3 ≈ 3.667; increasing, bounded by 4, limit solves r = 4 − 1/r → r = 2+√3. Good.
+
+m_j ≥ 11 d_j: m_j = 4 c_j d_j − 1 ≥ 12 d_j − 1 ≥ 11 d_j (since d_j ≥ 1). And d_j ≥ 11·(11/3)^{j−2} for j ≥ 2: base d_2 = 11; induction d_{j+1} = 4d_j − d_{j−1}; need d_{j−1} ≤ (3/11) d_j, i.e. r_{j−1} ≥ 11/3 — true since r increasing from 11/3. Then d_{j+1} ≥ (4 − 3/11) d_j = (41/11) d_j ≥ (11/3) d_j. Good.
+
+Sum: m_j ≥ 11 d_j ≥ 121 (11/3)^{j−2}. Σ_{j≥2} m_j^{−ρ} ≤ 121^{−ρ} Σ_{k≥0} (11/3)^{−kρ} = 121^{−ρ}/(1 − (11/3)^{−ρ}). (11/3)^ρ = e^{ρ ln(11/3)} = e^{0.4582 × 1.2993} = e^{0.5953} ≈ 1.8137. 121^ρ = e^{0.4582 × 4.7958} = e^{2.1973} ≈ 9.0. Indeed 121^ρ = (11²)^ρ = 11^{2ρ} = 11^{0.9164}; 11^0.9164 = e^{0.9164 ln 11} = e^{0.9164×2.3979} = e^{2.1972} = 9.000. Cute: 121^ρ = 9 exactly? ρ = ln3/ln11 → 121^ρ = e^{ln3 · ln121/ln11} = e^{ln3 · 2} = 9. Yes! Since ln121 = 2 ln11. So 121^{−ρ} = 1/9 exactly. And (11/3)^ρ = 11^ρ/3^ρ = 3/3^ρ... wait 11^ρ = e^{ln11·ln3/ln11} = 3. So (11/3)^ρ = 3/3^ρ = 3^{1−ρ}. 3^{1−ρ} = 3^{0.5418} = e^{0.5418×1.0986} = e^{0.5952} ≈ 1.8135. So Σ ≤ (1/9)/(1 − 1/1.8135) = (1/9)/(1 − 0.55143) = (1/9)/0.44857 = 0.2475. And C = (3/2)·0.2475 = 0.3713 ≤ 0.372. Great, consistent with packet's 0.248 and 0.372. Nice: I can even note 121^{−ρ} = 1/9 and 11^ρ = 3 exactly — a neat check. Also note (3/2)(H/m_j)^ρ bound derivation: size ≤ Σ_{k=0}^{K} 3^k = (3^{K+1}−1)/2 ≤ (3/2)·3^K where K = ⌊log_{11}(H/m_j)⌋, and 3^K ≤ 3^{log_{11}(H/m_j)} = (H/m_j)^{ln3/ln11} = (H/m_j)^ρ.
+
+Chain count: # chain vertices with d ≤ H is O(log H) — more precisely j_max ≈ log_λ H. d_j = Aλ^j + Bλ^{−j} ≥ Aλ^j, so d_j ≤ H ⇒ j ≤ log_λ(H/A) = log_λ H + O(1). Chain contributes ≤ log_λ H + O(1).
+
+So N(H) ≤ C H^ρ + log_λ H + O(1), C ≤ 0.372. 
+
+Lower bound final: N(H) ≥ max{⌊log_λ H⌋ + 1, c′(log₂ H)^β} for H ≥ 32; first term dominant. Also verify d_j ≤ λ^j: d_j = Aλ^j + Bλ^{−j} ≤ λ^j ⟺ A + Bλ^{−2j} ≤ 1; A + B = (3+√3+3−√3)/6 = 1, and B > 0, λ > 1, so A + Bλ^{−2j} < A + B = 1 for j ≥ 1. Good. And N(H) ≥ j+1 when d_j ≤ H; d_j ≤ λ^j ≤ H when j ≤ log_λ H, so N(H) ≥ ⌊log_λ H⌋ + 1.
+
+L2 details: children of non-root v are distinct sorted mutations of a, b, c. f(x) = 4abcd/x − x strictly decreasing in x for x > 0 (derivative or difference: f(x)−f(y) = (y−x)(4abcd/(xy) + 1)... let me verify: f(x) = P/x − x with P = 4abcd. f(x) − f(y) = P(1/x − 1/y) − (x − y) = P(y−x)/(xy) + (y − x) = (y−x)(P/(xy) + 1). So x < y ⇒ f(x) > f(y). Strictly decreasing. Good.) So distinct values among {a,b,c} give distinct child maxima. If a=b=c=x: equation 3x² + d² = 4x³d... wait, a=b=c=x gives 3x² + d² = 4 x² x d? No: 4abcd = 4·x·x·x·d = 4x³d. Hmm, but the packet says "d² = x²(4xd−3)" i.e. 3x² + d² = 4x³d ⇒ d² = 4x³d − 3x² = x²(4xd − 3). Yes. So x | d (x² | d² hence x | d — x²|d² ⇒ x|d yes since prime exponents). d = kx: k²x² = x²(4x·kx − 3) ⇒ k² = 4kx² − 3 ⇒ k² + 3 = 4kx². Then k | 3 (k | k² + 3 ⇒ k | 3). k ∈ {1, 3}. k=1: 1 + 3 = 4x² ⇒ x² = 1 ⇒ x=1, d = 1 → root. k=3: 9 + 3 = 12x² ⇒ x² = 1 ⇒ x = 1, d = 3 → (1,1,1,3) = v_1. So any vertex at depth ≥ 2 (i.e., other than v_0, v_1) has a,b,c not all equal... wait, need care: L2 says vertices at depth ≥ 2 have at least two distinct values among a,b,c, hence at least two distinct children. Since the only vertices with a=b=c are v_0 (depth 0) and v_1 (depth 1). Good. Note: also need the mutated vertices to be distinct as sorted tuples, not just distinct maxima — distinct maxima implies distinct tuples. Good.
+
+L3: below v_2 = (1,1,3,11), depth of v_2 is 2, log₂ d = log₂ 11. Each edge: child max ≤ 4d³ ⇒ log₂(child max) ≤ 3 log₂ d + 2 ⇒ L+1 ≤ 3(L+1)?? Check: 3L + 2 ≤ 3(L+1) ⟺ 2 ≤ 3. Yes. So with A := L₂ + 1 = log₂11 + 1, after t edges L + 1 ≤ 3^t A, i.e. log₂ d ≤ 3^t A − 1 ≤ 3^t A. If 3^t A ≤ log₂ H, all 2^t vertices at level t below v_2 (exists by L2 binary tree) have d ≤ H. Choose t = ⌊log₃(log₂ H / A)⌋; then N(H) ≥ 2^t ≥ 2^{log₃(log₂ H/A) − 1} = (1/2)(log₂ H / A)^β = c′(log₂ H)^β with c′ = 1/(2A^β). Need t ≥ 0 ⟺ log₂ H ≥ A = log₂11 + 1 ≈ 4.459 ⟺ H ≥ 2^4.459 ≈ 22.0; threshold H ≥ 32 suffices (and also ensures... well, 32 = 2^5, log₂ 32 = 5 ≥ 4.459. Fine.) A^β = e^{β ln A} = e^{0.6309 × ln(4.4594)} = e^{0.6309 × 1.4947} = e^{0.9430} ≈ 2.5677; c′ = 1/(2×2.5677) ≈ 0.1947. Good, ≈0.194.
+
+Depth extremes (D6): chain depth = log_λ d + O(1) — since on chain d_j ≈ Aλ^j, j = log_λ d + O(1); chain is the unique slowest infinite branch: any off-chain edge multiplies by ≥ 11 > λ²? (11 vs λ² = 7.46+... λ² = (2+√3)² = 7 + 4√3 ≈ 13.93. So 11 < λ²! Careful: off-chain edges have factor ≥ 11 per edge, chain edges have factor → λ ≈ 3.732 per edge. So per edge chain is slower. Any branch leaving the chain has all subsequent edges ≥ 11, so depth(d) along such branch ≤ ... it's faster per edge than the chain. Uniqueness of slowest branch: chain per-edge factor < 4 < 11 ≤ any off-chain per-edge factor. Wait chain factors r_j increase to λ < 4. So yes, chain strictly slowest.) Also T3 lower bound approached along branches with child max ~ 4d³ — requires mutating a when a,b,c ~ d... but note a=d only at root; still can have a,b,c comparable to d? Hmm — actually child max = 4·(product of other three) − x; to maximize, mutate the smallest coordinate x = a with b,c,d large. If b,c,d ~ d, child max ~ 4d³. Whether such vertices exist infinitely often is not asserted; the packet says "approached along branches maximizing each factor (child max comparable to 4d³, requiring a,b,c comparable to d)" — I'll state it carefully as: the upper end of the depth relation corresponds to edges with factor close to 4d² (i.e., child max comparable to 4d³), which requires the unmutated coordinates to be comparable to d. I'll keep the packet's phrasing but hedge appropriately — actually the packet confidence on C006 is 0.9 and it's an informal discussion. I'll present it as heuristic commentary, clearly labeled as such, not a theorem.
+
+D7 items checklist:
+- Exceptional small solutions: none found; within hand-checkable range the only solutions are root, (1,1,1,3), (1,1,3,11), (1,3,11,131) — verified by substitution; and D1+L1 prove that iterating descent from ANY solution reaches root, so no "exceptional" component exists at all (proved, not just observed).
+- Hidden cycles: excluded by D3 proof (proved).
+- Multiple parents: excluded by D2 (proved).
+- Induction failure modes: two recorded and corrected: (i) mod-3 route false; (ii) skeleton inequality d_j ≥ 11(2+√3)^{j−2} false; (iii) the false dominance clause in the lower-bound assignment. Also note re-sorting subtlety (d' may exceed c; parent's max is max(c,d') < d anyway) and equal-coordinate subtlety (resolved at vertex level).
+- The frozen enumeration spec: reproduce compactly; report never executed (3 attempts, output-length overruns); label as execution gap.
+
+D8 conjectures:
+- Open problem 1 (rq-sharp): improve ρ; sketch of the iterated product-jump dichotomy (from action:005 rationale: product-raising children jump p → ≥ p^{3/2}) — this was sketched but never executed/proved; label as unexamined idea, not conjecture with support. Hmm — the product-jump claim "p → ≥ p^{3/2}" appears in the recent_actions rationale, but the rq-sharp attack answer failed with zero evidence, so this idea has no proved status. I'll mention it as an unverified heuristic sketch only, or maybe omit the specific p^{3/2} to avoid propagating unchecked claims. I think one sentence: "a proposed iterated dichotomy (each new level's slow locus forcing product jumps) was sketched during the run but never reduced to proof; we record it only as an idea." That's honest.
+- Open problem 2 (rq-d5-stronger): beyond Θ(log H).
+- Explicit statement: no growth law is conjectured; the proved bracket is wide (log H vs H^0.4582); we do not conjecture a Theta law because neither side is currently within reach.
+
+D9 labeling: all observations labeled O1–O3 with explicit statement "valid only where checked; not an enumeration"; enumeration spec with explicit bounds (a ≤ b ≤ c ≤ 20, d ≤ 100) and reproducible procedure; statement that it was not executed.
+
+Most informative next step: quantify typical branching/per-edge factor inside one fast subtree subtree(u_j) (upper side, rq-sharp) — equivalently the positive-density branching lemma (lower side, rq-d5-stronger); cheap auxiliary: hand-execute the frozen d ≤ 100 spec.
+
+Length concern: this will be long-ish, but D10 demands self-contained completeness. I'll write tightly, lemma–proof style, minimal prose. Maybe ~2000-2400 words. That's acceptable for a research memorandum.
+
+One more check on L1's step "4abc² ≤ 4abcd = a²+b²+c²+d² ≤ 2(a²+b²+c²) ≤ 6c²": middle inequality uses d² ≤ a²+b²+c² (from d′ ≥ d). Good. So 4ab ≤ 6, 2ab ≤ 3, ab = 1. Then a=b=1. Then equation: 2 + c² + d² = 4cd, and d² ≤ c² + 2. Since c ≥ 1, c² + 2 < c² + 2c + 1 = (c+1)² (as 2 < 2c+1 for c ≥ 1). So d² < (c+1)², d ≤ c, with d ≥ c ⇒ d = c. Then 2 + 2c² = 4c² ⇒ c² = 1 ⇒ c = 1, d = 1, root. Contradiction with non-root assumption. Wait — the contradiction: we assumed v non-root and d′ ≥ d, derived v = root. Contradiction. Good.
+
+L2: a²+b² = (4ab−2)d². ab ≥ 1 ⇒ 4ab−2 ≥ 2 ⇒ LHS ≥ 2d². a,b ≤ d ⇒ LHS ≤ 2d². So equality: 4ab − 2 = 2 AND a² + b² = 2d². 4ab = 4 ⇒ ab = 1 ⇒ a = b = 1. Then 2 = 2d² ⇒ d = 1. Good — wait, need a²+b² = 2d² and a=b=1 gives 2 = 2d², d=1. Good.
+
+Also L2 consequence: a = d ⇒ c = d ⇒ root; and b = d ⇒ c = d (b ≤ c ≤ d) ⇒ root. So at non-root, d is strictly the unique max.
+
+L3: mutate x ∈ {a,b,c}: x′ = 4·(product of others) − x; the others include d and two coordinates each ≥ 1, so product ≥ d, x′ ≥ 4d − x ≥ 4d − d = 3d > d. New max after resort = x′ (others ≤ d < x′). For x = c: product includes a, b, d ⇒ ≥ abd, x′ ≥ 4abd − c ≥ (4ab − 1)d (using c ≤ d). Good. Factor ≥ 3 always; ≥ 4ab − 1 when mutating c... hmm actually for x = a: x′ = 4bcd − a ≥ 4bcd − d = (4bc − 1)d ≥ (4ab−1)d too? 4bcd − a ≥ 4bcd − d·(a/d)... simple: x′ ≥ 4bcd − a ≥ 4bcd − d = (4bc−1)d. And for x = b: (4ac−1)d... wait x′ = 4acd − b ≥ (4ac − 1)d. Hmm, so the per-edge factor depends on which coordinate: mutating x gives factor ≥ 4·(product of the two smallest of the remaining three)/... Anyway the lower bound used in T4: "every edge below u_j multiplies the max by ≥ 4ab − 1 ≥ 11". Is that right for mutating any of a,b,c? Child max after mutating x ∈ {a,b,c} is x′ ≥ 4·(product of the other three) − x ≥ 4·(product including d) − x. Product of others = abcd/x ≥ ab d /x · x = ... let me just: others include d and two entries whose product is ≥ ab? If x = a: others are b, c, d, product bcd ≥ ab·d? bcd/(abd) = c/a ≥ 1. Yes ≥ abd... wait product of others when mutating a is b·c·d ≥ 1·1·d, but we want ≥ (ab)d: bcd ≥ abd ⟺ c ≥ a. True. Mutating b: others a,c,d, product acd ≥ abd ⟺ c ≥ b. True. Mutating c: others a,b,d, product = abd. So in all cases product of others ≥ ab·d, so x′ ≥ 4abd − x ≥ 4abd − d = (4ab − 1)d. Great — so every child edge multiplies max by ≥ 4ab − 1 where ab is parent's product of two smallest. With ab ≥ 1: ≥ 3 (T1 consistent). With ab ≥ 3: ≥ 11. 
+
+And ab nondecreasing along child edges: child's two smallest = two smallest of remaining {a,b,c,d}∖{x} since x′ > d is the new unique max. Mutate a: child pair (b, c), product bc ≥ ab (c ≥ a). Mutate b: (a, c), ac ≥ ab. Mutate c: (a, b), ab. Good.
+
+Partition claim: every vertex is on the chain or in exactly one subtree(u_j). Descent path from v to root: consider the first (highest) vertex on the path with ab ≥ 3... The argument: along descent (parent edges), ab is nonincreasing (reverse of child edges). If v has ab ≤ 2... hmm, actually claim: if v is off-chain, its descent path passes through some u_j. ab is nondecreasing along child edges, so along the descent path from v, ab is nonincreasing. v off chain: does v have ab ≥ 3? Not necessarily — could an off-chain vertex have ab = 1? a=b=1 ⇒ on chain (T4(i)). ab = 2 ⇒ a=1, b=2: does any solution have (1,2,c,d)? Equation: 1+4+c²+d² = 8cd ⇒ c² + d² + 5 = 8cd. Hmm — T4(i) only addresses a=b=1. The packet says "the only vertices with ab ≤ 2 are the chain vertices (ab=1)" (counterevidence section) — is ab=2 excluded? a=1,b=2: 5 + c² + d² = 8cd, c ≥ 2, d ≥ c. Descent: d′ = (5+c²)/d... hmm is there a quick proof no solutions with a=1, b=2 exist? Mod consideration: c² + d² ≡ −5 mod 8? Squares mod 8 ∈ {0,1,4}. c²+d²+5 ≡ 0 mod 8 ⇒ c²+d² ≡ 3 mod 8 — impossible since {0,1,4} pairs sum to {0,1,2,4,5} mod 8, never 3. Indeed 0+...,1+1=2,1+4=5,4+4=0,0+1=1,0+4=4. So c²+d² ≢ 3 (mod 8), no solutions with (a,b)=(1,2). Nice — but this isn't in the packets! The packet T4(iii) says the partition is "chain or in exactly one subtree(u_j)" with justification "descend to the root; the path leaves the chain at most once, since ab ≥ 3 is irreversible by (ii)". Hmm, that justification: descend from v to root; the path passes through vertices; root has ab = 1. Along descent ab nonincreasing... wait along child edges ab nondecreasing, so along parent edges (descent) ab nonincreasing. If v has ab ≥ 3, whole descent path has ab ≥ 3 until... no: nonincreasing along descent means ab can drop. The claim "path leaves the chain at most once": path from root up to v: starts on chain; at some point may leave via u_j; once off-chain ab ≥ 3 and stays ≥ 3, so can't return to chain (chain has ab = 1). But what about vertices with ab = 2 or with ab = 1 off-chain? T4(i): ab = 1 (a=b=1) ⇒ on chain. ab = 2 (a=1,b=2): the packet asserts (in counterevidence) "the only vertices with ab ≤ 2 are the chain vertices (ab=1); ... Verified structurally via the a=b=1 descent, not merely by spot checks." Hmm — "verified structurally" but the a=b=1 descent doesn't exclude (1,2,c,d). Is there a gap? The partition needs: every vertex with ab ≤ 2 is on the chain. ab=1 ⇒ chain (proved T4(i)). ab=2 needs exclusion. The packets do NOT contain the mod-8 argument. Is this a genuine gap in the upper-bound proof?
+
+Let me think again. The partition in T4(iii): "every vertex lies on the chain or in exactly one of them (descend to the root; the path leaves the chain at most once, since ab ≥ 3 is irreversible by (ii))." Take any v. Descend to root. Look at the path v = w_0, w_1, ..., w_t = root. Consider the lowest vertex on the path that is off the chain... Alternatively: if v is not on the chain, let w_s be the last chain vertex on the descent path (root is on chain, so such exists). Then w_{s} = v_j for some j, and w_{s−1} is a child of v_j off the chain. Children of v_j: v_{j+1} (chain) and u_j (if j ≥ 2; if j = 1 only child is v_2; j=0 only v_1). So w_{s−1} = u_j, v ∈ subtree(u_j). This argument does NOT require anything about ab of v! It only requires knowing the children of chain vertices. Children of v_j (j ≥ 2): mutations of a=1, b=1 (coincide, giving u_j), c (giving v_{j+1}?? wait), d (parent). Hold on: v_j = (1,1,c_j,d_j). Mutating c_j: 4·1·1·d_j − c_j = 4d_j − c_j = d_{j+1}, giving (1,1,d_j,d_{j+1}) = v_{j+1}. Mutating a (or b, same): 4·1·c_j·d_j − 1 = 4c_jd_j − 1 → u_j = (1,c_j,d_j,4c_jd_j−1). Mutating d_j: parent v_{j−1}. So children of v_j: {v_{j+1}, u_j} — exactly two for j ≥ 2 (they're distinct since c_j ≥ 3 ⇒ 4c_jd_j − 1 > d_{j+1}? u_j's max vs v_{j+1}'s max: m_j = 4c_jd_j − 1 vs d_{j+1} = 4d_j − c_j. m_j > d_{j+1} ⟺ 4c_jd_j > 4d_j − c_j + 1, true for c_j ≥ 2. Also need u_j ≠ v_{j+1} — different max, yes distinct.) For j = 1: v_1 = (1,1,1,3); mutating any of the three 1's: 4·1·1·3−1 = 11 → (1,1,3,11) = v_2. Only child v_2. For j = 0: root, only child v_1. So the partition is valid purely from the child structure: every off-chain vertex descends through some u_j. 
+
+So the partition is fine without the ab ≤ 2 exclusion. The ab ≥ 3 property of subtree(u_j) is used only for the factor ≥ 11. And "ab ≤ 2 ⇒ chain" is a side remark (true, and needed only for the dichotomy narrative "slow growth confined to chain"). Actually wait — is it used anywhere in the bound? T4(v) sums over subtrees and chain; the partition covers all vertices. Fine. The "only vertices with ab ≤ 2 are chain" claim is cosmetic. But to be safe in the memo, I'll state the partition argument properly (via child structure of chain vertices) and mention the (1,2,c,d) exclusion only if I include the mod-8 argument — I can include it as a mini-lemma since it's correct and hand-checkable: no solution has (a,b) = (1,2) because c²+d² ≡ 3 (mod 8) impossible. Wait: a=1,b=2: equation 1 + 4 + c² + d² = 4·1·2·c·d = 8cd ⇒ c² + d² + 5 = 8cd ⇒ c² + d² ≡ −5 ≡ 3 (mod 8). Squares mod 8: 0,1,4. Sums of two: 0,1,2,4,5. 3 and 6,7 not achievable. So no solutions. Good — but it's optional; the partition doesn't need it. I'll include it as a remark strengthening the dichotomy (labeled as a proved mini-lemma by me now — it's elementary and I show the full argument, so it's fine within first-principles rules; the memo is allowed to contain complete proofs).
+
+Hmm, wait — should I be careful about adding NEW proved content not in the packets? The finalizer's job is to synthesize the validated dossier. Adding a small elementary lemma with full proof is within the spirit of a self-contained memo and doesn't invent evidence — it's derivational. But to be conservative, I could simply omit the ab=2 remark entirely, since the partition doesn't rely on it. I'll omit it to stay strictly within validated evidence. Actually, the packet's counterevidence explicitly asserts "the only vertices with ab ≤ 2 are the chain vertices (ab=1)" — this claim within the dossier is asserted but its justification ("verified structurally via the a=b=1 descent") is incomplete for ab=2. Since it's cosmetic, I'll simply not assert it in the memo. Good decision: avoid propagating an underjustified side claim.
+
+Also check T4(i) claim "every a=b=1 vertex lies on this chain": (1,1,c,d) with 2+c²+d² = 4cd. Solutions of this binary equation: it's a Markov-type binary quadratic. Descent: d′ = (c²+2)/d = 4c − d < d (by L1) and (1,1,c,d′) re-sorted is again a=b=1 solution. Iterate to d=1: get root path. Inverting gives all solutions on one chain: is that immediate? The descent shows every (1,1,c,d) solution is connected to root through a=b=1 solutions; the child structure of chain vertices (computed above) shows each v_j has exactly one a=b=1 child (v_{j+1}); so the a=b=1 locus is exactly {v_j}. But wait: could there be a (1,1,c,d) solution whose descent passes through v_j but which is not v_{j+1}? Its parent would be v_j (since descent path is unique — D2), and the only a=b=1 child of v_j is v_{j+1}. So by induction every a=b=1 vertex is some v_j. Clean, uses D2. Good.
+
+Also "chain ratio r_j = 4 − 1/r_{j−1} increasing from 11/3 toward 2+√3": d_{j+1}/d_j = (4d_j − d_{j−1})/d_j = 4 − d_{j−1}/d_j = 4 − 1/r_{j−1} where r_{j−1} = d_j/d_{j−1}. r_1 = d_2/d_1 = 11/3. Need d_2: v_2 = (1,1,3,11), so d_2 = 11, c_2 = d_1 = 3. d_0 = 1, d_1 = 3, d_2 = 4·3 − 1 = 11. r_1 = 11/3. f(x) = 4 − 1/x increasing, fixpoint 2+√3 ≈ 3.732; r_1 = 3.667 < fixpoint; so r_j increasing to fixpoint. Good.
+
+Closed form: d_{j+1} = 4d_j − d_{j−1}; characteristic x² − 4x + 1 = 0, roots 2±√3. d_j = Aλ^j + Bλ^{−j} with λ = 2+√3, λ^{−1} = 2−√3. d_0 = 1: A + B = 1. d_1 = 3: Aλ + Bλ^{−1} = 3. A(2+√3) + B(2−√3) = 2(A+B) + √3(A−B) = 2 + √3(A−B) = 3 ⇒ A − B = 1/√3 = √3/3. A = (1 + √3/3)/2 = (3+√3)/6. B = (3−√3)/6. Matches packet. Good.
+
+Everything checks. Now also double-check the T3 recurrence: L_k = max over vertices at depth k of log₂ d. Child max ≤ 4d³: log₂(child) ≤ log₂ 4 + 3 log₂ d = 3L + 2. So L_{k+1} ≤ 3L_k + 2, L_0 = 0 (root d=1). M_k := L_k + 1: M_{k+1} ≤ 3M_k − 3 + 3 = hmm: L_{k+1} + 1 ≤ 3L_k + 3 = 3(L_k + 1). Yes M_{k+1} ≤ 3M_k, M_0 = 1, M_k ≤ 3^k, L_k ≤ 3^k − 1. So depth k vertex has d ≤ 2^{3^k − 1}; invert: depth(v) ≥ log₃(log₂ d + 1). Good.
+
+Now, the memo. Also include in §1 that N(H) is well-defined/finite: vertices with d ≤ H have depth ≤ log₃ H and tree is ≤3-ary, so N(H) finite — actually T2 gives that. Fine, mention briefly.
+
+Word budget: I'll aim for a tight but complete memo. Let me draft.
+
+Title: Research Memorandum — The Markov–Hurwitz equation a²+b²+c²+d² = 4abcd: Vieta-mutation graph structure and growth of N(H)
+
+Sections:
+0. Summary of status (a table-like list, plain text).
+1. Definitions.
+2. Part I: structure (lemmas + theorems D1–D3 with proofs).
+3. Part II: counting.
+   3.1 Tree facts recalled.
+   3.2 Depth-height relation (T1, T3 + theorem D6).
+   3.3 Chain lemma (L1) — needed for both bounds.
+   3.4 Lower bound (L2, L3, theorem D5).
+   3.5 Upper bound (T2 crude; T4 dichotomy; theorem D4).
+4. Part III: observations, exception search, failure modes (D7/D9).
+5. Part IV: conjectures and open problems (D8), strictly separated.
+6. Obstructions.
+7. Most informative next step.
+
+Order: I'll put lower bound before upper bound or vice versa? Logical: chain lemma first (shared), then crude bounds, then lower (D5), then upper (D4), then depth (D6) — though depth T1/T3 needed for upper T4(iv)? T4(iv) uses factor ≥ 11 directly, not T1. T2 crude uses T1. I'll do: chain lemma; depth T1/T3 (D6); crude T2; dichotomy T4 + upper (D4); branching lemmas L2/L3 + lower (D5). Either order fine.
+
+Keep proofs compact. Let me write it.
+
+Also make sure to label proved vs observation vs conjecture at every stage, per instructions "distinguish established results, inferences, hypotheses, and null findings."
+
+Null findings: the enumeration never executed → no empirical null findings beyond spot checks; the proved theorems make "hidden cycles/multiple parents/disconnected components" impossible (that's a proved exclusion, stronger than a null finding). State both.
+
+Notation: use ² ³ ≤ ≥ √ λ ρ Θ ⌊ ⌋ ·. Plain text.
+
+Now, write carefully with correct numbers:
+- ρ = ln 3 / ln 11 = 0.45820...; (compute: ln3 = 1.098612, ln11 = 2.397895, ratio = 0.458156... let me compute: 1.098612/2.397895 = 0.45816. Packet says 0.4582. I'll write ≈ 0.4582.)
+- C ≤ (3/2)·(1/9)/(1 − 3^{−(1−ρ)}) ≤ 0.372. Just present as packet: C = (3/2) Σ ≤ 0.372. Maybe show the geometric-series bound: Σ_{j≥2} m_j^{−ρ} ≤ 121^{−ρ}/(1 − (11/3)^{−ρ}) = (1/9)/(1 − 3^{ρ−1}) ≈ 0.248. Note 121^ρ = 9 and (11/3)^ρ = 3^{1−ρ} ≈ 1.814. Nice exact touches: 11^ρ = 3.
+- λ = 2+√3 ≈ 3.7321; log_λ.
+- β = log₃2 = ln2/ln3 ≈ 0.6309.
+- A₂ = log₂11 + 1 ≈ 4.4594; c′ = 1/(2A₂^β) ≈ 0.194; H ≥ 32.
+- T2: N(H) ≤ (3^{⌊log₃H⌋+1} − 1

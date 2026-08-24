@@ -1,0 +1,10 @@
+{
+  "content_sha256": "b4d550767c0d0db1b1f81d5ca49700a29fac7d975abb44fefabbd1add56e3573",
+  "id": "link:b4d550767c0d0db1b1f81d5c",
+  "origin": "runtime",
+  "proposed_by_node_id": null,
+  "rationale": null,
+  "relation": "refines",
+  "source_id": "question:work:002-inv-dung-r2",
+  "target_id": "question:work:001-inv-formal-tools"
+}

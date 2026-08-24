@@ -1,0 +1,10 @@
+{
+  "content_sha256": "280d9983dcd9ca8734ec6c01d8418c8d5d72c1698789fbfd330dc69a4e122e2d",
+  "id": "link:280d9983dcd9ca8734ec6c01",
+  "origin": "runtime",
+  "proposed_by_node_id": null,
+  "rationale": null,
+  "relation": "refines",
+  "source_id": "question:work:001-inv-lorenz-influence",
+  "target_id": "question:demand:D3"
+}

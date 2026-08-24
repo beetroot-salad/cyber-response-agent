@@ -386,6 +386,22 @@ def normalize(text: str, *, run_dir: Path, run_id: str) -> str:
                 .replace(run_id, "<RUN_ID>"))
 
 
+def _refuse_conflicting_store_seams(resume, store_factory) -> None:
+    """`resume=` and `store_factory=` name the same thing and cannot both be honoured.
+
+    `driver._resolve_store_factory` lets the resume win, which is right for the driver — the
+    two can disagree about which database holds the branch point — but silent here. Every
+    neighbouring scenario injects `store_factory=` to capture the store handle it later asserts
+    over, so a #920 script written to that shape would get an empty sink and die on `sink[0]`
+    with an `IndexError` naming nothing. A resume already forks INTO the source run's store;
+    that handle is the one to assert over.
+    """
+    if resume is not None and store_factory is not None:
+        raise ValueError(
+            "drive(resume=…) derives its store from the spec's source run, so a store_factory= "
+            "beside it is silently discarded — assert over the source run's own handle instead")
+
+
 def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJECTION SEAM
         run_dir: Path, *, run_id: str, main, gather=None, verbs=None,
         limits=None, box=None, store_factory=None, review_stages=None, bounds=None,
@@ -464,7 +480,9 @@ def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJEC
     (`branch.BranchSpec`) naming the run and the message this one continues from. It rides here
     because a resumed run is still a driven replay in every other respect, and the alternative
     is a second copy of this function's model wrapping, hermetic guard and seam assembly in the
-    #920 scripts. Passed through only when supplied, so every existing call is byte-identical."""
+    #920 scripts. Passed through only when supplied, so every existing call is byte-identical.
+    It is MUTUALLY EXCLUSIVE with `store_factory=` — see `_refuse_conflicting_store_seams`."""
+    _refuse_conflicting_store_seams(resume, store_factory)
     main_built = BuiltModel(FunctionModel(main), None)
     gather_built = BuiltModel(FunctionModel(gather), None) if gather is not None else None
 

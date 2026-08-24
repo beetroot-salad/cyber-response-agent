@@ -200,6 +200,64 @@ def test_a_finished_run_resumes_at_one_of_its_own_messages(tmp_path):
         "the resumed run appended nothing at all, so 'it appended no duplicates' is vacuous")
 
 
+def test_a_resumed_run_appends_onto_the_document_it_inherited(tmp_path):
+    """    The sibling's first `append_block` lands ON TOP of the source's document, in the
+    sibling's own run dir.
+
+    The session is inherited and the run dir is FRESH, so the document has to be carried across
+    or the two halves disagree from turn one: the model's own history says it authored seven
+    fences, `_opening_prompt` hands it coordinates into that document, and `_tool_append_block`
+    writes `deps.run_dir/"investigation.md"`. Un-seeded, that call reported `(1835 total)`
+    against a source document of 13564 bytes, and the model could not read the original back
+    either — `permission.decide_read` is rooted at the sibling's run dir, so the source's copy
+    is denied.
+
+    Driven end to end rather than asserted at the seam, because everything downstream reads
+    this file: `_check_append_only` has no blocks to conserve without it, `_frontier_recall`
+    sees a document that never moved, and the close gate's projection reads the sibling's
+    verdict against no belief history at all."""
+    # provenance: `_opening_prompt`'s own docstring names the problem it cannot solve alone;
+    # `branch.seed_investigation` is the other half.
+    sink: list = []
+    source = _source_run(tmp_path, sink, docs=NO_DOCS)
+    spec, _prefix_ids = _spec(source, sink[0])
+    inherited = (source.run_dir / "investigation.md").read_text(encoding="utf-8")
+    # `FENCES` counts the model's own `append_block` TURNS; the document also carries the
+    # harness-authored lead-0 block in front of them, so the file's own count is the baseline
+    # to compare against rather than that constant.
+    landed = inherited.count("```invlang")
+    assert landed > FENCES, (
+        f"the SOURCE run did not author its document ({source.summary_dict}); nothing below "
+        "is about inheriting one")
+
+    sibling_dir = materialize_alert(tmp_path / "sibling", alert_doc())
+    # A block the validator accepts ON TOP OF the inherited document — which is itself half
+    # the demand: a lead row citing `v-001`/`h-002` only resolves if the seed carried the
+    # blocks that declare them.
+    own_fence = (
+        "```invlang\n:L findings [id|loop|name|target|tests|system|window]\n"
+        "l-007|3|sibling-probe|v-001|h-002|elastic|15:22-15:40Z\n```")
+    _resume(spec, sibling_dir, main=ReplayFn([
+        Turn(tool_calls=[("append_block", {"text": own_fence})]),
+        Turn(text="Resumed and stopping."),
+    ]))
+
+    document = (sibling_dir / "investigation.md").read_text(encoding="utf-8")
+    seed = document[: document.index(own_fence)].rstrip("\n")
+    assert seed, (
+        "the sibling's document does not open on the one its own history says it wrote — its "
+        "first append started an empty file in the fresh run dir")
+    assert inherited.startswith(seed), (
+        "the inherited document is not a byte prefix of the source's — a rebuilt one drops "
+        "the prose the author wrote between blocks")
+    assert seed.endswith("```"), (
+        "the seed does not end on a fence boundary, so it carries prose the source wrote "
+        "after its last landed block")
+    assert document.count("```invlang") == landed + 1, (
+        f"the sibling's document holds {document.count('```invlang')} fences, not the "
+        f"{landed} it inherited plus the one it wrote")
+
+
 def test_a_resumed_run_does_not_orient_again(tmp_path):
     """    A resumed run skips lead-0 entirely: no ancestor resolution, no `l-000` leads row, no
     query rows under a reserved id — even though the sibling is handed the same kind of verb
@@ -233,11 +291,20 @@ def test_a_resumed_run_does_not_orient_again(tmp_path):
     assert rec.calls == [], (
         f"the resumed run reached the backend {len(rec.calls)} time(s) before its first model "
         f"turn ({rec.verbs}) — lead-0 resolved again over evidence the prefix already holds")
-    assert not (sibling_dir / "gather_raw" / f"{L0}.lead.json").is_file(), (
-        "the resumed run claimed l-000; a branch point is past turn-0 work by construction")
+    # The l-000 sidecar is INHERITED, not claimed: a sibling gets the source's captured
+    # evidence in its own run dir, and `claim_lead` raises on id reuse — so the inherited
+    # claim is itself what stops a resumed run redoing turn-0 work. Byte-identical is the
+    # observable that separates the two; a re-claim would rewrite it.
+    inherited = sibling_dir / "gather_raw" / f"{L0}.lead.json"
+    assert inherited.read_bytes() == (
+        source.run_dir / "gather_raw" / f"{L0}.lead.json").read_bytes(), (
+        "the resumed run rewrote the l-000 leads row; a branch point is past turn-0 work by "
+        "construction")
     rows = read_jsonl_rows(RunPaths(sibling_dir).executed_queries)
-    assert [r for r in rows if r.get("lead_id") in (L0, L3)] == [], (
-        f"reserved-id query rows survive into the sibling's own table: {rows}")
+    source_rows = read_jsonl_rows(RunPaths(source.run_dir).executed_queries)
+    assert [r for r in rows if r.get("lead_id") in (L0, L3)] == [
+        r for r in source_rows if r.get("lead_id") in (L0, L3)], (
+        f"the sibling's reserved-id query rows are not exactly the ones it inherited: {rows}")
 
     assert sibling.seen, "the resumed run never reached the model"
     opening = sibling.seen[0]
@@ -301,6 +368,10 @@ def test_a_prefix_carrying_a_synthesized_turn_resumes_too(tmp_path):
     assert message_ids(store, children[0]) == child_path[len(prefix_ids):], (
         "the child owns rows off its own path — the prefix was copied, not inherited")
 
-    assert not (sibling_dir / "gather_raw" / f"{L3}.lead.json").is_file(), (
+    # INHERITED, not dispatched — same reading as the l-000 sidecar above. The sibling gets
+    # the source's captured evidence in its own run dir, so the observable that separates a
+    # re-dispatch from an inheritance is whether the bytes moved.
+    assert (sibling_dir / "gather_raw" / f"{L3}.lead.json").read_bytes() == (
+        source.run_dir / "gather_raw" / f"{L3}.lead.json").read_bytes(), (
         "the sibling dispatched its own correlation lead over ancestors the prefix already "
         "carries the answer to")

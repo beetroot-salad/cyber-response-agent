@@ -1,0 +1,109 @@
+{
+  "account": "The node's objective is a complete, auditable direct-scan table. While I can perform the enumeration myself, the acceptance condition requires that every one of the 33 feasible (x,y) pairs be independently scanned with the z-interval formula and exact rational integrality test. Expanding into a small number of independent row-wise children reduces the risk of arithmetic error in a 33-cell computation and lets the parent reconcile all row totals into one certified grand total. The children are strictly parallel and each covers disjoint x-values, so no child needs a sibling's output.",
+  "children": [
+    {
+      "acceptance_condition": "All 12 cells for (3,y), y=7..18, are computed; each cell lists the complete scanned z-interval as derived from the formula and explicitly identifies each z for which w is integral; per-cell counts sum to the reported x=3 row total; every displayed z/w is an exact rational.",
+      "demand_ids": [],
+      "expected_contribution": "The full row for x=3: 12 per-y counts, all scanned z-values with w-values, and the row total T2_x3.",
+      "local_id": "scan_x3",
+      "no_future_sibling_dependency": "Uses only the separator facts: feasible y-range, z-interval formula, and exact integrality test. No sibling contributes data needed for these computations.",
+      "objective": "For x=3, scan y intervals [7,18] (12 feasible pairs: y=7..18) and for each pair compute R=1/2-1/3-1/y, enumerate integer z in max(y, floor(1/R)+1) <= z <= floor(2/R), test exact integrality of w=z/(R*z-1), list all z, count w-integers, and report per-y counts plus row total for x=3.",
+      "rationale": "Splitting by x creates 4 disjoint parallel workloads. x=3 has the most pairs (12), requiring careful arithmetic and full z-listing; assigning it to one child keeps the work auditable and bounded.",
+      "separator_facts": [
+        "Problem statement: count quadruples of positive integers x ≤ y ≤ z ≤ w with 1/x + 1/y + 1/z + 1/w = 1/2.",
+        "Feasible region to verify: for x=3, y in [7,18].",
+        "z-interval formula to verify: max(y, floor(1/R)+1) <= z <= floor(2/R) with R = 1/2 - 1/x - 1/y; integrality test: w = z/(R*z - 1) must be a positive integer.",
+        "Exact arithmetic only; no floating-point approximation or unverified numeric claims."
+      ],
+      "source_ids": [],
+      "source_paths": []
+    },
+    {
+      "acceptance_condition": "All 14 cells for x=4 and x=5 are computed; each cell lists the complete scanned z-interval as derived from the formula and explicitly identifies each z for which w is integral; per-cell counts sum to the reported row totals for x=4 and x=5; every displayed z/w is an exact rational.",
+      "demand_ids": [],
+      "expected_contribution": "The rows for x=4 and x=5 with per-y counts, listed z-values, w-values, and row totals T2_x4 and T2_x5.",
+      "local_id": "scan_x4_x5",
+      "no_future_sibling_dependency": "Only uses supplied feasible y-ranges, z-interval formula, and integrality test. No sibling output is required.",
+      "objective": "For x=4, scan y in [5,12] (8 pairs) and for x=5, scan y in [5,10] (6 pairs); for each pair compute R=1/2-1/x-1/y, enumerate integer z in max(y, floor(1/R)+1) <= z <= floor(2/R), test exact integrality of w=z/(R*z-1), list all z, count w-integers, and report per-y counts plus row totals for x=4 and x=5.",
+      "rationale": "Combining x=4 and x=5 into one child keeps node count low while still bounding the work; 14 pairs is a manageable parallel slice and both rows use identical formula logic.",
+      "separator_facts": [
+        "Problem statement: count quadruples of positive integers x ≤ y ≤ z ≤ w with 1/x + 1/y + 1/z + 1/w = 1/2.",
+        "Feasible region to verify: for x=4, y in [5,12]; for x=5, y in [5,10].",
+        "z-interval formula to verify: max(y, floor(1/R)+1) <= z <= floor(2/R) with R = 1/2 - 1/x - 1/y; integrality test: w = z/(R*z - 1) must be a positive integer.",
+        "Exact arithmetic only; no floating-point approximation or unverified numeric claims."
+      ],
+      "source_ids": [],
+      "source_paths": []
+    },
+    {
+      "acceptance_condition": "All 7 cells for x=6..8 are computed; each cell lists the complete scanned z-interval as derived from the formula and explicitly identifies each z for which w is integral; per-cell counts sum to the reported row totals for x=6, x=7, x=8; every displayed z/w is an exact rational.",
+      "demand_ids": [],
+      "expected_contribution": "The rows for x=6, x=7, and x=8 with per-y counts, listed z-values, w-values, and row totals T2_x6, T2_x7, T2_x8.",
+      "local_id": "scan_x6_x7_x8",
+      "no_future_sibling_dependency": "Uses only supplied feasible y-ranges and formulas. It does not need results from the other row-scan children.",
+      "objective": "For x=6, scan y in [6,9] (4 pairs); for x=7, scan y in [7,8] (2 pairs); for x=8, scan y=8 (1 pair); for each pair compute R=1/2-1/x-1/y, enumerate integer z in max(y, floor(1/R)+1) <= z <= floor(2/R), test exact integrality of w=z/(R*z-1), list all z, count w-integers, and report per-y counts plus row totals for x=6, x=7, x=8.",
+      "rationale": "The remaining 7 pairs are grouped into one child to cover all x values. This balances child sizes (12, 14, 7 cells) and keeps total node count within the budget.",
+      "separator_facts": [
+        "Problem statement: count quadruples of positive integers x ≤ y ≤ z ≤ w with 1/x + 1/y + 1/z + 1/w = 1/2.",
+        "Feasible region to verify: for x=6, y in [6,9]; for x=7, y in [7,8]; for x=8, y=8.",
+        "z-interval formula to verify: max(y, floor(1/R)+1) <= z <= floor(2/R) with R = 1/2 - 1/x - 1/y; integrality test: w = z/(R*z - 1) must be a positive integer.",
+        "Exact arithmetic only; no floating-point approximation or unverified numeric claims."
+      ],
+      "source_ids": [],
+      "source_paths": []
+    },
+    {
+      "acceptance_condition": "The child proves, using exact arithmetic and inequalities, that for R=1/2-1/x-1/y > 0, any positive integer z with w=z/(R*z-1) integer and w >= z must satisfy max(y, floor(1/R)+1) <= z <= floor(2/R); and it lists the derived endpoints for all 33 feasible (x,y) pairs, matching the separator-fact formula exactly.",
+      "demand_ids": [],
+      "expected_contribution": "A rigorous proof of the z-interval bounds plus a verified endpoint table for all 33 pairs, enabling the reader to reproduce every scanned interval without trusting a program.",
+      "local_id": "crosscheck_bound_formula",
+      "no_future_sibling_dependency": "This proof uses only the equation structure and inequalities; it does not require any sibling's count output. It can be completed independently using the feasible region facts.",
+      "objective": "Independently re-derive and verify, for each feasible (x,y) pair in the 33-pair region, the finite z-interval lower bound max(y, floor(1/R)+1) and upper bound floor(2/R) using exact rational inequalities, confirming that all such z satisfy w >= z and that no integer solution can lie outside the interval. Present the derivation for the general formula and a spot-check table of endpoint values for all 33 pairs.",
+      "rationale": "The direct-scan method's completeness relies on the z-interval formula. This child supplies a separate verification of that bound, making the final document auditable and independent of a brute-force program, directly serving D5.",
+      "separator_facts": [
+        "Problem statement: count quadruples of positive integers x ≤ y ≤ z ≤ w with 1/x + 1/y + 1/z + 1/w = 1/2.",
+        "Feasible region to verify: 3 <= x <= 8; y-intervals [7,18] for x=3, [5,12] for x=4, [5,10] for x=5, [6,9] for x=6, [7,8] for x=7, {8} for x=8; 33 feasible pairs total.",
+        "z-interval formula to verify: max(y, floor(1/R)+1) <= z <= floor(2/R) with R = 1/2 - 1/x - 1/y; integrality test: w = z/(R*z - 1) must be a positive integer.",
+        "Exact arithmetic only; no floating-point approximation or unverified numeric claims."
+      ],
+      "source_ids": [],
+      "source_paths": []
+    }
+  ],
+  "decidability": {
+    "acceptance_mechanical": true,
+    "account": "All formulas, feasible region, and acceptance criteria are supplied. Each child can independently compute its row counts using exact rational arithmetic and the z-scan formula. The parent can then mechanically sum row totals and cross-check the grand total cell-by-cell.",
+    "context_complete": true,
+    "grounded_referents": [
+      "feasible region: 3 <= x <= 8; y-intervals [7,18] for x=3, [5,12] for x=4, [5,10] for x=5, [6,9] for x=6, [7,8] for x=7, {8} for x=8; 33 feasible pairs total",
+      "z-interval formula: max(y, floor(1/R)+1) <= z <= floor(2/R) with R = 1/2 - 1/x - 1/y",
+      "integrality test: w = z/(R*z - 1) must be a positive integer",
+      "exact arithmetic requirement",
+      "deliverable must include per-(x,y) counts, row totals, grand total T2"
+    ],
+    "independent_of_future_siblings": true,
+    "missing_context": []
+  },
+  "disposition": "expand",
+  "irreducible_core": null,
+  "requested_source_ids": [],
+  "requested_source_paths": [],
+  "synthesis_contract": {
+    "acceptance_condition": "T2 is reported as the sum of the six row totals; the final table lists all 33 cells, row totals, scanned intervals, and w-values; the parent's own reconciliation confirms every row total and the grand total; the bound proof covers all 33 pairs; the document uses only exact arithmetic and never invokes the divisor-enumeration lemma.",
+    "conflict_policy": "If any child's row total disagrees with the parent's manual recalculation from its cell counts, recompute that row independently using exact arithmetic before accepting. If the bound-verification child finds a discrepancy in any endpoint, discard the corresponding cell's scan and redo it from the corrected formula. The grand total T2 is accepted only when all rows reconcile and all displayed z-values pass the exact rational integrality test.",
+    "parent_question": "What is the exact grand total T2 of quadruples x ≤ y ≤ z ≤ w with 1/x + 1/y + 1/z + 1/w = 1/2, computed by a direct denominator scan without divisor enumeration, and how can a reader verify the full table?",
+    "required_contributions": [
+      "Row for x=3 with per-y counts (y=7..18), scanned z-values, w-values, and row total T2_x3.",
+      "Rows for x=4 and x=5 with per-y counts, scanned z-values, w-values, and row totals T2_x4 and T2_x5.",
+      "Rows for x=6, x=7, x=8 with per-y counts, scanned z-values, w-values, and row totals T2_x6, T2_x7, T2_x8.",
+      "A proof and endpoint verification for the z-interval formula applied to all 33 feasible pairs."
+    ],
+    "shared_invariants": [
+      "Every z-scan uses exact rational arithmetic for R and w.",
+      "Each cell's count equals the number of integer z in the displayed interval for which w is integral.",
+      "All row totals equal the sums of their cells.",
+      "No divisor-enumeration lemma is used in any row computation.",
+      "All endpoints derive from R=1/2-1/x-1/y via max(y, floor(1/R)+1) and floor(2/R)."
+    ]
+  }
+}

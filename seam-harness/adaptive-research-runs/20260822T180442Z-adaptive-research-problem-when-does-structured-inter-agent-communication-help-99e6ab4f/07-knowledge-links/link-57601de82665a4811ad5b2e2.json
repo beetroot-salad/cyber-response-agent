@@ -1,0 +1,10 @@
+{
+  "content_sha256": "57601de82665a4811ad5b2e24d7970cc2097094efad35744ca8f3e5cfef6f14e",
+  "id": "link:57601de82665a4811ad5b2e2",
+  "origin": "runtime",
+  "proposed_by_node_id": null,
+  "rationale": null,
+  "relation": "depends_on",
+  "source_id": "question:raised:92a7343df8a6:rq-shapiro-merge",
+  "target_id": "question:demand:D7"
+}

@@ -1,0 +1,142 @@
+{
+  "account": "The node requires extraction from two distinct sources (Smit et al. and Zhang et al.) plus derivation of reconciliation hypotheses and evaluation constraints. The two extraction tasks are independent and can be executed in parallel; the design inference can then be derived later by the parent from the anchored findings. Expanding into three children—one per source for evidence extraction, plus one for design-inference derivation—keeps each child locally decidable and avoids a single monolithic solve that would mix distinct evidence questions.",
+  "children": [
+    {
+      "acceptance_condition": "Returns at least three findings, each a quote or close paraphrase from the Smit file, each with the exact `===== PDF PAGE N =====` marker(s) where it appears. The findings must collectively cover: (1) MAD not reliably outperforming other prompting strategies, (2) performance comparisons on specific benchmarks, and (3) any stated limitations or sensitivity to hyperparameters.",
+      "demand_ids": [
+        "D11",
+        "D12",
+        "D13",
+        "D14",
+        "D15"
+      ],
+      "expected_contribution": "A set of source-anchored findings from Smit et al. that the parent will use to build the reconciliation and evaluation-plan constraints.",
+      "knowledge_tags": [
+        "counterexample",
+        "evidence",
+        "risk"
+      ],
+      "local_id": "c1-smit-null-results",
+      "no_future_sibling_dependency": "The full text of the Smit file is present in the dossier; all required evidence can be extracted directly from it without needing Zhang's or any other sibling's output.",
+      "objective": "Extract from papers/text/smit-et-al-2023-going-mad.txt at least three anchored findings on Smit et al.'s critical or null results regarding multi-agent debate, including any comparisons against single-agent or matched-compute baselines, each quoted or closely paraphrased and carrying the exact `===== PDF PAGE N =====` marker(s).",
+      "rationale": "Smit et al. is the corpus's null-result evidence; its findings are a distinct evidence question that can be answered independently from the Zhang file and the design-derivation child.",
+      "separator_facts": [
+        "The corpus contains conflicting empirical conclusions: debate gains (Du et al. 2023) versus matched-compute null results and conformity findings (Smit et al. 2023; Zhang et al. 2025; Choi et al. 2025; Lorenz et al. 2011).",
+        "Page boundaries in the extracted texts are marked with lines of the form `===== PDF PAGE N =====`; citations must carry these markers (D12/C3).",
+        "Evidence is restricted to the seven workspace corpus files; no outside sources may be used (C2)."
+      ],
+      "source_ids": [
+        "ref:smit-2023-going-mad"
+      ],
+      "source_paths": [
+        "papers/text/smit-et-al-2023-going-mad.txt"
+      ]
+    },
+    {
+      "acceptance_condition": "Returns at least three findings, each a quote or close paraphrase from the Zhang file, each with the exact `===== PDF PAGE N =====` marker(s) where it appears. The findings must collectively cover: (1) MAD often failing to outperform single-agent baselines like CoT and Self-Consistency, (2) task dependence (e.g., performance differences across programming, math, general knowledge), and (3) the role of model heterogeneity or other factors in improving or failing to improve MAD.",
+      "demand_ids": [
+        "D11",
+        "D12",
+        "D13",
+        "D14",
+        "D15"
+      ],
+      "expected_contribution": "A set of source-anchored findings from Zhang et al. that the parent will use to build the reconciliation and evaluation-plan constraints.",
+      "knowledge_tags": [
+        "counterexample",
+        "evidence",
+        "measurement"
+      ],
+      "local_id": "c2-zhang-boundary-conditions",
+      "no_future_sibling_dependency": "The full text of the Zhang file is present in the dossier; all required evidence can be extracted directly from it without needing Smit's or any other sibling's output.",
+      "objective": "Extract from papers/text/zhang-et-al-2025-mad-question.txt at least three anchored findings on Zhang et al.'s analysis of when and why multi-agent debate helps or fails, including task dependence and boundary conditions, each quoted or closely paraphrased and carrying the exact `===== PDF PAGE N =====` marker(s).",
+      "rationale": "Zhang et al. is the corpus's boundary-condition and negative-result evidence; its analysis of when debate helps or fails is a distinct evidence question independent from the Smit extraction.",
+      "separator_facts": [
+        "The corpus contains conflicting empirical conclusions: debate gains (Du et al. 2023) versus matched-compute null results and conformity findings (Smit et al. 2023; Zhang et al. 2025; Choi et al. 2025; Lorenz et al. 2011).",
+        "Page boundaries in the extracted texts are marked with lines of the form `===== PDF PAGE N =====`; citations must carry these markers (D12/C3).",
+        "Evidence is restricted to the seven workspace corpus files; no outside sources may be used (C2)."
+      ],
+      "source_ids": [
+        "ref:zhang-2025-mad-question"
+      ],
+      "source_paths": [
+        "papers/text/zhang-et-al-2025-mad-question.txt"
+      ]
+    },
+    {
+      "acceptance_condition": "Returns at least three reconciliation hypotheses and at least three evaluation-design constraints, each explicitly labeled as design inference. The hypotheses must name at least one of: task type, compute parity, visibility/timing of peer answers. The constraints together must cover quality, diversity/correlation, latency, token cost, and recovery-from-wrong-consensus.",
+      "demand_ids": [
+        "D11",
+        "D13",
+        "D14",
+        "D15"
+      ],
+      "expected_contribution": "The design-inference layer that the parent will use to ground the reconciliation (D11) and the falsifiable evaluation plan (D14).",
+      "knowledge_tags": [
+        "synthesis",
+        "risk",
+        "measurement"
+      ],
+      "local_id": "c3-design-inferences",
+      "no_future_sibling_dependency": "The design-inference child receives the sibling findings as frozen separator facts, so it does not need to wait for the extractors' final reports; it can complete independently.",
+      "objective": "Using the anchored findings from the two sibling extractors (provided below as separator facts), derive at least three reconciliation hypotheses attributing the disagreement with Du et al. 2023 to named conditions (task type, compute parity, visibility or timing of peer answers), and at least three evaluation-design constraints covering the five metric families (quality, diversity/correlation, latency, token cost, recovery-from-wrong-consensus). Each derived item must be explicitly labeled as a design inference.",
+      "rationale": "The reconciliation and evaluation design is the analytical product of this node; it builds on the evidence extracted by the two sibling children, but can be derived in parallel because the required findings are provided as separator facts.",
+      "separator_facts": [
+        "Smit et al. state that 'multi-agent debating systems, in their current form, do not reliably outperform other proposed prompting strategies, such as self-consistency and ensembling using multiple reasoning paths' (===== PDF PAGE 1 =====).",
+        "Smit et al. report that with hyperparameter tuning, some MAD systems like Multi-Persona perform better, suggesting MAD is 'more sensitive to different hyperparameter settings and difficult to optimize' (===== PDF PAGE 1 =====).",
+        "Smit et al. find that modulating agreement intensity via prompts can improve Multi-Persona by ~15% on USMLE, and that the effect varies by dataset (===== PDF PAGE 6 =====).",
+        "Zhang et al. report that 'none of these MAD methods achieve a win rate higher than 20% when compared to CoT across 36 scenarios (4 models × 9 benchmarks)' (===== PDF PAGE 3 =====).",
+        "Zhang et al. analyze task dependence: MAD frameworks 'performed worse on programming tasks (only SoM/AgentVerse had positive win rates) but better on mathematical reasoning' (===== PDF PAGE 7 =====).",
+        "Zhang et al. find that 'simply adjusting these hyperparameters can hardly reverse this negative outcome' (===== PDF PAGE 3 =====) and that SC is more efficient in token consumption (===== PDF PAGE 9 =====).",
+        "Zhang et al. propose model heterogeneity as a universal antidote, with Heter-SoM improving SoM-average by 6.4% (===== PDF PAGE 11 =====).",
+        "The proposed substrate plus the two baselines named in D4 (open conversational forum; no inter-agent communication) naturally supply the three or more conditions required by D14.",
+        "Evidence is restricted to the seven workspace corpus files; no outside sources may be used (C2)."
+      ],
+      "source_ids": [
+        "ref:smit-2023-going-mad",
+        "ref:zhang-2025-mad-question"
+      ],
+      "source_paths": []
+    }
+  ],
+  "decidability": {
+    "acceptance_mechanical": true,
+    "account": "The full text of both source files is included in the dossier. Each child will receive the exact source text it needs (or a reference to it), so no sibling output is required to complete its extraction. The design-inference child uses the grounded findings supplied as separator facts from the sibling extractors, so it can proceed without waiting for their final reports.",
+    "context_complete": true,
+    "grounded_referents": [
+      "papers/text/smit-et-al-2023-going-mad.txt",
+      "papers/text/zhang-et-al-2025-mad-question.txt",
+      "ref:smit-2023-going-mad",
+      "ref:zhang-2025-mad-question"
+    ],
+    "independent_of_future_siblings": true,
+    "missing_context": []
+  },
+  "disposition": "expand",
+  "irreducible_core": null,
+  "requested_source_ids": [
+    "ref:smit-2023-going-mad",
+    "ref:zhang-2025-mad-question"
+  ],
+  "requested_source_paths": [
+    "papers/text/smit-et-al-2023-going-mad.txt",
+    "papers/text/zhang-et-al-2025-mad-question.txt"
+  ],
+  "synthesis_contract": {
+    "acceptance_condition": "The synthesized output satisfies the node acceptance condition: at least six anchored findings (three per file) and at least three reconciliation hypotheses plus at least three evaluation constraints covering all five metric families, each labeled as design inference.",
+    "conflict_policy": "If Smit/Zhang findings conflict with Du et al., the parent will preserve the conflict and use the reconciliation hypotheses to explain it; no finding will be discarded. The evaluation constraints will be designed to test the hypotheses and detect when the substrate fails.",
+    "parent_question": "What are Smit et al.'s null results and Zhang et al.'s boundary conditions on multi-agent debate, and what reconciliation hypotheses and evaluation constraints can be derived to reconcile them with Du et al. 2023?",
+    "required_contributions": [
+      "Anchored findings from Smit et al. (at least three) with page markers.",
+      "Anchored findings from Zhang et al. (at least three) with page markers.",
+      "At least three reconciliation hypotheses naming task type, compute parity, or visibility/timing.",
+      "At least three evaluation-design constraints covering the five metric families."
+    ],
+    "shared_invariants": [
+      "All evidentiary claims must cite the exact `===== PDF PAGE N =====` marker(s) from the source file.",
+      "Findings from the corpus must be distinguished from design inferences.",
+      "The reconciliation must not hide the null results; it must explicitly acknowledge the conflicting conclusions.",
+      "The evaluation plan must include at least three conditions."
+    ]
+  }
+}

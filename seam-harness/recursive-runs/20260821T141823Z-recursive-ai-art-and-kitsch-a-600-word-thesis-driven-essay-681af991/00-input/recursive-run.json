@@ -1,0 +1,201 @@
+{
+  "policy": {
+    "final_max_tokens": 6000,
+    "final_model": "fireworks:accounts/fireworks/routers/kimi-k3-fast",
+    "max_children": 4,
+    "max_concurrency": 6,
+    "max_depth": 3,
+    "max_evidence_rounds": 2,
+    "max_nodes": 18,
+    "max_workspace_file_bytes": 100000,
+    "max_workspace_files": 500,
+    "max_workspace_total_bytes": 4000000,
+    "planner_max_tokens": 3000,
+    "request_limit_per_call": 2,
+    "require_root_expansion": true,
+    "research_max_tokens": 3000,
+    "research_model": "fireworks:accounts/fireworks/models/deepseek-v4-flash-0731",
+    "root_model": "fireworks:accounts/fireworks/routers/kimi-k3-fast",
+    "synthesis_max_tokens": 4500,
+    "synthesis_model": "fireworks:accounts/fireworks/routers/kimi-k3-fast"
+  },
+  "spec": {
+    "frame": {
+      "constraints": [
+        "Total length must land within roughly 550–650 words.",
+        "The essay must be standalone: comprehensible without external context or companion materials.",
+        "A title must be present.",
+        "Plain essay prose — no citation apparatus or academic formatting required by the brief."
+      ],
+      "demands": [
+        {
+          "id": "D1",
+          "rationale": "The raw request specifies ~600 words; decision:3 narrows the acceptable range to 550–650.",
+          "statement": "Produce an essay on AI art and kitsch of roughly 550–650 words."
+        },
+        {
+          "id": "D2",
+          "rationale": "Decision:1 fixes the audience and the genre; the essay must work on its own without surrounding context.",
+          "statement": "Address a general educated reader as a piece of standalone cultural criticism."
+        },
+        {
+          "id": "D3",
+          "rationale": "Decision:2 explicitly requires an argued position with nuance, ruling out a merely descriptive overview.",
+          "statement": "Choose and defend a clear, nuanced thesis rather than producing a neutral survey."
+        },
+        {
+          "id": "D4",
+          "rationale": "Decision:3 sets the form: accessible prose, titled, free of scholarly apparatus (though not forbidden from plain-language reference to ideas).",
+          "statement": "Use plain essay prose and include a title; no citations or named theorists are required."
+        }
+      ],
+      "product_intent": "The essay exists to give a general educated reader a self-contained piece of cultural criticism on AI art and kitsch — one that argues a defensible, nuanced thesis in accessible prose rather than neutrally surveying the topic.",
+      "referents": [],
+      "stable_context": [
+        "Audience: general educated reader (decision:1).",
+        "Genre/register: standalone cultural criticism (decision:1).",
+        "Stance posture: the writer selects and defends a clear, nuanced thesis; a neutral survey is explicitly out of scope (decision:2).",
+        "Form expectations: plain essay prose with a title; citations and named theorists are not required (decision:3).",
+        "Suggested title from the envelope: 'AI Art and Kitsch' (title_hint).",
+        "No source materials are provided; the essay draws on the writer's own reasoning about AI art and kitsch."
+      ],
+      "task": "Write a standalone essay on AI art and kitsch, approximately 600 words (550–650 acceptable), that takes and defends a clear, nuanced position for a general educated reader.",
+      "title": "AI Art and Kitsch — a ~600-word thesis-driven essay"
+    },
+    "intake": {
+      "assessment": {
+        "assumptions": [
+          "\"Approximately 600 words\" is operationalized as the 550–650 word range stated in decision:3.",
+          "\"No citations or named theorists are required\" is a permission, not a prohibition: the essay may invoke the concept of kitsch in plain terms but carries no scholarly apparatus obligation.",
+          "The required title is expected to be part of the deliverable and is assumed not to count toward the word range; this is minor and non-material.",
+          "The specific stance on AI art and kitsch is intentionally open: decision:2 delegates thesis selection to the writer, so this is a stated delegation rather than an unstated consequential choice.",
+          "As a single cohesive piece of cultural criticism, the task is treated as atomic; no decomposition into sub-products is implied by the envelope."
+        ],
+        "clarification_questions": [],
+        "derivations": [
+          {
+            "account": "The raw request is to write an approximately 600-word essay on AI art and kitsch; the frame restates this with the decision-refined length.",
+            "source_ids": [
+              "request"
+            ],
+            "status": "explicit",
+            "target": "task"
+          },
+          {
+            "account": "Decision:1 establishes the standalone cultural-criticism register for a general educated reader, which explains why the essay exists as a product.",
+            "source_ids": [
+              "request",
+              "decision:1"
+            ],
+            "status": "explicit",
+            "target": "product_intent"
+          },
+          {
+            "account": "The request specifies ~600 words on AI art and kitsch; decision:3 tightens this to roughly 550–650 words.",
+            "source_ids": [
+              "request",
+              "decision:3"
+            ],
+            "status": "explicit",
+            "target": "demand:D1"
+          },
+          {
+            "account": "Decision:1 defines the audience as a general educated reader and the genre as standalone cultural criticism.",
+            "source_ids": [
+              "decision:1"
+            ],
+            "status": "explicit",
+            "target": "demand:D2"
+          },
+          {
+            "account": "Decision:2 requires the writer to choose and defend a clear, nuanced thesis rather than survey neutrally.",
+            "source_ids": [
+              "decision:2"
+            ],
+            "status": "explicit",
+            "target": "demand:D3"
+          },
+          {
+            "account": "Decision:3 requires plain essay prose with a title and no citation apparatus; the title_hint suggests 'AI Art and Kitsch'.",
+            "source_ids": [
+              "decision:3",
+              "title_hint"
+            ],
+            "status": "explicit",
+            "target": "demand:D4"
+          },
+          {
+            "account": "The 550–650 word range and standalone-essay form are explicit restrictions from the conversation decisions.",
+            "source_ids": [
+              "decision:3",
+              "decision:1"
+            ],
+            "status": "explicit",
+            "target": "constraints"
+          },
+          {
+            "account": "Audience, genre, stance posture, and form expectations are all stated directly in the conversation decisions.",
+            "source_ids": [
+              "decision:1",
+              "decision:2",
+              "decision:3"
+            ],
+            "status": "explicit",
+            "target": "stable_context"
+          },
+          {
+            "account": "The materials array is empty; the envelope contains no existing artifacts or external objects to reference.",
+            "source_ids": [
+              "request"
+            ],
+            "status": "explicit",
+            "target": "referents"
+          }
+        ],
+        "framing_notes": "This is a single, self-contained writing task; no decomposition is proposed and none appears warranted by the envelope. The conversation decisions resolve the major sources of ambiguity that would otherwise block dispatch: audience and genre (decision:1), the requirement for an argued thesis rather than a survey (decision:2), and form plus length (decision:3). The one genuinely open choice — which thesis to defend — is explicitly delegated to the writer by decision:2, so dispatching preserves the request without smuggling in an unstated consequential choice. The materials array is empty, so no referents exist; the essay is the product to be created, not an existing artifact. Marked ready because every obligation in the frame traces directly to the request or a stated decision.",
+        "readiness": "ready",
+        "unresolved": [
+          "The specific thesis on AI art and kitsch remains open; this is explicitly delegated to the writer by decision:2 and is therefore not a blocker.",
+          "Whether the title counts toward the 550–650 word range is unspecified; the discrepancy is at most a few words and does not materially affect the product."
+        ]
+      },
+      "elapsed_ms": 32047,
+      "frame_sha256": "7e0dc1c6bce2766d7dfd3dd3f3a6eab8263da672087d399609604b5f2eeee97d",
+      "generated_by_model": "fireworks:accounts/fireworks/models/kimi-k3",
+      "source_sha256": "9fc90b6c77f90a34150dc8c924fb421eaee72bdf532c68e1a594801da199ec06",
+      "usage": {
+        "cache_read_tokens": 0,
+        "details": {
+          "reasoning_tokens": 1037
+        },
+        "input_tokens": 1234,
+        "output_tokens": 2579,
+        "requests": 1
+      }
+    },
+    "policy": {
+      "leaf_model": "fireworks:accounts/fireworks/models/kimi-k3",
+      "max_concurrency": 5,
+      "max_planning_rounds": 2,
+      "request_limit_per_role": 3,
+      "root_model": "fireworks:accounts/fireworks/models/kimi-k3"
+    },
+    "questioner_lenses": [
+      "adversarial counterexample",
+      "environment and execution context",
+      "failure semantics",
+      "shared invariant hunting",
+      "artifact and referent inspection"
+    ],
+    "source_envelope": {
+      "conversation_decisions": [
+        "The audience is a general educated reader and the essay is standalone cultural criticism.",
+        "The writer should choose and defend a clear, nuanced thesis rather than produce a neutral survey.",
+        "Use plain essay prose with a title; no citations or named theorists are required; aim for roughly 550 to 650 words."
+      ],
+      "materials": [],
+      "raw_request": "Write an approximately 600-word essay on AI art and kitsch.",
+      "title_hint": "AI Art and Kitsch"
+    }
+  }
+}

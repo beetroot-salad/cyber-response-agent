@@ -1,0 +1,22 @@
+{
+  "account": "The dossier already contains the exact z-interval formula, the full 33-pair feasible region, and the demand for an exact-arithmetic proof plus a complete endpoint table. No external sources are needed: every required bound and all 33 pairs are enumerated in the separator facts, and the acceptance condition is mechanical (prove the inequality chain and list 33 endpoint pairs matching the given formula). The node is locally decidable: I can verify the algebra symbolically, derive the endpoints for each of the 33 pairs, and produce the table without any sibling's future output.",
+  "children": [],
+  "decidability": {
+    "acceptance_mechanical": true,
+    "account": "All necessary definitions and the complete feasible region are provided in the dossier; the proof uses only rational arithmetic and the listed pairs, so no additional evidence or context is required.",
+    "context_complete": true,
+    "grounded_referents": [
+      "R = 1/2 - 1/x - 1/y",
+      "z-interval: max(y, floor(1/R)+1) <= z <= floor(2/R)",
+      "integrality: w = z/(R*z - 1) must be a positive integer",
+      "33 feasible (x,y) pairs listed by x from 3 to 8"
+    ],
+    "independent_of_future_siblings": true,
+    "missing_context": []
+  },
+  "disposition": "solve",
+  "irreducible_core": null,
+  "requested_source_ids": [],
+  "requested_source_paths": [],
+  "synthesis_contract": null
+}

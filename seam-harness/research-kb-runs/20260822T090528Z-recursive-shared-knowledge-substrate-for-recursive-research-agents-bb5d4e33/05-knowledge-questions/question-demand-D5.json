@@ -1,0 +1,14 @@
+{
+  "acceptance_condition": "Establish demand D5 with evidence.",
+  "content_sha256": "04efdfb487681553676fbfc02e1e0eba20f7638dcd990d68fffd3b7e56f7324a",
+  "demand_ids": [
+    "D5"
+  ],
+  "id": "question:demand:D5",
+  "node_id": null,
+  "rationale": "First of six specification areas listed in the request.",
+  "tags": [
+    "evidence"
+  ],
+  "text": "The data model and its invariants are specified."
+}

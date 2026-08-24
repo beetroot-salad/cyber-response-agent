@@ -1,0 +1,32 @@
+{
+  "claim_ids": [
+    "root.01-arg-semantics:C001",
+    "root.01-arg-semantics:C002",
+    "root.01-arg-semantics:C003",
+    "root.01-arg-semantics:C004",
+    "root.01-arg-semantics:C005",
+    "root.01-arg-semantics:C006",
+    "root.01-arg-semantics:C007",
+    "root.01-arg-semantics:C008"
+  ],
+  "content_sha256": "705b0400cc79504ec41011bdecd3d2918a9f037b6ae72e553e510a86dbc42732",
+  "id": "answer:root.01-arg-semantics",
+  "node_id": "root.01-arg-semantics",
+  "packet_id": "packet:root.01-arg-semantics",
+  "sufficiency": "ready_to_synthesize",
+  "summary": "Dung 1995 provides the formal backbone for modeling answer-to-answer conflict and belief revision in a question/answer graph. The core definitions—argumentation framework (AF), acceptability, conflict-free sets, admissible sets—all appear on PDF PAGE 6, with the framework's informal introduction straddling pages 5–6. The extension semantics are spread: preferred extensions on page 7, stable extensions and the characteristic function on page 8, and grounded extensions on page 9. Dung explicitly links these semantics to nonmonotonic reasoning and logic programming: stable extensions correspond to stable models, Reiter extensions, and autoepistemic expansions (page 8); Reiter's default logic and logic programming are shown as argumentation (pages 19–24). The source does not discuss belief revision or graph substrates, so mapping AF notions to a Q/A graph is necessarily design inference. From these foundations, we derive that answers map to arguments, conflict edges map to attacks, provenance edges are inert foreign edges, admissible sets define mutually consistent answer sets, preferred extensions define credulous acceptance, the grounded extension defines skeptical acceptance, and belief revision corresponds to mutating the attack relation or argument set and recomputing extensions, with tractability guarded by the incomputability result on page 25.",
+  "tags": [
+    "definition",
+    "evidence",
+    "method",
+    "synthesis",
+    "counterexample",
+    "uncertainty"
+  ],
+  "unresolved": [
+    "The exact syntax and directionality of attack edges (directional vs. bidirectional) is not resolved by Dung's text; the design must choose a convention.",
+    "The mapping from natural-language answer conflict to a machine-checkable attack relation is not specified by the source; this is a model-level inference task.",
+    "The treatment of weighted or typed conflicts (e.g., specificity vs. contradiction) is not addressed by Dung's binary attack relation.",
+    "The exact trigger semantics for when belief revision is performed (e.g., new answer, conflict edge added, explicit user request) is not defined in this node and must come from the parent's runtime specification."
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "content_sha256": "c8f68c6efaee9c94fc3e395ae3423436b5520191b0054f020f38b40f81f8e61e",
+  "id": "link:c8f68c6efaee9c94fc3e395a",
+  "origin": "runtime",
+  "proposed_by_node_id": null,
+  "rationale": null,
+  "relation": "refines",
+  "source_id": "question:work:001-w1-lorenz2011",
+  "target_id": "question:demand:D3"
+}

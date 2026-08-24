@@ -1,0 +1,14 @@
+{
+  "acceptance_condition": "Establish demand D6 with evidence.",
+  "content_sha256": "092edf3164f1e96b23cbd5d00422b8ffb3b9e3b4b5aa07d8dc02de089fb0f0bf",
+  "demand_ids": [
+    "D6"
+  ],
+  "id": "question:demand:D6",
+  "node_id": null,
+  "rationale": "The note must not overclaim from heterogeneous published studies.",
+  "tags": [
+    "measurement"
+  ],
+  "text": "Identify non-identifiability, measurement, and external-validity limits in the existing evidence."
+}

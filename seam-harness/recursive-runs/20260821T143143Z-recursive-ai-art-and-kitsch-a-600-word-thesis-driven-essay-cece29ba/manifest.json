@@ -1,0 +1,270 @@
+{
+  "created_at": "2026-08-21T14:31:43.832968+00:00",
+  "events": [
+    {
+      "event_hash": "e117d9ec9a5a532841dd74664750d349b5fc3af6c8e50f04331b5a7d9e47066e",
+      "index": 0,
+      "metadata": {},
+      "name": "recursive-run",
+      "path": "00-input/recursive-run.json",
+      "previous_event_hash": null,
+      "record_sha256": "5cb437bc6f148e175398315e0ecd3660dda37baf78fe2ffd6621f3c8806b3830",
+      "stage": "00-input",
+      "timestamp": "2026-08-21T14:31:43.834487+00:00"
+    },
+    {
+      "event_hash": "a1543be69f79bcf705e426e7ae2904581e2932aeaff50ce290b000fe36258d9d",
+      "index": 1,
+      "metadata": {},
+      "name": "replay-source",
+      "path": "00-input/replay-source.json",
+      "previous_event_hash": "e117d9ec9a5a532841dd74664750d349b5fc3af6c8e50f04331b5a7d9e47066e",
+      "record_sha256": "989a66f2b8a8a1a8655885b527455fd3962f161cc79fe2bf9b822b7b1ef5000d",
+      "stage": "00-input",
+      "timestamp": "2026-08-21T14:31:43.835379+00:00"
+    },
+    {
+      "event_hash": "5de3468649068c9d7cd7d28dcb8df2fb5686361675853fcb9f38bb643517bfd7",
+      "index": 2,
+      "metadata": {
+        "role": "root_plan_replay",
+        "source_run": "/workspace/seam-harness/recursive-runs/20260821T141823Z-recursive-ai-art-and-kitsch-a-600-word-thesis-driven-essay-681af991"
+      },
+      "name": "root-round-01",
+      "path": "10-node-plans/root-round-01.json",
+      "previous_event_hash": "a1543be69f79bcf705e426e7ae2904581e2932aeaff50ce290b000fe36258d9d",
+      "record_sha256": "3c79e2da9719783cee6fe122b9e8629dd1ec15d49038e63f0b5eca559a641d32",
+      "stage": "10-node-plans",
+      "timestamp": "2026-08-21T14:31:43.836285+00:00"
+    },
+    {
+      "event_hash": "6b8b4916f53a1680fc9beac19979ed69d889906d54c84210c8053433217d0612",
+      "index": 3,
+      "metadata": {
+        "original_packet_sha256": "7e2673818fa655e5af17e9eaecff464d44bddcadedce98bda69c7df8fd048bb6",
+        "replayed_from": "/workspace/seam-harness/recursive-runs/20260821T141823Z-recursive-ai-art-and-kitsch-a-600-word-thesis-driven-essay-681af991"
+      },
+      "name": "root.01-def-of-kitsch",
+      "path": "30-evidence-packets/root.01-def-of-kitsch.json",
+      "previous_event_hash": "5de3468649068c9d7cd7d28dcb8df2fb5686361675853fcb9f38bb643517bfd7",
+      "record_sha256": "be8b36b60778f73b5cae058481d33a948a52933afd27c2579a7f6c3d117ace31",
+      "stage": "30-evidence-packets",
+      "timestamp": "2026-08-21T14:31:43.837539+00:00"
+    },
+    {
+      "event_hash": "7695c76070f0723489eb8bfe824d98dbdc2c172651063b0902b0e75de04621a1",
+      "index": 4,
+      "metadata": {
+        "original_packet_sha256": "7e2673818fa655e5af17e9eaecff464d44bddcadedce98bda69c7df8fd048bb6",
+        "replayed_from": "/workspace/seam-harness/recursive-runs/20260821T141823Z-recursive-ai-art-and-kitsch-a-600-word-thesis-driven-essay-681af991"
+      },
+      "name": "root.01-def-of-kitsch",
+      "path": "31-node-traces/root.01-def-of-kitsch.json",
+      "previous_event_hash": "6b8b4916f53a1680fc9beac19979ed69d889906d54c84210c8053433217d0612",
+      "record_sha256": "9a0aec48e683b0d60cecbe0adc0117fac6901e37852b24cfdf00ce0c82f672d2",
+      "stage": "31-node-traces",
+      "timestamp": "2026-08-21T14:31:43.838154+00:00"
+    },
+    {
+      "event_hash": "73f6da127b5aab74563bdb76ee255813a668c1d9c43c14c7c9092df6c6aa45da",
+      "index": 5,
+      "metadata": {
+        "original_packet_sha256": "ece57053ccf4e8b3e4e4a130911cd71d440afec547d845e5e76aff510b6e3f90",
+        "replayed_from": "/workspace/seam-harness/recursive-runs/20260821T141823Z-recursive-ai-art-and-kitsch-a-600-word-thesis-driven-essay-681af991"
+      },
+      "name": "root.02-case-against",
+      "path": "30-evidence-packets/root.02-case-against.json",
+      "previous_event_hash": "7695c76070f0723489eb8bfe824d98dbdc2c172651063b0902b0e75de04621a1",
+      "record_sha256": "c3da143bf76e7f348049a74835de063327eecd33c177c3e902fcd79788a69425",
+      "stage": "30-evidence-packets",
+      "timestamp": "2026-08-21T14:31:43.838859+00:00"
+    },
+    {
+      "event_hash": "bde4784f190d298b046e7fc563df9e4c12b0ff48b81683e3803a675321e0a2f9",
+      "index": 6,
+      "metadata": {
+        "original_packet_sha256": "ece57053ccf4e8b3e4e4a130911cd71d440afec547d845e5e76aff510b6e3f90",
+        "replayed_from": "/workspace/seam-harness/recursive-runs/20260821T141823Z-recursive-ai-art-and-kitsch-a-600-word-thesis-driven-essay-681af991"
+      },
+      "name": "root.02-case-against",
+      "path": "31-node-traces/root.02-case-against.json",
+      "previous_event_hash": "73f6da127b5aab74563bdb76ee255813a668c1d9c43c14c7c9092df6c6aa45da",
+      "record_sha256": "04e09a2bc79e7d97730595656fb42c896e5fe45e33ba5bf7bd3c4e54ae8966ba",
+      "stage": "31-node-traces",
+      "timestamp": "2026-08-21T14:31:43.839423+00:00"
+    },
+    {
+      "event_hash": "54ef76d69a3b84629cb1f021e0e803f714022d8a398f44803573a5317d841817",
+      "index": 7,
+      "metadata": {
+        "original_packet_sha256": "f5684ce090600573ba798e53e5b899da8354358cda9889090fcc8cada32613ea",
+        "replayed_from": "/workspace/seam-harness/recursive-runs/20260821T141823Z-recursive-ai-art-and-kitsch-a-600-word-thesis-driven-essay-681af991"
+      },
+      "name": "root.03-case-for",
+      "path": "30-evidence-packets/root.03-case-for.json",
+      "previous_event_hash": "bde4784f190d298b046e7fc563df9e4c12b0ff48b81683e3803a675321e0a2f9",
+      "record_sha256": "efc09bd5a5008771ee93509dd19a83c42a500ee81f128f00c8fe67d4fa5120a8",
+      "stage": "30-evidence-packets",
+      "timestamp": "2026-08-21T14:31:43.840402+00:00"
+    },
+    {
+      "event_hash": "b1640ae7683f91e1afab03e0542e6e5893d483fe0f6d86b2294f663afbe0bf50",
+      "index": 8,
+      "metadata": {
+        "original_packet_sha256": "f5684ce090600573ba798e53e5b899da8354358cda9889090fcc8cada32613ea",
+        "replayed_from": "/workspace/seam-harness/recursive-runs/20260821T141823Z-recursive-ai-art-and-kitsch-a-600-word-thesis-driven-essay-681af991"
+      },
+      "name": "root.03-case-for",
+      "path": "31-node-traces/root.03-case-for.json",
+      "previous_event_hash": "54ef76d69a3b84629cb1f021e0e803f714022d8a398f44803573a5317d841817",
+      "record_sha256": "c363368632de0a440845f01aa83445752e4dab7df682925ef1ee02201f91979a",
+      "stage": "31-node-traces",
+      "timestamp": "2026-08-21T14:31:43.841253+00:00"
+    },
+    {
+      "event_hash": "df0455da1d0431e2e1f8b0a48d9072dcc0e9b8a245fdcf3d434cfe6237b114e9",
+      "index": 9,
+      "metadata": {
+        "original_packet_sha256": "357b43644f960decea5042d342f5e53189c4f7852dbdc79c4ca918ecd7723736",
+        "replayed_from": "/workspace/seam-harness/recursive-runs/20260821T141823Z-recursive-ai-art-and-kitsch-a-600-word-thesis-driven-essay-681af991"
+      },
+      "name": "root.04-examples-stock",
+      "path": "30-evidence-packets/root.04-examples-stock.json",
+      "previous_event_hash": "b1640ae7683f91e1afab03e0542e6e5893d483fe0f6d86b2294f663afbe0bf50",
+      "record_sha256": "9ce56ab734db21efaa3ac73e26475b76cc387dce406fedd9bc4d388ca0fedb0c",
+      "stage": "30-evidence-packets",
+      "timestamp": "2026-08-21T14:31:43.842308+00:00"
+    },
+    {
+      "event_hash": "4dcbe7da81e9b0370e5ff0fb6206745a1dc96e14010f57696f45ab63122e0946",
+      "index": 10,
+      "metadata": {
+        "original_packet_sha256": "357b43644f960decea5042d342f5e53189c4f7852dbdc79c4ca918ecd7723736",
+        "replayed_from": "/workspace/seam-harness/recursive-runs/20260821T141823Z-recursive-ai-art-and-kitsch-a-600-word-thesis-driven-essay-681af991"
+      },
+      "name": "root.04-examples-stock",
+      "path": "31-node-traces/root.04-examples-stock.json",
+      "previous_event_hash": "df0455da1d0431e2e1f8b0a48d9072dcc0e9b8a245fdcf3d434cfe6237b114e9",
+      "record_sha256": "c654ba5372e134fc2a2cfb560184558a2deb22ce0a6dcac17e2690881d1f852b",
+      "stage": "31-node-traces",
+      "timestamp": "2026-08-21T14:31:43.842950+00:00"
+    },
+    {
+      "event_hash": "9a622d47a1b3a553654d2924a9db2931cbd7d3a51ad517a66a5b5637313c15b9",
+      "index": 11,
+      "metadata": {
+        "model": "fireworks:accounts/fireworks/models/kimi-k3",
+        "role": "synthesizer"
+      },
+      "name": "call-0001-synthesizer",
+      "path": "01-call-inputs/call-0001-synthesizer.json",
+      "previous_event_hash": "4dcbe7da81e9b0370e5ff0fb6206745a1dc96e14010f57696f45ab63122e0946",
+      "record_sha256": "f4572553be12496f78f98d5e00efdb5733d59465f02e30998012e5fd2316715b",
+      "stage": "01-call-inputs",
+      "timestamp": "2026-08-21T14:31:43.846788+00:00"
+    },
+    {
+      "event_hash": "67322679bbf98bc5401713b3b5c2ea6508d67163ea84c4d3aa71b89e637d0e06",
+      "index": 12,
+      "metadata": {
+        "call_id": "call-0001-synthesizer",
+        "elapsed_ms": 276060,
+        "input_sha256": "7379189423854b84d976a99cf2ee3dbcf1904ceb9c36c45511723ab8e89a9084",
+        "model": "fireworks:accounts/fireworks/models/kimi-k3",
+        "role": "synthesizer",
+        "usage": {
+          "cache_read_tokens": 0,
+          "details": {
+            "reasoning_tokens": 5098
+          },
+          "input_tokens": 28736,
+          "output_tokens": 15384,
+          "requests": 2
+        }
+      },
+      "name": "root-synthesis",
+      "path": "20-node-work/root-synthesis.json",
+      "previous_event_hash": "9a622d47a1b3a553654d2924a9db2931cbd7d3a51ad517a66a5b5637313c15b9",
+      "record_sha256": "0bffff02be9191c7c5019d9db3ca04e7af654d633dc8936b61d0ba191a82b599",
+      "stage": "20-node-work",
+      "timestamp": "2026-08-21T14:36:19.908943+00:00"
+    },
+    {
+      "event_hash": "a38f7fff93d8328ec9b7207baf08cb381865b4ffba0272677006d155203aa2b8",
+      "index": 13,
+      "metadata": {},
+      "name": "root",
+      "path": "30-evidence-packets/root.json",
+      "previous_event_hash": "67322679bbf98bc5401713b3b5c2ea6508d67163ea84c4d3aa71b89e637d0e06",
+      "record_sha256": "98d8a581735a85dec069351b45bd21535fcbdc797b369a50d7689530ac27d408",
+      "stage": "30-evidence-packets",
+      "timestamp": "2026-08-21T14:36:19.910779+00:00"
+    },
+    {
+      "event_hash": "e7d8fdd9e0526641dec9157cf8594bb5b4702a6b07b7552e27eaf8e1b02edcb6",
+      "index": 14,
+      "metadata": {},
+      "name": "root",
+      "path": "31-node-traces/root.json",
+      "previous_event_hash": "a38f7fff93d8328ec9b7207baf08cb381865b4ffba0272677006d155203aa2b8",
+      "record_sha256": "0e0e56fa406d744b76dfcb69a58a17b7f7dcbb9ab5e5eaa6631a83a57e5473af",
+      "stage": "31-node-traces",
+      "timestamp": "2026-08-21T14:36:19.911537+00:00"
+    },
+    {
+      "event_hash": "c6fd96768547bb541f8cb3709ab8e2da4b92e536f87bc267aa2af8c23fac0174",
+      "index": 15,
+      "metadata": {
+        "model": "fireworks:accounts/fireworks/models/kimi-k3",
+        "role": "finalizer"
+      },
+      "name": "call-0002-finalizer",
+      "path": "01-call-inputs/call-0002-finalizer.json",
+      "previous_event_hash": "e7d8fdd9e0526641dec9157cf8594bb5b4702a6b07b7552e27eaf8e1b02edcb6",
+      "record_sha256": "4264c69bc7c5cb64745349f012ca6dfee47ec4c728164571997afe317a76fad7",
+      "stage": "01-call-inputs",
+      "timestamp": "2026-08-21T14:36:19.913218+00:00"
+    },
+    {
+      "event_hash": "f0ba4f27adefabfdbf8dae32a6bf25b3944f8ac862590818947ff22705f4e83f",
+      "index": 16,
+      "metadata": {
+        "call_id": "call-0002-finalizer",
+        "elapsed_ms": 178874,
+        "input_sha256": "32788e094b266bc2a0694222becd04080f979f65c6aee35a3d2a9e27e507f0e3",
+        "model": "fireworks:accounts/fireworks/models/kimi-k3",
+        "role": "finalizer",
+        "usage": {
+          "cache_read_tokens": 0,
+          "details": {
+            "reasoning_tokens": 1267
+          },
+          "input_tokens": 16644,
+          "output_tokens": 9548,
+          "requests": 2
+        }
+      },
+      "name": "artifact",
+      "path": "40-finalization/artifact.json",
+      "previous_event_hash": "c6fd96768547bb541f8cb3709ab8e2da4b92e536f87bc267aa2af8c23fac0174",
+      "record_sha256": "aef3b1d68a0572be3b4ce18f69bff769afec8b197915e939d81b140066eb34b2",
+      "stage": "40-finalization",
+      "timestamp": "2026-08-21T14:39:18.788470+00:00"
+    },
+    {
+      "event_hash": "0ffb9ecb82b7fe5fc173db8860b97bb88cb90e80de65f7bc0f0f4a5adad84921",
+      "index": 17,
+      "metadata": {},
+      "name": "recursive-result",
+      "path": "99-result/recursive-result.json",
+      "previous_event_hash": "f0ba4f27adefabfdbf8dae32a6bf25b3944f8ac862590818947ff22705f4e83f",
+      "record_sha256": "1c8a1e50f92cfc9a2f8035e8c6e7b43823736bf0bc18c524c2915e73e627c960",
+      "stage": "99-result",
+      "timestamp": "2026-08-21T14:39:18.792094+00:00"
+    }
+  ],
+  "finished_at": "2026-08-21T14:39:18.793589+00:00",
+  "run_id": "20260821T143143Z-recursive-ai-art-and-kitsch-a-600-word-thesis-driven-essay-cece29ba",
+  "schema_version": 1,
+  "status": "completed"
+}

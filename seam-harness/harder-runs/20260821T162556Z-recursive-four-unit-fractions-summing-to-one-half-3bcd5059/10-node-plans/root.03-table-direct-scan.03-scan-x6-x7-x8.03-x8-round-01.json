@@ -1,0 +1,24 @@
+{
+  "account": "This leaf node has a single feasible y (y=8) with a fully specified closed-form z-interval formula and an exact rational integrality test, so all arithmetic can be completed locally without needing sibling outputs or additional sources.",
+  "children": [],
+  "decidability": {
+    "acceptance_mechanical": true,
+    "account": "The exact z-interval, the only candidate z, and the exact rational w value are all derivable from the dossier's formulas with no additional evidence.",
+    "context_complete": true,
+    "grounded_referents": [
+      "x=8",
+      "y=8",
+      "R=1/2-1/8-1/8=1/4",
+      "z-interval formula floor(1/R)+1 = 5, floor(2/R)=8",
+      "z ∈ {8,9,...,8} = {8}",
+      "w=8/((1/4)*8-1)=8/(2-1)=8"
+    ],
+    "independent_of_future_siblings": true,
+    "missing_context": []
+  },
+  "disposition": "solve",
+  "irreducible_core": null,
+  "requested_source_ids": [],
+  "requested_source_paths": [],
+  "synthesis_contract": null
+}

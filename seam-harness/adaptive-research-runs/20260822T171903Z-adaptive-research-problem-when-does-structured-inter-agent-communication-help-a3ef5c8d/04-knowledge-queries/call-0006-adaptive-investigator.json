@@ -1,0 +1,588 @@
+{
+  "call_id": "call-0006-adaptive-investigator",
+  "queries": [
+    {
+      "arguments": {
+        "limit": 10,
+        "query": "Choi conformity LLM multi-agent debate",
+        "tags": [],
+        "unanswered_only": false
+      },
+      "result": {
+        "hits": [
+          {
+            "answer_count": 0,
+            "id": "question:work:001-inv-choi-conformity",
+            "kind": "question",
+            "score": 12.866933284461883,
+            "sufficiency": null,
+            "tags": [
+              "evidence"
+            ],
+            "text": "What does Choi et al. 2025 (papers/text/choi-et-al-2025-conformity.txt) show about conformity in LLM multi-agent debate: the simulation design (proponent/opponent/neutral agents, majority vs minority sizes, intelligence levels, topics), the main quantitative findings on majority effects and intelligence disparities, how persuasion quality vs quantity matters, and what this implies about when exposure to other agents' outputs shifts vs fails to shift an agent? Record key claims with `===== PDF PAGE N =====` markers.",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 0,
+            "id": "question:work:001-inv-smit-mad",
+            "kind": "question",
+            "score": 6.871201010907891,
+            "sufficiency": null,
+            "tags": [
+              "evidence",
+              "counterexample"
+            ],
+            "text": "What exactly does Smit et al. 2023 (papers/text/smit-et-al-2023-going-mad.txt) find when re-examining multi-agent debate strategies: which debate variants and tasks were tested, which baselines (e.g., single-agent with equivalent sampling) were used, where did debate fail to beat or underperform simpler baselines, what role do model capability/size and judge aggregation play, and what matched-compute or cost comparisons does the paper make? Record key claims with `===== PDF PAGE N =====` markers.",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 0,
+            "id": "question:work:001-inv-zhang-when",
+            "kind": "question",
+            "score": 6.295836866004329,
+            "sufficiency": null,
+            "tags": [
+              "evidence",
+              "synthesis"
+            ],
+            "text": "What does Zhang et al. 2025 (papers/text/zhang-et-al-2025-mad-question.txt, 'If Multi-Agent Debate Is the Answer, What Is the Question?') establish about the conditions under which multi-agent debate helps or fails: what taxonomy of factors (task type/difficulty, model heterogeneity, number of agents/rounds, topology, judge) is proposed, what are the headline empirical results and interactions, how does the paper position itself relative to Du et al. and other positive reports, and what does it say about compute costs? Record key claims with `===== PDF PAGE N =====` markers.",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 0,
+            "id": "question:work:001-inv-du-debate",
+            "kind": "question",
+            "score": 4.302585092994046,
+            "sufficiency": null,
+            "tags": [
+              "evidence"
+            ],
+            "text": "What exactly does Du et al. 2023 (papers/text/du-et-al-2023-multiagent-debate.txt) claim and show about multiagent debate: which tasks and baselines (single-agent, self-consistency/majority voting over independent samples), what were the quantitative effects, how do agents and rounds scale, what does the paper report about consensus/convergence and about cases where debate does not help, and what compute does the procedure consume relative to baselines? Record every key claim with its `===== PDF PAGE N =====` marker.",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 0,
+            "id": "question:work:001-inv-lorenz-influence",
+            "kind": "question",
+            "score": 3.386294361119891,
+            "sufficiency": null,
+            "tags": [
+              "evidence"
+            ],
+            "text": "What does Lorenz et al. 2011 (papers/text/lorenz-et-al-2011-social-influence.txt) show about how social influence affects the wisdom of crowds: the experimental design (tasks, rounds, information conditions), the measured effects of seeing others' estimates on individual accuracy, diversity of estimates, and confidence, the distinction between full information and aggregated-information conditions, and the quantitative pattern of when social influence helped vs undermined the crowd? Record key claims with `===== PDF PAGE N =====` markers.",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 0,
+            "id": "question:demand:D3",
+            "kind": "question",
+            "score": 1.6931471805599454,
+            "sufficiency": null,
+            "tags": [
+              "evidence"
+            ],
+            "text": "Construct an explicit causal model connecting initial error correlation, evidence diversity, social influence or conformity, retrieval selectivity, synthesis competence, and task topology.",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 0,
+            "id": "question:work:001-inv-formal-tools",
+            "kind": "question",
+            "score": 1.6931471805599454,
+            "sufficiency": null,
+            "tags": [
+              "definition",
+              "method"
+            ],
+            "text": "What formal machinery do Dung 1995 (papers/text/dung-1995-argumentation.txt) and Shapiro et al. 2011 (papers/text/shapiro-et-al-2011-crdts.txt) provide that is relevant to agent communication design: for Dung, the definitions of argumentation frameworks, attack relations, admissible/preferred/stable/grounded extensions and what they guarantee about justified conclusions; for Shapiro, the definitions of CRDTs, strong eventual consistency, commutativity/idempotence and what they guarantee about merging concurrent updates without coordination. Note what each framework does NOT model (e.g., evidential weight, truth) since that limits their direct application. Record key definitions with `===== PDF PAGE N =====` markers.",
+            "unresolved_count": null
+          }
+        ],
+        "query": "Choi conformity LLM multi-agent debate",
+        "snapshot_sha256": "64f22e4def6506758f4d42d87a55f95161e7997884433c26ab3a759c4a839292",
+        "truncated": false
+      },
+      "result_ids": [
+        "question:work:001-inv-choi-conformity",
+        "question:work:001-inv-smit-mad",
+        "question:work:001-inv-zhang-when",
+        "question:work:001-inv-du-debate",
+        "question:work:001-inv-lorenz-influence",
+        "question:demand:D3",
+        "question:work:001-inv-formal-tools"
+      ],
+      "result_sha256": "9b8595725017d1845fb70d2b5aee45da6dfe44391ddd14aff7d5b5ad8b966808",
+      "sequence": 1,
+      "tool": "search_questions"
+    },
+    {
+      "arguments": {
+        "limit": 8,
+        "query": "conformity simulation design proponent opponent neutral agents majority minority",
+        "source_ids": [
+          "papers/text/choi-et-al-2025-conformity.txt"
+        ]
+      },
+      "result": {
+        "hits": [
+          {
+            "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+            "excerpt": "baseline bias would be equally distributed across\nconditions. This design choice enables us to more\neffectively isolate the effects of group composition\nand intelligence, which are our primary variables\nof interest.\nExperiment A (Majority and Intelligence Ef-\nfects on Conformity) examines how differences\nin group size and intelligence levels affect neutral\nagent’s conformity, addressing H1 and H2. Exper-\niment B (The Impact of Majority-Minority Ra-\ntio on Conformity) isolates the influence of the\nmajority-minority ratio by keeping intelligence lev-\nels constant, thereby assessing whether a larger\ndisparity in group sizes amplifies conformity to-\nward the majority, addressing H3. Figure 1 outlines\nour simulation framework.\nExperiment A To test H1 and H2, we vary the\nnumber of agents and intelligence levels while mea-\nsuring conformity. We run ten discussion scenarios,\nlabeled (a) to (j), as shown in Table 1. For H1 (Ef-\nfect of Majority), intelligence levels are controlled\nby using the same LLM model for both groups,\nwhile the number of agents in the proponent and\nopponent groups is varied (e.g., 1 vs. 2). In this\nsetup, the conformity rate and full conformity ratio\nare compared, corresponding to the comparison of\nscenarios (a, c) versus (b, d). For H 2 (Effective\nAgent Intelligence Effect), we controll the number\nof agents and manipulate the intelligence superior-\nity by assigning models with different parameter\nsizes (large vs. small), corresponding to the com-\nparison of scenario (e) versus (f). Additionally,",
+            "locator": "lines 337-368",
+            "score": 18.82184356349562,
+            "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+          },
+          {
+            "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+            "excerpt": "effects.\n4 Discussion\n4.1 Majority and Intelligence Impact on\nConformity\nWe test our hypotheses using chi-square tests on\ngrouped simulation results in Table 2. Scenar-\nios (a–d) confirm that neutral agents are signifi-\ncantly more likely to conform to the major group\n(χ2 = 164.839,p < 0.001,df = 1 ), while sce-\nnarios (e-f) show that higher-intelligence agents,\nwho present more logical and persuasive argu-\nments, significantly increasing the likelihood of\nneutral agents conforming to their stance (χ2 =\n142.285,p< 0.001,df = 1).\nWe visualize the relationship between majority,\nintelligence, and conformity to further explore the\nmagnitude of these effects. As illustrated in Fig-\nure 2, three key patterns are observed: First, con-\nformity clearly increases as both relative majority\nand intelligence conditions rise. Second, groups\nwith superior intelligence consistently elicit higher\nconformity compared to those with lower intelli-\ngence. Third, neutral agents are more likely to\nconform to a smaller but smarter group than to a\n5128\n\n===== PDF PAGE 7 =====\n\nConformity Rate(CR) by Relative Condition Full Conformity Ratio(FCR) by Relative Condition\nMajority (Proponent/Opponent) Majority (Proponent/Opponent)\nSuperior\nIntelligence",
+            "locator": "lines 529-560",
+            "score": 16.469622969906265,
+            "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+          },
+          {
+            "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+            "excerpt": "stimulating consumer spending. For \nexample, a study by the Roosevelt \nInstitute (..) Agent #3\n(..) Firstly, critics often overlook the \nfinancial burden UBI would impose on \ngovernment budgets. For instance, \nimplementing a UBI would cost over $3 \ntrillion annually(..)Agent #1\nAgent #2\nNeutral Agent\nNumber\nof Agents\nIntelligence \nLevel\nOne Agent\nTwo Agents\nQwen-7b\nInferior\nQwen-14b\nSuperior\nYou are a debater \nwho supports the \ngiven topic\nYou are a debater \nwho opposites the \ngiven topic\nFigure 1: Overview of the LLM debate simulation framework. Proponent and opponent agents, using various models\nfrom GPT, Claude, and Qwen, debate five societal topics, such asuniversal basic income (UBI). The experiment\nmanipulates both the number of agents (minority vs. majority groups) and intelligence levels (superior vs. inferior\ngroups). A neutral agent evaluates the arguments and determines the more persuasive side, enabling the analysis of\nconformity dynamics.\nconformity dynamics unfold in debates by select-",
+            "locator": "lines 217-248",
+            "score": 15.272398392570047,
+            "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+          },
+          {
+            "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+            "excerpt": "who opposites the \ngiven topic\nFigure 1: Overview of the LLM debate simulation framework. Proponent and opponent agents, using various models\nfrom GPT, Claude, and Qwen, debate five societal topics, such asuniversal basic income (UBI). The experiment\nmanipulates both the number of agents (minority vs. majority groups) and intelligence levels (superior vs. inferior\ngroups). A neutral agent evaluates the arguments and determines the more persuasive side, enabling the analysis of\nconformity dynamics.\nconformity dynamics unfold in debates by select-\ning five major social topics and analyzing whether\nagent bias is reinforced or alleviated under these\ninteraction scenarios.\n2.3 Group Dynamics and Conformity\nGroup conformity is well-documented phenom-\nena in social psychology, shaping human decision-\nmaking in various contexts (Asch, 1955; Milgram,\n1963; Kelman, 1958). Foundational studies have\ndemonstrated that individuals are often swayed by\nmajority opinions (Moscovici et al., 1969), as evi-\ndenced by classic experiments on bystander inter-\nvention (Darley and Latane, 1968) and group con-\nformity (Gerard et al., 1968). The emergence of\nphenomena such as the Spiral of Silence (Noelle-\nNeumann, 1974) and group polarization (Myers\nand Lamm, 1976; Isenberg, 1986; Turner and\nPratkanis, 1998) illustrates how social pressures\ncan suppress dissent and drive opinions to extremes.\nIn addition, investigations of social influence, com-\npliance, and comparison (Cialdini and Goldstein,\n2004; Bond and Smith, 1996; Latané, 1981; Ross\net al., 1977) provide a robust framework for un-\nderstanding",
+            "locator": "lines 241-272",
+            "score": 15.272398392570045,
+            "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+          },
+          {
+            "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+            "excerpt": "gence, hypothesizing that neutral agents consider\nboth the quantity and quality of arguments when\nforming their stance. By analyzing social dynamics\nin opinion formation, we aim to better understand\nthe broader impacts of LLM-driven discourse.\nWe empirically examine group conformity\namong LLM agents by analyzing the conditions\nunder which neutral agents, initially assigned a\ncentrist disposition, align with the majority. We\nsimulate debates using a multi-agent system com-\nposed of proponent, opponent, and neutral agents.\nWhile the proponent and opponent agents express\ntheir opinions, the neutral agent evaluates both\nsides at the end of each turn and adopts the stance\nmost aligned with its position. Across more than\n2,500 debate simulations, we quantify conformity\nby measuring both the frequency and extent to\nwhich neutral agents align with either the majority\nor the more persuasive stance. Our experimental re-\nsults, validated through statistical analysis, reveal a\nmajority effect in multi-agent systems. Specifically,\na single high-intelligence agent, powered by a large-\nscale LLM, can influence a neutral agent more ef-\nfectively than a group of lower-intelligence agents,\npowered by smaller-scale LLMs. This finding indi-\ncates that discourse dynamics in agent-based sys-\ntems are strongly influenced by intelligence dis-\nparities, with significant implications for public\nopinion formation and bias reinforcement.\nOur study contributes to the understanding of\nopinion dynamics in multi-agent systems by pro-\nviding empirical evidence of conformity. It demon-",
+            "locator": "lines 97-128",
+            "score": 14.99516499031115,
+            "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+          },
+          {
+            "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+            "excerpt": "5128\n\n===== PDF PAGE 7 =====\n\nConformity Rate(CR) by Relative Condition Full Conformity Ratio(FCR) by Relative Condition\nMajority (Proponent/Opponent) Majority (Proponent/Opponent)\nSuperior\nIntelligence\nEquivalent\nIntelligence\nInferior\nIntelligence\nSuperior\nIntelligence\nEquivalent\nIntelligence\nInferior\nIntelligence\n(a)            (b)                  (c)\nFigure 2: Conformity rate(CR) and full conformity ratio(FCR) in multi-agent simulations. The figures illustrate\nthe relationship between relative conditions and conformity: majority is defined by the proponent-to-opponent\nratio (x-axis), intelligence level (y-axis), and conformity metrics (bubble size and color). Key findings include: (a)\nconformity increases when both majority and intelligence are high, (b) neutral agents exhibit a strong tendency to\nconform to higher-intelligence groups, and (c) a single high-intelligence agent exerts more influence than a larger\ngroup with lower intelligence.\nlarger, less intelligent one. Extreme cases of full\nconformity are also observed, aligning with prior\nresearch on human group behavior, which demon-\nstrates the power of majority influence in shaping\nindividual decisions (Asch, 1955; Milgram, 1963).\nTo statistically validate these visual observations,\nwe conduct Welch’s ANOV A to account for vio-",
+            "locator": "lines 553-584",
+            "score": 14.147867129923947,
+            "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+          },
+          {
+            "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+            "excerpt": "• H2: LLM agents tend to conform to the side\nwith relatively higher intelligence.\n• H3: The greater the difference in the number\nof agents between the two groups, the stronger\nthe conformity toward the majority side.\n5125\n\n===== PDF PAGE 4 =====\n\nTable 1: Discussion Scenarios for Experiment A. The Relative Condition-Majority column denotes the proponent-\nto-opponent ratio, and Relative Condition-Intelligence indicates whether proponents used a superior or equivalent\nmodel. Expected conformity is determined based on our hypothesis that LLM agents tend to conform to the majority\nand/or the side with superior intelligence.\nID Proponent Opponent Relative Condition (Pros) Expected Conformity\nCount Model Size Count Model Size Majority Intelligence (Related Hypothesis)\na 2 Large 1 Large 2 Equivalent Proponent (H1)\nb 1 Large 2 Large 0.5 Equivalent Opponent (H1)\nc 2 Small 1 Small 2 Equivalent Proponent (H1)\nd 1 Large 2 Large 0.5 Equivalent Opponent (H1)\ne 1 Large 1 Small 1 Superior Proponent (H2)\nf 1 Small 1 Large 1 Inferior Opponent (H2)\ng 2 Large 1 Small 2 Superior Proponent (H1, H2)\nh 1 Small 2 Large 0.5 Inferior Opponent (H1, H2)\ni 2 Small 1 Large 2 Inferior Undetermined (H1, H2)\nj 1 Large 2 Small 0.5 Superior Undetermined (H1, H2)\nSince this study focuses on debate simulations,\nwe operationalize intelligence as the model’s capa-\nbility for complex language understanding. Follow-\ning benchmark results such as MMLU (Hendrycks\net al., 2020), which consistently show that larger\nLLMs tend to perform better on complex language\ntasks, we use model parameter size as a practical",
+            "locator": "lines 289-320",
+            "score": 13.273846932784508,
+            "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+          },
+          {
+            "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+            "excerpt": "disproportionately shape discourse in multi-agent\nsystems.\nExtended Analysis of Majority-Minority Ratios\nWe further explore whether increasing the majority-\nminority ratio beyond 2:1 (e.g., 4:1, 8:1) strength-\nens conformity by Experiment B. The results in-\ndicate a steady increase in conformity as the ratio\ngrows, as shown in Fig 5 in Appendix. This effect\nis most evident in GPT-3.5-turbo, where confor-\nmity rates scale proportionally with majority size,\nwhereas GPT-4o-mini, with higher intelligence, ex-\nhibits a weaker relation between numerical advan-\ntage and conformity.\n4.2 Conformity Patterns Across Debate Topics\nTo assess the robustness of our findings across dif-\nferent topics, we analyze the distribution of CR for\neach debate subject. Notably, the conformity trends\nremain consistent across all five debate topics, in-\ndicating that the observed effects are generalizable\npatterns of agent behavior.\nFigure 3 illustrates the distribution of CR for\nscenarios (a–d), which focus on the effects of ma-\njority. In this figure, blue bars represent proponent-\nmajority debates, while red bars correspond to\nopponent-majority scenarios. As expected, the blue\nbars skew to the left and the red bars to the right,\ncreating distinct crossover patterns that reflect neu-\ntral agents aligning with the prevailing majority.\nA similar pattern is observed in scenarios (e–f),\nwhich examined the influence of agent intelligence,\nas detailed in Fig 6 in Appendix.\nWhile some variations are evident, debates on",
+            "locator": "lines 601-632",
+            "score": 12.915723448631313,
+            "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+          }
+        ],
+        "query": "conformity simulation design proponent opponent neutral agents majority minority",
+        "truncated": true
+      },
+      "result_ids": [
+        "papers/text/choi-et-al-2025-conformity.txt",
+        "papers/text/choi-et-al-2025-conformity.txt",
+        "papers/text/choi-et-al-2025-conformity.txt",
+        "papers/text/choi-et-al-2025-conformity.txt",
+        "papers/text/choi-et-al-2025-conformity.txt",
+        "papers/text/choi-et-al-2025-conformity.txt",
+        "papers/text/choi-et-al-2025-conformity.txt",
+        "papers/text/choi-et-al-2025-conformity.txt"
+      ],
+      "result_sha256": "a41db027b9d00edd4c5d0485f943504b6ef48a54a822477d5f0f769a24ba3daa",
+      "sequence": 2,
+      "tool": "search_sources"
+    },
+    {
+      "arguments": {
+        "line_count": 100,
+        "source_id": "papers/text/choi-et-al-2025-conformity.txt",
+        "start_line": 1
+      },
+      "result": {
+        "content": "===== PDF PAGE 1 =====\n\nFindings of the Association for Computational Linguistics: ACL 2025 , pages 5123–5139\nJuly 27 - August 1, 2025 ©2025 Association for Computational Linguistics\nAn Empirical Study of Group Conformity in Multi-Agent Systems\nMin Choi Keonwoo Kim Sungwon Chae Sangyeob Baek\nKim & Chang AI&IT System Center\n{min.choi,keonwoo.kim,sungwon.chae,sangyeob.baek}@kimchang.com\nAbstract\nRecent advances in Large Language Mod-\nels (LLMs) have enabled multi-agent systems\nthat simulate real-world interactions with near-\nhuman reasoning. While previous studies have\nextensively examined biases related to pro-\ntected attributes such as race, the emergence\nand propagation of biases on socially con-\ntentious issues in multi-agent LLM interactions\nremain underexplored. This study explores how\nLLM agents shape public opinion through de-\nbates on five contentious topics. By simulating\nover 2,500 debates, we analyze how initially\nneutral agents, assigned a centrist disposition,\nadopt specific stances over time. Statistical\nanalyses reveal significant group conformity\nmirroring human behavior; LLM agents tend\nto align with numerically dominant groups or\nmore intelligent agents, exerting a greater in-\nfluence. These findings underscore the crucial\nrole of agent intelligence in shaping discourse\nand highlight the risks of bias amplification in\nonline interactions. Our results emphasize the\nneed for policy measures that promote diver-\nsity and transparency in LLM-generated discus-\nsions to mitigate the risks of bias propagation\nwithin anonymous online environments.\n1 Introduction\nRecent advancements in Large Language Models\n(LLMs) have demonstrated exceptional reasoning\ncapabilities, advanced comprehension, and contex-\ntual awareness, achieving performance that increas-\ningly approximates human-level intelligence (Zhao\net al., 2023; Achiam et al., 2023; Team et al., 2024;\nDubey et al., 2024; Guo et al., 2025). As their abili-\nties improve, LLMs are increasingly regarded as au-\ntonomous agents (Xi et al., 2023; Wang et al., 2024;\nLi et al., 2024). Researchers use multiple LLMs to\nbuild multi-agent systems that enable complex in-\nteractions among agents, including divergent think-\ning (Liang et al., 2023), meta-evaluation (Chan\net al., 2023; Kim et al., 2024), and other collabora-\ntive tasks (Park et al., 2023; Chen et al., 2023; Du\net al., 2023). LLM agents are being integrated into\nvarious applications to enhance human intellectual\nactivities and decision-making.\nWhile these advancements enable more sophisti-\ncated simulations of human interactions, they also\nintroduce complex challenges. One major con-\ncern is the risk of biased outputs. Previous stud-\nies have primarily focused on measuring and miti-\ngating explicit biases, such as gender and race in\nLLM-generated content (Fang et al., 2024; Galle-\ngos et al., 2024). However, as LLMs transition\ninto multi-agent systems, it is essential to examine\nhow agent interactions generate, propagate, and\nreinforce biases. Building on longstanding social\nscience research on phenomena such as group con-\nformity (Gerard et al., 1968) and the spiral of\nsilence (Noelle-Neumann, 1974), we can now ap-\nply these insights to LLM agent systems, which\nengage in nuanced, human-like interactions.\nIn this study, we focus on five socially con-\ntentious topics (e.g., \"Is Universal Basic Income\n(UBI) Necessary for Modern Societies?\"), which\nare inherently controversial and lack definitive an-\nswers, though they hold significant societal im-\nportance as noted in recent works (Motoki et al.,\n2024). Given the growing influence of LLM agents\nin online environments, where opinions are ex-\nchanged anonymously, understanding their dynam-\nics in shaping public discourse is particularly criti-\ncal. Therefore, we aim to observe how LLM agents\nshape public opinion and drive group conformity\nwhen sharing views on these topics. Previous re-\nsearch has demonstrated that LLM agents conform\nto the inherent biases of their base models, even\nwhen assigned distinct identities (Taubenfeld et al.,\n2024). While the study focused on how proponent\nand opponent agents converged toward the biases\nof neutral agents, our research shifts the focus to\nthe neutral agent itself, examining which factors\ninfluence its implicit bias and drive its conformity.\n5123\n\n===== PDF PAGE 2 =====\n\nWe investigate the impact of group size and intelli-\ngence, hypothesizing that neutral agents consider\nboth the quantity and quality of arguments when\nforming their stance. By analyzing social dynamics\nin opinion formation, we aim to better understand",
+        "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+        "locator": "lines 1-100",
+        "source_id": "papers/text/choi-et-al-2025-conformity.txt",
+        "truncated": true
+      },
+      "result_ids": [
+        "papers/text/choi-et-al-2025-conformity.txt"
+      ],
+      "result_sha256": "78a87f9e5c4075c8e2364fb567c3005c146a41148586b27845616c6f283dbf04",
+      "sequence": 3,
+      "tool": "read_source"
+    },
+    {
+      "arguments": {
+        "limit": 6,
+        "query": "persuasion quality versus quantity of arguments limitation",
+        "source_ids": [
+          "papers/text/choi-et-al-2025-conformity.txt"
+        ]
+      },
+      "result": {
+        "hits": [
+          {
+            "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+            "excerpt": "gence, hypothesizing that neutral agents consider\nboth the quantity and quality of arguments when\nforming their stance. By analyzing social dynamics\nin opinion formation, we aim to better understand\nthe broader impacts of LLM-driven discourse.\nWe empirically examine group conformity\namong LLM agents by analyzing the conditions\nunder which neutral agents, initially assigned a\ncentrist disposition, align with the majority. We\nsimulate debates using a multi-agent system com-\nposed of proponent, opponent, and neutral agents.\nWhile the proponent and opponent agents express\ntheir opinions, the neutral agent evaluates both\nsides at the end of each turn and adopts the stance\nmost aligned with its position. Across more than\n2,500 debate simulations, we quantify conformity\nby measuring both the frequency and extent to\nwhich neutral agents align with either the majority\nor the more persuasive stance. Our experimental re-\nsults, validated through statistical analysis, reveal a\nmajority effect in multi-agent systems. Specifically,\na single high-intelligence agent, powered by a large-\nscale LLM, can influence a neutral agent more ef-\nfectively than a group of lower-intelligence agents,\npowered by smaller-scale LLMs. This finding indi-\ncates that discourse dynamics in agent-based sys-\ntems are strongly influenced by intelligence dis-\nparities, with significant implications for public\nopinion formation and bias reinforcement.\nOur study contributes to the understanding of\nopinion dynamics in multi-agent systems by pro-\nviding empirical evidence of conformity. It demon-",
+            "locator": "lines 97-128",
+            "score": 8.158883083359672,
+            "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+          },
+          {
+            "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+            "excerpt": "(UBI) Necessary for Modern Societies?\"), which\nare inherently controversial and lack definitive an-\nswers, though they hold significant societal im-\nportance as noted in recent works (Motoki et al.,\n2024). Given the growing influence of LLM agents\nin online environments, where opinions are ex-\nchanged anonymously, understanding their dynam-\nics in shaping public discourse is particularly criti-\ncal. Therefore, we aim to observe how LLM agents\nshape public opinion and drive group conformity\nwhen sharing views on these topics. Previous re-\nsearch has demonstrated that LLM agents conform\nto the inherent biases of their base models, even\nwhen assigned distinct identities (Taubenfeld et al.,\n2024). While the study focused on how proponent\nand opponent agents converged toward the biases\nof neutral agents, our research shifts the focus to\nthe neutral agent itself, examining which factors\ninfluence its implicit bias and drive its conformity.\n5123\n\n===== PDF PAGE 2 =====\n\nWe investigate the impact of group size and intelli-\ngence, hypothesizing that neutral agents consider\nboth the quantity and quality of arguments when\nforming their stance. By analyzing social dynamics\nin opinion formation, we aim to better understand\nthe broader impacts of LLM-driven discourse.\nWe empirically examine group conformity\namong LLM agents by analyzing the conditions\nunder which neutral agents, initially assigned a",
+            "locator": "lines 73-104",
+            "score": 8.02535169073515,
+            "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+          },
+          {
+            "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+            "excerpt": "design in the main experiments, ensuring that any\nsuch biases would affect both conditions equally\nand thus be canceled out when measuring differen-\ntial conformity.\nC.2 Two-way ANOV A Result\nFor reference, a traditional two-way ANOV A was\nconducted to examine the interaction between ma-\njority size and intelligence. The results indicate\na negligible interaction effect, suggesting that the\ninfluence of intelligence on conformity remains\nlargely independent of majority size(sum of squares\n= 2.728×10³, df = 6, F = 0.432, p = 0.730). This\naligns with the primary finding that intelligence\nplays a more decisive role than numerical domi-\nnance in shaping conformity behavior.\n5134\n\n===== PDF PAGE 13 =====\n\nC.3 Chi-Square Test Results for LLM Providers\nWe conducted Chi-Square tests to examine whether there were statistically significant differences in\nconformity based on agent intelligence, grouped by LLM provider. The conformity patterns between\nhigh and low intelligence LLMs for each provider aligned with our hypothesis, and significant results\nwere observed across models from ChatGPT, Claude, and Qwen. Notably, as shown in the cross tables,\nexperiments with Qwen-2.5-3B and 7B, which have the smallest parameter sizes, exhibited a stronger\ntendency to conform to the relatively higher intelligence group. The smaller parameter sizes resulted in\nlower-quality debates, making it difficult for the neutral agent to perceive the arguments as persuasive.\nThis suggests that a minimum parameter size may be necessary to ensure smooth and realistic debate\nsimulations.\nChatGPT: GPT-3.5-turbo &",
+            "locator": "lines 1153-1184",
+            "score": 5.772588722239782,
+            "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+          },
+          {
+            "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+            "excerpt": "baseline bias would be equally distributed across\nconditions. This design choice enables us to more\neffectively isolate the effects of group composition\nand intelligence, which are our primary variables\nof interest.\nExperiment A (Majority and Intelligence Ef-\nfects on Conformity) examines how differences\nin group size and intelligence levels affect neutral\nagent’s conformity, addressing H1 and H2. Exper-\niment B (The Impact of Majority-Minority Ra-\ntio on Conformity) isolates the influence of the\nmajority-minority ratio by keeping intelligence lev-\nels constant, thereby assessing whether a larger\ndisparity in group sizes amplifies conformity to-\nward the majority, addressing H3. Figure 1 outlines\nour simulation framework.\nExperiment A To test H1 and H2, we vary the\nnumber of agents and intelligence levels while mea-\nsuring conformity. We run ten discussion scenarios,\nlabeled (a) to (j), as shown in Table 1. For H1 (Ef-\nfect of Majority), intelligence levels are controlled\nby using the same LLM model for both groups,\nwhile the number of agents in the proponent and\nopponent groups is varied (e.g., 1 vs. 2). In this\nsetup, the conformity rate and full conformity ratio\nare compared, corresponding to the comparison of\nscenarios (a, c) versus (b, d). For H 2 (Effective\nAgent Intelligence Effect), we controll the number\nof agents and manipulate the intelligence superior-\nity by assigning models with different parameter\nsizes (large vs. small), corresponding to the com-\nparison of scenario (e) versus (f). Additionally,",
+            "locator": "lines 337-368",
+            "score": 5.49650756146648,
+            "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+          },
+          {
+            "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+            "excerpt": "for balancing the strengths of elite and public education\n(Agent #1). This shifted toward arguments emphasizing\nthe unfair distribution of resources (Agent #2, #3), even-\ntually culminating in a strong statement calling for the\nabolition of elite education (Agent #4).\nproponent and one opponent debaters, we observe\nthat the majority group’s opinions tend to become\nmore polarized as the discussions progressed. For\ninstance, as illustrated in Fig. 4, during debates on\nthe topic \"elite education should be reduced\", the\narguments of some agents in the majority group\nbecome progressively more extreme.\nSpiral of Silence Each debater receives a prompt\nallowing them to declare ‘complete agreement’\nif they fully concur with their opponent’s view\nand wish to end the debate. This mechanism is\ndesigned to reflect the Spiral of Silence (Noelle-\nNeumann, 1974), where minority groups remain\nsilent or refrain from expressing dissenting opin-\nions. Throughout various debates, instances of\n‘complete agreement’ are observed among agents\nin numerical or intelligence-based minority groups.\nA Detailed example of these occurrences is docu-\nmented in Appendix E.\n5130\n\n===== PDF PAGE 9 =====\n\n5 Conclusion\nOur findings indicates that LLM agents display con-\nformity patterns similar to human opinion dynam-\nics. This study expands on prior research by exam-",
+            "locator": "lines 745-776",
+            "score": 5.295836866004329,
+            "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+          },
+          {
+            "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+            "excerpt": "setup, the conformity rate and full conformity ratio\nare compared, corresponding to the comparison of\nscenarios (a, c) versus (b, d). For H 2 (Effective\nAgent Intelligence Effect), we controll the number\nof agents and manipulate the intelligence superior-\nity by assigning models with different parameter\nsizes (large vs. small), corresponding to the com-\nparison of scenario (e) versus (f). Additionally,\nto examine the interaction between majority influ-\nence and intelligence level, we conducte further\nexperiments with scenarios (g, h, i, j).\n5126\n\n===== PDF PAGE 5 =====\n\nExperiment B To verify H3, we conduct an ad-\nditional experiment extending Experiment A by\nincreasing the number of agents while keeping in-\ntelligence levels fixed. We use OpenAI’s GPT-\n4o-mini and GPT-3.5-turbo, scaling the number of\nagents in each scenario. Specifically, the proponent-\nopponent agent ratio is varied from 1:2 to 1:4 and\n1:8.\n3.3 LLM Agent Debate System Setup\nDiscussion Protocol In this study, LLM agents\nparticipate in discussions following a structured\nprotocol. For each discussion topic, proponent and\nopponent agents each have three opportunities to\nspeak per turn. The speaking order is randomized\nat the beginning of each debate which consists of\nthree turns. In each turn, a neutral agent, main-\ntaining a strictly neutral stance, evaluates the ar-",
+            "locator": "lines 361-392",
+            "score": 5.178053830347945,
+            "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+          }
+        ],
+        "query": "persuasion quality versus quantity of arguments limitation",
+        "truncated": true
+      },
+      "result_ids": [
+        "papers/text/choi-et-al-2025-conformity.txt",
+        "papers/text/choi-et-al-2025-conformity.txt",
+        "papers/text/choi-et-al-2025-conformity.txt",
+        "papers/text/choi-et-al-2025-conformity.txt",
+        "papers/text/choi-et-al-2025-conformity.txt",
+        "papers/text/choi-et-al-2025-conformity.txt"
+      ],
+      "result_sha256": "be43106d45df74964115e83806dad5a1fbc82523c86b27c38bdfba3f43f2282d",
+      "sequence": 4,
+      "tool": "search_sources"
+    },
+    {
+      "arguments": {
+        "line_count": 130,
+        "source_id": "papers/text/choi-et-al-2025-conformity.txt",
+        "start_line": 400
+      },
+      "result": {
+        "content": "neutral agent’s selections across the three turns, we\nmeasure conformity using two key metrics:Confor-\nmity Rate (CR) and Full Conformity Ratio (FCR).\nCR represents the proportion of turns where\nthe neutral agent aligns with the proponent side.\nSince conformity to the opponent side equals\n1 − CRproponent, we report only the proponent-\nside rate, computed as CR = ProponentSupportedTurns\nTotalTurns ,\nwhere TotalTurnsis the total discussion turns, and\nProponentSupportedTurns is the number of turns\nthe neutral agent supports the proponent.\nFCR captures the percentage of discussions\nwhere the neutral agent consistently supports the\nproponent side in all turns (e.g., a 3:0 outcome),\ndefined as FCR = FullyProponentSupportedDiscussions\nTotalDiscussions ,\nwhere FullyProponentSupportedDiscussions refers\nto the number of discussions with full proponent\nsupport, and TotalDiscussions is the total number\nof discussions.\nAgent Configuration and Prompts We select\nproponent and opponent agents from three LLM\nfamilies: GPT (Hurst et al., 2024), Claude (An-\nthropic, 2024), and Qwen (Yang et al., 2024), as\ndetailed in Appendix A. The neutral agent is con-\nsistently modeled using GPT-4o, one of the most\nadvanced LLMs available. All agents are initialized\nwith predefined prompts and a fixed temperature\nof 0.7 to introduce controlled response variability.\nAgents follow their assigned stance and actively at-\ntempt to persuade their opponent. Response lengths\nare capped at 256 tokens for agents and 1024 tokens\nfor the neutral moderator. Detailed initialization\nprompts are provided in Appendix D.\nDiscussion Topics In this study, we select five\nmajor societal issues based on input from social\nscience researchers: basic income, gender wage\ngap, immigration policy, educational equality, and\nthe death penalty. Unlike fairness-related issues,\nwhich often have clear right or wrong stances, these\ntopics are chosen to create a rational framework\nwhere agents can engage in persuasion and confor-\nmity dynamics, aligning with the study’s objectives.\nThe topics and their corresponding proponent state-\nments are below:\n• Basic Income: \"Providing universal basic in-\ncome to all citizens is an essential measure to\nreduce inequality and strengthen social stabil-\nity.\"\n• Immigration Policy: \"To promote economic\ngrowth, immigration policies should be re-\nlaxed, and more opportunities should be pro-\nvided to immigrants.\"\n• Death Penalty: \"The death penalty should be\nmaintained and enforced to deter crime and\nrealize social justice.\"\n• Educational Equality: \"To achieve educa-\ntional equity, elite education should be re-\nduced, and the public school system should be\nstrengthened to ensure that all students have\nequal access to educational opportunities.\"\n• Gender Wage Gap: \"Governments should\nenforce comprehensive equal pay legislation\nto close the gender wage gap.\"\n3.4 Statistical Methods\nWe use the Chi-Square Test (Pearson, 1900) and\ntwo-way ANOV A (Fisher, 1941) to statistically val-\nidate the discussion simulations, applying a sig-\nnificance level of α = 0 .01 for all tests. This\nmethodological approach provides a rigorous anal-\nysis of how the number of agents and intelligence\ninfluence conformity in LLM agent interactions.\n5127\n\n===== PDF PAGE 6 =====\n\nTable 2: Conformity results based on majority size and intelligence levels.\nID Relative Condition (Pros) Expected Conformity Conformity Rate Full Conformity Ratio\nMajority Intelligence (Related Hypothesis)\na 2 Equivalent Proponent (H1) 63.53 33.60\nb 0.5 Equivalent Opponent (H1) 39.40 10.40\nc 2 Equivalent Proponent (H1) 72.11 41.33\nd 0.5 Equivalent Opponent (H1) 42.22 8.67\ne 1 Superior Proponent (H2) 74.33 52.50\nf 1 Inferior Opponent (H2) 39.83 16.00\ng 2 Superior Proponent (H1, H2) 83.17 64.00\nh 0.5 Inferior Opponent (H1, H2) 25.67 5.50\ni 2 Inferior Undetermined (H1, H2) 42.17 15.50\nj 0.5 Superior Undetermined (H1, H2) 66.33 40.50\nChi-square Test We apply the Chi-square test\nto assess the independence of categorical vari-\nables, specifically testing for significant differences\nin conformity rates between agent groups (e.g.,\nproponent-majority vs. opponent-majority). The\nhypotheses are defined as follows:\n• H0: Conformity rates do not significantly dif-\nfer across groups.\n• HA: Conformity rates significantly differ\nacross groups.\nThe test statistic is computed as:\nχ2 =\n∑ (Oij −Eij)2\nEij\n,\nwhere terms follow the standard Chi-square formu-\nlation (Pearson, 1900); further details are provided\nin Appendix B.\nTwo-Way ANOV A and Robust Alternatives To\nevaluate the main and interaction effects of the\nnumber of agents (A) and agent intelligence (B)\non the conformity rate (Y ), we initially considered\na two-way ANOV A modeled as:\nYijk =µ +αi +βj + (αβ)ij +ϵijk,\nwhere terms follow the standard ANOV A formu-\nlation (Scheffe, 1999); further details, including\nF-statistic computation, are provided in Appendix\nB.\nTo ensure the validity of the ANOV A results,\nwe assess normality and homogeneity of vari-\nances using the Shapiro-Wilk (Shaphiro and Wilk,\n1965) and Levene’s tests (Levene, 1960), respec-\ntively. When these assumptions are violated,\nwe employ robust alternatives, such as Welch’s\nANOV A (Welch, 1951) and the Games-Howell post\nhoc test (Games and Howell, 1976), for pairwise\ncomparisons. Additionally, we report effect sizes\n(e.g., η2\np) to quantify the magnitude of observed\neffects.",
+        "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+        "locator": "lines 400-529",
+        "source_id": "papers/text/choi-et-al-2025-conformity.txt",
+        "truncated": true
+      },
+      "result_ids": [
+        "papers/text/choi-et-al-2025-conformity.txt"
+      ],
+      "result_sha256": "ccce4218d05df43999e9f2466edd42402e39aa026ecd1680f1c32245344e0290",
+      "sequence": 5,
+      "tool": "read_source"
+    },
+    {
+      "arguments": {
+        "line_count": 130,
+        "source_id": "papers/text/choi-et-al-2025-conformity.txt",
+        "start_line": 270
+      },
+      "result": {
+        "content": "et al., 1977) provide a robust framework for un-\nderstanding these dynamics. These insights are\nparticularly relevant in multi-agent systems, where\nLLM interactions can lead to conformity-driven\nbias amplification, reinforcing dominant perspec-\ntives while marginalizing minority viewpoints. Our\nwork applies these principles to analyze how con-\nformity effects emerge in LLM-based debates and\ntheir implications for bias propagation.\n3 Experimental Setup\n3.1 Objective and Hypotheses\nThe objective of this study is to analyze the con-\nformity in discussions among LLM agents. Specif-\nically, we examine how the number of agents in\nproponent and opponent groups, as well as their\nintelligence levels, influence the conformity of neu-\ntral agents. Our hypotheses are as follows:\n• H1: LLM agents would conform to the major-\nity opinion when one group has more agents.\n• H2: LLM agents tend to conform to the side\nwith relatively higher intelligence.\n• H3: The greater the difference in the number\nof agents between the two groups, the stronger\nthe conformity toward the majority side.\n5125\n\n===== PDF PAGE 4 =====\n\nTable 1: Discussion Scenarios for Experiment A. The Relative Condition-Majority column denotes the proponent-\nto-opponent ratio, and Relative Condition-Intelligence indicates whether proponents used a superior or equivalent\nmodel. Expected conformity is determined based on our hypothesis that LLM agents tend to conform to the majority\nand/or the side with superior intelligence.\nID Proponent Opponent Relative Condition (Pros) Expected Conformity\nCount Model Size Count Model Size Majority Intelligence (Related Hypothesis)\na 2 Large 1 Large 2 Equivalent Proponent (H1)\nb 1 Large 2 Large 0.5 Equivalent Opponent (H1)\nc 2 Small 1 Small 2 Equivalent Proponent (H1)\nd 1 Large 2 Large 0.5 Equivalent Opponent (H1)\ne 1 Large 1 Small 1 Superior Proponent (H2)\nf 1 Small 1 Large 1 Inferior Opponent (H2)\ng 2 Large 1 Small 2 Superior Proponent (H1, H2)\nh 1 Small 2 Large 0.5 Inferior Opponent (H1, H2)\ni 2 Small 1 Large 2 Inferior Undetermined (H1, H2)\nj 1 Large 2 Small 0.5 Superior Undetermined (H1, H2)\nSince this study focuses on debate simulations,\nwe operationalize intelligence as the model’s capa-\nbility for complex language understanding. Follow-\ning benchmark results such as MMLU (Hendrycks\net al., 2020), which consistently show that larger\nLLMs tend to perform better on complex language\ntasks, we use model parameter size as a practical\nproxy for intelligence in our experiments.\n3.2 Experimental Design\nTo evaluate our objective and test the proposed\nhypotheses, we design two complementary exper-\niments. Since LLMs have been shown to exhibit\ntopic-dependent biases even when assigned a neu-\ntral role (Taubenfeld et al., 2024), we first con-\nducted a proxy test to assess the initial leanings of\nthe neutral agent before the debate simulations. In\nthis pre-test, the agent was presented with balanced\npro and con arguments and asked to select the more\npersuasive side or respond with “No response.” The\nresults in Appendix C confirmed topic-specific pref-\nerences. To address this issue, we designed our ex-\nperiments as paired comparisons (e.g., proponent-\nmajority vs. opponent-majority), ensuring that any\nbaseline bias would be equally distributed across\nconditions. This design choice enables us to more\neffectively isolate the effects of group composition\nand intelligence, which are our primary variables\nof interest.\nExperiment A (Majority and Intelligence Ef-\nfects on Conformity) examines how differences\nin group size and intelligence levels affect neutral\nagent’s conformity, addressing H1 and H2. Exper-\niment B (The Impact of Majority-Minority Ra-\ntio on Conformity) isolates the influence of the\nmajority-minority ratio by keeping intelligence lev-\nels constant, thereby assessing whether a larger\ndisparity in group sizes amplifies conformity to-\nward the majority, addressing H3. Figure 1 outlines\nour simulation framework.\nExperiment A To test H1 and H2, we vary the\nnumber of agents and intelligence levels while mea-\nsuring conformity. We run ten discussion scenarios,\nlabeled (a) to (j), as shown in Table 1. For H1 (Ef-\nfect of Majority), intelligence levels are controlled\nby using the same LLM model for both groups,\nwhile the number of agents in the proponent and\nopponent groups is varied (e.g., 1 vs. 2). In this\nsetup, the conformity rate and full conformity ratio\nare compared, corresponding to the comparison of\nscenarios (a, c) versus (b, d). For H 2 (Effective\nAgent Intelligence Effect), we controll the number\nof agents and manipulate the intelligence superior-\nity by assigning models with different parameter\nsizes (large vs. small), corresponding to the com-\nparison of scenario (e) versus (f). Additionally,\nto examine the interaction between majority influ-\nence and intelligence level, we conducte further\nexperiments with scenarios (g, h, i, j).\n5126\n\n===== PDF PAGE 5 =====\n\nExperiment B To verify H3, we conduct an ad-\nditional experiment extending Experiment A by\nincreasing the number of agents while keeping in-\ntelligence levels fixed. We use OpenAI’s GPT-\n4o-mini and GPT-3.5-turbo, scaling the number of\nagents in each scenario. Specifically, the proponent-\nopponent agent ratio is varied from 1:2 to 1:4 and\n1:8.\n3.3 LLM Agent Debate System Setup\nDiscussion Protocol In this study, LLM agents\nparticipate in discussions following a structured\nprotocol. For each discussion topic, proponent and\nopponent agents each have three opportunities to\nspeak per turn. The speaking order is randomized\nat the beginning of each debate which consists of\nthree turns. In each turn, a neutral agent, main-\ntaining a strictly neutral stance, evaluates the ar-\nguments presented by both sides and selects the\nmost persuasive agent to support. Based on the\nneutral agent’s selections across the three turns,\nraw data for calculating conformity is collected.\nThis turn-by-turn evaluation and subsequent scor-\ning mechanism enable a quantitative assessment\nof conformity within each debate. Based on the",
+        "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+        "locator": "lines 270-399",
+        "source_id": "papers/text/choi-et-al-2025-conformity.txt",
+        "truncated": true
+      },
+      "result_ids": [
+        "papers/text/choi-et-al-2025-conformity.txt"
+      ],
+      "result_sha256": "8ef5628d35eedb2b8a42113d8b817775ac14a3bd2f558af09f07da008c4acea3",
+      "sequence": 5,
+      "tool": "read_source"
+    },
+    {
+      "arguments": {
+        "line_count": 130,
+        "source_id": "papers/text/choi-et-al-2025-conformity.txt",
+        "start_line": 560
+      },
+      "result": {
+        "content": "Intelligence\nEquivalent\nIntelligence\nInferior\nIntelligence\nSuperior\nIntelligence\nEquivalent\nIntelligence\nInferior\nIntelligence\n(a)            (b)                  (c)\nFigure 2: Conformity rate(CR) and full conformity ratio(FCR) in multi-agent simulations. The figures illustrate\nthe relationship between relative conditions and conformity: majority is defined by the proponent-to-opponent\nratio (x-axis), intelligence level (y-axis), and conformity metrics (bubble size and color). Key findings include: (a)\nconformity increases when both majority and intelligence are high, (b) neutral agents exhibit a strong tendency to\nconform to higher-intelligence groups, and (c) a single high-intelligence agent exerts more influence than a larger\ngroup with lower intelligence.\nlarger, less intelligent one. Extreme cases of full\nconformity are also observed, aligning with prior\nresearch on human group behavior, which demon-\nstrates the power of majority influence in shaping\nindividual decisions (Asch, 1955; Milgram, 1963).\nTo statistically validate these visual observations,\nwe conduct Welch’s ANOV A to account for vio-\nlations of normality and homogeneity of variance\nassumptions. Although the majority size shows\na moderate effect (η2\np ≈ 0.068), intelligence has\na significantly larger impact (η2\np ≈ 0.1665), cat-\negorized as a large effect (Cohen, 2013). A post\nhoc power analysis confirms a statistical power\nabove 0.99 for detecting intelligence effects, under-\nscoring the robustness of these findings. For refer-\nence, detailed results from the two-way ANOV A\nand statistical significance tests across different\nLLM providers are included in Appendix C. These\nresults suggest that in LLM-based debates, logi-\ncal and persuasive arguments outweigh numerical\nadvantage, indicating that advanced models can\ndisproportionately shape discourse in multi-agent\nsystems.\nExtended Analysis of Majority-Minority Ratios\nWe further explore whether increasing the majority-\nminority ratio beyond 2:1 (e.g., 4:1, 8:1) strength-\nens conformity by Experiment B. The results in-\ndicate a steady increase in conformity as the ratio\ngrows, as shown in Fig 5 in Appendix. This effect\nis most evident in GPT-3.5-turbo, where confor-\nmity rates scale proportionally with majority size,\nwhereas GPT-4o-mini, with higher intelligence, ex-\nhibits a weaker relation between numerical advan-\ntage and conformity.\n4.2 Conformity Patterns Across Debate Topics\nTo assess the robustness of our findings across dif-\nferent topics, we analyze the distribution of CR for\neach debate subject. Notably, the conformity trends\nremain consistent across all five debate topics, in-\ndicating that the observed effects are generalizable\npatterns of agent behavior.\nFigure 3 illustrates the distribution of CR for\nscenarios (a–d), which focus on the effects of ma-\njority. In this figure, blue bars represent proponent-\nmajority debates, while red bars correspond to\nopponent-majority scenarios. As expected, the blue\nbars skew to the left and the red bars to the right,\ncreating distinct crossover patterns that reflect neu-\ntral agents aligning with the prevailing majority.\nA similar pattern is observed in scenarios (e–f),\nwhich examined the influence of agent intelligence,\nas detailed in Fig 6 in Appendix.\nWhile some variations are evident, debates on\nthe death penalty exhibit a particularly pronounced\nleftward shift, suggesting a strong implicit bias of\nthe LLM toward the opponent’s perspective. This\nfinding aligns with prior research identifying sys-\ntematic biases in LLM-generated content on sensi-\ntive topics (Taubenfeld et al., 2024). Despite these\n5129\n\n===== PDF PAGE 8 =====\n\ntopic-specific shifts, the consistent skewness of con-\nformity rates based on the majority group across all\nscenarios reinforces our hypothesis: both majority\nand intelligence exert a predictable influence on\nneutral agent conformity, regardless of the debate\ntopic. Given the known sensitivity of LLMs to\nprompt framing, we conducted an additional exper-\niment using reversed topic formulations designed\nto favor the opposite stance. As detailed in Ap-\npendix C, conformity patterns remained consistent,\nsuggesting that the observed effects are not arti-\nfacts of prompt wording but rather reflect genuine\ndynamics of group influence.\n0/3 1/3 2/3 3/30\n10\n20\n30\n40\n50\n60\n70Percentage (%)\nOverall Distribution\nproponent\nopponent\n0/3 1/3 2/3 3/3\nPercentage (%)\nUniversal Basic Income\nproponent\nopponent\n0/3 1/3 2/3 3/30\n10\n20\n30\n40\n50\n60\n70Percentage (%)\nDeath Penalty\nproponent\nopponent\n0/3 1/3 2/3 3/3\nPercentage (%)\nImmigration Policy\nproponent\nopponent\n0/3 1/3 2/3 3/30\n10",
+        "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+        "locator": "lines 560-689",
+        "source_id": "papers/text/choi-et-al-2025-conformity.txt",
+        "truncated": true
+      },
+      "result_ids": [
+        "papers/text/choi-et-al-2025-conformity.txt"
+      ],
+      "result_sha256": "983a77e43b78ceacd0cbc1b042bc74b1b00ae8138a05c93249e1071f04ec611c",
+      "sequence": 7,
+      "tool": "read_source"
+    },
+    {
+      "arguments": {
+        "limit": 6,
+        "query": "limitations future work ethical considerations",
+        "source_ids": [
+          "papers/text/choi-et-al-2025-conformity.txt"
+        ]
+      },
+      "result": {
+        "hits": [
+          {
+            "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+            "excerpt": "5130\n\n===== PDF PAGE 9 =====\n\n5 Conclusion\nOur findings indicates that LLM agents display con-\nformity patterns similar to human opinion dynam-\nics. This study expands on prior research by exam-\nining how majority and intelligence influence con-\nformity. Notably, we find that higher-intelligence\nmodels exert a stronger influence on group dynam-\nics, even when they are in the minority. Such behav-\nior mirrors human social behavior, where knowl-\nedgeable individuals can sway opinions despite\nbeing outnumbered. These results underscore the\npotential risk of bias propagation in LLM-driven\ndiscourse and the need for policies that promote\ndiverse and transparent public discussions.\nLimitations This study explores a limited range\nof debate topics. Additionally, the classification of\nsocial issues (e.g., politics, culture) are not fully\naddressed. Conducting debates exclusively in En-\nglish may have introduced cultural and linguistic\nbiases. Future studies could expand the range of\ntopics and languages to enhance the generalizabil-\nity of the findings. This research focuses on in-\nteractions among LLMs, without considering the\nrole of human intervention in shaping discourse.\nWhile LLM-generated content could potentially\ninfluence public opinion or decision-making pro-\ncesses, the extent of this impact remains unclear.\nFuture studies should explore human-AI interac-",
+            "locator": "lines 769-800",
+            "score": 3.791759469228055,
+            "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+          },
+          {
+            "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+            "excerpt": "and vary based on each agent’s characteristics.\n2.2 Bias in LLM\nAs societal interest in AI safety has grown, research\non bias in LLMs has also expanded (Gallegos et al.,\n2024; Xu et al., 2024; Shin et al., 2024; Tjuatja\net al., 2024), including efforts to develop bench-\nmark datasets (Lee et al., 2023; Gupta et al., 2023)\nand analyze algorithmic bias (Xiao et al., 2024)\nanalyses. Since LLMs are trained on large-scale\ndatasets that may reflect existing societal biases,\nthere is a considerable risk that they internalize and\npropagate skewed representations (Bender et al.,\n2021; Liu et al., 2024). As a result, minority or vul-\nnerable perspectives, as well as specific cultures,\nraces, or genders, can be overlooked or distorted.\n(Tjuatja et al., 2024) further examines social bias in\nLLMs, exploring how different social perspectives\ncontribute to the emergence of such biases.\nWhile previous studies have primarily focused\non measuring and mitigating explicit biases in\nLLM-generated content, how biases emerge and\nevolve through agent interactions remains under-\nexplored. Recent work (Taubenfeld et al., 2024)\nsuggests that LLM agents in multi-agent interac-\ntions exhibit social biases, which can be mitigated\nthrough fine-tuning. However, it primarily exam-\nines how inherent biases manifest in multi-agent\nsettings, whereas our work focuses on how group\n5124\n\n===== PDF PAGE 3 =====\n",
+            "locator": "lines 169-200",
+            "score": 2.0986122886681096,
+            "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+          },
+          {
+            "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+            "excerpt": "powered by smaller-scale LLMs. This finding indi-\ncates that discourse dynamics in agent-based sys-\ntems are strongly influenced by intelligence dis-\nparities, with significant implications for public\nopinion formation and bias reinforcement.\nOur study contributes to the understanding of\nopinion dynamics in multi-agent systems by pro-\nviding empirical evidence of conformity. It demon-\nstrates that phenomena such as majority influence\nand minority suppression, extensively studied in\nhuman social dynamics (Asch, 1955), also emerge\nin LLM interactions. To the best of our knowledge,\nthis is the first study to show that LLM agents align\nnot only with the majority but also with higher-\nintelligence models, leading to more extreme out-\ncomes. These findings underscore the risk of bias\npropagation in LLM-generated discourse and high-\nlight the need for policy interventions to promote\ndiversity and transparency in public opinion forma-\ntion.\n2 Related Works\n2.1 Multi-agent with LLMs\nAs LLMs become capable of handling increasingly\ncomplex tasks (Kevian et al., 2024; Achiam et al.,\n2023; Team et al., 2024; Dubey et al., 2024), a\nsignificant body of research focuses on using a\nLLM as an agent for various tasks (Xi et al., 2023;\nKim and Lee, 2023; Mathur et al., 2024; Huang\net al., 2024). Moreover, recent studies have ex-\nplored multi-agent systems (Wang et al., 2024;\nGuo et al., 2024) where multiple agents interact,\nbuilding on prior work in world simulation, diver-",
+            "locator": "lines 121-152",
+            "score": 1.6931471805599454,
+            "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+          },
+          {
+            "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+            "excerpt": "Percentage (%)\nEducational Equality\nproponent\nopponent\nFigure 6: The distribution of CR across debate topics is\nshown, based on data from scenarios (e–f) examining\nthe intelligence effect. The x-axis represents confor-\nmity rates for each discussion, measured as 0/3, 1/3,\n2/3, or 3/3. Blue bars represent proponent-smart scenar-\nios, while red bars represent opponent-smart scenarios.\nAlthough the intensity varies, blue bars skew left and\nred bars skew right, reflecting the tendency of neutral\nagents to align with the dominant group, similar to the\npatterns observed in Figure 3.\n5136\n\n===== PDF PAGE 15 =====\n\nC.5 Robustness to Prompt Framing\nTo test whether prompt wording influenced conformity, we repeated the simulations using reframed topic\nstatements that favored the opposite side. Table 5 presents the original and reversed versions used in this\nexperiment.\nOriginal (Proponent) Reframed (Opponent)\nProviding universal basic income to all citizens\nis an essential measure to reduce inequality and\nstrengthen social stability.\nWhile UBI can help address inequality, imple-\nmenting it universally may reduce work incentives\nfor some and make it harder to fund more targeted,\nneeds-based support systems.\nTo promote economic growth, immigration poli-\ncies should be relaxed, and more opportunities",
+            "locator": "lines 1273-1304",
+            "score": 1.6931471805599454,
+            "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+          },
+          {
+            "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+            "excerpt": "is an essential measure to reduce inequality and\nstrengthen social stability.\nWhile UBI can help address inequality, imple-\nmenting it universally may reduce work incentives\nfor some and make it harder to fund more targeted,\nneeds-based support systems.\nTo promote economic growth, immigration poli-\ncies should be relaxed, and more opportunities\nshould be provided to immigrants.\nAlthough immigration can be beneficial, some\nexpress concerns that rapid policy changes might\nbring temporary adjustment issues in certain areas,\nespecially if not carefully managed.\nThe death penalty should be maintained and en-\nforced to deter crime and realize social justice.\nThe death penalty should be abolished to protect\nhuman rights and prevent irreversible judicial er-\nrors.\nTo achieve educational equity, elite education\nshould be reduced, and the public school system\nshould be strengthened to ensure that all students\nhave equal access to educational opportunities.\nWhile equity is a vital goal, reducing elite educa-\ntion too much may limit opportunities for gifted\nstudents and weaken overall academic diversity\nand innovation.\nGovernments should enforce comprehensive\nequal pay legislation to close the gender wage\ngap.\nWhile promoting equal pay is important, rigid\nlegislation may not fully account for the complex-\nity of wage decisions and could unintentionally",
+            "locator": "lines 1297-1328",
+            "score": 1.6931471805599454,
+            "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+          },
+          {
+            "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+            "excerpt": "immigrants. However, relaxing immigration policies can lead to unintended consequences that may\noutweigh these benefits. For instance, while immigrants may start businesses, a significant number\nalso rely on public services, which can strain resources and increase costs for taxpayers. A study by\nthe National Academies of Sciences found that while immigrants contribute to the economy, they also\nconsume more in public services than they pay in taxes. Moreover, increasing the number of immigrants\ncan lead to wage suppression for low-skilled workers. A report from the Center for Immigration Studies\nindicates that an influx of low-skilled labor can negatively impact the wages (..) In conclusion, while\nimmigration can contribute to economic growth, a relaxed policy might create more challenges than it\nresolves. We must carefully balance the benefits of immigration with the needs of our local population.\n[Agent_85]: The opponent argues that although immigrants bring economic benefits, relaxing immi-\ngration policies can strain public services and suppress wages for low-skilled workers. They suggest a\nmore targeted approach, like Canada’s point-based system. While it’s important to consider the strain on\npublic services, studies show that immigrants contribute more to the economy than they consume over the\nlong term. For example, a report by the National Academies of Sciences found that immigrants have a\nnet positive fiscal impact. Countries like the United States have a history of benefiting from immigrant\nentrepreneurship. For instance, immigrants founded more than half of the bi",
+            "locator": "lines 1393-1424",
+            "score": 1.6931471805599454,
+            "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+          }
+        ],
+        "query": "limitations future work ethical considerations",
+        "truncated": true
+      },
+      "result_ids": [
+        "papers/text/choi-et-al-2025-conformity.txt",
+        "papers/text/choi-et-al-2025-conformity.txt",
+        "papers/text/choi-et-al-2025-conformity.txt",
+        "papers/text/choi-et-al-2025-conformity.txt",
+        "papers/text/choi-et-al-2025-conformity.txt",
+        "papers/text/choi-et-al-2025-conformity.txt"
+      ],
+      "result_sha256": "174080bb97190995a0ec3c26a42bd5ffc7271936794214b631a5905235fd7891",
+      "sequence": 8,
+      "tool": "search_sources"
+    },
+    {
+      "arguments": {
+        "line_count": 115,
+        "source_id": "papers/text/choi-et-al-2025-conformity.txt",
+        "start_line": 689
+      },
+      "result": {
+        "content": "10\n20\n30\n40\n50\n60\n70Percentage (%)\nGender Wagegap\nproponent\nopponent\n0/3 1/3 2/3 3/3\nPercentage (%)\nEducational Equality\nproponent\nopponent\nFigure 3: The distribution of CR across debate topics is\nshown, based on data from scenarios (a–d) examining\nthe majority effect. The x-axis represents CR for each\ndiscussion, measured as 0/3, 1/3, 2/3, or 3/3.\n4.3 Qualitative Analysis\nFinally, we report on the conformity phenomena\nobserved in the agents’ debate processes, referenc-\ning well-documented social science theories such\nas group polarization and the spiral of silence.\nGroup Polarization Group polarization is the\ntendency for group discussions to amplify mem-\nbers’ initial views, resulting in more extreme posi-\ntions (Isenberg, 1986). In scenarios with a signifi-\ncant imbalance in the number of agents, with eight\nIn conclusion, we must focus on \ndismantling the existing inequities \nperpetuated by elite education. By \nreducing their influence (..)\n…\nThe resources and opportunities that \nelite institutions provide often draw \nfunding and attention away from \npublic schools, (..)\nThe existence of elite schools often \nleads to a disproportionate allocation \nof resources, creating a system where \naccess is (..)\n…\nRather than diminishing elite institutions, \nwe should look to replicate their \nsuccessful practices in public \neducation\nAgent #1\n…\nAgent #2\nAgent #3\nAgent #4\nFigure 4: Group polarization example in a debate on\nelite education. As the debate progressed, agents in the\nmajority group exhibit increasingly extreme positions.\nInitially, a moderate stance was observed, advocating\nfor balancing the strengths of elite and public education\n(Agent #1). This shifted toward arguments emphasizing\nthe unfair distribution of resources (Agent #2, #3), even-\ntually culminating in a strong statement calling for the\nabolition of elite education (Agent #4).\nproponent and one opponent debaters, we observe\nthat the majority group’s opinions tend to become\nmore polarized as the discussions progressed. For\ninstance, as illustrated in Fig. 4, during debates on\nthe topic \"elite education should be reduced\", the\narguments of some agents in the majority group\nbecome progressively more extreme.\nSpiral of Silence Each debater receives a prompt\nallowing them to declare ‘complete agreement’\nif they fully concur with their opponent’s view\nand wish to end the debate. This mechanism is\ndesigned to reflect the Spiral of Silence (Noelle-\nNeumann, 1974), where minority groups remain\nsilent or refrain from expressing dissenting opin-\nions. Throughout various debates, instances of\n‘complete agreement’ are observed among agents\nin numerical or intelligence-based minority groups.\nA Detailed example of these occurrences is docu-\nmented in Appendix E.\n5130\n\n===== PDF PAGE 9 =====\n\n5 Conclusion\nOur findings indicates that LLM agents display con-\nformity patterns similar to human opinion dynam-\nics. This study expands on prior research by exam-\nining how majority and intelligence influence con-\nformity. Notably, we find that higher-intelligence\nmodels exert a stronger influence on group dynam-\nics, even when they are in the minority. Such behav-\nior mirrors human social behavior, where knowl-\nedgeable individuals can sway opinions despite\nbeing outnumbered. These results underscore the\npotential risk of bias propagation in LLM-driven\ndiscourse and the need for policies that promote\ndiverse and transparent public discussions.\nLimitations This study explores a limited range\nof debate topics. Additionally, the classification of\nsocial issues (e.g., politics, culture) are not fully\naddressed. Conducting debates exclusively in En-\nglish may have introduced cultural and linguistic\nbiases. Future studies could expand the range of\ntopics and languages to enhance the generalizabil-\nity of the findings. This research focuses on in-\nteractions among LLMs, without considering the\nrole of human intervention in shaping discourse.\nWhile LLM-generated content could potentially\ninfluence public opinion or decision-making pro-\ncesses, the extent of this impact remains unclear.\nFuture studies should explore human-AI interac-\ntions more thoroughly to clarify how human in-\nvolvement affects conformity patterns and opinion\ndynamics.",
+        "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+        "locator": "lines 689-803",
+        "source_id": "papers/text/choi-et-al-2025-conformity.txt",
+        "truncated": true
+      },
+      "result_ids": [
+        "papers/text/choi-et-al-2025-conformity.txt"
+      ],
+      "result_sha256": "7f0a24a8ca9f30c56980659d0b1b56315a7ed76026946fc5c0788eabbaf862f3",
+      "sequence": 9,
+      "tool": "read_source"
+    },
+    {
+      "arguments": {
+        "limit": 6,
+        "query": "GPT-4o GPT-3.5 Claude Qwen model list Appendix A large small parameter",
+        "source_ids": [
+          "papers/text/choi-et-al-2025-conformity.txt"
+        ]
+      },
+      "result": {
+        "hits": [
+          {
+            "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+            "excerpt": "separately. With 6 discussion scenarios, 5 discus-\nsion topics, and 2 types of LLM models, 10 repeti-\ntions, a total of 600 (6x5x2x10) simulations were\nconducted.\nA.2 LLM models\nTo ensure generalizability, LLM models from dif-\nferent providers were used in Experiment A.\nTable 3: LLM Model Assignments by Provider\nProvider Large-size Small-size\n(Superior) (Inferior)\nOpenAI GPT-4o-mini GPT-3.5-turbo\nAnthropic Claude-3-Sonnet Claude-3-Haiku\nAlibaba Qwen2.5-7B Qwen2.5-3B\nQwen2.5-14B Qwen2.5-7B\nB Statistical Test Details\nChi-square Test The test statistic is computed\nas:\nχ2 =\n∑ (Oij −Eij)2\nEij\n,\nwhereOij andEij are the observed and expected\nfrequencies for cell (i,j) in the contingency table,\nrespectively. We ensured thatEij ≥ 5 for all cells\nto satisfy test assumptions.\nTwo-Way ANOV A To evaluate the main and in-\nteraction effects of the variable (A) and variable\n(B) on the target variable (Y ), we initially consid-\nered a two-way ANOV A modeled as:\nYijk =µ +αi +βj + (αβ)ij +ϵijk,\n5133\n",
+            "locator": "lines 1057-1088",
+            "score": 19.738134295369775,
+            "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+          },
+          {
+            "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+            "excerpt": "experiments with Qwen-2.5-3B and 7B, which have the smallest parameter sizes, exhibited a stronger\ntendency to conform to the relatively higher intelligence group. The smaller parameter sizes resulted in\nlower-quality debates, making it difficult for the neutral agent to perceive the arguments as persuasive.\nThis suggests that a minimum parameter size may be necessary to ensure smooth and realistic debate\nsimulations.\nChatGPT: GPT-3.5-turbo & GPT-4o-mini\n• Cross Table\nProponent Conforming Decision Conforming Decision\nIntelligence Level to Proponent to Opponent\nSuperior 111 39\nInferior 73 77\n• Chi-Square:χ2(1,N = 300) = 19.24,p< 0.001\nClaude: Claude-3-Sonnet & Claude-3-Haiku\n• Cross Table\nProponent Conforming Decision Conforming Decision\nIntelligence Level to Proponent to Opponent\nSuperior 100 48\nInferior 79 67\n• Chi-Square:χ2(1,N = 294) = 13.21,p< 0.001\nQwen: Qwen-2.5-14B & Qwen-2.5-7B\n• Cross Table\nProponent Conforming Decision Conforming Decision\nIntelligence Level to Proponent to Opponent\nSuperior 105 45\nInferior 80 69\n• Chi-Square:χ2(1,N = 299) = 16.29,p< 0.001\nQwen: Qwen-2.5-7B & Qwen-2.5-3B\n• Cross Table\nProponent Conforming Decision Conforming Decision\nIntelligence Level to Proponent to Opponent\nSuperior 127 22\nInferior 28 122",
+            "locator": "lines 1177-1208",
+            "score": 19.074606531990987,
+            "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+          },
+          {
+            "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+            "excerpt": "design in the main experiments, ensuring that any\nsuch biases would affect both conditions equally\nand thus be canceled out when measuring differen-\ntial conformity.\nC.2 Two-way ANOV A Result\nFor reference, a traditional two-way ANOV A was\nconducted to examine the interaction between ma-\njority size and intelligence. The results indicate\na negligible interaction effect, suggesting that the\ninfluence of intelligence on conformity remains\nlargely independent of majority size(sum of squares\n= 2.728×10³, df = 6, F = 0.432, p = 0.730). This\naligns with the primary finding that intelligence\nplays a more decisive role than numerical domi-\nnance in shaping conformity behavior.\n5134\n\n===== PDF PAGE 13 =====\n\nC.3 Chi-Square Test Results for LLM Providers\nWe conducted Chi-Square tests to examine whether there were statistically significant differences in\nconformity based on agent intelligence, grouped by LLM provider. The conformity patterns between\nhigh and low intelligence LLMs for each provider aligned with our hypothesis, and significant results\nwere observed across models from ChatGPT, Claude, and Qwen. Notably, as shown in the cross tables,\nexperiments with Qwen-2.5-3B and 7B, which have the smallest parameter sizes, exhibited a stronger\ntendency to conform to the relatively higher intelligence group. The smaller parameter sizes resulted in\nlower-quality debates, making it difficult for the neutral agent to perceive the arguments as persuasive.\nThis suggests that a minimum parameter size may be necessary to ensure smooth and realistic debate\nsimulations.\nChatGPT: GPT-3.5-turbo &",
+            "locator": "lines 1153-1184",
+            "score": 17.246479418592056,
+            "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+          },
+          {
+            "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+            "excerpt": "• H2: LLM agents tend to conform to the side\nwith relatively higher intelligence.\n• H3: The greater the difference in the number\nof agents between the two groups, the stronger\nthe conformity toward the majority side.\n5125\n\n===== PDF PAGE 4 =====\n\nTable 1: Discussion Scenarios for Experiment A. The Relative Condition-Majority column denotes the proponent-\nto-opponent ratio, and Relative Condition-Intelligence indicates whether proponents used a superior or equivalent\nmodel. Expected conformity is determined based on our hypothesis that LLM agents tend to conform to the majority\nand/or the side with superior intelligence.\nID Proponent Opponent Relative Condition (Pros) Expected Conformity\nCount Model Size Count Model Size Majority Intelligence (Related Hypothesis)\na 2 Large 1 Large 2 Equivalent Proponent (H1)\nb 1 Large 2 Large 0.5 Equivalent Opponent (H1)\nc 2 Small 1 Small 2 Equivalent Proponent (H1)\nd 1 Large 2 Large 0.5 Equivalent Opponent (H1)\ne 1 Large 1 Small 1 Superior Proponent (H2)\nf 1 Small 1 Large 1 Inferior Opponent (H2)\ng 2 Large 1 Small 2 Superior Proponent (H1, H2)\nh 1 Small 2 Large 0.5 Inferior Opponent (H1, H2)\ni 2 Small 1 Large 2 Inferior Undetermined (H1, H2)\nj 1 Large 2 Small 0.5 Superior Undetermined (H1, H2)\nSince this study focuses on debate simulations,\nwe operationalize intelligence as the model’s capa-\nbility for complex language understanding. Follow-\ning benchmark results such as MMLU (Hendrycks\net al., 2020), which consistently show that larger\nLLMs tend to perform better on complex language\ntasks, we use model parameter size as a practical",
+            "locator": "lines 289-320",
+            "score": 16.46595640945396,
+            "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+          },
+          {
+            "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+            "excerpt": "setup, the conformity rate and full conformity ratio\nare compared, corresponding to the comparison of\nscenarios (a, c) versus (b, d). For H 2 (Effective\nAgent Intelligence Effect), we controll the number\nof agents and manipulate the intelligence superior-\nity by assigning models with different parameter\nsizes (large vs. small), corresponding to the com-\nparison of scenario (e) versus (f). Additionally,\nto examine the interaction between majority influ-\nence and intelligence level, we conducte further\nexperiments with scenarios (g, h, i, j).\n5126\n\n===== PDF PAGE 5 =====\n\nExperiment B To verify H3, we conduct an ad-\nditional experiment extending Experiment A by\nincreasing the number of agents while keeping in-\ntelligence levels fixed. We use OpenAI’s GPT-\n4o-mini and GPT-3.5-turbo, scaling the number of\nagents in each scenario. Specifically, the proponent-\nopponent agent ratio is varied from 1:2 to 1:4 and\n1:8.\n3.3 LLM Agent Debate System Setup\nDiscussion Protocol In this study, LLM agents\nparticipate in discussions following a structured\nprotocol. For each discussion topic, proponent and\nopponent agents each have three opportunities to\nspeak per turn. The speaking order is randomized\nat the beginning of each debate which consists of\nthree turns. In each turn, a neutral agent, main-\ntaining a strictly neutral stance, evaluates the ar-",
+            "locator": "lines 361-392",
+            "score": 16.147867129923945,
+            "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+          },
+          {
+            "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+            "excerpt": "j 1 Large 2 Small 0.5 Superior Undetermined (H1, H2)\nSince this study focuses on debate simulations,\nwe operationalize intelligence as the model’s capa-\nbility for complex language understanding. Follow-\ning benchmark results such as MMLU (Hendrycks\net al., 2020), which consistently show that larger\nLLMs tend to perform better on complex language\ntasks, we use model parameter size as a practical\nproxy for intelligence in our experiments.\n3.2 Experimental Design\nTo evaluate our objective and test the proposed\nhypotheses, we design two complementary exper-\niments. Since LLMs have been shown to exhibit\ntopic-dependent biases even when assigned a neu-\ntral role (Taubenfeld et al., 2024), we first con-\nducted a proxy test to assess the initial leanings of\nthe neutral agent before the debate simulations. In\nthis pre-test, the agent was presented with balanced\npro and con arguments and asked to select the more\npersuasive side or respond with “No response.” The\nresults in Appendix C confirmed topic-specific pref-\nerences. To address this issue, we designed our ex-\nperiments as paired comparisons (e.g., proponent-\nmajority vs. opponent-majority), ensuring that any\nbaseline bias would be equally distributed across\nconditions. This design choice enables us to more\neffectively isolate the effects of group composition\nand intelligence, which are our primary variables\nof interest.\nExperiment A (Majority and Intelligence Ef-\nfects on Conformity) examines how differences\nin group size and intelligence levels affect neutral",
+            "locator": "lines 313-344",
+            "score": 14.866933284461881,
+            "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+          }
+        ],
+        "query": "GPT-4o GPT-3.5 Claude Qwen model list Appendix A large small parameter",
+        "truncated": true
+      },
+      "result_ids": [
+        "papers/text/choi-et-al-2025-conformity.txt",
+        "papers/text/choi-et-al-2025-conformity.txt",
+        "papers/text/choi-et-al-2025-conformity.txt",
+        "papers/text/choi-et-al-2025-conformity.txt",
+        "papers/text/choi-et-al-2025-conformity.txt",
+        "papers/text/choi-et-al-2025-conformity.txt"
+      ],
+      "result_sha256": "ddd6dcc650cfe67122e3603f099628e6381eb9d8bd073e003193044677a32caa",
+      "sequence": 10,
+      "tool": "search_sources"
+    },
+    {
+      "arguments": {
+        "line_count": 70,
+        "source_id": "papers/text/choi-et-al-2025-conformity.txt",
+        "start_line": 1020
+      },
+      "result": {
+        "content": "of several mean values: an alternative approach.\nBiometrika, 38(3/4):330–336.\nZhiheng Xi, Wenxiang Chen, Xin Guo, Wei He, Yiwen\nDing, Boyang Hong, Ming Zhang, Junzhe Wang,\nSenjie Jin, Enyu Zhou, et al. 2023. The rise and\npotential of large language model based agents: A\nsurvey. arXiv preprint arXiv:2309.07864.\nJiancong Xiao, Ziniu Li, Xingyu Xie, Emily Getzen,\nCong Fang, Qi Long, and Weijie J Su. 2024. On the\nalgorithmic bias of aligning large language models\nwith rlhf: Preference collapse and matching regular-\nization. arXiv preprint arXiv:2405.16455.\nWenda Xu, Guanglei Zhu, Xuandong Zhao, Liangming\nPan, Lei Li, and William Wang. 2024. Pride and\nprejudice: Llm amplifies self-bias in self-refinement.\nIn Proceedings of the 62nd Annual Meeting of the\nAssociation for Computational Linguistics (Volume\n1: Long Papers), pages 15474–15492.\nAn Yang, Baosong Yang, Beichen Zhang, Binyuan Hui,\nBo Zheng, Bowen Yu, Chengyuan Li, Dayiheng Liu,\nFei Huang, Haoran Wei, et al. 2024. Qwen2. 5 tech-\nnical report. arXiv preprint arXiv:2412.15115.\nWayne Xin Zhao, Kun Zhou, Junyi Li, Tianyi Tang,\nXiaolei Wang, Yupeng Hou, Yingqian Min, Beichen\nZhang, Junjie Zhang, Zican Dong, et al. 2023. A\nsurvey of large language models. arXiv preprint\narXiv:2303.18223.\nA Experimental Setting Details\nA.1 Simulation Setup\nIn the simulations, each discussion scenario was\ntested in 10 repetitions.\nExperiment A Given 10 discussion scenarios, 5\ndiscussion topics, and 4 types of LLM models, 10\nrepetitions, a total of 2,000 (10x5x4x10) simula-\ntions were conducted.\nExperiment B Scenarios ranging from (1:2) to\n(1:8) for each proponent and opponent were tested\nseparately. With 6 discussion scenarios, 5 discus-\nsion topics, and 2 types of LLM models, 10 repeti-\ntions, a total of 600 (6x5x2x10) simulations were\nconducted.\nA.2 LLM models\nTo ensure generalizability, LLM models from dif-\nferent providers were used in Experiment A.\nTable 3: LLM Model Assignments by Provider\nProvider Large-size Small-size\n(Superior) (Inferior)\nOpenAI GPT-4o-mini GPT-3.5-turbo\nAnthropic Claude-3-Sonnet Claude-3-Haiku\nAlibaba Qwen2.5-7B Qwen2.5-3B\nQwen2.5-14B Qwen2.5-7B\nB Statistical Test Details\nChi-square Test The test statistic is computed\nas:\nχ2 =\n∑ (Oij −Eij)2\nEij\n,\nwhereOij andEij are the observed and expected\nfrequencies for cell (i,j) in the contingency table,\nrespectively. We ensured thatEij ≥ 5 for all cells\nto satisfy test assumptions.\nTwo-Way ANOV A To evaluate the main and in-\nteraction effects of the variable (A) and variable\n(B) on the target variable (Y ), we initially consid-\nered a two-way ANOV A modeled as:\nYijk =µ +αi +βj + (αβ)ij +ϵijk,\n5133\n\n===== PDF PAGE 12 =====",
+        "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+        "locator": "lines 1020-1089",
+        "source_id": "papers/text/choi-et-al-2025-conformity.txt",
+        "truncated": true
+      },
+      "result_ids": [
+        "papers/text/choi-et-al-2025-conformity.txt"
+      ],
+      "result_sha256": "a6dc0f9bd0b154f84dd43401efe8ca4409cfc9bb625a7b844bd8c5fa8120b798",
+      "sequence": 11,
+      "tool": "read_source"
+    },
+    {
+      "arguments": {
+        "limit": 5,
+        "query": "Experiment B ratio 1:4 1:8 conformity rates Figure 5",
+        "source_ids": [
+          "papers/text/choi-et-al-2025-conformity.txt"
+        ]
+      },
+      "result": {
+        "hits": [
+          {
+            "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+            "excerpt": "disproportionately shape discourse in multi-agent\nsystems.\nExtended Analysis of Majority-Minority Ratios\nWe further explore whether increasing the majority-\nminority ratio beyond 2:1 (e.g., 4:1, 8:1) strength-\nens conformity by Experiment B. The results in-\ndicate a steady increase in conformity as the ratio\ngrows, as shown in Fig 5 in Appendix. This effect\nis most evident in GPT-3.5-turbo, where confor-\nmity rates scale proportionally with majority size,\nwhereas GPT-4o-mini, with higher intelligence, ex-\nhibits a weaker relation between numerical advan-\ntage and conformity.\n4.2 Conformity Patterns Across Debate Topics\nTo assess the robustness of our findings across dif-\nferent topics, we analyze the distribution of CR for\neach debate subject. Notably, the conformity trends\nremain consistent across all five debate topics, in-\ndicating that the observed effects are generalizable\npatterns of agent behavior.\nFigure 3 illustrates the distribution of CR for\nscenarios (a–d), which focus on the effects of ma-\njority. In this figure, blue bars represent proponent-\nmajority debates, while red bars correspond to\nopponent-majority scenarios. As expected, the blue\nbars skew to the left and the red bars to the right,\ncreating distinct crossover patterns that reflect neu-\ntral agents aligning with the prevailing majority.\nA similar pattern is observed in scenarios (e–f),\nwhich examined the influence of agent intelligence,\nas detailed in Fig 6 in Appendix.\nWhile some variations are evident, debates on",
+            "locator": "lines 601-632",
+            "score": 20.345091707260167,
+            "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+          },
+          {
+            "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+            "excerpt": "setup, the conformity rate and full conformity ratio\nare compared, corresponding to the comparison of\nscenarios (a, c) versus (b, d). For H 2 (Effective\nAgent Intelligence Effect), we controll the number\nof agents and manipulate the intelligence superior-\nity by assigning models with different parameter\nsizes (large vs. small), corresponding to the com-\nparison of scenario (e) versus (f). Additionally,\nto examine the interaction between majority influ-\nence and intelligence level, we conducte further\nexperiments with scenarios (g, h, i, j).\n5126\n\n===== PDF PAGE 5 =====\n\nExperiment B To verify H3, we conduct an ad-\nditional experiment extending Experiment A by\nincreasing the number of agents while keeping in-\ntelligence levels fixed. We use OpenAI’s GPT-\n4o-mini and GPT-3.5-turbo, scaling the number of\nagents in each scenario. Specifically, the proponent-\nopponent agent ratio is varied from 1:2 to 1:4 and\n1:8.\n3.3 LLM Agent Debate System Setup\nDiscussion Protocol In this study, LLM agents\nparticipate in discussions following a structured\nprotocol. For each discussion topic, proponent and\nopponent agents each have three opportunities to\nspeak per turn. The speaking order is randomized\nat the beginning of each debate which consists of\nthree turns. In each turn, a neutral agent, main-\ntaining a strictly neutral stance, evaluates the ar-",
+            "locator": "lines 361-392",
+            "score": 16.55333223803211,
+            "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+          },
+          {
+            "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+            "excerpt": "• H2: LLM agents tend to conform to the side\nwith relatively higher intelligence.\n• H3: The greater the difference in the number\nof agents between the two groups, the stronger\nthe conformity toward the majority side.\n5125\n\n===== PDF PAGE 4 =====\n\nTable 1: Discussion Scenarios for Experiment A. The Relative Condition-Majority column denotes the proponent-\nto-opponent ratio, and Relative Condition-Intelligence indicates whether proponents used a superior or equivalent\nmodel. Expected conformity is determined based on our hypothesis that LLM agents tend to conform to the majority\nand/or the side with superior intelligence.\nID Proponent Opponent Relative Condition (Pros) Expected Conformity\nCount Model Size Count Model Size Majority Intelligence (Related Hypothesis)\na 2 Large 1 Large 2 Equivalent Proponent (H1)\nb 1 Large 2 Large 0.5 Equivalent Opponent (H1)\nc 2 Small 1 Small 2 Equivalent Proponent (H1)\nd 1 Large 2 Large 0.5 Equivalent Opponent (H1)\ne 1 Large 1 Small 1 Superior Proponent (H2)\nf 1 Small 1 Large 1 Inferior Opponent (H2)\ng 2 Large 1 Small 2 Superior Proponent (H1, H2)\nh 1 Small 2 Large 0.5 Inferior Opponent (H1, H2)\ni 2 Small 1 Large 2 Inferior Undetermined (H1, H2)\nj 1 Large 2 Small 0.5 Superior Undetermined (H1, H2)\nSince this study focuses on debate simulations,\nwe operationalize intelligence as the model’s capa-\nbility for complex language understanding. Follow-\ning benchmark results such as MMLU (Hendrycks\net al., 2020), which consistently show that larger\nLLMs tend to perform better on complex language\ntasks, we use model parameter size as a practical",
+            "locator": "lines 289-320",
+            "score": 15.540909718033554,
+            "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+          },
+          {
+            "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+            "excerpt": "group with lower intelligence.\nlarger, less intelligent one. Extreme cases of full\nconformity are also observed, aligning with prior\nresearch on human group behavior, which demon-\nstrates the power of majority influence in shaping\nindividual decisions (Asch, 1955; Milgram, 1963).\nTo statistically validate these visual observations,\nwe conduct Welch’s ANOV A to account for vio-\nlations of normality and homogeneity of variance\nassumptions. Although the majority size shows\na moderate effect (η2\np ≈ 0.068), intelligence has\na significantly larger impact (η2\np ≈ 0.1665), cat-\negorized as a large effect (Cohen, 2013). A post\nhoc power analysis confirms a statistical power\nabove 0.99 for detecting intelligence effects, under-\nscoring the robustness of these findings. For refer-\nence, detailed results from the two-way ANOV A\nand statistical significance tests across different\nLLM providers are included in Appendix C. These\nresults suggest that in LLM-based debates, logi-\ncal and persuasive arguments outweigh numerical\nadvantage, indicating that advanced models can\ndisproportionately shape discourse in multi-agent\nsystems.\nExtended Analysis of Majority-Minority Ratios\nWe further explore whether increasing the majority-\nminority ratio beyond 2:1 (e.g., 4:1, 8:1) strength-\nens conformity by Experiment B. The results in-\ndicate a steady increase in conformity as the ratio\ngrows, as shown in Fig 5 in Appendix. This effect",
+            "locator": "lines 577-608",
+            "score": 15.336936913707618,
+            "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+          },
+          {
+            "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+            "excerpt": "• Educational Equality: \"To achieve educa-\ntional equity, elite education should be re-\nduced, and the public school system should be\nstrengthened to ensure that all students have\nequal access to educational opportunities.\"\n• Gender Wage Gap: \"Governments should\nenforce comprehensive equal pay legislation\nto close the gender wage gap.\"\n3.4 Statistical Methods\nWe use the Chi-Square Test (Pearson, 1900) and\ntwo-way ANOV A (Fisher, 1941) to statistically val-\nidate the discussion simulations, applying a sig-\nnificance level of α = 0 .01 for all tests. This\nmethodological approach provides a rigorous anal-\nysis of how the number of agents and intelligence\ninfluence conformity in LLM agent interactions.\n5127\n\n===== PDF PAGE 6 =====\n\nTable 2: Conformity results based on majority size and intelligence levels.\nID Relative Condition (Pros) Expected Conformity Conformity Rate Full Conformity Ratio\nMajority Intelligence (Related Hypothesis)\na 2 Equivalent Proponent (H1) 63.53 33.60\nb 0.5 Equivalent Opponent (H1) 39.40 10.40\nc 2 Equivalent Proponent (H1) 72.11 41.33\nd 0.5 Equivalent Opponent (H1) 42.22 8.67\ne 1 Superior Proponent (H2) 74.33 52.50\nf 1 Inferior Opponent (H2) 39.83 16.00\ng 2 Superior Proponent (H1, H2) 83.17 64.00\nh 0.5 Inferior Opponent (H1, H2) 25.67 5.50\ni 2 Inferior Undetermined (H1, H2) 42.17 15.50",
+            "locator": "lines 457-488",
+            "score": 14.272398392570047,
+            "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+          }
+        ],
+        "query": "Experiment B ratio 1:4 1:8 conformity rates Figure 5",
+        "truncated": true
+      },
+      "result_ids": [
+        "papers/text/choi-et-al-2025-conformity.txt",
+        "papers/text/choi-et-al-2025-conformity.txt",
+        "papers/text/choi-et-al-2025-conformity.txt",
+        "papers/text/choi-et-al-2025-conformity.txt",
+        "papers/text/choi-et-al-2025-conformity.txt"
+      ],
+      "result_sha256": "4543127a7d31d08b3baea2f0485eb0fe9a443ebd167c365d433df5cb3faa619f",
+      "sequence": 12,
+      "tool": "search_sources"
+    }
+  ],
+  "snapshot_sha256": "64f22e4def6506758f4d42d87a55f95161e7997884433c26ab3a759c4a839292"
+}

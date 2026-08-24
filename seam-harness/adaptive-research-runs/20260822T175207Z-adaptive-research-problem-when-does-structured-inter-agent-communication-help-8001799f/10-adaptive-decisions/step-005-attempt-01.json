@@ -1,0 +1,27 @@
+{
+  "account": "All seven corpus papers now have substantive, ready_to_synthesize answers (Du 2023 positive; Smit 2023 null/contingent; Zhang 2025 matched-compute negative plus heterogeneity; Lorenz 2011 human social-influence; Choi 2025 LLM conformity; Dung 1995 adjudication semantics; Shapiro 2011 merge algebra), and the four wave-1 blocked answers are superseded by r2 packets. The unanswered demands (D2 thesis, D3 causal model, D5 predictions, D6 limits, D7 experiment, D8 conclusion, D1 note) are all downstream of integrating these seven answers, and synthesis question work:004-synthesis is staged for exactly this. The raised questions rz1, rz2, rq-choi-1, rq-shapiro-merge are identification gaps the note must report under D6 and the experiment must instantiate under D7; they are not corpus-answerable, so no further extraction investigation is warranted. The highest-value bounded action is a synthesis converting the seven answers into the explanatory core: a reconciliation that preserves every finding, one mechanistic thesis, an edge-labeled causal model, and discriminating predictions. I keep the preregistered experiment (D7) and final note assembly (D1, D8) for the next turn, because the experiment's conditions, estimands, and failure criteria must be derived from a fixed mechanism and prediction set rather than designed concurrently with them.",
+  "action": {
+    "acceptance_condition": "The artifact contains: (a) a one-paragraph mechanistic thesis with explicit win/lose sign conditions referencing matched compute; (b) a causal model listing all six required variables with every edge labeled as corpus-evidenced, cross-paper inference, or non-identified, and with rz1, rz2, rq1, rq-choi-1, and rq-shapiro-merge each assigned to a specific open edge; (c) a reconciliation covering all seven papers with file-path plus PDF-PAGE citations that discards no reported finding; (d) at least four predictions, each with a direction or interaction and an explicit label naming which of compute-only, diversity-only, or deliberation-only alternatives it discriminates against.",
+    "answer_ids": [
+      "answer:work:001-inv-du-debate",
+      "answer:work:001-inv-lorenz-influence",
+      "answer:work:002-inv-choi-r2",
+      "answer:work:002-inv-dung-r2",
+      "answer:work:002-inv-shapiro-r2",
+      "answer:work:002-inv-smit-mad-r2",
+      "answer:work:002-inv-zhang-when-r2"
+    ],
+    "conflict_policy": "Never resolve the Du-positive versus Smit-null versus Zhang-negative conflict by preferring one outcome; represent it as a moderator structure over baseline strength, compute matching, and task topology. Where evidence conflicts with the emerging thesis, keep the contradiction visible as a labeled risk or falsification condition instead of smoothing it over.",
+    "kind": "synthesize",
+    "objective": "Produce the note's explanatory core as a reusable artifact. (1) Reconciled evidence map: show how Du 2023's debate gains over majority voting, Smit 2023's null and dataset-dependent agreement effects, and Zhang 2025's matched-compute self-consistency dominance plus heterogeneity gains can all be true simultaneously, attributing differences to baseline strength, compute confounding, and task topology rather than selecting a preferred outcome; cite file paths with PDF PAGE markers. (2) One original mechanistic thesis (D2): state when staged retrieval-mediated Q/A beats both independent sampling plus final aggregation and an open shared transcript under matched total inference compute, with explicit sign conditions. (3) An explicit causal model (D3) over initial error correlation, evidence diversity, social influence/conformity, retrieval selectivity, synthesis competence, and task topology, where every directed edge is labeled corpus-evidenced, cross-paper inference, or non-identified, and where raised questions rz1, rz2, rq1 (answer-only vs rationale exposure), rq-choi-1, and rq-shapiro-merge are mapped onto the specific edges they leave open (feeding D6). (4) At least four directional or interaction predictions (D5), each explicitly tagged with which alternative it discriminates against among compute-only, diversity-only, and deliberation-only. Use Lorenz 2011 and Choi 2025 for the social-influence pathway, Dung 1995 for what adjudication of conflicting answers can and cannot guarantee, and Shapiro 2011 for the truth-neutrality and non-commutativity of the merge stage.",
+    "question_ids": [
+      "question:work:004-synthesis",
+      "question:demand:D2",
+      "question:demand:D3",
+      "question:demand:D4",
+      "question:demand:D5",
+      "question:demand:D6"
+    ],
+    "rationale": "These seven answers are mutually constraining pieces of one mechanism (positive, null, and negative debate results; human and LLM conformity evidence; two formal accounts of synthesis and merging) and the deliverable demands D2-D6 are all integrative, so a single synthesis that reads them against each other is the correct shape; the four open raised questions are exactly the edges the corpus cannot identify and must be carried into the artifact rather than investigated further from text."
+  }
+}

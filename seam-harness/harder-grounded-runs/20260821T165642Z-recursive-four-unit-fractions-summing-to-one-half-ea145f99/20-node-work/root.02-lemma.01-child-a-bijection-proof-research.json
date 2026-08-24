@@ -1,0 +1,124 @@
+{
+  "account": "The dossier supplies the node's objective, rationale, acceptance condition, and exact-algebra constraint, but it contains no source materials, workspace documents, or external references. Consequently, I cannot observe, verify, or cite any substantive mathematical statements from the dossier; the proof components for the forward direction, the factor positivity/congruence conditions, and the inverse map must all be derived mathematically rather than observed from a source. I can only note the exact-algebra requirement and what the acceptance condition demands.",
+  "assumptions": [
+    "The variables p, q, z, w are positive integers and p, q are coprime, as stated in the node objective.",
+    "The factor-pair notion (u,v) uses the conventional interpretation that u and v are positive integers with uv = q^2 and u <= v.",
+    "The congruence 'u ≡ -q (mod p)' is to be interpreted modulo p in the standard integer sense."
+  ],
+  "boundary_findings": [],
+  "claims": [
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": null,
+          "locator": "acceptance_condition",
+          "source_id": "node.root.02-lemma.01-child-a-bijection-proof"
+        }
+      ],
+      "confidence": 1.0,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "c1",
+      "statement": "The node's acceptance condition requires deriving (pz - q)(pw - q) = q^2 from 1/z + 1/w = p/q using exact fractions."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": null,
+          "locator": "objective",
+          "source_id": "node.root.02-lemma.01-child-a-bijection-proof"
+        }
+      ],
+      "confidence": 1.0,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "c2",
+      "statement": "The node's objective requires proving the bijection in both directions and includes the exact map u = pz - q and v = pw - q."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": null,
+          "locator": "constraints",
+          "source_id": "node.root.02-lemma.01-child-a-bijection-proof"
+        },
+        {
+          "excerpt": null,
+          "locator": "acceptance_condition",
+          "source_id": "node.root.02-lemma.01-child-a-bijection-proof"
+        }
+      ],
+      "confidence": 1.0,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "c3",
+      "statement": "The acceptance condition and constraints require exact arithmetic only; no floating-point or unverified numeric computation is permitted."
+    },
+    {
+      "basis": "inferred",
+      "citations": [
+        {
+          "excerpt": null,
+          "locator": "acceptance_condition",
+          "source_id": "node.root.02-lemma.01-child-a-bijection-proof"
+        }
+      ],
+      "confidence": 0.95,
+      "counterevidence": [],
+      "derived_from_claim_ids": [
+        "c1"
+      ],
+      "local_id": "c4",
+      "statement": "For coprime positive integers p, q, if positive integers z, w satisfy 1/z + 1/w = p/q and u = pz - q, v = pw - q, then uv = q^2."
+    },
+    {
+      "basis": "inferred",
+      "citations": [
+        {
+          "excerpt": null,
+          "locator": "objective",
+          "source_id": "node.root.02-lemma.01-child-a-bijection-proof"
+        }
+      ],
+      "confidence": 0.9,
+      "counterevidence": [],
+      "derived_from_claim_ids": [
+        "c2"
+      ],
+      "local_id": "c5",
+      "statement": "For every admissible factor pair u, v with uv = q^2, u <= v, u ≡ -q mod p, and v ≡ -q mod p, the inverse z = (u + q)/p and w = (v + q)/p gives positive integers satisfying 1/z + 1/w = p/q and z <= w."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": null,
+          "locator": "source_materials",
+          "source_id": "node.root.02-lemma.01-child-a-bijection-proof"
+        },
+        {
+          "excerpt": null,
+          "locator": "workspace_documents",
+          "source_id": "node.root.02-lemma.01-child-a-bijection-proof"
+        }
+      ],
+      "confidence": 1.0,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "local_id": "c6",
+      "statement": "The dossier contains no source materials or workspace documents that provide algebraic derivations, citations, or boundary checks for this proof."
+    }
+  ],
+  "counterevidence": [],
+  "next_observation": "Obtain any source material or prior lemma draft that includes the algebraic derivation or the factor-pair enumeration; otherwise the proof must be independently reconstructed under the exact-algebra constraint.",
+  "source_ids_consulted": [
+    "root.02-lemma.01-child-a-bijection-proof"
+  ],
+  "sufficiency": "blocked",
+  "unresolved": [
+    "No source or stored derivation exists in the dossier to cite for the exact algebraic identity. The proof steps themselves must be constructed and verified independently."
+  ]
+}

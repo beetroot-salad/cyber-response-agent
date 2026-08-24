@@ -1,0 +1,46 @@
+{
+  "files": [
+    {
+      "content_sha256": "f6605c2b9bb68dd7906b2881ec1f0b48b32f607c7b768cd3ec8ab5a9ca46afaa",
+      "path": "CORPUS.md",
+      "size_bytes": 1937
+    },
+    {
+      "content_sha256": "4417097c955b9a3dce69c80601375ab34763bb658c26fe6c9d6c67a497416825",
+      "path": "papers/text/choi-et-al-2025-conformity.txt",
+      "size_bytes": 60691
+    },
+    {
+      "content_sha256": "0674b1614409c389ff275c78c696138a9453e321fee21b90ea1e4354700be7e2",
+      "path": "papers/text/du-et-al-2023-multiagent-debate.txt",
+      "size_bytes": 97256
+    },
+    {
+      "content_sha256": "8731efeb90375496d5dc1ea00840bc54e28f908021deff777966babcbc797f6f",
+      "path": "papers/text/dung-1995-argumentation.txt",
+      "size_bytes": 93057
+    },
+    {
+      "content_sha256": "10d6e61835ae38ecc32c345b6c18f5d4259ef40874694d12f60c4dd6162e160f",
+      "path": "papers/text/lorenz-et-al-2011-social-influence.txt",
+      "size_bytes": 46369
+    },
+    {
+      "content_sha256": "5363f488d988a892dd33e2cbba81c87e558deda9efdd190bc608ef9a8d4ba26a",
+      "path": "papers/text/shapiro-et-al-2011-crdts.txt",
+      "size_bytes": 42422
+    },
+    {
+      "content_sha256": "a1263656cb4d7e298c289b4ee44368fe9f38c1c2efc4ce88f0d54d60a62a3d1c",
+      "path": "papers/text/smit-et-al-2023-going-mad.txt",
+      "size_bytes": 80205
+    },
+    {
+      "content_sha256": "41e1d26db346207d4be0ec393e7bed983875ae417ca7aa5a530d390dca72e06e",
+      "path": "papers/text/zhang-et-al-2025-mad-question.txt",
+      "size_bytes": 95563
+    }
+  ],
+  "index_sha256": "91d775829bddc33e353ff0016fede026ad12041d4284eaaaa87c4e2d6e44d241",
+  "root": "/workspace/seam-harness/research-kb-workspace"
+}

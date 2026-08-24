@@ -1,0 +1,7 @@
+{
+  "content_sha256": "434b333d58f401d9124b5e1e722ee853b860fb5adc2abe749f7129d680247f7a",
+  "id": "link:434b333d58f401d9124b5e1e",
+  "relation": "refines",
+  "source_id": "question:root.04-debate-gains-evidence.01-extract-du-findings",
+  "target_id": "question:demand:D12"
+}

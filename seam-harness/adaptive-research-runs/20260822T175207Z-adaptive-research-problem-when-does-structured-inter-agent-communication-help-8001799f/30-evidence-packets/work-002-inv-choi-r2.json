@@ -1,0 +1,266 @@
+{
+  "account": "Choi et al. 2025 (ACL Findings) ran >2,500 structured LLM debates on five ground-truth-free social topics with proponent, opponent, and neutral (always GPT-4o) agents, manipulating group size (1:2, 2:1, up to 1:8) and 'intelligence' (parameter size, large vs small models from GPT/Claude/Qwen). Neutral agents conform significantly to numerical majorities (chi2=164.839, p<0.001; CR 63.5-72.1% at 2:1 vs 39.4-42.2% at 1:2) and to higher-intelligence sides (chi2=142.285, p<0.001; CR 74.3% when the proponent is the large model vs 39.8% when it is small). Critically, intelligence dominates numbers: one large-model agent against two small-model agents still wins 66.3% of turns, while two small agents against one large win only 42.2%; effect size for intelligence (eta_p2~0.167, large) dwarfs majority size (~0.068, moderate), and more capable evaluators (GPT-4o-mini vs GPT-3.5-turbo) are less swayed by headcount as ratios scale to 1:8. Authors conclude argument quality outweighs quantity. However, every condition exposes the neutral to full 256-token persuasive arguments across 3 turns; there is no bare-answer condition, so the paper cannot discriminate answer-only exposure from rationale-mediated influence (rq1 remains open; Choi only bounds it from the rationale side). Conformity here is evaluator persuasion on opinion topics, not accuracy change on verifiable tasks.",
+  "assumptions": [
+    "The extraction's ===== PDF PAGE N ===== markers are accurate; Table 2 values were read from the extracted text of PDF PAGE 6.",
+    "Absence of an answer-only condition in the design, results, and discussion sections is treated as absence from the study; appendices (model lists, ANOVA details, prompt text) were only partially inspected.",
+    "Chi-square tests are on turns/discussions pooled across topics; per-scenario Ns and provider breakdowns (Appendix C) were not extracted, so claim confidence on exact magnitudes relies on the reported tables."
+  ],
+  "boundary_findings": [
+    {
+      "alternative_explanation": "An answer-only control could exist in an appendix not fully read; section 3's design description and Figure 1 make this unlikely.",
+      "consequence_if_absorbed": "The note would mis-cite Choi as evidence that mere answer exposure drives conformity/diversity collapse in LLMs, mis-specifying whether retrieval-mediated staging should gate how many peer answers are seen versus whether rationales are attached - the two designs yield different predictions.",
+      "evidence": [
+        "papers/text/choi-et-al-2025-conformity.txt ===== PDF PAGE 5 ===== (protocol: neutral 'evaluates the arguments presented by both sides and selects the most persuasive agent')",
+        "papers/text/choi-et-al-2025-conformity.txt ===== PDF PAGE 7 ===== (conclusion that 'logical and persuasive arguments outweigh numerical advantage', with no answer-only comparison)"
+      ],
+      "narrative": "Choi et al. provides only rationale-accompanied influence: all 2,500+ debates expose the neutral agent to full persuasive arguments, and no bare-answer or vote-only condition exists. The paper therefore cannot discriminate whether LLM conformity requires reasoning exposure or also arises from mere answer exposure - exactly the fork in raised question rq1.",
+      "smallest_suspected_scope": "The social-influence pathway of the causal model (D3) and the rq1-dependent D5 predictions about gating exposure content vs exposure volume."
+    }
+  ],
+  "child_packet_ids": [],
+  "claims": [
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "By simulating over 2,500 debates, we analyze how initially neutral agents, assigned a centrist disposition, adopt specific stances over time.",
+          "locator": "===== PDF PAGE 1 =====, lines 1-30 (abstract)",
+          "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+        },
+        {
+          "excerpt": "proponent and opponent agents each have three opportunities to speak per turn. The speaking order is randomized... The neutral agent is consistently modeled using GPT-4o... fixed temperature of 0.7... Response lengths are capped at 256 tokens",
+          "locator": "===== PDF PAGE 5 =====, lines 368-427",
+          "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+        }
+      ],
+      "confidence": 0.95,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "id": "work:002-inv-choi-r2:C001",
+      "statement": "Design: Choi et al. simulate >2,500 multi-agent debates among proponent, opponent, and neutral agents on five socially contentious topics without definitive answers (basic income, immigration policy, death penalty, educational equality, gender wage gap); proponent/opponent agents are drawn from GPT, Claude, and Qwen families, the neutral agent is always GPT-4o, debates run 3 turns with 3 speaking opportunities per side per turn, randomized speaking order, temperature 0.7, and 256-token response caps."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "H1: LLM agents would conform to the majority opinion when one group has more agents. H2: LLM agents tend to conform to the side with relatively higher intelligence.",
+          "locator": "===== PDF PAGE 3 =====, lines 283-296",
+          "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+        },
+        {
+          "excerpt": "we use model parameter size as a practical [proxy]... e: 1 Large vs 1 Small (Superior); j: 1 Large vs 2 Small (Superior)",
+          "locator": "===== PDF PAGE 4 =====, lines 291-336 (Table 1)",
+          "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+        }
+      ],
+      "confidence": 0.95,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "id": "work:002-inv-choi-r2:C002",
+      "statement": "Design: hypotheses are H1 (agents conform to the numerical majority), H2 (agents conform to the side with relatively higher intelligence), H3 (larger group-size disparity strengthens majority conformity); intelligence is operationalized as model parameter size (large vs small), justified by MMLU-style benchmark correlations, and Experiment A uses ten scenarios (a-j) crossing proponent:opponent ratios (2, 0.5, 1) with superior/equivalent/inferior model size."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "neutral agents are significantly more likely to conform to the major group (chi2 = 164.839, p < 0.001, df = 1); a: 63.53/33.60; b: 39.40/10.40; c: 72.11/41.33; d: 42.22/8.67",
+          "locator": "===== PDF PAGE 6 =====, Table 2 and Discussion 4.1 (lines 429-545)",
+          "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+        }
+      ],
+      "confidence": 0.95,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "id": "work:002-inv-choi-r2:C003",
+      "statement": "Majority effect (H1 supported): with intelligence held equal, neutral agents conform significantly more to the majority side (chi2 = 164.839, p < 0.001, df = 1); proponent-side conformity rates are 63.53% and 72.11% under a 2:1 proponent majority (scenarios a, c) versus 39.40% and 42.22% under a 1:2 proponent minority (b, d), with full-conformity ratios 33.60/41.33% vs 10.40/8.67%."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "higher-intelligence agents, who present more logical and persuasive arguments, significantly increasing the likelihood of neutral agents conforming to their stance (chi2 = 142.285, p < 0.001, df = 1)",
+          "locator": "===== PDF PAGE 6 =====, Table 2 and Discussion 4.1 (lines 429-545)",
+          "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+        }
+      ],
+      "confidence": 0.95,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "id": "work:002-inv-choi-r2:C004",
+      "statement": "Intelligence effect (H2 supported): with group size held at 1:1, a large-model debater elicits significantly more neutral-agent conformity than a small-model debater (chi2 = 142.285, p < 0.001, df = 1): scenario e (1 large vs 1 small) yields CR 74.33% / FCR 52.50%, versus scenario f (1 small vs 1 large) CR 39.83% / FCR 16.00%."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "g: 83.17/64.00; h: 25.67/5.50; i: 42.17/15.50; j: 66.33/40.50",
+          "locator": "===== PDF PAGE 6 =====, Table 2",
+          "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+        },
+        {
+          "excerpt": "the majority size shows a moderate effect (eta_p2 ~ 0.068), intelligence has a significantly larger impact (eta_p2 ~ 0.1665)... a single high-intelligence agent exerts more influence than a larger group with lower intelligence",
+          "locator": "===== PDF PAGE 7 =====, Discussion 4.1 (lines 556-600)",
+          "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+        }
+      ],
+      "confidence": 0.95,
+      "counterevidence": [],
+      "derived_from_claim_ids": [
+        "work:002-inv-choi-r2:C003",
+        "work:002-inv-choi-r2:C004"
+      ],
+      "id": "work:002-inv-choi-r2:C005",
+      "statement": "Intelligence outweighs numbers: a single high-intelligence agent defeats a larger lower-intelligence group - scenario j (1 large vs 2 small) yields CR 66.33% / FCR 40.50% while scenario i (2 small vs 1 large) yields only CR 42.17% / FCR 15.50%; combined superiority (g: 2 large vs 1 small) reaches CR 83.17% / FCR 64.00% against h (1 small vs 2 large) CR 25.67% / FCR 5.50%; Welch's ANOVA gives a large effect for intelligence (eta_p2 ~ 0.1665) versus moderate for majority size (eta_p2 ~ 0.068), with post hoc power > 0.99 for the intelligence effect."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "the proponent-opponent agent ratio is varied from 1:2 to 1:4 and 1:8",
+          "locator": "===== PDF PAGE 5 =====, Experiment B (lines 369-380)",
+          "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+        },
+        {
+          "excerpt": "This effect is most evident in GPT-3.5-turbo, where conformity rates scale proportionally with majority size, whereas GPT-4o-mini, with higher intelligence, exhibits a weaker relation between numerical advantage and conformity.",
+          "locator": "===== PDF PAGE 7 =====, Extended Analysis (lines 596-606)",
+          "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+        }
+      ],
+      "confidence": 0.9,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "id": "work:002-inv-choi-r2:C006",
+      "statement": "Ratio scaling is moderated by evaluator capability (Experiment B): as the majority:minority ratio grows from 1:2 to 1:4 to 1:8 (GPT-3.5-turbo and GPT-4o-mini debaters, fixed intelligence), conformity rises steadily, but the scaling is strong and proportional only for GPT-3.5-turbo; GPT-4o-mini shows a weak relation between numerical advantage and conformity - i.e., more capable evaluators are less moved by sheer headcount."
+    },
+    {
+      "basis": "observed",
+      "citations": [
+        {
+          "excerpt": "conformity trends remain consistent across all five debate topics... debates on the death penalty exhibit a particularly pronounced leftward shift... instances of 'complete agreement' are observed among agents in numerical or intelligence-based minority groups",
+          "locator": "===== PDF PAGE 7 ===== and ===== PDF PAGE 8 =====, sections 4.2-4.3 (lines 606-770)",
+          "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+        }
+      ],
+      "confidence": 0.9,
+      "counterevidence": [],
+      "derived_from_claim_ids": [],
+      "id": "work:002-inv-choi-r2:C007",
+      "statement": "Robustness and qualitative dynamics: conformity trends are consistent across all five topics and survive reversed topic formulations (ruling out prompt-wording artifacts), though the death-penalty topic shows a pronounced baseline shift toward the opponent stance, indicating topic-level implicit model bias; qualitatively, 8:1 debates show group polarization (majority arguments grow more extreme across turns) and minority agents sometimes issue 'complete agreement' capitulations, which the authors interpret as a spiral-of-silence mechanism."
+    },
+    {
+      "basis": "inferred",
+      "citations": [
+        {
+          "excerpt": "hypothesizing that neutral agents consider both the quantity and quality of arguments when forming their stance",
+          "locator": "===== PDF PAGE 2 =====, Introduction (lines 97-100)",
+          "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+        },
+        {
+          "excerpt": "in LLM-based debates, logical and persuasive arguments outweigh numerical advantage",
+          "locator": "===== PDF PAGE 7 =====, Discussion 4.1 (lines 590-596)",
+          "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+        },
+        {
+          "excerpt": "a neutral agent, maintaining a strictly neutral stance, evaluates the arguments presented by both sides and selects the most persuasive agent to support",
+          "locator": "===== PDF PAGE 5 =====, Discussion Protocol (lines 381-396)",
+          "source_id": "papers/text/choi-et-al-2025-conformity.txt"
+        }
+      ],
+      "confidence": 0.85,
+      "counterevidence": [
+        "Appendices A-E were not read line-by-line; it is remotely possible an unadvertised answer-only control exists there, though the design sections (3.1-3.3) and Figure 1 describe only full-argument debate."
+      ],
+      "derived_from_claim_ids": [
+        "work:002-inv-choi-r2:C001",
+        "work:002-inv-choi-r2:C005"
+      ],
+      "id": "work:002-inv-choi-r2:C008",
+      "statement": "Quality-vs-quantity and the rq1 gap: the authors hypothesize neutrals weigh both the quantity and quality of arguments and conclude that 'logical and persuasive arguments outweigh numerical advantage' - but every experimental condition exposes the neutral agent to full persuasive argumentation (three turns of 256-token arguments); no bare-answer / vote-only condition exists, so Choi et al. cannot identify whether LLM conformity requires rationale exposure or also occurs under mere answer exposure (raised question rq1). Conformity in this paper is therefore only evidence about rationale-accompanied influence, and only about stance adoption on ground-truth-free topics, not about error change on verifiable tasks."
+    }
+  ],
+  "content_sha256": "eaee61611e2649a829da16f7790a965c75374e7603a565825921645a6a75659f",
+  "counterevidence": [
+    "Topics have no ground truth by design ('inherently controversial and lack definitive answers', PDF PAGE 1), so 'conformity' is evaluator persuasion, not accuracy change; this paper alone cannot say whether majority/intelligence-driven shifts reduce or amplify error on verifiable tasks.",
+    "'Intelligence' is operationalized as parameter size and is confounded with model family/provider and tuning; the dominance of 'intelligence' may partly be a persuasion-style or verbosity artifact rather than reasoning quality (authors justify the proxy only via MMLU correlations, PDF PAGE 4).",
+    "The neutral evaluator is always GPT-4o (PDF PAGE 5); conformity rates may reflect GPT-4o's evaluative preferences rather than agent-population dynamics in general.",
+    "Topic-level baseline biases (e.g., death-penalty leftward shift, PDF PAGE 7-8) show measured conformity partly tracks prior model bias, not just social influence; the authors mitigate but do not eliminate this via reversed formulations."
+  ],
+  "id": "packet:work:002-inv-choi-r2",
+  "knowledge_links": [
+    {
+      "rationale": "Directly fulfills the retry objective with 8 page-marked claims covering design, majority/intelligence findings, quality-vs-quantity, and the answer-vs-rationale gap.",
+      "relation": "answers",
+      "source_id": "self",
+      "target_id": "question:work:002-inv-choi-r2"
+    },
+    {
+      "rationale": "The wave-1 answer is a blocked failure packet with no claims; this packet supplies the evidence it failed to produce.",
+      "relation": "supersedes",
+      "source_id": "self",
+      "target_id": "answer:work:001-inv-choi-conformity"
+    },
+    {
+      "rationale": "Same underlying question as the r2 retry; all acceptance items (design, quantitative findings, quality-vs-quantity, limitations) are covered with page markers.",
+      "relation": "answers",
+      "source_id": "self",
+      "target_id": "question:work:001-inv-choi-conformity"
+    },
+    {
+      "rationale": "Bounds rq1 from the rationale side: Choi shows conformity under full-argument exposure and provides no bare-answer condition, so answer-only sufficiency remains experimentally open.",
+      "relation": "partially_answers",
+      "source_id": "self",
+      "target_id": "question:raised:784a683dbe8a:rq1"
+    },
+    {
+      "rationale": "Supplies the LLM-side social-influence pathway parameters: majority pull is real but moderate (eta_p2~0.068) and is dominated by capability disparity (eta_p2~0.167), with evaluator capability moderating headcount effects.",
+      "relation": "partially_answers",
+      "source_id": "self",
+      "target_id": "question:demand:D3"
+    },
+    {
+      "rationale": "Provides the Choi portion of the seven-paper reconciliation with explicit PDF page markers, including the caveat that its topics lack ground truth (needed when reconciling with accuracy-based debate results).",
+      "relation": "partially_answers",
+      "source_id": "self",
+      "target_id": "question:demand:D4"
+    }
+  ],
+  "next_observation": null,
+  "node_id": "work:002-inv-choi-r2",
+  "objective": "What does Choi et al. 2025 (papers/text/choi-et-al-2025-conformity.txt) show about conformity in LLM multi-agent debate: the simulation design (proponent/opponent/neutral agents, majority vs minority sizes, intelligence levels, topics); quantitative findings on majority effects and intelligence disparities; whether persuasion quality vs quantity of arguments matters; and anything the paper shows about whether agents shift in response to bare answers versus reasoned arguments (relevant to raised question rq1). Keep the answer compact: at most 8 claims, each with a `===== PDF PAGE N =====` marker.",
+  "raised_questions": [
+    {
+      "acceptance_condition": "A study with ground-truth tasks, mixed-capability LLM agents at varied majority/minority and capability configurations, measuring both answer-shift rates (conformity) and group accuracy pre/post exposure, under matched total inference compute.",
+      "discriminating_outcomes": [
+        "High-capability minority pulls groups toward the correct answer disproportionately often -> capability-weighted synthesis is warranted and conformity can be beneficial.",
+        "High-capability minority pulls groups toward its answer regardless of correctness -> conformity is error-amplifying and staging must gate influence, not just exposure.",
+        "No conformity on verifiable tasks (agents hold initial answers) -> Choi dynamics are opinion-topic-specific and the causal model's social-influence pathway is weak where it matters."
+      ],
+      "local_id": "rq-choi-1",
+      "rationale": "Choi's topics are deliberately ground-truth-free, so its conformity rates measure persuasion, not accuracy. The note's mechanism needs to know whether the capability-dominance effect (one strong agent outweighs a majority) is error-correcting (strong agent is right and pulls the group toward truth) or error-amplifying (strong agent is confidently wrong and collapses diversity) on verifiable tasks - this determines whether staged retrieval should amplify or dampen high-capability voices.",
+      "required_source_hints": [
+        "papers/text/choi-et-al-2025-conformity.txt",
+        "papers/text/zhang-et-al-2025-mad-question.txt",
+        "papers/text/smit-et-al-2023-going-mad.txt"
+      ],
+      "tags": [
+        "uncertainty",
+        "evidence",
+        "method"
+      ],
+      "target_question_ids": [
+        "question:work:002-inv-choi-r2",
+        "question:demand:D3"
+      ],
+      "text": "Do Choi-style conformity dynamics - majority pull dominated by single high-capability agents, and minority capitulation - reproduce on tasks with verifiable ground truth, and when they occur, do they reduce or increase aggregate error relative to independent sampling?"
+    }
+  ],
+  "source_ids_consulted": [
+    "papers/text/choi-et-al-2025-conformity.txt"
+  ],
+  "sufficiency": "ready_to_synthesize",
+  "unresolved": [
+    "Exact per-scenario sample sizes, per-provider breakdowns, and Appendix C ANOVA tables were not extracted; needed only if the note quotes provider-specific magnitudes.",
+    "Whether Choi-style conformity dynamics (majority pull, capability dominance, spiral-of-silence capitulation) occur on tasks with verifiable answers remains untested by this paper - the key external-validity bridge for the note's mechanism.",
+    "The 'complete agreement' capitulation frequency is reported only qualitatively (Appendix E example); no quantitative rate of minority silence is available in the extracted text."
+  ]
+}

@@ -1,0 +1,459 @@
+{
+  "call_id": "call-0009-adaptive-investigator",
+  "queries": [
+    {
+      "arguments": {
+        "entry_id": "answer:work:001-struct-core"
+      },
+      "result": {
+        "content": {
+          "claim_ids": [],
+          "content_sha256": "dcf195e3e08c1bbf3c19468cee159588bc2e833967e7642c474ce2a4fc67551d",
+          "id": "answer:work:001-struct-core",
+          "node_id": "work:001-struct-core",
+          "packet": {
+            "account": "Investigation failed before producing evidence: UnexpectedModelBehavior: Exceeded maximum output retries (2)",
+            "assumptions": [],
+            "boundary_findings": [],
+            "child_packet_ids": [],
+            "claims": [],
+            "content_sha256": "b23812a3e5d809c8dead9c6818d861afd4b0a35a81a51a34cd976a4d1c19f91b",
+            "counterevidence": [],
+            "id": "packet:work:001-struct-core",
+            "knowledge_links": [],
+            "next_observation": null,
+            "node_id": "work:001-struct-core",
+            "objective": "Prove or refute the structural claims D1-D3 for S = {sorted positive-integer quadruples with a^2+b^2+c^2+d^2 = 4abcd} under Vieta mutation (replace one coordinate x_i by 4 times the product of the other three minus x_i, then re-sort): (D1) every solution is connected to the root (1,1,1,1) by a mutation path; (D2) every non-root vertex has a unique height-decreasing mutation, where height-decreasing means strictly decreasing the maximum coordinate d (coordinate sum only auxiliary); (D3) consequently the quotient mutation graph is a rooted tree. Suggested route, to be verified rigorously: at a non-root vertex show d^2 > a^2+b^2+c^2 (equivalently the Vieta conjugate d' = (a^2+b^2+c^2)/d = 4abc - d satisfies 1 <= d' < d), e.g. by showing d' >= d forces a=b=1 and then c^2 - 4cd + d^2 = -2, whose integer solutions are excluded by m^2 = 3c^2 + 2 being impossible mod 3 except at the root; show c = d occurs only at the root; show mutation at any coordinate < d strictly increases the maximum; conclude strict descent, termination at the root, uniqueness of the parent, and the tree property (a cycle would give its maximum-height vertex two distinct height-decreasing mutations). If any claim fails, exhibit and verify the failure structure.",
+            "raised_questions": [],
+            "source_ids_consulted": [],
+            "sufficiency": "blocked",
+            "unresolved": [
+              "Investigation failed before producing evidence: UnexpectedModelBehavior: Exceeded maximum output retries (2)"
+            ]
+          },
+          "packet_id": "packet:work:001-struct-core",
+          "question_ids": [
+            "question:demand:D1",
+            "question:demand:D2",
+            "question:demand:D3",
+            "question:work:001-struct-core"
+          ],
+          "sufficiency": "blocked",
+          "summary": "Investigation failed before producing evidence: UnexpectedModelBehavior: Exceeded maximum output retries (2)",
+          "tags": [
+            "method",
+            "evidence",
+            "constraint",
+            "uncertainty"
+          ],
+          "unresolved": [
+            "Investigation failed before producing evidence: UnexpectedModelBehavior: Exceeded maximum output retries (2)"
+          ]
+        },
+        "id": "answer:work:001-struct-core",
+        "incoming_links": [],
+        "kind": "answer",
+        "outgoing_links": [
+          {
+            "content_sha256": "15c381a078950ca36c7ba2ad1701252b0547125fc43408bbd36f188d1745af64",
+            "id": "link:15c381a078950ca36c7ba2ad",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:001-struct-core",
+            "target_id": "question:demand:D1"
+          },
+          {
+            "content_sha256": "58d8911d7562023763c452281c1c207d3b8291e5bb7c8ed786503aa51c68b29b",
+            "id": "link:58d8911d7562023763c45228",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:001-struct-core",
+            "target_id": "question:demand:D2"
+          },
+          {
+            "content_sha256": "7935a960a168f995d0169ffd0e58f7215137f11c54cb1fb306480f06945341d8",
+            "id": "link:7935a960a168f995d0169ffd",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:001-struct-core",
+            "target_id": "question:demand:D3"
+          },
+          {
+            "content_sha256": "ab75de993e1c66705ff4be0aa034b28ab51917405d5822ffed028eb9118b1bb1",
+            "id": "link:ab75de993e1c66705ff4be0a",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:001-struct-core",
+            "target_id": "question:work:001-struct-core"
+          }
+        ]
+      },
+      "result_ids": [
+        "answer:work:001-struct-core"
+      ],
+      "result_sha256": "7da4a34a7a550999e4d239e334ee7227073c4dc1aae95e75903434ce9f6dde67",
+      "sequence": 1,
+      "tool": "get_entry"
+    },
+    {
+      "arguments": {
+        "limit": 10,
+        "query": "Markov-Hurwitz mutation graph descent root connectivity tree",
+        "tags": [],
+        "unanswered_only": false
+      },
+      "result": {
+        "hits": [
+          {
+            "answer_count": 1,
+            "id": "question:work:001-struct-core",
+            "kind": "question",
+            "score": 12.272398392570047,
+            "sufficiency": null,
+            "tags": [
+              "method",
+              "evidence",
+              "constraint"
+            ],
+            "text": "Prove or refute the structural claims D1-D3 for S = {sorted positive-integer quadruples with a^2+b^2+c^2+d^2 = 4abcd} under Vieta mutation (replace one coordinate x_i by 4 times the product of the other three minus x_i, then re-sort): (D1) every solution is connected to the root (1,1,1,1) by a mutation path; (D2) every non-root vertex has a unique height-decreasing mutation, where height-decreasing means strictly decreasing the maximum coordinate d (coordinate sum only auxiliary); (D3) consequently the quotient mutation graph is a rooted tree. Suggested route, to be verified rigorously: at a non-root vertex show d^2 > a^2+b^2+c^2 (equivalently the Vieta conjugate d' = (a^2+b^2+c^2)/d = 4abc - d satisfies 1 <= d' < d), e.g. by showing d' >= d forces a=b=1 and then c^2 - 4cd + d^2 = -2, whose integer solutions are excluded by m^2 = 3c^2 + 2 being impossible mod 3 except at the root; show c = d occurs only at the root; show mutation at any coordinate < d strictly increases the maximum; conclude strict descent, termination at the root, uniqueness of the parent, and the tree property (a cycle would give its maximum-height vertex two distinct height-decreasing mutations). If any claim fails, exhibit and verify the failure structure.",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 0,
+            "id": "question:work:003-struct-core-v2",
+            "kind": "question",
+            "score": 11.173786103901936,
+            "sufficiency": null,
+            "tags": [
+              "method",
+              "evidence",
+              "constraint"
+            ],
+            "text": "Prove D1-D3 compactly for S = {sorted quadruples 1<=a<=b<=c<=d, a^2+b^2+c^2+d^2=4abcd} under Vieta mutation (x_i -> 4*(product of others) - x_i, then re-sort), with root (1,1,1,1). REQUIRED ROUTE (verify, fix, or replace, but keep it elementary): (L1, descent) at any non-root vertex the conjugate d' = 4abc - d = (a^2+b^2+c^2)/d is an integer >= 1; prove d' < d by contradiction: d' >= d gives a^2+b^2+c^2 >= d^2, and combined with a^2+b^2+c^2 <= 3c^2 gives d <= c*sqrt(3); feeding into the equation gives 2ab <= 3, hence a=b=1; then 2+c^2+d^2 = 4cd with c <= d <= 3c/2 forces c=1 and d=1, i.e. the root - contradiction. (L2) c = d only at the root: from a^2+b^2+2d^2 = 4abd^2 deduce d^2 | a^2+b^2 and a^2+b^2 <= 2d^2, so a^2+b^2 in {d^2, 2d^2}; the first gives 3=4ab (impossible), the second gives ab=1 and then d=1. (L3) mutating any coordinate strictly below the maximum strictly increases the maximum: new value >= 4ab d - d >= 3d > d since ab >= 1 (and a=d only at root by L2-type argument). Conclude: (D2) the mutation at the unique maximal coordinate is the unique height-decreasing mutation, i.e. strictly decreases d; (D1) iterating it strictly decreases the positive integer d, so every vertex descends to d=1, and the only vertex with d=1 is (1,1,1,1) - verify this endpoint claim; (D3) the quotient graph is a rooted tree: a cycle's maximal-height vertex would have two distinct height-decreasing mutations, contradicting D2; multiple parents likewise. Address explicitly the subtlety that equal coordinates (a=b or b=c) make some of the 4 coordinate-mutations coincide after sorting, so 'unique height-decreasing mutation' is a statement about distinct mutated vertices, not coordinate indices. KEEP THE ANSWER COMPACT (target well under 1200 words): lemma - proof format, no digressions, no worked tables beyond at most 3 one-line substitution checks. If any lemma fails, stop and report the verified counterexample instead.",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 1,
+            "id": "question:root",
+            "kind": "question",
+            "score": 9.787491742782047,
+            "sufficiency": null,
+            "tags": [
+              "risk",
+              "constraint"
+            ],
+            "text": "Investigate the mutation graph of sorted positive-integer solutions of a^2+b^2+c^2+d^2 = 4abcd under Vieta mutation. First prove or refute the structural claims — connectivity of every solution to (1,1,1,1), uniqueness of a height-decreasing mutation at every non-root vertex, and the consequent rooted-tree structure of the quotient graph — then pursue the open asymptotic part: strongest attainable rigorous upper and lower bounds for N(H), the relation between mutation depth and log H, an active search for exceptional small solutions, hidden cycles, multiple parents, and induction failure modes, and sharply separated conjectures. Deliver a self-contained research memorandum.",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 1,
+            "id": "question:work:001-upper-bound-depth",
+            "kind": "question",
+            "score": 6.401197381662156,
+            "sufficiency": null,
+            "tags": [
+              "method",
+              "measurement",
+              "constraint"
+            ],
+            "text": "From first principles, prove the strongest rigorous upper bound attainable for N(H), the number of sorted solutions with maximum coordinate at most H, and analyze rigorously how mutation depth (distance from the root (1,1,1,1), well-defined once the tree structure holds) relates to log H. Expected components, to be proved or improved: (i) every child of a non-root vertex has maximum at least 3 times the parent's maximum (since mutating at any coordinate below the maximum d gives a new value >= (4ab-1)d with ab >= 1), hence depth(v) <= log_3(max(v)) and max(v) >= 3^{depth(v)}; (ii) every non-root vertex has at most 3 children and the root has exactly 1, giving a crude N(H) = O(H); (iii) sharpen the O(H) bound as far as rigorously possible (e.g., by analyzing coincidences between children, forced sorting effects, or refined growth factors larger than 3 on most branches), and give a two-sided relation between depth and log H along extremal branches (fastest- and slowest-growing chains). No growth law may be assumed; every bound must come with explicit constants and complete proofs.",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 0,
+            "id": "question:work:003-lower-bound-v2",
+            "kind": "question",
+            "score": 5.995732273553991,
+            "sufficiency": null,
+            "tags": [
+              "method",
+              "evidence",
+              "measurement"
+            ],
+            "text": "From first principles, prove the strongest rigorous lower bound for N(H). Compact plan: (A) The chain: define (c_0,d_0) = (1,3) and d_{n+1} = 4 d_n - c_n, c_{n+1} = d_n; prove by induction that (1,1,c_n,d_n) satisfies the equation (verify n=0: 1+1+1+9=12=4*3, and the induction step via the Vieta quadratic: if (1,1,c,d) is a solution then mutating c gives (1,1,d,4d-c), a solution by the Vieta root property - prove this root-swap lemma once) and that d_n strictly increases; solve the recurrence exactly (characteristic roots 2 +/- sqrt(3); compute the closed form for d_n correctly) and conclude N(H) >= log_{2+sqrt(3)}(H) - O(1), an explicit c*log(H) lower bound. (B) Power/super-log bound attack: at (1,1,c,d) with c >= 3 the child obtained by mutating a (=1) is (1,c,d,4cd-1) while mutating c gives (1,1,d,4d-c); prove these two children are distinct and that 4cd-1 <= 4*max^2; then consider the subtree generated by repeatedly taking either child, bound the depth reachable within max <= H (growth per edge <= 4*max^2 gives log-log type depth), and compute honestly what lower bound this delivers (e.g. N(H) >= c'(log H)^beta for the largest provable beta, or only c log H). Prove whichever is rigorously attainable with explicit constants; for anything stronger, state the precise obstruction as a labeled conjecture. All family members must be proved solutions (the Vieta-root lemma suffices) and proved distinct. KEEP COMPACT (well under 1200 words), no tables beyond 3 one-line checks.",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 1,
+            "id": "question:work:001-exception-search",
+            "kind": "question",
+            "score": 5.8903717578961645,
+            "sufficiency": null,
+            "tags": [
+              "counterexample",
+              "evidence",
+              "risk",
+              "measurement"
+            ],
+            "text": "D7 (with D9 labeling): Actively search for exceptional structure by explicit, hand-checkable enumeration with stated bounds and a reproducible procedure (e.g., systematically generate all sorted solutions reachable from (1,1,1,1) with maximum coordinate d <= 100 by breadth-first mutation, and independently verify by a direct bounded search over quadruples with d <= 100 using divisibility constraints from the equation). Report: (a) a complete table of small solutions within the stated bound, each verified by direct substitution; (b) any solution with c = d, or with a mutation that fixes the maximum; (c) any vertex with two distinct height-decreasing mutations (multiple parents); (d) any cycle not passing through the root or any solution not reachable from the root within the bound (cross-check the two enumeration methods against each other); (e) failure modes of the natural induction/descent proof (e.g., cases where d' = 4abc - d is not positive, not smaller than d, or where the re-sorting breaks a naive induction hypothesis). Report everything found as labeled observations with the enumeration bound explicit, distinguishing verified counterexamples from mere non-occurrences within the bound.",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 0,
+            "id": "question:work:003-exception-search-v2",
+            "kind": "question",
+            "score": 5.8903717578961645,
+            "sufficiency": null,
+            "tags": [
+              "counterexample",
+              "evidence",
+              "risk",
+              "measurement"
+            ],
+            "text": "D7+D9: Perform a BOUNDED, hand-checkable enumeration and report labeled observations only. Procedure (state it explicitly so it is reproducible by hand): (Method 1, direct search) enumerate all candidate solutions with d <= 100 by looping over sorted triples 1 <= a <= b <= c <= 100 and solving d^2 - (4abc) d + (a^2+b^2+c^2) = 0 for integer d >= c, using the cheap necessary condition d | a^2+b^2+c^2 to prune; (Method 2, BFS) list all vertices reachable from (1,1,1,1) by breadth-first mutation, mutating all 4 coordinates, re-sorting, discarding d > 100. Expected reachable set (verify each by direct substitution, one line each): (1,1,1,1), (1,1,1,3), (1,1,3,11), (1,1,11,41) - check whether anything else with d <= 100 appears (e.g. from (1,1,3,11), mutating a gives 131 > 100; from (1,1,11,41), mutating 11 gives 153 > 100, mutating 1 gives 1803 > 100). Report as LABELED OBSERVATIONS (enumeration bound d <= 100): (a) the complete verified table with one-line substitution checks; (b) whether any solution with c = d occurs; (c) whether any vertex has two distinct height-decreasing mutations / multiple parents (within the BFS check each vertex's parent is unique); (d) whether the two methods agree exactly (any direct-search solution not reachable from the root would locally refute D1); (e) descent sanity: for each non-root vertex compute d' = 4abc - d and confirm 1 <= d' < d, exhibiting the parent edge; (f) note any induction failure modes observed (e.g. re-sorting effects) or state their absence within the bound. STRICT BREVITY: total well under 900 words; distinguish verified facts within the bound from non-occurrences (which prove nothing beyond d <= 100).",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 0,
+            "id": "question:work:003-upper-depth-v2",
+            "kind": "question",
+            "score": 5.401197381662156,
+            "sufficiency": null,
+            "tags": [
+              "method",
+              "measurement",
+              "constraint"
+            ],
+            "text": "From first principles, prove the strongest rigorous upper bound for N(H) = #{sorted solutions with d <= H} and the two-sided depth-vs-log-H relation, ASSUMING the tree structure (prove the per-edge growth and branching lemmas directly so the thread is self-contained where cheap). Compact plan: (i) at a non-root vertex, mutating any of the three non-maximal coordinates x gives a child with new maximum 4*(product of three others) - x >= (4ab-1)d >= 3d; hence max(v) >= 3^{depth(v)} and depth(v) <= log_3(max(v)); the root has exactly one child (1,1,1,3) - verify. (ii) Each non-root vertex has at most 3 children and the root exactly 1, so N(H) <= sum_{k=0}^{floor(log_3 H)} 3^k = (3^{floor(log_3 H)+1}-1)/2 <= (3H-1)/2 = O(H) with explicit constant. (iii) Two-sided depth relation: upper depth bound log_3 H from (i); lower bound from the coarse child estimate d_child <= 4*d^3 (since a,b,c <= d), giving log max(v) <= 3^{depth(v)} * C for an explicit constant C, hence depth(v) >= log_3(log max(v)) - O(1) along every branch; identify along which branches each extreme is approached. (iv) Attempt to sharpen the O(H) constant or exponent rigorously (e.g., exploit that the (1,1,c,d)-chain is the unique slowest branch and off-chain children grow by factor >= 4ab-1 with ab >= 2, so most of the tree grows much faster; try to prove N(H) = O(H^alpha) for some alpha < 1); if a sharper bound cannot be fully proved, state exactly what is proved, and label any improvement as CONJECTURE with the precise gap. KEEP COMPACT (well under 1200 words): theorems with terse proofs, explicit constants, no tables.",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 1,
+            "id": "question:demand:D3",
+            "kind": "question",
+            "score": 5.079441541679836,
+            "sufficiency": null,
+            "tags": [
+              "risk"
+            ],
+            "text": "Establish whether the quotient mutation graph is a rooted tree as a consequence of D1 and D2 — and if any of D1-D3 fails, exhibit and verify the failure structure (disconnected component, cycle, or multiple parents).",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 1,
+            "id": "question:demand:D2",
+            "kind": "question",
+            "score": 3.386294361119891,
+            "sufficiency": null,
+            "tags": [
+              "measurement",
+              "decision"
+            ],
+            "text": "Prove or refute: every non-root vertex has a unique height-decreasing mutation, where height-decreasing means strictly decreasing the maximum coordinate d (decision 4); coordinate sum may be used only as an auxiliary measure.",
+            "unresolved_count": null
+          }
+        ],
+        "query": "Markov-Hurwitz mutation graph descent root connectivity tree",
+        "snapshot_sha256": "9f9e79e26e3a271ceffdec6a03ae5a4462c5547fdfaa94d08c0a9d67d4fadf3a",
+        "truncated": true
+      },
+      "result_ids": [
+        "question:work:001-struct-core",
+        "question:work:003-struct-core-v2",
+        "question:root",
+        "question:work:001-upper-bound-depth",
+        "question:work:003-lower-bound-v2",
+        "question:work:001-exception-search",
+        "question:work:003-exception-search-v2",
+        "question:work:003-upper-depth-v2",
+        "question:demand:D3",
+        "question:demand:D2"
+      ],
+      "result_sha256": "7addeecaedb11d2b1b519402c0c3b1c3e01ac1b3339ab1b974ce43a3ff73eca0",
+      "sequence": 2,
+      "tool": "search_questions"
+    },
+    {
+      "arguments": {
+        "entry_id": "answer:work:001-upper-bound-depth"
+      },
+      "result": {
+        "content": {
+          "claim_ids": [],
+          "content_sha256": "3016032ecca7385261fad5047a08b63e105d8f8e75222341c3b02f37adbe5756",
+          "id": "answer:work:001-upper-bound-depth",
+          "node_id": "work:001-upper-bound-depth",
+          "packet": {
+            "account": "Investigation failed before producing evidence: UnexpectedModelBehavior: Exceeded maximum output retries (2)",
+            "assumptions": [],
+            "boundary_findings": [],
+            "child_packet_ids": [],
+            "claims": [],
+            "content_sha256": "9318e0dba33940a624a28fb185fb6cda9c3af01fb9a865a4c6bf17f87e66c081",
+            "counterevidence": [],
+            "id": "packet:work:001-upper-bound-depth",
+            "knowledge_links": [],
+            "next_observation": null,
+            "node_id": "work:001-upper-bound-depth",
+            "objective": "From first principles, prove the strongest rigorous upper bound attainable for N(H), the number of sorted solutions with maximum coordinate at most H, and analyze rigorously how mutation depth (distance from the root (1,1,1,1), well-defined once the tree structure holds) relates to log H. Expected components, to be proved or improved: (i) every child of a non-root vertex has maximum at least 3 times the parent's maximum (since mutating at any coordinate below the maximum d gives a new value >= (4ab-1)d with ab >= 1), hence depth(v) <= log_3(max(v)) and max(v) >= 3^{depth(v)}; (ii) every non-root vertex has at most 3 children and the root has exactly 1, giving a crude N(H) = O(H); (iii) sharpen the O(H) bound as far as rigorously possible (e.g., by analyzing coincidences between children, forced sorting effects, or refined growth factors larger than 3 on most branches), and give a two-sided relation between depth and log H along extremal branches (fastest- and slowest-growing chains). No growth law may be assumed; every bound must come with explicit constants and complete proofs.",
+            "raised_questions": [],
+            "source_ids_consulted": [],
+            "sufficiency": "blocked",
+            "unresolved": [
+              "Investigation failed before producing evidence: UnexpectedModelBehavior: Exceeded maximum output retries (2)"
+            ]
+          },
+          "packet_id": "packet:work:001-upper-bound-depth",
+          "question_ids": [
+            "question:demand:D4",
+            "question:demand:D6",
+            "question:work:001-upper-bound-depth"
+          ],
+          "sufficiency": "blocked",
+          "summary": "Investigation failed before producing evidence: UnexpectedModelBehavior: Exceeded maximum output retries (2)",
+          "tags": [
+            "method",
+            "measurement",
+            "constraint",
+            "uncertainty"
+          ],
+          "unresolved": [
+            "Investigation failed before producing evidence: UnexpectedModelBehavior: Exceeded maximum output retries (2)"
+          ]
+        },
+        "id": "answer:work:001-upper-bound-depth",
+        "incoming_links": [],
+        "kind": "answer",
+        "outgoing_links": [
+          {
+            "content_sha256": "c162c57ddf668d021ba4fbcf5a11a5eac369658b5b6d0dd0ed9439d46de7c690",
+            "id": "link:c162c57ddf668d021ba4fbcf",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:001-upper-bound-depth",
+            "target_id": "question:demand:D6"
+          },
+          {
+            "content_sha256": "faf88ca9226738eeb2302dcfe0fc36d631d81a21847c28755ff3e478e81b0ba3",
+            "id": "link:faf88ca9226738eeb2302dcf",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:001-upper-bound-depth",
+            "target_id": "question:demand:D4"
+          },
+          {
+            "content_sha256": "fd42c1c54829033b6f65d2ca90220303b649fe08706840badd0b14850dd141fa",
+            "id": "link:fd42c1c54829033b6f65d2ca",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:001-upper-bound-depth",
+            "target_id": "question:work:001-upper-bound-depth"
+          }
+        ]
+      },
+      "result_ids": [
+        "answer:work:001-upper-bound-depth"
+      ],
+      "result_sha256": "891d8ae65cdc79d7a88a5b5b44e0fa51c2b2628173a65d8840c52b469ec92324",
+      "sequence": 3,
+      "tool": "get_entry"
+    },
+    {
+      "arguments": {
+        "entry_id": "answer:work:001-exception-search"
+      },
+      "result": {
+        "content": {
+          "claim_ids": [],
+          "content_sha256": "b3fb16d56ca82fa9fc733a55a25d879a00603ef868eda75731996b885f051cfb",
+          "id": "answer:work:001-exception-search",
+          "node_id": "work:001-exception-search",
+          "packet": {
+            "account": "Investigation failed before producing evidence: UnexpectedModelBehavior: Exceeded maximum output retries (2)",
+            "assumptions": [],
+            "boundary_findings": [],
+            "child_packet_ids": [],
+            "claims": [],
+            "content_sha256": "574742d2d16b449fef7e1828b08365de3225c53978c41169cb3ca542fe0892e2",
+            "counterevidence": [],
+            "id": "packet:work:001-exception-search",
+            "knowledge_links": [],
+            "next_observation": null,
+            "node_id": "work:001-exception-search",
+            "objective": "D7 (with D9 labeling): Actively search for exceptional structure by explicit, hand-checkable enumeration with stated bounds and a reproducible procedure (e.g., systematically generate all sorted solutions reachable from (1,1,1,1) with maximum coordinate d <= 100 by breadth-first mutation, and independently verify by a direct bounded search over quadruples with d <= 100 using divisibility constraints from the equation). Report: (a) a complete table of small solutions within the stated bound, each verified by direct substitution; (b) any solution with c = d, or with a mutation that fixes the maximum; (c) any vertex with two distinct height-decreasing mutations (multiple parents); (d) any cycle not passing through the root or any solution not reachable from the root within the bound (cross-check the two enumeration methods against each other); (e) failure modes of the natural induction/descent proof (e.g., cases where d' = 4abc - d is not positive, not smaller than d, or where the re-sorting breaks a naive induction hypothesis). Report everything found as labeled observations with the enumeration bound explicit, distinguishing verified counterexamples from mere non-occurrences within the bound.",
+            "raised_questions": [],
+            "source_ids_consulted": [],
+            "sufficiency": "blocked",
+            "unresolved": [
+              "Investigation failed before producing evidence: UnexpectedModelBehavior: Exceeded maximum output retries (2)"
+            ]
+          },
+          "packet_id": "packet:work:001-exception-search",
+          "question_ids": [
+            "question:demand:D7",
+            "question:demand:D9",
+            "question:work:001-exception-search"
+          ],
+          "sufficiency": "blocked",
+          "summary": "Investigation failed before producing evidence: UnexpectedModelBehavior: Exceeded maximum output retries (2)",
+          "tags": [
+            "counterexample",
+            "evidence",
+            "risk",
+            "measurement",
+            "uncertainty"
+          ],
+          "unresolved": [
+            "Investigation failed before producing evidence: UnexpectedModelBehavior: Exceeded maximum output retries (2)"
+          ]
+        },
+        "id": "answer:work:001-exception-search",
+        "incoming_links": [],
+        "kind": "answer",
+        "outgoing_links": [
+          {
+            "content_sha256": "00bbd0cf08c18f37151a7029177f3a1cbc81b72d984273c830a7fd1a7faa7c99",
+            "id": "link:00bbd0cf08c18f37151a7029",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:001-exception-search",
+            "target_id": "question:demand:D9"
+          },
+          {
+            "content_sha256": "4a4a47352d7204171aa3600bf72ebb9ddf79aabe38142d3062268fcaf22829ab",
+            "id": "link:4a4a47352d7204171aa3600b",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:001-exception-search",
+            "target_id": "question:demand:D7"
+          },
+          {
+            "content_sha256": "6f65fb173b318973a1c58a036359f2390ed14689b7328100fad6d597edd7632f",
+            "id": "link:6f65fb173b318973a1c58a03",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:001-exception-search",
+            "target_id": "question:work:001-exception-search"
+          }
+        ]
+      },
+      "result_ids": [
+        "answer:work:001-exception-search"
+      ],
+      "result_sha256": "28918ab27f03371ca3e6a7eeb1cf68b09aeb380abb2fec0053b3611a6e39962d",
+      "sequence": 4,
+      "tool": "get_entry"
+    }
+  ],
+  "snapshot_sha256": "9f9e79e26e3a271ceffdec6a03ae5a4462c5547fdfaa94d08c0a9d67d4fadf3a"
+}

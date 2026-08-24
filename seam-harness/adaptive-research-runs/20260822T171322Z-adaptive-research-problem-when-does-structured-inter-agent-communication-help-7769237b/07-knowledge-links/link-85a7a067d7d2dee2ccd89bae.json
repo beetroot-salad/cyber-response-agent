@@ -1,0 +1,10 @@
+{
+  "content_sha256": "85a7a067d7d2dee2ccd89baece7111f1434e49e39c06fc84445a0641a408eecd",
+  "id": "link:85a7a067d7d2dee2ccd89bae",
+  "origin": "runtime",
+  "proposed_by_node_id": null,
+  "rationale": null,
+  "relation": "refines",
+  "source_id": "question:work:001-w1-formal-models",
+  "target_id": "question:demand:D4"
+}

@@ -126,13 +126,21 @@ def _user_prompt(  # noqa: PLR0913 — the harness's own pre-turn seams (#808)
     orientation = orient.orientation(
         run_dir, defender_dir, alert_path, lead_zero_section=lead_zero_text,
     )
-    prompt = (
-        "Begin the investigation.\n\n"
-        f"run_dir: {run_dir}\n"
-        f"alert: {alert_path}\n\n"
-        f"{orientation}"
-    )
+    prompt = f"Begin the investigation.\n\n{_coordinates(run_dir, alert_path)}\n{orientation}"
     return prompt, ancestor_block, status
+
+
+def _coordinates(run_dir: Path, alert_path: Path) -> str:
+    """The two lines telling MAIN where THIS run's tree is.
+
+    ONE home, because a resumed run needs them for a reason a fresh one does not — every path
+    in the inherited prefix names the SOURCE run's dir, and `permission.decide_read` resolves
+    its roots from `deps.run_dir`, so a model re-reading `<source>/investigation.md` off its own
+    history is denied with no correct path to substitute. Two copies of the header is how a
+    third coordinate line gets added to the fresh scaffold and silently never reaches the one
+    run that cannot do without it.
+    """
+    return f"run_dir: {run_dir}\nalert: {alert_path}\n"
 
 
 def _opening_prompt(  # noqa: PLR0913 — `_user_prompt`'s parameters plus the resume it chooses between
@@ -154,18 +162,14 @@ def _opening_prompt(  # noqa: PLR0913 — `_user_prompt`'s parameters plus the r
     biased the run toward closing). It has to: a sibling gets its OWN run dir, while every path
     in the inherited prefix names the SOURCE run's — and `permission.decide_read` resolves its
     roots from `deps.run_dir`, so a model re-reading `<source>/investigation.md` off its own
-    history is denied with no correct path to substitute. The two lines are the same scaffold
-    `_user_prompt` emits; they are coordinates, not instruction.
+    history is denied with no correct path to substitute. It is `_coordinates`, the same call
+    `_user_prompt` makes; they are coordinates, not instruction.
     """
     if resume is None:
         return _user_prompt(
             run_dir, alert_path, defender_dir, verbs=verbs, limits=limits, run_id=run_id,
         )
-    prompt = (
-        f"{resume.continuation_prompt}\n\n"
-        f"run_dir: {run_dir}\n"
-        f"alert: {alert_path}\n"
-    )
+    prompt = f"{resume.continuation_prompt}\n\n{_coordinates(run_dir, alert_path)}"
     return prompt, "", ""
 
 
@@ -801,7 +805,7 @@ def _resolve_store_factory(resume: Any, store_factory: StoreFactory | None) -> S
     """
     if resume is not None:
         return branch.store_factory_for(resume)
-    if store_factory is not None:
+    if store_factory is not None:  # lint-default: ok — DI seam owning its default (R12's fifth seam)
         return store_factory
     return _default_store_factory
 
@@ -1034,25 +1038,40 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
         raise
 
     case_id = uuid.uuid4().hex
-    factory = _resolve_store_factory(resume, store_factory)  # lint-default: ok — DI seam owning its default (R12's fifth seam; a resume derives its own, and outranks it)
+    # R12's fifth DI seam, and a resume derives its own store and outranks it — the default and
+    # the precedence both live in `_resolve_store_factory`, which is where the `lint-default`
+    # site moved to as well.
+    factory = _resolve_store_factory(resume, store_factory)
     store = None
     try:
         store = factory(case_id, run_dir)
-        session_store.write_case_pointer(run_dir, case_id=case_id, store_path=store.path)
         # A resume JOINS a case rather than minting one: the store the factory hands back is
-        # the SOURCE run's, and the prefix rows live in it.
+        # the SOURCE run's, and the prefix rows live in it. So the pointer is written from the
+        # STORE's own case id rather than from the uuid minted above — on a fresh run they are
+        # the same string, and on a resume the minted one names no session in that database,
+        # because `fork` inherits its parent row's `case_id`.
         #
-        # KNOWN GAP, not a claim of correctness. `case_id` above is a fresh uuid, and the
-        # pointer therefore pairs it with a store named after the SOURCE's case — a store that
-        # holds no session under this id, because `fork` inherits its parent row's `case_id`.
-        # Two things follow, and both are live: `branch.open_source_store` on a sibling run dir
-        # can never match its derived path against the recorded one, so a branch cannot be
-        # taken from a branch; and any reader resolving a run dir to a store and then to
-        # `main_session_id` — `scripts/visualize/visualize_run.py` does exactly this — lands on
-        # the ROOT of the lineage, i.e. the source run's transcript rather than the sibling's.
-        # Closing it means deciding what a sibling's case identity IS, which is #920 PR 2's
-        # call, not a line to change here.
-        session_id, resume_history = branch.open_main_session(store, resume)
+        # That mismatch was not cosmetic. `branch.open_source_store` re-derives the store path
+        # from the recorded case id and refuses when it disagrees, so a branch could never be
+        # taken FROM a branch; and a reader resolving run_dir -> store -> `main_session_id`
+        # landed on the ROOT of the lineage, rendering the source run's transcript for the
+        # sibling. The session id below is the other half of that second one.
+        # `run_dir` rides along because a resumed MAIN inherits a DOCUMENT as well as a
+        # message history, and the document is a run-dir artifact — see `open_main_session`.
+        session_id, resume_history = branch.open_main_session(store, resume, run_dir)
+        # WRITTEN AFTER the session opens, so a REFUSED branch leaves no pointer behind. The
+        # pointer is what resolves a run dir to a store, and on a resume it names the SOURCE
+        # run's database — so a sibling dir that got one and then never started would hand any
+        # reader (`visualize_run`, and anything built to the "resolve the pointer, then clean up
+        # what it names" shape) the source run's store as if it were its own.
+        # REBOUND to what the pointer recorded, so `_run_summary` names the case this run
+        # joined rather than the uuid minted for a case it never opened. On a fresh run the
+        # two are the same string; on a resume the minted one names no session in the source
+        # database, and a reader joining the summary back to the store (or through
+        # `store_path_for`, which is exactly `open_source_store`'s derive-and-compare) resolves
+        # nothing.
+        case_id = branch.attach_case_pointer(
+            store, resume, run_dir, case_id=case_id, session_id=session_id)
     # `branch.BranchError` rides here with the store faults: a refused branch point (message 0,
     # no captured evidence, an empty or snapped frontier, a pointer that names another store)
     # is a SETUP failure, and without it the raise escapes `run_investigation` entirely —

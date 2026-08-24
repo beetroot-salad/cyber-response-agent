@@ -1,0 +1,20 @@
+{
+  "account": "Investigation failed before producing evidence: UnexpectedModelBehavior: Exceeded maximum output retries (1)",
+  "assumptions": [],
+  "boundary_findings": [],
+  "child_packet_ids": [],
+  "claims": [],
+  "content_sha256": "6fad56af3fadbdc3c848619b0e9505aa81ad5a13390feaa6c77f216f02800e7d",
+  "counterevidence": [],
+  "id": "packet:work:001-inv-choi-conformity",
+  "knowledge_links": [],
+  "next_observation": null,
+  "node_id": "work:001-inv-choi-conformity",
+  "objective": "What does Choi et al. 2025 (papers/text/choi-et-al-2025-conformity.txt) show about conformity in LLM multi-agent debate: the simulation design (proponent/opponent/neutral agents, majority vs minority sizes, intelligence levels, topics), the main quantitative findings on majority effects and intelligence disparities, how persuasion quality vs quantity matters, and what this implies about when exposure to other agents' outputs shifts vs fails to shift an agent? Record key claims with `===== PDF PAGE N =====` markers.",
+  "raised_questions": [],
+  "source_ids_consulted": [],
+  "sufficiency": "blocked",
+  "unresolved": [
+    "Investigation failed before producing evidence: UnexpectedModelBehavior: Exceeded maximum output retries (1)"
+  ]
+}

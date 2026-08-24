@@ -1,0 +1,47 @@
+{
+  "account": "The knowledge state has 9 open questions and 0 answers; nothing can be synthesized or experimented on yet. The binding constraint on every downstream demand (mechanism, causal model, predictions, experiment) is knowing exactly what the seven papers found, under what conditions, and with what page markers. The highest-information next action is therefore a parallel extraction wave over the corpus. The three core debate papers (Du 2023 positive, Smit 2023 critical/null, Zhang 2025 reappraisal) are the conflicting empirical heart and each merits a dedicated investigation; the two social-influence papers (Lorenz 2011, Choi 2025) each ground the diversity/conformity pathway; Dung 1995 and Shapiro 2011 are formal scaffolding for synthesis/adjudication and are combined into one investigation to fit the six-investigation limit. All six read disjoint files and can complete without peer results.",
+  "action_id": "action:001",
+  "content_sha256": "6c740ececf4df2c3928700f28d8195ee4c7786dff9962d109af0d42ed6568a3c",
+  "decision_call_id": "call-0001-adaptive-controller",
+  "experiment_id": null,
+  "input_entry_ids": [
+    "question:demand:D4",
+    "question:root",
+    "question:demand:D3"
+  ],
+  "kind": "investigate",
+  "output_entry_ids": [
+    "answer:work:001-inv-choi-conformity",
+    "answer:work:001-inv-du-debate",
+    "answer:work:001-inv-formal-tools",
+    "answer:work:001-inv-lorenz-influence",
+    "answer:work:001-inv-smit-mad",
+    "answer:work:001-inv-zhang-when",
+    "question:raised:784a683dbe8a:rq1",
+    "question:work:001-inv-choi-conformity",
+    "question:work:001-inv-du-debate",
+    "question:work:001-inv-formal-tools",
+    "question:work:001-inv-lorenz-influence",
+    "question:work:001-inv-smit-mad",
+    "question:work:001-inv-zhang-when"
+  ],
+  "sequence": 1,
+  "snapshot_after_sha256": "b158b2fdd220140d92e1d3205e96f22de6aa616228143a4537dfa1e7d2a7c579",
+  "snapshot_before_sha256": "50fc83eccb49a771047e44f1c8523a065272feb957d28692a785e9df1df6d0e4",
+  "work_call_ids": [
+    "call-0002-adaptive-investigator",
+    "failed:work:001-inv-smit-mad",
+    "failed:work:001-inv-zhang-when",
+    "call-0005-adaptive-investigator",
+    "failed:work:001-inv-choi-conformity",
+    "failed:work:001-inv-formal-tools"
+  ],
+  "work_item_ids": [
+    "work:001-inv-du-debate",
+    "work:001-inv-smit-mad",
+    "work:001-inv-zhang-when",
+    "work:001-inv-lorenz-influence",
+    "work:001-inv-choi-conformity",
+    "work:001-inv-formal-tools"
+  ]
+}

@@ -16,6 +16,7 @@ what keeps it so.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -42,6 +43,48 @@ def _touches(world: Any, system: str) -> bool:
     if isinstance(declared, str):
         declared = (declared,)
     return system in declared
+
+
+def unappliable(world: Any, patches: Mapping) -> list[str]:
+    """The systems in `patches` whose overlay this world could never apply.
+
+    TWO ways an entity patch is dropped in silence, and `apply` below is where both happen, so
+    they are named together here and refused where the world is built.
+
+    A system the world does not DECLARE never reaches the patch path at all — `apply` asks
+    `touches` first — so the row reads `passthrough`, truthfully, which is what makes it
+    invisible.
+
+    A STAGED system never reaches it either, and that one is worse: `apply` reports `STAGED`
+    and hands the payload back untouched, because on the event stream a world's difference is
+    supposed to be IN the documents the engine read. A patch table naming it is an authoring
+    slip that reads as the strongest possible confirmation — a row saying the world was applied
+    to a response the world never touched.
+    """
+    return sorted(s for s in patches if not _touches(world, s) or s in STAGERS)
+
+
+def unnameable(world: Any) -> list[str]:
+    """Why each staged system this world declares could not name a view for it, if any.
+
+    A stager derives its view name from the world id, and an id it cannot carry costs the
+    sibling that system's WHOLE evidence class — every call refused, while the base world keeps
+    all of it. Asked once, here, because the answer is a property of the id rather than of a
+    call, and the alternative is discovering it per served row.
+
+    Only the systems the world DECLARES: a stager whose system this world never touches is
+    never asked to name anything for it, so refusing on its rule would refuse a world that is
+    perfectly serveable.
+    """
+    reasons = []
+    for system, stager in STAGERS.items():
+        if not _touches(world, system):
+            continue
+        try:
+            stager.check_world_id(getattr(world, "world_id", None))
+        except Exception as bad_name:  # noqa: BLE001 — the stager owns its own refusal class
+            reasons.append(f"{system}: {bad_name}")
+    return reasons
 
 
 @dataclass
@@ -76,6 +119,30 @@ class WorldApplier:
         if stager is None:
             return params
         return stager.redirect(verb, params, self._staging_world(system, world), ctx)
+
+    def restore(
+        self, system: str, verb: str, payload: Any, asked: dict | None, prepared: dict,
+        ctx: Any = None,
+    ) -> Any:
+        """This response with the world's own corpus identity taken back out.
+
+        THE MIRROR OF `prepare`, and the seam calls them as a pair. `prepare` moves a call onto
+        the world's staged corpus; the identity it substituted then comes back echoed in the
+        response, so a staged payload differs from its base in a field the world never touched.
+        Undone here, the two payloads differ by exactly what the world staged and nothing else,
+        which is what makes ΔO over the event stream mean anything.
+
+        `asked is None` is a call staging did not move, so there is nothing to take back — the
+        same condition `ServedCall.asked_params` records under, asked once and answered the
+        same way in both places.
+
+        Vendor-free, like the rest of this module: WHICH field echoes a corpus identity is the
+        stager's knowledge and stays one directory down.
+        """
+        stager = STAGERS.get(system)
+        if stager is None or asked is None:
+            return payload
+        return stager.restore(verb, payload, asked, prepared, ctx)
 
     def apply(
         self, system: str, verb: str, params: dict, payload: Any, world: Any,  # noqa: ARG002

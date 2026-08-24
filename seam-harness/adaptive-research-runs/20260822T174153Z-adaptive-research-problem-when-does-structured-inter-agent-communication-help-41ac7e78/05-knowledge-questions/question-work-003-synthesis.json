@@ -1,0 +1,21 @@
+{
+  "acceptance_condition": "The synthesis answer contains: (1) a single-sentence mechanistic thesis with explicit scope conditions; (2) a causal model listing nodes, edges, and sign conditions; (3) a reconciliation mapping each of the seven papers to model variables with file paths and PDF page markers, distinguishing reported findings from cross-paper inference and from the note's new hypothesis; (4) at least four discriminating predictions, each tagged with the alternative (compute-only, diversity-only, deliberation-only) it excludes; (5) a limits section naming each raised question and why existing evidence cannot settle it; (6) an experiment skeleton covering units, strata, conditions, randomization, estimands, power inputs, exclusion rules, multiple-testing control, and stopping/failure criteria; (7) a closing paragraph with the strongest warranted conclusion and the single most falsifying observation.",
+  "content_sha256": "6b42a8d2d62b8154c5d03088dd70be75ff4673986ac4cdbf9cfb48767fd7c078",
+  "demand_ids": [
+    "D2",
+    "D3",
+    "D4",
+    "D5",
+    "D6",
+    "D7",
+    "D8"
+  ],
+  "id": "question:work:003-synthesis",
+  "node_id": "work:003-synthesis",
+  "rationale": "Synthesis is the correct action because the raw materials now exist as named answers and the remaining open questions are corpus-unanswerable gaps that the synthesis should convert into identifiability limits and experimental design rather than investigate further. The reconciliation must explain, not adjudicate by preference: Du's positives were measured against the weakest baselines (Zhang's reconciliation claim), Smit's nulls are hyperparameter- and dataset-contingent (agreement-intensity result), and Zhang's negatives hold under matched calls/tokens but leave heterogeneity's debate-specific value unidentified; a causal model in which error correlation, diversity preservation, selective exposure, and adjudication competence interact with task topology can absorb all three without discarding any. The formal papers sharpen this: Dung shows conflict between agent answers is undecidable without external evidence (motivating retrieval as tie-breaker), and Shapiro shows agreement after merging certifies nothing about truth (grounding the constraint that consensus is not evidence).",
+  "tags": [
+    "synthesis",
+    "evidence"
+  ],
+  "text": "Integrate the seven extraction answers into the note's core: (a) one original mechanistic thesis stating when staged retrieval-mediated Q/A beats both independent sampling with final aggregation and an open shared transcript under matched inference compute (D2); (b) an explicit causal model over initial error correlation, evidence diversity, social influence/conformity, retrieval selectivity, synthesis competence, and task topology, with directed pathways and sign conditions (D3); (c) a reconciliation of Du 2023's positive results, Smit 2023's null/hyperparameter-contingent results, and Zhang 2025's matched-compute negative plus heterogeneity result, using Lorenz 2011 and Choi 2025 for the social-influence pathway and Dung 1995 and Shapiro 2011 for the synthesis/merge stage (D4); (d) at least four directional or interaction predictions, each labeled with which alternative it discriminates against among compute-only, diversity-only, and deliberation-only (D5); (e) an explicit non-identifiability, measurement, and external-validity limits section built from rz1, rz2, rq-choi-1, rq1, and rq-shapiro-merge (D6); (f) a preregisterable experiment skeleton (conditions, randomization, estimands, power inputs, failure criteria, analysis plan) that instantiates rz1 and rz2 (D7); and (g) a draft of the strongest warranted conclusion and the single most likely falsifying observation (D8)."
+}

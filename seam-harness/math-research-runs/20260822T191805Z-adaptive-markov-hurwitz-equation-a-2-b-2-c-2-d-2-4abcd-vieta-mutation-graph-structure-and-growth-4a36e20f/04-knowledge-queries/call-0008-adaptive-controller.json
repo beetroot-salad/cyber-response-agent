@@ -1,0 +1,1522 @@
+{
+  "call_id": "call-0008-adaptive-controller",
+  "queries": [
+    {
+      "arguments": {
+        "entry_id": "question:raised:529a9c7e8677:rq-d5-stronger"
+      },
+      "result": {
+        "content": {
+          "acceptance_condition": "Either prove N(H)>=(log H)^{1+delta} for an explicit delta>0 with constants, or prove that along all but o(depth) levels the two-child branches have average log-growth slope 3, blocking this route.",
+          "answer_ids": [],
+          "content_sha256": "a090de72ad6e1ecd4b534dd504ac2e128d7f7dbd4c618829eefc32d826ea0707",
+          "demand_ids": [
+            "D5"
+          ],
+          "id": "question:raised:529a9c7e8677:rq-d5-stronger",
+          "node_id": "work:006-lower-bound-v5-compact#raised:rq-d5-stronger",
+          "rationale": "The binary-subtree argument is limited by the worst-case estimate child max<=4d^3, whose level-t height bound is 3^t A and yields only 2^t=(log H)^{log_3 2}; surpassing Theta(log H) requires typical, not worst-case, growth control.",
+          "tags": [
+            "method",
+            "measurement",
+            "uncertainty"
+          ],
+          "text": "Can the lower bound be pushed beyond Theta(log H)? Prove or refute that inside subtree(v2) a positive-density set of vertices has two children with average log-growth slope strictly below 3 over Omega(depth) consecutive levels, yielding N(H)>=(log H)^{1+delta} for some delta>0."
+        },
+        "id": "question:raised:529a9c7e8677:rq-d5-stronger",
+        "incoming_links": [
+          {
+            "content_sha256": "731c040c47e43dc22ffd93c7ef2b4fe55bdbaf08f2765186d1b870f5319319f5",
+            "id": "link:731c040c47e43dc22ffd93c7",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "raises",
+            "source_id": "answer:work:006-lower-bound-v5-compact",
+            "target_id": "question:raised:529a9c7e8677:rq-d5-stronger"
+          }
+        ],
+        "kind": "question",
+        "outgoing_links": [
+          {
+            "content_sha256": "485b1f2f2fcb99ae4ae3fafc61089f22887dc0c21384570a06e3168d8c04c3f2",
+            "id": "link:485b1f2f2fcb99ae4ae3fafc",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "depends_on",
+            "source_id": "question:raised:529a9c7e8677:rq-d5-stronger",
+            "target_id": "question:raised:07d805ce56d7:rq-sharp"
+          },
+          {
+            "content_sha256": "cc48608a33cf03933e6f5868dadb3de91934a4354a29a0f2e7c0abdfb038639d",
+            "id": "link:cc48608a33cf03933e6f5868",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "depends_on",
+            "source_id": "question:raised:529a9c7e8677:rq-d5-stronger",
+            "target_id": "question:demand:D5"
+          }
+        ]
+      },
+      "result_ids": [
+        "question:raised:529a9c7e8677:rq-d5-stronger"
+      ],
+      "result_sha256": "7c130e15426e4b6b2b3442621a67c6543fa5805c75df6f9e5fc7dc1fb1296932",
+      "sequence": 1,
+      "tool": "get_entry"
+    },
+    {
+      "arguments": {
+        "entry_id": "answer:work:006-lower-bound-v5-compact"
+      },
+      "result": {
+        "content": {
+          "claim_ids": [
+            "work:006-lower-bound-v5-compact:C001",
+            "work:006-lower-bound-v5-compact:C002",
+            "work:006-lower-bound-v5-compact:C003",
+            "work:006-lower-bound-v5-compact:C004"
+          ],
+          "content_sha256": "cec2e75143393dc160311f054a4461fcaf4ebaba35f1a838e31fa9f8001efca0",
+          "id": "answer:work:006-lower-bound-v5-compact",
+          "node_id": "work:006-lower-bound-v5-compact",
+          "packet": {
+            "account": "Frozen facts used: tree rooted at v0; non-root children are mutations of a,b,c; child max ≤4d³ (answer:work:003-struct-core-v2, answer:work:004-upper-depth-v3).\nL1. For j≥1, d0=1,d1=3,c_j=d_{j-1}; v0=(1,1,1,1), v_j=(1,1,c_j,d_j). Induction/mutation gives 2+c_j²+d_j²=4c_jd_j and d_{j+1}=4d_j−d_{j−1}. λ=2+√3; d_j=Aλ^j+Bλ^{−j}, A=(3+√3)/6, B=(3−√3)/6. Since A+Bλ^{−2j}≤A+B=1, d_j≤λ^j; d_j strictly increases, so N(H)≥⌊log_λH⌋+1.\nL2. Child maximum f(x)=4abcd/x−x is strictly decreasing, so distinct values among a,b,c give distinct children. If a=b=c=x, d²=x²(4xd−3), so x|d; d=kx gives k²+3=4kx², hence k|3. k=1→v0; k=3→v1=(1,1,1,3). Thus depth≥2⇒≥2 distinct children.\nL3. From v2=(1,1,3,11), A=log₂11+1. Each edge gives L+1≤3(L+1), so after t edges log₂d≤3^tA. If 3^tA≤log₂H, the 2^t level-t vertices below v2 have d≤H. Take t=⌊log₃(log₂H/A)⌋, β=log₃2=0.6309, c′=1/(2A^β)≈0.194, H≥32; then N(H)≥2^t≥c′(log₂H)^β.\nFINAL: N(H)≥max{⌊log_{2+√3}H⌋+1, c′(log₂H)^0.6309} for H≥32. Correction: the first term is asymptotically dominant (1>0.6309). CONJECTURE stronger than Θ(log H): missing positive-density branching/typical-growth lemma.",
+            "assumptions": [
+              "Vertices are sorted quadruples with permutations identified; height is the maximum coordinate d.",
+              "The structural tree/child facts are cited as frozen from answer:work:003-struct-core-v2 and answer:work:004-upper-depth-v3, not reproved here.",
+              "No blocked lower-bound answer is used as evidence."
+            ],
+            "boundary_findings": [
+              {
+                "alternative_explanation": null,
+                "consequence_if_absorbed": "The memorandum would state a false asymptotic comparison despite a correct two-term lower bound; the correction preserves the bound and separates the false dominance claim.",
+                "evidence": [
+                  "lambda=2+sqrt(3)>1 gives term Theta(log H)",
+                  "beta=log_3 2=0.6309<1"
+                ],
+                "narrative": "The assigned final-line clause asserts that the polylogarithmic term c'(log2 H)^0.6309 is asymptotically dominant, but the proved chain term is Theta(log H) and dominates it.",
+                "smallest_suspected_scope": "the dominance sentence in question:work:006-lower-bound-v5-compact"
+              }
+            ],
+            "child_packet_ids": [],
+            "claims": [
+              {
+                "basis": "inferred",
+                "citations": [],
+                "confidence": 0.99,
+                "counterevidence": [],
+                "derived_from_claim_ids": [],
+                "id": "work:006-lower-bound-v5-compact:C001",
+                "statement": "Frozen facts used without reproof: the sorted mutation graph is a tree rooted at (1,1,1,1); at a non-root the children are the distinct sorted mutations of a,b,c; every child maximum is at most 4d^3."
+              },
+              {
+                "basis": "inferred",
+                "citations": [],
+                "confidence": 0.99,
+                "counterevidence": [],
+                "derived_from_claim_ids": [
+                  "work:006-lower-bound-v5-compact:C001"
+                ],
+                "id": "work:006-lower-bound-v5-compact:C002",
+                "statement": "L1: the chain v_j=(1,1,d_{j-1},d_j), d0=1,d1=3,d_{j+1}=4d_j-d_{j-1}, consists of distinct solutions; with lambda=2+sqrt(3), d_j=A lambda^j+B lambda^{-j}, A=(3+sqrt3)/6, B=(3-sqrt3)/6, hence d_j<=lambda^j and N(H)>=floor(log_lambda H)+1."
+              },
+              {
+                "basis": "inferred",
+                "citations": [],
+                "confidence": 0.99,
+                "counterevidence": [],
+                "derived_from_claim_ids": [
+                  "work:006-lower-bound-v5-compact:C001"
+                ],
+                "id": "work:006-lower-bound-v5-compact:C003",
+                "statement": "L2: every vertex at depth at least 2 has at least two distinct children: f(x)=4abcd/x-x is strictly decreasing, and the equal case a=b=c=x forces x|d, d=kx, k^2+3=4kx^2, k|3, giving only the root or (1,1,1,3)."
+              },
+              {
+                "basis": "inferred",
+                "citations": [],
+                "confidence": 0.98,
+                "counterevidence": [
+                  "The assignment's clause that the (log H)^0.6309 term is asymptotically dominant is false: it is o(log H)."
+                ],
+                "derived_from_claim_ids": [
+                  "work:006-lower-bound-v5-compact:C001",
+                  "work:006-lower-bound-v5-compact:C002",
+                  "work:006-lower-bound-v5-compact:C003"
+                ],
+                "id": "work:006-lower-bound-v5-compact:C004",
+                "statement": "L3 and final bound: below v2=(1,1,3,11), with A=log2(11)+1, after t edges log2 d<=3^t A; for t=floor(log_3(log2(H)/A)), beta=log_3 2=0.6309, c'=1/(2A^beta) approximately 0.194, H>=32, N(H)>=c'(log2 H)^beta. Therefore N(H)>=max{floor(log_{2+sqrt3}H)+1, c'(log2 H)^0.6309}; the logarithmic chain term is asymptotically dominant."
+              }
+            ],
+            "content_sha256": "529a9c7e8677f27a85b3ab0caf69d2f1fbb18dddfbe301ef2191a7d1ab1f33c9",
+            "counterevidence": [
+              "Dominance clause in the packet is incorrect: floor(log_{2+sqrt3} H)+1 = Theta(log H), while c'(log2 H)^0.6309 = Theta((log H)^0.6309), and 1>0.6309.",
+              "The worst-case edge estimate child max <=4d^3 caps the proved binary-subtree exponent at log_3 2<1; exceeding Theta(log H) requires typical-growth control, not this worst-case estimate."
+            ],
+            "id": "packet:work:006-lower-bound-v5-compact",
+            "knowledge_links": [
+              {
+                "rationale": "Provides L1, L2, L3, the explicit constants lambda, beta, A, c', threshold H>=32, and the final two-term lower bound, while correcting the false dominance clause.",
+                "relation": "answers",
+                "source_id": "self",
+                "target_id": "question:work:006-lower-bound-v5-compact"
+              },
+              {
+                "rationale": "Establishes the strongest currently proved lower bound in this packet: N(H)>=max{floor(log_{2+sqrt3}H)+1, c'(log2 H)^0.6309} for H>=32.",
+                "relation": "answers",
+                "source_id": "self",
+                "target_id": "question:demand:D5"
+              },
+              {
+                "rationale": "Completes the same lower-bound demand independently; no blocked lower-bound answer is cited as evidence.",
+                "relation": "answers",
+                "source_id": "self",
+                "target_id": "question:work:004-lower-bound-v3"
+              },
+              {
+                "rationale": "Completes the retry demand with explicit proofs of L1-L3 and labels all stronger growth as conjectural.",
+                "relation": "answers",
+                "source_id": "self",
+                "target_id": "question:work:005-lower-bound-v4"
+              }
+            ],
+            "next_observation": null,
+            "node_id": "work:006-lower-bound-v5-compact",
+            "objective": "D5 RETRY, EVIDENCE-ONLY, HARD CAP 300 WORDS. Prove the strongest rigorous lower bound currently attainable for N(H), the number of sorted solutions (a,b,c,d), 1<=a<=b<=c<=d, of a^2+b^2+c^2+d^2=4abcd with d<=H. No introduction, no tables, no prose motivation. Cite as frozen facts, without reproving: the quotient graph is a tree rooted at v0=(1,1,1,1); children of a non-root are the distinct sorted vertices obtained by mutating a,b,c; child maximum is at most 4d^3 (answer:work:003-struct-core-v2, answer:work:004-upper-depth-v3). Prove exactly these lemmas. L1 CHAIN: with (c1,d1)=(1,3), c_{j+1}=d_j, d_{j+1}=4d_j-c_j, prove v_j=(1,1,c_j,d_j) are distinct solutions, d_{j+1}=4d_j-d_{j-1}, d0=1,d1=3, lambda=2+sqrt(3), and d_j = A lambda^j + B lambda^{-j} with A=(3+sqrt(3))/6, B=(3-sqrt(3))/6, hence d_j<=lambda^j and N(H)>=floor(log_lambda H)+1. L2 TWO CHILDREN BELOW DEPTH 2: at a vertex with at least two distinct values among a,b,c, the child maxima f(x)=4abcd/x-x are distinct because f is strictly decreasing; if a=b=c=x, prove from x|d and d=kx that k^2+3=4kx^2, k|3, and the only possibilities are the root or v1=(1,1,1,3). Therefore every vertex at depth >=2 has at least two distinct children. L3 BINARY SUBTREE: below v2=(1,1,3,11), use child max <=4d^3. If A=log2(11)+1, after t edges log2(d)<=3^t A. Thus whenever 3^t A<=log2(H), all 2^t vertices at that level below v2 have d<=H. Take t=floor(log_3(log2(H)/A)), beta=log_3 2=0.6309, c'=1/(2A^beta) (approximately 0.194), H>=32, and conclude N(H)>=c'(log2 H)^beta. FINAL LINE: N(H)>=max(floor(log_{2+sqrt3} H)+1, c'(log2 H)^0.6309) for H>=32, with the polylogarithmic term asymptotically dominant. Anything stronger must be labeled CONJECTURE with the exact missing lemma.",
+            "raised_questions": [
+              {
+                "acceptance_condition": "Either prove N(H)>=(log H)^{1+delta} for an explicit delta>0 with constants, or prove that along all but o(depth) levels the two-child branches have average log-growth slope 3, blocking this route.",
+                "discriminating_outcomes": [
+                  "Positive delta with explicit constants: the branching term exceeds Theta(log H).",
+                  "Average slope 3 on almost all levels: the 4d^3 worst case is typical for branching, so a new invariant or family is required."
+                ],
+                "local_id": "rq-d5-stronger",
+                "rationale": "The binary-subtree argument is limited by the worst-case estimate child max<=4d^3, whose level-t height bound is 3^t A and yields only 2^t=(log H)^{log_3 2}; surpassing Theta(log H) requires typical, not worst-case, growth control.",
+                "required_source_hints": [],
+                "tags": [
+                  "method",
+                  "measurement",
+                  "uncertainty"
+                ],
+                "target_question_ids": [
+                  "question:demand:D5",
+                  "question:raised:07d805ce56d7:rq-sharp"
+                ],
+                "text": "Can the lower bound be pushed beyond Theta(log H)? Prove or refute that inside subtree(v2) a positive-density set of vertices has two children with average log-growth slope strictly below 3 over Omega(depth) consecutive levels, yielding N(H)>=(log H)^{1+delta} for some delta>0."
+              }
+            ],
+            "source_ids_consulted": [],
+            "sufficiency": "ready_to_synthesize",
+            "unresolved": [
+              "Any lower bound stronger than Theta(log H), e.g. N(H)>=(log H)^{1+delta}, remains conjectural; the exact missing lemma is positive-density two-child branching with average log-growth slope strictly below 3 over Omega(depth) levels.",
+              "The gap to the proved upper bound N(H)=O(H^{ln3/ln11}) remains large and is not addressed by this lower-bound packet.",
+              "Runtime discarded unknown citation sources from C1: ['answer:work:003-struct-core-v2', 'answer:work:004-upper-depth-v3']",
+              "Runtime discarded unknown citation sources from C3: ['answer:work:003-struct-core-v2']",
+              "Runtime discarded unknown citation sources from C4: ['answer:work:004-upper-depth-v3']"
+            ]
+          },
+          "packet_id": "packet:work:006-lower-bound-v5-compact",
+          "question_ids": [
+            "question:demand:D5",
+            "question:work:004-lower-bound-v3",
+            "question:work:005-lower-bound-v4",
+            "question:work:006-lower-bound-v5-compact"
+          ],
+          "sufficiency": "ready_to_synthesize",
+          "summary": "Frozen facts used: tree rooted at v0; non-root children are mutations of a,b,c; child max ≤4d³ (answer:work:003-struct-core-v2, answer:work:004-upper-depth-v3).\nL1. For j≥1, d0=1,d1=3,c_j=d_{j-1}; v0=(1,1,1,1), v_j=(1,1,c_j,d_j). Induction/mutation gives 2+c_j²+d_j²=4c_jd_j and d_{j+1}=4d_j−d_{j−1}. λ=2+√3; d_j=Aλ^j+Bλ^{−j}, A=(3+√3)/6, B=(3−√3)/6. Since A+Bλ^{−2j}≤A+B=1, d_j≤λ^j; d_j strictly increases, so N(H)≥⌊log_λH⌋+1.\nL2. Child maximum f(x)=4abcd/x−x is strictly decreasing, so distinct values among a,b,c give distinct children. If a=b=c=x, d²=x²(4xd−3), so x|d; d=kx gives k²+3=4kx², hence k|3. k=1→v0; k=3→v1=(1,1,1,3). Thus depth≥2⇒≥2 distinct children.\nL3. From v2=(1,1,3,11), A=log₂11+1. Each edge gives L+1≤3(L+1), so after t edges log₂d≤3^tA. If 3^tA≤log₂H, the 2^t level-t vertices below v2 have d≤H. Take t=⌊log₃(log₂H/A)⌋, β=log₃2=0.6309, c′=1/(2A^β)≈0.194, H≥32; then N(H)≥2^t≥c′(log₂H)^β.\nFINAL: N(H)≥max{⌊log_{2+√3}H⌋+1, c′(log₂H)^0.6309} for H≥32. Correction: the first term is asymptotically dominant (1>0.6309). CONJECTURE stronger than Θ(log H): missing positive-density branching/typical-growth lemma.",
+          "tags": [
+            "method",
+            "measurement",
+            "constraint",
+            "synthesis",
+            "counterexample",
+            "uncertainty"
+          ],
+          "unresolved": [
+            "Any lower bound stronger than Theta(log H), e.g. N(H)>=(log H)^{1+delta}, remains conjectural; the exact missing lemma is positive-density two-child branching with average log-growth slope strictly below 3 over Omega(depth) levels.",
+            "The gap to the proved upper bound N(H)=O(H^{ln3/ln11}) remains large and is not addressed by this lower-bound packet.",
+            "Runtime discarded unknown citation sources from C1: ['answer:work:003-struct-core-v2', 'answer:work:004-upper-depth-v3']",
+            "Runtime discarded unknown citation sources from C3: ['answer:work:003-struct-core-v2']",
+            "Runtime discarded unknown citation sources from C4: ['answer:work:004-upper-depth-v3']"
+          ]
+        },
+        "id": "answer:work:006-lower-bound-v5-compact",
+        "incoming_links": [],
+        "kind": "answer",
+        "outgoing_links": [
+          {
+            "content_sha256": "5a36821217fdf237c2c1a3dfa1849aff6e1c52727945dd890f0169c091285571",
+            "id": "link:5a36821217fdf237c2c1a3df",
+            "origin": "agent",
+            "proposed_by_node_id": "work:006-lower-bound-v5-compact",
+            "rationale": "Establishes the strongest currently proved lower bound in this packet: N(H)>=max{floor(log_{2+sqrt3}H)+1, c'(log2 H)^0.6309} for H>=32.",
+            "relation": "answers",
+            "source_id": "answer:work:006-lower-bound-v5-compact",
+            "target_id": "question:demand:D5"
+          },
+          {
+            "content_sha256": "70b48ef98e705230b1a457a720aadc97cafa0901761633cd5470cd36aaa2ad65",
+            "id": "link:70b48ef98e705230b1a457a7",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:006-lower-bound-v5-compact",
+            "target_id": "question:demand:D5"
+          },
+          {
+            "content_sha256": "731c040c47e43dc22ffd93c7ef2b4fe55bdbaf08f2765186d1b870f5319319f5",
+            "id": "link:731c040c47e43dc22ffd93c7",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "raises",
+            "source_id": "answer:work:006-lower-bound-v5-compact",
+            "target_id": "question:raised:529a9c7e8677:rq-d5-stronger"
+          },
+          {
+            "content_sha256": "74a5eb9ec28341625ae050fdc1197548bd04543761ba733a253530f67127eebd",
+            "id": "link:74a5eb9ec28341625ae050fd",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "answers",
+            "source_id": "answer:work:006-lower-bound-v5-compact",
+            "target_id": "question:work:006-lower-bound-v5-compact"
+          },
+          {
+            "content_sha256": "8abd89bb0f0788b7744b178264264ab563cdb1d1eee79918289477a18a2e5fe0",
+            "id": "link:8abd89bb0f0788b7744b1782",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:006-lower-bound-v5-compact",
+            "target_id": "question:work:004-lower-bound-v3"
+          },
+          {
+            "content_sha256": "93408e307fb0b3ed94b351ba61044014b5de902b15d9288f35b2e4a70c180e4e",
+            "id": "link:93408e307fb0b3ed94b351ba",
+            "origin": "agent",
+            "proposed_by_node_id": "work:006-lower-bound-v5-compact",
+            "rationale": "Completes the retry demand with explicit proofs of L1-L3 and labels all stronger growth as conjectural.",
+            "relation": "answers",
+            "source_id": "answer:work:006-lower-bound-v5-compact",
+            "target_id": "question:work:005-lower-bound-v4"
+          },
+          {
+            "content_sha256": "ae5a6e4dd404e2c5b9f3bf406d24594bb2f57583acdf151810eb39152cdfa0a5",
+            "id": "link:ae5a6e4dd404e2c5b9f3bf40",
+            "origin": "agent",
+            "proposed_by_node_id": "work:006-lower-bound-v5-compact",
+            "rationale": "Completes the same lower-bound demand independently; no blocked lower-bound answer is cited as evidence.",
+            "relation": "answers",
+            "source_id": "answer:work:006-lower-bound-v5-compact",
+            "target_id": "question:work:004-lower-bound-v3"
+          },
+          {
+            "content_sha256": "b5410cc0846e462e3a6da7a76f0af148c620adf9ccc2136cf56dc32aa2ead488",
+            "id": "link:b5410cc0846e462e3a6da7a7",
+            "origin": "agent",
+            "proposed_by_node_id": "work:006-lower-bound-v5-compact",
+            "rationale": "Provides L1, L2, L3, the explicit constants lambda, beta, A, c', threshold H>=32, and the final two-term lower bound, while correcting the false dominance clause.",
+            "relation": "answers",
+            "source_id": "answer:work:006-lower-bound-v5-compact",
+            "target_id": "question:work:006-lower-bound-v5-compact"
+          },
+          {
+            "content_sha256": "fb6517a1f6925d3616d7e28fb0fcda0eee62dd36a541bc6a4a4b520e4360fcd6",
+            "id": "link:fb6517a1f6925d3616d7e28f",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:006-lower-bound-v5-compact",
+            "target_id": "question:work:005-lower-bound-v4"
+          }
+        ]
+      },
+      "result_ids": [
+        "answer:work:006-lower-bound-v5-compact"
+      ],
+      "result_sha256": "62e25ca029a1362dd61efb78f038007239c97f0246729bdae190a04767c5e407",
+      "sequence": 2,
+      "tool": "get_entry"
+    },
+    {
+      "arguments": {
+        "limit": 10,
+        "query": "",
+        "tags": [],
+        "unanswered_only": true
+      },
+      "result": {
+        "hits": [
+          {
+            "answer_count": 0,
+            "id": "question:demand:D10",
+            "kind": "question",
+            "score": 0.1,
+            "sufficiency": null,
+            "tags": [
+              "counterexample",
+              "constraint",
+              "definition"
+            ],
+            "text": "Produce a self-contained research memorandum with definitions, proved lemmas/theorems, counterexamples or sanity checks, quantitative bounds, conjectures, and the most informative next mathematical step; a meaningful partial result with clear obstructions is preferable to any pretense of settling an unproved asymptotic.",
+            "unresolved_count": null
+          },
+          {
+            "answer_count": 0,
+            "id": "question:raised:529a9c7e8677:rq-d5-stronger",
+            "kind": "question",
+            "score": 0.1,
+            "sufficiency": null,
+            "tags": [
+              "method",
+              "measurement",
+              "uncertainty"
+            ],
+            "text": "Can the lower bound be pushed beyond Theta(log H)? Prove or refute that inside subtree(v2) a positive-density set of vertices has two children with average log-growth slope strictly below 3 over Omega(depth) consecutive levels, yielding N(H)>=(log H)^{1+delta} for some delta>0.",
+            "unresolved_count": null
+          }
+        ],
+        "query": "",
+        "snapshot_sha256": "63ddc552a25a8b574f10e0dcf8670b66cbe685bf25a81068272d5f2dec31f6c0",
+        "truncated": false
+      },
+      "result_ids": [
+        "question:demand:D10",
+        "question:raised:529a9c7e8677:rq-d5-stronger"
+      ],
+      "result_sha256": "0da4fafb7e2389787586e5b1ac95197bf311a41791b674c6cbb366eebc2d333c",
+      "sequence": 3,
+      "tool": "search_questions"
+    },
+    {
+      "arguments": {
+        "limit": 10,
+        "query": "Markov-Hurwitz",
+        "question_ids": [],
+        "tags": []
+      },
+      "result": {
+        "hits": [],
+        "query": "Markov-Hurwitz",
+        "snapshot_sha256": "63ddc552a25a8b574f10e0dcf8670b66cbe685bf25a81068272d5f2dec31f6c0",
+        "truncated": false
+      },
+      "result_ids": [],
+      "result_sha256": "529e4f62a9df8c08ae184acbad68804eee2890e42b62cf5e16d440cdac28661a",
+      "sequence": 4,
+      "tool": "search_answers"
+    },
+    {
+      "arguments": {
+        "entry_id": "question:work:005-exception-search-v4"
+      },
+      "result": {
+        "content": {
+          "acceptance_condition": "A labeled observation table with explicit bounds (d<=100; state the a,b,c sweep bound), the two methods compared with the a<=2 slice of Method 1 complete and cross-checked, parent-edge values d'=4abc-d for every listed non-root vertex, explicit statements on items (b),(c),(d),(f), everything labeled OBSERVATION valid only within the stated bounds, total under 450 words.",
+          "answer_ids": [
+            "answer:work:005-exception-search-v4"
+          ],
+          "content_sha256": "f586d529b3ed8d5cbac48ea6dd333ad4e608b233f1e447884e3563e974f5e426",
+          "demand_ids": [
+            "D7",
+            "D9"
+          ],
+          "id": "question:work:005-exception-search-v4",
+          "node_id": "work:005-exception-search-v4",
+          "rationale": "D7/D9 has never produced evidence (two output-overrun failures), and the memorandum's sanity-check section (D10) requires this bounded cross-validation of the proved D1-D3 plus a reproducible procedure statement. The spec was already shrunk once for feasibility; this re-issue tightens the cap to 450 words and front-loads the verification arithmetic so the packet can complete.",
+          "tags": [
+            "evidence",
+            "counterexample",
+            "measurement",
+            "method"
+          ],
+          "text": "Execute the frozen spec of question:work:004-exception-search-v3 verbatim: bounded hand-checkable enumeration, LABELED OBSERVATIONS ONLY, HARD CAP 450 words. Procedure (state explicitly for reproducibility): Method 1 (direct): for all sorted 1<=a<=b<=c<=20, test whether t^2 - 4abc t + (a^2+b^2+c^2) = 0 has an integer root d with c <= d <= 100, pruning via d | a^2+b^2+c^2 and d+d' = 4abc; list every hit. Method 2 (BFS from (1,1,1,1)): mutate all 4 coordinates, re-sort, discard d>100. Expected vertices, verify each by one-line substitution: (1,1,1,1) [4=4]; (1,1,1,3) [1+1+1+9=12=4*3]; (1,1,3,11) [1+1+9+121=132=4*33]; (1,1,11,41) [1+1+121+1681=1804=4*451]; check all children of (1,1,11,41) exceed 100 (mutate 11: 4*41-11=153; mutate a=1: 4*11*41-1=1803), so BFS stops. Report: (a) verified table; (b) any c=d within the bound? (expected none, consistent with proved L2); (c) any vertex with two height-decreasing mutations or two parents within the BFS tree? (expected none, consistent with proved D2/D3); (d) do Methods 1 and 2 agree exactly within d<=100? The a<=2 slice of Method 1 MUST be completed and explicitly cross-checked, since every proved vertex has a<=3; any Method-1 solution unreachable from the root would refute D1 - check and report. (e) For each non-root vertex compute d'=4abc-d and confirm 1<=d'<d, exhibiting the parent edge: (1,1,1,3): d'=1; (1,1,3,11): d'=1; (1,1,11,41): d'=3. (f) Report induction failure modes observed (e.g. re-sorting effects) or state their absence within the bound. Label EVERYTHING as OBSERVATION valid only within d<=100; non-occurrences prove nothing beyond the bound. If the full Method-1 sweep is too long, complete the a<=2 slice and label the truncation explicitly."
+        },
+        "id": "question:work:005-exception-search-v4",
+        "incoming_links": [
+          {
+            "content_sha256": "a59d5840996c33554ad099a057a3b340e496191eb5c7c22a7cc01f1d259cc709",
+            "id": "link:a59d5840996c33554ad099a0",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:005-exception-search-v4",
+            "target_id": "question:work:005-exception-search-v4"
+          }
+        ],
+        "kind": "question",
+        "outgoing_links": [
+          {
+            "content_sha256": "3180d4f7eebd29782d290c936d8a639f1152094a1c45fc2507c9703d812c0a06",
+            "id": "link:3180d4f7eebd29782d290c93",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "refines",
+            "source_id": "question:work:005-exception-search-v4",
+            "target_id": "question:demand:D7"
+          },
+          {
+            "content_sha256": "9e463efe85d96705cf01a51b91ef6ac0d3ea3cea4a44e58f690d56e7b4c94fb5",
+            "id": "link:9e463efe85d96705cf01a51b",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "refines",
+            "source_id": "question:work:005-exception-search-v4",
+            "target_id": "question:work:004-exception-search-v3"
+          },
+          {
+            "content_sha256": "a9a2f47c928e915cb21a79eee68829fdd7090ffe4b42183277d15ec4b62e029f",
+            "id": "link:a9a2f47c928e915cb21a79ee",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "refines",
+            "source_id": "question:work:005-exception-search-v4",
+            "target_id": "question:demand:D9"
+          }
+        ]
+      },
+      "result_ids": [
+        "question:work:005-exception-search-v4"
+      ],
+      "result_sha256": "1bfc1edb3be5fd0e590c4ede64eda17a55a6dbc05e6fb0253725402867ac12cd",
+      "sequence": 5,
+      "tool": "get_entry"
+    },
+    {
+      "arguments": {
+        "entry_id": "answer:work:003-struct-core-v2"
+      },
+      "result": {
+        "content": {
+          "claim_ids": [
+            "work:003-struct-core-v2:C001",
+            "work:003-struct-core-v2:C002",
+            "work:003-struct-core-v2:C003",
+            "work:003-struct-core-v2:C004",
+            "work:003-struct-core-v2:C005",
+            "work:003-struct-core-v2:C006",
+            "work:003-struct-core-v2:C007",
+            "work:003-struct-core-v2:C008",
+            "work:003-struct-core-v2:C009"
+          ],
+          "content_sha256": "8425e817484ec302055c7f9c1444428fa4b2f71f420ea7e84a42d9cc921c8a27",
+          "id": "answer:work:003-struct-core-v2",
+          "node_id": "work:003-struct-core-v2",
+          "packet": {
+            "account": "MEMORANDUM — structural core (D1–D3) for S = {sorted 1≤a≤b≤c≤d, a²+b²+c²+d²=4abcd}, mutation x↦4·(product of others)−x then re-sort; root (1,1,1,1); height h(v)=d (decision 4). All proved from definitions SC1–SC2; no external materials exist (SC6).\n\nLEMMA V (Vieta conjugate). If (a,b,c,d)∈S then d′=4abc−d is an integer ≥1 and (a,b,c,d′), re-sorted, lies in S. Proof: d is a root of t²−4abc·t+(a²+b²+c²)=0; the other root d′ has d+d′=4abc∈ℤ and dd′=a²+b²+c²>0, so d′∈ℤ and d′≥1; the equation gives a²+b²+c²+d′²=4abc·d′. ∎\n\nLEMMA L2 (top tie only at root). If c=d then v=(1,1,1,1). Proof: the equation gives a²+b²=(4ab−2)d². Since ab≥1, RHS≥2d²; since a,b≤d, LHS≤2d². Equality: 4ab−2=2 ⇒ ab=1 ⇒ a=b=1, and 2=2d² ⇒ d=1. (Same as the suggested route: d² | a²+b² forces a²+b²∈{d²,2d²}; the first gives 4ab=3, impossible; the second is above.) Hence at every non-root vertex c<d: the maximum coordinate is unique; also a=d⇒c=d⇒root. ∎\n\nLEMMA L1 (descent). At every non-root v: 1≤d′<d. Proof: d′≥1 by Lemma V. Assume d′≥d. Then d²≤dd′=a²+b²+c²≤3c², so d≤c√3. Then 4abc²≤4abcd=a²+b²+c²+d²≤2(a²+b²+c²)≤6c², hence 4ab≤6, i.e. 2ab≤3, so ab=1 and a=b=1. Now d²≤a²+b²+c²=c²+2<(c+1)² (since 2<2c+1 for c≥1), so d≤c; with d≥c, d=c. The equation becomes 2+2c²=4c², so c=1 and v=(1,1,1,1) — contradiction. ∎ Note: no Pell/mod-3 step is needed; the previously suggested exclusion of m²=3c²−2 mod 3 is invalid as stated (m²≡1 mod 3 occurs, e.g. c=1), and this route avoids it entirely.\n\nLEMMA L3 (mutating below the max grows, factor ≥3). At non-root v, mutate x∈{a,b,c}: x′=4(abcd/x)−x≥4d−d=3d>d, because the other three coordinates include d (product ≥d) and x≤d. After re-sorting the new maximum is x′ (other entries ≤d<x′). So every mutation not at d strictly increases height, by factor ≥3 (for x=c the factor is ≥4ab−1). ∎\n\nCOROLLARY (no height-preserving mutation; the d-mutation lowers height). At non-root v: mutating d yields re-sorted (a,b,c,d′) with max=max(c,d′)<d (d′<d by L1, c<d by L2); mutating a,b,c yields max≥3d>d by L3. Hence every mutation strictly changes height. At the root the unique mutated vertex is (1,1,1,3), height 3>1. ∎\n\nTHEOREM D2 (unique height-decreasing mutation). At every non-root v exactly one mutated vertex has height<h(v): the one from mutating the maximum coordinate d; all other coordinate-mutations raise height to ≥3d. Uniqueness is at the level of vertices of the quotient (sorted) graph: if a=b or b=c, some of the four coordinate-mutations coincide after sorting (mutating a vs b when a=b gives the same multiset), but all such coincidences lie among height-increasing mutations, so the height-decreasing vertex is unique; since c<d (L2) it also comes from a unique coordinate index. No mutation fixes height. ∎\n\nTHEOREM D1 (connectivity). Define parent(v), v≠root: mutate at d, re-sort. By the Corollary h(parent(v))=max(c,d′)<d=h(v); by Lemma V parent(v)∈S. Iterating, height is a strictly decreasing positive integer, reaching 1 within d−1 steps; height 1 forces (1,1,1,1) (since 1≤a≤b≤c≤d=1), and (1,1,1,1)∈S as 1+1+1+1=4=4·1·1·1·1. So every v∈S is joined to the root by a mutation path. ∎\n\nTHEOREM D3 (rooted tree). The mutation relation on S is symmetric — coordinate mutation x↦M−x is an involution — so the quotient graph on sorted vertices is undirected. It is connected (D1). It is acyclic: in any cycle take a vertex v of maximal height; its two distinct cycle-neighbors have height≤h(v), cannot exceed h(v) (maximality), and cannot equal it (Corollary), so both are height-decreasing mutations of v — contradicting D2. Connected and acyclic ⇒ tree, rooted at (1,1,1,1) with parent as in D1; a multiple parent (a second lower-height neighbor) would contradict D2 identically. ∎\n\nLABELED OBSERVATIONS (hand-checkable spot checks, reproducible by direct substitution; not an enumeration): O1: (1,1,1,3): 1+1+1+9=12=4·3; d′=4−3=1, parent is root; all four root-mutations give 3, so the root has exactly one child. O2: (1,1,3,11): 1+1+9+121=132=4·33; d′=4·3−11=1, parent (1,1,1,3); mutating c=3 gives 41: (1,1,11,41), max 41≥3·11 (L3 confirmed). O3: (1,3,11,131): 1+9+121+17161=17292=4·4323, from (1,1,3,11) by mutating a 1 (4·1·3·11−1=131); d′=4·3·11−131=1, parent (1,1,3,11). Hence (1,1,3,11) has exactly two children (mutating a vs b coincide since a=b): branching exists and the equal-coordinate subtlety is realized already at depth 2.\n\nSTATUS: D1, D2, D3 PROVED, no counterexamples, no induction failure modes (L1 covers every non-root vertex; termination uses only that height is a positive integer). No growth law is assumed or implied; D4–D8 belong to the sibling threads.",
+            "assumptions": [
+              "Definitions taken from stable context SC1-SC2 as task data: S = sorted quadruples with a^2+b^2+c^2+d^2=4abcd; mutation x -> 4*(product of others) - x followed by re-sorting; permutations identified (C6).",
+              "Height means the maximum coordinate d (decision 4 / C3); coordinate sum is not used as the descent measure.",
+              "No external corpus or materials exist (SC6), so no source-tool citations are possible; every claim is a first-principles derivation included in full in the account, and the three spot checks are hand-verifiable arithmetic.",
+              "The graph is taken as undirected via the involution property of coordinate mutation; under any directed convention the same parent map yields an in-arborescence to the root."
+            ],
+            "boundary_findings": [
+              {
+                "alternative_explanation": null,
+                "consequence_if_absorbed": "The memorandum would silently lack empirical corroboration beyond depth-2 spot checks; mitigated by routing bounded hand-enumeration (d <= 100) to the exception-search thread and by labeling the three substitution checks as observations.",
+                "evidence": [
+                  "SC6: materials list is empty",
+                  "workspace_index: []",
+                  "available_experiments contains only text_statistics"
+                ],
+                "narrative": "This run has no source corpus, no workspace files, and no code execution (SC6, C2; workspace_index empty; only a text_statistics tool exists). All evidence is therefore derivational proof plus hand-checkable arithmetic; independent empirical cross-validation (e.g., brute-force enumeration to d <= 10^4) is impossible inside this interface.",
+                "smallest_suspected_scope": "tooling of this run"
+              },
+              {
+                "alternative_explanation": null,
+                "consequence_if_absorbed": "Downstream synthesis might cite the blocked v1 answers as if they contained results, inflating confidence; the supersedes link from this answer prevents that.",
+                "evidence": [
+                  "answer:work:001-struct-core",
+                  "answer:work:001-exception-search",
+                  "answer:work:001-upper-bound-depth"
+                ],
+                "narrative": "All four v1 answers on the board (struct-core, upper-bound-depth, lower-bound, exception-search) failed with output retries and contain zero evidence; this packet is the first substantive content for D1-D3.",
+                "smallest_suspected_scope": "knowledge-board provenance for this task"
+              }
+            ],
+            "child_packet_ids": [],
+            "claims": [
+              {
+                "basis": "inferred",
+                "citations": [],
+                "confidence": 1.0,
+                "counterevidence": [],
+                "derived_from_claim_ids": [],
+                "id": "work:003-struct-core-v2:C001",
+                "statement": "Vieta conjugate lemma: for (a,b,c,d) in S, d' = 4abc-d is an integer >= 1 and the re-sorted tuple (a,b,c,d') is again in S; mutation is an involution at the coordinate level, so the sorted mutation graph is undirected."
+              },
+              {
+                "basis": "inferred",
+                "citations": [],
+                "confidence": 0.99,
+                "counterevidence": [],
+                "derived_from_claim_ids": [
+                  "work:003-struct-core-v2:C001"
+                ],
+                "id": "work:003-struct-core-v2:C002",
+                "statement": "L2: c=d occurs only at the root (1,1,1,1). Proof: a^2+b^2=(4ab-2)d^2 is simultaneously >= 2d^2 (ab>=1) and <= 2d^2 (a,b<=d), forcing ab=1, a=b=1, then 2=2d^2, d=1. Consequently every non-root vertex has a unique maximum coordinate (c<d), and a=d only at the root."
+              },
+              {
+                "basis": "inferred",
+                "citations": [],
+                "confidence": 0.99,
+                "counterevidence": [
+                  "The mod-3/Pell obstruction suggested in the work:001 prompt (m^2=3c^2-2 impossible mod 3) is false as stated: m^2 = 3c^2-2 ≡ 1 (mod 3), which is a possible residue (c=1 gives m=1). The present route needs no such exclusion."
+                ],
+                "derived_from_claim_ids": [
+                  "work:003-struct-core-v2:C001"
+                ],
+                "id": "work:003-struct-core-v2:C003",
+                "statement": "L1 (descent): at every non-root vertex, 1 <= d' = 4abc-d < d. Proof: d'>=1 by cV; assuming d'>=d gives d^2<=a^2+b^2+c^2<=3c^2, then 4abc^2<=4abcd<=2(a^2+b^2+c^2)<=6c^2, so 2ab<=3, a=b=1; then d^2<=c^2+2<(c+1)^2 forces d=c, and 2+2c^2=4c^2 gives c=1, i.e. the root — contradiction."
+              },
+              {
+                "basis": "inferred",
+                "citations": [],
+                "confidence": 0.99,
+                "counterevidence": [],
+                "derived_from_claim_ids": [
+                  "work:003-struct-core-v2:C001"
+                ],
+                "id": "work:003-struct-core-v2:C004",
+                "statement": "L3: at a non-root vertex, mutating any coordinate x in {a,b,c} gives x' = 4(abcd/x) - x >= 4d - d = 3d > d (the other three coordinates include d, so their product is >= d, and x <= d); after re-sorting the new maximum is x' >= 3d. For x=c the factor is >= 4ab-1."
+              },
+              {
+                "basis": "inferred",
+                "citations": [],
+                "confidence": 0.99,
+                "counterevidence": [],
+                "derived_from_claim_ids": [
+                  "work:003-struct-core-v2:C003",
+                  "work:003-struct-core-v2:C002",
+                  "work:003-struct-core-v2:C004"
+                ],
+                "id": "work:003-struct-core-v2:C005",
+                "statement": "Corollary: no mutation preserves the maximum. At a non-root vertex, mutating d strictly lowers the maximum to max(c,d') < d (by cL1 and cL2); mutating a, b, or c raises it to >= 3d (by cL3). At the root the unique mutation raises height 1 to 3."
+              },
+              {
+                "basis": "inferred",
+                "citations": [],
+                "confidence": 0.99,
+                "counterevidence": [],
+                "derived_from_claim_ids": [
+                  "work:003-struct-core-v2:C005",
+                  "work:003-struct-core-v2:C002",
+                  "work:003-struct-core-v2:C004"
+                ],
+                "id": "work:003-struct-core-v2:C006",
+                "statement": "D2 PROVED: every non-root vertex has a unique height-decreasing mutation as a vertex of the sorted (quotient) graph — the mutation at the maximum coordinate d; all other coordinate-mutations raise the height to >= 3d, and none preserves it. Equal coordinates (a=b or b=c) can make height-increasing coordinate-mutations coincide after sorting, but never affect uniqueness of the height-decreasing one; since c<d at non-roots, that mutation also comes from a unique coordinate index."
+              },
+              {
+                "basis": "inferred",
+                "citations": [],
+                "confidence": 0.99,
+                "counterevidence": [],
+                "derived_from_claim_ids": [
+                  "work:003-struct-core-v2:C005",
+                  "work:003-struct-core-v2:C001"
+                ],
+                "id": "work:003-struct-core-v2:C007",
+                "statement": "D1 PROVED: iterating parent(v) = (mutate at d, re-sort) strictly decreases the positive integer height, so it reaches height 1 within d-1 steps; the only sorted quadruple with d=1 is (1,1,1,1), which satisfies the equation (4=4). Hence every solution is connected to the root by a mutation path."
+              },
+              {
+                "basis": "inferred",
+                "citations": [],
+                "confidence": 0.99,
+                "counterevidence": [],
+                "derived_from_claim_ids": [
+                  "work:003-struct-core-v2:C007",
+                  "work:003-struct-core-v2:C006",
+                  "work:003-struct-core-v2:C005",
+                  "work:003-struct-core-v2:C001"
+                ],
+                "id": "work:003-struct-core-v2:C008",
+                "statement": "D3 PROVED: the quotient mutation graph is a rooted tree. Undirected by the involution property (cV); connected by D1; acyclic because a cycle's maximal-height vertex would have two distinct height-decreasing neighbors, contradicting D2 (heights equal to the maximum are excluded by cCor); multiple parents excluded by the same argument. Parent map as in D1 makes the tree canonical."
+              },
+              {
+                "basis": "inferred",
+                "citations": [],
+                "confidence": 0.98,
+                "counterevidence": [],
+                "derived_from_claim_ids": [],
+                "id": "work:003-struct-core-v2:C009",
+                "statement": "Labeled observations (hand-checkable substitution spot checks, not an enumeration): (1,1,1,3): 1+1+1+9=12=4*3, d'=1 so parent is the root, and the root has exactly one child; (1,1,3,11): 1+1+9+121=132=4*33, d'=1, mutating c gives (1,1,11,41) with 41>=3*11; (1,3,11,131): 1+9+121+17161=17292=4*4323, child of (1,1,3,11) via mutating a 1, d'=1. So (1,1,3,11) has exactly two children: branching exists, and the a=b mutation-coincidence occurs already at depth 2."
+              }
+            ],
+            "content_sha256": "e19298af732337cb855dd1f23c860f32f34066cec94b9368cd9e81559f623d30",
+            "counterevidence": [
+              "The previously suggested mod-3 exclusion route (m^2 = 3c^2 - 2 impossible mod 3) is false as stated — m^2 ≡ 1 (mod 3) is possible; recorded so the flawed route is not resurrected. The proof here bypasses it.",
+              "Re-sorting concern checked: the conjugate d' may exceed c (parent's remaining entries reorder), but max(parent) = max(c, d') < d regardless, so descent is unaffected.",
+              "No counterexample to D1, D2, or D3 was found; all three are proved, so the failure-structure branch of the demand (exhibit a component, cycle, or multiple parent) is vacuous."
+            ],
+            "id": "packet:work:003-struct-core-v2",
+            "knowledge_links": [
+              {
+                "rationale": "Provides the required compact proofs of L1, L2, L3 and the deductions D1, D2, D3 with the equal-coordinate subtlety addressed.",
+                "relation": "answers",
+                "source_id": "self",
+                "target_id": "question:work:003-struct-core-v2"
+              },
+              {
+                "rationale": "Same demands; the v1 attempt produced no evidence, this packet completes it via a corrected elementary route.",
+                "relation": "answers",
+                "source_id": "self",
+                "target_id": "question:work:001-struct-core"
+              },
+              {
+                "rationale": "Proves connectivity of every solution to (1,1,1,1) by strict height descent with termination at the unique d=1 vertex.",
+                "relation": "answers",
+                "source_id": "self",
+                "target_id": "question:demand:D1"
+              },
+              {
+                "rationale": "Proves uniqueness of the height-decreasing mutation (maximum-coordinate semantics) including the equal-coordinate vertex-level subtlety.",
+                "relation": "answers",
+                "source_id": "self",
+                "target_id": "question:demand:D2"
+              },
+              {
+                "rationale": "Proves the quotient mutation graph is a rooted tree; cycles and multiple parents excluded via D2 plus the no-height-preserving-mutation corollary.",
+                "relation": "answers",
+                "source_id": "self",
+                "target_id": "question:demand:D3"
+              },
+              {
+                "rationale": "The v1 answer is blocked with no claims; this packet supplies the complete proofs it failed to produce.",
+                "relation": "supersedes",
+                "source_id": "self",
+                "target_id": "answer:work:001-struct-core"
+              }
+            ],
+            "next_observation": null,
+            "node_id": "work:003-struct-core-v2",
+            "objective": "Prove D1-D3 compactly for S = {sorted quadruples 1<=a<=b<=c<=d, a^2+b^2+c^2+d^2=4abcd} under Vieta mutation (x_i -> 4*(product of others) - x_i, then re-sort), with root (1,1,1,1). REQUIRED ROUTE (verify, fix, or replace, but keep it elementary): (L1, descent) at any non-root vertex the conjugate d' = 4abc - d = (a^2+b^2+c^2)/d is an integer >= 1; prove d' < d by contradiction: d' >= d gives a^2+b^2+c^2 >= d^2, and combined with a^2+b^2+c^2 <= 3c^2 gives d <= c*sqrt(3); feeding into the equation gives 2ab <= 3, hence a=b=1; then 2+c^2+d^2 = 4cd with c <= d <= 3c/2 forces c=1 and d=1, i.e. the root - contradiction. (L2) c = d only at the root: from a^2+b^2+2d^2 = 4abd^2 deduce d^2 | a^2+b^2 and a^2+b^2 <= 2d^2, so a^2+b^2 in {d^2, 2d^2}; the first gives 3=4ab (impossible), the second gives ab=1 and then d=1. (L3) mutating any coordinate strictly below the maximum strictly increases the maximum: new value >= 4ab d - d >= 3d > d since ab >= 1 (and a=d only at root by L2-type argument). Conclude: (D2) the mutation at the unique maximal coordinate is the unique height-decreasing mutation, i.e. strictly decreases d; (D1) iterating it strictly decreases the positive integer d, so every vertex descends to d=1, and the only vertex with d=1 is (1,1,1,1) - verify this endpoint claim; (D3) the quotient graph is a rooted tree: a cycle's maximal-height vertex would have two distinct height-decreasing mutations, contradicting D2; multiple parents likewise. Address explicitly the subtlety that equal coordinates (a=b or b=c) make some of the 4 coordinate-mutations coincide after sorting, so 'unique height-decreasing mutation' is a statement about distinct mutated vertices, not coordinate indices. KEEP THE ANSWER COMPACT (target well under 1200 words): lemma - proof format, no digressions, no worked tables beyond at most 3 one-line substitution checks. If any lemma fails, stop and report the verified counterexample instead.",
+            "raised_questions": [
+              {
+                "acceptance_condition": "A proved dichotomy (growth factor 3 only on an explicitly bounded sub-family; factor >= 7 elsewhere) together with a proved sublinear or improved-constant upper bound for N(H), or a verified counterexample vertex off the slow family with a child of factor < 7.",
+                "discriminating_outcomes": [
+                  "Outcome A: slow-growth vertices with d <= H are O(log H), yielding N(H) = O(H^alpha), alpha < 1 — the O(H) bound is improvable.",
+                  "Outcome B: a verified infinite family of slow-growth vertices beyond the (1,1,c,d)-chain exists — the O(H) linear bound is essentially sharp and alpha = 1."
+                ],
+                "local_id": "rq1",
+                "rationale": "The tree proof shows chain vertices with a=b have only 2 children and slowest growth factor 3, while ab >= 2 forces factor >= 7; quantifying the rare-slow-versus-common-fast split is the exact lever the O(H) bound needs, and the structural lemmas here make the split well-defined.",
+                "required_source_hints": [],
+                "tags": [
+                  "method",
+                  "measurement",
+                  "uncertainty"
+                ],
+                "target_question_ids": [
+                  "question:work:003-upper-depth-v2"
+                ],
+                "text": "For the D4 sharpening: prove that any vertex with a >= 2 (equivalently, off the (1,1,c,d)-chain and its immediate children) has every child growing by factor >= 4ab-1 >= 7, and bound the number of vertices with d <= H that have a = b = 1 or ab <= 2; conclude whether N(H) = O(H^alpha) for some alpha < 1."
+              }
+            ],
+            "source_ids_consulted": [],
+            "sufficiency": "ready_to_synthesize",
+            "unresolved": [
+              "Nothing within D1-D3 remains open. Quantitative sharpening for the counting threads (e.g., how often a<b so vertices have the full 3 children, versus the a=b coincidence that drops chain vertices to 2 children) belongs to question:work:003-upper-depth-v2; bounded hand-enumeration corroboration belongs to question:work:003-exception-search-v2.",
+              "Runtime rejected knowledge-link proposal outside the frozen board or with invalid endpoint types: self supports question:work:003-upper-depth-v2",
+              "Runtime rejected knowledge-link proposal outside the frozen board or with invalid endpoint types: self supports question:work:003-lower-bound-v2"
+            ]
+          },
+          "packet_id": "packet:work:003-struct-core-v2",
+          "question_ids": [
+            "question:demand:D1",
+            "question:demand:D2",
+            "question:demand:D3",
+            "question:work:001-struct-core",
+            "question:work:003-struct-core-v2"
+          ],
+          "sufficiency": "ready_to_synthesize",
+          "summary": "MEMORANDUM — structural core (D1–D3) for S = {sorted 1≤a≤b≤c≤d, a²+b²+c²+d²=4abcd}, mutation x↦4·(product of others)−x then re-sort; root (1,1,1,1); height h(v)=d (decision 4). All proved from definitions SC1–SC2; no external materials exist (SC6).\n\nLEMMA V (Vieta conjugate). If (a,b,c,d)∈S then d′=4abc−d is an integer ≥1 and (a,b,c,d′), re-sorted, lies in S. Proof: d is a root of t²−4abc·t+(a²+b²+c²)=0; the other root d′ has d+d′=4abc∈ℤ and dd′=a²+b²+c²>0, so d′∈ℤ and d′≥1; the equation gives a²+b²+c²+d′²=4abc·d′. ∎\n\nLEMMA L2 (top tie only at root). If c=d then v=(1,1,1,1). Proof: the equation gives a²+b²=(4ab−2)d². Since ab≥1, RHS≥2d²; since a,b≤d, LHS≤2d². Equality: 4ab−2=2 ⇒ ab=1 ⇒ a=b=1, and 2=2d² ⇒ d=1. (Same as the suggested route: d² | a²+b² forces a²+b²∈{d²,2d²}; the first gives 4ab=3, impossible; the second is above.) Hence at every non-root vertex c<d: the maximum coordinate is unique; also a=d⇒c=d⇒root. ∎\n\nLEMMA L1 (descent). At every non-root v: 1≤d′<d. Proof: d′≥1 by Lemma V. Assume d′≥d. Then d²≤dd′=a²+b²+c²≤3c², so d≤c√3. Then 4abc²≤4abcd=a²+b²+c²+d²≤2(a²+b²+c²)≤6c², hence 4ab≤6, i.e. 2ab≤3, so ab=1 and a=b=1. Now d²≤a²+b²+c²=c²+2<(c+1)² (since 2<2c+1 for c≥1), so d≤c; with d≥c, d=c. The equation becomes 2+2c²=4c², so c=1 and v=(1,1,1,1) — contradiction. ∎ Note: no Pell/mod-3 step is needed; the previously suggested exclusion of m²=3c²−2 mod 3 is invalid as stated (m²≡1 mod 3 occurs, e.g. c=1), and this route avoids it entirely.\n\nLEMMA L3 (mutating below the max grows, factor ≥3). At non-root v, mutate x∈{a,b,c}: x′=4(abcd/x)−x≥4d−d=3d>d, because the other three coordinates include d (product ≥d) and x≤d. After re-sorting the new maximum is x′ (other entries ≤d<x′). So every mutation not at d strictly increases height, by factor ≥3 (for x=c the factor is ≥4ab−1). ∎\n\nCOROLLARY (no height-preserving mutation; the d-mutation lowers height). At non-root v: mutating d yields re-sorted (a,b,c,d′) with max=max(c,d′)<d (d′<d by L1, c<d by L2); mutating a,b,c yields max≥3d>d by L3. Hence every mutation strictly changes height. At the root the unique mutated vertex is (1,1,1,3), height 3>1. ∎\n\nTHEOREM D2 (unique height-decreasing mutation). At every non-root v exactly one mutated vertex has height<h(v): the one from mutating the maximum coordinate d; all other coordinate-mutations raise height to ≥3d. Uniqueness is at the level of vertices of the quotient (sorted) graph: if a=b or b=c, some of the four coordinate-mutations coincide after sorting (mutating a vs b when a=b gives the same multiset), but all such coincidences lie among height-increasing mutations, so the height-decreasing vertex is unique; since c<d (L2) it also comes from a unique coordinate index. No mutation fixes height. ∎\n\nTHEOREM D1 (connectivity). Define parent(v), v≠root: mutate at d, re-sort. By the Corollary h(parent(v))=max(c,d′)<d=h(v); by Lemma V parent(v)∈S. Iterating, height is a strictly decreasing positive integer, reaching 1 within d−1 steps; height 1 forces (1,1,1,1) (since 1≤a≤b≤c≤d=1), and (1,1,1,1)∈S as 1+1+1+1=4=4·1·1·1·1. So every v∈S is joined to the root by a mutation path. ∎\n\nTHEOREM D3 (rooted tree). The mutation relation on S is symmetric — coordinate mutation x↦M−x is an involution — so the quotient graph on sorted vertices is undirected. It is connected (D1). It is acyclic: in any cycle take a vertex v of maximal height; its two distinct cycle-neighbors have height≤h(v), cannot exceed h(v) (maximality), and cannot equal it (Corollary), so both are height-decreasing mutations of v — contradicting D2. Connected and acyclic ⇒ tree, rooted at (1,1,1,1) with parent as in D1; a multiple parent (a second lower-height neighbor) would contradict D2 identically. ∎\n\nLABELED OBSERVATIONS (hand-checkable spot checks, reproducible by direct substitution; not an enumeration): O1: (1,1,1,3): 1+1+1+9=12=4·3; d′=4−3=1, parent is root; all four root-mutations give 3, so the root has exactly one child. O2: (1,1,3,11): 1+1+9+121=132=4·33; d′=4·3−11=1, parent (1,1,1,3); mutating c=3 gives 41: (1,1,11,41), max 41≥3·11 (L3 confirmed). O3: (1,3,11,131): 1+9+121+17161=17292=4·4323, from (1,1,3,11) by mutating a 1 (4·1·3·11−1=131); d′=4·3·11−131=1, parent (1,1,3,11). Hence (1,1,3,11) has exactly two children (mutating a vs b coincide since a=b): branching exists and the equal-coordinate subtlety is realized already at depth 2.\n\nSTATUS: D1, D2, D3 PROVED, no counterexamples, no induction failure modes (L1 covers every non-root vertex; termination uses only that height is a positive integer). No growth law is assumed or implied; D4–D8 belong to the sibling threads.",
+          "tags": [
+            "method",
+            "evidence",
+            "constraint",
+            "counterexample",
+            "uncertainty"
+          ],
+          "unresolved": [
+            "Nothing within D1-D3 remains open. Quantitative sharpening for the counting threads (e.g., how often a<b so vertices have the full 3 children, versus the a=b coincidence that drops chain vertices to 2 children) belongs to question:work:003-upper-depth-v2; bounded hand-enumeration corroboration belongs to question:work:003-exception-search-v2.",
+            "Runtime rejected knowledge-link proposal outside the frozen board or with invalid endpoint types: self supports question:work:003-upper-depth-v2",
+            "Runtime rejected knowledge-link proposal outside the frozen board or with invalid endpoint types: self supports question:work:003-lower-bound-v2"
+          ]
+        },
+        "id": "answer:work:003-struct-core-v2",
+        "incoming_links": [],
+        "kind": "answer",
+        "outgoing_links": [
+          {
+            "content_sha256": "0b5077e0a97acc33c77d711fd289147e8deda2fcb92b9969418f44346ad5027c",
+            "id": "link:0b5077e0a97acc33c77d711f",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:003-struct-core-v2",
+            "target_id": "question:demand:D1"
+          },
+          {
+            "content_sha256": "0b919d6570ae78ddc10da79d1e0021f4ac570c474276617e6e3e2d453729731a",
+            "id": "link:0b919d6570ae78ddc10da79d",
+            "origin": "agent",
+            "proposed_by_node_id": "work:003-struct-core-v2",
+            "rationale": "The v1 answer is blocked with no claims; this packet supplies the complete proofs it failed to produce.",
+            "relation": "supersedes",
+            "source_id": "answer:work:003-struct-core-v2",
+            "target_id": "answer:work:001-struct-core"
+          },
+          {
+            "content_sha256": "24d8ee8c18c9e342645aff1995c2a853496a9a8e62fd905d185763c063ea94a3",
+            "id": "link:24d8ee8c18c9e342645aff19",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "answers",
+            "source_id": "answer:work:003-struct-core-v2",
+            "target_id": "question:work:003-struct-core-v2"
+          },
+          {
+            "content_sha256": "2aba7c57481ab497bddfd575f0c616f8c035a7d711b19b64297f469cc81df1e3",
+            "id": "link:2aba7c57481ab497bddfd575",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "raises",
+            "source_id": "answer:work:003-struct-core-v2",
+            "target_id": "question:raised:e19298af7323:rq1"
+          },
+          {
+            "content_sha256": "446dfa425d0c7be8f0e36599153ede71dbf2b3af4a5271bd95e5b93c899a414c",
+            "id": "link:446dfa425d0c7be8f0e36599",
+            "origin": "agent",
+            "proposed_by_node_id": "work:003-struct-core-v2",
+            "rationale": "Provides the required compact proofs of L1, L2, L3 and the deductions D1, D2, D3 with the equal-coordinate subtlety addressed.",
+            "relation": "answers",
+            "source_id": "answer:work:003-struct-core-v2",
+            "target_id": "question:work:003-struct-core-v2"
+          },
+          {
+            "content_sha256": "473e1aaadaa53de12a6d4bd69d68fca8a5e16d395cff609c6a74170b89e03413",
+            "id": "link:473e1aaadaa53de12a6d4bd6",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:003-struct-core-v2",
+            "target_id": "question:demand:D2"
+          },
+          {
+            "content_sha256": "51f0bdec2000df1b3086afb613d35239e5a51a4e15f8a38dbdaeb87865db059f",
+            "id": "link:51f0bdec2000df1b3086afb6",
+            "origin": "agent",
+            "proposed_by_node_id": "work:003-struct-core-v2",
+            "rationale": "Proves uniqueness of the height-decreasing mutation (maximum-coordinate semantics) including the equal-coordinate vertex-level subtlety.",
+            "relation": "answers",
+            "source_id": "answer:work:003-struct-core-v2",
+            "target_id": "question:demand:D2"
+          },
+          {
+            "content_sha256": "82856e58db425e7d27c1438cd4a05535933ce17cd876156179b2750d73fa921e",
+            "id": "link:82856e58db425e7d27c1438c",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:003-struct-core-v2",
+            "target_id": "question:demand:D3"
+          },
+          {
+            "content_sha256": "92096e0e356c6f248d8db95449bab73a2d9fbadb9bebfac89cac8e38d1de47d2",
+            "id": "link:92096e0e356c6f248d8db954",
+            "origin": "agent",
+            "proposed_by_node_id": "work:003-struct-core-v2",
+            "rationale": "Proves connectivity of every solution to (1,1,1,1) by strict height descent with termination at the unique d=1 vertex.",
+            "relation": "answers",
+            "source_id": "answer:work:003-struct-core-v2",
+            "target_id": "question:demand:D1"
+          },
+          {
+            "content_sha256": "a6fb1feb1c5f50658e3551c2c6179c474b1759e1b5f9c7b01935e667a55f4451",
+            "id": "link:a6fb1feb1c5f50658e3551c2",
+            "origin": "agent",
+            "proposed_by_node_id": "work:003-struct-core-v2",
+            "rationale": "Proves the quotient mutation graph is a rooted tree; cycles and multiple parents excluded via D2 plus the no-height-preserving-mutation corollary.",
+            "relation": "answers",
+            "source_id": "answer:work:003-struct-core-v2",
+            "target_id": "question:demand:D3"
+          },
+          {
+            "content_sha256": "ad3e0f6a8fc36fd6ad98e6a649e85f045173cb270196ad897abcdf973218d3f0",
+            "id": "link:ad3e0f6a8fc36fd6ad98e6a6",
+            "origin": "agent",
+            "proposed_by_node_id": "work:003-struct-core-v2",
+            "rationale": "Same demands; the v1 attempt produced no evidence, this packet completes it via a corrected elementary route.",
+            "relation": "answers",
+            "source_id": "answer:work:003-struct-core-v2",
+            "target_id": "question:work:001-struct-core"
+          },
+          {
+            "content_sha256": "d08be85c1bd1614c6d2db8ab251e8bdd60358b0151e9a90d1eefa90b2d9d4dbc",
+            "id": "link:d08be85c1bd1614c6d2db8ab",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:003-struct-core-v2",
+            "target_id": "question:work:001-struct-core"
+          }
+        ]
+      },
+      "result_ids": [
+        "answer:work:003-struct-core-v2"
+      ],
+      "result_sha256": "ae66ed583374560465f9fe37315affe4d8e76ef6dcefa4109cdeeb78f12d2df0",
+      "sequence": 6,
+      "tool": "get_entry"
+    },
+    {
+      "arguments": {
+        "entry_id": "answer:work:004-upper-depth-v3"
+      },
+      "result": {
+        "content": {
+          "claim_ids": [
+            "work:004-upper-depth-v3:C001",
+            "work:004-upper-depth-v3:C002",
+            "work:004-upper-depth-v3:C003",
+            "work:004-upper-depth-v3:C004",
+            "work:004-upper-depth-v3:C005",
+            "work:004-upper-depth-v3:C006",
+            "work:004-upper-depth-v3:C007"
+          ],
+          "content_sha256": "a9d698007d05fb28bbe1ad7097f98b08c3e2a6a7a0a0aef51cfa19da37beafcc",
+          "id": "answer:work:004-upper-depth-v3",
+          "node_id": "work:004-upper-depth-v3",
+          "packet": {
+            "account": "MEMORANDUM (D4, D6, rq1). Cited as proved (answer:work:003-struct-core-v2): at every non-root vertex, mutation at the max d strictly lowers d; mutations at a,b,c raise the max to >= (4ab-1)d >= 3d; the quotient graph is a tree rooted at v_0=(1,1,1,1); every vertex has <= 3 children (fewer when coordinates coincide), the root has exactly 1.\n\nT1 (depth upper). Each child edge multiplies the max by >= 3, so d >= 3^{depth(v)} and depth(v) <= log_3 d.\n\nT2 (crude count). N(H) <= sum_{0<=k<=floor(log_3 H)} 3^k = (3^{floor(log_3 H)+1} - 1)/2 <= (3H-1)/2. N(H) = O(H), constant 3/2.\n\nT3 (depth lower). Child max = 4*(product of other three) - x <= 4bcd <= 4d^3. Let L_k = max of log_2 d at depth k: L_{k+1} <= 3L_k + 2, L_0 = 0, so L_k + 1 <= 3(L_{k-1} + 1), giving L_k <= 3^k - 1. Hence depth(v) >= log_3(log_2 d + 1). Two-sided: log_3(log_2 d + 1) <= depth(v) <= log_3 d.\n\nT4 (rq1 dichotomy; Outcome A holds). (i) The a=b=1 locus is a single chain. Equation: 2 + c^2 + d^2 = 4cd. The parent of (1,1,c,d) is the re-sorted (1,1,c,d'), d' = (c^2+2)/d < d, again with a=b=1; descending to the root and inverting gives the chain v_0=(1,1,1,1), v_1=(1,1,1,3), v_{j+1} = (1,1,d_j,4d_j - c_j) with c_{j+1}=d_j, i.e. d_{j+1} = 4d_j - d_{j-1}, ratio r_j = 4 - 1/r_{j-1} increasing from r_1 = 11/3 toward 2+sqrt(3). Chain vertices with d <= H: O(log H). For j >= 2 (c_j >= 3), v_j has exactly 2 children: v_{j+1} and u_j; every a=b=1 vertex lies on this chain.\n\n(ii) ab is nondecreasing along child edges. Mutating x in {a,b,c}: x' > d is the new max, so the child's two smallest entries are the two smallest of {a,b,c,d}\\{x}: mutate a gives bc >= ab; mutate b gives ac >= ab; mutate c leaves ab.\n\n(iii) The unique off-chain child of v_j (j >= 2) is u_j = (1,c_j,d_j,4c_jd_j - 1), max m_j = 4c_jd_j - 1 >= 12d_j - 1 >= 11d_j; its ab = c_j >= 3, so by (ii) every vertex of subtree(u_j) has ab >= 3 and every edge below multiplies the max by >= 4ab - 1 >= 11. The subtrees subtree(u_j), j >= 2, are pairwise disjoint (tree, distinct parents), disjoint from the chain (there b >= 3), and every vertex lies on the chain or in exactly one of them (descend to the root; the path leaves the chain at most once, since ab >= 3 is irreversible by (ii)).\n\n(iv) Subtree count. Vertices of subtree(u_j) with max <= H sit at depth <= log_{11}(H/m_j) below u_j, <= 3 children each, so size <= sum_k 3^k <= (3/2)*3^{log_{11}(H/m_j)} = (3/2)(H/m_j)^rho with rho = ln3/ln11 = 0.4582 < 1/2.\n\n(v) Summation. m_j >= 11 d_j and d_j >= 11*(11/3)^{j-2} (induction: d_{j-1} <= (3/11)d_j, so d_{j+1} = 4d_j - d_{j-1} >= (41/11)d_j >= (11/3)d_j). Hence sum_{j>=2} m_j^{-rho} <= 121^{-rho} / (1 - (11/3)^{-rho}) = 0.248, convergent since (11/3)^rho = 1.814 > 1. Therefore N(H) <= C*H^rho + O(log H), rho = ln3/ln11 = 0.4582, C = (3/2)*sum_{j>=2} m_j^{-rho} <= 0.372, an effective constant. N(H) = O(H^{0.4582}), sublinear; rq1 resolved by Outcome A.\n\nCORRECTION to skeleton (v): d_j >= 11(2+sqrt3)^{j-2} is false (r_j increases to 2+sqrt3 from below); the explicit base 11/3 is used instead, with all conclusions unchanged.\n\nDepth extremes: the chain is the unique slowest branch (asymptotic factor 2+sqrt3), so chain depth = log_{2+sqrt3}(d) + O(1); T1's log_3 is approached only through the root's small factors, and T3's lower bound is approached along branches maximizing each factor (child max ~ 4d^3 requires a,b,c comparable to d).\n\nLABELED OBSERVATION (hand-checkable substitution, not an enumeration): struct-core-v2 O1-O3 realize v_1, v_2, and u_2 = (1,3,11,131) with m_2 = 4*3*11 - 1 = 131 >= 11*11 and 1+9+121+17161 = 17292 = 4*4323 confirms u_2 in S; it has ab = 3, so its descendants grow by factor >= 11 as claimed.\n\nSTATUS: T1, T2, T3, T4 PROVED; rq1 closed by Outcome A with explicit exponent rho = ln3/ln11 and effective constant C <= 0.372; no conjecture remains open in this thread.",
+            "assumptions": [
+              "Tree structure, descent, and per-edge factor >= 3 are taken as proved from answer:work:003-struct-core-v2 (L1, L2, L3, D1-D3); the lemmas used are restated in one line each in the account.",
+              "Height means maximum coordinate d (C3); permutations are identified (C6).",
+              "No external corpus exists (SC6); all content is first-principles derivation, with board citations for the previously proved structural lemmas."
+            ],
+            "boundary_findings": [
+              {
+                "alternative_explanation": null,
+                "consequence_if_absorbed": "Quoting the skeleton's inequality verbatim would embed a false lemma in the memorandum; instead the valid explicit base 11/3 replaces it, preserving the convergence argument, the exponent rho = ln3/ln11, and the effective constant.",
+                "evidence": [
+                  "assignment objective skeleton step (v)",
+                  "chain recurrence d_{j+1} = 4d_j - d_{j-1}, r_1 = 11/3 = 3.667 < 2+sqrt(3) = 3.732"
+                ],
+                "narrative": "The assigned packet skeleton contained one incorrect intermediate inequality (d_j >= 11(2+sqrt3)^{j-2}), incompatible with the chain recurrence whose ratios increase to 2+sqrt(3) from below.",
+                "smallest_suspected_scope": "skeleton step (v) of packet work:004-upper-depth-v3"
+              }
+            ],
+            "child_packet_ids": [],
+            "claims": [
+              {
+                "basis": "inferred",
+                "citations": [],
+                "confidence": 0.99,
+                "counterevidence": [],
+                "derived_from_claim_ids": [],
+                "id": "work:004-upper-depth-v3:C001",
+                "statement": "T1: every child edge multiplies the maximum coordinate by >= 3, hence d >= 3^{depth(v)} and depth(v) <= log_3 d for every vertex v."
+              },
+              {
+                "basis": "inferred",
+                "citations": [],
+                "confidence": 0.99,
+                "counterevidence": [],
+                "derived_from_claim_ids": [
+                  "work:004-upper-depth-v3:C001"
+                ],
+                "id": "work:004-upper-depth-v3:C002",
+                "statement": "T2: N(H) <= (3^{floor(log_3 H)+1} - 1)/2 <= (3H-1)/2 = O(H) with explicit constant 3/2, using <= 3 children per vertex and exactly 1 child of the root."
+              },
+              {
+                "basis": "inferred",
+                "citations": [],
+                "confidence": 0.99,
+                "counterevidence": [],
+                "derived_from_claim_ids": [
+                  "work:004-upper-depth-v3:C001"
+                ],
+                "id": "work:004-upper-depth-v3:C003",
+                "statement": "T3: child max <= 4d^3, so L_k = max log_2 d at depth k satisfies L_k <= 3^k - 1, giving depth(v) >= log_3(log_2 d + 1); two-sided relation log_3(log_2 d + 1) <= depth(v) <= log_3 d."
+              },
+              {
+                "basis": "inferred",
+                "citations": [],
+                "confidence": 0.97,
+                "counterevidence": [],
+                "derived_from_claim_ids": [
+                  "work:004-upper-depth-v3:C001"
+                ],
+                "id": "work:004-upper-depth-v3:C004",
+                "statement": "T4 dichotomy proved: (i) the a=b=1 locus is exactly the chain v_{j+1} = (1,1,d_j,4d_j-c_j) with d_{j+1}=4d_j-d_{j-1}, ratio increasing from 11/3 to 2+sqrt(3), contributing O(log H) vertices with d <= H; (ii) the product ab of the two smallest coordinates is nondecreasing along every child edge (three one-line cases); (iii) the unique off-chain child of v_j (j>=2) is u_j = (1,c_j,d_j,4c_jd_j-1) with m_j >= 11 d_j and ab = c_j >= 3, so every edge in subtree(u_j) multiplies the max by >= 11; these subtrees are disjoint and together with the chain partition S."
+              },
+              {
+                "basis": "inferred",
+                "citations": [],
+                "confidence": 0.96,
+                "counterevidence": [
+                  "Skeleton step (v) claimed d_j >= 11(2+sqrt3)^{j-2}, which is false because the ratios r_j = d_{j+1}/d_j increase toward 2+sqrt(3) from below (r_1 = 11/3 < 2+sqrt3); the proof here uses the explicit valid base 11/3, and the convergence and exponent are unaffected."
+                ],
+                "derived_from_claim_ids": [
+                  "work:004-upper-depth-v3:C004"
+                ],
+                "id": "work:004-upper-depth-v3:C005",
+                "statement": "T4(iv)-(v): subtree(u_j) contributes <= (3/2)(H/m_j)^rho vertices with max <= H, rho = ln3/ln11 = 0.4582 < 1/2; since m_j >= 11 d_j >= 121*(11/3)^{j-2}, the sum over j >= 2 of m_j^{-rho} converges to <= 0.248, giving N(H) <= C*H^rho + O(log H) with effective constant C = (3/2)*sum_{j>=2} m_j^{-rho} <= 0.372. N(H) = O(H^{ln3/ln11}), sublinear; rq1 Outcome A."
+              },
+              {
+                "basis": "inferred",
+                "citations": [],
+                "confidence": 0.9,
+                "counterevidence": [],
+                "derived_from_claim_ids": [
+                  "work:004-upper-depth-v3:C003",
+                  "work:004-upper-depth-v3:C004"
+                ],
+                "id": "work:004-upper-depth-v3:C006",
+                "statement": "Depth extremes: the chain is the unique slowest infinite branch, with asymptotic edge factor 2+sqrt(3) (so chain depth = log_{2+sqrt3}(d) + O(1)); T1's log_3 upper depth bound is approached only via the root's small factors; T3's lower bound is approached along branches maximizing each factor (child max comparable to 4d^3, requiring a,b,c comparable to d)."
+              },
+              {
+                "basis": "hypothesis",
+                "citations": [],
+                "confidence": 0.98,
+                "counterevidence": [],
+                "derived_from_claim_ids": [],
+                "id": "work:004-upper-depth-v3:C007",
+                "statement": "Labeled observation (hand-checkable substitution, not an enumeration): u_2 = (1,3,11,131) satisfies 1+9+121+17161 = 17292 = 4*1*3*11*131, has m_2 = 4*3*11 - 1 = 131 >= 11*11 and ab = 3, instantiating T4(iii); v_1 = (1,1,1,3), v_2 = (1,1,3,11) instantiate the chain recurrence."
+              }
+            ],
+            "content_sha256": "07d805ce56d7bb41df7af7ddd5c34e4c793d103f74de90a9b220969c6e9f0e17",
+            "counterevidence": [
+              "Skeleton step (v) contained a false inequality (base 2+sqrt3 for d_j); corrected to base 11/3. Flagged so the flawed line is not propagated.",
+              "T1's factor 3 is never asymptotically attained on any branch (chain factor tends to 2+sqrt(3) > 3); the log_3 depth bound is therefore not sharp, but it is exactly what was requested and is superseded in sharpness by T4's dichotomy, not contradicted.",
+              "No counterexample found to the dichotomy: the only vertices with ab <= 2 are the chain vertices (ab=1); u_1 coincides with the chain child at j=1 since b=c=1 there. Verified structurally via the a=b=1 descent, not merely by spot checks."
+            ],
+            "id": "packet:work:004-upper-depth-v3",
+            "knowledge_links": [
+              {
+                "rationale": "Proves T1-T3 with explicit constants, the full dichotomy (i)-(iii), and the sublinear bound N(H) = O(H^{ln3/ln11}) with effective constant, meeting the acceptance condition (Outcome A).",
+                "relation": "answers",
+                "source_id": "self",
+                "target_id": "question:work:004-upper-depth-v3"
+              },
+              {
+                "rationale": "Strongest attained rigorous upper bound: N(H) <= C*H^rho + O(log H), rho = ln3/ln11 = 0.4582, C <= 0.372 effective, superseding the crude O(H).",
+                "relation": "answers",
+                "source_id": "self",
+                "target_id": "question:demand:D4"
+              },
+              {
+                "rationale": "Two-sided depth relation log_3(log_2 d + 1) <= depth(v) <= log_3 d proved, with the chain identified as the slowest branch (depth log_{2+sqrt3} d + O(1)).",
+                "relation": "answers",
+                "source_id": "self",
+                "target_id": "question:demand:D6"
+              },
+              {
+                "rationale": "Proves the slow/fast dichotomy: slow growth confined to the explicit chain (O(log H) vertices), all other branches grow by factor >= 11 per edge; concludes sublinear exponent, rq1 Outcome A.",
+                "relation": "answers",
+                "source_id": "self",
+                "target_id": "question:raised:e19298af7323:rq1"
+              },
+              {
+                "rationale": "The v2 attempt produced no evidence (blocked); this packet supplies the complete proofs it failed to produce.",
+                "relation": "supersedes",
+                "source_id": "self",
+                "target_id": "answer:work:003-upper-depth-v2"
+              },
+              {
+                "rationale": "The v1 attempt produced no evidence (blocked); this packet completes the same demand pair D4+D6.",
+                "relation": "supersedes",
+                "source_id": "self",
+                "target_id": "answer:work:001-upper-bound-depth"
+              }
+            ],
+            "next_observation": null,
+            "node_id": "work:004-upper-depth-v3",
+            "objective": "D4+D6+rq1: Prove the strongest rigorous upper bound for N(H) and the two-sided depth-vs-log-H relation for the rooted tree of sorted solutions of a^2+b^2+c^2+d^2=4abcd. REQUIRED SKELETON (terse lemma-proof, HARD CAP 700 words, no tables, no digressions): Restate in one line each, citing as proved: mutation at max d strictly lowers d; mutations at a,b,c raise max to >= (4ab-1)d >= 3d; quotient graph is a tree rooted at (1,1,1,1); every vertex has <= 3 children, root has 1. (T1, depth upper) d >= 3^depth so depth <= log_3 d. (T2, crude upper) N(H) <= sum_{k<=log_3 H} 3^k <= (3H-1)/2 = O(H), explicit constant. (T3, depth lower) child max <= 4 d^3, so inductively log2(max at depth k) <= 3^k - 1, giving depth >= log_3(log2 d + 1); state the two-sided relation log_3(log_2 d+1) <= depth <= log_3 d. (T4, rq1 dichotomy — the main sharpening) Prove: (i) a=b=1 forces the vertex onto the chain: (1,1,c,d) satisfies c^2+d^2+2=4cd, and by the same descent argument all its solutions form the single chain v_0=(1,1,1,1), v_1=(1,1,1,3), v_{j+1}=(1,1,d_j,4d_j-c_j); chain ratio tends to 2+sqrt(3), so #chain vertices with d<=H is <= log_{2+sqrt3}(H)+O(1) = O(log H). (ii) Along any child-path (height-increasing), the product ab of the two smallest coordinates is nondecreasing (mutating a,b,or c replaces one of them by a larger value; check the three cases in one line each). (iii) The unique off-chain child of chain vertex v_j (j>=2, i.e. c_j>=3) is u_j=(1,c_j,d_j,4c_jd_j-1) with max m_j=4c_jd_j-1 >= 3 d_j; it has ab=c_j>=3, so by (ii) every descendant edge multiplies the max by >= 4*3-1=11. (iv) Subtree of u_j down to max<=H has depth <= log_{11}(H/m_j) and <= 3 children per vertex, hence size <= (3/2)*(H/m_j)^rho with rho=log 3/log 11 (=ln3/ln11, approx 0.458 < 1/2). (v) Sum over j>=2: since d_j >= 11(2+sqrt3)^{j-2}, sum_j m_j^{-rho} converges to an explicit constant; conclude N(H) <= C*H^rho + O(log H) with rho=log3/log11, i.e. N(H)=O(H^rho) sublinear — state C explicitly if cheap, else as an effective constant. If any step resists, prove what holds and label the rest CONJECTURE with the exact gap. STRICT BREVITY: symbol-dense lemma-proof style; omit prose motivation entirely.",
+            "raised_questions": [
+              {
+                "acceptance_condition": "Either a proved improvement N(H) = O(H^{rho'}) with rho' < ln3/ln11, or a proved lower bound N(H) >= c*H^beta for some beta > 0 that brackets the exponent, or a rigorous statement that branching-3 with factor exactly 11 occurs along a positive-density set of branches (making rho sharp for this method).",
+                "discriminating_outcomes": [
+                  "Improved exponent rho' < 0.4582 proved: the minimal-factor-11 assumption is shown to be density-zero, so the subtree sizes are o((H/m_j)^rho).",
+                  "Positive lower bound beta > 0 proved: N(H) is genuinely polynomial, bracketing alpha in [beta, 0.4582].",
+                  "A family of vertices with ab = 3 and factor exactly 11 at positive density: rho is sharp for this method and further progress needs a new invariant."
+                ],
+                "local_id": "rq-sharp",
+                "rationale": "The upper bound treats each fast subtree as a worst-case 3-ary tree with minimal factor 11; both assumptions are generically far from tight, so the exponent 0.4582 is an artifact of the method. The most informative next mathematical step is quantifying typical branching and typical factor inside one fast subtree.",
+                "required_source_hints": [],
+                "tags": [
+                  "method",
+                  "measurement",
+                  "uncertainty"
+                ],
+                "target_question_ids": [
+                  "question:demand:D4",
+                  "question:demand:D8"
+                ],
+                "text": "Is the exponent rho = ln3/ln11 = 0.4582 improvable toward the true growth rate of N(H)? Specifically: inside subtree(u_j), bound how often vertices have the full 3 distinct children versus equal-coordinate coincidences, and how the per-edge factor (>= 11, typically much larger) distributes; combine with the lower-bound thread to decide whether N(H) = Theta(H^alpha) for some alpha or whether the true growth is polylogarithmic-times-subpower."
+              }
+            ],
+            "source_ids_consulted": [],
+            "sufficiency": "ready_to_synthesize",
+            "unresolved": [
+              "Sharpness of rho = ln3/ln11: the bound uses worst-case 3-ary branching and the minimal factor 11 inside fast subtrees; typical behavior is likely much sparser, so rho is an upper-bound artifact (see raised question rq-sharp).",
+              "The constant C <= 0.372 is effective but loose; tightening it requires exact values of m_j and exact subtree counts, neither of which affects the exponent.",
+              "The lower-bound side (D5) is a separate thread (work:004-lower-bound-v3); combining it with rho is needed before any Theta-conjecture can be framed under D8.",
+              "Runtime discarded unknown citation sources from C1: ['answer:work:003-struct-core-v2']",
+              "Runtime discarded unknown citation sources from C2: ['answer:work:003-struct-core-v2']",
+              "Runtime discarded unknown citation sources from C4: ['answer:work:003-struct-core-v2']",
+              "Runtime discarded unknown citation sources from C7: ['answer:work:003-struct-core-v2']",
+              "Runtime downgraded unsupported observed claim C7 to hypothesis",
+              "Runtime rejected knowledge-link proposal outside the frozen board or with invalid endpoint types: self depends_on answer:work:003-struct-core-v2"
+            ]
+          },
+          "packet_id": "packet:work:004-upper-depth-v3",
+          "question_ids": [
+            "question:demand:D4",
+            "question:demand:D6",
+            "question:raised:e19298af7323:rq1",
+            "question:work:004-upper-depth-v3"
+          ],
+          "sufficiency": "ready_to_synthesize",
+          "summary": "MEMORANDUM (D4, D6, rq1). Cited as proved (answer:work:003-struct-core-v2): at every non-root vertex, mutation at the max d strictly lowers d; mutations at a,b,c raise the max to >= (4ab-1)d >= 3d; the quotient graph is a tree rooted at v_0=(1,1,1,1); every vertex has <= 3 children (fewer when coordinates coincide), the root has exactly 1.\n\nT1 (depth upper). Each child edge multiplies the max by >= 3, so d >= 3^{depth(v)} and depth(v) <= log_3 d.\n\nT2 (crude count). N(H) <= sum_{0<=k<=floor(log_3 H)} 3^k = (3^{floor(log_3 H)+1} - 1)/2 <= (3H-1)/2. N(H) = O(H), constant 3/2.\n\nT3 (depth lower). Child max = 4*(product of other three) - x <= 4bcd <= 4d^3. Let L_k = max of log_2 d at depth k: L_{k+1} <= 3L_k + 2, L_0 = 0, so L_k + 1 <= 3(L_{k-1} + 1), giving L_k <= 3^k - 1. Hence depth(v) >= log_3(log_2 d + 1). Two-sided: log_3(log_2 d + 1) <= depth(v) <= log_3 d.\n\nT4 (rq1 dichotomy; Outcome A holds). (i) The a=b=1 locus is a single chain. Equation: 2 + c^2 + d^2 = 4cd. The parent of (1,1,c,d) is the re-sorted (1,1,c,d'), d' = (c^2+2)/d < d, again with a=b=1; descending to the root and inverting gives the chain v_0=(1,1,1,1), v_1=(1,1,1,3), v_{j+1} = (1,1,d_j,4d_j - c_j) with c_{j+1}=d_j, i.e. d_{j+1} = 4d_j - d_{j-1}, ratio r_j = 4 - 1/r_{j-1} increasing from r_1 = 11/3 toward 2+sqrt(3). Chain vertices with d <= H: O(log H). For j >= 2 (c_j >= 3), v_j has exactly 2 children: v_{j+1} and u_j; every a=b=1 vertex lies on this chain.\n\n(ii) ab is nondecreasing along child edges. Mutating x in {a,b,c}: x' > d is the new max, so the child's two smallest entries are the two smallest of {a,b,c,d}\\{x}: mutate a gives bc >= ab; mutate b gives ac >= ab; mutate c leaves ab.\n\n(iii) The unique off-chain child of v_j (j >= 2) is u_j = (1,c_j,d_j,4c_jd_j - 1), max m_j = 4c_jd_j - 1 >= 12d_j - 1 >= 11d_j; its ab = c_j >= 3, so by (ii) every vertex of subtree(u_j) has ab >= 3 and every edge below multiplies the max by >= 4ab - 1 >= 11. The subtrees subtree(u_j), j >= 2, are pairwise disjoint (tree, distinct parents), disjoint from the chain (there b >= 3), and every vertex lies on the chain or in exactly one of them (descend to the root; the path leaves the chain at most once, since ab >= 3 is irreversible by (ii)).\n\n(iv) Subtree count. Vertices of subtree(u_j) with max <= H sit at depth <= log_{11}(H/m_j) below u_j, <= 3 children each, so size <= sum_k 3^k <= (3/2)*3^{log_{11}(H/m_j)} = (3/2)(H/m_j)^rho with rho = ln3/ln11 = 0.4582 < 1/2.\n\n(v) Summation. m_j >= 11 d_j and d_j >= 11*(11/3)^{j-2} (induction: d_{j-1} <= (3/11)d_j, so d_{j+1} = 4d_j - d_{j-1} >= (41/11)d_j >= (11/3)d_j). Hence sum_{j>=2} m_j^{-rho} <= 121^{-rho} / (1 - (11/3)^{-rho}) = 0.248, convergent since (11/3)^rho = 1.814 > 1. Therefore N(H) <= C*H^rho + O(log H), rho = ln3/ln11 = 0.4582, C = (3/2)*sum_{j>=2} m_j^{-rho} <= 0.372, an effective constant. N(H) = O(H^{0.4582}), sublinear; rq1 resolved by Outcome A.\n\nCORRECTION to skeleton (v): d_j >= 11(2+sqrt3)^{j-2} is false (r_j increases to 2+sqrt3 from below); the explicit base 11/3 is used instead, with all conclusions unchanged.\n\nDepth extremes: the chain is the unique slowest branch (asymptotic factor 2+sqrt3), so chain depth = log_{2+sqrt3}(d) + O(1); T1's log_3 is approached only through the root's small factors, and T3's lower bound is approached along branches maximizing each factor (child max ~ 4d^3 requires a,b,c comparable to d).\n\nLABELED OBSERVATION (hand-checkable substitution, not an enumeration): struct-core-v2 O1-O3 realize v_1, v_2, and u_2 = (1,3,11,131) with m_2 = 4*3*11 - 1 = 131 >= 11*11 and 1+9+121+17161 = 17292 = 4*4323 confirms u_2 in S; it has ab = 3, so its descendants grow by factor >= 11 as claimed.\n\nSTATUS: T1, T2, T3, T4 PROVED; rq1 closed by Outcome A with explicit exponent rho = ln3/ln11 and effective constant C <= 0.372; no conjecture remains open in this thread.",
+          "tags": [
+            "method",
+            "measurement",
+            "constraint",
+            "synthesis",
+            "counterexample",
+            "uncertainty"
+          ],
+          "unresolved": [
+            "Sharpness of rho = ln3/ln11: the bound uses worst-case 3-ary branching and the minimal factor 11 inside fast subtrees; typical behavior is likely much sparser, so rho is an upper-bound artifact (see raised question rq-sharp).",
+            "The constant C <= 0.372 is effective but loose; tightening it requires exact values of m_j and exact subtree counts, neither of which affects the exponent.",
+            "The lower-bound side (D5) is a separate thread (work:004-lower-bound-v3); combining it with rho is needed before any Theta-conjecture can be framed under D8.",
+            "Runtime discarded unknown citation sources from C1: ['answer:work:003-struct-core-v2']",
+            "Runtime discarded unknown citation sources from C2: ['answer:work:003-struct-core-v2']",
+            "Runtime discarded unknown citation sources from C4: ['answer:work:003-struct-core-v2']",
+            "Runtime discarded unknown citation sources from C7: ['answer:work:003-struct-core-v2']",
+            "Runtime downgraded unsupported observed claim C7 to hypothesis",
+            "Runtime rejected knowledge-link proposal outside the frozen board or with invalid endpoint types: self depends_on answer:work:003-struct-core-v2"
+          ]
+        },
+        "id": "answer:work:004-upper-depth-v3",
+        "incoming_links": [],
+        "kind": "answer",
+        "outgoing_links": [
+          {
+            "content_sha256": "10c368608e060b320d4c6d2ddd8b8c2a757af38bc86c605993b61cc6a9cf9996",
+            "id": "link:10c368608e060b320d4c6d2d",
+            "origin": "agent",
+            "proposed_by_node_id": "work:004-upper-depth-v3",
+            "rationale": "The v2 attempt produced no evidence (blocked); this packet supplies the complete proofs it failed to produce.",
+            "relation": "supersedes",
+            "source_id": "answer:work:004-upper-depth-v3",
+            "target_id": "answer:work:003-upper-depth-v2"
+          },
+          {
+            "content_sha256": "16b966096c6b273fb30247d0573b7f10f750f43e542db51f62e590e9de279454",
+            "id": "link:16b966096c6b273fb30247d0",
+            "origin": "agent",
+            "proposed_by_node_id": "work:004-upper-depth-v3",
+            "rationale": "The v1 attempt produced no evidence (blocked); this packet completes the same demand pair D4+D6.",
+            "relation": "supersedes",
+            "source_id": "answer:work:004-upper-depth-v3",
+            "target_id": "answer:work:001-upper-bound-depth"
+          },
+          {
+            "content_sha256": "4012afd286ce31e36ce380697843a5586c63b5111f80541f594eba3e26271ad6",
+            "id": "link:4012afd286ce31e36ce38069",
+            "origin": "agent",
+            "proposed_by_node_id": "work:004-upper-depth-v3",
+            "rationale": "Proves the slow/fast dichotomy: slow growth confined to the explicit chain (O(log H) vertices), all other branches grow by factor >= 11 per edge; concludes sublinear exponent, rq1 Outcome A.",
+            "relation": "answers",
+            "source_id": "answer:work:004-upper-depth-v3",
+            "target_id": "question:raised:e19298af7323:rq1"
+          },
+          {
+            "content_sha256": "797ec2f1c5c5bf04dddb8db026ed17a83f3e1890eab69bc1f9a26dc9e53bbe8d",
+            "id": "link:797ec2f1c5c5bf04dddb8db0",
+            "origin": "agent",
+            "proposed_by_node_id": "work:004-upper-depth-v3",
+            "rationale": "Two-sided depth relation log_3(log_2 d + 1) <= depth(v) <= log_3 d proved, with the chain identified as the slowest branch (depth log_{2+sqrt3} d + O(1)).",
+            "relation": "answers",
+            "source_id": "answer:work:004-upper-depth-v3",
+            "target_id": "question:demand:D6"
+          },
+          {
+            "content_sha256": "a4da2dd08c789f82b76d6b00d4a952ada5f359601319d1f276ea123787954c53",
+            "id": "link:a4da2dd08c789f82b76d6b00",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "answers",
+            "source_id": "answer:work:004-upper-depth-v3",
+            "target_id": "question:work:004-upper-depth-v3"
+          },
+          {
+            "content_sha256": "bc588268eee9c5d745670c46868d97846f1d4b64c4b802d15db20279dce8bc9f",
+            "id": "link:bc588268eee9c5d745670c46",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:004-upper-depth-v3",
+            "target_id": "question:demand:D4"
+          },
+          {
+            "content_sha256": "c3f2cdafa86d0f53d6b4ed5ce26205eee0b6ba2e0b11ad9e896aebc09c228f6a",
+            "id": "link:c3f2cdafa86d0f53d6b4ed5c",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "raises",
+            "source_id": "answer:work:004-upper-depth-v3",
+            "target_id": "question:raised:07d805ce56d7:rq-sharp"
+          },
+          {
+            "content_sha256": "ce7184c7325de7857362581c491a9b8fcfa912b604585104580ca446df2e4cd6",
+            "id": "link:ce7184c7325de7857362581c",
+            "origin": "agent",
+            "proposed_by_node_id": "work:004-upper-depth-v3",
+            "rationale": "Proves T1-T3 with explicit constants, the full dichotomy (i)-(iii), and the sublinear bound N(H) = O(H^{ln3/ln11}) with effective constant, meeting the acceptance condition (Outcome A).",
+            "relation": "answers",
+            "source_id": "answer:work:004-upper-depth-v3",
+            "target_id": "question:work:004-upper-depth-v3"
+          },
+          {
+            "content_sha256": "d22722cd5a26aa8b701264c37fad56ac5abe929371784de43c4773a1477c1765",
+            "id": "link:d22722cd5a26aa8b701264c3",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:004-upper-depth-v3",
+            "target_id": "question:raised:e19298af7323:rq1"
+          },
+          {
+            "content_sha256": "db72369df0b9cd72f28e92ce67014f6b74f1ef33c0d9e735a60f18a364db1e66",
+            "id": "link:db72369df0b9cd72f28e92ce",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:004-upper-depth-v3",
+            "target_id": "question:demand:D6"
+          },
+          {
+            "content_sha256": "fb80e2759490a144b5687eb69912e77d8eb9a85ba73aa2c18080a7802793f548",
+            "id": "link:fb80e2759490a144b5687eb6",
+            "origin": "agent",
+            "proposed_by_node_id": "work:004-upper-depth-v3",
+            "rationale": "Strongest attained rigorous upper bound: N(H) <= C*H^rho + O(log H), rho = ln3/ln11 = 0.4582, C <= 0.372 effective, superseding the crude O(H).",
+            "relation": "answers",
+            "source_id": "answer:work:004-upper-depth-v3",
+            "target_id": "question:demand:D4"
+          }
+        ]
+      },
+      "result_ids": [
+        "answer:work:004-upper-depth-v3"
+      ],
+      "result_sha256": "42352b51bc2f68907b8329ac8847dfa01a32cff40d2310d3e04103a242e164ef",
+      "sequence": 7,
+      "tool": "get_entry"
+    },
+    {
+      "arguments": {
+        "limit": 10,
+        "query": "exception enumeration small solutions cycles",
+        "question_ids": [],
+        "tags": []
+      },
+      "result": {
+        "hits": [
+          {
+            "answer_count": null,
+            "id": "answer:work:004-upper-depth-v3",
+            "kind": "answer",
+            "score": 4.197224577336219,
+            "sufficiency": "ready_to_synthesize",
+            "tags": [
+              "method",
+              "measurement",
+              "constraint",
+              "synthesis",
+              "counterexample",
+              "uncertainty"
+            ],
+            "text": "MEMORANDUM (D4, D6, rq1). Cited as proved (answer:work:003-struct-core-v2): at every non-root vertex, mutation at the max d strictly lowers d; mutations at a,b,c raise the max to >= (4ab-1)d >= 3d; the quotient graph is a tree rooted at v_0=(1,1,1,1); every vertex has <= 3 children (fewer when coordinates coincide), the root has exactly 1.\n\nT1 (depth upper). Each child edge multiplies the max by >= 3, so d >= 3^{depth(v)} and depth(v) <= log_3 d.\n\nT2 (crude count). N(H) <= sum_{0<=k<=floor(log_3 H)} 3^k = (3^{floor(log_3 H)+1} - 1)/2 <= (3H-1)/2. N(H) = O(H), constant 3/2.\n\nT3 (depth lower). Child max = 4*(product of other three) - x <= 4bcd <= 4d^3. Let L_k = max of log_2 d at depth k: L_{k+1} <= 3L_k + 2, L_0 = 0, so L_k + 1 <= 3(L_{k-1} + 1), giving L_k <= 3^k - 1. Hence depth(v) >= log_3(log_2 d + 1). Two-sided: log_3(log_2 d + 1) <= depth(v) <= log_3 d.\n\nT4 (rq1 dichotomy; Outcome A holds). (i) The a=b=1 locus is a single chain. Equation: 2 + c^2 + d^2 = 4cd. The parent of (1,1,c,d) is the re-sorted (1,1,c,d'), d' = (c^2+2)/d < d, again with a=b=1; descending to the root and inverting gives the chain v_0=(1,1,1,1), v_1=(1,1,1,3), v_{j+1} = (1,1,d_j,4d_j - c_j) with c_{j+1}=d_j, i.e. d_{j+1} = 4d_j - d_{j-1}, ratio r_j = 4 - 1/r_{j-1} increasing from r_1 = 11/3 toward 2+sqrt(3). Chain vertices with d <= H: O(log H). For j >= 2 (c_j >= 3), v_j has exactly 2 children: v_{j+1} and u_j; every a=b=1 vertex lies on this chain.\n\n(ii) ab is nondecreasing along child edges. Mutating x in {a,b,c}: x' > d is the new max, so the child's two smallest entries are the two smallest of {a,b,c,d}\\{x}: mutate a gives bc >= ab; mutate b gives ac >= ab; mutate c leaves ab.\n\n(iii) The unique off-chain child of v_j (j >= 2) is u_j = (1,c_j,d_j,4c_jd_j - 1), max m_j = 4c_jd_j - 1 >= 12d_j - 1 >= 11d_j; its ab = c_j >= 3, so by (ii) every vertex of subtree(u_j) has ab >= 3 and every edge below multiplies the max by >= 4ab - 1 >= 11. The subtrees subtree(u_j), j >= 2, are pairwise disjoint (tree, distinct parents), disjoint from the chain (there b >= 3), and every vertex lies on the chain or in exactly one of them (descend to the root; the path leaves the chain at most once, since ab >= 3 is irreversible by (ii)).\n\n(iv) Subtree count. Vertices of subtree(u_j) with max <= H sit at depth <= log_{11}(H/m_j) below u_j, <= 3 children each, so size <= sum_k 3^k <= (3/2)*3^{log_{11}(H/m_j)} = (3/2)(H/m_j)^rho with rho = ln3/ln11 = 0.4582 < 1/2.\n\n(v) Summation. m_j >= 11 d_j and d_j >= 11*(11/3)^{j-2} (induction: d_{j-1} <= (3/11)d_j, so d_{j+1} = 4d_j - d_{j-1} >= (41/11)d_j >= (11/3)d_j). Hence sum_{j>=2} m_j^{-rho} <= 121^{-rho} / (1 - (11/3)^{-rho}) = 0.248, convergent since (11/3)^rho = 1.814 > 1. Therefore N(H) <= C*H^rho + O(log H), rho = ln3/ln11 = 0.4582, C = (3/2)*sum_{j>=2} m_j^{-rho} <= 0.372, an effective constant. N(H) = O(H^{0.4582}), sublinear; rq1 resolved by Outcome A.\n\nCORRECTION to skeleton (v): d_j >= 11(2+sqrt3)^{j-2} is false (r_j increases to 2+sqrt3 from below); the explicit base 11/3 is used instead, with all conclusions unchanged.\n\nDepth extremes: the chain is the unique slowest branch (asymptotic factor 2+sqrt3), so chain depth = log_{2+sqrt3}(d) + O(1); T1's log_3 is approached only through the root's small factors, and T3's lower bound is approached along branches maximizing each factor (child max ~ 4d^3 requires a,b,c comparable to d).\n\nLABELED OBSERVATION (hand-checkable substitution, not an enumeration): struct-core-v2 O1-O3 realize v_1, v_2, and u_2 = (1,3,11,131) with m_2 = 4*3*11 - 1 = 131 >= 11*11 and 1+9+121+17161 = 17292 = 4*4323 confirms u_2 in S; it has ab = 3, so its descendants grow by factor >= 11 as claimed.\n\nSTATUS: T1, T2, T3, T4 PROVED; rq1 closed by Outcome A with explicit exponent rho = ln3/ln11 and effective constant C <= 0.372; no conjecture remains open in this thread.",
+            "unresolved_count": 9
+          },
+          {
+            "answer_count": null,
+            "id": "answer:work:003-struct-core-v2",
+            "kind": "answer",
+            "score": 4.079441541679836,
+            "sufficiency": "ready_to_synthesize",
+            "tags": [
+              "method",
+              "evidence",
+              "constraint",
+              "counterexample",
+              "uncertainty"
+            ],
+            "text": "MEMORANDUM — structural core (D1–D3) for S = {sorted 1≤a≤b≤c≤d, a²+b²+c²+d²=4abcd}, mutation x↦4·(product of others)−x then re-sort; root (1,1,1,1); height h(v)=d (decision 4). All proved from definitions SC1–SC2; no external materials exist (SC6).\n\nLEMMA V (Vieta conjugate). If (a,b,c,d)∈S then d′=4abc−d is an integer ≥1 and (a,b,c,d′), re-sorted, lies in S. Proof: d is a root of t²−4abc·t+(a²+b²+c²)=0; the other root d′ has d+d′=4abc∈ℤ and dd′=a²+b²+c²>0, so d′∈ℤ and d′≥1; the equation gives a²+b²+c²+d′²=4abc·d′. ∎\n\nLEMMA L2 (top tie only at root). If c=d then v=(1,1,1,1). Proof: the equation gives a²+b²=(4ab−2)d². Since ab≥1, RHS≥2d²; since a,b≤d, LHS≤2d². Equality: 4ab−2=2 ⇒ ab=1 ⇒ a=b=1, and 2=2d² ⇒ d=1. (Same as the suggested route: d² | a²+b² forces a²+b²∈{d²,2d²}; the first gives 4ab=3, impossible; the second is above.) Hence at every non-root vertex c<d: the maximum coordinate is unique; also a=d⇒c=d⇒root. ∎\n\nLEMMA L1 (descent). At every non-root v: 1≤d′<d. Proof: d′≥1 by Lemma V. Assume d′≥d. Then d²≤dd′=a²+b²+c²≤3c², so d≤c√3. Then 4abc²≤4abcd=a²+b²+c²+d²≤2(a²+b²+c²)≤6c², hence 4ab≤6, i.e. 2ab≤3, so ab=1 and a=b=1. Now d²≤a²+b²+c²=c²+2<(c+1)² (since 2<2c+1 for c≥1), so d≤c; with d≥c, d=c. The equation becomes 2+2c²=4c², so c=1 and v=(1,1,1,1) — contradiction. ∎ Note: no Pell/mod-3 step is needed; the previously suggested exclusion of m²=3c²−2 mod 3 is invalid as stated (m²≡1 mod 3 occurs, e.g. c=1), and this route avoids it entirely.\n\nLEMMA L3 (mutating below the max grows, factor ≥3). At non-root v, mutate x∈{a,b,c}: x′=4(abcd/x)−x≥4d−d=3d>d, because the other three coordinates include d (product ≥d) and x≤d. After re-sorting the new maximum is x′ (other entries ≤d<x′). So every mutation not at d strictly increases height, by factor ≥3 (for x=c the factor is ≥4ab−1). ∎\n\nCOROLLARY (no height-preserving mutation; the d-mutation lowers height). At non-root v: mutating d yields re-sorted (a,b,c,d′) with max=max(c,d′)<d (d′<d by L1, c<d by L2); mutating a,b,c yields max≥3d>d by L3. Hence every mutation strictly changes height. At the root the unique mutated vertex is (1,1,1,3), height 3>1. ∎\n\nTHEOREM D2 (unique height-decreasing mutation). At every non-root v exactly one mutated vertex has height<h(v): the one from mutating the maximum coordinate d; all other coordinate-mutations raise height to ≥3d. Uniqueness is at the level of vertices of the quotient (sorted) graph: if a=b or b=c, some of the four coordinate-mutations coincide after sorting (mutating a vs b when a=b gives the same multiset), but all such coincidences lie among height-increasing mutations, so the height-decreasing vertex is unique; since c<d (L2) it also comes from a unique coordinate index. No mutation fixes height. ∎\n\nTHEOREM D1 (connectivity). Define parent(v), v≠root: mutate at d, re-sort. By the Corollary h(parent(v))=max(c,d′)<d=h(v); by Lemma V parent(v)∈S. Iterating, height is a strictly decreasing positive integer, reaching 1 within d−1 steps; height 1 forces (1,1,1,1) (since 1≤a≤b≤c≤d=1), and (1,1,1,1)∈S as 1+1+1+1=4=4·1·1·1·1. So every v∈S is joined to the root by a mutation path. ∎\n\nTHEOREM D3 (rooted tree). The mutation relation on S is symmetric — coordinate mutation x↦M−x is an involution — so the quotient graph on sorted vertices is undirected. It is connected (D1). It is acyclic: in any cycle take a vertex v of maximal height; its two distinct cycle-neighbors have height≤h(v), cannot exceed h(v) (maximality), and cannot equal it (Corollary), so both are height-decreasing mutations of v — contradicting D2. Connected and acyclic ⇒ tree, rooted at (1,1,1,1) with parent as in D1; a multiple parent (a second lower-height neighbor) would contradict D2 identically. ∎\n\nLABELED OBSERVATIONS (hand-checkable spot checks, reproducible by direct substitution; not an enumeration): O1: (1,1,1,3): 1+1+1+9=12=4·3; d′=4−3=1, parent is root; all four root-mutations give 3, so the root has exactly one child. O2: (1,1,3,11): 1+1+9+121=132=4·33; d′=4·3−11=1, parent (1,1,1,3); mutating c=3 gives 41: (1,1,11,41), max 41≥3·11 (L3 confirmed). O3: (1,3,11,131): 1+9+121+17161=17292=4·4323, from (1,1,3,11) by mutating a 1 (4·1·3·11−1=131); d′=4·3·11−131=1, parent (1,1,3,11). Hence (1,1,3,11) has exactly two children (mutating a vs b coincide since a=b): branching exists and the equal-coordinate subtlety is realized already at depth 2.\n\nSTATUS: D1, D2, D3 PROVED, no counterexamples, no induction failure modes (L1 covers every non-root vertex; termination uses only that height is a positive integer). No growth law is assumed or implied; D4–D8 belong to the sibling threads.",
+            "unresolved_count": 3
+          },
+          {
+            "answer_count": null,
+            "id": "answer:work:006-lower-bound-v5-compact",
+            "kind": "answer",
+            "score": 1.6931471805599454,
+            "sufficiency": "ready_to_synthesize",
+            "tags": [
+              "method",
+              "measurement",
+              "constraint",
+              "synthesis",
+              "counterexample",
+              "uncertainty"
+            ],
+            "text": "Frozen facts used: tree rooted at v0; non-root children are mutations of a,b,c; child max ≤4d³ (answer:work:003-struct-core-v2, answer:work:004-upper-depth-v3).\nL1. For j≥1, d0=1,d1=3,c_j=d_{j-1}; v0=(1,1,1,1), v_j=(1,1,c_j,d_j). Induction/mutation gives 2+c_j²+d_j²=4c_jd_j and d_{j+1}=4d_j−d_{j−1}. λ=2+√3; d_j=Aλ^j+Bλ^{−j}, A=(3+√3)/6, B=(3−√3)/6. Since A+Bλ^{−2j}≤A+B=1, d_j≤λ^j; d_j strictly increases, so N(H)≥⌊log_λH⌋+1.\nL2. Child maximum f(x)=4abcd/x−x is strictly decreasing, so distinct values among a,b,c give distinct children. If a=b=c=x, d²=x²(4xd−3), so x|d; d=kx gives k²+3=4kx², hence k|3. k=1→v0; k=3→v1=(1,1,1,3). Thus depth≥2⇒≥2 distinct children.\nL3. From v2=(1,1,3,11), A=log₂11+1. Each edge gives L+1≤3(L+1), so after t edges log₂d≤3^tA. If 3^tA≤log₂H, the 2^t level-t vertices below v2 have d≤H. Take t=⌊log₃(log₂H/A)⌋, β=log₃2=0.6309, c′=1/(2A^β)≈0.194, H≥32; then N(H)≥2^t≥c′(log₂H)^β.\nFINAL: N(H)≥max{⌊log_{2+√3}H⌋+1, c′(log₂H)^0.6309} for H≥32. Correction: the first term is asymptotically dominant (1>0.6309). CONJECTURE stronger than Θ(log H): missing positive-density branching/typical-growth lemma.",
+            "unresolved_count": 5
+          }
+        ],
+        "query": "exception enumeration small solutions cycles",
+        "snapshot_sha256": "63ddc552a25a8b574f10e0dcf8670b66cbe685bf25a81068272d5f2dec31f6c0",
+        "truncated": false
+      },
+      "result_ids": [
+        "answer:work:004-upper-depth-v3",
+        "answer:work:003-struct-core-v2",
+        "answer:work:006-lower-bound-v5-compact"
+      ],
+      "result_sha256": "f7cc4bf8ddf90659a5b9cd1cfeea41c44283325a1476ec178a7f56d6e1722e0a",
+      "sequence": 8,
+      "tool": "search_answers"
+    },
+    {
+      "arguments": {
+        "entry_id": "answer:work:005-exception-search-v4"
+      },
+      "result": {
+        "content": {
+          "claim_ids": [],
+          "content_sha256": "ed11ae89d8520b3f24c29ed8f7bd87b82c19506e5c6db6f5b4e5eb527b26bfc6",
+          "id": "answer:work:005-exception-search-v4",
+          "node_id": "work:005-exception-search-v4",
+          "packet": {
+            "account": "Investigation failed before producing evidence: UnexpectedModelBehavior: Exceeded maximum output retries (2)",
+            "assumptions": [],
+            "boundary_findings": [],
+            "child_packet_ids": [],
+            "claims": [],
+            "content_sha256": "155827e0590e10301ba9174e9473ed5aa674e98d97ed98c121206da216495a4e",
+            "counterevidence": [],
+            "id": "packet:work:005-exception-search-v4",
+            "knowledge_links": [],
+            "next_observation": null,
+            "node_id": "work:005-exception-search-v4",
+            "objective": "Execute the frozen spec of question:work:004-exception-search-v3 verbatim: bounded hand-checkable enumeration, LABELED OBSERVATIONS ONLY, HARD CAP 450 words. Procedure (state explicitly for reproducibility): Method 1 (direct): for all sorted 1<=a<=b<=c<=20, test whether t^2 - 4abc t + (a^2+b^2+c^2) = 0 has an integer root d with c <= d <= 100, pruning via d | a^2+b^2+c^2 and d+d' = 4abc; list every hit. Method 2 (BFS from (1,1,1,1)): mutate all 4 coordinates, re-sort, discard d>100. Expected vertices, verify each by one-line substitution: (1,1,1,1) [4=4]; (1,1,1,3) [1+1+1+9=12=4*3]; (1,1,3,11) [1+1+9+121=132=4*33]; (1,1,11,41) [1+1+121+1681=1804=4*451]; check all children of (1,1,11,41) exceed 100 (mutate 11: 4*41-11=153; mutate a=1: 4*11*41-1=1803), so BFS stops. Report: (a) verified table; (b) any c=d within the bound? (expected none, consistent with proved L2); (c) any vertex with two height-decreasing mutations or two parents within the BFS tree? (expected none, consistent with proved D2/D3); (d) do Methods 1 and 2 agree exactly within d<=100? The a<=2 slice of Method 1 MUST be completed and explicitly cross-checked, since every proved vertex has a<=3; any Method-1 solution unreachable from the root would refute D1 - check and report. (e) For each non-root vertex compute d'=4abc-d and confirm 1<=d'<d, exhibiting the parent edge: (1,1,1,3): d'=1; (1,1,3,11): d'=1; (1,1,11,41): d'=3. (f) Report induction failure modes observed (e.g. re-sorting effects) or state their absence within the bound. Label EVERYTHING as OBSERVATION valid only within d<=100; non-occurrences prove nothing beyond the bound. If the full Method-1 sweep is too long, complete the a<=2 slice and label the truncation explicitly.",
+            "raised_questions": [],
+            "source_ids_consulted": [],
+            "sufficiency": "blocked",
+            "unresolved": [
+              "Investigation failed before producing evidence: UnexpectedModelBehavior: Exceeded maximum output retries (2)"
+            ]
+          },
+          "packet_id": "packet:work:005-exception-search-v4",
+          "question_ids": [
+            "question:demand:D7",
+            "question:demand:D9",
+            "question:work:004-exception-search-v3",
+            "question:work:005-exception-search-v4"
+          ],
+          "sufficiency": "blocked",
+          "summary": "Investigation failed before producing evidence: UnexpectedModelBehavior: Exceeded maximum output retries (2)",
+          "tags": [
+            "evidence",
+            "counterexample",
+            "measurement",
+            "method",
+            "uncertainty"
+          ],
+          "unresolved": [
+            "Investigation failed before producing evidence: UnexpectedModelBehavior: Exceeded maximum output retries (2)"
+          ]
+        },
+        "id": "answer:work:005-exception-search-v4",
+        "incoming_links": [],
+        "kind": "answer",
+        "outgoing_links": [
+          {
+            "content_sha256": "02a1a658880b812fc2bd1975135c4d26f60aa6c143779c1d5f01fcc54b6209be",
+            "id": "link:02a1a658880b812fc2bd1975",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:005-exception-search-v4",
+            "target_id": "question:demand:D9"
+          },
+          {
+            "content_sha256": "a59d5840996c33554ad099a057a3b340e496191eb5c7c22a7cc01f1d259cc709",
+            "id": "link:a59d5840996c33554ad099a0",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:005-exception-search-v4",
+            "target_id": "question:work:005-exception-search-v4"
+          },
+          {
+            "content_sha256": "ba1466c99e62b597a03fe3eeba38f71c49aba9d6d877ddbf8107cc0460e97930",
+            "id": "link:ba1466c99e62b597a03fe3ee",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:005-exception-search-v4",
+            "target_id": "question:demand:D7"
+          },
+          {
+            "content_sha256": "e7a1edfe5a62d8dd85b308c325b73882180f64ec53d3a70a2f5e846185c1e029",
+            "id": "link:e7a1edfe5a62d8dd85b308c3",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:005-exception-search-v4",
+            "target_id": "question:work:004-exception-search-v3"
+          }
+        ]
+      },
+      "result_ids": [
+        "answer:work:005-exception-search-v4"
+      ],
+      "result_sha256": "1660171ed5e8baeefac5b0c205a1f3ed81848e8659bab7a85573375fed5425c4",
+      "sequence": 9,
+      "tool": "get_entry"
+    },
+    {
+      "arguments": {
+        "entry_id": "answer:work:005-rq-sharp-attack"
+      },
+      "result": {
+        "content": {
+          "claim_ids": [],
+          "content_sha256": "fd176885b60ee0a55bac7048d10d7b79956afa447046d4a6e95d94681d2b6b0c",
+          "id": "answer:work:005-rq-sharp-attack",
+          "node_id": "work:005-rq-sharp-attack",
+          "packet": {
+            "account": "Investigation failed before producing evidence: UnexpectedModelBehavior: Exceeded maximum output retries (2)",
+            "assumptions": [],
+            "boundary_findings": [],
+            "child_packet_ids": [],
+            "claims": [],
+            "content_sha256": "bac50ad82b180f3e211862f80f5cc29366453c4b1b62bf9dd8e44ad7eba12296",
+            "counterevidence": [],
+            "id": "packet:work:005-rq-sharp-attack",
+            "knowledge_links": [],
+            "next_observation": null,
+            "node_id": "work:005-rq-sharp-attack",
+            "objective": "Attack question:raised:07d805ce56d7:rq-sharp: is rho = ln3/ln11 = 0.4582 improvable toward the true growth rate of N(H)? HARD CAP 700 words, lemma-proof style. Take as proved (cite answer:work:003-struct-core-v2 and answer:work:004-upper-depth-v3, do not reprove): tree structure; children = mutations at a,b,c; child max >= (4ab-1)d; product ab nondecreasing along child edges; the a=b=1 locus is the single chain with ratio -> 2+sqrt3; N(H) <= C H^{ln3/ln11} + O(log H). ATTEMPT THIS ITERATED DICHOTOMY, proving each step that holds and labeling the rest CONJECTURE with the exact gap. (L1, level-p slow locus) For fixed a,b with p = ab, solutions (c,d), c<=d, of c^2+d^2 = 4p cd - (a^2+b^2) are generated by the Vieta involution (c,d) -> (d, 4p d - c) as one or more chains; each chain has consecutive ratio -> 2p + sqrt(4p^2-1) >= 4p-1, so contributes O(log H) vertices with d <= H. Prove the number of chains is finite by bounding each chain's minimal element (descend until d' >= d and bound that configuration explicitly); if finiteness resists, state it as the precise gap. (L2, product jump) At a vertex with ab = p: mutating c keeps product p (chain step, factor about 4p); mutating b gives new product a c >= c >= b >= sqrt(p) and in fact a c >= p c/b >= p when c >= b... establish the cleanest TRUE statement: any child strictly increasing the product has new product >= p^{3/2} (since the new product is ac or bc with c >= b >= sqrt(p)), hence per-edge factor >= 4 p^{3/2} - 1 below it. Verify the boundary cases a=b and b=c in one line each. (L3, iteration) Level 0: the ab=1 chain (O(log H) vertices); its product-raising children have p >= 3 (proved: u_j has ab = c_j >= 3). Level 1: vertices with ab=3, i.e. (a,b)=(1,3): equation c^2+d^2+10 = 12cd; find its minimal solution(s) and show the chains (u_2=(1,3,11,131) lies on one, ratio -> 6+sqrt35 = 11.92; substitution check 1+9+121+17161=17292=4*4323) contribute O(log H) vertices; their product-raising children have p >= min(1*c, 3*c) = c >= 11, so factor >= 43. Iterate: if level-k slow product p_k satisfies p_{k+1} >= p_k^{3/2}, then p_k >= 3^{(3/2)^{k-1}} (doubly exponential), each level contributes O(log H) chain vertices plus subtrees of size O(H^{ln3/ln(4p_k-1)}) whose exponents tend to 0. CONCLUDE the strongest statement actually proved: ideally N(H) = O_eps(H^eps) for every eps>0, stating exactly what the proof needs (finiteness of chain counts per level and uniformity of the level O(log H) counts); if full uniformity resists, prove the second iteration explicitly - N(H) = O(H^{ln3/ln43}) = O(H^0.2922), contingent on the ab=3 locus being a proved finite union of chains - and label the eps-statement CONJECTURE with the exact missing lemma. Phrase any lower-side bracket conditionally on the sibling lower-bound thread (N(H) >= c'(log H)^0.6309) since it is being proved in parallel. No tables; at most 2 one-line substitution checks.",
+            "raised_questions": [],
+            "source_ids_consulted": [],
+            "sufficiency": "blocked",
+            "unresolved": [
+              "Investigation failed before producing evidence: UnexpectedModelBehavior: Exceeded maximum output retries (2)"
+            ]
+          },
+          "packet_id": "packet:work:005-rq-sharp-attack",
+          "question_ids": [
+            "question:demand:D4",
+            "question:demand:D8",
+            "question:raised:07d805ce56d7:rq-sharp",
+            "question:work:005-rq-sharp-attack"
+          ],
+          "sufficiency": "blocked",
+          "summary": "Investigation failed before producing evidence: UnexpectedModelBehavior: Exceeded maximum output retries (2)",
+          "tags": [
+            "method",
+            "measurement",
+            "uncertainty",
+            "synthesis"
+          ],
+          "unresolved": [
+            "Investigation failed before producing evidence: UnexpectedModelBehavior: Exceeded maximum output retries (2)"
+          ]
+        },
+        "id": "answer:work:005-rq-sharp-attack",
+        "incoming_links": [],
+        "kind": "answer",
+        "outgoing_links": [
+          {
+            "content_sha256": "1fb67419d9ef0b2539547a7b2f2d281690ab0a633a391e4c86a02de4a9452635",
+            "id": "link:1fb67419d9ef0b2539547a7b",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:005-rq-sharp-attack",
+            "target_id": "question:raised:07d805ce56d7:rq-sharp"
+          },
+          {
+            "content_sha256": "bb1be7df749e2f6cb1111bd7ab91d34a1b7c0b902c0f088d8d70ec3baab60261",
+            "id": "link:bb1be7df749e2f6cb1111bd7",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:005-rq-sharp-attack",
+            "target_id": "question:demand:D8"
+          },
+          {
+            "content_sha256": "d5bc19f11c3a668d9c638d4d32d020df451b973160ea51df5280b1c1b3819dea",
+            "id": "link:d5bc19f11c3a668d9c638d4d",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:005-rq-sharp-attack",
+            "target_id": "question:demand:D4"
+          },
+          {
+            "content_sha256": "e6b4d405abbac818c7384a078fec3dca1018d32530c03fa56390c16f4ada13fc",
+            "id": "link:e6b4d405abbac818c7384a07",
+            "origin": "runtime",
+            "proposed_by_node_id": null,
+            "rationale": null,
+            "relation": "partially_answers",
+            "source_id": "answer:work:005-rq-sharp-attack",
+            "target_id": "question:work:005-rq-sharp-attack"
+          }
+        ]
+      },
+      "result_ids": [
+        "answer:work:005-rq-sharp-attack"
+      ],
+      "result_sha256": "1f85b8c91f437dab8766950a31bb6237b81e319689426c8e651783a4be51c524",
+      "sequence": 10,
+      "tool": "get_entry"
+    }
+  ],
+  "snapshot_sha256": "63ddc552a25a8b574f10e0dcf8670b66cbe685bf25a81068272d5f2dec31f6c0"
+}

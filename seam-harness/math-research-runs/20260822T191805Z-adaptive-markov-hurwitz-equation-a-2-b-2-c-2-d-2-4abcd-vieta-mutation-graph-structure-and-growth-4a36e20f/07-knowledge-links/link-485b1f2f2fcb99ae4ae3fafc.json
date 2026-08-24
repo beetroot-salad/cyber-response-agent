@@ -1,0 +1,10 @@
+{
+  "content_sha256": "485b1f2f2fcb99ae4ae3fafc61089f22887dc0c21384570a06e3168d8c04c3f2",
+  "id": "link:485b1f2f2fcb99ae4ae3fafc",
+  "origin": "runtime",
+  "proposed_by_node_id": null,
+  "rationale": null,
+  "relation": "depends_on",
+  "source_id": "question:raised:529a9c7e8677:rq-d5-stronger",
+  "target_id": "question:raised:07d805ce56d7:rq-sharp"
+}

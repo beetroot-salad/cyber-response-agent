@@ -1,0 +1,25 @@
+{
+  "account": "The node is a bounded, self-contained argument-development task. All context (audience, register, stance, form, length, absent sources) is already in the dossier; the work draws solely on general knowledge, which is fully available, so no external evidence is required. The acceptance condition is mechanical and checkable: at least three distinct counterarguments with 2–4 sentences each, historically accurate in broad outline, no invented facts, plus an explicit discriminating condition. There is no sequential staging or sibling-produced input needed, so the node is locally decidable and solved directly.\n\nTHE DEFENSE: AI ART IS NOT INHERENTLY KITSCH\n\nArgument 1 — Kitsch is a property of use, intention, and reception, not of tools. Kitsch names a relation between a work, its maker, and its audience: work that trades in prefabricated feeling at no risk. A brush cannot be sentimental, a hammer cannot be kitschy, and neither can a diffusion model. The tool may enable kitsch, but the category only takes hold in choices a person makes with it.\n\nArgument 2 — Every new medium was accused of kitsch and later produced genuine art. Photographers were told they merely transcribed nature mechanically; chromolithography, whose cheap sentiment mid-nineteenth century Munich critics helped make \"kitsch\" a word, was dismissed as soulless reproduction; recorded music was derided as a hollow copy of live performance. In each case the condemnation proved to be about novelty and market access, not inherent value. The pattern counsels humility about pronouncing a new tool incapable of art.\n\nArgument 3 — Human selection, editing, and framing impose risk and friction on AI output. A model generates hundreds of variations; the maker's choice of one over the rest is a judgment, a commitment that stakes something on a particular image meaning something. Discarding the easy, flattering candidates and reshaping what remains reintroduces exactly the friction — the willingness to make a choice that could be a mistake — that separates craft from kitsch. The output is not AI's; it is what a person decides to stand behind.\n\nArgument 4 — Formulaic sentiment long predates AI in human-made commercial art. Greeting cards, vacation-postcard sunsets, and formula pop songs have traded in the most comfortable expected feelings for over a century. If every AI image is kitsch by virtue of predictable feeling, then a large share of deliberate human-made commercial art is kitsch too — which stretches the label so wide it stops meaning anything worth arguing about.\n\nDISCRIMINATING CONDITION\nAI art escapes kitsch precisely when the maker bears real risk and judgment — selecting, framing, and revising toward a particular point of view rather than the most comfortable expected image. It remains kitsch when the output is frictionless flattery, engineered to hand the viewer a familiar feeling at no genuine cost to maker or audience.",
+  "children": [],
+  "decidability": {
+    "acceptance_mechanical": true,
+    "account": "All stable context (audience, register, thesis posture, form, length, and the absence of source materials) is supplied in the dossier; the task draws on general historical and cultural knowledge available to the writer, and every required element (four distinct arguments each with supporting sentences, a closing two-sentence discriminating condition, broad historical accuracy, no invented facts) is directly checkable against the text. No sibling output is needed and no sequential staging exists, so the node can be solved here.",
+    "context_complete": true,
+    "grounded_referents": [
+      "audience: general educated reader (decision:1)",
+      "register: standalone cultural criticism (decision:1)",
+      "stance: argued, nuanced thesis (decision:2)",
+      "form: plain prose with title, no citations (decision:3)",
+      "target length: 550–650 words (decision:3)",
+      "suggested title: 'AI Art and Kitsch'",
+      "historical referents: photography (1839), chromolithography and 'kitsch' (19th c. Munich art market), recorded music (late 19th c.)"
+    ],
+    "independent_of_future_siblings": true,
+    "missing_context": []
+  },
+  "disposition": "solve",
+  "irreducible_core": null,
+  "requested_source_ids": [],
+  "requested_source_paths": [],
+  "synthesis_contract": null
+}

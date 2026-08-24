@@ -1,0 +1,16 @@
+{
+  "acceptance_condition": "Returns at least four findings, each with the exact `===== PDF PAGE N =====` marker(s), collectively covering claimed gains (factuality and reasoning), experimental setup (agents, rounds, tasks, consensus), and stated limitations. Each finding is a direct quote or close paraphrase from the Du file, and no design inference is labeled as a source claim.",
+  "content_sha256": "44c4ec1a6f808864db0a5ee10af1785b02336138dc32b5d33d1384d6cabd6169",
+  "demand_ids": [
+    "D12",
+    "D13"
+  ],
+  "id": "question:root.04-debate-gains-evidence.01-extract-du-findings",
+  "node_id": "root.04-debate-gains-evidence.01-extract-du-findings",
+  "rationale": "This child isolates the evidence-extraction portion of the node objective. It can be completed independently because the source file is fully enclosed and the required page markers are visible. The findings will be directly used by the parent to reconcile with null results and to inform the design constraints.",
+  "tags": [
+    "evidence",
+    "measurement"
+  ],
+  "text": "Extract from papers/text/du-et-al-2023-multiagent-debate.txt, each anchored to the exact `===== PDF PAGE N =====` marker(s), at least four findings that cover: (a) the improvements in factuality and reasoning the paper claims for multiagent debate, (b) the experimental setup (number of agents, number of debate rounds, tasks used, and how consensus/final answer is reached), and (c) any limitations the authors state. Return each finding as a quote or close paraphrase with the exact page marker(s)."
+}

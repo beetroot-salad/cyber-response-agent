@@ -1,0 +1,16 @@
+{
+  "acceptance_condition": "A compact answer (<=8 claims) covering: evaluation design; MAD-vs-CoT and MAD-vs-self-consistency results including the comparable-compute comparison; agent/round scaling results; efficiency; the heterogeneity finding; robustness; positioning vs Du 2023/Smit 2024; each claim with an explicit `===== PDF PAGE N =====` marker.",
+  "content_sha256": "459a1618d2a4122cd584698669ab4daa675eab8c29a93f793483c319bcfa2ad0",
+  "demand_ids": [
+    "D4",
+    "D3"
+  ],
+  "id": "question:work:002-inv-zhang-when-r2",
+  "node_id": "work:002-inv-zhang-when-r2",
+  "rationale": "Zhang et al. is the decisive matched-compute evidence (MAD vs self-consistency at comparable calls/tokens) and the source of the heterogeneity moderation, both essential to the causal model (D3) and to reconciling Du's positive results (D4). Retry with a claim cap because the wave-1 attempt failed on output retries; the source is verified accessible with the negative win-rate results and the heterogeneity antidote clearly present.",
+  "tags": [
+    "evidence",
+    "counterexample"
+  ],
+  "text": "What does Zhang et al. 2025 (papers/text/zhang-et-al-2025-mad-question.txt, 'If Multi-Agent Debate Is the Answer, What Is the Question?') establish: the 5 MAD methods x 9 benchmarks x 4 models design; the headline negative result that MAD methods rarely beat CoT (win rates under 20% across 36 scenarios) and underperform self-consistency at comparable LLM-call/token budgets; the hyperparameter experiments (agents 3-9, rounds 2-4) showing stagnation/decline; efficiency findings on inference-budget utilization; the model-heterogeneity result as a 'universal antidote'; robustness findings; and how the paper positions itself against Du et al. 2023 and Smit et al. Keep the answer compact: at most 8 claims, each with a `===== PDF PAGE N =====` marker."
+}

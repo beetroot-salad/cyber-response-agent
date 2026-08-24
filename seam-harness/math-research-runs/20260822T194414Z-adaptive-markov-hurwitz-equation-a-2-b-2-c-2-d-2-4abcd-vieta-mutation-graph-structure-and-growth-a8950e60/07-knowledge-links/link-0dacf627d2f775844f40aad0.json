@@ -1,0 +1,10 @@
+{
+  "content_sha256": "0dacf627d2f775844f40aad04aea78853dac665b44174b8ad47033307dd77a18",
+  "id": "link:0dacf627d2f775844f40aad0",
+  "origin": "runtime",
+  "proposed_by_node_id": null,
+  "rationale": null,
+  "relation": "refines",
+  "source_id": "question:work:001-struct-core",
+  "target_id": "question:demand:D3"
+}

@@ -1,0 +1,15 @@
+{
+  "acceptance_condition": "Establish demand D7 with evidence.",
+  "content_sha256": "c7247ffe2c70d3a1d77f165a68e664a81eb88eab497991f830d491a4a55ac5df",
+  "demand_ids": [
+    "D7"
+  ],
+  "id": "question:demand:D7",
+  "node_id": null,
+  "rationale": "A concrete study should be executable by another lab.",
+  "tags": [
+    "risk",
+    "measurement"
+  ],
+  "text": "Specify a preregisterable matched-compute experiment: units, task strata, conditions, randomization, intervention fidelity, primary and secondary estimands, outcome measures, power-analysis inputs, exclusion rules, multiple-testing control, and failure or stopping criteria."
+}
