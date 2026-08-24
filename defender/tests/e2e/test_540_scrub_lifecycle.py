@@ -184,10 +184,13 @@ class FakeDocker:
     def _inspect(self, argv: list[str]) -> tuple[int, str, str]:
         """box.py asks THREE different questions through `docker inspect`, and the format
         string is what separates them — on a real daemon and here. Answering all three from
-        `existing` handed `_start_token` the STATE word as a start token, so a test that set
-        `existing="running"` would silently make `_reap_on_fault` read another lane's box as
-        its own and force-remove it — the #884 F-29 ownership check inverted by the double,
-        not by production. `_box665.RecordingDocker` already dispatches this way."""
+        `existing` hands `_start_token` the STATE word as a start token, and the damage runs
+        the OTHER way from an over-reap: `_reap_on_fault` reaps only when the label EQUALS the
+        `uuid4().hex` this call stamped, and no state word ever equals one — so the fault arm
+        would silently SKIP its reap and leak the container it owns, while the test asserting
+        "another lane's box is not reaped" went green for the wrong reason. The #884 F-29
+        ownership check answered by the double, not by production, in either direction.
+        `_box665.RecordingDocker` already dispatches this way."""
         if self.existing is None:
             return (1, "", "Error: No such object\n")
         fmt = argv[argv.index("-f") + 1] if "-f" in argv else ""

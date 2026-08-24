@@ -31,14 +31,25 @@ _PIPELINE_SEPARATORS = frozenset({"||", "&&", ";"})
 #: shape downstream is pinned on it.
 _SHLEX_PUNCTUATION = frozenset("();<>|&")
 
-#: The characters that SEPARATE words — `shlex.whitespace`, which is also bash's default IFS.
-#: Spelled out rather than reached for through `str.isspace()`, which is a much wider Unicode
-#: predicate: it is true for `\x0b`, `\x0c`, `\x1c`-`\x1f`, `\x85`, NBSP and every Unicode
-#: space, none of which bash or the `shlex` lexer this scanner replaces treats as a separator.
-#: Splitting on those cut a word bash keeps whole — `cat 'a\xa0b'` reaching the executor as
-#: `['cat', 'a', 'b']` — which is #955 F-50's own defect (an argv that is not the one the model
-#: wrote, authorised by a gate reading the rewritten one) one character class over.
-_BLANKS = frozenset(" \t\r\n")
+#: The characters that SEPARATE words — BASH's blank set, which is space and tab. (`\n` is
+#: carried for completeness only: `parse` splits the command on it before a line reaches the
+#: scanner, so it is never seen here.)
+#:
+#: Taken from bash rather than from `shlex`, and that is the whole of the distinction. Two
+#: wider sets are both wrong, in the same direction:
+#:
+#:   * `str.isspace()` is a Unicode predicate — true for `\x0b`, `\x0c`, `\x1c`-`\x1f`,
+#:     `\x85`, NBSP and every Unicode space, none of which bash splits on.
+#:   * `shlex.whitespace` is `' \t\r\n'`, which is NOT bash's IFS: bash's default IFS is
+#:     space/tab/newline and carries no `\r`. `cat a\rb` is ONE word to bash.
+#:
+#: Splitting on any of them cuts a word bash keeps whole — `cat 'a\xa0b'` reaching the
+#: executor as `['cat', 'a', 'b']`, or `w a\r2>/dev/null` losing its `2` operand and having
+#: its redirect read as an fd-2 one when bash redirects stdout. That is #955 F-50's own defect
+#: (an argv that is not the one the model wrote, authorised by a gate reading the rewritten
+#: one) one character class over, so the oracle here has to be bash and not the lexer this
+#: scanner replaced. `test_955_bash_fd_prefix.py::_NOT_SHELL_BLANKS` pins every member.
+_BLANKS = frozenset(" \t\n")
 
 #: The only fd this executor knows how to route. Bash's IO_NUMBER admits any digit run; every
 #: other one is refused, so the scan only has to recognise this one.
@@ -100,11 +111,23 @@ def _word_value(span: str) -> str | None:
     the slow path builds one `shlex.shlex` PER WORD where the lexer this scanner replaced built
     one per LINE, which is 80-90% of the scan's cost and made the gate up to 3x slower than the
     code it replaced. `_scan` has already split on unquoted blanks and punctuation, so what is
-    left cannot be more than one word."""
+    left cannot be more than one word.
+
+    The lexer is built by hand rather than reached through `shlex.split`, for ONE reason:
+    `shlex.split` hardcodes `shlex.whitespace`, which is `' \t\r\n'` and therefore one
+    character WIDER than `_BLANKS`. `_scan` keeps an unquoted `\r` inside its word (bash
+    does); `shlex.split` would then split that same span in two, `len(parts) != 1`, and the
+    whole line would be refused as untokenizable — so `cat a\rb'c'` would be denied while the
+    quote-free `cat a\rb` was allowed. The two word-boundary rules have to be ONE rule, so
+    the lexer is told which set to use instead of being trusted to agree."""
     if not ("'" in span or '"' in span or "\\" in span):
         return span
+    lex = shlex.shlex(span, posix=True)
+    lex.whitespace = "".join(sorted(_BLANKS))
+    lex.whitespace_split = True
+    lex.commenters = ""
     try:
-        parts = shlex.split(span, comments=False, posix=True)
+        parts = list(lex)
     except ValueError:
         return None
     return parts[0] if len(parts) == 1 else None

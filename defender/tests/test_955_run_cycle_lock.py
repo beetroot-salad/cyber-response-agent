@@ -118,6 +118,18 @@ def test_a_run_id_the_grammar_refuses_is_quarantined_not_dropped(tmp_path):
 
     quarantined = list((qdir / "failed").glob("*")) if (qdir / "failed").is_dir() else []
     assert quarantined, "an unprocessable run left no dead letter — the marker was dropped"
+    # WHICH refusal, not just "some exception". `_serve_marker`'s guard is `except Exception`,
+    # so a dead letter alone is satisfied by a NameError or a TypeError raised anywhere before
+    # the box — and `cli.py` maps only `RunUnprocessable` to the contracted exit 2 + "[loop]
+    # FATAL: unprocessable run". Without this line the file stays green while `loop.py
+    # <run_dir>` silently trades that contract for an uncontracted traceback.
+    reason = json.loads(quarantined[0].read_text(encoding="utf-8"))["failed"]
+    assert "RunUnprocessable" in reason, (
+        f"the dead letter names a different exception than the grammar refusal: {reason!r}"
+    )
+    assert "run-id grammar" in reason, (
+        f"the dead letter does not say WHICH refusal quarantined the run: {reason!r}"
+    )
 
 
 def test_the_lock_is_released_so_the_next_pass_can_run(tmp_path, monkeypatch):

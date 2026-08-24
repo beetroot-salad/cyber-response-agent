@@ -29,6 +29,7 @@ It fails against the pre-#955 parser on the first accepted mis-spelling.
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -130,7 +131,14 @@ def test_the_glued_spelling_still_works(cmd, stderr):
     assert argv == cmd.split()[:-1], f"{cmd!r} parsed to {argv}"
 
 
-@pytest.mark.parametrize("cmd", ["echo '2' >/dev/null", 'echo "2" >/dev/null', "foo2>/dev/null"])
+@pytest.mark.parametrize("cmd", [
+    "echo '2' >/dev/null", 'echo "2" >/dev/null', "foo2>/dev/null",
+    # A character bash does not split on keeps the `2` INSIDE the previous word, so it is not
+    # an IO_NUMBER — `a\r2>` is the word `a\r2` redirecting stdout. Read `\r` as a blank and
+    # the same text becomes `a` plus an fd-2 redirect: the operand vanishes and the routing
+    # inverts. This is the fd question and the word-boundary question meeting on one input.
+    "echo a\r2>/dev/null", "echo a\xa02>/dev/null",
+])
 def test_a_quoted_or_suffixed_two_is_not_an_fd(cmd):
     """Bash's IO_NUMBER is an UNQUOTED digit run that starts its own word. A quoted `2` is an
     ordinary argument and `foo2>` is the word `foo2`; in both, bash redirects stdout, which
@@ -160,10 +168,58 @@ def test_a_quoted_or_escaped_operator_is_a_word(cmd, argv):
     assert parsed[0] == argv, f"{cmd!r} parsed to {parsed[0]}"
 
 
-#: Characters `str.isspace()` calls whitespace and the shell does NOT. `shlex.whitespace` is
-#: ' \t\r\n' and bash's default IFS is space/tab/newline; every character here is an ordinary
-#: word character to both, and to `bash` itself.
-_NOT_SHELL_BLANKS = ["\x0b", "\x0c", "\x1c", "\x1f", "\x85", "\xa0", "\u2003", "\u3000"]
+#: Characters `str.isspace()` OR `shlex.whitespace` calls whitespace and BASH does not. The
+#: two candidate sets a scanner might be copied from are both wider than bash's, which is
+#: space and tab: `str.isspace()` is a Unicode predicate, and `shlex.whitespace` is
+#: ' \t\r\n' — one character wider than bash's default IFS of space/tab/newline. Every
+#: character here is an ordinary word character to `bash` itself, which is the only oracle
+#: that counts.
+_NOT_SHELL_BLANKS = [
+    # `\r` FIRST, because it is the one `shlex.whitespace` contains and bash does not, so it
+    # is the only member of this list a scanner copied from `shlex` gets wrong. `cat a\rb`
+    # is one word to bash; splitting it hands the gate an argv the model never wrote.
+    "\r",
+    "\x0b", "\x0c", "\x1c", "\x1f", "\x85", "\xa0", "\u2003", "\u3000",
+]
+
+
+#: The same question as `_NOT_SHELL_BLANKS`, asked so that RECALL cannot answer it.
+#:
+#: That list is written by hand, and it was wrong: it omitted `\r`, the one character where the
+#: two libraries disagree with each other. It was wrong because of HOW it was derived — by
+#: asking "what does `str.isspace()` add to `shlex`?", a question that can see what `isspace`
+#: gets wrong and is structurally blind to what `shlex` gets wrong. Enumerating an axis from
+#: one side is not enumerating it.
+#:
+#: So this derives the alphabet from the libraries themselves — every character either
+#: plausible source calls whitespace — and asks bash about each. A scanner copied from a THIRD
+#: source (a `\s` regex, a Unicode category test) lands inside this set whatever it picks, and
+#: nobody has to have remembered it.
+_CANDIDATE_BLANKS = sorted(
+    {c for c in map(chr, range(0x110000)) if c.isspace()} | set(shlex.shlex("").whitespace)
+)
+
+
+@pytest.mark.parametrize("blank", _CANDIDATE_BLANKS, ids=lambda c: f"U+{ord(c):04X}")
+def test_our_word_boundary_is_bash_s_word_boundary(shim_dir, blank):
+    """For every character either library calls whitespace, we split iff bash splits.
+
+    Not "we agree with `shlex`" and not "we agree with a list" — bash is the only oracle that
+    counts, because the argv is a claim about what bash would run. Asserting EQUALITY with
+    bash's argv pins both directions from one observation, so it cannot be satisfied by a
+    scanner that never splits, nor by one that splits on everything."""
+    if blank == "\n":
+        pytest.skip("`parse` splits the command on newlines before a line reaches the scanner")
+    cmd = f"{_SHIM} a{blank}b"
+    theirs = _bash_meaning(shim_dir, cmd)
+    if theirs is None or theirs[0] is None:
+        pytest.skip("bash will not run this shape, so it makes no claim about the boundary")
+    ours = _parsed(cmd)
+    assert ours is not None, f"U+{ord(blank):04X} made an ordinary command untokenizable"
+    assert ours[0] == theirs[0], (
+        f"U+{ord(blank):04X}: we would run {ours[0]}, bash runs {theirs[0]} — the gate "
+        "authorises our argv and the executor runs it, so this IS the divergence"
+    )
 
 
 @pytest.mark.parametrize("blank", _NOT_SHELL_BLANKS)
@@ -212,6 +268,14 @@ _CANDIDATES = [
     f"{_SHIM} {arg}" for arg in ("2>/dev/null", "2 >/dev/null", "2>&1", "2 >&1", "2")
 ] + [
     f"{_SHIM} -n 2>/dev/null", f"{_SHIM} -n 2 2>/dev/null", f"{_SHIM} 2 2>&1",
+] + [
+    # The separator question and the fd question, on ONE candidate each. A character bash does
+    # not split on, glued to the `2` of a redirect, is where the two defects meet: split the
+    # word and `a\r2>` becomes the word `a` plus an fd-2 redirect, where bash sees the word
+    # `a\r2` and a redirect of STDOUT — an operand lost AND the routing inverted, which is
+    # exactly what `_bash_meaning` is here to catch. `\r` is the member of `shlex.whitespace`
+    # that bash's IFS does not carry, so it is the one a scanner copied from `shlex` gets wrong.
+    f"{_SHIM} -n a\rb", f"{_SHIM} -n a\rb 2>/dev/null", f"{_SHIM} a\xa0b 2>&1",
 ]
 
 
@@ -247,7 +311,11 @@ def _bash_meaning(shim: tuple[Path, str], cmd: str):
     proc = subprocess.run(
         [bash, "-c", cmd], capture_output=True, text=True, env=env, cwd=shim_dir,
     )
-    raw = argv_file.read_text(encoding="utf-8") if argv_file.exists() else ""
+    # BYTES, not `read_text`: text mode translates a lone `\r` (and `\r\n`) to `\n`, and
+    # the split below is on `\n` — so an argv word bash kept whole came back as TWO words
+    # and the oracle agreed with a parse that had split it. The one character this file
+    # exists to police is the one the reader would have silently rewritten.
+    raw = argv_file.read_bytes().decode("utf-8") if argv_file.exists() else ""
     words = raw.split("\n")
     argv = [_SHIM] + words[:words.index("ARGV_END")] if "ARGV_END" in words else None
     if "ERR" in proc.stdout:

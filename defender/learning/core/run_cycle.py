@@ -21,7 +21,7 @@ from defender.learning.core.config import (
     source_first_party_key,
 )
 from defender._paths import PATHS
-from defender._run_id import is_valid_run_id
+from defender._run_id import RUN_ID_ALLOWED, is_valid_run_id
 from defender.runtime import box as box_mod
 from defender.run_common import is_held_out_alert_copy
 from defender.learning.core.directions import (
@@ -254,8 +254,8 @@ def run_one(
         # not become valid — so it takes the same channel the pre-#955 code reached by letting
         # `container_name`'s own grammar check raise: quarantine, with a reason on disk.
         raise RunUnprocessable(
-            f"run_id={run_id!r} fails the run-id grammar — REFUSING (its lock file and its "
-            f"container name are both derived from it)"
+            f"run_id={run_id!r} fails the run-id grammar (allowed: {RUN_ID_ALLOWED}) — "
+            f"REFUSING (its lock file and its container name are both derived from it)"
         )
     # One live pass per run. `learn_drain`'s lease keeps two DRAINERS apart and this is not
     # about them: the single-run CLI stage reaches `run_one` holding no lease, and the
