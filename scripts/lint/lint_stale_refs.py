@@ -116,6 +116,17 @@ GENERIC_NAMES = {
 # different question ("is this dir a reference SOURCE") and includes live dirs.
 _ARCHIVAL_DIRS = ("experiments/", ".claude/worktrees/", "docs/archive/", "spec-flow/specs/archive/")
 
+# Trees whose DISAPPEARANCE is not a code change. A third question again: `_ARCHIVAL_DIRS`
+# answers "may a name here vouch that a symbol survives", `EXCLUDED_GREP_DIRS` answers "is
+# this dir a reference SOURCE", and this answers "is a `def` deleted from here evidence that
+# a symbol was removed from the product". For local scratch — research runs, experiment
+# harnesses — it is not: those trees carry thousands of throwaway definitions whose names
+# collide with ordinary English (`transcripts`, `main`, `runs`), so removing one in a single
+# commit donates hundreds of identifiers and every unrelated mention of the word in the live
+# tree reads as a stale reference. Excluded from the removal DIFF rather than from the grep,
+# because it is the `-` side that manufactures them.
+NON_SOURCE_DIRS = ("seam-harness",)
+
 EXCLUDED_GREP_DIRS = (
     ".git", ".venv", "__pycache__", "node_modules",
     "defender/run-visualizations", "defender/fixtures",
@@ -322,7 +333,8 @@ def _changed_files(repo_root: Path, base_ref: str) -> set[str]:
 
 
 def _collect_removed_idents(repo_root: Path, base_ref: str) -> set[str]:
-    diff = _git(["diff", "--unified=0", f"{base_ref}...HEAD"], cwd=repo_root)
+    diff = _git(["diff", "--unified=0", f"{base_ref}...HEAD", "--", ".",
+                 *(f":(exclude){d}" for d in NON_SOURCE_DIRS)], cwd=repo_root)
     idents: set[str] = set()
     for line in diff.splitlines():
         if not line.startswith("-") or line.startswith("---"):
@@ -364,7 +376,8 @@ def _renamed_or_deleted_paths(
     to that name is stale. A RENAMED `a/foo_helper.py` -> `b/foo_helper.py` does not: the
     module still exists under the same name, and collecting its stem would flag every
     importer of a module that merely moved."""
-    out = _git(["diff", "--name-status", f"{base_ref}...HEAD"], cwd=repo_root)
+    out = _git(["diff", "--name-status", f"{base_ref}...HEAD", "--", ".",
+                *(f":(exclude){d}" for d in NON_SOURCE_DIRS)], cwd=repo_root)
     gone: set[str] = set()
     deleted: set[str] = set()
     for line in out.splitlines():
