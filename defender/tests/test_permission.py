@@ -378,7 +378,7 @@ def test_the_lexing_reason_names_every_way_a_command_can_fail_to_parse(label, cm
     """Each lexing failure answers the LEXING reason, and that reason names the cause.
 
     Two of these used to answer `policy.deny_reason` instead — the unbalanced quote and the
-    malformed `bash -c`, both of which reach the gate through `unwrap` rather than `tokenize`.
+    malformed `bash -c`, both of which reach the gate through `unwrap` rather than the scanner.
     That handed a model with a quoting mistake a CAPABILITY message ("not permitted for this
     agent"), which points it at a different tool rather than at its own quote, while the
     sibling quote failure one line away answered correctly."""
