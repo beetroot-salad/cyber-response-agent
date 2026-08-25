@@ -1479,7 +1479,28 @@ class _Projector:
                 _extend_by_id(hyp.setdefault("authorization_contract", []), authz)
             return
 
-    def _warn_repeated_ids(self, block: Block, rows: list[_RowT]) -> list[_RowT]:
+    #: The remedy for a repeated id at the TWELVE sites where a second block really does
+    #: ADD: `_extend_by_id` seeds `seen` from the destination, so the new rows land and only
+    #: the repeat is dropped.
+    _REPEAT_REMEDY_SECOND_BLOCK = (
+        "Give each row its own id, or send the added rows as a second block."
+    )
+    #: `:L findings` is NOT one of them, and must not be told it is. A lead re-listed in a
+    #: second `:L findings` block MERGES into its existing bucket — `lead.update(identity)`,
+    #: with `_lead_header_record` writing `target` UNCONDITIONALLY — so following the advice
+    #: above reproduces the very last-wins blend this warning exists to stop, and an amending
+    #: row whose `target` cell is blank erases the lead's target with no diagnostic on the
+    #: block that does it. `_check_false_positive_gating` then refuses the close over a lead
+    #: the author never retargeted, pointing at the wrong turn.
+    _REPEAT_REMEDY_ONE_BLOCK = (
+        "Give each row its own id and re-send this block whole: a second `:L findings` block "
+        "naming the same id AMENDS that lead rather than adding a row, so it would blend the "
+        "two readings instead of separating them."
+    )
+
+    def _warn_repeated_ids(
+        self, block: Block, rows: list[_RowT], remedy: str = _REPEAT_REMEDY_SECOND_BLOCK,
+    ) -> list[_RowT]:
         """An id written twice in ONE sub-block DELETES the second row, so say so.
 
         `_extend_by_id` keeps the first record per id — correct against the re-emission it
@@ -1533,8 +1554,7 @@ class _Projector:
                 self._warn(
                     block, -1, "",
                     f"{rid!r} is declared twice in this block; only the FIRST row is kept "
-                    f"and the later one is discarded with everything it declares. Give each "
-                    f"row its own id, or send the added rows as a second block.",
+                    f"and the later one is discarded with everything it declares. {remedy}",
                 )
                 continue  # lint-row-drop: ok — the warning above IS this row's drop channel
             seen.add(rid)
@@ -1727,7 +1747,7 @@ class _Projector:
                 self._warn(block, idx, row, "findings row missing id/name")
                 continue
             landed.append(rec)
-        for rec in self._warn_repeated_ids(block, landed):
+        for rec in self._warn_repeated_ids(block, landed, self._REPEAT_REMEDY_ONE_BLOCK):
             identity, outcome, query_details = _lead_header_record(rec)
             lead = self.lead_bucket(identity["id"])
             lead.update(identity)
