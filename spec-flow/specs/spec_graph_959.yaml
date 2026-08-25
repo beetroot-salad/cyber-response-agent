@@ -1,0 +1,2164 @@
+schema_version: 2
+design: "959"   # gh issue #959, title "bash parse: four places decide where a word ends, and one of
+                # them is a second parser". THE AUTHORITATIVE TEXT IS THE COMMENT ("Discussion —
+                # grounded against 6a2ea874"), not the body: the body is partly stale and three of
+                # its sentences are struck below. Read with `gh issue view 959 --json title,body,comments`
+                # (plain `--comments` returns empty in this environment — that is a failed read, not
+                # an empty thread).
+tests: defender/tests   # the suite this graph derives (project profile, `tests.dir`). check_binds
+                        # scans its docstrings; every `discharged_by` below is a test that does not
+                        # exist yet, which is the expected phase-D state.
+base: 6a2ea874          # main, #958 merged. write-code-from-spec's gate diffs against it.
+
+# ===========================================================================================
+# READ THIS FIRST
+#
+# THE CHANGE. Four places in the request path independently decide where a bash word ends:
+# `bash_exec._scan` (the scanner), `bash_exec._word_value` (a `shlex.split` per word),
+# `hooks/_cmd_segments.unwrap` (a second parser that flattens the command with `shlex.split`
+# before deciding what the `bash -c` argument was), and `permission/bash.decide_bash`'s
+# `command.strip()`. After this change exactly one place does. Six mechanisms:
+#
+#   M1  `_scan` yields one frozen record per token: value, start, end, kind.        (D3)
+#   M2  `_word_value` becomes an unquoter over a span — no blank set, no splitter.  (O2)
+#   M3  the wrapper folds into `parse`: prefix matched by TOKEN INDEX, the `-c`
+#       argument taken as its own token's RESOLVED VALUE and re-scanned (the token's
+#       SPAN says where it ends, which is what makes an outer operator visible — the
+#       comment's own "line[start:end] of the -c argument" is false for this arm and
+#       is corrected under RC7), the `timeout` prefix's remainder taken as the RAW
+#       SLICE from the next token's start, nothing returned when an outer operator
+#       means the wrapper is not the whole command.                                 (O1,O2,O4)
+#   M4  the gate's `command.strip()` is deleted.                                    (O1)
+#   M5  the verdict-change set is written down before implementation.               (O3)
+#   M6  `\r` leaves `_WORD_SEPARATORS` (a), and the #955 oracle reads the recorded
+#       argv file in BINARY (b).  NEW at §7 (F6) — not in the issue body.           (O1)
+#
+# M6 IS NECESSARY BUT NOT SUFFICIENT ON ITS OWN, AND THAT DEPENDENCY IS PART OF THE SPEC.
+# `_word_value` is `shlex.split(span, comments=False, posix=True)`, whose own hardcoded
+# whitespace contains `\r` whatever `_WORD_SEPARATORS` says. With M6(a) alone: a mid-word `\r`
+# still splits the resolved value (`'A\rB'` -> `['A','B']`), an edge `\r` is silently dropped
+# (`'P\r'` -> `['P']`), and a lone `\r` resolves to zero parts, fails the `len(parts) == 1`
+# guard and makes the whole line untokenizable. M6 closes O1 only if M2 lands as
+# `d_the_unquoter_has_no_notion_of_whitespace` requires. (45-dispositions RF-J4; three readers
+# found this independently; d_the_two_layers_agree_about_the_removed_separator pins it.)
+#
+# WHY THIS SPEC IS SHAPED THE WAY IT IS — three things carried forward:
+#
+#   1. THE ENUMERATED VERDICT-CHANGE SET IS A STATED DELIVERABLE (D2/M5/O3) AND IT WAS WRONG.
+#      It was closed at four members; it has six (the sixth contingent on FK1). What was
+#      missing, and what is corrected, is written out in full under
+#      `d_the_enumerated_set_is_written_before_implementation` — including M3's OWN HEADLINE
+#      CASE, which was absent while member 1 named M4's fix by name.
+#
+#   2. THE SPEC'S OWN RECORD LOST THE CHARACTERS FOUR PREMISES ARE ABOUT. `40-premise-file.py`
+#      and every answer file contain ZERO literal U+00A0, `\v`, `\f`, `\r` or U+2028 (claim a3,
+#      computed over the files' own bytes). Four worked examples were written with a literal
+#      U+00A0 that is now an ordinary space, and one docstring visibly self-corrects mid-sentence
+#      as its author watched the character vanish. The four are RESTATED IN ESCAPED FORM below
+#      (see "THE FOUR RESTATED WORKED EXAMPLES"), and the instruction is carried forward:
+#
+#        *** EVERY DIVERGENT-BLANK CASE IN THE SUITE IS BUILT FROM AN ESCAPE — "\u00a0",     ***
+#        *** "\v", "\f", "\r", "\u2028" — NEVER FROM A LITERAL CHARACTER TYPED INTO A         ***
+#        *** DOCSTRING OR A FIXTURE. A test written from a literal that has been normalised   ***
+#        *** away passes while exercising an ordinary space. This is the issue's own defect   ***
+#        *** class occurring inside the paperwork about it.                                   ***
+#
+#   3. THE ESCALATION TIER'S INDEPENDENCE WAS COMPROMISED (45-dispositions RF-J1): both
+#      escalation readers were handed the first reader's own `# HEDGE:` labels on 41 of 43
+#      premises, so a CONVERGED HEDGE IS WEAK EVIDENCE in this run. The judge re-weighted and
+#      its dispositions are taken as given here; nothing in this file treats converged hedging
+#      as signal, and no disposition is re-derived.
+#
+# ADDRESS SPELLING CONVENTION. A `domain.distinguished[...]` member is written as its PYTHON
+# REPR — `""`, `"   "`, `"\t"`, `"\r"`, `"\u00a0"` — quotes and backslashes included, never as
+# the character itself. That is deliberate: it is the same instruction as (2) above applied to
+# this file, it keeps the whole artifact ASCII, and it is what `20-demands.md` already coined,
+# so the inherited addresses resolve unchanged.
+#
+# NAME RECONCILIATION (three passes coined ids independently; this is the unification):
+#   * `bash` is THE via for the bash lane's access cells. `spec_graph_575-grant-gate.yaml` spells
+#     it `bash` on `read_surface`; `spec_graph_691.yaml:746` spells the decide_bash cat-scope cell
+#     `bash-cat` on a DIFFERENT boundary (`corpus_dir`); `20-demands.md` coined `bash-tool`.
+#     One spelling, `bash`, is used here and `bash-tool` is retired. (claims g11, a5.)
+#   * `decide_bash`, `tool_bash`, `compile_policy`, `decide_read`, `defender_policy_cli`,
+#     `read_surface`, `bash_exec`, `BashDecision` keep the ids `spec_graph_575-grant-gate.yaml`
+#     coined, keyed by role+origin, so the two graphs join.
+#   * THE FOLDED WRAPPER STEP IS `_wrapper_span`. F3 renamed the role: `unwrap` named a function
+#     returning an unwrapped STRING; the folded step returns a SPAN of the original text. Both
+#     elements exist here on purpose — `unwrap` is the removed one (R5's subject, and what the
+#     migration demands bind), `_wrapper_span` is the new one. WRITE-CODE-FROM-SPEC MUST EITHER
+#     NAME THE FOLDED FUNCTION `_wrapper_span` OR CHANGE THIS ID IN THE SAME COMMIT: a private
+#     synonym does not cost a config entry, it costs the check, silently (schema.md).
+#
+# THE FOUR RESTATED WORKED EXAMPLES (45-dispositions RF-J2 / note 5). Escaped, and each names
+# the demand that carries it:
+#
+#   1. `timeout\u00a05 cat x`  — a divergent blank GLUED to the wrapper word. The first token is
+#      `timeout\u00a05`, which is not `timeout`, so the wrapper is not recognised and the glued
+#      token denies as an ordinary ungranted program — matching bash, which would look for a
+#      program of that name. (was written as `timeout 5 cat x`, 40-premise-file.py:147)
+#      -> d_a_unicode_blank_belongs_to_the_word_it_touches
+#   2. `bash\u00a0-c 'ls'`     — the same shape at the `bash`/`sh` arm. `bash\u00a0-c` is one
+#      word and is not `bash`; nothing special-cases a leading `bash` substring, so it denies.
+#      (was written as `bash -c 'ls'`, 40-premise-file.py:163 — the docstring that self-corrects
+#      mid-sentence, "— wait, U+00A0 does not separate `bash` from `-c` here …")
+#      -> d_a_unicode_blank_belongs_to_the_word_it_touches
+#   3. `bash -c '\u00a0cat x'` — a divergent blank INSIDE the wrapper-extracted inner command.
+#      The extracted text is re-scanned by the same scanner, so the blank belongs to `cat` there
+#      exactly as it would in a bare command. (was written as `bash -c ' cat x'`,
+#      40-premise-file.py:172) -> d_the_divergent_blank_rule_reaches_wrapper_extracted_text
+#   4. `\u00a0timeout '5' cat x` / `timeout '5' cat x\u00a0` — F4's accepted widening and M4's
+#      accepted narrowing composed in one command. The composite is the union of the two: the
+#      leading blank corrupts the first token so the wrapper is not recognised and the command
+#      is refused regardless of the quoted-`timeout` acceptance. (was written with ordinary
+#      spaces, 40-premise-file.py:242) -> d_a_quoted_wrapper_word_is_the_program_bash_would_run
+#
+# WHAT IS STRUCK FROM THE DESIGN, AND WHY (each carried in `handoff.refuted`):
+#   * the body's "the refactor can only narrow what is accepted" — FALSE: M3's token-index prefix
+#     match WIDENS the `timeout` arm (x6, F4).
+#   * the body's "`test_955` derives its blank alphabet from `str.isspace() | shlex.whitespace`"
+#     — there is no blank alphabet in that file at all (x12).
+#   * the body's / c3's "`_word_value` (`shlex.shlex`)" and "the current code pins
+#     `lex.whitespace`" — it is `shlex.split` and there is no such pin (x1).
+#   * C2's second horn ("the folded parse returns zero pipelines rather than raising") — an
+#     executed probe refuted it: zero pipelines DENY (g6). Only a blank test AHEAD of the parse
+#     preserves today's verdict. F1 was probe-settled, not human-settled.
+#   * C3's fourth `parse(unwrap(x))` site — `e2e/test_540_box_boundary.py:362` is an in-box
+#     IMPORT probe, not a call site; and `test_bash_exec.py:28` carries a fifth trim (x8).
+#   * C4's "correct `intent_540.md:556`" — the stale mount constraint is at THREE lines,
+#     134, 466 and 556 (a2, correcting x9's "twice").
+# ===========================================================================================
+
+demands:
+
+  # =========================================================================================
+  # #0 — THE RETURN-VALUE CONTRACT. Three sentences bear on it; all three now settle.
+  # =========================================================================================
+
+  - id: d0_scan_returns_one_frozen_record_per_token
+    kind: seam
+    form: test
+    binds: ['_scan', 'interacts(parse->_scan).response']
+    discharged_by: test_scan_returns_one_frozen_record_per_token_with_value_span_and_kind
+    source: "comment D3 / M1"
+    seed_docstring: >-
+      `_scan` returns one frozen record per token carrying the resolved value, the start and end
+      offsets of that token in the raw line, and its kind — word, operator, or fd-prefixed
+      operator — and `line[start:end]` of every record is that token's raw spelling, quoting and
+      glue intact. Offsets are code-point offsets, so a multibyte character earlier on the line
+      leaves every later slice exact.
+    rejected:
+      - {nl: "positional tuples — named access is lost and nothing separates the two offsets"}
+      - {nl: "keep-parallel-collections-plus-spans — four index-aligned collections instead of three, and alignment between token stream and raw text is exactly what #955 was about"}
+
+  - id: d0_scan_still_refuses_an_unclosed_quote
+    kind: behavior
+    form: test
+    binds: ['interacts(parse->_scan).response']
+    discharged_by: test_a_quote_that_never_closes_still_ends_the_scan_with_no_tokens
+    seed_docstring: >-
+      A line whose quote never closes yields no token record stream, and `parse` turns that into
+      `UntokenizableCommand` exactly as it does today — including when the unclosed quote lives
+      entirely inside a `-c` argument, where the reason class is the one it is refused for today
+      and not a free implementation choice.
+
+  - id: d0_parse_takes_the_raw_command
+    kind: seam
+    form: test
+    binds: ['parse', 'interacts(parse->command_text)']
+    discharged_by: test_parse_takes_the_raw_command_and_no_caller_unwraps_first
+    source: "comment D1 / M3"
+    seed_docstring: >-
+      `parse` is handed the model's command text exactly as written — wrapper and all — and
+      returns the pipelines that text names; there is no second function a caller must remember
+      to apply first.
+
+  - id: d0_a_blank_command_is_answered_before_the_parse
+    kind: behavior
+    form: test
+    binds: ['interacts(decide_bash->command_text)', 'command_text.domain.distinguished[""]']
+    discharged_by: test_a_blank_command_is_answered_ahead_of_the_parse_not_by_its_result
+    source: "C2 first horn — F1, PROBE-SETTLED (g6), replacing 20-demands' provisional reading"
+    seed_docstring: >-
+      The blank command is answered before the parse runs and not from the parse's result: a
+      command with no tokens still allows with no pipelines. The other horn is refuted, not
+      forked — an empty pipeline list reaches `_decide_readers`, which returns `None`, so
+      `has_adapter([])` is false and `decide_bash`'s tail is `BashDecision(False, deny_reason)`.
+      A folded parse that "returns zero pipelines rather than raising" therefore DENIES a blank
+      command, where today it allows.
+    note: >-
+      This demand REPLACES `d0_a_command_with_no_tokens_parses_to_zero_pipelines`, whose
+      provisional reading the executed probe refuted (claim g6). The dead demand is recorded in
+      `handoff.drops` naming this address, per the accounting rule that a death names its
+      re-bind. WHICH ALPHABET the blank test uses is fork FK4 — see
+      `d_the_blank_test_reads_the_scanners_own_separator_constant`.
+
+  - id: d0_a_verdict_is_the_whole_decision
+    kind: negative
+    form: clause
+    binds: ['BashDecision', 'interacts(decide_bash->BashDecision)']
+    source: "F2, auto-resolved at §7 (non-material)"
+    outcome:
+      nl: >-
+        A verdict is the whole `BashDecision` — whether it allows, which reason it names, and the
+        pipelines it hands the box — so an input whose authorised argv or reason class moves has
+        had its verdict changed even when `allow` did not move.
+    rejected:
+      - {nl: "verdict = the `allow` boolean alone, which would let the argv crossing into the box change silently under a green O3"}
+    note: >-
+      The paired positive control for this negative is
+      `d_no_verdict_moves_outside_the_enumerated_set`, which drives the whole decision object.
+      FK8 asked whether the neutrality obligation reaches PAST the decision object to the four
+      consumers that re-walk the operand set afterwards; the judge's recommendation, taken here,
+      is that it does not — O3 stops at `BashDecision`, and those four are bound under O1
+      instead, at `_opened_operands` (d_the_operand_set_the_gate_derives_is_the_one_its_consumers_read).
+
+  # =========================================================================================
+  # O1 / P1 — THE GATE'S TRIM (M4). The live divergence the issue body called a settled no-op.
+  # =========================================================================================
+
+  - id: d_gate_hands_the_parser_the_text_unchanged
+    kind: negative
+    form: test
+    binds: ['interacts(decide_bash->command_text)', 'interacts(parse->command_text)']
+    discharged_by: test_the_gate_hands_the_parser_the_command_text_unchanged
+    seed_docstring: >-
+      `decide_bash` passes the model's command text to the parser byte for byte: no character is
+      removed from either end on the way in, so the argv the gate authorises is the argv the text
+      names and not the argv a Unicode-blank predicate left behind.
+
+  - id: d_bash_blank_only_command_is_still_the_allowed_no_op
+    kind: domain-outcome
+    form: test
+    binds:
+      - 'command_text.domain.distinguished[""]'
+      - 'command_text.domain.distinguished["   "]'
+      - 'command_text.domain.distinguished["\t"]'
+      - 'command_text.domain.distinguished["\n"]'
+    discharged_by: test_a_command_of_only_bash_blanks_is_still_the_allowed_no_op
+    seed_docstring: >-
+      A command that is empty, or only spaces, tabs or newlines, still allows with no pipelines —
+      deleting the trim does not turn the blank command into a refusal. The falsy member is the
+      one that matters most: `if not cmd` is the swallow shape, and the empty command is a
+      legitimate allowed no-op today.
+
+  - id: d_unicode_blank_only_command_is_a_command
+    kind: domain-outcome
+    form: test
+    binds:
+      - 'command_text.domain.distinguished["\u00a0"]'
+      - 'command_text.domain.distinguished["\v"]'
+      - 'command_text.domain.distinguished["\f"]'
+      - 'command_text.domain.distinguished["\u2028"]'
+    discharged_by: test_a_command_of_only_unicode_blanks_is_a_word_bash_would_try_to_run
+    seed_docstring: >-
+      A command that is nothing but U+00A0, a vertical tab, a form feed or U+2028 is a command
+      bash would look up as a program name, so it is refused rather than answered as the blank
+      no-op `str.strip()` used to make it. Build each case from the ESCAPE, never from a literal
+      character in this docstring.
+    rejected:
+      - {nl: "answering it as blank, which is what today's Unicode-predicate trim does"}
+
+  - id: d_a_unicode_blank_belongs_to_the_word_it_touches
+    kind: domain-outcome
+    form: test
+    binds: ['command_text.access[bash]', '_scan']
+    discharged_by: test_a_no_break_space_at_either_end_is_part_of_the_word_it_touches
+    seed_docstring: >-
+      An allowed pipeline prefixed or suffixed with U+00A0, a vertical tab or a form feed no
+      longer authorises the trimmed command: the blank belongs to the word it touches, exactly as
+      bash reads it, so the gate refuses rather than approving an argv the text does not name.
+      The same rule glued to a wrapper word makes the wrapper unrecognisable —
+      `timeout\u00a05 cat x` denies as an ordinary ungranted program, and `bash\u00a0-c 'ls'`
+      denies because `bash\u00a0-c` is not `bash` (restated worked examples 1 and 2; both were
+      written with a literal U+00A0 that the record then normalised away).
+
+  - id: d_an_interior_divergent_blank_is_verdict_neutral
+    kind: domain-outcome
+    form: test
+    binds: ['_scan', 'command_text.domain']
+    discharged_by: test_a_divergent_blank_between_two_words_changes_no_verdict
+    source: "45-dispositions note 3 — a settled premise no demand reached"
+    seed_docstring: >-
+      A divergent blank sitting BETWEEN two words, with no real blank between it and either, is
+      the positive control for the whole class: it merges into the word(s) it touches, matching
+      bash, and it is verdict-neutral — neither the deleted trim, nor the scanner, nor the
+      unquoter ever split on it there, so nothing about this command's decision moves.
+
+  - id: d_the_divergent_blank_rule_reaches_wrapper_extracted_text
+    kind: domain-outcome
+    form: test
+    binds: ['_wrapper_span', '_scan']
+    discharged_by: test_a_divergent_blank_inside_the_extracted_inner_command_behaves_as_it_does_outside
+    source: "45-dispositions note 3 — a composition no demand currently reaches"
+    seed_docstring: >-
+      The divergent-blank rule reaches the wrapper's extracted inner text, because the extracted
+      text is re-scanned by the same scanner: `bash -c '\u00a0cat x'` gives the inner command the
+      same treatment `\u00a0cat x` gets as a bare command, and a `-c` argument that is NOTHING but
+      a divergent blank is a one-word command bash would try to run, and is refused (restated
+      worked example 3).
+
+  - id: d_every_member_of_the_divergent_blank_alphabet_is_swept
+    kind: domain-outcome
+    form: test
+    binds: ['command_text.domain', '_WORD_SEPARATORS.domain']
+    discharged_by: test_every_member_of_the_divergent_blank_alphabet_behaves_the_same_way
+    source: "SB6 — the judge's recommendation, one table-driven test over the closed set"
+    seed_docstring: >-
+      One table-driven sweep over the whole closed alphabet, not three hand-authored members: the
+      26 characters `str.strip()` removes that neither the scanner nor the line split treats as a
+      blank are each exercised at both ends of an allowed pipeline, and each behaves the way the
+      three named members do. The set is derived in the test from `str.strip()` and the scanner's
+      own separator constant — never transcribed — so the 26th member (`\r`, which joins the
+      alphabet the moment M6 removes it from `_WORD_SEPARATORS`) cannot be left out by hand.
+
+  # =========================================================================================
+  # O1 / M6 — THE `\r` FIX. New at §7 (F6): the issue's census marks `_scan` "keep — this is
+  # the one", and that verdict is INCOMPLETE. Both halves are required; neither ships alone.
+  # =========================================================================================
+
+  - id: d_the_scanner_ends_a_word_where_bash_ends_one
+    kind: negative
+    form: test
+    binds: ['_scan', '_WORD_SEPARATORS.domain.distinguished["\r"]', 'bash_oracle']
+    discharged_by: test_the_scanner_ends_a_word_exactly_where_bash_ends_one
+    source: "F6(a), human-resolved — M6"
+    seed_docstring: >-
+      No character ends a word here that does not end one in bash: a carriage return inside an
+      operand is part of that operand, so `cat /run/report.md\rx` names one file and is not
+      authorised as a two-operand command that opens a different one. The same holds at a word
+      edge (`cat P\r`), across an operator run (`cat P\r| wc -c`), and for a line that is one
+      `\r` and nothing else, which is a one-character word and not zero tokens.
+    rejected:
+      - {nl: "the current `_WORD_SEPARATORS`, which contains `\\r` because the shlex lexer it replaced did — bash's own blank set is space and tab only"}
+
+  - id: d_the_two_layers_agree_about_the_removed_separator
+    kind: behavior
+    form: test
+    binds: ['_scan', '_word_value', 'interacts(parse->_word_value).response']
+    discharged_by: test_the_boundary_decision_and_the_value_resolution_agree_about_the_removed_separator
+    source: "45-dispositions RF-J4 / note 4 — M6's dependency on M2, as a demand"
+    seed_docstring: >-
+      The boundary decision and the value resolution agree about the removed separator in all
+      three shapes, which is only true once the unquoter has no blank set of its own: a mid-word
+      `\r` leaves one token whose RESOLVED value still carries the `\r`; an edge `\r` is not
+      silently dropped from the resolved value; and a word that is nothing but `\r` resolves to
+      that one-character word rather than to zero parts that make the line untokenizable. A
+      quoted `\r` is the control — unchanged in both directions, because quoting suppresses
+      separator recognition unconditionally.
+
+  - id: d_the_oracle_reads_bash_in_binary
+    kind: negative
+    form: test
+    binds: ['bash_oracle.access[subprocess]', 'interacts(bash_fd_prefix_955->bash_oracle)']
+    discharged_by: test_the_oracle_never_normalises_its_own_subject
+    source: "F6(b), human-resolved — M6(b); the issue's blind spot (2), still open at 6a2ea874"
+    seed_docstring: >-
+      The oracle recovers bash's recorded argv as bytes: nothing between bash and the assertion
+      rewrites a byte, so a carriage return in an argument arrives as a carriage return and
+      cannot be laundered into the delimiter the recovery then splits on. Today's
+      `Path.read_text(encoding="utf-8")` does worse than erase the character — universal-newline
+      translation treats a bare `\r` as its own line ending, so it phantom-splits entries and
+      shifts the `ARGV_END` alignment for everything after them (four expected entries recovered
+      as five).
+
+  - id: d_the_oracle_normalises_no_evidence_channel
+    kind: negative
+    form: test
+    binds: ['bash_oracle', 'interacts(bash_fd_prefix_955->bash_oracle).response']
+    discharged_by: test_no_channel_the_oracle_reads_evidence_through_rewrites_a_byte
+    source: "45-dispositions, settled: the binary-read demand is about the CLASS, not one call"
+    seed_docstring: >-
+      The binary read is a property of the oracle, not of one line: the stdout and stderr capture
+      beside the argv file is held to the same rule, because `subprocess.run(..., text=True)`
+      normalises exactly as `read_text` does. No channel between bash and the assertion —
+      delimiter, end marker, encoding, capture — may rewrite a byte.
+
+  # =========================================================================================
+  # O1 / P2 + C1 — THE WRAPPER FOLDS IN (M3).
+  # =========================================================================================
+
+  - id: d_the_c_argument_is_the_token_the_span_bounds
+    kind: behavior
+    form: test
+    binds: ['_wrapper_span', 'interacts(parse->_scan).response']
+    discharged_by: test_the_c_argument_is_the_token_its_span_bounds_not_a_rejoin_of_several
+    source: "C1 / P2; PROSE CORRECTED at the second verify loop (RC7) — the rule was stated for the wrong arm"
+    seed_docstring: >-
+      The inner command of a `bash -c` wrapper is the `-c` argument's OWN TOKEN, resolved once
+      and re-scanned as the inner command — never a re-join of several tokens that have already
+      been resolved. Its SPAN is what tells the parser where that token ends, which is how an
+      operator sitting after it becomes visible at all; the span is exact regardless of which
+      character sits at the boundary, because the offsets come from the matched token's own
+      position and not from a character-class test.
+    note: >-
+      THE PROSE HERE WAS WRONG AND THE ASSERTIONS WERE RIGHT (RC7, human-resolved at the second
+      verify loop). The design body, the authoritative comment's M3 and this demand's own former
+      id all said the `-c` argument is `line[start:end]` of its token. Executed at the base
+      commit: the raw span of a `-c` argument INCLUDES ITS QUOTES — which is exactly what
+      `d0_scan_returns_one_frozen_record_per_token`'s test asserts a span is — so re-scanning it
+      yields ONE argv word (`bash -c 'cat /run/report.md'` -> `[['cat /run/report.md']]`, a
+      program with a space in its name). The correct rule for this arm is the token's RESOLVED
+      value, which is what today's `unwrap` already does there (`tokens[i+2]`, a single resolved
+      token, never a re-join).
+      WHAT THE RAW-SLICE RULE WAS PROTECTING IS NOT REOPENED, AND THE NEXT READER MUST NOT "FIX"
+      THIS BACK: the concern was re-joining SEVERAL resolved tokens, where the glue between them
+      (quoting, runs of spaces) is destroyed and cannot be recovered. Resolving ONE token loses
+      nothing — it is exactly what a shell passes to the program — and the demand still forbids
+      the re-join. The raw slice remains the right rule for the OTHER arm, the `timeout` prefix,
+      where the remainder is many tokens whose glue must survive; that is
+      `d_the_timeout_prefix_is_skipped_by_token_index` and it is unchanged.
+
+  - id: d_an_outer_operator_means_the_wrapper_is_not_the_whole_command
+    kind: behavior
+    form: test
+    binds: ['_wrapper_span', 'interacts(parse->_scan).response']
+    discharged_by: test_an_operator_outside_the_c_argument_refuses_the_wrapper
+    source: "P2 / c2 / x2 — verdict-change set member 3, THE FIX'S OWN HEADLINE CASE"
+    seed_docstring: >-
+      When an operator sits outside the `-c` argument — `bash -c 'echo a '2>/dev/null`, where
+      bash's own `-c` argument is `echo a 2` and the redirect belongs to the outer shell — the
+      wrapper is not the whole command and the parse refuses it, instead of handing the inner
+      shell a redirect the outer shell owned.
+    rejected:
+      - {nl: "today's answer: ALLOW, with `[['echo','a']]` and stderr on /dev/null crossing into the box, while real bash runs `echo a 2` with the outer redirect taking stdout"}
+
+  - id: d_a_bash_c_wrapper_that_is_not_the_whole_command_is_refused
+    kind: behavior
+    form: test
+    binds: ['_wrapper_span', 'command_text']
+    discharged_by: test_a_bash_c_wrapper_with_anything_after_it_is_refused
+    source: "C1; SPLIT from d_the_wrapper_decision_sees_the_whole_command per 45-dispositions note 2 (FK5)"
+    seed_docstring: >-
+      A `bash -c` wrapper must be the WHOLE command: `bash -c 'ls'` followed by a second physical
+      line is refused, because the `-c` argument does not claim the text after it, and so is a
+      stray word after the `-c` string on the same line. The wrapper decision is taken over the
+      whole command and cannot live inside the per-line scan — a first-line-only fold reads
+      `bash -c 'ls'` as a complete wrapper and silently loses line 2.
+
+  - id: d_a_timeout_prefix_leaves_every_later_line_in_the_parse
+    kind: behavior
+    form: test
+    binds: ['_wrapper_span', 'command_text']
+    discharged_by: test_a_timeout_prefix_on_the_first_line_leaves_every_later_line_in_the_parse
+    source: "C1; the OTHER arm of the split (FK5) — the two arms answer opposite ways"
+    seed_docstring: >-
+      A `timeout N` prefix does NOT claim the rest of the text: a prefix that uses up its own
+      physical line leaves every later line in the parse, so `timeout 5\ncat P` is still the two
+      lines it names. Recognising a prefix does not evaluate whether the remainder is granted — a
+      later line no grant admits still denies on the ordinary capability reason.
+    note: >-
+      FK5 exists because ONE sentence carried these two opposite answers and each escalation
+      reader collapsed it to one of them — the only premise in the run where two escalation
+      readers gave opposite SETTLED verdicts. Splitting it is the phase-D action the judge asked
+      for; neither arm is a fork any more.
+
+  - id: d_the_timeout_prefix_is_skipped_by_token_index
+    kind: behavior
+    form: test
+    binds: ['_wrapper_span', 'interacts(parse->_scan).response']
+    discharged_by: test_the_timeout_prefix_is_skipped_by_token_index_and_the_rest_is_a_raw_slice
+    seed_docstring: >-
+      A `timeout N` prefix is skipped by counting tokens, and what is parsed is the raw line from
+      the next token's start offset — no string surgery re-derives where the prefix ended. The
+      duration token is matched on its RESOLVED value, not its raw span: `'5'`'s raw span fails a
+      digit test while its resolved value passes, and F4 requires `timeout '5' cat x` to be
+      accepted.
+
+  - id: d_a_quoted_wrapper_word_is_the_program_bash_would_run
+    kind: domain-outcome
+    form: test
+    binds: ['_wrapper_span', 'UNTOKENIZABLE_REASON.domain.distinguished[cause5]']
+    discharged_by: test_a_quoted_timeout_prefix_is_the_timeout_program_bash_would_run
+    source: "F4, human-resolved (ACCEPTED) — verdict-change set member 4"
+    seed_docstring: >-
+      A `timeout` prefix whose own words are quoted — `timeout '5' cat x`, `"timeout" 5 cat x` —
+      is the same prefix bash would run, so it is skipped like any other, and
+      `UNTOKENIZABLE_REASON` cause (5) no longer names it. Composed with a leading or trailing
+      divergent blank the outcome is the union of the two accepted changes and nothing new:
+      `\u00a0timeout '5' cat x` is still refused, because the leading blank corrupts the first
+      token and the wrapper is not recognised at all (restated worked example 4).
+    rejected:
+      - {nl: "today's answer: refused as untokenizable, because `_strip_prefix_from_raw` matches the prefix against the RAW text rather than the token values"}
+    note: >-
+      The `bash`/`sh` arm is ALREADY value-matched today (`\"bash\" -c \"ls\"` unwraps), so the
+      widening is confined to the `timeout` arm. This is the one member of the set that moves
+      deny->allow, and it is why the body's "can only narrow what is accepted" sentence is struck.
+
+  - id: d_a_newline_inside_the_c_argument_is_an_unclosed_quote
+    kind: domain-outcome
+    form: test
+    binds: ['_wrapper_span', 'UNTOKENIZABLE_REASON.domain.distinguished[cause1]']
+    discharged_by: test_a_newline_inside_the_c_argument_is_the_unclosed_quote_it_looks_like
+    source: "F5, human-resolved (ACCEPTED) — verdict-change set member 5"
+    seed_docstring: >-
+      A `bash -c` argument carrying a newline is refused for the reason every other cross-line
+      quote is refused — a quoted string cannot span lines — instead of being flattened into one
+      token and re-split into a pipeline per line. The refusal must reach the model as a reason
+      that EXPLAINS THE NEWLINE, not as a generic parse failure: a model that sends a multi-line
+      `-c` payload today gets an allow, and after this change it needs to know what to fix.
+    rejected:
+      - {nl: "today's answer: allowed, `bash -c 'cat /run/report.md\\nwc -l'` parsing to two pipelines"}
+
+  - id: d_an_independently_unbalanced_quote_keeps_the_generic_lexing_cause
+    kind: domain-outcome
+    form: test
+    binds: ['UNTOKENIZABLE_REASON.domain.distinguished[cause1]', '_wrapper_span']
+    discharged_by: test_a_newline_in_a_c_argument_that_is_also_independently_unbalanced_keeps_the_generic_cause
+    source: "SB4 — the judge's bound on F5's obligation, which as written is unconditional"
+    seed_docstring: >-
+      F5's obligation binds when the newline is WHY the scan failed. Where the `-c` argument
+      carries a separately unbalanced quote that fails first, the generic cause (1) wording is
+      the correct one and the newline explanation is not owed — a design-introduced narrowing and
+      a genuine syntax bug must not be conflated in either direction.
+
+  - id: d_the_wrapper_shapes_the_reason_still_names_stay_refused
+    kind: survival
+    form: test
+    binds: ['UNTOKENIZABLE_REASON.domain.distinguished[cause5]', 'unwrap']
+    discharged_by: test_every_wrapper_shape_the_lexing_reason_names_is_still_refused_for_that_reason
+    seed_docstring: >-
+      Every wrapper shape `UNTOKENIZABLE_REASON` cause (5) still names after F4's strike — a bare
+      `bash`, `bash script.sh`, `sh -lc …`, a stray word after the `-c` string, a second complete
+      wrapper following the first — is still refused with the LEXING reason after the fold, and
+      the reason's own sentence still matches what the parser does. A bare `timeout`, by
+      contrast, still denies on the POLICY reason: that asymmetry is today's, it is not in the
+      enumerated set, and a folded implementation that unifies the two arms has made an
+      unenumerated verdict change.
+      THE MATCHER RECOGNISES A WRAPPER BY ITS FIRST TOKEN, and a character the model cannot see
+      landing on a LATER token may not change which reason answers: `bash -c 'cat P' extra\u00a0`
+      is a stray word after the `-c` string whether or not that word ends in a no-break space, so
+      cause (5) still names it and the model still reads the message that says what is actually
+      wrong with what it sent.
+
+    note: >-
+      THE FIRST-TOKEN RULE IS A DECISION, NOT AN OBSERVATION (RF-E8, human-resolved at the third
+      verify loop, and recorded as such so a later reader does not mistake a chosen answer for a
+      measured one). Seven wrapper shapes whose LAST token is not the wrapper word —
+      `sh -lc 'ls'`, `bash -c '<cmd>' extra`, `bash -x -c '<cmd>'`, `bash -c'<cmd>'`,
+      `bash <script>`, two complete wrappers in a row, and a `-c` wrapper followed by a second
+      physical line — were the one group the third verify loop could not settle by probe: an
+      M4+M6+M2 simulation reports them falling through to the capability deny, but that
+      simulation parses WITHOUT the fold, which is the very code the answer turns on. The author
+      leaf recorded neither answer and put the question up rather than pinning whichever behaviour
+      its own simulation produced. RESOLVED: they KEEP the specific lexing reason, and the corpus
+      carries all seven × the 26-character alphabet (182 rows) as verdict-NEUTRAL BY DECISION.
+      REJECTED: letting them fall through to the capability deny — 182 more shapes into member 8,
+      and the model loses the message that says what is actually wrong, which is the same
+      message-loss RC1, RC6 and RC9 were each about; and leaving it unrecorded, where whichever
+      way the implementation happened to be built would silently have become the answer.
+
+  - id: d_wrapper_recognition_applies_once_at_the_top_level
+    kind: behavior
+    form: test
+    fork: FK3
+    resolved: "once — taken by the human at §7, as recommended"
+    recommended_reading: "once, at the top level only, never over the text it extracts"
+    binds: ['_wrapper_span']
+    discharged_by: test_the_wrapper_step_applies_exactly_once_and_never_to_the_text_it_extracts
+    seed_docstring: >-
+      Wrapper recognition applies once, at the top level, and never re-runs over the slice it
+      just extracted: `timeout 5 timeout 3 cat x` still denies, `bash -c 'timeout 5 cat x'` still
+      denies, and a `timeout` appearing as the first word INSIDE a `-c` argument is ordinary text
+      to the outer match.
+    readings:
+      once: "single, outward-only application — matches today's behaviour exactly and preserves both denies"
+      fixed-point: "loop to a fixed point, or re-apply recognition to the extracted `-c` slice — turns two of today's denies into allows, a deny->allow widening on a security gate that is in nobody's enumerated set and is reached by accident rather than by decision"
+    note: >-
+      RESOLVED AT §7 (FK3, human): ONCE, at the top level, never re-run over the slice it
+      extracts. `fixed-point` was rejected explicitly — it turns two of today's denies into
+      allows, a deny->allow widening reached by accident rather than by decision, and it adds
+      NO member to the enumerated set. Nothing in the design says "once", and folding makes recursion
+      structurally easy — that is the whole risk this fork exists to catch. The recommendation is
+      `once`; if §7 takes the other reading it is a seventh member of the verdict-change set.
+
+  - id: d_a_bare_wrapper_word_keeps_its_reason_class
+    kind: behavior
+    form: test
+    binds: ['_wrapper_span', 'BashDecision']
+    discharged_by: test_a_bare_wrapper_word_denies_with_the_reason_class_it_denies_with_today
+    source: "45-dispositions, settled (both escalation copies hedged on the reason class; settled from O3+F2)"
+    seed_docstring: >-
+      A bare `bash` or `sh` denies with the LEXING reason (cause (5) names it); a bare `timeout`
+      denies with the POLICY reason, because `unwrap('timeout')` returns the empty string, which
+      parses to zero pipelines and falls through. Reason identity is part of the verdict, and
+      this shape is not in the enumerated set, so neither arm may move.
+
+  # =========================================================================================
+  # O2 — ONE SCANNER (M2).
+  # =========================================================================================
+
+  - id: d_nothing_outside_the_scanner_splits_bash_text
+    kind: negative
+    form: test
+    binds: ['_scan', '_cmd_segments', 'unwrap']
+    discharged_by: test_nothing_outside_bash_exec_decides_where_a_bash_word_ends
+    seed_docstring: >-
+      One module decides where a bash word ends: no other module in the tree splits command text
+      — no `shlex.split`, no `shlex.shlex`, no blank-set `strip` on a command — and the only
+      `shlex` left elsewhere is `shlex.join`, which formats an argv and never parses one.
+
+  - id: d_the_scanner_is_the_positive_control_for_that_negative
+    kind: behavior
+    form: test
+    binds: ['_scan']
+    discharged_by: test_the_one_module_that_splits_bash_text_still_splits_it
+    seed_docstring: >-
+      The paired control: the one module that does split still splits — `a | b && c` is three
+      stages across two connectors, an operator-looking character produced by a quoting idiom was
+      never an operator token, and an escaped operator character is an ordinary word everywhere —
+      so the negative above cannot pass by everything having stopped working.
+    note: >-
+      RENAMED from `20-demands.md`'s `test_an_unquoted_operator_is_still_an_operator`, which is an
+      EXISTING test at `test_955_bash_fd_prefix.py:148`. A `discharged_by` that resolves to a test
+      predating the spec reads as discharged by work this change did not do, and `check_binds`
+      would scan that older docstring instead of this demand's prose.
+
+  - id: d_the_unquoter_has_no_notion_of_whitespace
+    kind: seam
+    form: test
+    binds: ['_word_value']
+    discharged_by: test_the_unquoter_has_no_notion_of_whitespace
+    seed_docstring: >-
+      `_word_value` resolves the quoting of one span and nothing else: it holds no blank set, it
+      is not built on a splitter, and there is no pin stopping it from re-splitting because it has
+      no such capability to pin.
+    rejected:
+      - {nl: "the body's claim that the current code pins `lex.whitespace` to stop it — there is no such pin in the module (x1)"}
+      - {nl: "any performance claim for the hand-rolled unquoter — the doc defers benchmarks rather than asserting them"}
+
+  - id: d_the_unquoter_resolves_every_form_the_lexer_resolved
+    kind: behavior
+    form: test
+    binds: ['interacts(parse->_word_value).response']
+    discharged_by: test_the_unquoter_resolves_every_quoting_form_the_lexer_resolved
+    seed_docstring: >-
+      The hand-rolled unquoter returns exactly what the POSIX lexer returned for every form the
+      grammar admits: `"a\nb"` keeps its backslash, `"a\"b"` gives `a"b`, `"a\\b"` gives `a\b`,
+      `a\ b` gives one word with a space, `'a'"b"c` glues to `abc`, `'a\nb'` is literal, `"$x"` is
+      not expanded, `\;` is the semicolon `find -exec` needs, and a quote-concatenated spelling of
+      a wrapper word (`'ba''sh'`) resolves to `bash` and is recognised like any other.
+
+  - id: d_a_trailing_backslash_still_continues_nothing
+    kind: domain-outcome
+    form: test
+    binds: ['UNTOKENIZABLE_REASON.domain.distinguished[cause2]', '_word_value']
+    discharged_by: test_a_trailing_backslash_still_continues_nothing
+    seed_docstring: >-
+      A command ending in a dangling backslash is still refused as untokenizable — the escape the
+      lexer raised on must still be a refusal once the unquoter is hand-rolled, or cause (2) of
+      the lexing reason becomes a sentence about nothing.
+
+  - id: d_the_lexing_causes_this_change_does_not_touch_still_name_what_they_name
+    kind: survival
+    form: test
+    binds:
+      - 'UNTOKENIZABLE_REASON.domain.distinguished[cause3]'
+      - 'UNTOKENIZABLE_REASON.domain.distinguished[cause4]'
+    discharged_by: test_the_line_boundary_and_incomplete_connector_causes_still_name_what_they_name
+    seed_docstring: >-
+      Causes (3) and (4) — a `|`/`&&`/`||` at a line boundary, and a connector without a complete
+      command on both sides within one line — still name exactly what the parser refuses FOR EVERY
+      SPELLING THAT STILL REACHES THEM. The per-line dangling-connector and pending-connector
+      checks stay inside the per-line loop while the wrapper decision sits outside it; the two
+      constraints pull in opposite directions and both must hold. A `\r` glued to the word BEFORE
+      a connector leaves the connector as the line's last token and cause (3) still answers; a
+      `\r` AFTER the connector does not — it is a word of its own, the connector is no longer
+      last, the check is structurally out of reach, and the command is refused down the other
+      path. That is enumerated member 8, not a repair to make here: bash genuinely ends the
+      pipeline at the connector, so teaching this check to look past a trailing `\r` would put a
+      second private opinion about `\r` back into the change whose thesis is that there should be
+      exactly one (RC1, human-resolved at the verify loop).
+
+  # =========================================================================================
+  # O3 — THE ENUMERATED VERDICT-CHANGE SET (M5, D2). A STATED DELIVERABLE OF THIS SPEC.
+  # =========================================================================================
+
+  - id: d_the_enumerated_set_is_written_before_implementation
+    kind: coherence
+    form: clause
+    binds: ['decide_bash']
+    source: "D2 / M5, CORRECTED per 45-dispositions RF-J3 (note 1)"
+    outcome:
+      nl: >-
+        The spec artifact carries the enumerated verdict-change set in full before any
+        implementation exists, and every instrument that certifies the refactor is read against
+        that one written set rather than against whatever the suite complained about afterwards.
+        THE SET, CORRECTED AND EXTENDED — EIGHT NUMBERED MEMBERS HOLDING SEVEN DISTINCT SHAPES
+        (slot (6) is the placeholder FK1 filled as (7), counted twice).
+        THIS NUMBERING GOVERNS (RC10): the frontier records `70-resolutions.md` and
+        `71-verify-resolutions.md` number members 3, 4 and 5 in the other order — quoted
+        `timeout` / newline-in-`-c` / outer-operator, where this artifact and the corpus have
+        outer-operator / quoted `timeout` / newline-in-`-c`. The two lists hold the same shapes,
+        so every count reconciles and no check can see the difference, but a composed corpus tag
+        like `1+4` decodes to a different case depending on which document is being read. The
+        artifact and the corpus agree with each other, which is the pair the implementation
+        joins on, so they govern and the frontier files carry a line saying so.
+        (1) LEADING OR TRAILING DIVERGENT BLANKS (M4, the deleted trim). 26 characters at each of
+        two ends, plus the three whole-command blank spellings. Previously allowed with a
+        rewritten argv, the character silently removed; now the blank belongs to the word it
+        touches, so an otherwise-allowed pipeline is refused and a command that is nothing but one
+        of them is a one-word command bash would try to run. The 26 are `str.strip()`'s 29 blanks
+        minus space, tab and newline — newline excluded because `parse` splits physical lines on
+        it before `_scan` ever runs — and the 26th is `\r`, which joins the alphabet the moment M6
+        removes it from `_WORD_SEPARATORS`. The previously closed set said 25, a count taken from
+        the very constant this change edits (claim a1, computed; correcting claim g4).
+        (2) `\r` INSIDE OR AT THE EDGE OF A WORD (M6, and M2 with it). Includes the shape
+        immediately before an fd marker, `cat P\r2>/dev/null`, ALLOWED today as `['cat', P]`
+        with stderr on /dev/null while real bash runs `cat P\r2` with STDOUT redirected — an
+        operand changed AND both streams re-routed; the corpus carried its mirror and not this
+        direction until the verify loop (RC1). Previously `_scan` split
+        the word there and the gate authorised two operands where bash passes one — `cat A\rB`
+        authorised `['cat', A, B]` and opened two files. Now one operand, as bash reads it. THE
+        VERDICT MOVES IN BOTH DIRECTIONS AND THE PREVIOUS WORDING STATED ONLY THE PARSE CHANGE:
+        for a `cat`-shaped grant the CR-bearing operand fails `grant.SEG` and the command flips
+        ALLOW->DENY, so a model pasting a CRLF command starts being refused; for an
+        `OPENS_NOTHING` program whose grant shape ends in a single `VALUE` it stays ALLOWED WITH A
+        DIFFERENT ARGV, which is the half a check that reads only allow/deny cannot see.
+        (3) AN OUTER OPERATOR AFTER A `bash -c` ARGUMENT (M3) — the fix's own headline case, and
+        it was missing from the closed set although member 1 named M4's fix by name.
+        `bash -c 'echo a '2>/dev/null` is ALLOWED today with `[['echo','a']]` and stderr on
+        /dev/null, while real bash's `-c` argument is `echo a 2` and the redirect belongs to the
+        outer shell. ALLOW->DENY.
+        (4) A QUOTED `timeout` WRAPPER WORD (M3 + F4). Previously refused as untokenizable because
+        the prefix was matched against the raw text; now recognised by resolved value.
+        DENY->ALLOW — the only widening, and the clause naming it leaves cause (5) together with
+        the test that pins it.
+        (5) A NEWLINE INSIDE A `bash -c` ARGUMENT (M3 + F5). Previously allowed and flattened into
+        two pipelines; now refused as the unclosed quote it is. ALLOW->DENY, and the refusal must
+        name the newline.
+        (6) is the slot reserved for FK1 while it was pending at the human seam; FK1 was ACCEPTED
+        and landed as member (7), so the set numbers to SEVEN and holds SIX DISTINCT SHAPES.
+        (7) ACCEPTED AT §7 (FK1, minimal arm only) — A `timeout` PREFIX WITH NO DURATION-SHAPED TOKEN.
+        `timeout cat report.md` is allowed today and executes `cat report.md`, while real
+        `timeout` reads `cat` as its duration and runs nothing. The minimal fix advances past
+        `timeout` only when at least one duration- or flag-shaped token is actually consumed:
+        ALLOW->DENY, a narrowing, one condition and one test. The rejected arms are named in
+        `d_a_timeout_prefix_with_no_duration_is_not_a_wrapper`.
+        (8) ADDED AT THE FIRST VERIFY LOOP (RC1) AND WIDENED AT THE SECOND, THIRD, FOURTH AND
+        FIFTH (RC6, RC9, RC11, RC12) — A DIVERGENT BLANK AT EITHER END MOVES WHICH MESSAGE A
+        COMMAND THAT WAS ALREADY REFUSED IS REFUSED WITH. STATED AS A RULE OVER SETS DERIVED FROM
+        THE CODE, NOT AS A LIST OF SHAPES, AND ITS FOUR AXES ARE NOW CLOSED RATHER THAN WIDENED:
+        the CHARACTER axis is the computed 26-member alphabet checked against the frozen tuple;
+        the REASON-CLASS axis is the four messages the gate can answer with, enumerated in one
+        place (`_baseline_959.reason_classes`) that the recorder and the suite's control both
+        read; the ARM axis is the places that decide which of those messages a refusal carries,
+        derived per class — for `UNTOKENIZABLE_REASON` that is every `raise UntokenizableCommand`
+        in `bash_exec.py` and `permission/bash.py` (six sites at this base commit, AST-derived by
+        the suite so a new arm fails a test), and for the three classes that are RETURNED rather
+        than raised it is their own tabled arms; and the POSITION axis is TWO, because
+        `str.strip()` reaches two ends and nothing else (the interior belongs to member 2, where
+        only the carriage return moves).
+        THE STATEMENT FORM WAS THE TRAP AND IT IS WORTH THE SENTENCE: deriving the arms from
+        `raise` statements missed `ADAPTER_RETIRED_REASON` BY CONSTRUCTION, because it is a
+        `return`. 78 shapes moved off the message that tells the model to reach the system through
+        the `query` tool — a REDIRECTION, not a diagnosis — while the derivation reported itself
+        complete. The axis was never "places that raise"; it is "places that decide which message
+        a refusal carries".
+        THE RULE: the blank glues to the token it TOUCHES, and the refusal moves off its arm IFF
+        that token is the one the arm's decision turns on — the LAST token for a trailing blank,
+        the FIRST for a leading one. The glued token stops matching what the arm recognises and
+        the command falls through to the capability path: still refused, correctly and more
+        faithfully to bash, but the message that told the model what to fix is replaced by one
+        that does not. Reason identity is part of a verdict (F2), so these are verdict changes.
+        THE ADAPTER CLASS, AT THE LEADING END ONLY (RC12): `<blank>defender-elastic query foo`
+        and its two siblings move 26/26 from the adapter message to the generic policy one, by the
+        wrapper arm's exact mechanism — `is_adapter_stage` reads `argv[0]`, and a leading blank
+        makes it a word that neither `startswith("defender-")` nor `ADAPTER_RE` matches. A
+        trailing blank lands on the last operand, leaves `argv[0]` intact, and moves nothing:
+        0/26. Determined rather than chosen, so it is recorded as an observation.
+        THE TWO ENDS DO NOT ANSWER ALIKE, WHICH IS WHY NEITHER STANDS FOR THE OTHER. At the
+        leading end the wrapper arm and the connector-opens-a-line arm move (10 base shapes ×
+        26 = 260 shapes, executed): `<blank>bash`, `<blank>sh`, the seven wrapper shapes whose
+        trailing end RF-E8 decided the other way, and `<blank>| wc -l`, where the blank supplies
+        the very left-hand command whose absence was the refusal. At the trailing end those seven
+        wrapper shapes KEEP their reason and the connector-opens-a-line arm does not move, while
+        the trailing-backslash, bare-redirect and pending-connector arms do.
+        THE MOVERS, each swept over all 26 characters and each executed 26/26 under the M4+M6+M2
+        simulation: a trailing backslash (`cat P \`), a `|` whose right side is a bare redirect
+        (`cat P | 2> /dev/null`), a connector closing its line (`cat P |`, `&&`, `||` — the
+        separator spelling, 78 shapes), an `&&` whose right side never arrived (`cat P && ;`),
+        and a bare wrapper word (`bash`, `sh`). THE NON-MOVERS, swept identically and recorded
+        NEUTRAL because a sweep run only over the moving part of a set cannot say the rest does
+        not move: an unclosed quote, a newline inside a quoted argument, a `|` whose right side
+        fails three tokens back (`cat P | ; wc -l`), a connector opening a line (`| wc -l`), a
+        connector crossing a line boundary, and an unclosed quote inside a `-c` argument.
+        ONE GROUP IS DELIBERATELY OUT OF THIS MEMBER AT ONE END ONLY (RF-E8, human-resolved): a
+        wrapper shape whose LAST token is not the wrapper word — `bash -c '<cmd>' extra{blank}`
+        and six siblings — KEEPS the specific lexing reason, because the matcher recognises the
+        wrapper by its FIRST token. 182 shapes, verdict-NEUTRAL BY DECISION rather than by
+        observation, and the obligation is carried by
+        `d_the_wrapper_shapes_the_reason_still_names_stay_refused`. THE SAME SEVEN SHAPES ARE
+        MEMBER 8 AT THE LEADING END (RC11, and by OBSERVATION rather than decision): there the
+        blank lands ON the wrapper word, `<blank>bash` is a first token no matcher recognises on
+        any implementation this spec permits, and RF-E8's unanswerable-by-probe status does not
+        reach it — the uncertainty it named was about a matcher that still sees `bash` first.
+        ONE DIRECTION IS MEMBER 1'S, NOT THIS ONE: `cat P ;{blank}` was ALLOWED before (a `;` is
+        not a dangling connector, so no arm looked at it) and is refused after — allow->deny at
+        member 8's position, carried by the composed tag `1+8`.
+        In every direction the message half folds into
+        `d_a_command_refused_only_for_an_invisible_character_says_so`, which now carries both
+        predicates: a command refused ONLY for an invisible character, and one whose REASON CLASS
+        moved because of one.
+        REJECTED: special-casing an arm to look past a trailing blank, which would reintroduce a
+        second private opinion about what a blank is inside the change whose thesis is that there
+        should be exactly one; and accepting the message change unenumerated, which leaves O3
+        knowingly false on shapes a model plausibly sends.
+        WHY IT TOOK THREE PASSES, RECORDED BECAUSE THE SHAPE REPEATED EACH TIME: member 1 was
+        written as 25 characters, measured against the very constant this change edits, and
+        recounted to 26. Member 8 was then written from three worked examples that all carried a
+        carriage return, because that is what the finding that produced it was about (RC1); RC6
+        widened it across the character axis and left the ARM axis unexamined; RC9 derived the
+        arm axis from the code. Each pass closed what had been demonstrated. What is written here
+        is a rule over a set the next reader can recompute from the source, which is the only
+        form of this member that a fourth pass cannot widen by finding one more shape.
+        THE SET NUMBERS EIGHT AND HOLDS SEVEN DISTINCT SHAPES: slot (6) is the placeholder FK1
+        filled as (7), counted twice.
+        Everything outside these members is verdict-neutral, AND THE INSTRUMENT THAT SAYS SO IS
+        THE FROZEN-BASELINE REPLAY (FK7, accepted): the gate's whole decision over a purpose-built
+        corpus, recorded at `6a2ea874` before any implementation existed and replayed afterwards.
+        The two existing differentials could not have said it — their corpora contain no wrapper
+        word, no `\r`, and no blank other than an ordinary space, so "verdict-neutral" over them
+        means "no test that already existed changed its mind" across a corpus with zero coverage
+        of the three classes this change touches.
+
+  - id: d_no_verdict_moves_outside_the_enumerated_set
+    kind: negative
+    form: test
+    binds: ['decide_bash', 'BashDecision', 'command_text.access[bash]']
+    discharged_by: test_no_verdict_moves_outside_the_enumerated_set
+    seed_docstring: >-
+      Every command shape this suite and the two differentials already exercise reaches the same
+      decision after the refactor as before it — the same allow, the same reason IDENTITY, the
+      same argv and the same stderr routing — except the enumerated shapes this spec changes on
+      purpose. A `cd`-containing command is the standing control: it already denies at the gate
+      because no grant names `cd`, and none of the six mechanisms touches grant matching.
+    rejected:
+      - {nl: "the body's non-obligation 'not a change to what is accepted or refused' as the whole test — D2 accepts explicitly that some of the fixes change verdicts"}
+
+  - id: d_the_frozen_baseline_replay_certifies_neutrality
+    kind: behavior
+    form: test
+    fork: FK7
+    resolved: "frozen-baseline — taken by the human at §7; BUILT, at this base commit, before anything else in the suite"
+    binds: ['BashDecision', 'command_text.domain']
+    discharged_by: test_a_frozen_baseline_replay_certifies_every_unenumerated_shape
+    seed_docstring: >-
+      A corpus of command texts is run through the gate AT THE BASE COMMIT and its whole decision
+      recorded — allow, reason identity, and the pipelines — then replayed after the change: every
+      shape outside the enumerated set reaches an identical decision, and every shape inside it
+      reaches the enumerated one. The corpus carries the three classes the existing corpora do not:
+      wrapper words, `\r`, and the divergent blanks.
+    readings:
+      frozen-baseline: "record the current gate's whole decision over a purpose-built corpus BEFORE implementation and replay it after — the only instrument that can actually discharge O3's neutrality obligation, and buildable only now"
+      suite-afterwards: "'no existing test changed its mind' — costs nothing and certifies almost nothing, because neither differential corpus contains a wrapper word, a carriage return, or any blank but a space"
+    note: >-
+      RESOLVED AT §7 (FK7, human): the replay is BUILT, now. The neutrality obligation therefore
+      stays a UNIVERSAL and is not downgraded. The recording lives at
+      `defender/tests/_baseline_959_frozen.json`, taken at `6a2ea874` by
+      `defender/tests/_baseline_959.py`, and it is committed with the spec — it may never be
+      regenerated, because a baseline re-recorded after the implementation certifies nothing
+      (`test_the_recorded_baseline_predates_the_change_it_certifies` is the guard). The corpus
+      carries the three classes the existing corpora do not: wrapper words, `\r`, and the
+      divergent blanks. FK7's second premise carried too — see
+      `d_the_operator_cli_reports_the_whole_verdict`.
+
+  - id: d_the_blank_test_reads_the_scanners_own_separator_constant
+    kind: behavior
+    form: test
+    fork: FK4
+    resolved: "read-the-scanners-constant — taken by the human at §7, as recommended"
+    recommended_reading: "test blankness with the scanner's own separator constant — `not command.strip(_WORD_SEPARATORS)`"
+    binds: ['interacts(decide_bash->_WORD_SEPARATORS)', 'command_text.domain.distinguished["   "]']
+    discharged_by: test_the_blank_test_holds_no_opinion_of_its_own_about_what_a_blank_is
+    seed_docstring: >-
+      The blank test ahead of the parse holds no opinion of its own about what a blank is: it
+      READS the scanner's separator constant rather than owning a second one, so exactly one place
+      in the tree still decides. Checked against every member it touches — `""`, `"   "`, `"\t"`,
+      `"\n"` stay the allowed no-op; `"\u00a0"`, `"\v"`, `"\f"` alone are words bash would try to
+      run as program names and are refused; a lone `"\r"` is likewise a word, which is exactly
+      what M6 says bash reads it as.
+    readings:
+      read-the-scanners-constant: "`not command.strip(_WORD_SEPARATORS)` — one decider survives, and the blank test reads the opinion rather than holding it; costs nothing and needs no new constant"
+      delegate-to-the-scan: "ask `_scan` — F1's probe-refuted horn: the parse cannot answer it (zero pipelines DENY), so this needs a NEW special case rather than a pure delegation"
+      a-second-constant: "an explicitly-named blank-check constant — reintroduces a second opinion about whitespace in the very change whose thesis is that there should be one"
+    note: >-
+      RESOLVED AT §7 (FK4, human): `not command.strip(_WORD_SEPARATORS)`. The blank test holds no
+      opinion of its own, so exactly one place in the tree still decides — the change's whole
+      thesis. `delegate-to-the-scan` was probe-refuted at F1 and `a-second-constant` rejected as
+      a second opinion about whitespace inside the change that exists to remove second opinions.
+      Adds NO member to the enumerated set. F1 settled WHERE the blank test sits (ahead of the parse); this is WITH
+      WHAT ALPHABET, which no doc sentence picks. The recommended reading is a third one neither
+      escalation reader offered.
+
+  - id: d_the_blank_test_and_the_nul_check_keep_their_order
+    kind: behavior
+    form: test
+    binds: ['EMBEDDED_NUL_REASON', 'interacts(decide_bash->command_text)']
+    discharged_by: test_the_relocated_blank_check_and_the_embedded_nul_check_keep_the_same_relative_order
+    source: "brief f5 — the arm ordering the trim's deletion moves"
+    seed_docstring: >-
+      The order is firm and pinned: the blank test, then the embedded-NUL check, then the parse.
+      The NUL arm may not move above or below the relocated blank test, it still runs once over
+      the whole raw command before any parsing including wrapper detection — so it fires
+      identically at every wrapper depth — and a command carrying both a NUL and a divergent blank
+      is answered by the NUL arm.
+
+  # =========================================================================================
+  # O4 + C5 — THE ORACLE. The wrapper seam covered by an executable oracle against real bash.
+  # =========================================================================================
+
+  - id: d_wrapper_shapes_enter_the_differential_corpus
+    kind: behavior
+    form: test
+    binds: ['bash_oracle', 'interacts(bash_fd_prefix_955->bash_oracle)', '_wrapper_span']
+    discharged_by: test_a_wrapper_shape_we_accept_means_what_bash_means
+    seed_docstring: >-
+      The differential's corpus carries wrapper shapes — `bash -c '<candidate>'` and
+      `timeout N <candidate>`, including the glued-operator spelling — so for every wrapper the
+      parse accepts, real bash is asked what it actually ran and where its stderr went, and the
+      two must agree.
+    note: >-
+      RENAMED for the same reason as the O2 control above: `20-demands.md` pointed this demand at
+      `test_what_we_accept_means_what_bash_means`, the EXISTING parametrized case at
+      `test_955_bash_fd_prefix.py:212`, whose corpus is single-stage `w …` shapes and contains no
+      wrapper word at all (c9). The wrapper cases join THAT file — D1's decisive argument is that
+      folding puts the wrapper under the existing differential — as their own case, so the new
+      coverage cannot read as already present.
+
+  - id: d_the_two_layer_stderr_detection_is_deliberate
+    kind: behavior
+    form: test
+    binds: ['bash_oracle', 'interacts(bash_fd_prefix_955->bash_oracle).response']
+    discharged_by: test_the_oracle_tells_the_inner_shells_stderr_from_the_outer_shells
+    seed_docstring: >-
+      When the corpus runs bash inside bash, the oracle still tells where the stderr marker landed
+      for the command under test rather than for the shell wrapping it.
+
+  - id: d_blank_alphabet_enters_the_differential
+    kind: behavior
+    form: test
+    binds: ['bash_oracle', 'command_text.domain']
+    discharged_by: test_our_blank_set_is_the_blank_set_bash_splits_on
+    seed_docstring: >-
+      The differential's alphabet carries blanks derived from both sides of the comparison —
+      `str.isspace()` together with the scanner's own set — so every character one side calls a
+      word separator is put to real bash, and a character bash does not split on does not end a
+      word here either. The blank must be rendered GLUED to an adjacent token with no separator:
+      a space-separated blank cannot exercise the property, and if the corpus renderer cannot do
+      that today it gains the machinery.
+
+  - id: d_the_oracle_syntax_checks_the_inner_text_too
+    kind: behavior
+    form: test
+    fork: FK9
+    resolved: "multi-stage-with-inner-precheck — auto-resolved at §7 (non-material); its load-bearing half is probe-settled, not chosen"
+    recommended_reading: "take the multi-stage path AND precheck the inner text as well as the outer"
+    binds: ['bash_oracle.access[subprocess]']
+    discharged_by: test_a_candidate_whose_inner_c_payload_is_broken_is_reported_not_silently_accepted
+    seed_docstring: >-
+      The oracle prechecks the text it is about to trust: a second, independent `bash -n -c` over
+      the EXTRACTED INNER text, because the existing outer `bash -n -c "<outer>"` reports nothing
+      at all about a nested `-c '<inner>'` payload's syntax. A candidate whose inner payload is
+      broken is skipped and reported, never silently accepted into the corpus. The helper must
+      also accept a multi-stage candidate rather than raising: `bash -c 'cat x | wc -l'` is the
+      shape a model most plausibly writes and is exactly where an argv divergence would hide.
+    readings:
+      multi-stage-with-inner-precheck: "a second helper path plus a second precheck — costs a helper, and is the only way the multi-pipeline `-c` payload gets an oracle at all"
+      single-stage-discipline: "only ever add single-stage candidates and keep the one outer precheck — free, and leaves the multi-pipeline `-c` payload with no oracle while a malformed inner payload turns a candidate into a test of nothing"
+    note: >-
+      RESOLVED AT §7 (FK9, auto — non-material): the multi-stage path AND the inner precheck. The
+      load-bearing half is probe-settled rather than chosen: probe PO-J3 executed it (claim pj3).
+      Four broken-inner shapes nested inside a well-quoted outer all returned rc=0 with empty
+      stderr, while the same text handed directly to `bash -n -c` was reliably flagged (rc=2).
+      The inner precheck is required, not optional. Note also that the existing helper asserts
+      `len(stages) == 1` inside `_parsed`, so a multi-stage candidate RAISES rather than
+      asserting — a green-looking failure to add coverage.
+
+  - id: d_the_oracle_bounds_its_own_subprocesses
+    kind: behavior
+    form: test
+    fork: FK10
+    resolved: "both — auto-resolved at §7 (non-material)"
+    recommended_reading: "both — an explicit timeout on the harness's own subprocess calls AND disciplined corpus construction"
+    binds: ['bash_oracle.access[subprocess]']
+    discharged_by: test_the_oracle_harness_bounds_its_own_subprocess_calls
+    seed_docstring: >-
+      The oracle harness bounds its own subprocess calls explicitly, so a candidate that does not
+      terminate — or a composed candidate whose child outlives the parent the harness waits on —
+      turns a hung suite into a failed test rather than polluting the next candidate's evidence
+      file.
+    note: >-
+      RESOLVED AT §7 (FK10, auto — non-material): both, an explicit timeout on the harness's own
+      subprocess calls AND disciplined corpus construction. It decides nothing about what the
+      gate accepts.
+
+  # =========================================================================================
+  # C3 / C4 — MIGRATION AND THE MODULE. R5's dependents, one demand per dependent.
+  # =========================================================================================
+
+  - id: d_every_caller_stops_unwrapping_by_hand
+    kind: survival
+    form: test
+    binds: ['unwrap', 'parse']
+    discharged_by: test_the_gate_hands_the_raw_command_straight_to_the_parse
+    seed_docstring: >-
+      The production dependent survives the removal: the gate no longer applies a wrapper step
+      before parsing — it hands the raw command straight to the parse — so a shape that used to be
+      unwrapped once cannot survive as a silently different command, and `unwrap`'s
+      non-idempotence stops being reachable through the gate at all.
+
+  - id: d_the_test_helpers_that_paired_a_wrapper_step_with_the_parse_migrate
+    kind: survival
+    form: test
+    binds: ['unwrap', '_cmd_segments']
+    discharged_by: test_no_call_site_pairs_a_wrapper_step_with_the_parse
+    seed_docstring: >-
+      The test dependents survive it too: no call site in the tree pairs a wrapper step with the
+      parse any more. The three real pairings are `test_permission.py:801-802`,
+      `test_grant_gate_575.py:1070/1078` and `test_bash_exec.py:15/29` — three, not the four the
+      doc lists — and `test_bash_exec.py:28` carries its own `cmd.strip()` ahead of the unwrap, a
+      fifth trim that a migration following the doc's list literally would leave standing. The
+      fourth site the doc names, `e2e/test_540_box_boundary.py:362`, is an in-box IMPORT probe and
+      is not a call site at all; it breaks differently, silently, inside a box.
+
+  - id: d_bash_exec_still_imports_only_the_standard_library
+    kind: negative
+    form: test
+    binds: ['bash_exec', '_cmd_segments']
+    discharged_by: test_bash_exec_still_imports_only_the_standard_library
+    seed_docstring: >-
+      `bash_exec` imports nothing from this tree at module scope: the wrapper's code is ABSORBED,
+      not imported, so the module still loads inside the box with only its own file on the path
+      and the mount constraint #958 retired stays retired. This is a prevention demand, not a
+      diagnosis one — no diagnostic shape is asserted for the failure, because the in-box import
+      census cannot exist before the code does.
+
+  - id: d_the_shim_constants_stay_where_their_consumers_read_them
+    kind: survival
+    form: test
+    binds: ['_cmd_segments']
+    discharged_by: test_the_shim_name_constants_survive_the_move
+    seed_docstring: >-
+      `NON_ADAPTER_SHIMS`, `OPERATOR_TOOLS` and `ADAPTER_RE` are still importable from
+      `defender.hooks._cmd_segments`, because the four production modules and the test files that
+      read them are not part of this change. The three private helpers that go
+      (`_skip_timeout_prefix`, `_unwrap_bash_c`, `_strip_prefix_from_raw`) have zero references
+      outside their own module, so removing them leaves no stale reference behind.
+
+  - id: d_the_stale_mount_constraint_is_corrected
+    kind: coherence
+    form: clause
+    binds: ['intent_540_md']
+    source: "C4, CORRECTED per 45-dispositions note 7 — three lines, not one and not two"
+    outcome:
+      nl: >-
+        `defender/tests/intent_540.md` no longer records that `bash_exec` imports
+        `defender.hooks._cmd_segments`; ALL THREE places that assert it — line 134 ("Its one
+        non-stdlib import is …"), line 466 (the same sentence inside a recorded claim) and line
+        556 (the F5 mount constraint the design names) — are corrected in this change, so no
+        reader of that record is left believing a mount constraint #958 already retired. The
+        design names only 556; `20-demands.md` found 134 and stopped at two; the census (claim a2)
+        is three.
+
+  # =========================================================================================
+  # NON-OBLIGATIONS KEPT VISIBLE, AND THE POST-DECISION CONSUMERS (FK8).
+  # =========================================================================================
+
+  - id: d_the_paren_fall_through_still_fails_closed_a_layer_up
+    kind: survival
+    form: test
+    binds: ['_scan', '_stage_unsafe']
+    discharged_by: test_the_paren_fall_through_still_fails_closed_a_layer_up
+    seed_docstring: >-
+      `(` and `)` still break a word without being operators the grammar accepts, so `cat <(id)`
+      still reaches argv as ordinary words and is still refused by the guard that reads argv —
+      whether the stage came from a bare command or from a wrapper's extracted text. The
+      deliberate fall-through `test_540_exec_seam.py` pins is not what this change touches, and a
+      token-record refactor must not quietly change the token stream that pin asserts on.
+
+  - id: d_the_operand_set_the_gate_derives_is_the_one_its_consumers_read
+    kind: coherence
+    form: test
+    binds: ['interacts(tool_bash->_opened_operands)', '_opened_operands']
+    discharged_by: test_the_operand_set_the_four_post_decision_consumers_read_is_the_one_the_gate_authorised
+    source: "FK8 — the judge's phase-D action: make sure at least one demand binds the derivation itself"
+    seed_docstring: >-
+      The operand set is walked once from the authorised decision and threaded, and every consumer
+      downstream of the decision sees THAT set: whether an authored read is refused
+      (`_deny_authored_bash_read`), whether the returned bytes are framed as untrusted
+      (`_opens_untrusted_read` -> `is_untrusted_read`), which output ceiling applies, and how the
+      overflow hint is worded (`_bash_overflow_hint`). A word-boundary change can move all four
+      while allow, reason and pipelines are literally unchanged, which is why O3's neutrality
+      stopping at the decision object is only safe if this derivation is bound under O1.
+
+  - id: d_the_audit_rows_attribution_derives_from_the_same_operand_set
+    kind: coherence
+    form: test
+    binds: ['interacts(record_shim_failure->_opened_operands)']
+    discharged_by: test_the_audit_rows_system_attribution_derives_from_the_authorised_operand_set
+    seed_docstring: >-
+      The queries-table row the shim-failure path writes derives its `system=` attribution from the
+      same authorised operand set, re-derived from the same decision with no cache, so the row and
+      the execution cannot disagree about which files the command opened.
+
+  - id: d_the_audit_row_and_the_authorised_argv_name_the_same_command
+    kind: coherence
+    form: test
+    binds: ['interacts(record_shim_failure->command_text)']
+    discharged_by: test_the_audit_rows_raw_command_is_unmoved_for_every_shape_outside_the_enumerated_set
+    seed_docstring: >-
+      The audit row records the RAW command text while its gating and attribution come from the
+      PARSE — a documented, accepted divergence this change does not close. What this change must
+      not do is widen it: for every shape outside the enumerated set the recorded row is unmoved,
+      and for the `\r` class the two agree more closely after the change than before, because the
+      argv stops naming a command the text does not.
+    note: >-
+      BOUNDED, NOT CLOSED, AND THE BOUND IS EVIDENTIARY (45-dispositions RF-J1, probe PO-J1,
+      claim pj1). `recorded_command = command[:SHIM_COMMAND_MAX_CHARS]` with the constant at 2000:
+      a realistic command is never truncated and a trailing divergent character survives intact
+      (the boundary is exact — index 1999 survives, index 2000 drops). But the constant's own
+      docstring names this field as the one field of a shim row an attacker-influenced turn
+      chooses freely, so a command padded past 2000 characters can push the divergent character
+      out of the recorded evidence and leave the audit row showing a plausible, non-divergent
+      command while a different one ran. §7 should weigh that as a real if narrow gap in the audit
+      trail's evidentiary value, not dismiss it because realistic commands are short.
+
+  - id: d_the_bash_lane_enforces_every_constraint_the_read_lane_does
+    kind: parity
+    form: test
+    binds: ['read_surface.access[bash]', 'read_surface.access[read-tool]']
+    discharged_by: test_every_constraint_the_read_tool_lane_enforces_the_bash_lane_enforces_too
+    source: "10-brief, 'Sibling surfaces' — the parity partner a widening the differential misses would need"
+    seed_docstring: >-
+      Every constraint the read-tool lane enforces on a resolved operand path — confine (the
+      grant's scope fullmatch), denylist, and resolve — the bash lane enforces too, over the
+      operand set THE PARSE PRODUCED. The two vias reach the same resource and only one of them
+      derives its operand set by splitting text, so a divergence introduced on the bash side has
+      no mirror on the read-tool side to contradict it.
+
+  - id: d_the_read_tool_lane_is_unmoved_by_the_parse_change
+    kind: coherence
+    form: test
+    binds: ['interacts(decide_read->read_surface)']
+    discharged_by: test_the_read_tool_lane_reaches_the_same_decisions_it_reached_before
+    seed_docstring: >-
+      The read-tool lane is unmoved: it never parses command text, so every path it admits and
+      refuses before the change it admits and refuses after — driven and observed at that reader,
+      not asserted at the boundary.
+
+  - id: d_every_assertion_site_of_the_lexing_reason_moves_with_it
+    kind: coherence
+    form: test
+    binds: ['interacts(bash_lane_test_helpers->UNTOKENIZABLE_REASON)']
+    discharged_by: test_every_assertion_site_of_the_lexing_reason_agrees_with_the_reason_after_the_change
+    source: "F4's second half — 'strike the clause TOGETHER WITH the test pinning it'; claim g10"
+    seed_docstring: >-
+      Every reader of the refusal message moves with it. The drift guard that pins the cause list
+      is updated in the same change — F4 strikes the "quoted `timeout` prefix" clause from cause
+      (5) — and the six other assertion sites across `test_permission.py` and
+      `test_read_confine.py` still agree with what the parser actually refuses. This is the only
+      place the model is ever told why a wrapper was refused; a reason that has drifted from the
+      parser is a sentence about nothing.
+
+  - id: d_the_object_the_gate_authorised_is_the_object_the_box_runs
+    kind: shape
+    form: test
+    binds: ['interacts(box_executor->bash_exec).payload']
+    discharged_by: test_the_object_the_gate_authorised_is_the_object_the_box_runs
+    seed_docstring: >-
+      The pipelines the gate authorised are the pipelines the box runs: they cross the process
+      boundary unmediated, with no re-derivation from text anywhere on the path, and every argv
+      entry that crosses is the resolved value the parse produced — a CR-bearing operand included,
+      unmodified and unre-encoded. That is what makes every argv-divergence demand here an
+      EXECUTION-change demand and not merely an authorisation one.
+
+  - id: d_nothing_mutates_the_authorised_pipelines_between_authorisation_and_execution
+    kind: negative
+    form: test
+    binds: ['interacts(box_executor->bash_exec).payload', 'BashDecision']
+    discharged_by: test_nothing_mutates_the_authorised_pipelines_between_authorisation_and_execution
+    source: "45-dispositions, settled — 'phase D should mint a demand'; today's safety is incidental"
+    seed_docstring: >-
+      Nothing mutates the authorised pipeline objects between the authorisation and the execution:
+      the operand walk, the audit path and the executor all read the same object graph and none of
+      them writes to it. Only the token record is frozen by this change; the object graph above it
+      has no declared immutability on either side, so the property that makes the check meaningful
+      is asserted rather than assumed.
+
+  - id: d_a_command_refused_only_for_an_invisible_character_says_so
+    kind: domain-outcome
+    form: test
+    fork: FK6
+    resolved: "name-the-line-ending — auto-resolved at §7 (non-material): the human already set this obligation at F5 for the newline, and this applies the same rule to the same class of surprise"
+    recommended_reading: "attach an obligation mirroring F5's — the refusal must name the line ending"
+    binds: ['UNTOKENIZABLE_REASON', 'command_text.domain', 'command_text.domain.distinguished["\r"]']
+    discharged_by: test_a_command_refused_only_for_an_invisible_character_is_told_so
+    seed_docstring: >-
+      A command refused only because a character the model cannot see is now part of a word is
+      told WHICH character: the reason names it BY CODEPOINT — the only way a reason can name a
+      character that renders as nothing — rather than a generic capability deny for a command
+      that renders on screen identically to one that works. The whole invisible class, swept
+      from the frozen alphabet, not the line ending alone: member 1 is the largest member of the
+      enumerated set's centre of gravity (107 member-1 cases and 209 member-8 cases, 316 of the
+      362 enumerated corpus rows), and of the 118 cases that delegate
+      their reason to this demand, 103 carry no carriage return at all — counted over the
+      recorded corpus, which is also what caught the earlier "91" (RC8). A model that pastes a path
+      with a no-break space in it has no other way to discover the character.
+    readings:
+      name-the-line-ending: "mint the cause, mirroring the obligation F5 already carries for the newline — one sentence in `UNTOKENIZABLE_REASON` plus its existing drift guard, and the model can repair its own command"
+      generic-capability-deny: "leave it on the ordinary grant/capability path, which is where a CR-bearing operand fails today — costs nothing to build and leaves a model that cannot see what is wrong"
+    note: >-
+      RESOLVED AT §7 (FK6, auto — non-material): a command refused only for a character the model
+      cannot see must be told WHICH character and WHERE, not handed a generic parse failure. Its
+      BOUNDARY is the neutrality line and the suite pins it: a command already refused for the
+      same operand BEFORE this change (a quoted `\r`, say) keeps the reason it has today, since
+      moving that one would be a verdict change outside the enumerated set.
+      WIDENED TWICE. (RC9, human, third loop) IT NOW CARRIES TWO PREDICATES: a command refused
+      ONLY for a character the model cannot see, AND a command that was already refused whose
+      REASON CLASS moved because of one — every lexing arm whose decision turns on the last
+      token loses its specific message when a blank is appended there, and the model is worse off
+      than in the first case, because it had a message naming the problem and now has one that
+      names nothing. The test sweeps the second predicate from the corpus's own derived arm
+      table, so it follows the code rather than a list of shapes.
+      (RC2, human, second loop) FK6 was resolved for "a character the model cannot
+      see" and this demand was bound for the line ending alone — the class was resolved and one
+      member of it was pinned. It now binds the whole frozen divergent-blank alphabet, swept the
+      way `d_every_member_of_the_divergent_blank_alphabet_is_swept` sweeps it, and requires the
+      codepoint to be named. It also carries member 8's message question (RC1): a `\r` after a
+      connector loses the lexing reason that used to tell the model what to do, and this is what
+      replaces it. Rejected: narrowing FK6's recorded resolution to line endings — honest and
+      free, but the largest group of newly-refused commands would then be refused with a message
+      that explains nothing. Blast radius: after this change every CRLF-pasted command carrying a path
+      operand under a `cat`-shaped grant is refused (verdict-change member 2's allow->deny half),
+      and a CRLF paste is by far the likeliest `\r` a model sends. One escalation answer on this
+      premise was DISCOUNTED by the judge — it rested on the mechanism inverted ("the word splits"
+      after M6, when M6 is precisely what stops it splitting) and claim g1 refutes it directly.
+
+  - id: d_the_operator_cli_reports_the_whole_verdict
+    kind: coherence
+    form: test
+    fork: FK7
+    resolved: "in scope — taken by the human at §7 with the replay: the one tool that prints a decision for a human currently omits the argv, i.e. exactly the half F2 resolved a verdict to include"
+    recommended_reading: "give `policy_cli explain --json` the missing `pipelines` field"
+    binds: ['interacts(defender_policy_cli->command_text)', 'command_text.access[argv]']
+    discharged_by: test_the_serialised_verdict_an_operator_reads_carries_the_argv_half
+    seed_docstring: >-
+      The one tool that prints a decision for a human reports the WHOLE verdict: the operator path
+      reaches the same gate over the same command text, and what it serialises carries the
+      pipelines as well as allow, grant and reason — otherwise the surface a human audits is blind
+      to exactly the half F2 resolved a verdict to include.
+    note: >-
+      RESOLVED AT §7 (FK7, second premise, human): IN SCOPE. `policy_cli explain --json` emits
+      allow/grant/reason and never the pipelines today; it is a small, self-contained scope
+      addition, and it is what keeps the neutrality claim auditable by a human after the fact —
+      the frozen replay certifies it mechanically, this makes it readable.
+
+  - id: d_a_timeout_prefix_with_no_duration_is_not_a_wrapper
+    kind: behavior
+    form: test
+    fork: FK1
+    resolved: "minimal — ACCEPTED by the human at §7, minimal arm only; it joins the enumerated set as its seventh numbered member"
+    recommended_reading: "accept, as D2's sixth member, in the MINIMAL form only"
+    binds: ['_wrapper_span']
+    discharged_by: test_a_timeout_prefix_that_consumes_no_duration_shaped_token_is_not_a_wrapper
+    seed_docstring: >-
+      The wrapper step advances past `timeout` only when at least one duration- or flag-shaped
+      token is actually consumed, so `timeout cat report.md` is not a recognised wrapper and is
+      refused — where today it is allowed and executes `cat report.md`, while the real `timeout`
+      would read `cat` as its duration, refuse, and run nothing. `timeout --` and a bare `timeout`
+      reach the same disposition through the same arm.
+    readings:
+      minimal: "require the loop to consume at least one duration/flag-shaped token — a narrowing, one condition and one test, same cost and same defect class as the `\\r` fix the human already accepted at F6"
+      full-grammar: "model coreutils' real grammar too (the `s`/`m`/`h`/`d` suffix, and `-k`/`-s` each taking a value) — flips `timeout 5s cat x` and `timeout -s KILL 5 cat x` deny->allow, a widening on a security gate, each member enumerated by hand, and scope beyond M1-M6"
+      decline: "the new token-index matcher must reproduce today's approximation character-for-character and the live bug ships, certified clean by a differential whose corpus contains no `timeout` at all"
+    note: >-
+      RESOLVED AT §7 (FK1, human): ACCEPTED, MINIMAL ARM ONLY — the loop must consume at least one
+      duration- or flag-shaped token; a bare `timeout` and `timeout --` reach the same refusal.
+      `full-grammar` and `decline` were both rejected by name. The gate advances past the literal
+      word `timeout` unconditionally, BEFORE it looks for a duration at all
+      (`_cmd_segments.py:17-21`). The judge recommends the minimal arm only and explicitly not the
+      full grammar. One sub-question is already settled and is not the human's: the duration token
+      is matched on its RESOLVED value, because F4 requires `timeout '5' cat x` to be accepted and
+      `'5'`'s raw span fails a digit test while its resolved value passes.
+
+# ===========================================================================================
+# STRUCTURE
+# ===========================================================================================
+
+structure:
+  axes:
+    - operand_path   # the only axis this change's neighbourhood keys on: `read_surface`'s
+                     # identity, inherited verbatim from spec_graph_575-grant-gate.yaml. NOTHING
+                     # here interpolates a path — no writer is added to any shared root — so the
+                     # registry gains no member and R2 has nothing to fire on. The one shared
+                     # artefact is the Pipeline list, which crosses decide_bash -> tools.py ->
+                     # box.run_parsed -> bash_exec.run_parsed unmediated (claim x14): an edge
+                     # payload, not a resource with an identity facet.
+
+  actors:
+    - {id: tool_bash,             frame: composition, provenance: code}    # runtime/tools.py::_tool_bash — the model-facing lane (575's id)
+    - {id: decide_bash,           frame: leg,         provenance: design}  # runtime/permission/bash.py — M4 deletes its trim, F1 relocates the blank test
+    - {id: parse,                 frame: leg,         provenance: design}  # runtime/bash_exec.py::parse — the ONE entry point (D1/M3)
+    - {id: box_executor,          frame: leg,         provenance: code}    # runtime/box.py::BoxExecutor.run_parsed -> the in-box re-exec
+    - {id: record_shim_failure,   frame: leg,         provenance: code}    # runtime/tools.py::_record_shim_failure — the audit row (brief f2)
+    - {id: defender_policy_cli,   frame: leg,         provenance: code}    # scripts/policy_cli.py — the operator's view (575's id)
+    - {id: decide_read,           frame: leg,         provenance: code}    # the read-tool lane — read_surface's other reader (575's id)
+    - {id: compile_policy,        frame: leg,         provenance: code}    # reads _cmd_segments' surviving constants (575's id)
+    - {id: bash_fd_prefix_955,    frame: composition, provenance: design}  # tests/test_955_bash_fd_prefix.py — the accept-direction oracle; M6(b) changes it
+    - {id: bash_differential_897, frame: composition, provenance: code}    # tests/test_bash_differential_897.py — the reject-direction differential
+    - {id: bash_lane_test_helpers, frame: composition, provenance: code}   # the three parse(unwrap(x)) sites + the seven UNTOKENIZABLE_REASON assertion sites
+
+  boundaries:
+
+    - id: command_text
+      provenance: design
+      facets:
+        domain:
+          type: str
+          refinement:
+            nl: >-
+              The model's bash command text, verbatim. Members are written as their PYTHON REPR
+              (`""`, `"\t"`, `"\u00a0"`), never as the character itself — this file holds no
+              literal divergent blank, deliberately. The three bash blanks (`""`, `"   "`,
+              `"\t"`, `"\n"`) are today's allowed no-op and stay so; the divergent members are
+              words bash would try to run. The full divergent alphabet is 26 characters —
+              `str.strip()`'s 29 minus space, tab and newline — and the members named here are
+              the representatives; the whole set is swept by one table-driven demand.
+          default: '""'
+          distinguished: ['""', '"   "', '"\t"', '"\n"', '"\r"', '"\u00a0"', '"\v"', '"\f"', '"\u2028"']
+          falsy_valid: true
+          documented_alternatives: []
+        access:
+          constraints_by_via:
+            bash:
+              trust: attacker-influenced
+              constraints: [nul-refusal, grant-fullmatch, scope-shape]
+            argv:
+              trust: operator
+              constraints: [nul-refusal, grant-fullmatch, scope-shape]
+
+    - id: _scan
+      provenance: design
+      facets: {}     # the word-boundary decision itself; its knob is `_WORD_SEPARATORS` below.
+                     # M1 changes its RETURN SHAPE (one frozen record per token); the seam demand
+                     # binds the boundary and the record stream binds the edge's `.response`.
+
+    - id: _WORD_SEPARATORS
+      provenance: design
+      facets:
+        domain:
+          type: str
+          refinement:
+            nl: >-
+              The characters that END a word — today shlex's own whitespace set, spelled in the
+              source as the escape sequence for space, tab, carriage return and newline. bash's
+              lexer blanks are space and tab only. The module's own docstring argues the set ONE
+              WAY ONLY ("the two differ on U+00A0, `\v`, `\f`, U+2028 … and bash splits on none
+              of them") and never asks the converse — whether shlex splits on something bash does
+              not. It does: `\r`. M6 removes it. `\n` never reaches this set as a word character
+              because `parse` splits physical lines on it first.
+          default: '" \t\r\n"'
+          distinguished: ['"\r"']
+          falsy_valid: false
+          documented_alternatives: []
+
+    - id: _word_value
+      provenance: design
+      facets: {}     # M2: an unquoter over a span. Today `shlex.split(span, comments=False,
+                     # posix=True)` guarded by `len(parts) == 1` — a splitter, with its own
+                     # hardcoded whitespace, which is why M6 needs M2 (RF-J4).
+
+    - id: _wrapper_span
+      provenance: design
+      facets: {}     # THE FOLDED WRAPPER STEP (M3). F3's rename: it returns a SPAN of the
+                     # original text, not an unwrapped string. See NAME RECONCILIATION above.
+
+    - id: unwrap
+      provenance: code
+      facets: {}     # hooks/_cmd_segments.unwrap — the standalone step M3 REMOVES. Its live
+                     # dependents are the gate and the test helpers; R5's subject.
+
+    - id: _cmd_segments
+      provenance: code
+      facets: {}     # the module: the wrapper code moves out, the three shim-name constants and
+                     # their four production consumers stay (C4).
+
+    - id: bash_exec
+      provenance: design
+      facets:
+        payload:
+          parts:
+            - {role: argv, source: const:decision.pipelines}
+          invariants: [all-slots-bound]
+          nl: >-
+            `run_parsed` receives exactly the pipelines the gate already parsed — the
+            single-parse decision that collapses the validator/executor differential
+            (spec_graph_575's facet, unchanged). This is also the module whose MODULE-SCOPE
+            imports execute inside the box, which is what C4 is about: the boxed transport is
+            `docker exec … python3 -m defender.runtime.bash_exec`, so `parse`/`_scan`/the
+            wrapper step never run in the box but the import block does.
+
+    - id: BashDecision
+      provenance: code
+      facets: {}     # allow + reason + pipelines. F2: the verdict is the whole object. Its SHAPE
+                     # is unchanged by this work, which is why it is `code`; what moves is which
+                     # decision a given text gets.
+
+    - id: UNTOKENIZABLE_REASON
+      provenance: design
+      facets:
+        domain:
+          type: enum
+          refinement:
+            nl: >-
+              The agent-facing refusal message, whose five documented causes are pinned by
+              `test_the_lexing_reason_names_every_way_a_command_can_fail_to_parse` — the guard
+              against the list drifting from what the parser actually refuses. It is the only
+              place the model is ever told why a wrapper was refused. F4 strikes a clause from
+              cause (5); F5 gives cause (1) a new shape; FK6 asks whether the line ending earns
+              a cause of its own.
+          default: cause5
+          distinguished: [cause1, cause2, cause3, cause4, cause5]
+          falsy_valid: false
+          documented_alternatives: []
+
+    - id: EMBEDDED_NUL_REASON
+      provenance: code
+      facets: {}     # the arm that must keep its position relative to the relocated blank test.
+
+    - id: _opened_operands
+      provenance: design
+      facets: {}     # runtime/tools.py:414 — the operand-set derivation walked once from the
+                     # authorised decision. Its INPUT moves with this change, which is why it is
+                     # in the delta; its four post-decision consumers are FK8's subject.
+
+    - id: read_surface
+      provenance: code
+      facets:
+        access:
+          constraints_by_via:
+            bash:
+              trust: attacker-influenced
+              constraints: [confine, denylist, resolve]
+            read-tool:
+              trust: attacker-influenced
+              constraints: [confine, denylist, resolve]
+        identity:
+          key_axes: [operand_path]
+          evidence:
+            nl: >-
+              The resolved operand path is the full key, read off `files.read_allowed_path` and
+              the cat grant's scope, which the design makes the same shape objects
+              (spec_graph_575-grant-gate.yaml, inherited verbatim).
+          sharing: unique-key
+
+    - id: bash_oracle
+      provenance: design
+      facets:
+        access:
+          constraints_by_via:
+            subprocess:
+              trust: derived
+              constraints: [binary-argv-read, outer-syntax-precheck]
+      # The recording shim under real bash. `binary-argv-read` is M6(b) — today's
+      # `Path.read_text(encoding="utf-8")` universal-newline-translates `\r` into the very
+      # delimiter the next line splits on, which is how the oracle certifies the `\r` divergence
+      # clean. `outer-syntax-precheck` is the EXISTING `bash -n -c "<outer>"`, which probe PO-J3
+      # showed reports nothing about a nested `-c '<inner>'` payload — the inner precheck is
+      # FK9's second recommendation and is not yet a constraint of this cell.
+
+    - id: _stage_unsafe
+      provenance: code
+      facets: {}     # the argv-reading guard one layer up that catches `(`/`)` (brief f6).
+
+    - id: SHIM_COMMAND_MAX_CHARS
+      provenance: code
+      facets: {}     # scripts/gather_tools/record_query.py:416 — 2000. Bounds how much of the
+                     # audit row's evidentiary value survives an attacker-padded command (pj1).
+
+    - id: intent_540_md
+      provenance: code
+      facets: {}     # A PROSE consumer with no runtime contract and no edge: three lines of
+                     # `defender/tests/intent_540.md` assert a mount constraint #958 retired.
+                     # Bound by a coherence clause; it fires no rule, and that is correct.
+
+  interacts:
+    # --- the command text and who reads it ------------------------------------------------
+    - {from: decide_bash,          to: command_text,  mode: read, via: bash, provenance: design}
+    - {from: parse,                to: command_text,  mode: read, via: api,  provenance: design}
+    - {from: bash_fd_prefix_955,   to: command_text,  mode: read, via: api,  provenance: design}   # the corpus IS command text
+    - {from: record_shim_failure,  to: command_text,  mode: read, via: api,  provenance: code}     # raw_command, truncated (pj1)
+    - {from: defender_policy_cli,  to: command_text,  mode: read, via: argv, provenance: code}     # the operator's explain path
+
+    # --- inside the parser ------------------------------------------------------------------
+    - {from: parse,        to: _scan,             mode: invoke, via: api, provenance: design}
+    - {from: parse,        to: _word_value,       mode: invoke, via: api, provenance: design}
+    - {from: parse,        to: _wrapper_span,     mode: invoke, via: api, provenance: design}
+    - {from: parse,        to: _WORD_SEPARATORS,  mode: read,   via: api, provenance: design}
+    - {from: decide_bash,  to: _WORD_SEPARATORS,  mode: read,   via: api, provenance: design}      # FK4's recommended blank test
+
+    # --- what M3 removes, and who depended on it -------------------------------------------
+    - {from: parse,                 to: unwrap, mode: remove, via: api, provenance: design}
+    - {from: decide_bash,           to: unwrap, mode: invoke, via: api, provenance: code}
+    - {from: bash_lane_test_helpers, to: unwrap, mode: invoke, via: api, provenance: code}
+    - {from: parse,          to: _cmd_segments, mode: remove, via: api, provenance: design}
+    - {from: decide_bash,    to: _cmd_segments, mode: read,   via: api, provenance: code}
+    - {from: compile_policy, to: _cmd_segments, mode: read,   via: api, provenance: code}
+
+    # --- the decision, and the refusal message ---------------------------------------------
+    - {from: decide_bash,           to: BashDecision,          mode: write, via: api, provenance: design}
+    - {from: tool_bash,             to: BashDecision,          mode: read,  via: api, provenance: code}
+    - {from: decide_bash,           to: UNTOKENIZABLE_REASON,  mode: read,  via: api, provenance: design}
+    - {from: bash_lane_test_helpers, to: UNTOKENIZABLE_REASON, mode: read,  via: api, provenance: code}
+    - {from: decide_bash,           to: EMBEDDED_NUL_REASON,   mode: read,  via: api, provenance: code}
+    - {from: decide_bash,           to: _stage_unsafe,         mode: invoke, via: api, provenance: code}
+
+    # --- the operand set the decision implies ----------------------------------------------
+    - {from: tool_bash,            to: _opened_operands, mode: read, via: api, provenance: code}
+    - {from: record_shim_failure,  to: _opened_operands, mode: read, via: api, provenance: code}
+    - {from: record_shim_failure,  to: SHIM_COMMAND_MAX_CHARS, mode: read, via: api, provenance: code}
+    - {from: decide_bash,          to: read_surface, mode: read, via: bash,      provenance: design}
+    - {from: decide_read,          to: read_surface, mode: read, via: read-tool, provenance: code}
+
+    # --- execution, and the oracle ----------------------------------------------------------
+    - {from: box_executor,       to: bash_exec,   mode: invoke, via: subprocess, provenance: code, sends: payload, transport: subprocess}
+    - {from: bash_fd_prefix_955, to: bash_oracle, mode: invoke, via: subprocess, provenance: design}
+
+  drives:
+    - {from: tool_bash,             to: decide_bash,  provenance: code,   multiplicity: serial}
+    - {from: tool_bash,             to: box_executor, provenance: code,   multiplicity: serial}
+    - {from: decide_bash,           to: parse,        provenance: design, multiplicity: serial}
+    - {from: bash_fd_prefix_955,    to: parse,        provenance: design, multiplicity: serial}
+    - {from: bash_differential_897, to: parse,        provenance: code,   multiplicity: serial}
+
+# ===========================================================================================
+# CLAIMS — the ledger. Every claim the three input frontiers raised, inherited ids kept.
+# Six kinds; four claims are RETYPED here because the instrument table would have let them
+# through on the wrong instrument (each says so in its note) and one, x9, is REFUTED by a
+# census run at assembly. Verdict strings are the closed vocabulary; the elaboration that used
+# to ride on them ("holds — re-verified, EXTENDED by g5") lives in `note`.
+# ===========================================================================================
+
+claims:
+
+  # --- inherited from the authoritative comment (discuss-issue's sweep) --------------------
+  - id: c1
+    source: discuss
+    kind: behavior
+    claim: "the gate's `strip` is a LIVE divergence, not a settled no-op"
+    probe: "decide_bash under a real MAIN policy with the divergent characters at each end of an allowed pipeline; grep -rn for _BLANKS and for does_not_rewrite over defender/"
+    probe_kind: executed
+    observed: "all variants allow=True with argv identical to the unprefixed command; `_BLANKS` returns ZERO hits tree-wide and `does_not_rewrite` returns ZERO hits, so neither the constant nor the pin the issue body describes exists. permission/bash.py:206 is plain `command.strip()`"
+    verdict: holds
+    note: "re-executed at 6a2ea874 by both phase-A leaves; EXTENDED by g5 (`\\f` and U+2028 join the table). CORRECTS the issue body, which spelled it `command.strip(BLANKS)` and said a test pinned it."
+
+  - id: c2
+    source: discuss
+    kind: behavior
+    claim: "`unwrap` mis-identifies the `-c` argument because it cannot see outer operators"
+    probe: "decide_bash(\"bash -c 'echo a '2>/dev/null\", policy=MAIN) beside real bash running the same text"
+    probe_kind: executed
+    observed: "gate allow=True, authorised stage argv=['echo','a'] with stderr='devnull'. Real bash: the -c argument is `echo a 2`, the outer redirect takes stdout, stderr reports `cat: 2: No such file or directory` for the cat spelling. Operand dropped AND both streams re-routed"
+    verdict: holds
+    note: "ESCALATED by x2/g3: this is an ALLOW that EXECUTES, not merely a parse disagreement. It is verdict-change set member 3 — the member the closed four-member set was missing."
+
+  - id: c3
+    source: discuss
+    kind: census
+    claim: "exactly four sites split bash text; nothing else does"
+    probe: "grep -rn shlex over all of defender/, split into production and tests"
+    probe_kind: search
+    observed: "splitters: _cmd_segments.py:45 (shlex.split), bash_exec.py:83 (_word_value, shlex.split), bash_exec.py:89 (_scan, hand-rolled), permission/bash.py:206 (command.strip). Every other production hit is shlex.join — query_tool.py:139, lead_zero.py:326, _stub_transport.py:417. permission/files.py:26 is a comment; test_bash_exec.py:175,185 use shlex.quote, which formats and never parses"
+    verdict: holds
+    note: "line-for-line at 6a2ea874. One member is described wrongly by the doc — see x1."
+
+  - id: c4
+    source: discuss
+    kind: referential
+    claim: "`_cmd_segments` has no hook consumers; its only callers are the gate and its neighbours"
+    probe: "grep -rn _cmd_segments over defender/, plus a resolved reference lookup on `unwrap`"
+    probe_kind: search
+    observed: "ZERO importers under defender/hooks/. Production importers: runtime/permission/bash.py:8, runtime/permission/command_shape.py:4, runtime/permission/grant.py:10, runtime/permission/policies/_common.py:7. scripts/policy_cli.py:16 is a docstring mention, not an import"
+    verdict: holds
+    note: "extended by x10 with the test-side importers."
+
+  - id: c5
+    source: discuss
+    kind: behavior
+    claim: "a per-line wrapper scan loses lines a flattening scan refuses"
+    probe: "unwrap(\"bash -c 'ls'\\ncat /etc/hosts\") and unwrap('timeout 5 cat x\\nls')"
+    probe_kind: executed
+    observed: "None and 'cat x\\nls'. `parse` splits on \\n at bash_exec.py:278 and `_scan` is per line, so a first-line-only fold reads `bash -c 'ls'` as a complete wrapper and drops line 2"
+    verdict: holds
+    note: "C1's widening risk. It is why the wrapper decision must sit OUTSIDE the per-line loop while every check inside it stays inside — and it is the pair of shapes FK5 split into two demands."
+
+  - id: c6
+    source: discuss
+    kind: behavior
+    claim: "deleting the trim refuses blank commands unless the empty path is handled"
+    probe: "unwrap(''), unwrap('   '), unwrap('\\t'), unwrap('\\n'); then a no-strip re-implementation of decide_bash over the same inputs"
+    probe_kind: executed
+    observed: "all four unwrap to None. Under a no-strip decide_bash: '' stays allow=True (the `if not cmd` arm still fires) but '   ', '\\t' and '\\n' become DENY/UNTOKENIZABLE"
+    verdict: holds
+    note: "INCOMPLETE as stated — x5 shows the Unicode blanks flip the OTHER way (they are words, not blanks), and g6 refutes the doc's second remedy."
+
+  - id: c7
+    source: discuss
+    kind: behavior
+    claim: "`unwrap` is not idempotent"
+    probe: "unwrap('timeout 5 timeout 3 cat x') then unwrap of the result; a resolved reference census on `unwrap`"
+    probe_kind: executed
+    observed: "'timeout 3 cat x' then 'cat x' — one prefix per application. Resolved call sites: 9 references in 5 files (grep floor 89) — the definition, permission/bash.py:8,98, and the test sites"
+    verdict: holds
+    note: "the doc's call-site list is corrected by x8: THREE parse(unwrap(x)) pairings, not four."
+
+  - id: c8
+    source: discuss
+    kind: referential
+    claim: "`bash_exec` imports only stdlib, and the box-mount constraint recorded for it is stale"
+    probe: "read bash_exec.py:1-12; grep -rn _cmd_segments over *.md"
+    probe_kind: read
+    observed: "bash_exec imports contextlib, os, shlex, subprocess, sys, time, dataclasses, pathlib — stdlib only; `defender.runtime.box` is imported lazily INSIDE _run_box_entrypoint (bash_exec.py:447) and tempfile lazily inside _run_one_pipeline"
+    verdict: holds
+    note: "the stale record is at THREE lines of intent_540.md, not the one the doc names — see a2."
+
+  - id: c9
+    source: discuss
+    kind: census
+    claim: "neither differential's corpus contains the wrapper words"
+    probe: "read _WORD/_ALPHABET/_SEEDED_FAMILIES in test_bash_differential_897.py and _SHIM/_CANDIDATES in test_955_bash_fd_prefix.py, then grep both files for bash/sh/timeout as a CANDIDATE program"
+    probe_kind: search
+    observed: "_WORD='echo'; _ALPHABET=('echo','|',';','&&','||','\\n','2>/dev/null','2>&1'); _SHIM='w' and every _CANDIDATES entry is a `w …` shape. The only `bash` in either file is the harness's own oracle invocation and the only `timeout` is a subprocess kwarg — no wrapper word appears as a candidate program in either corpus"
+    verdict: holds
+    note: "RETYPED from `reachability`/`read` to `census`/`search`: it is a completeness claim about two corpora, and reachability's instrument table demands an executed break-attempt it never had. Folding therefore perturbs no existing case — and buys coverage only if wrapper shapes enter the corpus (C5)."
+
+  - id: c10
+    source: discuss
+    kind: reachability
+    claim: "the refactor changes no verdict outside D2's enumerated set"
+    probe: "deferred to implementation — both differentials plus the full suite, read against the six-member set this artifact now carries"
+    probe_kind: read
+    observed: "not yet attempted"
+    verdict: deferred
+    note: "TRANSFERS TO write-code-from-spec. FK7 is the fork about what instrument could actually settle it: over today's corpora it would close on 'no existing test changed its mind' across a corpus with zero coverage of the wrapper, `\\r` and blank classes."
+
+  # --- raised by the grounding leaf (10-brief.md) ------------------------------------------
+  - id: g1
+    kind: behavior
+    claim: "`_scan` splits words on `\\r`, which bash treats as an ordinary character — a live, authorised argv divergence inside the one site the design keeps unchanged"
+    probe: "a recording shim under real bash for `w a\\rb`, `w\\rx`, `w a\\rb | cat`, argv file read as BYTES; then bash_exec.parse on the same texts; then decide_bash under a real MAIN policy over ten `\\r` spellings of an allowed pipeline"
+    probe_kind: executed
+    observed: "bash records argv b'a\\rb\\n' — ONE word — and answers `w\\rx` with `$'w\\rx': command not found` (rc=127). parse gives ['w','a','b'] and ['w','x']. Through the real gate all of these are allow=True with the split argv: `cat P\\r` -> ['cat',P]; `cat\\rP` -> ['cat',P]; `cat P\\r| wc -c` -> two stages; `cat A\\rB` -> ['cat',A,B], i.e. ONE bash word becomes TWO authorised operands and two files are read. `wc -c\\rP` and `grep -n x\\rP` deny on grant patterns, so the family is narrower than the whole surface but is not empty"
+    verdict: holds
+    note: "THE RUN'S MOST IMPORTANT FINDING. It contradicts the issue's census verdict for `_scan` ('keep — this is the one') — incomplete, not wrong — and it is what became M6 at §7 (F6)."
+
+  - id: g2
+    kind: behavior
+    claim: "the #955 differential cannot observe g1: it normalises its own subject"
+    probe: "read test_955_bash_fd_prefix.py:199-201; write b'a\\rb\\nARGV_END\\n' through the same read path"
+    probe_kind: executed
+    observed: "line 199 is `argv_file.read_text(encoding=\"utf-8\")` — newline=None, so universal newlines rewrite \\r to \\n — and line 200 splits on '\\n'. The recorded bytes come back as 'a\\nb\\n' and become the words ['a','b'], exactly the wrong parse. `scripts/lint/lint_unpinned_text_io.py` cannot catch it: the encoding IS pinned and it is the newline argument that is missing"
+    verdict: holds
+    note: "the issue's blind spot (2) is OPEN at 6a2ea874, in the very file the issue credits with closing it. M6(b) is this fix; pj2 measured what it buys."
+
+  - id: g3
+    kind: behavior
+    claim: "the wrapper path is a live ALLOW path, not only a deny path"
+    probe: "decide_bash under MAIN over bash -c / sh -c / timeout spellings of an allowed cat"
+    probe_kind: executed
+    observed: "`bash -c 'cat P'` ALLOW argv [['cat',P]]; `sh -c 'cat P'` ALLOW; `timeout 5 cat P` ALLOW; `timeout 5 timeout 3 cat P` DENY (c7's non-idempotence, refusing rather than mis-parsing); `bash -c 'cat P 'x` ALLOW argv [['cat',P,'x']] and bash agrees. test_permission.py:271's note that 'every bash -c test is a deny case' is about that FILE's corpus, not about the surface"
+    verdict: holds
+    note: "this is what makes c2 a security finding rather than a parse curiosity."
+
+  - id: g4
+    kind: primitive
+    claim: "the divergence alphabet between `str.strip()` and `_WORD_SEPARATORS` is closed and computable, and every member of it flips the same way"
+    probe: "enumerate every codepoint in range(0x110000) whose str.strip() is empty, subtract frozenset(' \\t\\r\\n'); then drive both today's decide_bash and a no-strip re-implementation over each at both ends of an allowed pipeline"
+    probe_kind: executed
+    observed: "str.strip() removes 29 characters; 25 are outside today's `_WORD_SEPARATORS`. Every one of the 12 sampled flips allow(today) -> deny(no-strip) at BOTH ends. Direction is uniformly NARROWING. `shlex.shlex('').whitespace` is ' \\t\\r\\n' — `_WORD_SEPARATORS` is that set exactly, which is how `\\r` got in (g1)"
+    verdict: holds
+    note: "RETYPED from `census` to `primitive`: it is a claim about `str.strip()`'s contract that closed on an executed probe, and the census instrument table would have demanded a search. THE COUNT IS SUPERSEDED BY a1: 25 is measured against the CURRENT separator set, and M6 edits that very constant, so the set the spec must carry is 26."
+
+  - id: g5
+    kind: behavior
+    claim: "with the trim deleted, `\\f` and U+2028 join the P1 table the comment recorded for U+00A0 and `\\v`"
+    probe: "the same MAIN-policy table extended with \\f and U+2028"
+    probe_kind: executed
+    observed: "both allow=True today with argv identical to the clean command; both parse to a corrupted first/last word without the strip (U+2028+'cat' as argv[0], 'wc -c'+\\f as the last operand)"
+    verdict: holds
+
+  - id: g6
+    kind: behavior
+    claim: "C2's alternative remedy — 'the folded parse returns zero pipelines rather than raising' — does not restore the blank verdict"
+    probe: "command_shape.flat_stages([]), permission.bash._decide_readers([], MAIN, run_dir=…), command_shape.has_adapter([])"
+    probe_kind: executed
+    observed: "[] , None , False. `decide_bash`'s tail after a None reader and a False has_adapter is `BashDecision(False, policy.deny_reason)`. Zero pipelines therefore DENY a blank command, where today it allows"
+    verdict: holds
+    note: "REFUTES one half of the doc's C2 disjunction and settles F1 by probe rather than by the human. Only a blank test AHEAD of the parse preserves today's verdict; `d0_a_blank_command_is_answered_before_the_parse` is what replaced the provisional demand written the other way."
+
+  - id: g7
+    kind: census
+    claim: "the resolved reference census for every symbol this change touches"
+    probe: "pyrefly-refs per symbol, run from /workspace (the main checkout at the same commit — the resolver under-resolves inside the worktree); the grep floor reported by the tool each time"
+    probe_kind: search
+    observed: "decide_bash: 134 refs in 35 files (floor 455) — production callers are exactly runtime/tools.py:61, runtime/tools.py:285, scripts/policy_cli.py:168, plus the re-export at runtime/permission/__init__.py:10. unwrap: 9 refs in 5 files (floor 89). bash_exec.parse: 36 refs in 12 files (floor 1630) — one production caller, permission/bash.py:111. run_parsed: 2 refs, bash_exec.py:409 and box.py:1022. `_scan`, `_word_value`, `_literal_mask`, `_is_fd_prefix`, `_PipelineBuilder.feed_token`: ZERO references outside bash_exec.py"
+    verdict: holds
+    note: "THE FIVE INTERNALS ARE FREE TO CHANGE SHAPE; `parse`, `run_parsed`, `Pipeline`, `Stage`, `unwrap`, `decide_bash` ARE NOT. This is the census M1's record-stream rewrite rests on."
+
+  - id: g8
+    kind: referential
+    claim: "`bash_exec` is loaded in two processes, and only the run half is loaded inside the box"
+    probe: "read box.py:1004-1017 (_DockerTransport), box.py:1019-1030 (_HostTransport), bash_exec.py:446-478; grep for the module's __main__"
+    probe_kind: read
+    observed: "the boxed transport is `docker exec -i -w <cwd> <name> python3 -m defender.runtime.bash_exec` with the encoded frame on stdin; `_run_box_entrypoint` decodes it and calls run_parsed. `parse`/`_scan`/the wrapper step are never reached inside the box — only run_parsed is — but bash_exec's MODULE-LEVEL imports are executed there, which is exactly what C4 is about. e2e/test_665_box_live.py:183 already probes `python3 -c 'import defender.runtime.bash_exec'` inside a live box"
+    verdict: holds
+    note: "RETYPED from `reachability` to `referential`: it was probed by reading transports and an import block, and a reachability claim owes an executed break-attempt. The cross-process edge a static import walk stops at. THE LIVE PIN IS `live`-MARKED AND THEREFORE EXCLUDED BY THE CI MARKER EXPRESSION — CI alone will not catch a C4 violation (carried in handoff.deviations)."
+
+  - id: g9
+    kind: primitive
+    claim: "the real semantics of the two external tools the wrapper models, read off the tools rather than off priors"
+    probe: "`timeout --help` on this image; unwrap over eight real `timeout` spellings; real bash over `bash -c` adjacency shapes"
+    probe_kind: executed
+    observed: "coreutils: `timeout [OPTION] DURATION COMMAND [ARG]...`, DURATION is a float with an optional s/m/h/d suffix, and -k/--kill-after and -s/--signal each TAKE A VALUE. `_skip_timeout_prefix` models neither: it accepts any token starting with `-` and any token that is digits-after-removing-dots. So `timeout 5s cat x` -> '5s cat x' and `timeout -s KILL 5 cat x` -> 'KILL 5 cat x'. Both then DENY, so the mis-model is narrowing today. `timeout 5 bash -c 'cat x'` -> 'cat x': the two wrappers compose, one application each"
+    verdict: holds
+    note: "RETYPED from `census` to `primitive` (an external tool's contract, executed). This is FK1's second arm — the judge recommends NOT taking it, but a token-index rewrite must reproduce today's approximation deliberately, because it is a set D2 would otherwise have to enumerate."
+
+  - id: g10
+    kind: census
+    claim: "the coherence readers of the refusal message this change moves"
+    probe: "grep -rn UNTOKENIZABLE_REASON over defender/"
+    probe_kind: search
+    observed: "the constant is permission/bash.py:75-94 and is re-exported at permission/__init__.py:8,36. Its cause (5) describes the wrapper's refusals BY NAME. Assertion sites: test_permission.py:316, :340, :387 (the drift guard, at :377), :405 (the negative control), and test_read_confine.py:366, :472, :479 — seven"
+    verdict: holds
+    note: "M3 and M4 both change what can reach this reason, and F4 strikes a clause from it, so every one of the seven is a coherence reader of this change — modelled as the `bash_lane_test_helpers` edge R7 fires on."
+
+  - id: g11
+    kind: census
+    claim: "the existing spec-graph ids this change must key against, so phase D's name reconciliation has a target"
+    probe: "grep -ln over spec-flow/specs/spec_graph_*.yaml for bash_exec/decide_bash/_cmd_segments/unwrap, then read the structure layer of the two that model this seam"
+    probe_kind: search
+    observed: "21 spec files mention the seam; the structure-layer owner is spec_graph_575-grant-gate.yaml — actors `decide_bash`, `tool_bash`, `compile_policy`, `decide_read`, `defender_policy_cli`; boundaries `bash_exec` (payload facet) and `read_surface` (access: bash + read-tool; identity: operand_path); axes agent_role, program, operand_path, via, run_dir. spec_graph_691.yaml:746 spells a decide_bash access cell `bash-cat`, so the via vocabulary is NOT unified across passes"
+    verdict: holds
+    note: "ENACTED at the top of this file: ids keyed by role+origin are inherited verbatim, `bash` is the one via spelling, `bash-tool` is retired, and the folded step is `_wrapper_span`."
+
+  - id: g12
+    kind: census
+    claim: "deleting `_cmd_segments`'s three private helpers is lint-clean; the three module constants are not deletable"
+    probe: "grep -rn each of the six module-level names over *.py/*.md/*.yaml/*.json; read scripts/lint/lint_stale_refs.py's algorithm"
+    probe_kind: search
+    observed: "`_skip_timeout_prefix`, `_unwrap_bash_c`, `_strip_prefix_from_raw` have ZERO references outside their own module. `NON_ADAPTER_SHIMS` (command_shape.py:6, grant.py:10, policies/_common.py:7 + 4 test sites), `OPERATOR_TOOLS` (command_shape.py:7 + policy_cli.py:16 + bin/README.md:14) and `ADAPTER_RE` (command_shape.py:5 + docs/runtime-sandbox-design.md:370) all have live consumers. lint_stale_refs skips identifiers under 8 chars with no underscore, so the bare name `unwrap` is below its floor either way"
+    verdict: holds
+
+  - id: g13
+    kind: behavior
+    claim: "the base is green and the worktree is genuinely the tree under test"
+    probe: "assert the imported module __file__ resolves under the worktree, then run the four bash-lane test files under the CI marker expression"
+    probe_kind: executed
+    observed: "modules resolve to /workspace/.claude/worktrees/959-one-scanner/defender/... with PYTHONPATH set; 255 passed in 14.35s for test_955_bash_fd_prefix.py + test_bash_differential_897.py + test_bash_exec.py + test_permission.py"
+    verdict: holds
+
+  - id: g14
+    kind: behavior
+    claim: "the tool-derived driver census is empty before implementation, and the resolver under-resolves inside this worktree"
+    probe: "spec-graph trace drivers --base HEAD; spec-graph trace resource run_dir; pyrefly-refs run in both checkouts"
+    probe_kind: executed
+    observed: "trace drivers: 'no changed census modules against base=HEAD — nothing to anchor', as expected before implementation. trace resource run_dir returns the declared writer/reader walk plus floor lines, none of which this change adds to. Inside the worktree the resolver trips its resolution guard on every cross-file symbol (decide_bash: 1 ref in 1 file against a 42-file grep floor); the same command from /workspace resolves 134 refs in 35 files"
+    verdict: holds
+    note: "RETYPED from `census` to `behavior` — it is a claim about what the tools DO here, and it closed on an executed run. THE OPERATIONAL RULE IT IMPLIES: every resolver census in this run was executed from /workspace (main, HEAD == 6a2ea874, tree clean, byte-identical for the files in play), including this leaf's. Read empty as empty, never as complete."
+
+  # --- raised by the demand-extraction leaf (20-demands.md) --------------------------------
+  - id: x1
+    kind: referential
+    claim: "the body's and c3's description of `_word_value`'s implementation does not match the module"
+    probe: "read defender/runtime/bash_exec.py at 6a2ea874"
+    probe_kind: read
+    observed: "`_word_value` is `shlex.split(span, comments=False, posix=True)` guarded by `len(parts) == 1`. There is no `shlex.shlex` and no `lex.whitespace` pin in the module"
+    verdict: holds
+    note: "RETYPED from `behavior` to `referential` — it is a claim about what the source says, settled by reading it. It CORRECTS the body ('the current code pins `lex.whitespace` to stop it' describes code that is not there). M2's substance survives: it IS a splitter and can re-split, which is exactly why M6 needs it (RF-J4)."
+
+  - id: x2
+    kind: behavior
+    claim: "the gate ALLOWS and EXECUTES the mis-unwrapped `bash -c` command, not merely mis-unwraps it"
+    probe: "decide_bash(\"bash -c 'echo a '2>/dev/null\", policy=MAIN, run_dir=/run, defender_dir=/dfn)"
+    probe_kind: executed
+    observed: "allow=True, pipelines=[[['echo','a']]] with stage stderr routed to devnull. Real bash's -c argument is `echo a 2` and the redirect belongs to the outer shell. The argv that crosses into the box drops an operand AND inverts the routing"
+    verdict: holds
+    note: "EXTENDS c2, which stops at unwrap's return value. This is verdict-change set member 3."
+
+  - id: x3
+    kind: behavior
+    claim: "`_scan` splits on `\\r`, which bash does not split on, and the gate authorises the resulting different command"
+    probe: "decide_bash('cat /run/report.md\\rx') vs bash running the same text with od -c on the recorded argv"
+    probe_kind: executed
+    observed: "gate: allow=True, [[['cat','/run/report.md','x']]]. bash: NARGS=1, the single argument being `/run/report.md\\rx`"
+    verdict: holds
+    note: "independent confirmation of g1 by the other phase-A leaf."
+
+  - id: x4
+    kind: behavior
+    claim: "test_955's oracle still normalises its own subject — blind spot (2) is live in the file said to have closed it"
+    probe: "read test_955_bash_fd_prefix.py:195-201; Path.read_text on bytes b'a\\rb\\nARGV_END\\n'"
+    probe_kind: executed
+    observed: "line 199 recovers the recorded argv with `read_text(encoding='utf-8')` and line 200 splits it on '\\n'; the argument `a\\rb` is recovered as two argv entries. `subprocess.run(..., text=True)` on line 197 does the same to stdout and stderr"
+    verdict: holds
+    note: "independent confirmation of g2, and the reason the binary-read demand is written at CLASS grain (`d_the_oracle_normalises_no_evidence_channel`) rather than at line 199."
+
+  - id: x5
+    kind: behavior
+    claim: "C2's blank set is incomplete: the Unicode blanks flip the other way"
+    probe: "unwrap('\\xa0'), unwrap('\\v'), unwrap('\\f'); decide_bash on each"
+    probe_kind: executed
+    observed: "unwrap returns the character itself, not None — so these are WORDS, not blanks. Today decide_bash allows them via `if not cmd` (str.strip() eats them); after M4 they parse to a one-word argv and are refused"
+    verdict: holds
+    note: "EXTENDS c6. C2's escape hatch covers '', '   ', '\\t', '\\n' and does NOT cover these; they are a separate, opposite verdict change and they are why `d_unicode_blank_only_command_is_a_command` exists beside the bash-blank demand."
+
+  - id: x6
+    kind: behavior
+    claim: "an index-based prefix match WIDENS the wrapper, contradicting the doc's stated direction of risk"
+    probe: "unwrap(\"timeout '5' cat x\"), unwrap('\"timeout\" 5 cat x'), unwrap('\"bash\" -c \"ls\"'); read _strip_prefix_from_raw and test_permission.py:355-372"
+    probe_kind: executed
+    observed: "the two `timeout` spellings return None today and are pinned as UNTOKENIZABLE by the drift guard's 'quoted `timeout` prefix' case; the refusal exists only because `_strip_prefix_from_raw` matches the RAW text. `\"bash\" -c \"ls\"` already unwraps to 'ls', so the bash/sh arm is already value-matched and only the timeout arm widens"
+    verdict: holds
+    note: "CONTRADICTS the body's 'can only narrow what is accepted', which §7 struck as false (F4). Verdict-change set member 4."
+
+  - id: x7
+    kind: behavior
+    claim: "a newline inside a `bash -c` argument is allowed today and a per-line fold refuses it"
+    probe: "decide_bash(\"bash -c 'cat /run/report.md\\nwc -l'\")"
+    probe_kind: executed
+    observed: "allow=True, [[['cat','/run/report.md']], [['wc','-l']]] — shlex.split flattens the newline into the -c token and parse then splits it back into two lines. `_scan` is per line, so a folded scan meets an unclosed quote on line 1"
+    verdict: holds
+    note: "verdict-change set member 5 (F5, accepted)."
+
+  - id: x8
+    kind: census
+    claim: "C3's fourth call site pairing the wrapper step with the parser does not exist, and a fifth trim does"
+    probe: "grep -rn unwrap defender/ --include=*.py; read e2e/test_540_box_boundary.py:355-370 and test_bash_exec.py:26-33"
+    probe_kind: search
+    observed: "the pairings are test_permission.py:801-802, test_grant_gate_575.py:1070/1078, test_bash_exec.py:15/29 — three, plus the production site permission/bash.py:8/98. `e2e/test_540_box_boundary.py:362` is `import defender.hooks._cmd_segments as seg` inside the `_IMPORT_DEFENDER` probe string, an assertion that the module imports INSIDE THE BOX. test_bash_exec.py:28 also does `cmd.strip()` before unwrapping"
+    verdict: holds
+    note: "CORRECTS C3. A migration following the doc's list literally moves a site that does not exist and leaves the trim that does."
+
+  - id: x9
+    kind: referential
+    claim: "the stale `_cmd_segments` import is recorded in intent_540.md twice, not once"
+    probe: "grep -n 'parent of the mount point' defender/tests/intent_540.md"
+    probe_kind: search
+    observed: "that phrase matches lines 134 and 556, which is where 'twice' came from"
+    verdict: refuted
+    note: "REFUTED BY a2, run at assembly with the wider pattern: `grep -n _cmd_segments` returns 134, 466 AND 556. The phrase-anchored probe missed line 466, which restates the same import inside a recorded claim. The demand is written to three lines."
+
+  - id: x10
+    kind: census
+    claim: "the full `_cmd_segments` consumer list, production and test"
+    probe: "grep -rn _cmd_segments defender/ --include=*.py, excluding the module"
+    probe_kind: search
+    observed: "production: permission/bash.py:8 (unwrap), permission/command_shape.py:4, permission/grant.py:10, permission/policies/_common.py:7 (constants). Tests: test_grant_gate_575.py:68 + 1070, test_permission.py:801, test_bash_exec.py:15, e2e/test_540_box_boundary.py:362, e2e/test_query_tool_611.py:62. Zero importers under defender/hooks/"
+    verdict: holds
+
+  - id: x11
+    kind: behavior
+    claim: "`parse('')` already returns `[]`, so C2's second horn is the parser's existing behaviour"
+    probe: "bash_exec.parse('')"
+    probe_kind: executed
+    observed: "[] — an empty pipeline list, no exception. Also parse('   cat /etc/hosts   ') -> [['cat','/etc/hosts']] and parse('\\t\\tls -la\\n') -> [['ls','-la']]"
+    verdict: holds
+    note: "TRUE ABOUT THE PARSER AND NOT SUFFICIENT FOR THE GATE — g6 shows what happens to those zero pipelines downstream, which is why the recommendation this claim supported was overturned by probe at §7 (F1)."
+
+  - id: x12
+    kind: census
+    claim: "no test in the tree exercises a bash command carrying a non-space blank"
+    probe: "grep -rn isspace defender/tests/*.py defender/tests/e2e/*.py; grep -rln for the U+00A0 spellings across defender/tests/"
+    probe_kind: search
+    observed: "isspace appears only in test_empty_output_722.py, a different subject entirely; no U+00A0 appears in any bash, permission or parse test. Neither differential's corpus contains a blank other than the space inside its own candidate strings and `\\n` in 897's alphabet"
+    verdict: holds
+    note: "CORRECTS the body, which says test_955 'derives its blank alphabet from str.isspace() | shlex.whitespace' — there is no blank alphabet in that file. O1's stated discharge ('the path census plus both differentials') therefore does not cover the blank class at all, which is why P1's defect survived, and it is half of FK7's problem."
+
+  - id: x13
+    kind: behavior
+    claim: "the unquoter's exact obligations, read off the current implementation"
+    probe: "_word_value over a table of quoting forms"
+    probe_kind: executed
+    observed: "'\"a\\\\nb\"' -> 'a\\\\nb' (backslash kept before a non-special char inside double quotes); '\"a\\\\\"b\"' -> 'a\"b'; '\"a\\\\\\\\b\"' -> 'a\\\\b'; 'a\\\\ b' -> 'a b'; \"'a'\\\"b\\\"c\" -> 'abc'; \"'a\\\\nb'\" -> literal; '\"$x\"' -> '$x'; '\\\\;' -> ';'. A lone trailing backslash raises inside shlex and becomes UntokenizableCommand"
+    verdict: holds
+    note: "this is the table `d_the_unquoter_resolves_every_form_the_lexer_resolved` asserts, derived from the current behaviour rather than from a prior."
+
+  - id: x14
+    kind: census
+    claim: "the parser's output reaches the box unmediated, so an argv divergence is executed, not merely authorised"
+    probe: "grep for bash_exec.parse and run_parsed across runtime, hooks, scripts and run.py"
+    probe_kind: search
+    observed: "the only production parse is permission/bash.py:111; the pipelines travel decide_bash -> tools.py:298 (deps.box.run_parsed) -> box.py:109/1022 -> bash_exec.run_parsed. No second parse anywhere on the path"
+    verdict: holds
+    note: "RETYPED from `reachability` to `census` — it is a completeness claim about parse sites, established by a search, and reachability would have owed an executed break-attempt. It is what makes every verdict-change demand here also an execution-change demand."
+
+  # --- the three re-ground probes the judge raised (46-reground.md) ------------------------
+  - id: pj1
+    kind: behavior
+    claim: "a realistic-length allowed command is not truncated before a trailing divergent character, and the boundary at which it is has no off-by-one"
+    probe: "read record_query.SHIM_COMMAND_MAX_CHARS and its single production call site (tools.py:251, `command[:SHIM_COMMAND_MAX_CHARS]`), then slice a ~50-char command with a trailing CR, a 2005-char command with the CR at index 2000, and the two boundary cases at 1999 and 2000, importing the real constant rather than hardcoding it"
+    probe_kind: executed
+    observed: "SHIM_COMMAND_MAX_CHARS = 2000. Case A (50 chars, trailing CR): recorded == command, the CR survives. Case B (2005 chars, CR at index 2000): the CR is absent from the recorded row. Case C (index 1999): survives. Case D (index 2000): dropped. Plain Python slice semantics, no surprises"
+    verdict: holds
+    note: "SETTLES the truncation premise AND bounds the audit row's evidentiary value. The constant's own docstring names the command field as the one field of a shim row an attacker-influenced turn chooses freely, so an attacker padding past 2000 characters can push the divergent character out of the evidence while a plausible non-divergent command is what the audit shows. Narrow (>2000 chars) but real — §7 should weigh it, not dismiss it because realistic commands are short."
+
+  - id: pj2
+    kind: primitive
+    claim: "under a byte-level read and a split on b'\\n', a `\\r` adjacent to the recording shim's own delimiter is not misattributed to the wrong argv entry"
+    probe: "build the real shim, run it under real bash with `\\r` trailing an entry, leading an entry, standalone, and beside an empty entry; verify the bytes with od -c; recover the same file both ways"
+    probe_kind: executed
+    observed: "od -c confirms the bytes sent are the bytes received. `read_bytes()` + `split(b'\\n')` recovered every shape byte-exact, including the CR-beside-an-empty-entry case. Today's `read_text()` + `str.split('\\n')` recovered 4 expected entries as 5 wrong ones: universal-newline translation treats a bare `\\r` as its own line ending, so it PHANTOM-SPLITS entries and corrupts the index-based ARGV_END alignment for everything downstream"
+    verdict: holds
+    note: "M6(b) is not a marginal improvement — it is the difference between a usable and an unusable recovery mechanism for any command containing `\\r`. One orthogonal limit remains and is NOT what M6(b) claims to fix: an argv entry containing a literal `\\n` byte still breaks the shim's line-based protocol."
+
+  - id: pj3
+    kind: primitive
+    claim: "`bash -n -c \"<outer>\"` reports nothing about the syntax of a nested `-c '<inner>'` payload"
+    probe: "four broken-inner shapes (unclosed if/then, unclosed brace, dangling pipe, and a valid pipeline) nested inside a syntactically well-formed single-quoted outer, run through `bash -n -c`; control = the identical inner text handed directly to `bash -n -c`"
+    probe_kind: executed
+    observed: "all four nested shapes returned rc=0 with empty stderr — completely silent. The controls were reliably flagged: rc=2 with explicit 'syntax error' / 'unexpected EOF' messages. An earlier double-quoted-outer trial that returned rc=2 had an unbalanced OUTER quote — an outer-level defect, not inner recursion"
+    verdict: holds
+    note: "makes FK9's second recommendation REQUIRED, not optional: a corpus relying on the single outer precheck silently accepts a candidate whose inner payload is broken, and then tests nothing."
+
+  # --- raised at assembly (phase D) --------------------------------------------------------
+  - id: a1
+    kind: primitive
+    claim: "the divergent-blank alphabet the enumerated set must carry is 26 characters once M6 lands, not the 25 the closed set recorded"
+    probe: "compute {c for c in range(0x110000) if chr(c).strip() == ''} and subtract, in turn, today's frozenset(' \\t\\r\\n') and the set the scanner is left with after M6 plus the newline `parse` consumes as a line boundary"
+    probe_kind: executed
+    observed: "str.strip() removes 29 characters. Minus today's separator set: 25. Minus {space, tab, newline}: 26 — the 25 plus `\\r`. The 26 are \\x0b \\x0c \\x0d \\x1c \\x1d \\x1e \\x1f \\x85 \\xa0 U+1680 U+2000..U+200A U+2028 U+2029 U+202F U+205F U+3000. Newline is excluded on purpose: `parse` splits physical lines on it before `_scan` runs, so it never reaches the separator set as a word character"
+    verdict: holds
+    note: "THE COUNT WAS DERIVED FROM THE VERY CONSTANT THIS CHANGE EDITS, which is how it came out one short. Corrects member 1 of the enumerated set and supersedes g4's 25."
+
+  - id: a2
+    kind: referential
+    claim: "the stale `bash_exec` -> `_cmd_segments` import is recorded at three lines of intent_540.md, not one and not two"
+    probe: "grep -n _cmd_segments defender/tests/intent_540.md, beside grep -n 'parent of the mount point' (the phrase the earlier census anchored on)"
+    probe_kind: search
+    observed: "the module name matches at 134, 466 and 556. The phrase matches only 134 and 556 — line 466 restates the same import inside a recorded claim without the phrase, which is how the phrase-anchored census under-counted by one"
+    verdict: holds
+    note: "REFUTES x9 and CORRECTS C4, which names 556 alone. Written into `d_the_stale_mount_constraint_is_corrected`."
+
+  - id: a3
+    kind: census
+    claim: "the spec's own phase-C record holds zero literal divergent blanks, and four worked examples were written with a U+00A0 that is no longer there"
+    probe: "scan the bytes of every 4*-prefixed frontier file for any codepoint whose str.strip() is empty and which is not space/tab/newline; then read 40-premise-file.py at the four docstrings the judge named"
+    probe_kind: search
+    observed: "40-premise-file.py, 40-premises.md, all three 41-escalation-subset files, 42-answers.py and both answer sidecars contain ZERO such characters. 45-dispositions.md contains exactly one U+00A0, inside the red flag reporting this. The four worked examples at 40-premise-file.py:147, :163, :172, :242 read as ordinary spaces, and the one at :163 self-corrects mid-sentence as its author watched the character vanish"
+    verdict: holds
+    note: "THE ISSUE'S OWN DEFECT CLASS, ONE LAYER FURTHER OUT: the instrument normalised the exact character its subject turns on. The four are restated in escaped form at the top of this file and the instruction is carried to the author; a test written from those docstrings as they stand passes while exercising an ordinary space."
+
+  - id: a4
+    kind: referential
+    claim: "`UNTOKENIZABLE_REASON` documents exactly five causes, and cause (5) is the one F4 edits"
+    probe: "read defender/runtime/permission/bash.py:74-94"
+    probe_kind: read
+    observed: "(1) an unbalanced quote or a newline INSIDE a quoted argument; (2) a trailing backslash; (3) a connector at a line boundary; (4) a connector without a complete command on both sides within one line; (5) a wrapper that does not unwrap to a single command string — 'anything other than exactly `bash -c \\'<one command string>\\'` (a bare `bash`, `bash script.sh`, `sh -lc …`, a stray word after the string), or a `timeout …` prefix whose own words are quoted'. The module's own comment records that a named test guards the list against drifting from what the parser refuses"
+    verdict: holds
+    note: "the distinguished members of the UNTOKENIZABLE_REASON domain facet are these five, read off the constant rather than recalled. F4 strikes the final clause of (5); F5 gives (1) a new shape; FK6 asks whether `\\r` earns a sixth."
+
+  - id: a5
+    kind: census
+    claim: "the corpus spells the bash lane's access via three different ways across three coining passes"
+    probe: "grep -h 'via:' spec-flow/specs/spec_graph_*.yaml and count, then read the two cells that name this seam"
+    probe_kind: search
+    observed: "`bash` appears as a via 5 times (including spec_graph_575's `read_surface` cell, the structure-layer owner of this seam); `read-tool` twice; `bash-cat` once, at spec_graph_691.yaml:746, on a DIFFERENT boundary (`corpus_dir`) for the decide_bash cat-scope cell; and 20-demands.md coined a fourth spelling, `bash-tool`, in this run"
+    verdict: holds
+    note: "RECONCILED: `bash` is the spelling used here. Two artifacts coining different names for one thing is the join-breaker the registry rule exists to prevent."
+
+  - id: a6
+    kind: census
+    claim: "the four post-decision consumers of the operand set, at the names the code threads them under"
+    probe: "grep -rn _opened_operands / is_untrusted_read / _overflow_filter_hint over defender/runtime/tools.py and read the walk at tools.py:295"
+    probe_kind: search
+    observed: "`operands = tuple(_opened_operands(deps, decision))` at tools.py:295, walked ONCE and threaded, feeds: `_deny_authored_bash_read(deps, operands)`; `_opens_untrusted_read(operands)` -> `permission.is_untrusted_read`; the ceiling the capping operand sets; and `_bash_overflow_hint` -> `_overflow_filter_hint`. A fifth reader is `_record_shim_failure` at tools.py:263, which re-derives the same set for the audit row's `system=` attribution"
+    verdict: holds
+    note: "FK8's four consumers, named. They are bound under O1 at `_opened_operands` rather than under O3, per the judge's recommendation — a word-boundary change can move all four while allow, reason and pipelines are literally unchanged."
+
+  # --- raised by the gate leaf (phase D, step 6 — R6's chooser/sanitizer walk) -------------
+  - id: gt1
+    kind: referential
+    claim: "the queries-table row that carries `raw_command` has no raw-frame/escaped-value split for R6 to find — the whole row, keys and `raw_command` alike, goes through one encoding call"
+    probe: "read defender/scripts/gather_tools/record_query.py:124-163 (`append_query_row`, the sole writer) and defender/runtime/tools.py:223-268 (`_record_shim_failure`, the only production caller on this change's path)"
+    probe_kind: read
+    observed: "`append_query_row` assembles all thirteen row keys — `raw_command` among them — into one plain dict and appends it with `write_guarded(RunPaths(run_dir).executed_queries, json.dumps(row) + \"\\n\", mode=\"append\")`. One `json.dumps` call over the whole dict sits between the row and the file: a newline, quote or brace inside `raw_command` becomes its JSON escape sequence in the same call that produces the row's keys, so there is no separate raw-frame-plus-escaped-value step for a hostile character in the command text to exploit."
+    verdict: holds
+    note: "RAISED AT THE GATE (R6's chooser/sanitizer walk, phases/graph-gate.md): the only two rendered/parsed-text sinks this change's edges reach are `UNTOKENIZABLE_REASON` (chooser: the author, fixed cause strings — command text never splices in) and this queries-table row (chooser: the model/attacker, via `raw_command`). This claim is what lets R6 close `fired: false` rather than on prose — see `gate.evaluated`."
+
+# ===========================================================================================
+# GATE — phase D, step 6 (phases/graph-gate.md, "Charge — the gate leaf"). `spec-graph gate
+# --residue` computed 28 firings over R1 (x1), R3 (x4), R4 (x15), R5 (x2), R7 (x6); every one
+# is already answered by a demand already in this artifact (assembled before this leaf ran), so
+# every firing routes `pre_discharged`, not `obligation` — nothing here is a demand still to be
+# minted. R2 fires zero times (no shared sink gains a second writer or a driven writer; the one
+# axis, `operand_path`, gains no interpolating member). R0/R5/R6/R8 carry no slot predicate
+# `spec-graph gate` computes (rules.md, "The rules" / schema.md's JUDGMENT set) — their entries
+# below are this leaf's own reconciliation/extension/walk/census, not the tool's arithmetic.
+# `spec-graph gate spec_graph_959.yaml` (bare, no flag) exits clean against this block.
+# ===========================================================================================
+
+gate:
+  evaluated:
+    - rule: R0
+      fired: false
+      cites: [g11, g7]
+      note: >-
+        Bidirectional prose reconciliation. Forward direction (a normative design sentence
+        binding no element): spot-checked every M1-M6/D1-D3/O1-O4/C1-C5 sentence in the header
+        comment against the demand list — each has ≥1 binding demand (M1->d0_scan_..., M2->
+        d_the_unquoter_..., M3->the wrapper-fold demands, M4->d_gate_hands_the_parser_...,
+        M5->d_the_enumerated_set_..., M6->d_the_scanner_ends_a_word_.../d_the_oracle_reads_
+        bash_in_binary, D1->d0_parse_takes_the_raw_command, O1-O4/C1-C5->the demand groups
+        their section headers name). None found unbound. Reverse direction (a delta element
+        tracing to no design sentence): the two candidates the assembler flagged as deliberate —
+        `_wrapper_span` (F3's rename; the STEP is M3's, only the code name is this spec's — g11
+        pins the id reconciliation) and `command_text.access[argv]` (the operator CLI; not in
+        the design body, but FK7's second premise brings it in and `d_the_operator_cli_reports_
+        the_whole_verdict` binds it, g7 confirms `scripts/policy_cli.py:168` is a real
+        `decide_bash` caller, not an invented surface) — both trace, one to a mechanism sentence
+        via id reconciliation, one to a recorded judge fork. No element traces to nothing.
+    - rule: R1
+      fired: true
+    - rule: R2
+      fired: false
+      note: >-
+        Computed clean (0 triggers): no boundary's identity facet gains a second writer or a
+        driven writer in this delta. The one axis, `operand_path`, is inherited unchanged from
+        `spec_graph_575-grant-gate.yaml` for `read_surface`'s identity, and no writer interpolates
+        it or any other axis — R2's key-coverage check therefore has nothing to check either.
+    - rule: R3
+      fired: true
+    - rule: R4
+      fired: true
+    - rule: R5
+      fired: true
+      note: >-
+        Tightening/safe-by-construction extension. Five of the six D2 members narrow; the sixth
+        (FK1) is pending. The extension's question — is a security-critical caller left
+        constructible in the newly-unsafe state — has one live shape: if FK1 is declined, a
+        caller can still construct `timeout <non-duration> <cmd>` (e.g. `timeout cat
+        report.md`) and have it authorised as the argv real `timeout` would refuse to run at
+        all. This is already bound, not a fresh mint: `d_a_timeout_prefix_with_no_duration_is_
+        not_a_wrapper` (`fork: FK1`) asserts the caller CANNOT be built into that state — the
+        prefix is not recognised as a wrapper and the command is refused — which is the
+        cannot-be-built-unsafe property in this domain's terms (there is no object constructor
+        here; "the gate authorises it" is the analogous unsafe construction). Contingent on §7:
+        if FK1 is declined, this property is not achieved and the live gap ships uncaught by a
+        differential whose corpus contains no `timeout` at all (RF-J1, 50-graph-digest.md).
+    - rule: R6
+      fired: false
+      cites: [gt1]
+      note: >-
+        Chooser/sanitizer walk over every value reached by this change's edges into rendered or
+        parsed text. Two sinks: (1) `UNTOKENIZABLE_REASON` — chooser: the author; its five cause
+        strings are fixed prose selected by an enum member (a4), and no command-derived text is
+        spliced into the message body, in any of F4/F5/FK6's changes to it. (2) the queries-table
+        row's `raw_command` (`_record_shim_failure` -> `record_query.append_query_row`) —
+        chooser: the model/attacker-influenced command text (pj1 already establishes this).
+        Walked the frame/value distinction the canonical escape turns on: unlike a template that
+        renders a heading raw while only escaping values, this row's frame (its keys) and its
+        `raw_command` value pass through one `json.dumps(row)` call together (claim gt1, read at
+        the gate) — no raw-frame step for a newline or brace in the command text to forge a
+        second row or corrupt a field boundary in. No obligation found on either sink.
+    - rule: R7
+      fired: true
+    - rule: R8
+      fired: false
+      cites: [g7]
+      note: >-
+        Re-keyed field census. No field this delta touches changes shape or derivation in a way
+        some reader uses as a join/lookup/correlation key across two artifacts. The candidate
+        that comes closest — `_scan`'s return shape (M1: positional tuple -> a frozen
+        value/start/end/kind record) — has zero readers outside `bash_exec.py` to begin with
+        (g7: "`_scan`, `_word_value`, ... ZERO references outside bash_exec.py"), so nothing
+        external can be keying on its old shape. `_opened_operands`'s four/five consumers read
+        the operand VALUES to make a decision (R7's territory, already fired above), not a KEY
+        correlating this artifact against an independently-written one — no message-id/trace-id
+        style re-minting exists anywhere in this change.
+  obligations: []   # every computed R1/R3/R4/R5/R7 firing was already bound by an existing demand
+                     # (see pre_discharged below) — checked, none left over as a demand still to mint.
+  holes: []          # R0's reconciliation found no unbound design sentence and no untraceable delta
+                     # element (see gate.evaluated's R0 note); nothing here to route to §7.
+  pre_discharged:
+    - {rule: R1, element: 'interacts(box_executor->bash_exec).payload', by: d_the_object_the_gate_authorised_is_the_object_the_box_runs, cites: [x14], witness: "box_executor sends `const:decision.pipelines` into bash_exec — the argv the gate authorised is the argv that crosses the process boundary unmediated; the shape demand pins that nothing re-derives it from text on the way in."}
+    - {rule: R3, element: 'command_text.access[bash]', by: d_a_unicode_blank_belongs_to_the_word_it_touches, cites: [c1, g5], witness: "command_text is reachable over [argv, bash]; the bash cell's nul-refusal/grant-fullmatch/scope-shape constraints are exercised by the same demand that pins the divergent-blank rule at this via, so the cell is not left to inherit parity by assumption."}
+    - {rule: R3, element: 'command_text.access[argv]', by: d_the_operator_cli_reports_the_whole_verdict, cites: [g7], witness: "the argv via is the operator CLI's route to the same gate over the same command text (g7: scripts/policy_cli.py:168 is a real decide_bash caller); the demand binds this cell so the operator surface is not silently exempted from the parity the bash cell owes."}
+    - {rule: R3, element: 'read_surface.access[bash]', by: d_the_bash_lane_enforces_every_constraint_the_read_lane_does, cites: [g11], witness: "read_surface is reachable over [bash, read-tool] (both inherited from spec_graph_575-grant-gate.yaml, g11); the parity demand asserts every constraint the read-tool cell enforces (confine, denylist, resolve) the bash cell enforces too, over the operand set the parse produced."}
+    - {rule: R3, element: 'read_surface.access[read-tool]', by: d_the_bash_lane_enforces_every_constraint_the_read_lane_does, cites: [g11], witness: "the same parity demand's other cell — the established via this change does not touch, asserted as the baseline the bash cell must match."}
+    - {rule: R4, element: 'command_text.domain.distinguished[""]', by: d_bash_blank_only_command_is_still_the_allowed_no_op, cites: [c6, g6], witness: "the empty command is the falsy distinguished member (falsy_valid: true); the demand pins that it stays the allowed no-op after the trim is deleted, not the swallow-shape default coercion R4 warns about."}
+    - {rule: R4, element: 'command_text.domain.distinguished["   "]', by: d_bash_blank_only_command_is_still_the_allowed_no_op, cites: [c6], witness: "a spaces-only command is one of the three surviving bash-blank spellings; the demand exercises it individually rather than folding it into the empty-string case."}
+    - {rule: R4, element: 'command_text.domain.distinguished["\t"]', by: d_bash_blank_only_command_is_still_the_allowed_no_op, cites: [c6], witness: "a tab-only command is the second surviving bash-blank spelling, exercised individually by the same demand."}
+    - {rule: R4, element: 'command_text.domain.distinguished["\n"]', by: d_bash_blank_only_command_is_still_the_allowed_no_op, cites: [c6], witness: "a newline-only command is the third surviving bash-blank spelling; distinguished from the divergent members below, which the same trim deletion refuses instead of allowing."}
+    - {rule: R4, element: 'command_text.domain.distinguished["\r"]', by: d_a_command_refused_only_for_an_invisible_character_says_so, cites: [g1], witness: "a bare `\\r` is the 26th divergent-blank member once M6 removes it from `_WORD_SEPARATORS` (g1); the demand exercises it individually and asks whether the refusal names the character by codepoint, not just a generic capability deny — widened at the verify loop from the line ending alone to the whole invisible class (RC2)."}
+    - {rule: R4, element: 'command_text.domain.distinguished["\u00a0"]', by: d_unicode_blank_only_command_is_a_command, cites: [x5], witness: "a bare U+00A0 command is a word bash would try to run as a program name, not a blank (x5: unwrap returns the character itself); the demand exercises it individually against the swallow-shape default."}
+    - {rule: R4, element: 'command_text.domain.distinguished["\v"]', by: d_unicode_blank_only_command_is_a_command, cites: [x5], witness: "same table, the vertical-tab member — x5's finding (these are words, not blanks) applies uniformly, and the demand exercises this member on its own."}
+    - {rule: R4, element: 'command_text.domain.distinguished["\f"]', by: d_unicode_blank_only_command_is_a_command, cites: [g5], witness: "the form-feed member, which g5 established joins the P1 table alongside U+00A0 and \\v — exercised individually here rather than assumed to follow from the others."}
+    - {rule: R4, element: 'command_text.domain.distinguished["\u2028"]', by: d_unicode_blank_only_command_is_a_command, cites: [g5], witness: "the U+2028 (line separator) member, the fourth g5 confirmed allows today with a corrupted first/last word and must be refused, not answered blank, once the trim is gone."}
+    - {rule: R4, element: '_WORD_SEPARATORS.domain.distinguished["\r"]', by: d_the_scanner_ends_a_word_where_bash_ends_one, cites: [g1, g4], witness: "the one distinguished member of the separator constant itself — g1's live finding that `_scan` splits on `\\r` where bash does not; the demand pins that the scanner stops treating it as a word-ending character."}
+    - {rule: R4, element: 'UNTOKENIZABLE_REASON.domain.distinguished[cause1]', by: d_a_newline_inside_the_c_argument_is_an_unclosed_quote, cites: [x7, a4], witness: "cause (1), the unbalanced-quote/newline-in-a-quoted-argument reason (a4); F5's demand pins that a newline inside a `bash -c` argument is refused under this cause rather than allowed and flattened (x7)."}
+    - {rule: R4, element: 'UNTOKENIZABLE_REASON.domain.distinguished[cause2]', by: d_a_trailing_backslash_still_continues_nothing, cites: [x13, a4], witness: "cause (2), the trailing-backslash reason; the demand pins that a dangling escape still refuses under this cause once the unquoter is hand-rolled, matching x13's table of what the current lexer does with one."}
+    - {rule: R4, element: 'UNTOKENIZABLE_REASON.domain.distinguished[cause3]', by: d_the_lexing_causes_this_change_does_not_touch_still_name_what_they_name, cites: [a4], witness: "cause (3), the connector-at-a-line-boundary reason; the survival demand pins that this cause still names exactly what the parser refuses after the wrapper decision moves outside the per-line loop."}
+    - {rule: R4, element: 'UNTOKENIZABLE_REASON.domain.distinguished[cause4]', by: d_the_lexing_causes_this_change_does_not_touch_still_name_what_they_name, cites: [a4], witness: "cause (4), the incomplete-connector-within-one-line reason; the same survival demand pins it alongside cause (3), since both per-line checks must keep working while the wrapper check moves outside the loop."}
+    - {rule: R4, element: 'UNTOKENIZABLE_REASON.domain.distinguished[cause5]', by: d_a_quoted_wrapper_word_is_the_program_bash_would_run, cites: [x6, a4], witness: "cause (5), the wrapper-lexing reason; F4's demand pins that the \"quoted timeout prefix\" clause is struck from its text (x6: an index-based match widens the timeout arm), while d_the_wrapper_shapes_the_reason_still_names_stay_refused pins that every OTHER shape the clause still names stays refused for it."}
+    - {rule: R5, element: unwrap, by: d_every_caller_stops_unwrapping_by_hand, cites: [c7, g7], witness: "parse removes its edge to unwrap while bash_lane_test_helpers and decide_bash still depend on it (c7's non-idempotence census, extended by g7's 9-references-in-5-files count); the survival demand pins that the gate hands the raw command straight to parse with no caller reinstating the removed step."}
+    - {rule: R5, element: _cmd_segments, by: d_the_shim_constants_stay_where_their_consumers_read_them, cites: [c4, g12], witness: "parse removes its edge to _cmd_segments while compile_policy and decide_bash still read its surviving constants (c4's caller census); g12 confirms the three deleted private helpers have zero outside references while NON_ADAPTER_SHIMS/OPERATOR_TOOLS/ADAPTER_RE do not, so the survival demand names exactly what must stay importable."}
+    - {rule: R7, element: 'interacts(record_shim_failure->command_text)', by: d_the_audit_row_and_the_authorised_argv_name_the_same_command, cites: [c1, pj1], witness: "command_text is read by five actors; the delta moves bash_fd_prefix_955/decide_bash/parse and leaves record_shim_failure on the old reading — this reader's own demand asserts the recorded row stays unmoved for every shape outside the enumerated set, bounded by pj1's 2000-char evidentiary limit."}
+    - {rule: R7, element: 'interacts(defender_policy_cli->command_text)', by: d_the_operator_cli_reports_the_whole_verdict, cites: [g7], witness: "the same shared-source split, at the operator CLI's own edge (g7 confirms it is a real caller, scripts/policy_cli.py:168); FK7's demand drives this reader to report the pipelines half of the verdict too, rather than leaving it silently unmoved."}
+    - {rule: R7, element: 'interacts(bash_lane_test_helpers->UNTOKENIZABLE_REASON)', by: d_every_assertion_site_of_the_lexing_reason_moves_with_it, cites: [g10], witness: "UNTOKENIZABLE_REASON is read by bash_lane_test_helpers and decide_bash; the delta moves decide_bash's cause text and this demand drives all seven assertion sites g10 censused to move with it in the same change."}
+    - {rule: R7, element: 'interacts(tool_bash->_opened_operands)', by: d_the_operand_set_the_gate_derives_is_the_one_its_consumers_read, cites: [a6], witness: "_opened_operands is read by tool_bash and record_shim_failure; the delta moves the derivation's own input and this demand drives tool_bash's four downstream consumers (a6) to be observed against the post-change set, not assumed unaffected."}
+    - {rule: R7, element: 'interacts(record_shim_failure->_opened_operands)', by: d_the_audit_rows_attribution_derives_from_the_same_operand_set, cites: [a6], witness: "the same shared-source split, at record_shim_failure's own edge — the audit row's system= attribution is re-derived from the same authorised operand set with no cache, so it cannot disagree with the execution about which files the command opened."}
+    - {rule: R7, element: 'interacts(decide_read->read_surface)', by: d_the_read_tool_lane_is_unmoved_by_the_parse_change, cites: [c3], witness: "read_surface is read by decide_bash and decide_read; the delta moves decide_bash and this demand drives decide_read to be observed and confirmed unmoved — c3's census established the read-tool lane is not one of the four sites that split bash text, so it has nothing of this change's mechanism to react to."}
+
+# ===========================================================================================
+# HANDOFF
+# ===========================================================================================
+
+handoff:
+  forks:
+    - "F6 — is O1's universal in scope? IN SCOPE, both halves required. resolved_by: human. `\\r` leaves `_WORD_SEPARATORS` (a) AND the #955 oracle reads the recorded argv in binary (b): (b) without (a) is a red test, (a) without (b) is a green suite over an unasserted property. Became mechanism M6, which is not in the issue body."
+    - "F4 — does the enumerated set admit the widening M3 itself produces? ACCEPTED. resolved_by: human. `timeout '5' cat x` / `\"timeout\" 5 cat x` flip deny->allow; the 'quoted `timeout` prefix' clause leaves UNTOKENIZABLE_REASON cause (5) together with the test pinning it. The body's 'can only narrow what is accepted' sentence is STRUCK as false."
+    - "F5 — is the multi-line `-c` narrowing wanted? ACCEPTED. resolved_by: human. Obligation attached: the refusal must reach the model as a reason that explains the newline. SB4 bounds it — where an independently unbalanced quote fails first, the generic cause is correct."
+    - "F2 — what is a verdict? THE WHOLE `BashDecision` (allow + reason identity + pipelines). resolved_by: auto (non-material)."
+    - "F3 — does `unwrap` survive as a name? RENAMED. resolved_by: auto (non-material). The folded step works in SPANS of the original text — the `timeout` arm parses the raw slice from the next token's start offset, and the `bash -c` arm uses its token's span to know where the argument ends (which is how an outer operator becomes visible) while handing on that token's RESOLVED value as the inner command. It is `_wrapper_span` here and `unwrap` remains as the removed element. The rationale originally recorded here — \"it returns a span, not an unwrapped string\" — was true of one arm and false of the other; corrected at the second verify loop (RC7)."
+    - "F1 — where is the blank command answered? PROBE-SETTLED, not a fork: the two phase-A leaves disagreed and the executed probe won (g6). A folded parse returning zero pipelines DENIES; only a blank test AHEAD of the parse preserves today's verdict. Recorded because a later reader will find the refuted recommendation still sitting in 20-demands.md."
+    - "RESOLVED AT §7 — FK1 ACCEPTED, MINIMAL ARM ONLY (human): the wrapper step advances past `timeout` only when at least one duration- or flag-shaped token is consumed; `timeout cat report.md` flips allow->deny and joins the enumerated set as member 7. `full-grammar` and `decline` rejected by name. FK3 ONCE, at the top level, never over the slice it extracts (human) — adds NO member. FK4 the blank test READS `_WORD_SEPARATORS` (human) — adds NO member. FK7 the frozen-baseline replay is BUILT NOW (human), so the neutrality obligation stays a universal, and its second premise carries: `policy_cli explain --json` gains the missing `pipelines` field. FK6 (auto, non-material) the invisible-character refusal names the character. FK9 (auto) multi-stage path AND inner precheck — its load-bearing half is probe-settled (pj3), not chosen. FK10 (auto) the oracle bounds its own subprocesses. Each demand above carries `resolved:` and the readings it rejected."
+    - "FK2 — how far does O1's universal reach into the wrapper's own semantics? RESOLVED AT §7 (human, routed late on the author leaf's red flag): O1 BINDS THE ARGV AUTHORISED FOR THE INNER COMMAND. The wrapper's own discarded semantics — the kill timer `timeout 5 cat x` never starts, the shell `bash -c 'echo $HOME'` never gets to expand `$HOME` in — ARE A NAMED NON-OBLIGATION OF THIS SURFACE, stated here explicitly rather than left implicit, because O1 read literally was already false for every wrapper shape the design KEEPS. Rejected: extending O1 to the wrapper's semantics (enforcing the timer, or refusing the wrapper outright — far beyond consolidating where a word ends), and leaving it unstated. No demand is minted either way and nothing in the suite turns on it; every O1 assertion in the suite is already scoped to the inner command's argv, and the differential compares the argv the parse authorised against the argv bash actually passed, which structurally cannot fail on an effect the parser never modelled. THE ROUTING FAILURE IS ITSELF RECORDED: this family fell out between the judge's ten and the seven that reached §7, and was recovered only because the author leaf noticed it had no resolution."
+    - "FK5 and FK8 were RESOLVED IN STRUCTURE rather than put to the human: FK5 by splitting one sentence into two demands (`bash -c` refuses, a `timeout` prefix accepts), FK8 by stopping O3 at the decision object and binding the four post-decision consumers under O1 at `_opened_operands`. Both are recorded here so the merge-gate human can disagree."
+    - "SB2, SB3, SB5, SB6 take the judge's recommendations and are bound above (reason identity for the leftover `timeout 3 cat x`; the two-way malformed/refused distinction; the argv the wire will not carry recorded as out of O1's scope; one table-driven sweep over the closed alphabet). SB1 routes into FK3, which the human resolved as `once`."
+    - "RC1/RC6/RC9/RC11/RC12 — a divergent blank moves WHICH MESSAGE an already-refused command is refused with. RESOLVED ACROSS FIVE VERIFY LOOPS. The final form is a rule over four axes that are CLOSED rather than widened: CHARACTER (the computed 26-member alphabet checked against the frozen tuple), REASON CLASS (the four messages the gate can answer with, enumerated once in `_baseline_959.reason_classes` and read by both the recorder and the control), ARM (derived per class — AST-walked `raise` sites for the lexing class, tabled arms for the three classes that RETURN their message), and POSITION (two, because `str.strip()` reaches two ends and nothing else). The rule: the blank glues to the token it touches, and the refusal moves off its arm iff that token is the one the arm's decision turns on — the last token for a trailing blank, the first for a leading one. WHY FIVE PASSES, recorded because the shape repeated every time: RC1 found it as one character at one arm; RC6 found the character axis unwidened; RC9 found the arm axis unwidened; RC11 found the position axis unwidened; RC12 found the arm DERIVATION keyed on the statement form — `ADAPTER_RETIRED_REASON` is a `return`, so a walk over `raise` sites could not reach it however carefully written, and 78 shapes moved off the message that redirects the model to the `query` tool while the derivation reported itself complete. Each pass closed exactly what had been demonstrated; what stops a sixth is not a wider sweep but `test_every_recorded_transition_belongs_to_an_enumerated_class`, which states the recorded reason-transition space as a closed set of twelve families and fails on a thirteenth."
+    - "RC2 — the invisible-character reason obligation. RESOLVED AT THE VERIFY LOOP (human): FK6 was resolved for a CLASS and bound for one member of it, so the demand is WIDENED (not doubled) to every member of the frozen divergent-blank alphabet and the refusal must name the character BY CODEPOINT. Of the corpus cases delegating their reason to that demand, the overwhelming majority carry no carriage return at all (103 of 118 over the corpus as it now stands; 78 of 91 when the finding was written). Rejected: narrowing FK6's recorded resolution to line endings."
+    - "RC4 — the audit row's 2000-character truncation bound. ACCEPTED at the verify loop (human) and recorded as an acceptance in `handoff.deviations`, after being routed to the human seam twice and answered neither time. RC3 and RC5 were folded as records without asking: three out-of-scope premises are now `handoff.drops` entries, and the frontiers checker's second finding is a consequence of a file written after the mechanical leaf ran."
+    - "RF-E8 — a wrapper shape whose LATER token carries an invisible character. RESOLVED AT §7 (human, third verify loop): it KEEPS the specific lexing reason. A faithful folded matcher recognises the wrapper by its FIRST token, so the shape is still recognisably a wrapper and cause (5) still names it. Rejected: falling back to the capability deny (182 more shapes into member 8, and the model loses the message naming what is actually wrong), and leaving it unrecorded (whichever way the implementer happened to build it would silently become the answer). The corpus records all seven shapes × 26 characters as NEUTRAL BY DECISION — the simulation that settled every other arm reports these MOVING, but it parses without the fold, so it cannot settle them; `d_the_wrapper_shapes_the_reason_still_names_stay_refused` states the first-token rule as an obligation on the implementation rather than leaving it to be inferred from a corpus row. THIS IS THE ONE ANSWER IN THE SUITE THAT IS CHOSEN RATHER THAN MEASURED, and it is marked as such in the artifact, the corpus and the test."
+  refuted:
+    - "the body's 'the folded step returns a slice of the original string' and the authoritative comment's M3 'taking `line[start:end]` of the `-c` argument' — FALSE FOR THE `bash -c` ARM, and inherited verbatim into a demand id, its prose and its test docstring before anyone probed it (RC7, second verify loop). Executed: a `-c` argument's raw span includes its quotes, so re-scanning it yields ONE argv word — `bash -c 'cat /run/report.md'` would parse to a program named `cat /run/report.md`. The arm's real rule is the token's RESOLVED value, re-scanned; the span bounds the token so an operator after it is visible. The raw slice stays correct for the `timeout` arm. This is the fourth stale sentence probed out of the same body paragraph family (x1, x12, b20, and this)."
+    - "the body's 'the refactor can only narrow what is accepted, and any widening is a bug the differential must catch' — FALSE. M3's token-index prefix match widens the `timeout` arm (x6). Struck at §7."
+    - "the body's 'test_955_bash_fd_prefix.py derives its blank alphabet from str.isspace() | shlex.whitespace' — there is no blank alphabet in that file (x12), so O1's stated discharge never covered the blank class at all."
+    - "the body's / c3's 'the current code pins lex.whitespace' and '`_word_value` (`shlex.shlex`)' — it is `shlex.split` and no such pin exists (x1). M2's substance survives; the mechanism the doc credits does not exist."
+    - "the body's P1 sentence that the trim is 'now pinned by a test at that seam' and spelled `command.strip(BLANKS)` — neither the constant nor the test exists (c1)."
+    - "C2's second horn, 'the folded parse returns zero pipelines rather than raising' — zero pipelines DENY a blank command (g6). F1's recommendation in 20-demands.md rested on it and is overturned."
+    - "C3's fourth `parse(unwrap(x))` migration site — `e2e/test_540_box_boundary.py:362` is an in-box import probe, not a call site; and a fifth trim at test_bash_exec.py:28 is not on the list (x8)."
+    - "C4's 'intent_540.md:556 should be corrected' — the stale record is at three lines, 134, 466 and 556 (a2, refuting x9's 'twice')."
+    - "the issue's census verdict for `_scan`, 'keep — this is the one' — INCOMPLETE, not wrong: `_WORD_SEPARATORS` contains `\\r` and bash does not split on it (g1). That gap became M6."
+    - "the enumerated verdict-change set as closed at four members — under-counted by at least two, with member 1's character count one short and member 2 stating only its parse change (45-dispositions RF-J3). The corrected six-member set is carried by `d_the_enumerated_set_is_written_before_implementation`."
+    - "M6 as sufficient on its own — `_word_value`'s own `shlex.split` whitespace contains `\\r` regardless of `_WORD_SEPARATORS`, so M6 closes O1 only if M2 lands (RF-J4, three readers independently)."
+  deferred:
+    - "c10 — verdict-neutrality outside the enumerated set. An implementation-time measurement over both differentials plus the full suite, read against the six-member set this file carries. TRANSFERS TO write-code-from-spec."
+    - "the folded parser's in-box import census (C4's failure mode) — it cannot be censused before the code exists; `spec-graph trace drivers` confirmed there is nothing to anchor at this base. Deferred to write-code-from-spec's `actors` run, where a real source diff exists."
+    - "whether the implementation names the folded step `_wrapper_span`. If it picks another name, THE GRAPH ID MOVES WITH IT IN THE SAME COMMIT — an alias would disable the check for that concept rather than paper over it."
+  drops:
+    - "d0_a_command_with_no_tokens_parses_to_zero_pipelines — the provisional demand written for C2's second horn. Its reading was refuted by executed probe (g6) before any test was authored; RE-BOUND at `d0_a_blank_command_is_answered_before_the_parse`, which pins the horn that survives."
+    - "test_a_cd_stage_changes_the_working_directory_only_for_pipelines_after_it_in_the_same_command — pure executor semantics (`_do_cd`'s cwd mutation across pipelines), unreachable through the gate because no grant names `cd`, untouched by all six mechanisms."
+    - "test_a_failed_cd_short_circuits_the_pipeline_after_it_exactly_as_a_failed_ordinary_stage_would — connector short-circuit semantics in the executor, unreachable through the gate, untouched by all six mechanisms."
+    - "test_a_cd_executed_in_one_bash_call_does_not_carry_its_working_directory_into_the_next_bash_call — a process-lifetime/session-state property with no parsing content; no mechanism proposes altering per-call cwd reset."
+    - "test_the_oracle_and_the_box_run_two_different_bashes — SETTLED OUT OF SCOPE at phase C and recorded here so it is an examined no rather than a silence (RC3): the differential resolves `bash` with `shutil.which` on the test machine while the executor runs inside a named container, a pre-existing environment-parity gap none of M1-M6 touches and no obligation names."
+    - "test_a_malformed_stage_reaches_the_channel_that_carries_pipelines_into_the_box — SETTLED OUT OF SCOPE at phase C (RC3): no demand binds the argv entries' string-type invariant end to end, and nothing in this change moves what type crosses the wire. Phase D may mint the obligation; it is not an ambiguity."
+    - "test_two_independent_runners_of_the_same_pipeline_meet_a_construction_bug_differently — SETTLED OUT OF SCOPE at phase C (RC3): the two transports surface a construction fault differently, none of M1-M6 touches either, and no obligation names divergent error-surfacing between them."
+  nullstub_passes: []
+  deviations:
+    - "KNOWN LIMIT OF THE SUITE — THE SPEC'S OWN RECORD LOST ITS SUBJECT. `40-premise-file.py` and every answer file contain zero literal U+00A0, `\\v`, `\\f`, `\\r` or U+2028 (a3), and four worked examples were written with a literal U+00A0 that is now an ordinary space. The four are restated in escaped form at the top of this file. EVERY DIVERGENT-BLANK CASE IN THE SUITE MUST BE BUILT FROM AN ESCAPE, never from a literal in a docstring or a fixture: a test written from those docstrings as they stand passes while exercising an ordinary space. The same rule applies to `\\r` — a CRLF that a tool normalises on the way into a fixture takes the whole subject with it."
+    - "DEGRADATION — THE ESCALATION TIER WAS NOT INDEPENDENT. The escalation subset files carried the first answerer's own `# HEDGE:` lines on 41 of 43 premises, so both escalation readers were told, per premise and before answering, that the doc does not decide and what the two candidate readings are (45-dispositions RF-J1). A CONVERGED HEDGE IS THEREFORE WEAK EVIDENCE IN THIS RUN. The judge re-weighted on the two signals that survive — a reader settling AGAINST a handed hedge, and two settled answers contradicting — and this artifact takes its dispositions as given without re-deriving them and without treating converged hedging as signal. The fix for the next run is to strip `# HEDGE:` lines when building the subset; `# fork:` markers are phase B's and are fine to carry."
+    - "KNOWN LIMIT — THE ONE LIVE PIN FOR C4 IS CI-EXCLUDED. `e2e/test_665_box_live.py:183` imports `defender.runtime.bash_exec` inside a live box, which is what would catch a folded parser that reintroduces the non-stdlib import — and it is `live`-marked, so the CI marker expression this project's gate runs excludes it (g8). `d_bash_exec_still_imports_only_the_standard_library` is a prevention demand at module scope; the diagnostic shape of an in-box import failure is deliberately unasserted, because the census cannot exist before the code does."
+    - "ACCEPTED AT §7 (RC4, human, at the verify loop) — THE AUDIT ROW'S EVIDENTIARY VALUE IS BOUNDED, AND THE BOUND IS ACCEPTED FOR THIS CHANGE. `recorded_command = command[:2000]` (pj1, executed): a realistic command is never truncated and the 1999/2000 boundary is exact, but the field's own docstring names it as the one field of a shim row an attacker-influenced turn chooses freely, so a command padded past 2000 characters can push the divergent character out of the recorded evidence while the row still reads as a plausible, non-divergent command. Phase D and the re-ground leaf each routed this to the human seam and it went unanswered twice; asked and answered at the verify loop, the decision is to ACCEPT the bound for this change rather than widen the field or mint a follow-up now. It stays a named known limit, and `test_the_audit_rows_raw_command_is_unmoved_for_every_shape_outside_the_enumerated_set` re-probes the boundary live rather than citing it, so a later change to the constant fails a test instead of quietly moving the limit."
+    - "OPERATIONAL — THE RESOLVER UNDER-RESOLVES INSIDE THIS WORKTREE. Every `spec-graph`/symbol-refs census in this run was executed from /workspace (the main checkout at the same commit, tree clean, byte-identical for the files in play), including this leaf's (g14, a2, a5, a6). Inside the worktree the resolution guard trips on every cross-file symbol and returns 1 reference where 134 exist — read empty as empty, never as complete."
+    - "KNOWN LIMIT — `test_955`'s recording protocol is line-based, so an argv entry containing a literal `\\n` byte still breaks recovery even under M6(b)'s binary read (pj2). That is a pre-existing limitation of the protocol, orthogonal to `\\r`, and nothing here claims to fix it."

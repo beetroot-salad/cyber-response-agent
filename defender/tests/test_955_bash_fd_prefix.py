@@ -233,3 +233,308 @@ def test_what_we_accept_means_what_bash_means(shim_dir, cmd):
     assert ours[1] == where, (
         f"{cmd!r}: we route stderr to {ours[1]!r}, bash routes it to {where!r}"
     )
+
+
+# ============================================================================================ #
+# #959 — the wrapper seam, the blank alphabet, and the oracle's own evidence channels.
+#
+# Folding `hooks/_cmd_segments.unwrap` into `parse` (M3) puts the wrapper under this
+# differential for the first time: today neither this corpus nor #897's contains a wrapper
+# word, a carriage return, or any blank but an ordinary space (claims c9, x12), so the three
+# classes this change touches have never been put to bash at all.
+#
+# Blind spot (2) is still live in the file that was said to have closed it: line 199 recovers
+# the recorded argv with `read_text(encoding="utf-8")`, whose universal-newline translation
+# turns a bare `\r` into the very delimiter line 200 splits on — so a `\r` in an argument is
+# recovered as two entries and the oracle certifies the `\r` divergence CLEAN. Every blank
+# below is built from its codepoint for the same reason the corpus is: a literal in a docstring
+# is a character a later edit can normalise into a space.
+# ============================================================================================ #
+
+import ast as _ast  # noqa: E402
+import sys as _sys  # noqa: E402
+
+_CR = chr(0x000D)
+_NBSP = chr(0x00A0)
+_THIS_FILE = Path(__file__).resolve()
+
+#: Wrapper shapes, as their own cases. Every one of them RUNS the shim, which is what makes
+#: bash answerable about it: a candidate real bash refuses to run (`timeout w a`, where the
+#: real `timeout` reads `w` as its duration) has no argv for the oracle to compare and belongs
+#: at the gate's own tests, not here.
+_WRAPPER_CANDIDATES = [
+    f"bash -c '{_SHIM} a'",
+    f"bash -c '{_SHIM} a 2>/dev/null'",
+    f"bash -c '{_SHIM} -c 2 2>/dev/null'",
+    f"bash -c '{_SHIM} a '2>/dev/null",          # the glued-operator spelling: OUTSIDE the -c
+    f'"bash" -c "{_SHIM} a"',
+    f"sh -c '{_SHIM} a'",
+    f"timeout 5 {_SHIM} a",
+    f"timeout '5' {_SHIM} a",
+    f"timeout 5 {_SHIM} a 2>/dev/null",
+]
+
+
+def _stages(cmd: str):
+    """Every stage `cmd` parses to, as argv lists — the multi-stage shape `_parsed` refuses."""
+    return [list(s.argv) for p in bash_exec.parse(cmd) for s in p.stages]
+
+
+def _bash_argv_bytes(shim_dir: Path, cmd: str) -> list[str] | None:
+    """The argv bash passed the shim, recovered from the evidence file IN BINARY.
+
+    Deliberately not `_bash_meaning`: that recovery is itself under repair here (M6(b)), and a
+    test of the SCANNER that recovers its evidence through a normalising read is green whenever
+    the two make the same mistake — which is exactly how a `\r` divergence stayed certified
+    clean. `None` when bash never ran the shim."""
+    bash = shutil.which("bash")
+    argv_file = shim_dir / "argv.bytes"
+    argv_file.unlink(missing_ok=True)
+    env = {
+        **os.environ,
+        "PATH": f"{shim_dir}{os.pathsep}{os.environ.get('PATH', '')}",
+        "W_ARGV": str(argv_file),
+    }
+    subprocess.run(
+        [bash, "-c", cmd], capture_output=True, env=env, cwd=shim_dir, timeout=60,
+    )
+    if not argv_file.exists():
+        return None
+    entries = argv_file.read_bytes().split(b"\n")
+    if b"ARGV_END" not in entries:
+        return None
+    return [_SHIM] + [e.decode("utf-8", "surrogateescape")
+                      for e in entries[:entries.index(b"ARGV_END")]]
+
+
+@pytest.mark.parametrize("cmd", _WRAPPER_CANDIDATES)
+def test_a_wrapper_shape_we_accept_means_what_bash_means(shim_dir, cmd):
+    """The differential's corpus carries wrapper shapes — `bash -c '<candidate>'` and
+    `timeout N <candidate>`, including the glued-operator spelling — so for every wrapper the
+    parse accepts, real bash is asked what it actually ran and where its stderr went, and the
+    two must agree.
+
+    This is the direction that can see the wrapper defect: `bash -c 'echo a '2>/dev/null` is a
+    shape both sides accept and mean differently, and an oracle comparing accept/reject verdicts
+    is structurally blind to it whatever its corpus."""
+    ours = _parsed(cmd)
+    if ours is None:
+        return                      # refusing more than bash is this executor's prerogative
+    theirs = _bash_meaning(shim_dir, cmd)
+    assert theirs is not None, f"we accepted {cmd!r} and bash will not even parse it"
+    argv, where = theirs
+    assert argv is not None, f"we accepted {cmd!r} but bash never ran the command in it"
+    assert ours[0] == argv, (
+        f"{cmd!r}: we would run {ours[0]}, bash runs {argv} — the wrapper the gate strips and "
+        "the wrapper bash honours are not the same wrapper"
+    )
+    assert ours[1] == where, f"{cmd!r}: we route stderr to {ours[1]!r}, bash routes it to {where!r}"
+
+
+def test_the_oracle_tells_the_inner_shells_stderr_from_the_outer_shells(shim_dir):
+    """When the corpus runs bash inside bash, the oracle still tells where the stderr marker
+    landed for the command under test rather than for the shell wrapping it."""
+    assert _bash_meaning(shim_dir, f"bash -c '{_SHIM} a'")[1] == "capture"
+    assert _bash_meaning(shim_dir, f"bash -c '{_SHIM} a 2>/dev/null'")[1] == "devnull"
+    assert _bash_meaning(shim_dir, f"bash -c '{_SHIM} a 2>&1'")[1] == "stdout"
+    # ...and the argv is the inner command's, not the wrapping shell's.
+    assert _bash_meaning(shim_dir, f"bash -c '{_SHIM} a'")[0] == [_SHIM, "a"]
+
+
+def test_the_scanner_ends_a_word_exactly_where_bash_ends_one(shim_dir):
+    r"""No character ends a word here that does not end one in bash: a carriage return inside an
+    operand is part of that operand, so `cat /run/report.md\rx` names one file and is not
+    authorised as a two-operand command that opens a different one. The same holds at a word
+    edge (`cat P\r`), across an operator run (`cat P\r| wc -c`), and for a line that is one
+    `\r` and nothing else, which is a one-character word and not zero tokens.
+
+    Rejected: the current `_WORD_SEPARATORS`, which contains `\r` because the shlex lexer it
+    replaced did — bash's own blank set is space and tab only. Bash is the oracle here, and it
+    is asked with the shim rather than assumed."""
+    for cmd in (
+        f"{_SHIM} a{_CR}b",
+        f"{_SHIM} P{_CR}",
+        f"{_SHIM} {_CR}x",
+        f"{_SHIM} a{_CR}b c{_CR}d",
+    ):
+        ours = _parsed(cmd)
+        assert ours is not None, f"{cmd!r} was refused — a carriage return is an ordinary byte"
+        theirs = (_bash_argv_bytes(shim_dir, cmd), None)
+        assert theirs[0] is not None, f"bash never ran the shim for {cmd!r}"
+        assert ours[0] == theirs[0], (
+            f"{cmd!r}: we would run {ours[0]}, bash runs {theirs[0]} — the scanner ends a word "
+            "where bash does not, so the argv the gate authorises is not the argv the text names"
+        )
+    # A line that is one carriage return is a one-character word, not zero tokens.
+    assert _stages(_CR) == [[_CR]]
+
+
+def test_our_blank_set_is_the_blank_set_bash_splits_on(shim_dir):
+    """The differential's alphabet carries blanks derived from both sides of the comparison —
+    `str.isspace()` together with the scanner's own set — so every character one side calls a
+    word separator is put to real bash, and a character bash does not split on does not end a
+    word here either. The blank must be rendered GLUED to an adjacent token with no separator: a
+    space-separated blank cannot exercise the property, and if the corpus renderer cannot do
+    that today it gains the machinery."""
+    ours_side = set(bash_exec._WORD_SEPARATORS)
+    pythons_side = {chr(cp) for cp in range(0x110000) if chr(cp).isspace()}
+    alphabet = sorted((ours_side | pythons_side) - {"\n"})
+    assert len(alphabet) > 25, "the alphabet collapsed — this asserts nothing over one character"
+
+    disagreements = []
+    for blank in alphabet:
+        cmd = f"{_SHIM} a{blank}b"          # GLUED: no separator between the blank and a word
+        ours = _parsed(cmd)
+        if ours is None:
+            continue
+        theirs = _bash_argv_bytes(shim_dir, cmd)
+        if theirs is None:
+            continue
+        if ours[0] != theirs:
+            disagreements.append((hex(ord(blank)), ours[0], theirs))
+    assert not disagreements, (
+        "these characters end a word for us and not for bash (or the reverse): "
+        f"{disagreements}"
+    )
+
+
+def test_the_oracle_never_normalises_its_own_subject(shim_dir):
+    r"""The oracle recovers bash's recorded argv as bytes: nothing between bash and the
+    assertion rewrites a byte, so a carriage return in an argument arrives as a carriage return
+    and cannot be laundered into the delimiter the recovery then splits on.
+
+    Today's `Path.read_text(encoding="utf-8")` does worse than erase the character — universal
+    newline translation treats a bare `\r` as its own line ending, so it phantom-splits entries
+    and shifts the `ARGV_END` alignment for everything after them (four expected entries
+    recovered as five). The oracle then reports the same wrong argv our own scanner produces,
+    and certifies the divergence clean."""
+    argv, _where = _bash_meaning(shim_dir, f"{_SHIM} a{_CR}b tail")
+    assert argv == [_SHIM, f"a{_CR}b", "tail"], (
+        "the recorded argv came back split at the carriage return. bash passed ONE argument; "
+        "the recovery invented two, so the oracle agrees with the bug it exists to catch"
+    )
+
+
+def test_no_channel_the_oracle_reads_evidence_through_rewrites_a_byte(shim_dir, tmp_path):
+    r"""The binary read is a property of the oracle, not of one line: the stdout and stderr
+    capture beside the argv file is held to the same rule, because
+    `subprocess.run(..., text=True)` normalises exactly as `read_text` does. No channel between
+    bash and the assertion — delimiter, end marker, encoding, capture — may rewrite a byte.
+
+    The normalisation is re-probed here against the real primitives rather than cited, so the
+    day the taxonomy changes this test says so instead of quietly passing."""
+    evidence = tmp_path / "evidence"
+    evidence.write_bytes(b"a" + _CR.encode() + b"b\nARGV_END\n")
+    assert evidence.read_bytes().split(b"\n")[0] == b"a" + _CR.encode() + b"b"
+    assert evidence.read_text(encoding="utf-8").split("\n")[0] == "a", (
+        "read_text no longer universal-newline-translates a bare CR — the claim this demand "
+        "rests on has changed and the whole M6(b) argument should be re-examined"
+    )
+    bash = shutil.which("bash")
+    printed = subprocess.run(
+        [bash, "-c", "printf 'a\\rb\\n'"], capture_output=True, timeout=60,
+    )
+    assert printed.stdout == b"a" + _CR.encode() + b"b\n"
+    decoded = subprocess.run(
+        [bash, "-c", "printf 'a\\rb\\n'"], capture_output=True, text=True, timeout=60,
+    )
+    assert decoded.stdout != printed.stdout.decode("utf-8"), (
+        "text=True no longer rewrites a bare CR — same re-examination as above"
+    )
+
+    # ...so no channel THE ORACLE recovers evidence through may be read through either of them.
+    # Scanned over this module's helpers only: a `test_` body may hold the rewrite deliberately,
+    # as the four assertions above do, and reading this file's own source is not an evidence
+    # channel between bash and an assertion.
+    tree = _ast.parse(_THIS_FILE.read_bytes().decode("utf-8"))
+    helpers = [
+        node for node in tree.body
+        if isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef))
+        and not node.name.startswith("test_")
+    ]
+    normalising = []
+    for helper in helpers:
+        for node in _ast.walk(helper):
+            if not isinstance(node, _ast.Call) or not isinstance(node.func, _ast.Attribute):
+                continue
+            if node.func.attr == "read_text":
+                normalising.append((helper.name, "read_text", node.lineno))
+            if node.func.attr == "run":
+                for kw in node.keywords:
+                    if kw.arg == "text" and getattr(kw.value, "value", None) is True:
+                        normalising.append((helper.name, "subprocess text=True", node.lineno))
+    assert not normalising, (
+        f"these evidence reads normalise their subject: {normalising}. A carriage return in an "
+        "argument, in stdout or in stderr must reach the assertion as the byte bash wrote - and "
+        "the argv recovery splitting on the delimiter is where the laundering lands."
+    )
+
+
+def test_a_candidate_whose_inner_c_payload_is_broken_is_reported_not_silently_accepted(shim_dir):
+    """The oracle prechecks the text it is about to trust: a second, independent `bash -n -c`
+    over the EXTRACTED INNER text, because the existing outer `bash -n -c "<outer>"` reports
+    nothing at all about a nested `-c '<inner>'` payload's syntax. A candidate whose inner
+    payload is broken is skipped and reported, never silently accepted into the corpus. The
+    helper must also accept a multi-stage candidate rather than raising: `bash -c 'cat x | wc
+    -l'` is the shape a model most plausibly writes and is exactly where an argv divergence
+    would hide.
+
+    The blindness is re-probed here rather than cited (claim pj3): four broken inner payloads
+    nested inside a well-formed outer, each also handed to `bash -n -c` directly as the
+    control."""
+    bash = shutil.which("bash")
+    broken = ("if true; then", "{ echo a", "echo a |", "for i in")
+    for inner in broken:
+        outer = f"bash -c '{inner}'"
+        nested = subprocess.run([bash, "-n", "-c", outer], capture_output=True, timeout=60)
+        direct = subprocess.run([bash, "-n", "-c", inner], capture_output=True, timeout=60)
+        blind = f"the outer syntax check now reports on the inner payload {inner!r} — the " \
+                "premise of the inner precheck has changed"
+        assert nested.returncode == 0, blind
+        assert not nested.stderr, blind
+        assert direct.returncode != 0, f"{inner!r} is not actually broken"
+        assert _bash_meaning(shim_dir, outer) is None, (
+            f"the oracle admitted {outer!r}, whose inner payload bash refuses to parse. The "
+            "outer precheck is structurally blind to it, so the candidate silently becomes a "
+            "test of nothing."
+        )
+    # A multi-stage `-c` payload is a candidate, not a crash: the helper reports on it.
+    multi = f"bash -c '{_SHIM} a | {_SHIM} b'"
+    assert _stages(multi) == [[_SHIM, "a"], [_SHIM, "b"]], (
+        "the multi-pipeline `-c` payload does not reach the parser as the two stages it names"
+    )
+    _parsed(multi)   # must REPORT rather than raise: a raise is a green-looking coverage gap
+
+
+def test_the_oracle_harness_bounds_its_own_subprocess_calls():
+    """The oracle harness bounds its own subprocess calls explicitly, so a candidate that does
+    not terminate — or a composed candidate whose child outlives the parent the harness waits on
+    — turns a hung suite into a failed test rather than polluting the next candidate's evidence
+    file.
+
+    Adding wrapper shapes makes this differential run bash inside bash, which is what brings the
+    unbounded wait within reach of a corpus entry."""
+    tree = _ast.parse(_THIS_FILE.read_text(encoding="utf-8"))
+    unbounded = []
+    for node in _ast.walk(tree):
+        if (
+            isinstance(node, _ast.Call)
+            and isinstance(node.func, _ast.Attribute)
+            and node.func.attr == "run"
+            and isinstance(node.func.value, _ast.Name)
+            and node.func.value.id == "subprocess"
+        ):
+            bound = next((kw for kw in node.keywords if kw.arg == "timeout"), None)
+            if bound is None:
+                unbounded.append(node.lineno)
+            elif isinstance(bound.value, _ast.Constant):
+                assert bound.value.value <= 300, (
+                    f"line {node.lineno}: a bound of {bound.value.value}s is long enough that a "
+                    "hung candidate reads as a hung suite"
+                )
+    assert not unbounded, (
+        f"these subprocess calls carry no timeout: lines {unbounded}. The oracle IS a "
+        "subprocess, and an unbounded wait on one is how a corpus addition hangs the suite "
+        "instead of failing it."
+    )
+    assert _sys.version_info >= (3, 10)
