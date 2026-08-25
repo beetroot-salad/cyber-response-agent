@@ -76,10 +76,31 @@ def parse_jsonl_row(line: str) -> dict | None:
 
 
 def read_jsonl_rows(path: Path) -> list[dict]:
+    return read_jsonl_rows_report(path)[0]
+
+
+def read_jsonl_rows_report(path: Path) -> tuple[list[dict], int]:
+    """JSONL rows plus the number of non-blank physical lines that were not rows.
+
+    Most artifact readers are deliberately tolerant and need only :func:`read_jsonl_rows`.
+    Boundaries that must account for lost evidence, however, cannot recover malformed lines
+    after that tolerant reader has discarded them. Keeping the accounting beside
+    :func:`parse_jsonl_row` makes both readers agree on exactly what a row is.
+    """
     if not path.is_file():
-        return []
+        return [], 0
     text = path.read_text(encoding="utf-8", errors="replace")  # lint-jsonl-io: ok — the canonical tolerant reader  # noqa: E501
-    return [row for line in text.splitlines() if (row := parse_jsonl_row(line)) is not None]
+    rows: list[dict] = []
+    unreadable = 0
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        row = parse_jsonl_row(line)
+        if row is None:
+            unreadable += 1
+        else:
+            rows.append(row)
+    return rows, unreadable
 
 
 def append_jsonl(path: Path, rows: list[dict]) -> int:

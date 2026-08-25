@@ -16,6 +16,9 @@ Refused at the launcher, where the operator's own argument is still in hand.
 from __future__ import annotations
 
 import importlib
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -75,3 +78,90 @@ def test_a_run_directly_under_the_runs_base_is_accepted(tmp_path, runs_base):
     source.mkdir(parents=True, exist_ok=True)
 
     cli_mod().refuse_distant_source(Path(source))
+
+
+@pytest.mark.parametrize("episode_id", ["../escaped", "/tmp/escaped", "nested/episode"])
+def test_an_episode_id_that_is_not_one_safe_component_is_refused_before_priming(
+        tmp_path, runs_base, monkeypatch, episode_id):
+    """Absolute and traversing episode ids never reach the capture writer.
+
+    ``prepare_episode`` writes before run-id materialization, so relying on the later run-dir
+    validation is too late. A bomb in ``prime_base`` makes the ordering observable: the unsafe
+    id must exit while it is still just an argument.
+    """
+    cli = cli_mod()
+
+    def primed_too_early(*_args, **_kwargs):
+        pytest.fail("prime_base was called before the episode id was validated")
+
+    monkeypatch.setattr(cli, "prime_base", primed_too_early)
+
+    with pytest.raises(SystemExit, match="episode-id"):
+        cli.prepare_episode(tmp_path / "source", episode_id)
+
+    assert not (runs_base / "episodes").exists()
+
+
+def test_a_safe_episode_id_resolves_beneath_the_episode_root(runs_base):
+    """The positive control for the path-component refusal."""
+    assert cli_mod().episode_dir_for("episode-001") == runs_base / "episodes" / "episode-001"
+
+
+def test_an_existing_episode_is_refused_even_if_only_stale_world_rows_remain(
+        tmp_path, runs_base, monkeypatch):
+    """Reusing an episode id cannot revive old per-world live-base rows.
+
+    Checking only ``served/base.jsonl`` misses a partly removed or partly failed episode. Its
+    world ledger still participates in ``Ledger._absorb`` and can override live reads for keys
+    the new source never captured, so the episode directory itself is the immutable unit.
+    """
+    cli = cli_mod()
+    episode = runs_base / "episodes" / "episode-001"
+    stale = episode / "served" / "w1.jsonl"
+    stale.parent.mkdir(parents=True, exist_ok=True)
+    stale.write_text('{"source":"base","world_id":null}\n', encoding="utf-8")
+
+    def primed_too_early(*_args, **_kwargs):
+        pytest.fail("prime_base ran for an episode id that already exists")
+
+    monkeypatch.setattr(cli, "prime_base", primed_too_early)
+
+    with pytest.raises(cli.LedgerError, match="already exists"):
+        cli.prepare_episode(tmp_path / "source", "episode-001")
+
+    assert stale.is_file(), "the refusal should not mutate or sanitize the stale episode"
+
+
+def test_the_launcher_bootstraps_the_package_when_invoked_by_path(tmp_path):
+    """The documented ``python3 defender/learning/branch/cli.py`` shape reaches argparse.
+
+    The subprocess has no pytest-injected ``PYTHONPATH`` and starts outside the repository, so
+    only the launcher's own bootstrap can make ``defender.*`` imports and its branch siblings
+    resolvable. ``--help`` stops before any run or external dependency is touched.
+    """
+    cli_path = Path(__file__).resolve().parents[1] / "learning" / "branch" / "cli.py"
+    env = dict(os.environ)
+    env.pop("PYTHONPATH", None)
+
+    proc = subprocess.run(  # noqa: S603 — fixed in-repo launcher and interpreter
+        [sys.executable, str(cli_path), "--help"], cwd=tmp_path, env=env,
+        capture_output=True, text=True, check=False,
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert "usage: branch" in proc.stdout
+
+
+def test_an_unknown_world_system_is_refused_before_the_episode_is_primed(
+        tmp_path, runs_base):
+    """A misspelt touch cannot become a successful all-passthrough sibling."""
+    source = runs_base / "source-run"
+    source.mkdir()
+
+    with pytest.raises(SystemExit, match="elastc"):
+        cli_mod().main([
+            str(source), "1", "--episode-id", "episode-001",
+            "--world", "w:elastc", "--continuation-prompt", "continue",
+        ])
+
+    assert not (runs_base / "episodes").exists()

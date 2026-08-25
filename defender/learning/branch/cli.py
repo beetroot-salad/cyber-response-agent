@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Fork one finished run into a family of sibling worlds, and run them.
 
 The composition root for the turn-N branch. Everything it wires already exists as a seam —
@@ -15,6 +16,24 @@ Steps 1 and 2 are what a per-sibling entry point cannot get right on its own: th
 a moment derived independently by each world is not a shared clock at all, the second because
 the base must be written while there is provably no reader.
 
+NOT YET WIRED FOR A LIVE RUN, and that is a scope boundary rather than an oversight. This is
+the composition root for ORDERING — the four steps above, which no seam can enforce about
+itself — and it deliberately does not reproduce `run.py`'s per-run lifecycle. Three pieces are
+missing and each fails loudly rather than quietly if you try:
+
+- no `start_box`/`stop_and_scrub`, so `AgentDeps` falls back to an unattached `BoxExecutor`
+  and every `deps.box.run_parsed` raises `BoxFault`; a sibling would burn its budget retrying
+  and never get a shell;
+- no reap-scan, so `scrub.tree_verified` is False for every sibling run dir and
+  `run_common.learning_refusal_gate` refuses it;
+- no `preflight_role_models`, the one in-process pass that sources the billable key — so a
+  missing key surfaces per sibling, after the base is primed and N forks have committed into
+  the SOURCE store.
+
+Wiring them means deciding whether N sandboxes may run concurrently, which is a design
+question this batch has not answered. Until it is, drive a branched run through the e2e replay
+harness (`tests/e2e/test_920_branch_resume.py`) rather than through this entry point.
+
 WHAT THIS DOES NOT DO, and it is deliberate rather than unfinished: it does not author the
 worlds. A `World` here carries an id and the systems it touches, and its overlay is whatever the
 caller hands it. The questioner that writes a triplet, the review that replays it against the
@@ -25,18 +44,36 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+# This file is a path-based launcher, just like `run.py` and `learning/loop.py`. Python puts
+# only `learning/branch/` on `sys.path` for `python3 defender/learning/branch/cli.py`, so both
+# the first `defender` import and package-relative imports fail unless the workspace root is
+# installed before any package import resolves. Re-exec into the project venv first when it
+# exists, matching the other launchers' dependency boundary.
+_DEFENDER_DIR = Path(__file__).resolve().parents[2]
+_VENV_PY = _DEFENDER_DIR / ".venv" / "bin" / "python3"
+if __name__ == "__main__" and _VENV_PY.is_file() and Path(sys.executable) != _VENV_PY:
+    os.execv(str(_VENV_PY), [str(_VENV_PY), __file__, *sys.argv[1:]])
+
+if (_root := str(_DEFENDER_DIR.parent)) not in sys.path:
+    sys.path.insert(0, _root)
+
 from defender._paths import PATHS
+from defender._run_id import RUN_ID_ALLOWED, is_valid_run_id
 from defender._run_paths import RunPaths
+from defender.learning.branch.capture import prime_base
+from defender.learning.branch.estate.registry import (
+    EstateError,
+    WorldRegistry,
+    validate_world_touches,
+)
+from defender.learning.branch.ledger import Ledger, LedgerError, base_file
 from defender.run_common import materialize_run_dir, resolve_runs_base
 from defender.runtime import branch, driver
-
-from .capture import prime_base
-from .estate.registry import WorldRegistry
-from .ledger import BASE_FILENAME, SERVED_DIRNAME, Ledger
 
 
 @dataclass(frozen=True)
@@ -46,20 +83,49 @@ class World:
     `touches` decides cost as much as semantics — a system no world declares is never staged,
     never patched and never costs a model call — so it is the world's own declaration rather
     than something inferred from an overlay that may be empty for honest reasons.
+
+    THE ID IS CHECKED AT THE MINT, here, because everything downstream checks a DIFFERENT rule
+    at a later depth: the registry wants a non-empty string, a stager wants a name its corpus
+    can carry, `Ledger.for_world` wants a filename component, and `materialize_run_dir` wants
+    `{episode_id}-{world_id}` to be a legal run id. Refused only there, an operator's typo cost
+    a primed episode directory and however many siblings had already run to completion against
+    a live model — and `materialize_run_dir` refuses with `sys.exit`, which is a
+    `BaseException`, so it aborts the family rather than landing in the result list.
     """
 
     world_id: str
     touches: tuple[str, ...] = ()
 
+    def __post_init__(self) -> None:
+        if not self.world_id:
+            raise SystemExit(
+                "a world needs an id: `--world ID[:sys,sys]`. `None`/empty is how the family "
+                "tier spells 'the shared base', and a world claiming it would overwrite the "
+                "recording its siblings replay")
+        if not is_valid_run_id(self.world_id):
+            raise SystemExit(
+                f"world id {self.world_id!r} is not usable (allowed: {RUN_ID_ALLOWED}) — it "
+                "names this sibling's run dir, its ledger file and its staged corpus, and each "
+                "of those refuses a different subset at a different depth")
 
-def episode_dir_for(source_run_dir: Path, episode_id: str) -> Path:
+
+def episode_dir_for(episode_id: str) -> Path:
     """Where one episode's shared records live.
 
     Beside the runs rather than inside any of them: the base ledger is the FAMILY's, and parking
     it in one sibling's run dir would make that sibling's tree the thing every other sibling
     reads through — a coupling nothing later could untangle, and one that reads as ordinary
     until someone deletes a run dir.
+
+    `episode_id` is checked as a run-id-shaped token by `parse_branch_args`, for the reason the
+    world id is: it is joined straight into a path here, and `prepare_episode` writes through
+    that path BEFORE `materialize_run_dir` ever gets to judge the run id derived from it — so
+    an id carrying a separator planted the family's capture outside the runs base entirely.
     """
+    # Validate at the path-construction boundary as well as in `_launch`: callers such as tests
+    # and future orchestration code invoke `prepare_episode` directly, and none may write before
+    # the same single-component rule has run.
+    refuse_bad_episode_id(episode_id)
     return resolve_runs_base() / "episodes" / episode_id
 
 
@@ -92,39 +158,86 @@ def prepare_episode(source_run_dir: Path, episode_id: str) -> Path:
     sibling built out of order fails loudly instead of reading the live estate for every key,
     and this is the call that makes the ordering true rather than merely checked.
     """
-    episode = episode_dir_for(source_run_dir, episode_id)
-    report = prime_base(source_run_dir, episode / SERVED_DIRNAME / BASE_FILENAME)
+    episode = episode_dir_for(episode_id)
+    if episode.exists() or episode.is_symlink():
+        raise LedgerError(
+            f"episode {episode_id!r} already exists at {episode} — an episode id names one "
+            "immutable family capture and its per-world live-base rows. Reusing it would mix "
+            "the earlier estate into this run under first-row-wins; name a fresh episode id")
+    report = prime_base(source_run_dir, base_file(episode))
     # BOTH HALVES, NAMED. Every skipped row is a key that will reach the LIVE estate during the
     # episode rather than replaying, so the skips are the size of the non-deterministic surface
     # — and a reader shown only "primed 10" would assume it was zero.
     skipped = report.duplicates + report.failed + report.sentinels + report.unreadable
     print(
         f"[branch] primed {report.primed} captured row(s) into "
-        f"{episode / SERVED_DIRNAME / BASE_FILENAME}; {skipped} skipped ({report}) — a skipped "
+        f"{base_file(episode)}; {skipped} skipped ({report}) — a skipped "
         "key is read live per world rather than replayed",
         file=sys.stderr)
     return episode
 
 
+def materialize_worlds(
+    worlds: list[World], *, spec: branch.BranchSpec, episode_dir: Path, episode_id: str,
+) -> list[tuple[World, str, Path, WorldRegistry]]:
+    """Step 3, whole and SERIALLY, before any sibling starts spending.
+
+    This is where the module docstring's ordering says it belongs, and doing it inside the
+    parallel step instead cost two things. `materialize_run_dir` refuses with `sys.exit`, and
+    `SystemExit` is a `BaseException` that CPython's `Task.__step` re-raises past
+    `asyncio.gather(return_exceptions=True)` and out of `asyncio.run` — so a run dir that
+    already existed (the ordinary state after a partly-failed episode, which the CLI's own exit
+    code invites you to retry) aborted the whole family instead of landing in the result list,
+    cancelling siblings mid-flight and skipping the "N/M ran" report entirely. And
+    `Ledger.for_world`'s refusals — an id that is not a filename component, or one that names
+    the family's own capture — fired per world, after N-1 siblings had already run a real model
+    against a real estate.
+
+    THE REGISTRY IS BUILT HERE for the same reason: every one of `WorldRegistry.__init__`'s
+    four refusals — an empty id, an unreadable `touches`, an id no stager can name a corpus in,
+    a patch table the applier could never apply — is a property of the WORLD alone, knowable
+    before the family starts. Left inside the gathered task they fired per sibling, so an
+    authoring typo in world 3 was reported as "2/3 ran": a family with a missing arm, which
+    reads like a run that failed rather than like a launch that should never have happened.
+
+    Both are properties of the family that are knowable before it starts, so they are answered
+    before it starts: every failure here is a raise out of `main` with nothing spent.
+    """
+    prepared = []
+    for world in worlds:
+        run_id = f"{episode_id}-{world.world_id}"
+        registry = WorldRegistry(
+            PATHS.adapters_dir, driver.GATHER_DEF.verb_grant,
+            world=world, ledger=Ledger.for_world(episode_dir, world.world_id),
+            as_of=spec.as_of,
+        )
+        run_dir = materialize_run_dir(RunPaths(Path(spec.source_run_dir)).alert, run_id)
+        prepared.append((world, run_id, run_dir, registry))
+    return prepared
+
+
 async def run_world(
-    world: World, *, spec: branch.BranchSpec, episode_dir: Path, run_id: str,
-    defender_dir: Path, model_name: str | None,
+    *, spec: branch.BranchSpec, run_id: str, run_dir: Path, registry: WorldRegistry,
+    defender_dir: Path, model_name: str | None, model_override: str | None,
 ) -> dict:
-    """One sibling, in its own run dir, against its own ledger over the family's base."""
-    run_dir = materialize_run_dir(RunPaths(Path(spec.source_run_dir)).alert, run_id)
-    registry = WorldRegistry(
-        PATHS.adapters_dir, driver.GATHER_DEF.verb_grant,
-        world=world, ledger=Ledger.for_world(episode_dir, world.world_id), as_of=spec.as_of,
-    )
+    """One sibling, in its own run dir, against its own ledger over the family's base.
+
+    `model_override` is the operator's RAW `--model`, carried beside the resolved `model_name`
+    exactly as `run.py` carries it: `run_investigation` threads it into the review bundle, whose
+    roles pin their OWN defaults. Dropped, `branch --model X` ran MAIN on X and every review
+    stage on its pinned default — a family that is not comparable with a `run.py --model X`
+    baseline, with nothing anywhere saying the two review configurations differed.
+    """
     return await driver.run_investigation(
         alert_path=RunPaths(run_dir).alert, run_dir=run_dir, run_id=run_id,
-        defender_dir=defender_dir, model_name=model_name, verbs=registry, resume=spec,
+        defender_dir=defender_dir, model_name=model_name, model_override=model_override,
+        verbs=registry, resume=spec,
     )
 
 
 async def run_family(
-    worlds: list[World], *, spec: branch.BranchSpec, episode_dir: Path, episode_id: str,
-    defender_dir: Path, model_name: str | None,
+    prepared: list[tuple[World, str, Path, WorldRegistry]], *, spec: branch.BranchSpec,
+    defender_dir: Path, model_name: str | None, model_override: str | None,
 ) -> list:
     """Every sibling, concurrently.
 
@@ -135,14 +248,16 @@ async def run_family(
 
     `return_exceptions`, because one world failing is a result rather than a reason to abandon
     its siblings: the ones that completed are still a family, and the caller can see which arm
-    is missing instead of losing all three to whichever failed first.
+    is missing instead of losing all three to whichever failed first. That promise is only kept
+    because `materialize_worlds` already took the setup failures — a `BaseException` raised in
+    a gathered task is re-raised past `return_exceptions` and there is nothing this call can do
+    about it.
     """
     return await asyncio.gather(*(
         run_world(
-            world, spec=spec, episode_dir=episode_dir,
-            run_id=f"{episode_id}-{world.world_id}",
-            defender_dir=defender_dir, model_name=model_name)
-        for world in worlds
+            spec=spec, run_id=run_id, run_dir=run_dir, registry=registry,
+            defender_dir=defender_dir, model_name=model_name, model_override=model_override)
+        for _world, run_id, run_dir, registry in prepared
     ), return_exceptions=True)
 
 
@@ -162,20 +277,68 @@ def parse_branch_args(argv: list[str]) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
+def refuse_bad_episode_id(episode_id: str) -> None:
+    """Refuse an episode id that cannot name a directory beside the runs.
+
+    `episode_dir_for` joins this straight into a path, and `prepare_episode` WRITES through it
+    before `materialize_run_dir` ever judges the run id derived from it — so `--episode-id
+    ../..` planted the family's capture outside the runs base, or onto another episode's, with
+    the run still green. The same rule the world id is held to, because the two are joined into
+    one run id and a token that fails there fails here.
+    """
+    if not is_valid_run_id(episode_id):
+        raise SystemExit(
+            f"--episode-id {episode_id!r} is not usable (allowed: {RUN_ID_ALLOWED}) — it names "
+            "a directory beside the runs and half of every sibling's run id")
+
+
 def parse_world(spec: str) -> World:
     world_id, _, touches = spec.partition(":")
-    return World(
+    world = World(
         world_id=world_id,
         touches=tuple(s for s in touches.split(",") if s))
+    # BEFORE THE SOURCE STORE OR EPISODE. A typo otherwise survives as a world that touches
+    # nothing: every real system records `passthrough`, the run stays green, and the declared
+    # difference was never applied. The registry repeats this same helper for programmatic
+    # worlds; calling it here keeps a bad CLI declaration from priming an immutable episode.
+    validate_world_touches(world, driver.GATHER_DEF.verb_grant)
+    return world
 
 
 def main(argv: list[str]) -> int:
+    """Launch one episode, reporting a refusal as a REFUSAL rather than as a crash.
+
+    Every check this module owns exits with a written explanation, and the checks it delegates
+    to — `open_source_store`, `branch_point_time`, `validate`, `prime_base`, `Ledger.for_world`
+    — raise `BranchError`/`LedgerError`/`EstateError` with messages authored for exactly this
+    reader. Uncaught, those reached the operator wrapped in a stack trace while the four beside
+    them printed cleanly: two spellings of "you cannot branch this" from one command.
+    """
+    try:
+        return _launch(argv)
+    except (branch.BranchError, LedgerError, EstateError) as refusal:
+        raise SystemExit(f"[branch] {refusal}") from refusal
+
+
+def _launch(argv: list[str]) -> int:
     ns = parse_branch_args(argv)
     source = Path(ns.source_run_dir).resolve()
     refuse_distant_source(source)
+    refuse_bad_episode_id(ns.episode_id)
     worlds = [parse_world(w) for w in ns.world]
     if not worlds:
         raise SystemExit("name at least one --world; a family with no sibling measures nothing")
+    # DISTINCT, and refused here rather than discovered as a collision. Two `--world a` entries
+    # is an ordinary copy-paste, and it hands two siblings ONE run id and ONE ledger path — two
+    # `Ledger` objects, so two `threading.Lock`s, appending to one file. `run_family`'s parallel
+    # design rests on "each world writes its own file"; a repeated id is the one way to make
+    # that premise false from outside.
+    repeated = sorted({w.world_id for w in worlds if
+                       [x.world_id for x in worlds].count(w.world_id) > 1})
+    if repeated:
+        raise SystemExit(
+            f"--world named {repeated} more than once — a family is a set of DIFFERENT worlds, "
+            "and two siblings sharing an id share a run dir and a ledger file")
 
     store = branch.open_source_store(source)
     try:
@@ -192,9 +355,11 @@ def main(argv: list[str]) -> int:
         store.close()
 
     episode_dir = prepare_episode(source, ns.episode_id)
+    prepared = materialize_worlds(
+        worlds, spec=spec, episode_dir=episode_dir, episode_id=ns.episode_id)
     results = asyncio.run(run_family(
-        worlds, spec=spec, episode_dir=episode_dir, episode_id=ns.episode_id,
-        defender_dir=PATHS.defender_dir, model_name=ns.model))
+        prepared, spec=spec, defender_dir=PATHS.defender_dir,
+        model_name=ns.model, model_override=ns.model))
     failed = [(w.world_id, r) for w, r in zip(worlds, results, strict=True)
               if isinstance(r, BaseException)]
     for world_id, err in failed:

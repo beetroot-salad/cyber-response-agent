@@ -86,6 +86,18 @@ SERVED_DIRNAME = "served"
 BASE_FILENAME = "base.jsonl"
 
 
+def base_file(episode_dir: Path) -> Path:
+    """The family's capture under `episode_dir`.
+
+    The JOIN, not just the leaf name. `BASE_FILENAME` and `SERVED_DIRNAME` were extracted here
+    because "a second spelling is how one starts writing where the other is not looking", and
+    then the composition of the two was left to each caller to write out — three copies of
+    `episode / SERVED_DIRNAME / BASE_FILENAME` across the primer's caller and this module. One
+    home for the path the primer writes and every `Ledger` reads.
+    """
+    return Path(episode_dir) / SERVED_DIRNAME / BASE_FILENAME
+
+
 def payload_text(payload: Any) -> str:
     """The canonical bytes for a payload, and the ONE spelling of them.
 
@@ -242,9 +254,13 @@ class Ledger:
 
         The id is validated AS A FILENAME COMPONENT, which nothing upstream does: the registry
         checks it is a non-empty string, and a stager checks it can name a corpus — and only
-        for a world that touches a staged system. Neither refuses `../base`, which would
-        resolve onto the family's own capture and let one world's rows be replayed by every
-        sibling as the estate.
+        for a world that touches a staged system. Neither refuses `../base`, which would write
+        outside the episode entirely.
+
+        THAT CHECK IS NOT WHAT KEEPS A WORLD OFF THE CAPTURE, and reading it as such is how the
+        bare id `base` got through: it needs no separator, passes every rule here, and names
+        `BASE_FILENAME` exactly. The collision is refused by `__post_init__` on the property
+        itself (`path == base_path`), where the direct constructor cannot route around it.
         """
         if not isinstance(world_id, str) or not world_id:
             raise LedgerError(
@@ -254,8 +270,8 @@ class Ledger:
                 f"world id {world_id!r} is not a single filename component — a world's rows are "
                 "a file beside the family's base, and an id carrying a separator would write "
                 "outside the episode or onto the capture its siblings replay")
-        served = Path(episode_dir) / SERVED_DIRNAME
-        return cls(path=served / f"{world_id}.jsonl", base_path=served / BASE_FILENAME)
+        base = base_file(episode_dir)
+        return cls(path=base.parent / f"{world_id}.jsonl", base_path=base)
 
     def __post_init__(self) -> None:
         #: THE FAMILY TIER ONLY, keyed by request key. `base_payload` is the sole reader and
@@ -268,6 +284,20 @@ class Ledger:
         #: writes this file. Splitting the tiers closed the cross-PROCESS half of the tearing
         #: problem; this is the cross-THREAD half, and it is untouched by the split.
         self._lock = threading.Lock()
+        # A WORLD'S FILE IS NEVER THE FAMILY'S. Stated as the property rather than as a rule
+        # about ids, because the id rule is a PROXY for it and missed the one spelling that
+        # needs no separator: `for_world(episode, "base")` names `base.jsonl`, which IS
+        # `BASE_FILENAME`, so that world's rows were appended into the capture its siblings
+        # replay — one world's live read served to every sibling AS THE ESTATE, and the file's
+        # "read-only for the whole run" invariant false for the episode. Checked HERE so the
+        # direct constructor (which the tests and every later reader use) cannot reach it
+        # either; `for_world`'s component check stays, because it refuses a different thing —
+        # a write outside the episode.
+        if self.path == self.base_path:
+            raise LedgerError(
+                f"a world's ledger is {self.path}, which is the family's own capture — the base "
+                "is primed once before any sibling forks and is read-only for the run, so a "
+                "world writing there serves its own live reads to every sibling as the estate")
         # THE BASE MUST ALREADY EXIST, and that refusal is the ordering guarantee. Priming runs
         # once, before any sibling forks; a `Ledger` built against a missing base is a sibling
         # that started early, and letting it through would mean every key missed the family tier
@@ -316,10 +346,20 @@ class Ledger:
             # Keying on the coerced spelling keeps a malformed row addressable instead of
             # crashing the replay that has to notice it.
             text = row.get("payload_text")
-            if row.get("world_id") is not None:
+            if row.get("world_id") is not None or row.get("source") not in FAMILY_SOURCES:
                 # A world's OWN row, which nothing reads back: this memo answers the family tier
                 # and only the family tier. Absorbing it doubled the memo in payload bytes to
                 # answer a question no caller has.
+                #
+                # BOTH HALVES OF `record`'s TIER RULE, not just the `world_id` one. The reader
+                # was the fail-open side of a seam whose writer refuses: `record` rejects a
+                # family-tier row whose source is not `base`/`captured`, but this loop asked
+                # only about the owner — so a `fault` or `refused` row carrying `world_id: null`
+                # (a hand edit, a torn line that still parses, a future writer that skips
+                # `record`) was memoized as the family's ANSWER, and its `payload_text` is an
+                # error digest like `"exit=1; HTTP 404 …"`. Served to the applier as a
+                # successful response, that is the silent scenario injection `_captured_call`
+                # refuses to commit on the writing side.
                 continue
             # A row with no payload is not an ANSWER, and memoizing it as `""` would make
             # `base_payload` report a hit that `json.loads` then dies on — moving the crash one

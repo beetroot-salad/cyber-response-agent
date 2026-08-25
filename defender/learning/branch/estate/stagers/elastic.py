@@ -32,13 +32,19 @@ A present bound is never rewritten: it is a scenario-timeline value the model ch
 months from the wall clock, so clamping it would truncate the alert's own window.
 
 `esql` has no such parameter. Its window is `| WHERE @timestamp >= "..."` INSIDE the body, so
-bounding it would mean editing a pipe stage — general query-language surgery, which everything
-above refuses for the reason `_METADATA` and `_one_source` refuse their own near-misses: every
-failure mode is a SILENT half-application, and a predicate this module half-understood would
-narrow evidence rather than omit it. So the bound is the model's to write, and the resumed run
-is TOLD the date instead (`driver._branch_clock`). All 12 committed `esql` templates already
-carry `< "${end}"`, so today this costs nothing; an ad-hoc query that omits an upper bound
-reads the live tail, and this paragraph is what speaks up when that starts to matter.
+the bound is added as its own pipe stage after the source command rather than by editing the
+predicate the model wrote (`elastic_adapter.bounded_esql`). Appending narrows and can never
+widen, which is why it is not the query-language surgery this module refuses elsewhere: nothing
+reads or rewrites the existing `WHERE`, so there is no half-application to be silent about.
+`evals/oracle_golden/controls.add_esql_window` makes the same move on the same splitter.
+
+The bound rides the WIRE and not the evidence: `esql_payload` echoes the query into the payload,
+so the asked form is what is echoed and recorded, and a branched payload stays byte-comparable
+with the capture it came from.
+
+An earlier revision left `esql` unbounded and relied on the resumed run being TOLD the date. That
+did not hold — the coordinate reaches MAIN's opening prompt, while the model that writes these
+queries is the GATHER subagent, whose deps carry no clock and whose prompt renders none.
 """
 
 from __future__ import annotations

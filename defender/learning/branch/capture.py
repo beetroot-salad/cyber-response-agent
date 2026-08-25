@@ -25,9 +25,8 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from defender._io import append_jsonl, read_jsonl_rows, read_text_soft
-from defender._run_paths import RunPaths, contained_payload
-from defender.scripts.gather_tools.record_query import is_reserved_query_id
+from defender._io import append_jsonl, read_text_soft
+from defender.learning.lead_repository import QueryRow, load_queries_report
 
 from .ledger import CAPTURED, LedgerError, ServedCall, payload_text
 
@@ -60,12 +59,36 @@ def prime_base(source_run_dir: Path, base_path: Path) -> PrimeReport:
     world's own difference is still applied on top. Slicing it would buy nothing and cost
     determinism on exactly the keys a sibling is most likely to re-ask.
     """
-    rows = read_jsonl_rows(RunPaths(Path(source_run_dir)).executed_queries)
+    # ONCE IS A REFUSAL, NOT A NARRATION. `append_jsonl` opens `"a"`, so a second prime into the
+    # same episode stacked a second capture underneath the first — and `_absorb` is
+    # first-row-wins, so the EARLIER source's answers stayed the estate for every sibling of the
+    # later episode while `PrimeReport` reported a clean prime of the new one. Green run, wrong
+    # capture, nothing in the record to say so: the same shape the empty-prime raise below
+    # refuses, arriving through the door beside it. Retrying a partly-failed episode is the
+    # ordinary way in — `materialize_run_dir` exits on an existing run dir, which invites
+    # exactly the re-run — so this is the common path, not the exotic one.
+    if base_path.exists() or base_path.is_symlink():
+        raise LedgerError(
+            f"{base_path} already holds a primed base — a family's capture is written once, "
+            "before any sibling forks, and priming over it merges two runs' estates under "
+            "first-row-wins with nothing in the table to tell them apart. Name a fresh "
+            "episode id, or remove the episode directory to re-prime it")
+    # THROUGH `lead_repository`, which `defender/CLAUDE.md` names as "the single read/join
+    # surface … consumers never re-parse the artifacts". Hand-decoded here, the primer was a
+    # second reader of a thirteen-column row with ONE writer, and it had already drifted:
+    # `row.get("exit_code") != 0` treats a `"0"` written as a string as a failure where
+    # `load_queries` coerces it through `_as_int` and reads it as the success it is — so the two
+    # readers disagreed about which captures exist, in the direction that silently leaves keys
+    # to the live estate.
+    rows, table_unreadable = load_queries_report(Path(source_run_dir))
     seen: set[str] = set()
     out: list[dict] = []
-    counts = {"duplicates": 0, "failed": 0, "sentinels": 0, "unreadable": 0}
+    counts = {
+        "duplicates": 0, "failed": 0, "sentinels": 0,
+        "unreadable": table_unreadable,
+    }
     for row in rows:
-        call = _captured_call(Path(source_run_dir), row, counts)
+        call = _captured_call(row, counts)
         if call is None:
             continue
         # FIRST KEY WINS, the rule the ledger's memo folds a file under. Two rules would let the
@@ -78,20 +101,31 @@ def prime_base(source_run_dir: Path, base_path: Path) -> PrimeReport:
         out.append(call.row())
     if not out:
         # `branch.validate` already refuses a source that captured nothing that reached a system,
-        # so an empty prime means the capture is PRESENT and unreadable. Continuing would leave
-        # every key to the live estate while the run stayed green — the fail-open shape #920
-        # names as its fourth trap, reached through the one step that exists to prevent it.
+        # so an empty prime means the capture is PRESENT and every row was SKIPPED. Continuing
+        # would leave every key to the live estate while the run stayed green — the fail-open
+        # shape #920 names as its fourth trap, reached through the one step that exists to
+        # prevent it.
+        #
+        # THE COUNTS NAME WHICH SKIP, and the message must not guess: `validate` screens only
+        # reserved query ids, never `exit_code`, so a short source whose every real capture
+        # errored (the one shipped fixture holds a cmdb 404) reaches here with `failed=N` and
+        # nothing unreadable at all. Told "nothing in it could be read back", an operator goes
+        # looking for a corrupt sidecar that does not exist.
         raise LedgerError(
-            f"{source_run_dir} primed no base rows ({counts}) — its capture is present but "
-            "nothing in it could be read back, so every sibling would read the live estate for "
-            "every key with nothing in the record to say so")
-    base_path.parent.mkdir(parents=True, exist_ok=True)  # lint-unguarded-tree-write: ok — episode archive under the learning state root, host-side, outside every box mount
-    append_jsonl(  # lint-unguarded-tree-write: ok — episode archive under the learning state root, host-side, outside every box mount
+            f"{source_run_dir} primed no base rows — every row in its capture was skipped "
+            f"({counts}), so every sibling would read the live estate for every key with "
+            "nothing in the record to say so. The counts name which rule skipped them: "
+            "`failed` is a non-zero exit, `sentinels` never reached a system, `unreadable` is "
+            "a payload this episode could not read back")
+    # NO mkdir HERE: `append_jsonl` makes the parent itself, and the `if not out` raise above
+    # means it can never take its empty-rows early return. A second copy of the same call was a
+    # second `lint-unguarded-tree-write` waiver to re-audit for one write.
+    append_jsonl(  # lint-unguarded-tree-write: ok — the episode archive is `runs_base/episodes/<id>/`, a sibling of the run dirs rather than one of them, so it is not bound into any box  # noqa: E501
         base_path, out)
     return PrimeReport(primed=len(out), **counts)
 
 
-def _captured_call(run_dir: Path, row: dict, counts: dict) -> ServedCall | None:
+def _captured_call(row: QueryRow, counts: dict) -> ServedCall | None:
     """One capture row as a family-tier `ServedCall`, or `None` with `counts` advanced.
 
     SUCCESSFUL ANSWERS ONLY, and that is a property of the tier rather than a simplification.
@@ -107,20 +141,26 @@ def _captured_call(run_dir: Path, row: dict, counts: dict) -> ServedCall | None:
     and may not fail the same way twice. It is bounded — a `1` exit is `agent-fixable` and not an
     INFRA code, so a replayed failure cannot trip the circuit breaker in one sibling and not its
     base — and `PrimeReport.failed` is its size.
+
+    A `QueryRow`, not a raw dict: the sentinel predicate, the `exit_code` coercion and the
+    containment check on `payload_path` are `lead_repository`'s, so this seam holds only the
+    rules that are the TIER's. `params` arrives already coerced to `{}` when the stored value is
+    not a dict, which is also exactly what `request_key` does with one — so the primed key and
+    the key a live serve would compute agree, where skipping such a row left the two readers of
+    one malformed line disagreeing about whether it exists.
     """
-    if is_reserved_query_id(str(row.get("query_id", ""))):
+    if row.is_sentinel:
         # A `∅.`-prefixed row is a writer-only record of a call that never reached a system of
         # record. There is no estate answer behind it to replay.
         counts["sentinels"] += 1
         return None
-    if row.get("exit_code") != 0:
+    if row.exit_code != 0:
         counts["failed"] += 1
         return None
-    sidecar = contained_payload(run_dir, row.get("payload_path"))
-    if sidecar is None:
+    if row.raw_ref is None:
         counts["unreadable"] += 1
         return None
-    text = read_text_soft(sidecar)[0]
+    text = read_text_soft(row.raw_ref)[0]
     if text is None:
         counts["unreadable"] += 1
         return None
@@ -128,13 +168,12 @@ def _captured_call(run_dir: Path, row: dict, counts: dict) -> ServedCall | None:
     if canonical is None:
         counts["unreadable"] += 1
         return None
-    system, verb = str(row.get("system", "")), str(row.get("verb", ""))
-    params = row.get("params")
-    if not system or not verb or not isinstance(params, dict):
+    system, verb = row.system, row.verb
+    if not system or not verb:
         counts["unreadable"] += 1
         return None
     return ServedCall(
-        system=system, verb=verb, params=params,
+        system=system, verb=verb, params=row.params,
         payload_text=canonical, source=CAPTURED, world_id=None,
     )
 
@@ -153,8 +192,16 @@ def _canonical_payload(text: str) -> str | None:
     the base tier and read the estate, on a run that stayed green and a base file that looked
     full. `payload_text` is imported from the ledger rather than respelled for exactly that
     reason: the two spellings must be one.
+
+    `RecursionError` BESIDE `ValueError`, because "unreadable" is a COUNT here and not a fault:
+    the caller's whole contract is that a sidecar this episode cannot read back advances
+    `PrimeReport.unreadable` and the run states the size of its non-deterministic surface.
+    `json.loads` raises `RecursionError` — not a `ValueError` — on a deeply nested payload, and
+    adapter output is arbitrary vendor JSON, so one such row escaped every frame up to
+    `cli.main` and killed the episode before a world forked, with a traceback naming neither
+    the row nor the file.
     """
     try:
         return payload_text(json.loads(text))
-    except ValueError:
+    except (ValueError, RecursionError):
         return None

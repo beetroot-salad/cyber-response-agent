@@ -192,9 +192,17 @@ def _branch_clock(resume: Any) -> str:
     window is written into its own body is the model's sentence, and no rewrite short of
     parsing that language can bound it. Telling the model the date is what makes it write the
     bound itself; the gap where it does not is recorded in the stager's own docstring.
+
+    `resume.as_of` DIRECTLY, not `getattr(..., None)` with a `""` fallback. `BranchSpec.as_of`
+    is a required, non-`Optional` field precisely so a resume without a moment cannot be
+    spelled, and re-coalescing it here reopened that: a shape carrying no clock produced a
+    prompt with no clock line, silently, which is the failure the field's own docstring says it
+    exists to remove. `defender/CLAUDE.md` names the rule — "Resolve an optional input once at
+    the boundary, thread it inward non-`Optional`; don't re-coalesce in the body" — and the
+    boundary already did the work. An `AttributeError` here is the honest answer for a resume
+    shape that is not a `BranchSpec`.
     """
-    at = getattr(resume, "as_of", None)
-    return "" if at is None else f"now: {_clock.z_seconds(at)}\n"
+    return f"now: {_clock.z_seconds(resume.as_of)}\n"
 
 
 def _budget_state_for_enforcement(state: dict, deps: AgentDeps) -> dict:

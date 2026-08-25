@@ -68,6 +68,11 @@ from defender.tests._branch_947 import (  # noqa: E402
     legal_source,
     spec_at,
 )
+from defender.tests.test_920_elastic_staging import (  # noqa: E402
+    COMMITTED,
+    ESQL_TEMPLATES,
+    leading_source,
+)
 from defender.tests._session_store_705 import (  # noqa: E402
     make_store,
     runs_base,
@@ -356,14 +361,22 @@ def tz_east_of_utc(monkeypatch):
 
     A POSIX `TZ` string rather than a zone name, so the fixture does not depend on a tz database
     being installed — under a missing one a zone name silently resolves to UTC and the arm it
-    supports would pass against the very implementation it exists to catch."""
+    supports would pass against the very implementation it exists to catch.
+
+    THE RESTORE IS IN A `finally`, and the guard assertion is INSIDE it. `monkeypatch`'s own
+    finalizer puts `TZ` back but only `time.tzset()` clears libc's cached zone — so an assert
+    raised in fixture SETUP, before the `yield`, meant pytest never resumed this generator and
+    the whole worker ran five hours east of UTC for every later test, failing them somewhere
+    else entirely. That is exactly the host this assertion exists to detect."""
     monkeypatch.setenv("TZ", "XXX-5")
     time.tzset()
-    assert dt.datetime(2026, 5, 25, 15, 30).astimezone().utcoffset() == dt.timedelta(hours=5), (
-        "the host did not take the TZ override, so local and UTC are the same clock here")
-    yield
-    monkeypatch.undo()
-    time.tzset()
+    try:
+        assert dt.datetime(2026, 5, 25, 15, 30).astimezone().utcoffset() == dt.timedelta(hours=5), (
+            "the host did not take the TZ override, so local and UTC are the same clock here")
+        yield
+    finally:
+        monkeypatch.undo()
+        time.tzset()
 
 
 # ==========================================================================
@@ -391,8 +404,8 @@ def test_an_unstaged_host_state_call_reaches_the_adapter_carrying_the_runs_clock
     """    THE arm of this batch: a `host-state` read — a system NO world stages — comes back
     stamped with T0, through the real registry, the real grant and the real adapter body.
 
-    The world-id declaration one column over fires only when staging MOVED the call
-    (`registry._declaring`, and `test_920_estate_seam` pins that it stays scoped). A clock
+    The world-id declaration one column over fires only when staging MOVED the call (the second
+    `registry._carrying` call site, and `test_920_estate_seam` pins that it stays scoped). A clock
     copied from that shape would reach the three elastic verbs and nothing else — leaving all
     six host-state stamps on the wall clock, which is where they are today and which is exactly
     what makes two siblings' `captured_at` differ for no world's reason.
@@ -575,7 +588,11 @@ def test_a_zero_offset_zone_that_is_not_utc_itself_is_accepted(tmp_path):
                         ledger=primed_ledger(tmp_path),
                         as_of=dt.datetime(2026, 5, 25, 15, 30, 45, tzinfo=ZeroOffset()))
 
-    assert _clock.z_seconds(reg.as_of if hasattr(reg, "as_of") else T0) == T0_Z
+    # `reg.as_of` DIRECTLY, no `hasattr` fallback: the fallback made this line a tautology —
+    # `_clock.z_seconds(T0) == T0_Z` holds by construction, so a registry that stopped carrying
+    # `as_of` at all still passed the one assertion about it carrying `as_of`. An
+    # `AttributeError` is the correct failure for that.
+    assert _clock.z_seconds(reg.as_of) == T0_Z
 
 
 def test_a_registry_will_not_serve_without_being_told_which_moment_it_serves(tmp_path):
@@ -683,6 +700,21 @@ def test_an_ordinary_run_leaves_an_unbounded_search_unbounded(tmp_path):
     assert range_filter(search_body(tmp_path)) is None
 
 
+@pytest.mark.parametrize("verb", ["query", "alerts"])
+def test_an_empty_string_end_is_closed_at_the_runs_clock(tmp_path, verb):
+    """``end=""`` is the same open bound the body builder already treats as absent.
+
+    It is valid for the declared string parameter. If the branch-clock fill instead tests only
+    ``is None``, the empty string survives to the body builder, is omitted there as falsy, and
+    the request reaches Elasticsearch with no ``lte`` filter — reading the live tail.
+    """
+    ctx = elastic_ctx(tmp_path, as_of=T0)
+
+    getattr(elastic_adapter, verb)(ctx, native_query="event.action:ssh_login", end="")
+
+    assert range_filter(search_body(tmp_path)) == {"lte": T0_Z}
+
+
 @pytest.mark.parametrize(("start", "end", "expected"), [
     (None, "2026-06-01T00:00:00Z", {"lte": "2026-06-01T00:00:00Z"}),
     ("2026-05-01T00:00:00Z", None, {"gte": "2026-05-01T00:00:00Z", "lte": T0_Z}),
@@ -720,6 +752,175 @@ def test_filling_the_window_does_not_edit_the_callers_own_arguments(tmp_path):
 
     assert first == {"lte": T0_Z}
     assert second == {"gte": "2026-05-01T00:00:00Z", "lte": T0_Z}
+
+
+# --------------------------------------------------------------------------
+# the ES|QL half of the window: a stage appended, never a predicate edited
+# --------------------------------------------------------------------------
+
+#: The clause a bounded ES|QL query carries. `<=`, matching `_build_search_body`'s `lte` on the
+#: parameter path — the two halves close the same window, so a document written at exactly the
+#: branch point is inside both or the same instant is evidence on one lane and not the other.
+BOUND = f'| WHERE @timestamp <= "{T0_Z}"'
+
+
+def test_the_bound_lands_after_the_source_command_not_after_the_first_line(tmp_path):
+    """    A whole pipeline written on ONE line still takes the bound immediately after its source
+    command.
+
+    The failure this exists for is not a formatting nit. `FROM logs-zeek.ssh-* | LIMIT 1` split
+    on `\n` puts the clause after `LIMIT`, which takes one arbitrary row and only THEN filters
+    it by timestamp — not a narrower row set but an empty one, which reads downstream as a lead
+    that measured nothing rather than as a broken query. `|` is the separator ES|QL actually
+    uses, and `controls.add_esql_window`'s docstring names this exact case; the clock's copy has
+    to make the same cut or the two halves of the tree disagree about where a stage goes."""
+    out = elastic_adapter.bounded_esql(docker_ctx(tmp_path, as_of=T0),
+                                       "FROM logs-zeek.ssh-* | LIMIT 1")
+
+    assert out == f"FROM logs-zeek.ssh-*\n{BOUND}\n| LIMIT 1"
+
+
+def test_the_source_commands_own_suffix_stays_attached_to_it(tmp_path):
+    """    A `METADATA` clause belongs to the source command, so the bound goes after it.
+
+    `FROM x METADATA _id` is one command in two words, and a cut that took the FROM alone would
+    strand `METADATA _id` at the head of the next stage — where it is not a valid stage at all,
+    so the lead's whole query is refused by Elasticsearch rather than narrowed. Committed
+    templates use the clause, which is why it is pinned rather than left to the splitter."""
+    out = elastic_adapter.bounded_esql(docker_ctx(tmp_path, as_of=T0),
+                                       "FROM logs-x-* METADATA _id | LIMIT 5")
+
+    assert out == f"FROM logs-x-* METADATA _id\n{BOUND}\n| LIMIT 5"
+
+
+def test_a_pipe_inside_a_quoted_name_is_not_a_stage_boundary(tmp_path):
+    """    A `|` inside a quoted index name is part of the NAME, not the end of the source command.
+
+    The naive `partition("|")` cuts here, and what it produces is not a wrong window — it is a
+    query sliced through the middle of a string literal, `FROM "logs` followed by a stage
+    beginning `|weird"`. Refused by the cluster, so the lead loses its evidence entirely; and
+    refused for a reason no reader can attribute to the clock. The splitter has to understand
+    quoting, which is why this lane reuses the one `esql_text` already owns."""
+    out = elastic_adapter.bounded_esql(docker_ctx(tmp_path, as_of=T0), 'FROM "logs|weird"')
+
+    # By LINES, so the assertion names the stage boundary and nothing else: a query with no
+    # downstream stage has no bytes after the clause to be exact about, and trailing whitespace
+    # there is not what this arm is asking about.
+    assert out.splitlines() == ['FROM "logs|weird"', BOUND]
+
+
+def test_the_models_own_time_predicate_is_left_exactly_as_written(tmp_path):
+    """    A query that already bounds `@timestamp` keeps that clause BYTE-IDENTICAL, with the run's
+    bound alongside it.
+
+    This is the arm that catches an implementation trying to be helpful — merging the two
+    windows, narrowing the model's `<` to the run's `<=`, or replacing a bound it judges wider.
+    Any of those is the query-language surgery the stager refuses everywhere else: the clock
+    does not read the predicate the model wrote, it appends an INDEPENDENT stage after the
+    source, and appending a stage can only narrow a row set. Two `WHERE`s in a pipeline is
+    ordinary ES|QL and needs no reconciling.
+
+    A lead that deliberately reads a window around a later event is exactly who gets hurt by the
+    helpful version, and the damage is invisible: the payload echoes the query the lead asked,
+    so a narrowed window looks like a window that simply held less."""
+    asked = ('FROM logs-system.auth-*\n'
+             '| WHERE @timestamp >= "2026-05-01T00:00:00Z" AND @timestamp < "2026-06-01T00:00:00Z"\n'
+             '| STATS events = COUNT(*) BY user = user.name')
+
+    out = elastic_adapter.bounded_esql(docker_ctx(tmp_path, as_of=T0), asked)
+
+    assert out == ('FROM logs-system.auth-*\n'
+                   f'{BOUND}\n'
+                   '| WHERE @timestamp >= "2026-05-01T00:00:00Z" AND @timestamp < "2026-06-01T00:00:00Z"\n'
+                   '| STATS events = COUNT(*) BY user = user.name')
+    assert asked.partition("\n")[2] in out, (
+        "the model's own predicate was edited — the clock reads no predicate and writes none")
+
+
+def test_an_unbranched_run_sends_the_query_exactly_as_written(tmp_path):
+    """    With no clock on the ctx, `bounded_esql` is the identity.
+
+    The positive control against a bound that fires everywhere. An ordinary investigation asking
+    an unbounded question IS asking about now, and a clause appended there would silently
+    exclude documents indexed while the run was thinking — a lead reporting less than the estate
+    holds, on the lane where most of a run's evidence lives."""
+    asked = "FROM logs-zeek.ssh-*\n| LIMIT 5"
+
+    assert elastic_adapter.bounded_esql(docker_ctx(tmp_path, as_of=None), asked) == asked
+
+
+def test_the_bound_reaches_the_wire_and_stays_out_of_the_evidence(tmp_path):
+    """    The BOUNDED query is what Elasticsearch runs; the ASKED query is what the payload records.
+
+    THE arm of this half, and the two directions fail differently. Send the asked form and the
+    window is not closed at all — the episode is unreplayable and nothing says so. Record the
+    bounded form and a clause the model never wrote enters the run's own account of what it
+    asked: the payload is the lead's evidence, `executed_queries.jsonl` keys off it, a later
+    lead re-binds the template it was just served, and the ledger's `restore` cannot help —
+    it repairs a staged CORPUS identity in that echo, which is a substitution in the `FROM`, and
+    knows nothing about an inserted stage.
+
+    Both sides are read for real: what the transport was handed comes off the fake `docker`'s
+    own argv, and the payload comes back from the real verb."""
+    ctx = elastic_ctx(tmp_path, as_of=T0)
+    asked = "FROM logs-zeek.ssh-*\n| LIMIT 5"
+
+    payload = elastic_adapter.esql(ctx, query=asked)
+
+    assert payload["query"] == asked, (
+        f"the payload records {payload['query']!r} — a clause the model never wrote is now in "
+        "the run's own record of the question it asked")
+    assert search_body(tmp_path)["query"] == f"FROM logs-zeek.ssh-*\n{BOUND}\n| LIMIT 5", (
+        "the query that reached the cluster carries no bound, so the episode reads the live "
+        "tail and cannot be replayed")
+
+
+def test_both_halves_of_the_window_include_the_branch_point_itself(tmp_path):
+    """    The ES|QL clause and the search body close the window INCLUSIVELY, both of them.
+
+    One instant, two lanes, and they must agree about it: `<=` here and `lte` there. Split, a
+    document written at exactly T0 is evidence for a lead that used `query` and invisible to one
+    that used `esql` — a difference between two siblings' payloads that belongs to neither
+    world, arriving from the boundary condition rather than from anything either lead did."""
+    ctx = elastic_ctx(tmp_path, as_of=T0)
+
+    clause = elastic_adapter.bounded_esql(ctx, "FROM logs-zeek.ssh-*")
+    elastic_adapter.query(ctx, native_query="event.action:ssh_login")
+
+    assert clause.splitlines()[-1] == f'| WHERE @timestamp <= "{T0_Z}"'
+    assert range_filter(search_body(tmp_path)) == {"lte": T0_Z}
+
+
+@pytest.mark.parametrize(("stem", "body"), COMMITTED, ids=[s for s, _ in COMMITTED])
+def test_every_committed_template_takes_the_bound_with_its_pipes_intact(tmp_path, stem, body):
+    """    A real template comes back as its source command, the bound, and EVERY OTHER BYTE
+    unchanged.
+
+    The strongest form the claim can take, and over the 12 bodies a gather lead actually sends
+    rather than over queries invented here: multi-line `STATS ... BY ...` blocks, `WHERE`
+    continuation lines, trailing `| SORT`, and the exact whitespace of each. A clock that
+    reflowed a pipeline would change what the query MEANS on some template nobody wrote a case
+    for, and the sweep covers them without enumerating them.
+
+    The expected value is built by a LINE split, deliberately independent of the `|`-splitter
+    under test — every committed template opens with its source command alone on line one, so
+    the two agree here and only here. Computing it with the implementation's own helper would
+    let the assertion and the code agree by construction."""
+    head, _, tail = body.partition("\n")
+    assert head == f"FROM {leading_source(body)}", stem
+
+    out = elastic_adapter.bounded_esql(docker_ctx(tmp_path, as_of=T0), body)
+
+    assert out == f"{head}\n{BOUND}\n{tail}", stem
+
+
+def test_the_swept_catalog_is_the_corpus_this_half_claims():
+    """    12 committed ES|QL templates, which is what the sweep above is sized against.
+
+    Asserted rather than derived, for `test_920_elastic_staging`'s reason: a catalog that
+    shrank — or a fence reader that stopped matching — would make the parametrization collect
+    fewer cases, or none, and stay green while covering nothing."""
+    assert len(COMMITTED) == ESQL_TEMPLATES
 
 
 # ==========================================================================

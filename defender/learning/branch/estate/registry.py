@@ -21,11 +21,12 @@ import functools
 import json
 import sys
 from collections.abc import Mapping
-from dataclasses import fields, is_dataclass, replace
+from dataclasses import is_dataclass, replace
 from datetime import datetime, timedelta
 from typing import Any
 
 from defender.runtime.verbs import ModuleVerbRegistry
+from defender.runtime.verb_grant import VerbGrant
 from defender.scripts.adapters.faults import USAGE_EXIT_CODE
 
 from ..ledger import BASE, FAULT, REFUSED, Ledger, LedgerError, ServedCall, payload_text
@@ -35,6 +36,42 @@ from .applier import WorldApplier
 
 class EstateError(Exception):
     """A world that cannot be served honestly."""
+
+
+def validate_world_touches(world: Any, grant: VerbGrant) -> tuple[str, ...]:
+    """Validate the systems a world declares against its serving grant.
+
+    A declaration is authoring input, not an advisory label: it decides whether staging or
+    patches run at all. An unknown name therefore cannot be allowed to degrade to the honest
+    `passthrough` decision every real adapter makes for it. The grant is the authoritative
+    roster because a system outside it cannot be queried by this role even if an adapter file
+    happens to exist.
+
+    Kept as one helper for both the CLI boundary and this registry boundary. The CLI can then
+    refuse before priming an immutable episode, while programmatic callers cannot bypass the
+    check by constructing a world directly.
+    """
+    declared = getattr(world, "touches", ())
+    if not isinstance(declared, (str, list, tuple, set, frozenset)):
+        raise EstateError(
+            f"a world's `touches` must be a sequence of system names (or one name), got "
+            f"{declared!r} — an unreadable `touches` routes every response to `passthrough` "
+            "and the run then measures nothing with every row still reading honestly")
+
+    names = (declared,) if isinstance(declared, str) else tuple(declared)
+    malformed = [name for name in names if not isinstance(name, str) or not name]
+    if malformed:
+        raise EstateError(
+            f"a world's `touches` contains invalid system name(s) {malformed!r} — every name "
+            "must be a non-empty string from the serving role's grant")
+
+    unknown = sorted(set(names) - grant.systems)
+    if unknown:
+        raise EstateError(
+            f"a world's `touches` names unknown or unavailable system(s) {unknown}; systems "
+            f"served to role {grant.role!r} are {sorted(grant.systems)} — an unknown name "
+            "would apply no difference and record only `passthrough` rows")
+    return names
 
 
 class WorldRegistry(ModuleVerbRegistry):
@@ -78,20 +115,10 @@ class WorldRegistry(ModuleVerbRegistry):
                 f"a world needs a non-empty string id, got {world_id!r} — `None` is how the "
                 "family tier spells 'the shared base', and a world claiming it would overwrite "
                 "the recording its siblings replay")
-        declared = getattr(world, "touches", ())
-        if not isinstance(declared, (str, list, tuple, set, frozenset)):
-            # READ ONCE, HERE, LOUDLY. `_touches` coerces a bare string and answers `False` for
-            # everything else it cannot read — and a world whose `touches` reads as empty routes
-            # every response to `passthrough`, so the run measures nothing while every ledger
-            # row stays honest. That is the silent failure this seam is built around, and the
-            # only place to catch it is where the world arrives: `_touches` runs per call, deep
-            # inside `served`, where a `TypeError` is not an `AdapterFault` and the query tool
-            # files it as exit 2 — an INFRA code the circuit breaker counts as the estate being
-            # down for this sibling and up for its base.
-            raise EstateError(
-                f"a world's `touches` must be a sequence of system names (or one name), got "
-                f"{declared!r} — an unreadable `touches` routes every response to `passthrough` "
-                "and the run then measures nothing with every row still reading honestly")
+        # Unknown names route every real response to `passthrough`, so a misspelt difference
+        # vanishes while the ledger remains internally honest. The CLI calls this before
+        # priming; this call is the non-bypassable boundary for programmatic worlds.
+        declared = validate_world_touches(world, grant)
         # AND NAMEABLE, which `str` and non-empty do not cover. A staged system derives its
         # per-world corpus name from this id, so one a stager cannot carry does not fail a
         # query, it fails EVERY query on that system — the sibling records a `refused` row per
@@ -161,20 +188,22 @@ class WorldRegistry(ModuleVerbRegistry):
         @functools.wraps(fn)
         def served(ctx: Any, **params: Any) -> Any:
             applier, ledger, world = self.applier, self.ledger, self.world
-            # UNCONDITIONAL, and that is the whole point — unlike `_declaring` below, which
-            # fires only where staging MOVED the call. The two conditions look alike and are
-            # not: a declaration widens what a call may reach (`confine_index` admits a world's
-            # views by declaration, so setting it on an untouched call would admit that world's
-            # views for a read that was never retargeted), while a clock admits nothing and
-            # narrows nothing. And the adapter that makes an episode unreplayable by stamping
-            # the wall clock into its payload is host-state, which has no stager and is never
-            # staged — so a clock scoped to staged calls would miss every call it exists for.
+            # UNCONDITIONAL, and that is the whole point — unlike the `world_id` declaration
+            # below, which fires only where staging MOVED the call. The two conditions look
+            # alike and are not: a declaration widens what a call may reach (`confine_index`
+            # admits a world's views by declaration, so setting it on an untouched call would
+            # admit that world's views for a read that was never retargeted), while a clock
+            # admits nothing and narrows nothing. And the adapter that makes an episode
+            # unreplayable by stamping the wall clock into its payload is host-state, which has
+            # no stager and is never staged — so a clock scoped to staged calls would miss
+            # every call it exists for. Both go through `_carrying`, which holds the GUARD and
+            # leaves the CONDITION here, where it is visible beside the other one.
             #
             # Rebound BEFORE `applier.prepare`, so the stager and `restore` see the same moment
-            # the adapter body will. Cannot raise — the guards in `_at` are total and `as_of`
+            # the adapter body will. Cannot raise — `_carrying`'s guards are total and `as_of`
             # was validated at construction — which matters because this line sits OUTSIDE the
             # refusal handler below.
-            ctx = _at(ctx, self.as_of)
+            ctx = _carrying(ctx, as_of=self.as_of)
             try:
                 prepared = applier.prepare(system, verb, params, world, ctx)
             except Exception as refusal:
@@ -204,7 +233,7 @@ class WorldRegistry(ModuleVerbRegistry):
             asked = dict(params) if prepared != params else None
             try:
                 payload, base_text = _base_payload(
-                    fn, _declaring(ctx, world.world_id) if asked is not None else ctx,
+                    fn, _carrying(ctx, world_id=world.world_id) if asked is not None else ctx,
                     prepared, system, verb, ledger, asked,
                     # BEFORE the base row is written, so the FAMILY's shared recording carries
                     # no world's identity. That row is replayed by every sibling, and it is
@@ -284,53 +313,33 @@ def _record_beside(ledger: Ledger, call: ServedCall) -> None:
               f"({write_failed!r}); the call's own failure is what propagates", file=sys.stderr)
 
 
-def _at(ctx: Any, as_of: datetime) -> Any:
-    """`ctx`, carrying the moment this call is being served as of.
+def _carrying(ctx: Any, **values: Any) -> Any:
+    """`ctx` with `values` set on the fields it declares, or `ctx` untouched.
 
-    `_declaring`'s two guards, for `_declaring`'s two reasons — a non-dataclass or a dataclass
-    without the field is a test stub rather than a run, and `replace` would raise `TypeError`
-    on it, which the query tool files as an INFRA exit code the circuit breaker reads as the
-    estate being down for this sibling and up for its base.
+    ONE GUARD, TWO CALLERS, and the two conditions stay at the call sites where they belong.
+    `served` sets `as_of` on EVERY call and `world_id` only where staging moved one; folding
+    those conditions in here is what would let one silently acquire the other's scope — a
+    declaration widens what a call may reach (`confine_index` admits a world's views by
+    declaration, so setting it on an untouched call would admit that world's views for a read
+    that was never retargeted), while a clock admits nothing and narrows nothing. Written as two
+    functions, though, the GUARD was written twice, and a guard fixed in one copy and not the
+    other is the invisible half of that.
 
-    A SEPARATE function rather than a second argument to `_declaring`, because the two are
-    applied under different conditions and folding them together is how one silently acquires
-    the other's scope: `_declaring` is a confinement widening and must stay scoped to the call
-    that earned it, while this must reach every call or it misses the unstaged adapters that
-    are the only ones minting a timestamp.
+    A ctx THAT CANNOT CARRY A FIELD IS HANDED BACK UNTOUCHED rather than repaired. That is a
+    test stub, not a run: the real seam builds `VerbContext`. `replace` raises `TypeError` both
+    on a non-dataclass and on a dataclass that simply has no such field, and a `TypeError` deep
+    inside `served` is not an `AdapterFault` — the query tool files it as exit 2, an INFRA code
+    the circuit breaker reads as the estate being down for this sibling and up for its base,
+    which is the base-vs-sibling contamination this whole module exists to exclude.
+
+    `__dataclass_fields__` rather than `fields(ctx)`: the latter builds a fresh tuple per call
+    and this runs on every served verb, twice on a staged one.
     """
     if not is_dataclass(ctx) or isinstance(ctx, type):
         return ctx
-    if not any(f.name == "as_of" for f in fields(ctx)):
-        return ctx
-    return replace(ctx, as_of=as_of)
-
-
-def _declaring(ctx: Any, world_id: str) -> Any:
-    """`ctx`, carrying the world whose views this call may read.
-
-    THE RETARGET AND THE DECLARATION ARE ONE ACT, so they are done in one place. A staged call
-    addresses a view named OUTSIDE every configured pattern — deliberately, because a view the
-    base pattern still reaches is a view the base run and every unstaged sibling read too — and
-    `confine_index` therefore cannot admit it by reach. It admits it by declaration instead, and
-    the only frame that knows which world is being served is this one.
-
-    PER WORLD, never a blanket exemption: the ctx names A, so A's views resolve and B's are
-    still refused. And only where staging MOVED the call — an untouched call addresses the
-    corpus itself and has nothing to declare, so the ordinary path is unchanged.
-
-    A ctx that cannot CARRY the declaration is handed back untouched rather than repaired. That
-    is a test stub, not a run: the real seam builds `VerbContext`, and the failure mode if one
-    ever were not is a `ConfinementFault` naming the index — a refusal, which is the direction
-    this whole module errs in. The field is checked as well as the dataclass-ness, because
-    `replace` raises `TypeError` on a dataclass that simply has no `world_id` — and a `TypeError`
-    here is not an `AdapterFault`, so the query tool files it as exit 2, an INFRA code the
-    circuit breaker reads as the estate being down for this sibling and up for its base.
-    """
-    if not is_dataclass(ctx) or isinstance(ctx, type):
-        return ctx
-    if not any(f.name == "world_id" for f in fields(ctx)):
-        return ctx
-    return replace(ctx, world_id=world_id)
+    declared = getattr(type(ctx), "__dataclass_fields__", {})
+    settable = {name: value for name, value in values.items() if name in declared}
+    return replace(ctx, **settable) if settable else ctx
 
 
 def _base_payload(  # noqa: PLR0913 — one call's whole identity: what runs it, where, as what
@@ -339,10 +348,15 @@ def _base_payload(  # noqa: PLR0913 — one call's whole identity: what runs it,
 ) -> tuple[Any, str]:
     """This key's base answer and its canonical text: the family's recording, else the adapter.
 
-    Recorded ONCE PER FAMILY rather than once per world. The estate is live, so two siblings
-    calling it minutes apart would get different data and the pair's invariance — the whole
-    reason a sibling is worth running — would be a fiction. A hit here issues no adapter call
-    at all.
+    THE HIT IS THE FAMILY'S; THE MISS IS THIS WORLD'S. A hit issues no adapter call at all, and
+    for a key the source run captured that is a guarantee: the base file was primed before any
+    sibling forked, so every sibling replays the same bytes. A MISS is a key the capture never
+    held — one a sibling invented, which it will, because a sibling is continuing an
+    investigation — and the `base` row written below goes into THIS world's own file, which no
+    sibling reads. So two worlds asking one invented question each read the estate live and may
+    differ; that residual is what `Ledger`'s own docstring sizes, and this frame is where it is
+    incurred. (Before the tier split this row went into a shared table and a sibling could pick
+    it up; "recorded once per family" was true of it then and is not now.)
 
     The TEXT comes back beside the tree because the caller needs it for the served row and it
     is already in hand on both arms — recomputed there, a memo hit paid a `loads` plus a `dumps`

@@ -387,6 +387,30 @@ def test_a_payload_this_episode_cannot_read_is_counted_not_guessed(
     assert [r["verb"] for r in read_jsonl_rows(base)] == ["list-hosts"]
 
 
+@pytest.mark.parametrize("physical_line", ['{"lead_id": "lost"', '["not", "a", "row"]'],
+                         ids=["truncated-json", "non-dict-json"])
+def test_a_malformed_capture_table_line_is_counted_before_the_tolerant_reader_drops_it(
+        tmp_path, physical_line):
+    """Every malformed non-blank physical line advances the primer's unreadable count.
+
+    The ordinary JSONL reader intentionally drops truncated and non-dict lines. Priming cannot:
+    each may be a lost question, and reporting a clean capture would let a sibling re-ask that
+    key against the live estate without any skipped-row signal.
+    """
+    run_dir = source_run(tmp_path)
+    append_call(run_dir, call_row("l-001", 0, "cmdb", "list-hosts", {}),
+                json.dumps({"hosts": ["canary-1"]}))
+    with RunPaths(run_dir).executed_queries.open("a", encoding="utf-8") as fh:
+        fh.write(physical_line + "\n")
+    _root, base = episode(tmp_path)
+
+    report = capture_mod().prime_base(run_dir, base)
+
+    assert counts(report) == {"primed": 1, "duplicates": 0, "failed": 0,
+                              "sentinels": 0, "unreadable": 1}
+    assert [row["verb"] for row in read_jsonl_rows(base)] == ["list-hosts"]
+
+
 def test_a_repeated_question_keeps_the_answer_the_run_saw_first(tmp_path):
     """    Two captures of one key resolve to the FIRST, and the second is counted as a duplicate.
 
@@ -431,6 +455,32 @@ def test_a_key_spelled_in_another_order_is_the_same_captured_question(tmp_path):
     report = capture_mod().prime_base(run_dir, base)
 
     assert (report.primed, report.duplicates) == (1, 1)
+
+
+def test_priming_an_existing_base_is_refused_without_changing_its_first_capture(tmp_path):
+    """An episode's capture is immutable: a second source cannot append beneath the first.
+
+    The ledger resolves duplicate keys first-row-wins, so appending a new prime would report the
+    new source while every sibling continued receiving the old source's answer. The refusal is
+    checked both by the exception and by the original bytes remaining untouched.
+    """
+    first = source_run(tmp_path, "run-first")
+    second = source_run(tmp_path, "run-second")
+    row = call_row("l-001", 0, "cmdb", "get-host", {"host": "canary-1"})
+    append_call(first, row, json.dumps({"owner": "first"}))
+    append_call(second, row, json.dumps({"owner": "second"}))
+    root, base = episode(tmp_path)
+    capture_mod().prime_base(first, base)
+    original = base.read_bytes()
+
+    with pytest.raises(LedgerError, match="already holds a primed base"):
+        capture_mod().prime_base(second, base)
+
+    assert base.read_bytes() == original
+    payload = Ledger.for_world(root, "w1").base_payload(
+        "cmdb", "get-host", {"host": "canary-1"})
+    assert payload is not None
+    assert json.loads(payload) == {"owner": "first"}
 
 
 # ==========================================================================

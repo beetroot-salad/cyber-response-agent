@@ -80,6 +80,7 @@ from defender.learning.branch.ledger import (  # noqa: E402
     Ledger,
     LedgerError,
     ServedCall,
+    base_file,
     request_key,
 )
 from defender.runtime import driver, observe  # noqa: E402
@@ -739,6 +740,20 @@ def test_a_world_whose_touches_cannot_be_read_is_refused_at_construction(tmp_pat
     assert not (tmp_path / "served.jsonl").exists(), "a refused world must not have written a row"
 
 
+@pytest.mark.parametrize("touches", ["elastc", ("elastc",), ("elastic", "elastc")])
+def test_a_world_cannot_declare_a_system_outside_the_serving_grant(tmp_path, touches):
+    """Unknown touch names are refused instead of silently routing all calls to passthrough."""
+    ledger_path = tmp_path / "served.jsonl"
+
+    with pytest.raises(EstateError, match="elastc"):
+        world_registry(
+            fake_estate(tmp_path), FAKE_GRANT, ledger_path,
+            world=World("w1", touches),
+        )
+
+    assert not ledger_path.exists(), "a refused world must not have written a served row"
+
+
 def test_a_patch_for_a_system_the_world_does_not_touch_is_refused(tmp_path):
     """    A patch table naming a system the world does not declare is refused at construction.
 
@@ -790,6 +805,25 @@ def test_a_world_a_stager_cannot_name_is_refused_at_construction(tmp_path, world
     world_registry(
         fake_estate(tmp_path), FAKE_GRANT, tmp_path / "served2.jsonl",
         world=World(world_id, touches=("cmdb",)))
+
+
+def test_the_reserved_base_world_id_cannot_name_the_family_capture(tmp_path):
+    """The natural id ``base`` is refused when it would make both ledger tiers one file.
+
+    It is a safe corpus name and a safe filename component, so generic validation admits it.
+    Under the episode factory, though, it resolves to ``served/base.jsonl`` — exactly the file
+    siblings replay as their immutable capture. Construction must fail before any world row can
+    be appended there.
+    """
+    episode_root = tmp_path / "episode"
+    capture = base_file(episode_root)
+    capture.parent.mkdir(parents=True, exist_ok=True)
+    capture.touch()
+
+    with pytest.raises(LedgerError, match="family's own capture"):
+        Ledger.for_world(episode_root, "base")
+
+    assert capture.read_text(encoding="utf-8") == ""
 
 
 # ==========================================================================
@@ -846,13 +880,13 @@ def test_a_duplicate_base_row_resolves_the_same_way_in_memory_and_on_disk(tmp_pa
     """    Two base rows for one key resolve to the FIRST, whether the answer comes from this
     process's memo or from a rebuild off the file.
 
-    `base_payload`'s own docstring concedes the window: the check-then-act spans the adapter
-    call, so two siblings — two worker threads, or two processes — can both miss and both
-    record. The file then holds two rows for one key, and the tie-break is the only thing left
-    to make them agree. Resolved one way in `record` and the other in `_refresh`, this process
-    served the second payload while any process rebuilding from the file served the first: two
-    answers to one question with both rows reading honestly, which is exactly the invariance
-    the family tier exists to buy."""
+    The check-then-act spans the adapter call and `base_payload` reads the memo unlocked, so
+    two of ONE world's gather threads can both miss and both record — the tier split closed the
+    cross-process half of this, not the cross-thread half. The file then holds two rows for one
+    key, and the tie-break is the only thing left to make them agree. Resolved one way in
+    `record` and the other in `_absorb`, this process served the second payload while any
+    process rebuilding from the file served the first: two answers to one question with both
+    rows reading honestly, which is exactly the invariance the family tier exists to buy."""
     ledger_path = tmp_path / "served.jsonl"
     ledger = fresh_ledger(ledger_path)
     call = dict(system="cmdb", verb="get-host", params={"host": "canary-1"},

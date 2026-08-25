@@ -399,22 +399,44 @@ def test_a_refusal_clears_the_claim_before_any_later_return_can_pop_it(tmp_path)
         tmp_path, investigation=GOLDEN_INVESTIGATION.read_text(encoding="utf-8"))
     refused_dispatch(store, session_id, "l-004", call_id="reused-1")
     orphan = bare_return(store, session_id, call_id="reused-1")
-    evidence(run_dir, [(UNDISPATCHED, 0), ("l-004", 0)])
+    # No l-004 artifact here: this arm isolates whether the stale pending entry can make the
+    # orphan return LAND it. Pre-existing evidence under a refused id is the separate arm below
+    # and must be inherited.
+    evidence(run_dir, [(UNDISPATCHED, 0)])
 
     assert branch_mod().leads_at(store, session_id, orphan, run_dir) == {UNDISPATCHED}, (
         "a return under a REFUSED call id landed the refused lead — the sibling inherits "
         "evidence on the strength of a dispatch that never ran")
 
 
+def test_a_refused_retry_does_not_remove_an_inherited_undispatched_lead(tmp_path):
+    """A retry-refused call is absent from the dispatch census, not merely from ``pending``.
+
+    Lead-0 can leave a pre-existing claim and evidence that MAIN never dispatched. If MAIN later
+    tries that same id, the claim gate returns ``RetryPromptPart`` and performs no work. Counting
+    the refused call as a dispatch subtracts the pre-existing lead from the lead-0 fallback, so
+    the sibling silently loses evidence and is then free to reuse the inherited id.
+    """
+    inherited = "l-004"
+    store, run_dir, session_id, _path_ids = legal_source(
+        tmp_path, investigation=GOLDEN_INVESTIGATION.read_text(encoding="utf-8"))
+    refused = refused_dispatch(store, session_id, inherited, call_id="already-claimed")
+    evidence(run_dir, [(UNDISPATCHED, 0), (inherited, 0)])
+
+    assert branch_mod().leads_at(store, session_id, refused, run_dir) == {
+        UNDISPATCHED, inherited,
+    }, "the retry-refused gather erased a pre-existing inherited lead from the census"
+
+
 def test_a_refused_dispatch_does_not_land_for_whoever_reuses_its_call_id(tmp_path):
-    """    A `gather` call the tool REFUSED lands nothing — and the next return under the same
-    `tool_call_id` credits the lead THAT call named, not the refused one.
+    """    A refused call lands nothing; the next return credits the lead THAT call named.
 
     The join is by `tool_call_id`, because the CALL carries the lead id and the RETURN carries
     only the id — so a refusal that stayed pending is popped by the next return, and the two
     leads swap places: the refused one is credited at a row it never ran on, and the lead that
-    actually landed there is left looking un-landed. The sibling then inherits evidence its
-    prefix does not name AND drops evidence it does.
+    actually landed there is left looking un-landed. The refused id's PRE-EXISTING evidence is
+    inherited independently through the undispatched fallback; that is not this return landing
+    it, and keeping the two paths separate is the review regression beside this test.
 
     `_tool_gather`'s refusals arrive as `ModelRetry`, which the framework records as a
     `RetryPromptPart` — the same shape `fence_count_at` already drops without counting. The
@@ -427,9 +449,11 @@ def test_a_refused_dispatch_does_not_land_for_whoever_reuses_its_call_id(tmp_pat
     evidence(run_dir, [(UNDISPATCHED, 0), ("l-004", 0), ("l-005", 0)])
     leads_at = branch_mod().leads_at
 
-    assert leads_at(store, session_id, refused, run_dir) == {UNDISPATCHED}, (
-        "a lead landed at a branch point where nothing had returned yet")
-    assert leads_at(store, session_id, landed, run_dir) == {UNDISPATCHED, "l-005"}, (
+    assert leads_at(store, session_id, refused, run_dir) == {UNDISPATCHED, "l-004"}, (
+        "the refused call removed a pre-existing undispatched lead from inherited evidence")
+    assert leads_at(store, session_id, landed, run_dir) == {
+        UNDISPATCHED, "l-004", "l-005",
+    }, (
         "the return under the reused id credited the REFUSED lead — so the sibling inherits "
         "evidence its prefix never names and drops the lead that actually landed there")
 

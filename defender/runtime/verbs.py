@@ -74,8 +74,11 @@ class VerbContext:
     #: as one.
     world_id: str | None = None
     #: The moment this call is being served AS OF, when it is being served for a branched
-    #: world. `None` is the ordinary run and the base world alike — both are executing now, so
-    #: both mint from the wall clock.
+    #: world. `None` is the ORDINARY run — it is executing now, so it mints from the wall clock.
+    #: Every world of a branched family carries the branch point's moment, the base world
+    #: included: since #947 the base tier is the source run's primed CAPTURE rather than a
+    #: separate world executing live, so there is no arm of a branch that legitimately reads
+    #: the wall clock.
     #:
     #: Set by the estate registry, never by a model, and threaded UNCONDITIONALLY rather than
     #: only on staged calls the way `world_id` is: a declaration widens what a call may reach

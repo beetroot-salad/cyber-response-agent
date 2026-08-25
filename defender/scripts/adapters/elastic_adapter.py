@@ -14,6 +14,7 @@ from defender import _clock
 from defender.runtime.verbs import VerbContext, verb
 from defender.scripts.adapters import _stub_transport as transport
 from defender.scripts.adapters.confinement import confine_index, guard_outbound
+from defender.scripts.adapters.esql_text import split_first_command
 from defender.scripts.adapters.faults import ConfigFault, TransportFault, UpstreamFault
 
 SYSTEM = "elastic"
@@ -160,13 +161,32 @@ def resolve_sort(sort: str) -> str:
     return sort
 
 
+def _bound_set(bound) -> bool:
+    """Does this window bound say anything?
+
+    THE ONE PREDICATE, because two frames decide about the same value and a disagreement
+    between them is invisible. `_bounded_end` asks "did the caller leave the end open, so the
+    run's clock should close it"; the body builder below asks "is there a bound to emit". Those
+    have to be the same question, and they were not: `is not None` there against truthiness
+    here let `end=""` be *present* to the filler and *absent* to the builder, so a branched
+    run's unbounded search reached Elasticsearch with no range filter at all — the live tail,
+    which is the exact payload `as_of` was threaded through the ctx to remove.
+
+    FALSY IS OMITTED is the adapter's own established reading of a bound-shaped param —
+    `_search_verb` resolves `index or config[index_key]`, so `index=""` addresses the
+    configured default exactly as an absent one does — and a model spelling "no upper bound"
+    as `""` passes `validate_params`, which only type-checks.
+    """
+    return bool(bound)
+
+
 def _build_search_body(query_string, time_start, time_end, time_field, limit, sort):
     filters: list[dict] = []
-    if time_start or time_end:
+    if _bound_set(time_start) or _bound_set(time_end):
         rng: dict[str, str] = {}
-        if time_start:
+        if _bound_set(time_start):
             rng["gte"] = time_start
-        if time_end:
+        if _bound_set(time_end):
             rng["lte"] = time_end
         filters.append({"range": {time_field: rng}})
 
@@ -234,6 +254,9 @@ def _bounded_end(ctx: VerbContext, end: str | None) -> str | None:
     adapter's wall-clock `captured_at`: a served payload that is not a function of the question
     asked, and the reason an episode replayed a week later reads a different corpus.
 
+    "OPEN" IS `_bound_set`'s ANSWER, not a second reading of it — see that predicate for the
+    `end=""` hole a private one left.
+
     A PRESENT `end` is never touched. It is a scenario-timeline value the model chose — the
     corpus routinely puts it months from the wall clock — so clamping it to `as_of` would
     truncate the alert's own window in service of a determinism the caller had already bought
@@ -250,7 +273,7 @@ def _bounded_end(ctx: VerbContext, end: str | None) -> str | None:
     `asked_params` column whose whole meaning is "staging moved it".
     """
     at = getattr(ctx, "as_of", None)
-    return end if end is not None or at is None else _clock.z_seconds(at)
+    return end if _bound_set(end) or at is None else _clock.z_seconds(at)
 
 
 def search_envelope(index: str, docs: list, total: int, truncated: bool, sort: str) -> dict:
@@ -357,11 +380,51 @@ def esql_payload(query: str, resp: dict) -> dict:
     }
 
 
+def bounded_esql(ctx: VerbContext, query: str) -> str:
+    """`query` with the run's own clock as an upper bound, when the run has one.
+
+    THE `query`/`alerts` FILL, for the verb whose window is not a parameter. `_bounded_end`
+    closes an open upper bound where the bound is an argument; here it lives inside the
+    ES|QL the model wrote, so the bound is added as its own pipe stage instead.
+
+    APPENDED, NEVER EDITED, and that distinction is the whole safety argument. This does not
+    read, parse or rewrite the predicate the model authored — it splices an independent
+    command in after the source, so it can only NARROW the row set and can never widen one.
+    That is `evals/oracle_golden/controls.add_esql_window`'s property and its reasoning, on
+    the same `split_first_command`; a rewrite that had to understand the existing `WHERE`
+    could half-apply, which is what the surrounding module refuses everywhere.
+
+    AFTER THE SOURCE COMMAND, found by ES|QL's own separator rather than by newline: a query
+    may write its whole pipeline on one line, and splicing after the first LINE would put the
+    clause after a `LIMIT` — taking one arbitrary row and only then filtering it, which is not
+    a narrower row set but an empty one.
+
+    `@timestamp` is safe to name because every corpus this reaches is a data stream, and a
+    data stream requires that field. `lte`, matching `_build_search_body`'s spelling for the
+    parameter path, so a document written exactly at the branch point is inside both windows
+    rather than inside one.
+
+    An UNBRANCHED run has no clock and gets its query back untouched.
+    """
+    at = getattr(ctx, "as_of", None)
+    if at is None:
+        return query
+    head, tail = split_first_command(query)
+    return f'{head.rstrip()}\n| WHERE @timestamp <= "{_clock.z_seconds(at)}"\n{tail.lstrip()}'
+
+
 @verb(engine="esql", body_param="query")
 def esql(ctx: VerbContext, *, query: str) -> dict:  # noqa: A002 — shadows the `query` verb by design
     config = load_config(ctx)
     url = f"{config['ELASTICSEARCH_URL'].rstrip('/')}/_query?format=json"
-    status, resp = _http_json(ctx, "POST", url, config, body={"query": query})
+    # THE BOUND RIDES THE WIRE, NOT THE EVIDENCE. `esql_payload` echoes the query into the
+    # payload, so a bounded form handed to it would put a clause the model never wrote into
+    # the record every reader treats as what this lead asked — and `stagers/elastic.restore`
+    # repairs the corpus identity in that echo, not an inserted stage. Sending the bounded
+    # form and echoing the asked one keeps the harness's bound out of the run's own account of
+    # itself, and keeps a branched payload byte-comparable with the capture it came from.
+    status, resp = _http_json(
+        ctx, "POST", url, config, body={"query": bounded_esql(ctx, query)})
     _raise_on_es_error(status, resp, "ES|QL query")
     return esql_payload(query, resp)
 

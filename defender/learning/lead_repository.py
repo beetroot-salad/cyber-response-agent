@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 import yaml
 
-from defender._io import TEXT_READ_ERRORS, read_jsonl_rows, read_text_utf8
+from defender._io import TEXT_READ_ERRORS, read_jsonl_rows_report, read_text_utf8
 from defender._run_paths import (
     LEAD_ID_RE as _LEAD_ID_RE,
     RunPaths,
@@ -128,18 +128,28 @@ def load_leads(run_dir: Path) -> dict[str, dict]:
 
 
 def load_queries(run_dir: Path) -> list[QueryRow]:
+    """The query rows consumers join, tolerating malformed physical records."""
+    return load_queries_report(run_dir)[0]
+
+
+def load_queries_report(run_dir: Path) -> tuple[list[QueryRow], int]:
+    """The query rows and every physical record that could not become one.
+
+    Ordinary consumers intentionally use the tolerant :func:`load_queries` view. Capture
+    priming uses this report because each discarded record is a question that may otherwise
+    fall through to the live estate without appearing in its non-determinism count.
+    """
     run_dir = Path(run_dir)
     log = RunPaths(run_dir).executed_queries
     rows: list[QueryRow] = []
     try:
-        raw_rows = read_jsonl_rows(log)
+        raw_rows, unreadable = read_jsonl_rows_report(log)
     except OSError:
-        return []
+        return [], 1
     for rec in raw_rows:
-        if not isinstance(rec, dict):
-            continue
         lead_id = rec.get("lead_id")
         if not lead_id:
+            unreadable += 1
             continue
         raw_ref = contained_payload(run_dir, rec.get("payload_path"))
         params = rec.get("params")
@@ -165,7 +175,7 @@ def load_queries(run_dir: Path) -> list[QueryRow]:
                 raw_ref=raw_ref,
             )
         )
-    return rows
+    return rows, unreadable
 
 
 
