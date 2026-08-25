@@ -5,8 +5,17 @@ from ._types import Block, RowError
 
 
 def _split_quoted(
-    s: str, sep: str, *, unescape_delim: bool = False, keep_empty: bool = False
+    s: str,
+    sep: str,
+    *,
+    unescape_delim: bool = False,
+    keep_empty: bool = False,
+    strip: bool = True,
 ) -> list[str]:
+    """THE tokenizer. `strip=False` hands back the raw span between two delimiters instead of a
+    stripped copy — a knob rather than a fork, because the whole value of `_split_cells_raw` is
+    that it finds the SAME boundaries `_split_cells` does, and a second hand-written scanner
+    makes that agreement a thing review has to re-establish after every edit to this one."""
     parts: list[str] = []
     cur: list[str] = []
     in_q = False
@@ -34,7 +43,8 @@ def _split_quoted(
             i += 1
             continue
         if ch == sep and not in_q:
-            tok = "".join(cur).strip()
+            tok = "".join(cur)
+            tok = tok.strip() if strip else tok
             if keep_empty or tok:
                 parts.append(tok)
             cur = []
@@ -42,7 +52,8 @@ def _split_quoted(
             continue
         cur.append(ch)
         i += 1
-    tok = "".join(cur).strip()
+    tok = "".join(cur)
+    tok = tok.strip() if strip else tok
     if keep_empty or tok:
         parts.append(tok)
     return parts
@@ -50,6 +61,23 @@ def _split_quoted(
 
 def _split_cells(row: str) -> list[str]:
     return _split_quoted(row, "|", unescape_delim=True, keep_empty=True)
+
+
+def _split_cells_raw(row: str) -> list[str]:
+    """Cell BOUNDARIES only — every byte the author wrote survives, whitespace and escapes
+    alike. `_split_cells` strips each cell and unescapes `\\|`; a repair that rebuilds a row
+    from THAT output normalises padding away and corrupts an escaped pipe (#954/F-47). This is
+    the no-strip boundary scanner a raw-text rebuild needs: it finds the same unquoted `|`
+    delimiters `_split_cells` does, so cell N here is cell N there, but hands back the raw
+    span rather than a stripped, unescaped copy — so a caller that replaces exactly one cell
+    and rejoins with `"|"` leaves every other cell byte-identical to what the author wrote.
+
+    ONE scanner, reached through a knob, rather than a second one written to match: "cell N here
+    is cell N there" is the whole contract, and a forked state machine would leave it true only
+    by inspection — the next fix to the escape branch above lands in one copy and not the
+    other, `_swap_cell` then writes `class` over the author's `value`, and the re-split gate in
+    `_illegal_key_diagnostic` cannot see it because a wrong-cell swap still counts right."""
+    return _split_quoted(row, "|", keep_empty=True, strip=False)
 
 
 def _split_subcells(cell: str) -> list[str]:

@@ -8,8 +8,8 @@ from typing import Any, Literal
 
 from defender._vocab import normalized_disposition
 from . import _walkers, vocab
-from ._cells import _row_dict, _unquote
-from ._types import RowError
+from ._cells import _row_cells, _row_dict, _split_cells, _split_cells_raw, _unquote
+from ._types import Block, RowError
 from .parser import (
     _CONCLUDE_SUBTABLE_FIELDS,
     COMMITMENT_ID_RE,
@@ -1686,6 +1686,147 @@ def _is_legal_refinement_key(key: str) -> bool:
     return key in (SLOT_CLASS, SLOT_IDENT) or key.startswith(ATTR_PREFIX)
 
 
+def _candidate_refusal(
+    block: Block, cols: list[str], parsed: list[str], at: int, candidate: str
+) -> str | None:
+    """Why this rebuilt row cannot be OFFERED, or `None` when it can.
+
+    FOUR questions, because "does the parser accept it" answers only one of them and the rest
+    are how a rebuild corrupts a row, or earns a refusal, while re-splitting to a legal width:
+
+      * could it stand inside the fence at all — a cell carrying ``` closes the block early,
+        and the row reader, handed one row, has no notion of the fence;
+      * does it read back at all — `_row_cells`, the parser's own reader, which also catches
+        a `"` the splice opened inside a token (`attrs."class"`);
+      * does it split to the DECLARED width — asked separately because `_row_cells` PADS a row
+        between `required_cells` and the declared width and returns normally, while
+        `runtime.tools._new_row_shape_reason` (the guard the model's `fix_row` actually meets)
+        demands equality. Under a header with a trailing `?` column, the padded rejoin
+        `…|c:\\path\\` + `|` turns the author's closing backslash into an escaped delimiter,
+        the candidate comes back one cell SHORT, `_row_cells` pads it back and says nothing —
+        and the paste earns exactly the second refusal F-47 exists to prevent;
+      * do the author's OTHER cells survive — the one failure worse than a refusal. `key` is
+        spliced in from the PARSED record, where `\\|` has already been unescaped, so a key
+        cell carrying an escaped pipe rebuilds as `attrs.a|a\\` and the joining `|` pairs with
+        the trailing backslash: `l-001|v-001|a\\|a\\ |hello` re-splits to four cells, passes
+        both width gates, pastes with ZERO diagnostics, and leaves the document claiming key
+        `attrs.a` / value `a|hello` where the author wrote value `hello`.
+
+    Compared cell-by-cell against the row as the PARSER reads it, not against the raw spans:
+    a candidate is allowed to normalise padding the tokenizer would have stripped anyway, and
+    is not allowed to move a byte across a boundary.
+    """
+    if "```" in candidate:
+        # An invlang FACT, not a runtime one: rows live inside a ```invlang fence, so a row
+        # carrying the delimiter would close its own block early. `_row_cells` has no notion
+        # of the fence — it is handed one row — so the offer gate has to say it, or it hands
+        # the model a `use:` line `fix_row` refuses for a reason the row reader never checks.
+        return (
+            "it carries a fence delimiter (```), which would close the block early — the row "
+            "cannot be repaired in place at all"
+        )
+    try:
+        _row_cells(block, candidate, len(cols))
+    except RowError as e:
+        return str(e)
+    back = _split_cells(candidate)
+    if len(back) != len(cols):
+        return (
+            f"it splits to {len(back)} cells but the block declares {len(cols)} — "
+            f"the rejoined row lost a delimiter"
+        )
+    moved = [cols[i] for i in range(len(cols)) if i != at and back[i] != parsed[i]]
+    if moved:
+        return (
+            f"it would rewrite the {', '.join(repr(c) for c in moved)} cell(s), which the "
+            f"repair must leave exactly as written"
+        )
+    return None
+
+
+def _illegal_key_diagnostic(
+    block: Block, row: str, cols: list[str], rec: dict[str, str], key: str,
+) -> Diagnostic:
+    """The warn-severity diagnostic for one `:R attr_updates` row whose `key` cell names
+    neither `class`, `ident` nor an `attrs.<name>`. Split out of `_check_attr_update_keys`
+    only to keep that loop under the mccabe cap; see its docstring for the raw-text rebuild
+    this builds `fix` from.
+    """
+    # The LAST `key` column, because that is the cell `key` came from: `_row_dict` zips the
+    # header onto the cells and a repeated column name lets the later cell win, so a header
+    # spelling `key` twice makes `cols.index` point at a cell the record never read. The
+    # suggestion then rewrites an innocent cell and leaves the offending one standing — a
+    # repair that re-earns its own warning, forever, since the row still parses.
+    at = len(cols) - 1 - cols[::-1].index("key")
+    raw_cells = _split_cells_raw(row)
+    if len(raw_cells) < len(cols):
+        # A legal SHORT row under a header marking its trailing column(s) optional — pad out
+        # to the declared width, same as `_row_cells` pads the parsed record, so the pasted
+        # candidate is full-width rather than re-opening the same gap.
+        raw_cells = raw_cells + [""] * (len(cols) - len(raw_cells))
+    candidates = (
+        _swap_cell(raw_cells, at, "class"),
+        _swap_cell(raw_cells, at, f"attrs.{key}"),
+    )
+    # ALL-OR-NOTHING (F-M half one): put each candidate through `_candidate_refusal` — which
+    # wraps the parser's OWN row reader rather than substituting it, since that reader RAISES
+    # where this check returns a value — and withhold the whole suggestion the moment either
+    # candidate would not come back as the author's row with one cell changed. One
+    # complete-looking suggestion with the other route silently missing would be worse than
+    # none.
+    #
+    # The refusal is CARRIED, not paraphrased: the three grounds it distinguishes are three
+    # different things for the author to fix, and naming only the width sends someone counting
+    # pipes on a row whose pipes are already right.
+    #
+    # `parsed` cannot raise here, and is not wrapped for it: `_check_attr_update_keys` reached
+    # this row only by `_row_dict(block, row)` returning, and that is this same call — the
+    # `default_cols` arm it resolves collapses to `block.columns or []`, which is `cols`.
+    parsed = _row_cells(block, row, len(cols))
+    refusal: str | None = None
+    rejected = ""
+    for candidate in candidates:
+        refusal = _candidate_refusal(block, cols, parsed, at, candidate)
+        if refusal is not None:
+            rejected = candidate
+            break
+    # `or`, not `.get`'s default: `rec` is keyed on the block's DECLARED columns, so a header
+    # that names `target` puts the key there whatever the cell holds — the default fires only
+    # for a header that omits the column entirely, and a blank cell renders "on : key ...",
+    # naming no object at all. Blank and absent are the same thing to a reader here.
+    message = (
+        f":R attr_updates on {rec.get('target') or '?'}: key {key!r} is not a "
+        f"valid refinement key — use `class` (class refinement), `ident` "
+        f"(identifier refinement) or `attrs.<name>` (attribute); a bare key "
+        f"is dropped silently"
+    )
+    if refusal is not None:
+        message += (
+            # QUOTES THE REBUILT ROW the refusal is ABOUT. The carried reason is the row
+            # reader's verdict on a MACHINE-BUILT candidate, and it sits two lines above
+            # `render_diagnostic`'s `row: <the author's line>` — so unattributed it reads as a
+            # verdict on the author's row and prescribes an edit to bytes they never wrote
+            # ("row has 5 cells but 4 expected", printed beside a 4-cell row).
+            #
+            # NO VERB INSTRUCTION HERE. `runtime.tools` already appends "Repair each flagged
+            # row with `fix_row(old_row, new_row)` — or delete it with `fix_row(old_row, "")`"
+            # under every rendered warn diagnostic, and it owns that vocabulary; a second copy
+            # is a third place to keep in step.
+            f" — the suggested repair is withheld: rebuilding this row as {rejected!r} "
+            f"would not read back as a row of this block ({refusal})"
+        )
+    return Diagnostic(
+        message=message,
+        locus=Locus(block=":R attr_updates", row_text=row),
+        fix=() if refusal is not None else candidates,
+        # THE one warn-severity family. The row is INERT — it changes no effective vertex
+        # state — so the block it rides in is worth keeping, and the model repairs the row
+        # with `fix_row` instead of re-emitting the whole block. Every other family stays a
+        # refusal: nothing is written and the model re-sends.
+        severity="warning",
+    )
+
+
 def _check_attr_update_keys(proposed_text: str) -> list[Diagnostic]:
     """`:R attr_updates` refinement rows — the KEY, and the value that key promises to carry
     — checked over the ROWS rather than the folded records.
@@ -1726,7 +1867,7 @@ def _check_attr_update_keys(proposed_text: str) -> list[Diagnostic]:
                 if "value" in cols and not (value or "").strip():
                     out.append(Diagnostic(
                         message=(
-                            f":R attr_updates on {rec.get('target', '?')}: the `value` cell "
+                            f":R attr_updates on {rec.get('target') or '?'}: the `value` cell "
                             f"for key {key!r} is empty — a refinement settles a slot by "
                             f"naming the value the lead obtained, and an empty cell settles "
                             f"nothing. Write that value, or leave the `??` standing and "
@@ -1736,28 +1877,9 @@ def _check_attr_update_keys(proposed_text: str) -> list[Diagnostic]:
                     ))
                 continue
             # `rec`'s keys are the block's DECLARED columns, so a non-empty `key` is proof
-            # the header names a `key` column to substitute into.
-            at = cols.index("key")
-            cells = [rec.get(c, "") for c in cols]
-            out.append(Diagnostic(
-                message=(
-                    f":R attr_updates on {rec.get('target', '?')}: key {key!r} is not a "
-                    f"valid refinement key — use `class` (class refinement), `ident` "
-                    f"(identifier refinement) or `attrs.<name>` (attribute); a bare key "
-                    f"is dropped silently"
-                ),
-                locus=Locus(block=":R attr_updates", row_text=row),
-                fix=(
-                    _swap_cell(cells, at, "class"),
-                    _swap_cell(cells, at, f"attrs.{key}"),
-                ),
-                # THE one warn-severity family. The row is INERT — it changes no effective
-                # vertex state — so the block it rides in is worth keeping, and the model
-                # repairs the row with `fix_row` instead of re-emitting the whole block.
-                # Every other family stays a refusal: nothing is written and the model
-                # re-sends.
-                severity="warning",
-            ))
+            # the header names a `key` column to substitute into. Built from the row's RAW
+            # text, not from `rec` — see `_illegal_key_diagnostic`.
+            out.append(_illegal_key_diagnostic(block, row, cols, rec, key))
     return out
 
 
