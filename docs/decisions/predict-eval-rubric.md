@@ -109,6 +109,15 @@ Each case yields a per-dimension score. Aggregate = (weighted sum across cases).
     `≥1`/`≤1`).
   - **compound_claim**: `claim` text contains ` AND `, ` OR `, comma-separated
     observables, "or off the".
+    *(#932: scope this to `predictions[]` and `attribute_predictions[]`, and
+    EXCLUDE `refutation_shape[]`. A refutation scoped `refutes: p1,p2`
+    overturns `p1 ∧ p2`, so `¬p1 ∨ ¬p2` is the correct rendering and the
+    regex reads it as the defect — measured at 48% of the refutation rows
+    in the tree, including `defender/SKILL.md`'s own teaching block, both
+    worked examples and a shipped e2e golden. Compound claims are real and
+    they sit in the predictions. Full measurement in
+    `defender-invlang-enforcement-ramp.md` §Why a refutation-atomicity gate
+    is not a rung.)*
   - **invoker_identity_peer_fork**: two hypotheses share `proposed_edge.relation`
     + `parent_vertex.classification` AND their `predictions[].claim` sets are
     subset-equal modulo `authorization_contract`.

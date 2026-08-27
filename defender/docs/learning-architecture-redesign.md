@@ -209,6 +209,12 @@ Never querying the holding system is a lead-set gap; querying it at the wrong sc
 lead-quality; receiving the fact and reasoning past it is analyze-discipline; establishing
 it without the warranted disposition change is decision discipline.
 
+Refutation splits on the same line and needs saying, because the word covers two phases.
+Writing the refutation shape — the `:H h-NNN.refuts` row saying what observation would kill
+the hypothesis, and which of its own predictions that overturns — is PLAN. Citing the shape
+that came in, on a `--`, is ANALYZE. A shape defect attributed to ANALYZE lands on the wrong
+prompt, and "refutation is an ANALYZE concern" is the reading to expect (#932).
+
 A `discard` verdict is required (no current outcome enum has one — `core/config.py:245`).
 If the oracle contradicted the base or an earlier answer, the episode teaches nothing about
 either player. Most contradictions are mechanical and belong upstream of the reviewer, but
