@@ -105,12 +105,12 @@ def _parse(cmd: str) -> list[bash_exec.Pipeline] | None:
 
 
 def _is_blank(cmd: str) -> bool:
-    """Is `cmd` nothing but the scanner's own word separators — the allowed no-op, ahead of the
-    parse (#959 M4/F1/FK4). Asks `bash_exec.is_word_separator` rather than owning a second
-    opinion about what a blank is: `str.strip()` removes 26 characters the scanner does not,
-    and answering the falsy/whitespace-only command from THAT predicate authorised an argv the
-    text did not name. The falsy member (`""`) is `all()` over nothing, which is `True`."""
-    return all(bash_exec.is_word_separator(c) for c in cmd)
+    """Is `cmd` nothing but bash's own blanks — the allowed no-op, ahead of the parse
+    (#959 M4/F1/FK4). Reads `bash_exec.BLANKS`, the scanner's own set, rather than owning a
+    second opinion about what a blank is: `str.strip()` removes 26 characters the scanner does
+    not, and answering the falsy/whitespace-only command from THAT predicate authorised an argv
+    the text did not name. The falsy member (`""`) is `all()` over nothing, which is `True`."""
+    return all(c in bash_exec.BLANKS for c in cmd)
 
 
 #: The 26 characters `str.strip()` removed that the scanner never treats as a blank (claim a1;
@@ -210,7 +210,7 @@ def _raw_decide(command: str, policy: AgentPolicy, run_dir: Path | None) -> tupl
 
 
 #: The one divergent-blank character whose behaviour changed EVERYWHERE a word can carry it,
-#: not only at the two ends the deleted trim used to reach: `_WORD_SEPARATORS` carried `\r`
+#: not only at the two ends the deleted trim used to reach: `_BLANKS` carried `\r`
 #: before M6, so a mid-word carriage return was a live separator then and is an ordinary
 #: character now. Every other divergent blank was NEVER a separator anywhere but the two ends
 #: (the deleted trim was the only old opinion that ever touched it), so its responsibility
@@ -377,9 +377,14 @@ def decide_bash(
     run_dir: Path | None = None, defender_dir: Path | None = None,
     cwd_anchor: Path | None = None,
 ) -> BashDecision:
-    # No `.strip()` here (#959 M4): the parser is handed the model's text byte for byte, and
-    # the blank check below reads the scanner's own separator constant rather than owning a
-    # second opinion about what a blank is.
+    # NO TRIM AT ALL here (#959 M4), where main narrowed the trim to `bash_exec.BLANKS`. Both
+    # sides are answering the same defect — `str.strip()` is a UNICODE predicate and removed
+    # `\r`, NBSP, `\x0b`, `\x85`, U+2003, every character the scanner was narrowed to KEEP
+    # inside its word, so `cat <run_dir>/report.md<NBSP>` was checked and RUN as
+    # `cat <run_dir>/report.md`, an argv the model did not write. Narrowing the trim closes
+    # that; deleting it closes the class, because the parser is then handed the model's text
+    # byte for byte and there is no second opinion left to disagree with the scanner. The
+    # blank command is answered by `_is_blank`, which asks the scanner's own set.
     effective_run_dir = cwd_anchor if cwd_anchor is not None else run_dir
 
     if _is_blank(command):

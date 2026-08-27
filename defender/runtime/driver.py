@@ -48,6 +48,7 @@ from .tools import (
 from .verb_grant import VerbGrant
 from .verbs import ModuleVerbRegistry
 
+from defender import _clock
 from defender._env import env_bool
 from defender._frontmatter import strip_frontmatter
 from defender._run_paths import RunPaths
@@ -169,8 +170,41 @@ def _opening_prompt(  # noqa: PLR0913 — `_user_prompt`'s parameters plus the r
         return _user_prompt(
             run_dir, alert_path, defender_dir, verbs=verbs, limits=limits, run_id=run_id,
         )
-    prompt = f"{resume.continuation_prompt}\n\n{_coordinates(run_dir, alert_path)}"
+    prompt = (
+        f"{resume.continuation_prompt}\n\n"
+        f"{_coordinates(run_dir, alert_path)}{_branch_clock(resume)}")
     return prompt, "", ""
+
+
+def _branch_clock(resume: Any) -> str:
+    """The line telling a resumed run WHEN it is.
+
+    A COORDINATE, not an instruction, which is why it rides here beside `_coordinates` and not
+    in `continuation_prompt`. That field is deliberately the caller's — the 2026-08-16
+    experiment's caveat was that its own continuation wording biased the run toward closing — so
+    putting the clock there would make it optional (a caller forgets it and the episode silently
+    has no clock statement) and per-caller (two siblings' prompts are authored separately, so
+    they could disagree about when they are, which is a difference in the one part of the
+    prompt that is supposed to be shared).
+
+    It is NOT what closes the ES|QL window — `elastic_adapter.bounded_esql` does that on the
+    wire, by splicing a bound in as its own pipe stage, and MAIN is not the role that writes
+    those queries anyway (the GATHER subagent is, and its deps carry no clock; see the corpus
+    stager's docstring). What this line buys is MAIN's own reasoning: a resumed run reads back
+    a history full of dated evidence and has to place "now" against it, and a model that
+    silently assumes the wall clock reasons about a gap that does not exist in the world it is
+    resuming into.
+
+    `resume.as_of` DIRECTLY, not `getattr(..., None)` with a `""` fallback. `BranchSpec.as_of`
+    is a required, non-`Optional` field precisely so a resume without a moment cannot be
+    spelled, and re-coalescing it here reopened that: a shape carrying no clock produced a
+    prompt with no clock line, silently, which is the failure the field's own docstring says it
+    exists to remove. `defender/CLAUDE.md` names the rule — "Resolve an optional input once at
+    the boundary, thread it inward non-`Optional`; don't re-coalesce in the body" — and the
+    boundary already did the work. An `AttributeError` here is the honest answer for a resume
+    shape that is not a `BranchSpec`.
+    """
+    return f"now: {_clock.z_seconds(resume.as_of)}\n"
 
 
 def _budget_state_for_enforcement(state: dict, deps: AgentDeps) -> dict:

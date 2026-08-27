@@ -12,6 +12,7 @@ from pathlib import Path as _Path
 if (_root := str(_Path(__file__).resolve().parents[3])) not in _sys.path:
     _sys.path.insert(0, _root)
 
+from defender import _clock
 from defender.runtime.verbs import VerbContext
 from defender.scripts.adapters import _stub_transport as transport
 from defender.scripts.adapters.confinement import confine_host_state_call
@@ -53,8 +54,30 @@ def _raise_on_docker_error(ctx: VerbContext, rc: int, stderr: str, host: str) ->
     raise UpstreamFault(f"docker exec on {host} (rc={rc}): {s or 'no stderr'}")
 
 
-def _utcnow_z() -> str:
-    return datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+def _captured_at(ctx: VerbContext) -> str:
+    """When this observation was taken, as the RUN reckons time.
+
+    This adapter is the only one of the seven that mints a timestamp, and `captured_at` is the
+    one field in a served payload that is not a function of the question asked. On an ordinary
+    run that is exactly right — a host-state read IS a point-in-time capture, and the skill
+    tells its readers to cross-reference the value against event timestamps. On a BRANCHED run
+    it is what makes an episode unreplayable: two siblings forked from one branch point, or one
+    episode re-run a week later, produce different bytes for identical questions, and the
+    difference belongs to neither world. `ctx.as_of` is the branch point's moment, so the
+    stamp describes the world the sibling is living in rather than the afternoon it executed.
+
+    `getattr` rather than `ctx.as_of`, for the reason `elastic_adapter` reads `world_id` the
+    same way: this adapter is reached with duck-typed contexts from the CLI lane and from test
+    stubs, and an `AttributeError` inside a verb body is not an `AdapterFault` — the query tool
+    files it as exit 2, an INFRA code, so a shape mismatch would read as the estate being down.
+
+    THE ONE ANCHOR for the optionality: resolved here, once, and every caller below takes a
+    concrete string. `health_check` is deliberately not a caller — it stamps nothing today,
+    reaches no corpus, and a liveness probe that grew a timestamp would be a contract change
+    for no gain.
+    """
+    at = getattr(ctx, "as_of", None)
+    return _clock.z_seconds(datetime.datetime.now(datetime.UTC) if at is None else at)
 
 
 def health_check(ctx: VerbContext) -> dict:
@@ -101,7 +124,7 @@ def container_inspect(ctx: VerbContext, *, container_id: str) -> dict:
     image = json.loads(parts[1]) if len(parts) > 1 and parts[1] else ""
     return {
         "container_id": container_id,
-        "captured_at": _utcnow_z(),
+        "captured_at": _captured_at(ctx),
         "name": name,
         "image": image,
     }
@@ -111,7 +134,7 @@ def proc_tree(ctx: VerbContext, *, host: str) -> dict:
     confine_host_state_call("ps", host)
     rc, out, err = _exec(ctx, host, ["ps", "-eo", "pid,ppid,user,stat,etime,cmd", "--forest"])
     _raise_on_docker_error(ctx, rc, err, host)
-    return {"host": host, "captured_at": _utcnow_z(), "ps_output": out}
+    return {"host": host, "captured_at": _captured_at(ctx), "ps_output": out}
 
 
 def passwd(ctx: VerbContext, *, host: str) -> dict:
@@ -119,7 +142,7 @@ def passwd(ctx: VerbContext, *, host: str) -> dict:
     rc, out, err = _exec(ctx, host, ["cat", "/etc/passwd"])
     _raise_on_docker_error(ctx, rc, err, host)
     entries = [line for line in out.splitlines() if line and not line.startswith("#")]
-    return {"host": host, "captured_at": _utcnow_z(), "entries": entries}
+    return {"host": host, "captured_at": _captured_at(ctx), "entries": entries}
 
 
 def authorized_keys(ctx: VerbContext, *, host: str, user: str = "root") -> dict:
@@ -148,7 +171,7 @@ def authorized_keys(ctx: VerbContext, *, host: str, user: str = "root") -> dict:
         "host": host,
         "user": user,
         "path": ak_path,
-        "captured_at": _utcnow_z(),
+        "captured_at": _captured_at(ctx),
         "keys": keys,
     }
 
@@ -164,7 +187,7 @@ def fim_checksum(ctx: VerbContext, *, host: str, path: str) -> dict:
             raise UpstreamFault(f"{path!r} does not exist on {host}")
         _raise_on_docker_error(ctx, rc, err, host)
     digest = out.split()[0] if out.strip() else ""
-    return {"host": host, "path": path, "captured_at": _utcnow_z(), "sha256": digest}
+    return {"host": host, "path": path, "captured_at": _captured_at(ctx), "sha256": digest}
 
 
 def package_list(ctx: VerbContext, *, host: str) -> dict:
@@ -173,7 +196,7 @@ def package_list(ctx: VerbContext, *, host: str) -> dict:
     rc, out, err = _exec(ctx, host, ["dpkg-query", "-W", "-f=" + fmt], timeout_sec=30)
     _raise_on_docker_error(ctx, rc, err, host)
     pkgs = [line for line in out.splitlines() if line.strip()]
-    return {"host": host, "captured_at": _utcnow_z(), "packages": pkgs}
+    return {"host": host, "captured_at": _captured_at(ctx), "packages": pkgs}
 
 
 VERBS = {

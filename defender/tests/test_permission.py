@@ -386,11 +386,15 @@ _LEXING_FAILURES = [
 def test_the_lexing_reason_names_every_way_a_command_can_fail_to_parse(label, cmd, phrase):
     """Each lexing failure answers the LEXING reason, and that reason names the cause.
 
-    Two of these used to answer `policy.deny_reason` instead — the unbalanced quote and the
-    malformed `bash -c`, both of which reach the gate through the wrapper fold rather than an ordinary word.
-    That handed a model with a quoting mistake a CAPABILITY message ("not permitted for this
-    agent"), which points it at a different tool rather than at its own quote, while the
-    sibling quote failure one line away answered correctly."""
+    The unbalanced quote used to answer `policy.deny_reason` instead, because it reached the
+    gate through the standalone wrapper step rather than through the executor's own scan of the
+    command text. That handed a model with a quoting mistake a CAPABILITY message ("not
+    permitted for this agent"), which points it at a different tool rather than at its own
+    quote, while the sibling quote failure one line away answered correctly.
+
+    Its old partner in that pair, a malformed `bash -c`, is gone from this list: #971 deletes
+    the wrapper step, so a wrapper is an ungranted PROGRAM and the capability reason is the
+    right answer for it rather than the wrong one."""
     d = _bash(cmd, GATHER)
     assert not d.allow, f"{label}: a command that cannot be parsed was allowed"
     assert d.reason == permission.UNTOKENIZABLE_REASON, \

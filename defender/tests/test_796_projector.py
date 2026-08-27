@@ -497,3 +497,66 @@ def test_a_record_with_no_strong_movement_has_no_target():
         }],
     }
     assert ablation_target(weak) is None
+
+
+#: One resolution naming `e-002` three times in its `⟂` cell, and TWO resolutions each naming
+#: `e-001` once. The counts a reader means are e-002:1 and e-001:2, so `e-002` is the
+#: narrowest-supported edge and the one to withhold. Counting MENTIONS reverses that — e-002:3,
+#: e-001:2 — and withholds `e-001` instead. Chosen so neither state is a tie: the pre-fix answer
+#: and the post-fix answer are different edges AND different counts.
+_AN_EDGE_NAMED_THRICE_IN_ONE_RESOLUTION = (
+    "```invlang\n"
+    ":V prologue.vertices [id|type|class|ident|attrs?]\n"
+    "v-001|identity|user/known-corp|dev.dana|\n"
+    "v-002|session|interactive|session@db-1|\n"
+    "\n"
+    ":E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]\n"
+    "e-001|authenticated_as|v-002|v-001|2026-05-25T13:53:35Z|siem-event:elastic|host=db-1\n"
+    "e-002|authenticated_as|v-002|v-001|2026-05-25T13:55:02Z|siem-event:elastic|host=db-2\n"
+    "\n"
+    ":H hypothesize.hypotheses "
+    "[id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]\n"
+    "h-001|?benign|v-001|authenticated_as|session|interactive||null|active\n"
+    "h-002|?evil|v-001|authenticated_as|session|interactive||null|active\n"
+    "h-003|?stolen|v-001|authenticated_as|session|interactive||null|active\n"
+    "\n"
+    ":L findings [id|loop|name|target|tests|system|window]\n"
+    "l-001|1|identity-authz-check|v-001|h-001,h-002,h-003|identity|n/a\n"
+    "\n"
+    ":T resolutions\n"
+    "h-001  null → --    [l-001 r1 severe ⟂ e-001 :: not provisioned for db-1]\n"
+    "h-002  null → --    [l-001 r1 severe ⟂ e-001 :: nor for the second window]\n"
+    "h-003  null → --    [l-001 r1 severe ⟂ e-002 e-002 e-002 :: db-2 the same three ways]\n"
+    "```\n"
+)
+
+
+def test_an_edge_named_twice_in_one_cell_is_one_citation():
+    """#969. The `⟂` cell is free text and the parser read every MENTION of an edge id, while
+    the two sibling id lists on that same record were deduped — this was the one that was not.
+
+    Pinned at the parse, because that is where the field's contract lives: a reader asking
+    which edges a resolution cites must not have to know how many times the cell said one."""
+    doc = parse_investigation(_AN_EDGE_NAMED_THRICE_IN_ONE_RESOLUTION)
+    cited = [res["supporting_edges"] for _lead, res in _walkers.iter_resolutions(doc)]
+    assert cited == [["e-001"], ["e-001"], ["e-002"]], (
+        f"a repeated mention survived the parse as a repeated citation: {cited}"
+    )
+
+
+def test_the_ablation_target_counts_resolutions_not_mentions():
+    """#969's consequence, and the reason the parse matters. `ablation_target` withholds the
+    NARROWEST-supported edge — ablating one that carries every resolution removes the whole
+    case, and a lens reading a near-empty world diverges for reasons that have nothing to do
+    with fragility.
+
+    Counting mentions made one resolution look like three, so the edge with the widest real
+    support was scored as the narrowest, `e-001` was withheld instead, and the inflated count
+    travelled to the composer as "this edge was load-bearing"."""
+    from defender.runtime.review.projector import ablation_target
+
+    doc = parse_investigation(_AN_EDGE_NAMED_THRICE_IN_ONE_RESOLUTION)
+    assert ablation_target(doc) == ("e-002", 1), (
+        "the narrowest-supported edge is the one cited by ONE resolution, and the count "
+        "handed to the composer is that one resolution — not three mentions of it"
+    )

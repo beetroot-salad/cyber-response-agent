@@ -159,7 +159,9 @@ class FakeDocker:
     as `(0, "", "")` — which for a state query is not "fine", it is a daemon reporting rc 0 and
     no state at all. No daemon does that: a name holding nothing answers rc 1. Routing the
     query around `reply` keeps those tables saying what they were written to say, and keeps
-    the state a test DOES care about (`existing="running"`) something it must ask for."""
+    the state a test DOES care about (`existing="running"`) something it must ask for. It is
+    answered per FORMAT STRING, because `existing` is a state and box.py asks two other
+    questions down the same verb — see `_inspect`."""
 
     def __init__(self, reply=None, existing: str | None = None):
         self.calls: list[_DockerCall] = []
@@ -172,7 +174,7 @@ class FakeDocker:
         call = _DockerCall(list(argv))
         self.calls.append(call)
         if call.verb == "inspect":
-            rc, out, err = self._inspect(call.argv)
+            rc, out, err = self._inspect(list(argv))
         else:
             rc, out, err = (
                 self._reply(call.verb) if self._reply is not None else self._all_succeed(call)
@@ -180,17 +182,26 @@ class FakeDocker:
         return subprocess.CompletedProcess(list(argv), rc, out, err)
 
     def _inspect(self, argv: list[str]) -> tuple[int, str, str]:
-        # FORMAT-AWARE, like `_box665.RecordingDocker._inspect`: `box.py` issues two different
-        # inspects — `-f {{.State.Status}}` for the pre-create sweep and
-        # `-f {{index .Config.Labels "defender.start-token"}}` for the create-fault arm's
-        # ownership check. Answering the state to both hands `_start_token` the string
-        # "running" as a start-token label, which is an answer no daemon produces.
-        fmt = argv[argv.index("-f") + 1] if "-f" in argv else ""
+        """box.py asks THREE different questions through `docker inspect`, and the format
+        string is what separates them — on a real daemon and here. Answering all three from
+        `existing` hands `_start_token` the STATE word as a start token, and the damage runs
+        the OTHER way from an over-reap: `_reap_on_fault` reaps only when the label EQUALS the
+        `uuid4().hex` this call stamped, and no state word ever equals one — so the fault arm
+        would silently SKIP its reap and leak the container it owns, while the test asserting
+        "another lane's box is not reaped" went green for the wrong reason. The #884 F-29
+        ownership check answered by the double, not by production, in either direction.
+        `_box665.RecordingDocker` already dispatches this way."""
         if self.existing is None:
             return (1, "", "Error: No such object\n")
+        fmt = argv[argv.index("-f") + 1] if "-f" in argv else ""
+        if not fmt:
+            # `--format`, not `-f`: the DooD shared-mounts query. A container that exists but
+            # whose mount table we do not model answers with an empty table, never a state.
+            return (0, "", "")
         if "Config.Labels" in fmt:
-            # A container this double never stamped: docker prints `<no value>` for a label
-            # the container does not carry rather than failing.
+            # The start-token label. This double models a container held by SOMEONE ELSE (that
+            # is what `existing` means), and docker prints `<no value>` for a label a container
+            # does not carry — which `_start_token` reads as "not ours", the honest answer.
             return (0, "<no value>\n", "")
         return (0, f"{self.existing}\n", "")
 
@@ -1214,26 +1225,30 @@ def test_a_stopped_box_of_the_same_name_does_not_block_a_new_run(tmp_path):
     reply until a removal for that name has been issued, and succeeds afterwards. A start that
     skips the reap therefore cannot pass."""
     run = _clean_run_dir(tmp_path)
-    state = {"present": True}
 
     class StoppedCollision(FakeDocker):
+        """The stateful daemon rule, and NOTHING about `inspect`.
+
+        The container this test is about is stopped, holds the name, and collides on create.
+        `exited` is what a real daemon calls it, and it is what tells the pre-create sweep the
+        container is finished and may be cleared — the distinction from the live sibling two
+        tests down, which must not be. That state is `existing`, so the inspect goes through
+        `FakeDocker._inspect` and is answered PER FORMAT STRING: a subclass that answered
+        every inspect with the state word would hand `_start_token` `"exited"` as a start
+        token, which is the trap the base class's own docstring exists to close."""
+
         def __call__(self, argv, **kwargs):
             call = _DockerCall(list(argv))
-            self.calls.append(call)
-            if call.verb == "inspect" and state["present"]:
-                # The container this test is ABOUT: stopped, holding the name, colliding on
-                # create. `exited` is what a real daemon calls it, and it is what tells the
-                # pre-create sweep the container is finished and may be cleared — the
-                # distinction from the live sibling two tests down, which must not be.
-                return subprocess.CompletedProcess(list(argv), 0, "exited\n", "")
             if call.verb in ("rm", "kill"):
-                state["present"] = False
+                self.calls.append(call)
+                self.existing = None
                 return subprocess.CompletedProcess(list(argv), *C43A_RM_MISSING)
-            if call.verb == "run" and state["present"]:
+            if call.verb == "run" and self.existing is not None:
+                self.calls.append(call)
                 return subprocess.CompletedProcess(list(argv), *C43B_NAME_COLLISION)
-            return subprocess.CompletedProcess(list(argv), *self._all_succeed(call))
+            return super().__call__(argv, **kwargs)
 
-    docker = StoppedCollision()
+    docker = StoppedCollision(existing="exited")
     box = start_box(run, DEFENDER, docker=docker)
     assert box is not None
     assert docker.verbs.index("rm") < docker.verbs.index("run"), \
@@ -1314,17 +1329,15 @@ def test_a_colliding_run_id_refuses_rather_than_reaping_a_live_sibling(tmp_path)
     run = _clean_run_dir(tmp_path)
     name = container_name(run.name)
 
-    class LiveSibling(FakeDocker):
-        def __call__(self, argv, **kwargs):
-            call = _DockerCall(list(argv))
-            self.calls.append(call)
-            if call.verb == "inspect":
-                return subprocess.CompletedProcess(list(argv), 0, "running\n", "")
-            if call.verb == "run":
-                return subprocess.CompletedProcess(list(argv), *C43B_NAME_COLLISION)
-            return subprocess.CompletedProcess(list(argv), 0, "", "")
-
-    docker = LiveSibling()
+    # `existing="running"` rather than a subclass answering every inspect with the state word:
+    # the state query and the START-TOKEN query are different questions down one verb, and a
+    # double that answers both with `running` hands `_start_token` a token no `uuid4().hex`
+    # can equal — so `_reap_on_fault` would silently skip its reap and this test's "no rm for
+    # that name" assertion would pass for the double's reason instead of production's.
+    docker = FakeDocker(
+        lambda verb: C43B_NAME_COLLISION if verb == "run" else (0, "", ""),
+        existing="running",
+    )
     with pytest.raises(BoxFault) as e:
         start_box(run, DEFENDER, docker=docker)
     assert name in str(e.value) or run.name in str(e.value)

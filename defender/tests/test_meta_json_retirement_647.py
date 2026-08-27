@@ -514,7 +514,17 @@ def test_no_module_outside_the_defender_package_imports_run_common():
     repo is rooted inside `defender/` and structurally could not see the caller that lived
     under `scripts/`. The sweep therefore runs from the repo root over tracked files, and the
     surviving caller set is a property of the tree rather than of a list."""
-    hits = live_hits(repo_grep(r"\brun_common\b"))
+    hits = live_hits(
+        repo_grep(r"\brun_common\b"),
+        # A lint gate's scan CENSUS is the category `live_hits` already exempts for the lint
+        # BASELINES: it records the module by name as a thing to scan and imports nothing.
+        # `lint_tree_read_follows_link` names this module because the alert copy it screens
+        # for lives in it — the copy that followed a link into every sibling run dir — so
+        # dropping the name to satisfy a textual sweep would take the site the gate exists
+        # for out of the gate's scope. The exclusion is the gate script only; its baseline
+        # is already covered by the suffix rule above.
+        extra_excludes=("scripts/lint/lint_tree_read_follows_link.py",),
+    )
     outside = [h for h in hits if not h.startswith("defender/")]
     assert not outside, (
         "run_common is imported from outside the defender package:\n" + "\n".join(outside)

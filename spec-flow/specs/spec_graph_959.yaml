@@ -30,12 +30,12 @@ base: 6a2ea874          # main, #958 merged. write-code-from-spec's gate diffs a
 #       means the wrapper is not the whole command.                                 (O1,O2,O4)
 #   M4  the gate's `command.strip()` is deleted.                                    (O1)
 #   M5  the verdict-change set is written down before implementation.               (O3)
-#   M6  `\r` leaves `_WORD_SEPARATORS` (a), and the #955 oracle reads the recorded
+#   M6  `\r` leaves `_BLANKS` (a), and the #955 oracle reads the recorded
 #       argv file in BINARY (b).  NEW at §7 (F6) — not in the issue body.           (O1)
 #
 # M6 IS NECESSARY BUT NOT SUFFICIENT ON ITS OWN, AND THAT DEPENDENCY IS PART OF THE SPEC.
 # `_word_value` is `shlex.split(span, comments=False, posix=True)`, whose own hardcoded
-# whitespace contains `\r` whatever `_WORD_SEPARATORS` says. With M6(a) alone: a mid-word `\r`
+# whitespace contains `\r` whatever `_BLANKS` says. With M6(a) alone: a mid-word `\r`
 # still splits the resolved value (`'A\rB'` -> `['A','B']`), an edge `\r` is silently dropped
 # (`'P\r'` -> `['P']`), and a lone `\r` resolves to zero parts, fails the `len(parts) == 1`
 # guard and makes the whole line untokenizable. M6 closes O1 only if M2 lands as
@@ -331,7 +331,7 @@ demands:
   - id: d_every_member_of_the_divergent_blank_alphabet_is_swept
     kind: domain-outcome
     form: test
-    binds: ['command_text.domain', '_WORD_SEPARATORS.domain']
+    binds: ['command_text.domain', '_BLANKS.domain']
     discharged_by: test_every_member_of_the_divergent_blank_alphabet_behaves_the_same_way
     source: "SB6 — the judge's recommendation, one table-driven test over the closed set"
     seed_docstring: >-
@@ -340,7 +340,7 @@ demands:
       blank are each exercised at both ends of an allowed pipeline, and each behaves the way the
       three named members do. The set is derived in the test from `str.strip()` and the scanner's
       own separator constant — never transcribed — so the 26th member (`\r`, which joins the
-      alphabet the moment M6 removes it from `_WORD_SEPARATORS`) cannot be left out by hand.
+      alphabet the moment M6 removes it from `_BLANKS`) cannot be left out by hand.
 
   # =========================================================================================
   # O1 / M6 — THE `\r` FIX. New at §7 (F6): the issue's census marks `_scan` "keep — this is
@@ -350,7 +350,7 @@ demands:
   - id: d_the_scanner_ends_a_word_where_bash_ends_one
     kind: negative
     form: test
-    binds: ['_scan', '_WORD_SEPARATORS.domain.distinguished["\r"]', 'bash_oracle']
+    binds: ['_scan', '_BLANKS.domain.distinguished["\r"]', 'bash_oracle']
     discharged_by: test_the_scanner_ends_a_word_exactly_where_bash_ends_one
     source: "F6(a), human-resolved — M6"
     seed_docstring: >-
@@ -360,7 +360,7 @@ demands:
       edge (`cat P\r`), across an operator run (`cat P\r| wc -c`), and for a line that is one
       `\r` and nothing else, which is a one-character word and not zero tokens.
     rejected:
-      - {nl: "the current `_WORD_SEPARATORS`, which contains `\\r` because the shlex lexer it replaced did — bash's own blank set is space and tab only"}
+      - {nl: "the current `_BLANKS`, which contains `\\r` because the shlex lexer it replaced did — bash's own blank set is space and tab only"}
 
   - id: d_the_two_layers_agree_about_the_removed_separator
     kind: behavior
@@ -590,7 +590,7 @@ demands:
         of them is a one-word command bash would try to run. The 26 are `str.strip()`'s 29 blanks
         minus space, tab and newline — newline excluded because `parse` splits physical lines on
         it before `_scan` ever runs — and the 26th is `\r`, which joins the alphabet the moment M6
-        removes it from `_WORD_SEPARATORS`. The previously closed set said 25, a count taken from
+        removes it from `_BLANKS`. The previously closed set said 25, a count taken from
         the very constant this change edits (claim a1, computed; correcting claim g4).
         (2) `\r` INSIDE OR AT THE EDGE OF A WORD (M6, and M2 with it). Includes the shape
         immediately before an fd marker, `cat P\r2>/dev/null`, ALLOWED today as `['cat', P]`
@@ -757,8 +757,8 @@ demands:
     form: test
     fork: FK4
     resolved: "read-the-scanners-constant — taken by the human at §7, as recommended"
-    recommended_reading: "test blankness with the scanner's own separator constant — `not command.strip(_WORD_SEPARATORS)`"
-    binds: ['interacts(decide_bash->_WORD_SEPARATORS)', 'command_text.domain.distinguished["   "]']
+    recommended_reading: "test blankness with the scanner's own separator constant — `not command.strip(_BLANKS)`"
+    binds: ['interacts(decide_bash->_BLANKS)', 'command_text.domain.distinguished["   "]']
     discharged_by: test_the_blank_test_holds_no_opinion_of_its_own_about_what_a_blank_is
     seed_docstring: >-
       The blank test ahead of the parse holds no opinion of its own about what a blank is: it
@@ -768,11 +768,11 @@ demands:
       run as program names and are refused; a lone `"\r"` is likewise a word, which is exactly
       what M6 says bash reads it as.
     readings:
-      read-the-scanners-constant: "`not command.strip(_WORD_SEPARATORS)` — one decider survives, and the blank test reads the opinion rather than holding it; costs nothing and needs no new constant"
+      read-the-scanners-constant: "`not command.strip(_BLANKS)` — one decider survives, and the blank test reads the opinion rather than holding it; costs nothing and needs no new constant"
       delegate-to-the-scan: "ask `_scan` — F1's probe-refuted horn: the parse cannot answer it (zero pipelines DENY), so this needs a NEW special case rather than a pure delegation"
       a-second-constant: "an explicitly-named blank-check constant — reintroduces a second opinion about whitespace in the very change whose thesis is that there should be one"
     note: >-
-      RESOLVED AT §7 (FK4, human): `not command.strip(_WORD_SEPARATORS)`. The blank test holds no
+      RESOLVED AT §7 (FK4, human): `not command.strip(_BLANKS)`. The blank test holds no
       opinion of its own, so exactly one place in the tree still decides — the change's whole
       thesis. `delegate-to-the-scan` was probe-refuted at F1 and `a-second-constant` rejected as
       a second opinion about whitespace inside the change that exists to remove second opinions.
@@ -1239,11 +1239,11 @@ structure:
 
     - id: _scan
       provenance: design
-      facets: {}     # the word-boundary decision itself; its knob is `_WORD_SEPARATORS` below.
+      facets: {}     # the word-boundary decision itself; its knob is `_BLANKS` below.
                      # M1 changes its RETURN SHAPE (one frozen record per token); the seam demand
                      # binds the boundary and the record stream binds the edge's `.response`.
 
-    - id: _WORD_SEPARATORS
+    - id: _BLANKS
       provenance: design
       facets:
         domain:
@@ -1397,8 +1397,8 @@ structure:
     - {from: parse,        to: _scan,             mode: invoke, via: api, provenance: design}
     - {from: parse,        to: _word_value,       mode: invoke, via: api, provenance: design}
     - {from: parse,        to: _wrapper_span,     mode: invoke, via: api, provenance: design}
-    - {from: parse,        to: _WORD_SEPARATORS,  mode: read,   via: api, provenance: design}
-    - {from: decide_bash,  to: _WORD_SEPARATORS,  mode: read,   via: api, provenance: design}      # FK4's recommended blank test
+    - {from: parse,        to: _BLANKS,  mode: read,   via: api, provenance: design}
+    - {from: decide_bash,  to: _BLANKS,  mode: read,   via: api, provenance: design}      # FK4's recommended blank test
 
     # --- what M3 removes, and who depended on it -------------------------------------------
     - {from: parse,                 to: unwrap, mode: remove, via: api, provenance: design}
@@ -1575,10 +1575,10 @@ claims:
 
   - id: g4
     kind: primitive
-    claim: "the divergence alphabet between `str.strip()` and `_WORD_SEPARATORS` is closed and computable, and every member of it flips the same way"
+    claim: "the divergence alphabet between `str.strip()` and `_BLANKS` is closed and computable, and every member of it flips the same way"
     probe: "enumerate every codepoint in range(0x110000) whose str.strip() is empty, subtract frozenset(' \\t\\r\\n'); then drive both today's decide_bash and a no-strip re-implementation over each at both ends of an allowed pipeline"
     probe_kind: executed
-    observed: "str.strip() removes 29 characters; 25 are outside today's `_WORD_SEPARATORS`. Every one of the 12 sampled flips allow(today) -> deny(no-strip) at BOTH ends. Direction is uniformly NARROWING. `shlex.shlex('').whitespace` is ' \\t\\r\\n' — `_WORD_SEPARATORS` is that set exactly, which is how `\\r` got in (g1)"
+    observed: "str.strip() removes 29 characters; 25 are outside today's `_BLANKS`. Every one of the 12 sampled flips allow(today) -> deny(no-strip) at BOTH ends. Direction is uniformly NARROWING. `shlex.shlex('').whitespace` is ' \\t\\r\\n' — `_BLANKS` is that set exactly, which is how `\\r` got in (g1)"
     verdict: holds
     note: "RETYPED from `census` to `primitive`: it is a claim about `str.strip()`'s contract that closed on an executed probe, and the census instrument table would have demanded a search. THE COUNT IS SUPERSEDED BY a1: 25 is measured against the CURRENT separator set, and M6 edits that very constant, so the set the spec must carry is 26."
 
@@ -1992,12 +1992,12 @@ gate:
     - {rule: R4, element: 'command_text.domain.distinguished["   "]', by: d_bash_blank_only_command_is_still_the_allowed_no_op, cites: [c6], witness: "a spaces-only command is one of the three surviving bash-blank spellings; the demand exercises it individually rather than folding it into the empty-string case."}
     - {rule: R4, element: 'command_text.domain.distinguished["\t"]', by: d_bash_blank_only_command_is_still_the_allowed_no_op, cites: [c6], witness: "a tab-only command is the second surviving bash-blank spelling, exercised individually by the same demand."}
     - {rule: R4, element: 'command_text.domain.distinguished["\n"]', by: d_bash_blank_only_command_is_still_the_allowed_no_op, cites: [c6], witness: "a newline-only command is the third surviving bash-blank spelling; distinguished from the divergent members below, which the same trim deletion refuses instead of allowing."}
-    - {rule: R4, element: 'command_text.domain.distinguished["\r"]', by: d_a_command_refused_only_for_an_invisible_character_says_so, cites: [g1], witness: "a bare `\\r` is the 26th divergent-blank member once M6 removes it from `_WORD_SEPARATORS` (g1); the demand exercises it individually and asks whether the refusal names the character by codepoint, not just a generic capability deny — widened at the verify loop from the line ending alone to the whole invisible class (RC2)."}
+    - {rule: R4, element: 'command_text.domain.distinguished["\r"]', by: d_a_command_refused_only_for_an_invisible_character_says_so, cites: [g1], witness: "a bare `\\r` is the 26th divergent-blank member once M6 removes it from `_BLANKS` (g1); the demand exercises it individually and asks whether the refusal names the character by codepoint, not just a generic capability deny — widened at the verify loop from the line ending alone to the whole invisible class (RC2)."}
     - {rule: R4, element: 'command_text.domain.distinguished["\u00a0"]', by: d_unicode_blank_only_command_is_a_command, cites: [x5], witness: "a bare U+00A0 command is a word bash would try to run as a program name, not a blank (x5: unwrap returns the character itself); the demand exercises it individually against the swallow-shape default."}
     - {rule: R4, element: 'command_text.domain.distinguished["\v"]', by: d_unicode_blank_only_command_is_a_command, cites: [x5], witness: "same table, the vertical-tab member — x5's finding (these are words, not blanks) applies uniformly, and the demand exercises this member on its own."}
     - {rule: R4, element: 'command_text.domain.distinguished["\f"]', by: d_unicode_blank_only_command_is_a_command, cites: [g5], witness: "the form-feed member, which g5 established joins the P1 table alongside U+00A0 and \\v — exercised individually here rather than assumed to follow from the others."}
     - {rule: R4, element: 'command_text.domain.distinguished["\u2028"]', by: d_unicode_blank_only_command_is_a_command, cites: [g5], witness: "the U+2028 (line separator) member, the fourth g5 confirmed allows today with a corrupted first/last word and must be refused, not answered blank, once the trim is gone."}
-    - {rule: R4, element: '_WORD_SEPARATORS.domain.distinguished["\r"]', by: d_the_scanner_ends_a_word_where_bash_ends_one, cites: [g1, g4], witness: "the one distinguished member of the separator constant itself — g1's live finding that `_scan` splits on `\\r` where bash does not; the demand pins that the scanner stops treating it as a word-ending character."}
+    - {rule: R4, element: '_BLANKS.domain.distinguished["\r"]', by: d_the_scanner_ends_a_word_where_bash_ends_one, cites: [g1, g4], witness: "the one distinguished member of the separator constant itself — g1's live finding that `_scan` splits on `\\r` where bash does not; the demand pins that the scanner stops treating it as a word-ending character."}
     - {rule: R4, element: 'UNTOKENIZABLE_REASON.domain.distinguished[cause1]', by: d_a_newline_inside_the_c_argument_is_an_unclosed_quote, cites: [x7, a4], witness: "cause (1), the unbalanced-quote/newline-in-a-quoted-argument reason (a4); F5's demand pins that a newline inside a `bash -c` argument is refused under this cause rather than allowed and flattened (x7)."}
     - {rule: R4, element: 'UNTOKENIZABLE_REASON.domain.distinguished[cause2]', by: d_a_trailing_backslash_still_continues_nothing, cites: [x13, a4], witness: "cause (2), the trailing-backslash reason; the demand pins that a dangling escape still refuses under this cause once the unquoter is hand-rolled, matching x13's table of what the current lexer does with one."}
     - {rule: R4, element: 'UNTOKENIZABLE_REASON.domain.distinguished[cause3]', by: d_the_lexing_causes_this_change_does_not_touch_still_name_what_they_name, cites: [a4], witness: "cause (3), the connector-at-a-line-boundary reason; the survival demand pins that this cause still names exactly what the parser refuses after the wrapper decision moves outside the per-line loop."}
@@ -2018,13 +2018,13 @@ gate:
 
 handoff:
   forks:
-    - "F6 — is O1's universal in scope? IN SCOPE, both halves required. resolved_by: human. `\\r` leaves `_WORD_SEPARATORS` (a) AND the #955 oracle reads the recorded argv in binary (b): (b) without (a) is a red test, (a) without (b) is a green suite over an unasserted property. Became mechanism M6, which is not in the issue body."
+    - "F6 — is O1's universal in scope? IN SCOPE, both halves required. resolved_by: human. `\\r` leaves `_BLANKS` (a) AND the #955 oracle reads the recorded argv in binary (b): (b) without (a) is a red test, (a) without (b) is a green suite over an unasserted property. Became mechanism M6, which is not in the issue body."
     - "F4 — does the enumerated set admit the widening M3 itself produces? ACCEPTED. resolved_by: human. `timeout '5' cat x` / `\"timeout\" 5 cat x` flip deny->allow; the 'quoted `timeout` prefix' clause leaves UNTOKENIZABLE_REASON cause (5) together with the test pinning it. The body's 'can only narrow what is accepted' sentence is STRUCK as false."
     - "F5 — is the multi-line `-c` narrowing wanted? ACCEPTED. resolved_by: human. Obligation attached: the refusal must reach the model as a reason that explains the newline. SB4 bounds it — where an independently unbalanced quote fails first, the generic cause is correct."
     - "F2 — what is a verdict? THE WHOLE `BashDecision` (allow + reason identity + pipelines). resolved_by: auto (non-material)."
     - "F3 — does `unwrap` survive as a name? RENAMED. resolved_by: auto (non-material). The folded step works in SPANS of the original text — the `timeout` arm parses the raw slice from the next token's start offset, and the `bash -c` arm uses its token's span to know where the argument ends (which is how an outer operator becomes visible) while handing on that token's RESOLVED value as the inner command. It is `_wrapper_span` here and `unwrap` remains as the removed element. The rationale originally recorded here — \"it returns a span, not an unwrapped string\" — was true of one arm and false of the other; corrected at the second verify loop (RC7)."
     - "F1 — where is the blank command answered? PROBE-SETTLED, not a fork: the two phase-A leaves disagreed and the executed probe won (g6). A folded parse returning zero pipelines DENIES; only a blank test AHEAD of the parse preserves today's verdict. Recorded because a later reader will find the refuted recommendation still sitting in 20-demands.md."
-    - "RESOLVED AT §7 — FK1 ACCEPTED, MINIMAL ARM ONLY (human): the wrapper step advances past `timeout` only when at least one duration- or flag-shaped token is consumed; `timeout cat report.md` flips allow->deny and joins the enumerated set as member 7. `full-grammar` and `decline` rejected by name. FK3 ONCE, at the top level, never over the slice it extracts (human) — adds NO member. FK4 the blank test READS `_WORD_SEPARATORS` (human) — adds NO member. FK7 the frozen-baseline replay is BUILT NOW (human), so the neutrality obligation stays a universal, and its second premise carries: `policy_cli explain --json` gains the missing `pipelines` field. FK6 (auto, non-material) the invisible-character refusal names the character. FK9 (auto) multi-stage path AND inner precheck — its load-bearing half is probe-settled (pj3), not chosen. FK10 (auto) the oracle bounds its own subprocesses. Each demand above carries `resolved:` and the readings it rejected."
+    - "RESOLVED AT §7 — FK1 ACCEPTED, MINIMAL ARM ONLY (human): the wrapper step advances past `timeout` only when at least one duration- or flag-shaped token is consumed; `timeout cat report.md` flips allow->deny and joins the enumerated set as member 7. `full-grammar` and `decline` rejected by name. FK3 ONCE, at the top level, never over the slice it extracts (human) — adds NO member. FK4 the blank test READS `_BLANKS` (human) — adds NO member. FK7 the frozen-baseline replay is BUILT NOW (human), so the neutrality obligation stays a universal, and its second premise carries: `policy_cli explain --json` gains the missing `pipelines` field. FK6 (auto, non-material) the invisible-character refusal names the character. FK9 (auto) multi-stage path AND inner precheck — its load-bearing half is probe-settled (pj3), not chosen. FK10 (auto) the oracle bounds its own subprocesses. Each demand above carries `resolved:` and the readings it rejected."
     - "FK2 — how far does O1's universal reach into the wrapper's own semantics? RESOLVED AT §7 (human, routed late on the author leaf's red flag): O1 BINDS THE ARGV AUTHORISED FOR THE INNER COMMAND. The wrapper's own discarded semantics — the kill timer `timeout 5 cat x` never starts, the shell `bash -c 'echo $HOME'` never gets to expand `$HOME` in — ARE A NAMED NON-OBLIGATION OF THIS SURFACE, stated here explicitly rather than left implicit, because O1 read literally was already false for every wrapper shape the design KEEPS. Rejected: extending O1 to the wrapper's semantics (enforcing the timer, or refusing the wrapper outright — far beyond consolidating where a word ends), and leaving it unstated. No demand is minted either way and nothing in the suite turns on it; every O1 assertion in the suite is already scoped to the inner command's argv, and the differential compares the argv the parse authorised against the argv bash actually passed, which structurally cannot fail on an effect the parser never modelled. THE ROUTING FAILURE IS ITSELF RECORDED: this family fell out between the judge's ten and the seven that reached §7, and was recovered only because the author leaf noticed it had no resolution."
     - "FK5 and FK8 were RESOLVED IN STRUCTURE rather than put to the human: FK5 by splitting one sentence into two demands (`bash -c` refuses, a `timeout` prefix accepts), FK8 by stopping O3 at the decision object and binding the four post-decision consumers under O1 at `_opened_operands`. Both are recorded here so the merge-gate human can disagree."
     - "SB2, SB3, SB5, SB6 take the judge's recommendations and are bound above (reason identity for the leftover `timeout 3 cat x`; the two-way malformed/refused distinction; the argv the wire will not carry recorded as out of O1's scope; one table-driven sweep over the closed alphabet). SB1 routes into FK3, which the human resolved as `once`."
@@ -2041,9 +2041,9 @@ handoff:
     - "C2's second horn, 'the folded parse returns zero pipelines rather than raising' — zero pipelines DENY a blank command (g6). F1's recommendation in 20-demands.md rested on it and is overturned."
     - "C3's fourth `parse(unwrap(x))` migration site — `e2e/test_540_box_boundary.py:362` is an in-box import probe, not a call site; and a fifth trim at test_bash_exec.py:28 is not on the list (x8)."
     - "C4's 'intent_540.md:556 should be corrected' — the stale record is at three lines, 134, 466 and 556 (a2, refuting x9's 'twice')."
-    - "the issue's census verdict for `_scan`, 'keep — this is the one' — INCOMPLETE, not wrong: `_WORD_SEPARATORS` contains `\\r` and bash does not split on it (g1). That gap became M6."
+    - "the issue's census verdict for `_scan`, 'keep — this is the one' — INCOMPLETE, not wrong: `_BLANKS` contains `\\r` and bash does not split on it (g1). That gap became M6."
     - "the enumerated verdict-change set as closed at four members — under-counted by at least two, with member 1's character count one short and member 2 stating only its parse change (45-dispositions RF-J3). The corrected six-member set is carried by `d_the_enumerated_set_is_written_before_implementation`."
-    - "M6 as sufficient on its own — `_word_value`'s own `shlex.split` whitespace contains `\\r` regardless of `_WORD_SEPARATORS`, so M6 closes O1 only if M2 lands (RF-J4, three readers independently)."
+    - "M6 as sufficient on its own — `_word_value`'s own `shlex.split` whitespace contains `\\r` regardless of `_BLANKS`, so M6 closes O1 only if M2 lands (RF-J4, three readers independently)."
   deferred:
     - "c10 — verdict-neutrality outside the enumerated set. An implementation-time measurement over both differentials plus the full suite, read against the six-member set this file carries. TRANSFERS TO write-code-from-spec."
     - "the folded parser's in-box import census (C4's failure mode) — it cannot be censused before the code exists; `spec-graph trace drivers` confirmed there is nothing to anchor at this base. Deferred to write-code-from-spec's `actors` run, where a real source diff exists."

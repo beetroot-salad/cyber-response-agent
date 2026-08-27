@@ -5,7 +5,8 @@ import contextlib
 import re
 from collections.abc import Iterator
 from dataclasses import dataclass, field
-from typing import Any, cast
+from functools import lru_cache
+from typing import Any, TypeVar, cast
 
 from ._cells import (
     _has_unbalanced_quote,
@@ -42,6 +43,12 @@ from .schema import (
     ResolutionRow,
     VertexRecord,
 )
+
+#: One projected row, whatever the block's projector builds them as. `_warn_repeated_ids` hands
+#: back the rows it did NOT warn about, and it is the caller that knows their type — a bare
+#: `list[Any]` there would launder `list[dict[str, str]]` into `Any` at every call site that
+#: consumes the return, which is the narrowing `_lead_header_record`'s `rec["id"]` relies on.
+_RowT = TypeVar("_RowT")
 
 INVLANG_FENCE_RE = re.compile(r"```invlang\n(.*?)\n```", re.DOTALL)
 HEADER_RE = re.compile(
@@ -230,6 +237,101 @@ _EDGE_COLS = ["id", "rel", "src", "tgt", "when", "auth_kind:source", "attrs"]
 _SURVIVING_COLS = ["hyp_id", "final_weight"]
 
 
+@dataclass(frozen=True)
+class FenceScan:
+    """What a document's ```invlang fences enclose, AND what they leave out.
+
+    THE ONE PLACE that answers "which bytes are invlang content". Three readers had derived
+    it independently — the tokenizer, the frontier's prefix rebuild, and the turn-N seed
+    slicer — each restating in prose that fences are the content and the rest is ignored,
+    and each blind to the same thing in the same way. Ignoring the rest is correct; ignoring
+    it SILENTLY is what let a run's whole PLAN section sit outside a fence, parse to nothing,
+    and clear every hypothesis-side rule vacuously (#932).
+
+    So the complement rides along with the content and cannot be taken without it. `bodies`
+    and `spans` are what the fences hold; `orphaned_headers` is the accounting — lines that
+    open a block (`_HEADER_ATTEMPT_RE`) while sitting outside every fence, which is content
+    the author wrote and no reader will ever see.
+
+    **This type reports; it does not refuse.** Whether an orphan is an error, and for whom,
+    is policy: `validate._check_surface` refuses only the orphans a given WRITE introduces,
+    because `investigation.md` is append-only and bytes already committed cannot be fenced
+    after the fact. Raising here instead would wedge every later write on a document already
+    broken, and would turn the frontier and seed readers — which must never raise — into
+    paths that do.
+
+    A TRAILING UNTERMINATED ```invlang counts as open to end-of-document (`open_tail`). That
+    is a write cut off mid-block: the next append closes it and the rows parse, a shape
+    `tests/test_frontier_recall_919.py` fixes as accepted by design. Rows orphaned after a
+    CLOSED fence are permanent — no later append reaches back to wrap committed bytes — so
+    only those are reported."""
+
+    #: The text inside each fence, in document order — `INVLANG_FENCE_RE`'s group(1).
+    bodies: tuple[str, ...]
+    #: `(start, end)` of each FULL fence — the ```invlang delimiter through the closing
+    #: ``` — against the original text. Full, not the enclosed region: the turn-N seed
+    #: slicer cuts a document at `spans[n-1][1]` and an inner bound would drop the closing
+    #: delimiter.
+    spans: tuple[tuple[int, int], ...]
+    #: Block-opening lines that fell outside every fence, as the author wrote them. Matched
+    #: on the STRIPPED line, the way `_tokenize_fence` matches the same regex — an indented
+    #: `:H` is a header the tokenizer would open a block on, so outside a fence it is
+    #: orphaned content and not prose.
+    orphaned_headers: tuple[str, ...]
+    #: Offset of the ```invlang delimiter that opens a trailing UNTERMINATED fence, or
+    #: `None`. Everything from here to end-of-document is a block the author is still in the
+    #: middle of writing, so nothing under it counts as orphaned. `validate._check_surface`
+    #: reads it off the BASELINE too: with the on-disk document mid-block, the next append's
+    #: own ```invlang gets paired with the open one by `INVLANG_FENCE_RE` and the new block
+    #: reads as orphaned, which would refuse the only continuation `append_block` can send.
+    open_tail: int | None
+
+
+#: The opener, as a whole line. A prose MENTION of ```invlang — the repair instruction
+#: `_check_surface` prints contains one — must not open a phantom region to end-of-document
+#: and swallow every orphan under it, so the test is the stripped LINE, not `str.find`.
+_FENCE_OPEN_LINE = "```invlang"
+
+
+@lru_cache(maxsize=8)
+def scan_fences(text: str) -> FenceScan:
+    """Split `text` into what the ```invlang fences enclose and what they orphan.
+
+    Never raises and never refuses — see `FenceScan`. Every reader of fenced content goes
+    through here so that the complement is accounted for once, in the open, rather than
+    dropped on the floor three times.
+
+    MEMOIZED because it is not free and one `validate.diagnose` calls it seven times over the
+    same two documents — `_check_surface`, `_check_append_only` and `parse_dense_companion`
+    each on the proposal and the baseline. Pure function of `text`, so the cache can only
+    return what a re-scan would; the bound is small because the strings it pins are whole
+    investigation documents (64 KiB each at the cap)."""
+    matches = list(INVLANG_FENCE_RE.finditer(text))
+    spans = tuple(m.span() for m in matches)
+    open_tail: int | None = None
+    orphans: list[str] = []
+    offset = 0
+    for line in text.split("\n"):
+        start, end = offset, offset + len(line)
+        offset = end + 1
+        inside = any(a <= start and end <= b for a, b in spans)
+        stripped = line.strip()
+        if not inside and stripped == _FENCE_OPEN_LINE:
+            # An opener the regex could not pair: the fence it starts runs to EOF.
+            open_tail = start if open_tail is None else open_tail
+            continue
+        if inside or (open_tail is not None and start >= open_tail):
+            continue
+        if _HEADER_ATTEMPT_RE.match(stripped):
+            orphans.append(line)
+    return FenceScan(
+        bodies=tuple(m.group(1) for m in matches),
+        spans=spans,
+        orphaned_headers=tuple(orphans),
+        open_tail=open_tail,
+    )
+
+
 def iter_blocks(text: str) -> Iterator[Block]:
     """Every invlang `Block` in `text`, in document order, with its DECLARED header and its
     rows as the author wrote them.
@@ -241,11 +343,11 @@ def iter_blocks(text: str) -> Iterator[Block]:
 
     Kept out of the companion deliberately: carrying per-row provenance on the records inflated
     the parsed body by up to 25%, and that body is projected into the review lens prompts."""
-    for fence in INVLANG_FENCE_RE.finditer(text):
+    for body in scan_fences(text).bodies:
         # Blocks only. A caller at this layer is quoting a ROW back under its block, and a
         # line that reached no block has no block to quote it under; `parse_dense_companion`
         # is where the tokenizer's warnings are collected and refused on.
-        yield from _tokenize_fence(fence.group(1))[0]
+        yield from _tokenize_fence(body)[0]
 
 
 def _vertex_record(block: Block, row: str) -> VertexRecord:
@@ -351,7 +453,13 @@ def deferred_hypothesis_ids(
             named = (_row_first_cell(w.row),)
         else:
             continue
-        usable = [i for i in named if HYPOTHESIS_ID_RE.fullmatch(i)]
+        # lint-selection: ok — the complement CHANGES THE ANSWER rather than vanishing:
+        # an empty selection means a dropped declaration could not be mapped to an id,
+        # and `return None` then stands the undeclared-hypothesis rule down document-wide
+        # instead of reporting references the parse error already explains.
+        usable = [  # lint-selection: ok — empty selection returns None; see above
+            i for i in named if HYPOTHESIS_ID_RE.fullmatch(i)
+        ]
         if not usable:
             return None
         deferred.update(usable)
@@ -700,6 +808,16 @@ def _extract_iff_literals(annotation: str) -> tuple[list[str], list[str]]:
     return pred_ids, refut_ids
 
 
+#: An edge id in the `⟂` cell. WORD-BOUNDED, because the cell is free text and its non-id
+#: spelling lands in `supporting_marker`: unanchored, `⟂ inference-only` yields a phantom
+#: `e-only` and `⟂ none-observed` an `e-observed`. A phantom is worse than none — it makes
+#: `_check_strong_provenance` answer "cites e-only but it carries no strong authority" instead
+#: of "cites no supporting edge", and it can win `projector.ablation_target` as the
+#: narrowest-supported edge, whereupon `_drop_edge` removes nothing and the ablation lens
+#: reads the FULL world while the composer is told that edge was withheld.
+_SUPPORTING_EDGE_RE = re.compile(r"\be-[A-Za-z0-9]+\b")
+
+
 def _resolution_record(row: str) -> tuple[str | None, ResolutionRecord]:
     m = _RESOLUTION_LINE_RE.match(row)
     if not m:
@@ -726,7 +844,17 @@ def _resolution_record(row: str) -> tuple[str | None, ResolutionRecord]:
     iff_pred_ids, iff_refut_ids = _extract_iff_literals(annotation)
     # Same split as the `⟺` side: an id-shaped token that is not `r*` is a prediction, so
     # `ap*` files under predictions in both spellings. A bare `startswith("p")` drops `ap1`.
-    head_ids = [t for t in head_refs if _REF_ID_RE.fullmatch(t)]
+    # lint-selection: ok — PARTIALLY covered downstream, and the gap is recorded rather
+    # than claimed closed. A head whose ids ALL drop cites nothing, which
+    # `_check_strong_move_provenance` refuses; a head that keeps one good id and drops a
+    # malformed sibling passes, and an `ac1` written here drops silently because `ac*` is
+    # discharged by a `:R authz` row and `_REF_ID_RE` does not admit it
+    # (`experiments/oracle-telemetry-fidelity/runs/defender-run-snapshot` does exactly
+    # that). Whether an `ac*` is legal in a resolution head is a spec question, not a
+    # mechanical one, so it is not decided here.
+    head_ids = [  # lint-selection: ok — partially covered downstream; see above
+        t for t in head_refs if _REF_ID_RE.fullmatch(t)
+    ]
     # UNION, not `iff_ids or head_ids`. The `⟺` form exists for the row that cites nothing in
     # its head, and replacing meant one iff literal in a `::` segment — which is otherwise free
     # prose — DISCARDED the head's own list: a `++` whose head cites `p1,p2` and whose
@@ -742,7 +870,14 @@ def _resolution_record(row: str) -> tuple[str | None, ResolutionRecord]:
         "before": m.group("before"),
         "after": m.group("after"),
         "severity_of_test": severity,
-        "supporting_edges": re.findall(r"e-[A-Za-z0-9]+", supp_text),
+        # `_dedup`, like the two sibling id lists above it — this was the one id list on the
+        # record that skipped it. The `⟂` cell is free text, so `findall` returns every
+        # MENTION: a row citing `⟂ e-001 e-002 e-001` yields `e-001` twice. Every reader
+        # means the edges CITED, never how often the cell named them — `ablation_target`
+        # counts "how many strong resolutions cite it" to pick the narrowest-supported edge
+        # to withhold from the ablation lens, so a repeat made one resolution look like two,
+        # withheld a different edge, and reported the inflated count to the composer (#969).
+        "supporting_edges": _dedup(_SUPPORTING_EDGE_RE.findall(supp_text)),
         "matched_prediction_ids": matched_pred_ids,
         "matched_refutation_ids": matched_refut_ids,
     }
@@ -1473,7 +1608,28 @@ class _Projector:
                 _extend_by_id(hyp.setdefault("authorization_contract", []), authz)
             return
 
-    def _warn_repeated_ids(self, block: Block, rows: list[Any]) -> None:
+    #: The remedy for a repeated id at the TWELVE sites where a second block really does
+    #: ADD: `_extend_by_id` seeds `seen` from the destination, so the new rows land and only
+    #: the repeat is dropped.
+    _REPEAT_REMEDY_SECOND_BLOCK = (
+        "Give each row its own id, or send the added rows as a second block."
+    )
+    #: `:L findings` is NOT one of them, and must not be told it is. A lead re-listed in a
+    #: second `:L findings` block MERGES into its existing bucket — `lead.update(identity)`,
+    #: with `_lead_header_record` writing `target` UNCONDITIONALLY — so following the advice
+    #: above reproduces the very last-wins blend this warning exists to stop, and an amending
+    #: row whose `target` cell is blank erases the lead's target with no diagnostic on the
+    #: block that does it. `_check_false_positive_gating` then refuses the close over a lead
+    #: the author never retargeted, pointing at the wrong turn.
+    _REPEAT_REMEDY_ONE_BLOCK = (
+        "Give each row its own id and re-send this block whole: a second `:L findings` block "
+        "naming the same id AMENDS that lead rather than adding a row, so it would blend the "
+        "two readings instead of separating them."
+    )
+
+    def _warn_repeated_ids(
+        self, block: Block, rows: list[_RowT], remedy: str = _REPEAT_REMEDY_SECOND_BLOCK,
+    ) -> list[_RowT]:
         """An id written twice in ONE sub-block DELETES the second row, so say so.
 
         `_extend_by_id` keeps the first record per id — correct against the re-emission it
@@ -1498,24 +1654,41 @@ class _Projector:
         cannot see it — it is written against the cross-BLOCK re-emission, where the first
         declaration standing silently is the sanctioned append-only shape.
 
+        `:L findings` is the thirteenth site and the one whose rows the model edits
+        individually rather than re-emitting wholesale: a lead id written twice in one block
+        is not the cross-block re-listing the amendment path is built on, and the row it drops
+        carries the lead's whole header — name, target, loop, system, window — which every
+        reader that asks whether a lead is DECLARED then answers from the survivor alone.
+
         Only the rows of the block in hand are compared, which keeps that legal cross-block
         repeat silent.
+
+        RETURNS THE SURVIVORS — the first row per id, plus every row whose id is unreadable —
+        so a caller that has to ENFORCE the "only the FIRST row is kept" this message promises
+        (`_project_findings_block`, which folds by `lead_bucket` rather than through
+        `_extend_by_id`) reads the partition off the same walk that warned about it. The other
+        twelve call sites hand the result to `_extend_by_id`, which drops the repeat itself, and
+        ignore the return.
         """
         seen: set[str] = set()
+        firsts: list[_RowT] = []
         for r in rows:
             rid = r.get("id") if isinstance(r, dict) else None
             if not isinstance(rid, str) or not rid:
                 # A row with no readable id cannot be checked for a repeated one, and the
                 # caller still projects it — so nothing is dropped here.
+                firsts.append(r)
                 continue  # lint-row-drop: ok — no id to compare; the caller still lands it
             if rid in seen:
                 self._warn(
                     block, -1, "",
                     f"{rid!r} is declared twice in this block; only the FIRST row is kept "
-                    f"and the later one is discarded with everything it declares. Give each "
-                    f"row its own id, or send the added rows as a second block.",
+                    f"and the later one is discarded with everything it declares. {remedy}",
                 )
+                continue  # lint-row-drop: ok — the warning above IS this row's drop channel
             seen.add(rid)
+            firsts.append(r)
+        return firsts
 
     def _off_schema_plan_header(self, block: Block, cols: list[str]) -> bool:
         """True (and warned) when a `:L` plan block's header names a column this projection
@@ -1651,7 +1824,11 @@ class _Projector:
                 # `p9` — and `deferred_hypothesis_ids` would then find no id-shaped name,
                 # return `None`, and stand the undeclared-hypothesis rule down for the WHOLE
                 # DOCUMENT. The typo case is unaffected: its ids ARE `h-*`.
+                # lint-selection: ok — the drop is the point, and the comment above says
+                # where it goes: a non-`h-*` id here would make `deferred_hypothesis_ids`
+                # find no id-shaped name and stand a rule down for the whole document.
                 dropped_ids=tuple(
+                    # lint-selection: ok — the drop is the point; see above
                     cell
                     for cell in (_row_first_cell(r) for r in block.rows)
                     if HYPOTHESIS_ID_RE.fullmatch(cell)
@@ -1690,10 +1867,20 @@ class _Projector:
         )
 
     def _project_findings_block(self, block: Block) -> None:
+        # A repeated id WITHIN this one block is never the cross-block amendment
+        # `_lead_header_record`'s callers rely on (see `_warn_repeated_ids`): the second row
+        # is discarded, loudly, and the first row's values are kept whole. Swept up front,
+        # over the rows that actually LAND (id+name present) — `_warn_repeated_ids` cannot be
+        # handed the raw row strings, since it reads `r.get("id")` (F-B). It hands back the
+        # survivors it warned about, so the drop and the warning are ONE walk: a second `seen`
+        # set here would be a copy of the partition that check just made, free to drift from it.
+        landed: list[dict[str, str]] = []
         for idx, row, rec in self._for_each_row(block):
             if not rec.get("id") or not rec.get("name"):
                 self._warn(block, idx, row, "findings row missing id/name")
                 continue
+            landed.append(rec)
+        for rec in self._warn_repeated_ids(block, landed, self._REPEAT_REMEDY_ONE_BLOCK):
             identity, outcome, query_details = _lead_header_record(rec)
             lead = self.lead_bucket(identity["id"])
             lead.update(identity)
@@ -1914,8 +2101,8 @@ def parse_dense_companion(
 ) -> tuple[CompanionBody, list[ParseWarning]]:
     blocks: list[Block] = []
     warnings: list[ParseWarning] = []
-    for match in INVLANG_FENCE_RE.finditer(text):
-        fence_blocks, fence_warnings = _tokenize_fence(match.group(1))
+    for body in scan_fences(text).bodies:
+        fence_blocks, fence_warnings = _tokenize_fence(body)
         blocks.extend(fence_blocks)
         warnings.extend(fence_warnings)
     # Return the warnings, not `[]`. A fence whose FIRST header was rejected opens no block at

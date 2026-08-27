@@ -546,6 +546,28 @@ def test_resolution_falls_back_to_head_tokens_when_no_iff():
     assert rec["reasoning"] == "refutation triggered"
 
 
+def test_a_supporting_marker_is_not_mined_for_edge_ids():
+    """The `⟂` cell is free text, and its non-id spelling lands in `supporting_marker`. An
+    UNANCHORED `e-[A-Za-z0-9]+` finds an id inside that prose — `inference-only` yields
+    `e-only` — and a phantom is worse than no citation: `_check_strong_provenance` then
+    answers "cites e-only, which carries no strong authority" instead of "cites no supporting
+    edge", and `projector.ablation_target` can pick it as the narrowest-supported edge, after
+    which `_drop_edge` removes nothing and the ablation lens reads the FULL world while the
+    composer is told that edge was withheld."""
+    _lead, rec = _resolution_record(
+        "h-001  null → --   [l-001 r1 severe ⟂ inference-only :: no observed edge]"
+    )
+    assert rec["supporting_edges"] == [], (
+        f"prose in the ⟂ cell was mined for an edge id: {rec['supporting_edges']}"
+    )
+    assert rec["supporting_marker"] == "inference-only"
+
+    _lead, real = _resolution_record(
+        "h-001  null → --   [l-001 r1 severe ⟂ e-001,e-002 e-001 :: two edges, one twice]"
+    )
+    assert real["supporting_edges"] == ["e-001", "e-002"]
+
+
 def test_resolution_negated_iff_literal_still_attributes():
     """Polarity is reasoning-prose only; `¬p1` still counts as 'p1 was
     tested' for downstream attribution purposes."""

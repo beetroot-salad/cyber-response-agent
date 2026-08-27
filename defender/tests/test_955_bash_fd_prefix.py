@@ -104,24 +104,39 @@ def test_the_verdict_does_not_depend_on_the_value_of_an_operand(operand):
     assert _single(f"head -c {operand} >& 1") is None
 
 
-@pytest.mark.parametrize("cmd", [
-    "head -c 2 >/dev/null",
-    "cat /etc/hosts 2 >/dev/null",
-    "tail -n 2 >&1",
-    "cut -f 2 >& 1",
+@pytest.mark.parametrize(("cmd", "argv"), [
+    # The spaced spellings, which this executor REFUSES — `>`/`>&` after a bare `2` is a
+    # redirect of STDOUT, which is not on this surface. `None` is the whole assertion.
+    ("head -c 2 >/dev/null", None),
+    ("cat /etc/hosts 2 >/dev/null", None),
+    ("tail -n 2 >&1", None),
+    ("cut -f 2 >& 1", None),
+    # …and the ACCEPTED neighbours, which are where an operand can actually go missing. The
+    # expected argv is written out rather than derived from `cmd.split()`: a derivation has to
+    # re-implement the grammar under test to know which words are operator and which are
+    # operand, and gets it wrong on exactly the shapes that matter (for `cut -f 2 >& 1` it
+    # keeps the redirect TARGET `1` as an operand). Every case above refuses, so a body that
+    # only asserted on the accepted ones asserted NOTHING at all.
+    ("head -c 2 2>/dev/null", ["head", "-c", "2"]),
+    ("cat /etc/hosts 2>/dev/null", ["cat", "/etc/hosts"]),
+    ("tail -n 2 2>&1", ["tail", "-n", "2"]),
+    ("cut -f 2 2>&1", ["cut", "-f", "2"]),
+    ("cut -f 22 2>&1", ["cut", "-f", "22"]),
+    ("echo 2 2>/dev/null", ["echo", "2"]),
 ])
-def test_an_accepted_command_never_loses_an_operand(cmd):
+def test_an_accepted_command_never_loses_an_operand(cmd, argv):
     """The second half of the defect: when the fd test fired wrongly, it POPPED the operand.
 
     Whatever the verdict, the argv that survives parse must be the argv the model wrote. A
     refusal satisfies this; a silent rewrite does not, and the executor and the gate share
-    this parse, so neither could see the substitution."""
+    this parse, so neither could see the substitution. The only word a redirect may remove is
+    the fd prefix that IS the redirect — `head -c 2 2>/dev/null` keeps its `-c 2`."""
     result = _single(cmd)
-    if result is None:
+    if argv is None:
+        assert result is None, f"{cmd!r} was accepted — a spaced `>` is a redirect of stdout"
         return
-    argv, _stderr = result
-    words = [w for w in cmd.split() if w not in (">", ">&") and not w.startswith(">")]
-    assert argv == words, f"{cmd!r} parsed to {argv} — an operand was dropped"
+    assert result is not None, f"{cmd!r} was refused — the fd redirect itself broke"
+    assert result[0] == argv, f"{cmd!r} parsed to {result[0]} — an operand was dropped"
 
 
 @pytest.mark.parametrize(("cmd", "stderr"), [
@@ -141,7 +156,14 @@ def test_the_glued_spelling_still_works(cmd, stderr):
     assert argv == cmd.split()[:-1], f"{cmd!r} parsed to {argv}"
 
 
-@pytest.mark.parametrize("cmd", ["echo '2' >/dev/null", 'echo "2" >/dev/null', "foo2>/dev/null"])
+@pytest.mark.parametrize("cmd", [
+    "echo '2' >/dev/null", 'echo "2" >/dev/null', "foo2>/dev/null",
+    # A character bash does not split on keeps the `2` INSIDE the previous word, so it is not
+    # an IO_NUMBER — `a\r2>` is the word `a\r2` redirecting stdout. Read `\r` as a blank and
+    # the same text becomes `a` plus an fd-2 redirect: the operand vanishes and the routing
+    # inverts. This is the fd question and the word-boundary question meeting on one input.
+    "echo a\r2>/dev/null", "echo a\xa02>/dev/null",
+])
 def test_a_quoted_or_suffixed_two_is_not_an_fd(cmd):
     """Bash's IO_NUMBER is an UNQUOTED digit run that starts its own word. A quoted `2` is an
     ordinary argument and `foo2>` is the word `foo2`; in both, bash redirects stdout, which
@@ -171,11 +193,213 @@ def test_a_quoted_or_escaped_operator_is_a_word(cmd, argv):
     assert parsed[0] == argv, f"{cmd!r} parsed to {parsed[0]}"
 
 
+@pytest.mark.parametrize(("cmd", "argv"), [
+    # An unquoted `#` that STARTS a word opens a comment, and the rest of the line is not
+    # command text. Everything after it — operands, and the `;`/`|` that would otherwise
+    # separate stages — is gone, as it is for bash.
+    ("w a # b", ["w", "a"]),
+    ("w a #b", ["w", "a"]),
+    ("w a #", ["w", "a"]),
+    ("w #", ["w"]),
+    ("w a # ; w b", ["w", "a"]),
+    # ...and a `#` that does NOT start a word is an ordinary character, in all three of the
+    # spellings that make it one.
+    ("w a# b", ["w", "a#", "b"]),
+    ("w a '#' b", ["w", "a", "#", "b"]),
+    (r"w a\#b", ["w", "a#b"]),
+])
+def test_an_unquoted_hash_that_starts_a_word_opens_a_comment(cmd, argv):
+    r"""F-50's own class, on the third fact the raw text has to answer.
+
+    `shlex` resolves a word to its VALUE before any arm looks, so a `#` that opened a comment
+    and a `#` that stood for itself arrive as the same token — and the scanner, reading the
+    token stream, kept both. `w a # ; w b` therefore parsed to TWO stages where bash runs ONE
+    command and a comment: the executor running an argv the model's own text says is commented
+    out, and the gate authorising that one. The converse matters as much: `a#b` is a filename,
+    `'#'` is a grep pattern, and truncating either would deny a command bash runs."""
+    parsed = _parsed(cmd)
+    assert parsed is not None, f"{cmd!r} was refused — a comment is not a lexing failure"
+    assert parsed[0] == argv, f"{cmd!r} parsed to {parsed[0]}"
+
+
+@pytest.mark.parametrize("cmd", ["w a|#b", "w a&&#b", "w >#x", "w 2>#x"])
+def test_an_operator_left_dangling_by_a_comment_still_fails(cmd):
+    """The control the test above needs: dropping the comment must not smuggle an operator
+    past the checks that exist for it. Each of these is a bash SYNTAX ERROR — the comment ate
+    the token the operator needed — and each must stay a refusal here rather than becoming a
+    line that quietly runs its left half."""
+    assert _parsed(cmd) is None
+
+
+@pytest.mark.parametrize("cmd", ["w a)2>/dev/null", "w a(2>/dev/null"])
+def test_a_paren_is_not_a_word_boundary_an_fd_may_follow(cmd):
+    """`_SHLEX_PUNCTUATION` is wider than bash's operator set, and the gap is `(`/`)`. Reading
+    the wide set as "a word starts here" made `w a)2>/dev/null` an fd-2 redirect — the `2`
+    popped off argv and stderr rerouted — on a line `bash -n` refuses outright. That is the
+    accept-what-bash-rejects direction `test_bash_differential_897.py` exists to close, and
+    the operand loss is F-50's own defect."""
+    assert _parsed(cmd) is None
+
+
+@pytest.mark.parametrize("cmd", ["w a;2>/dev/null", "w a 2>/dev/null"])
+def test_a_real_operator_boundary_still_admits_the_fd(cmd):
+    """The control: the refusal above must be about the PAREN, not about narrowing the
+    predecessor set until no fd redirect is ever recognised again."""
+    assert _parsed(cmd) is not None
+
+
+#: Characters `str.isspace()` OR `shlex.whitespace` calls whitespace and BASH does not. The
+#: two candidate sets a scanner might be copied from are both wider than bash's, which is
+#: space and tab: `str.isspace()` is a Unicode predicate, and `shlex.whitespace` is
+#: ' \t\r\n' — one character wider than bash's default IFS of space/tab/newline. Every
+#: character here is an ordinary word character to `bash` itself, which is the only oracle
+#: that counts.
+_NOT_SHELL_BLANKS = [
+    # `\r` FIRST, because it is the one `shlex.whitespace` contains and bash does not, so it
+    # is the only member of this list a scanner copied from `shlex` gets wrong. `cat a\rb`
+    # is one word to bash; splitting it hands the gate an argv the model never wrote.
+    "\r",
+    "\x0b", "\x0c", "\x1c", "\x1f", "\x85", "\xa0", "\u2003", "\u3000",
+]
+
+
+#: The same question as `_NOT_SHELL_BLANKS`, asked so that RECALL cannot answer it.
+#:
+#: That list is written by hand, and it was wrong: it omitted `\r`, the one character where the
+#: two libraries disagree with each other. It was wrong because of HOW it was derived — by
+#: asking "what does `str.isspace()` add to `shlex`?", a question that can see what `isspace`
+#: gets wrong and is structurally blind to what `shlex` gets wrong. Enumerating an axis from
+#: one side is not enumerating it.
+#:
+#: So this derives the alphabet from the libraries themselves — every character either
+#: plausible source calls whitespace — and asks bash about each. A scanner copied from a THIRD
+#: source (a `\s` regex, a Unicode category test) lands inside this set whatever it picks, and
+#: nobody has to have remembered it.
+#: U+3000 IDEOGRAPHIC SPACE is the highest code point `str.isspace()` answers True for, so the
+#: scan stops there rather than walking all 1,114,112 of them — the same 29 characters, at
+#: pytest COLLECTION time, which every filtered run of this tree pays whether or not a test in
+#: this file is selected. `test_the_candidate_ceiling_still_holds` re-derives the ceiling from
+#: the full range, so the bound is machine-checked rather than asserted in prose.
+_ISSPACE_CEILING = 0x3000
+
+_CANDIDATE_BLANKS = sorted(
+    {c for c in map(chr, range(_ISSPACE_CEILING + 1)) if c.isspace()}
+    | set(shlex.shlex("").whitespace)
+)
+
+
+def test_the_candidate_ceiling_still_holds():
+    """The bound `_CANDIDATE_BLANKS` is derived under, paid once, in a test body rather than at
+    import. If a future Unicode revision adds a whitespace character above U+3000, the
+    alphabet above would silently stop covering it — and an alphabet that quietly narrows is
+    the failure `_CANDIDATE_BLANKS` was written to prevent."""
+    highest = max(c for c in map(chr, range(0x110000)) if c.isspace())
+    assert ord(highest) == _ISSPACE_CEILING, (
+        f"U+{ord(highest):04X} is whitespace and above the ceiling the alphabet is built "
+        "under, so `_CANDIDATE_BLANKS` no longer enumerates the axis"
+    )
+
+
+@pytest.mark.parametrize("blank", _CANDIDATE_BLANKS, ids=lambda c: f"U+{ord(c):04X}")
+def test_our_word_boundary_is_bash_s_word_boundary(shim_dir, blank):
+    """For every character either library calls whitespace, we split iff bash splits.
+
+    Not "we agree with `shlex`" and not "we agree with a list" — bash is the only oracle that
+    counts, because the argv is a claim about what bash would run. Asserting EQUALITY with
+    bash's argv pins both directions from one observation, so it cannot be satisfied by a
+    scanner that never splits, nor by one that splits on everything."""
+    if blank == "\n":
+        pytest.skip("`parse` splits the command on newlines before a line reaches the scanner")
+    cmd = f"{_SHIM} a{blank}b"
+    theirs = _bash_meaning(shim_dir, cmd)
+    if theirs is None or theirs[0] is None:
+        pytest.skip("bash will not run this shape, so it makes no claim about the boundary")
+    ours = _parsed(cmd)
+    assert ours is not None, f"U+{ord(blank):04X} made an ordinary command untokenizable"
+    assert ours[0] == theirs[0], (
+        f"U+{ord(blank):04X}: we would run {ours[0]}, bash runs {theirs[0]} — the gate "
+        "authorises our argv and the executor runs it, so this IS the divergence"
+    )
+
+
+@pytest.mark.parametrize("blank", _NOT_SHELL_BLANKS)
+def test_a_character_the_shell_does_not_split_on_stays_inside_its_word(blank):
+    """The third question the raw text has to answer, beside "glued?" and "an operator?":
+    WHERE DOES THE WORD END?
+
+    `str.isspace()` is a Unicode predicate and the shell's blank set is four ASCII characters.
+    Reaching for the former cut `cat 'a\xa0b'` into `['cat', 'a', 'b']` — two operands where
+    the model wrote one, and neither of them the file it named. That is F-50's own defect
+    (the argv that runs is not the argv that was written, and the gate authorises the rewritten
+    one) one character class over, and it is worse than a mis-parse: it moved a real VERDICT,
+    turning a `cat <run_dir>/a\xa0b` that the main policy denied — the NBSP fails its path
+    shape — into an allow on a two-operand argv whose halves each pass."""
+    result = _parsed(f"w -n a{blank}b")
+    assert result is not None, f"U+{ord(blank):04X} made an ordinary command untokenizable"
+    assert result[0] == ["w", "-n", f"a{blank}b"], (
+        f"U+{ord(blank):04X} split a word bash keeps whole — the executor would run an argv "
+        "the model did not write, and the gate would have authorised that one"
+    )
+
+
+@pytest.mark.parametrize("blank", [" ", "\t"])
+def test_the_characters_the_shell_DOES_split_on_still_split(blank):
+    """The control the test above needs: pinning "do not split on X" is satisfied by a scanner
+    that never splits at all, which would collapse every command into a single argv word."""
+    assert _parsed(f"w -n a{blank}b")[0] == ["w", "-n", "a", "b"]
+
+
 def test_an_unquoted_operator_is_still_an_operator():
     """The control the test above needs: if quoting were ignored the other way round, every
     pipeline in the tree would collapse into one argv and this file would still be green."""
     stages = [s for p in bash_exec.parse("a | b && c") for s in p.stages]
     assert [s.argv for s in stages] == [["a"], ["b"], ["c"]]
+
+
+# --------------------------------------------------------------------------- #
+# The same invariant, at the layer that actually decides.
+# --------------------------------------------------------------------------- #
+def test_the_gate_does_not_rewrite_the_command_before_it_parses_it():
+    """`decide_bash` is the entry point; `bash_exec.parse` is a step inside it.
+
+    Pinning the scanner alone is not enough, and this is the case that proves it: the scanner's
+    blank set was narrowed to bash's on the reasoning that `\r`, NBSP and the Unicode spaces
+    belong INSIDE a word — and one call above it the gate did `command.strip()`, which is the
+    Unicode predicate, deleting exactly those characters before the scanner ever saw them. The
+    fix held at the layer under test and was undone at the layer that ships. So the argv the
+    GATE authorises is what this asserts on, since that tuple is what crosses into the box.
+
+    Every #955 defect is two rules where the code needs one, and every one of them has been
+    found at a seam rather than inside a function. This is the seam.
+    """
+    from defender.agents import GATHER_DEF
+    from defender.runtime.agent_definition import compile_policy_for
+    from defender.runtime.permission import decide_bash
+
+    run_dir = Path(tempfile.mkdtemp()) / "run"
+    run_dir.mkdir(parents=True)
+    defender_dir = run_dir / "defender"
+    defender_dir.mkdir()
+    target = run_dir / "report.md"
+    target.write_text("x", encoding="utf-8")
+    policy = compile_policy_for(GATHER_DEF, run_dir=run_dir, defender_dir=defender_dir)
+
+    for blank in _NOT_SHELL_BLANKS:
+        cmd = f"cat {target}{blank}"
+        decision = decide_bash(
+            cmd, policy=policy, run_dir=run_dir, defender_dir=defender_dir,
+        )
+        if decision.pipelines is None:
+            # Refused — always this executor's prerogative, and it means no argv was
+            # authorised, which cannot be the wrong argv.
+            continue
+        gate_argv = [s.argv for p in decision.pipelines for s in p.stages]
+        scanner_argv = [s.argv for p in bash_exec.parse(cmd) for s in p.stages]
+        assert gate_argv == scanner_argv, (
+            f"U+{ord(blank):04X}: the gate authorised {gate_argv} while the scanner reads "
+            f"{scanner_argv} — the command was rewritten between the two, so the argv that "
+            "runs is not the one the scanner's word-boundary rule was verified against"
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -190,6 +414,20 @@ _CANDIDATES = [
     f"{_SHIM} {arg}" for arg in ("2>/dev/null", "2 >/dev/null", "2>&1", "2 >&1", "2")
 ] + [
     f"{_SHIM} -n 2>/dev/null", f"{_SHIM} -n 2 2>/dev/null", f"{_SHIM} 2 2>&1",
+] + [
+    # The comment question, against the same oracle. `#` was absent from this alphabet, which
+    # is why the differential was green while `w a # ; w b` ran a stage bash comments away.
+    f"{_SHIM} a # b", f"{_SHIM} a #b", f"{_SHIM} a# b", f"{_SHIM} a #",
+    f"{_SHIM} a # ; {_SHIM} b", f"{_SHIM} a '#' b", f"{_SHIM} -c 2 # 2>/dev/null",
+    f"{_SHIM} a )2>/dev/null", f"{_SHIM} a;2>/dev/null",
+] + [
+    # The separator question and the fd question, on ONE candidate each. A character bash does
+    # not split on, glued to the `2` of a redirect, is where the two defects meet: split the
+    # word and `a\r2>` becomes the word `a` plus an fd-2 redirect, where bash sees the word
+    # `a\r2` and a redirect of STDOUT — an operand lost AND the routing inverted, which is
+    # exactly what `_bash_meaning` is here to catch. `\r` is the member of `shlex.whitespace`
+    # that bash's IFS does not carry, so it is the one a scanner copied from `shlex` gets wrong.
+    f"{_SHIM} -n a\rb", f"{_SHIM} -n a\rb 2>/dev/null", f"{_SHIM} a\xa0b 2>&1",
 ]
 
 
@@ -201,7 +439,10 @@ def shim_dir():
         path = Path(d) / _SHIM
         path.write_text(_SHIM_SRC, encoding="utf-8")
         path.chmod(0o755)
-        yield Path(d)
+        # The bash path is resolved ONCE, here, rather than per candidate: `shutil.which`
+        # walks the whole PATH with a stat per directory, and the candidate matrix is a
+        # cross product that only grows.
+        yield Path(d), shutil.which("bash")
 
 
 def _inner_c_argument(cmd: str) -> str | None:
@@ -217,7 +458,7 @@ def _inner_c_argument(cmd: str) -> str | None:
     return None
 
 
-def _bash_meaning(shim_dir: Path, cmd: str):
+def _bash_meaning(shim: tuple[Path, str], cmd: str):
     """What bash DOES with `cmd`: the argv it passed the shim, and where the shim's stderr
     marker landed. `None` if bash itself refuses the text, OR if it is a `bash -c`/`sh -c`
     wrapper whose INNER payload is independently broken — the outer `bash -n -c "<outer>"`
@@ -225,14 +466,14 @@ def _bash_meaning(shim_dir: Path, cmd: str):
     independent precheck runs over the extracted inner text too.
 
     Every evidence channel here is read in BINARY (#959 M6(b)): `Path.read_text` and
-    `subprocess.run(text=True)` both universal-newline-translate a bare `\\r` into the very
-    delimiter the argv recovery splits on, so a `\\r` divergence was reported clean by the
+    `subprocess.run(text=True)` both universal-newline-translate a bare `\r` into the very
+    delimiter the argv recovery splits on, so a `\r` divergence was reported clean by the
     oracle that exists to catch it (#955's blind spot 2, still live before this fix)."""
+    shim_dir, bash = shim
     argv_file = shim_dir / "argv.out"
     argv_file.unlink(missing_ok=True)
     # The shim dir goes in FRONT of the inherited PATH rather than replacing it: `subprocess`
     # resolves the executable against the PATH in `env`, so a bare replacement loses bash too.
-    bash = shutil.which("bash")
     env = {
         **os.environ,
         "PATH": f"{shim_dir}{os.pathsep}{os.environ.get('PATH', '')}",
@@ -248,6 +489,12 @@ def _bash_meaning(shim_dir: Path, cmd: str):
     proc = subprocess.run(
         [bash, "-c", cmd], capture_output=True, env=env, cwd=shim_dir, timeout=60,
     )
+    # BYTES, not `read_text`, and not `subprocess.run(text=True)` either: text mode translates
+    # a lone `\r` (and `\r\n`) to `\n`, and the split below is on `\n` — so an argv word bash
+    # kept whole came back as TWO words and the oracle agreed with a parse that had split it.
+    # The one character this file exists to police is the one the reader would have silently
+    # rewritten. #959 M6(b) extends that from the argv file to BOTH output streams, which the
+    # stderr-placement answer below is read from.
     raw = argv_file.read_bytes() if argv_file.exists() else b""
     words = raw.split(b"\n")
     argv = (
@@ -336,14 +583,14 @@ def _stages(cmd: str):
     return [list(s.argv) for p in bash_exec.parse(cmd) for s in p.stages]
 
 
-def _bash_argv_bytes(shim_dir: Path, cmd: str) -> list[str] | None:
+def _bash_argv_bytes(shim: tuple[Path, str], cmd: str) -> list[str] | None:
     """The argv bash passed the shim, recovered from the evidence file IN BINARY.
 
     Deliberately not `_bash_meaning`: that recovery is itself under repair here (M6(b)), and a
     test of the SCANNER that recovers its evidence through a normalising read is green whenever
     the two make the same mistake — which is exactly how a `\r` divergence stayed certified
     clean. `None` when bash never ran the shim."""
-    bash = shutil.which("bash")
+    shim_dir, bash = shim
     argv_file = shim_dir / "argv.bytes"
     argv_file.unlink(missing_ok=True)
     env = {
@@ -403,7 +650,7 @@ def test_the_scanner_ends_a_word_exactly_where_bash_ends_one(shim_dir):
     edge (`cat P\r`), across an operator run (`cat P\r| wc -c`), and for a line that is one
     `\r` and nothing else, which is a one-character word and not zero tokens.
 
-    Rejected: the current `_WORD_SEPARATORS`, which contains `\r` because the shlex lexer it
+    Rejected: the current `_BLANKS`, which contains `\r` because the shlex lexer it
     replaced did — bash's own blank set is space and tab only. Bash is the oracle here, and it
     is asked with the shim rather than assumed."""
     for cmd in (
@@ -431,7 +678,7 @@ def test_our_blank_set_is_the_blank_set_bash_splits_on(shim_dir):
     word here either. The blank must be rendered GLUED to an adjacent token with no separator: a
     space-separated blank cannot exercise the property, and if the corpus renderer cannot do
     that today it gains the machinery."""
-    ours_side = set(bash_exec._WORD_SEPARATORS)
+    ours_side = set(bash_exec._BLANKS)
     pythons_side = {chr(cp) for cp in range(0x110000) if chr(cp).isspace()}
     alphabet = sorted((ours_side | pythons_side) - {"\n"})
     assert len(alphabet) > 25, "the alphabet collapsed — this asserts nothing over one character"

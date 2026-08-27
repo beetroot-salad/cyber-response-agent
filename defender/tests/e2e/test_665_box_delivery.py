@@ -625,7 +625,7 @@ def test_stale_run_cycle_container_from_a_prior_crashed_attempt_at_the_same_run_
     from _box665 import RecordingDocker
 
     run_dir = make_run_dir(tmp_path, disposition="inconclusive")
-    docker = RecordingDocker(running=True)  # a LIVE same-name container (po4-grounded)
+    docker = RecordingDocker(status="running")  # a LIVE same-name container (po4-grounded)
     with pytest.raises(box_mod.BoxFault):
         box_mod.start_box(run_dir, DEFENDER, docker=docker)
     assert not any(c[:3] == ["docker", "rm", "-f"] for c in docker.calls), \

@@ -9,7 +9,9 @@ target role container. Observations are point-in-time and
 non-replayable; two calls seconds apart on volatile state (processes,
 sockets) can legitimately disagree. Every text response carries an
 explicit `captured_at` UTC timestamp; the agent must not
-cross-time-window observations from different captures.
+cross-time-window observations from different captures. Read
+`captured_at` as the moment the observation describes, which is not
+always the moment you asked: trust the field over the wall clock.
 
 This file is split by audience. **Visibility surface** is read by
 the defender, the author skill, and the actor-reviewer judge.

@@ -34,7 +34,7 @@ no character in the source for an editor, a copy-paste or a frontier file to nor
 `test_no_source_file_of_this_suite_carries_a_literal_divergent_blank` reads these files' own
 bytes back to prove it.
 
-THE CORPUS IS STATIC ON PURPOSE. Nothing here is derived from `_WORD_SEPARATORS` or from any
+THE CORPUS IS STATIC ON PURPOSE. Nothing here is derived from `_BLANKS` or from any
 other constant the change edits: a corpus that moved with the code would replay a different
 question than the one that was recorded. The DERIVED form of the alphabet is checked against
 this frozen tuple in `test_959_scanner.py`, which is where a drift between the two belongs.
@@ -67,7 +67,7 @@ POLICIES = {"main": MAIN, "gather": GATHER}
 #: as CODEPOINTS and FROZEN here (claim a1, computed: `str.strip()`'s 29 minus space, tab and
 #: newline - newline excluded because `parse` splits physical lines on it before `_scan` ever
 #: runs). U+000D is the 26th, and it is in this alphabet only because M6 takes it out of
-#: `_WORD_SEPARATORS`; the closed set that said 25 had counted against the very constant this
+#: `_BLANKS`; the closed set that said 25 had counted against the very constant this
 #: change edits.
 DIVERGENT_BLANK_CODEPOINTS = (
     0x000B, 0x000C, 0x000D, 0x001C, 0x001D, 0x001E, 0x001F, 0x0085,

@@ -284,10 +284,10 @@ def test_every_member_of_the_divergent_blank_alphabet_behaves_the_same_way():
     as a blank are each exercised at both ends of an allowed pipeline, and each behaves the way
     the three named members do. The set is derived in the test from `str.strip()` and the
     scanner's own separator constant - never transcribed - so the 26th member (`\r`, which
-    joins the alphabet the moment M6 removes it from `_WORD_SEPARATORS`) cannot be left out by
+    joins the alphabet the moment M6 removes it from `_BLANKS`) cannot be left out by
     hand."""
     stripped = {chr(cp) for cp in range(0x110000) if chr(cp).strip() == ""}
-    alphabet = stripped - set(bash_exec._WORD_SEPARATORS) - {"\n"}
+    alphabet = stripped - set(bash_exec._BLANKS) - {"\n"}
     assert len(alphabet) == 26, (
         f"the divergent-blank alphabet computes to {len(alphabet)} characters, not 26. It is "
         "`str.strip()`'s 29 minus space, tab and newline; the count the closed set recorded "
@@ -323,7 +323,7 @@ def test_the_boundary_decision_and_the_value_resolution_agree_about_the_removed_
     separator recognition unconditionally.
 
     M6 is necessary and NOT sufficient on its own: `_word_value` is `shlex.split`, whose own
-    hardcoded whitespace contains `\r` whatever `_WORD_SEPARATORS` says, so with M6(a) alone a
+    hardcoded whitespace contains `\r` whatever `_BLANKS` says, so with M6(a) alone a
     mid-word `\r` still splits the resolved value, an edge `\r` is silently DROPPED, and a lone
     `\r` resolves to zero parts and makes the whole line untokenizable."""
     assert bash_exec._word_value("A" + CR + "B") == "A" + CR + "B"
@@ -412,7 +412,7 @@ def test_the_unquoter_has_no_notion_of_whitespace():
     assert not _shlex_attributes(DEFENDER / "runtime" / "bash_exec.py") & {"split", "shlex"}, (
         "`_word_value` is still built on a splitter, so it still has a blank set of its own - "
         "`shlex.split`'s own hardcoded whitespace contains the carriage return whatever "
-        "`_WORD_SEPARATORS` says, which is why M6 does not close O1 without M2"
+        "`_BLANKS` says, which is why M6 does not close O1 without M2"
     )
     # ...and behaviourally: handed a span carrying the character the scanner no longer splits
     # on, it resolves it rather than re-splitting or dropping it.
@@ -525,10 +525,10 @@ def test_the_blank_test_holds_no_opinion_of_its_own_about_what_a_blank_is():
     would try to run as program names and are refused; a lone `"\r"` is likewise a word, which
     is exactly what M6 says bash reads it as.
 
-    The alphabet is not transcribed here either: it is read off `_WORD_SEPARATORS` at run time,
+    The alphabet is not transcribed here either: it is read off `_BLANKS` at run time,
     so this test follows the constant when M6 moves it. That is the whole content of the
     resolution - the blank test reads the one opinion rather than holding a second."""
-    separators = set(bash_exec._WORD_SEPARATORS)
+    separators = set(bash_exec._BLANKS)
     for sep in sorted(separators):
         cmd = sep * 3
         assert _bash(cmd).allow, (
@@ -544,10 +544,22 @@ def test_the_blank_test_holds_no_opinion_of_its_own_about_what_a_blank_is():
             "only of it is a word bash would try to run - and it was answered as blank"
         )
 
-    gate_source = (DEFENDER / "runtime" / "permission" / "bash.py").read_text(encoding="utf-8")
-    assert "_WORD_SEPARATORS" in gate_source, (
-        "the gate's blank test names no separator constant, so it is holding a second opinion "
-        "about what a blank is - inside the change whose thesis is that there should be one"
+    # ...and the gate reaches the scanner's set through the CODE, not through a comment about
+    # it. Read off the AST rather than the file text: the substring form of this check passed on
+    # a docstring that merely MENTIONED the constant, which is the failure mode it exists to
+    # catch, one level up.
+    gate_ast = ast.parse(
+        (DEFENDER / "runtime" / "permission" / "bash.py").read_text(encoding="utf-8")
+    )
+    reached = {
+        node.attr for node in ast.walk(gate_ast)
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name)
+        and node.value.id == "bash_exec"
+    }
+    assert "BLANKS" in reached, (
+        "the gate's blank test does not READ the scanner's blank set, so it is holding a second "
+        f"opinion about what a blank is - inside the change whose thesis is that there should "
+        f"be one. It reaches: {sorted(reached)}"
     )
 
 

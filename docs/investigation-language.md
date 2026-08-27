@@ -1,8 +1,14 @@
 # Investigation Language
 
-**Status:** Spec v2.22. Implemented.
+**Status:** Spec v2.23. Implemented.
 **Query tool:** `soc-agent/scripts/invlang/` — see `cli.py --help`
-**On-disk surface:** `​```invlang` fenced blocks. `​```yaml` fences in `investigation.md` are rejected by the validator. Block-tag grammar (`:V` / `:E` / `:H` / `:L` / `:R` / `:T` / `:G`), row shapes, and the surface-to-canonical-dict projection live in `docs/dense-investigation-format.md`. The canonical companion dict — what the validator and the corpus queries operate on — is what every block projects to via `soc-agent/scripts/handlers/_dense_parser.py`.
+**On-disk surface:** `​```invlang` fenced blocks. `​```yaml` fences in `investigation.md` are rejected by the validator, and so is a write that introduces a block header OUTSIDE any fence — rows written there are not parsed, so they reach no rule and no corpus query. A trailing unterminated `​```invlang` is exempt: that is a write cut off mid-block, which the next append closes. Block-tag grammar (`:V` / `:E` / `:H` / `:L` / `:R` / `:T` / `:G`), row shapes, and the surface-to-canonical-dict projection live in `docs/dense-investigation-format.md`. The canonical companion dict — what the validator and the corpus queries operate on — is what every block projects to via `soc-agent/scripts/handlers/_dense_parser.py`.
+
+**v2.23 delta:** the unnumbered SURFACE rule gains a clause (a write may not introduce a block header outside a fence); no numbered rule is added or struck — **the active count stays at 26** (#932). The other two bullets are doc-only.
+
+- **Rule #5 gains a scope note: refutation spans two phases.** The refutation *shape* is authored at PLAN (`:H h-NNN.refuts`) and its `refutes` cell validated there against the declaring hypothesis's predictions (`_check_refutation_scope`); refutation *matching* is graded at ANALYZE, and that is what rule #5 states. Nothing changes about what either half refuses. The note exists because a finding about refutation was being attributed to ANALYZE by default, sending shape defects to the wrong prompt — which is how an experiment's top-ranked PLAN failure mode came to be a measurement of a schema field that did not yet exist.
+- **The surface rule gains its quiet half.** `_check_surface` refused a ```yaml fence and nothing else, so a block written under NO fence — the shape a run produces when it closes its ORIENT fence, writes prose, then continues with `## PLAN` and its `:H` rows — landed clean and parsed to nothing. Every hypothesis-side rule stood down on an empty companion, and the append-only fence COUNT check saw no decrease because the write added no pair rather than removing one. Now refused, scoped to the headers THIS write introduces so a document already carrying unfenced rows is not wedged, and exempting a trailing unterminated fence, which is a write cut off mid-block rather than an orphaned one. Measured before arming: over the 27 documents in the tree carrying invlang, exactly one investigation fires — the run that prompted it — and no shipped golden, worked example or SKILL fence does.
+- **A proposed PLAN-side atomicity gate on `refuts` rows was measured and refused**, and does not become rule #37. It has no gap entry here because it was never a rule; the measurement and the argument are in `docs/decisions/defender-invlang-enforcement-ramp.md` §Why a refutation-atomicity gate is not a rung. Short form: a refutation scoped `refutes: p1,p2` overturns `p1 ∧ p2`, so `¬p1 ∨ ¬p2` is the correct rendering and a lexical AND/OR test reads the correct rendering as the defect — it fires on 48% of the refutation rows in the tree, `defender/SKILL.md`'s own teaching block and a shipped e2e golden among them. Same disposition, same reason, as #32 and #36.
 
 **v2.22 delta:** the two APPEND-ONLY WEDGES are closed (#933 follow-up). **The active count is unchanged at 26** — rules #6 and #17 both keep their numbers; #17 loses one of its three clauses and #6 changes which documents it speaks about, neither adds or strikes a rule.
 
@@ -1031,6 +1037,17 @@ The validator enforces **26 active rules** (rules 1–36 with ten gaps: 36 numbe
 5. **Refutation ID match.** Every `--` resolution's
    `matched_refutation_ids` is non-empty and references IDs that
    exist in the target hypothesis.
+
+   **Refutation spans two phases, and this rule owns one of them.**
+   The refutation *shape* — "what observation would kill this
+   hypothesis" — is authored at PLAN as an `:H h-NNN.refuts` row, and
+   its `refutes` cell is validated there against the declaring
+   hypothesis's own predictions (`_check_refutation_scope`). Refutation
+   *matching* — a `--` citing the `r*` that came in — is graded at
+   ANALYZE, and that is the half stated above. A finding about
+   refutation attributes to PLAN or ANALYZE by which half it is about;
+   "refutation is an ANALYZE concern" is the natural misreading, and it
+   sends shape defects to the wrong prompt.
 
 6. **Prediction completeness for `++`.** `matched_prediction_ids`
    across all resolutions on a hypothesis must equal the full

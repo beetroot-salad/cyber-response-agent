@@ -236,13 +236,16 @@ def render_runtime_metrics(
     totals: dict,
     health: dict,
 ) -> str:
+    # The comprehension IS the collapse: `phase_order` is a render list that may name one
+    # bucket twice, and a dict keeps first-insertion order with one entry per key — which is
+    # exactly the order and the key set the bar wants (#956).
     cost_bar = _phase_bar(
         {ph: (attribution.get(ph) or {}).get("cost", 0.0) for ph in phase_order},
-        phase_order, lambda v: f"${v:.3f}",
+        lambda v: f"${v:.3f}",
     )
     wall_bar = _phase_bar(
         {ph: (wall_times.get(ph) or {}).get("duration_sec", 0.0) for ph in phase_order},
-        phase_order, lambda v: fmt_duration(v * 1000),
+        lambda v: fmt_duration(v * 1000),
     )
     model_bits = " · ".join(
         f"{esc(k)} ${v:.4f}" for k, v in (totals.get("by_model") or {}).items() if v
@@ -275,13 +278,16 @@ def render_runtime_metrics(
 
 
 
-def _phase_bar(values: dict[str, float], phase_order: list[str], fmt) -> str:
+def _phase_bar(values: dict[str, float], fmt) -> str:
     total = sum(v for v in values.values() if v and v > 0)
     if total <= 0:
         return '<div class="empty">(no per-phase attribution)</div>'
     segs: list[str] = []
-    for ph in phase_order:
-        v = values.get(ph, 0.0) or 0.0
+    # One segment per BUCKET, so the dict itself is the order — `total` sums the dict, and a
+    # name drawn once per appearance in a render list would make the widths sum past 100% and
+    # spill out of the bar. Walking `values` is that collapse, not a second copy of it.
+    for ph, v in values.items():
+        v = v or 0.0
         if v <= 0:
             continue
         pct = v / total * 100
@@ -475,7 +481,14 @@ def render_runtime_page(run_dir: Path) -> str:
     leads = sorted(lead_repository.joined(run_dir), key=_lead_sort_key)
 
     raw_phases = normalize_phase_names(split_investigation_phases(run_dir))
+    # TWO lists, and they are not the same list (#956). `phase_order` is the RENDER order —
+    # one entry per `##` header, and it may name one bucket twice (`## GATHER` twice with no
+    # `## PLAN` between normalizes to the same `GATHER (loop N)`); the phase TAGGER needs it
+    # whole, because it matches the Nth occurrence of a verb positionally. `phase_keys` is the
+    # BUCKET set every per-phase dict below is keyed on — walk the render list against one of
+    # those dicts and a repeat is billed once per appearance.
     phase_order = [p["name"] for p in raw_phases if p["name"] != "preamble"]
+    phase_keys = list(dict.fromkeys(phase_order))
     tags = tag_events_by_phase(events, phase_order)
 
     attribution = phase_attribution(events, phase_order, tags)
@@ -483,7 +496,10 @@ def render_runtime_page(run_dir: Path) -> str:
     gather_by_phase, gather_total = gather_cost_by_phase(
         run_dir, events, tags, phase_order, main_total, result_total, messages
     )
-    for ph in phase_order:
+    # `phase_keys`, not `phase_order`: every number here lives in a dict keyed on the name, so
+    # a repeated name is one bucket visited twice and the `+=` would bill its gather cost once
+    # per visit.
+    for ph in phase_keys:
         attribution[ph]["gather_cost"] = gather_by_phase.get(ph, 0.0)
         attribution[ph]["cost"] += gather_by_phase.get(ph, 0.0)
     # The review's spend is totalled but deliberately NOT attributed to a phase: the
@@ -495,7 +511,9 @@ def render_runtime_page(run_dir: Path) -> str:
     g_wall_to, g_wall_from = gather_wall_by_phase(
         run_dir, events, tags, phase_order, messages
     )
-    for ph in phase_order:
+    # Buckets again, and here it is worse than a double-add: the second visit reads
+    # `duration_sec` back out of the entry the first one just wrote, so the shift compounds.
+    for ph in phase_keys:
         d = wall_times.get(ph) or {"start": None, "end": None, "duration_sec": 0.0}
         base = d.get("duration_sec", 0.0) or 0.0
         moved = min(g_wall_from.get(ph, 0.0), base)

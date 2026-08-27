@@ -387,11 +387,22 @@ def _call(docker: DockerFn, argv: list[str]) -> subprocess.CompletedProcess:
 #: concurrent lane's box sits in `created` for the whole window in which two lanes can collide
 #: on one name — precisely the window a liveness test reads as "not live, reap it", and
 #: precisely the collision the reap then resolves by destroying the other lane's run.
-#: Every other state is refused to a HUMAN rather than reaped, and each for its own reason:
-#: `paused` resumes and keeps writing, `restarting` is about to, `created` is the collision
-#: window above, and `removing` resolves itself — the daemon is already tearing it down, so the
-#: next attempt finds no container at all and an `rm -f` here would only race that.
 _FINISHED_STATES = frozenset({"exited", "dead"})
+
+
+def _inspect_field(docker: DockerFn, name: str, fmt: str) -> str | None:
+    """One `-f` field off `docker inspect`, or `None` when the daemon answered non-zero.
+
+    The rc/stdout contract of an inspect, in ONE place, because both reap decisions rest on
+    it: `_container_status` asks what state this name holds and `_start_token` asks whose
+    container it is, and two copies of "rc means absent, stdout stripped means the answer" is
+    two places a later correction — a whitespace-only reply, a timeout, an rc-2 case — can be
+    applied to only one, leaving the pre-create sweep and the create-fault arm disagreeing
+    about the same daemon reply. What each answer MEANS stays with its own caller."""
+    proc = _call(docker, ["docker", "inspect", "-f", fmt, name])
+    if proc.returncode != 0:
+        return None
+    return (proc.stdout or "").strip()
 
 
 def _container_status(docker: DockerFn, name: str) -> str | None:
@@ -401,29 +412,36 @@ def _container_status(docker: DockerFn, name: str) -> str | None:
     rather than `None`, which keeps it OUT of `_FINISHED_STATES` and therefore unreapable. A
     daemon we cannot understand is not evidence that the container is done with.
 
-    A NON-ZERO rc IS TWO ANSWERS, and they are opposite. `docker inspect` exits 1 both for "no
-    such object" and for "cannot connect to the daemon", and the caller reads `None` as "the
-    name is free" — so a sick daemon licensed a create against a name another lane may hold,
-    which is the collision the ownership check exists to make impossible. The daemon is probed
-    on that path rather than the stderr text matched, because the text is a UI string and the
-    liveness of the daemon is the actual question."""
-    proc = _call(docker, ["docker", "inspect", "-f", "{{.State.Status}}", name])
-    if proc.returncode == 0:
-        return (proc.stdout or "").strip()
+    A NON-ZERO rc IS TWO ANSWERS, and they are opposite. `docker inspect` exits non-zero both
+    for "no such object" and for "cannot connect to the daemon" — and only THIS caller reads
+    `None` as "the name is free", which licenses a create against a name another lane may
+    hold: the collision the ownership check exists to make impossible. So the rc alone is not
+    taken as absence here; the daemon is asked whether it is answering at all. The daemon is
+    PROBED rather than the stderr text matched, because the text is a UI string and liveness
+    is the actual question.
+
+    `_start_token`'s `None` needs no such probe: there it means "nothing to own, reap
+    nothing", which is the safe direction on a path already unwinding a fault. Same rc, two
+    readings, and the difference is what each caller does with it — which is why
+    `_inspect_field` reports the rc and declines to interpret it."""
+    status = _inspect_field(docker, name, "{{.State.Status}}")
+    if status is not None:
+        return status
     probe = _call(docker, ["docker", "version", "-f", "{{.Server.Version}}"])
     if probe.returncode != 0:
         raise BoxFault(
             f"docker could not say what the name {name} holds, and could not answer for the "
             f"daemon either ({(probe.stderr or '').strip()[:200]!r}) — refusing rather than "
             "reading that as a free name, because a create against a name another lane holds "
-            "is the collision the ownership check exists to prevent")
+            "is the collision the ownership check exists to prevent"
+        )
     return None
 
 
 #: Stamped on every box at create, so a fault arm can tell OUR container from another lane's
 #: under the same name. A name alone cannot: `docker run --detach` is create-then-start, so a
 #: non-zero rc means EITHER "we created it and the task would not start" or "the name was
-#: already taken", and `_is_running` cannot discriminate either — a concurrent lane's container
+#: already taken", and no liveness test can discriminate either — a concurrent lane's container
 #: is itself in `created` for the whole conflict window. Minted per START, never per run id: a
 #: reused run-cycle name is exactly where the run id would answer yes for somebody else's box.
 START_TOKEN_LABEL = "defender.start-token"
@@ -434,14 +452,10 @@ _NO_LABEL = "<no value>"
 
 
 def _start_token(docker: DockerFn, name: str) -> str | None:
-    proc = _call(
-        docker,
-        ["docker", "inspect", "-f",
-         f'{{{{index .Config.Labels "{START_TOKEN_LABEL}"}}}}', name],
+    # `None` from the helper is "no such container" — nothing to own, and nothing to reap.
+    token = _inspect_field(
+        docker, name, f'{{{{index .Config.Labels "{START_TOKEN_LABEL}"}}}}',
     )
-    if proc.returncode != 0:
-        return None          # no such container — nothing to own, and nothing to reap
-    token = (proc.stdout or "").strip()
     return None if not token or token == _NO_LABEL else token
 
 
@@ -704,7 +718,19 @@ def _start_boxed(
     shared_mounts: SharedMountsFn = _shared_mounts,
 ) -> BoxExecutor:
     name = container_name(run_dir.name)
-    _reap_stale_before_create(docker, name)
+    try:
+        _reap_stale_before_create(docker, name)
+    except BoxFault as e:
+        # The §7 D2 marker, on the arm that now raises MOST often. Every other fault path in
+        # this function writes it before raising, and `test_a_reap_that_cannot_reach_the_
+        # daemon_still_leaves_the_did_not_run_marker` pins the rule for the sibling arm: a
+        # startup fault that leaves no verdict makes the tree read "nobody has judged this
+        # run yet", which is the one state `write_did_not_run` exists to prevent. #955 F-49
+        # widened this arm's trigger from `running` alone to every state but exited/dead —
+        # i.e. to every leaked container on a REUSED name, repeatably — so the gap that was
+        # a rare corner is now the common wedge.
+        write_did_not_run(run_dir, f"box start refused before create: {e}")
+        raise
     start_token = uuid.uuid4().hex
     created = _call(
         docker,
@@ -793,7 +819,18 @@ def _start_boxed_request(
             f"composed container name {request.name!r} fails the run-id grammar "
             f"(allowed: {RUN_ID_ALLOWED})"
         )
-    _reap_stale_before_create(docker, request.name)
+    try:
+        _reap_stale_before_create(docker, request.name)
+    except BoxFault as e:
+        # `_start_boxed`'s reason, on the request lane's own geography — with the caveat that
+        # geography makes: `_did_not_run_for_request` writes one verdict per WRITABLE mount,
+        # and `run_cycle._run_cycle_box_request` composes every mount `writable=False`. So on
+        # the RUN-CYCLE lane — the one caller that reuses a name, and therefore the one this
+        # arm exists for — this writes NOTHING. That is `stop_and_scrub`'s rule holding, not
+        # an omission (a tree the box could not write needs no verdict about what it wrote),
+        # but it means the §7 D2 cover the sibling arm gets is not cover this lane gets.
+        _did_not_run_for_request(request, f"box start refused before create: {e}")
+        raise
     start_token = uuid.uuid4().hex
     created = _call(
         docker, _render_argv(request, shared_mounts(docker), start_token),

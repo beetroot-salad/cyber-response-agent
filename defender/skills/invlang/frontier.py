@@ -54,7 +54,7 @@ import sys
 from dataclasses import dataclass
 
 from . import _walkers, vocab
-from .parser import INVLANG_FENCE_RE
+from .parser import scan_fences
 from .schema import CompanionBody
 from .validate import (
     auth_kind_of,
@@ -363,7 +363,7 @@ def frontier_at(text: str, n: int) -> FrontierAt:
 
     NEVER RAISES, inheriting `frontier_from_text`'s guarantee.
     """
-    bodies = INVLANG_FENCE_RE.findall(text)
+    bodies = scan_fences(text).bodies
     total = len(bodies)
     resolved = max(0, min(n, total))
     prefix = "\n\n".join(f"```invlang\n{body}\n```" for body in bodies[:resolved])

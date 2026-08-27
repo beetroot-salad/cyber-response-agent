@@ -22,6 +22,29 @@ still reaches lets the base run collect every sibling's staged documents — so 
 half cannot be admitted by reach and is admitted by DECLARATION instead: the estate registry
 hands the adapter a ctx naming the world, and `confine_index` resolves that world's views and
 no sibling's.
+
+THE SAME SPLIT RUNS THROUGH THE TIME WINDOW, and there it leaves a gap this module does not
+close. A branched run is pinned to its branch point's moment, so a payload cannot differ merely
+because one sibling executed later than another — the state adapters take that moment from the
+ctx, and `query`/`alerts` carry their window as `start`/`end` parameters, so an OMITTED upper
+bound is closed at the branch point before the search runs (`elastic_adapter._bounded_end`).
+A present bound is never rewritten: it is a scenario-timeline value the model chose, routinely
+months from the wall clock, so clamping it would truncate the alert's own window.
+
+`esql` has no such parameter. Its window is `| WHERE @timestamp >= "..."` INSIDE the body, so
+the bound is added as its own pipe stage after the source command rather than by editing the
+predicate the model wrote (`elastic_adapter.bounded_esql`). Appending narrows and can never
+widen, which is why it is not the query-language surgery this module refuses elsewhere: nothing
+reads or rewrites the existing `WHERE`, so there is no half-application to be silent about.
+`evals/oracle_golden/controls.add_esql_window` makes the same move on the same splitter.
+
+The bound rides the WIRE and not the evidence: `esql_payload` echoes the query into the payload,
+so the asked form is what is echoed and recorded, and a branched payload stays byte-comparable
+with the capture it came from.
+
+An earlier revision left `esql` unbounded and relied on the resumed run being TOLD the date. That
+did not hold — the coordinate reaches MAIN's opening prompt, while the model that writes these
+queries is the GATHER subagent, whose deps carry no clock and whose prompt renders none.
 """
 
 from __future__ import annotations
