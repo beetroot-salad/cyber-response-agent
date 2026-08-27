@@ -748,7 +748,14 @@ def _resolution_record(row: str) -> tuple[str | None, ResolutionRecord]:
         "before": m.group("before"),
         "after": m.group("after"),
         "severity_of_test": severity,
-        "supporting_edges": re.findall(r"e-[A-Za-z0-9]+", supp_text),
+        # `_dedup`, like the two sibling id lists above it — this was the one id list on the
+        # record that skipped it. The `⟂` cell is free text, so `findall` returns every
+        # MENTION: a row citing `⟂ e-001 e-002 e-001` yields `e-001` twice. Every reader
+        # means the edges CITED, never how often the cell named them — `ablation_target`
+        # counts "how many strong resolutions cite it" to pick the narrowest-supported edge
+        # to withhold from the ablation lens, so a repeat made one resolution look like two,
+        # withheld a different edge, and reported the inflated count to the composer (#969).
+        "supporting_edges": _dedup(re.findall(r"e-[A-Za-z0-9]+", supp_text)),
         "matched_prediction_ids": matched_pred_ids,
         "matched_refutation_ids": matched_refut_ids,
     }
