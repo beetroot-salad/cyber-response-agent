@@ -10,25 +10,25 @@ count, and a run whose tree could not be interrogated at all still runs.
 from __future__ import annotations
 
 import json
+from dataclasses import fields
 from pathlib import Path
 
 import pytest
 
 from defender import _git, _provenance  # type: ignore[import-not-found]
 from defender._provenance import RunProvenance  # type: ignore[import-not-found]
-from defender._run_paths import RunPaths  # type: ignore[import-not-found]
+from defender._run_paths import PROVENANCE, RunPaths  # type: ignore[import-not-found]
+from defender.tests._repo import seed_repo  # type: ignore[import-not-found]
 
 
-def _repo(tmp_path: Path, name: str = "repo") -> Path:
-    repo = tmp_path / name
+def _repo(tmp_path: Path) -> Path:
+    """A throwaway repo with one commit, through `_repo.seed_repo` rather than a fifteenth
+    hand-rolled `git init` — that module exists because the same five lines had drifted across
+    fourteen sites under five different placeholder identities."""
+    repo = tmp_path / "repo"
     repo.mkdir()
-    _git.git(["init", "-q", "-b", "main"], cwd=repo)
-    _git.git(["config", "user.email", "t@t"], cwd=repo)
-    _git.git(["config", "user.name", "t"], cwd=repo)
-    (repo / "seed.md").write_text("seed\n")
-    _git.git(["add", "-A"], cwd=repo)
-    _git.git(["commit", "-q", "-m", "seed"], cwd=repo)
-    return repo
+    (repo / "seed.md").write_text("seed\n", encoding="utf-8")
+    return seed_repo(repo)
 
 
 def test_clean_tree_records_the_head_sha_and_no_dirt(tmp_path):
@@ -109,6 +109,7 @@ def test_capture_never_raises_when_git_is_not_on_path(tmp_path, monkeypatch):
     prov = _provenance.capture_tree(repo)
     assert prov.commit is None
     assert prov.dirty is None
+    assert prov.unavailable is not None
     assert "unavailable" in prov.unavailable
 
 
@@ -163,9 +164,11 @@ def test_a_bool_is_not_accepted_as_the_path_count(tmp_path):
 
 
 def test_materialize_run_dir_stamps_every_run(tmp_path, monkeypatch):
-    """Stamped at the ONE place a run bundle is created, so no caller can forget — the branch
-    launcher materialises its siblings through this same call, which is what makes a family's
-    worlds comparable on their code rather than merely assumed to be."""
+    """Stamped at the ONE place a run the box will EXECUTE is materialised, so no caller can
+    forget — the branch launcher materialises its siblings through this same call, which is
+    what makes a family's worlds comparable on their code rather than merely assumed to be.
+    (The learning loop's ARCHIVED bundle is built elsewhere and carries no stamp — see
+    `run_common.materialize_run_dir`, which names that gap where a reader will meet it.)"""
     from defender import run_common
 
     runs = tmp_path / "runs"
@@ -189,11 +192,15 @@ def test_the_stamp_is_not_named_in_the_model_facing_map(tmp_path):
     infrastructure the operator reads, not a surface the investigator should reason about."""
     from defender.scripts import workspace_map
 
-    assert "provenance.json" in workspace_map._UNLISTED
+    # `PROVENANCE`, not the literal, on BOTH sides: a test that spells the filename itself
+    # agrees with a stale suppression rather than with the accessor, which is the one way this
+    # assertion could pass while the stamp was back in the model's view under its new name.
+    assert PROVENANCE in workspace_map._UNLISTED
     run_dir = tmp_path / "run"
-    (run_dir / "gather_raw").mkdir(parents=True)
-    _provenance.write(RunPaths(run_dir).provenance, RunProvenance(commit="a" * 40, dirty=False))
-    assert "provenance.json" not in workspace_map.workspace_map(run_dir)
+    paths = RunPaths(run_dir)
+    paths.gather_raw.mkdir(parents=True)
+    _provenance.write(paths.provenance, RunProvenance(commit="a" * 40, dirty=False))
+    assert paths.provenance.name not in workspace_map.workspace_map(run_dir)
 
 
 @pytest.mark.parametrize("dirty", [True, False, None])
@@ -202,4 +209,137 @@ def test_the_three_valued_dirt_survives_the_round_trip(tmp_path, dirty):
     reintroduce the exact lie the three-valued field exists to prevent."""
     path = tmp_path / "p.json"
     _provenance.write(path, RunProvenance(commit="a" * 40, dirty=dirty))
-    assert _provenance.read(path).dirty is dirty
+    rec = _provenance.read(path)
+    assert rec is not None, "the round trip lost the record entirely"
+    assert rec.dirty is dirty
+
+
+def test_a_git_that_cannot_be_EXECUTED_is_recorded_rather_than_raised(tmp_path, monkeypatch):
+    """The failure an absent-binary arm does NOT cover.
+
+    A `git` that resolves and cannot be exec'd raises a BARE `OSError` (ENOEXEC) — not
+    `FileNotFoundError`, not a `SubprocessError` — and so do the fork/pipe failures a loaded
+    host produces (ENOMEM, EMFILE). A handler that names three OSError subclasses lets every
+    one of them out of `materialize_run_dir`, which turns a record into a hard startup crash
+    that also leaves a half-built run dir behind and wedges the run id."""
+    repo = _repo(tmp_path)
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    broken = fake_bin / "git"
+    broken.write_text("this is not a program\n", encoding="utf-8")
+    broken.chmod(0o755)
+    monkeypatch.setenv("PATH", str(fake_bin))
+
+    prov = _provenance.capture_tree(repo)
+    assert prov.commit is None
+    assert prov.dirty is None
+    assert prov.unavailable
+
+
+def test_a_stamp_that_is_a_planted_link_reads_as_no_stamp(tmp_path):
+    """The read-side twin of the refusal `write` already makes. This file sits in the box's rw
+    bind, so an entry at its name may be a link the model planted — and following it would hand
+    back whatever it points at AS this run's record of what it ran against."""
+    real = tmp_path / "elsewhere.json"
+    _provenance.write(real, RunProvenance(commit="b" * 40, dirty=False))
+    planted = tmp_path / PROVENANCE
+    planted.symlink_to(real)
+    assert _provenance.read(planted) is None
+
+
+def test_a_deeply_nested_payload_reads_as_no_stamp(tmp_path):
+    """`json.loads` raises `RecursionError` on deep nesting, and it is not a `ValueError` — the
+    omission `learning/branch/capture.py` already paid for once, where one such row escaped
+    every frame and killed the episode."""
+    path = tmp_path / PROVENANCE
+    path.write_text("[" * 200_000 + "]" * 200_000, encoding="utf-8")
+    assert _provenance.read(path) is None
+
+
+@pytest.mark.parametrize("doc", [{}, {"commit": None, "dirty": None}, {"commit": None, "dirty": False}])
+def test_a_record_capture_cannot_produce_is_not_a_record(tmp_path, doc):
+    """Type-checking each field alone is not enough. An object saying NOTHING would otherwise
+    answer "this run carries a stamp" to a caller whose only question is whether one exists,
+    and `dirty is False` with no sha is the clean bill of health with nothing behind it — the
+    one error the record must not make. Every `commit is None` path in `capture_tree` leaves
+    `dirty` at `None` and sets a reason."""
+    path = tmp_path / PROVENANCE
+    path.write_text(json.dumps(doc), encoding="utf-8")
+    assert _provenance.read(path) is None
+
+
+@pytest.mark.parametrize(
+    ("rec", "expected"),
+    [
+        (None, "commit=unrecorded"),
+        (RunProvenance(commit=None, dirty=None, unavailable="git: no"), "commit=unavailable"),
+        (RunProvenance(commit="a" * 40, dirty=False), "commit=aaaaaaaaaaaa"),
+        (
+            RunProvenance(commit="a" * 40, dirty=True, dirty_paths=("x",), dirty_path_count=3),
+            "+dirty (3 paths)",
+        ),
+        (
+            RunProvenance(commit="a" * 40, dirty=None, unavailable="git status: broken index"),
+            "+dirt-unknown (git status: broken index)",
+        ),
+        # A corrupted count read back as its default must not become a QUANTITY on the line.
+        (RunProvenance(commit="a" * 40, dirty=True, dirty_path_count=0), "+dirty"),
+    ],
+)
+def test_the_announce_line_says_what_the_record_says(tmp_path, capsys, rec, expected):
+    """The stamp's one consumer on the day it lands, and the line an operator actually reads.
+
+    Every branch is pinned because each is a different CLAIM: no stamp, no sha, a clean sha, a
+    dirty sha with its size, and the three-valued middle — git answered for HEAD and then could
+    not answer for the tree — which must read as neither clean nor dirty and must carry the
+    reason."""
+    from defender import run  # noqa: PLC0415 — run.py re-execs into the venv at import
+
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    if rec is not None:
+        _provenance.write(RunPaths(run_dir).provenance, rec)
+
+    run._announce_provenance(run_dir)
+
+    line = capsys.readouterr().err
+    assert expected in line, line
+    if rec is not None and rec.dirty is False:
+        assert "dirty" not in line, "a clean tree was marked"
+    if rec is not None and rec.dirty is True and not rec.dirty_path_count:
+        assert "paths" not in line, "a count nobody wrote reached the operator's line"
+
+
+def test_every_field_reaches_the_wire_and_comes_back(tmp_path):
+    """`as_json` spells the wire shape out, which makes it a SECOND census of the class's
+    fields — so this arm derives the expected set from `dataclasses.fields` rather than from a
+    list typed here. Without it, a sixth field is silently dropped by the writer and defaulted
+    by `from_obj`, and the round-trip arms above keep passing on the five they do spell: a
+    stamp claiming a completeness it does not have, which for a provenance record is the whole
+    failure mode."""
+    declared = {f.name for f in fields(RunProvenance)}
+    on_disk = json.loads(RunProvenance(commit="a" * 40, dirty=False).as_json())
+    assert set(on_disk) == declared, (
+        f"the wire shape and the record's fields disagree: {declared ^ set(on_disk)}"
+    )
+    rich = RunProvenance(
+        commit="a" * 40, dirty=True, dirty_paths=("x.md", "y.md"), dirty_path_count=2,
+        unavailable=None,
+    )
+    path = tmp_path / PROVENANCE
+    _provenance.write(path, rich)
+    assert _provenance.read(path) == rich
+
+
+def test_one_dirty_path_earning_two_status_records_is_counted_once(tmp_path):
+    """`git status -z` emits one record per (path, reason) and a single path can earn two:
+    `git rm --cached foo` leaves `D  foo` AND `?? foo`. Counting records would overstate the
+    dirt — in exactly the direction `DIRTY_PATH_SAMPLE`'s comment promises the count never
+    does — and would spend two of the sample's 50 slots on one file."""
+    repo = _repo(tmp_path)
+    _git.git(["rm", "--cached", "-q", "seed.md"], cwd=repo)
+
+    prov = _provenance.capture_tree(repo)
+    assert prov.dirty is True
+    assert prov.dirty_paths == ("seed.md",), prov.dirty_paths
+    assert prov.dirty_path_count == 1, "one dirty path was counted once per status record"

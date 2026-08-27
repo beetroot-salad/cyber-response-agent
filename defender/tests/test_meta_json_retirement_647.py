@@ -444,9 +444,10 @@ def test_run_paths_accessor_set_is_exactly_its_artifacts_after_the_meta_accessor
     tmp_path,
 ):
     """`RunPaths` names exactly the run artifacts a consumer reads, and no longer the removed
-    file — the alert, the report, the investigation log, the queries table, the raw-payload dir
-    and the wire log. No accessor may survive naming a file no consumer reads, and the class
-    docstring's own count must agree with the accessors it enumerates.
+    file — the alert, the report, the investigation log, the queries table, the raw-payload
+    dir, the wire log and the provenance stamp. No accessor may survive naming a file no
+    consumer reads, and the class docstring's own count must agree with the accessors it
+    enumerates.
 
     The count is asserted rather than typed twice: `wire_log` was added when the wire log moved
     under `<run>/wire_logs/` (out of every reader agent's single-segment read shape), and the
@@ -472,27 +473,98 @@ def test_run_paths_accessor_set_is_exactly_its_artifacts_after_the_meta_accessor
     assert "meta" not in doc, "the docstring still enumerates the removed accessor"
 
 
+#: Calls that make an accessor's path a WRITE TARGET rather than something read back.
+#: `meta.json` was written by `materialize_run_dir` and read by nothing, so a census that
+#: counts its writer as a consumer discharges the exact accessor #647 deleted — which is why
+#: the two are told apart here rather than merged into "is mentioned".
+_WRITE_RECEIVER_METHODS = frozenset({"mkdir", "write_text", "write_bytes", "touch", "unlink"})
+_WRITE_ARG_CALLS = frozenset(
+    {"write", "write_guarded", "guarded_mkdir", "copy", "copy2", "copyfile", "copytree", "move"}
+)
+
+
+def _is_run_paths_call(node: ast.expr) -> bool:
+    return (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id == "RunPaths")
+
+
+def _run_paths_locals(tree: ast.AST) -> set[str]:
+    """Names bound to a `RunPaths(...)`. `rp = RunPaths(d)` and `src, dst = RunPaths(a),
+    RunPaths(b)` are both live shapes in this tree."""
+    bound: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        target = node.targets[0]
+        if isinstance(target, ast.Tuple) and isinstance(node.value, ast.Tuple):
+            pairs = list(zip(target.elts, node.value.elts, strict=False))
+        else:
+            pairs = [(target, node.value)]
+        bound |= {t.id for t, v in pairs if isinstance(t, ast.Name) and _is_run_paths_call(v)}
+    return bound
+
+
+def _write_target_ids(tree: ast.AST) -> set[int]:
+    """The `id()` of every expression this module uses as a WRITE target — the receiver of a
+    mutating `Path` method, or an argument to a write/copy seam."""
+    written: set[int] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if isinstance(func, ast.Attribute) and func.attr in _WRITE_RECEIVER_METHODS:
+            written.add(id(func.value))
+        name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+        if name in _WRITE_ARG_CALLS:
+            written.update(id(arg) for arg in node.args)
+    return written
+
+
+def _run_paths_reads(tree: ast.AST, accessors: set[str]) -> set[str]:
+    """Which of `accessors` this module READS off a `RunPaths` value.
+
+    AST, not a substring sweep. `f".{accessor}" in text` answers yes for `stream.provenance` on
+    an unrelated object, for a filename in a docstring, and for a probe string inside a
+    spec yaml — three channels that each discharge an accessor here today with no reader
+    behind them."""
+    bound, written = _run_paths_locals(tree), _write_target_ids(tree)
+
+    def _on_run_paths(value: ast.expr) -> bool:
+        return _is_run_paths_call(value) or (isinstance(value, ast.Name) and value.id in bound)
+
+    return {
+        node.attr for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute) and node.attr in accessors
+        and _on_run_paths(node.value) and id(node) not in written
+    }
+
+
 def test_no_accessor_names_a_file_nothing_reads():
     """#647's actual rule, kept executable rather than left as prose in the docstring above.
 
-    Every accessor's filename must appear in a READ somewhere outside `_run_paths.py` and
+    Every accessor must be READ off a `RunPaths` value somewhere outside `_run_paths.py` and
     outside the tests — that is what `meta.json` had stopped having and why it was deleted.
     Derived with `git grep` from the repo root rather than from a list typed into this file,
     for the reason the module docstring gives: every hand-written census in this change was
-    wrong."""
-    read_sites = subprocess.run(
-        ["git", "grep", "-l", "-F", "--", "RunPaths("],
-        cwd=REPO_ROOT, capture_output=True, text=True, check=True,
-    ).stdout.split()
+    wrong.
+
+    A WRITE IS NOT A READ, and the distinction is the whole test: `meta.json`'s writer was
+    `materialize_run_dir`, which named the accessor, so a census that accepts any mention
+    passes the very accessor #647 deleted. `provenance` (#976) has exactly one real reader —
+    `run.py:_announce_provenance` — and its writer in `run_common` must not stand in for it."""
     consumers = [
-        f for f in read_sites
-        if not f.startswith("defender/tests/") and f != "defender/_run_paths.py"
+        h.split(":", 1)[0]
+        for h in live_hits(repo_grep(r"RunPaths\(", "*.py"),
+                           extra_excludes=("defender/tests/", "defender/_run_paths.py"))
     ]
     accessors = {n for n, v in vars(RunPaths).items() if isinstance(v, property)}
     unread = set(accessors)
-    for path in consumers:
-        text = (REPO_ROOT / path).read_text(encoding="utf-8", errors="replace")
-        unread -= {a for a in unread if f".{a}" in text}
+    for path in dict.fromkeys(consumers):
+        try:
+            tree = ast.parse((REPO_ROOT / path).read_text(encoding="utf-8", errors="replace"))
+        except SyntaxError:  # pragma: no cover — a tracked .py that does not parse
+            continue
+        unread -= _run_paths_reads(tree, accessors)
     assert not unread, f"accessors nothing outside the tests reads: {sorted(unread)}"
 
 

@@ -63,9 +63,9 @@ from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart  # noqa: 
 from pydantic_ai.models import override_allow_model_requests  # noqa: E402
 from pydantic_ai.models.function import FunctionModel  # noqa: E402
 
-from defender._io import read_jsonl_rows  # noqa: E402
 from defender import _provenance  # noqa: E402
 from defender import run_common  # noqa: E402
+from defender._io import read_jsonl_rows  # noqa: E402
 from defender._run_paths import RunPaths  # noqa: E402
 from defender.runtime import box as box_mod  # noqa: E402
 from defender.runtime import driver  # noqa: E402
@@ -369,17 +369,21 @@ def materialize(tmp_path: Path, golden: Path) -> Path:
     on disk for this to seed. Keeping the parameters would let a test pass `salt=` and believe
     it had set up a salted run dir — setup a test can silently pass without.
 
-    THE STAMP IS WRITTEN HERE BECAUSE PRODUCTION WRITES IT (#976), and this dir is what a
-    replayed message 0 enumerates: a harness whose file set is a subset of production's pins a
-    prompt production does not emit, which is the same trap #647's parity arm was built to
-    catch pointing the other way. Captured off this repo like production's, so a replayed run
-    records the tree it was replayed on rather than a frozen fixture value."""
+    THE STAMP IS WRITTEN HERE BECAUSE PRODUCTION WRITES IT (#976). What that buys is FILE-SET
+    parity with `run_common.materialize_run_dir` — `test_salt_origin_647`'s parity arm, the
+    same trap #647's was built to catch pointing the other way. It is NOT message 0's listing:
+    `workspace_map._UNLISTED` suppresses the stamp, so a replayed message 0 is byte-identical
+    either way, and a reader deciding whether the other hand-built run-dir fixtures need one
+    should weigh the parity arm rather than the prompt.
+
+    Captured against `run_common.REPO_ROOT` — production's own constant, not a second path
+    derived by counting `parents[...]` here — so "like production's" is a fact rather than a
+    coincidence of where this file sits in the tree."""
     run_dir = tmp_path / "run"
-    (run_dir / "gather_raw").mkdir(parents=True)
-    shutil.copy(golden / "alert.json", run_dir / "alert.json")
-    _provenance.write(
-        RunPaths(run_dir).provenance, _provenance.capture_tree(Path(__file__).resolve().parents[3])
-    )
+    paths = RunPaths(run_dir)
+    paths.gather_raw.mkdir(parents=True)
+    shutil.copy(golden / "alert.json", paths.alert)
+    _provenance.write(paths.provenance, _provenance.capture_tree(run_common.REPO_ROOT))
     return run_dir
 
 

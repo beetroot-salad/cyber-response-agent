@@ -269,7 +269,9 @@ def test_main_is_told_the_reserved_ids_are_already_taken(tmp_path):
 def test_message_zeros_run_dir_listing_names_the_queries_table(tmp_path):
     """R7 `interacts(workspace_map->run_dir_listing)` — message 0's own run-dir listing names
     `executed_queries.jsonl`, because lead-0's rows are appended BEFORE `orientation()` runs
-    and `workspace_map` skips only `gather_raw` and `budget.json` (g12/E5, executed).
+    and the queries table is not one of the names `workspace_map._UNLISTED` suppresses
+    (`gather_raw`, `wire_logs/`, `budget.json`, and since #976 the provenance stamp — read the
+    set there rather than a count from here) (g12/E5, executed).
 
     The listing is a pinned surface — `test_salt_origin_647.py:480-516` asserts its contents —
     so this is not cosmetic: a new name appears in it on every run, the design does not

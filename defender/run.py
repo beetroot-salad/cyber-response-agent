@@ -301,8 +301,18 @@ def _announce_provenance(run_dir: Path) -> None:
     # `dirty is None` is neither clean nor dirty: git answered for HEAD and then could not
     # answer for the working tree, and flattening that to either word would be a claim.
     mark = {True: " +dirty", False: "", None: " +dirt-unknown"}[rec.dirty]
-    extra = f" ({rec.dirty_path_count} paths)" if rec.dirty else ""
-    print(f"[run.py] commit={rec.commit[:12]}{mark}{extra}", file=sys.stderr)
+    if rec.dirty is None:
+        # The REASON, on the one branch where it is most actionable: a corrupt index and a
+        # missing git send an operator at different knobs, and " +dirt-unknown" alone names
+        # neither. `capture_tree` kept the string for exactly this line.
+        detail = f" ({rec.unavailable})" if rec.unavailable else ""
+    else:
+        # `if rec.dirty_path_count`, not `if rec.dirty`: this file is in the box's rw bind, so
+        # the count read back may be a default standing in for a corrupted one, and " (0
+        # paths)" beside "+dirty" is a QUANTITY nobody wrote — the announce's own version of
+        # filing an unknown as a fact.
+        detail = f" ({rec.dirty_path_count} paths)" if rec.dirty_path_count else ""
+    print(f"[run.py] commit={rec.commit[:12]}{mark}{detail}", file=sys.stderr)
 
 
 def main(

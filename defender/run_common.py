@@ -60,11 +60,18 @@ def materialize_run_dir(alert: Path, run_id: str | None) -> Path:
         sys.exit(f"run dir already exists: {run_dir}")
     RunPaths(run_dir).gather_raw.mkdir(parents=True)
     shutil.copy(alert, RunPaths(run_dir).alert)
-    # STAMPED HERE, at the one place a run bundle is ever created, so no caller can forget —
-    # the branch launcher materialises its siblings through this same call, which is what makes
-    # a family's worlds comparable on their code rather than merely assumed to be. Captured
-    # BEFORE the box exists and before any agent is alive, because the run dir is the box's rw
-    # bind and a stamp written later is a stamp the run could have moved.
+    # STAMPED HERE, at the one place a run the box will EXECUTE is ever materialised, so no
+    # caller can forget — the branch launcher materialises its siblings through this same call
+    # (`learning/branch/cli.materialize_worlds`), which is what makes a family's worlds
+    # comparable on their code rather than merely assumed to be. Captured BEFORE the box exists
+    # and before any agent is alive, because the run dir is the box's rw bind and a stamp
+    # written later is a stamp the run could have moved.
+    #
+    # NOT every `RunPaths` bundle: the learning loop's ARCHIVED episode under
+    # `LoopPaths.runs_dir` is mkdir'd and populated by `learning/core/persist.py`, never
+    # through here, and carries no stamp today. Carrying the source run's stamp across that
+    # copy is #976's archive half — see `_run_paths.RunPaths`, which says so where a reader
+    # holding an arbitrary run dir will meet it.
     _provenance.write(RunPaths(run_dir).provenance, _provenance.capture_tree(REPO_ROOT))
     return run_dir
 

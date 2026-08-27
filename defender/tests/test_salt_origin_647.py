@@ -42,7 +42,8 @@ from pathlib import Path
 import pytest
 
 from defender import run_common
-from defender._run_paths import RunPaths
+from defender._run_paths import PROVENANCE, RunPaths
+from defender.scripts.workspace_map import _UNLISTED
 from defender.tests.e2e._replay_harness import (
     GOLDEN,
     GOLDEN_AB3,
@@ -315,7 +316,8 @@ def test_message_zero_orientation_lists_exactly_the_materialized_run_dir_childre
 ):
     """MAIN's first model request enumerates the run dir's REAL children, and the removed file
     is not among them. The orientation inlines a workspace map whose run-dir section lists one
-    line per child, skipping only the subagent-only raw-payload subdir; every name it lists
+    line per child, skipping the names `workspace_map._UNLISTED` suppresses — the subagent-only
+    raw-payload subdir, and since #976 the run's own provenance stamp; every name it lists
     exists on disk, and every artifact the builder materialized appears. This listing was
     unpinned before this change, which is precisely why removing a file that gets listed —
     and therefore altering MAIN's prompt — went unnoticed through three review passes. The
@@ -339,16 +341,16 @@ def test_message_zero_orientation_lists_exactly_the_materialized_run_dir_childre
     assert set(listed) <= on_disk, (
         f"message 0 lists names that do not exist in the run dir: {set(listed) - on_disk}"
     )
-    # `provenance.json` joins `gather_raw` in the exclusion for the reason `_UNLISTED` gives:
-    # the map IS the model's directory view, and the run's record of the commit it was built
-    # from is infrastructure the OPERATOR reads. Listing it would invite MAIN to reason about
-    # its own build, which is not a fact about the case in front of it.
-    unlisted = {"gather_raw", "provenance.json"}
-    assert (materialized - unlisted) <= set(listed), (
+    # `workspace_map._UNLISTED` ITSELF, not a subset re-typed here: the suppression and the
+    # expectation must be one value, or a name added to (or dropped from) the real set leaves
+    # this arm asserting about a set nobody maintains. `provenance.json` joins `gather_raw` in
+    # it for the reason the comment there gives — the map IS the model's directory view, and
+    # the run's record of the commit it was built from is infrastructure the OPERATOR reads.
+    assert (materialized - _UNLISTED) <= set(listed), (
         f"a materialized artifact is missing from message 0: "
-        f"{(materialized - unlisted) - set(listed)}"
+        f"{(materialized - _UNLISTED) - set(listed)}"
     )
-    assert "provenance.json" not in listed, (
+    assert PROVENANCE not in listed, (
         "the run's own provenance stamp leaked into MAIN's directory view"
     )
 
@@ -403,7 +405,7 @@ def test_replay_harness_run_dir_and_production_run_dir_present_the_same_file_set
     that a run dir a scenario drives looks like a run dir an operator gets, because the change
     edits the two builders separately and their file sets can otherwise drift silently.
     Immediately after materialization, before anything is driven, both hold exactly the copied
-    alert and the raw-payload subdir.
+    alert, the raw-payload subdir and the provenance stamp (#976).
 
     The scope is not decoration: the production builder conditionally copies a sibling
     `ground_truth.yaml` into the run dir (`run_common.py:69-71`) and the replay harness has NO
@@ -429,4 +431,5 @@ def test_replay_harness_run_dir_and_production_run_dir_present_the_same_file_set
         f"the two builders' run dirs diverge: production={sorted(prod_names)} "
         f"harness={sorted(harness_names)}"
     )
-    assert prod_names == {"alert.json", "gather_raw", "provenance.json"}
+    rp = RunPaths(prod_dir)
+    assert prod_names == {rp.alert.name, rp.gather_raw.name, rp.provenance.name}
