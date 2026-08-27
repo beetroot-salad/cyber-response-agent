@@ -44,9 +44,27 @@ judged by "does this failure silently produce a wrong CONCLUDE?"
 | 5 | Parallel sanctioned/unsanctioned pair (same mechanism) | 13 | 46% | high |
 | 6 | Over-lean (≥3 predictions on one hypothesis) | 1 | 4% | low |
 | 7 | Narrative umbrella classification name | 11 | 39% | medium |
-| 8 | Refutation doesn't cite predictions (no `refutes_predictions: [pN]` link) | 28 | 100% | medium (structural) |
 | 9 | Empty `story:` | skipped per spec (only 1 block uses story, never empty) | — | — |
 | 10 | Lead selection not justified against playbook | 0 | 0% | low |
+
+### Closed by schema — not a behavioural failure mode
+
+**FM8 — refutation doesn't cite predictions.** Struck from the table
+above (#932). It read 28/28 = 100%, and that number measured the
+schema, not the agent: at the time of the pass the emitted invlang had
+no field for the link, so every block failed a check nothing could
+pass. Ranking a measurement artifact above FM4 (79%) and FM5 (46%),
+which are behavioural, put the wrong row at the top of the table and
+misdirects the next PLAN prompt change.
+
+The absence is closed. The `refuts` row carries the link as a
+first-class column — `:H h-NNN.refuts [id|refutes|claim]`
+(`defender/SKILL.md` §PLAN) — and the validator resolves it: a
+`refutes` cell naming a `p*`/`ap*` the declaring hypothesis does not
+declare is refused (`_check_refutation_scope`, spec rule #5's
+declaring-side half), and a `--` citing an `r*` settles the predictions
+that `r*` names (`_settled_predictions`). The column is populated on
+every hypothesis in every recent run.
 
 ## 3. Exemplars
 
@@ -137,18 +155,22 @@ Canonical example (task-spec-matching):
 - `?reverse-shell-post-exploit` (run 20260418-041739 loop 2) — umbrella
   classification for co-firing 100002; mechanism is not specified.
 
-### FM8 — Refutation doesn't cite predictions (28 / 28)
+### FM8 — Refutation doesn't cite predictions (28 / 28) — closed, see §2
 
-Structural. The invlang schema as emitted does not include a
-`refutes_predictions: [pN]` field on any `refutation_shape` entry.
-Entries carry only `id` and `claim`. In most blocks the reader can map
-an r1 to a p1 by proximity, but the link is never explicit. Example of
-the asymmetry causing analysis pain:
+Structural, and the denominator was the schema. The invlang as emitted
+at the time of this pass did not include a `refutes_predictions: [pN]`
+field on any `refutation_shape` entry; entries carried only `id` and
+`claim`. In most blocks the reader can map an r1 to a p1 by proximity,
+but the link was never explicit. Example of the asymmetry causing
+analysis pain:
 
 - `runs/20260418-064543-rule100110/...` loop 2 h-002 r1 "subdomains
   identical across sessions…" — the text itself says "matching p1's
   first branch is ambiguous", acknowledging the link but not encoding
   it. A judge cannot mechanically check refutation adequacy.
+
+The field exists now — the `refutes` column on `:H h-NNN.refuts` — and
+a judge can. See §2 "Closed by schema".
 
 ### FM10 — Lead selection not justified (0 clear instances)
 
@@ -221,11 +243,26 @@ Per failure mode with meaningful frequency:
   predicted value differs between these two hypotheses — quote the
   predictions" lands cleanly.
 
-- **FM3 Compound prediction (43%, high)** — (a) structural invlang
-  validator rule. Detecting "`;`, `AND`, `and`, `OR`, `or`, `,`-with-
-  clause-separator, or `>` inside `claim`" is a regex+tokenizer job,
-  and the fix is mechanical (split into p1/p2). Should be a PreToolUse
-  block on investigation.md writes.
+- **FM3 Compound prediction (43%, high)** — (b) judge or eval-rubric
+  question, **not** (a) a structural validator rule. This entry
+  originally prescribed a regex over `claim` — "`;`, `AND`, `and`,
+  `OR`, `or`, `,`-with-clause-separator, or `>`" — as a PreToolUse
+  block, and that prescription was measured and refused (#932; see
+  `docs/decisions/defender-invlang-enforcement-ramp.md`). Two reasons.
+  First the corpus: over every ```invlang document in the tree the
+  regex fires on 35% of prediction rows (33/95) and 48% of refutation
+  rows (26/54), and among the documents it refuses are the runtime
+  authoring skill's own teaching block, both shipped worked examples,
+  and both shipped e2e goldens. Much of that is the word "and" joining
+  one observable's parts — "short-lived and not a package manager" is
+  one process characterization, not two claims. Second the semantics,
+  on the refutation half: a refutation scoped to `p1,p2` negates a
+  conjunction, so De Morgan makes "¬p1 or ¬p2" the *correct* rendering,
+  and the regex reads the correct rendering as the defect. Compound
+  claims are real and they sit in the **predictions**; the `refuts` row
+  is where you see them, not where they are. The detector belongs where
+  `predict-eval-rubric.md` already puts it — a scored dimension over
+  hand-labelled cases with a calibration step — not on a write gate.
 
 - **FM4 Legitimacy packed in classification (79%, medium)** — (c)
   subagent-prompt tightening, with (a) structural backstop. The
@@ -234,8 +271,12 @@ Per failure mode with meaningful frequency:
   `runtime-process`, `image-entrypoint`, `underlying-host`, etc.) and
   forbid a regex-detectable set of legitimacy prefixes (`authorized-`,
   `unauthorized-`, `legitimate-`, `malicious-`, `adversarial-`,
-  `sanctioned-`, `compromised-`). Validator can enforce the regex as a
-  cheap guardrail.
+  `sanctioned-`, `compromised-`). *(#932: the "(a) structural backstop"
+  half is withdrawn. A forbidden-prefix regex over model-authored names
+  is the exact test spec rules #36 and #32 were struck for — #36's v2.14
+  token list produced false rejections of correctly-graded routings and
+  v2.16 deleted it. The whitelist in the prompt is the live ask; the
+  validator regex is not.)*
 
 - **FM5 Parallel sanctioned/unsanctioned pair (46%, high)** — (b)
   Haiku judge question, because "same mechanism, differs only on
@@ -256,13 +297,15 @@ Per failure mode with meaningful frequency:
   unconditional GATHER lead. For umbrella names more broadly, same
   whitelist/blacklist mechanism as FM4.
 
-- **FM8 No prediction-refutation link (100%, medium)** — (a)
-  structural schema extension + validator rule. Add
-  `refutes_predictions: [pN, ...]` to `refutation_shape[]` entries in
-  the schema; validator enforces non-empty and validates that pN
-  exists on the same hypothesis. This also upgrades invlang corpus
-  queries (rule #8 in the validator catalog becomes mechanically
-  checkable). Subagent prompt updates to populate the new field.
+- **FM8 No prediction-refutation link — shipped, not outstanding.** The
+  `refutes` column landed on `:H h-NNN.refuts`, the validator resolves
+  each cited `p*`/`ap*` against the declaring hypothesis
+  (`_check_refutation_scope`), a cited `r*` settles the predictions it
+  names on the ANALYZE side (`_settled_predictions`), and the emitting
+  prompt populates it in every recent run. Nothing here is a live ask.
+  The one clause never shipped — "validator enforces non-empty" — fires
+  on nothing: every hypothesis with predictions in the tree already
+  writes at least one `refuts` row, so the gate would be dead code.
 
 - **FM2 Missing seed** and **FM10 lead-not-in-playbook** are
   unrepresented in the corpus; defer until we see a failing case.
@@ -282,12 +325,13 @@ hypothesis pairs** (46%, where two hypotheses share a mechanism and
 differ only on authority — best caught by a Haiku judge, then
 collapsed into one hypothesis with a `legitimacy_contract`), and
 **legitimacy/intent packed into classification names** (79%, pervasive;
-tackled by a mechanism-stem whitelist in the subagent prompt plus a
-forbidden-prefix regex in the validator). The most surprising finding
-is structural and uniform: **every single block omits the
-`refutes_predictions: [pN]` link on refutation entries** — the corpus
-cannot mechanically evaluate refutation adequacy, and invlang rule #8
-currently checks only the loose prose assessment. Extending the
-schema to require this link, then backfilling the emitting subagent
-prompt, is a one-day fix that unlocks an entire class of automated
-auditability.
+tackled by a mechanism-stem whitelist in the subagent prompt — the
+forbidden-prefix regex this paragraph also proposed for the validator
+is the same lexical shape that spec rules #32 and #36 were struck for,
+and is not a live ask).
+
+*(Amended #932. The original fourth finding here — "every single block
+omits the `refutes_predictions: [pN]` link", called the most surprising
+result and a one-day fix — was measuring the absence of a schema field,
+not agent behaviour. The field shipped; see §2 "Closed by schema". The
+three above are the findings.)*

@@ -797,6 +797,169 @@ own entry above for unrelated reasons.
 
 Numbering preserved for grep-stability, per the v2.15 convention.
 
+### Why a refutation-atomicity gate is not a rung (#932)
+
+Asked for and refused before arming, so it is not a rung this list
+skipped. #932 proposed a PLAN-side gate on `:H h-NNN.refuts` rows in two
+halves: **(a)** claim atomicity — refuse ` AND ` / ` OR ` / `;`-joined
+observables — and **(b)** `refutes` coverage of the declared prediction
+set, or an explicit waiver. Both were measured against every ```invlang
+document in the tree (21 carrying a `.refuts` block, 54 refutation rows,
+33 hypotheses declaring predictions), including the live runs under
+`.defender-runs/` from the last month. Both refuse the reference corpus,
+and (a) refuses it for the wrong reason.
+
+*Measurement caveat, and it is its own finding: of the three live runs,
+only two contribute rows. `live-867-old`'s entire PLAN section is
+**outside any ```invlang fence** — the fence opened at its `## ORIENT`
+closes before the prose, and `## PLAN` and everything under it was never
+reopened — so its hypotheses, predictions, refutations and four leads are
+invisible to the parser and reach no rule at all. See the side-observations
+at the end of this section. Its rows are quoted below as authored text,
+not as parsed corpus.*
+
+**(a) fires on 48% of refutation rows — 26 of 54 — and what it refuses
+is the documents that teach the shape.** (On the prediction rows the
+same regex fires on 35%, 33 of 95, with nine hits in shipped documents —
+so widening it past `refuts` does not rescue it either.) Among them: the runtime
+authoring skill's own PLAN block (`defender/SKILL.md`,
+`r1|p1,p2|"no apt event near modification time, or checksum diverges
+from upstream"`), both shipped worked examples
+(`examples/example-b-parallel-iam-cmdb.md`, and all three hypotheses of
+`examples/example-c-cumulative-escalation.md`), and a shipped e2e golden
+(`fixtures-e2e/golden-sshpivot-ab3`). This is the #32 result verbatim: a
+rule that refuses the document teaching the right answer is not
+measuring the corpus; the corpus is measuring the rule.
+
+**And the disjunction it fires on is the correct rendering, not the
+defect.** A refutation scoped `refutes: p1,p2` overturns the conjunction
+`p1 ∧ p2`, and `¬(p1 ∧ p2)` is `¬p1 ∨ ¬p2`. The "or" is De Morgan. Every
+one of the five compound-refutation exemplars #932 cites is exactly that
+— the negation of its own `refutes` cell, written out:
+
+| run | row | scope | claim | reading |
+|---|---|---|---|---|
+| `live-867-old`\* | h-001 r1 | p1,p2 | "no service script or entrypoint references runuser+nc, or nc targets external hosts, or cadence is irregular" | ¬p1 ∨ ¬p2, with p2 itself compound |
+| `live-867-new` | h-001 r2 | p2,p3 | "…include sensitive reads or cron writes, or external SSH login precedes alert" | ¬p2 ∨ ¬p3 |
+| `turnN-A` | h-001 r2 | p3,p4 | "No active CR and co-occurring attack-phase Falco events present" | ¬p3 ∧ ¬p4 — stricter than needed, coherent |
+| `fresh-01` | h-001 r2 | p2,p3 | "no successful auth events; usernames are random or non-existent accounts" | ¬p3 ; ¬p2 |
+| `defender-run-snapshot` | h-002 r1 | p1,p2 | "source IP is external or undocumented, or failure pattern is rapid-fire single-source not periodic" | ¬p1 ∨ ¬p2 |
+
+\* authored text, read off the file; this row is unfenced and does not parse — see the caveat above.
+
+So #932's headline — "the violations sit in the `refuts` rows
+specifically" — is an artifact of reading the expansion. Where a genuine
+compound exists it is **upstream in the prediction**: `live-867-new` p1
+("a known image with SSH healthcheck **or** entrypoint using runuser +
+nc"), `live-867-old` p2 (destination **and** cadence),
+`defender-run-snapshot` h-001 p2 ("many usernames **or** a single common
+account at high rate"). The refutation row is where you see the compound,
+not where it is. Gating the row treats the symptom and refuses the cure.
+
+Narrowing the scope does not save it. Restricted to rows whose `refutes`
+cell names exactly ONE prediction — where De Morgan cannot be the
+explanation — it still fires on 6 of 23 (26%), and four of the six are
+shipped reference documents. Two are outright lexical false positives:
+`example-b` `r1|p1|"the SSH client has no package or systemd ancestry"`
+is the correct negation of "a distro-packaged unit started by systemd",
+and `golden-sshpivot-ab3` `r3|p3|"sub-second timing between workstation
+acceptance and prod-tier failures"` trips on an "and" that joins the two
+endpoints of one interval and is not a connective at all. Rule #36's
+v2.14 token list failed this way and v2.16 deleted it; the same
+experiment does not need running a third time.
+
+**(b) fires on 15% — 5 of 33 hypotheses — and all five are shipped
+reference documents**, none from the recent runs: `example-b` h-001,
+both hypotheses of `fixtures-e2e/golden-v2sshd`, and both of
+`fixtures-e2e/golden-sshpivot-ab3`. Each leaves exactly one prediction
+uncovered, and in each the uncovered one is corroborating rather than
+load-bearing — `golden-v2sshd` h-001 p3 ("inter-event timing has a gap…")
+adds nothing once r1 has killed the source-identity claim p1/p2 rests on.
+Requiring per-prediction coverage would mint redundant refutation rows,
+which is what arming #32 would have done to integrity peers. Rule #34
+already asks the question that matters — every `p*`/`ap*` on a
+non-refuted hypothesis is cited or deferred with a rationale by CONCLUDE.
+
+**The presence clause fires on nothing.** Every hypothesis in the tree
+that declares predictions already writes at least one `refuts` row, so a
+"a `refuts` row must exist" gate is dead code, in the shape of #28's
+"plausibly never written" note.
+
+**The routing gap #932 posits is closed.** "If one conjunct fails,
+ANALYZE has no defined routing" — it does: `matched_prediction_ids`
+files a negated literal `¬p2` alongside `p1` on the same row,
+`_contradicted_predictions` reads it, and `_settled_predictions`
+subtracts it before the union, so a partially-materialized refutation
+settles the half that came in and leaves the other half owed to rule #34.
+
+**Where the compound detector does belong.** `docs/decisions/predict-eval-rubric.md`
+already has it — D5 `compound_claim`, scored per case against hand
+labels, next to a D8 that grades per prediction so one bad predicate does
+not tank a case, and a documented calibrate-against-human-labels step.
+That is the right instrument for a judgment about what a sentence
+asserts. Promoting it to a write gate is the move this section refuses.
+
+**Not a candidate for a later rung.** Nothing about the corpus growing
+changes the De Morgan argument, which is why this sits with #32 and #36
+rather than in the deferred list. Re-arming is a fresh spec decision.
+
+**#932's two side-observations, checked.** (1) becomes an issue, for a
+different and worse reason than the one filed; (2) does not.
+
+**(1) `live-867-old` — the rule did not pass, it never ran.** #932 reads
+h-001/h-002 sharing `parent_class=unclassified-process` on
+`attached_to=v-003` as a rule #23 (fork distinctness) violation that
+failed to fire. On the stated grounds it is not one: since #934, #23 keys
+on the predicted observable rather than on classification, siblings
+legitimately share an open `parent_class`, and these two hypotheses'
+predictions do differ. But that is not why nothing fired. **The document's
+whole PLAN section is unfenced.** Its ```invlang fence opens at
+`## ORIENT`, closes after the `:E prologue.edges` rows, and the `## PLAN`
+heading below the prose opens no new one — the trailing ``` at the end of
+the file is read as an opening fence that is never closed. So the `:H`
+hypotheses, their `.preds` and `.refuts` sub-blocks, and the four `:L`
+leads are outside every fence: `parse_dense_companion` returns two
+harness-authored leads and no hypotheses, and every hypothesis-side rule
+— #23, #5's declaring half, #6, #34 — has nothing to look at.
+`_check_surface` caught a ```yaml fence and nothing caught a missing
+one, so the write landed clean and the run's entire PLAN went
+unvalidated. A validator-surface gap, not a PLAN-authoring one — and
+**fixed in this change rather than deferred**: `_check_surface` now
+refuses a write that introduces a block header outside every fence.
+Scoped to what the write introduces, because `investigation.md` is
+append-only and bytes already committed unfenced cannot be wrapped after
+the fact — a whole-document reading would deny every later write with no
+repair available, which is the wedge the v2.22 delta closed on rules #6
+and #17. A trailing unterminated ```invlang is exempt: that is a write
+cut off mid-block, the next append closes it, and
+`tests/test_frontier_recall_919.py` fixes that shape as accepted by
+design. Measured before arming: across the 27 documents in the tree
+carrying invlang, one investigation fires — `live-867-old` itself — and
+nothing else does. `docs/investigation-language.md` §On-disk surface
+carries the rule; `tests/test_932_unfenced_surface.py` is the guard.
+
+The gate is the second half of the fix, not the whole of it. The first
+half is that the split itself was derived in three places — the
+tokenizer, the frontier's prefix rebuild, and the turn-N seed slicer —
+each restating in a comment that fences are the content and the rest is
+ignored, and each blind the same way. `parser.scan_fences` is now the
+one reader of `INVLANG_FENCE_RE`, and it returns what the fences ORPHAN
+alongside what they hold, so the complement cannot be dropped without a
+caller choosing to. It REPORTS and does not refuse: the frontier and
+seed readers must never raise, and refusing on committed bytes is the
+wedge above. `scripts/lint/lint_unaccounted_fence_scan.py` keeps a
+fourth copy from growing back — baseline empty, because all five sites
+were folded in the same change.
+**(2) The `≥3 predictions` rate does climb — 22 of 36 hypotheses
+with predictions (61%) declare more than two, and both live runs that
+parse are in that set. But a `≤2` cap is unarmable on the same evidence as (a) above:
+it refuses both shipped e2e goldens and `skills/invlang/SKILL.md`'s own
+h-002. "Lean means 1–2 predictions" stays what it is in
+`docs/investigation-language.md` §Hypothesis — authoring guidance, not a
+gate. This is also the upstream cause of the wide refutation rows: more
+predictions per hypothesis means a wider `refutes` scope means a longer
+De Morgan expansion.
+
 **Open: two current-spec rules were deferred because the spec
 contradicted its own worked examples.** Don't enforce one until its spec
 is reconciled, or it'll false-positive on valid current writes. One is

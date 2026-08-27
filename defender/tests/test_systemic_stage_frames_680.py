@@ -773,7 +773,12 @@ def test_d17_legal_artifacts_gain_no_new_deny_or_modelretry(tmp_path):
     report = (
         "---\ndisposition: benign\n---\n## heading\n<synthesis>lookalike</synthesis>"
     )
-    investigation = ":T hypothesis -- because evidence\n"
+    # The lookalike is the `--` weight token in an artifact body, which is what cc7's
+    # retained literal has to not collide with. It was written as a bare `:T hypothesis`
+    # row, which is not a legal investigation body in two ways that nothing checked: the
+    # row is outside every ```invlang fence (#932), and `:T hypothesis` is not a header the
+    # parser accepts even fenced. Prose carries the same lookalike and is legal.
+    investigation = "## notes\n\nhypothesis -- because evidence\n"
     assert _decide_report_write(report).allow
     assert _decide_investigation_write(
         investigation, tmp_path / "investigation.md"

@@ -5,6 +5,7 @@ import contextlib
 import re
 from collections.abc import Iterator
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Any, TypeVar, cast
 
 from ._cells import (
@@ -236,6 +237,101 @@ _EDGE_COLS = ["id", "rel", "src", "tgt", "when", "auth_kind:source", "attrs"]
 _SURVIVING_COLS = ["hyp_id", "final_weight"]
 
 
+@dataclass(frozen=True)
+class FenceScan:
+    """What a document's ```invlang fences enclose, AND what they leave out.
+
+    THE ONE PLACE that answers "which bytes are invlang content". Three readers had derived
+    it independently — the tokenizer, the frontier's prefix rebuild, and the turn-N seed
+    slicer — each restating in prose that fences are the content and the rest is ignored,
+    and each blind to the same thing in the same way. Ignoring the rest is correct; ignoring
+    it SILENTLY is what let a run's whole PLAN section sit outside a fence, parse to nothing,
+    and clear every hypothesis-side rule vacuously (#932).
+
+    So the complement rides along with the content and cannot be taken without it. `bodies`
+    and `spans` are what the fences hold; `orphaned_headers` is the accounting — lines that
+    open a block (`_HEADER_ATTEMPT_RE`) while sitting outside every fence, which is content
+    the author wrote and no reader will ever see.
+
+    **This type reports; it does not refuse.** Whether an orphan is an error, and for whom,
+    is policy: `validate._check_surface` refuses only the orphans a given WRITE introduces,
+    because `investigation.md` is append-only and bytes already committed cannot be fenced
+    after the fact. Raising here instead would wedge every later write on a document already
+    broken, and would turn the frontier and seed readers — which must never raise — into
+    paths that do.
+
+    A TRAILING UNTERMINATED ```invlang counts as open to end-of-document (`open_tail`). That
+    is a write cut off mid-block: the next append closes it and the rows parse, a shape
+    `tests/test_frontier_recall_919.py` fixes as accepted by design. Rows orphaned after a
+    CLOSED fence are permanent — no later append reaches back to wrap committed bytes — so
+    only those are reported."""
+
+    #: The text inside each fence, in document order — `INVLANG_FENCE_RE`'s group(1).
+    bodies: tuple[str, ...]
+    #: `(start, end)` of each FULL fence — the ```invlang delimiter through the closing
+    #: ``` — against the original text. Full, not the enclosed region: the turn-N seed
+    #: slicer cuts a document at `spans[n-1][1]` and an inner bound would drop the closing
+    #: delimiter.
+    spans: tuple[tuple[int, int], ...]
+    #: Block-opening lines that fell outside every fence, as the author wrote them. Matched
+    #: on the STRIPPED line, the way `_tokenize_fence` matches the same regex — an indented
+    #: `:H` is a header the tokenizer would open a block on, so outside a fence it is
+    #: orphaned content and not prose.
+    orphaned_headers: tuple[str, ...]
+    #: Offset of the ```invlang delimiter that opens a trailing UNTERMINATED fence, or
+    #: `None`. Everything from here to end-of-document is a block the author is still in the
+    #: middle of writing, so nothing under it counts as orphaned. `validate._check_surface`
+    #: reads it off the BASELINE too: with the on-disk document mid-block, the next append's
+    #: own ```invlang gets paired with the open one by `INVLANG_FENCE_RE` and the new block
+    #: reads as orphaned, which would refuse the only continuation `append_block` can send.
+    open_tail: int | None
+
+
+#: The opener, as a whole line. A prose MENTION of ```invlang — the repair instruction
+#: `_check_surface` prints contains one — must not open a phantom region to end-of-document
+#: and swallow every orphan under it, so the test is the stripped LINE, not `str.find`.
+_FENCE_OPEN_LINE = "```invlang"
+
+
+@lru_cache(maxsize=8)
+def scan_fences(text: str) -> FenceScan:
+    """Split `text` into what the ```invlang fences enclose and what they orphan.
+
+    Never raises and never refuses — see `FenceScan`. Every reader of fenced content goes
+    through here so that the complement is accounted for once, in the open, rather than
+    dropped on the floor three times.
+
+    MEMOIZED because it is not free and one `validate.diagnose` calls it seven times over the
+    same two documents — `_check_surface`, `_check_append_only` and `parse_dense_companion`
+    each on the proposal and the baseline. Pure function of `text`, so the cache can only
+    return what a re-scan would; the bound is small because the strings it pins are whole
+    investigation documents (64 KiB each at the cap)."""
+    matches = list(INVLANG_FENCE_RE.finditer(text))
+    spans = tuple(m.span() for m in matches)
+    open_tail: int | None = None
+    orphans: list[str] = []
+    offset = 0
+    for line in text.split("\n"):
+        start, end = offset, offset + len(line)
+        offset = end + 1
+        inside = any(a <= start and end <= b for a, b in spans)
+        stripped = line.strip()
+        if not inside and stripped == _FENCE_OPEN_LINE:
+            # An opener the regex could not pair: the fence it starts runs to EOF.
+            open_tail = start if open_tail is None else open_tail
+            continue
+        if inside or (open_tail is not None and start >= open_tail):
+            continue
+        if _HEADER_ATTEMPT_RE.match(stripped):
+            orphans.append(line)
+    return FenceScan(
+        bodies=tuple(m.group(1) for m in matches),
+        spans=spans,
+        orphaned_headers=tuple(orphans),
+        open_tail=open_tail,
+    )
+
+
 def iter_blocks(text: str) -> Iterator[Block]:
     """Every invlang `Block` in `text`, in document order, with its DECLARED header and its
     rows as the author wrote them.
@@ -247,11 +343,11 @@ def iter_blocks(text: str) -> Iterator[Block]:
 
     Kept out of the companion deliberately: carrying per-row provenance on the records inflated
     the parsed body by up to 25%, and that body is projected into the review lens prompts."""
-    for fence in INVLANG_FENCE_RE.finditer(text):
+    for body in scan_fences(text).bodies:
         # Blocks only. A caller at this layer is quoting a ROW back under its block, and a
         # line that reached no block has no block to quote it under; `parse_dense_companion`
         # is where the tokenizer's warnings are collected and refused on.
-        yield from _tokenize_fence(fence.group(1))[0]
+        yield from _tokenize_fence(body)[0]
 
 
 def _vertex_record(block: Block, row: str) -> VertexRecord:
@@ -357,7 +453,13 @@ def deferred_hypothesis_ids(
             named = (_row_first_cell(w.row),)
         else:
             continue
-        usable = [i for i in named if HYPOTHESIS_ID_RE.fullmatch(i)]
+        # lint-selection: ok — the complement CHANGES THE ANSWER rather than vanishing:
+        # an empty selection means a dropped declaration could not be mapped to an id,
+        # and `return None` then stands the undeclared-hypothesis rule down document-wide
+        # instead of reporting references the parse error already explains.
+        usable = [  # lint-selection: ok — empty selection returns None; see above
+            i for i in named if HYPOTHESIS_ID_RE.fullmatch(i)
+        ]
         if not usable:
             return None
         deferred.update(usable)
@@ -742,7 +844,17 @@ def _resolution_record(row: str) -> tuple[str | None, ResolutionRecord]:
     iff_pred_ids, iff_refut_ids = _extract_iff_literals(annotation)
     # Same split as the `⟺` side: an id-shaped token that is not `r*` is a prediction, so
     # `ap*` files under predictions in both spellings. A bare `startswith("p")` drops `ap1`.
-    head_ids = [t for t in head_refs if _REF_ID_RE.fullmatch(t)]
+    # lint-selection: ok — PARTIALLY covered downstream, and the gap is recorded rather
+    # than claimed closed. A head whose ids ALL drop cites nothing, which
+    # `_check_strong_move_provenance` refuses; a head that keeps one good id and drops a
+    # malformed sibling passes, and an `ac1` written here drops silently because `ac*` is
+    # discharged by a `:R authz` row and `_REF_ID_RE` does not admit it
+    # (`experiments/oracle-telemetry-fidelity/runs/defender-run-snapshot` does exactly
+    # that). Whether an `ac*` is legal in a resolution head is a spec question, not a
+    # mechanical one, so it is not decided here.
+    head_ids = [  # lint-selection: ok — partially covered downstream; see above
+        t for t in head_refs if _REF_ID_RE.fullmatch(t)
+    ]
     # UNION, not `iff_ids or head_ids`. The `⟺` form exists for the row that cites nothing in
     # its head, and replacing meant one iff literal in a `::` segment — which is otherwise free
     # prose — DISCARDED the head's own list: a `++` whose head cites `p1,p2` and whose
@@ -1712,7 +1824,11 @@ class _Projector:
                 # `p9` — and `deferred_hypothesis_ids` would then find no id-shaped name,
                 # return `None`, and stand the undeclared-hypothesis rule down for the WHOLE
                 # DOCUMENT. The typo case is unaffected: its ids ARE `h-*`.
+                # lint-selection: ok — the drop is the point, and the comment above says
+                # where it goes: a non-`h-*` id here would make `deferred_hypothesis_ids`
+                # find no id-shaped name and stand a rule down for the whole document.
                 dropped_ids=tuple(
+                    # lint-selection: ok — the drop is the point; see above
                     cell
                     for cell in (_row_first_cell(r) for r in block.rows)
                     if HYPOTHESIS_ID_RE.fullmatch(cell)
@@ -1985,8 +2101,8 @@ def parse_dense_companion(
 ) -> tuple[CompanionBody, list[ParseWarning]]:
     blocks: list[Block] = []
     warnings: list[ParseWarning] = []
-    for match in INVLANG_FENCE_RE.finditer(text):
-        fence_blocks, fence_warnings = _tokenize_fence(match.group(1))
+    for body in scan_fences(text).bodies:
+        fence_blocks, fence_warnings = _tokenize_fence(body)
         blocks.extend(fence_blocks)
         warnings.extend(fence_warnings)
     # Return the warnings, not `[]`. A fence whose FIRST header was rejected opens no block at
