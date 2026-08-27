@@ -20,6 +20,8 @@ returned reason back into `Decision(False, reason)`.
 
 from __future__ import annotations
 
+import sys
+
 import yaml
 
 from defender._frontmatter import FrontmatterError, split_frontmatter
@@ -313,12 +315,27 @@ def committed_investigation_reason(text: str) -> str | None:
         refusal text false — over-bound, that text offers "close the investigation on the
         evidence you already have" as the way out, which is exactly the move a size-checking
         close would refuse.
-      * NO APPEND-ONLY BASELINE. Append-only is a property of a PROPOSED write judged against
-        history. Nothing is proposed here; this is the committed document, so `diagnose` is
-        given no `current` and the history checks do not run.
+      * THE DOCUMENT IS ITS OWN BASELINE. Every check that keys on `current` asks what THIS
+        WRITE INTRODUCES, and a close introduces nothing — so the honest baseline for a
+        committed document is the document. `None` is the WRONG spelling of that, and not
+        harmlessly: `_check_surface` subtracts the baseline's orphaned headers from the
+        proposal's, so with no baseline every unfenced header already on disk reads as newly
+        added. `investigation.md` is append-only and `fix_row` reaches `:R attr_updates` rows
+        only, so those bytes can never be fenced after the fact — the close would refuse, for
+        the life of the run, a document every write gate had accepted, with no repair the
+        model can make. Passed the text itself, `_check_surface` subtracts to nothing and
+        `_check_append_only` compares the document to itself (equal fence counts, every
+        record mapping to itself), which is exactly the no-op "nothing is proposed" means.
 
-    Fails CLOSED on an internal validator error, the same rule the write gate obeys: a gate
-    that cannot look must not report clean.
+    Fails OPEN on an internal validator error, and this is where it parts company with the
+    write gate above. There, failing closed is free — nothing is written and the model
+    re-sends. Here the same choice makes a validator BUG an unclosable run: no repair exists
+    for it, so the model retries until the framework force-closes `inconclusive` and the
+    disposition the run reached is discarded. `runtime.tools.committed_document_refusal`, the
+    only caller, already fails open when the document cannot be READ, for exactly that reason
+    (#836's H7) — a gate that failed open on unreadable bytes and closed on an unreadable
+    validator would be answering one question two ways. The condition is logged, because a
+    validator that raises is a defect to chase and silence is how it would go unchased.
 
     WHY THE CLOSE NEEDS ITS OWN READING AT ALL. Every other write verb reaches this module
     through `permission.decide_write`, so "a committed investigation parses" held by
@@ -326,13 +343,14 @@ def committed_investigation_reason(text: str) -> str | None:
     report whose frontmatter the learning loop trains on and hands the parsed companion to the
     review gate. The one verb that publishes was the one verb that did not check (#961)."""
     try:
-        found = diagnose(text, None)
-    except Exception as e:  # noqa: BLE001 — a blocking gate must fail closed
-        return (
-            f"close blocked: `investigation.md` could not be validated and the gate fails "
-            f"closed ({e!r}). Repair the document — a close is not permitted while the gate "
-            f"cannot look."
+        found = diagnose(text, text)
+    except Exception as e:  # noqa: BLE001 — fail open (H7); an unclosable run is worse
+        print(
+            f"[artifact_schema] investigation.md could not be validated for the close, "
+            f"treating it as publishable: {e!r}",
+            file=sys.stderr,
         )
+        return None
     rendered = _rendered_errors(found)
     if rendered is None:
         return None

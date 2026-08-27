@@ -186,6 +186,107 @@ def test_the_price_gate_still_answers_first_for_what_it_prices(tmp_path):
     )
 
 
+def test_a_committed_unfenced_header_does_not_make_the_run_unclosable(tmp_path):
+    """The close reads the document as ITS OWN BASELINE, not against no baseline at all.
+
+    Every check keyed on `current` asks what THIS WRITE INTRODUCES, and a close introduces
+    nothing. `_check_surface` subtracts the baseline's orphaned headers from the proposal's, so
+    with `None` every unfenced block header already committed reads as newly added — a family
+    the write gate deliberately scopes to what a write ADDS, precisely because append-only and
+    a `:R`-only `fix_row` leave those bytes unreachable forever. Read that way the close would
+    refuse, for the life of the run, a document every write gate had accepted, with no repair
+    the model could make.
+    """
+    deps, run = main_deps(tmp_path)
+    seed_investigation(
+        run,
+        PROLOGUE + "\n## PLAN\n\n:H hypothesize.hypotheses [id|claim]\n",
+    )
+
+    _close(deps, "inconclusive")
+
+    assert (run / "report.md").is_file()
+
+
+def test_an_error_severity_row_is_repairable_rather_than_a_dead_end(tmp_path):
+    """The close names `fix_row`, so `fix_row` has to be able to reach what the close refused.
+
+    The repair WINDOW is warn-severity — the rows whose presence blocks an append. The repair
+    SET is what the verb may touch, and an error-severity row belongs in it: it blocks every
+    write just as hard, but was not in the window, so `fix_row` refused it and was not even
+    offered. That left no legal move — close refuses and names `fix_row`, `fix_row` says
+    nothing is flagged, `append_block` refuses the same bytes — and the model would spend its
+    whole retry budget before the framework force-closed `inconclusive`, discarding the
+    disposition the run had actually reached.
+
+    Reachable because a document valid when written can stop being valid later: a rule that
+    ships after the bytes landed judges what is already committed, and #962 is exactly one.
+    """
+    from defender.runtime.tools import (
+        _tool_fix_row, committed_document_refusal, flagged_diagnostics,
+        repairable_diagnostics,
+    )
+
+    deps, run = main_deps(tmp_path)
+    seed_investigation(run, _ERROR_DOC)
+
+    assert flagged_diagnostics(deps) == (), "the warn window is empty — that was the trap"
+    assert [d.locus.row_text for d in repairable_diagnostics(deps)] == [
+        "l-001|v-001|class|workstation"
+    ]
+    assert committed_document_refusal(deps) is not None
+
+    _tool_fix_row(deps, "l-001|v-001|class|workstation", "")
+
+    assert committed_document_refusal(deps) is None
+    _close(deps, "inconclusive")
+    assert (run / "report.md").is_file()
+
+
+def test_a_row_naming_no_text_stays_out_of_the_repair_set(tmp_path):
+    """The set is the rows `fix_row` can ADDRESS, and one nobody can quote back is not one.
+
+    The repeated-lead-id family reports at BLOCK scope, so it carries a locus whose `row_text`
+    is empty — and `fix_row` reads an empty `old_row` as DELETE. Admitting it would offer a
+    repair that names nothing and deletes on sight, and would quietly reverse #954's decision
+    that a document holding that repeat is refused at every write verb with no legacy
+    exemption.
+    """
+    from defender.runtime.tools import repairable_diagnostics
+    from defender.tests._invlang_amendment_954 import VERTICES, findings_block
+
+    deps, run = main_deps(tmp_path)
+    seed_investigation(run, VERTICES + findings_block(
+        "l-001|1|first|v-001||cmdb|n/a", "l-001|2|second|v-002||edr|48h"))
+
+    assert repairable_diagnostics(deps) == ()
+
+
+def test_a_validator_that_raises_does_not_make_the_run_unclosable(tmp_path, capsys):
+    """The close's structure gate fails OPEN on a validator fault, like the gate one line above
+    it (#836 H7) and unlike the WRITE gate it shares a schema with.
+
+    On a write, failing closed is free — nothing lands and the model re-sends. Here the same
+    choice turns a validator BUG into an unclosable run: there is no repair for it, so the
+    model retries until the framework force-closes and the real disposition is discarded. A
+    gate that failed open on unreadable BYTES and closed on an unreadable VALIDATOR would be
+    answering one question two ways.
+    """
+    import defender._artifact_schema as schema
+
+    def _boom(_text, _current):
+        raise RecursionError("validator blew up")
+
+    original = schema.diagnose
+    schema.diagnose = _boom
+    try:
+        assert schema.committed_investigation_reason("anything") is None
+    finally:
+        schema.diagnose = original
+
+    assert "could not be validated" in capsys.readouterr().err, "the fault must be logged"
+
+
 # --------------------------------------------------------------------------- #
 # #964 — the harness's own seed
 # --------------------------------------------------------------------------- #

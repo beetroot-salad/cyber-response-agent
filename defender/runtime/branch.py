@@ -698,7 +698,16 @@ def seed_investigation(store: Any, spec: BranchSpec | None, run_dir: Path) -> in
     # every subsequent append is refused for a fault it did not write and cannot repair —
     # append-only puts the bad bytes out of its reach. This is also the same answer the fence
     # mismatch above already gives, for the same reason: a seed cut wrong is not a seed.
-    reason = validate_artifact(INVESTIGATION_NAME, seed, None)
+    # THE SEED IS ITS OWN BASELINE, for the reason `committed_investigation_reason` spells
+    # out: every check keyed on `current` asks what THIS WRITE INTRODUCES, and an inherited
+    # prefix introduces nothing its source had not already committed. With `None`, an unfenced
+    # block header the SOURCE committed — legal there, since the write gate scopes that family
+    # to what a write adds — reads as newly introduced, and a run whose document ever carried
+    # one could never be branched or resumed again. What this call is actually for survives the
+    # change untouched: the reference and structure rules are document-global and do not look
+    # at the baseline at all, which is why the `undeclared lead` prefix that motivated the
+    # check is still refused.
+    reason = validate_artifact(INVESTIGATION_NAME, seed, seed)
     if reason is not None:
         raise BranchError(
             f"the {fences}-fence prefix of "

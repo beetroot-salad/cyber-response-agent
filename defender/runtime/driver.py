@@ -122,7 +122,11 @@ def _user_prompt(  # noqa: PLR0913 — the harness's own pre-turn seams (#808)
             ),
             status=lead_zero_mod.STATUS_FAILED,
         )
-        lead_zero_text = lead_zero_mod.render_orient_section(degraded)
+        # `run_dir` here too, not just on the resolved arm: this limb is reached when the
+        # resolution was INTERRUPTED, which is the case in which lead-0's declaring `:L
+        # findings` row is least likely to be on the page — so it is the arm that most needs
+        # the heading's "declare it yourself; that is not reuse" line (#964).
+        lead_zero_text = lead_zero_mod.render_orient_section(degraded, run_dir)
 
     orientation = orient.orientation(
         run_dir, defender_dir, alert_path, lead_zero_section=lead_zero_text,

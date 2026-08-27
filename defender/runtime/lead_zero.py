@@ -1073,8 +1073,12 @@ def render_orient_section(result: LeadZeroResult, run_dir: Path | None = None) -
     DERIVED FROM THE DOCUMENT, not from a flag the seed sets. Same rule the repair window
     obeys: the answer is a property of the bytes on disk, so it cannot go stale, cannot
     disagree with the file, and is right about a row that went missing some other way. Passed
-    `None` (the degraded arm, which has no run dir in hand), the extra line is simply omitted —
-    the heading is exactly what it was.
+    `None`, the extra line is simply omitted — the heading is exactly what it was. Both
+    production call sites pass a real dir, INCLUDING the degraded arm: a `BudgetKill` or
+    `RunAborted` mid-resolution is the case in which the seed most likely never ran at all, so
+    an arm that silently dropped the run dir would omit the escape line on precisely the runs
+    that need it. `None` is for a caller that genuinely has no run dir — the tests that drive
+    this function directly.
 
     `L3` gets no such line: it is dispatched AFTER this renders and conditionally, so an absent
     row there is the ordinary case and not a fault. Its citation is covered by the validator's
@@ -1100,6 +1104,14 @@ def _is_declared(run_dir: Path, lead_id: str) -> bool:
     and in a `:R` row's first cell too, and a heading that promised a declaration on the
     strength of either would be wrong in exactly the case it exists to catch.
 
+    DECLARED MEANS WHAT THE VALIDATOR MEANS BY IT — a `:L findings` row carrying a NAME. The
+    projector opens a lead bucket for any id it meets, so a bare `:R` reference already puts
+    `{"id": lead_id}` in `findings`; keying on the id alone would answer True for exactly the
+    citation `_check_lead_refs` is about to refuse as `undeclared lead`, and the heading would
+    then withhold the escape line on the one document that needs it. `_check_lead_refs`
+    separates the two the same way (`if isinstance(f.get("id"), str) and f.get("name")`), and
+    the two readings have to agree or the prompt contradicts the refusal.
+
     FAILS OPEN — an unreadable or unparseable document returns True, so the extra line is
     omitted. This is prompt text, not a gate: a document nothing can parse is a fault the
     write gate and the close both refuse on their own terms, and guessing "not declared" here
@@ -1114,7 +1126,10 @@ def _is_declared(run_dir: Path, lead_id: str) -> bool:
     except Exception as e:  # noqa: BLE001 — prompt prose must not decide a run's fate
         print(f"[lead_zero] could not check whether {lead_id} is declared: {e!r}")
         return True
-    return any(f.get("id") == lead_id for f in companion.get("findings", []))
+    return any(
+        f.get("id") == lead_id and f.get("name")
+        for f in companion.get("findings", [])
+    )
 
 
 # ─── the entry point (F1) ─────────────────────────────────────────────────────────────

@@ -200,18 +200,23 @@ def _check_lead_refs(companion: CompanionBody) -> list[str]:
         fid = f.get("id")
         if not isinstance(fid, str) or fid in declared:
             continue
-        hint = (
+        # ONE repair per shape, never both. A comma-joined id is not a lead at all, so
+        # "declare it in a `:L findings` block" is advice that would have the author declare
+        # `l-004,l-005` AS a lead — and printed right after the split-it hint it contradicts
+        # the sentence before it. The harness-reserved sentence rides only on the shape it is
+        # about (#964): an id the author may legitimately declare.
+        repair = (
             " — a resolution is owned by exactly one lead; attribute it to one "
             "and name the others in `cites_leads`"
-            if "," in fid else ""
+            if "," in fid else
+            ". Declare it in a `:L findings` block and re-send — that holds for a "
+            "HARNESS-RESERVED id whose declaring row is not on the page too: the harness "
+            "reserves the id so you do not attach new work to it, and writing the row it "
+            "is missing is not reusing it"
         )
         errors.append(
             f"undeclared lead {fid!r}: referenced by a `:R` / `:T` row or a "
-            f"lead sub-block, but no `:L findings` row declares it{hint}. Declare it "
-            f"in a `:L findings` block and re-send — including a HARNESS-RESERVED id "
-            f"whose declaring row is not on the page: the harness reserves the id so "
-            f"you do not attach new work to it, and writing the row it is missing is "
-            f"not reusing it"
+            f"lead sub-block, but no `:L findings` row declares it{repair}"
         )
     for row in _walkers.iter_grounded_resolutions(companion):
         owner = row.get("resolved_by_lead")
@@ -2086,6 +2091,22 @@ def _check_attr_update_keys(proposed_text: str) -> list[Diagnostic]:
         cols = block.columns or []
         if block.name != "attr_updates":
             continue
+        # One map per BLOCK, and the scope is the whole point (#962). A slot refined again in a
+        # LATER block is the format's documented `??` -> candidate set -> concrete value
+        # progression, and that block is written after gather returned something the first
+        # could not know; carrying this map across blocks would refuse the amendment path.
+        # Within ONE block nothing happened between the two rows, so the later row does not
+        # refine the earlier one — it contradicts it.
+        #
+        # HERE, not in the parser, because the rule needs the legal-key vocabulary to be true.
+        # A row whose key is not `class`/`ident`/`attrs.*` never reaches effective state at all
+        # (`_apply_attr_updates` skips it), so a repeat of one discards NOTHING and saying it
+        # did is a false message — and it would turn the deliberately warn-severity illegal-key
+        # family, whose whole point is that the row lands and is repaired in place, into a hard
+        # refusal of the block it rides in. Keyed on `(target, key)` and not the resolving
+        # lead: `effective_vertex_state` folds across every lead into one `(vertex, slot)`
+        # value, so two leads naming one slot lose a value exactly as one lead would.
+        refined_here: dict[tuple[str, str], str] = {}
         for row in block.rows:
             try:
                 rec = _row_dict(block, row)
@@ -2095,6 +2116,31 @@ def _check_attr_update_keys(proposed_text: str) -> list[Diagnostic]:
             if not key:
                 continue
             if _is_legal_refinement_key(key):
+                # A VALUE LOST is the defect, not a row repeated. Two rows naming one slot
+                # with the SAME value are redundant and destroy nothing — the fold lands what
+                # either row alone would land. Two with DIFFERENT values contradict each other
+                # inside one atomic write and one author-written value disappears in silence.
+                # Narrowing it this way is also what keeps `fix_row` able to repair a
+                # non-unique flagged row: it rewrites EVERY identical occurrence at once
+                # (#836 H4), so repairing two byte-identical bad rows necessarily produces two
+                # byte-identical good ones, which a rule keyed on the slot alone would refuse.
+                target = rec.get("target") or ""
+                slot = (target, key)
+                previous = refined_here.get(slot)
+                if previous is not None and previous != (rec.get("value") or ""):
+                    out.append(Diagnostic(
+                        message=(
+                            f":R attr_updates on {target or '?'}: {key!r} is refined twice in "
+                            f"this block, to {previous!r} and then to "
+                            f"{rec.get('value') or ''!r}; only the LAST value is recorded and "
+                            f"{previous!r} is discarded with nothing said. Give this block one "
+                            f"row per slot and re-send it whole — refining the same slot again "
+                            f"in a LATER block is the documented `??` -> candidate set -> "
+                            f"concrete value progression and stays legal"
+                        ),
+                        locus=Locus(block=":R attr_updates", row_text=row),
+                    ))
+                refined_here[slot] = rec.get("value") or ""
                 value = rec.get("value")
                 if "value" in cols and not (value or "").strip():
                     out.append(Diagnostic(
