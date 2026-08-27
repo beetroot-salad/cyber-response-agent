@@ -303,14 +303,19 @@ def test_every_lexing_refusal_arm_the_code_has_is_swept():
 #: with `unchanged` for a row this change must not move. Seven enumerated families and five
 #: neutral ones, and the list is what makes "the space is exhausted" checkable rather than
 #: asserted: a transition outside it is a class of verdict change nobody enumerated.
+#:
+#: It reads in BOTH directions, which is how #971 landed cleanly: deleting the `timeout` prefix
+#: fold added `untokenizable -> policy-deny` and left `untokenizable -> none` - the one
+#: deny->allow family this spec ever had - exercised by nothing. The unused half of this check
+#: is what said so, rather than a dead family sitting in the list looking enumerated.
 _RECORDED_TRANSITIONS = {
     # enumerated: the demanded verdict differs from the recorded one
     ("adapter-retired", "!adapter-retired"),   # member 8, adapter class, leading end (RC12)
     ("untokenizable", "!untokenizable"),       # member 8, lexing class, both ends
-    ("untokenizable", "none"),                 # member 4: the quoted `timeout` prefix is accepted
     ("none", "*"),                             # members 1/2: refused, reason owned by FK6's demand
     ("none", "none"),                          # members 1/2: allowed, with a different argv
-    ("none", "policy-deny"),                   # member 7: the timeout gap
+    ("none", "policy-deny"),                   # members 7/9: the timeout prefix, allowed then
+    ("untokenizable", "policy-deny"),          #   refused - the fold's two entry shapes
     ("none", "untokenizable"),                 # members 3/5: the wrapper narrowings
     # neutral: the recorded decision must not move at all
     ("adapter-retired", "unchanged"),

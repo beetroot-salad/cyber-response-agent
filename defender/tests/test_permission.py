@@ -146,7 +146,8 @@ def test_gather_denies_arbitrary_shell(cmd):
 
 @pytest.mark.parametrize("cmd", [
     "defender-elastic query foo",                 # was: routed to standalone capture
-    "timeout 60 defender-cmdb host-lookup web-1",  # ... behind a timeout prefix
+    "timeout 60 defender-cmdb host-lookup web-1",  # ... behind a timeout prefix (#971: denied
+                                                   #     for the prefix, not for the adapter)
     "defender-elastic query foo | jq '.'",        # compound
     "cat /run/report.md | jq '.'",                # a plain reader command
     "defender-invlang enum types",                # non-adapter shim
@@ -266,14 +267,13 @@ def test_bash_script_file_before_c_fails_closed(cmd):
 
 
 # Happy-path anchor for the exact-adjacency tightening above: the LEGITIMATE inline
-# `bash -c <payload>`/`sh -c <payload>` form (optionally behind a `timeout` prefix)
-# wrapping a read-only viewer must STILL be approved in BOTH sessions. Without this,
-# every `bash -c` test is a deny case, so a future over-tightening of the fold could
-# flip these real commands to deny and the whole suite would stay green.
+# `bash -c <payload>`/`sh -c <payload>` form wrapping a read-only viewer must STILL be
+# approved in BOTH sessions. Without this, every `bash -c` test is a deny case, so a
+# future over-tightening of the fold could flip these real commands to deny and the
+# whole suite would stay green.
 @pytest.mark.parametrize("cmd", [
     "bash -c 'cat /run/investigation.md'",
     "sh -c 'cat /run/investigation.md'",
-    "timeout 5 bash -c 'cat /run/investigation.md'",         # ... behind a timeout prefix
     "bash -c 'cat /run/investigation.md | wc -l'",           # a pipeline payload must not be re-quoted
 ])
 def test_inline_bash_c_viewer_still_allowed(cmd):
@@ -282,14 +282,25 @@ def test_inline_bash_c_viewer_still_allowed(cmd):
 
 
 @pytest.mark.parametrize("cmd", [
-    # a `timeout` prefix in front of a legit pipeline must STILL be approved — the
-    # wrapper-fold fix must not quote the `|` or otherwise break the pipeline.
     "timeout 30 cat /run/investigation.md | wc -l",
     "timeout 5 cat /run/investigation.md",
+    "timeout 5 bash -c 'cat /run/investigation.md'",
 ])
-def test_timeout_prefix_keeps_legit_pipeline(cmd):
-    assert _bash(cmd, MAIN).allow
-    assert _bash(cmd, GATHER).allow
+def test_a_timeout_prefix_denies_and_the_same_command_without_it_does_not(cmd):
+    """#971: the prefix used to be STRIPPED before the decision, so these were allows. It is an
+    ordinary ungranted word now and they deny — on the capability reason, which names the
+    programs the lane does have.
+
+    The pairing is the point. Each command is asserted twice: with the prefix (denied) and with
+    it removed (allowed), so what this pins is that the PREFIX is the whole difference. A bare
+    `assert not allow` would also pass if the pipeline or the payload had quietly broken."""
+    for policy in (MAIN, GATHER):
+        assert not _bash(cmd, policy).allow, f"{cmd!r}: `timeout` is not a granted program"
+        assert _bash(cmd, policy).reason == policy.deny_reason
+        without = cmd.split(" ", 2)[2]
+        assert _bash(without, policy).allow, (
+            f"{without!r} is denied too — the refusal above is not about the prefix at all"
+        )
 
 
 @pytest.mark.parametrize("cmd", [

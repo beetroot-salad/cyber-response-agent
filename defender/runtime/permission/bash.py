@@ -87,9 +87,13 @@ UNTOKENIZABLE_REASON = (
     "will not help; give every connector one complete command on each side.\n"
     "(5) A `bash`/`sh` wrapper that does not fold to a single command string: anything other "
     "than exactly `bash -c '<one command string>'` (a bare `bash`, `bash script.sh`, `sh -lc "
-    "…`, a stray word after the string, a second wrapper).\n"
-    "Redirects (`>`, `>>`), background `&`, and `$(...)` substitution are a separate matter: "
-    "they are not part of this surface at all, and are refused as capability, not syntax."
+    "…`, a stray word after the string, a second wrapper), or ANYTHING AT ALL after that "
+    "string — an OPERATOR counts, so `bash -c '<cmd>' | wc -l`, `bash -c '<cmd>';` and "
+    "`bash -c '<cmd>' 2>/dev/null` are refused here rather than as a capability: the wrapper "
+    "has to be the whole command, and what follows it belongs INSIDE the quoted string.\n"
+    "Redirects (`>`, `>>`), background `&`, and `$(...)` substitution are a separate matter "
+    "OUTSIDE a wrapper: there they are not part of this surface at all, and are refused as "
+    "capability, not syntax."
 )
 
 
@@ -127,19 +131,17 @@ _DIVERGENT_BLANK_CODEPOINTS = (
 _DIVERGENT_BLANKS = frozenset(chr(cp) for cp in _DIVERGENT_BLANK_CODEPOINTS)
 
 
-def _strip_unquoted(text: str, target: str, replacement: str = "") -> str:
-    """`text` with every occurrence of `target` that is NOT inside a real quote pair replaced
-    by `replacement` — bare or backslash-escaped both count, since an escape hides a character
-    from operator recognition, not from existing in the word at all. A quoted occurrence is
+def _strip_unquoted(text: str, target: str, replacement: str) -> str:
+    """`text` with every BARE occurrence of `target` replaced by `replacement`. A quoted one is
     left untouched, matching the fact that quoting suppresses separator recognition
-    unconditionally (#959 FK6). Used only to build the counterfactual `_raw_decide` compares
-    against below.
+    unconditionally, and a backslash-ESCAPED one is deleted with its escape left standing, for
+    the reason spelled out at that arm below (#959 FK6). Used only to build the counterfactual
+    `_raw_decide` compares against.
 
-    `replacement` defaults to nothing, simulating the deleted trim (M4), which REMOVED a
-    character rather than splitting on it. For `\\r` (M6) the caller passes a real space
-    instead: `\\r` used to be a WORD SEPARATOR, not a removed character, and simple deletion
-    would also close a raw-text adjacency gap (`_is_fd_prefix`'s glue test) that has nothing to
-    do with #959 and was never a separator question at all."""
+    `replacement` is the caller's, with no default: the ONE caller passes a real space,
+    because `\\r` (M6) used to be a WORD SEPARATOR rather than a removed character, and simple
+    deletion would also close a raw-text adjacency gap (`_is_fd_prefix`'s glue test) that has
+    nothing to do with #959 and was never a separator question at all."""
     out: list[str] = []
     quote: str | None = None
     i, n = 0, len(text)
@@ -149,7 +151,16 @@ def _strip_unquoted(text: str, target: str, replacement: str = "") -> str:
             if c == "\\" and i + 1 < n:
                 nxt = text[i + 1]
                 if nxt == target:
-                    out.append(replacement)
+                    # ESCAPED: the backslash STAYS and only the character goes. An escaped
+                    # character was never a separator under either regime (`_literal_mask`
+                    # marks it non-literal, so `_scan` has never split there), so "what if it
+                    # were a separator" is not a question this position can be asked — the only
+                    # counterfactual that means anything here is its plain ABSENCE, which is
+                    # also exactly the edit the reason tells the model to make. Deleting the
+                    # backslash with it modelled a split the scanner never performed, and named
+                    # `\<CR>b` as CR-caused when nothing about it moved (a false accusation)
+                    # while missing `\<CR>report.md`, where the CR really is the whole cause.
+                    out.append(c)
                     i += 2
                     continue
                 out.append(c)
@@ -211,21 +222,27 @@ def _raw_decide(command: str, policy: AgentPolicy, run_dir: Path | None) -> tupl
 #: character now. Every other divergent blank was NEVER a separator anywhere but the two ends
 #: (the deleted trim was the only old opinion that ever touched it), so its responsibility
 #: check must stay confined to those ends — checking it everywhere would flag a glued interior
-#: character (e.g. `timeout<NBSP>5 …`) that #959 never touched at all.
+#: character (e.g. `echo a<NBSP>b`) that #959 never touched at all.
 _CR = "\r"
 
 
-def _edge_stripped(command: str, char: str) -> str:
-    """`command` with one LEADING and/or TRAILING occurrence of `char` removed — the two
-    positions the deleted trim (M4) used to affect. Quoting is irrelevant at a true edge of the
-    raw command: nothing has opened a quote yet at position 0, and a quote opened earlier in a
-    syntactically complete command is already closed by the end."""
-    out = command
-    if out.startswith(char):
-        out = out[1:]
-    if out.endswith(char):
-        out = out[:-1]
-    return out
+def _edge_stripped(command: str, chars: str) -> str:
+    """`command` with the leading and trailing RUNS of `chars` removed — the two positions the
+    deleted trim (M4) used to affect, and it removed a RUN of them, not one character: a paste
+    that carries two no-break spaces is the ordinary shape, and stripping only one leaves a
+    counterfactual that still fails for the same reason and so names nothing at all. Quoting is
+    irrelevant at a true edge of the raw command: nothing has opened a quote yet at position 0,
+    and a quote opened earlier in a syntactically complete command is already closed by the
+    end."""
+    return command.strip(chars)
+
+
+def _blanks_removed(command: str, chars: str) -> str:
+    """`command` as it would read with `chars` gone from the positions #959 changed the
+    treatment of — the two ends of the whole command (M4) and, for `\\r` alone, anywhere
+    unquoted (M6)."""
+    out = _strip_unquoted(command, _CR, " ") if _CR in chars else command
+    return _edge_stripped(out, chars)
 
 
 def _name_responsible_divergent_char(
@@ -239,19 +256,26 @@ def _name_responsible_divergent_char(
     command (M4) or, for `\\r` alone, anywhere unquoted (M6) — remove it there and recompute the
     RAW decision; if it differs from the current one, this character's presence is what the
     current refusal turns on, and the model — which cannot see the character at all — is told
-    which one by codepoint, the only way a reason can name a character that renders as nothing."""
+    which one by codepoint, the only way a reason can name a character that renders as nothing.
+
+    Checked per character FIRST, so the usual single-character case names exactly the character
+    responsible, and then JOINTLY over what is left: the trim removed every blank at both ends
+    in one go, so a command carrying two DIFFERENT ones (`<VT>cat P<FF>`) has no single
+    character whose removal changes anything, and testing one at a time reports nothing for the
+    very paste-artifact shape the naming exists to explain."""
     candidates = sorted({c for c in command if c in _DIVERGENT_BLANKS}, key=ord)
     if not candidates:
         return None
     current = (False, base_reason)
     responsible = [
         c for c in candidates
-        if (variant := (
-            _strip_unquoted(command, c, " ") if c == _CR else _edge_stripped(command, c)
-        ))
-        != command
+        if (variant := _blanks_removed(command, c)) != command
         and _raw_decide(variant, policy, run_dir) != current
     ]
+    if not responsible and len(candidates) > 1:
+        joint = _blanks_removed(command, "".join(candidates))
+        if joint != command and _raw_decide(joint, policy, run_dir) != current:
+            responsible = candidates
     if not responsible:
         return None
     names = ", ".join(f"U+{ord(c):04X}" for c in responsible)
@@ -264,13 +288,15 @@ def _name_responsible_divergent_char(
 
 
 def _final_reason(
-    command: str, policy: AgentPolicy, run_dir: Path | None, *, base: str | None = None,
+    command: str, policy: AgentPolicy, run_dir: Path | None, base: str,
 ) -> str:
-    """The reason for a DENY that has fallen through to the policy/adapter tail — named for a
-    responsible invisible character (#959 FK6) when one is found, the plain `base` otherwise."""
-    base_reason = base if base is not None else policy.deny_reason
-    named = _name_responsible_divergent_char(command, policy, run_dir, base_reason)
-    return named if named is not None else base_reason
+    """The reason a DENY carries — named for a responsible invisible character (#959 FK6) when
+    one is found, the plain `base` otherwise. `base` is required, not defaulted: the caller
+    already knows which refusal it is answering, and re-coalescing `policy.deny_reason` here
+    would put a second owner on that default (`defender/CLAUDE.md`, "Anchor a default in one
+    place")."""
+    named = _name_responsible_divergent_char(command, policy, run_dir, base)
+    return named if named is not None else base
 
 
 def require_anchor_root(what: str, p: Path) -> None:
@@ -372,11 +398,20 @@ def decide_bash(
     try:
         pipelines = _parse(command)
     except bash_exec.NarrowedReason as e:
-        return BashDecision(False, str(e))
+        return BashDecision(False, _final_reason(command, policy, effective_run_dir, str(e)))
     except bash_exec.UntokenizableCommand:
-        return BashDecision(False, UNTOKENIZABLE_REASON)
+        # Through the naming step like every other deny (#959 FK6). This is the arm an
+        # invisible character reaches MOST often, not least: a trailing no-break space after a
+        # `bash -c '<payload>'` makes a fourth token and the wrapper stops matching, so the
+        # model was handed cause (5)'s "a stray word after the string" for a command with no
+        # visible stray word — and the one character that would fix it was never named.
+        return BashDecision(
+            False, _final_reason(command, policy, effective_run_dir, UNTOKENIZABLE_REASON),
+        )
     if pipelines is None:
-        return BashDecision(False, _final_reason(command, policy, effective_run_dir))
+        return BashDecision(
+            False, _final_reason(command, policy, effective_run_dir, policy.deny_reason),
+        )
 
     reader = _decide_readers(pipelines, policy, run_dir=effective_run_dir)
     if reader is not None:
@@ -387,12 +422,14 @@ def decide_bash(
         # route it through here too, or a divergent-blank-caused scope mismatch (#959 FK6)
         # never gets named.
         return BashDecision(
-            False, _final_reason(command, policy, effective_run_dir, base=reader.reason),
+            False, _final_reason(command, policy, effective_run_dir, reader.reason),
         )
 
     if command_shape.has_adapter(pipelines):
         return BashDecision(
-            False, _final_reason(command, policy, effective_run_dir, base=ADAPTER_RETIRED_REASON),
+            False, _final_reason(command, policy, effective_run_dir, ADAPTER_RETIRED_REASON),
         )
 
-    return BashDecision(False, _final_reason(command, policy, effective_run_dir))
+    return BashDecision(
+        False, _final_reason(command, policy, effective_run_dir, policy.deny_reason),
+    )

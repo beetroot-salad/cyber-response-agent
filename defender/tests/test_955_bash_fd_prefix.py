@@ -51,19 +51,40 @@ printf 'ERR\\n' >&2
 """
 
 
+#: What `_parsed` reports for a candidate that parses to anything other than ONE stage. A
+#: DISTINCT value from the `None` that means "we refuse it", and distinct on purpose: every
+#: differential below reads `None` as "refused, nothing to compare" and returns early, so one
+#: shared sentinel makes a stage-count regression — a word boundary moving until one stage
+#: becomes two, which is the class this whole file exists to catch — read as a refusal and skip
+#: the bash comparison in silence. Reported rather than raised, so a multi-stage candidate is a
+#: candidate and not a crash; `_single` is what turns the report into a loud failure at the call
+#: sites that meant to hand this file a single-stage command.
+MULTI_STAGE = object()
+
+
 def _parsed(cmd: str):
-    """`(argv, stderr)` of the single stage `cmd` parses to, `None` if we refuse it, or if it
-    parses to anything other than exactly one stage — REPORTED as `None` rather than an
-    `AssertionError`, so a multi-stage candidate calling this by mistake is a green-looking
-    coverage gap, not a crash that could get silently swallowed somewhere upstream."""
+    """`(argv, stderr)` of the single stage `cmd` parses to, `None` if we refuse it, or
+    `MULTI_STAGE` if it parses to anything other than exactly one stage."""
     try:
         pipelines = bash_exec.parse(cmd)
     except bash_exec.BashExecError:
         return None
     stages = [s for p in pipelines for s in p.stages]
     if len(stages) != 1:
-        return None
+        return MULTI_STAGE
     return stages[0].argv, stages[0].stderr
+
+
+def _single(cmd: str):
+    """`_parsed(cmd)` for a caller that means a SINGLE-STAGE candidate: the multi-stage report
+    becomes a failure here rather than silently taking the "we refused it" branch."""
+    result = _parsed(cmd)
+    assert result is not MULTI_STAGE, (
+        f"{cmd!r} parses to more than one stage, so this differential compared nothing. One "
+        "stage becoming two is a word boundary that moved — the defect class this file is "
+        "about — and reading it as a refusal is how that regression would stay green."
+    )
+    return result
 
 
 # --------------------------------------------------------------------------- #
@@ -76,11 +97,11 @@ def test_the_verdict_does_not_depend_on_the_value_of_an_operand(operand):
     A gate whose answer moves with an argument's VALUE is answering a question no grant asks.
     `head -c 2 >/dev/null` was accepted and `head -c 20 >/dev/null` refused, which is not a
     distinction any policy in this tree can express — and the accepted one ran `head -c`."""
-    assert _parsed(f"head -c {operand} >/dev/null") is None, (
+    assert _single(f"head -c {operand} >/dev/null") is None, (
         f"a spaced `>` redirect was accepted after the operand {operand!r} — the fd prefix is "
         "being read off the previous token, so the verdict moves with an argument's value"
     )
-    assert _parsed(f"head -c {operand} >& 1") is None
+    assert _single(f"head -c {operand} >& 1") is None
 
 
 @pytest.mark.parametrize("cmd", [
@@ -95,7 +116,7 @@ def test_an_accepted_command_never_loses_an_operand(cmd):
     Whatever the verdict, the argv that survives parse must be the argv the model wrote. A
     refusal satisfies this; a silent rewrite does not, and the executor and the gate share
     this parse, so neither could see the substitution."""
-    result = _parsed(cmd)
+    result = _single(cmd)
     if result is None:
         return
     argv, _stderr = result
@@ -113,7 +134,7 @@ def test_the_glued_spelling_still_works(cmd, stderr):
     """The fix must not cost the construct it is about. `2>` written the way bash means it —
     glued, at the start of its own word — is still an fd 2 redirect, and the `2` that IS the
     prefix is the only word removed."""
-    result = _parsed(cmd)
+    result = _single(cmd)
     assert result is not None, f"{cmd!r} was refused — the fd redirect itself broke"
     argv, got = result
     assert got == stderr
@@ -125,7 +146,7 @@ def test_a_quoted_or_suffixed_two_is_not_an_fd(cmd):
     """Bash's IO_NUMBER is an UNQUOTED digit run that starts its own word. A quoted `2` is an
     ordinary argument and `foo2>` is the word `foo2`; in both, bash redirects stdout, which
     this executor does not implement — so the answer is a refusal, never a stderr redirect."""
-    assert _parsed(cmd) is None
+    assert _single(cmd) is None
 
 
 @pytest.mark.parametrize(("cmd", "argv"), [
@@ -145,7 +166,7 @@ def test_a_quoted_or_escaped_operator_is_a_word(cmd, argv):
     lost the terminator `find` cannot run without, silently, and the executor ran a command
     `find` rejects. Fixed in the same place as F-50, because it is the same missing bit: what
     the raw text said, as against what the value came out as."""
-    parsed = _parsed(cmd)
+    parsed = _single(cmd)
     assert parsed is not None, f"{cmd!r} was refused — a quoted operator is an ordinary word"
     assert parsed[0] == argv, f"{cmd!r} parsed to {parsed[0]}"
 
@@ -255,7 +276,7 @@ def test_what_we_accept_means_what_bash_means(shim_dir, cmd):
 
     The converse stays unasserted, exactly as over there: we deliberately refuse plenty that
     bash accepts (every stdout redirect, for one — this executor does not implement it)."""
-    ours = _parsed(cmd)
+    ours = _single(cmd)
     if ours is None:
         return                      # refusing more than bash is this executor's prerogative
     theirs = _bash_meaning(shim_dir, cmd)
@@ -298,6 +319,14 @@ _THIS_FILE = Path(__file__).resolve()
 #: bash answerable about it: a candidate real bash refuses to run (`timeout w a`, where the
 #: real `timeout` reads `w` as its duration) has no argv for the oracle to compare and belongs
 #: at the gate's own tests, not here.
+#:
+#: THE `timeout N <candidate>` ROWS WENT WITH THE PREFIX FOLD (#971). The parse has no opinion
+#: about a `timeout` prefix any more - it stays in the argv and the gate refuses the command on
+#: the capability reason - so there is no folded wrapper here for bash to be asked about. The
+#: oracle would also be asking the wrong question: it measures which argv reached the SHIM, and
+#: a prefix we pass through reaches it one exec level further down than we model. What is left
+#: to pin is that those shapes deny at all, which is
+#: `test_959_wrapper_fold.py::test_a_timeout_prefix_is_not_a_wrapper_and_is_never_folded_away`'s.
 _WRAPPER_CANDIDATES = [
     f"bash -c '{_SHIM} a'",
     f"bash -c '{_SHIM} a 2>/dev/null'",
@@ -305,9 +334,6 @@ _WRAPPER_CANDIDATES = [
     f"bash -c '{_SHIM} a '2>/dev/null",          # the glued-operator spelling: OUTSIDE the -c
     f'"bash" -c "{_SHIM} a"',
     f"sh -c '{_SHIM} a'",
-    f"timeout 5 {_SHIM} a",
-    f"timeout '5' {_SHIM} a",
-    f"timeout 5 {_SHIM} a 2>/dev/null",
 ]
 
 
@@ -345,15 +371,14 @@ def _bash_argv_bytes(shim_dir: Path, cmd: str) -> list[str] | None:
 
 @pytest.mark.parametrize("cmd", _WRAPPER_CANDIDATES)
 def test_a_wrapper_shape_we_accept_means_what_bash_means(shim_dir, cmd):
-    """The differential's corpus carries wrapper shapes — `bash -c '<candidate>'` and
-    `timeout N <candidate>`, including the glued-operator spelling — so for every wrapper the
-    parse accepts, real bash is asked what it actually ran and where its stderr went, and the
-    two must agree.
+    """The differential's corpus carries wrapper shapes — `bash -c '<candidate>'`, including the
+    glued-operator spelling — so for every wrapper the parse accepts, real bash is asked what it
+    actually ran and where its stderr went, and the two must agree.
 
     This is the direction that can see the wrapper defect: `bash -c 'echo a '2>/dev/null` is a
     shape both sides accept and mean differently, and an oracle comparing accept/reject verdicts
     is structurally blind to it whatever its corpus."""
-    ours = _parsed(cmd)
+    ours = _single(cmd)
     if ours is None:
         return                      # refusing more than bash is this executor's prerogative
     theirs = _bash_meaning(shim_dir, cmd)
@@ -393,7 +418,7 @@ def test_the_scanner_ends_a_word_exactly_where_bash_ends_one(shim_dir):
         f"{_SHIM} {_CR}x",
         f"{_SHIM} a{_CR}b c{_CR}d",
     ):
-        ours = _parsed(cmd)
+        ours = _single(cmd)
         assert ours is not None, f"{cmd!r} was refused — a carriage return is an ordinary byte"
         theirs = (_bash_argv_bytes(shim_dir, cmd), None)
         assert theirs[0] is not None, f"bash never ran the shim for {cmd!r}"
@@ -420,7 +445,7 @@ def test_our_blank_set_is_the_blank_set_bash_splits_on(shim_dir):
     disagreements = []
     for blank in alphabet:
         cmd = f"{_SHIM} a{blank}b"          # GLUED: no separator between the blank and a word
-        ours = _parsed(cmd)
+        ours = _single(cmd)
         if ours is None:
             continue
         theirs = _bash_argv_bytes(shim_dir, cmd)

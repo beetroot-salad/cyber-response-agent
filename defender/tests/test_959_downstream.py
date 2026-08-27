@@ -318,14 +318,20 @@ def test_every_assertion_site_of_the_lexing_reason_agrees_with_the_reason_after_
         assert d.reason == reason, f"{cmd!r} no longer earns the lexing reason"
         assert phrase in reason, f"the reason stopped naming {phrase!r}"
     # ...and the clause F4 strikes has no live command left, in the reason OR in the readers
-    # that assert on it.
+    # that assert on it. #971 settles it the other way from F4 - the parser has no opinion about
+    # a `timeout` prefix at all now, quoted or not - but the obligation is the same one: the
+    # reason must not name a shape it does not decide, and no reader may pin the struck clause.
     assert "timeout" not in reason
-    assert _bash(f"timeout '5' cat {REPORT}").allow
+    assert _bash(f"timeout '5' cat {REPORT}").reason == base.MAIN.deny_reason, (
+        "a quoted `timeout` prefix earns the CAPABILITY reason - it is an ungranted word, and "
+        "sending the model to fix its quoting explains nothing about the program it named"
+    )
     for name in ("test_permission.py", "test_read_confine.py"):
         source = (DEFENDER / "tests" / name).read_text(encoding="utf-8")
         assert "quoted `timeout` prefix" not in source, (
             f"{name} still asserts that a quoted `timeout` prefix is a lexing refusal, and the "
-            "parser now accepts it - F4 strikes the clause TOGETHER WITH the test pinning it"
+            "parser has no opinion about one - F4 strikes the clause TOGETHER WITH the test "
+            "pinning it"
         )
 
 

@@ -1134,72 +1134,6 @@
    }
   },
   {
-   "id": "wrap-timeout",
-   "command": "timeout 5 cat /run/report.md",
-   "policy": "main",
-   "member": "",
-   "after": null,
-   "baseline": {
-    "allow": true,
-    "reason": "none",
-    "pipelines": [
-     [
-      [
-       [
-        "cat",
-        "/run/report.md"
-       ],
-       "capture"
-      ]
-     ]
-    ]
-   }
-  },
-  {
-   "id": "wrap-timeout-fractional",
-   "command": "timeout 0.5 cat /run/report.md",
-   "policy": "main",
-   "member": "",
-   "after": null,
-   "baseline": {
-    "allow": true,
-    "reason": "none",
-    "pipelines": [
-     [
-      [
-       [
-        "cat",
-        "/run/report.md"
-       ],
-       "capture"
-      ]
-     ]
-    ]
-   }
-  },
-  {
-   "id": "wrap-timeout-then-line",
-   "command": "timeout 5\ncat /run/report.md",
-   "policy": "main",
-   "member": "",
-   "after": null,
-   "baseline": {
-    "allow": true,
-    "reason": "none",
-    "pipelines": [
-     [
-      [
-       [
-        "cat",
-        "/run/report.md"
-       ],
-       "capture"
-      ]
-     ]
-    ]
-   }
-  },
-  {
    "id": "wrap-timeout-suffix-duration",
    "command": "timeout 5s cat /run/report.md",
    "policy": "main",
@@ -1269,28 +1203,6 @@
     "allow": false,
     "reason": "policy-deny",
     "pipelines": null
-   }
-  },
-  {
-   "id": "wrap-timeout-then-bash-c",
-   "command": "timeout 5 bash -c 'echo hi'",
-   "policy": "main",
-   "member": "",
-   "after": null,
-   "baseline": {
-    "allow": true,
-    "reason": "none",
-    "pipelines": [
-     [
-      [
-       [
-        "echo",
-        "hi"
-       ],
-       "capture"
-      ]
-     ]
-    ]
    }
   },
   {
@@ -1802,21 +1714,11 @@
    "id": "m4-quoted-duration",
    "command": "timeout '5' cat /run/report.md",
    "policy": "main",
-   "member": "4",
+   "member": "9",
    "after": {
-    "allow": true,
-    "reason": "none",
-    "pipelines": [
-     [
-      [
-       [
-        "cat",
-        "/run/report.md"
-       ],
-       "capture"
-      ]
-     ]
-    ]
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
    },
    "baseline": {
     "allow": false,
@@ -1828,21 +1730,11 @@
    "id": "m4-quoted-wrapper-word",
    "command": "\"timeout\" 5 cat /run/report.md",
    "policy": "main",
-   "member": "4",
+   "member": "9",
    "after": {
-    "allow": true,
-    "reason": "none",
-    "pipelines": [
-     [
-      [
-       [
-        "cat",
-        "/run/report.md"
-       ],
-       "capture"
-      ]
-     ]
-    ]
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
    },
    "baseline": {
     "allow": false,
@@ -1983,6 +1875,110 @@
    "command": "timeout echo hi",
    "policy": "main",
    "member": "7",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
+   "baseline": {
+    "allow": true,
+    "reason": "none",
+    "pipelines": [
+     [
+      [
+       [
+        "echo",
+        "hi"
+       ],
+       "capture"
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "id": "wrap-timeout",
+   "command": "timeout 5 cat /run/report.md",
+   "policy": "main",
+   "member": "9",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
+   "baseline": {
+    "allow": true,
+    "reason": "none",
+    "pipelines": [
+     [
+      [
+       [
+        "cat",
+        "/run/report.md"
+       ],
+       "capture"
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "id": "wrap-timeout-fractional",
+   "command": "timeout 0.5 cat /run/report.md",
+   "policy": "main",
+   "member": "9",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
+   "baseline": {
+    "allow": true,
+    "reason": "none",
+    "pipelines": [
+     [
+      [
+       [
+        "cat",
+        "/run/report.md"
+       ],
+       "capture"
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "id": "wrap-timeout-then-line",
+   "command": "timeout 5\ncat /run/report.md",
+   "policy": "main",
+   "member": "9",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
+   "baseline": {
+    "allow": true,
+    "reason": "none",
+    "pipelines": [
+     [
+      [
+       [
+        "cat",
+        "/run/report.md"
+       ],
+       "capture"
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "id": "wrap-timeout-then-bash-c",
+   "command": "timeout 5 bash -c 'echo hi'",
+   "policy": "main",
+   "member": "9",
    "after": {
     "allow": false,
     "reason": "policy-deny",

@@ -142,7 +142,10 @@ def test_parse_takes_the_raw_command_and_no_caller_unwraps_first():
     returns the pipelines that text names; there is no second function a caller must remember
     to apply first."""
     assert _parsed(f"bash -c 'cat {REPORT} | wc -c'") == [[["cat", REPORT], ["wc", "-c"]]]
-    assert _parsed(f"timeout 5 cat {REPORT}") == [[["cat", REPORT]]]
+    assert _parsed(f"timeout 5 cat {REPORT}") == [[["timeout", "5", "cat", REPORT]]], (
+        "a `timeout` prefix is ordinary text (#971): the parse reports what the command says "
+        "and the capability question is then asked about `timeout` itself"
+    )
     # ...and the gate reaches those same pipelines from the same raw text: one entry point,
     # so what was grant-checked is what crosses into the box.
     assert _argv(f"bash -c 'cat {REPORT} | wc -c'") == [[["cat", REPORT], ["wc", "-c"]]]

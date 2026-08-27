@@ -38,7 +38,7 @@ SELECT h.<field> FROM (SELECT unnest(hits) h FROM data) WHERE h.<other> = '<valu
 
 **Positional rows behind a column header** — `{columns, values, row_count}`.
 `unnest(values)` yields a POSITIONAL JSON array, NOT a struct, so `v.<field>`
-fails. `SELECT columns FROM data` names the positions; index 1-based and unwrap:
+fails. `SELECT columns FROM data` names the positions; index 1-based and unpack:
 
 ```sql
 SELECT v[2]->>'$' FROM (SELECT unnest(values) v FROM data)

@@ -374,32 +374,6 @@ class _PipelineBuilder:
         return i + 1
 
 
-def _looks_like_duration_or_flag(tok: Token) -> bool:
-    """Whether `tok` is duration- or flag-shaped: a leading `-`, or a run of digits and dots.
-    Real `timeout`'s own grammar (`5s`, `-s KILL`) is deliberately NOT modelled further — #959
-    FK1's minimal arm, so `timeout 5s cat x` and `timeout -s KILL 5 cat x` keep denying rather
-    than quietly widening what this gate accepts."""
-    if tok.kind != WORD:
-        return False
-    v = tok.value
-    return v.startswith("-") or v.replace(".", "").isdigit()
-
-
-def _skip_timeout_prefix(tokens: list[Token]) -> int:
-    """How many leading tokens are a `timeout` prefix — ZERO unless the token right after
-    `timeout` is itself duration- or flag-shaped (#959 FK1, minimal arm). `timeout cat x` must
-    NOT be recognised at all: the real `timeout` would read `cat` as its duration and refuse to
-    run anything, so unwrapping to `cat x` authorised an argv real `timeout` never runs."""
-    if not tokens or tokens[0].kind != WORD or tokens[0].value != "timeout":
-        return 0
-    if len(tokens) < 2 or not _looks_like_duration_or_flag(tokens[1]):
-        return 0
-    i = 1
-    while i < len(tokens) and _looks_like_duration_or_flag(tokens[i]):
-        i += 1
-    return i
-
-
 def _check_multiline_c_argument(value: str) -> None:
     """`value` (a resolved `-c` argument) contains a newline. If every LINE of it scans cleanly
     on its own, the newline itself is the only problem, and the refusal must explain it
@@ -416,63 +390,81 @@ def _check_multiline_c_argument(value: str) -> None:
     raise NarrowedReason(NEWLINE_IN_WRAPPER_ARGUMENT_REASON)
 
 
-def _wrapper_span(cmd: str, tokens: list[Token], i: int) -> str:
-    """`tokens[i]` is a `bash`/`sh` token (#959 M3). Returns the inner command text when this
+def _wrapper_span(tokens: list[Token]) -> str:
+    """`tokens[0]` is a `bash`/`sh` token (#959 M3). Returns the inner command text when this
     is a complete, WHOLE-COMMAND `<wrapper> -c '<one argument>'` shape — the argument's own
     RESOLVED VALUE, re-scanned as the inner command (never a raw slice: a `-c` argument's raw
     span includes its quotes, and re-scanning THAT would parse the quotes into the program
     name). Raises `UntokenizableCommand` for every other shape a `bash`/`sh` first token can
     reach — a bare wrapper, a stray word after the argument, a second wrapper, a script path,
     `-lc`, a flag between the wrapper and `-c` — never falling through to treat it as an
-    ordinary, ungranted word: none of those is a wrapper bash would run either."""
-    n = len(tokens)
-    if (
-        i + 1 < n and tokens[i + 1].kind == WORD and tokens[i + 1].value == "-c"
-        and i + 2 == n - 1
-    ):
-        value = tokens[i + 2].value
+    ordinary, ungranted word: none of those is a wrapper bash would run either.
+
+    Takes the TOKENS and nothing else: the raw command text is deliberately out of scope here,
+    so the "never a raw slice" rule above is enforced by the signature rather than by this
+    paragraph."""
+    if len(tokens) == 3 and tokens[1].kind == WORD and tokens[1].value == "-c":
+        value = tokens[2].value
         if "\n" in value:
             _check_multiline_c_argument(value)
         return value
     raise UntokenizableCommand("bash/sh wrapper did not resolve to a single -c argument")
 
 
-def _fold_wrapper(cmd: str) -> str:
+def _fold_wrapper(cmd: str) -> tuple[str, list[Token] | None]:
     """The wrapper recognition step (#959 M3, C1, C4): applied ONCE, at the top level, over
     the WHOLE (possibly multi-line) raw command — never inside the per-line loop, and never
-    re-applied to the text it extracts (a fixed point would turn `timeout 5 timeout 3 cat x`
-    and `bash -c 'timeout 5 cat x'` into allows, a deny->allow widening nobody enumerated).
+    re-applied to the text it extracts (a fixed point would turn `bash -c 'bash -c "echo hi"'`
+    into an allow, a deny->allow widening nobody enumerated).
 
-    Returns the text that should actually be parsed: the extracted `-c` argument for a
-    recognised `bash`/`sh` wrapper, the raw slice after a recognised `timeout` prefix, or `cmd`
-    unchanged when no wrapper is recognised at the front of the token stream at all."""
+    Returns the text that should actually be parsed — the extracted `-c` argument for a
+    recognised `bash`/`sh` wrapper, or `cmd` unchanged when the command does not start with one
+    — paired with the token stream ALREADY SCANNED for that text when the two are the same scan
+    `parse` would do next (an unchanged single-line command, which is nearly every command), or
+    `None` when they are not. Handing the stream back is what keeps the fold from costing a
+    second full pass over every command that has no wrapper at all.
+
+    A `timeout N` PREFIX IS NOT RECOGNISED HERE, and deliberately (#971). Folding one deleted
+    text AHEAD OF the decision, so every way of mis-reading a prefix was a way of widening what
+    the gate allows — `timeout\n5 cat x` and `timeout --foreground cat x` both reached an allow
+    for a command real `timeout` never runs. And what the fold bought was only the APPEARANCE of
+    honouring the bound: the prefix was discarded, never executed (there is no `timeout` binary
+    in the box), and the command ran under the runtime's own deadline with nothing said. So
+    `timeout` is now an ordinary ungranted word — no grant matches it, the lane's capability
+    reason answers on the same turn, and no text is rewritten before the decision is made.
+    Pass-through cannot widen; a fold can, which is the whole of the argument."""
     tokens = _scan(cmd)
-    if not tokens:
-        # Either the whole text failed to scan (some quote never closes ANYWHERE — let the
-        # normal per-line parse discover and report exactly that below) or it is blank.
-        return cmd
-    i = _skip_timeout_prefix(tokens)
-    if i < len(tokens) and tokens[i].kind == WORD and tokens[i].value in ("bash", "sh"):
-        return _wrapper_span(cmd, tokens, i)
-    if i > 0:
-        if i == len(tokens):
-            return ""
-        # The remainder is a RAW SLICE from the next token's own start offset — no string
-        # surgery re-derives where the prefix ended, and the glue between the remaining tokens
-        # (their own spacing, any quoting) survives intact, which a re-join of resolved values
-        # would destroy.
-        return cmd[tokens[i].start:]
-    return cmd
+    if tokens is None:
+        # The whole text failed to scan — some quote never closes ANYWHERE. Let the normal
+        # per-line parse discover and report exactly that, rather than answering it here.
+        return cmd, None
+    if tokens and tokens[0].kind == WORD and tokens[0].value in ("bash", "sh"):
+        return _wrapper_span(tokens), None
+    return cmd, _reusable(cmd, tokens)
+
+
+def _reusable(cmd: str, tokens: list[Token]) -> list[Token] | None:
+    """`tokens` if scanning `cmd` as ONE line is the same question `parse`'s per-line loop will
+    ask, `None` otherwise. A newline makes them different questions: `_scan` treats it as a word
+    separator and `parse` splits on it first, so a multi-line command has to be re-scanned line
+    by line."""
+    return None if "\n" in cmd else tokens
 
 
 def parse(cmd: str) -> list[Pipeline]:
     """The pipelines `cmd` names — the model's raw command text, wrapper and all: there is no
     second function a caller must apply first (#959 D1/C3). Folds the wrapper once at the top
     (#959 M3) and then scans each physical line of whatever text results."""
-    inner = _fold_wrapper(cmd)
+    inner, scanned = _fold_wrapper(cmd)
     builder = _PipelineBuilder()
+    tokens: list[Token] | None
     for line in inner.split("\n"):
-        tokens = _scan(line)
+        if scanned is not None:
+            # The fold already scanned this exact text as one line and handed the stream back;
+            # CONSUMED here, so a later line can never read a stream that is not its own.
+            tokens, scanned = scanned, None
+        else:
+            tokens = _scan(line)
         if tokens is None:
             raise UntokenizableCommand("untokenizable command reached the executor")
         i, n = 0, len(tokens)

@@ -436,16 +436,16 @@ CORPUS: tuple[Case, ...] = tuple([
     Case("wrap-unclosed-inside-c", "bash -c 'cat " + REPORT),
     Case("wrap-empty-c", "bash -c ''"),
     Case("wrap-c-then-second-line", "bash -c 'ls'\ncat /etc/hosts"),
-    Case("wrap-timeout", "timeout 5 cat " + REPORT),
-    Case("wrap-timeout-fractional", "timeout 0.5 cat " + REPORT),
-    Case("wrap-timeout-then-line", "timeout 5\ncat " + REPORT),
+    # (`wrap-timeout`, `wrap-timeout-fractional`, `wrap-timeout-then-line` and
+    #  `wrap-timeout-then-bash-c` were here too, recorded as allows. #971 moves them into
+    #  member 9 below; the `timeout` rows that stay are the ones that were denials already,
+    #  which do not move - only the code that refuses them does.)
     Case("wrap-timeout-suffix-duration", "timeout 5s cat " + REPORT),
     Case("wrap-timeout-signal-flag", "timeout -s KILL 5 cat " + REPORT),
     Case("wrap-bare-timeout", "timeout"),
     Case("wrap-timeout-double-dash", "timeout --"),
     Case("wrap-timeout-twice", "timeout 5 timeout 3 cat " + REPORT),
     Case("wrap-timeout-inside-c", "bash -c 'timeout 5 cat " + REPORT + "'"),
-    Case("wrap-timeout-then-bash-c", "timeout 5 bash -c 'echo hi'"),
     Case("wrap-nested-bash-c", "bash -c 'bash -c \"echo hi\"'"),
     # ------------------------------------------------------------------ neutral: gather's lane
     Case("gather-payload-pipe", "cat /run/gather_raw/l-1/0.json | grep hits", policy="gather"),
@@ -487,15 +487,19 @@ CORPUS: tuple[Case, ...] = tuple([
     Case("m3-outer-operator", "bash -c 'echo a '2>/dev/null", "3", _deny("untokenizable")),
     Case("m3-outer-operator-cat", "bash -c 'cat " + REPORT + " '2>/dev/null", "3",
          _deny("untokenizable")),
-    # 4: a quoted `timeout` wrapper word (M3 + F4) - the ONE deny->allow member.
-    Case("m4-quoted-duration", "timeout '5' cat " + REPORT, "4",
-         _allow((["cat", REPORT], "capture"))),
-    Case("m4-quoted-wrapper-word", '"timeout" 5 cat ' + REPORT, "4",
-         _allow((["cat", REPORT], "capture"))),
-    # ...composed with member 1: restated worked example 4, the union of the two accepted
-    # changes and nothing new. The leading blank corrupts the first token, so the wrapper is
-    # not recognised at all and the command is refused on the POLICY reason where today it is
-    # refused on the LEXING one - a reason-identity move, which F2 makes a verdict change.
+    # 4 WAS "a quoted `timeout` wrapper word is skipped like any other prefix" - the one
+    # deny->allow member. #971 RETIRES IT into member 9: there is no prefix arm left for a
+    # quoted spelling to reach, and both shapes are refused on the capability reason with the
+    # rest of the class. The number is left standing rather than reused, so a reader tracing a
+    # member id through this spec's history lands where they expect.
+    Case("m4-quoted-duration", "timeout '5' cat " + REPORT, "9", _deny()),
+    Case("m4-quoted-wrapper-word", '"timeout" 5 cat ' + REPORT, "9", _deny()),
+    # ...composed with member 1. It WAS the union of two accepted changes; the blank is not
+    # part of the answer any more, because `timeout` is ungranted with it and without it. What
+    # survives is the demand that always mattered here: not the lexing reason. (That the blank
+    # must now NOT be named either is
+    # `test_a_blank_glued_to_an_ungranted_word_is_not_blamed_for_the_refusal`'s to pin - the
+    # `!untokenizable` slot cannot say it.)
     Case("m4-quoted-with-leading-blank", NBSP + "timeout '5' cat " + REPORT, "1+4",
          _deny("!untokenizable")),
     Case("m4-quoted-with-trailing-blank", "timeout '5' cat " + REPORT + NBSP, "1+4",
@@ -506,9 +510,33 @@ CORPUS: tuple[Case, ...] = tuple([
          _deny(OWNED_ELSEWHERE)),
     # 6 is the slot the assembler reserved for FK1 while it was pending at the human seam;
     # FK1 landed as member 7, so the set numbers to seven and holds six distinct shapes.
-    # 7: a `timeout` prefix with no duration-shaped token (FK1, MINIMAL arm only).
+    # 7: a `timeout` prefix with no duration-shaped token (FK1, MINIMAL arm only). Member 9
+    # subsumes the rule - NO prefix is recognised now - and these two keep the verdict they
+    # were enumerated for, reached by the wider rule instead of the minimal one.
     Case("m7-timeout-no-duration", "timeout cat " + REPORT, "7", _deny()),
     Case("m7-timeout-no-duration-echo", "timeout echo hi", "7", _deny()),
+    # 9 (#971): A `timeout` PREFIX IS NOT A WRAPPER AT ALL. Every row here was an ALLOW under
+    # the fold, reached by DELETING the prefix from the text before the decision - which is what
+    # made every mis-read a widening rather than a refusal: `timeout\n5 cat P` (the prefix
+    # straddling a line boundary) and `timeout --foreground cat P` (a prefix carrying no
+    # duration at all) both folded to `cat P` and authorised a command real `timeout` never
+    # runs. Two live deny->allow holes in one arm, found by review rather than by the corpus,
+    # which carried neither spelling.
+    #
+    # And the fold honoured nothing it appeared to. The stripped prefix was DISCARDED, not
+    # executed - there is no `timeout` binary in the box - so the bound the model asked for was
+    # dropped in silence and the command ran under the runtime's own 120s deadline. Granting the
+    # word instead was rejected for a sharper reason: `timeout` turns the rest of the argv into
+    # a new program, the one shape a per-stage grant ladder must never be loose about.
+    #
+    # So it is an ordinary ungranted word, and the lane's capability reason - which names the
+    # programs the lane does have - answers on the same turn. Pass-through cannot widen; a fold
+    # can. That asymmetry is the whole of the argument, and it is why this is a deletion rather
+    # than a third repair of the same arm.
+    Case("wrap-timeout", "timeout 5 cat " + REPORT, "9", _deny()),
+    Case("wrap-timeout-fractional", "timeout 0.5 cat " + REPORT, "9", _deny()),
+    Case("wrap-timeout-then-line", "timeout 5\ncat " + REPORT, "9", _deny()),
+    Case("wrap-timeout-then-bash-c", "timeout 5 bash -c 'echo hi'", "9", _deny()),
     # 8 (RC1, human-resolved at the verify loop; widened to the whole alphabet at the second
     # loop, RC6): A DIVERGENT BLANK IMMEDIATELY AFTER A SEPARATOR - 26 characters x 4
     # separators, all 104 of which move, with the carriage return as the worked example rather

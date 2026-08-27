@@ -436,54 +436,59 @@ demands:
       whole command and cannot live inside the per-line scan — a first-line-only fold reads
       `bash -c 'ls'` as a complete wrapper and silently loses line 2.
 
-  - id: d_a_timeout_prefix_leaves_every_later_line_in_the_parse
-    kind: behavior
-    form: test
-    binds: ['_wrapper_span', 'command_text']
-    discharged_by: test_a_timeout_prefix_on_the_first_line_leaves_every_later_line_in_the_parse
-    source: "C1; the OTHER arm of the split (FK5) — the two arms answer opposite ways"
-    seed_docstring: >-
-      A `timeout N` prefix does NOT claim the rest of the text: a prefix that uses up its own
-      physical line leaves every later line in the parse, so `timeout 5\ncat P` is still the two
-      lines it names. Recognising a prefix does not evaluate whether the remainder is granted — a
-      later line no grant admits still denies on the ordinary capability reason.
-    note: >-
-      FK5 exists because ONE sentence carried these two opposite answers and each escalation
-      reader collapsed it to one of them — the only premise in the run where two escalation
-      readers gave opposite SETTLED verdicts. Splitting it is the phase-D action the judge asked
-      for; neither arm is a fork any more.
-
-  - id: d_the_timeout_prefix_is_skipped_by_token_index
-    kind: behavior
-    form: test
-    binds: ['_wrapper_span', 'interacts(parse->_scan).response']
-    discharged_by: test_the_timeout_prefix_is_skipped_by_token_index_and_the_rest_is_a_raw_slice
-    seed_docstring: >-
-      A `timeout N` prefix is skipped by counting tokens, and what is parsed is the raw line from
-      the next token's start offset — no string surgery re-derives where the prefix ended. The
-      duration token is matched on its RESOLVED value, not its raw span: `'5'`'s raw span fails a
-      digit test while its resolved value passes, and F4 requires `timeout '5' cat x` to be
-      accepted.
-
-  - id: d_a_quoted_wrapper_word_is_the_program_bash_would_run
+  - id: d_a_timeout_prefix_is_not_a_wrapper
     kind: domain-outcome
     form: test
-    binds: ['_wrapper_span', 'UNTOKENIZABLE_REASON.domain.distinguished[cause5]']
-    discharged_by: test_a_quoted_timeout_prefix_is_the_timeout_program_bash_would_run
-    source: "F4, human-resolved (ACCEPTED) — verdict-change set member 4"
+    binds: ['_wrapper_span', 'command_text']
+    discharged_by: test_a_timeout_prefix_is_not_a_wrapper_and_is_never_folded_away
+    source: "#971, human-resolved — verdict-change set member 9; SUPERSEDES three of this spec's own demands"
     seed_docstring: >-
-      A `timeout` prefix whose own words are quoted — `timeout '5' cat x`, `"timeout" 5 cat x` —
-      is the same prefix bash would run, so it is skipped like any other, and
-      `UNTOKENIZABLE_REASON` cause (5) no longer names it. Composed with a leading or trailing
-      divergent blank the outcome is the union of the two accepted changes and nothing new:
-      `\u00a0timeout '5' cat x` is still refused, because the leading blank corrupts the first
-      token and the wrapper is not recognised at all (restated worked example 4).
+      A `timeout` prefix is not a wrapper. It stays in the argv, no grant matches it, and the
+      lane's capability reason — which names the programs the lane does have — answers on the
+      same turn. No text is deleted before the decision is made.
+    supersedes:
+      - d_a_timeout_prefix_leaves_every_later_line_in_the_parse
+      - d_the_timeout_prefix_is_skipped_by_token_index
+      - d_a_quoted_wrapper_word_is_the_program_bash_would_run
+      - d_a_timeout_prefix_with_no_duration_is_not_a_wrapper
     rejected:
-      - {nl: "today's answer: refused as untokenizable, because `_strip_prefix_from_raw` matches the prefix against the RAW text rather than the token values"}
+      - {nl: "repair the prefix arm a third time — each repair closes the spelling that was demonstrated and leaves the DIRECTION of failure intact: a fold deletes text ahead of the decision, so every mis-read is a widening"}
+      - {nl: "grant `timeout` and put the binary in the box, so the bound is honoured — it makes the gate grant a word that turns the rest of the argv into a NEW PROGRAM, which forces the scope check to recurse through it; the one shape a per-stage grant ladder must never be loose about"}
     note: >-
-      The `bash`/`sh` arm is ALREADY value-matched today (`\"bash\" -c \"ls\"` unwraps), so the
-      widening is confined to the `timeout` arm. This is the one member of the set that moves
-      deny->allow, and it is why the body's "can only narrow what is accepted" sentence is struck.
+      WHAT THE FOLD COST, MEASURED RATHER THAN ARGUED. Two live deny->allow holes were found by
+      review in the arm this spec had already narrowed once at FK1: `timeout\n5 cat P`, where the
+      prefix STRADDLES a line boundary and folding deleted physical line 1; and
+      `timeout --foreground cat P`, where the duration guard FK1 added is satisfied by any
+      flag-shaped word, so a prefix carrying no duration at all was recognised. Both authorised a
+      command the real `timeout` never runs (it exits 125 without running anything). Neither was
+      visible to the frozen corpus, which carried only `timeout 5\ncat P` — the newline on the
+      OTHER side of the prefix — so the instrument built to certify this change neutral certified
+      both clean.
+      AND THE FOLD HONOURED NOTHING. The stripped prefix was DISCARDED, not executed: there is no
+      `timeout` binary in the box, and every command already runs under the runtime's own 120s
+      deadline. So a model that asked for a five-second bound got no bound, silently, and the
+      three demands above spent a corpus, a test file and two enumerated members on the
+      appearance of a feature.
+      THE ASYMMETRY IS THE ARGUMENT. A fold can widen what is allowed; a pass-through cannot —
+      the worst a mis-read can do there is refuse. That is why this is a deletion and not a third
+      narrowing.
+
+  - id: d_a_blank_glued_to_an_ungranted_word_is_not_blamed
+    kind: domain-outcome
+    form: test
+    binds: ['_wrapper_span']
+    discharged_by: test_a_blank_glued_to_an_ungranted_word_is_not_blamed_for_the_refusal
+    source: "#971 — the composition RC2 required, inverted by member 9"
+    seed_docstring: >-
+      `\u00a0timeout '5' cat P` was refused BECAUSE of the blank, while the same text without it
+      was allowed — so RC2 obliged the refusal to name the codepoint. It is not refused for the
+      blank any more: `timeout` is ungranted with it and without it. The invisible-character
+      machinery must stay quiet about this command rather than blame a character that changes
+      nothing, and must still name a blank that IS decisive.
+    note: >-
+      The `!untokenizable` slot in the corpus cannot say this — it demands only that the reason
+      moved OFF the lexing message, and the generic capability deny satisfies that while naming
+      nothing. The obligation runs the other way now, so it needs its own test.
 
   - id: d_a_newline_inside_the_c_argument_is_an_unclosed_quote
     kind: domain-outcome
@@ -580,7 +585,9 @@ demands:
     source: "45-dispositions, settled (both escalation copies hedged on the reason class; settled from O3+F2)"
     seed_docstring: >-
       A bare `bash` or `sh` denies with the LEXING reason (cause (5) names it); a bare `timeout`
-      denies with the POLICY reason, because `unwrap('timeout')` returns the empty string, which
+      denies with the POLICY reason, because it is an ordinary ungranted word (#971 — it was the
+      same verdict when a fold produced it, by a different route: `unwrap('timeout')` returned
+      the empty string, which
       parses to zero pipelines and falls through. Reason identity is part of the verdict, and
       this shape is not in the enumerated set, so neither arm may move.
 
@@ -1261,7 +1268,8 @@ demands:
     resolved: "minimal — ACCEPTED by the human at §7, minimal arm only; it joins the enumerated set as its seventh numbered member"
     recommended_reading: "accept, as D2's sixth member, in the MINIMAL form only"
     binds: ['_wrapper_span']
-    discharged_by: test_a_timeout_prefix_that_consumes_no_duration_shaped_token_is_not_a_wrapper
+    discharged_by: test_a_timeout_prefix_is_not_a_wrapper_and_is_never_folded_away
+    superseded_by: d_a_timeout_prefix_is_not_a_wrapper
     seed_docstring: >-
       The wrapper step advances past `timeout` only when at least one duration- or flag-shaped
       token is actually consumed, so `timeout cat report.md` is not a recognised wrapper and is
@@ -2100,7 +2108,7 @@ gate:
     - {rule: R4, element: 'UNTOKENIZABLE_REASON.domain.distinguished[cause2]', by: d_a_trailing_backslash_still_continues_nothing, cites: [x13, a4], witness: "cause (2), the trailing-backslash reason; the demand pins that a dangling escape still refuses under this cause once the unquoter is hand-rolled, matching x13's table of what the current lexer does with one."}
     - {rule: R4, element: 'UNTOKENIZABLE_REASON.domain.distinguished[cause3]', by: d_the_lexing_causes_this_change_does_not_touch_still_name_what_they_name, cites: [a4], witness: "cause (3), the connector-at-a-line-boundary reason; the survival demand pins that this cause still names exactly what the parser refuses after the wrapper decision moves outside the per-line loop."}
     - {rule: R4, element: 'UNTOKENIZABLE_REASON.domain.distinguished[cause4]', by: d_the_lexing_causes_this_change_does_not_touch_still_name_what_they_name, cites: [a4], witness: "cause (4), the incomplete-connector-within-one-line reason; the same survival demand pins it alongside cause (3), since both per-line checks must keep working while the wrapper check moves outside the loop."}
-    - {rule: R4, element: 'UNTOKENIZABLE_REASON.domain.distinguished[cause5]', by: d_a_quoted_wrapper_word_is_the_program_bash_would_run, cites: [x6, a4], witness: "cause (5), the wrapper-lexing reason; F4's demand pins that the \"quoted timeout prefix\" clause is struck from its text (x6: an index-based match widens the timeout arm), while d_the_wrapper_shapes_the_reason_still_names_stay_refused pins that every OTHER shape the clause still names stays refused for it."}
+    - {rule: R4, element: 'UNTOKENIZABLE_REASON.domain.distinguished[cause5]', by: d_a_timeout_prefix_is_not_a_wrapper, cites: [x6, a4], witness: "cause (5), the wrapper-lexing reason. F4's demand pinned that the \"quoted timeout prefix\" clause is struck from its text because an index-based match ACCEPTS that prefix (x6); #971 strikes the same clause for the opposite reason — the parser has no opinion about a timeout prefix at all — and the superseding demand carries the same assertion, that the reason must not name a shape it does not decide. d_the_wrapper_shapes_the_reason_still_names_stay_refused pins that every OTHER shape the clause still names stays refused for it."}
     - {rule: R5, element: unwrap, by: d_every_caller_stops_unwrapping_by_hand, cites: [c7, g7], witness: "parse removes its edge to unwrap while bash_lane_test_helpers and decide_bash still depend on it (c7's non-idempotence census, extended by g7's 9-references-in-5-files count); the survival demand pins that the gate hands the raw command straight to parse with no caller reinstating the removed step."}
     - {rule: R5, element: _cmd_segments, by: d_the_shim_constants_stay_where_their_consumers_read_them, cites: [c4, g12], witness: "parse removes its edge to _cmd_segments while compile_policy and decide_bash still read its surviving constants (c4's caller census); g12 confirms the three deleted private helpers have zero outside references while NON_ADAPTER_SHIMS/OPERATOR_TOOLS/ADAPTER_RE do not, so the survival demand names exactly what must stay importable."}
     - {rule: R7, element: 'interacts(record_shim_failure->command_text)', by: d_the_audit_row_and_the_authorised_argv_name_the_same_command, cites: [c1, pj1], witness: "command_text is read by five actors; the delta moves bash_fd_prefix_955/decide_bash/parse and leaves record_shim_failure on the old reading — this reader's own demand asserts the recorded row stays unmoved for every shape outside the enumerated set, bounded by pj1's 2000-char evidentiary limit."}

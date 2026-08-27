@@ -8,14 +8,16 @@ fold replaces that with a match by TOKEN INDEX over the one scanner's records, a
 argument becomes its own token's resolved value, re-scanned as the inner command, with that
 token's SPAN saying where it ends — which is what makes an operator after it visible at all.
 
-The folded step is `_wrapper_span` (F3 renamed the role: it works in SPANS of the original text.
-Read that per arm, because the design body said it for the wrong one and this file's own
-assertions were what caught it, RC7: the `timeout` prefix's remainder IS the raw slice from the
-next token's start offset, while the `-c` argument is a single token that is RESOLVED and
-re-scanned. Re-scanning that argument's raw span would parse its quotes as part of the program
-name.) If the implementation picks another name, the spec-graph id moves with
-it in the same commit - an alias would disable the check for that concept rather than paper
-over it.
+The folded step is `_wrapper_span`. The `-c` argument is a single token that is RESOLVED and
+re-scanned; re-scanning that argument's RAW span would parse its quotes as part of the program
+name. If the implementation picks another name, the spec-graph id moves with it in the same
+commit - an alias would disable the check for that concept rather than paper over it.
+
+THE `timeout` PREFIX ARM IS GONE (#971). It was the other half of this step: a prefix skipped by
+token index, with the remainder taken as a raw slice. Folding it deleted text AHEAD OF the
+decision, so mis-reading a prefix widened what the gate allows - and the stripped prefix was
+then discarded rather than executed, so the bound it named was never honoured either. `timeout`
+is now an ordinary ungranted word and the capability reason answers it.
 """
 from __future__ import annotations
 
@@ -137,77 +139,70 @@ def test_a_bash_c_wrapper_with_anything_after_it_is_refused():
     assert _argv(f"bash -c 'cat {REPORT} | wc -c'") == [[["cat", REPORT], ["wc", "-c"]]]
 
 
-def test_a_timeout_prefix_on_the_first_line_leaves_every_later_line_in_the_parse():
-    """A `timeout N` prefix does NOT claim the rest of the text: a prefix that uses up its own
-    physical line leaves every later line in the parse, so `timeout 5\\ncat P` is still the two
-    lines it names. Recognising a prefix does not evaluate whether the remainder is granted - a
-    later line no grant admits still denies on the ordinary capability reason.
+def test_a_timeout_prefix_is_not_a_wrapper_and_is_never_folded_away():
+    r"""#971: `timeout` is an ORDINARY UNGRANTED WORD. The parse leaves it in the argv, no
+    grant matches it, and the lane's capability reason answers - the same answer any other
+    unavailable program gets, on the same turn, with no text rewritten before the decision.
 
-    This arm and `bash -c`'s answer opposite ways, which is why the one demand sentence that
-    carried both was split in two: a prefix does not claim the text after it, a `-c` argument
-    does."""
-    assert _argv(f"timeout 5\ncat {REPORT}") == [[["cat", REPORT]]]
-    d = _bash(f"timeout 5 cat {REPORT}\nls -la")
-    assert not d.allow
-    assert d.reason == base.MAIN.deny_reason, (
-        "a later line no grant admits denies on the CAPABILITY reason - recognising the prefix "
-        "is not a judgement about the remainder"
+    Why the prefix fold went, rather than being repaired again: it deleted text AHEAD OF the
+    decision, so every way of mis-reading a prefix was a way of WIDENING what the gate allows.
+    `timeout\n5 cat P` (the prefix straddling a line boundary) and `timeout --foreground cat P`
+    (a prefix carrying no duration at all) each folded to `cat P` and reached an ALLOW for a
+    command real `timeout` never runs. Pass-through has no such direction of failure: the worst
+    a mis-read can do is refuse.
+
+    And the fold bought nothing real. The stripped prefix was DISCARDED, never executed - there
+    is no `timeout` binary in the box - so a bound the model asked for was silently dropped and
+    the command ran under the runtime's own deadline instead. Honouring it would have meant
+    granting a word that turns the rest of the argv into a new program, which is the one shape
+    a per-stage grant ladder must never be permissive about."""
+    assert _parsed(f"timeout 5 cat {REPORT}") == [[["timeout", "5", "cat", REPORT]]], (
+        "the prefix is still in the argv - the parse reports what the text says, and the "
+        "capability question is asked about `timeout` itself"
     )
-
-
-def test_the_timeout_prefix_is_skipped_by_token_index_and_the_rest_is_a_raw_slice():
-    """A `timeout N` prefix is skipped by counting tokens, and what is parsed is the raw line
-    from the next token's start offset - no string surgery re-derives where the prefix ended.
-    The duration token is matched on its RESOLVED value, not its raw span: `'5'`'s raw span
-    fails a digit test while its resolved value passes, and F4 requires `timeout '5' cat x` to
-    be accepted."""
-    assert _parsed(f"timeout 5 cat {REPORT}") == [[["cat", REPORT]]]
-    assert _parsed(f"timeout   5   cat {REPORT}") == [[["cat", REPORT]]]
-    assert _parsed("timeout 5 echo 'a  b'") == [[["echo", "a  b"]]], (
-        "the rest of the line is a RAW slice; a rejoin of resolved tokens loses the inner glue"
-    )
-    assert _parsed(f"timeout '5' cat {REPORT}") == [[["cat", REPORT]]], (
-        "the duration is matched on its resolved value - matching the raw span is what makes a "
-        "quoted duration unmatchable, and it is the surgery M1's offsets exist to delete"
-    )
-
-
-def test_a_quoted_timeout_prefix_is_the_timeout_program_bash_would_run():
-    r"""A `timeout` prefix whose own words are quoted - `timeout '5' cat x`, `"timeout" 5 cat x`
-    - is the same prefix bash would run, so it is skipped like any other, and
-    `UNTOKENIZABLE_REASON` cause (5) no longer names it. Composed with a leading or trailing
-    divergent blank the outcome is the union of the two accepted changes and nothing new:
-    ` timeout '5' cat x` is still refused, because the leading blank corrupts the first token
-    and the wrapper is not recognised at all (restated worked example 4).
-
-    Rejected: today's answer, refused as untokenizable, because the prefix is matched against
-    the RAW text rather than the token values. This is verdict-change member 4 and the one
-    member that moves deny->allow; the `bash`/`sh` arm is already value-matched today, so the
-    widening is confined to the `timeout` arm."""
-    assert _argv(f"timeout '5' cat {REPORT}") == [[["cat", REPORT]]]
-    assert _argv(f'"timeout" 5 cat {REPORT}') == [[["cat", REPORT]]]
+    for cmd in (
+        f"timeout 5 cat {REPORT}",             # the plain prefix
+        f"timeout 0.5 cat {REPORT}",           # a fractional duration
+        f"timeout '5' cat {REPORT}",           # quoted: the retired member 4
+        f'"timeout" 5 cat {REPORT}',
+        f"timeout --foreground cat {REPORT}",  # no duration anywhere: the old FK1 hazard
+        f"timeout\n5 cat {REPORT}",            # the prefix straddling a line boundary
+        f"timeout 5 timeout 3 cat {REPORT}",   # a second prefix the apply-once fold left behind
+        f"bash -c 'timeout 5 cat {REPORT}'",   # inside a wrapper, where the fold never reached
+        f"timeout cat {REPORT}",
+        "timeout",
+        "timeout --",
+    ):
+        d = _bash(cmd)
+        assert not d.allow, f"{cmd!r} is allowed"
+        assert d.reason == base.MAIN.deny_reason, (
+            f"{cmd!r}: refused, but not on the reason that tells the model which programs this "
+            "lane actually has - which is the whole point of letting the word through"
+        )
     assert "timeout" not in permission.UNTOKENIZABLE_REASON, (
-        "cause (5) still names a quoted `timeout` prefix as a refusal, and the parser no "
-        "longer refuses it - F4 strikes the clause TOGETHER WITH the test pinning it, or the "
-        "only sentence the model is ever shown about this is a sentence about nothing"
+        "the lexing reason names a `timeout` prefix, and the parser has no opinion about one - "
+        "the only sentence the model is ever shown about this would be a sentence about nothing"
     )
-    # The composition with member 1: refused, and NOT for the lexing reason any more - the
-    # wrapper is not recognised at all, so it is an ordinary ungranted first word.
+
+
+def test_a_blank_glued_to_an_ungranted_word_is_not_blamed_for_the_refusal():
+    """The composition #971 retires: `<NBSP>timeout '5' cat P` was refused BECAUSE of the blank
+    while the same text without it was allowed, so the blank had to be named (RC2). It is not
+    refused for the blank any more - `timeout` is ungranted either way - and the invisible-
+    character machinery must stay quiet about it rather than blame a character that changes
+    nothing. Naming it would send the model hunting for a stray codepoint in a command whose
+    real problem is the program it names."""
     for cmd in (NBSP + f"timeout '5' cat {REPORT}", f"timeout '5' cat {REPORT}" + NBSP):
         d = _bash(cmd)
         assert not d.allow
-        assert d.reason != permission.UNTOKENIZABLE_REASON, (
-            f"{cmd!r}: the quoted prefix is accepted now, so what refuses this command is the "
-            "divergent blank - and blaming the quoting sends the model to fix its quotes"
+        assert not re.search(r"U\+0*[0-9a-f]{4}\b", d.reason, re.IGNORECASE), (
+            f"{cmd!r}: a codepoint is named for a command that is refused with or without it"
         )
-        # ...and saying so means SAYING SO: not-the-lexing-reason is satisfied by the generic
-        # capability deny, which names nothing. The character is invisible, so the codepoint is
-        # the only thing that can be said about it - the same obligation the whole invisible
-        # class carries (RC2), asserted here because this docstring already demanded it.
-        assert re.search(rf"U\+0*{ord(NBSP):04x}\b", d.reason, re.IGNORECASE), (
-            f"{cmd!r}: the refusal never names U+00A0, so the one thing the model cannot see is "
-            "the one thing it is not told"
-        )
+    # The control: a blank that IS decisive is still named, so the quiet above is about this
+    # command and not about the machinery having stopped working.
+    d = _bash(NBSP + f"cat {REPORT}")
+    assert not d.allow
+    assert re.search(rf"U\+0*{ord(NBSP):04x}\b", d.reason, re.IGNORECASE)
 
 
 def test_a_newline_inside_the_c_argument_is_the_unclosed_quote_it_looks_like():
@@ -327,71 +322,34 @@ def test_every_wrapper_shape_the_lexing_reason_names_is_still_refused_for_that_r
 
 def test_the_wrapper_step_applies_exactly_once_and_never_to_the_text_it_extracts():
     """Wrapper recognition applies once, at the top level, and never re-runs over the slice it
-    just extracted: `timeout 5 timeout 3 cat x` still denies, `bash -c 'timeout 5 cat x'` still
-    denies, and a `timeout` appearing as the first word INSIDE a `-c` argument is ordinary text
-    to the outer match.
+    just extracted: a `bash -c` argument that is itself a wrapper still denies, and a wrapper
+    word appearing as the first word INSIDE a `-c` argument is ordinary text to the outer match.
 
     Rejected: looping to a fixed point, or re-applying recognition to the extracted `-c` slice -
-    which turns two of today's denies into allows, a deny->allow widening on a security gate
-    that is in nobody's enumerated set and would be reached by accident rather than by
-    decision. Nothing in the design says "once", and folding makes recursion the easier thing
-    to write by mistake."""
+    which turns today's denies into allows, a deny->allow widening on a security gate that is in
+    nobody's enumerated set and would be reached by accident rather than by decision. Nothing in
+    the design says "once", and folding makes recursion the easier thing to write by mistake."""
     for cmd in (
-        f"timeout 5 timeout 3 cat {REPORT}",
-        f"bash -c 'timeout 5 cat {REPORT}'",
         "bash -c 'bash -c \"echo hi\"'",
+        f"bash -c 'timeout 5 cat {REPORT}'",
     ):
         assert not _bash(cmd).allow, f"{cmd!r} became an allow - recognition ran more than once"
     # ...and the extracted text keeps the wrapper word as an ordinary word in the argv.
     assert _parsed(f"bash -c 'timeout 5 cat {REPORT}'") == [[["timeout", "5", "cat", REPORT]]]
-    # The positive control: ONE application still happens, on both arms and composed.
-    assert _argv(f"timeout 5 cat {REPORT}") == [[["cat", REPORT]]]
+    assert _parsed("bash -c 'bash -c \"echo hi\"'") == [[["bash", "-c", "echo hi"]]]
+    # The positive control: ONE application still happens.
     assert _argv(f"bash -c 'cat {REPORT}'") == [[["cat", REPORT]]]
-    assert _argv("timeout 5 bash -c 'echo hi'") == [[["echo", "hi"]]]
 
 
 def test_a_bare_wrapper_word_denies_with_the_reason_class_it_denies_with_today():
     """A bare `bash` or `sh` denies with the LEXING reason (cause (5) names it); a bare `timeout`
-    denies with the POLICY reason, because `unwrap('timeout')` returns the empty string, which
-    parses to zero pipelines and falls through. Reason identity is part of the verdict, and this
-    shape is not in the enumerated set, so neither arm may move."""
+    denies with the POLICY reason, because it is an ordinary word no grant admits (#971 - it was
+    the same verdict when a fold produced it, by a different route). Reason identity is part of
+    the verdict, and this shape is not in the enumerated set, so neither arm may move."""
     assert _bash("bash").reason == permission.UNTOKENIZABLE_REASON
     assert _bash("sh").reason == permission.UNTOKENIZABLE_REASON
     assert _bash("timeout").reason == base.MAIN.deny_reason
     assert _bash("timeout --").reason == base.MAIN.deny_reason
-
-
-def test_a_timeout_prefix_that_consumes_no_duration_shaped_token_is_not_a_wrapper():
-    """The wrapper step advances past `timeout` only when at least one duration- or flag-shaped
-    token is actually consumed, so `timeout cat report.md` is not a recognised wrapper and is
-    refused - where today it is allowed and executes `cat report.md`, while the real `timeout`
-    would read `cat` as its duration, refuse, and run nothing (`invalid time interval 'cat'`,
-    rc 125). `timeout --` and a bare `timeout` reach the same disposition through the same arm.
-
-    Rejected: modelling coreutils' real duration grammar too (the `s`/`m`/`h`/`d` suffix, and
-    `-k`/`-s` each taking a value), which would flip `timeout 5s cat x` and
-    `timeout -s KILL 5 cat x` deny->allow - a widening on a security gate, each member
-    enumerated by hand, and scope beyond this change. And rejected: declining the fix, which
-    ships the live bug certified clean by a differential whose corpus contains no `timeout` at
-    all."""
-    for cmd in (f"timeout cat {REPORT}", "timeout echo hi"):
-        d = _bash(cmd)
-        assert not d.allow, (
-            f"{cmd!r} is authorised as the command with the wrapper word removed - an argv the "
-            "real `timeout` would refuse to run at all"
-        )
-    assert _bash("timeout --").reason == _bash("timeout").reason, (
-        "a bare `timeout` and `timeout --` reach the same refusal through the same arm"
-    )
-    # The positive control: a prefix that DOES consume a duration- or flag-shaped token is
-    # still recognised, on both the plain and the quoted spelling.
-    assert _argv(f"timeout 5 cat {REPORT}") == [[["cat", REPORT]]]
-    assert _argv(f"timeout 0.5 cat {REPORT}") == [[["cat", REPORT]]]
-    assert _argv(f"timeout '5' cat {REPORT}") == [[["cat", REPORT]]]
-    # ...and the arms this change does NOT take stay where they are: the real grammar is still
-    # unmodelled, so these keep denying rather than quietly widening.
-    assert not _bash(f"timeout 5s cat {REPORT}").allow
-    assert not _bash(f"timeout -s KILL 5 cat {REPORT}").allow
 
 
 # --------------------------------------------------------------------------- #
@@ -430,9 +388,9 @@ def test_the_gate_hands_the_raw_command_straight_to_the_parse():
         "the gate still imports the standalone wrapper step, so there are still two parsers on "
         "the path and the fold has not happened"
     )
-    # ...and the non-idempotence is unreachable: one application, so the second prefix stays.
-    assert not _bash(f"timeout 5 timeout 3 cat {REPORT}").allow
-    assert _argv(f"timeout 5 cat {REPORT}") == [[["cat", REPORT]]]
+    # ...and the non-idempotence is unreachable: one application, so a second wrapper stays.
+    assert not _bash("bash -c 'bash -c \"echo hi\"'").allow
+    assert _argv(f"bash -c 'cat {REPORT}'") == [[["cat", REPORT]]]
 
 
 def test_no_call_site_pairs_a_wrapper_step_with_the_parse():
