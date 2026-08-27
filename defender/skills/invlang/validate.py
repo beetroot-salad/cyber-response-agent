@@ -207,7 +207,11 @@ def _check_lead_refs(companion: CompanionBody) -> list[str]:
         )
         errors.append(
             f"undeclared lead {fid!r}: referenced by a `:R` / `:T` row or a "
-            f"lead sub-block, but no `:L findings` row declares it{hint}"
+            f"lead sub-block, but no `:L findings` row declares it{hint}. Declare it "
+            f"in a `:L findings` block and re-send — including a HARNESS-RESERVED id "
+            f"whose declaring row is not on the page: the harness reserves the id so "
+            f"you do not attach new work to it, and writing the row it is missing is "
+            f"not reusing it"
         )
     for row in _walkers.iter_grounded_resolutions(companion):
         owner = row.get("resolved_by_lead")
@@ -1864,6 +1868,28 @@ def _is_legal_refinement_key(key: str) -> bool:
     return key in (SLOT_CLASS, SLOT_IDENT) or key.startswith(ATTR_PREFIX)
 
 
+def _unquoted(cell: str) -> str:
+    """The cell with ONE wrapping pair of double quotes removed, or the cell unchanged.
+
+    NOT a decoding step, and this file does not use it as one. In invlang a quote PROTECTS a
+    delimiter and is KEPT: `_split_quoted` hands back `"v-001|v-002"` with its quotes, and the
+    `:V` row declaring that vertex carries them too, so both sides of a target comparison see
+    the same bytes. A key cell is read the same way as every other cell — which is why
+    `"class"` is not the key `class`, and why `_is_legal_refinement_key` is not taught to
+    accept it (#963). Making the key cell the one place quotes fall away would put this check
+    at odds with every other reader of the format, including the target match one column left.
+
+    What it is for is the REPAIR. An author who wrote `"class"` meant `class`, and the useful
+    suggestion is the key they meant — not `attrs."class"`, which is what prefixing text the
+    check has already refused produces: a legal-SHAPED key naming an attribute whose name
+    contains quote characters, which nobody wants and which `_candidate_refusal` then rejects
+    anyway, withholding the whole suggestion and leaving the author with no repair at all.
+    """
+    if len(cell) >= 2 and cell.startswith('"') and cell.endswith('"'):
+        return cell[1:-1]
+    return cell
+
+
 def _candidate_refusal(
     block: Block, cols: list[str], parsed: list[str], at: int, candidate: str
 ) -> str | None:
@@ -1942,10 +1968,30 @@ def _illegal_key_diagnostic(
         # to the declared width, same as `_row_cells` pads the parsed record, so the pasted
         # candidate is full-width rather than re-opening the same gap.
         raw_cells = raw_cells + [""] * (len(cols) - len(raw_cells))
-    candidates = (
-        _swap_cell(raw_cells, at, "class"),
-        _swap_cell(raw_cells, at, f"attrs.{key}"),
-    )
+    # The repair is built from the key with its wrapping quotes removed, never from the raw
+    # cell: `attrs.{key}` over a quoted cell splices text the check has ALREADY judged
+    # malformed behind a legal prefix (#963). When the unquoted text is itself a legal key the
+    # author simply quoted, that key IS the repair and there is no second route to offer —
+    # `class` and `attrs.class` are not two readings of `"class"`, and offering the pair would
+    # invite the author to pick the wrong one.
+    basis = _unquoted(key)
+    quoted_legal = basis != key and _is_legal_refinement_key(basis)
+    candidates: tuple[str, ...]
+    if quoted_legal:
+        candidates = (_swap_cell(raw_cells, at, basis),)
+    else:
+        # The `attrs.` route needs a NAME to prefix. With the quotes stripped off `""` there
+        # is none, and `attrs.` is legal-SHAPED — `_is_legal_refinement_key` accepts anything
+        # starting with the prefix — so offering it would land an attribute whose name is the
+        # empty string. That is the same "repair worse than the row" #963 is about, reachable
+        # here only because the unquoting made the prefix splice succeed where `attrs.""`
+        # used to be caught by the offer guard. The `class` route is unaffected and is offered
+        # alone; nothing is silently dropped, because for an empty name there is no second
+        # route to drop.
+        routes = [_swap_cell(raw_cells, at, "class")]
+        if basis:
+            routes.append(_swap_cell(raw_cells, at, f"attrs.{basis}"))
+        candidates = tuple(routes)
     # ALL-OR-NOTHING (F-M half one): put each candidate through `_candidate_refusal` — which
     # wraps the parser's OWN row reader rather than substituting it, since that reader RAISES
     # where this check returns a value — and withhold the whole suggestion the moment either
@@ -1978,6 +2024,14 @@ def _illegal_key_diagnostic(
         f"(identifier refinement) or `attrs.<name>` (attribute); a bare key "
         f"is dropped silently"
     )
+    if quoted_legal:
+        # Says WHY a word the author knows is legal was refused. Without it the message reads
+        # as the validator not recognising `class`, and the author's next move is to argue
+        # with it rather than to drop two characters.
+        message += (
+            f" — a quote is part of the cell in this format, never stripped from it, so "
+            f"{key} names a different key than {basis}"
+        )
     if refusal is not None:
         message += (
             # QUOTES THE REBUILT ROW the refusal is ABOUT. The carried reason is the row

@@ -694,28 +694,75 @@ def test_even_length_trailing_backslash_run_re_splits_to_the_declared_width():
         assert len(cells(candidate)) == 4
 
 
-def test_a_quote_opening_mid_token_is_withheld_not_offered():
-    """A candidate that would open a `"` inside a token is WITHHELD: the guard re-splits
-    through the parser's own row reader rather than the bare cell splitter, and treats its
-    refusal as "withhold" — so `fix` is `()` while the row stays flagged (F-M half one +
-    F-H, D17).
+def test_a_quoted_legal_keyword_is_repaired_by_unquoting_it():
+    """A key cell spelling a quoted legal keyword is still an ILLEGAL key, and the repair
+    offered for it is now the unquoted keyword (#963, superseding the observable #954 pinned
+    here).
 
-    The width-only guard cannot see this class. EXECUTED at base (J11): for a key cell spelling
-    a quoted legal keyword, the offered `attrs."class"` splits to four cells, passes both the
-    offer guard and the paste gate, lands on disk — and the next parse of that row raises,
-    which `diagnose` lifts to error severity. That is a live, currently-shipping wedge.
+    WHAT #954 PINNED AND WHY IT CHANGED. At `505b8d1c` the two candidates were `class` and
+    `attrs."class"`; the second splits to four cells, passed both the offer guard and the
+    paste gate, landed on disk — and the next parse of that row raised, which `diagnose` lifts
+    to error severity. F-47's all-or-nothing rule withheld the pair over it, so this row's
+    author got NO repair at all for a mistake two characters wide. #954 pinned that
+    (`fix == ()`) rather than changing it, because the raw-text rebuild it was shipping
+    changed what the bad candidate looked like and leaving the behaviour untested through that
+    change would have been worse.
 
-    F-H's own observable is pinned alongside: a quoted legal keyword IS an illegal refinement
-    key today (`_row_dict` never unquotes, C16), it stays one, and the repair that would have
-    spliced it behind `attrs.` is not offered.
+    #963 removes the bad candidate at its source rather than withholding around it: the
+    repair is built from the key with its wrapping quotes removed, so a quoted legal keyword
+    yields the keyword and there is no `attrs."class"` to withhold over.
+
+    WHAT DID NOT CHANGE, asserted alongside because it is the half a reader will assume was
+    relaxed: `"class"` is still not the key `class`. In invlang a quote PROTECTS a delimiter
+    and is KEPT — `_split_cells` hands back `"v-001|v-002"` with its quotes and the `:V` row
+    declaring that vertex carries them too — so teaching the key check to unquote would put it
+    at odds with the target match one column to its left.
     """
     doc = attr_doc(MID_TOKEN_QUOTE_ROW)
     d = key_warning(doc)
     assert "'\"class\"'" in d.message, "the quoted keyword is still an illegal key"
-    assert d.fix == ()
+    assert d.fix == ("l-001|v-001|class|hello",)
+    assert not any('attrs."class"' in c for c in d.fix), (
+        "the candidate that splices a refused key behind `attrs.` is gone, not withheld"
+    )
     assert d.locus is not None
     assert d.locus.row_text == MID_TOKEN_QUOTE_ROW
     assert d.severity == "warning"
+
+
+def test_an_empty_key_is_not_repaired_into_an_empty_attribute_name():
+    """`attrs.` is legal-SHAPED and names nothing — the `attrs.<name>` test is a prefix check,
+    so it accepts the bare prefix and would land an attribute whose name is the empty string.
+
+    Reachable only because #963 unquotes before splicing: at base the candidate was `attrs.""`,
+    which the offer guard caught as a quote opening mid-token and withheld. Unquoting makes the
+    splice succeed, so the emptiness has to be refused on its own terms rather than as a side
+    effect of a quote. The `class` route is unaffected and is offered alone — nothing is
+    silently dropped, because for an empty name there is no second route to drop.
+    """
+    d = key_warning(attr_doc('l-001|v-001|""|hello'))
+    assert d.fix == ("l-001|v-001|class|hello",)
+    assert not any(c.endswith("attrs.|hello") for c in d.fix)
+
+
+def test_the_offered_unquoting_repair_actually_pastes(tmp_path):
+    """The repair #963 offers is one `fix_row` accepts and one that clears the flag — the loop
+    the withheld suggestion could not close.
+
+    Driven through the real verb rather than the offer guard: `_candidate_refusal` and the
+    paste gate are two different checks over one row, and an offer that only satisfies the
+    first is the exact shape F-47 was written against.
+    """
+    doc = attr_doc(MID_TOKEN_QUOTE_ROW)
+    d = key_warning(doc)
+    deps, run = main_deps(tmp_path)
+    seed_investigation(run, doc)
+
+    _fix(deps, MID_TOKEN_QUOTE_ROW, d.fix[0])
+
+    after = _inv(run)
+    assert d.fix[0] in after
+    assert _flagged(after) == []
 
 
 def test_an_invisible_character_the_strip_does_not_remove_reaches_model_context_raw():

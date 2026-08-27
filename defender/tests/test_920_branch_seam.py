@@ -544,6 +544,76 @@ def test_a_reused_run_dir_is_refused_rather_than_seeded_over(tmp_path):
             continuation_prompt="continue"), sibling_dir)
 
 
+def test_a_prefix_that_would_not_validate_is_refused_rather_than_seeded(tmp_path):
+    """    A fence-boundary prefix that does not pass invlang validation is refused, even though the
+    SOURCE document passes whole.
+
+    The premise this seam rested on — a valid source gives a valid prefix — is false, and not
+    by a technicality. `_check_lead_refs` asks whether a cited lead is declared ANYWHERE in the
+    document, not whether it was declared first, so a source whose `:R` block cites a lead its
+    `:L findings` block declares one fence LATER is well-formed as a whole and `undeclared
+    lead` when cut between the two. That is exactly the cut this function makes.
+
+    REFUSED rather than seeded, and refused rather than repaired: the sibling would receive a
+    document it did not write, cannot fix — append-only puts the committed bytes out of reach —
+    and every subsequent append of which is refused for a fault that is not its own. It is the
+    same answer, for the same reason, that the fence-count mismatch above already gives: a seed
+    cut wrong is not a seed.
+
+    The third site of #961/#964's class, found by `lint_ungated_artifact_write` on its first
+    run rather than by either issue.
+    """
+    branch = branch_mod()
+    store, run_dir, session_id, _ = _source_run(tmp_path)
+    returns = _fence_turns(store, session_id, [1, 1, 1])
+
+    from defender.skills.invlang.validate import diagnose
+    from defender.tests._invlang_amendment_954 import (
+        VERTICES, attr_block, findings_block,
+    )
+    source_doc = (
+        VERTICES
+        + attr_block("l-001|v-001|class|server")
+        + findings_block("l-001|1|probe|v-001||cmdb|n/a")
+    )
+    assert [d for d in diagnose(source_doc, None) if d.severity != "warning"] == [], (
+        "the fixture's premise: the SOURCE document is well-formed"
+    )
+    (run_dir / "investigation.md").write_text(source_doc, encoding="utf-8")
+
+    sibling_dir = tmp_path / "defender-runs" / "run-sibling-prefix"
+    sibling_dir.mkdir(parents=True, exist_ok=True)
+
+    with pytest.raises(branch.BranchError, match="does not pass validation"):
+        branch.seed_investigation(store, branch.BranchSpec(
+            source_run_dir=run_dir, branch_message_id=returns[1],
+            continuation_prompt="continue"), sibling_dir)
+
+    assert not (sibling_dir / "investigation.md").exists(), (
+        "the refusal came after the write — the sibling holds a document it can never repair"
+    )
+
+
+def test_a_prefix_that_validates_is_still_seeded(tmp_path):
+    """    POSITIVE CONTROL for the check above: the ordinary source, cut at the same kind of
+    boundary, still seeds. Without it an implementation that refused every branch would pass."""
+    branch = branch_mod()
+    store, run_dir, session_id, _ = _source_run(tmp_path)
+    returns = _fence_turns(store, session_id, [1, 1])
+    (run_dir / "investigation.md").write_text(
+        GOLDEN_INVESTIGATION.read_text(encoding="utf-8"), encoding="utf-8")
+    sibling_dir = tmp_path / "defender-runs" / "run-sibling-ok"
+    sibling_dir.mkdir(parents=True, exist_ok=True)
+
+    # The fence COUNT is a fixture detail (`_source_run`'s own opening turn carries the whole
+    # document, so the branch point maps past it); the claim is that a well-formed prefix is
+    # still seeded rather than refused.
+    assert branch.seed_investigation(store, branch.BranchSpec(
+        source_run_dir=run_dir, branch_message_id=returns[0],
+        continuation_prompt="continue"), sibling_dir) > 0
+    assert (sibling_dir / "investigation.md").is_file()
+
+
 def test_message_zero_is_refused_as_a_branch_point(tmp_path):
     """    Message 0 is refused. It precedes every payload the run captured, so both siblings are
     consistent with the prefix by construction and the captured base constrains nothing —

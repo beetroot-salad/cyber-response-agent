@@ -275,14 +275,75 @@ def validate_investigation(proposed_text: str, current: str | None) -> str | Non
             f"investigation.md validation errored — failing closed: {e!r}. "
             f"{UNCHANGED_NOTICE} Simplify the invlang and re-send."
         )
-    errors = [d for d in found if d.severity != "warning"]
-    if errors:
+    rendered = _rendered_errors(found)
+    if rendered is not None:
         return (
             f"investigation.md failed invlang validation. {UNCHANGED_NOTICE}\n\n"
-            + "\n".join(render_diagnostic(d) for d in errors)
+            + rendered
             + "\n\nRe-send the block with those rows corrected."
         )
     return None
+
+
+def _rendered_errors(found: list[Diagnostic]) -> str | None:
+    """The ERROR-severity findings as the model sees them, or `None` when there are none.
+
+    One filter and one renderer for both readings of this schema — the WRITE gate above and
+    the CLOSE gate below. They frame the result differently (a refused write can say the
+    file is unchanged; a refused close offered no bytes to be unchanged FROM) and that is the
+    only thing they differ in, so the frame is the caller's and everything under it is here.
+
+    WARN severity is excluded on both paths for the same reason: it is the repair window
+    `runtime.tools` owns, not a reason to refuse."""
+    errors = [d for d in found if d.severity != "warning"]
+    if not errors:
+        return None
+    return "\n".join(render_diagnostic(d) for d in errors)
+
+
+def committed_investigation_reason(text: str) -> str | None:
+    """Is `investigation.md` AS IT STANDS well-formed enough to publish? The deny reason, or
+    `None`.
+
+    This is the CLOSE's reading of the same schema `validate_investigation` gates writes with,
+    and it is deliberately narrower in two ways:
+
+      * NO BYTE BOUND. The bound is a volume control on what a write ADDS, and a close adds
+        nothing to this document. Enforcing it here would also make the write gate's own
+        refusal text false — over-bound, that text offers "close the investigation on the
+        evidence you already have" as the way out, which is exactly the move a size-checking
+        close would refuse.
+      * NO APPEND-ONLY BASELINE. Append-only is a property of a PROPOSED write judged against
+        history. Nothing is proposed here; this is the committed document, so `diagnose` is
+        given no `current` and the history checks do not run.
+
+    Fails CLOSED on an internal validator error, the same rule the write gate obeys: a gate
+    that cannot look must not report clean.
+
+    WHY THE CLOSE NEEDS ITS OWN READING AT ALL. Every other write verb reaches this module
+    through `permission.decide_write`, so "a committed investigation parses" held by
+    construction — except at the close, which is the one verb that PUBLISHES: it commits the
+    report whose frontmatter the learning loop trains on and hands the parsed companion to the
+    review gate. The one verb that publishes was the one verb that did not check (#961)."""
+    try:
+        found = diagnose(text, None)
+    except Exception as e:  # noqa: BLE001 — a blocking gate must fail closed
+        return (
+            f"close blocked: `investigation.md` could not be validated and the gate fails "
+            f"closed ({e!r}). Repair the document — a close is not permitted while the gate "
+            f"cannot look."
+        )
+    rendered = _rendered_errors(found)
+    if rendered is None:
+        return None
+    return (
+        "close blocked: `investigation.md` does not pass invlang validation, and the close is "
+        "what publishes it — the report commits against this document and the review gate "
+        "reads it.\n\n"
+        + rendered
+        + "\n\nRepair those rows with `fix_row(old_row, new_row)` — or delete one with "
+        '`fix_row(old_row, "")` — and close again.'
+    )
 
 
 def validate_artifact(name: str, proposed_text: str, current: str | None) -> str | None:

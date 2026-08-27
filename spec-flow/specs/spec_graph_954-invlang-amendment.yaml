@@ -493,21 +493,27 @@ demands:
   - id: D17
     kind: domain-outcome
     form: test
-    discharged_by: test_a_quote_opening_mid_token_is_withheld_not_offered
+    discharged_by: test_a_quoted_legal_keyword_is_repaired_by_unquoting_it
     binds:
       - "raw_row.domain.distinguished[mid-token-quote]"
-      - "fix.domain.distinguished[()]"
     note: >
       R4 obligation; settled premise (dispositions' settled-92,
       `a_cell_has_a_quote_that_opens_mid_token`). J11 (executed) grounds the mechanism: a quote
       opening mid-token is exactly what `_row_cells`/`_quotes_wrap_whole_values` raises `RowError`
       on and the width-only guard does not see. AMENDED at phase E: this leaf's note asked for
-      `fix != ()` — today's observable — but §7 has since taken F-M half one (b), re-splitting
+      `fix != ()` — the observable at base — but §7 has since taken F-M half one (b), re-splitting
       the candidate through the parser's own row reader and treating its refusal as "withhold",
-      so the demanded observable is `fix == ()` on a still-flagged row. Pinning `fix != ()` would
-      have hardened the wedge as intended behaviour. F-H's observable rides here too (they are
-      the same live path, J11): a quoted legal keyword stays an illegal refinement key and the
-      `attrs."class"` candidate is not offered.
+      so the demanded observable was `fix == ()` on a still-flagged row. Pinning `fix != ()` would
+      have hardened the wedge as intended behaviour.
+      SUPERSEDED by #963, which removed the bad candidate at its source instead of withholding
+      around it: the repair is now built from the key with its wrapping quotes removed, so a
+      quoted legal keyword yields the keyword itself and there is no `attrs."class"` to withhold
+      over. The `fix.domain.distinguished[()]` binding moves off this leaf with it — three other
+      leaves still bind that value, each over a candidate the offer guard genuinely refuses
+      (fence delimiter, width, a moved cell), so the withholding mechanism keeps its coverage
+      and only this INPUT stops reaching it. F-H's observable still rides here and is unchanged
+      in the half that matters: a quoted legal keyword is STILL an illegal refinement key, and
+      the `attrs."class"` candidate is still not offered.
   - id: D18
     kind: domain-outcome
     form: test
@@ -1588,6 +1594,13 @@ claims:
     probe_kind: executed
     observed: "`attrs.\"class\"` and `attrs.\"a|b\"` both split to 4 and both make the re-parsed document an error. Fork F-M half one is a live, currently-shipping path, and it is the same path fork F-H describes"
     verdict: holds
+  - id: J20
+    kind: behavior
+    claim: "A quote is not stripped from ANY invlang cell, so `\"class\"` is a different key from `class` throughout the format and not only in the key check; and once the repair is built from the unquoted key, no candidate for a quoted spelling opens a `\"` inside a token."
+    probe: "executed `_split_cells` over `a|\"b|c\"|d`, `a|\"class\"|d` and `a|  \"class\"  |d`; then `diagnose` over `attr_doc(row)` for the quoted-legal (`\"class\"`, `\"ident\"`), quoted-attrs (`\"attrs.owner\"`), quoted-illegal (`\"owner\"`) and bare-illegal (`owner`) key cells, plus the mid-token spellings `cl\"ass`, `a\"b`; each offered candidate then driven through the real `fix_row` verb"
+    probe_kind: executed
+    observed: "`_split_cells` returns `\"b|c\"` and `\"class\"` WITH their quotes -- the quote protects the delimiter and is kept, which is also why the `:V` fixture declaring `\"v-001|v-002\"` matches a refinement targeting that same quoted text. After #963 the offers are: `\"class\"` -> (`class`,), `\"ident\"` -> (`ident`,), `\"attrs.owner\"` -> (`attrs.owner`,), `\"owner\"` -> (`class`, `attrs.owner`), `owner` -> (`class`, `attrs.owner`) -- no `attrs.\"...\"` candidate is constructed anywhere. The mid-token spellings never reach the key check at all: the parser refuses them at error severity as `opens a `\"` inside a token`, so the quoted-legal keyword was the ONLY input that produced a quote-opening candidate, and #963 removes it at the source. The offered repair pastes through `fix_row` and clears the window"
+    verdict: holds
   - id: J12
     kind: census
     claim: "The brief's N1/N2 censuses do not close: `skills/invlang/advisory.py` and `skills/invlang/queries.py` reach leads through `Companion.leads`, and `learning/core/persist.py:197` is a second, error-partition intake gate — none of the three appears in N1 or N2."
@@ -1832,7 +1845,9 @@ gate:
     - {rule: R4, element: "raw_row.domain.distinguished[legal-short-row]",
        witness: "F-F's fork, grounded by J10/PO-J2 (executed): today's parsed-cell mechanism pads to full width and pastes cleanly; the raw-text rebuild as specified would emit a short candidate the paste gate rejects, giving up a working repair. Observable content depends on F-F's (a)/(b)/(c) decision; pending Sec.7."}
     - {rule: R4, element: "raw_row.domain.distinguished[quoted-legal-keyword]",
-       witness: "F-H's fork, sharpened by J11 (the attrs.\"class\" wedge is live and shipping); pending Sec.7."}
+       cites: [J11, J20],
+       resolution: "Settled by #963, after #954 pinned the observable rather than changing it. Two questions, answered separately: (1) a quoted legal keyword is NOT accepted as that keyword -- in invlang a quote PROTECTS a delimiter and is KEPT (`_split_cells` returns `\"v-001|v-002\"` with its quotes, and the `:V` row declaring that vertex carries them too), so unquoting in the key check alone would put it at odds with the target match one column left; (2) the offered repair is no longer built by splicing the refused key behind `attrs.` -- it is built from the key with its wrapping quotes removed, which for a quoted legal keyword IS the keyword, and the message says why the quoted spelling was refused.",
+       witness: "F-H's fork, sharpened by J11 (the attrs.\"class\" wedge was live and shipping); closed by #963."}
     - {rule: R4, element: "attr_updates_block.domain.distinguished[header-declares-an-optional-trailing-column]",
        witness: "F-F's own named trigger case; observable content depends on F-F's decision (see raw_row.legal-short-row above, same fork)."}
     - {rule: R4, element: "attr_updates_block.domain.alternatives[declared-width-is-the-headers-full-column-count]",

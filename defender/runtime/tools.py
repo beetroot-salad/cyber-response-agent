@@ -752,6 +752,51 @@ def flagged_diagnostics(deps: AgentDeps) -> tuple[Diagnostic, ...]:
         return ()
 
 
+def committed_document_refusal(deps: AgentDeps) -> str | None:
+    """The close's structural verdict on `investigation.md` as it stands — the refusal text,
+    or `None` when the document is publishable. #961.
+
+    Lives beside `flagged_diagnostics` and not in the close because the two are ONE reading of
+    one document, taken at the same moment, and they have to agree about what "cannot look"
+    means. Splitting them put that agreement in two files the first time and it did not
+    survive the trip.
+
+    THE READ IS STRICT, and that is the whole subtlety. Two conditions look alike from the
+    close and are not:
+
+      * the document DECODES and does not validate — the author wrote something malformed,
+        the close is what publishes it, and it is refused (#961);
+      * the document's BYTES do not decode — nothing can be derived from it at all. That is
+        H7's condition, and #836 settled it: fail OPEN, because converting an unrelated read
+        fault into an unclosable run is the wedge class that mechanism exists to remove.
+
+    Reading leniently (`errors="replace"`) collapses the two and answers the second with the
+    first: the replacement character lands mid-header, the validator reports a broken block
+    the author never wrote, and the run can no longer close. So the strict read is what keeps
+    this gate's `None` meaning "publishable" rather than "unreadable", and the fail-open arm
+    below is what keeps H7 true. A document that never decodes is still gated on the way IN —
+    `append_block` refuses it for its own pre-existing reason — so nothing gated can create
+    one.
+
+    ABSENCE is not a fault: a close on a run with no companion is the entry-price gate's
+    question, not this one's, and it asks it separately."""
+    from defender._artifact_schema import committed_investigation_reason
+
+    p = _investigation_path(deps)
+    if not p.is_file():
+        return None
+    try:
+        text = read_text_utf8(p)
+    except Exception as e:  # noqa: BLE001 — fail open (H7); a wedged run is the worse failure
+        print(
+            f"[tools] investigation.md could not be read for the close's structure check, "
+            f"treating it as publishable: {e!r}",
+            file=sys.stderr,
+        )
+        return None
+    return committed_investigation_reason(text)
+
+
 def _addressable(diags: Iterable[Diagnostic]) -> tuple[Diagnostic, ...]:
     return tuple(d for d in diags if d.locus is not None)
 

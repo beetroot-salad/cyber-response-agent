@@ -239,6 +239,11 @@ def _write_source_refs(
         "alert_rule_key": alert_rule_key,
     }
     with _SHARED_INPUTS_LOCK:
+        # lint-artifact-gate: ok — the artifacts are NAMED here, not written: this is a
+        # manifest of where the source run's files live, and the only file it writes is
+        # `source_refs.yaml`. The gate keys on a write and an artifact name appearing in one
+        # frame, which cannot tell "writes X while naming Y" from "writes Y" — the cost of
+        # asking the question by co-occurrence rather than by dataflow, paid here.
         (learning_run_dir / "source_refs.yaml").write_text(yaml.safe_dump(source_refs), encoding="utf-8")
 
 

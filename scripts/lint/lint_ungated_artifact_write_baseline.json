@@ -1,0 +1,4 @@
+{
+  "//": "lint_ungated_artifact_write baseline — functions under defender/ that write investigation.md or report.md with no content schema applied in the same frame (#961, #964). Fingerprint is file:function (no line number), file relative to the scan scope. CI fails on a fingerprint absent here. This baseline ships EMPTY — both known sites were fixed when the gate landed, so an entry in it is a regression someone chose. Regenerate: python scripts/lint/lint_ungated_artifact_write.py --update-baseline.",
+  "entries": {}
+}
