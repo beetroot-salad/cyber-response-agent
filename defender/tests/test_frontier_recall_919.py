@@ -287,9 +287,9 @@ def _lessons_frontier():
 # corpora
 # --------------------------------------------------------------------------- #
 
-# `_write_lesson` lives in `_lessons_corpus` so a second suite can use it without
-# importing this COLLECTED module (which would load it twice in one session).
-from defender.tests._lessons_corpus import _write_lesson  # noqa: E402
+# `_write_lesson` and `_main_deps` live in `_lessons_corpus` so a second suite can use them
+# without importing this COLLECTED module (which would load it twice in one session).
+from defender.tests._lessons_corpus import _main_deps, _write_lesson  # noqa: E402
 
 
 def _corpus(parent: Path, name: str = "lessons") -> Path:
@@ -315,23 +315,6 @@ def _exit_code(main, argv: list[str]) -> int:
         return int(main(argv))
     except SystemExit as e:
         return int(e.code or 0)
-
-
-def _main_deps(tmp_path: Path):
-    """MAIN deps through the real `bind` seam — real compiled policy, real gate.
-
-    `test_append_only_write_lane_810.py::_main_deps` verbatim, plus the defender tree in the
-    return: the corpus `_tool_append_block` recalls against is `deps`-resolved
-    (`defender_dir/lessons`, MAIN's own `corpus_dirs` entry), so a hermetic test needs the
-    tmp tree the `bind` call was given."""
-    from defender.agents import MAIN_DEF
-    from defender.runtime.agent_definition import bind
-
-    run = tmp_path / "run"
-    run.mkdir()
-    dfn = tmp_path / "defender"
-    dfn.mkdir()
-    return bind(MAIN_DEF, run, defender_dir=dfn), run, dfn
 
 
 # --------------------------------------------------------------------------- #
@@ -1397,10 +1380,10 @@ def test_the_shipped_corpus_reaches_the_motivating_investigation(tmp_path):
     retrieved.
 
     Every other test in this file drives a fixture. This one drives the artefact the issue
-    was filed about — `learning/runs/turnN-A/investigation.md`, the Falco authorized_keys
-    case whose report asserted an attack chain that did not happen — against the REAL 16-file
-    corpus. It is the only test here that can tell "the mechanism works" from "the mechanism
-    works on documents written to suit it"."""
+    was filed about — the `turnN-A` run, the Falco authorized_keys case whose report asserted
+    an attack chain that did not happen — against the REAL 16-file corpus. It is the only test
+    here that can tell "the mechanism works" from "the mechanism works on documents written to
+    suit it"."""
     # The COMMITTED copy under `_golden_invlang/`, not `learning/runs/turnN-A/` — that path is
     # where the run lives and `.gitignore:91` excludes it, so this test, the repo's north star
     # for the whole lane, skipped everywhere but the machine that produced the run (#935).

@@ -1,4 +1,5 @@
-"""Lesson-corpus fixtures shared by the frontier-retrieval suites.
+"""Lesson-corpus fixtures shared by the frontier-retrieval suites — and the MAIN `deps`
+those suites drive `_frontier_recall` through.
 
 HERE rather than in `test_frontier_recall_919.py`, which is where `_write_lesson` was born and
 where `test_lessons_frontier_scale_935.py` first reached for it. Importing a name out of a
@@ -46,3 +47,25 @@ def _write_lesson(
     path = corpus / (filename or f"{name}.md")
     path.write_text("---\n" + "\n".join(lines) + "\n---\n\nlesson body\n", encoding="utf-8")
     return path
+
+
+def _main_deps(tmp_path: Path):
+    """MAIN deps through the real `bind` seam — real compiled policy, real gate.
+
+    `test_append_only_write_lane_810.py::_main_deps` verbatim, plus the defender tree in the
+    return: the corpus `_tool_append_block` recalls against is `deps`-resolved
+    (`defender_dir/lessons`, MAIN's own `corpus_dirs` entry), so a hermetic test needs the
+    tmp tree the `bind` call was given.
+
+    HERE for the same reason `_write_lesson` is: three suites drive this seam, and reaching for
+    it inside a COLLECTED module is what loads that module twice in one session. The two
+    imports below stay lazy so this module costs nothing to import without the runtime extra.
+    """
+    from defender.agents import MAIN_DEF
+    from defender.runtime.agent_definition import bind
+
+    run = tmp_path / "run"
+    run.mkdir()
+    dfn = tmp_path / "defender"
+    dfn.mkdir()
+    return bind(MAIN_DEF, run, defender_dir=dfn), run, dfn

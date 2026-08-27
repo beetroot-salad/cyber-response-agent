@@ -344,7 +344,7 @@ def test_the_recall_fast_path_sees_a_delimiter_that_straddles_the_seam(tmp_path)
     is ever relaxed — which is exactly when a tautological test would have said nothing."""
     from defender.runtime.tools import _frontier_recall
     from defender.skills.invlang.frontier import frontier_from_text
-    from defender.tests.test_frontier_recall_919 import _main_deps, _write_lesson
+    from defender.tests._lessons_corpus import _main_deps, _write_lesson
 
     deps, _run, dfn = _main_deps(tmp_path)
     corpus = dfn / "lessons"

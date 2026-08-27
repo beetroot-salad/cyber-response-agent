@@ -116,16 +116,16 @@ def _match(text: str, *, top_k: int = LF.DEFAULT_TOP_K) -> list:
     return LF.match_lessons(frontier_from_text(text), CORPUS, top_k=top_k)
 
 
-def _replayed(path: Path) -> list[tuple[int, list[str]]]:
-    """`(fence index, the names the model is handed)` for every prefix of a real run.
+def _prefixes(text: str) -> list:
+    """The frontier after each of `text`'s first `n` fences, for every `n` in `0..total`.
 
-    Fence by fence because that is when the recall FIRES: `_frontier_recall` derives the block
-    over the pre- and post-append document and injects only when the two differ, so a defect
-    that shows up as "the same three lessons as last time" is invisible to any test that scores
-    the terminal document once."""
-    text = path.read_text(encoding="utf-8")
+    ONE list, walked once. Fence by fence because that is when the recall FIRES:
+    `_frontier_recall` derives the block over the pre- and post-append document and injects only
+    when the two differ, so a defect that shows up as "the same three lessons as last time" is
+    invisible to any test that scores the terminal document once. Every caller below wants both
+    `n` and `n - 1`, and `frontier_at` re-scans and re-parses the whole document per call."""
     total = frontier_at(text, sys.maxsize).total
-    return [(n, _names(LF.match_lessons(frontier_at(text, n).frontier, CORPUS))) for n in range(total + 1)]
+    return [frontier_at(text, n).frontier for n in range(total + 1)]
 
 
 # --------------------------------------------------------------------------- #
@@ -387,17 +387,20 @@ def test_the_block_moves_on_the_append_that_opens_an_authorization_question(labe
     Asserted on the RENDERED block, which is the thing the diff actually compares."""
     assert path.is_file(), f"{label}'s document is tracked and must be present ({path})"
     text = path.read_text(encoding="utf-8")
-    total = frontier_at(text, sys.maxsize).total
+    # ONE walk of the prefixes. `frontier_at` re-scans the fences and re-parses the rebuilt
+    # prefix on every call, so asking for `n` and `n - 1` inside the comprehension paid for the
+    # whole document twice per fence.
+    prefixes = _prefixes(text)
 
     opened = [
-        n for n in range(1, total + 1)
-        if frontier_at(text, n).frontier.contracts and not frontier_at(text, n - 1).frontier.contracts
+        n for n in range(1, len(prefixes))
+        if prefixes[n].contracts and not prefixes[n - 1].contracts
     ]
     assert opened, f"{label} never opens an authorization contract — the fixture moved"
 
     for n in opened:
-        before = LF.render(LF.match_lessons(frontier_at(text, n - 1).frontier, CORPUS))
-        after = LF.render(LF.match_lessons(frontier_at(text, n).frontier, CORPUS))
+        before = LF.render(LF.match_lessons(prefixes[n - 1], CORPUS))
+        after = LF.render(LF.match_lessons(prefixes[n], CORPUS))
         assert after != before, (
             f"{label} fence {n} opened a contract and the block did not move — "
             f"`_frontier_recall` would inject nothing:\n{after}"
@@ -486,8 +489,7 @@ def test_no_replayed_block_leaves_an_open_thing_unrepresented(label, path):
     runner-up on a covered item is the right answer there."""
     assert path.is_file(), f"{label}'s document is tracked and must be present ({path})"
     text = path.read_text(encoding="utf-8")
-    for n in range(frontier_at(text, sys.maxsize).total + 1):
-        frontier = frontier_at(text, n).frontier
+    for n, frontier in enumerate(_prefixes(text)):
         emitted = [h.matched for h in LF.match_lessons(frontier, CORPUS)]
         available = {h.matched for h in LF.match_lessons(frontier, CORPUS, top_k=99)}
         assert len(set(emitted)) == min(LF.DEFAULT_TOP_K, len(available)), (
@@ -507,16 +509,16 @@ def test_the_loginuid_lesson_survives_every_fence_of_its_own_run():
     _, path = REPLAYED_RUNS[1]
     assert path.is_file(), f"turnN-A's document is tracked and must be present ({path})"
 
-    text = path.read_text(encoding="utf-8")
+    prefixes = _prefixes(path.read_text(encoding="utf-8"))
     holds = [
-        n for n in range(frontier_at(text, sys.maxsize).total + 1)
-        if any(h.slot == "attrs.loginuid" for h in frontier_at(text, n).frontier.held)
+        n for n, frontier in enumerate(prefixes)
+        if any(h.slot == "attrs.loginuid" for h in frontier.held)
     ]
     assert holds, "turnN-A no longer settles `attrs.loginuid` — the fixture moved"
 
     for n in holds:
         assert LOGINUID_LESSON in _names(
-            LF.match_lessons(frontier_at(text, n).frontier, CORPUS)
+            LF.match_lessons(prefixes[n], CORPUS)
         ), f"the loginuid lesson fell out of the block at fence {n}, where the run holds the value"
 
 
@@ -559,8 +561,9 @@ def test_moving_which_vertex_wins_a_tie_does_not_re_staple_the_same_lessons(tmp_
     ordinary document growth — the defect is a latent one. `_frontier_recall` takes the two
     texts directly, which is the seam that makes the invariant testable at all, and the
     invariant is what the gate promises rather than what today's documents happen to exercise."""
+    pytest.importorskip("pydantic_ai")  # as the two sibling suites do at module scope
     from defender.runtime.tools import _frontier_recall
-    from defender.tests.test_frontier_recall_919 import _main_deps
+    from defender.tests._lessons_corpus import _main_deps
 
     deps, _run, dfn = _main_deps(tmp_path)
     corpus = dfn / "lessons"
@@ -604,33 +607,47 @@ v-007|identity|user/known-corp|jsmith|loginuid=??
     )
 
 
-def test_an_open_selector_slot_pins_nothing_against_an_open_case_slot(tmp_path):
-    """CLAIM: a class pattern spelled `??` says as little as `*` does — it neither pins nor
-    anchors against a case slot that is also open.
+def test_an_unresolved_selector_slot_says_exactly_what_a_wildcard_says(tmp_path):
+    """CLAIM: a class-pattern slot the AUTHOR left unresolved — `??` or a candidate set —
+    behaves identically to `*`: it never pins, never anchors, and never refuses.
 
-    The inversion this scoring exists to refuse, wearing the open marker instead of a class
-    literal. `??` compares EQUAL to an open case slot, so it set `anchored` and then collected
-    every following slot as a pin: `??/internet/novel` against `??/??/??` scored a full pinned
-    triple for a selector that agrees with the document about nothing, where the honest
-    `*/internet/novel` scores zero. `learning/author/lessons/prompt.md` steers authors off
-    `class: '*'` because a bare `*` opens a YAML alias — which is exactly what makes `??` the
-    spelling they reach for.
+    Two defects meet here, and the second is why "never refuses" is in the claim.
 
-    Pre-existing, and harmless while every node selector scored 2; the weights turned a
-    fabricated pin into a block-saturating score."""
-    wholly_open = "??/??/??"
-    assert LF._class_pins("??/internet/novel", wholly_open, "compute") == 0, (
-        "an all-open selector anchored on the open marker and collected the rest as pins"
+    It used to ANCHOR. `??` compares equal to an open case slot, so `??/internet/novel`
+    against `??/??/??` anchored on slot 0 and collected slots 1 and 2 as pins — a full pinned
+    triple for a selector agreeing with the document about nothing, where the honest
+    `*/internet/novel` scores zero. That is the inversion this scoring exists to refuse,
+    wearing the open marker. Harmless while every node selector scored 2; the new weights made
+    it block-saturating.
+
+    Refusing was the OTHER half, and it made the marker non-monotonic. A first fix credited
+    nothing but still refused against a SETTLED case slot, so `??/internet/novel` matched
+    `??/??/??` and returned `None` once a refinement settled slot 0 — the retrieval going dark
+    on the write that made the document more specific, which is exactly what
+    `test_recording_more_about_a_class_slot_never_loses_a_selector` forbids and what this whole
+    change exists to remove. A slot that says nothing cannot also constrain.
+
+    Asserted as EQUIVALENCE to `*` over a refinement sequence rather than as three numbers,
+    because that is the property: whatever the wildcard does, the unresolved spellings do."""
+    refinements = ("??/??/??", "bastion/??/??", "bastion/internet/??", "bastion/internet/novel")
+    wildcard = [LF._class_pins("*/internet/novel", c, "compute") for c in refinements]
+
+    for spelling in ("??/internet/novel", "{internal, dmz}/internet/novel"):
+        assert [
+            LF._class_pins(spelling, c, "compute") for c in refinements
+        ] == wildcard, (
+            f"`{spelling}` does not say what `*` says — an unresolved slot the author wrote "
+            f"is either crediting a pin it did not earn or refusing a match it cannot refuse"
+        )
+    # ...and the sequence it agrees with is itself monotonic, so the equivalence above is not
+    # two functions being wrong together.
+    assert None not in wildcard, f"the wildcard baseline stopped matching: {wildcard}"
+    assert wildcard == sorted(wildcard), (
+        f"the wildcard baseline is not monotonic: {wildcard}"
     )
-    assert LF._class_pins("*/internet/novel", wholly_open, "compute") == 0, (
-        "the honest spelling of the same non-statement changed answer"
-    )
-    # ...and NARROWED, not widened: `??` against a SETTLED slot is still a disagreement, so it
-    # must still refuse rather than wildcard through.
-    assert LF._class_pins("??/internet", "bastion/??/??", "compute") is None, (
-        "an open selector slot started matching a settled case slot"
-    )
-    # ...and a real pin beside it is untouched.
-    assert LF._class_pins("ip-only/??", "ip-only/??/??", "compute") == 1, (
-        "the open slot stopped costing nothing where the other slot genuinely anchored"
+
+    # ...and NARROWING the credit did not widen the MATCH: a concrete selector slot still
+    # refuses a case slot settled to something else, which is the clause all of this sits on.
+    assert LF._class_pins("bastion/internet", "ip-only/??/??", "compute") is None, (
+        "a concrete slot stopped refusing a case slot that disagrees with it"
     )

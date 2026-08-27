@@ -287,8 +287,11 @@ def _class_pins(selector_class: str, case_class: str, vertex_type: str) -> int |
     #     still admitted against `??` or `??/??` — refusing it would make the most open cell
     #     match the FEWEST selectors, the inverse of what the inversion exists for.
     arity = max(vocab.class_arity(vertex_type), len(case))
-    if all(is_open_slot(c) for c in case):
-        arity = max(arity, len(sel))
+    if len(sel) > arity and all(is_open_slot(c) for c in case):
+        # Guarded on the LENGTH first, which is the only way the widening can change anything:
+        # `max(arity, len(sel))` is a no-op below that bound, and this scan otherwise ran per
+        # (selector x frontier item) pair on the hot path of every frontier-moving write.
+        arity = len(sel)
     # Past the widenings, a selector naming more slots than the type HAS is mis-authored — the
     # same class of fault `_node_selector` drops a non-scalar cell for — and it matches nothing.
     if len(sel) > arity:
@@ -300,19 +303,32 @@ def _class_pins(selector_class: str, case_class: str, vertex_type: str) -> int |
     for i, s in enumerate(sel):
         if not s or s == WILDCARD:
             continue
-        # A selector slot spelled `??` against a case slot that is ALSO open is two cells
-        # agreeing they are unsettled — the same non-statement a bare `*` makes, so it
-        # neither pins nor anchors. Crediting it was the inversion this function exists to
-        # refuse, wearing the open marker instead of a class literal: `??/internet/novel`
-        # against `??/??/??` anchored on slot 0 and then collected slots 1 and 2 as pins, so
-        # a selector that agreed with the document about NOTHING scored a full pinned triple
-        # and outranked every honest match. `learning/author/lessons/prompt.md` steers
-        # authors off `class: *` (it opens a YAML alias), which is exactly what makes `??`
-        # the spelling they reach for instead.
+        # An UNRESOLVED selector slot says NOTHING, in both directions — exactly what a bare
+        # `*` says, and skipped by the same `continue` for the same reason. `??` and a
+        # candidate set are the document's own spellings for "not settled", and nothing
+        # validates a selector's values, so a curator quoting a cell back verbatim writes one.
         #
-        # Only when BOTH sides are open: `??` against a SETTLED slot falls through and still
-        # earns the refusal below, so this narrows the credit without widening the match.
-        if s == OPEN_MARKER and is_open_slot(case[i]):
+        # It used to ANCHOR. `??` compares equal to an open case slot, so `??/internet/novel`
+        # against `??/??/??` anchored on slot 0 and then collected slots 1 and 2 as pins: a
+        # selector agreeing with the document about nothing scored a full pinned triple and
+        # outranked every honest match. That is the inversion this function exists to refuse,
+        # wearing the open marker instead of a class literal.
+        #
+        # `is_open_slot(s)`, not `s == OPEN_MARKER`, because the marker is one spelling of
+        # unsettled and the candidate set is the other — a quoted `'{internal, dmz}/internet'`
+        # against a case still carrying that set is the identical fabrication, one spelling
+        # over. One predicate decides "does this slot say anything", on both sides.
+        #
+        # UNCONDITIONAL, and that is the half a narrower rule got wrong (#935 review). Gating
+        # it on the CASE slot also being open left `??` scoring as a non-statement but
+        # REFUSING as a constraint: `??/internet/novel` matched `??/??/??` and then returned
+        # `None` the moment a refinement settled slot 0 to `bastion`, so the retrieval went
+        # dark on the write that made the document more specific — the non-monotonicity
+        # `test_recording_more_about_a_class_slot_never_loses_a_selector` forbids, and the one
+        # this whole change exists to remove. A slot that says nothing cannot also refuse; if
+        # a lesson is ever meant to say "this slot must still be OPEN", that is a new selector
+        # field with its own name, not a second meaning for the marker.
+        if is_open_slot(s):
             continue
         pinned += 1
         if s == case[i]:
@@ -475,7 +491,11 @@ def _best_match(selectors: _Selectors, frontier: Frontier) -> tuple[int, str] | 
 def match_lessons(
     frontier: Frontier, corpus: Path, *, top_k: int = DEFAULT_TOP_K
 ) -> list[Hit]:
-    """The `top_k` lessons that speak most precisely to something still open."""
+    """The `top_k` lessons the block is built from — the head of `_spread_over_items`' order.
+
+    NOT simply "the `top_k` highest-scoring": the head covers as many DISTINCT frontier items as
+    the matches allow before any one item takes a second slot, so a lower-scoring lesson about
+    an unrepresented question outranks the runner-up on a question already covered (#935)."""
     # A NEGATIVE `top_k` would reach `hits[:top_k]` as a negative slice and return everything
     # BUT the last few — the opposite of a cap, on the one surface whose whole job is to bound
     # what the model is handed. Checked here as well as in `match_loaded` so an empty answer
