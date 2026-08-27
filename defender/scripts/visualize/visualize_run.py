@@ -280,7 +280,9 @@ def _phase_bar(values: dict[str, float], phase_order: list[str], fmt) -> str:
     if total <= 0:
         return '<div class="empty">(no per-phase attribution)</div>'
     segs: list[str] = []
-    for ph in phase_order:
+    # One segment per BUCKET: `total` sums the dict, so a name drawn once per appearance in
+    # the order would make the widths sum past 100% and spill out of the bar.
+    for ph in dict.fromkeys(phase_order):
         v = values.get(ph, 0.0) or 0.0
         if v <= 0:
             continue
@@ -483,7 +485,11 @@ def render_runtime_page(run_dir: Path) -> str:
     gather_by_phase, gather_total = gather_cost_by_phase(
         run_dir, events, tags, phase_order, main_total, result_total, messages
     )
-    for ph in phase_order:
+    # `dict.fromkeys`, not `phase_order`: the order is a RENDER list and may repeat a name
+    # (two GATHER headers with no PLAN between them normalize to the same `GATHER (loop N)`),
+    # while every number here lives in a dict keyed on that name — so a repeat is one bucket
+    # visited twice, and the `+=` would bill its gather cost once per visit.
+    for ph in dict.fromkeys(phase_order):
         attribution[ph]["gather_cost"] = gather_by_phase.get(ph, 0.0)
         attribution[ph]["cost"] += gather_by_phase.get(ph, 0.0)
     # The review's spend is totalled but deliberately NOT attributed to a phase: the
@@ -495,7 +501,9 @@ def render_runtime_page(run_dir: Path) -> str:
     g_wall_to, g_wall_from = gather_wall_by_phase(
         run_dir, events, tags, phase_order, messages
     )
-    for ph in phase_order:
+    # Distinct names again, and here it is worse than a double-add: the second visit reads
+    # `duration_sec` back out of the entry the first one just wrote, so the shift compounds.
+    for ph in dict.fromkeys(phase_order):
         d = wall_times.get(ph) or {"start": None, "end": None, "duration_sec": 0.0}
         base = d.get("duration_sec", 0.0) or 0.0
         moved = min(g_wall_from.get(ph, 0.0), base)
