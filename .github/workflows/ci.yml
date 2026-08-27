@@ -778,6 +778,19 @@ jobs:
       - name: Silent invlang row drop gate (warn or land before you drop, #876 — baseline-ratcheted)
         run: defender/.venv/bin/python scripts/lint/lint_silent_row_drop.py
 
+      # A reader that splits an investigation on its ```invlang fences must go through
+      # `parser.scan_fences`, which hands back what the fences ORPHAN alongside what they
+      # hold. Three readers had derived the split independently and all three dropped the
+      # complement in silence — content outside a fence never reaches the tokenizer, so it
+      # cannot even raise a ParseWarning, and a run's whole PLAN section parsed to an empty
+      # companion that every hypothesis-side rule then passed vacuously (#932). Two arms:
+      # binding INVLANG_FENCE_RE (import or attribute, any `as` name) and re-deriving the
+      # ```invlang pattern in an `re` call. Baseline ships EMPTY — all five sites were
+      # folded when the gate landed. NOT mechanized: computed access, a `str.split` fence
+      # walk, and whether a scan_fences caller reads `orphaned_headers` at all.
+      - name: Unaccounted invlang fence scan gate (route through scan_fences, #932 — baseline-ratcheted)
+        run: defender/.venv/bin/python scripts/lint/lint_unaccounted_fence_scan.py
+
       # For symbols this PR removed, the post-PR tree must hold no surviving reference.
       # Needs the merge-base with origin/main — hence `fetch-depth: 0` on the checkout
       # above. Fails CLOSED: exit 2 if the base ref or the merge-base is unavailable, so

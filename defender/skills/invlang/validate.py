@@ -14,12 +14,12 @@ from .parser import (
     _CONCLUDE_SUBTABLE_FIELDS,
     COMMITMENT_ID_RE,
     HYPOTHESIS_ID_RE,
-    INVLANG_FENCE_RE,
     ParseWarning,
     deferred_hypothesis_ids,
     is_conclude_empty_marker,
     iter_blocks,
     parse_dense_companion,
+    scan_fences,
 )
 from .schema import (
     AuthorizationContract,
@@ -103,14 +103,58 @@ def _normalize_newlines(text: str) -> str:
 
 
 
-def _check_surface(proposed_text: str) -> list[str]:
+def _check_surface(proposed_text: str, current_text: str | None = None) -> list[str]:
+    """The on-disk surface is ```invlang fences, and this is the family that says so.
+
+    Two ways to miss it. Writing the block under a ```yaml fence is the loud one — the
+    document says invlang and the fence says otherwise. Writing it under NO fence is the
+    quiet one, and it is the one that cost a run: a model that closes its ORIENT fence,
+    writes a paragraph of prose, then continues with `## PLAN` and its `:H` blocks without
+    reopening produces a file that reads correctly to a human and parses to nothing.
+    `parse_dense_companion` returns no hypotheses, so #23, #5's declaring half, #6 and #34
+    all have nothing to look at and all pass in silence, and `_check_append_only` — which
+    counts ```invlang pairs and refuses a DECREASE — sees no decrease, because the write
+    added no pair rather than removing one. Every hypothesis-side gate stood down on a
+    document whose PLAN was never validated (#932, run `live-867-old`).
+
+    `parser.scan_fences` does the accounting and carries the reasons the complement is
+    reported rather than raised, and why a trailing unterminated fence is exempt. What is
+    decided HERE is the policy over it.
+
+    **Scoped to what THIS write introduces**, by comparing counts against the baseline rather
+    than refusing any unfenced header in the document. `investigation.md` is append-only: a
+    file that already carries unfenced rows cannot have them fenced after the fact, so a
+    whole-document reading would refuse every later write for bytes no repair can reach —
+    the append-only wedge the v2.22 delta closed on rules #6 and #17. A count comparison also
+    survives `fix_row`, which rewrites a row in place and adds no header. With no baseline
+    every unfenced header is new, which is the right reading for a first write.
+
+    The repair is the one the author can take: re-send the block inside a ```invlang fence.
+    Bytes already committed unfenced stay as prose and parse to nothing, which is what they
+    already did; the correctly fenced copy is what lands.
+    """
     if _YAML_FENCE_RE.search(proposed_text):
         return [
             "non-invlang surface: investigation.md contains a ```yaml/```yml "
             "fenced block, but the on-disk surface is ```invlang (defender "
             "SKILL §dense format). Rewrite the block(s) as ```invlang."
         ]
-    return []
+    proposed_unfenced = list(scan_fences(proposed_text).orphaned_headers)
+    baseline = len(scan_fences(current_text).orphaned_headers) if current_text is not None else 0
+    if len(proposed_unfenced) <= baseline:
+        return []
+    introduced = proposed_unfenced[baseline:]
+    shown = ", ".join(repr(line.strip()) for line in introduced[:3])
+    if len(introduced) > 3:
+        shown += f", … ({len(introduced)} in all)"
+    return [
+        f"non-invlang surface: this write adds {len(introduced)} block header(s) OUTSIDE "
+        f"any ```invlang fence — {shown}. Content outside a fence is not parsed, so the "
+        f"rows under those headers reach no validator rule and no corpus query: they are "
+        f"invisible, not merely unchecked. This is what a `## PLAN` section written after a "
+        f"closed fence looks like. Re-send the block with ```invlang on its own line before "
+        f"the first header and ``` after the last row."
+    ]
 
 
 
@@ -690,8 +734,8 @@ def _check_append_only(
         return []
     errors: list[str] = []
 
-    cur_fences = len(INVLANG_FENCE_RE.findall(current_text))
-    new_fences = len(INVLANG_FENCE_RE.findall(proposed_text))
+    cur_fences = len(scan_fences(current_text).bodies)
+    new_fences = len(scan_fences(proposed_text).bodies)
     if new_fences < cur_fences:
         errors.append(
             f"append-only violation: proposed content has {new_fences} ```invlang "
@@ -3624,7 +3668,7 @@ def diagnose(
         current_text = _normalize_newlines(current_text)
 
     found: list[Diagnostic] = []
-    found.extend(_plain(_check_surface(proposed_text)))
+    found.extend(_plain(_check_surface(proposed_text, current_text)))
 
     companion, warnings = parse_dense_companion(proposed_text)
     current_companion: CompanionBody | None = None

@@ -236,6 +236,75 @@ _EDGE_COLS = ["id", "rel", "src", "tgt", "when", "auth_kind:source", "attrs"]
 _SURVIVING_COLS = ["hyp_id", "final_weight"]
 
 
+@dataclass(frozen=True)
+class FenceScan:
+    """What a document's ```invlang fences enclose, AND what they leave out.
+
+    THE ONE PLACE that answers "which bytes are invlang content". Three readers had derived
+    it independently — the tokenizer, the frontier's prefix rebuild, and the turn-N seed
+    slicer — each restating in prose that fences are the content and the rest is ignored,
+    and each blind to the same thing in the same way. Ignoring the rest is correct; ignoring
+    it SILENTLY is what let a run's whole PLAN section sit outside a fence, parse to nothing,
+    and clear every hypothesis-side rule vacuously (#932).
+
+    So the complement rides along with the content and cannot be taken without it. `bodies`
+    and `spans` are what the fences hold; `orphaned_headers` is the accounting — lines that
+    open a block (`_HEADER_ATTEMPT_RE`) while sitting outside every fence, which is content
+    the author wrote and no reader will ever see.
+
+    **This type reports; it does not refuse.** Whether an orphan is an error, and for whom,
+    is policy: `validate._check_surface` refuses only the orphans a given WRITE introduces,
+    because `investigation.md` is append-only and bytes already committed cannot be fenced
+    after the fact. Raising here instead would wedge every later write on a document already
+    broken, and would turn the frontier and seed readers — which must never raise — into
+    paths that do.
+
+    A TRAILING UNTERMINATED ```invlang counts as open to end-of-document. That is a write cut
+    off mid-block: the next append closes it and the rows parse, a shape
+    `tests/test_frontier_recall_919.py` fixes as accepted by design. Rows orphaned after a
+    CLOSED fence are permanent — no later append reaches back to wrap committed bytes — so
+    only those are reported."""
+
+    #: The text inside each fence, in document order — `INVLANG_FENCE_RE`'s group(1).
+    bodies: tuple[str, ...]
+    #: `(start, end)` of each FULL fence — the ```invlang delimiter through the closing
+    #: ``` — against the original text. Full, not the enclosed region: the turn-N seed
+    #: slicer cuts a document at `spans[n-1][1]` and an inner bound would drop the closing
+    #: delimiter, and the trailing-unterminated test below asks whether an ```invlang
+    #: occurrence sits inside an already-matched fence, which an inner bound never contains.
+    spans: tuple[tuple[int, int], ...]
+    #: Block-opening lines that fell outside every fence, as the author wrote them.
+    orphaned_headers: tuple[str, ...]
+
+
+def scan_fences(text: str) -> FenceScan:
+    """Split `text` into what the ```invlang fences enclose and what they orphan.
+
+    Never raises and never refuses — see `FenceScan`. Every reader of fenced content goes
+    through here so that the complement is accounted for once, in the open, rather than
+    dropped on the floor three times."""
+    matches = list(INVLANG_FENCE_RE.finditer(text))
+    spans = [m.span() for m in matches]
+    tail = text.rfind("```invlang")
+    if tail != -1 and not any(a <= tail < b for a, b in spans):
+        spans.append((tail, len(text)))
+    orphans: list[str] = []
+    offset = 0
+    for line in text.split("\n"):
+        start, end = offset, offset + len(line)
+        offset = end + 1
+        if not _HEADER_ATTEMPT_RE.match(line):
+            continue
+        if any(a <= start and end <= b for a, b in spans):
+            continue
+        orphans.append(line)
+    return FenceScan(
+        bodies=tuple(m.group(1) for m in matches),
+        spans=tuple(m.span() for m in matches),
+        orphaned_headers=tuple(orphans),
+    )
+
+
 def iter_blocks(text: str) -> Iterator[Block]:
     """Every invlang `Block` in `text`, in document order, with its DECLARED header and its
     rows as the author wrote them.
@@ -247,11 +316,11 @@ def iter_blocks(text: str) -> Iterator[Block]:
 
     Kept out of the companion deliberately: carrying per-row provenance on the records inflated
     the parsed body by up to 25%, and that body is projected into the review lens prompts."""
-    for fence in INVLANG_FENCE_RE.finditer(text):
+    for body in scan_fences(text).bodies:
         # Blocks only. A caller at this layer is quoting a ROW back under its block, and a
         # line that reached no block has no block to quote it under; `parse_dense_companion`
         # is where the tokenizer's warnings are collected and refused on.
-        yield from _tokenize_fence(fence.group(1))[0]
+        yield from _tokenize_fence(body)[0]
 
 
 def _vertex_record(block: Block, row: str) -> VertexRecord:
@@ -1985,8 +2054,8 @@ def parse_dense_companion(
 ) -> tuple[CompanionBody, list[ParseWarning]]:
     blocks: list[Block] = []
     warnings: list[ParseWarning] = []
-    for match in INVLANG_FENCE_RE.finditer(text):
-        fence_blocks, fence_warnings = _tokenize_fence(match.group(1))
+    for body in scan_fences(text).bodies:
+        fence_blocks, fence_warnings = _tokenize_fence(body)
         blocks.extend(fence_blocks)
         warnings.extend(fence_warnings)
     # Return the warnings, not `[]`. A fence whose FIRST header was rejected opens no block at

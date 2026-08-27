@@ -95,7 +95,17 @@ def test_real_corpus_companion_is_byte_identical(case):
 
 
 
-_PRODUCTION_SURFACE = ["parse_dense_companion", "ParseWarning", "INVLANG_FENCE_RE"]
+_PRODUCTION_SURFACE = [
+    "parse_dense_companion",
+    "ParseWarning",
+    "INVLANG_FENCE_RE",
+    # The fence split itself, and the type that carries what the fences ORPHAN
+    # alongside what they hold. Production surface since #932 — `validate`,
+    # `frontier` and `runtime.branch` all import it, and a lint gate directs every
+    # new reader here, so renaming it is a breaking change and not an internal one.
+    "scan_fences",
+    "FenceScan",
+]
 _TEST_SURFACE = [
     "RowError",
     "_resolution_record",
@@ -124,6 +134,12 @@ def test_reexported_symbols_keep_their_kind():
     assert callable(parser._split_cells)
     assert issubclass(parser.RowError, ValueError)
     assert hasattr(parser.INVLANG_FENCE_RE, "finditer")
+    assert callable(parser.scan_fences)
+    # A frozen dataclass with all three halves of the accounting — the complement
+    # cannot be dropped from the type without this failing.
+    assert parser.FenceScan.__dataclass_fields__.keys() == {
+        "bodies", "spans", "orphaned_headers",
+    }
     assert parser._VERTEX_COLS == ["id", "type", "class", "ident", "attrs"]
     assert parser._EDGE_COLS[:2] == ["id", "rel"]
     assert isinstance(parser._HYP_HEADER_COLS, set)
