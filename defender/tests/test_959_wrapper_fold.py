@@ -119,12 +119,26 @@ def test_no_word_is_parsed_as_a_wrapper():
         [["bash", "-c", f"cat {REPORT} | wc -l"]]
     ]
     assert _parsed("bash -c 'bash -c \"echo hi\"'") == [[["bash", "-c", 'bash -c "echo hi"']]]
-    # The reason itself must stop describing a step the parser does not take: a model told its
+    # The reason itself must stop DESCRIBING a step the parser does not take: a model told its
     # wrapper "did not fold to a single command string" would go on trying to spell one.
-    for word in ("bash -c", "wrapper", "-lc"):
-        assert word not in permission.UNTOKENIZABLE_REASON.replace(
-            "`bash -c '<cmd>'` is refused as an ungranted program", ""
-        ), f"the lexing reason still describes a wrapper step ({word!r})"
+    #
+    # Stated over the numbered CAUSES, not over the whole message. The first spelling of this
+    # scanned the whole reason with the one sentence this change added carved out by a
+    # byte-for-byte `.replace()` - a guard whose search surface was the text under review minus
+    # the text under review, so it could not fail on the only occurrence it was written for,
+    # and any reword of that sentence would have failed it on prose and sent the next author to
+    # edit the carve-out. The causes are the part that must not describe a fold; the closing
+    # paragraph is where the message is allowed to say what `bash -c` earns instead.
+    causes = "\n".join(
+        line for line in permission.UNTOKENIZABLE_REASON.splitlines()
+        if line.startswith("(")
+    )
+    assert causes.count("(") >= 4, "the numbered causes stopped being parseable as a list"
+    for word in ("bash -c", "wrapper", "-lc", "fold"):
+        assert word not in causes, (
+            f"a numbered lexing cause still describes a wrapper step ({word!r}) - the parser "
+            "does not take one, so no cause may be about one"
+        )
 
 
 def test_a_newline_inside_a_quoted_argument_is_the_unclosed_quote_it_looks_like():
@@ -194,6 +208,35 @@ def test_a_timeout_prefix_is_not_a_wrapper_and_is_never_folded_away():
         "the lexing reason names a `timeout` prefix, and the parser has no opinion about one - "
         "the only sentence the model is ever shown about this would be a sentence about nothing"
     )
+
+
+def test_an_ungranted_first_word_answers_before_any_classification_of_the_rest():
+    """The consequence #971 accepts rather than repairs, pinned so nobody repairs it.
+
+    Adapter classification reads argv[0]. While the fold existed, `timeout 60 defender-elastic
+    query foo` had its prefix deleted first, so argv[0] was the adapter and the model got the
+    message that names the `query` tool it should have used - a REDIRECTION, the most useful
+    message this gate has. It does not any more: argv[0] is `timeout`, an ungranted program,
+    and the capability reason answers.
+
+    That is correct, and it is not worth fixing. The command's FIRST problem really is
+    `timeout`; the message says so; and dropping the prefix gets the adapter message on the
+    next turn. The alternative - teaching the classifier to look past a leading `timeout` or
+    `bash` - puts word-level special casing back into a second place, one layer below the
+    parser it was just removed from, where it would be subject to exactly the mis-reading that
+    made the fold a widening. One extra turn is the price of not having that."""
+    for policy in (base.MAIN, base.GATHER):
+        bare = _bash("defender-elastic query foo", policy)
+        assert bare.reason == permission.ADAPTER_RETIRED_REASON, (
+            "the adapter message no longer answers a bare adapter command - the classification "
+            "this test scopes has broken, not just its reach"
+        )
+        prefixed = _bash("timeout 60 defender-elastic query foo", policy)
+        assert prefixed.reason == policy.deny_reason, (
+            "an ungranted first word stopped answering first. If this is now the adapter "
+            "message, something taught the classifier to look past a prefix - which is the "
+            "special casing #971 removed, rebuilt one layer down"
+        )
 
 
 def test_a_blank_glued_to_an_ungranted_word_is_not_blamed_for_the_refusal():

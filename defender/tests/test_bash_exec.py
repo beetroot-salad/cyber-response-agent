@@ -57,15 +57,20 @@ def test_two_stage_pipe(tmp_path):
 @pytest.mark.parametrize(("cmd", "rc", "out"), [
     ("echo hello | cat | cat", 0, "hello\n"),        # pipes chain past two stages
     ("echo 'a | b'", 0, "a | b\n"),                  # a QUOTED pipe is data, not a split
-    ("bash -c 'echo wrapped'", 0, "wrapped\n"),      # the inline -c payload is unwrapped and run
-    ("timeout 5 echo hi", 0, "hi\n"),                # a timeout prefix is stripped, the tail runs
+    # NOT wrappers any more (#971): nothing unpacks a `-c` payload and nothing strips a
+    # `timeout` prefix. Both rows now spawn the real `bash`/`timeout` BINARY as an ordinary
+    # program, which is what bash itself does with them — and they stay here for exactly that
+    # reason: they are the pin that no word is parsed specially. (The permission gate refuses
+    # both as ungranted programs a layer up; `run_parsed` never sees them from the gate.)
+    ("bash -c 'echo wrapped'", 0, "wrapped\n"),      # `bash` is an ordinary program here
+    ("timeout 5 echo hi", 0, "hi\n"),                # ...and so is `timeout`
     ("true && echo yes", 0, "yes\n"),                # && runs the tail on success ...
     ("false || echo fallback", 0, "fallback\n"),     # ... and || runs it on failure
     ("echo a ; echo b", 0, "a\nb\n"),                # `;` runs both, in order
     ("echo a\necho b", 0, "a\nb\n"),                 # a bare NEWLINE separates commands too
 ], ids=lambda v: v if isinstance(v, str) and "\n" not in v else "")
 def test_a_composed_command_runs_and_returns_exactly_bashs_output(cmd, rc, out):
-    """Pipes, quoting, the `bash -c`/`timeout` wrappers, and the `&&`/`||`/`;`/newline
+    """Pipes, quoting, `bash`/`timeout` as ordinary programs, and the `&&`/`||`/`;`/newline
     separators each compose the way bash composes them — and stdout matches byte-for-byte,
     which is what makes a dropped stage visible rather than plausible."""
     assert _run(cmd)[:2] == (rc, out)

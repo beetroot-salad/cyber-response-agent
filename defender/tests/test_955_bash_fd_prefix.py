@@ -562,9 +562,13 @@ _CR = chr(0x000D)
 _NBSP = chr(0x00A0)
 _THIS_FILE = Path(__file__).resolve()
 
-#: WRAPPER SHAPES ARE GONE FROM THIS DIFFERENTIAL (#971), and the list is kept as an empty
-#: tuple with this note rather than deleted, because "why is there no wrapper coverage here"
-#: is the question a later reader will ask.
+#: WRAPPER SHAPES ARE GONE FROM THIS DIFFERENTIAL (#971), and so is the test that consumed
+#: them. The note stays, because "why is there no wrapper coverage here" is the question a
+#: later reader asks; the TEST could not stay, because a `@parametrize` over an empty list is
+#: reported SKIPPED — its body, its assertions and a docstring claiming the corpus "carries
+#: wrapper shapes" all survive, so a reader greps the accept-direction oracle, finds a wrapper
+#: differential, and believes real bash is being asked. Nothing was. A test that cannot fail is
+#: worse than an absence with a note, which is what this is.
 #:
 #: The oracle asks bash what a command it ACCEPTS actually ran. The parse accepts no wrapper any
 #: more: `bash -c '<payload>'` is three ordinary words whose first is an ungranted program, and
@@ -575,7 +579,6 @@ _THIS_FILE = Path(__file__).resolve()
 #: What is left to pin is that those shapes DENY, and that is
 #: `test_959_wrapper_fold.py::test_no_word_is_parsed_as_a_wrapper`'s, over a wider shape list
 #: than this file ever carried.
-_WRAPPER_CANDIDATES: list[str] = []
 
 
 def _stages(cmd: str):
@@ -608,29 +611,6 @@ def _bash_argv_bytes(shim: tuple[Path, str], cmd: str) -> list[str] | None:
         return None
     return [_SHIM] + [e.decode("utf-8", "surrogateescape")
                       for e in entries[:entries.index(b"ARGV_END")]]
-
-
-@pytest.mark.parametrize("cmd", _WRAPPER_CANDIDATES)
-def test_a_wrapper_shape_we_accept_means_what_bash_means(shim_dir, cmd):
-    """The differential's corpus carries wrapper shapes — `bash -c '<candidate>'`, including the
-    glued-operator spelling — so for every wrapper the parse accepts, real bash is asked what it
-    actually ran and where its stderr went, and the two must agree.
-
-    This is the direction that can see the wrapper defect: `bash -c 'echo a '2>/dev/null` is a
-    shape both sides accept and mean differently, and an oracle comparing accept/reject verdicts
-    is structurally blind to it whatever its corpus."""
-    ours = _single(cmd)
-    if ours is None:
-        return                      # refusing more than bash is this executor's prerogative
-    theirs = _bash_meaning(shim_dir, cmd)
-    assert theirs is not None, f"we accepted {cmd!r} and bash will not even parse it"
-    argv, where = theirs
-    assert argv is not None, f"we accepted {cmd!r} but bash never ran the command in it"
-    assert ours[0] == argv, (
-        f"{cmd!r}: we would run {ours[0]}, bash runs {argv} — the wrapper the gate strips and "
-        "the wrapper bash honours are not the same wrapper"
-    )
-    assert ours[1] == where, f"{cmd!r}: we route stderr to {ours[1]!r}, bash routes it to {where!r}"
 
 
 def test_the_oracle_tells_the_inner_shells_stderr_from_the_outer_shells(shim_dir):

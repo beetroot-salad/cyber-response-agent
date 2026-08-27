@@ -183,14 +183,31 @@ def test_a_blank_command_is_answered_ahead_of_the_parse_not_by_its_result():
 def test_the_gate_hands_the_parser_the_command_text_unchanged():
     """`decide_bash` passes the model's command text to the parser byte for byte: no character
     is removed from either end on the way in, so the argv the gate authorises is the argv the
-    text names and not the argv a Unicode-blank predicate left behind."""
+    text names and not the argv a Unicode-blank predicate left behind.
+
+    THE TWO ENDS ARE ASSERTED SEPARATELY, and that is the repair rather than the shape. This was
+    one loop over both, asserting `argv is None or <the real check>` - and the leading-blank half
+    always DENIES, so `argv is None` short-circuited it and five of the ten cases pinned nothing.
+    A trim that stripped only the LEADING blank - the dangerous end, the one every first-token
+    matcher reads - would have left the whole test green."""
     for blank in (NBSP, base.VT, base.FF, base.LSEP, CR):
-        for cmd in ("echo hi" + blank, blank + "echo hi"):
-            argv = _argv(cmd)
-            assert argv is None or any(blank in tok for st in argv[0] for tok in st), (
-                f"{cmd!r} was authorised as {argv} - the argv the gate approved is not the one "
-                "the text names, and it is the approved argv that crosses into the box"
-            )
+        # Trailing: the command is still ALLOWED, so the authorised argv is readable and must
+        # carry the character. This is the half that can be asserted at the gate.
+        argv = _argv("echo hi" + blank)
+        assert argv is not None, f"trailing U+{ord(blank):04X}: the allow itself went away"
+        assert any(blank in tok for st in argv[0] for tok in st), (
+            f"{'echo hi' + blank!r} was authorised as {argv} - the argv the gate approved is "
+            "not the one the text names, and it is the approved argv that crosses into the box"
+        )
+        # Leading: the character lands on the PROGRAM word, so the command is refused and there
+        # is no authorised argv to read. The same property is asserted one layer down, on the
+        # parse the gate calls - which is where "the text reached it unchanged" actually lives.
+        parsed = bash_exec.parse(blank + "echo hi")
+        assert parsed[0].stages[0].argv[0] == blank + "echo", (
+            f"leading U+{ord(blank):04X}: the parser was handed text with the character "
+            "already removed, so the gate is trimming before it decides"
+        )
+        assert not _bash(blank + "echo hi").allow
     # The positive control this negative needs: the same bytes DO reach the parser, and the
     # blanks bash itself splits on are still dropped - by the scanner, where the one opinion
     # about word boundaries lives.

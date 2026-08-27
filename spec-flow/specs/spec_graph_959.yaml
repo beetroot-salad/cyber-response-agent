@@ -801,7 +801,7 @@ demands:
     kind: behavior
     form: test
     binds: ['bash_oracle', 'interacts(bash_fd_prefix_955->bash_oracle)', '_scan']
-    discharged_by: test_a_wrapper_shape_we_accept_means_what_bash_means
+    discharged_by: test_what_we_accept_means_what_bash_means
     seed_docstring: >-
       For every shape the parse accepts, real bash is asked what it actually ran and where its
       stderr went, and the two must agree. This is the direction that can see a shape both sides
@@ -814,8 +814,12 @@ demands:
       which argv reached the shim, and a wrapper passed through reaches it one exec level below
       what the parse models. That those shapes DENY is
       `d_no_word_is_parsed_as_a_wrapper`'s, over a wider list than this corpus ever carried.
-      The list is left in place as an empty tuple carrying that reasoning, because "why is there
-      no wrapper coverage in the wrapper differential" is the question a later reader asks.
+      The NOTE is left in place carrying that reasoning, because "why is there no wrapper
+      coverage in the wrapper differential" is the question a later reader asks. The test is
+      not: a `@parametrize` over an empty list reports SKIPPED while its body and its "the
+      corpus carries wrapper shapes" docstring survive intact, so it read as coverage and
+      asserted nothing. This demand now points at the accept-direction differential itself --
+      the same oracle, over the shapes that remain -- rather than at a case that cannot run.
       ORIGINALLY: >-
       RENAMED for the same reason as the O2 control above: `20-demands.md` pointed this demand at
       `test_what_we_accept_means_what_bash_means`, the EXISTING parametrized case at

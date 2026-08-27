@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import contextlib
-import dataclasses
 import os
 import subprocess
 import sys
@@ -82,8 +81,8 @@ BLANKS = "".join(sorted(_BLANKS))
 #: a comment are one token. Reading it off the token stream is what made
 #: `cat run/a.json # ; rm -rf run/b` TWO stages here and ONE command plus a comment in bash —
 #: the executor running an argv the model's own text says is commented out, and the gate
-#: authorising that one. `_word_value` still clears `commenters`: a `#` INSIDE a word is an
-#: ordinary character and the default would truncate the word at it.
+#: authorising that one. A `#` INSIDE a word stays an ordinary character: `_word_value` simply
+#: passes it through, where the lexer this replaced had to be told to (`commenters = ""`).
 _COMMENT = "#"
 
 #: The only fd this executor knows how to route. Bash's IO_NUMBER admits any digit run; every
@@ -183,19 +182,34 @@ def _word_value(span: str) -> str | None:
 
     A hand-rolled unquoter over a span that HAS no unquoted whitespace and no unquoted operator
     (`_scan` bounds it that way), so it never needs a notion of whitespace and can never
-    re-split what it is handed — the whole of #959 M2.
+    re-split what it is handed — the whole of #959 M2. `None` on a dangling escape or a quote
+    that never closes within the span (both indicate a line that `_literal_mask` already
+    accepted as balanced overall but whose OWN token turned out not to be — practically
+    unreachable given that guarantee, kept as a defensive `None` rather than an exception).
 
     CHOSEN OVER CONFIGURING `shlex`, which is how main closed the same defect: pinning
     `lex.whitespace = BLANKS` stops the re-split too, and both readings were live at the merge.
-    Two things decide it. It is ~3x faster on a representative span mix, measured, because the
-    lexer was built PER WORD; and `shlex` is not bash — inside double quotes bash resolves `\$`
-    to `$` and a backslash-escaped backtick to a backtick, and `shlex` hands both back with the
-    backslash still on. A gate whose thesis is "mean what bash means" cannot resolve a word by
-    a rule bash does not use. That difference is a verdict change on two spellings that no
-    corpus row carries; it is enumerated here rather than left to be discovered. `None` on a dangling escape or a quote
-    that never closes within the span (both indicate a line that `_literal_mask` already
-    accepted as balanced overall but whose OWN token turned out not to be — practically
-    unreachable given that guarantee, kept as a defensive `None` rather than an exception)."""
+    What decides it is bash, not speed. Inside double quotes bash resolves `\$` to `$` and a
+    backslash-escaped backtick to a backtick; `shlex` hands both back with the backslash still
+    on. A gate whose thesis is "mean what bash means" cannot resolve a word by a rule bash does
+    not use. That difference is a verdict change on two spellings no corpus row carries, and it
+    is enumerated here rather than left to be discovered.
+
+    THE FAST PATH IS WHAT MAKES THE SPEED CLAIM TRUE, and it was missing when this landed. A
+    span carrying none of the three characters that mean anything here — `'`, `"`, `\` — already
+    IS its value, and three C-level `in` scans say so; the loop below costs one Python
+    iteration, one `str` allocation and one list append PER CHARACTER to reach the same answer.
+    82% of the spans in this change's own frozen corpus are quote-free, and `parse` runs on
+    every Bash tool call, so the path this skips is the common one.
+
+    MEASURED over every span of that corpus, three readings, so nobody has to take the
+    adjective: `shlex` with its own fast path 0.237s, this loop WITHOUT one 0.184s, this loop
+    with one 0.044s. The omission was not a regression — it was still marginally ahead — but
+    the "~3x faster" this file used to claim was measured on a hand-picked span mix that was
+    half quoted, where the real one is a fifth. Against `shlex` the honest numbers are ~1.3x
+    without the fast path and ~5x with it."""
+    if not ("'" in span or '"' in span or "\\" in span):
+        return span
     out: list[str] = []
     i, n = 0, len(span)
     while i < n:
@@ -292,7 +306,13 @@ def _scan(line: str) -> list[Token] | None:
                 # Retroactively mark the PRECEDING bare digit as the fd component — it is the
                 # digit's glue to this operator that makes it an IO_NUMBER, not a property of
                 # the operator token itself, which stays plain `OPERATOR` either way.
-                toks[-1] = dataclasses.replace(toks[-1], kind=FD_OPERATOR)
+                #
+                # Constructed rather than `dataclasses.replace`d: `replace` re-derives the field
+                # list and re-enters `__init__` through a kwargs splat for 2x the cost, on a
+                # function that runs for every `2>` on every Bash tool call. Same frozen record
+                # either way — a NEW Token, never a mutation.
+                prev = toks[-1]
+                toks[-1] = Token(prev.value, prev.start, prev.end, FD_OPERATOR)
             toks.append(Token(line[i:j], i, j, OPERATOR))
             i = j
             continue

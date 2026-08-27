@@ -1039,7 +1039,7 @@ def test_i2_policy_explain_is_a_second_consumer_not_a_second_implementation(env,
 
 def test_i3_defender_policy_is_not_a_shim_any_agent_can_run(env):
     """i3 (negative): `defender-policy` is NOT in `NON_ADAPTER_SHIMS` and DENIES on every agent lane.
-    Adding it to `hooks/_cmd_segments.py:56` would hand every agent free policy introspection via
+    Adding it to `hooks/_cmd_segments.py`'s `NON_ADAPTER_SHIMS` would hand every agent free policy introspection via
     `_shim_names` — a read of its own gate, which is a map of what to attack (and, for the judge, of
     exactly which grants stand between it and the answer key).
     Positive control: the shims that ARE sanctioned still run."""
