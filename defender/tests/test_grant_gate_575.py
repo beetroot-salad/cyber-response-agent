@@ -1039,7 +1039,7 @@ def test_i2_policy_explain_is_a_second_consumer_not_a_second_implementation(env,
 
 def test_i3_defender_policy_is_not_a_shim_any_agent_can_run(env):
     """i3 (negative): `defender-policy` is NOT in `NON_ADAPTER_SHIMS` and DENIES on every agent lane.
-    Adding it to `hooks/_cmd_segments.py:56` would hand every agent free policy introspection via
+    Adding it to `hooks/_cmd_segments.py`'s `NON_ADAPTER_SHIMS` would hand every agent free policy introspection via
     `_shim_names` — a read of its own gate, which is a map of what to attack (and, for the judge, of
     exactly which grants stand between it and the answer key).
     Positive control: the shims that ARE sanctioned still run."""
@@ -1067,7 +1067,6 @@ def test_f6_executed_argv_is_the_gated_argv(env, cmd):
     decomposition `bash_exec.parse` produces for the same command — so the
     executor never re-parses the raw string and no parser differential can
     reopen. Compared as argv structure, not object identity."""
-    from defender.hooks._cmd_segments import unwrap
     from defender.runtime import bash_exec
 
     resolved = cmd.format(run=env.run)
@@ -1075,7 +1074,9 @@ def test_f6_executed_argv_is_the_gated_argv(env, cmd):
     assert decision.allow, resolved
 
     gated = [[list(st.argv) for st in pl.stages] for pl in (decision.pipelines or ())]
-    executed = [[list(st.argv) for st in pl.stages] for pl in bash_exec.parse(unwrap(resolved))]
+    # `parse` takes the raw command text directly (#959 D1/C3) — no standalone wrapper step to
+    # apply first any more.
+    executed = [[list(st.argv) for st in pl.stages] for pl in bash_exec.parse(resolved)]
     assert gated == executed, (
         f"the gate approved {gated!r} but the executor would run {executed!r} — "
         "a validator/executor parser differential"

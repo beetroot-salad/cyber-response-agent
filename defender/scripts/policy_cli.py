@@ -175,6 +175,12 @@ def _explain(  # noqa: PLR0913 — the gate's own call shape, plus the output-fo
             "allow": d.allow,
             "grant": grants,
             "reason": d.reason or "",
+            # The argv half of the verdict (#959 F2/O3): allow/grant/reason alone cannot show
+            # the class of change where allow does not move but the argv the gate authorises
+            # does, and this is the one surface a human audits.
+            "pipelines": None if d.pipelines is None else [
+                [list(st.argv) for st in pl.stages] for pl in d.pipelines
+            ],
         }
         print(json.dumps(out))
         return 0
@@ -183,6 +189,19 @@ def _explain(  # noqa: PLR0913 — the gate's own call shape, plus the output-fo
         print("matched: " + ", ".join(grants))
     else:
         print(f"reason: {d.reason}")
+    # The argv half of the verdict on THIS path too (#959 F2/O3). `--json` is not the surface an
+    # operator types; this one is, and it carried allow/grant/reason alone — which cannot show
+    # the class of change where allow does not move but the authorised argv does. CONNECTOR and
+    # STDERR ride along because they are half of that class: `A && B` demoted to `A ; B`, or a
+    # stage's stderr rerouted, are argv-identical and verdict-identical and neither is a thing
+    # a human should have to diff two runs to notice.
+    for pl in d.pipelines or ():
+        stages = " | ".join(
+            " ".join(repr(t) for t in st.argv)
+            + ("" if st.stderr == "capture" else f"  2>{st.stderr}")
+            for st in pl.stages
+        )
+        print(f"  argv ({pl.connector}): {stages}")
     return 0
 
 

@@ -11,7 +11,7 @@ the sole opener; `grep`/`head`/`tail`/`wc` are stdin-only pipe stages; `ls`/`cd`
 from every lane. The capability BITS this file used to construct policies with
 (`adapters` / `adapter_sql_pipe` / `raw_reads` / `operand_gated`) are deleted — each is now a
 fact the grant list carries directly, so the tests below construct grants instead of bits. The
-model itself is specced in `test_grant_gate_575.py`; this file keeps the shim/adapter/unwrap/
+model itself is specced in `test_grant_gate_575.py`; this file keeps the shim/adapter/wrapper-fold/
 redirect/write coverage it always had, ported onto the new API.
 
 Since #611 a data source is reached through the typed `query` TOOL, never from bash. There is no
@@ -44,7 +44,7 @@ from defender.runtime.permission.grant import PathShapes, under  # noqa: E402
 # RESOLVED roots into every grant's SCOPE and RAISES without them (safe-by-construction). These
 # synthetic absolute roots anchor the lane; `decide_bash` resolves an operand but never stats it,
 # so they need not exist. The per-run anchored-read behavior is specced in test_read_confine_bash.py;
-# here the bash tests exercise shim/adapter/unwrap/redirect shapes against the same policies.
+# here the bash tests exercise shim/adapter/wrapper-fold/redirect shapes against the same policies.
 _RUN = Path("/run")
 _DFN = Path("/dfn")
 MAIN = compile_policy_for(MAIN_DEF, run_dir=_RUN, defender_dir=_DFN)
@@ -146,7 +146,8 @@ def test_gather_denies_arbitrary_shell(cmd):
 
 @pytest.mark.parametrize("cmd", [
     "defender-elastic query foo",                 # was: routed to standalone capture
-    "timeout 60 defender-cmdb host-lookup web-1",  # ... behind a timeout prefix
+    "timeout 60 defender-cmdb host-lookup web-1",  # ... behind a timeout prefix (#971: denied
+                                                   #     for the prefix, not for the adapter)
     "defender-elastic query foo | jq '.'",        # compound
     "cat /run/report.md | jq '.'",                # a plain reader command
     "defender-invlang enum types",                # non-adapter shim
@@ -160,7 +161,7 @@ def test_decision_carries_no_adapter_routing_payload(cmd):
     d = _bash(cmd, GATHER)
     assert not hasattr(d, "adapter_argv")
     assert not hasattr(d, "sql_pipe")
-    # ... and the timeout-prefixed adapter, whose argv the capture layer used to unwrap, denies.
+    # ... and the timeout-prefixed adapter, whose argv the capture layer used to fold, denies.
     if "defender-elastic" in cmd or "defender-cmdb" in cmd:
         assert not d.allow
 
@@ -225,11 +226,11 @@ def test_gather_still_denies_real_redirect_and_substitution(cmd):
 
 
 # --- a second command must never hide behind a safe head -------------------
-# shlex eats an unquoted newline as whitespace, and unwrap()'s `bash -c`/`timeout`
+# shlex eats an unquoted newline as whitespace, and the wrapper fold's `bash -c`/`timeout`
 # handling used to drop or re-quote what followed — both let a safe head (an in-scope
 # `cat`) front an ungated second command the shell still runs. Each must fail closed
 # in BOTH sessions. The heads are all commands the lane really allows, so a regression
-# in unwrap shows up as an ALLOW here rather than being masked by the head's own deny.
+# in the wrapper fold shows up as an ALLOW here rather than being masked by the head's own deny.
 
 @pytest.mark.parametrize("cmd", [
     "cat /run/report.md\nrm -rf /tmp/x",                    # unquoted newline = a 2nd command
@@ -239,7 +240,7 @@ def test_gather_still_denies_real_redirect_and_substitution(cmd):
     "bash -c 'cat /run/report.md' && curl http://evil",
     "bash -c 'cat /run/report.md' | sh",
     'bash -c "cat /run/report.md\nrm -rf /tmp/x"',          # newline INSIDE the -c payload
-    "timeout 5 cat /run/report.md\nrm -rf /tmp/x",          # timeout prefix + newline (unwrap join)
+    "timeout 5 cat /run/report.md\nrm -rf /tmp/x",          # timeout prefix + newline (wrapper-fold join)
     "timeout 5 cat /run/report.md ; rm -rf /tmp/x",
     "cat /run/report.md ;; rm -rf /tmp/x",                  # ;-fused token must fail closed
     "echo a ;& curl http://evil",
@@ -250,11 +251,11 @@ def test_no_second_command_hides_behind_safe_head(cmd):
 
 
 # A SCRIPT FILE before `-c` is not the inline `bash -c <payload>` wrapper: the shell
-# runs the script and `-c`/the "payload" become its positional args. unwrap used to
+# runs the script and `-c`/the "payload" become its positional args. the wrapper fold used to
 # grab the first `-c` anywhere, extract the safe-looking payload, and approve while
-# `shell=True` ran the script (issue #379 bypass). The exact-adjacency unwrap must
+# `shell=True` ran the script (issue #379 bypass). The exact-adjacency fold must
 # fail closed here in BOTH sessions. The payload is an ALLOWED command on purpose:
-# an unwrap that grabbed it would approve, so the deny pins the adjacency rule itself.
+# a fold that grabbed it would approve, so the deny pins the adjacency rule itself.
 @pytest.mark.parametrize("cmd", [
     "bash evil.sh -c 'cat /run/report.md'",            # script file before -c → -c is the script's arg
     "sh evil.sh -c 'cat /run/report.md'",
@@ -265,31 +266,44 @@ def test_bash_script_file_before_c_fails_closed(cmd):
     assert not _bash(cmd, MAIN).allow
 
 
-# Happy-path anchor for the exact-adjacency tightening above: the LEGITIMATE inline
-# `bash -c <payload>`/`sh -c <payload>` form (optionally behind a `timeout` prefix)
-# wrapping a read-only viewer must STILL be approved in BOTH sessions. Without this,
-# every `bash -c` test is a deny case, so a future over-tightening of unwrap could
-# flip these real commands to deny and the whole suite would stay green.
-@pytest.mark.parametrize("cmd", [
-    "bash -c 'cat /run/investigation.md'",
-    "sh -c 'cat /run/investigation.md'",
-    "timeout 5 bash -c 'cat /run/investigation.md'",         # ... behind a timeout prefix
-    "bash -c 'cat /run/investigation.md | wc -l'",           # a pipeline payload must not be re-quoted
+# The happy-path anchor this used to be — the inline `bash -c <viewer>` form must STILL be
+# approved — is retired with the fold (#971). What replaces it is the pairing: the wrapper
+# denies, the payload on its own is allowed. That keeps the guard the anchor existed for (a
+# deny-only corpus would stay green if the viewers themselves broke) while pinning the new
+# answer, in both sessions.
+@pytest.mark.parametrize(("wrapped", "payload"), [
+    ("bash -c 'cat /run/investigation.md'", "cat /run/investigation.md"),
+    ("sh -c 'cat /run/investigation.md'", "cat /run/investigation.md"),
+    ("bash -c 'cat /run/investigation.md | wc -l'", "cat /run/investigation.md | wc -l"),
 ])
-def test_inline_bash_c_viewer_still_allowed(cmd):
-    assert _bash(cmd, GATHER).allow
-    assert _bash(cmd, MAIN).allow
+def test_a_wrapped_viewer_denies_and_its_payload_alone_does_not(wrapped, payload):
+    for policy in (MAIN, GATHER):
+        assert not _bash(wrapped, policy).allow, f"{wrapped!r}: `bash`/`sh` is not granted"
+        assert _bash(wrapped, policy).reason == policy.deny_reason
+        assert _bash(payload, policy).allow, (
+            f"{payload!r} is denied too — the refusal above is not about the wrapper at all"
+        )
 
 
 @pytest.mark.parametrize("cmd", [
-    # a `timeout` prefix in front of a legit pipeline must STILL be approved — the
-    # unwrap fix must not quote the `|` or otherwise break the pipeline.
     "timeout 30 cat /run/investigation.md | wc -l",
     "timeout 5 cat /run/investigation.md",
 ])
-def test_timeout_prefix_keeps_legit_pipeline(cmd):
-    assert _bash(cmd, MAIN).allow
-    assert _bash(cmd, GATHER).allow
+def test_a_timeout_prefix_denies_and_the_same_command_without_it_does_not(cmd):
+    """#971: the prefix used to be STRIPPED before the decision, so these were allows. It is an
+    ordinary ungranted word now and they deny — on the capability reason, which names the
+    programs the lane does have.
+
+    The pairing is the point. Each command is asserted twice: with the prefix (denied) and with
+    it removed (allowed), so what this pins is that the PREFIX is the whole difference. A bare
+    `assert not allow` would also pass if the pipeline or the payload had quietly broken."""
+    for policy in (MAIN, GATHER):
+        assert not _bash(cmd, policy).allow, f"{cmd!r}: `timeout` is not a granted program"
+        assert _bash(cmd, policy).reason == policy.deny_reason
+        without = cmd.split(" ", 2)[2]
+        assert _bash(without, policy).allow, (
+            f"{without!r} is denied too — the refusal above is not about the prefix at all"
+        )
 
 
 @pytest.mark.parametrize("cmd", [
@@ -358,17 +372,12 @@ _LEXING_FAILURES = [
     ("pipe then `|`",               "cat /run/report.md | | wc -l",            "BOTH sides"),
     ("connector then bare `;`",     "cat /run/report.md && ;",                 "BOTH sides"),
     ("pipe into a bare redirect",   "cat /run/report.md | 2> /dev/null",       "BOTH sides"),
-    # `bash -c` must carry EXACTLY one command string; a stray trailing word leaves `unwrap`
-    # with nothing single to hand on. (Nested quotes like `bash -c 'cat /a | grep 'x''` are
-    # NOT this case — shlex concatenates them into one token and the command unwraps fine.)
-    ("malformed `bash -c`",         "bash -c 'cat /run/report.md' extra",      "bash -c"),
-    # The other two shapes `unwrap` answers None to. Both used to reach the model as a
-    # CAPABILITY refusal and both now answer the lexing reason, so cause (5) has to name them
-    # rather than the `bash -c` spelling alone — a wrapper with no `-c` at all, and a `timeout`
-    # prefix whose own words are quoted (shlex normalizes them away, so the prefix no longer
-    # matches the raw text and cannot be stripped back off it).
-    ("shell wrapper with no -c",    "bash /run/report.md",                     "bash -c"),
-    ("quoted `timeout` prefix",     "timeout '5' cat /run/report.md",          "timeout"),
+    # NO WRAPPER SHAPE IS ON THIS LIST (#971). `bash -c '<cmd>' extra`, `bash /run/report.md`
+    # and a quoted `timeout` prefix were each here at one time or another, because a fold had an
+    # opinion about them and the lexing reason had to explain it. Nothing folds now: they are
+    # ungranted PROGRAMS and answer the capability reason, which is the one that says what the
+    # lane can actually run. `test_959_wrapper_fold.py::test_no_word_is_parsed_as_a_wrapper`
+    # holds that end.
 ]
 
 
@@ -377,12 +386,15 @@ _LEXING_FAILURES = [
 def test_the_lexing_reason_names_every_way_a_command_can_fail_to_parse(label, cmd, phrase):
     """Each lexing failure answers the LEXING reason, and that reason names the cause.
 
-    Two of these used to answer `policy.deny_reason` instead — the unbalanced quote and the
-    malformed `bash -c`, both of which reach the gate through `unwrap` rather than through the
-    executor's own scan of the command text.
-    That handed a model with a quoting mistake a CAPABILITY message ("not permitted for this
-    agent"), which points it at a different tool rather than at its own quote, while the
-    sibling quote failure one line away answered correctly."""
+    The unbalanced quote used to answer `policy.deny_reason` instead, because it reached the
+    gate through the standalone wrapper step rather than through the executor's own scan of the
+    command text. That handed a model with a quoting mistake a CAPABILITY message ("not
+    permitted for this agent"), which points it at a different tool rather than at its own
+    quote, while the sibling quote failure one line away answered correctly.
+
+    Its old partner in that pair, a malformed `bash -c`, is gone from this list: #971 deletes
+    the wrapper step, so a wrapper is an ungranted PROGRAM and the capability reason is the
+    right answer for it rather than the wrong one."""
     d = _bash(cmd, GATHER)
     assert not d.allow, f"{label}: a command that cannot be parsed was allowed"
     assert d.reason == permission.UNTOKENIZABLE_REASON, \
@@ -799,8 +811,9 @@ from defender.runtime.permission import command_shape  # noqa: E402
 
 
 def _shape(cmd):
-    from defender.hooks._cmd_segments import unwrap
-    return bash_exec.parse(unwrap(cmd))
+    # `parse` takes the raw command text directly (#959 D1/C3) — the standalone wrapper step
+    # has folded into it, so there is no second function to apply first any more.
+    return bash_exec.parse(cmd)
 
 
 def test_command_shape_is_adapter_stage():

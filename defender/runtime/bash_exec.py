@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import contextlib
 import os
-import shlex
 import subprocess
 import sys
 import time
@@ -56,7 +55,9 @@ _SHLEX_PUNCTUATION = frozenset("();<>|&")
 #: scanner replaced. `test_955_bash_fd_prefix.py::_NOT_SHELL_BLANKS` pins every member.
 _BLANKS = frozenset(" \t\n")
 
-#: `_BLANKS` as a string, built ONCE — for `shlex.whitespace`, and for `str.strip`.
+#: `_BLANKS` as a string, built ONCE — for `str.strip`, and for any membership test outside
+#: this module. (It fed `shlex.whitespace` on main; #959 M2 removed the lexer this module used
+#: to resolve a word with, so there is nothing left here to configure.)
 #:
 #: PUBLIC, and that is the point rather than a convenience. Every defect in #955 is two rules
 #: where the code needs one: an fd read off the token stream vs the raw text, a word boundary
@@ -80,8 +81,8 @@ BLANKS = "".join(sorted(_BLANKS))
 #: a comment are one token. Reading it off the token stream is what made
 #: `cat run/a.json # ; rm -rf run/b` TWO stages here and ONE command plus a comment in bash —
 #: the executor running an argv the model's own text says is commented out, and the gate
-#: authorising that one. `_word_value` still clears `commenters`: a `#` INSIDE a word is an
-#: ordinary character and the default would truncate the word at it.
+#: authorising that one. A `#` INSIDE a word stays an ordinary character: `_word_value` simply
+#: passes it through, where the lexer this replaced had to be told to (`commenters = ""`).
 _COMMENT = "#"
 
 #: The only fd this executor knows how to route. Bash's IO_NUMBER admits any digit run; every
@@ -97,6 +98,31 @@ _FD2_REDIRECTS = {">": ("/dev/null", "devnull"), ">&": ("1", "stdout")}
 #: line to mean anything. `;` is deliberately absent: `A;` is a finished command.
 _DANGLING_CONNECTORS = frozenset({"|", "&&", "||"})
 
+#: A token's KIND — the three cases the grammar turns on. `2>` is bash's IO_NUMBER redirect;
+#: a spaced `>` is a redirect of stdout after the ordinary word `2`, and both arrive with the
+#: same TEXT (#955 F-50), so the kind is what a reader must use to tell them apart. `FD_OPERATOR`
+#: marks the bare digit token itself (`2`) that a following `>`/`>&` is GLUED to — the operator
+#: that follows stays plain `OPERATOR` — because the two still arrive as separate tokens (their
+#: raw spans and values differ) and it is the digit's own glue to what follows that makes it an
+#: IO_NUMBER rather than an ordinary word.
+WORD = "word"
+OPERATOR = "operator"
+FD_OPERATOR = "fd-operator"
+
+
+@dataclass(frozen=True)
+class Token:
+    """One token of a scanned line: its resolved VALUE, the START/END offsets of its raw
+    spelling in the line (code-point offsets, quoting and glue intact), and its KIND.
+
+    One frozen record per token (#959 M1) — not three index-aligned collections, where
+    alignment between the token stream and the raw text was exactly what #955 F-50 was about."""
+
+    value: str
+    start: int
+    end: int
+    kind: str
+
 
 def _literal_mask(line: str) -> list[bool] | None:
     """Which characters of `line` stand as themselves — unquoted, unescaped, and not a quote
@@ -104,7 +130,7 @@ def _literal_mask(line: str) -> list[bool] | None:
 
     Everything `_scan` decides rests on this: whether an operator character IS an operator, and
     whether it was glued to the word on its left. Both are facts about the raw text, and both
-    are gone by the time `shlex` has resolved a word to its value (#955 F-50)."""
+    are gone by the time a word has been resolved to its value (#955 F-50)."""
     mask = [False] * len(line)
     quote: str | None = None
     i = 0
@@ -130,49 +156,119 @@ def _literal_mask(line: str) -> list[bool] | None:
     return None if quote is not None else mask
 
 
+def _double_quoted_value(span: str, start: int) -> tuple[str, int] | None:
+    """The resolved content of a double-quoted run starting at `span[start] == '"'`, and the
+    index just past its closing quote — or `None` if it never closes. Split out of
+    `_word_value` purely to keep that function's branch count within the lint budget; the
+    escaping rule (only `"`, `\\`, `$` and a backtick are meaningful after a backslash here) is
+    the one POSIX double-quote carve-out the single-quote and bare-word cases don't need."""
+    j, n = start + 1, len(span)
+    buf: list[str] = []
+    while j < n:
+        c = span[j]
+        if c == '"':
+            return "".join(buf), j + 1
+        if c == "\\" and j + 1 < n and span[j + 1] in ('"', "\\", "$", "`"):
+            buf.append(span[j + 1])
+            j += 2
+            continue
+        buf.append(c)
+        j += 1
+    return None
+
+
 def _word_value(span: str) -> str | None:
-    r"""One word's raw text — quotes and escapes intact — reduced to the value it stands for.
+    r"""One word's raw text — quotes and escapes intact — resolved to the value it stands for.
 
-    `shlex` again, but over a span that HAS no unquoted whitespace and no unquoted operator, so
-    it is being asked only to resolve quoting and must hand back exactly one word. `comments`
-    is off for the reason the line lexer always cleared `commenters`: `#` is an ordinary
-    character in a filename or a pattern here, and the default would truncate the word at it.
+    A hand-rolled unquoter over a span that HAS no unquoted whitespace and no unquoted operator
+    (`_scan` bounds it that way), so it never needs a notion of whitespace and can never
+    re-split what it is handed — the whole of #959 M2. `None` on a dangling escape or a quote
+    that never closes within the span (both indicate a line that `_literal_mask` already
+    accepted as balanced overall but whose OWN token turned out not to be — practically
+    unreachable given that guarantee, kept as a defensive `None` rather than an exception).
 
-    A span carrying none of the three characters that MEAN anything to `shlex` — `'`, `"`, `\`
-    — already IS its value, and the fast path says so rather than building a lexer to be told.
-    That is not a micro-optimisation on a cold path: `parse` runs on every Bash tool call, and
-    the slow path builds one `shlex.shlex` PER WORD where the lexer this scanner replaced built
-    one per LINE, which is 80-90% of the scan's cost and made the gate up to 3x slower than the
-    code it replaced. `_scan` has already split on unquoted blanks and punctuation, so what is
-    left cannot be more than one word.
+    CHOSEN OVER CONFIGURING `shlex`, which is how main closed the same defect: pinning
+    `lex.whitespace = BLANKS` stops the re-split too, and both readings were live at the merge.
+    What decides it is bash, not speed. Inside double quotes bash resolves `\$` to `$` and a
+    backslash-escaped backtick to a backtick; `shlex` hands both back with the backslash still
+    on. A gate whose thesis is "mean what bash means" cannot resolve a word by a rule bash does
+    not use. That difference is a verdict change on two spellings no corpus row carries, and it
+    is enumerated here rather than left to be discovered.
 
-    The lexer is built by hand rather than reached through `shlex.split`, for ONE reason:
-    `shlex.split` hardcodes `shlex.whitespace`, which is `' \t\r\n'` and therefore one
-    character WIDER than `_BLANKS`. `_scan` keeps an unquoted `\r` inside its word (bash
-    does); `shlex.split` would then split that same span in two, `len(parts) != 1`, and the
-    whole line would be refused as untokenizable — so `cat a\rb'c'` would be denied while the
-    quote-free `cat a\rb` was allowed. The two word-boundary rules have to be ONE rule, so
-    the lexer is told which set to use instead of being trusted to agree."""
+    THE FAST PATH IS WHAT MAKES THE SPEED CLAIM TRUE, and it was missing when this landed. A
+    span carrying none of the three characters that mean anything here — `'`, `"`, `\` — already
+    IS its value, and three C-level `in` scans say so; the loop below costs one Python
+    iteration, one `str` allocation and one list append PER CHARACTER to reach the same answer.
+    82% of the spans in this change's own frozen corpus are quote-free, and `parse` runs on
+    every Bash tool call, so the path this skips is the common one.
+
+    MEASURED over every span of that corpus, three readings, so nobody has to take the
+    adjective: `shlex` with its own fast path 0.237s, this loop WITHOUT one 0.184s, this loop
+    with one 0.044s. The omission was not a regression — it was still marginally ahead — but
+    the "~3x faster" this file used to claim was measured on a hand-picked span mix that was
+    half quoted, where the real one is a fifth. Against `shlex` the honest numbers are ~1.3x
+    without the fast path and ~5x with it."""
     if not ("'" in span or '"' in span or "\\" in span):
         return span
-    lex = shlex.shlex(span, posix=True)
-    lex.whitespace = BLANKS
-    lex.whitespace_split = True
-    lex.commenters = ""
-    try:
-        parts = list(lex)
-    except ValueError:
-        return None
-    return parts[0] if len(parts) == 1 else None
+    out: list[str] = []
+    i, n = 0, len(span)
+    while i < n:
+        c = span[i]
+        if c == "\\":
+            if i + 1 >= n:
+                return None
+            out.append(span[i + 1])
+            i += 2
+            continue
+        if c == "'":
+            j = span.find("'", i + 1)
+            if j == -1:
+                return None
+            out.append(span[i + 1:j])
+            i = j + 1
+            continue
+        if c == '"':
+            resolved = _double_quoted_value(span, i)
+            if resolved is None:
+                return None
+            value, i = resolved
+            out.append(value)
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
 
 
-def _scan(line: str) -> tuple[list[str], frozenset[int], frozenset[int]] | None:
-    r"""The line's tokens, which of them are OPERATORS, and which operators carry an fd.
+def _is_fd_prefix(line: str, mask: list[bool], at: int, toks: list[Token]) -> bool:
+    """Whether the operator run starting at `at` is bash's IO_NUMBER — an unquoted `2` glued
+    to its left that STARTS its own word.
 
-    Structure is decided against the RAW TEXT and only the values go through `shlex`, which is
-    the whole of #955 F-50. Lexing the line with `punctuation_chars=True` — as this module did
-    — hands back a stream in which the two questions the grammar turns on can no longer be
-    asked:
+    The last clause is not decoration: bash reads `foo2>` as the word `foo2` redirecting
+    stdout, not as a redirect of fd 2, and a quoted `"2">` the same way. Only a bare digit run
+    standing alone is the fd."""
+    if at == 0 or not mask[at - 1] or line[at - 1] != _STDERR_FD:
+        return False
+    if not toks or toks[-1].value != _STDERR_FD:
+        return False
+    if at == 1:
+        return True
+    before = line[at - 2]
+    # `_OPERATOR_CHARS`, NOT `_SHLEX_PUNCTUATION`: the wider set carries `(`/`)`, which end a
+    # word for the scanner but are not characters an IO_NUMBER may follow in any line bash
+    # will run. Reading them as one made `w a)2>/dev/null` an fd-2 redirect — the `2` popped
+    # off argv and stderr rerouted — on a line `bash -n` refuses outright, which is the
+    # accept-what-bash-rejects direction `test_bash_differential_897.py` exists to close.
+    return mask[at - 2] and (before in _BLANKS or before in _OPERATOR_CHARS)
+
+
+def _scan(line: str) -> list[Token] | None:
+    r"""The line's tokens, as one frozen record per token (#959 M1): resolved value, the
+    start/end offsets of its raw spelling, and its kind.
+
+    Structure is decided against the RAW TEXT and only the values go through `_word_value`,
+    which is the whole of #955 F-50. Lexing the line with a punctuation-splitting shlex lexer —
+    as this module used to — hands back a stream in which the two questions the grammar turns
+    on can no longer be asked:
 
       * WAS THE OPERATOR GLUED to the word on its left? `2>` is a single IO_NUMBER redirect
         and `2 >` is the word `2` followed by a redirect of stdout, and both arrive as
@@ -188,9 +284,7 @@ def _scan(line: str) -> tuple[list[str], frozenset[int], frozenset[int]] | None:
     mask = _literal_mask(line)
     if mask is None:
         return None
-    toks: list[str] = []
-    operators: set[int] = set()
-    fd_prefixed: set[int] = set()
+    toks: list[Token] = []
     i, n = 0, len(line)
     while i < n:
         if mask[i] and line[i] in _BLANKS:
@@ -209,9 +303,17 @@ def _scan(line: str) -> tuple[list[str], frozenset[int], frozenset[int]] | None:
             while j < n and mask[j] and line[j] in _SHLEX_PUNCTUATION:
                 j += 1
             if _is_fd_prefix(line, mask, i, toks):
-                fd_prefixed.add(len(toks))
-            operators.add(len(toks))
-            toks.append(line[i:j])
+                # Retroactively mark the PRECEDING bare digit as the fd component — it is the
+                # digit's glue to this operator that makes it an IO_NUMBER, not a property of
+                # the operator token itself, which stays plain `OPERATOR` either way.
+                #
+                # Constructed rather than `dataclasses.replace`d: `replace` re-derives the field
+                # list and re-enters `__init__` through a kwargs splat for 2x the cost, on a
+                # function that runs for every `2>` on every Bash tool call. Same frozen record
+                # either way — a NEW Token, never a mutation.
+                prev = toks[-1]
+                toks[-1] = Token(prev.value, prev.start, prev.end, FD_OPERATOR)
+            toks.append(Token(line[i:j], i, j, OPERATOR))
             i = j
             continue
         j = i
@@ -220,31 +322,9 @@ def _scan(line: str) -> tuple[list[str], frozenset[int], frozenset[int]] | None:
         word = _word_value(line[i:j])
         if word is None:
             return None
-        toks.append(word)
+        toks.append(Token(word, i, j, WORD))
         i = j
-    return toks, frozenset(operators), frozenset(fd_prefixed)
-
-
-def _is_fd_prefix(line: str, mask: list[bool], at: int, toks: list[str]) -> bool:
-    """Whether the operator run starting at `at` is bash's IO_NUMBER — an unquoted `2` glued
-    to its left that STARTS its own word.
-
-    The last clause is not decoration: bash reads `foo2>` as the word `foo2` redirecting
-    stdout, not as a redirect of fd 2, and a quoted `"2">` the same way. Only a bare digit run
-    standing alone is the fd."""
-    if at == 0 or not mask[at - 1] or line[at - 1] != _STDERR_FD:
-        return False
-    if not toks or toks[-1] != _STDERR_FD:
-        return False
-    if at == 1:
-        return True
-    before = line[at - 2]
-    # `_OPERATOR_CHARS`, NOT `_SHLEX_PUNCTUATION`: the wider set carries `(`/`)`, which end a
-    # word for the scanner but are not characters an IO_NUMBER may follow in any line bash
-    # will run. Reading them as one made `w a)2>/dev/null` an fd-2 redirect — the `2` popped
-    # off argv and stderr rerouted — on a line `bash -n` refuses outright, which is the
-    # accept-what-bash-rejects direction `test_bash_differential_897.py` exists to close.
-    return mask[at - 2] and (before in _BLANKS or before in _OPERATOR_CHARS)
+    return toks
 
 
 class BashExecError(Exception):
@@ -303,12 +383,10 @@ class _PipelineBuilder:
             self.cur_stages = []
             self.pending_connector = next_connector
 
-    def feed_token(
-        self, toks: list[str], i: int,
-        operators: frozenset[int], fd_prefixed: frozenset[int],
-    ) -> int:
-        t, n = toks[i], len(toks)
-        if i not in operators:
+    def feed_token(self, tokens: list[Token], i: int) -> int:
+        tok, n = tokens[i], len(tokens)
+        t = tok.value
+        if tok.kind == WORD:
             # A token whose TEXT is an operator but whose raw spelling was quoted or escaped —
             # `find … {} \;`, `echo ';'`. Every arm below dispatches on text, so without this
             # the `;` that `find -exec` requires was read as a pipeline separator and dropped,
@@ -339,16 +417,17 @@ class _PipelineBuilder:
             # wrong, and two copies of it is two places a later correction can be applied to
             # only one — which is the shape the original defect already had.
             #
-            # `i in fd_prefixed` is the whole of the fd test; `cur_argv[-1] == "2"` only
-            # confirms the token stream agrees with the raw text about which word that was.
-            # Testing the TOKEN alone (as both arms did until #955 F-50) reads an ordinary
-            # numeric operand as an fd: `head -c 2 >/dev/null` was accepted and ran
-            # `head -c` — the gate's answer turning on an argument's VALUE, and the executor
-            # running a command the model did not write.
+            # The PRECEDING token carrying `fd-operator` kind is the whole of the fd test;
+            # `cur_argv[-1] == "2"` only confirms the token stream agrees with the raw text
+            # about which word that was. Testing the TOKEN alone (as both arms did until
+            # #955 F-50) reads an ordinary numeric operand as an fd: `head -c 2 >/dev/null` was
+            # accepted and ran `head -c` — the gate's answer turning on an argument's VALUE,
+            # and the executor running a command the model did not write.
             target, stderr = _FD2_REDIRECTS[t]
             if (
-                i in fd_prefixed and self.cur_argv and self.cur_argv[-1] == _STDERR_FD
-                and i + 1 < n and toks[i + 1] == target
+                i > 0 and tokens[i - 1].kind == FD_OPERATOR
+                and self.cur_argv and self.cur_argv[-1] == _STDERR_FD
+                and i + 1 < n and tokens[i + 1].value == target
             ):
                 self.cur_argv.pop()
                 self.cur_stderr = stderr
@@ -360,22 +439,38 @@ class _PipelineBuilder:
         return i + 1
 
 
-def parse(inner: str) -> list[Pipeline]:
+def parse(cmd: str) -> list[Pipeline]:
+    """The pipelines `cmd` names — the model's raw command text, byte for byte: there is no
+    wrapper step, and no second function a caller must apply first (#959 D1/C3, #971). Every
+    PHYSICAL LINE is scanned on its own and each stage becomes a bare argv.
+
+    NO WORD IS PARSED SPECIALLY HERE. `bash -c '<payload>'` used to be recognised and its
+    payload extracted — the last of the two folds, after the `timeout` prefix went in #971 —
+    and both are gone for the same reason: a fold DELETES TEXT AHEAD OF THE DECISION, so every
+    way of mis-reading the shape is a way of WIDENING what the gate allows, while a
+    pass-through can only refuse. `bash` and `sh` are ordinary ungranted words now; the lane's
+    capability reason answers them like any other program it does not have. What is still
+    special is punctuation, never a keyword: the connectors, the two stderr redirects, the
+    newline that ends a line, and the quoting."""
     builder = _PipelineBuilder()
-    for line in inner.split("\n"):
-        scanned = _scan(line)
-        if scanned is None:
+    tokens: list[Token] | None
+    for line in cmd.split("\n"):
+        tokens = _scan(line)
+        if tokens is None:
             raise UntokenizableCommand("untokenizable command reached the executor")
-        toks, operators, fd_prefixed = scanned
-        i, n = 0, len(toks)
+        i, n = 0, len(tokens)
         while i < n:
-            i = builder.feed_token(toks, i, operators, fd_prefixed)
-        if toks and toks[-1] in _DANGLING_CONNECTORS and len(toks) - 1 in operators:
+            i = builder.feed_token(tokens, i)
+        if (
+            tokens and tokens[-1].value in _DANGLING_CONNECTORS
+            and tokens[-1].kind != WORD
+        ):
             # `A |` / `A &&` closing a line. There is no shell to join the lines, so the
             # connector would be dropped and the implicit `;` below would run the next line
             # as an independent command.
             raise UntokenizableCommand(
-                f"pipeline/connector token {toks[-1]!r} closes a line with nothing to its right"
+                f"pipeline/connector token {tokens[-1].value!r} closes a line with nothing to "
+                "its right"
             )
         builder.end_pipeline(";")
         if builder.pending_connector in _DANGLING_CONNECTORS:
