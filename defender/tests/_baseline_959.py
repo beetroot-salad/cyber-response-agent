@@ -253,7 +253,7 @@ SEPARATORS = (("pipe", "|", "8"), ("and", "&&", "8"), ("or", "||", "8"), ("semic
 #: `moves=True` rows carry member 8; `moves=False` rows carry no member and must reach the same
 #: decision after the change as before it. Every value here was executed under the M4+M6+M2
 #: simulation over all 26 characters before it was written down - 26/26 either way, never mixed.
-LEXING_ARMS = (
+SWEPT_LEXING_ARMS = (
     # id                        base command                            trail   lead
     # bash_exec.py:281 `_scan` returned nothing - and the two causes that reach it part company.
     ("quote-never-closes",      "cat " + REPORT + " | grep 'unterminated", False, False),
@@ -270,15 +270,33 @@ LEXING_ARMS = (
     ("connector-across-lines",  "cat " + REPORT + " |\nwc -l",            False, False),
     # bash_exec.py:304 an `&&`/`||` whose right side never arrived within its own line.
     ("pending-connector",       "cat " + REPORT + " && ;",                 True, False),
-    # permission/bash.py:107 a wrapper that does not fold to a single command string. This arm
-    # is the one that moves at BOTH ends, and for different reasons: at either end the blank lands
-    # on the wrapper word itself, which no matcher recognises once it is glued. The shapes whose
-    # LATER token carries the blank are the RF-E8 table below, and they part company with this arm
-    # at the trailing end only.
+    # A bare `bash`/`sh` raised the wrapper-lexing refusal at the base commit; #971 deleted the
+    # wrapper step, so both are ordinary ungranted programs now and answer the capability reason
+    # at either end. RETIRED, not removed - see `RETIRED_LEXING_ARM_IDS` below.
     ("bare-bash",               "bash",                                    True, True),
     ("bare-sh",                 "sh",                                      True, True),
+    # An unclosed quote that happens to have a `bash -c` in front of it. It reaches the same arm
+    # as `quote-never-closes` above and always did - the wrapper step never got a say about a
+    # quote that never closes - so it survives #971 unchanged. That is what makes it worth
+    # keeping: the control that says the two arms above went and this one did not.
     ("unclosed-quote-inside-c", "bash -c 'cat " + REPORT,                  False, False),
 )
+
+#: The arms of `SWEPT_LEXING_ARMS` that the code no longer has. Their 104 swept rows STAY, because
+#: the rows are in the recording and a recording may not be re-taken
+#: (`test_the_corpus_module_and_the_recording_have_not_drifted_apart`) - and they still assert
+#: something true, since the member-8 demand they were recorded with is "no longer the lexing
+#: reason" and the capability deny satisfies it.
+#:
+#: The two tuples exist because they are read for OPPOSITE purposes. The sweep needs every arm
+#: that was RECORDED, in its recorded order. `test_every_lexing_refusal_arm_the_code_has_is_swept`
+#: needs every arm the CODE STILL HAS: pointing it at a retired arm makes it assert a raise site
+#: that no longer exists, and dropping the rows to satisfy it breaks the drift guard instead.
+RETIRED_LEXING_ARM_IDS = frozenset({"bare-bash", "bare-sh"})
+
+#: The live half - what the code still raises, derived rather than re-listed so the two can
+#: never disagree about a shape.
+LEXING_ARMS = tuple(a for a in SWEPT_LEXING_ARMS if a[0] not in RETIRED_LEXING_ARM_IDS)
 
 
 def _blank_sweep() -> list[Case]:
@@ -309,10 +327,13 @@ def _blank_sweep() -> list[Case]:
             ),
         ]
         for name, shape in WRAPPER_LATER_TOKEN_SHAPES:
-            # Trailing: neutral BY DECISION (RF-E8) - the wrapper is recognised by its first
-            # token, so an invisible character on a LATER token may not move the reason class.
+            # Trailing: WAS neutral by decision (RF-E8) - a wrapper recognised by its FIRST
+            # token keeps the lexing reason when an invisible character lands on a later one.
+            # #971 deletes the wrapper step, so there is no first-token recognition to survive:
+            # every shape here is an ungranted program and answers the capability reason at
+            # both ends. Member 10, and the RF-E8 decision is void rather than contradicted.
             cases.append(
-                Case(f"neutral-wrapper-{name}-{tag}", shape + blank, "", None)
+                Case(f"neutral-wrapper-{name}-{tag}", shape + blank, "10", _deny())
             )
             # Leading: the blank lands ON the wrapper word, which no matcher recognises. Member 8
             # by OBSERVATION (26/26 executed), and the boundary of the decision above.
@@ -331,7 +352,7 @@ def _blank_sweep() -> list[Case]:
                          cmd, "8" if moves else "",
                          _deny("!adapter-retired") if moves else None)
                 )
-        for arm, base, moves_trailing, moves_leading in LEXING_ARMS:
+        for arm, base, moves_trailing, moves_leading in SWEPT_LEXING_ARMS:
             # The refusal is already a refusal; what an invisible character can move is WHICH ARM
             # answers it, and F2 makes the reason identity part of the verdict. Swept at both
             # ends, because the blank glues to the token it touches and the arms differ in which
@@ -418,24 +439,28 @@ CORPUS: tuple[Case, ...] = tuple([
     Case("neutral-quoted-cr-operand", "cat '" + REPORT + CR + "'"),
     Case("neutral-quoted-cr-echo", "echo 'a" + CR + "b'"),
     Case("neutral-cr-before-fd-marker", "cat " + REPORT + " 2" + CR + ">/dev/null"),
-    # ------------------------------------------------------- neutral: the wrapper words today
-    Case("wrap-bash-c", "bash -c 'cat " + REPORT + "'"),
-    Case("wrap-bash-c-pipeline", "bash -c 'cat " + REPORT + " | wc -l'"),
-    Case("wrap-sh-c", "sh -c 'echo hi'"),
-    Case("wrap-quoted-bash", '"bash" -c "echo hi"'),
-    Case("wrap-concatenated-bash", "'ba''sh' -c 'echo hi'"),
-    Case("wrap-glued-c", "bash -c'echo hi'"),
-    Case("wrap-flag-between", "bash -x -c 'echo hi'"),
+    # --------------------- member 10: the wrapper words (#971 - see the enumerated set below)
+    Case("wrap-bash-c", "bash -c 'cat " + REPORT + "'", "10", _deny()),
+    Case("wrap-bash-c-pipeline", "bash -c 'cat " + REPORT + " | wc -l'", "10", _deny()),
+    Case("wrap-sh-c", "sh -c 'echo hi'", "10", _deny()),
+    Case("wrap-quoted-bash", '"bash" -c "echo hi"', "10", _deny()),
+    Case("wrap-concatenated-bash", "'ba''sh' -c 'echo hi'", "10", _deny()),
+    Case("wrap-glued-c", "bash -c'echo hi'", "10", _deny()),
+    Case("wrap-flag-between", "bash -x -c 'echo hi'", "10", _deny()),
+    Case("wrap-bare-bash", "bash", "10", _deny()),
+    Case("wrap-bare-sh", "sh", "10", _deny()),
+    Case("wrap-bash-script", "bash " + REPORT, "10", _deny()),
+    Case("wrap-sh-lc", "sh -lc 'ls'", "10", _deny()),
+    Case("wrap-stray-word-after-c", "bash -c 'cat " + REPORT + "' extra", "10", _deny()),
+    Case("wrap-second-wrapper", "bash -c 'echo a' bash -c 'echo b'", "10", _deny()),
+    Case("wrap-c-then-second-line", "bash -c 'ls'\ncat /etc/hosts", "10", _deny()),
+    # ...and the wrapper-shaped rows that do NOT move, which is what makes the three groups
+    # above a claim rather than a sweep: an uppercase `BASH` was never recognised, an unclosed
+    # quote is a LEXING failure whichever word precedes it, and an empty `-c` argument leaves
+    # `bash` as an ungranted program exactly as it always did.
     Case("wrap-uppercase", "BASH -c 'echo hi'"),
-    Case("wrap-bare-bash", "bash"),
-    Case("wrap-bare-sh", "sh"),
-    Case("wrap-bash-script", "bash " + REPORT),
-    Case("wrap-sh-lc", "sh -lc 'ls'"),
-    Case("wrap-stray-word-after-c", "bash -c 'cat " + REPORT + "' extra"),
-    Case("wrap-second-wrapper", "bash -c 'echo a' bash -c 'echo b'"),
     Case("wrap-unclosed-inside-c", "bash -c 'cat " + REPORT),
     Case("wrap-empty-c", "bash -c ''"),
-    Case("wrap-c-then-second-line", "bash -c 'ls'\ncat /etc/hosts"),
     # (`wrap-timeout`, `wrap-timeout-fractional`, `wrap-timeout-then-line` and
     #  `wrap-timeout-then-bash-c` were here too, recorded as allows. #971 moves them into
     #  member 9 below; the `timeout` rows that stay are the ones that were denials already,
@@ -450,7 +475,8 @@ CORPUS: tuple[Case, ...] = tuple([
     # ------------------------------------------------------------------ neutral: gather's lane
     Case("gather-payload-pipe", "cat /run/gather_raw/l-1/0.json | grep hits", policy="gather"),
     Case("gather-adapter-denied", "defender-elastic query foo", policy="gather"),
-    Case("gather-untok-wrapper", "bash -c 'cat " + REPORT + "' extra", policy="gather"),
+    Case("gather-untok-wrapper", "bash -c 'cat " + REPORT + "' extra", "10", _deny(),
+         policy="gather"),
     # ============================================== the enumerated set - members 1 through 7
     # 1: leading/trailing divergent blanks - the deleted trim (M4). The sweep below carries the
     #    whole 26-character alphabet at both ends; these are the composed spellings.
@@ -483,10 +509,13 @@ CORPUS: tuple[Case, ...] = tuple([
     # `1+8`: the `\r` is not inside a word there, it becomes a STAGE OF ITS OWN - member 8's
     # mechanism at member 1's position and in member 1's direction. Filing it under member 2
     # sent a reader auditing the set to a sentence that does not describe it.)
-    # 3: an outer operator after a `bash -c` argument (M3) - the fix's own headline case.
-    Case("m3-outer-operator", "bash -c 'echo a '2>/dev/null", "3", _deny("untokenizable")),
-    Case("m3-outer-operator-cat", "bash -c 'cat " + REPORT + " '2>/dev/null", "3",
-         _deny("untokenizable")),
+    # 3 WAS "an outer operator after a `bash -c` argument" - #959's own headline case, where
+    # the wrapper step had to notice that `2>/dev/null` belonged to the OUTER shell. #971
+    # retires it into member 10: with no wrapper step there is no inner shell for a redirect to
+    # be stolen from, and both shapes are refused as an ungranted program. The number is left
+    # standing rather than reused, as member 4's was.
+    Case("m3-outer-operator", "bash -c 'echo a '2>/dev/null", "10", _deny()),
+    Case("m3-outer-operator-cat", "bash -c 'cat " + REPORT + " '2>/dev/null", "10", _deny()),
     # 4 WAS "a quoted `timeout` wrapper word is skipped like any other prefix" - the one
     # deny->allow member. #971 RETIRES IT into member 9: there is no prefix arm left for a
     # quoted spelling to reach, and both shapes are refused on the capability reason with the
@@ -537,6 +566,29 @@ CORPUS: tuple[Case, ...] = tuple([
     Case("wrap-timeout-fractional", "timeout 0.5 cat " + REPORT, "9", _deny()),
     Case("wrap-timeout-then-line", "timeout 5\ncat " + REPORT, "9", _deny()),
     Case("wrap-timeout-then-bash-c", "timeout 5 bash -c 'echo hi'", "9", _deny()),
+    # 10 (#971): THE `bash`/`sh` WRAPPER IS NOT A WRAPPER EITHER. The prefix arm went first,
+    # for a demonstrated hole; this arm goes for the argument that outlived it. A fold DELETES
+    # TEXT AHEAD OF THE DECISION, so every way of mis-reading the shape is a way of WIDENING
+    # what the gate allows, while a pass-through can only refuse. That asymmetry does not depend
+    # on which words are folded, and the wrapper arm had already cost this spec two of its
+    # enumerated members (3 and 5) and a repair at nearly every verify loop.
+    #
+    # The `-c` extraction was FAITHFUL where the prefix fold was not - bash really does run the
+    # payload - so nothing here was demonstrably wrong. What it was, was the last remaining way
+    # for the command the GATE JUDGED to differ from the command the MODEL WROTE, held in place
+    # by four conditions (whole command, exactly one argument, never re-folded, nothing at all
+    # after the closing quote) that separate findings had each had to repair. Deleting the arm
+    # removes the conditions with it.
+    #
+    # `bash` and `sh` are ordinary ungranted words now. Every shape tagged member 10 above - the
+    # plain wrapper, a pipeline payload, the quoted and concatenated spellings of the word, a
+    # bare wrapper, a script path, `-lc`, a glued `-c`, a flag in between, a stray word after
+    # the argument, a second wrapper, a second physical line, and member 3's outer operator -
+    # answers the lane's capability reason, which names the programs the lane does have and
+    # tells the model to send the payload on its own. The 182 SWEPT rows are those same shapes
+    # carrying an invisible character on a later token: they used to keep the lexing reason by
+    # RF-E8's decision, and there is no first-token recognition left for that decision to be
+    # about, so it is void rather than contradicted.
     # 8 (RC1, human-resolved at the verify loop; widened to the whole alphabet at the second
     # loop, RC6): A DIVERGENT BLANK IMMEDIATELY AFTER A SEPARATOR - 26 characters x 4
     # separators, all 104 of which move, with the carriage return as the worked example rather

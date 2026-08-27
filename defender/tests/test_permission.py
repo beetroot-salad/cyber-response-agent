@@ -266,25 +266,28 @@ def test_bash_script_file_before_c_fails_closed(cmd):
     assert not _bash(cmd, MAIN).allow
 
 
-# Happy-path anchor for the exact-adjacency tightening above: the LEGITIMATE inline
-# `bash -c <payload>`/`sh -c <payload>` form wrapping a read-only viewer must STILL be
-# approved in BOTH sessions. Without this, every `bash -c` test is a deny case, so a
-# future over-tightening of the fold could flip these real commands to deny and the
-# whole suite would stay green.
-@pytest.mark.parametrize("cmd", [
-    "bash -c 'cat /run/investigation.md'",
-    "sh -c 'cat /run/investigation.md'",
-    "bash -c 'cat /run/investigation.md | wc -l'",           # a pipeline payload must not be re-quoted
+# The happy-path anchor this used to be — the inline `bash -c <viewer>` form must STILL be
+# approved — is retired with the fold (#971). What replaces it is the pairing: the wrapper
+# denies, the payload on its own is allowed. That keeps the guard the anchor existed for (a
+# deny-only corpus would stay green if the viewers themselves broke) while pinning the new
+# answer, in both sessions.
+@pytest.mark.parametrize(("wrapped", "payload"), [
+    ("bash -c 'cat /run/investigation.md'", "cat /run/investigation.md"),
+    ("sh -c 'cat /run/investigation.md'", "cat /run/investigation.md"),
+    ("bash -c 'cat /run/investigation.md | wc -l'", "cat /run/investigation.md | wc -l"),
 ])
-def test_inline_bash_c_viewer_still_allowed(cmd):
-    assert _bash(cmd, GATHER).allow
-    assert _bash(cmd, MAIN).allow
+def test_a_wrapped_viewer_denies_and_its_payload_alone_does_not(wrapped, payload):
+    for policy in (MAIN, GATHER):
+        assert not _bash(wrapped, policy).allow, f"{wrapped!r}: `bash`/`sh` is not granted"
+        assert _bash(wrapped, policy).reason == policy.deny_reason
+        assert _bash(payload, policy).allow, (
+            f"{payload!r} is denied too — the refusal above is not about the wrapper at all"
+        )
 
 
 @pytest.mark.parametrize("cmd", [
     "timeout 30 cat /run/investigation.md | wc -l",
     "timeout 5 cat /run/investigation.md",
-    "timeout 5 bash -c 'cat /run/investigation.md'",
 ])
 def test_a_timeout_prefix_denies_and_the_same_command_without_it_does_not(cmd):
     """#971: the prefix used to be STRIPPED before the decision, so these were allows. It is an
@@ -369,16 +372,12 @@ _LEXING_FAILURES = [
     ("pipe then `|`",               "cat /run/report.md | | wc -l",            "BOTH sides"),
     ("connector then bare `;`",     "cat /run/report.md && ;",                 "BOTH sides"),
     ("pipe into a bare redirect",   "cat /run/report.md | 2> /dev/null",       "BOTH sides"),
-    # `bash -c` must carry EXACTLY one command string; a stray trailing word leaves the fold
-    # with nothing single to hand on. (Nested quotes like `bash -c 'cat /a | grep 'x''` are
-    # NOT this case — shlex concatenates them into one token and the command unwraps fine.)
-    ("malformed `bash -c`",         "bash -c 'cat /run/report.md' extra",      "bash -c"),
-    # The other shape the fold refuses that used to reach the model as a CAPABILITY refusal and
-    # now answers the lexing reason, so cause (5) has to name it too — a wrapper with no `-c`
-    # at all. (A QUOTED `timeout` prefix — `timeout '5' cat x` — is no longer on this list at
-    # all: #959 F4 matches the prefix on its RESOLVED value rather than the raw text, so it is
-    # skipped like any other and the command is ACCEPTED, not refused.)
-    ("shell wrapper with no -c",    "bash /run/report.md",                     "bash -c"),
+    # NO WRAPPER SHAPE IS ON THIS LIST (#971). `bash -c '<cmd>' extra`, `bash /run/report.md`
+    # and a quoted `timeout` prefix were each here at one time or another, because a fold had an
+    # opinion about them and the lexing reason had to explain it. Nothing folds now: they are
+    # ungranted PROGRAMS and answer the capability reason, which is the one that says what the
+    # lane can actually run. `test_959_wrapper_fold.py::test_no_word_is_parsed_as_a_wrapper`
+    # holds that end.
 ]
 
 

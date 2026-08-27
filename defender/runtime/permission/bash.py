@@ -85,15 +85,10 @@ UNTOKENIZABLE_REASON = (
     "`A | 2>/dev/null`, `A && ;`, `A && 2>/dev/null`. Each would drop the connector and leave "
     "a stage reading nothing, so one line is already the fix and re-sending it on one line "
     "will not help; give every connector one complete command on each side.\n"
-    "(5) A `bash`/`sh` wrapper that does not fold to a single command string: anything other "
-    "than exactly `bash -c '<one command string>'` (a bare `bash`, `bash script.sh`, `sh -lc "
-    "…`, a stray word after the string, a second wrapper), or ANYTHING AT ALL after that "
-    "string — an OPERATOR counts, so `bash -c '<cmd>' | wc -l`, `bash -c '<cmd>';` and "
-    "`bash -c '<cmd>' 2>/dev/null` are refused here rather than as a capability: the wrapper "
-    "has to be the whole command, and what follows it belongs INSIDE the quoted string.\n"
-    "Redirects (`>`, `>>`), background `&`, and `$(...)` substitution are a separate matter "
-    "OUTSIDE a wrapper: there they are not part of this surface at all, and are refused as "
-    "capability, not syntax."
+    "Redirects (`>`, `>>`), background `&`, and `$(...)` substitution are not part of this "
+    "surface at all, and are refused as capability, not syntax. Neither is `bash`/`sh`: there "
+    "is no shell to invoke, so `bash -c '<cmd>'` is refused as an ungranted program — send "
+    "`<cmd>` on its own."
 )
 
 
@@ -202,8 +197,6 @@ def _raw_decide(command: str, policy: AgentPolicy, run_dir: Path | None) -> tupl
         return False, EMBEDDED_NUL_REASON
     try:
         pipelines = _parse(command)
-    except bash_exec.NarrowedReason as e:
-        return False, str(e)
     except bash_exec.UntokenizableCommand:
         return False, UNTOKENIZABLE_REASON
     if pipelines is None:
@@ -397,14 +390,10 @@ def decide_bash(
 
     try:
         pipelines = _parse(command)
-    except bash_exec.NarrowedReason as e:
-        return BashDecision(False, _final_reason(command, policy, effective_run_dir, str(e)))
     except bash_exec.UntokenizableCommand:
-        # Through the naming step like every other deny (#959 FK6). This is the arm an
-        # invisible character reaches MOST often, not least: a trailing no-break space after a
-        # `bash -c '<payload>'` makes a fourth token and the wrapper stops matching, so the
-        # model was handed cause (5)'s "a stray word after the string" for a command with no
-        # visible stray word — and the one character that would fix it was never named.
+        # Through the naming step like every other deny (#959 FK6): a lexing refusal is exactly
+        # where an invisible character lands, and the generic parse-failure text names none of
+        # them, so the character that would fix the command has to be said out loud here.
         return BashDecision(
             False, _final_reason(command, policy, effective_run_dir, UNTOKENIZABLE_REASON),
         )

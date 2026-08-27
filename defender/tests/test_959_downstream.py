@@ -299,11 +299,10 @@ def test_the_read_tool_lane_reaches_the_same_decisions_it_reached_before():
 
 def test_every_assertion_site_of_the_lexing_reason_agrees_with_the_reason_after_the_change():
     """Every reader of the refusal message moves with it. The drift guard that pins the cause
-    list is updated in the same change - F4 strikes the "quoted `timeout` prefix" clause from
-    cause (5) - and the six other assertion sites across `test_permission.py` and
-    `test_read_confine.py` still agree with what the parser actually refuses. This is the only
-    place the model is ever told why a wrapper was refused; a reason that has drifted from the
-    parser is a sentence about nothing."""
+    list is updated in the same change - #971 strikes cause (5) whole, because there is no
+    wrapper step left for it to describe - and the other assertion sites across
+    `test_permission.py` and `test_read_confine.py` still agree with what the parser actually
+    refuses. A reason that has drifted from the parser is a sentence about nothing."""
     reason = permission.UNTOKENIZABLE_REASON
     # Each cause the reason still documents has a live command that earns it.
     for cmd, phrase in (
@@ -311,7 +310,6 @@ def test_every_assertion_site_of_the_lexing_reason_agrees_with_the_reason_after_
         (f"cat {REPORT} \\", "continues nothing"),
         (f"cat {REPORT}\n| wc -l", "line boundary"),
         (f"cat {REPORT} | ; wc -l", "BOTH sides"),
-        ("bash -c 'x' extra", "bash -c"),
     ):
         d = _bash(cmd)
         assert not d.allow, f"{cmd!r} no longer earns the lexing reason"
@@ -321,16 +319,31 @@ def test_every_assertion_site_of_the_lexing_reason_agrees_with_the_reason_after_
     # that assert on it. #971 settles it the other way from F4 - the parser has no opinion about
     # a `timeout` prefix at all now, quoted or not - but the obligation is the same one: the
     # reason must not name a shape it does not decide, and no reader may pin the struck clause.
+    # ...and neither wrapper word is named any more, because neither is parsed any differently
+    # from `ls`. A refusal message that describes a step the parser does not take sends the
+    # model to fix a problem it does not have.
     assert "timeout" not in reason
+    for cmd in ("bash -c 'x' extra", "bash", "sh -lc 'ls'", f"bash -c 'cat {REPORT}'"):
+        assert _bash(cmd).reason == base.MAIN.deny_reason, (
+            f"{cmd!r} still earns the lexing reason - `bash`/`sh` is an ungranted PROGRAM now, "
+            "and the capability message is the one that says which programs the lane has"
+        )
     assert _bash(f"timeout '5' cat {REPORT}").reason == base.MAIN.deny_reason, (
         "a quoted `timeout` prefix earns the CAPABILITY reason - it is an ungranted word, and "
         "sending the model to fix its quoting explains nothing about the program it named"
     )
+    # ...and no reader still PINS the struck clause. Read over the code only: this scan used to
+    # look at the whole file, which made it fire on the comment that RECORDS the removal - prose
+    # explaining that a shape is no longer a lexing refusal is the opposite of asserting that it
+    # is, and contorting the comment around a substring check would have been the wrong repair.
     for name in ("test_permission.py", "test_read_confine.py"):
         source = (DEFENDER / "tests" / name).read_text(encoding="utf-8")
-        assert "quoted `timeout` prefix" not in source, (
+        code = "\n".join(
+            line for line in source.splitlines() if not line.lstrip().startswith("#")
+        )
+        assert "quoted `timeout` prefix" not in code, (
             f"{name} still asserts that a quoted `timeout` prefix is a lexing refusal, and the "
-            "parser has no opinion about one - F4 strikes the clause TOGETHER WITH the test "
+            "parser has no opinion about one - the clause is struck TOGETHER WITH the test "
             "pinning it"
         )
 
@@ -494,13 +507,23 @@ def test_a_command_refused_only_for_an_invisible_character_is_told_so():
                     "nothing after it. The character is what moved the refusal off that arm, so "
                     "the reason has to say which character"
                 )
-    # ...and the wrapper shapes, which move at the leading end only (RF-E8's boundary).
+    # ...and the wrapper shapes, which are the case #971 INVERTS. They used to be refused for
+    # the lexing reason and to lose it when a leading blank took the wrapper word with it, so
+    # the character had to be named. There is no wrapper word to take any more: each one is an
+    # ungranted program with the blank and without it, so the character is not what refuses
+    # them, and naming it would send the model hunting for a stray codepoint in a command whose
+    # real problem is the program it names.
     for name, shape in base.WRAPPER_LATER_TOKEN_SHAPES:
         for blank in base.DIVERGENT_BLANKS:
             d = _bash(blank + shape)
-            assert _names_codepoint(d.reason, blank), (
-                f"leading U+{ord(blank):04X} + {name}: the character took the wrapper word with "
-                "it, so the reason must name the character"
+            assert not d.allow, f"leading U+{ord(blank):04X} + {name} became an allow"
+            assert not _names_codepoint(d.reason, blank), (
+                f"leading U+{ord(blank):04X} + {name}: a codepoint is named for a command that "
+                f"is refused with it and without it ({shape!r} is refused on its own)"
+            )
+            assert _bash(shape).reason == d.reason, (
+                f"{name}: the blank changed the message after all, so it IS part of the answer "
+                "and the obligation to name it is back"
             )
 
     # The controls. An ordinary capability refusal keeps the plain reason...

@@ -315,26 +315,20 @@ _CR = chr(0x000D)
 _NBSP = chr(0x00A0)
 _THIS_FILE = Path(__file__).resolve()
 
-#: Wrapper shapes, as their own cases. Every one of them RUNS the shim, which is what makes
-#: bash answerable about it: a candidate real bash refuses to run (`timeout w a`, where the
-#: real `timeout` reads `w` as its duration) has no argv for the oracle to compare and belongs
-#: at the gate's own tests, not here.
+#: WRAPPER SHAPES ARE GONE FROM THIS DIFFERENTIAL (#971), and the list is kept as an empty
+#: tuple with this note rather than deleted, because "why is there no wrapper coverage here"
+#: is the question a later reader will ask.
 #:
-#: THE `timeout N <candidate>` ROWS WENT WITH THE PREFIX FOLD (#971). The parse has no opinion
-#: about a `timeout` prefix any more - it stays in the argv and the gate refuses the command on
-#: the capability reason - so there is no folded wrapper here for bash to be asked about. The
-#: oracle would also be asking the wrong question: it measures which argv reached the SHIM, and
-#: a prefix we pass through reaches it one exec level further down than we model. What is left
-#: to pin is that those shapes deny at all, which is
-#: `test_959_wrapper_fold.py::test_a_timeout_prefix_is_not_a_wrapper_and_is_never_folded_away`'s.
-_WRAPPER_CANDIDATES = [
-    f"bash -c '{_SHIM} a'",
-    f"bash -c '{_SHIM} a 2>/dev/null'",
-    f"bash -c '{_SHIM} -c 2 2>/dev/null'",
-    f"bash -c '{_SHIM} a '2>/dev/null",          # the glued-operator spelling: OUTSIDE the -c
-    f'"bash" -c "{_SHIM} a"',
-    f"sh -c '{_SHIM} a'",
-]
+#: The oracle asks bash what a command it ACCEPTS actually ran. The parse accepts no wrapper any
+#: more: `bash -c '<payload>'` is three ordinary words whose first is an ungranted program, and
+#: `timeout N <cmd>` likewise, so there is no folded command for bash to be answerable about.
+#: Asking anyway would compare the wrong things — the oracle measures which argv reached the
+#: shim, and a wrapper we pass through reaches it one exec level below what we model.
+#:
+#: What is left to pin is that those shapes DENY, and that is
+#: `test_959_wrapper_fold.py::test_no_word_is_parsed_as_a_wrapper`'s, over a wider shape list
+#: than this file ever carried.
+_WRAPPER_CANDIDATES: list[str] = []
 
 
 def _stages(cmd: str):
@@ -559,12 +553,15 @@ def test_a_candidate_whose_inner_c_payload_is_broken_is_reported_not_silently_ac
             "outer precheck is structurally blind to it, so the candidate silently becomes a "
             "test of nothing."
         )
-    # A multi-stage `-c` payload is a candidate, not a crash: the helper reports on it.
+    # A multi-stage payload inside quotes is a candidate, not a crash: the helper reports on it.
+    # Since #971 nothing unpacks the quotes, so it is ONE stage - `bash` with a long argument -
+    # and the pipe inside them is not a pipe. The property under test is unchanged: the helper
+    # must REPORT rather than raise, because a raise is a green-looking coverage gap.
     multi = f"bash -c '{_SHIM} a | {_SHIM} b'"
-    assert _stages(multi) == [[_SHIM, "a"], [_SHIM, "b"]], (
-        "the multi-pipeline `-c` payload does not reach the parser as the two stages it names"
+    assert _stages(multi) == [["bash", "-c", f"{_SHIM} a | {_SHIM} b"]], (
+        "a quoted payload is one argument; the `|` inside it must not become a stage boundary"
     )
-    _parsed(multi)   # must REPORT rather than raise: a raise is a green-looking coverage gap
+    _parsed(multi)
 
 
 def test_the_oracle_harness_bounds_its_own_subprocess_calls():

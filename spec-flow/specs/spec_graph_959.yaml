@@ -83,12 +83,14 @@ base: 6a2ea874          # main, #958 merged. write-code-from-spec's gate diffs a
 #   * `decide_bash`, `tool_bash`, `compile_policy`, `decide_read`, `defender_policy_cli`,
 #     `read_surface`, `bash_exec`, `BashDecision` keep the ids `spec_graph_575-grant-gate.yaml`
 #     coined, keyed by role+origin, so the two graphs join.
-#   * THE FOLDED WRAPPER STEP IS `_wrapper_span`. F3 renamed the role: `unwrap` named a function
-#     returning an unwrapped STRING; the folded step returns a SPAN of the original text. Both
-#     elements exist here on purpose — `unwrap` is the removed one (R5's subject, and what the
-#     migration demands bind), `_wrapper_span` is the new one. WRITE-CODE-FROM-SPEC MUST EITHER
-#     NAME THE FOLDED FUNCTION `_wrapper_span` OR CHANGE THIS ID IN THE SAME COMMIT: a private
-#     synonym does not cost a config entry, it costs the check, silently (schema.md).
+#   * THE FOLDED WRAPPER STEP WAS `_wrapper_span`, AND IS RETIRED (#971). It named the step that
+#     recognised `bash -c '<payload>'` and handed the payload on to be parsed in place of the
+#     command the model wrote. Both wrapper arms are gone now — the `timeout` prefix (member 9)
+#     and this one (member 10) — for one reason: a fold DELETES TEXT AHEAD OF THE DECISION, so
+#     mis-reading the shape widens what the gate allows, while a pass-through can only refuse.
+#     `unwrap` remains here as the element M3 removed (R5's subject, and what the migration
+#     demands bind); `_wrapper_span` remains as the element that replaced it and then went the
+#     same way. No function of either name exists in the code.
 #
 # THE FOUR RESTATED WORKED EXAMPLES (45-dispositions RF-J2 / note 5). Escaped, and each names
 # the demand that carries it:
@@ -285,18 +287,46 @@ demands:
       bash, and it is verdict-neutral — neither the deleted trim, nor the scanner, nor the
       unquoter ever split on it there, so nothing about this command's decision moves.
 
-  - id: d_the_divergent_blank_rule_reaches_wrapper_extracted_text
+  - id: d_no_word_is_parsed_as_a_wrapper
     kind: domain-outcome
     form: test
-    binds: ['_wrapper_span', '_scan']
-    discharged_by: test_a_divergent_blank_inside_the_extracted_inner_command_behaves_as_it_does_outside
-    source: "45-dispositions note 3 — a composition no demand currently reaches"
+    binds: ['_scan', 'command_text']
+    discharged_by: test_no_word_is_parsed_as_a_wrapper
+    source: "#971, human-resolved -- verdict-change set member 10; SUPERSEDES eight of this spec's own demands"
     seed_docstring: >-
-      The divergent-blank rule reaches the wrapper's extracted inner text, because the extracted
-      text is re-scanned by the same scanner: `bash -c '\u00a0cat x'` gives the inner command the
-      same treatment `\u00a0cat x` gets as a bare command, and a `-c` argument that is NOTHING but
-      a divergent blank is a one-word command bash would try to run, and is refused (restated
-      worked example 3).
+      Neither `bash` nor `sh` is recognised, so no text is extracted from a command before the
+      gate decides about it. They are ungranted programs, and the lane's capability reason --
+      which names the programs the lane does have -- answers every shape they appear in.
+    supersedes:
+      - d_the_c_argument_is_the_token_the_span_bounds
+      - d_an_outer_operator_means_the_wrapper_is_not_the_whole_command
+      - d_a_bash_c_wrapper_that_is_not_the_whole_command_is_refused
+      - d_the_wrapper_shapes_the_reason_still_names_stay_refused
+      - d_wrapper_recognition_applies_once_at_the_top_level
+      - d_a_bare_wrapper_word_keeps_its_reason_class
+      - d_the_divergent_blank_rule_reaches_wrapper_extracted_text
+      - d_an_independently_unbalanced_quote_keeps_the_generic_lexing_cause
+    rejected:
+      - {nl: "keep the `-c` fold because it is FAITHFUL -- bash really does run the payload, so unlike the `timeout` prefix nothing here was demonstrably wrong; rejected because faithful-today is a property of four conditions that keep having to be repaired, not of the design"}
+      - {nl: "narrow the arm again, as every prior verify loop did -- each narrowing closes the spelling that was demonstrated and leaves the DIRECTION of failure intact"}
+    note: >-
+      WHAT THE ARM COST THIS SPEC, before it was worth anything. It bought two of the seven
+      enumerated verdict-change members (3, an outer operator after the `-c` argument; 5, a
+      newline inside it), the RF-E8 decision about which shapes keep the lexing reason when an
+      invisible character lands on a later token, cause (5) of the model-facing refusal message,
+      and a repair at nearly every verify loop. What it bought IN RETURN was that a model could
+      write `bash -c '<cmd>'` instead of `<cmd>`.
+      THE ARGUMENT IS THE SAME ONE MEMBER 9 MADE, and it does not turn on which words are
+      folded. A fold DELETES TEXT AHEAD OF THE DECISION, so the command the gate judges can
+      differ from the command the model wrote -- and every finding on this surface has been an
+      instance of that. The `-c` extraction held that gap closed with four conditions (whole
+      command, exactly one argument, never re-folded, nothing at all after the closing quote),
+      three of which had already needed a fix. Deleting the arm deletes the conditions with it:
+      a pass-through has nothing to get wrong.
+      WHAT SURVIVES IS THE GENERAL RULE THE ARM WAS A SPECIAL CASE OF. A quoted argument is one
+      token and its contents are its own, so a newline inside one is an unclosed quote --
+      cause (1), which was always the true answer and is now also the only one
+      (`d_a_newline_inside_the_c_argument_is_an_unclosed_quote`, repointed).
 
   - id: d_every_member_of_the_divergent_blank_alphabet_is_swept
     kind: domain-outcome
@@ -378,68 +408,10 @@ demands:
   # O1 / P2 + C1 — THE WRAPPER FOLDS IN (M3).
   # =========================================================================================
 
-  - id: d_the_c_argument_is_the_token_the_span_bounds
-    kind: behavior
-    form: test
-    binds: ['_wrapper_span', 'interacts(parse->_scan).response']
-    discharged_by: test_the_c_argument_is_the_token_its_span_bounds_not_a_rejoin_of_several
-    source: "C1 / P2; PROSE CORRECTED at the second verify loop (RC7) — the rule was stated for the wrong arm"
-    seed_docstring: >-
-      The inner command of a `bash -c` wrapper is the `-c` argument's OWN TOKEN, resolved once
-      and re-scanned as the inner command — never a re-join of several tokens that have already
-      been resolved. Its SPAN is what tells the parser where that token ends, which is how an
-      operator sitting after it becomes visible at all; the span is exact regardless of which
-      character sits at the boundary, because the offsets come from the matched token's own
-      position and not from a character-class test.
-    note: >-
-      THE PROSE HERE WAS WRONG AND THE ASSERTIONS WERE RIGHT (RC7, human-resolved at the second
-      verify loop). The design body, the authoritative comment's M3 and this demand's own former
-      id all said the `-c` argument is `line[start:end]` of its token. Executed at the base
-      commit: the raw span of a `-c` argument INCLUDES ITS QUOTES — which is exactly what
-      `d0_scan_returns_one_frozen_record_per_token`'s test asserts a span is — so re-scanning it
-      yields ONE argv word (`bash -c 'cat /run/report.md'` -> `[['cat /run/report.md']]`, a
-      program with a space in its name). The correct rule for this arm is the token's RESOLVED
-      value, which is what today's `unwrap` already does there (`tokens[i+2]`, a single resolved
-      token, never a re-join).
-      WHAT THE RAW-SLICE RULE WAS PROTECTING IS NOT REOPENED, AND THE NEXT READER MUST NOT "FIX"
-      THIS BACK: the concern was re-joining SEVERAL resolved tokens, where the glue between them
-      (quoting, runs of spaces) is destroyed and cannot be recovered. Resolving ONE token loses
-      nothing — it is exactly what a shell passes to the program — and the demand still forbids
-      the re-join. The raw slice remains the right rule for the OTHER arm, the `timeout` prefix,
-      where the remainder is many tokens whose glue must survive; that is
-      `d_the_timeout_prefix_is_skipped_by_token_index` and it is unchanged.
-
-  - id: d_an_outer_operator_means_the_wrapper_is_not_the_whole_command
-    kind: behavior
-    form: test
-    binds: ['_wrapper_span', 'interacts(parse->_scan).response']
-    discharged_by: test_an_operator_outside_the_c_argument_refuses_the_wrapper
-    source: "P2 / c2 / x2 — verdict-change set member 3, THE FIX'S OWN HEADLINE CASE"
-    seed_docstring: >-
-      When an operator sits outside the `-c` argument — `bash -c 'echo a '2>/dev/null`, where
-      bash's own `-c` argument is `echo a 2` and the redirect belongs to the outer shell — the
-      wrapper is not the whole command and the parse refuses it, instead of handing the inner
-      shell a redirect the outer shell owned.
-    rejected:
-      - {nl: "today's answer: ALLOW, with `[['echo','a']]` and stderr on /dev/null crossing into the box, while real bash runs `echo a 2` with the outer redirect taking stdout"}
-
-  - id: d_a_bash_c_wrapper_that_is_not_the_whole_command_is_refused
-    kind: behavior
-    form: test
-    binds: ['_wrapper_span', 'command_text']
-    discharged_by: test_a_bash_c_wrapper_with_anything_after_it_is_refused
-    source: "C1; SPLIT from d_the_wrapper_decision_sees_the_whole_command per 45-dispositions note 2 (FK5)"
-    seed_docstring: >-
-      A `bash -c` wrapper must be the WHOLE command: `bash -c 'ls'` followed by a second physical
-      line is refused, because the `-c` argument does not claim the text after it, and so is a
-      stray word after the `-c` string on the same line. The wrapper decision is taken over the
-      whole command and cannot live inside the per-line scan — a first-line-only fold reads
-      `bash -c 'ls'` as a complete wrapper and silently loses line 2.
-
   - id: d_a_timeout_prefix_is_not_a_wrapper
     kind: domain-outcome
     form: test
-    binds: ['_wrapper_span', 'command_text']
+    binds: ['_scan', 'command_text']
     discharged_by: test_a_timeout_prefix_is_not_a_wrapper_and_is_never_folded_away
     source: "#971, human-resolved — verdict-change set member 9; SUPERSEDES three of this spec's own demands"
     seed_docstring: >-
@@ -476,7 +448,7 @@ demands:
   - id: d_a_blank_glued_to_an_ungranted_word_is_not_blamed
     kind: domain-outcome
     form: test
-    binds: ['_wrapper_span']
+    binds: ['_scan']
     discharged_by: test_a_blank_glued_to_an_ungranted_word_is_not_blamed_for_the_refusal
     source: "#971 — the composition RC2 required, inverted by member 9"
     seed_docstring: >-
@@ -493,8 +465,8 @@ demands:
   - id: d_a_newline_inside_the_c_argument_is_an_unclosed_quote
     kind: domain-outcome
     form: test
-    binds: ['_wrapper_span', 'UNTOKENIZABLE_REASON.domain.distinguished[cause1]']
-    discharged_by: test_a_newline_inside_the_c_argument_is_the_unclosed_quote_it_looks_like
+    binds: ['_scan', 'UNTOKENIZABLE_REASON.domain.distinguished[cause1]']
+    discharged_by: test_a_newline_inside_a_quoted_argument_is_the_unclosed_quote_it_looks_like
     source: "F5, human-resolved (ACCEPTED) — verdict-change set member 5"
     seed_docstring: >-
       A `bash -c` argument carrying a newline is refused for the reason every other cross-line
@@ -504,96 +476,6 @@ demands:
       `-c` payload today gets an allow, and after this change it needs to know what to fix.
     rejected:
       - {nl: "today's answer: allowed, `bash -c 'cat /run/report.md\\nwc -l'` parsing to two pipelines"}
-
-  - id: d_an_independently_unbalanced_quote_keeps_the_generic_lexing_cause
-    kind: domain-outcome
-    form: test
-    binds: ['UNTOKENIZABLE_REASON.domain.distinguished[cause1]', '_wrapper_span']
-    discharged_by: test_a_newline_in_a_c_argument_that_is_also_independently_unbalanced_keeps_the_generic_cause
-    source: "SB4 — the judge's bound on F5's obligation, which as written is unconditional"
-    seed_docstring: >-
-      F5's obligation binds when the newline is WHY the scan failed. Where the `-c` argument
-      carries a separately unbalanced quote that fails first, the generic cause (1) wording is
-      the correct one and the newline explanation is not owed — a design-introduced narrowing and
-      a genuine syntax bug must not be conflated in either direction.
-
-  - id: d_the_wrapper_shapes_the_reason_still_names_stay_refused
-    kind: survival
-    form: test
-    binds: ['UNTOKENIZABLE_REASON.domain.distinguished[cause5]', 'unwrap']
-    discharged_by: test_every_wrapper_shape_the_lexing_reason_names_is_still_refused_for_that_reason
-    seed_docstring: >-
-      Every wrapper shape `UNTOKENIZABLE_REASON` cause (5) still names after F4's strike — a bare
-      `bash`, `bash script.sh`, `sh -lc …`, a stray word after the `-c` string, a second complete
-      wrapper following the first — is still refused with the LEXING reason after the fold, and
-      the reason's own sentence still matches what the parser does. A bare `timeout`, by
-      contrast, still denies on the POLICY reason: that asymmetry is today's, it is not in the
-      enumerated set, and a folded implementation that unifies the two arms has made an
-      unenumerated verdict change.
-      THE MATCHER RECOGNISES A WRAPPER BY ITS FIRST TOKEN, and a character the model cannot see
-      landing on a LATER token may not change which reason answers: `bash -c 'cat P' extra\u00a0`
-      is a stray word after the `-c` string whether or not that word ends in a no-break space, so
-      cause (5) still names it and the model still reads the message that says what is actually
-      wrong with what it sent.
-
-    note: >-
-      THE FIRST-TOKEN RULE IS A DECISION, NOT AN OBSERVATION (RF-E8, human-resolved at the third
-      verify loop, and recorded as such so a later reader does not mistake a chosen answer for a
-      measured one). Seven wrapper shapes whose LAST token is not the wrapper word —
-      `sh -lc 'ls'`, `bash -c '<cmd>' extra`, `bash -x -c '<cmd>'`, `bash -c'<cmd>'`,
-      `bash <script>`, two complete wrappers in a row, and a `-c` wrapper followed by a second
-      physical line — were the one group the third verify loop could not settle by probe: an
-      M4+M6+M2 simulation reports them falling through to the capability deny, but that
-      simulation parses WITHOUT the fold, which is the very code the answer turns on. The author
-      leaf recorded neither answer and put the question up rather than pinning whichever behaviour
-      its own simulation produced. RESOLVED: they KEEP the specific lexing reason, and the corpus
-      carries all seven × the 26-character alphabet (182 rows) as verdict-NEUTRAL BY DECISION.
-      REJECTED: letting them fall through to the capability deny — 182 more shapes into member 8,
-      and the model loses the message that says what is actually wrong, which is the same
-      message-loss RC1, RC6 and RC9 were each about; and leaving it unrecorded, where whichever
-      way the implementation happened to be built would silently have become the answer.
-
-  - id: d_wrapper_recognition_applies_once_at_the_top_level
-    kind: behavior
-    form: test
-    fork: FK3
-    resolved: "once — taken by the human at §7, as recommended"
-    recommended_reading: "once, at the top level only, never over the text it extracts"
-    binds: ['_wrapper_span']
-    discharged_by: test_the_wrapper_step_applies_exactly_once_and_never_to_the_text_it_extracts
-    seed_docstring: >-
-      Wrapper recognition applies once, at the top level, and never re-runs over the slice it
-      just extracted: `timeout 5 timeout 3 cat x` still denies, `bash -c 'timeout 5 cat x'` still
-      denies, and a `timeout` appearing as the first word INSIDE a `-c` argument is ordinary text
-      to the outer match.
-    readings:
-      once: "single, outward-only application — matches today's behaviour exactly and preserves both denies"
-      fixed-point: "loop to a fixed point, or re-apply recognition to the extracted `-c` slice — turns two of today's denies into allows, a deny->allow widening on a security gate that is in nobody's enumerated set and is reached by accident rather than by decision"
-    note: >-
-      RESOLVED AT §7 (FK3, human): ONCE, at the top level, never re-run over the slice it
-      extracts. `fixed-point` was rejected explicitly — it turns two of today's denies into
-      allows, a deny->allow widening reached by accident rather than by decision, and it adds
-      NO member to the enumerated set. Nothing in the design says "once", and folding makes recursion
-      structurally easy — that is the whole risk this fork exists to catch. The recommendation is
-      `once`; if §7 takes the other reading it is a seventh member of the verdict-change set.
-
-  - id: d_a_bare_wrapper_word_keeps_its_reason_class
-    kind: behavior
-    form: test
-    binds: ['_wrapper_span', 'BashDecision']
-    discharged_by: test_a_bare_wrapper_word_denies_with_the_reason_class_it_denies_with_today
-    source: "45-dispositions, settled (both escalation copies hedged on the reason class; settled from O3+F2)"
-    seed_docstring: >-
-      A bare `bash` or `sh` denies with the LEXING reason (cause (5) names it); a bare `timeout`
-      denies with the POLICY reason, because it is an ordinary ungranted word (#971 — it was the
-      same verdict when a fold produced it, by a different route: `unwrap('timeout')` returned
-      the empty string, which
-      parses to zero pipelines and falls through. Reason identity is part of the verdict, and
-      this shape is not in the enumerated set, so neither arm may move.
-
-  # =========================================================================================
-  # O2 — ONE SCANNER (M2).
-  # =========================================================================================
 
   - id: d_nothing_outside_the_scanner_splits_bash_text
     kind: negative
@@ -918,14 +800,23 @@ demands:
   - id: d_wrapper_shapes_enter_the_differential_corpus
     kind: behavior
     form: test
-    binds: ['bash_oracle', 'interacts(bash_fd_prefix_955->bash_oracle)', '_wrapper_span']
+    binds: ['bash_oracle', 'interacts(bash_fd_prefix_955->bash_oracle)', '_scan']
     discharged_by: test_a_wrapper_shape_we_accept_means_what_bash_means
     seed_docstring: >-
-      The differential's corpus carries wrapper shapes — `bash -c '<candidate>'` and
-      `timeout N <candidate>`, including the glued-operator spelling — so for every wrapper the
-      parse accepts, real bash is asked what it actually ran and where its stderr went, and the
-      two must agree.
+      For every shape the parse accepts, real bash is asked what it actually ran and where its
+      stderr went, and the two must agree. This is the direction that can see a shape both sides
+      accept and MEAN differently, which an accept/reject oracle is structurally blind to.
     note: >-
+      #971 EMPTIED THE WRAPPER HALF OF THIS CORPUS, and the demand survives as the differential
+      it always was. The parse accepts no wrapper now — `bash -c '<payload>'` is three ordinary
+      words whose first is an ungranted program — so there is no folded command left for bash to
+      be answerable about, and asking anyway would compare the wrong things: the oracle measures
+      which argv reached the shim, and a wrapper passed through reaches it one exec level below
+      what the parse models. That those shapes DENY is
+      `d_no_word_is_parsed_as_a_wrapper`'s, over a wider list than this corpus ever carried.
+      The list is left in place as an empty tuple carrying that reasoning, because "why is there
+      no wrapper coverage in the wrapper differential" is the question a later reader asks.
+      ORIGINALLY: >-
       RENAMED for the same reason as the O2 control above: `20-demands.md` pointed this demand at
       `test_what_we_accept_means_what_bash_means`, the EXISTING parametrized case at
       `test_955_bash_fd_prefix.py:212`, whose corpus is single-stage `w …` shapes and contains no
@@ -1267,7 +1158,7 @@ demands:
     fork: FK1
     resolved: "minimal — ACCEPTED by the human at §7, minimal arm only; it joins the enumerated set as its seventh numbered member"
     recommended_reading: "accept, as D2's sixth member, in the MINIMAL form only"
-    binds: ['_wrapper_span']
+    binds: ['_scan']
     discharged_by: test_a_timeout_prefix_is_not_a_wrapper_and_is_never_folded_away
     superseded_by: d_a_timeout_prefix_is_not_a_wrapper
     seed_docstring: >-
@@ -1379,8 +1270,11 @@ structure:
 
     - id: _wrapper_span
       provenance: design
-      facets: {}     # THE FOLDED WRAPPER STEP (M3). F3's rename: it returns a SPAN of the
-                     # original text, not an unwrapped string. See NAME RECONCILIATION above.
+      retired_by: "#971"
+      facets: {}     # THE FOLDED WRAPPER STEP (M3), RETIRED. It survives as an element because
+                     # this graph's history binds to it; no function of this name exists in the
+                     # code any longer. `d_no_word_is_parsed_as_a_wrapper` is what replaced it,
+                     # and it binds `_scan` — there is no step between the raw text and the scan.
 
     - id: unwrap
       provenance: code

@@ -1,23 +1,24 @@
-r"""#959 - the wrapper folds into the parser (M3), and what the removal leaves behind.
+r"""#959 - the wrapper folded into the parser (M3); #971 - and then out of it entirely.
 
-`hooks/_cmd_segments.unwrap` is the second parser: it flattens the whole command with
-`shlex.split` and then decides what the `bash -c` argument was, which is why
-`bash -c 'echo a '2>/dev/null` is allowed today as `[['echo','a']]` with stderr on /dev/null
-while real bash's `-c` argument is `echo a 2` and the redirect belongs to the outer shell. The
-fold replaces that with a match by TOKEN INDEX over the one scanner's records, and the `-c`
-argument becomes its own token's resolved value, re-scanned as the inner command, with that
-token's SPAN saying where it ends — which is what makes an operator after it visible at all.
+`hooks/_cmd_segments.unwrap` was a second parser: it flattened the whole command with
+`shlex.split` and then decided what the `bash -c` argument had been, which is why
+`bash -c 'echo a '2>/dev/null` was allowed as `[['echo','a']]` with stderr on /dev/null while
+real bash's `-c` argument is `echo a 2` and the redirect belongs to the outer shell. #959
+replaced it with a match by TOKEN INDEX over the one scanner's records.
 
-The folded step is `_wrapper_span`. The `-c` argument is a single token that is RESOLVED and
-re-scanned; re-scanning that argument's RAW span would parse its quotes as part of the program
-name. If the implementation picks another name, the spec-graph id moves with it in the same
-commit - an alias would disable the check for that concept rather than paper over it.
+#971 DELETES THE STEP. Both arms - the `timeout N` prefix and the `bash -c` payload - are gone,
+for one reason that does not depend on which words are folded: A FOLD DELETES TEXT AHEAD OF THE
+DECISION, so the command the gate judges can differ from the command the model wrote, and every
+way of mis-reading the shape is a way of WIDENING what the gate allows. A pass-through has no
+such direction of failure - the worst a mis-read can do is refuse. The prefix arm went with two
+demonstrated deny->allow holes behind it; the `-c` arm was faithful (bash really does run the
+payload) and went anyway, because faithful-today was a property of four conditions that kept
+needing repair rather than of the design.
 
-THE `timeout` PREFIX ARM IS GONE (#971). It was the other half of this step: a prefix skipped by
-token index, with the remainder taken as a raw slice. Folding it deleted text AHEAD OF the
-decision, so mis-reading a prefix widened what the gate allows - and the stripped prefix was
-then discarded rather than executed, so the bound it named was never honoured either. `timeout`
-is now an ordinary ungranted word and the capability reason answers it.
+So what this file pins is an ABSENCE, plus the things that were true underneath the step and
+outlived it: a quoted argument is one token and keeps its own contents, a newline inside one is
+an unclosed quote, and parens still reach argv as ordinary words. `bash`, `sh` and `timeout` are
+ungranted programs, and the lane's capability reason is what answers them.
 """
 from __future__ import annotations
 
@@ -68,75 +69,85 @@ def _generic_lexing_reason() -> str:
 
 
 # --------------------------------------------------------------------------- #
-# M3 - the `-c` argument is a span, and the wrapper must be the whole command.
+# #971 - no word is a wrapper, and what that leaves the parser doing.
 # --------------------------------------------------------------------------- #
-def test_the_c_argument_is_the_token_its_span_bounds_not_a_rejoin_of_several():
-    r"""The inner command of a `bash -c` wrapper is the `-c` argument's OWN TOKEN, resolved once
-    and re-scanned as the inner command - never a re-join of several tokens that have already
-    been resolved. Its SPAN is what tells the parser where that token ends, which is how an
-    operator sitting after it becomes visible at all; the span is exact regardless of which
-    character sits at the boundary, because the offsets come from the matched token's own
-    position and not from a character-class test.
+def test_no_word_is_parsed_as_a_wrapper():
+    r"""#971: neither `bash` nor `sh` is recognised, so no text is extracted from a command
+    before the gate decides about it. They are ungranted programs and the lane's capability
+    reason - which names the programs the lane does have - answers every shape they appear in.
 
-    THE DESIGN SAID `line[start:end]` HERE AND IT IS FALSE FOR THIS ARM (RC7). A `-c` argument's
-    raw span includes its quotes - which is exactly what `test_scan_returns_one_frozen_record_
-    per_token_with_value_span_and_kind` asserts a span is - so re-scanning it yields ONE argv
-    word: `bash -c 'cat /run/report.md'` would parse to a program whose name contains a space.
-    Every assertion below was already written for the resolved reading, which is what caught it.
+    WHY THE `-c` FOLD WENT, given that it was FAITHFUL where the `timeout` prefix fold was not.
+    Bash really does run a `-c` payload, so extracting it was not wrong the way deleting a
+    prefix was. What it was, was the last remaining way for the command the GATE JUDGED to
+    differ from the command the MODEL WROTE - and that difference is the thing every finding on
+    this surface has been about. It was held closed by four conditions (the wrapper must be the
+    whole command, the payload exactly one argument, the extracted text never re-folded, and
+    nothing at all may follow the closing quote), three of which had already needed a repair.
+    Deleting the arm deletes the conditions with it: a pass-through has nothing to get wrong.
 
-    What the raw-slice rule was protecting is NOT reopened, and the next reader must not "fix"
-    this back: the concern is re-joining SEVERAL resolved tokens, where the glue between them is
-    destroyed and unrecoverable. Resolving ONE token loses nothing - it is exactly what a shell
-    hands the program - and the re-join is still forbidden here. The raw slice remains right for
-    the other arm, `test_the_timeout_prefix_is_skipped_by_token_index_and_the_rest_is_a_raw_slice`,
-    where the remainder is many tokens whose glue must survive."""
-    # A rejoin of resolved tokens loses the inner quoting: `"a  b"` would come back as `a b`.
-    assert _parsed("bash -c 'echo \"a  b\"'") == [[["echo", "a  b"]]]
-    assert _parsed("bash -c 'echo a\\ b'") == [[["echo", "a b"]]]
-    # ...and the boundary character does not decide where the slice ends.
-    assert _parsed("bash -c 'echo P" + CR + "'") == [[["echo", "P" + CR]]]
-    assert _parsed("bash -c 'echo " + NBSP + "P'") == [[["echo", NBSP + "P"]]]
-
-
-def test_an_operator_outside_the_c_argument_refuses_the_wrapper():
-    """When an operator sits outside the `-c` argument - `bash -c 'echo a '2>/dev/null`, where
-    bash's own `-c` argument is `echo a 2` and the redirect belongs to the outer shell - the
-    wrapper is not the whole command and the parse refuses it, instead of handing the inner
-    shell a redirect the outer shell owned.
-
-    Rejected: today's answer, which is ALLOW, with `[['echo','a']]` and stderr on /dev/null
-    crossing into the box while real bash runs `echo a 2` with the outer redirect taking
-    stdout. This is verdict-change member 3 and it is the fix's own headline case."""
-    for cmd in ("bash -c 'echo a '2>/dev/null", f"bash -c 'cat {REPORT} '2>/dev/null"):
-        d = _bash(cmd)
-        assert not d.allow, f"{cmd!r} is still allowed with an argv bash does not run"
-        assert d.reason == permission.UNTOKENIZABLE_REASON
-        assert d.pipelines is None
-    # The positive control: the same operator INSIDE the `-c` argument belongs to the inner
-    # command and is still accepted, with the stderr routing the text asks for.
-    d = _bash(f"bash -c 'cat {REPORT} 2>/dev/null'")
-    assert d.allow
-    assert [st.stderr for pl in d.pipelines for st in pl.stages] == ["devnull"]
-
-
-def test_a_bash_c_wrapper_with_anything_after_it_is_refused():
-    """A `bash -c` wrapper must be the WHOLE command: `bash -c 'ls'` followed by a second
-    physical line is refused, because the `-c` argument does not claim the text after it, and so
-    is a stray word after the `-c` string on the same line. The wrapper decision is taken over
-    the whole command and cannot live inside the per-line scan - a first-line-only fold reads
-    `bash -c 'ls'` as a complete wrapper and silently loses line 2."""
+    The shapes below are the ones #959's own enumerated set spent members 3 and 5 on, plus every
+    spelling its `UNTOKENIZABLE_REASON` cause (5) used to list. They all answer the same message
+    now, and it is the message that tells the model what to do instead."""
     for cmd in (
-        "bash -c 'ls'\ncat /etc/hosts",
-        f"bash -c 'cat {REPORT}'\nwc -l",
-        f"bash -c 'cat {REPORT}' extra",
-        "bash -c 'echo a' bash -c 'echo b'",
+        f"bash -c 'cat {REPORT}'",                    # the plain wrapper
+        f"bash -c 'cat {REPORT} | wc -l'",            # a pipeline payload
+        "sh -c 'echo hi'",
+        '"bash" -c "echo hi"',                        # the quoted spelling of the word
+        "'ba''sh' -c 'echo hi'",                      # ...and the concatenated one
+        "bash",                                       # a bare wrapper
+        "sh",
+        f"bash {REPORT}",                             # a script path
+        "sh -lc 'ls'",
+        "bash -c'echo hi'",                           # a glued `-c`
+        "bash -x -c 'echo hi'",                       # a flag in between
+        f"bash -c 'cat {REPORT}' extra",              # a stray word after the argument
+        "bash -c 'echo a' bash -c 'echo b'",          # a second wrapper
+        "bash -c 'ls'\ncat /etc/hosts",               # a second physical line
+        "bash -c ''",                                 # an empty payload
+        "bash -c 'bash -c \"echo hi\"'",              # a wrapper inside a wrapper
+        "bash -c 'echo a '2>/dev/null",              # the retired member 3: an OUTER operator
+        f"bash -c 'cat {REPORT} '2>/dev/null",
     ):
         d = _bash(cmd)
-        assert not d.allow, f"{cmd!r} was allowed - a wrapper that is not the whole command"
-        assert d.reason == permission.UNTOKENIZABLE_REASON, f"{cmd!r}"
-    # The positive control: the wrapper that IS the whole command still parses to its inner
-    # pipelines, so the refusals above are not everything having stopped working.
-    assert _argv(f"bash -c 'cat {REPORT} | wc -c'") == [[["cat", REPORT], ["wc", "-c"]]]
+        assert not d.allow, f"{cmd!r} is allowed"
+        assert d.reason == base.MAIN.deny_reason, (
+            f"{cmd!r}: refused, but not on the reason that names the programs this lane has"
+        )
+    # ...and the parse reports what the text says, quotes and all - no payload is unpacked, and
+    # the `|` inside a quoted argument is not a pipe.
+    assert _parsed(f"bash -c 'cat {REPORT} | wc -l'") == [
+        [["bash", "-c", f"cat {REPORT} | wc -l"]]
+    ]
+    assert _parsed("bash -c 'bash -c \"echo hi\"'") == [[["bash", "-c", 'bash -c "echo hi"']]]
+    # The reason itself must stop describing a step the parser does not take: a model told its
+    # wrapper "did not fold to a single command string" would go on trying to spell one.
+    for word in ("bash -c", "wrapper", "-lc"):
+        assert word not in permission.UNTOKENIZABLE_REASON.replace(
+            "`bash -c '<cmd>'` is refused as an ungranted program", ""
+        ), f"the lexing reason still describes a wrapper step ({word!r})"
+
+
+def test_a_newline_inside_a_quoted_argument_is_the_unclosed_quote_it_looks_like():
+    r"""A quoted argument carrying a newline is refused for the reason every cross-line quote is
+    refused - a quoted string cannot span lines - and the refusal has to EXPLAIN that, because a
+    model that pretty-printed a SQL or JSON argument needs to know what to fix.
+
+    This is what is left of member 5 (#959 F5), and it needed a message of its own back when a
+    `-c` payload was extracted before the lines were split. It does not any more: `parse` splits
+    physical lines FIRST, so the quote is simply never closed on its own line and cause (1) -
+    the general rule - is both the true answer and the useful one."""
+    for cmd in (
+        f"bash -c 'cat {REPORT}\nwc -l'",
+        f"cat {REPORT} | grep 'a\nb'",
+        "defender-sql 'SELECT 1\nFROM t'",
+    ):
+        d = _bash(cmd)
+        assert not d.allow, cmd
+        assert d.reason == permission.UNTOKENIZABLE_REASON, cmd
+    assert "newline INSIDE a quoted argument" in permission.UNTOKENIZABLE_REASON, (
+        "the reason no longer explains a newline inside a quoted argument, which is the one "
+        "thing a model that pretty-printed its payload needs told"
+    )
 
 
 def test_a_timeout_prefix_is_not_a_wrapper_and_is_never_folded_away():
@@ -205,152 +216,6 @@ def test_a_blank_glued_to_an_ungranted_word_is_not_blamed_for_the_refusal():
     assert re.search(rf"U\+0*{ord(NBSP):04x}\b", d.reason, re.IGNORECASE)
 
 
-def test_a_newline_inside_the_c_argument_is_the_unclosed_quote_it_looks_like():
-    r"""A `bash -c` argument carrying a newline is refused for the reason every other cross-line
-    quote is refused - a quoted string cannot span lines - instead of being flattened into one
-    token and re-split into a pipeline per line. The refusal must reach the model as a reason
-    that EXPLAINS THE NEWLINE, not as a generic parse failure: a model that sends a multi-line
-    `-c` payload today gets an allow, and after this change it needs to know what to fix.
-
-    Rejected: today's answer, allowed, with `bash -c 'cat /run/report.md\nwc -l'` parsing to two
-    pipelines. This is verdict-change member 5."""
-    d = _bash(f"bash -c 'cat {REPORT}\nwc -l'")
-    assert not d.allow, "a multi-line `-c` payload is still flattened into two pipelines"
-    assert d.pipelines is None
-    assert d.reason != _generic_lexing_reason(), (
-        "the refusal is the generic parse failure an unbalanced quote earns. F5's obligation "
-        "is that this narrowing explains ITSELF: the model sent a payload that worked "
-        "yesterday, and the reason it now reads has to name the newline it must collapse"
-    )
-    assert re.search(r"newline|line break|one line", d.reason, re.IGNORECASE), (
-        "the refusal never names the newline the model has to remove"
-    )
-
-
-def test_a_newline_in_a_c_argument_that_is_also_independently_unbalanced_keeps_the_generic_cause():
-    """F5's obligation binds when the newline is WHY the scan failed. Where the `-c` argument
-    carries a separately unbalanced quote that fails first, the generic cause (1) wording is the
-    correct one and the newline explanation is not owed - a design-introduced narrowing and a
-    genuine syntax bug must not be conflated in either direction."""
-    d = _bash('bash -c "cat \'a\nb"')
-    assert not d.allow
-    assert d.reason == _generic_lexing_reason(), (
-        "the `-c` argument here carries an unbalanced quote of its own, which fails first; "
-        "explaining a newline to a model whose real mistake is an open quote sends it to fix "
-        "the wrong thing"
-    )
-
-
-def test_every_wrapper_shape_the_lexing_reason_names_is_still_refused_for_that_reason():
-    """Every wrapper shape `UNTOKENIZABLE_REASON` cause (5) still names after F4's strike - a
-    bare `bash`, `bash script.sh`, `sh -lc ...`, a stray word after the `-c` string, a second
-    complete wrapper following the first - is still refused with the LEXING reason after the
-    fold, and the reason's own sentence still matches what the parser does. A bare `timeout`, by
-    contrast, still denies on the POLICY reason: that asymmetry is today's, it is not in the
-    enumerated set, and a folded implementation that unifies the two arms has made an
-    unenumerated verdict change.
-
-    AND THE MATCHER RECOGNISES A WRAPPER BY ITS FIRST TOKEN, so a trailing character the model
-    cannot see, landing on a LATER token, may not change which reason answers (RF-E8,
-    human-resolved at the third verify loop). `bash -c 'cat P' extra<U+00A0>` is a stray word
-    after the `-c` string whether or not that word ends in a no-break space; the shape is still
-    recognisably a wrapper, so cause (5) still names it and the model still reads the message
-    that says what is actually wrong.
-
-    THIS IS AN OBLIGATION ON THE IMPLEMENTATION, NOT AN OBSERVATION. An M4+M6+M2 simulation
-    reports these shapes falling through to the capability deny - but that simulation parses
-    WITHOUT the fold, which is the very code the answer depends on, so it cannot settle it. The
-    rejected reading was to let them fall through: 182 more shapes into member 8, and the model
-    loses the specific message in exactly the way the previous three findings were about. The
-    corpus records all seven shapes x 26 characters as verdict-neutral BY DECISION.
-
-    AND THE DECISION HAS A BOUNDARY, WHICH IS THE OTHER END OF THE COMMAND. Prepend the same
-    character and the answer inverts: `<U+00A0>bash -c '<cmd>' extra` has a first token no matcher
-    recognises as `bash` on any implementation this spec permits - matching is on resolved values
-    and exact - so the wrapper is not recognised, the shape is an ordinary ungranted command, and
-    it leaves the lexing reason. That is member 8 by OBSERVATION (26/26 executed, and determined
-    rather than chosen, because the fold's absence cannot change a token nothing recognises). The
-    two ends of one command give opposite answers for the same seven shapes, which is why neither
-    end could be swept as a stand-in for the other."""
-    for cmd in (
-        "bash", "sh", f"bash {REPORT}", "sh -lc 'ls'",
-        f"bash -c 'cat {REPORT}' extra", "bash -c 'echo a' bash -c 'echo b'",
-        "bash -x -c 'echo hi'", "bash -c'echo hi'",
-    ):
-        d = _bash(cmd)
-        assert not d.allow, f"{cmd!r} left the lexing reason cause (5) names"
-        assert d.reason == permission.UNTOKENIZABLE_REASON, (
-            f"{cmd!r} left the lexing reason cause (5) names"
-        )
-    assert "bash -c" in permission.UNTOKENIZABLE_REASON
-
-    # The first-token rule, over every shape whose last token is not the wrapper word and every
-    # character the model cannot see. Swept from the corpus's own table so the two cannot drift.
-    for name, shape in base.WRAPPER_LATER_TOKEN_SHAPES:
-        for blank in base.DIVERGENT_BLANKS:
-            d = _bash(shape + blank)
-            assert not d.allow, f"{name} + U+{ord(blank):04X} became an allow"
-            assert d.reason == permission.UNTOKENIZABLE_REASON, (
-                f"{name} + U+{ord(blank):04X}: the wrapper is recognised by its FIRST token, so "
-                "an invisible character on a later one may not move this refusal onto the "
-                "capability path - the model would lose the one message that names what is "
-                "actually wrong with the command it sent"
-            )
-
-    # The boundary: the same character at the OTHER end takes the wrapper word with it, so the
-    # first-token rule has nothing to recognise and the refusal leaves this reason.
-    for name, shape in base.WRAPPER_LATER_TOKEN_SHAPES:
-        for blank in base.DIVERGENT_BLANKS:
-            d = _bash(blank + shape)
-            assert not d.allow, f"leading U+{ord(blank):04X} + {name} became an allow"
-            assert d.reason != permission.UNTOKENIZABLE_REASON, (
-                f"leading U+{ord(blank):04X} + {name}: the first token is not `bash` any more, so "
-                "there is no wrapper to recognise and no cause (5) to keep - this is the boundary "
-                "of the first-token rule, not an instance of it"
-            )
-
-    for cmd in ("timeout", "timeout --"):
-        d = _bash(cmd)
-        assert not d.allow
-        assert d.reason == base.MAIN.deny_reason, (
-            f"{cmd!r} moved to the lexing reason. The asymmetry is today's - `unwrap('timeout')` "
-            "returns the empty string, which parses to zero pipelines and falls through to the "
-            "policy reason, where a bare `bash` raises - and reason identity is part of the "
-            "verdict"
-        )
-
-
-def test_the_wrapper_step_applies_exactly_once_and_never_to_the_text_it_extracts():
-    """Wrapper recognition applies once, at the top level, and never re-runs over the slice it
-    just extracted: a `bash -c` argument that is itself a wrapper still denies, and a wrapper
-    word appearing as the first word INSIDE a `-c` argument is ordinary text to the outer match.
-
-    Rejected: looping to a fixed point, or re-applying recognition to the extracted `-c` slice -
-    which turns today's denies into allows, a deny->allow widening on a security gate that is in
-    nobody's enumerated set and would be reached by accident rather than by decision. Nothing in
-    the design says "once", and folding makes recursion the easier thing to write by mistake."""
-    for cmd in (
-        "bash -c 'bash -c \"echo hi\"'",
-        f"bash -c 'timeout 5 cat {REPORT}'",
-    ):
-        assert not _bash(cmd).allow, f"{cmd!r} became an allow - recognition ran more than once"
-    # ...and the extracted text keeps the wrapper word as an ordinary word in the argv.
-    assert _parsed(f"bash -c 'timeout 5 cat {REPORT}'") == [[["timeout", "5", "cat", REPORT]]]
-    assert _parsed("bash -c 'bash -c \"echo hi\"'") == [[["bash", "-c", "echo hi"]]]
-    # The positive control: ONE application still happens.
-    assert _argv(f"bash -c 'cat {REPORT}'") == [[["cat", REPORT]]]
-
-
-def test_a_bare_wrapper_word_denies_with_the_reason_class_it_denies_with_today():
-    """A bare `bash` or `sh` denies with the LEXING reason (cause (5) names it); a bare `timeout`
-    denies with the POLICY reason, because it is an ordinary word no grant admits (#971 - it was
-    the same verdict when a fold produced it, by a different route). Reason identity is part of
-    the verdict, and this shape is not in the enumerated set, so neither arm may move."""
-    assert _bash("bash").reason == permission.UNTOKENIZABLE_REASON
-    assert _bash("sh").reason == permission.UNTOKENIZABLE_REASON
-    assert _bash("timeout").reason == base.MAIN.deny_reason
-    assert _bash("timeout --").reason == base.MAIN.deny_reason
-
 
 # --------------------------------------------------------------------------- #
 # C3 / C4 - what the removal leaves behind.
@@ -373,10 +238,10 @@ def _identifier_hits(name: str, *, skip: set[str]) -> dict[str, list[int]]:
 
 
 def test_the_gate_hands_the_raw_command_straight_to_the_parse():
-    """The production dependent survives the removal: the gate no longer applies a wrapper step
-    before parsing - it hands the raw command straight to the parse - so a shape that used to be
-    unwrapped once cannot survive as a silently different command, and `unwrap`'s
-    non-idempotence stops being reachable through the gate at all."""
+    """The production dependent survives the removal: the gate applies NO wrapper step before
+    parsing - it hands the raw command straight through - so no shape can reach the box as a
+    silently different command, and `unwrap`'s non-idempotence is unreachable because there is
+    no unwrapping left anywhere on the path."""
     gate = (DEFENDER / "runtime" / "permission" / "bash.py").read_text(encoding="utf-8")
     imported = {
         alias.name
@@ -388,9 +253,9 @@ def test_the_gate_hands_the_raw_command_straight_to_the_parse():
         "the gate still imports the standalone wrapper step, so there are still two parsers on "
         "the path and the fold has not happened"
     )
-    # ...and the non-idempotence is unreachable: one application, so a second wrapper stays.
-    assert not _bash("bash -c 'bash -c \"echo hi\"'").allow
-    assert _argv(f"bash -c 'cat {REPORT}'") == [[["cat", REPORT]]]
+    # ...and the raw text is what reaches the parse: a wrapper word is a word.
+    assert _parsed(f"bash -c 'cat {REPORT}'") == [[["bash", "-c", f"cat {REPORT}"]]]
+    assert _argv(f"bash -c 'cat {REPORT}'") is None, "a refused command hands the box nothing"
 
 
 def test_no_call_site_pairs_a_wrapper_step_with_the_parse():
@@ -469,11 +334,15 @@ def test_the_shim_name_constants_survive_the_move():
 def test_the_paren_fall_through_still_fails_closed_a_layer_up():
     """`(` and `)` still break a word without being operators the grammar accepts, so
     `cat <(id)` still reaches argv as ordinary words and is still refused by the guard that
-    reads argv - whether the stage came from a bare command or from a wrapper's extracted text.
-    The deliberate fall-through `test_540_exec_seam.py` pins is not what this change touches, and
-    a token-record refactor must not quietly change the token stream that pin asserts on."""
+    reads argv. The deliberate fall-through `test_540_exec_seam.py` pins is not what this change
+    touches, and a token-record refactor must not quietly change the token stream that pin
+    asserts on.
+
+    Inside quotes the parens are not even words of their own any more - there is no payload to
+    re-scan (#971) - so the wrapper spelling is refused one layer earlier, as an ungranted
+    program. Both still refuse, which is the property; only the layer moved."""
     assert _parsed("cat <(id)") == [[["cat", "<(", "id", ")"]]]
-    assert _parsed("bash -c 'cat <(id)'") == [[["cat", "<(", "id", ")"]]]
+    assert _parsed("bash -c 'cat <(id)'") == [[["bash", "-c", "cat <(id)"]]]
     for cmd in ("cat <(id)", "bash -c 'cat <(id)'"):
         d = _bash(cmd)
         why = (f"{cmd!r}: the parens reach argv as ordinary words and the argv-reading guard "

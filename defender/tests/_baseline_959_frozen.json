@@ -876,8 +876,12 @@
    "id": "wrap-bash-c",
    "command": "bash -c 'cat /run/report.md'",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": true,
     "reason": "none",
@@ -898,8 +902,12 @@
    "id": "wrap-bash-c-pipeline",
    "command": "bash -c 'cat /run/report.md | wc -l'",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": true,
     "reason": "none",
@@ -927,8 +935,12 @@
    "id": "wrap-sh-c",
    "command": "sh -c 'echo hi'",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": true,
     "reason": "none",
@@ -949,8 +961,12 @@
    "id": "wrap-quoted-bash",
    "command": "\"bash\" -c \"echo hi\"",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": true,
     "reason": "none",
@@ -971,8 +987,12 @@
    "id": "wrap-concatenated-bash",
    "command": "'ba''sh' -c 'echo hi'",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": true,
     "reason": "none",
@@ -993,8 +1013,12 @@
    "id": "wrap-glued-c",
    "command": "bash -c'echo hi'",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -1005,8 +1029,124 @@
    "id": "wrap-flag-between",
    "command": "bash -x -c 'echo hi'",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
+   "baseline": {
+    "allow": false,
+    "reason": "untokenizable",
+    "pipelines": null
+   }
+  },
+  {
+   "id": "wrap-bare-bash",
+   "command": "bash",
+   "policy": "main",
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
+   "baseline": {
+    "allow": false,
+    "reason": "untokenizable",
+    "pipelines": null
+   }
+  },
+  {
+   "id": "wrap-bare-sh",
+   "command": "sh",
+   "policy": "main",
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
+   "baseline": {
+    "allow": false,
+    "reason": "untokenizable",
+    "pipelines": null
+   }
+  },
+  {
+   "id": "wrap-bash-script",
+   "command": "bash /run/report.md",
+   "policy": "main",
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
+   "baseline": {
+    "allow": false,
+    "reason": "untokenizable",
+    "pipelines": null
+   }
+  },
+  {
+   "id": "wrap-sh-lc",
+   "command": "sh -lc 'ls'",
+   "policy": "main",
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
+   "baseline": {
+    "allow": false,
+    "reason": "untokenizable",
+    "pipelines": null
+   }
+  },
+  {
+   "id": "wrap-stray-word-after-c",
+   "command": "bash -c 'cat /run/report.md' extra",
+   "policy": "main",
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
+   "baseline": {
+    "allow": false,
+    "reason": "untokenizable",
+    "pipelines": null
+   }
+  },
+  {
+   "id": "wrap-second-wrapper",
+   "command": "bash -c 'echo a' bash -c 'echo b'",
+   "policy": "main",
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
+   "baseline": {
+    "allow": false,
+    "reason": "untokenizable",
+    "pipelines": null
+   }
+  },
+  {
+   "id": "wrap-c-then-second-line",
+   "command": "bash -c 'ls'\ncat /etc/hosts",
+   "policy": "main",
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -1022,78 +1162,6 @@
    "baseline": {
     "allow": false,
     "reason": "policy-deny",
-    "pipelines": null
-   }
-  },
-  {
-   "id": "wrap-bare-bash",
-   "command": "bash",
-   "policy": "main",
-   "member": "",
-   "after": null,
-   "baseline": {
-    "allow": false,
-    "reason": "untokenizable",
-    "pipelines": null
-   }
-  },
-  {
-   "id": "wrap-bare-sh",
-   "command": "sh",
-   "policy": "main",
-   "member": "",
-   "after": null,
-   "baseline": {
-    "allow": false,
-    "reason": "untokenizable",
-    "pipelines": null
-   }
-  },
-  {
-   "id": "wrap-bash-script",
-   "command": "bash /run/report.md",
-   "policy": "main",
-   "member": "",
-   "after": null,
-   "baseline": {
-    "allow": false,
-    "reason": "untokenizable",
-    "pipelines": null
-   }
-  },
-  {
-   "id": "wrap-sh-lc",
-   "command": "sh -lc 'ls'",
-   "policy": "main",
-   "member": "",
-   "after": null,
-   "baseline": {
-    "allow": false,
-    "reason": "untokenizable",
-    "pipelines": null
-   }
-  },
-  {
-   "id": "wrap-stray-word-after-c",
-   "command": "bash -c 'cat /run/report.md' extra",
-   "policy": "main",
-   "member": "",
-   "after": null,
-   "baseline": {
-    "allow": false,
-    "reason": "untokenizable",
-    "pipelines": null
-   }
-  },
-  {
-   "id": "wrap-second-wrapper",
-   "command": "bash -c 'echo a' bash -c 'echo b'",
-   "policy": "main",
-   "member": "",
-   "after": null,
-   "baseline": {
-    "allow": false,
-    "reason": "untokenizable",
     "pipelines": null
    }
   },
@@ -1118,18 +1186,6 @@
    "baseline": {
     "allow": false,
     "reason": "policy-deny",
-    "pipelines": null
-   }
-  },
-  {
-   "id": "wrap-c-then-second-line",
-   "command": "bash -c 'ls'\ncat /etc/hosts",
-   "policy": "main",
-   "member": "",
-   "after": null,
-   "baseline": {
-    "allow": false,
-    "reason": "untokenizable",
     "pipelines": null
    }
   },
@@ -1262,8 +1318,12 @@
    "id": "gather-untok-wrapper",
    "command": "bash -c 'cat /run/report.md' extra",
    "policy": "gather",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -1662,10 +1722,10 @@
    "id": "m3-outer-operator",
    "command": "bash -c 'echo a '2>/dev/null",
    "policy": "main",
-   "member": "3",
+   "member": "10",
    "after": {
     "allow": false,
-    "reason": "untokenizable",
+    "reason": "policy-deny",
     "pipelines": null
    },
    "baseline": {
@@ -1688,10 +1748,10 @@
    "id": "m3-outer-operator-cat",
    "command": "bash -c 'cat /run/report.md '2>/dev/null",
    "policy": "main",
-   "member": "3",
+   "member": "10",
    "after": {
     "allow": false,
-    "reason": "untokenizable",
+    "reason": "policy-deny",
     "pipelines": null
    },
    "baseline": {
@@ -2124,8 +2184,12 @@
    "id": "neutral-wrapper-sh-lc-u000b",
    "command": "sh -lc 'ls'\u000b",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -2152,8 +2216,12 @@
    "id": "neutral-wrapper-stray-word-after-c-u000b",
    "command": "bash -c 'cat /run/report.md' extra\u000b",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -2180,8 +2248,12 @@
    "id": "neutral-wrapper-flag-between-u000b",
    "command": "bash -x -c 'echo hi'\u000b",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -2208,8 +2280,12 @@
    "id": "neutral-wrapper-glued-c-u000b",
    "command": "bash -c'echo hi'\u000b",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -2236,8 +2312,12 @@
    "id": "neutral-wrapper-bash-script-u000b",
    "command": "bash /run/report.md\u000b",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -2264,8 +2344,12 @@
    "id": "neutral-wrapper-second-wrapper-u000b",
    "command": "bash -c 'echo a' bash -c 'echo b'\u000b",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -2292,8 +2376,12 @@
    "id": "neutral-wrapper-c-then-second-line-u000b",
    "command": "bash -c 'ls'\ncat /etc/hosts\u000b",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -2950,8 +3038,12 @@
    "id": "neutral-wrapper-sh-lc-u000c",
    "command": "sh -lc 'ls'\f",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -2978,8 +3070,12 @@
    "id": "neutral-wrapper-stray-word-after-c-u000c",
    "command": "bash -c 'cat /run/report.md' extra\f",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -3006,8 +3102,12 @@
    "id": "neutral-wrapper-flag-between-u000c",
    "command": "bash -x -c 'echo hi'\f",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -3034,8 +3134,12 @@
    "id": "neutral-wrapper-glued-c-u000c",
    "command": "bash -c'echo hi'\f",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -3062,8 +3166,12 @@
    "id": "neutral-wrapper-bash-script-u000c",
    "command": "bash /run/report.md\f",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -3090,8 +3198,12 @@
    "id": "neutral-wrapper-second-wrapper-u000c",
    "command": "bash -c 'echo a' bash -c 'echo b'\f",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -3118,8 +3230,12 @@
    "id": "neutral-wrapper-c-then-second-line-u000c",
    "command": "bash -c 'ls'\ncat /etc/hosts\f",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -3776,8 +3892,12 @@
    "id": "neutral-wrapper-sh-lc-u000d",
    "command": "sh -lc 'ls'\r",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -3804,8 +3924,12 @@
    "id": "neutral-wrapper-stray-word-after-c-u000d",
    "command": "bash -c 'cat /run/report.md' extra\r",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -3832,8 +3956,12 @@
    "id": "neutral-wrapper-flag-between-u000d",
    "command": "bash -x -c 'echo hi'\r",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -3860,8 +3988,12 @@
    "id": "neutral-wrapper-glued-c-u000d",
    "command": "bash -c'echo hi'\r",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -3888,8 +4020,12 @@
    "id": "neutral-wrapper-bash-script-u000d",
    "command": "bash /run/report.md\r",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -3916,8 +4052,12 @@
    "id": "neutral-wrapper-second-wrapper-u000d",
    "command": "bash -c 'echo a' bash -c 'echo b'\r",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -3944,8 +4084,12 @@
    "id": "neutral-wrapper-c-then-second-line-u000d",
    "command": "bash -c 'ls'\ncat /etc/hosts\r",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -4602,8 +4746,12 @@
    "id": "neutral-wrapper-sh-lc-u001c",
    "command": "sh -lc 'ls'\u001c",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -4630,8 +4778,12 @@
    "id": "neutral-wrapper-stray-word-after-c-u001c",
    "command": "bash -c 'cat /run/report.md' extra\u001c",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -4658,8 +4810,12 @@
    "id": "neutral-wrapper-flag-between-u001c",
    "command": "bash -x -c 'echo hi'\u001c",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -4686,8 +4842,12 @@
    "id": "neutral-wrapper-glued-c-u001c",
    "command": "bash -c'echo hi'\u001c",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -4714,8 +4874,12 @@
    "id": "neutral-wrapper-bash-script-u001c",
    "command": "bash /run/report.md\u001c",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -4742,8 +4906,12 @@
    "id": "neutral-wrapper-second-wrapper-u001c",
    "command": "bash -c 'echo a' bash -c 'echo b'\u001c",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -4770,8 +4938,12 @@
    "id": "neutral-wrapper-c-then-second-line-u001c",
    "command": "bash -c 'ls'\ncat /etc/hosts\u001c",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -5428,8 +5600,12 @@
    "id": "neutral-wrapper-sh-lc-u001d",
    "command": "sh -lc 'ls'\u001d",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -5456,8 +5632,12 @@
    "id": "neutral-wrapper-stray-word-after-c-u001d",
    "command": "bash -c 'cat /run/report.md' extra\u001d",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -5484,8 +5664,12 @@
    "id": "neutral-wrapper-flag-between-u001d",
    "command": "bash -x -c 'echo hi'\u001d",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -5512,8 +5696,12 @@
    "id": "neutral-wrapper-glued-c-u001d",
    "command": "bash -c'echo hi'\u001d",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -5540,8 +5728,12 @@
    "id": "neutral-wrapper-bash-script-u001d",
    "command": "bash /run/report.md\u001d",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -5568,8 +5760,12 @@
    "id": "neutral-wrapper-second-wrapper-u001d",
    "command": "bash -c 'echo a' bash -c 'echo b'\u001d",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -5596,8 +5792,12 @@
    "id": "neutral-wrapper-c-then-second-line-u001d",
    "command": "bash -c 'ls'\ncat /etc/hosts\u001d",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -6254,8 +6454,12 @@
    "id": "neutral-wrapper-sh-lc-u001e",
    "command": "sh -lc 'ls'\u001e",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -6282,8 +6486,12 @@
    "id": "neutral-wrapper-stray-word-after-c-u001e",
    "command": "bash -c 'cat /run/report.md' extra\u001e",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -6310,8 +6518,12 @@
    "id": "neutral-wrapper-flag-between-u001e",
    "command": "bash -x -c 'echo hi'\u001e",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -6338,8 +6550,12 @@
    "id": "neutral-wrapper-glued-c-u001e",
    "command": "bash -c'echo hi'\u001e",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -6366,8 +6582,12 @@
    "id": "neutral-wrapper-bash-script-u001e",
    "command": "bash /run/report.md\u001e",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -6394,8 +6614,12 @@
    "id": "neutral-wrapper-second-wrapper-u001e",
    "command": "bash -c 'echo a' bash -c 'echo b'\u001e",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -6422,8 +6646,12 @@
    "id": "neutral-wrapper-c-then-second-line-u001e",
    "command": "bash -c 'ls'\ncat /etc/hosts\u001e",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -7080,8 +7308,12 @@
    "id": "neutral-wrapper-sh-lc-u001f",
    "command": "sh -lc 'ls'\u001f",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -7108,8 +7340,12 @@
    "id": "neutral-wrapper-stray-word-after-c-u001f",
    "command": "bash -c 'cat /run/report.md' extra\u001f",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -7136,8 +7372,12 @@
    "id": "neutral-wrapper-flag-between-u001f",
    "command": "bash -x -c 'echo hi'\u001f",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -7164,8 +7404,12 @@
    "id": "neutral-wrapper-glued-c-u001f",
    "command": "bash -c'echo hi'\u001f",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -7192,8 +7436,12 @@
    "id": "neutral-wrapper-bash-script-u001f",
    "command": "bash /run/report.md\u001f",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -7220,8 +7468,12 @@
    "id": "neutral-wrapper-second-wrapper-u001f",
    "command": "bash -c 'echo a' bash -c 'echo b'\u001f",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -7248,8 +7500,12 @@
    "id": "neutral-wrapper-c-then-second-line-u001f",
    "command": "bash -c 'ls'\ncat /etc/hosts\u001f",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -7906,8 +8162,12 @@
    "id": "neutral-wrapper-sh-lc-u0085",
    "command": "sh -lc 'ls'\u0085",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -7934,8 +8194,12 @@
    "id": "neutral-wrapper-stray-word-after-c-u0085",
    "command": "bash -c 'cat /run/report.md' extra\u0085",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -7962,8 +8226,12 @@
    "id": "neutral-wrapper-flag-between-u0085",
    "command": "bash -x -c 'echo hi'\u0085",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -7990,8 +8258,12 @@
    "id": "neutral-wrapper-glued-c-u0085",
    "command": "bash -c'echo hi'\u0085",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -8018,8 +8290,12 @@
    "id": "neutral-wrapper-bash-script-u0085",
    "command": "bash /run/report.md\u0085",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -8046,8 +8322,12 @@
    "id": "neutral-wrapper-second-wrapper-u0085",
    "command": "bash -c 'echo a' bash -c 'echo b'\u0085",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -8074,8 +8354,12 @@
    "id": "neutral-wrapper-c-then-second-line-u0085",
    "command": "bash -c 'ls'\ncat /etc/hosts\u0085",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -8732,8 +9016,12 @@
    "id": "neutral-wrapper-sh-lc-u00a0",
    "command": "sh -lc 'ls'\u00a0",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -8760,8 +9048,12 @@
    "id": "neutral-wrapper-stray-word-after-c-u00a0",
    "command": "bash -c 'cat /run/report.md' extra\u00a0",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -8788,8 +9080,12 @@
    "id": "neutral-wrapper-flag-between-u00a0",
    "command": "bash -x -c 'echo hi'\u00a0",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -8816,8 +9112,12 @@
    "id": "neutral-wrapper-glued-c-u00a0",
    "command": "bash -c'echo hi'\u00a0",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -8844,8 +9144,12 @@
    "id": "neutral-wrapper-bash-script-u00a0",
    "command": "bash /run/report.md\u00a0",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -8872,8 +9176,12 @@
    "id": "neutral-wrapper-second-wrapper-u00a0",
    "command": "bash -c 'echo a' bash -c 'echo b'\u00a0",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -8900,8 +9208,12 @@
    "id": "neutral-wrapper-c-then-second-line-u00a0",
    "command": "bash -c 'ls'\ncat /etc/hosts\u00a0",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -9558,8 +9870,12 @@
    "id": "neutral-wrapper-sh-lc-u1680",
    "command": "sh -lc 'ls'\u1680",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -9586,8 +9902,12 @@
    "id": "neutral-wrapper-stray-word-after-c-u1680",
    "command": "bash -c 'cat /run/report.md' extra\u1680",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -9614,8 +9934,12 @@
    "id": "neutral-wrapper-flag-between-u1680",
    "command": "bash -x -c 'echo hi'\u1680",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -9642,8 +9966,12 @@
    "id": "neutral-wrapper-glued-c-u1680",
    "command": "bash -c'echo hi'\u1680",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -9670,8 +9998,12 @@
    "id": "neutral-wrapper-bash-script-u1680",
    "command": "bash /run/report.md\u1680",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -9698,8 +10030,12 @@
    "id": "neutral-wrapper-second-wrapper-u1680",
    "command": "bash -c 'echo a' bash -c 'echo b'\u1680",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -9726,8 +10062,12 @@
    "id": "neutral-wrapper-c-then-second-line-u1680",
    "command": "bash -c 'ls'\ncat /etc/hosts\u1680",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -10384,8 +10724,12 @@
    "id": "neutral-wrapper-sh-lc-u2000",
    "command": "sh -lc 'ls'\u2000",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -10412,8 +10756,12 @@
    "id": "neutral-wrapper-stray-word-after-c-u2000",
    "command": "bash -c 'cat /run/report.md' extra\u2000",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -10440,8 +10788,12 @@
    "id": "neutral-wrapper-flag-between-u2000",
    "command": "bash -x -c 'echo hi'\u2000",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -10468,8 +10820,12 @@
    "id": "neutral-wrapper-glued-c-u2000",
    "command": "bash -c'echo hi'\u2000",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -10496,8 +10852,12 @@
    "id": "neutral-wrapper-bash-script-u2000",
    "command": "bash /run/report.md\u2000",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -10524,8 +10884,12 @@
    "id": "neutral-wrapper-second-wrapper-u2000",
    "command": "bash -c 'echo a' bash -c 'echo b'\u2000",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -10552,8 +10916,12 @@
    "id": "neutral-wrapper-c-then-second-line-u2000",
    "command": "bash -c 'ls'\ncat /etc/hosts\u2000",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -11210,8 +11578,12 @@
    "id": "neutral-wrapper-sh-lc-u2001",
    "command": "sh -lc 'ls'\u2001",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -11238,8 +11610,12 @@
    "id": "neutral-wrapper-stray-word-after-c-u2001",
    "command": "bash -c 'cat /run/report.md' extra\u2001",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -11266,8 +11642,12 @@
    "id": "neutral-wrapper-flag-between-u2001",
    "command": "bash -x -c 'echo hi'\u2001",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -11294,8 +11674,12 @@
    "id": "neutral-wrapper-glued-c-u2001",
    "command": "bash -c'echo hi'\u2001",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -11322,8 +11706,12 @@
    "id": "neutral-wrapper-bash-script-u2001",
    "command": "bash /run/report.md\u2001",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -11350,8 +11738,12 @@
    "id": "neutral-wrapper-second-wrapper-u2001",
    "command": "bash -c 'echo a' bash -c 'echo b'\u2001",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -11378,8 +11770,12 @@
    "id": "neutral-wrapper-c-then-second-line-u2001",
    "command": "bash -c 'ls'\ncat /etc/hosts\u2001",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -12036,8 +12432,12 @@
    "id": "neutral-wrapper-sh-lc-u2002",
    "command": "sh -lc 'ls'\u2002",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -12064,8 +12464,12 @@
    "id": "neutral-wrapper-stray-word-after-c-u2002",
    "command": "bash -c 'cat /run/report.md' extra\u2002",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -12092,8 +12496,12 @@
    "id": "neutral-wrapper-flag-between-u2002",
    "command": "bash -x -c 'echo hi'\u2002",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -12120,8 +12528,12 @@
    "id": "neutral-wrapper-glued-c-u2002",
    "command": "bash -c'echo hi'\u2002",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -12148,8 +12560,12 @@
    "id": "neutral-wrapper-bash-script-u2002",
    "command": "bash /run/report.md\u2002",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -12176,8 +12592,12 @@
    "id": "neutral-wrapper-second-wrapper-u2002",
    "command": "bash -c 'echo a' bash -c 'echo b'\u2002",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -12204,8 +12624,12 @@
    "id": "neutral-wrapper-c-then-second-line-u2002",
    "command": "bash -c 'ls'\ncat /etc/hosts\u2002",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -12862,8 +13286,12 @@
    "id": "neutral-wrapper-sh-lc-u2003",
    "command": "sh -lc 'ls'\u2003",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -12890,8 +13318,12 @@
    "id": "neutral-wrapper-stray-word-after-c-u2003",
    "command": "bash -c 'cat /run/report.md' extra\u2003",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -12918,8 +13350,12 @@
    "id": "neutral-wrapper-flag-between-u2003",
    "command": "bash -x -c 'echo hi'\u2003",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -12946,8 +13382,12 @@
    "id": "neutral-wrapper-glued-c-u2003",
    "command": "bash -c'echo hi'\u2003",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -12974,8 +13414,12 @@
    "id": "neutral-wrapper-bash-script-u2003",
    "command": "bash /run/report.md\u2003",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -13002,8 +13446,12 @@
    "id": "neutral-wrapper-second-wrapper-u2003",
    "command": "bash -c 'echo a' bash -c 'echo b'\u2003",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -13030,8 +13478,12 @@
    "id": "neutral-wrapper-c-then-second-line-u2003",
    "command": "bash -c 'ls'\ncat /etc/hosts\u2003",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -13688,8 +14140,12 @@
    "id": "neutral-wrapper-sh-lc-u2004",
    "command": "sh -lc 'ls'\u2004",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -13716,8 +14172,12 @@
    "id": "neutral-wrapper-stray-word-after-c-u2004",
    "command": "bash -c 'cat /run/report.md' extra\u2004",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -13744,8 +14204,12 @@
    "id": "neutral-wrapper-flag-between-u2004",
    "command": "bash -x -c 'echo hi'\u2004",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -13772,8 +14236,12 @@
    "id": "neutral-wrapper-glued-c-u2004",
    "command": "bash -c'echo hi'\u2004",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -13800,8 +14268,12 @@
    "id": "neutral-wrapper-bash-script-u2004",
    "command": "bash /run/report.md\u2004",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -13828,8 +14300,12 @@
    "id": "neutral-wrapper-second-wrapper-u2004",
    "command": "bash -c 'echo a' bash -c 'echo b'\u2004",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -13856,8 +14332,12 @@
    "id": "neutral-wrapper-c-then-second-line-u2004",
    "command": "bash -c 'ls'\ncat /etc/hosts\u2004",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -14514,8 +14994,12 @@
    "id": "neutral-wrapper-sh-lc-u2005",
    "command": "sh -lc 'ls'\u2005",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -14542,8 +15026,12 @@
    "id": "neutral-wrapper-stray-word-after-c-u2005",
    "command": "bash -c 'cat /run/report.md' extra\u2005",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -14570,8 +15058,12 @@
    "id": "neutral-wrapper-flag-between-u2005",
    "command": "bash -x -c 'echo hi'\u2005",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -14598,8 +15090,12 @@
    "id": "neutral-wrapper-glued-c-u2005",
    "command": "bash -c'echo hi'\u2005",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -14626,8 +15122,12 @@
    "id": "neutral-wrapper-bash-script-u2005",
    "command": "bash /run/report.md\u2005",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -14654,8 +15154,12 @@
    "id": "neutral-wrapper-second-wrapper-u2005",
    "command": "bash -c 'echo a' bash -c 'echo b'\u2005",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -14682,8 +15186,12 @@
    "id": "neutral-wrapper-c-then-second-line-u2005",
    "command": "bash -c 'ls'\ncat /etc/hosts\u2005",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -15340,8 +15848,12 @@
    "id": "neutral-wrapper-sh-lc-u2006",
    "command": "sh -lc 'ls'\u2006",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -15368,8 +15880,12 @@
    "id": "neutral-wrapper-stray-word-after-c-u2006",
    "command": "bash -c 'cat /run/report.md' extra\u2006",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -15396,8 +15912,12 @@
    "id": "neutral-wrapper-flag-between-u2006",
    "command": "bash -x -c 'echo hi'\u2006",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -15424,8 +15944,12 @@
    "id": "neutral-wrapper-glued-c-u2006",
    "command": "bash -c'echo hi'\u2006",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -15452,8 +15976,12 @@
    "id": "neutral-wrapper-bash-script-u2006",
    "command": "bash /run/report.md\u2006",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -15480,8 +16008,12 @@
    "id": "neutral-wrapper-second-wrapper-u2006",
    "command": "bash -c 'echo a' bash -c 'echo b'\u2006",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -15508,8 +16040,12 @@
    "id": "neutral-wrapper-c-then-second-line-u2006",
    "command": "bash -c 'ls'\ncat /etc/hosts\u2006",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -16166,8 +16702,12 @@
    "id": "neutral-wrapper-sh-lc-u2007",
    "command": "sh -lc 'ls'\u2007",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -16194,8 +16734,12 @@
    "id": "neutral-wrapper-stray-word-after-c-u2007",
    "command": "bash -c 'cat /run/report.md' extra\u2007",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -16222,8 +16766,12 @@
    "id": "neutral-wrapper-flag-between-u2007",
    "command": "bash -x -c 'echo hi'\u2007",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -16250,8 +16798,12 @@
    "id": "neutral-wrapper-glued-c-u2007",
    "command": "bash -c'echo hi'\u2007",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -16278,8 +16830,12 @@
    "id": "neutral-wrapper-bash-script-u2007",
    "command": "bash /run/report.md\u2007",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -16306,8 +16862,12 @@
    "id": "neutral-wrapper-second-wrapper-u2007",
    "command": "bash -c 'echo a' bash -c 'echo b'\u2007",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -16334,8 +16894,12 @@
    "id": "neutral-wrapper-c-then-second-line-u2007",
    "command": "bash -c 'ls'\ncat /etc/hosts\u2007",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -16992,8 +17556,12 @@
    "id": "neutral-wrapper-sh-lc-u2008",
    "command": "sh -lc 'ls'\u2008",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -17020,8 +17588,12 @@
    "id": "neutral-wrapper-stray-word-after-c-u2008",
    "command": "bash -c 'cat /run/report.md' extra\u2008",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -17048,8 +17620,12 @@
    "id": "neutral-wrapper-flag-between-u2008",
    "command": "bash -x -c 'echo hi'\u2008",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -17076,8 +17652,12 @@
    "id": "neutral-wrapper-glued-c-u2008",
    "command": "bash -c'echo hi'\u2008",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -17104,8 +17684,12 @@
    "id": "neutral-wrapper-bash-script-u2008",
    "command": "bash /run/report.md\u2008",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -17132,8 +17716,12 @@
    "id": "neutral-wrapper-second-wrapper-u2008",
    "command": "bash -c 'echo a' bash -c 'echo b'\u2008",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -17160,8 +17748,12 @@
    "id": "neutral-wrapper-c-then-second-line-u2008",
    "command": "bash -c 'ls'\ncat /etc/hosts\u2008",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -17818,8 +18410,12 @@
    "id": "neutral-wrapper-sh-lc-u2009",
    "command": "sh -lc 'ls'\u2009",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -17846,8 +18442,12 @@
    "id": "neutral-wrapper-stray-word-after-c-u2009",
    "command": "bash -c 'cat /run/report.md' extra\u2009",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -17874,8 +18474,12 @@
    "id": "neutral-wrapper-flag-between-u2009",
    "command": "bash -x -c 'echo hi'\u2009",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -17902,8 +18506,12 @@
    "id": "neutral-wrapper-glued-c-u2009",
    "command": "bash -c'echo hi'\u2009",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -17930,8 +18538,12 @@
    "id": "neutral-wrapper-bash-script-u2009",
    "command": "bash /run/report.md\u2009",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -17958,8 +18570,12 @@
    "id": "neutral-wrapper-second-wrapper-u2009",
    "command": "bash -c 'echo a' bash -c 'echo b'\u2009",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -17986,8 +18602,12 @@
    "id": "neutral-wrapper-c-then-second-line-u2009",
    "command": "bash -c 'ls'\ncat /etc/hosts\u2009",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -18644,8 +19264,12 @@
    "id": "neutral-wrapper-sh-lc-u200a",
    "command": "sh -lc 'ls'\u200a",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -18672,8 +19296,12 @@
    "id": "neutral-wrapper-stray-word-after-c-u200a",
    "command": "bash -c 'cat /run/report.md' extra\u200a",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -18700,8 +19328,12 @@
    "id": "neutral-wrapper-flag-between-u200a",
    "command": "bash -x -c 'echo hi'\u200a",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -18728,8 +19360,12 @@
    "id": "neutral-wrapper-glued-c-u200a",
    "command": "bash -c'echo hi'\u200a",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -18756,8 +19392,12 @@
    "id": "neutral-wrapper-bash-script-u200a",
    "command": "bash /run/report.md\u200a",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -18784,8 +19424,12 @@
    "id": "neutral-wrapper-second-wrapper-u200a",
    "command": "bash -c 'echo a' bash -c 'echo b'\u200a",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -18812,8 +19456,12 @@
    "id": "neutral-wrapper-c-then-second-line-u200a",
    "command": "bash -c 'ls'\ncat /etc/hosts\u200a",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -19470,8 +20118,12 @@
    "id": "neutral-wrapper-sh-lc-u2028",
    "command": "sh -lc 'ls'\u2028",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -19498,8 +20150,12 @@
    "id": "neutral-wrapper-stray-word-after-c-u2028",
    "command": "bash -c 'cat /run/report.md' extra\u2028",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -19526,8 +20182,12 @@
    "id": "neutral-wrapper-flag-between-u2028",
    "command": "bash -x -c 'echo hi'\u2028",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -19554,8 +20214,12 @@
    "id": "neutral-wrapper-glued-c-u2028",
    "command": "bash -c'echo hi'\u2028",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -19582,8 +20246,12 @@
    "id": "neutral-wrapper-bash-script-u2028",
    "command": "bash /run/report.md\u2028",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -19610,8 +20278,12 @@
    "id": "neutral-wrapper-second-wrapper-u2028",
    "command": "bash -c 'echo a' bash -c 'echo b'\u2028",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -19638,8 +20310,12 @@
    "id": "neutral-wrapper-c-then-second-line-u2028",
    "command": "bash -c 'ls'\ncat /etc/hosts\u2028",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -20296,8 +20972,12 @@
    "id": "neutral-wrapper-sh-lc-u2029",
    "command": "sh -lc 'ls'\u2029",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -20324,8 +21004,12 @@
    "id": "neutral-wrapper-stray-word-after-c-u2029",
    "command": "bash -c 'cat /run/report.md' extra\u2029",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -20352,8 +21036,12 @@
    "id": "neutral-wrapper-flag-between-u2029",
    "command": "bash -x -c 'echo hi'\u2029",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -20380,8 +21068,12 @@
    "id": "neutral-wrapper-glued-c-u2029",
    "command": "bash -c'echo hi'\u2029",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -20408,8 +21100,12 @@
    "id": "neutral-wrapper-bash-script-u2029",
    "command": "bash /run/report.md\u2029",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -20436,8 +21132,12 @@
    "id": "neutral-wrapper-second-wrapper-u2029",
    "command": "bash -c 'echo a' bash -c 'echo b'\u2029",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -20464,8 +21164,12 @@
    "id": "neutral-wrapper-c-then-second-line-u2029",
    "command": "bash -c 'ls'\ncat /etc/hosts\u2029",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -21122,8 +21826,12 @@
    "id": "neutral-wrapper-sh-lc-u202f",
    "command": "sh -lc 'ls'\u202f",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -21150,8 +21858,12 @@
    "id": "neutral-wrapper-stray-word-after-c-u202f",
    "command": "bash -c 'cat /run/report.md' extra\u202f",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -21178,8 +21890,12 @@
    "id": "neutral-wrapper-flag-between-u202f",
    "command": "bash -x -c 'echo hi'\u202f",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -21206,8 +21922,12 @@
    "id": "neutral-wrapper-glued-c-u202f",
    "command": "bash -c'echo hi'\u202f",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -21234,8 +21954,12 @@
    "id": "neutral-wrapper-bash-script-u202f",
    "command": "bash /run/report.md\u202f",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -21262,8 +21986,12 @@
    "id": "neutral-wrapper-second-wrapper-u202f",
    "command": "bash -c 'echo a' bash -c 'echo b'\u202f",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -21290,8 +22018,12 @@
    "id": "neutral-wrapper-c-then-second-line-u202f",
    "command": "bash -c 'ls'\ncat /etc/hosts\u202f",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -21948,8 +22680,12 @@
    "id": "neutral-wrapper-sh-lc-u205f",
    "command": "sh -lc 'ls'\u205f",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -21976,8 +22712,12 @@
    "id": "neutral-wrapper-stray-word-after-c-u205f",
    "command": "bash -c 'cat /run/report.md' extra\u205f",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -22004,8 +22744,12 @@
    "id": "neutral-wrapper-flag-between-u205f",
    "command": "bash -x -c 'echo hi'\u205f",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -22032,8 +22776,12 @@
    "id": "neutral-wrapper-glued-c-u205f",
    "command": "bash -c'echo hi'\u205f",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -22060,8 +22808,12 @@
    "id": "neutral-wrapper-bash-script-u205f",
    "command": "bash /run/report.md\u205f",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -22088,8 +22840,12 @@
    "id": "neutral-wrapper-second-wrapper-u205f",
    "command": "bash -c 'echo a' bash -c 'echo b'\u205f",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -22116,8 +22872,12 @@
    "id": "neutral-wrapper-c-then-second-line-u205f",
    "command": "bash -c 'ls'\ncat /etc/hosts\u205f",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -22774,8 +23534,12 @@
    "id": "neutral-wrapper-sh-lc-u3000",
    "command": "sh -lc 'ls'\u3000",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -22802,8 +23566,12 @@
    "id": "neutral-wrapper-stray-word-after-c-u3000",
    "command": "bash -c 'cat /run/report.md' extra\u3000",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -22830,8 +23598,12 @@
    "id": "neutral-wrapper-flag-between-u3000",
    "command": "bash -x -c 'echo hi'\u3000",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -22858,8 +23630,12 @@
    "id": "neutral-wrapper-glued-c-u3000",
    "command": "bash -c'echo hi'\u3000",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -22886,8 +23662,12 @@
    "id": "neutral-wrapper-bash-script-u3000",
    "command": "bash /run/report.md\u3000",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -22914,8 +23694,12 @@
    "id": "neutral-wrapper-second-wrapper-u3000",
    "command": "bash -c 'echo a' bash -c 'echo b'\u3000",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",
@@ -22942,8 +23726,12 @@
    "id": "neutral-wrapper-c-then-second-line-u3000",
    "command": "bash -c 'ls'\ncat /etc/hosts\u3000",
    "policy": "main",
-   "member": "",
-   "after": null,
+   "member": "10",
+   "after": {
+    "allow": false,
+    "reason": "policy-deny",
+    "pipelines": null
+   },
    "baseline": {
     "allow": false,
     "reason": "untokenizable",

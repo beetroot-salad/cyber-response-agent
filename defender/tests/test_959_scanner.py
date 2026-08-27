@@ -138,17 +138,23 @@ def test_a_quote_that_never_closes_still_ends_the_scan_with_no_tokens():
 
 
 def test_parse_takes_the_raw_command_and_no_caller_unwraps_first():
-    """`parse` is handed the model's command text exactly as written - wrapper and all - and
-    returns the pipelines that text names; there is no second function a caller must remember
-    to apply first."""
-    assert _parsed(f"bash -c 'cat {REPORT} | wc -c'") == [[["cat", REPORT], ["wc", "-c"]]]
-    assert _parsed(f"timeout 5 cat {REPORT}") == [[["timeout", "5", "cat", REPORT]]], (
-        "a `timeout` prefix is ordinary text (#971): the parse reports what the command says "
-        "and the capability question is then asked about `timeout` itself"
-    )
-    # ...and the gate reaches those same pipelines from the same raw text: one entry point,
-    # so what was grant-checked is what crosses into the box.
-    assert _argv(f"bash -c 'cat {REPORT} | wc -c'") == [[["cat", REPORT], ["wc", "-c"]]]
+    """`parse` is handed the model's command text exactly as written and returns the pipelines
+    that text names; there is no second function a caller must remember to apply first, and
+    since #971 no word is treated as a wrapper on the way through either.
+
+    Both folds are gone for one reason: a fold DELETES TEXT AHEAD OF THE DECISION, so the
+    command the gate judges can differ from the command the model wrote. What is left special
+    is punctuation - the connectors, the two stderr redirects, the newline, the quoting - and
+    none of it can make the parse report a program the text does not name."""
+    assert _parsed(f"bash -c 'cat {REPORT} | wc -c'") == [
+        [["bash", "-c", f"cat {REPORT} | wc -c"]]
+    ], "the wrapper and its payload are ordinary words; the pipe inside the quotes is not a pipe"
+    assert _parsed(f"timeout 5 cat {REPORT}") == [[["timeout", "5", "cat", REPORT]]]
+    # ...and the gate reaches those same pipelines from the same raw text: one entry point, so
+    # what was grant-checked is what would cross into the box. Both refuse here, on the
+    # capability reason, because neither first word is a program this lane has.
+    for cmd in (f"bash -c 'cat {REPORT} | wc -c'", f"timeout 5 cat {REPORT}"):
+        assert _bash(cmd).reason == base.MAIN.deny_reason, cmd
 
 
 def test_a_blank_command_is_answered_ahead_of_the_parse_not_by_its_result():
@@ -253,18 +259,23 @@ def test_a_divergent_blank_between_two_words_changes_no_verdict():
     assert _argv("echo a" + NBSP + "b") == [[["echo", "a" + NBSP + "b"]]]
 
 
-def test_a_divergent_blank_inside_the_extracted_inner_command_behaves_as_it_does_outside():
-    r"""The divergent-blank rule reaches the wrapper's extracted inner text, because the
-    extracted text is re-scanned by the same scanner: `bash -c '<U+00A0>cat x'` gives the inner
-    command the same treatment `<U+00A0>cat x` gets as a bare command, and a `-c` argument that
-    is NOTHING but a divergent blank is a one-word command bash would try to run, and is
-    refused (restated worked example 3)."""
+def test_a_divergent_blank_inside_a_quoted_argument_is_part_of_that_argument():
+    r"""There is no extracted inner text any more (#971), so the question this used to ask -
+    does the divergent-blank rule reach inside a `-c` payload - has no subject. What replaces it
+    is the rule that made the answer yes: a quoted argument is ONE token and its contents are
+    its own, blanks included. `bash -c '<U+00A0>cat x'` is three words, the third of which
+    begins with a no-break space, and nothing in the parse looks inside it.
+
+    Still refused, and now for the reason that was always the true one: `bash` is not a program
+    this lane has."""
     inner = NBSP + "cat " + REPORT
-    assert _parsed("bash -c '" + inner + "'") == _parsed(inner), (
-        "the extracted inner text must be scanned by the same scanner that scans a bare command"
+    assert _parsed("bash -c '" + inner + "'") == [[["bash", "-c", inner]]], (
+        "the quoted argument is one token and keeps its blank; nothing re-scans its contents"
     )
-    assert not _bash("bash -c '" + inner + "'").allow
-    assert not _bash("bash -c '" + NBSP + "'").allow
+    for cmd in ("bash -c '" + inner + "'", "bash -c '" + NBSP + "'"):
+        d = _bash(cmd)
+        assert not d.allow
+        assert d.reason == base.MAIN.deny_reason, cmd
 
 
 def test_every_member_of_the_divergent_blank_alphabet_behaves_the_same_way():

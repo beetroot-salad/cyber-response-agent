@@ -243,28 +243,6 @@ class UntokenizableCommand(BashExecError):
     pass
 
 
-class NarrowedReason(UntokenizableCommand):
-    """An `UntokenizableCommand` whose message IS the caller-facing reason, verbatim — used for
-    the one narrowing (#959 F5) whose obligation is to explain itself rather than fall back to
-    the generic parse-failure text `permission.bash.UNTOKENIZABLE_REASON` names everywhere
-    else. Every other `UntokenizableCommand` in this module carries a short internal message
-    for `test_959_frozen_baseline.py`'s arm sweep; the gate collapses those to the one constant."""
-
-
-#: The `-c` argument sent to `bash`/`sh` may not contain a newline — there is no shell here to
-#: run it as a script, so a multi-statement payload is refused rather than silently flattened
-#: into one pipeline per line (#959 M3 + F5). Named as its own reason, not folded into the
-#: generic parse-failure text, because F5's obligation is that the refusal EXPLAINS the
-#: newline: a model that sent this payload yesterday got an allow, and needs to know what to
-#: fix now — a generic "could not be parsed" sends it looking for the wrong mistake.
-NEWLINE_IN_WRAPPER_ARGUMENT_REASON = (
-    "Blocked: the `-c` argument given to `bash`/`sh` contains a newline (a `\\n` inside the "
-    "quoted string). There is no shell here to run it as a multi-line script — collapse the "
-    "payload onto ONE physical line before sending it, exactly as every other command here "
-    "must be one line."
-)
-
-
 @dataclass(frozen=True)
 class Stage:
 
@@ -374,97 +352,23 @@ class _PipelineBuilder:
         return i + 1
 
 
-def _check_multiline_c_argument(value: str) -> None:
-    """`value` (a resolved `-c` argument) contains a newline. If every LINE of it scans cleanly
-    on its own, the newline itself is the only problem, and the refusal must explain it
-    (#959 F5). If some line is independently broken (an unclosed quote, say), that failure is
-    the real one and earns the generic parse-failure reason instead — the two must never be
-    conflated (SB4)."""
-    for line in value.split("\n"):
-        if _scan(line) is None:
-            # The SAME message the ordinary per-line scan failure raises (below, in `parse`) —
-            # deliberately not a distinct one: this is the identical failure (an unclosed quote,
-            # a dangling escape), just reached one call earlier because a `-c` argument is
-            # checked before its lines are handed to the per-line loop.
-            raise UntokenizableCommand("untokenizable command reached the executor")
-    raise NarrowedReason(NEWLINE_IN_WRAPPER_ARGUMENT_REASON)
-
-
-def _wrapper_span(tokens: list[Token]) -> str:
-    """`tokens[0]` is a `bash`/`sh` token (#959 M3). Returns the inner command text when this
-    is a complete, WHOLE-COMMAND `<wrapper> -c '<one argument>'` shape — the argument's own
-    RESOLVED VALUE, re-scanned as the inner command (never a raw slice: a `-c` argument's raw
-    span includes its quotes, and re-scanning THAT would parse the quotes into the program
-    name). Raises `UntokenizableCommand` for every other shape a `bash`/`sh` first token can
-    reach — a bare wrapper, a stray word after the argument, a second wrapper, a script path,
-    `-lc`, a flag between the wrapper and `-c` — never falling through to treat it as an
-    ordinary, ungranted word: none of those is a wrapper bash would run either.
-
-    Takes the TOKENS and nothing else: the raw command text is deliberately out of scope here,
-    so the "never a raw slice" rule above is enforced by the signature rather than by this
-    paragraph."""
-    if len(tokens) == 3 and tokens[1].kind == WORD and tokens[1].value == "-c":
-        value = tokens[2].value
-        if "\n" in value:
-            _check_multiline_c_argument(value)
-        return value
-    raise UntokenizableCommand("bash/sh wrapper did not resolve to a single -c argument")
-
-
-def _fold_wrapper(cmd: str) -> tuple[str, list[Token] | None]:
-    """The wrapper recognition step (#959 M3, C1, C4): applied ONCE, at the top level, over
-    the WHOLE (possibly multi-line) raw command — never inside the per-line loop, and never
-    re-applied to the text it extracts (a fixed point would turn `bash -c 'bash -c "echo hi"'`
-    into an allow, a deny->allow widening nobody enumerated).
-
-    Returns the text that should actually be parsed — the extracted `-c` argument for a
-    recognised `bash`/`sh` wrapper, or `cmd` unchanged when the command does not start with one
-    — paired with the token stream ALREADY SCANNED for that text when the two are the same scan
-    `parse` would do next (an unchanged single-line command, which is nearly every command), or
-    `None` when they are not. Handing the stream back is what keeps the fold from costing a
-    second full pass over every command that has no wrapper at all.
-
-    A `timeout N` PREFIX IS NOT RECOGNISED HERE, and deliberately (#971). Folding one deleted
-    text AHEAD OF the decision, so every way of mis-reading a prefix was a way of widening what
-    the gate allows — `timeout\n5 cat x` and `timeout --foreground cat x` both reached an allow
-    for a command real `timeout` never runs. And what the fold bought was only the APPEARANCE of
-    honouring the bound: the prefix was discarded, never executed (there is no `timeout` binary
-    in the box), and the command ran under the runtime's own deadline with nothing said. So
-    `timeout` is now an ordinary ungranted word — no grant matches it, the lane's capability
-    reason answers on the same turn, and no text is rewritten before the decision is made.
-    Pass-through cannot widen; a fold can, which is the whole of the argument."""
-    tokens = _scan(cmd)
-    if tokens is None:
-        # The whole text failed to scan — some quote never closes ANYWHERE. Let the normal
-        # per-line parse discover and report exactly that, rather than answering it here.
-        return cmd, None
-    if tokens and tokens[0].kind == WORD and tokens[0].value in ("bash", "sh"):
-        return _wrapper_span(tokens), None
-    return cmd, _reusable(cmd, tokens)
-
-
-def _reusable(cmd: str, tokens: list[Token]) -> list[Token] | None:
-    """`tokens` if scanning `cmd` as ONE line is the same question `parse`'s per-line loop will
-    ask, `None` otherwise. A newline makes them different questions: `_scan` treats it as a word
-    separator and `parse` splits on it first, so a multi-line command has to be re-scanned line
-    by line."""
-    return None if "\n" in cmd else tokens
-
-
 def parse(cmd: str) -> list[Pipeline]:
-    """The pipelines `cmd` names — the model's raw command text, wrapper and all: there is no
-    second function a caller must apply first (#959 D1/C3). Folds the wrapper once at the top
-    (#959 M3) and then scans each physical line of whatever text results."""
-    inner, scanned = _fold_wrapper(cmd)
+    """The pipelines `cmd` names — the model's raw command text, byte for byte: there is no
+    wrapper step, and no second function a caller must apply first (#959 D1/C3, #971). Every
+    PHYSICAL LINE is scanned on its own and each stage becomes a bare argv.
+
+    NO WORD IS PARSED SPECIALLY HERE. `bash -c '<payload>'` used to be recognised and its
+    payload extracted — the last of the two folds, after the `timeout` prefix went in #971 —
+    and both are gone for the same reason: a fold DELETES TEXT AHEAD OF THE DECISION, so every
+    way of mis-reading the shape is a way of WIDENING what the gate allows, while a
+    pass-through can only refuse. `bash` and `sh` are ordinary ungranted words now; the lane's
+    capability reason answers them like any other program it does not have. What is still
+    special is punctuation, never a keyword: the connectors, the two stderr redirects, the
+    newline that ends a line, and the quoting."""
     builder = _PipelineBuilder()
     tokens: list[Token] | None
-    for line in inner.split("\n"):
-        if scanned is not None:
-            # The fold already scanned this exact text as one line and handed the stream back;
-            # CONSUMED here, so a later line can never read a stream that is not its own.
-            tokens, scanned = scanned, None
-        else:
-            tokens = _scan(line)
+    for line in cmd.split("\n"):
+        tokens = _scan(line)
         if tokens is None:
             raise UntokenizableCommand("untokenizable command reached the executor")
         i, n = 0, len(tokens)

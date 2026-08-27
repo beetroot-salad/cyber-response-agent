@@ -316,7 +316,6 @@ _RECORDED_TRANSITIONS = {
     ("none", "none"),                          # members 1/2: allowed, with a different argv
     ("none", "policy-deny"),                   # members 7/9: the timeout prefix, allowed then
     ("untokenizable", "policy-deny"),          #   refused - the fold's two entry shapes
-    ("none", "untokenizable"),                 # members 3/5: the wrapper narrowings
     # neutral: the recorded decision must not move at all
     ("adapter-retired", "unchanged"),
     ("embedded-nul", "unchanged"),
