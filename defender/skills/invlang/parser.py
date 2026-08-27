@@ -706,6 +706,16 @@ def _extract_iff_literals(annotation: str) -> tuple[list[str], list[str]]:
     return pred_ids, refut_ids
 
 
+#: An edge id in the `⟂` cell. WORD-BOUNDED, because the cell is free text and its non-id
+#: spelling lands in `supporting_marker`: unanchored, `⟂ inference-only` yields a phantom
+#: `e-only` and `⟂ none-observed` an `e-observed`. A phantom is worse than none — it makes
+#: `_check_strong_provenance` answer "cites e-only but it carries no strong authority" instead
+#: of "cites no supporting edge", and it can win `projector.ablation_target` as the
+#: narrowest-supported edge, whereupon `_drop_edge` removes nothing and the ablation lens
+#: reads the FULL world while the composer is told that edge was withheld.
+_SUPPORTING_EDGE_RE = re.compile(r"\be-[A-Za-z0-9]+\b")
+
+
 def _resolution_record(row: str) -> tuple[str | None, ResolutionRecord]:
     m = _RESOLUTION_LINE_RE.match(row)
     if not m:
@@ -748,7 +758,14 @@ def _resolution_record(row: str) -> tuple[str | None, ResolutionRecord]:
         "before": m.group("before"),
         "after": m.group("after"),
         "severity_of_test": severity,
-        "supporting_edges": re.findall(r"e-[A-Za-z0-9]+", supp_text),
+        # `_dedup`, like the two sibling id lists above it — this was the one id list on the
+        # record that skipped it. The `⟂` cell is free text, so `findall` returns every
+        # MENTION: a row citing `⟂ e-001 e-002 e-001` yields `e-001` twice. Every reader
+        # means the edges CITED, never how often the cell named them — `ablation_target`
+        # counts "how many strong resolutions cite it" to pick the narrowest-supported edge
+        # to withhold from the ablation lens, so a repeat made one resolution look like two,
+        # withheld a different edge, and reported the inflated count to the composer (#969).
+        "supporting_edges": _dedup(_SUPPORTING_EDGE_RE.findall(supp_text)),
         "matched_prediction_ids": matched_pred_ids,
         "matched_refutation_ids": matched_refut_ids,
     }

@@ -472,3 +472,133 @@ def test_load_messages_still_finds_a_pre_observe_run_s_wire_log(tmp_path):
     (both / d.LEGACY_WIRE_LOG).write_text(json.dumps({"id": "old#0", "kind": "response"}) + "\n")
     wire.write_text(json.dumps({"id": "new#0", "kind": "response"}) + "\n")
     assert [r["id"] for r in d.load_messages(both)] == ["new#0"]
+
+
+def _duplicate_the_gather_phase(run: Path) -> None:
+    """Two `## GATHER` headers with no `PLAN` between them — the shape the review gate's
+    "another GATHER turn" return path invites. `normalize_phase_names` only bumps the loop
+    counter on a PLAN, so both normalize to `GATHER (loop 1)`: one dict bucket, two entries
+    in the render list."""
+    p = run / "investigation.md"
+    text = p.read_text(encoding="utf-8")
+    second = "## GATHER\n\nGathered again after the gate sent the turn back.\n\n"
+    p.write_text(text.replace("## REPORT", second + "## REPORT"), encoding="utf-8")
+
+
+def test_a_bucket_that_appears_twice_is_tiled_once(tmp_path):
+    """#956, the half the render list hides: a repeat that is NOT adjacent.
+
+    `## GATHER … ## ANALYZE … ## GATHER` with no `## PLAN` between normalizes to ONE
+    `GATHER (loop 1)` bucket named at two positions. Tiling per APPEARANCE made the forward
+    scan for "the next phase that has events" find the LATER `GATHER`, whose first timestamp
+    is EARLIER than the ANALYZE it was meant to end — so ANALYZE ended before it started, was
+    clamped to zero, and GATHER's first span was lost to the overwrite. Pinned as coverage:
+    the tiles are contiguous and account for the whole run, which is the property a reader
+    checks a wall bar against."""
+    phases = [{"name": n} for n in ["ORIENT", "PLAN", "GATHER", "ANALYZE", "GATHER", "REPORT"]]
+    order = [p["name"] for p in d.normalize_phase_names(phases)]
+    assert order.count("GATHER (loop 1)") == 2, f"fixture names no repeat: {order}"
+
+    # The tagger never re-introduces a header it has already seen, so the turns written under
+    # the SECOND `## GATHER` stay tagged with the phase that preceded them — which is why the
+    # honest tiling puts their seconds on ANALYZE rather than inventing a second GATHER span.
+    tags = ["ORIENT", "PLAN (loop 1)", "GATHER (loop 1)", "ANALYZE (loop 1)",
+            "ANALYZE (loop 1)", "REPORT"]
+    events = [
+        {"type": "user", "timestamp": f"2026-06-26T14:0{i}:00+00:00"}
+        for i in range(len(tags))
+    ]
+    wall = d.phase_wall_times(events, tags, order)
+
+    assert wall["ANALYZE (loop 1)"]["duration_sec"] > 0, (
+        "the later appearance of the GATHER bucket ended ANALYZE before it began"
+    )
+    assert sum(v["duration_sec"] for v in wall.values()) == 300.0, (
+        f"the tiles no longer cover the run: {[(k, v['duration_sec']) for k, v in wall.items()]}"
+    )
+
+
+def _bar_figures(html: str) -> dict[str, dict[str, str]]:
+    """`{bar: {phase: rendered value}}`, read off the segment tooltips — the only place the
+    per-phase cost and wall land in the page as numbers a reader can check."""
+    import re
+
+    out: dict[str, dict[str, str]] = {}
+    bars = re.findall(
+        r'me-bar-label">(cost|wall)</span><div class="cost-bar">(.*?)</div></div></div>', html)
+    assert [name for name, _ in bars] == ["cost", "wall"], f"bars not rendered: {bars}"
+    for name, inner in bars:
+        widths = [float(w) for w in re.findall(r'class="cb-seg" style="width:([0-9.]+)%', inner)]
+        assert abs(sum(widths) - 100.0) < 0.1, (
+            f"the {name} bar's segments overflow it: {sum(widths)}% from {widths}"
+        )
+        figures: dict[str, str] = {}
+        for title in re.findall(r'title="([^"]+)"', inner):
+            phase, value, _pct = (part.strip() for part in title.split("·"))
+            assert phase not in figures, f"{phase} drew two {name} segments from one bucket"
+            figures[phase] = value
+        out[name] = figures
+    return out
+
+
+def test_a_repeated_phase_name_is_one_bucket_not_two(tmp_path, monkeypatch):
+    """#956. `phase_order` is a render list, not a key set. Every per-phase number lives in a
+    dict keyed on the name, so a name that appears twice is ONE bucket visited twice: the
+    cost fix-up `+=`s the same entry, and the wall fix-up re-reads the duration the pass
+    before it just wrote — so that adjustment compounds rather than merely repeating.
+
+    Pinned as an equality against the same run written with ONE gather header, because that
+    is the whole claim: the second header names no new bucket, so it may not move a number.
+    The headline reconcile is the second half — a bar that agrees with itself but not with
+    the total is still wrong, and disagreeing with the total is how a reader would notice."""
+    import re
+
+    plain = _build_run(tmp_path / "plain")
+    doubled = _build_run(tmp_path / "doubled")
+    _duplicate_the_gather_phase(doubled)
+    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
+
+    assert _phase_order(doubled).count("GATHER (loop 1)") == 2, (
+        f"fixture no longer duplicates a name: {_phase_order(doubled)}"
+    )
+    assert "GATHER (loop 1)" in _phase_order(plain)
+
+    doubled_html = render_runtime_page(doubled)
+    assert _bar_figures(doubled_html) == _bar_figures(render_runtime_page(plain)), (
+        "the repeated header moved a per-phase number"
+    )
+
+    headline = float(re.search(r'ts-cost">\$([0-9.]+)', doubled_html).group(1))
+    segs = [float(x) for x in re.findall(r'cb-pct">\$([0-9.]+)', doubled_html)]
+    assert abs(headline - sum(segs)) < 0.002, (
+        f"the repeated name was counted twice: headline {headline} != bars {sum(segs)}"
+    )
+
+    # And the § Investigation stats lines, which are the SAME buckets read phase by phase.
+    # The bar could agree with the headline while the block under the second header still
+    # re-prints the whole bucket's money — one reader reconciling is not the claim.
+    per_block = [float(x) for x in re.findall(r'ps-cost">\$([0-9.]+)', doubled_html)]
+    assert abs(headline - sum(per_block)) < 0.002, (
+        f"the repeated header re-printed its bucket's stats: headline {headline} != "
+        f"per-phase blocks {sum(per_block)}"
+    )
+
+
+def test_a_repeated_planning_name_is_one_loop(tmp_path):
+    """#956's fourth site. The loop counter walks the render list and counts PLAN headers, so
+    a planning name that appears twice reports a loop the run never ran — while `attribution`,
+    the wall tiles and both bars, all keyed on the same name, see one.
+
+    The repeat needs an EXPLICIT loop number: `normalize_phase_names` auto-increments only on
+    a bare `PLAN`, so two bare ones are two loops and genuinely distinct. Two that name the
+    same loop are the same loop, said twice."""
+    written = [{"name": n} for n in ["PLAN (loop 2)", "GATHER", "PLAN (loop 2)", "REPORT"]]
+    order = [p["name"] for p in d.normalize_phase_names(written)]
+    assert order.count("PLAN (loop 2)") == 2, f"fixture names no repeat: {order}"
+
+    run = _build_run(tmp_path)
+    health = d.run_health(
+        run, read_jsonl_rows(run / "tool_trace.jsonl"), d.load_messages(run), order)
+    assert health["loops"] == 1, (
+        f"the repeated planning header was counted as its own loop: {health['loops']}"
+    )

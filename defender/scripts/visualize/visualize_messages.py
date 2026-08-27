@@ -367,7 +367,10 @@ def run_health(
 ) -> dict:
     retries = _count_retries(messages)
     dead_ends = _dead_end_count(_safe_joined(run_dir) if leads is None else leads)
-    loops = sum(1 for p in phase_order if phase_verb(p) == "PLAN")
+    # BUCKETS, not appearances (#956). `phase_order` is a render list: two headers that
+    # normalize to the same `PLAN (loop N)` are one planning phase, and counting the list
+    # reports a loop the run never ran.
+    loops = sum(1 for p in dict.fromkeys(phase_order) if phase_verb(p) == "PLAN")
     turns = _turn_count(events)
     # "Completed" asks whether the run reached REPORT at all, so it keys off the frontmatter
     # HAVING a `disposition` key, not off that value being valid. A run that closed on a
