@@ -259,9 +259,36 @@ def test_the_same_ident_refinements_inside_one_block_are_refused(tmp_path):
 
     errors = [d for d in _diagnose(doc, None) if d.severity != "warning"]
     assert len(errors) == 2, "one per value discarded, not one per row"
-    assert all("refined twice in this block" in d.message for d in errors)
+    assert all("refined twice in this write" in d.message for d in errors)
     # The fold is unchanged — the refusal is the whole of what #962 added.
     assert _effective(doc)["v-001"]["identifier"] == "third.corp"
+
+
+def test_two_attr_blocks_in_one_fence_are_one_write(tmp_path):
+    """Splitting the block in two does not buy a second chance at the same slot.
+
+    The unit #962 is about is ONE ATOMIC WRITE — `append_block` sends one ```invlang fence per
+    call, and nothing happens between two rows of it to justify the second. A fence carries as
+    many `:X` blocks as the author put in it (the prologue's `:V` and `:L` ride in one), so a
+    rule scoped to the parsed BLOCK is evaded by exactly the reformatting below: same fence,
+    same write, one author-written value gone, and no diagnostic at all.
+
+    Pinned beside the across-BLOCKS test above, which is across FENCES and stays legal.
+    """
+    doc = PROLOGUE + (
+        "\n```invlang\n"
+        ":R attr_updates [resolved_by|target|key|value]\n"
+        "l-001|v-001|ident|first.corp\n"
+        "\n"
+        ":R attr_updates [resolved_by|target|key|value]\n"
+        "l-001|v-001|ident|second.corp\n"
+        "```\n"
+    )
+
+    errors = [d for d in _diagnose(doc, None) if d.severity != "warning"]
+    assert len(errors) == 1
+    assert "refined twice in this write" in errors[0].message
+    assert _effective(doc)["v-001"]["identifier"] == "second.corp"
 
 
 def test_a_slot_repeated_with_the_same_value_in_one_block_is_left_alone(tmp_path):

@@ -974,10 +974,13 @@ async def _drive_agent(  # noqa: PLR0913 — the loop's own inputs: agent, promp
                 # is ever consumed here; the run's own bounds are threaded anyway rather
                 # than re-resolved, so this limb cannot end up acting on a different value
                 # from the one the rest of the run was built with.
-                #: `forced=True`: the framework's own close is exempt from the flagged-row
-                #: gate. No model is left to repair the row, and refusing here would end the
-                #: run with NO report.md — dead-lettering it at persist for the wrong reason.
-                #: Every close the MODEL invokes is still gated.
+                #: `forced=True`: the framework's own close is exempt from BOTH document
+                #: gates — the flagged-row window and the invlang structure check (#961). No
+                #: model is left to repair either, and refusing here would end the run with NO
+                #: report.md — dead-lettering it at persist for the wrong reason. A malformed
+                #: companion is worse to publish than a well-formed one; a run with no
+                #: disposition at all is worse than either. Every close the MODEL invokes is
+                #: still gated by both.
                 await _close_investigation_async(
                     deps, "inconclusive", stages=None, bounds=bounds, forced=True,
                 )

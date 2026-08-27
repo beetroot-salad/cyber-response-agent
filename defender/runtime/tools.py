@@ -826,17 +826,34 @@ def repairable_diagnostics(deps: AgentDeps) -> tuple[Diagnostic, ...]:
     the one `flagged_diagnostics` already states for a locus-less finding: the set is the rows
     `fix_row` can ADDRESS, and a row nobody can quote back is not one.
 
+    AND A ROW OUTSIDE `:R attr_updates` STAYS OUT, which is what keeps the widening a widening
+    of SEVERITY and not of SCOPE. The warn window walks that block and nothing else, so every
+    guard downstream of it inherited the scope for free: `_attr_block_columns` returns `None`
+    for a row no `:R attr_updates` block holds — its own docstring says that "cannot happen for
+    a flagged row" — and `_tool_fix_row` reads that `None` as "skip the shape guard", which is
+    the guard that makes "no verb mutates or removes a committed `:V`/`:E` record" true by
+    construction. Parse diagnostics carry a locus and a real row for EVERY block, so admitting
+    them by severity alone would put a committed `:V` declaration inside the repair set with no
+    shape guard in front of it — a `new_row` free to span lines, carry a fence delimiter, or be
+    a block header. The severity partition and the block partition are two different questions;
+    this widens exactly one of them.
+
     FAILS OPEN like its sibling, for the same reason and via the same reader — a wedged run is
-    the worse failure."""
+    the worse failure. Read with the document as its OWN baseline, the reading
+    `committed_investigation_reason` takes: the repair set has to be derived from the same
+    verdict the close renders, or the verb is offered on findings the close never names."""
+    from defender.skills.invlang.validate import ATTR_UPDATES_LOCUS as REPAIRABLE_BLOCK
     from defender.skills.invlang.validate import diagnose
 
     p = _investigation_path(deps)
     if not p.is_file():
         return ()
     try:
+        text = read_text_utf8(p)
         return tuple(
-            d for d in _addressable(diagnose(read_text_utf8(p)))
+            d for d in _addressable(diagnose(text, text))
             if d.locus is not None and d.locus.row_text
+            and d.locus.block == REPAIRABLE_BLOCK
         )
     except Exception as e:  # noqa: BLE001 — fail open; a wedged run is the worse failure
         print(
@@ -1261,8 +1278,14 @@ def _tool_fix_row(deps: AgentDeps, old_row: str, new_row: str) -> str:
         )
 
     if new_row:
+        # UNCONDITIONALLY, `cells is None` included. `_new_row_shape_reason` is written for
+        # that case — an unlocatable declaring block narrows the guard by one arm (the cell
+        # count) instead of switching the whole write surface off — and short-circuiting it
+        # here inverted that: the one shape the caller could not vouch for was the one shape
+        # the guard never saw, so a `new_row` spanning lines, carrying a fence delimiter, or
+        # spelling a block header went through untested.
         cells = _attr_block_columns(current, old_row)
-        reason = _new_row_shape_reason(new_row, cells) if cells is not None else None
+        reason = _new_row_shape_reason(new_row, cells)
         if reason is not None:
             raise ModelRetry(
                 f"{UNCHANGED_NOTICE} `new_row` must be a single row of the same "

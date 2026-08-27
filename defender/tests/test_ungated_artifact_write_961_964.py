@@ -115,7 +115,7 @@ def test_the_close_refusal_names_the_rows_and_the_repair_verb(tmp_path):
         _close(deps, "inconclusive")
     message = str(exc.value)
 
-    assert "refined twice in this block" in message
+    assert "refined twice in this write" in message
     assert "fix_row" in message
     assert "publishes" in message, "say why a close is the moment this is checked"
 
@@ -241,6 +241,49 @@ def test_an_error_severity_row_is_repairable_rather_than_a_dead_end(tmp_path):
     assert committed_document_refusal(deps) is None
     _close(deps, "inconclusive")
     assert (run / "report.md").is_file()
+
+
+def test_the_repair_set_is_widened_by_severity_and_not_by_scope(tmp_path):
+    """An error-severity row OUTSIDE `:R attr_updates` stays out, and that is what keeps the
+    widening safe.
+
+    The warn window walks `:R attr_updates` and nothing else, so every guard downstream of it
+    inherited the scope for free — `_attr_block_columns` answers `None` for a row no such block
+    holds, and `_tool_fix_row` reads that `None` as "skip the shape guard", the guard that
+    makes "no verb mutates or removes a committed `:V`/`:E` record" true by construction.
+    Parse diagnostics carry a locus and a real row for EVERY block, so admitting them by
+    severity alone would put a committed `:V` declaration in the repair set with nothing in
+    front of it: this `new_row` spans two lines and would forge a whole second vertex.
+
+    Both halves are asserted, because either alone leaves the hole open: the row is not in the
+    set, and the verb refuses it if the model quotes it anyway.
+    """
+    from pydantic_ai.exceptions import ModelRetry
+
+    from defender.runtime.tools import _tool_fix_row, repairable_diagnostics
+
+    bad_vertex = "v-001|compute|bastion/internal/known-corp|bastion-01.corp|kind=physical|extra"
+    doc = (
+        "```invlang\n"
+        ":V prologue.vertices [id|type|class|ident|attrs?]\n"
+        f"{bad_vertex}\n"
+        "\n"
+        ":L findings [id|loop|name|target|tests|system|window]\n"
+        "l-001|1|cmdb-lookup|v-001||cmdb|n/a\n"
+        "```\n"
+    )
+    deps, run = main_deps(tmp_path)
+    seed_investigation(run, doc)
+
+    assert repairable_diagnostics(deps) == (), "a :V row is not a row `fix_row` may address"
+
+    with pytest.raises(ModelRetry):
+        _tool_fix_row(
+            deps, bad_vertex,
+            "v-001|compute|workstation/internal/known-corp|attacker.corp|kind=physical\n"
+            "v-009|compute|bastion/internal/known-corp|planted.corp|kind=physical",
+        )
+    assert (run / "investigation.md").read_text(encoding="utf-8") == doc
 
 
 def test_a_row_naming_no_text_stays_out_of_the_repair_set(tmp_path):
