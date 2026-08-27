@@ -160,7 +160,7 @@ def fence_count_at(
     `total` and `frontier_at` reports the disagreement instead of quietly answering from a
     state neither half describes.
     """
-    from defender.skills.invlang.parser import INVLANG_FENCE_RE
+    from defender.skills.invlang.parser import scan_fences
 
     ids = session_store.path_row_ids(store, session_id)
     messages = session_store.hydrate(store, session_id, role="analysis")
@@ -180,10 +180,10 @@ def fence_count_at(
                 # have the next return pop the refused text instead of its own.
                 pending.pop(part.tool_call_id, None)
             elif isinstance(part, ToolReturnPart):
-                landed = len(INVLANG_FENCE_RE.findall(pending.pop(part.tool_call_id, "")))
+                landed = len(scan_fences(pending.pop(part.tool_call_id, "")).bodies)
                 overall += landed
                 through += landed if row_id <= branch_message_id else 0
-    return max(0, len(INVLANG_FENCE_RE.findall(document)) - overall) + through
+    return max(0, len(scan_fences(document).bodies) - overall) + through
 
 
 def _appended_text(part: Any) -> str:
@@ -359,14 +359,14 @@ def seed_investigation(store: Any, spec: BranchSpec | None, run_dir: Path) -> in
     """
     if spec is None:
         return 0
-    from defender.skills.invlang.parser import INVLANG_FENCE_RE
+    from defender.skills.invlang.parser import scan_fences
 
     target = RunPaths(Path(run_dir)).investigation
     refuse_seeded_run_dir(run_dir)
     source_text, _ = read_text_soft(RunPaths(Path(spec.source_run_dir)).investigation)
     text = source_text if source_text is not None else ""
     fences = fence_count_at(store, source_session(store, spec), spec.branch_message_id, text)
-    bounds = list(INVLANG_FENCE_RE.finditer(text))
+    bounds = scan_fences(text).spans
     if fences > len(bounds):
         # `validate` refuses a SNAPPED frontier, so the count is in range by the time this
         # runs. Restated here because the two reads are separated by a fork and this one
@@ -380,7 +380,7 @@ def seed_investigation(store: Any, spec: BranchSpec | None, run_dir: Path) -> in
     # stages under an unpredictable name and `os.replace`s into place rather than opening the
     # target — so a planted symlink at the sibling's `investigation.md` is replaced instead of
     # followed. The same lane `_tool_append_block` writes this file through.
-    write_guarded(target, text[: bounds[fences - 1].end()] if fences else "")
+    write_guarded(target, text[: bounds[fences - 1][1]] if fences else "")
     _inherit_evidence(Path(spec.source_run_dir), Path(run_dir))
     return fences
 

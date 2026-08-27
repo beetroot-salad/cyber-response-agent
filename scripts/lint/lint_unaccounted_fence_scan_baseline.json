@@ -1,0 +1,4 @@
+{
+  "//": "lint_unaccounted_fence_scan baseline — readers under defender/ that split a document on its ```invlang fences without going through skills/invlang/parser.scan_fences (#932). Fingerprint is file:function:kind (import|attribute|regex; no line number), file relative to the scan scope. CI fails on a fingerprint absent here. This baseline ships EMPTY — all five sites were folded into scan_fences when the gate landed, so an entry in it is a regression someone chose. Regenerate: python scripts/lint/lint_unaccounted_fence_scan.py --update-baseline.",
+  "entries": {}
+}
