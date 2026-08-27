@@ -1,0 +1,4 @@
+{
+  "//": "lint_list_as_key_set baseline — a fix-up pass that walks an ordered LIST to patch a table already keyed by that same list, so a repeated element patches one bucket twice (#956: two GATHER headers in one loop normalize to one phase name, and the run page billed its cost twice and compounded its wall time). Fingerprint is file:function:seq->table (no line number). CI fails on a fingerprint absent here. This baseline ships EMPTY — an entry in it is a regression someone chose. Regenerate: python scripts/lint/lint_list_as_key_set.py --update-baseline.",
+  "entries": {}
+}

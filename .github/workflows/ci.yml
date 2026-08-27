@@ -729,6 +729,22 @@ jobs:
       - name: Half-read-table gate (one reader per key, #879 — baseline-ratcheted)
         run: defender/.venv/bin/python scripts/lint/lint_half_read_table.py
 
+      # A fix-up pass that walks an ordered LIST to patch a table already KEYED by that same
+      # list, so a repeated element patches one bucket twice (#956). `phase_order` is the
+      # investigation's `## PHASE` headers in the order written; `attribution` is a dict keyed
+      # on the phase NAME. Two GATHER headers with no PLAN between them normalize to the same
+      # name, so the run page billed that phase's gather cost twice and — in the wall-time twin,
+      # which reads the duration back out of the entry the previous visit wrote — compounded it.
+      # The gate is narrow ON PURPOSE: both halves must sit in one function, which is what
+      # separates the defect from the counting idiom that shares its syntax (`df[tok] += 1` over
+      # a corpus). The plain "augmented assign into a dict keyed on the loop variable" rule was
+      # measured over this tree first — it fires six times and is wrong all six, so it is not
+      # what runs here. Green is NARROW: per-appearance RENDERING is invisible to it (#956's
+      # third site drew one bar segment per appearance and overflowed 100%), and so is a fix-up
+      # split across functions. Suppress a deliberate site with `# lint-keyset: ok — <reason>`.
+      - name: List-as-key-set gate (a render list is not a key set, #956 — baseline-ratcheted)
+        run: defender/.venv/bin/python scripts/lint/lint_list_as_key_set.py
+
       # A row leaving a loop in the invlang row-carrying surface by continue/break/bare
       # return with neither a ParseWarning nor a landing unconditionally on that path
       # (#876). The two roles are derived STRUCTURALLY, never from a name list: a PROJECTOR
