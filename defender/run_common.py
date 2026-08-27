@@ -15,6 +15,7 @@ REPO_ROOT = DEFENDER_DIR.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from defender import _provenance  # noqa: E402
 from defender._run_id import RUN_ID_ALLOWED, is_valid_run_id  # noqa: E402
 from defender._run_paths import RunPaths  # noqa: E402
 
@@ -59,6 +60,12 @@ def materialize_run_dir(alert: Path, run_id: str | None) -> Path:
         sys.exit(f"run dir already exists: {run_dir}")
     RunPaths(run_dir).gather_raw.mkdir(parents=True)
     shutil.copy(alert, RunPaths(run_dir).alert)
+    # STAMPED HERE, at the one place a run bundle is ever created, so no caller can forget —
+    # the branch launcher materialises its siblings through this same call, which is what makes
+    # a family's worlds comparable on their code rather than merely assumed to be. Captured
+    # BEFORE the box exists and before any agent is alive, because the run dir is the box's rw
+    # bind and a stamp written later is a stamp the run could have moved.
+    _provenance.write(RunPaths(run_dir).provenance, _provenance.capture_tree(REPO_ROOT))
     return run_dir
 
 

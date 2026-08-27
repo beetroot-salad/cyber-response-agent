@@ -64,7 +64,9 @@ from pydantic_ai.models import override_allow_model_requests  # noqa: E402
 from pydantic_ai.models.function import FunctionModel  # noqa: E402
 
 from defender._io import read_jsonl_rows  # noqa: E402
+from defender import _provenance  # noqa: E402
 from defender import run_common  # noqa: E402
+from defender._run_paths import RunPaths  # noqa: E402
 from defender.runtime import box as box_mod  # noqa: E402
 from defender.runtime import driver  # noqa: E402
 from defender.runtime.providers import BuiltModel  # noqa: E402
@@ -358,16 +360,26 @@ def load_turns_from_trace(
 
 
 def materialize(tmp_path: Path, golden: Path) -> Path:
-    """The on-disk run dir a driven run starts from: `gather_raw/` plus the copied alert.
+    """The on-disk run dir a driven run starts from: `gather_raw/`, the copied alert, and the
+    provenance stamp.
 
     Takes no `run_id`/`salt`: it seeds NOTHING salted. Both were parameters only because this
     used to write the run's retired metadata file (#647); the trust token is now minted in
     process by `run_common.materialize_run_dir` and threaded as a value, so there is nothing
     on disk for this to seed. Keeping the parameters would let a test pass `salt=` and believe
-    it had set up a salted run dir — setup a test can silently pass without."""
+    it had set up a salted run dir — setup a test can silently pass without.
+
+    THE STAMP IS WRITTEN HERE BECAUSE PRODUCTION WRITES IT (#976), and this dir is what a
+    replayed message 0 enumerates: a harness whose file set is a subset of production's pins a
+    prompt production does not emit, which is the same trap #647's parity arm was built to
+    catch pointing the other way. Captured off this repo like production's, so a replayed run
+    records the tree it was replayed on rather than a frozen fixture value."""
     run_dir = tmp_path / "run"
     (run_dir / "gather_raw").mkdir(parents=True)
     shutil.copy(golden / "alert.json", run_dir / "alert.json")
+    _provenance.write(
+        RunPaths(run_dir).provenance, _provenance.capture_tree(Path(__file__).resolve().parents[3])
+    )
     return run_dir
 
 

@@ -21,8 +21,10 @@ REPO_ROOT = DEFENDER_DIR.parent
 #: (`test_gather_raw_suppressed`). `wire_logs/` joins `gather_raw/` on exactly that ground: it
 #: holds the run's wire log, one level down and so outside MAIN's `under(run, SEG)` read shape
 #: by construction — see `_run_paths.WIRE_LOG_DIR`. `budget.json` is listed here too, to keep
-#: the suppression in one place.
-_UNLISTED = frozenset({"gather_raw", WIRE_LOG_DIR, "budget.json"})
+#: the suppression in one place, and `provenance.json` joins it on the same ground: the run's
+#: record of the commit it was made against is infrastructure the OPERATOR reads, and naming it
+#: as a "canonical surface" would invite the investigator to reason about its own build.
+_UNLISTED = frozenset({"gather_raw", WIRE_LOG_DIR, "budget.json", "provenance.json"})
 
 
 def _safe_name(name: str) -> str:

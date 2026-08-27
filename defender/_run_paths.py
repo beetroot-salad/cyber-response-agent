@@ -78,13 +78,21 @@ GATE_METADATA_KEY = "json"
 
 @dataclass(frozen=True)
 class RunPaths:
-    """One run's directories and its six artifact accessors: the alert, the report, the
-    investigation log, the executed-queries table, the raw-payload dir and the wire log.
+    """One run's directories and its seven accessors: the alert, the report, the
+    investigation log, the executed-queries table, the raw-payload dir, the wire log — and the
+    provenance stamp.
 
-    Every artifact accessor resolves relative to ``run_dir``, so construct
-    ``RunPaths(some_dir)`` on whichever root you hold. ONE root, deliberately: a caller
-    needing a second (the per-case leg-output dir) takes it as its own argument rather than
-    making every single-root construction carry an always-`None` `Optional`.
+    Every accessor resolves relative to ``run_dir``, so construct ``RunPaths(some_dir)`` on
+    whichever root you hold. ONE root, deliberately: a caller needing a second (the per-case
+    leg-output dir) takes it as its own argument rather than making every single-root
+    construction carry an always-`None` `Optional`.
+
+    SIX OF THE SEVEN ARE CONTENT THE RUN PRODUCED; ``provenance`` is not, and the census above
+    keeps them in one list only because the census is about LAYOUT. It is the run's record of
+    what it ran against, captured by the host at ``materialize_run_dir`` time before any agent
+    exists — see ``defender._provenance`` for why a run needs one and what it does not cover.
+    A second fact of that kind (the branch point's moment, the source-run pointer) belongs
+    beside it rather than as another argument threaded through a call chain.
     """
 
     run_dir: Path
@@ -112,6 +120,10 @@ class RunPaths:
     @property
     def wire_log(self) -> Path:
         return self.run_dir / WIRE_LOG_DIR / WIRE_LOG
+
+    @property
+    def provenance(self) -> Path:
+        return self.run_dir / "provenance.json"
 
 
 # A run bundle is ALWAYS `runs_dir / <run_id>` (`LoopPaths.runs_dir` is the only place the

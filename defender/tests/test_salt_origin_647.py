@@ -339,9 +339,17 @@ def test_message_zero_orientation_lists_exactly_the_materialized_run_dir_childre
     assert set(listed) <= on_disk, (
         f"message 0 lists names that do not exist in the run dir: {set(listed) - on_disk}"
     )
-    assert (materialized - {"gather_raw"}) <= set(listed), (
+    # `provenance.json` joins `gather_raw` in the exclusion for the reason `_UNLISTED` gives:
+    # the map IS the model's directory view, and the run's record of the commit it was built
+    # from is infrastructure the OPERATOR reads. Listing it would invite MAIN to reason about
+    # its own build, which is not a fact about the case in front of it.
+    unlisted = {"gather_raw", "provenance.json"}
+    assert (materialized - unlisted) <= set(listed), (
         f"a materialized artifact is missing from message 0: "
-        f"{(materialized - {'gather_raw'}) - set(listed)}"
+        f"{(materialized - unlisted) - set(listed)}"
+    )
+    assert "provenance.json" not in listed, (
+        "the run's own provenance stamp leaked into MAIN's directory view"
     )
 
 
@@ -421,4 +429,4 @@ def test_replay_harness_run_dir_and_production_run_dir_present_the_same_file_set
         f"the two builders' run dirs diverge: production={sorted(prod_names)} "
         f"harness={sorted(harness_names)}"
     )
-    assert prod_names == {"alert.json", "gather_raw"}
+    assert prod_names == {"alert.json", "gather_raw", "provenance.json"}

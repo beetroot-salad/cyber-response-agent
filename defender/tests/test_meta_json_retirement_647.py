@@ -450,18 +450,50 @@ def test_run_paths_accessor_set_is_exactly_its_artifacts_after_the_meta_accessor
 
     The count is asserted rather than typed twice: `wire_log` was added when the wire log moved
     under `<run>/wire_logs/` (out of every reader agent's single-segment read shape), and the
-    docstring is where a reader learns the set, so the two must not be able to drift apart."""
+    docstring is where a reader learns the set, so the two must not be able to drift apart.
+
+    `provenance` (#976) is the seventh and the first that is NOT content the run produced — it
+    is the run's record of the commit it was made against. THE RULE THIS TEST ENFORCES IS
+    UNCHANGED AND IT STILL BINDS: what retired `meta.json` was inertness, a file written by one
+    thing and read by NOTHING, and the arm below is what keeps that from being re-earned
+    quietly. `run.py` reads this one back at run start to announce the commit, so it has a
+    consumer on the day it lands rather than an intention to have one."""
     accessors = {n for n, v in vars(RunPaths).items() if isinstance(v, property)}
     assert accessors == {
         "alert", "report", "investigation", "executed_queries", "gather_raw", "wire_log",
+        "provenance",
     }, f"the artifact accessor set drifted: {sorted(accessors)}"
     assert not hasattr(RunPaths(tmp_path), "meta"), "RunPaths still resolves a meta.json path"
 
     doc = " ".join((RunPaths.__doc__ or "").split())
-    assert "six artifact accessors" in doc, (
+    assert "seven accessors" in doc, (
         "the class docstring's count disagrees with the accessors it has"
     )
     assert "meta" not in doc, "the docstring still enumerates the removed accessor"
+
+
+def test_no_accessor_names_a_file_nothing_reads():
+    """#647's actual rule, kept executable rather than left as prose in the docstring above.
+
+    Every accessor's filename must appear in a READ somewhere outside `_run_paths.py` and
+    outside the tests — that is what `meta.json` had stopped having and why it was deleted.
+    Derived with `git grep` from the repo root rather than from a list typed into this file,
+    for the reason the module docstring gives: every hand-written census in this change was
+    wrong."""
+    read_sites = subprocess.run(
+        ["git", "grep", "-l", "-F", "--", "RunPaths("],
+        cwd=REPO_ROOT, capture_output=True, text=True, check=True,
+    ).stdout.split()
+    consumers = [
+        f for f in read_sites
+        if not f.startswith("defender/tests/") and f != "defender/_run_paths.py"
+    ]
+    accessors = {n for n, v in vars(RunPaths).items() if isinstance(v, property)}
+    unread = set(accessors)
+    for path in consumers:
+        text = (REPO_ROOT / path).read_text(encoding="utf-8", errors="replace")
+        unread -= {a for a in unread if f".{a}" in text}
+    assert not unread, f"accessors nothing outside the tests reads: {sorted(unread)}"
 
 
 def test_run_paths_resolves_artifacts_under_exactly_one_root():
