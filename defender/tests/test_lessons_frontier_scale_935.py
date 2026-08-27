@@ -228,6 +228,22 @@ def test_recording_more_about_a_class_slot_never_loses_a_selector():
         "a three-slot selector matched a two-slot type — arity is not being read from the type"
     )
 
+    # ...and the property holds ONE ARITY OVER, where the first fix left a second copy of the
+    # same defect. A selector naming more slots than its type has is mis-authored, and a
+    # "wholly-open cases say nothing about their own arity" clause widened the bound to the
+    # SELECTOR — so `class: bash/child` on a one-slot `process` matched `class=??` and then
+    # returned `None` the moment the run settled the basename to `bash`. Refusing it at every
+    # stage of the refinement is what the surrounding comment already claimed; refusing it at
+    # only some of them is the retrieval going dark on the write that says more.
+    over_long = [
+        LF._class_pins("bash/child", case, "process")
+        for case in ("??", "{bash, sh}", "bash")
+    ]
+    assert over_long == [None, None, None], (
+        f"a mis-authored over-long selector matched while the cell was open and stopped "
+        f"matching once it settled: {over_long}"
+    )
+
 
 def test_a_settled_slot_still_refuses_a_selector_that_disagrees_with_it():
     """CLAIM: normalising arity WIDENS the case, it does not wildcard it.
@@ -490,8 +506,14 @@ def test_no_replayed_block_leaves_an_open_thing_unrepresented(label, path):
     assert path.is_file(), f"{label}'s document is tracked and must be present ({path})"
     text = path.read_text(encoding="utf-8")
     for n, frontier in enumerate(_prefixes(text)):
-        emitted = [h.matched for h in LF.match_lessons(frontier, CORPUS)]
-        available = {h.matched for h in LF.match_lessons(frontier, CORPUS, top_k=99)}
+        # ONE corpus walk per fence, and the two values derived from it separately. `top_k` is
+        # a CUT on one order rather than a second ranking — `test_the_order_is_total_and_stable
+        # _across_calls` pins that — so the emitted block is the head of this list, and asking
+        # `match_lessons` a second time re-opened and re-YAML-parsed all 16 lesson files per
+        # fence of both runs for an answer already in hand.
+        ranked = LF.match_lessons(frontier, CORPUS, top_k=99)
+        emitted = [h.matched for h in ranked[:LF.DEFAULT_TOP_K]]
+        available = {h.matched for h in ranked}
         assert len(set(emitted)) == min(LF.DEFAULT_TOP_K, len(available)), (
             f"{label} fence {n} doubled up while an open thing went unmentioned: "
             f"{emitted} out of {sorted(available)}"
@@ -506,7 +528,9 @@ def test_the_loginuid_lesson_survives_every_fence_of_its_own_run():
     that settles the value onward, which is where defect 2's fix could quietly evict it — the
     contracts on this run are never discharged, so the edge lane holds a slot for the rest of
     the run."""
-    _, path = REPLAYED_RUNS[1]
+    # BY LABEL, not by index: reordering `REPLAYED_RUNS` would otherwise point this silently
+    # at the other run, and `assert holds` below would fail naming the wrong cause.
+    path = dict(REPLAYED_RUNS)["turnN-A"]
     assert path.is_file(), f"turnN-A's document is tracked and must be present ({path})"
 
     prefixes = _prefixes(path.read_text(encoding="utf-8"))
@@ -526,43 +550,39 @@ def test_the_loginuid_lesson_survives_every_fence_of_its_own_run():
 # the gate the spread sits in front of
 # --------------------------------------------------------------------------- #
 
-#: Two `compute` vertices, both with an open class triple and an open ident, differing only in
-#: WHICH of them carries the `ip-only` role. The pair produces the same lessons at the same
-#: scores and a different `matched` winner — see the test below for why that combination is the
-#: one shape that can defeat the emission gate.
-def _two_compute_doc(first: str, second: str) -> str:
-    return f"""```invlang
+#: One `compute` vertex with an open class triple and an open ident, and the ordinary append
+#: that declares a second. The pair is the churn shape the gate below exists for — see the test.
+_ONE_COMPUTE = """```invlang
 :V prologue.vertices [id|type|class|ident|attrs?]
-v-001|compute|{first}|??|knowledge=partial
-v-004|compute|{second}|??|knowledge=partial
+v-001|compute|ip-only/??/??|??|knowledge=partial
+```
+"""
+_SECOND_COMPUTE = """```invlang
+:V prologue.vertices [id|type|class|ident|attrs?]
+v-004|compute|??/??/??|host-4.corp|knowledge=partial
 ```
 """
 
 
-def test_moving_which_vertex_wins_a_tie_does_not_re_staple_the_same_lessons(tmp_path):
-    """CLAIM: `_frontier_recall` stays quiet when the lesson set and its scores are unchanged,
-    however the frontier re-shuffles WHICH item each lesson matched on.
+def test_a_coverage_reshuffle_does_not_re_staple_the_same_lessons(tmp_path):
+    """CLAIM: `_frontier_recall` stays quiet when the lesson set and its scores are unchanged
+    and only the COVERAGE order moved.
 
-    THE REGRESSION `_spread_over_items` INTRODUCED, and the reason that gate now sorts. Its
-    own comment already refused to compare `matched`: it names whichever frontier item won
-    `_best_match`'s `max`, `max` returns the FIRST maximal element, so declaring a second
-    equally-scoring vertex flips it while the lesson set, the ranking and the frontmatter stay
-    byte-identical. Re-emitting on that re-staples ~1.5KB of precedent the model already holds.
+    `_spread_over_items` makes the emitted order a property of which frontier items the block
+    covers, not of score alone — so an append can permute the three without changing which
+    three or what they scored. The gate compared an ORDERED `(path, score)` list, which was a
+    pure function of the pairs only while the ranking was `(-score, name)`; it now compares
+    that as a sorted multiset, because re-stapling ~1.5KB of precedent the model already holds
+    is the churn this second gate exists to prevent.
 
-    The spread made the emitted ORDER a function of `matched`, so an ORDERED comparison of
-    `(path, score)` let that flip decide emission through the back door. Below, `ip-only` sits
-    on `v-001` in one document and on `v-004` in the other: the top lesson scores 3 either way,
-    on a different vertex — which changes which item is already covered when the runners-up are
-    placed, and permutes all three. Same three lessons, same three scores, different order.
+    The append below is ordinary: `v-001` is the only compute vertex, so the loose
+    `{type: compute, slot: class}` lesson shares its cell with the `ip-only` one and sits in
+    the second pass. Declaring `v-004` gives it a cell of its own, it moves into the first
+    pass, and all three permute — same three lessons, same three scores.
 
-    DRIVEN THROUGH THE GATE, and the two documents are alternatives rather than an append and
-    its successor. That is deliberate and worth stating: `_tool_append_block` is append-only and
-    a refinement cannot un-declare a class, so this exact permutation is hard to reach by
-    ordinary document growth — the defect is a latent one. `_frontier_recall` takes the two
-    texts directly, which is the seam that makes the invariant testable at all, and the
-    invariant is what the gate promises rather than what today's documents happen to exercise."""
+    Driven through `_tool_append_block`, which is where the gate runs on the authoring path."""
     pytest.importorskip("pydantic_ai")  # as the two sibling suites do at module scope
-    from defender.runtime.tools import _frontier_recall
+    from defender.runtime.tools import _tool_append_block
     from defender.tests._lessons_corpus import _main_deps
 
     deps, _run, dfn = _main_deps(tmp_path)
@@ -572,44 +592,80 @@ def test_moving_which_vertex_wins_a_tie_does_not_re_staple_the_same_lessons(tmp_
     _write_lesson(corpus, "bbb-ip-only", nodes=("type: compute, class: ip-only, slot: class",))
     _write_lesson(corpus, "ccc-any-compute-ident", nodes=("type: compute, slot: ident",))
 
-    before = _two_compute_doc("ip-only/??/??", "??/??/??")
-    after = _two_compute_doc("??/??/??", "ip-only/??/??")
-
-    # The fixture only tests the gate if the two documents really are the churn shape: same
-    # lessons at the same scores, different order. Asserted rather than assumed — a corpus or
-    # weight change that broke the permutation would make the gate assertion below vacuous.
+    # The fixture only tests the gate if the append really is the churn shape: same lessons at
+    # the same scores, different order. Asserted rather than assumed — a weight or placement
+    # change that stopped permuting would make the assertion below vacuous.
     ranked = [
         [(h.name, h.score) for h in LF.match_lessons(frontier_from_text(doc), corpus)]
-        for doc in (before, after)
+        for doc in (_ONE_COMPUTE, _ONE_COMPUTE + _SECOND_COMPUTE)
     ]
     assert sorted(ranked[0]) == sorted(ranked[1]), "the fixture no longer holds scores equal"
     assert ranked[0] != ranked[1], (
         "the fixture no longer permutes the block — it cannot test the gate"
     )
-    # ...and the frontier really did move, so the CHEAPER gate above this one is not what is
-    # keeping the block quiet. Without this the test passes against a `return ""` at the top.
-    assert frontier_from_text(before) != frontier_from_text(after)
 
-    assert _frontier_recall(deps, before, after) == "", (
-        "the same three lessons at the same three scores were re-stapled because one hit's "
-        "winning item moved from v-001 to v-004"
+    _tool_append_block(deps, _ONE_COMPUTE)
+    second = _tool_append_block(deps, _SECOND_COMPUTE)
+    assert "Lessons matched against your record" not in second, (
+        f"the same three lessons at the same three scores were re-stapled:\n{second}"
     )
-    # ...and the gate is not simply mute: a frontier that reaches a DIFFERENT lesson still
-    # emits, so the assertion above is about `matched` rather than about a broken corpus.
-    opened = before + """```invlang
+    # ...and the gate is not simply mute: an append reaching a lesson it has not shown emits.
+    _write_lesson(corpus, "ddd-loginuid", nodes=("type: identity, slot: attrs.loginuid",))
+    third = _tool_append_block(deps, """```invlang
 :V prologue.vertices [id|type|class|ident|attrs?]
 v-007|identity|user/known-corp|jsmith|loginuid=??
 ```
-"""
-    _write_lesson(corpus, "ddd-loginuid", nodes=("type: identity, slot: attrs.loginuid",))
-    assert "ddd-loginuid" in _frontier_recall(deps, before, opened), (
+""")
+    assert "ddd-loginuid" in third, (
         "the gate stayed quiet on an append that reached a lesson it had not shown"
     )
 
 
-def test_an_unresolved_selector_slot_says_exactly_what_a_wildcard_says(tmp_path):
-    """CLAIM: a class-pattern slot the AUTHOR left unresolved — `??` or a candidate set —
-    behaves identically to `*`: it never pins, never anchors, and never refuses.
+def test_a_lesson_tied_across_two_cells_is_placed_on_the_one_nothing_else_covers(tmp_path):
+    """CLAIM: a lesson that reaches its best score on several items is recorded against the
+    item the block is not already covering — not against whichever the walk saw first.
+
+    `_best_match` used to answer with `max`, which returns the FIRST maximal element, so a
+    lesson tied across two cells was attributed by the order the vertices happen to be declared
+    in. That was harmless while the answer was only rendered; the spread places a lesson BY its
+    item, which made block membership depend on declaration order. The tie is not an edge case:
+    replayed over both committed runs it holds on nearly every fence, including for the
+    `attrs.loginuid` lesson this lane exists to retrieve.
+
+    Below, the loose class lesson ties across both compute vertices. Placing it on the one the
+    `ip-only` lesson is not already occupying is what lets the block name two cells instead of
+    one — and it is a function of the frontier's content, so reversing the declaration order
+    cannot change it."""
+    corpus = tmp_path / "lessons"
+    corpus.mkdir()
+    _write_lesson(corpus, "aaa-any-compute-class", nodes=("type: compute, slot: class",))
+    _write_lesson(corpus, "bbb-ip-only", nodes=("type: compute, class: ip-only, slot: class",))
+
+    rows = (
+        "v-001|compute|ip-only/??/??|host-1.corp|knowledge=partial",
+        "v-004|compute|??/??/??|host-4.corp|knowledge=partial",
+    )
+
+    def block(order):
+        doc = "```invlang\n:V prologue.vertices [id|type|class|ident|attrs?]\n"
+        doc += "\n".join(order) + "\n```\n"
+        return {h.name: h.matched for h in LF.match_lessons(frontier_from_text(doc), corpus)}
+
+    placed = block(rows)
+    assert placed["bbb-ip-only"].startswith("v-001"), "the `ip-only` lesson left its own cell"
+    assert placed["aaa-any-compute-class"].startswith("v-004"), (
+        "the loose lesson doubled up on the cell the specific one already covers, leaving the "
+        "other open class unmentioned"
+    )
+    assert block(tuple(reversed(rows))) == placed, (
+        "reversing the order the vertices are DECLARED in changed where the lessons landed — "
+        "placement is reading the walk order rather than the frontier's content"
+    )
+
+
+def test_the_open_marker_in_a_selector_says_exactly_what_a_wildcard_says(tmp_path):
+    """CLAIM: a class-pattern slot the author spelled `??` behaves identically to `*` — it
+    never pins, never anchors, and never refuses.
 
     Two defects meet here, and the second is why "never refuses" is in the claim.
 
@@ -624,21 +680,20 @@ def test_an_unresolved_selector_slot_says_exactly_what_a_wildcard_says(tmp_path)
     nothing but still refused against a SETTLED case slot, so `??/internet/novel` matched
     `??/??/??` and returned `None` once a refinement settled slot 0 — the retrieval going dark
     on the write that made the document more specific, which is exactly what
-    `test_recording_more_about_a_class_slot_never_loses_a_selector` forbids and what this whole
-    change exists to remove. A slot that says nothing cannot also constrain.
+    `test_recording_more_about_a_class_slot_never_loses_a_selector` forbids. A slot that says
+    nothing cannot also constrain.
 
     Asserted as EQUIVALENCE to `*` over a refinement sequence rather than as three numbers,
-    because that is the property: whatever the wildcard does, the unresolved spellings do."""
+    because that is the property: whatever the wildcard does, the marker does."""
     refinements = ("??/??/??", "bastion/??/??", "bastion/internet/??", "bastion/internet/novel")
     wildcard = [LF._class_pins("*/internet/novel", c, "compute") for c in refinements]
 
-    for spelling in ("??/internet/novel", "{internal, dmz}/internet/novel"):
-        assert [
-            LF._class_pins(spelling, c, "compute") for c in refinements
-        ] == wildcard, (
-            f"`{spelling}` does not say what `*` says — an unresolved slot the author wrote "
-            f"is either crediting a pin it did not earn or refusing a match it cannot refuse"
-        )
+    assert [
+        LF._class_pins("??/internet/novel", c, "compute") for c in refinements
+    ] == wildcard, (
+        "`??` does not say what `*` says — it is either crediting a pin it did not earn or "
+        "refusing a match it cannot refuse"
+    )
     # ...and the sequence it agrees with is itself monotonic, so the equivalence above is not
     # two functions being wrong together.
     assert None not in wildcard, f"the wildcard baseline stopped matching: {wildcard}"
@@ -650,4 +705,42 @@ def test_an_unresolved_selector_slot_says_exactly_what_a_wildcard_says(tmp_path)
     # refuses a case slot settled to something else, which is the clause all of this sits on.
     assert LF._class_pins("bastion/internet", "ip-only/??/??", "compute") is None, (
         "a concrete slot stopped refusing a case slot that disagrees with it"
+    )
+
+
+def test_a_candidate_set_in_a_selector_is_a_disjunction_and_not_a_wildcard(tmp_path):
+    """CLAIM: `{a, b}` written by a LESSON AUTHOR scopes the lesson to `a` or `b` — it earns
+    no pin, but it refuses a cell settled outside it.
+
+    The two unresolved spellings part company here, and reading them as one thing was wrong.
+    In a DOCUMENT both mean "not settled" and the candidate set is the richer of the two, which
+    is why `is_open_slot` answers for both and why neither may anchor. In a SELECTOR the author
+    is stating a scope: `??` says nothing, and `{internal, dmz}` says "internal or dmz". Making
+    both behave like `*` let a lesson about internal-or-dmz hosts match — and score a pin
+    against — a `bastion` vertex.
+
+    The refusal is not the non-monotonicity the sibling test forbids. Losing a selector the
+    document CONTRADICTS is correct and already pinned by
+    `test_a_settled_slot_still_refuses_a_selector_that_disagrees_with_it`; losing one the
+    document merely REFINED is the bug. Inside the set the path stays monotonic, and it is
+    strictly better than the pre-#935 code, which compared the whole `{...}` string to the cell
+    and so refused even a member."""
+    sel = "{internal, dmz}/internet"
+    inside = [
+        LF._class_pins(sel, c, "compute")
+        for c in ("??/??/??", "{internal, dmz}/??/??", "internal/??/??", "dmz/internet/??")
+    ]
+    assert None not in inside, (
+        f"refining a cell toward a value the selector NAMES lost the selector: {inside}"
+    )
+    assert inside == sorted(inside), f"the in-set refinement path is not monotonic: {inside}"
+
+    assert LF._class_pins(sel, "bastion/internet/novel", "compute") is None, (
+        "a lesson scoped to internal-or-dmz matched a bastion vertex — the candidate set is "
+        "being read as a wildcard rather than as the disjunction the author wrote"
+    )
+    # ...and it still earns nothing where it matches: it names no single value, so there is
+    # no equality for it to anchor on, exactly as the open marker has none.
+    assert LF._class_pins(sel, "{internal, dmz}/??/??", "compute") == 0, (
+        "a candidate set anchored on a cell carrying the same set and collected the rest"
     )

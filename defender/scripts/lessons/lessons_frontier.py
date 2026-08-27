@@ -26,7 +26,7 @@ truthful selector to write, and a birth-time gate would only buy fabricated ones
 from __future__ import annotations
 
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
@@ -231,6 +231,20 @@ class _Selectors:
     observed: list[_NodeSelector] = field(default_factory=list)
 
 
+def _candidate_members(slot: str) -> frozenset[str]:
+    """The values a `{a, b}` slot enumerates — empty for any other spelling.
+
+    Split on the commas the SKILL's own `{a, b, c}` form writes, and no deeper: a nested brace
+    is not a shape the class grammar has, and treating an unterminated `{` as a one-member set
+    would let a dropped `}` name a value nothing can equal. `is_open_slot` has already said
+    this slot is unresolved; this only asks WHICH of the two unresolved spellings it is.
+    """
+    v = slot.strip()
+    if not (v.startswith("{") and v.endswith("}")):
+        return frozenset()
+    return frozenset(part.strip() for part in v[1:-1].split(",") if part.strip())
+
+
 def _class_pins(selector_class: str, case_class: str, vertex_type: str) -> int | None:
     """How many class slots this selector actually PINNED about this cell — `None` on a miss.
 
@@ -271,29 +285,31 @@ def _class_pins(selector_class: str, case_class: str, vertex_type: str) -> int |
     #
     # Guessing from the cell was non-monotonic across arity, which is the defect this fixes:
     # for `sel="ip-only/internet/novel"`, case `??` and `??/??` both matched (they say nothing
-    # about their own arity, so the branch below widened to the selector), and `ip-only/??/??`
+    # about their own arity, so the old code widened to the selector), and `ip-only/??/??`
     # matched — but `ip-only/??` MISSED, because it was concrete enough to be taken at its
     # length. Recording more about slot 0 of a two-slot tuple LOST a selector the vaguer
     # document matched one write earlier, and nothing validates class arity, so that cell is
     # diagnostic-clean.
     #
-    # WIDENED, never truncated, and the two widenings are separate:
-    #   * `len(case)` — a cell declaring MORE slots than the grammar allows is mis-authored,
-    #     but truncating it would silently drop what the author did say and let a selector
-    #     match through the hole. The extra slots stay, and a selector still has to agree with
-    #     them. This is also what keeps an off-vocabulary `type` working: `vocab.class_arity`
-    #     answers 1 for a type it does not know, and the cell's own length takes over.
-    #   * a WHOLLY-open case says nothing about its own arity either, so an explicit triple is
-    #     still admitted against `??` or `??/??` — refusing it would make the most open cell
-    #     match the FEWEST selectors, the inverse of what the inversion exists for.
+    # WIDENED, never truncated, and the widening is `len(case)`: a cell declaring MORE slots
+    # than the grammar allows is mis-authored, but truncating it would silently drop what the
+    # author did say and let a selector match through the hole. The extra slots stay, and a
+    # selector still has to agree with them. This is also what keeps an off-vocabulary `type`
+    # working: `vocab.class_arity` answers 1 for a type it does not know, and the cell's own
+    # length takes over.
+    #
+    # The case's OPENNESS is not a second widening, and it must not be. Padding to the type
+    # already admits an explicit triple against `??` or `??/??` on a three-slot type, so the
+    # only selector a "wholly-open case widens to the selector" clause ever reached was one
+    # naming MORE slots than the type has — and it reached that selector only while the cell
+    # was wholly open. `class: bash/child` on a `process` (one slot) matched `class=??` at 0
+    # and then returned `None` the moment the run settled the image basename to `bash`: the
+    # retrieval going dark on the write that made the document more specific, which is the
+    # exact non-monotonicity this whole function was rewritten to remove, one arity over.
     arity = max(vocab.class_arity(vertex_type), len(case))
-    if len(sel) > arity and all(is_open_slot(c) for c in case):
-        # Guarded on the LENGTH first, which is the only way the widening can change anything:
-        # `max(arity, len(sel))` is a no-op below that bound, and this scan otherwise ran per
-        # (selector x frontier item) pair on the hot path of every frontier-moving write.
-        arity = len(sel)
-    # Past the widenings, a selector naming more slots than the type HAS is mis-authored — the
-    # same class of fault `_node_selector` drops a non-scalar cell for — and it matches nothing.
+    # A selector naming more slots than the type HAS is mis-authored — the same class of fault
+    # `_node_selector` drops a non-scalar cell for — and it matches nothing, at every stage of
+    # the cell's refinement rather than at some of them.
     if len(sel) > arity:
         return None
     case += [OPEN_MARKER] * (arity - len(case))
@@ -303,32 +319,42 @@ def _class_pins(selector_class: str, case_class: str, vertex_type: str) -> int |
     for i, s in enumerate(sel):
         if not s or s == WILDCARD:
             continue
-        # An UNRESOLVED selector slot says NOTHING, in both directions — exactly what a bare
-        # `*` says, and skipped by the same `continue` for the same reason. `??` and a
-        # candidate set are the document's own spellings for "not settled", and nothing
-        # validates a selector's values, so a curator quoting a cell back verbatim writes one.
+        # An UNRESOLVED selector slot earns NO pin and NO anchor. It used to anchor: `??`
+        # compares equal to an open case slot, so `??/internet/novel` against `??/??/??`
+        # anchored on slot 0 and then collected slots 1 and 2 as pins — a selector agreeing
+        # with the document about nothing scoring a full pinned triple and outranking every
+        # honest match. That is the inversion this function exists to refuse, wearing the open
+        # marker instead of a class literal. `is_open_slot`, not `s == OPEN_MARKER`, because
+        # the marker is one spelling of unresolved and the candidate set is the other, and a
+        # quoted `'{internal, dmz}/internet'` against a case still carrying that set is the
+        # identical fabrication one spelling over.
         #
-        # It used to ANCHOR. `??` compares equal to an open case slot, so `??/internet/novel`
-        # against `??/??/??` anchored on slot 0 and then collected slots 1 and 2 as pins: a
-        # selector agreeing with the document about nothing scored a full pinned triple and
-        # outranked every honest match. That is the inversion this function exists to refuse,
-        # wearing the open marker instead of a class literal.
+        # WHAT THEY CONSTRAIN IS WHERE THE TWO SPELLINGS PART, and reading them as one thing
+        # was wrong (#935 review). In a DOCUMENT both mean "not settled" and the candidate set
+        # is the richer of the two. In a SELECTOR the author is stating a scope, so:
         #
-        # `is_open_slot(s)`, not `s == OPEN_MARKER`, because the marker is one spelling of
-        # unsettled and the candidate set is the other — a quoted `'{internal, dmz}/internet'`
-        # against a case still carrying that set is the identical fabrication, one spelling
-        # over. One predicate decides "does this slot say anything", on both sides.
+        #   * `??` constrains NOTHING — the same non-statement `*` makes, and skipped by the
+        #     same `continue`. Refusing on it made the marker non-monotonic: a lesson keyed
+        #     `??/internet/novel` matched `??/??/??` and returned `None` once a refinement
+        #     settled slot 0, so retrieval went dark on the write that made the document MORE
+        #     specific — what `test_recording_more_about_a_class_slot_never_loses_a_selector`
+        #     forbids. A slot that says nothing cannot also refuse.
+        #   * `{internal, dmz}` is a DISJUNCTION — "this lesson is about internal or dmz
+        #     hosts". Treating it as `*` too let that lesson match, and score a pin against, a
+        #     `bastion` vertex. So it still refuses a slot settled outside its members, and
+        #     that refusal is not the non-monotonicity above: a selector naming `bastion`
+        #     against a cell settled to `ip-only` refuses for the same reason, and
+        #     `test_a_settled_slot_still_refuses_a_selector_that_disagrees_with_it` pins it.
+        #     Losing a selector the document CONTRADICTS is correct; losing one it merely
+        #     refined is the bug.
         #
-        # UNCONDITIONAL, and that is the half a narrower rule got wrong (#935 review). Gating
-        # it on the CASE slot also being open left `??` scoring as a non-statement but
-        # REFUSING as a constraint: `??/internet/novel` matched `??/??/??` and then returned
-        # `None` the moment a refinement settled slot 0 to `bastion`, so the retrieval went
-        # dark on the write that made the document more specific — the non-monotonicity
-        # `test_recording_more_about_a_class_slot_never_loses_a_selector` forbids, and the one
-        # this whole change exists to remove. A slot that says nothing cannot also refuse; if
-        # a lesson is ever meant to say "this slot must still be OPEN", that is a new selector
-        # field with its own name, not a second meaning for the marker.
+        # It admits a member (`internal`) where the pre-#935 code refused even that — it
+        # compared the whole `{...}` string to the cell — so the refinement path INSIDE the
+        # set stays monotonic: `??` -> `{internal, dmz}` -> `internal` all match, at 0.
         if is_open_slot(s):
+            members = _candidate_members(s)
+            if members and not is_open_slot(case[i]) and case[i] not in members:
+                return None
             continue
         pinned += 1
         if s == case[i]:
@@ -444,8 +470,8 @@ def _parse_selectors(fm: dict) -> _Selectors:
     return out
 
 
-def _best_match(selectors: _Selectors, frontier: Frontier) -> tuple[int, str] | None:
-    """The single most specific selector this lesson has that the frontier satisfies.
+def _best_match(selectors: _Selectors, frontier: Frontier) -> tuple[int, tuple[str, ...]] | None:
+    """This lesson's best score against the frontier, and EVERY item it reaches that score on.
 
     BEST, not sum: a lesson declaring five loose selectors should not outrank one that
     declares the exact slot in play. Scoring the winner makes the rank mean "how precisely
@@ -483,9 +509,22 @@ def _best_match(selectors: _Selectors, frontier: Frontier) -> tuple[int, str] | 
         for contract in frontier.contracts
         if _edge_matches(edge_sel, contract)
     ]
-    # `max` with a key returns the FIRST maximal element, which is the tie-break the two
-    # hand-rolled `>` accumulators had — one rule now instead of two that can drift apart.
-    return max(scored, key=lambda m: m[0], default=None)
+    if not scored:
+        return None
+    best = max(score for score, _ in scored)
+    # EVERY item at the best score, not the first of them (#935 review). This used to be a
+    # `max`, which returns the FIRST maximal element — so when a lesson tied across two cells,
+    # which cell it was recorded against came down to the order the vertices happen to be
+    # declared in. That was harmless while the answer was only rendered. `_spread_over_items`
+    # made it load-bearing: it places a lesson by the item it matched, so an arbitrary winner
+    # made block MEMBERSHIP a function of declaration order. The tie is not an edge case —
+    # replayed over both committed runs it holds on nearly every fence, including for the
+    # `attrs.loginuid` lesson this lane exists to retrieve, which ties across two cells on the
+    # last two fences of `turnN-A`.
+    #
+    # SORTED, so the tuple is a function of the frontier's CONTENT rather than of the order it
+    # was walked in — the same reason the ranking has a total tiebreak at all.
+    return best, tuple(sorted({item for score, item in scored if score == best}))
 
 
 def match_lessons(
@@ -525,32 +564,42 @@ def match_loaded(
     # second gate exists to prevent, with no error to notice it by.
     lessons = list(lessons)
     hits: list[Hit] = []
+    candidate_items: list[tuple[str, ...]] = []
     for lesson in lessons:
         fm = lesson.fm
         match = _best_match(_parse_selectors(fm), frontier)
         if match is None:
             continue
-        score, why = match
+        score, candidates = match
+        # `candidates[0]` is a PLACEHOLDER — `_spread_over_items` picks which of the tied
+        # items this lesson is finally recorded against, and rewrites `matched` to it.
+        candidate_items.append(candidates)
         hits.append(Hit(
             path=lesson.path,
             name=str(fm.get("name") or lesson.path.stem),
             frontmatter=fm,
             score=score,
-            matched=why,
+            matched=candidates[0],
         ))
     # Name is the LAST tiebreak so the order is total and stable: an unstable top-3 would make
     # the injected block churn between appends that changed nothing about the frontier.
-    hits.sort(key=lambda h: (-h.score, h.name))
-    return _spread_over_items(hits)[:top_k]
+    # Sorted TOGETHER, so each hit keeps its own candidate tuple across the reorder.
+    # `strict`, because the two lists are built by one loop and a mismatch would silently
+    # pair a hit with another lesson's candidate items rather than raise.
+    ranked = sorted(
+        zip(hits, candidate_items, strict=True),
+        key=lambda pair: (-pair[0].score, pair[0].name),
+    )
+    return _spread_over_items(ranked)[:top_k]
 
 
-def _spread_over_items(ranked: list[Hit]) -> list[Hit]:
+def _spread_over_items(ranked: list[tuple[Hit, tuple[str, ...]]]) -> list[Hit]:
     """The ranked hits, re-ordered so the head COVERS distinct frontier items before it doubles
     up on one — the best lesson about each item first, then the second-best about each, and so
-    on, score order inside every pass.
+    on, score order inside every pass. Each hit is recorded against the item it was PLACED on.
 
     THE OTHER HALF OF THE REBALANCE (#935), and the scale alone is not enough without it. Two
-    selectors at their lane's floor are genuinely equally specific — `{type: T, slot: class}`
+    selectors at their lanes' floors are genuinely equally specific — `{type: T, slot: class}`
     says "this run has a vertex of type T" and `{anchor_kind: iam-policy}` says "this run has an
     undischarged contract anchored on iam-policy" — and no honest weight orders them. Only the
     `name` tiebreak could, which is how #919's motivating lesson got cut in the first place, and
@@ -564,32 +613,36 @@ def _spread_over_items(ranked: list[Hit]) -> list[Hit]:
     the second lesson on an item is not thereby lost — it is behind the first lesson on every
     OTHER item, which is where it belongs.
 
-    Grouped on `matched`, which IS the item's identity rather than a rendering of it:
-    `_best_match` builds it as "which open thing hit" and
-    `test_matched_names_the_frontier_item_rather_than_the_selector` pins that. Two lessons
-    scoring against the same cell or the same contract produce the same string by construction.
+    EVERY item a lesson tied on, not one of them, and that is not a refinement (#935 review).
+    A lesson frequently reaches its best score on several cells at once, and `_best_match` used
+    to hand over whichever the walk saw first — so placing a lesson by its item made block
+    MEMBERSHIP depend on the order vertices were declared in. Choosing the least-covered of a
+    lesson's tied items instead makes the block a function of the frontier's content, and it is
+    also simply the better answer: a lesson that CAN speak to something nothing else in the
+    block covers should be recorded against that.
 
-    TOTAL AND STABLE: `ranked` arrives sorted by `(-score, name)` and this is a stable
-    re-grouping of it, so equal-ranked hits keep that order and two calls on one frontier
-    cannot disagree.
+    TOTAL AND STABLE: `ranked` arrives sorted by `(-score, name)`, each candidate tuple is
+    itself sorted, and the placement below is a single forward pass — so two calls on one
+    frontier cannot disagree.
 
-    Stable is NOT the same as order-insensitive, and the difference is a gate. This function
-    makes the emitted ORDER a function of `matched`, and `matched` names whichever frontier
-    item won `_best_match`'s `max` — which `max` picks as the FIRST maximal element, so
-    declaring a second, equally-scoring vertex flips it with nothing about the lesson set
-    changing. `runtime/tools._frontier_recall` decides whether to inject by comparing WHICH
-    lessons at WHICH scores, and it sorts that comparison for exactly this reason; do not
-    "simplify" it back to a list comparison, which would re-staple a byte-identical set of
-    lessons every time one hit's winning item moved.
+    Stable is NOT the same as order-insensitive, and the difference is a gate.
+    `runtime/tools._frontier_recall` decides whether to inject by comparing WHICH lessons at
+    WHICH scores, and it SORTS that comparison because this function makes the emitted order a
+    property of coverage rather than of score alone; do not "simplify" it back to a list
+    comparison, which would re-staple a byte-identical set of lessons whenever coverage
+    reshuffled them.
     """
-    seen: dict[str, int] = {}
+    used: dict[str, int] = {}
     keyed: list[tuple[int, int, Hit]] = []
-    for position, hit in enumerate(ranked):
-        pass_index = seen.get(hit.matched, 0)
-        seen[hit.matched] = pass_index + 1
+    for position, (hit, candidates) in enumerate(ranked):
+        # The least-covered of this lesson's tied items, ties inside that broken by the
+        # candidate tuple's own sorted order — never by how the frontier was walked.
+        item = min(candidates, key=lambda c: (used.get(c, 0), c))
+        pass_index = used.get(item, 0)
+        used[item] = pass_index + 1
         # `position` preserves the incoming `(-score, name)` order within a pass rather than
         # re-deriving it, so this function owns exactly one rule and cannot drift from the sort.
-        keyed.append((pass_index, position, hit))
+        keyed.append((pass_index, position, replace(hit, matched=item)))
     keyed.sort(key=lambda k: (k[0], k[1]))
     return [hit for _, _, hit in keyed]
 
