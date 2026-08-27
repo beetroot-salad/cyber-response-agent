@@ -61,10 +61,17 @@ def render_runtime_investigation(
         body = '<div class="empty">no investigation.md or empty</div>'
         return (section("sec-investigation", "defender", "Investigation", subtitle, body), [])
     blocks: list[str] = []
+    # The stats line belongs to the BUCKET, and `phases` is a render list that may name one
+    # twice (`## GATHER` twice with no `## PLAN` between normalizes to one `GATHER (loop N)`).
+    # Drawing it under every appearance bills the same money and the same seconds once per
+    # header, so the section's own per-phase figures stop summing to the headline — #956's
+    # symptom, in the section an operator reads phase by phase. First appearance carries it.
+    billed: set[str] = set()
     for ph in phases:
         stats = (attribution or {}).get(ph["name"])
         wall = (wall_times or {}).get(ph["name"])
-        stats_html = _phase_stats_html(stats, wall) if stats else ""
+        stats_html = _phase_stats_html(stats, wall) if stats and ph["name"] not in billed else ""
+        billed.add(ph["name"])
         body_html = stats_html + f'<pre class="text invlang">{esc(ph["body"])}</pre>'
         blocks.append(block("phase", ph["name"], body_html, open_=True, anchor=ph["anchor"]))
     return (section("sec-investigation", "defender", "Investigation", subtitle, "".join(blocks)), phases)
@@ -103,7 +110,13 @@ def render_runtime_transcript(
     tools: list[dict],
     phases: list[dict],
 ) -> tuple[str, int, set[str]]:
-    phase_anchor = {ph["name"]: ph["anchor"] for ph in phases}
+    # FIRST appearance wins. A repeated phase name (`## GATHER` twice inside one loop) is one
+    # transcript group, so exactly one `tx-<anchor>` id is emitted for it — and a plain
+    # comprehension would key it to the LAST block's anchor while the nav still links the
+    # first, leaving `#tx-phase-gather` pointing at nothing (#956).
+    phase_anchor: dict[str, str] = {}
+    for ph in phases:
+        phase_anchor.setdefault(ph["name"], ph["anchor"])
     anchored: set[str] = set()
 
     chips: list[str] = []
@@ -676,8 +689,15 @@ def render_runtime_toc(  # noqa: PLR0913 — one argument per section the nav li
         anchor = ph["anchor"]
         return f"#tx-{esc(anchor)}" if ph["name"] in tx_phases else f"#{esc(anchor)}"
 
+    # One transcript entry per BUCKET (first appearance), matching the one `tx-` anchor the
+    # transcript emits for a repeated name; the investigation links below stay one-per-block,
+    # because those blocks really are distinct sections of the document.
+    tx_phase_blocks: dict[str, dict] = {}
+    for ph in phases:
+        tx_phase_blocks.setdefault(ph["name"], ph)
     tx_links = "".join(
-        _phase_nav_li(ph, _tx_target(ph), f' data-phase-link="{esc(ph["name"])}"') for ph in phases
+        _phase_nav_li(ph, _tx_target(ph), f' data-phase-link="{esc(ph["name"])}"')
+        for ph in tx_phase_blocks.values()
     )
     inv_links = "".join(_phase_nav_li(ph, f'#{esc(ph["anchor"])}') for ph in phases)
     lead_links = "".join(

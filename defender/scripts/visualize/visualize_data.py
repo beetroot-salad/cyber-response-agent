@@ -336,6 +336,14 @@ def _parse_timestamped_user_events(
 def _tile_phase_boundaries(
     parsed: list[tuple], phase_order: list[str]
 ) -> dict[str, dict]:
+    # Tile over BUCKETS, not appearances (#956). `out` is keyed on the name, so a repeated one
+    # is written twice and the last write wins — and the forward scan below is worse than a
+    # lost write: it finds the LATER appearance of a name whose `first_in_phase` is an EARLIER
+    # timestamp, so `## GATHER … ## ANALYZE … ## GATHER` (one bucket, non-adjacent) ends
+    # ANALYZE before it starts, clamps it to zero, and drops GATHER's first span on the
+    # overwrite. Collapsing first makes each bucket one contiguous tile that still covers the
+    # whole run.
+    phase_order = list(dict.fromkeys(phase_order))
     parsed.sort(key=lambda x: x[0])
     run_start = parsed[0][0]
     run_end = parsed[-1][0]
