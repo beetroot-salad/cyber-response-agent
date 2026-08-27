@@ -82,22 +82,23 @@ def test_a_run_directly_under_the_runs_base_is_accepted(tmp_path, runs_base):
 
 @pytest.mark.parametrize("episode_id", ["../escaped", "/tmp/escaped", "nested/episode"])
 def test_an_episode_id_that_is_not_one_safe_component_is_refused_before_priming(
-        tmp_path, runs_base, monkeypatch, episode_id):
+        tmp_path, runs_base, episode_id):
     """Absolute and traversing episode ids never reach the capture writer.
 
     ``prepare_episode`` writes before run-id materialization, so relying on the later run-dir
     validation is too late. A bomb in ``prime_base`` makes the ordering observable: the unsafe
     id must exit while it is still just an argument.
+
+    Handed in through ``prepare_episode``'s own injection seam rather than patched onto the
+    module, so the arm drives the production call path instead of a rebound global.
     """
     cli = cli_mod()
 
     def primed_too_early(*_args, **_kwargs):
         pytest.fail("prime_base was called before the episode id was validated")
 
-    monkeypatch.setattr(cli, "prime_base", primed_too_early)
-
     with pytest.raises(SystemExit, match="episode-id"):
-        cli.prepare_episode(tmp_path / "source", episode_id)
+        cli.prepare_episode(tmp_path / "source", episode_id, primed_too_early)
 
     assert not (runs_base / "episodes").exists()
 
@@ -108,12 +109,15 @@ def test_a_safe_episode_id_resolves_beneath_the_episode_root(runs_base):
 
 
 def test_an_existing_episode_is_refused_even_if_only_stale_world_rows_remain(
-        tmp_path, runs_base, monkeypatch):
+        tmp_path, runs_base):
     """Reusing an episode id cannot revive old per-world live-base rows.
 
     Checking only ``served/base.jsonl`` misses a partly removed or partly failed episode. Its
     world ledger still participates in ``Ledger._absorb`` and can override live reads for keys
     the new source never captured, so the episode directory itself is the immutable unit.
+
+    Handed in through ``prepare_episode``'s own injection seam rather than patched onto the
+    module, so the arm drives the production call path instead of a rebound global.
     """
     cli = cli_mod()
     episode = runs_base / "episodes" / "episode-001"
@@ -124,10 +128,8 @@ def test_an_existing_episode_is_refused_even_if_only_stale_world_rows_remain(
     def primed_too_early(*_args, **_kwargs):
         pytest.fail("prime_base ran for an episode id that already exists")
 
-    monkeypatch.setattr(cli, "prime_base", primed_too_early)
-
     with pytest.raises(cli.LedgerError, match="already exists"):
-        cli.prepare_episode(tmp_path / "source", "episode-001")
+        cli.prepare_episode(tmp_path / "source", "episode-001", primed_too_early)
 
     assert stale.is_file(), "the refusal should not mutate or sanitize the stale episode"
 

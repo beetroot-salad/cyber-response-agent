@@ -21,12 +21,13 @@ import json
 import sqlite3
 from collections import Counter
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from pydantic_ai.messages import RetryPromptPart, ToolCallPart, ToolReturnPart
 
+from defender import _clock
 from defender._io import (
     guarded_mkdir,
     read_jsonl_rows,
@@ -368,11 +369,12 @@ def _prefix_stamps(prefix: list):
 def _utc(at: datetime) -> datetime:
     """`at` as an aware UTC moment, reading a NAIVE value as UTC.
 
-    `parse_iso_utc`'s documented rule and `_clock.z_seconds`', spelled once more here because
-    the alternative — `astimezone` on a naive value — reads it as LOCAL and shifts T0 by the
-    host's offset, differently on a developer's machine than in CI.
+    `_clock.as_utc`'s rule and NOT a second copy of it: T0 is normalised here at the
+    DERIVATION and again inside `_clock.z_seconds` at every FORMATTING, and `_refuse_bad_as_of`
+    compares the two for exact equality — so two spellings that ever part make this module
+    refuse the very spec it just derived.
     """
-    return (at if at.tzinfo is not None else at.replace(tzinfo=UTC)).astimezone(UTC)
+    return _clock.as_utc(at)
 
 
 def _refuse_bad_as_of(spec: BranchSpec, derived: datetime) -> None:
@@ -551,7 +553,10 @@ def _known_leads(run_dir: Path) -> set[str]:
         if row.get("lead_id")
     }
     for directory in (run_dir / name for name in _LEAD_DIRS):
-        if directory.is_dir():
+        # `artifact_dir`, not `is_dir()`: this run dir is the box's rw bind, and a link planted
+        # at a lead directory would otherwise contribute its TARGET's entry names to the set
+        # that decides which leads a sibling inherits.
+        if artifact_dir(directory):
             known |= {_lead_of(entry.name) for entry in directory.iterdir()}
     return {lead for lead in known if lead}
 

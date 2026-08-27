@@ -21,7 +21,7 @@ import functools
 import json
 import sys
 from collections.abc import Mapping
-from dataclasses import is_dataclass, replace
+from dataclasses import fields, is_dataclass, replace
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -332,12 +332,19 @@ def _carrying(ctx: Any, **values: Any) -> Any:
     the circuit breaker reads as the estate being down for this sibling and up for its base,
     which is the base-vs-sibling contamination this whole module exists to exclude.
 
-    `__dataclass_fields__` rather than `fields(ctx)`: the latter builds a fresh tuple per call
-    and this runs on every served verb, twice on a staged one.
+    `fields(ctx)` rather than `type(ctx).__dataclass_fields__`, and the difference is not
+    stylistic. `__dataclass_fields__` also holds the `ClassVar` and `InitVar` PSEUDO-fields
+    that `fields()` filters out, so a stub declaring `as_of: ClassVar[datetime]` passed the
+    membership test and reached `replace`, which raises `TypeError: __init__() got an
+    unexpected keyword argument`. `f.init` rides with it for the third shape: `replace` raises
+    `ValueError` on an `init=False` field. Either one is the exact `TypeError`-deep-inside-
+    `served` this guard exists to prevent, and the `as_of` call site sits OUTSIDE the refusal
+    handler — so it would escape with no ledger row at all. The tuple `fields()` builds per
+    call is the price of the guard actually guarding.
     """
     if not is_dataclass(ctx) or isinstance(ctx, type):
         return ctx
-    declared = getattr(type(ctx), "__dataclass_fields__", {})
+    declared = {f.name for f in fields(ctx) if f.init}
     settable = {name: value for name, value in values.items() if name in declared}
     return replace(ctx, **settable) if settable else ctx
 

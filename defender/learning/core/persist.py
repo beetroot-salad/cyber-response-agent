@@ -202,10 +202,14 @@ def _copy_shared_inputs(run_dir: Path, learning_run_dir: Path) -> None:
                         f"investigation.md failed invlang validation on the copy path "
                         f"({src}): {errors}"
                     )
-            shutil.copy2(src, dst)
+            # `src` is judged by `artifact_file` at the top of this loop, and a link there
+            # raises rather than reaching the copy.
+            shutil.copy2(src, dst)  # lint-tree-read-follows-link: ok — screened above
         loaded = run_dir / "lessons_loaded.jsonl"
         if artifact_file(loaded):
-            shutil.copy2(loaded, learning_run_dir / "lessons_loaded.jsonl")
+            # Guarded by the `artifact_file` above; the `elif` below is what a link here gets.
+            shutil.copy2(  # lint-tree-read-follows-link: ok — screened on the line above
+                loaded, learning_run_dir / "lessons_loaded.jsonl")
         elif loaded.exists() or loaded.is_symlink():
             _refused(run_dir, [loaded])
         from defender.learning import lead_repository

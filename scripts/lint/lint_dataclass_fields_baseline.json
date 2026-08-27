@@ -1,0 +1,4 @@
+{
+  "//": "lint_dataclass_fields baseline — reads of __dataclass_fields__ under defender/ outside tests. The raw mapping also holds ClassVar/InitVar pseudo-fields, so splatting it into replace()/__init__ raises; dataclasses.fields() is the answer to every use in this tree. Ships EMPTY. Fingerprint is file:function. Every entry needs a reason. Regenerate: python scripts/lint/lint_dataclass_fields.py --update-baseline.",
+  "entries": {}
+}

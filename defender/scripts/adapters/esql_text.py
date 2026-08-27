@@ -12,7 +12,29 @@ be vendor-named by design, and both callers already reach the elastic adapter.
 
 from __future__ import annotations
 
+import re
+
 COMMAND_SEP = "|"
+
+#: The source command every time-bearing ES|QL query opens with. ES|QL requires `FROM` FIRST,
+#: and it is the only source command that reaches a data stream — `ROW` mints literal rows and
+#: `SHOW` answers about the cluster, and neither has an `@timestamp` column to bound.
+#:
+#: A PREDICATE, not the stager's parse. `stagers/elastic._FROM` captures the clause's parts
+#: because it rewrites them; a caller that only needs to know whether bounding this query
+#: could mean anything must not carry a second copy of that capture, and must not answer the
+#: question a looser way either.
+_OPENS_FROM = re.compile(r"\A\s*FROM\s", re.IGNORECASE)
+
+
+def opens_with_from(query: str) -> bool:
+    """Does this query open with the `FROM` source command?
+
+    Asked by anything that wants to add a `@timestamp` stage: appending one to a query whose
+    source has no such column does not narrow the row set, it turns a query that answers into
+    an `Unknown column [@timestamp]` error.
+    """
+    return bool(_OPENS_FROM.match(split_first_command(query)[0]))
 
 
 def separator_offsets(query: str) -> list[int]:

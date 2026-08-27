@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from defender._io import append_jsonl, read_jsonl_rows
+from defender._run_paths import artifact_file
 from defender.scripts.gather_tools.record_query import _json_safe_params, _request_key
 
 #: What produced a served payload. A row carrying anything else is a writer that has invented
@@ -293,18 +294,35 @@ class Ledger:
         # direct constructor (which the tests and every later reader use) cannot reach it
         # either; `for_world`'s component check stays, because it refuses a different thing —
         # a write outside the episode.
-        if self.path == self.base_path:
+        # CASE-FOLDED, because the collision being refused is between two FILENAMES and the
+        # filesystem is what decides whether they are one. `is_valid_run_id` admits upper case,
+        # so `for_world(episode, "Base")` names `served/Base.jsonl` — a different string from
+        # `BASE_FILENAME` and, on macOS (where the default runs base lives for every developer
+        # on one; `_io.guarded_mkdir` names the same platform for the same reason), the SAME
+        # FILE. That is the bare-`base` hole below in the one spelling an exact compare cannot
+        # see, and it arrives through the id rule that was supposed to be a proxy for it.
+        # Refused on a case-sensitive host too: the safe direction here is to refuse a world
+        # that MIGHT be writing the capture, not to make the guard depend on the host.
+        if (self.path.parent, self.path.name.casefold()) == (
+                self.base_path.parent, self.base_path.name.casefold()):
             raise LedgerError(
-                f"a world's ledger is {self.path}, which is the family's own capture — the base "
-                "is primed once before any sibling forks and is read-only for the run, so a "
-                "world writing there serves its own live reads to every sibling as the estate")
+                f"a world's ledger is {self.path}, which is the family's own capture "
+                f"({self.base_path}, compared without case) — the base is primed once before "
+                "any sibling forks and is read-only for the run, so a world writing there "
+                "serves its own live reads to every sibling as the estate")
         # THE BASE MUST ALREADY EXIST, and that refusal is the ordering guarantee. Priming runs
         # once, before any sibling forks; a `Ledger` built against a missing base is a sibling
         # that started early, and letting it through would mean every key missed the family tier
         # and read the live estate — the run green, the episode worthless, and nothing in the
         # record to say which. #920's fourth trap is this exact shape: "the seam fails open
         # today", and a missed hook answering from the real estate instead of the capture.
-        if not self.base_path.is_file():
+        # `artifact_file`, not `is_file()`: the latter stats THROUGH a link, so a symlink
+        # wearing the capture's own name passed this check and `_absorb` then read its target
+        # as the family's estate — with `captured` provenance, the one label `record` refuses
+        # to let any serving path mint. The primer already refuses to WRITE through a link
+        # here (`prime_base` tests `exists() or is_symlink()`); this is the same rule on the
+        # reading side, and the same `lstat` posture the evidence copy uses.
+        if not artifact_file(self.base_path):
             raise LedgerError(
                 f"no primed base at {self.base_path} — the family's capture is written once, "
                 "before any sibling forks, and a world serving without it reads the live estate "

@@ -187,11 +187,13 @@ def _branch_clock(resume: Any) -> str:
     they could disagree about when they are, which is a difference in the one part of the
     prompt that is supposed to be shared).
 
-    It is what the estate cannot enforce. The seam pins every timestamp the ADAPTERS mint, and
-    it closes an open upper bound on a search whose window is a parameter — but a query whose
-    window is written into its own body is the model's sentence, and no rewrite short of
-    parsing that language can bound it. Telling the model the date is what makes it write the
-    bound itself; the gap where it does not is recorded in the stager's own docstring.
+    It is NOT what closes the ES|QL window — `elastic_adapter.bounded_esql` does that on the
+    wire, by splicing a bound in as its own pipe stage, and MAIN is not the role that writes
+    those queries anyway (the GATHER subagent is, and its deps carry no clock; see the corpus
+    stager's docstring). What this line buys is MAIN's own reasoning: a resumed run reads back
+    a history full of dated evidence and has to place "now" against it, and a model that
+    silently assumes the wall clock reasons about a gap that does not exist in the world it is
+    resuming into.
 
     `resume.as_of` DIRECTLY, not `getattr(..., None)` with a `""` fallback. `BranchSpec.as_of`
     is a required, non-`Optional` field precisely so a resume without a moment cannot be

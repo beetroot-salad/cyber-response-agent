@@ -47,6 +47,17 @@ class PrimeReport:
     sentinels: int = 0
     unreadable: int = 0
 
+    @property
+    def skipped(self) -> int:
+        """Every row the capture held that this episode will NOT replay.
+
+        Summed HERE rather than at the one caller that prints it, so a sixth skip class added
+        to this dataclass is counted the day it is defined. Re-added by hand at the reader, a
+        new class was silently excluded from the one number an operator reads as the size of
+        the episode's non-deterministic surface.
+        """
+        return self.duplicates + self.failed + self.sentinels + self.unreadable
+
 
 def prime_base(source_run_dir: Path, base_path: Path) -> PrimeReport:
     """Write `base_path` from `source_run_dir`'s capture. Once, before any sibling exists.
@@ -122,7 +133,14 @@ def prime_base(source_run_dir: Path, base_path: Path) -> PrimeReport:
     # second `lint-unguarded-tree-write` waiver to re-audit for one write.
     append_jsonl(  # lint-unguarded-tree-write: ok — the episode archive is `runs_base/episodes/<id>/`, a sibling of the run dirs rather than one of them, so it is not bound into any box  # noqa: E501
         base_path, out)
-    return PrimeReport(primed=len(out), **counts)
+    # NAMED, not splatted. `PrimeReport(primed=…, **counts)` type-checked as nothing: a renamed
+    # or added field raised `TypeError` at RUNTIME, and it raised HERE — after `append_jsonl`
+    # has already written the base file, so the episode is primed, `prepare_episode` never
+    # returns, and `prime_base`'s own "already holds a primed base" refusal then makes that
+    # episode id permanently unusable.
+    return PrimeReport(
+        primed=len(out), duplicates=counts["duplicates"], failed=counts["failed"],
+        sentinels=counts["sentinels"], unreadable=counts["unreadable"])
 
 
 def _captured_call(row: QueryRow, counts: dict) -> ServedCall | None:

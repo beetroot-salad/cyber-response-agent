@@ -100,7 +100,10 @@ class JoinedLead:
 
 def load_leads(run_dir: Path) -> dict[str, dict]:
     gather = RunPaths(Path(run_dir)).gather_raw
-    if not gather.is_dir():
+    # `artifact_dir`, not `is_dir()`: a link at `gather_raw` would otherwise be walked and its
+    # target's files read as this run's leads. `stage_tables` below already judges the same
+    # directory this way; the two are the same tree read by two functions.
+    if not artifact_dir(gather):
         return {}
     leads: dict[str, dict] = {}
     for path in sorted(gather.glob(f"*{_LEAD_SUFFIX}")):
@@ -262,7 +265,10 @@ def first_rendered_payload(
     """
     failure: Exception | None = None
     for q in lead.queries:
-        if q.raw_ref is None or not q.raw_ref.is_file():
+        # `artifact_file`, not `is_file()`: this payload is rendered into the actor view, so a
+        # link planted at a by-ref name would put its TARGET's bytes there under the name of
+        # something an adapter wrote. Skipping is what an absent payload already gets.
+        if q.raw_ref is None or not artifact_file(q.raw_ref):
             continue
         try:
             raw = read_text_utf8(q.raw_ref)
@@ -325,7 +331,9 @@ def stage_tables(src_run_dir: Path, dst_dir: Path) -> list[Path]:
     refused: list[Path] = []
     queries_src = RunPaths(src_run_dir).executed_queries
     if artifact_file(queries_src):
-        shutil.copy2(queries_src, RunPaths(dst_dir).executed_queries)
+        # Guarded by the `artifact_file` above; a link here lands in `refused` instead.
+        shutil.copy2(  # lint-tree-read-follows-link: ok — screened on the line above
+            queries_src, RunPaths(dst_dir).executed_queries)
     elif queries_src.exists() or queries_src.is_symlink():
         refused.append(queries_src)
     gather_src = RunPaths(src_run_dir).gather_raw
@@ -333,8 +341,11 @@ def stage_tables(src_run_dir: Path, dst_dir: Path) -> list[Path]:
         # `symlinks=True` alongside the ignore hook: the hook decides from an `lstat` taken
         # before the copy, so the flag is what keeps a link planted inside that window from
         # being dereferenced anyway.
-        shutil.copytree(gather_src, RunPaths(dst_dir).gather_raw, symlinks=True,
-                       ignore=_refuse_non_artifacts(refused), dirs_exist_ok=True)
+        # The ROOT is judged by `artifact_dir` above, and `symlinks=True` covers every entry
+        # found while walking.
+        shutil.copytree(  # lint-tree-read-follows-link: ok — root screened, entries preserved
+            gather_src, RunPaths(dst_dir).gather_raw, symlinks=True,
+            ignore=_refuse_non_artifacts(refused), dirs_exist_ok=True)
     elif gather_src.exists() or gather_src.is_symlink():
         refused.append(gather_src)
     return refused

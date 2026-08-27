@@ -45,7 +45,10 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
+import sqlite3
 import sys
+from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -63,9 +66,14 @@ if (_root := str(_DEFENDER_DIR.parent)) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender._paths import PATHS
-from defender._run_id import RUN_ID_ALLOWED, is_valid_run_id
-from defender._run_paths import RunPaths
-from defender.learning.branch.capture import prime_base
+from defender._run_id import (
+    CASE_STABLE_REQUIRED,
+    RUN_ID_ALLOWED,
+    is_case_stable_id,
+    is_valid_run_id,
+)
+from defender._run_paths import RunPaths, artifact_file
+from defender.learning.branch.capture import PrimeReport, prime_base
 from defender.learning.branch.estate.registry import (
     EstateError,
     WorldRegistry,
@@ -73,7 +81,7 @@ from defender.learning.branch.estate.registry import (
 )
 from defender.learning.branch.ledger import Ledger, LedgerError, base_file
 from defender.run_common import materialize_run_dir, resolve_runs_base
-from defender.runtime import branch, driver
+from defender.runtime import branch, driver, session_store
 
 
 @dataclass(frozen=True)
@@ -107,6 +115,14 @@ class World:
                 f"world id {self.world_id!r} is not usable (allowed: {RUN_ID_ALLOWED}) — it "
                 "names this sibling's run dir, its ledger file and its staged corpus, and each "
                 "of those refuses a different subset at a different depth")
+        if not is_case_stable_id(self.world_id):
+            raise SystemExit(
+                f"world id {self.world_id!r} is not usable ({CASE_STABLE_REQUIRED}) — it names "
+                f"a file beside its siblings and beside the family's capture, and on a "
+                f"case-insensitive filesystem {self.world_id.casefold()!r} is the same file. "
+                f"Every guard between a world and that capture is an exact string compare, so "
+                f"the collision is invisible to all of them. Use "
+                f"{self.world_id.casefold()!r}")
 
 
 def episode_dir_for(episode_id: str) -> Path:
@@ -151,12 +167,20 @@ def refuse_distant_source(source_run_dir: Path) -> None:
             "and one parked elsewhere cannot be branched from")
 
 
-def prepare_episode(source_run_dir: Path, episode_id: str) -> Path:
+def prepare_episode(
+    source_run_dir: Path, episode_id: str,
+    prime: Callable[[Path, Path], PrimeReport] = prime_base,
+) -> Path:
     """Prime the family's base and hand back the episode directory.
 
     ONCE, AND BEFORE ANY WORLD. `Ledger.__post_init__` refuses a missing base precisely so a
     sibling built out of order fails loudly instead of reading the live estate for every key,
     and this is the call that makes the ordering true rather than merely checked.
+
+    `prime` is the primer as an INJECTION SEAM rather than a module lookup, so a caller that
+    needs to observe whether priming ran at all — the refusals above exist precisely to keep it
+    from running — can hand in its own without reaching into this module's globals. The default
+    is the real one, so no production caller has to know the seam is there.
     """
     episode = episode_dir_for(episode_id)
     if episode.exists() or episode.is_symlink():
@@ -164,11 +188,11 @@ def prepare_episode(source_run_dir: Path, episode_id: str) -> Path:
             f"episode {episode_id!r} already exists at {episode} — an episode id names one "
             "immutable family capture and its per-world live-base rows. Reusing it would mix "
             "the earlier estate into this run under first-row-wins; name a fresh episode id")
-    report = prime_base(source_run_dir, base_file(episode))
+    report = prime(source_run_dir, base_file(episode))
     # BOTH HALVES, NAMED. Every skipped row is a key that will reach the LIVE estate during the
     # episode rather than replaying, so the skips are the size of the non-deterministic surface
     # — and a reader shown only "primed 10" would assume it was zero.
-    skipped = report.duplicates + report.failed + report.sentinels + report.unreadable
+    skipped = report.skipped
     print(
         f"[branch] primed {report.primed} captured row(s) into "
         f"{base_file(episode)}; {skipped} skipped ({report}) — a skipped "
@@ -203,6 +227,22 @@ def materialize_worlds(
     Both are properties of the family that are knowable before it starts, so they are answered
     before it starts: every failure here is a raise out of `main` with nothing spent.
     """
+    # THE SOURCE ALERT IS SCREENED BEFORE THE FIRST COPY, and this is the only frame that can.
+    # `materialize_run_dir` admits it with `alert.is_file()` and copies it with `shutil.copy` —
+    # both of which FOLLOW a link — and every other caller hands it an operator-supplied path.
+    # This one hands it a path INSIDE the source run dir, which is the box's rw bind, so
+    # `alert.json` there is model-writable and a link planted at that name copies its TARGET's
+    # bytes into all N sibling run dirs under the case input's own name, where the visualizer
+    # and the archive read them as the alert. `branch._inherit_evidence` already refuses that
+    # link with the same `artifact_file` — but only per sibling, inside `run_investigation`,
+    # long after the copies exist and after `store.fork` has committed. Asked once, here,
+    # before anything is written.
+    alert = RunPaths(Path(spec.source_run_dir)).alert
+    if not artifact_file(alert):
+        raise SystemExit(
+            f"source alert {alert} is not a plain file — the alert is the case input every "
+            "sibling investigates, and a link wearing its name would copy bytes from outside "
+            "the source run into every run dir this launcher creates")
     prepared = []
     for world in worlds:
         run_id = f"{episode_id}-{world.world_id}"
@@ -222,11 +262,15 @@ async def run_world(
 ) -> dict:
     """One sibling, in its own run dir, against its own ledger over the family's base.
 
-    `model_override` is the operator's RAW `--model`, carried beside the resolved `model_name`
-    exactly as `run.py` carries it: `run_investigation` threads it into the review bundle, whose
-    roles pin their OWN defaults. Dropped, `branch --model X` ran MAIN on X and every review
-    stage on its pinned default — a family that is not comparable with a `run.py --model X`
-    baseline, with nothing anywhere saying the two review configurations differed.
+    `model_override` is the operator's RAW `--model`, and so is `model_name` — this launcher
+    resolves NEITHER, because `run_investigation` calls `resolve_main_model(model_name)` itself.
+    Both slots are kept rather than collapsed because they part company one frame in:
+    `model_override` is what reaches the review bundle, whose roles pin their OWN defaults, and
+    dropping it ran MAIN on `X` and every review stage on its pinned default — a family not
+    comparable with a `run.py --model X` baseline, with nothing anywhere saying the two review
+    configurations differed. (`run.py` resolves `model_name` before the call because it also
+    PRINTS it and runs `preflight_role_models`; this launcher does neither — see the module
+    docstring's third missing piece.)
     """
     return await driver.run_investigation(
         alert_path=RunPaths(run_dir).alert, run_dir=run_dir, run_id=run_id,
@@ -290,6 +334,15 @@ def refuse_bad_episode_id(episode_id: str) -> None:
         raise SystemExit(
             f"--episode-id {episode_id!r} is not usable (allowed: {RUN_ID_ALLOWED}) — it names "
             "a directory beside the runs and half of every sibling's run id")
+    if not is_case_stable_id(episode_id):
+        # The same rule the world id is held to, and for the reason `prepare_episode` refuses a
+        # reused id: an episode id names one immutable family capture, and two spellings of it
+        # are one directory wherever the filesystem folds case — which would mix an earlier
+        # estate into this run under first-row-wins while every check here read them as
+        # distinct.
+        raise SystemExit(
+            f"--episode-id {episode_id!r} is not usable ({CASE_STABLE_REQUIRED}) — use "
+            f"{episode_id.casefold()!r}")
 
 
 def parse_world(spec: str) -> World:
@@ -313,10 +366,20 @@ def main(argv: list[str]) -> int:
     — raise `BranchError`/`LedgerError`/`EstateError` with messages authored for exactly this
     reader. Uncaught, those reached the operator wrapped in a stack trace while the four beside
     them printed cleanly: two spellings of "you cannot branch this" from one command.
+
+    THE STORE FAULTS RIDE HERE TOO, and they are the same set `driver.run_investigation`'s own
+    setup handler names for the same reason. `open_source_store`, `branch_point_time` and
+    `validate` all read the source's sqlite database, so a file that is not one, or one written
+    under a schema version this build does not know, raises `sqlite3.DatabaseError` or a
+    `StoreError` — never a `BranchError`. Left out, the corrupt-store case printed a traceback
+    naming `PRAGMA user_version` while the pointer-mismatch case one line away printed a clean
+    refusal: exactly the two spellings this handler exists to collapse, from the two inputs an
+    operator is most likely to get wrong together.
     """
     try:
         return _launch(argv)
-    except (branch.BranchError, LedgerError, EstateError) as refusal:
+    except (branch.BranchError, LedgerError, EstateError,
+            session_store.StoreError, sqlite3.Error) as refusal:
         raise SystemExit(f"[branch] {refusal}") from refusal
 
 
@@ -333,12 +396,21 @@ def _launch(argv: list[str]) -> int:
     # `Ledger` objects, so two `threading.Lock`s, appending to one file. `run_family`'s parallel
     # design rests on "each world writes its own file"; a repeated id is the one way to make
     # that premise false from outside.
-    repeated = sorted({w.world_id for w in worlds if
-                       [x.world_id for x in worlds].count(w.world_id) > 1})
+    # CASE-FOLDED, because the thing being kept distinct is a FILENAME. `is_valid_run_id`
+    # admits upper case, so `--world a --world A` is two ids by string and ONE run dir and ONE
+    # ledger file on a case-insensitive filesystem — which macOS is, and which is where the
+    # default runs base lives for every developer on one (`_io.guarded_mkdir` names the same
+    # platform for the same reason). Refusing the pair on a case-SENSITIVE host too is the safe
+    # direction: a family whose arms are told apart only by capitalisation is unreadable in a
+    # report either way.
+    repeated = sorted(
+        world_id for world_id, seen
+        in Counter(w.world_id.casefold() for w in worlds).items() if seen > 1)
     if repeated:
         raise SystemExit(
-            f"--world named {repeated} more than once — a family is a set of DIFFERENT worlds, "
-            "and two siblings sharing an id share a run dir and a ledger file")
+            f"--world named {repeated} more than once (ignoring case) — a family is a set of "
+            "DIFFERENT worlds, and two siblings sharing an id share a run dir and a ledger "
+            "file, which on a case-insensitive filesystem includes two spellings of one id")
 
     store = branch.open_source_store(source)
     try:
@@ -360,7 +432,13 @@ def _launch(argv: list[str]) -> int:
     results = asyncio.run(run_family(
         prepared, spec=spec, defender_dir=PATHS.defender_dir,
         model_name=ns.model, model_override=ns.model))
-    failed = [(w.world_id, r) for w, r in zip(worlds, results, strict=True)
+    # PAIRED WITH `prepared`, not with `worlds`. `run_family` gathers over `prepared` and
+    # `asyncio.gather` answers in ARGUMENT order, so the results line up with the list that was
+    # gathered — and re-zipping the separate input list is correct only while
+    # `materialize_worlds` happens to preserve it one-for-one. The world is already in the
+    # tuple; reading it from there makes the attribution structural rather than incidental, so
+    # a future skip or reorder there cannot silently name the wrong sibling as the broken arm.
+    failed = [(world.world_id, r) for (world, *_), r in zip(prepared, results, strict=True)
               if isinstance(r, BaseException)]
     for world_id, err in failed:
         print(f"[branch] world {world_id} failed: {err!r}", file=sys.stderr)

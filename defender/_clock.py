@@ -17,21 +17,36 @@ def now_iso() -> str:
 Z_SECONDS = "%Y-%m-%dT%H:%M:%SZ"
 
 
+def as_utc(moment: _dt.datetime) -> _dt.datetime:
+    """`moment` as an aware UTC datetime, reading a NAIVE value as UTC.
+
+    THE ONE normalisation, because the turn-N branch DERIVES a moment in one module and
+    FORMATS it in another and then cross-checks the two for exact equality
+    (`runtime.branch._refuse_bad_as_of`). Two copies of this rule that ever part make a spec
+    the derivation produced fail its own check, which is the failure that check exists to
+    catch, arriving through the normalisation instead of through the value.
+
+    Naive-is-UTC rather than `astimezone` on a naive value: the latter reads it as LOCAL and
+    shifts the moment by the host's offset — silently, and differently on a developer's machine
+    than in CI, which is the one failure a timestamp helper must not have. It is also
+    `parse_iso_utc`'s documented rule, so the two ends of a round trip agree.
+    """
+    at = moment if moment.tzinfo is not None else moment.replace(tzinfo=_dt.UTC)
+    return at.astimezone(_dt.UTC)
+
+
 def z_seconds(moment: _dt.datetime) -> str:
     """`moment` as `YYYY-MM-DDTHH:MM:SSZ`.
 
-    A NAIVE input is read as UTC, matching `parse_iso_utc`'s documented rule so the two ends of
-    a round trip agree. `astimezone` would read it as LOCAL and shift the moment by the host's
-    offset — silently, and differently on a developer's machine than in CI, which is the one
-    failure a timestamp helper must not have.
+    A NAIVE input is read as UTC through :func:`as_utc` — see there for why that is not
+    `astimezone`.
 
     Whole seconds because the format drops sub-second precision anyway: formatting a
     microsecond-bearing moment yields a string that no longer round-trips to it, so two
     spellings of one instant compare unequal and a cross-check against a stored T0 fails for a
     difference no reader can see.
     """
-    at = moment if moment.tzinfo is not None else moment.replace(tzinfo=_dt.UTC)
-    return at.astimezone(_dt.UTC).strftime(Z_SECONDS)
+    return as_utc(moment).strftime(Z_SECONDS)
 
 
 def parse_iso_utc(raw: object) -> _dt.datetime | None:
