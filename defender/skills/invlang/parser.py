@@ -1892,6 +1892,16 @@ class _Projector:
     def _project_resolution_block(self, block: Block) -> None:
         name = block.name
         bucket_key = _RESOLUTION_BUCKET_KEY[name]
+        # One map per BLOCK, and the scope is the whole point (#962). A slot refined again in a
+        # LATER block is the format's documented `??` -> candidate set -> concrete value
+        # progression, and the second block is written after gather returned something the
+        # first could not know; carrying this map across blocks would refuse that path. Within
+        # ONE block nothing happened between the two rows, so the later row is not a
+        # refinement of the earlier one — it contradicts it.
+        #
+        # It holds the VALUE, not just the slot, because what is worth refusing is a value
+        # LOST — see `_apply_attr_update`.
+        refined_here: dict[tuple[str, str, str], str] = {}
         for idx, row, rec in self._for_each_row(block):
             lead_id = rec.get("resolved_by") or rec.get("lead")
             if not lead_id:
@@ -1899,15 +1909,25 @@ class _Projector:
                 continue
             lead = self.lead_bucket(lead_id)
             if name == "attr_updates":
-                self._apply_attr_update(lead, rec, block, idx, row)
+                self._apply_attr_update(lead, rec, block, idx, row, lead_id, refined_here)
             else:
                 lead.setdefault("outcome", {}).setdefault(bucket_key, []).append(
                     _canonicalize_resolution_row(rec)
                 )
 
-    def _apply_attr_update(
+    #: What a slot refined twice in ONE block costs, and the remedy. Split out because the
+    #: sentence has to say BOTH halves: the drop, and that the cross-block path it looks like
+    #: is not this and stays legal. An author reading only the first half re-sends the second
+    #: row as its own block, which is correct — and would read as being told off for it.
+    _REPEAT_SLOT_REMEDY = (
+        "Give this block one row per slot and re-send it whole. Refining the same slot again "
+        "in a LATER block is the documented `??` -> candidate set -> concrete value "
+        "progression and stays legal — it is the repeat WITHIN one block that has no reading."
+    )
+
+    def _apply_attr_update(  # noqa: PLR0913 — the row's coordinates, plus the block's own slot map
         self, lead: dict[str, Any], rec: dict[str, str], block: Block,
-        idx: int, row: str,
+        idx: int, row: str, lead_id: str, refined_here: dict[tuple[str, str, str], str],
     ) -> None:
         tgt = rec.get("target")
         key = rec.get("key")
@@ -1915,6 +1935,38 @@ class _Projector:
         if not tgt or not key:
             self._warn(block, idx, row, "attr_updates missing target/key")
             return
+        # KEYED ON THE LEAD TOO, not just `(target, key)`: the fold below writes into the
+        # bucket of the lead that RESOLVED the row, so two leads refining one slot of one
+        # vertex in the same block land in two different entries and overwrite nothing.
+        slot = (lead_id, tgt, key)
+        # A VALUE LOST is the defect, not a row repeated. Two rows naming one slot with the
+        # SAME value are redundant and destroy nothing — the fold lands exactly what either
+        # row alone would land — so they are left alone. Two rows naming one slot with
+        # DIFFERENT values are a contradiction inside a single atomic write, and one of the
+        # two author-written values disappears with nothing said.
+        #
+        # Narrowing it this way is not a convenience. `fix_row` deliberately repairs EVERY
+        # flagged occurrence of a row's text at once (#836 H4, so a non-unique flagged row
+        # stays repairable at all), which means the repair of two byte-identical bad rows
+        # necessarily produces two byte-identical good ones. A rule keyed on the slot alone
+        # would refuse that repair and leave the window open with no way to close it — the
+        # exact wedge H4 exists to prevent.
+        previous = refined_here.get(slot)
+        if previous is not None and previous != val:
+            # LAST-WINS is left exactly as it was, and the warning is the whole change. The
+            # direction already matches the cross-block progression — a later row sharpens an
+            # earlier one — so one sentence describes both scopes, and every document already
+            # on disk keeps the effective state it had. #954's neighbouring site keeps the
+            # FIRST row instead, and deliberately: a lead is DECLARED once, so its repeat is a
+            # slip and the first row carries the header every reader answers from. A
+            # refinement declares nothing. The survivor rule does not carry across.
+            self._warn(
+                block, idx, row,
+                f"{key!r} on {tgt!r} is refined twice in this block, to {previous!r} and then "
+                f"to {val!r}; only the LAST value is recorded and {previous!r} is discarded "
+                f"with nothing said. {self._REPEAT_SLOT_REMEDY}",
+            )
+        refined_here[slot] = val
         au = lead.setdefault("outcome", {}).setdefault("attribute_updates", [])
         for entry in au:
             if entry.get("target") == tgt and isinstance(entry.get("updates"), dict):

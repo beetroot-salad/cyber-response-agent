@@ -961,7 +961,32 @@ def _declare_l_finding(run_dir: Path, lead_id: str, name: str, system: str) -> N
     they do not share an authority for it — item 1's is the literal its own backend calls name
     (`ITEM1_SYSTEM`), item 3's is derived from the grant that confines it
     (`CORRELATION_SYSTEM`). They are the same string today; a shared constant would silently
-    mislabel one of the two rows the moment they stop being."""
+    mislabel one of the two rows the moment they stop being.
+
+    THE SEED IS VALIDATED LIKE ANY OTHER APPEND (#964). This writer runs before MAIN's first
+    turn and reaches `write_guarded` directly — it is not a tool call, so there is no
+    `permission.decide_write` in front of it — which made it the one writer of this document
+    that no schema had seen. Harmless in fact (one block, one row, so it cannot form the
+    within-block duplicate the validator refuses) and load-bearing anyway: the invariant every
+    other gate is designed against is "a committed investigation parses", and an ungated
+    writer makes that true only of the verbs the MODEL calls. It is checked here rather than
+    routed through the permission gate because that gate answers WHO MAY WRITE WHERE from a
+    policy and a role, and this frame has neither — what it needs is the content schema, which
+    `validate_artifact` is the neutral leaf for.
+
+    A SEED THAT FAILS IS NOT WRITTEN, and the id stays undeclared. That is the deliberate half
+    (the issue asks for a decision, not just a check). Writing it anyway would rebuild the
+    bypass under a new name — the whole point is that no unvalidated bytes reach this
+    document. Skipping costs a reserved id that MAIN may then cite, and the validator answers
+    that citation with `undeclared lead` — a refusal MAIN reads, can act on, and can clear by
+    declaring the lead itself. So the failure is loud, actionable and recoverable, where a
+    laundered write is none of the three. The likely reason for a failure is a document that
+    was ALREADY malformed when this frame read it, in which case the seed is the messenger and
+    the refusal names the real fault.
+
+    Best-effort is preserved in both directions: a refusal prints and returns, and never
+    raises into a run that has not started."""
+    from defender._artifact_schema import INVESTIGATION_NAME, validate_artifact
     from defender._io import write_guarded
 
     path = RunPaths(run_dir).investigation
@@ -973,8 +998,19 @@ def _declare_l_finding(run_dir: Path, lead_id: str, name: str, system: str) -> N
         "```\n\n"
     )
     try:
-        existing = path.read_text(encoding="utf-8") if path.is_file() else ""
-        write_guarded(path, existing + block)
+        # `None` for an absent file, matching what `permission.decide_write` passes as the
+        # append-only baseline — `""` would claim an empty document was committed.
+        existing = path.read_text(encoding="utf-8") if path.is_file() else None
+        proposed = block if existing is None else existing + block
+        reason = validate_artifact(INVESTIGATION_NAME, proposed, existing)
+        if reason is not None:
+            print(
+                f"[lead_zero] refused to declare {lead_id} in investigation.md — the document "
+                f"would not pass validation, so nothing was written and the id stays "
+                f"undeclared: {reason}"
+            )
+            return
+        write_guarded(path, proposed)
     except (OSError, ValueError) as e:  # noqa: BLE001 — best-effort; never breaks the run
         print(f"[lead_zero] could not declare {lead_id} in investigation.md: {e!r}")
 
@@ -1022,14 +1058,63 @@ def _render_section(body: str) -> str:
     return wrap_fresh(body, "untrusted")
 
 
-def render_orient_section(result: LeadZeroResult) -> str:
+def render_orient_section(result: LeadZeroResult, run_dir: Path | None = None) -> str:
     """The ORIENT-time section text: the trusted heading (naming the reserved ids MAIN must not
-    reuse) followed by item 1's whole untrusted frame, unmodified."""
-    return (
+    reuse) followed by item 1's whole untrusted frame, unmodified.
+
+    `run_dir` is what lets the heading tell the truth about `L0`. The harness seeds that lead's
+    declaring `:L findings` row before this renders, and that seed can decline to write — it
+    validates the document first and refuses rather than laundering unvalidated bytes past the
+    gate (#964). "Already claimed; do not reuse them" is then a TRAP, and a tight one: MAIN is
+    told the id is claimed, cites it, and is refused with `undeclared lead` — for which the
+    only repair is to write the very `:L findings` row it reads "do not reuse" as forbidding.
+    So when the row is not on the page, say so and say what to do.
+
+    DERIVED FROM THE DOCUMENT, not from a flag the seed sets. Same rule the repair window
+    obeys: the answer is a property of the bytes on disk, so it cannot go stale, cannot
+    disagree with the file, and is right about a row that went missing some other way. Passed
+    `None` (the degraded arm, which has no run dir in hand), the extra line is simply omitted —
+    the heading is exactly what it was.
+
+    `L3` gets no such line: it is dispatched AFTER this renders and conditionally, so an absent
+    row there is the ordinary case and not a fault. Its citation is covered by the validator's
+    own refusal, which names the harness-reserved case in its repair text."""
+    heading = (
         f"{LEAD_ZERO_HEADING} (resolved by the harness before your first turn — reserved "
         f"lead ids {L0} (this resolution) and {L3} (a correlation lead dispatched off it, "
-        "if any) are already claimed; do not reuse them)\n\n" + result.text
+        "if any) are already claimed; do not attach new work to them"
     )
+    if run_dir is not None and not _is_declared(run_dir, L0):
+        heading += (
+            f". NOTE: {L0}'s declaring `:L findings` row is NOT in investigation.md — the "
+            f"harness could not write it. If you cite {L0}, declare it yourself in a `:L "
+            f"findings` block first; that is not reuse"
+        )
+    return heading + ")\n\n" + result.text
+
+
+def _is_declared(run_dir: Path, lead_id: str) -> bool:
+    """Is `lead_id`'s declaring `:L findings` row on the page right now?
+
+    Answered through the real parser rather than a substring search: the id appears in prose
+    and in a `:R` row's first cell too, and a heading that promised a declaration on the
+    strength of either would be wrong in exactly the case it exists to catch.
+
+    FAILS OPEN — an unreadable or unparseable document returns True, so the extra line is
+    omitted. This is prompt text, not a gate: a document nothing can parse is a fault the
+    write gate and the close both refuse on their own terms, and guessing "not declared" here
+    would bolt a confusing instruction onto a run whose real problem is elsewhere."""
+    from defender.skills.invlang.parser import parse_dense_companion
+
+    path = RunPaths(run_dir).investigation
+    if not path.is_file():
+        return False
+    try:
+        companion, _warnings = parse_dense_companion(path.read_text(encoding="utf-8"))
+    except Exception as e:  # noqa: BLE001 — prompt prose must not decide a run's fate
+        print(f"[lead_zero] could not check whether {lead_id} is declared: {e!r}")
+        return True
+    return any(f.get("id") == lead_id for f in companion.get("findings", []))
 
 
 # ─── the entry point (F1) ─────────────────────────────────────────────────────────────

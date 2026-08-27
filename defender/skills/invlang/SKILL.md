@@ -141,6 +141,13 @@ lead choice is mechanical.
   `??` → `{a, b, c}` → concrete value. The `:V` declaration itself is
   IMMUTABLE — a sharpened `ident` is a new `:R` row, never a rewrite of
   the row that declared the vertex.
+- **One row per slot, per block.** The progression above runs ACROSS
+  blocks: each step is its own `append_block`, written when gather
+  returns something the last step could not know. Two rows in ONE block
+  giving the same `(target, key)` two DIFFERENT values are refused —
+  nothing happened between them to justify the second, and only the last
+  would be recorded, silently dropping a value you wrote. Repeating a
+  row with the SAME value is harmless and passes.
 
 **Worked example.** A rule-5710 failed-auth alert names a source IP
 with no role/zone context. The defender doesn't yet know whether

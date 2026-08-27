@@ -111,7 +111,7 @@ def _user_prompt(  # noqa: PLR0913 — the harness's own pre-turn seams (#808)
             run_dir=run_dir, defender_dir=defender_dir, alert_path=alert_path,
             verbs=verbs, limits=limits, run_id=run_id,
         )
-        lead_zero_text = lead_zero_mod.render_orient_section(result)
+        lead_zero_text = lead_zero_mod.render_orient_section(result, run_dir)
         ancestor_block = result.text
         status = result.status
     except (BudgetKill, RunAborted) as e:

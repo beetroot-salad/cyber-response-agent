@@ -663,6 +663,7 @@ def seed_investigation(store: Any, spec: BranchSpec | None, run_dir: Path) -> in
     """
     if spec is None:
         return 0
+    from defender._artifact_schema import INVESTIGATION_NAME, validate_artifact
     from defender.skills.invlang.parser import scan_fences
 
     target = RunPaths(Path(run_dir)).investigation
@@ -680,11 +681,37 @@ def seed_investigation(store: Any, spec: BranchSpec | None, run_dir: Path) -> in
             f"{RunPaths(Path(spec.source_run_dir)).investigation} holds {len(bounds)} "
             f"fence(s) but the branch point maps to {fences} — the document and the session "
             "disagree about what had landed, and a seed cut from either is a guess")
+    seed = text[: bounds[fences - 1][1]] if fences else ""
+    # THE SEED MEETS THE SCHEMA, like every other writer of this artifact (#961/#964's class,
+    # third site). This frame reaches `write_guarded` directly — it is host code, not a tool
+    # call, so there is no `permission.decide_write` in front of it — and a valid source
+    # document does NOT guarantee a valid prefix: the reference rules are order-INDEPENDENT,
+    # so a source whose `:R` block cites a lead its `:L findings` block declares one fence
+    # LATER is well-formed whole and `undeclared lead` when cut between the two. Measured, not
+    # reasoned: no document in the checked-in corpus has that shape, and one built to have it
+    # reproduces the refusal exactly.
+    #
+    # RAISES rather than seeding anyway, unlike `lead_zero`'s best-effort seed. The difference
+    # is who is left holding it: that one runs before MAIN's first turn and its failure leaves
+    # a model that can still declare the lead itself, while this one hands a SIBLING RUN its
+    # entire starting document. Seeding a malformed one gives that run an investigation whose
+    # every subsequent append is refused for a fault it did not write and cannot repair —
+    # append-only puts the bad bytes out of its reach. This is also the same answer the fence
+    # mismatch above already gives, for the same reason: a seed cut wrong is not a seed.
+    reason = validate_artifact(INVESTIGATION_NAME, seed, None)
+    if reason is not None:
+        raise BranchError(
+            f"the {fences}-fence prefix of "
+            f"{RunPaths(Path(spec.source_run_dir)).investigation} does not pass validation, so "
+            f"the sibling cannot be seeded from it — the source document is well-formed only "
+            f"as a whole, and a run started on the prefix could never repair it "
+            f"(append-only). {reason}"
+        )
     # `write_guarded`, not `write_text`: this writes into the shared run tree, and the seam
     # stages under an unpredictable name and `os.replace`s into place rather than opening the
     # target — so a planted symlink at the sibling's `investigation.md` is replaced instead of
     # followed. The same lane `_tool_append_block` writes this file through.
-    write_guarded(target, text[: bounds[fences - 1][1]] if fences else "")
+    write_guarded(target, seed)
     _inherit_evidence(
         Path(spec.source_run_dir), Path(run_dir),
         leads_at(store, source_session(store, spec), spec.branch_message_id,

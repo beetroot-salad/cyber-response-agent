@@ -791,6 +791,22 @@ jobs:
       - name: Unaccounted invlang selection gate (say where the rest went, #932 — baseline-ratcheted)
         run: defender/.venv/bin/python scripts/lint/lint_unaccounted_selection.py
 
+      # An invariant enforced at a gate, and then believed of the ARTIFACT. `_artifact_schema`
+      # owns what a well-formed investigation.md / report.md is, and the permission gate
+      # applies it to every write a MODEL makes — which made "a committed investigation
+      # parses" true of the verbs the agent writes through, and false of two writers nobody
+      # had censused: the harness seeding a `:L findings` row before MAIN's first turn (#964),
+      # and the close, the one verb that PUBLISHES, validating the report it wrote but never
+      # the companion it published (#961). A third turned up when this gate first ran — the
+      # turn-N branch seeding a sibling's whole document from a fence-boundary prefix, which
+      # a valid source does not guarantee is valid. Flags a function holding a write and a
+      # gated artifact name with no schema call in the same frame. Baseline ships EMPTY. NOT
+      # mechanized: whether the validated text IS the written text, a write split across two
+      # functions, and the consumer half of #961 (publishing is not a syntactic act) — those
+      # are tests/test_ungated_artifact_write_961_964.py's, not this gate's.
+      - name: Ungated artifact write gate (every writer meets the schema, #961/#964 — baseline-ratcheted)
+        run: defender/.venv/bin/python scripts/lint/lint_ungated_artifact_write.py
+
       # For symbols this PR removed, the post-PR tree must hold no surviving reference.
       # Needs the merge-base with origin/main — hence `fetch-depth: 0` on the checkout
       # above. Fails CLOSED: exit 2 if the base ref or the merge-base is unavailable, so
