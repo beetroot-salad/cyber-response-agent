@@ -168,7 +168,7 @@ def test_esql_values_are_positional_json_not_a_struct():
     """The trap the prompts must not fall into: `unnest(values)` yields a POSITIONAL
     `JSON[]`, NOT the named struct `unnest(hits)` yields. `v.<field>` — the idiom the
     prompt teaches for search hits — is a Binder Error here, so the ES|QL row of the
-    shape table must teach positional indexing + a JSON unwrap instead."""
+    shape table must teach positional indexing + a JSON unpack instead."""
     payload = _REAL_ESQL.read_text()
     doc = json.loads(payload)
     field = doc["columns"][1]["name"]

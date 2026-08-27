@@ -1,7 +1,7 @@
 r"""#959 - one scanner: the token record stream, the unquoter, the blanks and the `\r`.
 
 Four places in the request path decide where a bash word ends: `bash_exec._scan`,
-`bash_exec._word_value` (a `shlex.split` per word), `hooks/_cmd_segments.unwrap` (a second
+`bash_exec._word_value` (a `shlex.split` per word), the standalone wrapper step that used to live in `hooks/_cmd_segments.py` (a second
 parser that flattens the command before deciding what the `bash -c` argument was), and
 `permission/bash.decide_bash`'s `command.strip()`. After this change exactly one does. Any
 disagreement between them is a disagreement between what was CHECKED and what RUNS - the gate

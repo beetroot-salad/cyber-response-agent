@@ -12,7 +12,6 @@ import subprocess
 
 import pytest
 
-from defender.hooks._cmd_segments import unwrap
 from defender.runtime import bash_exec
 
 
@@ -23,14 +22,11 @@ def _env(**extra: str) -> dict[str, str]:
 
 
 def _run(cmd: str, *, env=None, cwd="/", timeout: float = 10.0):
-    stripped = cmd.strip()
-    if not stripped:
-        return 0, "", ""
-    inner = unwrap(stripped)
-    if inner is None:
-        raise bash_exec.BashExecError("command could not be unwrapped for execution")
+    # `parse` takes the raw command text directly (#959 D1/C3) — there is no second,
+    # standalone wrapper step to apply first, and no trim ahead of it either: the scanner
+    # itself treats a blank-only command as zero pipelines, which `run_parsed` runs as a no-op.
     return bash_exec.run_parsed(
-        bash_exec.parse(inner), command=cmd, env=env or _env(), cwd=cwd, timeout=timeout,
+        bash_exec.parse(cmd), command=cmd, env=env or _env(), cwd=cwd, timeout=timeout,
     )
 
 

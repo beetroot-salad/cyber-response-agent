@@ -1067,7 +1067,6 @@ def test_f6_executed_argv_is_the_gated_argv(env, cmd):
     decomposition `bash_exec.parse` produces for the same command — so the
     executor never re-parses the raw string and no parser differential can
     reopen. Compared as argv structure, not object identity."""
-    from defender.hooks._cmd_segments import unwrap
     from defender.runtime import bash_exec
 
     resolved = cmd.format(run=env.run)
@@ -1075,7 +1074,9 @@ def test_f6_executed_argv_is_the_gated_argv(env, cmd):
     assert decision.allow, resolved
 
     gated = [[list(st.argv) for st in pl.stages] for pl in (decision.pipelines or ())]
-    executed = [[list(st.argv) for st in pl.stages] for pl in bash_exec.parse(unwrap(resolved))]
+    # `parse` takes the raw command text directly (#959 D1/C3) — no standalone wrapper step to
+    # apply first any more.
+    executed = [[list(st.argv) for st in pl.stages] for pl in bash_exec.parse(resolved)]
     assert gated == executed, (
         f"the gate approved {gated!r} but the executor would run {executed!r} — "
         "a validator/executor parser differential"

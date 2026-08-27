@@ -182,7 +182,7 @@ def test_a_whole_reply_wrapped_in_a_code_fence_is_still_read(refs):
 
 
 def test_a_fence_around_prose_is_still_unreadable(refs):
-    """The unwrap is anchored at BOTH ends of the whole reply. A fence that merely appears
+    """The unpacking is anchored at BOTH ends of the whole reply. A fence that merely appears
     inside a reply of prose means the composer answered outside its contract, and that is the
     fail-closed arm rather than something to dig an object out of."""
     with pytest.raises(Unreadable):

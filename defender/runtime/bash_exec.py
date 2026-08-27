@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import os
-import shlex
 import subprocess
 import sys
 import time
@@ -14,22 +14,30 @@ from pathlib import Path
 _OPERATOR_CHARS = frozenset("<>|&;")
 _PIPELINE_SEPARATORS = frozenset({"||", "&&", ";"})
 
-#: The characters that END a word and start an operator run — `shlex`'s own punctuation set
-#: from the `punctuation_chars=True` lexing this module used to do, kept verbatim so the
-#: scanner splits words exactly where that lexer split them. WIDER than `_OPERATOR_CHARS`:
-#: `(`/`)` break a word here without being operators the grammar accepts. `feed_token` does
-#: NOT refuse them — its operator arm tests `set(t) <= _OPERATOR_CHARS`, which they are not in
-#: — so they land in argv as ordinary words, exactly as the `punctuation_chars` lexer left
-#: them. That is inert here (no stage is run through a shell), and the guard that cares is
+#: The characters that END a word and start an operator run — kept verbatim so the scanner
+#: splits words exactly where the old `punctuation_chars=True` lexer split them. WIDER than
+#: `_OPERATOR_CHARS`: `(`/`)` break a word here without being operators the grammar accepts.
+#: `feed_token` does NOT refuse them — its operator arm tests `set(t) <= _OPERATOR_CHARS`,
+#: which they are not in — so they land in argv as ordinary words, exactly as before. That is
+#: inert here (no stage is run through a shell), and the guard that cares is
 #: `permission/bash._stage_unsafe`, which reads argv. Kept verbatim so this scanner and that
 #: guard see the same token stream they always did; it is not a licence to widen the set.
 _SHLEX_PUNCTUATION = frozenset("();<>|&")
 
-#: The whitespace that ENDS a word — `shlex`'s own set, not `str.isspace()`. The two differ on
-#: U+00A0, `\v`, `\f`, U+2028 and every other Unicode space, and bash splits on none of them:
-#: `str.isspace()` tore `cat /tmp/a\xa0b` into two operands and ran a command the model did not
-#: write, on a path the gate then scope-checked instead of the one that was asked for.
-_WORD_SEPARATORS = frozenset(" \t\r\n")
+#: The whitespace that ENDS a word — bash's own set, not `str.isspace()`, and NOT `\r` (#959
+#: M6): bash does not split on a carriage return, and a `\r` inside or at the edge of an
+#: operand used to be silently torn off by this constant. `str.isspace()` and a stray `\r` both
+#: tore `cat /tmp/a\xa0b` / `cat /tmp/a\rb` into two operands and ran a command the model did
+#: not write, on a path the gate then scope-checked instead of the one that was asked for.
+_WORD_SEPARATORS = frozenset(" \t\n")
+
+
+def is_word_separator(char: str) -> bool:
+    """This module's own answer to "is `char` a word separator" — the one place that decides,
+    so a caller elsewhere in the tree (`permission/bash._is_blank`, #959 M4/F1) asks THIS
+    rather than re-deriving membership in `_WORD_SEPARATORS` on its own."""
+    return char in _WORD_SEPARATORS
+
 
 #: The only fd this executor knows how to route. Bash's IO_NUMBER admits any digit run; every
 #: other one is refused, so the scan only has to recognise this one.
@@ -39,6 +47,31 @@ _STDERR_FD = "2"
 #: line to mean anything. `;` is deliberately absent: `A;` is a finished command.
 _DANGLING_CONNECTORS = frozenset({"|", "&&", "||"})
 
+#: A token's KIND — the three cases the grammar turns on. `2>` is bash's IO_NUMBER redirect;
+#: a spaced `>` is a redirect of stdout after the ordinary word `2`, and both arrive with the
+#: same TEXT (#955 F-50), so the kind is what a reader must use to tell them apart. `FD_OPERATOR`
+#: marks the bare digit token itself (`2`) that a following `>`/`>&` is GLUED to — the operator
+#: that follows stays plain `OPERATOR` — because the two still arrive as separate tokens (their
+#: raw spans and values differ) and it is the digit's own glue to what follows that makes it an
+#: IO_NUMBER rather than an ordinary word.
+WORD = "word"
+OPERATOR = "operator"
+FD_OPERATOR = "fd-operator"
+
+
+@dataclass(frozen=True)
+class Token:
+    """One token of a scanned line: its resolved VALUE, the START/END offsets of its raw
+    spelling in the line (code-point offsets, quoting and glue intact), and its KIND.
+
+    One frozen record per token (#959 M1) — not three index-aligned collections, where
+    alignment between the token stream and the raw text was exactly what #955 F-50 was about."""
+
+    value: str
+    start: int
+    end: int
+    kind: str
+
 
 def _literal_mask(line: str) -> list[bool] | None:
     """Which characters of `line` stand as themselves — unquoted, unescaped, and not a quote
@@ -46,7 +79,7 @@ def _literal_mask(line: str) -> list[bool] | None:
 
     Everything `_scan` decides rests on this: whether an operator character IS an operator, and
     whether it was glued to the word on its left. Both are facts about the raw text, and both
-    are gone by the time `shlex` has resolved a word to its value (#955 F-50)."""
+    are gone by the time a word has been resolved to its value (#955 F-50)."""
     mask = [False] * len(line)
     quote: str | None = None
     i = 0
@@ -72,27 +105,90 @@ def _literal_mask(line: str) -> list[bool] | None:
     return None if quote is not None else mask
 
 
+def _double_quoted_value(span: str, start: int) -> tuple[str, int] | None:
+    """The resolved content of a double-quoted run starting at `span[start] == '"'`, and the
+    index just past its closing quote — or `None` if it never closes. Split out of
+    `_word_value` purely to keep that function's branch count within the lint budget; the
+    escaping rule (only `"`, `\\`, `$` and a backtick are meaningful after a backslash here) is
+    the one POSIX double-quote carve-out the single-quote and bare-word cases don't need."""
+    j, n = start + 1, len(span)
+    buf: list[str] = []
+    while j < n:
+        c = span[j]
+        if c == '"':
+            return "".join(buf), j + 1
+        if c == "\\" and j + 1 < n and span[j + 1] in ('"', "\\", "$", "`"):
+            buf.append(span[j + 1])
+            j += 2
+            continue
+        buf.append(c)
+        j += 1
+    return None
+
+
 def _word_value(span: str) -> str | None:
-    """One word's raw text — quotes and escapes intact — reduced to the value it stands for.
+    """One word's raw text — quotes and escapes intact — resolved to the value it stands for.
 
-    `shlex` again, but over a span that HAS no unquoted whitespace and no unquoted operator, so
-    it is being asked only to resolve quoting and must hand back exactly one word. `comments`
-    is off for the reason the line lexer always cleared `commenters`: `#` is an ordinary
-    character in a filename or a pattern here, and the default would truncate the word at it."""
-    try:
-        parts = shlex.split(span, comments=False, posix=True)
-    except ValueError:
-        return None
-    return parts[0] if len(parts) == 1 else None
+    A hand-rolled unquoter over a span that HAS no unquoted whitespace and no unquoted operator
+    (`_scan` bounds it that way), so it never needs a notion of whitespace and can never
+    re-split what it is handed — the whole of #959 M2. `None` on a dangling escape or a quote
+    that never closes within the span (both indicate a line that `_literal_mask` already
+    accepted as balanced overall but whose OWN token turned out not to be — practically
+    unreachable given that guarantee, kept as a defensive `None` rather than an exception)."""
+    out: list[str] = []
+    i, n = 0, len(span)
+    while i < n:
+        c = span[i]
+        if c == "\\":
+            if i + 1 >= n:
+                return None
+            out.append(span[i + 1])
+            i += 2
+            continue
+        if c == "'":
+            j = span.find("'", i + 1)
+            if j == -1:
+                return None
+            out.append(span[i + 1:j])
+            i = j + 1
+            continue
+        if c == '"':
+            resolved = _double_quoted_value(span, i)
+            if resolved is None:
+                return None
+            value, i = resolved
+            out.append(value)
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
 
 
-def _scan(line: str) -> tuple[list[str], frozenset[int], frozenset[int]] | None:
-    r"""The line's tokens, which of them are OPERATORS, and which operators carry an fd.
+def _is_fd_prefix(line: str, mask: list[bool], at: int, toks: list[Token]) -> bool:
+    """Whether the operator run starting at `at` is bash's IO_NUMBER — an unquoted `2` glued
+    to its left that STARTS its own word.
 
-    Structure is decided against the RAW TEXT and only the values go through `shlex`, which is
-    the whole of #955 F-50. Lexing the line with `punctuation_chars=True` — as this module did
-    — hands back a stream in which the two questions the grammar turns on can no longer be
-    asked:
+    The last clause is not decoration: bash reads `foo2>` as the word `foo2` redirecting
+    stdout, not as a redirect of fd 2, and a quoted `"2">` the same way. Only a bare digit run
+    standing alone is the fd."""
+    if at == 0 or not mask[at - 1] or line[at - 1] != _STDERR_FD:
+        return False
+    if not toks or toks[-1].value != _STDERR_FD:
+        return False
+    if at == 1:
+        return True
+    before = line[at - 2]
+    return mask[at - 2] and (before in _WORD_SEPARATORS or before in _SHLEX_PUNCTUATION)
+
+
+def _scan(line: str) -> list[Token] | None:
+    r"""The line's tokens, as one frozen record per token (#959 M1): resolved value, the
+    start/end offsets of its raw spelling, and its kind.
+
+    Structure is decided against the RAW TEXT and only the values go through `_word_value`,
+    which is the whole of #955 F-50. Lexing the line with a punctuation-splitting shlex lexer —
+    as this module used to — hands back a stream in which the two questions the grammar turns
+    on can no longer be asked:
 
       * WAS THE OPERATOR GLUED to the word on its left? `2>` is a single IO_NUMBER redirect
         and `2 >` is the word `2` followed by a redirect of stdout, and both arrive as
@@ -108,9 +204,7 @@ def _scan(line: str) -> tuple[list[str], frozenset[int], frozenset[int]] | None:
     mask = _literal_mask(line)
     if mask is None:
         return None
-    toks: list[str] = []
-    operators: set[int] = set()
-    fd_prefixed: set[int] = set()
+    toks: list[Token] = []
     i, n = 0, len(line)
     while i < n:
         if mask[i] and line[i] in _WORD_SEPARATORS:
@@ -121,9 +215,11 @@ def _scan(line: str) -> tuple[list[str], frozenset[int], frozenset[int]] | None:
             while j < n and mask[j] and line[j] in _SHLEX_PUNCTUATION:
                 j += 1
             if _is_fd_prefix(line, mask, i, toks):
-                fd_prefixed.add(len(toks))
-            operators.add(len(toks))
-            toks.append(line[i:j])
+                # Retroactively mark the PRECEDING bare digit as the fd component — it is the
+                # digit's glue to this operator that makes it an IO_NUMBER, not a property of
+                # the operator token itself, which stays plain `OPERATOR` either way.
+                toks[-1] = dataclasses.replace(toks[-1], kind=FD_OPERATOR)
+            toks.append(Token(line[i:j], i, j, OPERATOR))
             i = j
             continue
         j = i
@@ -134,26 +230,9 @@ def _scan(line: str) -> tuple[list[str], frozenset[int], frozenset[int]] | None:
         word = _word_value(line[i:j])
         if word is None:
             return None
-        toks.append(word)
+        toks.append(Token(word, i, j, WORD))
         i = j
-    return toks, frozenset(operators), frozenset(fd_prefixed)
-
-
-def _is_fd_prefix(line: str, mask: list[bool], at: int, toks: list[str]) -> bool:
-    """Whether the operator run starting at `at` is bash's IO_NUMBER — an unquoted `2` glued
-    to its left that STARTS its own word.
-
-    The last clause is not decoration: bash reads `foo2>` as the word `foo2` redirecting
-    stdout, not as a redirect of fd 2, and a quoted `"2">` the same way. Only a bare digit run
-    standing alone is the fd."""
-    if at == 0 or not mask[at - 1] or line[at - 1] != _STDERR_FD:
-        return False
-    if not toks or toks[-1] != _STDERR_FD:
-        return False
-    if at == 1:
-        return True
-    before = line[at - 2]
-    return mask[at - 2] and (before in _WORD_SEPARATORS or before in _SHLEX_PUNCTUATION)
+    return toks
 
 
 class BashExecError(Exception):
@@ -162,6 +241,28 @@ class BashExecError(Exception):
 
 class UntokenizableCommand(BashExecError):
     pass
+
+
+class NarrowedReason(UntokenizableCommand):
+    """An `UntokenizableCommand` whose message IS the caller-facing reason, verbatim — used for
+    the one narrowing (#959 F5) whose obligation is to explain itself rather than fall back to
+    the generic parse-failure text `permission.bash.UNTOKENIZABLE_REASON` names everywhere
+    else. Every other `UntokenizableCommand` in this module carries a short internal message
+    for `test_959_frozen_baseline.py`'s arm sweep; the gate collapses those to the one constant."""
+
+
+#: The `-c` argument sent to `bash`/`sh` may not contain a newline — there is no shell here to
+#: run it as a script, so a multi-statement payload is refused rather than silently flattened
+#: into one pipeline per line (#959 M3 + F5). Named as its own reason, not folded into the
+#: generic parse-failure text, because F5's obligation is that the refusal EXPLAINS the
+#: newline: a model that sent this payload yesterday got an allow, and needs to know what to
+#: fix now — a generic "could not be parsed" sends it looking for the wrong mistake.
+NEWLINE_IN_WRAPPER_ARGUMENT_REASON = (
+    "Blocked: the `-c` argument given to `bash`/`sh` contains a newline (a `\\n` inside the "
+    "quoted string). There is no shell here to run it as a multi-line script — collapse the "
+    "payload onto ONE physical line before sending it, exactly as every other command here "
+    "must be one line."
+)
 
 
 @dataclass(frozen=True)
@@ -212,12 +313,10 @@ class _PipelineBuilder:
             self.cur_stages = []
             self.pending_connector = next_connector
 
-    def feed_token(
-        self, toks: list[str], i: int,
-        operators: frozenset[int], fd_prefixed: frozenset[int],
-    ) -> int:
-        t, n = toks[i], len(toks)
-        if i not in operators:
+    def feed_token(self, tokens: list[Token], i: int) -> int:
+        tok, n = tokens[i], len(tokens)
+        t = tok.value
+        if tok.kind == WORD:
             # A token whose TEXT is an operator but whose raw spelling was quoted or escaped —
             # `find … {} \;`, `echo ';'`. Every arm below dispatches on text, so without this
             # the `;` that `find -exec` requires was read as a pipeline separator and dropped,
@@ -244,15 +343,16 @@ class _PipelineBuilder:
             self.end_pipeline(t)
             return i + 1
         if t == ">":
-            # `i in fd_prefixed` is the whole of the fd test; `cur_argv[-1] == "2"` only
-            # confirms the token stream agrees with the raw text about which word that was.
-            # Testing the TOKEN alone (as both arms did until #955 F-50) reads an ordinary
-            # numeric operand as an fd: `head -c 2 >/dev/null` was accepted and ran
-            # `head -c` — the gate's answer turning on an argument's VALUE, and the executor
-            # running a command the model did not write.
+            # The PRECEDING token carrying `fd-operator` kind is the whole of the fd test;
+            # `cur_argv[-1] == "2"` only confirms the token stream agrees with the raw text
+            # about which word that was. Testing the TOKEN alone (as both arms did before
+            # #955 F-50) reads an ordinary numeric operand as an fd: `head -c 2 >/dev/null` was
+            # accepted and ran `head -c` — the gate's answer turning on an argument's VALUE,
+            # and the executor running a command the model did not write.
             if (
-                i in fd_prefixed and self.cur_argv and self.cur_argv[-1] == _STDERR_FD
-                and i + 1 < n and toks[i + 1] == "/dev/null"
+                i > 0 and tokens[i - 1].kind == FD_OPERATOR
+                and self.cur_argv and self.cur_argv[-1] == _STDERR_FD
+                and i + 1 < n and tokens[i + 1].value == "/dev/null"
             ):
                 self.cur_argv.pop()
                 self.cur_stderr = "devnull"
@@ -260,8 +360,9 @@ class _PipelineBuilder:
             raise BashExecError(f"unexpected redirect token in validated command: {t!r}")
         if t == ">&":
             if (
-                i in fd_prefixed and self.cur_argv and self.cur_argv[-1] == _STDERR_FD
-                and i + 1 < n and toks[i + 1] == "1"
+                i > 0 and tokens[i - 1].kind == FD_OPERATOR
+                and self.cur_argv and self.cur_argv[-1] == _STDERR_FD
+                and i + 1 < n and tokens[i + 1].value == "1"
             ):
                 self.cur_argv.pop()
                 self.cur_stderr = "stdout"
@@ -273,22 +374,120 @@ class _PipelineBuilder:
         return i + 1
 
 
-def parse(inner: str) -> list[Pipeline]:
+def _looks_like_duration_or_flag(tok: Token) -> bool:
+    """Whether `tok` is duration- or flag-shaped: a leading `-`, or a run of digits and dots.
+    Real `timeout`'s own grammar (`5s`, `-s KILL`) is deliberately NOT modelled further — #959
+    FK1's minimal arm, so `timeout 5s cat x` and `timeout -s KILL 5 cat x` keep denying rather
+    than quietly widening what this gate accepts."""
+    if tok.kind != WORD:
+        return False
+    v = tok.value
+    return v.startswith("-") or v.replace(".", "").isdigit()
+
+
+def _skip_timeout_prefix(tokens: list[Token]) -> int:
+    """How many leading tokens are a `timeout` prefix — ZERO unless the token right after
+    `timeout` is itself duration- or flag-shaped (#959 FK1, minimal arm). `timeout cat x` must
+    NOT be recognised at all: the real `timeout` would read `cat` as its duration and refuse to
+    run anything, so unwrapping to `cat x` authorised an argv real `timeout` never runs."""
+    if not tokens or tokens[0].kind != WORD or tokens[0].value != "timeout":
+        return 0
+    if len(tokens) < 2 or not _looks_like_duration_or_flag(tokens[1]):
+        return 0
+    i = 1
+    while i < len(tokens) and _looks_like_duration_or_flag(tokens[i]):
+        i += 1
+    return i
+
+
+def _check_multiline_c_argument(value: str) -> None:
+    """`value` (a resolved `-c` argument) contains a newline. If every LINE of it scans cleanly
+    on its own, the newline itself is the only problem, and the refusal must explain it
+    (#959 F5). If some line is independently broken (an unclosed quote, say), that failure is
+    the real one and earns the generic parse-failure reason instead — the two must never be
+    conflated (SB4)."""
+    for line in value.split("\n"):
+        if _scan(line) is None:
+            # The SAME message the ordinary per-line scan failure raises (below, in `parse`) —
+            # deliberately not a distinct one: this is the identical failure (an unclosed quote,
+            # a dangling escape), just reached one call earlier because a `-c` argument is
+            # checked before its lines are handed to the per-line loop.
+            raise UntokenizableCommand("untokenizable command reached the executor")
+    raise NarrowedReason(NEWLINE_IN_WRAPPER_ARGUMENT_REASON)
+
+
+def _wrapper_span(cmd: str, tokens: list[Token], i: int) -> str:
+    """`tokens[i]` is a `bash`/`sh` token (#959 M3). Returns the inner command text when this
+    is a complete, WHOLE-COMMAND `<wrapper> -c '<one argument>'` shape — the argument's own
+    RESOLVED VALUE, re-scanned as the inner command (never a raw slice: a `-c` argument's raw
+    span includes its quotes, and re-scanning THAT would parse the quotes into the program
+    name). Raises `UntokenizableCommand` for every other shape a `bash`/`sh` first token can
+    reach — a bare wrapper, a stray word after the argument, a second wrapper, a script path,
+    `-lc`, a flag between the wrapper and `-c` — never falling through to treat it as an
+    ordinary, ungranted word: none of those is a wrapper bash would run either."""
+    n = len(tokens)
+    if (
+        i + 1 < n and tokens[i + 1].kind == WORD and tokens[i + 1].value == "-c"
+        and i + 2 == n - 1
+    ):
+        value = tokens[i + 2].value
+        if "\n" in value:
+            _check_multiline_c_argument(value)
+        return value
+    raise UntokenizableCommand("bash/sh wrapper did not resolve to a single -c argument")
+
+
+def _fold_wrapper(cmd: str) -> str:
+    """The wrapper recognition step (#959 M3, C1, C4): applied ONCE, at the top level, over
+    the WHOLE (possibly multi-line) raw command — never inside the per-line loop, and never
+    re-applied to the text it extracts (a fixed point would turn `timeout 5 timeout 3 cat x`
+    and `bash -c 'timeout 5 cat x'` into allows, a deny->allow widening nobody enumerated).
+
+    Returns the text that should actually be parsed: the extracted `-c` argument for a
+    recognised `bash`/`sh` wrapper, the raw slice after a recognised `timeout` prefix, or `cmd`
+    unchanged when no wrapper is recognised at the front of the token stream at all."""
+    tokens = _scan(cmd)
+    if not tokens:
+        # Either the whole text failed to scan (some quote never closes ANYWHERE — let the
+        # normal per-line parse discover and report exactly that below) or it is blank.
+        return cmd
+    i = _skip_timeout_prefix(tokens)
+    if i < len(tokens) and tokens[i].kind == WORD and tokens[i].value in ("bash", "sh"):
+        return _wrapper_span(cmd, tokens, i)
+    if i > 0:
+        if i == len(tokens):
+            return ""
+        # The remainder is a RAW SLICE from the next token's own start offset — no string
+        # surgery re-derives where the prefix ended, and the glue between the remaining tokens
+        # (their own spacing, any quoting) survives intact, which a re-join of resolved values
+        # would destroy.
+        return cmd[tokens[i].start:]
+    return cmd
+
+
+def parse(cmd: str) -> list[Pipeline]:
+    """The pipelines `cmd` names — the model's raw command text, wrapper and all: there is no
+    second function a caller must apply first (#959 D1/C3). Folds the wrapper once at the top
+    (#959 M3) and then scans each physical line of whatever text results."""
+    inner = _fold_wrapper(cmd)
     builder = _PipelineBuilder()
     for line in inner.split("\n"):
-        scanned = _scan(line)
-        if scanned is None:
+        tokens = _scan(line)
+        if tokens is None:
             raise UntokenizableCommand("untokenizable command reached the executor")
-        toks, operators, fd_prefixed = scanned
-        i, n = 0, len(toks)
+        i, n = 0, len(tokens)
         while i < n:
-            i = builder.feed_token(toks, i, operators, fd_prefixed)
-        if toks and toks[-1] in _DANGLING_CONNECTORS and len(toks) - 1 in operators:
+            i = builder.feed_token(tokens, i)
+        if (
+            tokens and tokens[-1].value in _DANGLING_CONNECTORS
+            and tokens[-1].kind != WORD
+        ):
             # `A |` / `A &&` closing a line. There is no shell to join the lines, so the
             # connector would be dropped and the implicit `;` below would run the next line
             # as an independent command.
             raise UntokenizableCommand(
-                f"pipeline/connector token {toks[-1]!r} closes a line with nothing to its right"
+                f"pipeline/connector token {tokens[-1].value!r} closes a line with nothing to "
+                "its right"
             )
         builder.end_pipeline(";")
         if builder.pending_connector in _DANGLING_CONNECTORS:

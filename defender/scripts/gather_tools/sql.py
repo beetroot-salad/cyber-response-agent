@@ -96,7 +96,7 @@ def _shape_hint(con, message: str) -> str:
             order = "see `SELECT columns FROM data`"
         idiom = (
             "ES|QL shape — `unnest(values)` yields a POSITIONAL JSON array, NOT a struct "
-            f"(`v.<field>` fails). Positions: {order}. Filter 1-based and unwrap the JSON: "
+            f"(`v.<field>` fails). Positions: {order}. Filter 1-based and unpack the JSON: "
             "`v[2]->>'$' = '<value>'`."
         )
     else:

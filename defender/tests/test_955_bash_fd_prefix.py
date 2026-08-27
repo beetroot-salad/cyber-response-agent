@@ -29,6 +29,7 @@ It fails against the pre-#955 parser on the first accepted mis-spelling.
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -51,13 +52,17 @@ printf 'ERR\\n' >&2
 
 
 def _parsed(cmd: str):
-    """`(argv, stderr)` of the single stage `cmd` parses to, or `None` if we refuse it."""
+    """`(argv, stderr)` of the single stage `cmd` parses to, `None` if we refuse it, or if it
+    parses to anything other than exactly one stage — REPORTED as `None` rather than an
+    `AssertionError`, so a multi-stage candidate calling this by mistake is a green-looking
+    coverage gap, not a crash that could get silently swallowed somewhere upstream."""
     try:
         pipelines = bash_exec.parse(cmd)
     except bash_exec.BashExecError:
         return None
     stages = [s for p in pipelines for s in p.stages]
-    assert len(stages) == 1, f"{cmd!r} is not the single-stage shape this file is about"
+    if len(stages) != 1:
+        return None
     return stages[0].argv, stages[0].stderr
 
 
@@ -178,9 +183,30 @@ def shim_dir():
         yield Path(d)
 
 
+def _inner_c_argument(cmd: str) -> str | None:
+    """The `-c` argument of a `bash -c '<...>'`/`sh -c '<...>'` candidate, extracted with
+    `shlex` — deliberately NOT `bash_exec`, so the oracle's own precheck cannot inherit a bug
+    from the very thing it exists to catch. `None` for anything that is not exactly that shape."""
+    try:
+        tokens = shlex.split(cmd)
+    except ValueError:
+        return None
+    if len(tokens) == 3 and tokens[0] in ("bash", "sh") and tokens[1] == "-c":
+        return tokens[2]
+    return None
+
+
 def _bash_meaning(shim_dir: Path, cmd: str):
     """What bash DOES with `cmd`: the argv it passed the shim, and where the shim's stderr
-    marker landed. `None` if bash itself refuses the text."""
+    marker landed. `None` if bash itself refuses the text, OR if it is a `bash -c`/`sh -c`
+    wrapper whose INNER payload is independently broken — the outer `bash -n -c "<outer>"`
+    reports nothing about a nested `-c '<inner>'` payload's own syntax (#959 pj3), so a second,
+    independent precheck runs over the extracted inner text too.
+
+    Every evidence channel here is read in BINARY (#959 M6(b)): `Path.read_text` and
+    `subprocess.run(text=True)` both universal-newline-translate a bare `\\r` into the very
+    delimiter the argv recovery splits on, so a `\\r` divergence was reported clean by the
+    oracle that exists to catch it (#955's blind spot 2, still live before this fix)."""
     argv_file = shim_dir / "argv.out"
     argv_file.unlink(missing_ok=True)
     # The shim dir goes in FRONT of the inherited PATH rather than replacing it: `subprocess`
@@ -191,17 +217,27 @@ def _bash_meaning(shim_dir: Path, cmd: str):
         "PATH": f"{shim_dir}{os.pathsep}{os.environ.get('PATH', '')}",
         "W_ARGV": str(argv_file),
     }
-    if subprocess.run([bash, "-n", "-c", cmd], capture_output=True).returncode != 0:
+    if subprocess.run([bash, "-n", "-c", cmd], capture_output=True, timeout=60).returncode != 0:
+        return None
+    inner = _inner_c_argument(cmd)
+    if inner is not None and subprocess.run(
+        [bash, "-n", "-c", inner], capture_output=True, timeout=60,
+    ).returncode != 0:
         return None
     proc = subprocess.run(
-        [bash, "-c", cmd], capture_output=True, text=True, env=env, cwd=shim_dir,
+        [bash, "-c", cmd], capture_output=True, env=env, cwd=shim_dir, timeout=60,
     )
-    raw = argv_file.read_text(encoding="utf-8") if argv_file.exists() else ""
-    words = raw.split("\n")
-    argv = [_SHIM] + words[:words.index("ARGV_END")] if "ARGV_END" in words else None
-    if "ERR" in proc.stdout:
+    raw = argv_file.read_bytes() if argv_file.exists() else b""
+    words = raw.split(b"\n")
+    argv = (
+        [_SHIM] + [w.decode("utf-8", "surrogateescape") for w in words[:words.index(b"ARGV_END")]]
+        if b"ARGV_END" in words else None
+    )
+    stdout = proc.stdout.decode("utf-8", "surrogateescape")
+    stderr = proc.stderr.decode("utf-8", "surrogateescape")
+    if "ERR" in stdout:
         where = "stdout"
-    elif "ERR" in proc.stderr:
+    elif "ERR" in stderr:
         where = "capture"
     else:
         where = "devnull"
@@ -238,7 +274,7 @@ def test_what_we_accept_means_what_bash_means(shim_dir, cmd):
 # ============================================================================================ #
 # #959 — the wrapper seam, the blank alphabet, and the oracle's own evidence channels.
 #
-# Folding `hooks/_cmd_segments.unwrap` into `parse` (M3) puts the wrapper under this
+# Folding the standalone `hooks/_cmd_segments` wrapper step into `parse` (M3) puts the wrapper under this
 # differential for the first time: today neither this corpus nor #897's contains a wrapper
 # word, a carriage return, or any blank but an ordinary space (claims c9, x12), so the three
 # classes this change touches have never been put to bash at all.

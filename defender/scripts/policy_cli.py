@@ -175,6 +175,12 @@ def _explain(  # noqa: PLR0913 — the gate's own call shape, plus the output-fo
             "allow": d.allow,
             "grant": grants,
             "reason": d.reason or "",
+            # The argv half of the verdict (#959 F2/O3): allow/grant/reason alone cannot show
+            # the class of change where allow does not move but the argv the gate authorises
+            # does, and this is the one surface a human audits.
+            "pipelines": None if d.pipelines is None else [
+                [list(st.argv) for st in pl.stages] for pl in d.pipelines
+            ],
         }
         print(json.dumps(out))
         return 0

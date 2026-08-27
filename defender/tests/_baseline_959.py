@@ -270,7 +270,7 @@ LEXING_ARMS = (
     ("connector-across-lines",  "cat " + REPORT + " |\nwc -l",            False, False),
     # bash_exec.py:304 an `&&`/`||` whose right side never arrived within its own line.
     ("pending-connector",       "cat " + REPORT + " && ;",                 True, False),
-    # permission/bash.py:107 a wrapper that does not unwrap to a single command string. This arm
+    # permission/bash.py:107 a wrapper that does not fold to a single command string. This arm
     # is the one that moves at BOTH ends, and for different reasons: at either end the blank lands
     # on the wrapper word itself, which no matcher recognises once it is glued. The shapes whose
     # LATER token carries the blank are the RF-E8 table below, and they part company with this arm
