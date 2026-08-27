@@ -752,6 +752,117 @@ def flagged_diagnostics(deps: AgentDeps) -> tuple[Diagnostic, ...]:
         return ()
 
 
+def committed_document_refusal(deps: AgentDeps) -> str | None:
+    """The close's structural verdict on `investigation.md` as it stands — the refusal text,
+    or `None` when the document is publishable. #961.
+
+    Lives beside `flagged_diagnostics` and not in the close because the two are ONE reading of
+    one document, taken at the same moment, and they have to agree about what "cannot look"
+    means. Splitting them put that agreement in two files the first time and it did not
+    survive the trip.
+
+    THE READ IS STRICT, and that is the whole subtlety. Two conditions look alike from the
+    close and are not:
+
+      * the document DECODES and does not validate — the author wrote something malformed,
+        the close is what publishes it, and it is refused (#961);
+      * the document's BYTES do not decode — nothing can be derived from it at all. That is
+        H7's condition, and #836 settled it: fail OPEN, because converting an unrelated read
+        fault into an unclosable run is the wedge class that mechanism exists to remove.
+
+    Reading leniently (`errors="replace"`) collapses the two and answers the second with the
+    first: the replacement character lands mid-header, the validator reports a broken block
+    the author never wrote, and the run can no longer close. So the strict read is what keeps
+    this gate's `None` meaning "publishable" rather than "unreadable", and the fail-open arm
+    below is what keeps H7 true. A document that never decodes is still gated on the way IN —
+    `append_block` refuses it for its own pre-existing reason — so nothing gated can create
+    one.
+
+    ABSENCE is not a fault: a close on a run with no companion is the entry-price gate's
+    question, not this one's, and it asks it separately."""
+    from defender._artifact_schema import committed_investigation_reason
+
+    p = _investigation_path(deps)
+    if not p.is_file():
+        return None
+    try:
+        text = read_text_utf8(p)
+    except Exception as e:  # noqa: BLE001 — fail open (H7); a wedged run is the worse failure
+        print(
+            f"[tools] investigation.md could not be read for the close's structure check, "
+            f"treating it as publishable: {e!r}",
+            file=sys.stderr,
+        )
+        return None
+    return committed_investigation_reason(text)
+
+
+def repairable_diagnostics(deps: AgentDeps) -> tuple[Diagnostic, ...]:
+    """Every row `fix_row` may address — the REPAIR set, which is wider than the repair WINDOW.
+
+    `flagged_diagnostics` above is the warn-severity window: the rows whose presence BLOCKS an
+    append and a close. This is the set the repair verb is allowed to touch, and the two are
+    not the same question. An ERROR-severity row blocks just as hard — `append_block` validates
+    the whole document, so a committed error refuses every later write — but it was not in the
+    window, so `fix_row` refused it and was not even offered. That left a document carrying one
+    with NO legal move: the close refuses and names `fix_row`, `fix_row` says nothing is
+    flagged, `append_block` refuses the same bytes, and append-only puts them out of reach. The
+    model then spends its whole retry budget before the framework force-closes `inconclusive`,
+    discarding the disposition the run actually reached.
+
+    Reachable because a document valid when written can stop being valid later: a rule that
+    ships after a run's bytes landed (#962 is exactly one) judges what is already committed.
+
+    Widening the REPAIR set cannot widen what the model may write. `fix_row` still faces
+    `decide_write` on the resulting document, so a repair that does not actually fix the row is
+    refused like any other write.
+
+    A diagnostic naming NO ROW stays out — no locus, and equally an EMPTY `row_text`. The
+    empty case is not hypothetical: the repeated-lead-id family reports at block scope
+    (`_warn(block, -1, "")`), so it carries a locus whose row is the empty string, and `fix_row`
+    reads an empty `old_row` as DELETE. Admitting it would offer the model a repair that names
+    nothing and deletes on sight, and it would quietly reverse #954's decision that a document
+    holding that repeat is refused at every write verb with no legacy exemption. The rule is
+    the one `flagged_diagnostics` already states for a locus-less finding: the set is the rows
+    `fix_row` can ADDRESS, and a row nobody can quote back is not one.
+
+    AND A ROW OUTSIDE `:R attr_updates` STAYS OUT, which is what keeps the widening a widening
+    of SEVERITY and not of SCOPE. The warn window walks that block and nothing else, so every
+    guard downstream of it inherited the scope for free: `_attr_block_columns` returns `None`
+    for a row no `:R attr_updates` block holds — its own docstring says that "cannot happen for
+    a flagged row" — and `_tool_fix_row` reads that `None` as "skip the shape guard", which is
+    the guard that makes "no verb mutates or removes a committed `:V`/`:E` record" true by
+    construction. Parse diagnostics carry a locus and a real row for EVERY block, so admitting
+    them by severity alone would put a committed `:V` declaration inside the repair set with no
+    shape guard in front of it — a `new_row` free to span lines, carry a fence delimiter, or be
+    a block header. The severity partition and the block partition are two different questions;
+    this widens exactly one of them.
+
+    FAILS OPEN like its sibling, for the same reason and via the same reader — a wedged run is
+    the worse failure. Read with the document as its OWN baseline, the reading
+    `committed_investigation_reason` takes: the repair set has to be derived from the same
+    verdict the close renders, or the verb is offered on findings the close never names."""
+    from defender.skills.invlang.validate import ATTR_UPDATES_LOCUS as REPAIRABLE_BLOCK
+    from defender.skills.invlang.validate import diagnose
+
+    p = _investigation_path(deps)
+    if not p.is_file():
+        return ()
+    try:
+        text = read_text_utf8(p)
+        return tuple(
+            d for d in _addressable(diagnose(text, text))
+            if d.locus is not None and d.locus.row_text
+            and d.locus.block == REPAIRABLE_BLOCK
+        )
+    except Exception as e:  # noqa: BLE001 — fail open; a wedged run is the worse failure
+        print(
+            f"[tools] repair-set derivation failed, treating it as empty: {e!r}",
+            file=sys.stderr,
+        )
+        return ()
+
+
 def _addressable(diags: Iterable[Diagnostic]) -> tuple[Diagnostic, ...]:
     return tuple(d for d in diags if d.locus is not None)
 
@@ -1116,7 +1227,10 @@ def _tool_fix_row(deps: AgentDeps, old_row: str, new_row: str) -> str:
             "committed a recorded disposition for this run, and a further repair could "
             "silently move it. The case is closed."
         )
-    diags = flagged_diagnostics(deps)
+    # The REPAIR set, not the warn window: an error-severity row blocks every write just as
+    # hard and used to be unreachable by the one verb that could clear it. See
+    # `repairable_diagnostics`.
+    diags = repairable_diagnostics(deps)
     flagged = _flagged_rows(diags)
     if not flagged:
         # Deliberately the SAME refusal a never-flagged `old_row` earns once the window has
@@ -1164,8 +1278,14 @@ def _tool_fix_row(deps: AgentDeps, old_row: str, new_row: str) -> str:
         )
 
     if new_row:
+        # UNCONDITIONALLY, `cells is None` included. `_new_row_shape_reason` is written for
+        # that case — an unlocatable declaring block narrows the guard by one arm (the cell
+        # count) instead of switching the whole write surface off — and short-circuiting it
+        # here inverted that: the one shape the caller could not vouch for was the one shape
+        # the guard never saw, so a `new_row` spanning lines, carrying a fence delimiter, or
+        # spelling a block header went through untested.
         cells = _attr_block_columns(current, old_row)
-        reason = _new_row_shape_reason(new_row, cells) if cells is not None else None
+        reason = _new_row_shape_reason(new_row, cells)
         if reason is not None:
             raise ModelRetry(
                 f"{UNCHANGED_NOTICE} `new_row` must be a single row of the same "
@@ -1308,8 +1428,12 @@ async def _prepare_fix_row(ctx: RunContext[AgentDeps], tool_def: Any) -> Any:
 
     ERGONOMICS, not a control. The offer is computed once per model REQUEST, so a model that
     saw the definition on an earlier turn can still emit the call after the window closed;
-    `_tool_fix_row` re-derives and refuses. The security property rests on that body."""
-    return tool_def if flagged_diagnostics(ctx.deps) else None
+    `_tool_fix_row` re-derives and refuses. The security property rests on that body.
+
+    Offered on the REPAIR set, which the body also gates on: a document whose only defect is
+    error-severity has no warn window, and offering on that would hide the verb in exactly the
+    case the close is about to demand it."""
+    return tool_def if repairable_diagnostics(ctx.deps) else None
 
 
 def _register_deferred_tools(agent, tools: ToolSet, verbs: Any = None) -> None:

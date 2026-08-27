@@ -332,6 +332,21 @@ def scan_fences(text: str) -> FenceScan:
     )
 
 
+def iter_fence_blocks(text: str) -> Iterator[list[Block]]:
+    """Every FENCE's blocks, grouped by the fence that holds them, in document order.
+
+    The grouping is what `iter_blocks` below throws away, and a check whose rule is about ONE
+    WRITE needs it: `append_block` sends one ```invlang fence per call, and a fence carries as
+    many `:X` blocks as the author put in it (the prologue's `:V` and `:L` ride in one). A
+    rule scoped to the parsed BLOCK therefore answers "one atomic write" wrong by exactly the
+    reformatting that splits a block in two — same fence, same write, two maps, nothing said.
+
+    Blocks only, for the reason `iter_blocks` states: a line that reached no block has no
+    block to quote it under."""
+    for body in scan_fences(text).bodies:
+        yield _tokenize_fence(body)[0]
+
+
 def iter_blocks(text: str) -> Iterator[Block]:
     """Every invlang `Block` in `text`, in document order, with its DECLARED header and its
     rows as the author wrote them.
@@ -341,13 +356,13 @@ def iter_blocks(text: str) -> Iterator[Block]:
     of it, needs this layer underneath: rebuilding a row from the folded record means assuming
     a column order the grammar does not enforce.
 
+    Flattens `iter_fence_blocks` rather than re-walking the fences, so the two readings of
+    "the blocks of this document" cannot drift.
+
     Kept out of the companion deliberately: carrying per-row provenance on the records inflated
     the parsed body by up to 25%, and that body is projected into the review lens prompts."""
-    for body in scan_fences(text).bodies:
-        # Blocks only. A caller at this layer is quoting a ROW back under its block, and a
-        # line that reached no block has no block to quote it under; `parse_dense_companion`
-        # is where the tokenizer's warnings are collected and refused on.
-        yield from _tokenize_fence(body)[0]
+    for blocks in iter_fence_blocks(text):
+        yield from blocks
 
 
 def _vertex_record(block: Block, row: str) -> VertexRecord:

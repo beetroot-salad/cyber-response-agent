@@ -218,17 +218,96 @@ def test_ident_refined_more_than_once_across_runs_history(tmp_path):
 
     M6 reuses `_apply_attr_updates`' existing fold, so the superseded value survives only as
     the raw rows on disk. Asserted with THREE refinements so a "second wins" implementation
-    is distinguishable from a "last wins" one."""
-    doc = PROLOGUE + attr_block(
-        "l-001|v-001|ident|first.corp",
-        "l-001|v-001|ident|second.corp",
-        "l-001|v-001|ident|third.corp",
+    is distinguishable from a "last wins" one.
+
+    ONE BLOCK PER REFINEMENT, which is the shape the claim was always about: "a run's
+    history" is a slot sharpened as gather returns, and each return is its own
+    `append_block`. The three rows were written into a single block as a fixture
+    convenience, and #962 made that spelling a formation error — a slot given two DIFFERENT
+    values inside one atomic write loses one of them with nothing said. The demand M6 states
+    is untouched by that and is what is asserted here: document order, last wins, no
+    history.
+    """
+    doc = (
+        PROLOGUE
+        + attr_block("l-001|v-001|ident|first.corp")
+        + attr_block("l-001|v-001|ident|second.corp")
+        + attr_block("l-001|v-001|ident|third.corp")
     )
 
     assert _diagnose(doc, None) == []
     assert _effective(doc)["v-001"]["identifier"] == "third.corp"
     assert "first.corp" in doc
     assert "second.corp" in doc
+
+
+def test_the_same_ident_refinements_inside_one_block_are_refused(tmp_path):
+    """The other side of the line #962 drew, pinned against the test above so the two shapes
+    cannot drift into each other.
+
+    The rows are IDENTICAL to the ones the amendment path accepts; only the fencing differs.
+    Across blocks each refinement supersedes the last, which is the format's documented
+    progression. Inside one block the same three rows discard two author-written values, and
+    the fold's last-wins answer is indistinguishable from a document that only ever said
+    `third.corp`.
+    """
+    doc = PROLOGUE + attr_block(
+        "l-001|v-001|ident|first.corp",
+        "l-001|v-001|ident|second.corp",
+        "l-001|v-001|ident|third.corp",
+    )
+
+    errors = [d for d in _diagnose(doc, None) if d.severity != "warning"]
+    assert len(errors) == 2, "one per value discarded, not one per row"
+    assert all("refined twice in this write" in d.message for d in errors)
+    # The fold is unchanged — the refusal is the whole of what #962 added.
+    assert _effective(doc)["v-001"]["identifier"] == "third.corp"
+
+
+def test_two_attr_blocks_in_one_fence_are_one_write(tmp_path):
+    """Splitting the block in two does not buy a second chance at the same slot.
+
+    The unit #962 is about is ONE ATOMIC WRITE — `append_block` sends one ```invlang fence per
+    call, and nothing happens between two rows of it to justify the second. A fence carries as
+    many `:X` blocks as the author put in it (the prologue's `:V` and `:L` ride in one), so a
+    rule scoped to the parsed BLOCK is evaded by exactly the reformatting below: same fence,
+    same write, one author-written value gone, and no diagnostic at all.
+
+    Pinned beside the across-BLOCKS test above, which is across FENCES and stays legal.
+    """
+    doc = PROLOGUE + (
+        "\n```invlang\n"
+        ":R attr_updates [resolved_by|target|key|value]\n"
+        "l-001|v-001|ident|first.corp\n"
+        "\n"
+        ":R attr_updates [resolved_by|target|key|value]\n"
+        "l-001|v-001|ident|second.corp\n"
+        "```\n"
+    )
+
+    errors = [d for d in _diagnose(doc, None) if d.severity != "warning"]
+    assert len(errors) == 1
+    assert "refined twice in this write" in errors[0].message
+    assert _effective(doc)["v-001"]["identifier"] == "second.corp"
+
+
+def test_a_slot_repeated_with_the_same_value_in_one_block_is_left_alone(tmp_path):
+    """Redundancy is not the defect (#962). Two rows naming one slot with the SAME value
+    destroy nothing — the fold lands what either row alone would land — so they draw no
+    diagnostic.
+
+    Load-bearing rather than a nicety: `fix_row` repairs EVERY flagged occurrence of a row's
+    text at once (#836 H4), so repairing two byte-identical bad rows necessarily produces two
+    byte-identical good ones. A rule keyed on the slot alone would refuse that repair and
+    leave the window open with nothing able to close it.
+    """
+    doc = PROLOGUE + attr_block(
+        "l-001|v-001|ident|same.corp",
+        "l-001|v-001|ident|same.corp",
+    )
+
+    assert _diagnose(doc, None) == []
+    assert _effective(doc)["v-001"]["identifier"] == "same.corp"
 
 
 def test_ident_refinement_and_warn_defect_on_same_vertex(tmp_path):

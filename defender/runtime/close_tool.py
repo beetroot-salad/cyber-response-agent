@@ -329,8 +329,15 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
     forced: bool = False,
 ) -> CloseResult:
     """`forced` distinguishes the FRAMEWORK's close from the model's. Only the driver's
-    retry-exhaustion limb sets it, and it buys exactly one thing: exemption from the
-    flagged-row gate below. Defaulted False so every other caller is gated."""
+    retry-exhaustion limb sets it, and it buys exemption from the two document gates below —
+    the invlang structure check and the flagged-row window. Defaulted False so every other
+    caller is gated.
+
+    Both exemptions rest on the same fact: retry exhaustion has no model left to repair with,
+    so gating the forced close would dead-letter the run at persist for a MISSING report.md.
+    A malformed companion is worse to publish than a well-formed one, but a run with no
+    disposition at all is worse than either, and the frontmatter still records honestly which
+    way the close went."""
     if deps.role is not AgentRole.MAIN:
         raise ModelRetry(
             "close_investigation is reachable only from the investigator (main) role — "
@@ -387,6 +394,29 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
     # `investigation.md` write gate. AFTER the terminal-close refusal so R4's ordering holds,
     # and before the gate so a close that owes the price never spends a review.
     _refuse_if_entry_price_is_owed(deps, disposition)
+    # The check the close never had (#961). Every other write verb meets the invlang schema
+    # through `permission.decide_write`; the close is the verb that PUBLISHES — report.md
+    # commits against this document and the review gate parses it — so it was the one path on
+    # which an error-severity document reached a committed disposition. It reads through
+    # `tools_mod`, beside the repair window above, so both document gates share one reader and
+    # one answer to "the document could not be read at all" (H7: fail open).
+    #
+    # LAST of the three document gates, and the order is load-bearing. This one runs the WHOLE
+    # validator, which includes rules conditioned on the disposition the DOCUMENT concludes —
+    # benign gating, the false-positive entity check. Ahead of the price gate it would answer a
+    # close of `false-positive` with a complaint about the `benign` the companion happens to
+    # declare: true, but about a keyword the model is no longer claiming, and it would shadow
+    # the specific obligation the model can actually discharge. Behind it, each refusal is the
+    # most specific one the document has earned, and nothing gets past: the price gate refuses
+    # what it prices, this refuses everything else. Still ahead of every disposition branch, so
+    # no review is spent on a close that is going to be refused (H5's reason).
+    #
+    # `forced` is exempt with the flagged-row window above, for that exemption's own reason:
+    # retry exhaustion has no model left to repair with.
+    if not forced:
+        structure = tools_mod.committed_document_refusal(deps)
+        if structure is not None:
+            raise ModelRetry(structure)
     if disposition == "inconclusive":
         # The gate reviews CONFIDENT closes only, so nothing was reviewed and there is no
         # stage output to diagnose — the empty detail here is the honest value, not a gap.

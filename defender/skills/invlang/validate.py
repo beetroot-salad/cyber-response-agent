@@ -18,7 +18,7 @@ from .parser import (
     ParseWarning,
     deferred_hypothesis_ids,
     is_conclude_empty_marker,
-    iter_blocks,
+    iter_fence_blocks,
     parse_dense_companion,
     scan_fences,
 )
@@ -182,6 +182,19 @@ def _check_surface(proposed_text: str, current_text: str | None) -> list[str]:
 
 
 
+#: The repair for an id the author may legitimately declare — carried by BOTH arms that can
+#: report one, so the two cannot drift. It names the harness-reserved case explicitly: the seed
+#: that writes `l-000`'s declaring row validates the document first and declines rather than
+#: laundering unvalidated bytes past the gate (#964), so "already claimed" and "undeclared
+#: lead" can both be true at once, and a model told only the first has no move.
+_DECLARE_IT_YOURSELF = (
+    ". Declare it in a `:L findings` block and re-send — that holds for a "
+    "HARNESS-RESERVED id whose declaring row is not on the page too: the harness "
+    "reserves the id so you do not attach new work to it, and writing the row it "
+    "is missing is not reusing it"
+)
+
+
 def _check_lead_refs(companion: CompanionBody) -> list[str]:
     """`:L findings` is the sole site that declares a lead; every other mention must resolve
     to one.
@@ -200,23 +213,33 @@ def _check_lead_refs(companion: CompanionBody) -> list[str]:
         fid = f.get("id")
         if not isinstance(fid, str) or fid in declared:
             continue
-        hint = (
+        # ONE repair per shape, never both. A comma-joined id is not a lead at all, so
+        # "declare it in a `:L findings` block" is advice that would have the author declare
+        # `l-004,l-005` AS a lead — and printed right after the split-it hint it contradicts
+        # the sentence before it. The harness-reserved sentence rides only on the shape it is
+        # about (#964): an id the author may legitimately declare.
+        repair = (
             " — a resolution is owned by exactly one lead; attribute it to one "
             "and name the others in `cites_leads`"
-            if "," in fid else ""
+            if "," in fid else _DECLARE_IT_YOURSELF
         )
         errors.append(
             f"undeclared lead {fid!r}: referenced by a `:R` / `:T` row or a "
-            f"lead sub-block, but no `:L findings` row declares it{hint}"
+            f"lead sub-block, but no `:L findings` row declares it{repair}"
         )
     for row in _walkers.iter_grounded_resolutions(companion):
         owner = row.get("resolved_by_lead")
         for cited in row.get("cites_leads") or []:
             if cited not in declared:
+                # The SAME repair the declaring arm above carries, and for the same reason: a
+                # `cites_leads` cell is one of the two ways MAIN reaches a harness-reserved id
+                # whose declaring row the seed declined to write (#964), and a refusal that
+                # named the fault without naming the move left that trap open on this path
+                # alone.
                 errors.append(
                     f"`cites_leads` on the resolution owned by "
                     f"{owner or '<unattributed>'} names {cited!r}, which no "
-                    f"`:L findings` row declares"
+                    f"`:L findings` row declares{_DECLARE_IT_YOURSELF}"
                 )
             elif cited == owner:
                 errors.append(
@@ -1859,9 +1882,39 @@ IDENT_REFINEMENT_KEY = "ident"
 SLOT_IDENT = IDENT_REFINEMENT_KEY
 ATTR_PREFIX = "attrs."
 
+#: The `Locus.block` label for the one block a row-level repair may reach. Spelled ONCE because
+#: three readers have to agree on it byte for byte: the two families here that mint a `Locus`
+#: by hand, the parse warnings, whose label is built as `f":{block.tag} {block.name}"` and
+#: lands on this same string for an `attr_updates` block, and `runtime.tools`' repair set,
+#: which filters on it to keep `fix_row` inside the scope the warn window used to give it for
+#: free. A fourth spelling would silently widen or empty that set.
+ATTR_UPDATES_LOCUS = ":R attr_updates"
+
 
 def _is_legal_refinement_key(key: str) -> bool:
     return key in (SLOT_CLASS, SLOT_IDENT) or key.startswith(ATTR_PREFIX)
+
+
+def _unquoted(cell: str) -> str:
+    """The cell with ONE wrapping pair of double quotes removed, or the cell unchanged.
+
+    NOT a decoding step, and this file does not use it as one. In invlang a quote PROTECTS a
+    delimiter and is KEPT: `_split_quoted` hands back `"v-001|v-002"` with its quotes, and the
+    `:V` row declaring that vertex carries them too, so both sides of a target comparison see
+    the same bytes. A key cell is read the same way as every other cell — which is why
+    `"class"` is not the key `class`, and why `_is_legal_refinement_key` is not taught to
+    accept it (#963). Making the key cell the one place quotes fall away would put this check
+    at odds with every other reader of the format, including the target match one column left.
+
+    What it is for is the REPAIR. An author who wrote `"class"` meant `class`, and the useful
+    suggestion is the key they meant — not `attrs."class"`, which is what prefixing text the
+    check has already refused produces: a legal-SHAPED key naming an attribute whose name
+    contains quote characters, which nobody wants and which `_candidate_refusal` then rejects
+    anyway, withholding the whole suggestion and leaving the author with no repair at all.
+    """
+    if len(cell) >= 2 and cell.startswith('"') and cell.endswith('"'):
+        return cell[1:-1]
+    return cell
 
 
 def _candidate_refusal(
@@ -1942,10 +1995,37 @@ def _illegal_key_diagnostic(
         # to the declared width, same as `_row_cells` pads the parsed record, so the pasted
         # candidate is full-width rather than re-opening the same gap.
         raw_cells = raw_cells + [""] * (len(cols) - len(raw_cells))
-    candidates = (
-        _swap_cell(raw_cells, at, "class"),
-        _swap_cell(raw_cells, at, f"attrs.{key}"),
-    )
+    # The repair is built from the key with its wrapping quotes removed, never from the raw
+    # cell: `attrs.{key}` over a quoted cell splices text the check has ALREADY judged
+    # malformed behind a legal prefix (#963). When the unquoted text is itself a legal key the
+    # author simply quoted, that key IS the repair and there is no second route to offer —
+    # `class` and `attrs.class` are not two readings of `"class"`, and offering the pair would
+    # invite the author to pick the wrong one.
+    basis = _unquoted(key)
+    # TWO different questions off one unquoting. `unquoted` says the repair was BUILT from a
+    # different string than the author wrote — which is what the message has to explain, and
+    # it is just as surprising for `"owner"` -> `attrs.owner` as for `"class"` -> `class`.
+    # `quoted_legal` says the unquoted text is itself a legal key, which is what collapses the
+    # two routes into one. Conflating them left the quoted-ILLEGAL author watching their
+    # quotes disappear with no sentence saying why.
+    unquoted = basis != key
+    quoted_legal = unquoted and _is_legal_refinement_key(basis)
+    candidates: tuple[str, ...]
+    if quoted_legal:
+        candidates = (_swap_cell(raw_cells, at, basis),)
+    else:
+        # The `attrs.` route needs a NAME to prefix. With the quotes stripped off `""` there
+        # is none, and `attrs.` is legal-SHAPED — `_is_legal_refinement_key` accepts anything
+        # starting with the prefix — so offering it would land an attribute whose name is the
+        # empty string. That is the same "repair worse than the row" #963 is about, reachable
+        # here only because the unquoting made the prefix splice succeed where `attrs.""`
+        # used to be caught by the offer guard. The `class` route is unaffected and is offered
+        # alone; nothing is silently dropped, because for an empty name there is no second
+        # route to drop.
+        routes = [_swap_cell(raw_cells, at, "class")]
+        if basis:
+            routes.append(_swap_cell(raw_cells, at, f"attrs.{basis}"))
+        candidates = tuple(routes)
     # ALL-OR-NOTHING (F-M half one): put each candidate through `_candidate_refusal` — which
     # wraps the parser's OWN row reader rather than substituting it, since that reader RAISES
     # where this check returns a value — and withhold the whole suggestion the moment either
@@ -1978,6 +2058,16 @@ def _illegal_key_diagnostic(
         f"(identifier refinement) or `attrs.<name>` (attribute); a bare key "
         f"is dropped silently"
     )
+    if unquoted:
+        # Says WHY a word the author knows is legal was refused. Without it the message reads
+        # as the validator not recognising `class`, and the author's next move is to argue
+        # with it rather than to drop two characters. It rides on the UNQUOTING, not on the
+        # keyword: the repair below drops the author's quotes either way, and an unexplained
+        # transformation is the same puzzle whatever the key spells.
+        message += (
+            f" — a quote is part of the cell in this format, never stripped from it, so "
+            f"{key} names a different key than {basis}"
+        )
     if refusal is not None:
         message += (
             # QUOTES THE REBUILT ROW the refusal is ABOUT. The carried reason is the row
@@ -1995,7 +2085,7 @@ def _illegal_key_diagnostic(
         )
     return Diagnostic(
         message=message,
-        locus=Locus(block=":R attr_updates", row_text=row),
+        locus=Locus(block=ATTR_UPDATES_LOCUS, row_text=row),
         fix=() if refusal is not None else candidates,
         # THE one warn-severity family. The row is INERT — it changes no effective vertex
         # state — so the block it rides in is worth keeping, and the model repairs the row
@@ -2028,36 +2118,84 @@ def _check_attr_update_keys(proposed_text: str) -> list[Diagnostic]:
     is present and says nothing. No `fix` is offered: the missing value is the one thing this
     check cannot supply."""
     out: list[Diagnostic] = []
-    for block in iter_blocks(proposed_text):
-        cols = block.columns or []
-        if block.name != "attr_updates":
-            continue
-        for row in block.rows:
-            try:
-                rec = _row_dict(block, row)
-            except RowError:
-                continue  # already a parse warning; not this check's business
-            key = rec.get("key")
-            if not key:
+    for fence_blocks in iter_fence_blocks(proposed_text):
+        # One map per FENCE, and the scope is the whole point (#962). The unit the rule is
+        # about is ONE ATOMIC WRITE: `append_block` sends one ```invlang fence per call, so a
+        # slot refined again in a LATER fence is the format's documented `??` -> candidate set
+        # -> concrete value progression — written after gather returned something the first
+        # could not know — while two rows inside ONE fence had nothing happen between them, so
+        # the later row does not refine the earlier one, it contradicts it.
+        #
+        # THE FENCE AND NOT THE BLOCK, because a fence carries as many `:X` blocks as the
+        # author put in it (the prologue's `:V` and `:L` ride in one). Keyed on the block, the
+        # rule is evaded by splitting one `:R attr_updates` block into two inside the same
+        # fence: same write, same value lost, no diagnostic at all — which is the defect, not
+        # a near miss of it.
+        #
+        # HERE, not in the parser, because the rule needs the legal-key vocabulary to be true.
+        # A row whose key is not `class`/`ident`/`attrs.*` never reaches effective state at all
+        # (`_apply_attr_updates` skips it), so a repeat of one discards NOTHING and saying it
+        # did is a false message — and it would turn the deliberately warn-severity illegal-key
+        # family, whose whole point is that the row lands and is repaired in place, into a hard
+        # refusal of the block it rides in. Keyed on `(target, key)` and not the resolving
+        # lead: `effective_vertex_state` folds across every lead into one `(vertex, slot)`
+        # value, so two leads naming one slot lose a value exactly as one lead would.
+        refined_here: dict[tuple[str, str], str] = {}
+        for block in fence_blocks:
+            cols = block.columns or []
+            if block.name != "attr_updates":
                 continue
-            if _is_legal_refinement_key(key):
-                value = rec.get("value")
-                if "value" in cols and not (value or "").strip():
-                    out.append(Diagnostic(
-                        message=(
-                            f":R attr_updates on {rec.get('target') or '?'}: the `value` cell "
-                            f"for key {key!r} is empty — a refinement settles a slot by "
-                            f"naming the value the lead obtained, and an empty cell settles "
-                            f"nothing. Write that value, or leave the `??` standing and "
-                            f"escalate"
-                        ),
-                        locus=Locus(block=":R attr_updates", row_text=row),
-                    ))
-                continue
-            # `rec`'s keys are the block's DECLARED columns, so a non-empty `key` is proof
-            # the header names a `key` column to substitute into. Built from the row's RAW
-            # text, not from `rec` — see `_illegal_key_diagnostic`.
-            out.append(_illegal_key_diagnostic(block, row, cols, rec, key))
+            for row in block.rows:
+                try:
+                    rec = _row_dict(block, row)
+                except RowError:
+                    continue  # already a parse warning; not this check's business
+                key = rec.get("key")
+                if not key:
+                    continue
+                if _is_legal_refinement_key(key):
+                    # A VALUE LOST is the defect, not a row repeated. Two rows naming one slot
+                    # with the SAME value are redundant and destroy nothing — the fold lands what
+                    # either row alone would land. Two with DIFFERENT values contradict each other
+                    # inside one atomic write and one author-written value disappears in silence.
+                    # Narrowing it this way is also what keeps `fix_row` able to repair a
+                    # non-unique flagged row: it rewrites EVERY identical occurrence at once
+                    # (#836 H4), so repairing two byte-identical bad rows necessarily produces two
+                    # byte-identical good ones, which a rule keyed on the slot alone would refuse.
+                    target = rec.get("target") or ""
+                    slot = (target, key)
+                    previous = refined_here.get(slot)
+                    if previous is not None and previous != (rec.get("value") or ""):
+                        out.append(Diagnostic(
+                            message=(
+                                f":R attr_updates on {target or '?'}: {key!r} is refined twice in "
+                                f"this write, to {previous!r} and then to "
+                                f"{rec.get('value') or ''!r}; only the LAST value is recorded and "
+                                f"{previous!r} is discarded with nothing said. Give this write one "
+                                f"row per slot and re-send it whole — refining the same slot again "
+                                f"in a LATER `append_block` is the documented `??` -> candidate "
+                                f"set -> concrete value progression and stays legal"
+                            ),
+                            locus=Locus(block=ATTR_UPDATES_LOCUS, row_text=row),
+                        ))
+                    refined_here[slot] = rec.get("value") or ""
+                    value = rec.get("value")
+                    if "value" in cols and not (value or "").strip():
+                        out.append(Diagnostic(
+                            message=(
+                                f":R attr_updates on {rec.get('target') or '?'}: the `value` cell "
+                                f"for key {key!r} is empty — a refinement settles a slot by "
+                                f"naming the value the lead obtained, and an empty cell settles "
+                                f"nothing. Write that value, or leave the `??` standing and "
+                                f"escalate"
+                            ),
+                            locus=Locus(block=ATTR_UPDATES_LOCUS, row_text=row),
+                        ))
+                    continue
+                # `rec`'s keys are the block's DECLARED columns, so a non-empty `key` is proof
+                # the header names a `key` column to substitute into. Built from the row's RAW
+                # text, not from `rec` — see `_illegal_key_diagnostic`.
+                out.append(_illegal_key_diagnostic(block, row, cols, rec, key))
     return out
 
 
@@ -3807,7 +3945,17 @@ def diagnose(
     companion, warnings = parse_dense_companion(proposed_text)
     current_companion: CompanionBody | None = None
     if current_text is not None:
-        current_companion, _ = parse_dense_companion(current_text)
+        # THE SAME TEXT IS THE SAME PARSE. Two callers read a committed document as its OWN
+        # baseline — `committed_investigation_reason` (a close proposes nothing) and
+        # `seed_investigation` (an inherited prefix introduces nothing its source had not
+        # already committed) — and for them the second `parse_dense_companion` is a full
+        # re-parse of bytes already in hand, feeding an append-only comparison of the document
+        # with itself. Both texts are newline-normalized above, so the equality is over the
+        # same value the parse would see.
+        current_companion = (
+            companion if current_text == proposed_text
+            else parse_dense_companion(current_text)[0]
+        )
 
     found.extend(_plain(
         _check_append_only(proposed_text, current_text, companion, current_companion)
