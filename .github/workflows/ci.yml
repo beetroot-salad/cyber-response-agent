@@ -788,8 +788,8 @@ jobs:
       # ```invlang pattern in an `re` call. Baseline ships EMPTY — all five sites were
       # folded when the gate landed. NOT mechanized: computed access, a `str.split` fence
       # walk, and whether a scan_fences caller reads `orphaned_headers` at all.
-      - name: Unaccounted invlang fence scan gate (route through scan_fences, #932 — baseline-ratcheted)
-        run: defender/.venv/bin/python scripts/lint/lint_unaccounted_fence_scan.py
+      - name: Unaccounted invlang selection gate (say where the rest went, #932 — baseline-ratcheted)
+        run: defender/.venv/bin/python scripts/lint/lint_unaccounted_selection.py
 
       # For symbols this PR removed, the post-PR tree must hold no surviving reference.
       # Needs the merge-base with origin/main — hence `fetch-depth: 0` on the checkout

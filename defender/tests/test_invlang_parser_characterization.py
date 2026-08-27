@@ -136,9 +136,11 @@ def test_reexported_symbols_keep_their_kind():
     assert hasattr(parser.INVLANG_FENCE_RE, "finditer")
     assert callable(parser.scan_fences)
     # A frozen dataclass with all three halves of the accounting — the complement
-    # cannot be dropped from the type without this failing.
+    # cannot be dropped from the type without this failing — plus `open_tail`, the
+    # mid-block state `validate._check_surface` reads off the BASELINE so an append
+    # onto an unterminated fence is not refused for the pairing that state forces.
     assert parser.FenceScan.__dataclass_fields__.keys() == {
-        "bodies", "spans", "orphaned_headers",
+        "bodies", "spans", "orphaned_headers", "open_tail",
     }
     assert parser._VERTEX_COLS == ["id", "type", "class", "ident", "attrs"]
     assert parser._EDGE_COLS[:2] == ["id", "rel"]

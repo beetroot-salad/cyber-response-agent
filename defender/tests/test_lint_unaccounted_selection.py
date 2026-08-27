@@ -1,4 +1,4 @@
-"""The gate that keeps the fence-scan fold from regressing: lint_unaccounted_fence_scan
+"""The gate that keeps the fence-scan fold from regressing: lint_unaccounted_selection
 (#932).
 
 `scan_fences` is the one place that knows which bytes of an investigation are invlang
@@ -22,7 +22,7 @@ from pathlib import Path
 
 from defender.tests._by_path import load_lint_gate
 
-_GATE = load_lint_gate("lint_unaccounted_fence_scan")
+_GATE = load_lint_gate("lint_unaccounted_selection")
 
 _IMPORT_ALIASED = (
     "from defender.skills.invlang.parser import INVLANG_FENCE_RE as F\n"
@@ -52,7 +52,7 @@ _CLEAN = (
 )
 _SUPPRESSED = (
     "from defender.skills.invlang.parser import INVLANG_FENCE_RE"
-    "  # lint-fence-scan: ok — counting only\n"
+    "  # lint-selection: ok — counting only\n"
 )
 
 
@@ -137,6 +137,58 @@ def test_the_ratchet_and_the_blind_scope(tmp_path):
     _write_baseline(baselined, [f.fingerprint for f in findings])
     assert _GATE.main([], scope=tree, baseline_path=baselined) == 0
     assert _GATE.main([], scope=tmp_path / "does-not-exist") == 2
+
+
+_GRAMMAR_FILTER = (
+    "def f_filter(tokens):\n"
+    "    return [t for t in tokens if SOME_ID_RE.fullmatch(t)]\n"
+)
+_NEGATED_REPORT = (
+    "def f_report(tokens):\n"
+    "    return [err(t) for t in tokens if not SOME_ID_RE.fullmatch(t)]\n"
+)
+_MARKED_FILTER = (
+    "def f_marked(tokens):\n"
+    "    return [  # lint-selection: ok — the empty case returns None\n"
+    "        t for t in tokens if SOME_ID_RE.fullmatch(t)\n"
+    "    ]\n"
+)
+
+
+def test_arm2_flags_a_grammar_filter_that_drops_the_rest(tmp_path):
+    """`[t for t in xs if ID_RE.fullmatch(t)]` keeps the matches and discards everything
+    else, which is how a token in neither namespace reached no rule at all."""
+    tree = tmp_path / "scope"
+    _pyfile(tree, "filt.py", _GRAMMAR_FILTER)
+    assert _kinds(_GATE._scan(tree)) == {"filter"}
+
+
+def test_arm2_leaves_the_reporting_shape_alone(tmp_path):
+    """THE DISTINCTION THE ARM RESTS ON. `if not RE.fullmatch(t)` turns every non-match into
+    the finding — the shape validate.py's four id-structure rules use. Without the negation
+    test this gate would flag all of them and read as noise, so this is the control that
+    keeps the arm honest rather than merely quiet."""
+    tree = tmp_path / "scope"
+    _pyfile(tree, "report.py", _NEGATED_REPORT)
+    assert _GATE._scan(tree) == []
+
+
+def test_arm2_applies_inside_the_parser_too(tmp_path):
+    """Arm 1 exempts the module that OWNS the fence split — it must use the regex. Arm 2 has
+    no such owner: a silent grammar filter is the same defect wherever it sits, and three of
+    the four sites this gate documents live in the parser."""
+    tree = tmp_path / "scope"
+    _pyfile(tree, "skills/invlang/parser.py", _GRAMMAR_FILTER + _IMPORT_ALIASED)
+    # arm 1 exempt (the import), arm 2 not
+    assert _kinds(_GATE._scan(tree)) == {"filter"}
+
+
+def test_arm2_marker_must_sit_inside_the_flagged_span(tmp_path):
+    """The marker documents where the complement goes, and it only counts where a reader
+    will see it — on the flagged expression, not floating above it."""
+    tree = tmp_path / "scope"
+    _pyfile(tree, "marked.py", _MARKED_FILTER)
+    assert _GATE._scan(tree) == []
 
 
 def test_the_real_tree_is_clean_and_the_baseline_is_empty():

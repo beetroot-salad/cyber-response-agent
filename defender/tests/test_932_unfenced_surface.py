@@ -127,8 +127,75 @@ def test_the_continuation_that_closes_a_truncated_block_lands() -> None:
     assert sorted(_walkers.all_hypotheses(companion)) == ["h-001"]
 
 
+def test_the_fenced_append_onto_a_truncated_baseline_lands() -> None:
+    """The continuation `append_block` ACTUALLY sends. The tool carries one fenced block per
+    call, so the append onto a mid-block baseline opens its own ```invlang — which
+    `INVLANG_FENCE_RE` then pairs with the open one on disk, leaving the NEW block reading as
+    orphaned. Refusing that would name a repair the model had already made, and every retry
+    would be refused identically: a wedge on the one tool it has. The baseline's `open_tail`
+    is the state that exempts it."""
+    truncated = f"{_ORIENT_ONLY}\n```invlang\n:H hypothesize.hypotheses [id|name|attached_to"
+    appended = f"{truncated}\n```invlang\n:H h-001.preds [id|subject|claim]\np1|x|\"y\"\n```\n"
+    assert _surface_errors(appended, truncated) == []
+
+
+def test_a_prose_mention_of_the_fence_does_not_disarm_the_gate() -> None:
+    """The exemption is a whole LINE that is the opener, never `str.find`. The refusal this
+    module tests prints ```invlang inside its own repair instruction, so a model that echoes
+    it into the document would otherwise open a phantom fence to end-of-document and hide
+    every orphaned header written under it."""
+    mentioned = f"{_ORIENT_ONLY}\nNote: blocks go inside ```invlang fences.\n\n{_PLAN_ROWS}"
+    errors = _surface_errors(mentioned, _ORIENT_ONLY)
+    assert len(errors) == 1
+    assert "adds 3 block header(s)" in errors[0]
+
+
+def test_an_indented_orphan_header_is_still_an_orphan() -> None:
+    """`_tokenize_fence` matches `_HEADER_ATTEMPT_RE` on the STRIPPED line, so an indented
+    `:H` inside a fence opens a block. Outside one it is exactly as invisible as a flush-left
+    header, and the accounting has to agree with the tokenizer about what a header is."""
+    indented = f"{_ORIENT_ONLY}\n## PLAN\n\n" + "\n".join(
+        f"  {line}" for line in _PLAN_ROWS.splitlines()
+    )
+    errors = _surface_errors(indented, _ORIENT_ONLY)
+    assert len(errors) == 1
+    assert "adds 3 block header(s)" in errors[0]
+
+
+def test_a_write_that_drops_one_orphan_and_adds_two_reports_both() -> None:
+    """A count comparison nets those to "+1" and names the survivor's LAST line. The
+    subtraction is a multiset difference, so both new headers are reported and the dropped
+    one is not mistaken for one of them."""
+    baseline = f"{_ORIENT_ONLY}\n:T old_orphan\n"
+    proposed = f"{_ORIENT_ONLY}\n:H new_one [id|name]\n:H new_two [id|name]\n"
+    errors = _surface_errors(proposed, baseline)
+    assert len(errors) == 1
+    assert "adds 2 block header(s)" in errors[0]
+    assert ":H new_one [id|name]" in errors[0]
+    assert ":H new_two [id|name]" in errors[0]
+
+
+def test_a_committed_document_validated_whole_is_not_refused_for_its_own_bytes() -> None:
+    """`learning/core/persist.py` validates the FINISHED investigation on the copy path. The
+    bytes are committed and no repair reaches them, so the document is its own baseline —
+    a `None` there would read every orphan as newly written and fail the run into
+    `queue/failed/`."""
+    assert _surface_errors(_UNFENCED_PLAN, _UNFENCED_PLAN) == []
+
+
 def test_yaml_fence_still_refused() -> None:
     """The loud half of the same family, unchanged."""
     errors = _surface_errors("```yaml\nhypothesize:\n  hypotheses: []\n```\n")
     assert len(errors) == 1
     assert "```yaml/```yml" in errors[0]
+
+
+def test_both_halves_of_the_surface_rule_report_together() -> None:
+    """A yaml fence must not hide the orphans behind it: the author would fix the loud half,
+    re-send, and meet the quiet one only on the next round trip."""
+    errors = _surface_errors(
+        "```yaml\nhypothesize: []\n```\n\n:H hypothesize.hypotheses [id|name]\nh-001|x\n"
+    )
+    assert len(errors) == 2
+    assert any("```yaml/```yml" in e for e in errors)
+    assert any("adds 1 block header(s)" in e for e in errors)

@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 import re
+from collections import Counter
 from collections.abc import Callable, Container, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, NamedTuple
 
 from defender._vocab import normalized_disposition
 from . import _walkers, vocab
@@ -103,7 +104,7 @@ def _normalize_newlines(text: str) -> str:
 
 
 
-def _check_surface(proposed_text: str, current_text: str | None = None) -> list[str]:
+def _check_surface(proposed_text: str, current_text: str | None) -> list[str]:
     """The on-disk surface is ```invlang fences, and this is the family that says so.
 
     Two ways to miss it. Writing the block under a ```yaml fence is the loud one — the
@@ -121,40 +122,62 @@ def _check_surface(proposed_text: str, current_text: str | None = None) -> list[
     reported rather than raised, and why a trailing unterminated fence is exempt. What is
     decided HERE is the policy over it.
 
-    **Scoped to what THIS write introduces**, by comparing counts against the baseline rather
-    than refusing any unfenced header in the document. `investigation.md` is append-only: a
-    file that already carries unfenced rows cannot have them fenced after the fact, so a
-    whole-document reading would refuse every later write for bytes no repair can reach —
-    the append-only wedge the v2.22 delta closed on rules #6 and #17. A count comparison also
-    survives `fix_row`, which rewrites a row in place and adds no header. With no baseline
-    every unfenced header is new, which is the right reading for a first write.
+    **Scoped to what THIS write introduces**, by subtracting the baseline's orphans from the
+    proposal's rather than refusing any unfenced header in the document. `investigation.md`
+    is append-only: a file that already carries unfenced rows cannot have them fenced after
+    the fact, so a whole-document reading would refuse every later write for bytes no repair
+    can reach — the append-only wedge the v2.22 delta closed on rules #6 and #17. The
+    subtraction is a MULTISET difference over the header lines, not a count comparison: a
+    write that drops one committed orphan while adding two would otherwise net to "+1" and
+    name the wrong line. It also survives `fix_row`, which rewrites a row in place and adds
+    no header. With no baseline every unfenced header is new, which is the right reading for
+    a first write.
+
+    **A baseline that stopped MID-BLOCK is exempt entirely.** With an unterminated ```invlang
+    on disk, `INVLANG_FENCE_RE` pairs it with the OPENING delimiter of the next append, so
+    that append's own block reads as orphaned — and `append_block` sends exactly one fenced
+    block per call, so the refusal would name a repair the model had already made and every
+    retry would be refused the same way. `scan_fences(...).open_tail` is that state, read off
+    the baseline.
 
     The repair is the one the author can take: re-send the block inside a ```invlang fence.
     Bytes already committed unfenced stay as prose and parse to nothing, which is what they
     already did; the correctly fenced copy is what lands.
     """
+    errors: list[str] = []
     if _YAML_FENCE_RE.search(proposed_text):
-        return [
+        # Reported ALONGSIDE the unfenced-header half, not instead of it: returning here
+        # would hide every orphan behind the yaml fence until the author fixed that first.
+        errors.append(
             "non-invlang surface: investigation.md contains a ```yaml/```yml "
             "fenced block, but the on-disk surface is ```invlang (defender "
             "SKILL §dense format). Rewrite the block(s) as ```invlang."
-        ]
-    proposed_unfenced = list(scan_fences(proposed_text).orphaned_headers)
-    baseline = len(scan_fences(current_text).orphaned_headers) if current_text is not None else 0
-    if len(proposed_unfenced) <= baseline:
-        return []
-    introduced = proposed_unfenced[baseline:]
+        )
+    if current_text is not None and scan_fences(current_text).open_tail is not None:
+        return errors
+    baseline = Counter(
+        scan_fences(current_text).orphaned_headers if current_text is not None else ()
+    )
+    introduced: list[str] = []
+    for line in scan_fences(proposed_text).orphaned_headers:
+        if baseline[line]:
+            baseline[line] -= 1
+        else:
+            introduced.append(line)
+    if not introduced:
+        return errors
     shown = ", ".join(repr(line.strip()) for line in introduced[:3])
     if len(introduced) > 3:
         shown += f", … ({len(introduced)} in all)"
-    return [
+    errors.append(
         f"non-invlang surface: this write adds {len(introduced)} block header(s) OUTSIDE "
         f"any ```invlang fence — {shown}. Content outside a fence is not parsed, so the "
         f"rows under those headers reach no validator rule and no corpus query: they are "
         f"invisible, not merely unchecked. This is what a `## PLAN` section written after a "
         f"closed fence looks like. Re-send the block with ```invlang on its own line before "
         f"the first header and ``` after the last row."
-    ]
+    )
+    return errors
 
 
 
@@ -249,23 +272,82 @@ def _lead_prefix(lid: str) -> str:
     return f"lead {lid}: "
 
 
+class _TestsToken(NamedTuple):
+    """One entry of a `:L findings` `tests` cell, split into the namespaces that own it.
+
+    The cell is MIXED — a lead names the hypotheses it discriminates AND the commitments it
+    was run for — so a reader wanting one kind has to select. Selecting by regex in a
+    comprehension is what let `h-001.ac1` fall out of BOTH selections and be checked by
+    nothing (#932/#972 follow-up): it is not a bare `h-*` and not a bare `p*`/`ac*`, so the
+    hypothesis rule skipped it and the commitment rule skipped it, on a live run whose lead
+    named that contract and nothing else.
+
+    Classifying once, exhaustively, is the fix. Every token lands in exactly one of four
+    shapes and the fourth is REPORTED rather than dropped:
+
+    * bare `h-001` / `h-001-002` -> `hypothesis`
+    * bare `p2` / `ap1` / `r1` / `ac1` -> `commitment`
+    * qualified `h-001.ac1` -> BOTH, and the pairing is what makes it checkable
+    * `lp1` -> `foreign`: a real namespace, which this column's two rules cannot resolve
+    * anything else -> none of them, and `_check_tested_id_namespaces` refuses it
+
+    `foreign` is why the last arm can be a refusal at all. An `lp*` is scoped to a LEAD while
+    both readers here scope to a HYPOTHESIS, so no hypothesis's declarations could resolve it
+    and `_check_lead_prediction_structure` owns it where it lives. Recognized-but-unresolvable
+    and unrecognized are different answers; collapsing them would either deny a legal `lp1` or
+    wave through an `h_888`, which is exactly the pair the old shape gate could not separate.
+
+    The qualified spelling is the one spec rule #7 blesses for `fulfills_contract`, and
+    `_check_authz_contract_closure` already accepts it there — reusing its `rpartition`
+    idiom rather than restating the split."""
+
+    raw: str
+    hypothesis: str | None
+    commitment: str | None
+    foreign: bool = False
+
+
+def _classify_tests_token(tok: str) -> _TestsToken:
+    """One `tests` entry, resolved against every namespace the column can carry."""
+    if HYPOTHESIS_ID_RE.fullmatch(tok):
+        return _TestsToken(tok, tok, None)
+    if COMMITMENT_ID_RE.fullmatch(tok):
+        return _TestsToken(tok, None, tok)
+    owner, dot, local = tok.rpartition(".")
+    if dot and HYPOTHESIS_ID_RE.fullmatch(owner) and COMMITMENT_ID_RE.fullmatch(local):
+        return _TestsToken(tok, owner, local)
+    # Module-level and defined further down; function bodies resolve at call time.
+    if _LEAD_PRED_ID_RE.fullmatch(tok):
+        return _TestsToken(tok, None, None, foreign=True)
+    return _TestsToken(tok, None, None)
+
+
+def _tests_tokens(lead: FindingRecord) -> list[_TestsToken]:
+    return [
+        _classify_tests_token(tok)
+        for tok in (lead.get("tests_hypotheses") or [])
+        if isinstance(tok, str) and tok
+    ]
+
+
 def _cited_hypothesis_ids(lead: FindingRecord) -> Iterator[tuple[str, list[str]]]:
     """Every `h-*` a LEAD names, paired with the phrase that says where.
 
     One site since #933 retired `:T shelved`: `:L findings`' `tests` column, which the parser
     splits to `tests_hypotheses` through `_split_csv` without ever looking the ids up.
 
-    SHAPE-GATED, because `tests` is mixed: it lists the COMMITMENTS the lead was run for,
-    which is three id kinds (`ac1` and `p2` alongside `h-*`). A `p2` resolves against
-    `:H h-NNN.preds` and an `ac1` against `:H h-NNN.authz` — separate rules against separate
-    declaring blocks — so reading the column as hypotheses-only would deny a correct document.
-    The cost is that a malformed `h-*` here (`h_888`, `H-888`) reads as some other kind of id
-    and passes; the column cannot distinguish them, and denying the document is worse.
+    Reads the classified tokens rather than regex-filtering the raw cell, so the hypothesis
+    HALF of a qualified `h-001.ac1` is a reference like any other. Previously this filtered on
+    `HYPOTHESIS_ID_RE` alone and the qualified spelling matched nothing, so a lead whose
+    `tests` cell was exactly `h-001.ac1` had its hypothesis reference checked by no rule at
+    all — the shape `.defender-runs/turnN-A` l-003 actually wrote.
+
+    A token in NO namespace is not smuggled in here as a hypothesis: `_check_tested_id_
+    namespaces` owns it and names it for what it is, so `h_888` still cannot read as some
+    other kind of id and pass. That is the residue the old docstring accepted as the price of
+    the shape gate; classifying exhaustively is what stops it being a price.
     """
-    cited = [
-        hid for hid in (lead.get("tests_hypotheses") or [])
-        if isinstance(hid, str) and hid and HYPOTHESIS_ID_RE.fullmatch(hid)
-    ]
+    cited = [tok.hypothesis for tok in _tests_tokens(lead) if tok.hypothesis]
     if cited:
         yield "`:L findings` tests", cited
 
@@ -359,12 +441,17 @@ def _check_tested_commitment_refs(companion: CompanionBody) -> list[str]:
     falls back to every declared hypothesis rather than inventing a stricter rule than the
     format states.
 
-    NOT checked: an id in no recognized namespace. The one that reaches here is `lp*`, and it
-    stays exempt after #933 projected `:L l-NNN.lead_preds` — for a better reason than "nothing
-    declares it". An `lp*` is scoped to a LEAD and this column is scoped to a HYPOTHESIS, so
-    there is no hypothesis whose declarations could resolve it; `_check_lead_prediction_structure`
-    owns the `lp*` namespace where it lives. (`COMMITMENT_ID_RE` already excludes `lp1` — `p\\d+`
-    is `fullmatch`ed — so the exemption is structural rather than a filter here.)
+    NOT resolved here: an `lp*`, exempt after #933 projected `:L l-NNN.lead_preds` for a
+    better reason than "nothing declares it". An `lp*` is scoped to a LEAD and this column is
+    scoped to a HYPOTHESIS, so no hypothesis's declarations could resolve it;
+    `_check_lead_prediction_structure` owns that namespace where it lives. It is now carried
+    as `_TestsToken.foreign` rather than falling out of a regex — that exemption used to be a
+    side effect of `COMMITMENT_ID_RE` not matching `lp1`, and the same silence is what hid
+    `h_888` and the qualified `h-001.ac1`.
+
+    An id in NO namespace is no longer a blind spot either: `_check_tested_id_namespaces`
+    reports it by name, closing the residue the old shape gate accepted as the price of the
+    mixed column.
     """
     by_hyp = {
         hid: _declared_commitments(hyp)
@@ -372,8 +459,12 @@ def _check_tested_commitment_refs(companion: CompanionBody) -> list[str]:
     }
     errors: list[str] = []
     for lead in _leads(companion):
-        tested = [t for t in lead.get("tests_hypotheses") or [] if isinstance(t, str)]
-        named = [t for t in tested if HYPOTHESIS_ID_RE.fullmatch(t)]
+        tokens = _tests_tokens(lead)
+        # BARE tokens only. A qualified `h-001.ac1` names its own declarer, so it is scoped
+        # below against that hypothesis rather than against the row's union — the union would
+        # accept `h-001.ac1` because a SIBLING on the same row declares `ac1`, which is the
+        # cross-citation this rule refuses one level down.
+        named = [tok.raw for tok in tokens if tok.hypothesis and not tok.commitment]
         if any(h not in by_hyp for h in named):
             # An undeclared or dropped `h-*` on this row: `_check_hypothesis_refs` owns
             # that defect, and its commitments cannot be scoped until it is fixed.
@@ -388,7 +479,7 @@ def _check_tested_commitment_refs(companion: CompanionBody) -> list[str]:
         scope: set[str] = set()
         for h in scope_ids:
             scope |= by_hyp[h]
-        cited = [t for t in tested if COMMITMENT_ID_RE.fullmatch(t)]
+        cited = [tok.raw for tok in tokens if tok.commitment and not tok.hypothesis]
         for cid in _unresolved(cited, scope):
             errors.append(
                 f"{_lead_prefix(lead.get('id', '?'))}`:L findings` tests commitment "
@@ -396,6 +487,49 @@ def _check_tested_commitment_refs(companion: CompanionBody) -> list[str]:
                 f"({_known_ids(set(scope_ids))}) — a `p*`/`ap*` is declared by "
                 f"`:H h-NNN.preds` / `.attr_preds`, an `r*` by `.refuts` and an `ac*` by "
                 f"`.authz` (declared: {_known_ids(scope)})"
+            )
+        # The qualified spelling carries its own scope, so it is resolved against the
+        # hypothesis it names and no other. Skipped when that hypothesis is undeclared —
+        # `_check_hypothesis_refs` owns THAT defect and reports it by id.
+        for tok in tokens:
+            if not (tok.hypothesis and tok.commitment) or tok.hypothesis not in by_hyp:
+                continue
+            if tok.commitment not in by_hyp[tok.hypothesis]:
+                errors.append(
+                    f"{_lead_prefix(lead.get('id', '?'))}`:L findings` tests commitment "
+                    f"{tok.raw!r}, but {tok.hypothesis} does not declare "
+                    f"{tok.commitment!r} (declared: {_known_ids(by_hyp[tok.hypothesis])}) "
+                    f"— a qualified `h-NNN.<id>` resolves against the hypothesis it names, "
+                    f"never against a sibling on the same row"
+                )
+    return errors
+
+
+def _check_tested_id_namespaces(companion: CompanionBody) -> list[str]:
+    """Every `:L findings` `tests` entry lands in a namespace some rule owns.
+
+    The column is mixed — hypotheses and the commitments a lead was run for — and both
+    readers of it used to SELECT their kind with a regex, which meant a token in neither
+    namespace was skipped by both and validated clean. `h_888`, `H-888` and the qualified
+    `h-001.ac1` all had that shape; the last one is not even a defect, and it went unchecked
+    on a live run because nothing claimed it. `_classify_tests_token` resolves the three
+    legal shapes, and this rule is what makes the fourth a finding instead of a silence.
+
+    Measured before arming: across the 27 documents in the tree carrying invlang, 150 `tests`
+    tokens resolve — 146 bare `h-*`, 2 bare commitments, 2 qualified — and after the
+    qualified spelling is recognized, ZERO fall through. Error severity costs nothing on the
+    current corpus and no shipped golden or worked example fires.
+    """
+    errors: list[str] = []
+    for lead in _leads(companion):
+        for tok in _tests_tokens(lead):
+            if tok.hypothesis or tok.commitment or tok.foreign:
+                continue
+            errors.append(
+                f"{_lead_prefix(lead.get('id', '?'))}`:L findings` tests {tok.raw!r}, which "
+                f"is in no id namespace this format declares — write a hypothesis "
+                f"(`h-001`, `h-001-002`), a commitment the tested hypotheses declare "
+                f"(`p1`/`ap1`/`r1`/`ac1`), or the qualified form `h-001.ac1`"
             )
     return errors
 
@@ -3694,6 +3828,7 @@ def diagnose(
     found.extend(_plain(_check_refutation_scope(companion)))
     found.extend(_plain(_check_authz_contract_ids(companion)))
     found.extend(_plain(_check_tested_commitment_refs(companion)))
+    found.extend(_plain(_check_tested_id_namespaces(companion)))
     found.extend(_plain(_check_strong_move_provenance(companion)))
     found.extend(_plain(_check_prediction_completeness(companion)))
     found.extend(_plain(_check_attribute_prediction_structure(companion)))
