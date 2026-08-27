@@ -49,6 +49,7 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
+from defender.tests._branch_947 import ALERT_DOC, spec_at  # noqa: E402
 from defender.tests._session_head_754 import message_ids  # noqa: E402
 from defender.tests._session_store_705 import (  # noqa: E402
     DEFENDER,
@@ -201,6 +202,10 @@ def _source_run(tmp_path, *, case_id: str = "case-source"):
     run_dir = runs_base(tmp_path) / "run-source-001"
     run_dir.mkdir(parents=True, exist_ok=True)
     ss.write_case_pointer(run_dir, case_id=case_id, store_path=store.path)
+    # Every real run dir holds its alert before anything else happens
+    # (`run_common.materialize_run_dir`), and the sibling investigates the same one — so a
+    # source run without one is not a shape a branch is ever taken from (#947).
+    (run_dir / "alert.json").write_text(ALERT_DOC, encoding="utf-8")
     session_id = store.new_session(agent_id="main")
     sel.ingest(store, session_id, [user_request("investigate the alert"), *complete_pair()],
                agent_id="main")
@@ -222,8 +227,7 @@ def test_the_branch_factory_opens_the_source_runs_own_database(tmp_path):
     ss = store_mod()
     branch = branch_mod()
     store, run_dir, session_id, path_ids = _source_run(tmp_path)
-    spec = branch.BranchSpec(source_run_dir=run_dir, branch_message_id=path_ids[-1],
-                             continuation_prompt="continue")
+    spec = spec_at(store, run_dir, path_ids[-1])
 
     factory = branch.store_factory_for(spec)
     sibling_dir = tmp_path / "defender-runs" / "run-sibling-001"
@@ -246,10 +250,8 @@ def test_the_branch_factory_wears_the_store_factory_shape(tmp_path):
     a second one. Neither argument steers it: a resume joins a case, it does not mint one."""
     # provenance: driver.py's `StoreFactory = Callable[[str, Path], Any]`; design M1 reuses it.
     branch = branch_mod()
-    _store, run_dir, _session_id, path_ids = _source_run(tmp_path)
-    factory = branch.store_factory_for(
-        branch.BranchSpec(source_run_dir=run_dir, branch_message_id=path_ids[-1],
-                          continuation_prompt="continue"))
+    store, run_dir, _session_id, path_ids = _source_run(tmp_path)
+    factory = branch.store_factory_for(spec_at(store, run_dir, path_ids[-1]))
 
     params = list(inspect.signature(factory).parameters.values())
     assert len(params) == 2, f"not (case_id, run_dir)-shaped: {params}"
@@ -415,9 +417,7 @@ def test_a_resumed_run_inherits_the_document_its_history_claims(tmp_path):
     sibling_dir = tmp_path / "defender-runs" / "run-sibling-doc"
     sibling_dir.mkdir(parents=True, exist_ok=True)
 
-    branch.open_main_session(store, branch.BranchSpec(
-        source_run_dir=run_dir, branch_message_id=returns[1],
-        continuation_prompt="continue"), sibling_dir)
+    branch.open_main_session(store, spec_at(store, run_dir, returns[1]), sibling_dir)
 
     seeded = (sibling_dir / "investigation.md").read_text(encoding="utf-8")
     from defender.skills.invlang.parser import INVLANG_FENCE_RE
@@ -460,9 +460,7 @@ def test_a_resumed_run_inherits_the_evidence_its_prefix_names(tmp_path):
     sibling_dir = tmp_path / "defender-runs" / "run-sibling-evidence"
     sibling_dir.mkdir(parents=True, exist_ok=True)
 
-    branch.open_main_session(store, branch.BranchSpec(
-        source_run_dir=run_dir, branch_message_id=returns[1],
-        continuation_prompt="continue"), sibling_dir)
+    branch.open_main_session(store, spec_at(store, run_dir, returns[1]), sibling_dir)
 
     assert (sibling_dir / "executed_queries.jsonl").read_text(encoding="utf-8") == (
         run_dir / "executed_queries.jsonl").read_text(encoding="utf-8")
@@ -493,8 +491,7 @@ def test_a_run_dir_holding_evidence_is_refused_before_anything_forks(tmp_path):
     sibling_dir = tmp_path / "defender-runs" / "run-sibling-dirty"
     (sibling_dir / "gather_raw" / "l-009").mkdir(parents=True)
     (sibling_dir / "gather_raw" / "l-009" / "0.json").write_text("{}", encoding="utf-8")
-    spec = branch.BranchSpec(source_run_dir=run_dir, branch_message_id=path_ids[-1],
-                             continuation_prompt="continue")
+    spec = spec_at(store, run_dir, path_ids[-1])
 
     with pytest.raises(branch.BranchError, match="already holds"):
         branch.open_main_session(store, spec, sibling_dir)
@@ -539,9 +536,7 @@ def test_a_reused_run_dir_is_refused_rather_than_seeded_over(tmp_path):
     (sibling_dir / "investigation.md").write_text("someone else's work\n", encoding="utf-8")
 
     with pytest.raises(branch.BranchError, match="already holds"):
-        branch.seed_investigation(store, branch.BranchSpec(
-            source_run_dir=run_dir, branch_message_id=returns[0],
-            continuation_prompt="continue"), sibling_dir)
+        branch.seed_investigation(store, spec_at(store, run_dir, returns[0]), sibling_dir)
 
 
 def test_message_zero_is_refused_as_a_branch_point(tmp_path):
@@ -552,12 +547,12 @@ def test_message_zero_is_refused_as_a_branch_point(tmp_path):
     # provenance: design §The captured base world ("the base is captured, not authored");
     # the branch point is defined as "when the defender holds a concrete set of payloads".
     branch = branch_mod()
-    store, run_dir, _path_ids = _legal_source(
+    store, run_dir, path_ids = _legal_source(
         tmp_path, investigation=GOLDEN_INVESTIGATION.read_text(encoding="utf-8"))
 
     with pytest.raises(branch.BranchError):
-        branch.validate(store, branch.BranchSpec(
-            source_run_dir=run_dir, branch_message_id=0, continuation_prompt="continue"))
+        branch.validate(store, dataclasses.replace(
+            spec_at(store, run_dir, path_ids[-1]), branch_message_id=0))
 
 
 def test_a_run_that_captured_no_queries_is_refused(tmp_path):
@@ -571,9 +566,7 @@ def test_a_run_that_captured_no_queries_is_refused(tmp_path):
         tmp_path, investigation=GOLDEN_INVESTIGATION.read_text(encoding="utf-8"), queries=None)
 
     with pytest.raises(branch.BranchError):
-        branch.validate(store, branch.BranchSpec(
-            source_run_dir=run_dir, branch_message_id=path_ids[-1],
-            continuation_prompt="continue"))
+        branch.validate(store, spec_at(store, run_dir, path_ids[-1]))
 
 
 def test_a_branch_point_with_an_empty_frontier_is_refused(tmp_path):
@@ -589,9 +582,7 @@ def test_a_branch_point_with_an_empty_frontier_is_refused(tmp_path):
     store, run_dir, path_ids = _legal_source(tmp_path, investigation=None)
 
     with pytest.raises(branch.BranchError):
-        branch.validate(store, branch.BranchSpec(
-            source_run_dir=run_dir, branch_message_id=path_ids[-1],
-            continuation_prompt="continue"))
+        branch.validate(store, spec_at(store, run_dir, path_ids[-1]))
 
 
 def test_the_frontier_is_read_at_the_branch_point_not_at_the_end_of_the_run(tmp_path):
@@ -613,16 +604,15 @@ def test_the_frontier_is_read_at_the_branch_point_not_at_the_end_of_the_run(tmp_
         "below would be asserting over an empty document")
     store, run_dir, path_ids = _legal_source(tmp_path, investigation=document)
 
-    def spec_at(message_id: int):
-        return branch.BranchSpec(source_run_dir=run_dir, branch_message_id=message_id,
-                                 continuation_prompt="continue")
+    def at(message_id: int):
+        return spec_at(store, run_dir, message_id)
 
-    assert branch.validate(store, spec_at(path_ids[-1])) is None, (
+    assert branch.validate(store, at(path_ids[-1])) is None, (
         "a branch point past the run's own append_block was refused; nothing here is left "
         "to accept and the refusals above are vacuous")
 
     with pytest.raises(branch.BranchError):
-        branch.validate(store, spec_at(path_ids[2]))
+        branch.validate(store, at(path_ids[2]))
 
 
 def test_a_message_that_is_not_on_mains_path_is_refused(tmp_path):
@@ -636,9 +626,8 @@ def test_a_message_that_is_not_on_mains_path_is_refused(tmp_path):
         tmp_path, investigation=GOLDEN_INVESTIGATION.read_text(encoding="utf-8"))
 
     with pytest.raises(branch.BranchError, match="MAIN path"):
-        branch.validate(store, branch.BranchSpec(
-            source_run_dir=run_dir, branch_message_id=path_ids[-1] + 1000,
-            continuation_prompt="continue"))
+        branch.validate(store, dataclasses.replace(
+            spec_at(store, run_dir, path_ids[-1]), branch_message_id=path_ids[-1] + 1000))
 
 
 def test_a_branch_point_mid_tool_pair_is_refused(tmp_path):
@@ -659,13 +648,9 @@ def test_a_branch_point_mid_tool_pair_is_refused(tmp_path):
         tmp_path, investigation=GOLDEN_INVESTIGATION.read_text(encoding="utf-8"))
 
     with pytest.raises(branch.BranchError, match="unanswered"):
-        branch.validate(store, branch.BranchSpec(
-            source_run_dir=run_dir, branch_message_id=path_ids[3],
-            continuation_prompt="continue"))
+        branch.validate(store, spec_at(store, run_dir, path_ids[3]))
 
-    assert branch.validate(store, branch.BranchSpec(
-        source_run_dir=run_dir, branch_message_id=path_ids[4],
-        continuation_prompt="continue")) is None, (
+    assert branch.validate(store, spec_at(store, run_dir, path_ids[4])) is None, (
         "the tool RETURN one row later was refused too, so the arm above is satisfied by a "
         "guard that refuses every branch point rather than by the pair rule")
 
@@ -699,27 +684,32 @@ def test_a_snapped_frontier_is_refused_by_its_own_name(tmp_path):
     assert tip != path_ids[-1], "the two extra rows did not land"
 
     with pytest.raises(branch.BranchError, match="snapped"):
-        branch.validate(store, branch.BranchSpec(
-            source_run_dir=run_dir, branch_message_id=tip, continuation_prompt="continue"))
+        branch.validate(store, spec_at(store, run_dir, tip))
 
 
 # ==========================================================================
 # the two named seams
 # ==========================================================================
 
-def test_branch_spec_carries_the_three_branch_coordinates():
+def test_branch_spec_carries_the_four_branch_coordinates():
     """    `BranchSpec` is the whole of what a resume is told: which run to read the capture and
-    the document from, which of its messages to fork at, and what to say on arrival.
+    the document from, which of its messages to fork at, what to say on arrival, and WHEN the
+    branch point was.
 
     `continuation_prompt` is a FIELD rather than something the seam composes because the
     08-16 experiment's own caveat was that its continuation wording biased the run toward
-    closing over gathering — the prompt is part of the measured instrument."""
+    closing over gathering — the prompt is part of the measured instrument.
+
+    `as_of` joined them in #947 and is required for the mirror reason: it is the moment every
+    payload of the episode is stamped and every open window is closed at, so a resume that
+    could be spelled without one would stamp the afternoon it happened to run. Its own
+    demands — the derivation, and `validate`'s cross-check — are `test_947_clock.py`."""
     # provenance: design M1 — "takes (session, branch_message_id, continuation_prompt, verbs)";
     # `verbs` is the oracle registry and lands with the oracle, not with the runtime half.
     branch = branch_mod()
     names = [f.name for f in dataclasses.fields(branch.BranchSpec)]
-    assert names == ["source_run_dir", "branch_message_id", "continuation_prompt"], (
-        f"BranchSpec's coordinates are not the three the design names: {names}")
+    assert names == ["source_run_dir", "branch_message_id", "continuation_prompt", "as_of"], (
+        f"BranchSpec's coordinates are not the four the design names: {names}")
 
 
 def test_the_driver_carries_the_two_resume_seams():

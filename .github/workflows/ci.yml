@@ -600,6 +600,23 @@ jobs:
       - name: Unguarded shared-tree-write gate (#771 M3 — hard-gated census modules + baseline-ratcheted)
         run: defender/.venv/bin/python scripts/lint/lint_unguarded_tree_write.py
 
+      # The READ-side twin of the gate above. #771 M3 settled writing into a box-writable tree
+      # and left reading alone, so the same directory this repo refuses to write through
+      # unexamined was trusted when stat'ed and copied: is_file()/is_dir()/shutil.copy* all
+      # follow a link, so a planted one is admitted as an artifact and its TARGET's bytes are
+      # copied in under the artifact's name. defender._run_paths.artifact_file / artifact_dir
+      # are lstat and judge the entry itself. Scoped to the LINT_TREE_READER_MODULES census.
+      - name: Link-following tree-read gate (lstat the entry, not its target — baseline-ratcheted)
+        run: defender/.venv/bin/python scripts/lint/lint_tree_read_follows_link.py
+
+      # __dataclass_fields__ where dataclasses.fields() is meant. The raw mapping also holds
+      # ClassVar/InitVar pseudo-fields, which the generated __init__ does not accept — so
+      # splatting it into replace() raises, and in #965 it raised from a line whose comment
+      # asserted it could not, outside the handler that turns a fault into a ledger row.
+      # Flat ban with an EMPTY baseline: fields() answers every use in this tree.
+      - name: Dataclass pseudo-field gate (fields() over __dataclass_fields__ — empty baseline)
+        run: defender/.venv/bin/python scripts/lint/lint_dataclass_fields.py
+
       # Text reads/writes under defender/ that decode or encode under the AMBIENT
       # LOCALE instead of pinning encoding="utf-8" (#588/#589). The corpora are UTF-8
       # and the CLIs print them, so an unpinned read raises where the locale is ascii
