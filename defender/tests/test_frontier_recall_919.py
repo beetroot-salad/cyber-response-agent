@@ -576,8 +576,11 @@ def test_an_edge_selector_matches_only_when_every_field_it_declares_is_equal(tmp
     hits = match_lessons(_frontier(_FIXTURE_DOCS["authz declared"]), corpus, top_k=10)
 
     assert _names(hits) == ["edge-both", "edge-kind-only"]
-    # ...and specificity is the count of DECLARED fields, so the two-field selector ranks first
-    assert [h.score for h in hits] == [2, 1]
+    # ...and each declared field adds its own weight, so the two-field selector ranks first.
+    # The numbers are the edge lane's floor plus `rel`, not a count of fields: a count floored
+    # this whole lane below the node lane's floor, which is #935's defect 2. `ANCHOR_KIND_
+    # WEIGHT` + `REL_WEIGHT` against `ANCHOR_KIND_WEIGHT` alone.
+    assert [h.score for h in hits] == [4, 3]
 
 
 # --------------------------------------------------------------------------- #
@@ -934,7 +937,10 @@ def test_an_edge_selector_can_key_on_the_observational_authority(tmp_path):
     assert _names(hits) == ["right-authority"], (
         "an edge selector matched a contract whose observational authority differs"
     )
-    assert hits[0].score == 2, "both declared fields should count toward specificity"
+    assert hits[0].score == 4, (
+        "both declared fields should count toward specificity — `ANCHOR_KIND_WEIGHT` plus "
+        "`AUTH_KIND_WEIGHT`"
+    )
 
 
 def test_matched_names_the_frontier_item_rather_than_the_selector(tmp_path):
@@ -1176,10 +1182,21 @@ v-008|process|??|nc[pid=4242]|loginuid=??
     assert hits["aaa-wholly-open-class"] == 2, (
         "`nginx` matched a `??` — it pinned nothing and must not outscore the attribute"
     )
-    assert hits["zzz-names-the-open-attribute"] == 2
-    assert hits["aaa-wholly-open-class"] <= hits["zzz-names-the-open-attribute"], (
+    assert hits["zzz-names-the-open-attribute"] == 3, (
+        "naming an `attrs.<name>` slot is a claim about what the document HOLDS, where "
+        "`class` and `ident` are cells every vertex carries — `ATTR_SLOT_WEIGHT` (#935)"
+    )
+    assert hits["aaa-wholly-open-class"] < hits["zzz-names-the-open-attribute"], (
         "a class literal the document never mentions outranked the exact open slot"
     )
+
+    # ...and STRICTLY, which is the half this test could not see (#935). It ran at `top_k=9`
+    # and asserted only scores, so it stayed green while the two TIED at 2 and the emitted
+    # top-3 was decided by the alphabet — cutting the loginuid lesson its own docstring is
+    # about. The ordering at the real cut is the observable.
+    assert _names(match_lessons(_frontier(open_class), corpus, top_k=1)) == [
+        "zzz-names-the-open-attribute"
+    ], "the exact open slot must lead the block, not lose a coin-flip to `aaa`"
 
 
 def test_the_frontier_and_the_benign_gate_agree_on_a_shared_contract_id(tmp_path):
@@ -1389,7 +1406,12 @@ def test_the_two_node_lanes_share_one_ranking_scale(tmp_path):
     A tilt toward either half would bury one kind of advice behind the other regardless of
     how precisely it speaks to the document."""
     corpus = _corpus(tmp_path)
-    _write_lesson(corpus, "aaa-held-loose", observed=("type: identity, slot: attrs.loginuid",))
+    # BOTH selectors are `type` + a universal cell, so the two carry the same specificity and
+    # only the LANE differs — which is the claim. The held side used to name `attrs.loginuid`,
+    # and that stopped being an equal-specificity pair once the scale learned to tell a named
+    # attribute from a cell every vertex has (#935): the fixture would have been asserting
+    # that a more specific selector scores the same, not that the lanes are level.
+    _write_lesson(corpus, "aaa-held-loose", observed=("type: identity, slot: class",))
     _write_lesson(corpus, "zzz-open-loose", nodes=("type: process, slot: class",))
     doc = PROLOGUE + SETTLED_BLOCK + OPEN_CLASS_BLOCK
     hits = _lessons_frontier().match_lessons(_frontier(doc), corpus)

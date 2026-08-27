@@ -262,6 +262,51 @@ SLOTS: dict[str, tuple[str, ...]] = {
 }
 
 
+#: The SHAPE of a `class` cell, per vertex type — how many slash-separated slots it carries,
+#: and which enum fills each one. `skills/invlang/SKILL.md` §Classification grammar states this
+#: table in prose and nothing in the tree could read it, which is what deferred all three of
+#: #935's defects at once: the frontier retrieval had to GUESS a cell's arity from the cell
+#: itself, and a cell that names fewer slots than its type has says nothing about WHICH ones it
+#: left out. `class=ip-only/??` on a `compute` vertex is the same claim as `ip-only/??/??`, and
+#: only the type can say so.
+#:
+#: Spelled as the `SLOTS` keys rather than as a bare integer, so the table carries which
+#: vocabulary fills each position and the assert below can hold it against the registry. An
+#: arity that is only a number drifts from the grammar it claims to describe with nothing to
+#: notice — and the enum names are what an author is sent to look up when a slot is wrong.
+#:
+#: A type absent here takes ONE slot, which is why `session`, `process` and the artifact types
+#: are not listed at 1 rather than listed: SKILL.md gives them as "single sub-kind token" by
+#: DEFAULT, so an entry per type would be a second place to add one whenever a type is minted.
+CLASS_GRAMMAR: dict[str, tuple[str, ...]] = {
+    "compute": ("compute.role", "compute.zone", "compute.provenance"),
+    "identity": ("identity.kind", "identity.provenance"),
+    "application": ("application.vendor", "application.trust"),
+}
+
+#: What a type absent from `CLASS_GRAMMAR` carries — SKILL.md's "all others".
+DEFAULT_CLASS_ARITY: int = 1
+
+assert set(CLASS_GRAMMAR).issubset(TYPES), (
+    "CLASS_GRAMMAR keys must be known vertex types"
+)
+assert all(slot in SLOTS for slots in CLASS_GRAMMAR.values() for slot in slots), (
+    "every CLASS_GRAMMAR position must name a slot `enum` can answer"
+)
+
+
+def class_arity(vertex_type: str) -> int:
+    """How many slots a `class` cell on `vertex_type` carries.
+
+    Answers `DEFAULT_CLASS_ARITY` for anything not in `CLASS_GRAMMAR`, INCLUDING a type outside
+    `TYPES` — this table states the grammar, it does not police the type, and
+    `_check_vocab_vertices` is where an unknown type is refused. The one caller
+    (`scripts/lessons/lessons_frontier._class_pins`) widens to whatever the cell itself declares
+    before using this, so an off-vocabulary type is never TRUNCATED by the default here.
+    """
+    return len(CLASS_GRAMMAR.get(vertex_type, ())) or DEFAULT_CLASS_ARITY
+
+
 def list_slots() -> list[str]:
     return sorted(SLOTS)
 
