@@ -46,6 +46,7 @@ from defender.scripts.lessons import lessons_frontier as LF  # noqa: E402
 from defender.skills.invlang import vocab  # noqa: E402
 from defender.skills.invlang.frontier import frontier_at, frontier_from_text  # noqa: E402
 from defender.skills.invlang.validate import diagnose  # noqa: E402
+from defender.tests._lessons_corpus import _write_lesson  # noqa: E402
 
 CORPUS = DEFENDER / "lessons"
 SKILL_MD = DEFENDER / "skills" / "invlang" / "SKILL.md"
@@ -64,11 +65,17 @@ v-002|identity|user/known-corp|jsmith|uid=1000;loginuid=-1
 #: The lesson the whole lane exists to reach, and the one every defect cut.
 LOGINUID_LESSON = "falco-loginuid-tty-non-interactive-not-docker-exec"
 
-#: The committed runs the issue replayed. `turnN-A` lives under `learning/runs/` and may be
-#: absent from a slimmed tree, so it is skipped rather than assumed; the e2e fixture is not.
+#: The two runs the issue replayed, at paths git actually tracks.
+#:
+#: `turnN-A` is COPIED into `_golden_invlang/` rather than read from `learning/runs/turnN-A/`,
+#: which is where the run itself lives and which `.gitignore:91` excludes — runs are kept out
+#: of the repo on purpose (`defender/CLAUDE.md`). Reading it there made every assertion about
+#: it a skip on any machine but the one that produced it, so the fence-by-fence evidence for
+#: #935's defect 2 could never run in CI. It is the document #919 was filed about and the one
+#: this lane is judged on; committing the ~11KB is what makes the claim checkable by anyone.
 REPLAYED_RUNS = (
     ("golden-sshpivot-ab3", DEFENDER / "fixtures-e2e" / "golden-sshpivot-ab3" / "investigation.md"),
-    ("turnN-A", DEFENDER / "learning" / "runs" / "turnN-A" / "investigation.md"),
+    ("turnN-A", DEFENDER / "tests" / "_golden_invlang" / "turnN-A.investigation.md"),
 )
 
 
@@ -134,9 +141,14 @@ def test_the_arity_table_says_what_the_skill_documents():
     refactor later, so this parses the prose and holds the code against it: the arity, and the
     ENUM NAME filling each position, both have to agree.
     """
-    rows = re.findall(
-        r"^\|\s*`?([a-z -]+)`?\s*\|\s*`?([^|`]+)`?\s*\|", SKILL_MD.read_text(encoding="utf-8"), re.M
-    )
+    # SCOPED to the section, not to the whole file. The row pattern is generic enough to hit
+    # any table anywhere in SKILL.md whose first column happens to be a vertex type, and the
+    # dict below is last-wins — so an unrelated table added later would silently redefine what
+    # this test holds the code against, or fail it somewhere the grammar is not even discussed.
+    body = SKILL_MD.read_text(encoding="utf-8")
+    section = re.search(r"^## Classification grammar$(.*?)^#", body, re.M | re.S)
+    assert section, "SKILL.md no longer has a §Classification grammar section"
+    rows = re.findall(r"^\|\s*`?([a-z -]+)`?\s*\|\s*`?([^|`]+)`?\s*\|", section.group(1), re.M)
     documented = {
         t.strip(): g.strip() for t, g in rows if t.strip() in vocab.TYPES or t.strip() == "all others"
     }
@@ -256,12 +268,28 @@ def test_the_filed_reproduction_reaches_the_loginuid_lesson_at_the_real_cut():
     `top_k=9` and asserted only scores, which is precisely why it stayed green through this."""
     assert diagnose(TWO_VERTEX_DOC, None) == [], "the reproduction is no longer a clean document"
 
-    top = _names(_match(TWO_VERTEX_DOC))
+    hits = _match(TWO_VERTEX_DOC)
+    top = _names(hits)
     assert LOGINUID_LESSON in top, (
         f"#919's motivating lesson is still cut from its own reproduction; got {top}"
     )
-    # ...and it LEADS, rather than surviving on the alphabet a second time.
-    assert top[0] == LOGINUID_LESSON, f"the exact-attribute lesson is not first; got {top}"
+
+    # ...and it is IN because it outscores the two bare-`ident` lessons that cut it, not
+    # because it happens to sort ahead of them. Asserted as a score relation rather than as
+    # `top[0] == ...`, and the difference is whether this test survives its own corpus:
+    # `defender/lessons/` is machine-authored and the curator commits to it one batch at a
+    # time (`defender/CLAUDE.md`), so a NEW lesson keyed on the same `attrs.loginuid` cell
+    # ties at the same score on the same item — `_spread_over_items` cannot separate two
+    # lessons about one cell, so the `name` tiebreak decides between them. Pinning the
+    # position would then red CI in a file nobody edited, and would be pinning the one thing
+    # this lane genuinely cannot promise.
+    by_name = {h.name: h.score for h in _match(TWO_VERTEX_DOC, top_k=99)}
+    cut_it = ["container-id-anchor-before-uid-lookup", "container-identity-gap-not-terminal"]
+    for loser in cut_it:
+        assert by_name[loser] < by_name[LOGINUID_LESSON], (
+            f"{loser} keys on a bare `slot: ident` and still scores at or above the lesson "
+            f"naming the exact attribute the document holds"
+        )
 
 
 def test_a_named_attribute_outscores_a_cell_every_vertex_carries():
@@ -325,8 +353,6 @@ def test_the_edge_lane_wins_a_slot_on_score_rather_than_on_its_name(tmp_path):
     carry its own weight — matching one of the run's ~2 open contracts under a named anchor is
     a stronger claim about this document than matching one of its ~25 node cells by type plus a
     universal cell, and `ANCHOR_KIND_WEIGHT` is where that is written down."""
-    from defender.tests.test_frontier_recall_919 import _write_lesson
-
     assert diagnose(CONTRACT_AND_THREE_CELLS_DOC, None) == [], "the fixture is not clean"
 
     corpus = tmp_path / "lessons"
@@ -359,8 +385,7 @@ def test_the_block_moves_on_the_append_that_opens_an_authorization_question(labe
     cannot see this: by then the list has moved for other reasons.
 
     Asserted on the RENDERED block, which is the thing the diff actually compares."""
-    if not path.is_file():
-        pytest.skip(f"{label} is not in this tree ({path})")
+    assert path.is_file(), f"{label}'s document is tracked and must be present ({path})"
     text = path.read_text(encoding="utf-8")
     total = frontier_at(text, sys.maxsize).total
 
@@ -402,8 +427,6 @@ def test_two_lessons_about_one_open_thing_do_not_take_the_whole_block(tmp_path):
 
     Three lessons about one cell is strictly less of the frontier covered than three about
     three, and the runner-up is not lost — it sits behind the leader on every OTHER item."""
-    from defender.tests.test_frontier_recall_919 import _write_lesson
-
     corpus = tmp_path / "lessons"
     corpus.mkdir()
     same = ("type: identity, slot: attrs.loginuid",)
@@ -461,8 +484,7 @@ def test_no_replayed_block_leaves_an_open_thing_unrepresented(label, path):
     The bound is `min(top_k, distinct items matched)`, not `top_k` — an early fence may simply
     not have three different open things to speak to, and filling the third slot with the
     runner-up on a covered item is the right answer there."""
-    if not path.is_file():
-        pytest.skip(f"{label} is not in this tree ({path})")
+    assert path.is_file(), f"{label}'s document is tracked and must be present ({path})"
     text = path.read_text(encoding="utf-8")
     for n in range(frontier_at(text, sys.maxsize).total + 1):
         frontier = frontier_at(text, n).frontier
@@ -483,8 +505,7 @@ def test_the_loginuid_lesson_survives_every_fence_of_its_own_run():
     contracts on this run are never discharged, so the edge lane holds a slot for the rest of
     the run."""
     _, path = REPLAYED_RUNS[1]
-    if not path.is_file():
-        pytest.skip(f"turnN-A is not in this tree ({path})")
+    assert path.is_file(), f"turnN-A's document is tracked and must be present ({path})"
 
     text = path.read_text(encoding="utf-8")
     holds = [
@@ -497,3 +518,119 @@ def test_the_loginuid_lesson_survives_every_fence_of_its_own_run():
         assert LOGINUID_LESSON in _names(
             LF.match_lessons(frontier_at(text, n).frontier, CORPUS)
         ), f"the loginuid lesson fell out of the block at fence {n}, where the run holds the value"
+
+
+# --------------------------------------------------------------------------- #
+# the gate the spread sits in front of
+# --------------------------------------------------------------------------- #
+
+#: Two `compute` vertices, both with an open class triple and an open ident, differing only in
+#: WHICH of them carries the `ip-only` role. The pair produces the same lessons at the same
+#: scores and a different `matched` winner — see the test below for why that combination is the
+#: one shape that can defeat the emission gate.
+def _two_compute_doc(first: str, second: str) -> str:
+    return f"""```invlang
+:V prologue.vertices [id|type|class|ident|attrs?]
+v-001|compute|{first}|??|knowledge=partial
+v-004|compute|{second}|??|knowledge=partial
+```
+"""
+
+
+def test_moving_which_vertex_wins_a_tie_does_not_re_staple_the_same_lessons(tmp_path):
+    """CLAIM: `_frontier_recall` stays quiet when the lesson set and its scores are unchanged,
+    however the frontier re-shuffles WHICH item each lesson matched on.
+
+    THE REGRESSION `_spread_over_items` INTRODUCED, and the reason that gate now sorts. Its
+    own comment already refused to compare `matched`: it names whichever frontier item won
+    `_best_match`'s `max`, `max` returns the FIRST maximal element, so declaring a second
+    equally-scoring vertex flips it while the lesson set, the ranking and the frontmatter stay
+    byte-identical. Re-emitting on that re-staples ~1.5KB of precedent the model already holds.
+
+    The spread made the emitted ORDER a function of `matched`, so an ORDERED comparison of
+    `(path, score)` let that flip decide emission through the back door. Below, `ip-only` sits
+    on `v-001` in one document and on `v-004` in the other: the top lesson scores 3 either way,
+    on a different vertex — which changes which item is already covered when the runners-up are
+    placed, and permutes all three. Same three lessons, same three scores, different order.
+
+    DRIVEN THROUGH THE GATE, and the two documents are alternatives rather than an append and
+    its successor. That is deliberate and worth stating: `_tool_append_block` is append-only and
+    a refinement cannot un-declare a class, so this exact permutation is hard to reach by
+    ordinary document growth — the defect is a latent one. `_frontier_recall` takes the two
+    texts directly, which is the seam that makes the invariant testable at all, and the
+    invariant is what the gate promises rather than what today's documents happen to exercise."""
+    from defender.runtime.tools import _frontier_recall
+    from defender.tests.test_frontier_recall_919 import _main_deps
+
+    deps, _run, dfn = _main_deps(tmp_path)
+    corpus = dfn / "lessons"
+    corpus.mkdir()
+    _write_lesson(corpus, "aaa-any-compute-class", nodes=("type: compute, slot: class",))
+    _write_lesson(corpus, "bbb-ip-only", nodes=("type: compute, class: ip-only, slot: class",))
+    _write_lesson(corpus, "ccc-any-compute-ident", nodes=("type: compute, slot: ident",))
+
+    before = _two_compute_doc("ip-only/??/??", "??/??/??")
+    after = _two_compute_doc("??/??/??", "ip-only/??/??")
+
+    # The fixture only tests the gate if the two documents really are the churn shape: same
+    # lessons at the same scores, different order. Asserted rather than assumed — a corpus or
+    # weight change that broke the permutation would make the gate assertion below vacuous.
+    ranked = [
+        [(h.name, h.score) for h in LF.match_lessons(frontier_from_text(doc), corpus)]
+        for doc in (before, after)
+    ]
+    assert sorted(ranked[0]) == sorted(ranked[1]), "the fixture no longer holds scores equal"
+    assert ranked[0] != ranked[1], (
+        "the fixture no longer permutes the block — it cannot test the gate"
+    )
+    # ...and the frontier really did move, so the CHEAPER gate above this one is not what is
+    # keeping the block quiet. Without this the test passes against a `return ""` at the top.
+    assert frontier_from_text(before) != frontier_from_text(after)
+
+    assert _frontier_recall(deps, before, after) == "", (
+        "the same three lessons at the same three scores were re-stapled because one hit's "
+        "winning item moved from v-001 to v-004"
+    )
+    # ...and the gate is not simply mute: a frontier that reaches a DIFFERENT lesson still
+    # emits, so the assertion above is about `matched` rather than about a broken corpus.
+    opened = before + """```invlang
+:V prologue.vertices [id|type|class|ident|attrs?]
+v-007|identity|user/known-corp|jsmith|loginuid=??
+```
+"""
+    _write_lesson(corpus, "ddd-loginuid", nodes=("type: identity, slot: attrs.loginuid",))
+    assert "ddd-loginuid" in _frontier_recall(deps, before, opened), (
+        "the gate stayed quiet on an append that reached a lesson it had not shown"
+    )
+
+
+def test_an_open_selector_slot_pins_nothing_against_an_open_case_slot(tmp_path):
+    """CLAIM: a class pattern spelled `??` says as little as `*` does — it neither pins nor
+    anchors against a case slot that is also open.
+
+    The inversion this scoring exists to refuse, wearing the open marker instead of a class
+    literal. `??` compares EQUAL to an open case slot, so it set `anchored` and then collected
+    every following slot as a pin: `??/internet/novel` against `??/??/??` scored a full pinned
+    triple for a selector that agrees with the document about nothing, where the honest
+    `*/internet/novel` scores zero. `learning/author/lessons/prompt.md` steers authors off
+    `class: '*'` because a bare `*` opens a YAML alias — which is exactly what makes `??` the
+    spelling they reach for.
+
+    Pre-existing, and harmless while every node selector scored 2; the weights turned a
+    fabricated pin into a block-saturating score."""
+    wholly_open = "??/??/??"
+    assert LF._class_pins("??/internet/novel", wholly_open, "compute") == 0, (
+        "an all-open selector anchored on the open marker and collected the rest as pins"
+    )
+    assert LF._class_pins("*/internet/novel", wholly_open, "compute") == 0, (
+        "the honest spelling of the same non-statement changed answer"
+    )
+    # ...and NARROWED, not widened: `??` against a SETTLED slot is still a disagreement, so it
+    # must still refuse rather than wildcard through.
+    assert LF._class_pins("??/internet", "bastion/??/??", "compute") is None, (
+        "an open selector slot started matching a settled case slot"
+    )
+    # ...and a real pin beside it is untouched.
+    assert LF._class_pins("ip-only/??", "ip-only/??/??", "compute") == 1, (
+        "the open slot stopped costing nothing where the other slot genuinely anchored"
+    )

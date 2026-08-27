@@ -287,39 +287,9 @@ def _lessons_frontier():
 # corpora
 # --------------------------------------------------------------------------- #
 
-def _write_lesson(
-    corpus: Path,
-    name: str,
-    *,
-    nodes: tuple[str, ...] = (),
-    edges: tuple[str, ...] = (),
-    observed: tuple[str, ...] = (),
-    signature: str = "v2-cross-tier-ssh-pivot",
-    filename: str | None = None,
-    raw_nodes: str | None = None,
-) -> Path:
-    """One lesson file. `nodes` / `edges` are YAML FLOW mappings written exactly as the
-    design spells them (`type: process, slot: attrs.loginuid`), so the fixture and the doc
-    cannot drift on spelling."""
-    lines = [
-        f"name: {name}",
-        f"description: {name} description",
-        f"source_signature: [{signature}]",
-    ]
-    if observed:
-        lines.append("observed_nodes:")
-        lines += [f"  - {{{sel}}}" for sel in observed]
-    if raw_nodes is not None:
-        lines.append(f"frontier_nodes: {raw_nodes}")
-    elif nodes:
-        lines.append("frontier_nodes:")
-        lines += [f"  - {{{sel}}}" for sel in nodes]
-    if edges:
-        lines.append("frontier_edges:")
-        lines += [f"  - {{{sel}}}" for sel in edges]
-    path = corpus / (filename or f"{name}.md")
-    path.write_text("---\n" + "\n".join(lines) + "\n---\n\nlesson body\n", encoding="utf-8")
-    return path
+# `_write_lesson` lives in `_lessons_corpus` so a second suite can use it without
+# importing this COLLECTED module (which would load it twice in one session).
+from defender.tests._lessons_corpus import _write_lesson  # noqa: E402
 
 
 def _corpus(parent: Path, name: str = "lessons") -> Path:
@@ -1431,9 +1401,11 @@ def test_the_shipped_corpus_reaches_the_motivating_investigation(tmp_path):
     case whose report asserted an attack chain that did not happen — against the REAL 16-file
     corpus. It is the only test here that can tell "the mechanism works" from "the mechanism
     works on documents written to suit it"."""
-    real = Path(__file__).resolve().parents[1] / "learning" / "runs" / "turnN-A" / "investigation.md"
-    if not real.is_file():
-        pytest.skip(f"the motivating investigation is not in this tree ({real})")
+    # The COMMITTED copy under `_golden_invlang/`, not `learning/runs/turnN-A/` — that path is
+    # where the run lives and `.gitignore:91` excludes it, so this test, the repo's north star
+    # for the whole lane, skipped everywhere but the machine that produced the run (#935).
+    real = Path(__file__).resolve().parent / "_golden_invlang" / "turnN-A.investigation.md"
+    assert real.is_file(), f"the motivating investigation is tracked and must be present ({real})"
     corpus = Path(__file__).resolve().parents[1] / "lessons"
 
     hits = _names(_lessons_frontier().match_lessons(

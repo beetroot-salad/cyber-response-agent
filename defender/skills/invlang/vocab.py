@@ -303,8 +303,14 @@ def class_arity(vertex_type: str) -> int:
     `_check_vocab_vertices` is where an unknown type is refused. The one caller
     (`scripts/lessons/lessons_frontier._class_pins`) widens to whatever the cell itself declares
     before using this, so an off-vocabulary type is never TRUNCATED by the default here.
+
+    ABSENCE is the question, not falsiness (`defender/CLAUDE.md` §Conventions: prefer
+    `is not None` over `or`). `len(...) or DEFAULT_CLASS_ARITY` answers 1 for a type entered
+    here as `()` — the spelling for "this type carries no class cell at all" — which is the
+    one answer that entry cannot mean.
     """
-    return len(CLASS_GRAMMAR.get(vertex_type, ())) or DEFAULT_CLASS_ARITY
+    slots = CLASS_GRAMMAR.get(vertex_type)
+    return DEFAULT_CLASS_ARITY if slots is None else len(slots)
 
 
 def list_slots() -> list[str]:

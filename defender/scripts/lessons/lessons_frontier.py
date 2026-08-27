@@ -116,9 +116,17 @@ WILDCARD = "*"
 #      cells by type plus a universal cell — and the count-of-fields scale encoded exactly the
 #      opposite. Hence `ANCHOR_KIND_WEIGHT` at 3.
 #
-# The ranges overlap on purpose: node runs 2..6 (`type` + an attrs slot + up to a pinned class
-# triple), edge runs 3..5. Neither lane floors below the other and neither can shut the other
-# out — which is the property "one `max` over two lanes" needed all along and did not have.
+# The ranges overlap on purpose: on a well-formed document node runs 2..6 (`type` + an attrs
+# slot + up to a pinned class triple) and edge runs 3..5. The node lane still FLOORS lower —
+# 2 against 3 — and that is the point rather than an oversight: what the old scale got wrong
+# was that the edge lane could never reach a node match at all, and what matters is that
+# neither lane can now shut the other out. The overlap is where that is written.
+#
+# The node CEILING is a property of the document, not of this table: `_class_pins` widens
+# arity to `max(the type's grammar, what the cell declares)`, so a mis-authored class cell
+# carrying five slots against a five-slot selector pins 5 and scores 8. Both sides have to be
+# wrong for that, and nothing validates class arity — so read 6 as the well-formed ceiling,
+# not as a bound.
 #
 # WEIGHTS ARE HALF OF IT. Two selectors at their lanes' floors are genuinely equally specific
 # and no honest weight orders them, so ties are a permanent feature of any scale here rather
@@ -253,7 +261,7 @@ def _class_pins(selector_class: str, case_class: str, vertex_type: str) -> int |
     `name` tiebreak picks between them.
     """
     sel = class_slots(selector_class)
-    case = list(class_slots(case_class))
+    case = class_slots(case_class)  # a fresh list per call, so the padding below may mutate it
 
     # NORMALISED TO THE TYPE, not guessed from the cell (#935). Class-tuple arity is a
     # documented function of the vertex TYPE (SKILL.md §Classification grammar, now readable as
@@ -291,6 +299,20 @@ def _class_pins(selector_class: str, case_class: str, vertex_type: str) -> int |
     anchored = False
     for i, s in enumerate(sel):
         if not s or s == WILDCARD:
+            continue
+        # A selector slot spelled `??` against a case slot that is ALSO open is two cells
+        # agreeing they are unsettled — the same non-statement a bare `*` makes, so it
+        # neither pins nor anchors. Crediting it was the inversion this function exists to
+        # refuse, wearing the open marker instead of a class literal: `??/internet/novel`
+        # against `??/??/??` anchored on slot 0 and then collected slots 1 and 2 as pins, so
+        # a selector that agreed with the document about NOTHING scored a full pinned triple
+        # and outranked every honest match. `learning/author/lessons/prompt.md` steers
+        # authors off `class: *` (it opens a YAML alias), which is exactly what makes `??`
+        # the spelling they reach for instead.
+        #
+        # Only when BOTH sides are open: `??` against a SETTLED slot falls through and still
+        # earns the refusal below, so this narrows the credit without widening the match.
+        if s == OPEN_MARKER and is_open_slot(case[i]):
             continue
         pinned += 1
         if s == case[i]:
@@ -527,10 +549,18 @@ def _spread_over_items(ranked: list[Hit]) -> list[Hit]:
     `test_matched_names_the_frontier_item_rather_than_the_selector` pins that. Two lessons
     scoring against the same cell or the same contract produce the same string by construction.
 
-    TOTAL AND STABLE, because `_frontier_recall` decides whether to inject by DIFFING two
-    rendered blocks: `ranked` arrives sorted by `(-score, name)` and this is a stable
+    TOTAL AND STABLE: `ranked` arrives sorted by `(-score, name)` and this is a stable
     re-grouping of it, so equal-ranked hits keep that order and two calls on one frontier
     cannot disagree.
+
+    Stable is NOT the same as order-insensitive, and the difference is a gate. This function
+    makes the emitted ORDER a function of `matched`, and `matched` names whichever frontier
+    item won `_best_match`'s `max` — which `max` picks as the FIRST maximal element, so
+    declaring a second, equally-scoring vertex flips it with nothing about the lesson set
+    changing. `runtime/tools._frontier_recall` decides whether to inject by comparing WHICH
+    lessons at WHICH scores, and it sorts that comparison for exactly this reason; do not
+    "simplify" it back to a list comparison, which would re-staple a byte-identical set of
+    lessons every time one hit's winning item moved.
     """
     seen: dict[str, int] = {}
     keyed: list[tuple[int, int, Hit]] = []
