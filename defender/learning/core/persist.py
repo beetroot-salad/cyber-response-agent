@@ -196,7 +196,16 @@ def _copy_shared_inputs(run_dir: Path, learning_run_dir: Path) -> None:
                 # hand-edit and re-drive out of `queue/failed/`.
                 from defender.skills.invlang.validate import validate_companion
 
-                errors = validate_companion(src.read_text(encoding="utf-8"), None)
+                # THE DOCUMENT IS ITS OWN BASELINE. This is a finished run, not a write: the
+                # bytes are already committed and no repair can reach them. The surface rule
+                # (#932) refuses only the unfenced block headers a WRITE introduces, so a
+                # `None` baseline would read every one in the file as newly written and send
+                # a whole run to `queue/failed/` for prose that has been there since the
+                # append that wrote it. Passing the text as both halves makes the introduced
+                # set empty; the append-only comparison against itself is likewise a no-op,
+                # which is what `None` already meant here.
+                committed = src.read_text(encoding="utf-8")
+                errors = validate_companion(committed, committed)
                 if errors:
                     raise RunUnprocessable(
                         f"investigation.md failed invlang validation on the copy path "

@@ -412,6 +412,10 @@ def _lead_ids_from_companion(companion: CompanionBody) -> set[str]:
     return {
         f["id"]
         for f in companion.get("findings", [])
+        # lint-selection: ok — reads bytes the write gate already accepted. `:L findings` is
+        # the sole site that declares a lead and `validate._check_lead_refs` refuses a
+        # malformed id there, so nothing this could drop reaches a persisted document. Defence
+        # in depth over validated input, not a selection that decides anything.
         if isinstance(f, dict) and isinstance(f.get("id"), str)
         and _LEAD_ID_RE.match(f["id"])
     }
