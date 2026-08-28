@@ -1,8 +1,9 @@
 {
   "//": "lint_shippable_surface baseline — env-specific (vendor) tokens in the shipped defender/ surface. Fingerprint is file:token (no line number). CI fails on a file:token absent here. Regenerate: python scripts/lint/lint_shippable_surface.py --update-baseline. Annotate intentional entries (e.g. \"intentional: protocol-surface identifier\"); \"\" means un-triaged debt to fix or annotate.",
   "entries": {
-    "defender/runtime/driver.py:elastic": "intentional (#632): GATHER_PAIRS is the c18 census verb grant — an enumerated, reviewable per-system allowlist, not incidental vendor coupling",
-    "defender/runtime/lead_zero.py:elastic": "intentional (#808): item 1/3's primary path is Elastic-specific by the design's own stated scope (building-block alerts keyed on kibana.alert.group.id, an Elastic/Kibana field) — matches driver.py's own accepted GATHER_PAIRS entry above, not incidental vendor coupling. Should widen if #808 ever grows a second alert source.",
-    "defender/skills/gather/verb-roster.md:elastic": "intentional (#632): generated roster, one `{system}.{verb}` entry per granted pair — regenerate via runtime.verb_roster.generate_roster, do not hand-edit"
+    "defender/runtime/_build.py:elastic": "intentional (#632): GATHER_PAIRS is the c18 census verb grant — an enumerated, reviewable per-system allowlist, not incidental vendor coupling",
+    "defender/runtime/_l0_spec.py:elastic": "intentional (#808): item 1/3's primary path is Elastic-specific by the design's own stated scope (building-block alerts keyed on kibana.alert.group.id, an Elastic/Kibana field) — matches driver.py's own accepted GATHER_PAIRS entry above, not incidental vendor coupling. Should widen if #808 ever grows a second alert source.",
+    "defender/skills/gather/verb-roster.md:elastic": "intentional (#632): generated roster, one `{system}.{verb}` entry per granted pair — regenerate via runtime.verb_roster.generate_roster, do not hand-edit",
+    "defender/runtime/_l0_capture.py:elastic": "intentional (#808): item 1/3's primary path is Elastic-specific by the design's own stated scope (building-block alerts keyed on kibana.alert.group.id, an Elastic/Kibana field) — matches driver.py's own accepted GATHER_PAIRS entry above, not incidental vendor coupling. Should widen if #808 ever grows a second alert source."
   }
 }

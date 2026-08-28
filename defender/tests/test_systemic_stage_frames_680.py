@@ -515,7 +515,9 @@ def test_d6_every_stage_boundary_grammar_uses_wrap(tmp_path, monkeypatch):
         "pipeline/oracle/sample.py",
         "author/verify_forward/checks.py",
         "author/shared.py",
-        "leads/lead_author.py",
+        # The handoff prompt is built here since `lead_author.py` became a facade — this
+        # list names the file that RENDERS a boundary, not the module a reader imports.
+        "leads/_la_handoff.py",
         "leads/pitfalls_curator.py",
     }
     called = set()

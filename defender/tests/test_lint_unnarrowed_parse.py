@@ -93,7 +93,7 @@ def _checks(findings) -> set[str]:
     return {f.fingerprint.rsplit(":", 1)[-1] for f in findings}
 
 
-# --------------------------------------------------------------- (a) it fires
+# (a) it fires
 
 
 def test_the_seam_is_flagged(tmp_path):
@@ -169,7 +169,7 @@ def test_two_same_named_siblings_get_distinct_fingerprints(tmp_path):
     }
 
 
-# ------------------------------------------------- (b) the legitimate near-misses
+# (b) the legitimate near-misses
 
 
 def test_the_validator_construction_is_not_flagged(tmp_path):
@@ -253,7 +253,7 @@ def test_tests_are_out_of_scope(tmp_path):
     assert all("prod.py" in f.fingerprint for f in _GATE._scan(tree))
 
 
-# ------------------------------------------------------------ (c) suppression
+# (c) suppression
 
 
 def test_suppression_on_the_signature(tmp_path):
@@ -302,7 +302,7 @@ def test_a_marker_buried_in_the_body_does_not_suppress(tmp_path):
     ))
 
 
-# ------------------------------------------------- (d) ScanBlind, and the ratchet
+# (d) ScanBlind, and the ratchet
 
 
 def test_unparseable_file_in_scope_is_not_silently_clean(tmp_path):
@@ -376,12 +376,12 @@ def test_the_motivating_findings_are_in_the_shipped_baseline():
     also out of the shipped baseline, so a re-widening comes back as a NEW finding and fails the
     ratchet — which is the regression this direction of the assertion protects.
 
-    `lead_zero._correlation_contract` stays open deliberately: it is the same hand-rolled half
+    `_l0_items._correlation_contract` stays open deliberately: it is the same hand-rolled half
     of `parse_iso_utc`, but it PARSES ONLY TO VALIDATE and discards the value, so no naive-vs-
     aware comparison is reachable from it. It is a debt this gate names, not one of #878's five
     reachable faults, and #878 did not widen its scope to collect it."""
     fingerprints = {f.fingerprint for f in _GATE._scan(_GATE.DEFENDER)}
-    assert "defender/runtime/lead_zero.py:_correlation_contract:unowned-iso-parse" in fingerprints
+    assert "defender/runtime/_l0_items.py:_correlation_contract:unowned-iso-parse" in fingerprints
 
     for fixed in (
         "defender/hooks/_run_dir.py:read_json_locked:unnarrowed-parse",

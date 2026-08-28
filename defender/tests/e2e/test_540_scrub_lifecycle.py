@@ -96,7 +96,10 @@ pytestmark = pytest.mark.e2e
 
 REPO_ROOT = DEFENDER.parent
 RUN_PY = DEFENDER / "run.py"
-TOOLS_PY = DEFENDER / "runtime" / "tools.py"
+#: The module holding the bash tool BODY. Not `tools.py`, which is the registration
+#: facade: the structural leg below parses the function itself, so it has to read the
+#: file that defines it.
+BASH_PY = DEFENDER / "runtime" / "_bash.py"
 GATHER_ONLY = REPO_ROOT / "scripts" / "testing" / "gather_only.py"
 
 
@@ -1276,7 +1279,7 @@ def test_no_box_failure_path_executes_in_process(tmp_path, gate_env):
         runtime_tools._tool_bash(faulting, f"cat {gate_env.run}/report.md")
     assert secret not in str(e.value)
 
-    fn = _fn_node(TOOLS_PY, "_tool_bash")
+    fn = _fn_node(BASH_PY, "_tool_bash")
     called = _call_order(fn)
     assert "run_parsed" in called, "the tool no longer executes anything; re-site this demand"
     for node in ast.walk(fn):

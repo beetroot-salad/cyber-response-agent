@@ -12,6 +12,18 @@ list empty, so the prefix has to be handed back as `message_history` or `selecti
 underflows against a store that was already right. `driver.run_investigation` does that by
 hydrating the fork it just opened; the symmetry is exact rather than approximate, because
 `fork` and `hydrate(role="send")` truncate through the same `_complete_prefix_len`.
+
+The turn-N branch: forking a run from a message in an earlier one.
+
+Split into three modules when this file reached 1197 lines:
+
+  * `_br_spec`     — what a branch request IS, and opening the store it reads from.
+  * `_br_frontier` — reading the source run: where the fences end, which leads existed,
+                     what the clock said at the branch point.
+  * `_br_seed`     — writing the sibling: the inherited prefix, evidence and lead dirs.
+
+`validate` below is what refuses a branch that would not be a faithful fork, and it is
+the reason the two halves above stay separable.
 """
 
 from __future__ import annotations
@@ -38,850 +50,42 @@ from defender._run_paths import RunPaths, artifact_dir, artifact_file
 from defender.scripts.gather_tools.record_query import is_reserved_query_id
 
 from . import session_store
-
-
-class BranchError(Exception):
-    """A branch point that cannot carry a sibling world."""
-
-
-@dataclass(frozen=True)
-class BranchSpec:
-    """One resume: which run, which message, and what to say on arrival.
-
-    `continuation_prompt` is a PARAMETER rather than something this module composes, and that
-    is deliberate — the 2026-08-16 experiment's own caveat was that its continuation wording
-    ("close it when the evidence supports a disposition") biased the run toward closing over
-    gathering. The prompt is part of the measured instrument, so it belongs to whoever is
-    running the measurement, not to the seam.
-
-    `as_of` is the branch point's own moment — the time the sibling is resuming INTO. It is
-    REQUIRED rather than defaulted, because the one wrong answer is the silent one: a spec that
-    fell back to "now" would let every sibling stamp its payloads with the afternoon it
-    executed, which is exactly the defect the field exists to remove, arriving through the
-    field itself. `branch_point_time` derives it from the source store; `validate` refuses a
-    spec whose value disagrees with that derivation, so a hand-written or copy-pasted spec
-    cannot carry another branch point's clock into this episode.
-    """
-
-    source_run_dir: Path
-    branch_message_id: int
-    continuation_prompt: str
-    as_of: datetime
-
-
-def open_source_store(run_dir: Path) -> Any:
-    """The finished run's OWN store, opened for writing.
-
-    A sibling gets a fresh run dir for its own artifacts but forks INTO the source database:
-    the prefix rows live there, and `fork` walks parents inside one transaction, so a child in
-    any other file would inherit nothing. The case pointer is what makes the source store
-    findable from a run dir alone.
-
-    `runs_base` is derived the way the WRITER derived it — `run_dir.parent`, exactly as
-    `driver._default_store_factory` did when this store was created — and then CHECKED against
-    the path the writer recorded. The check is not defensive noise: `store_path_for` resolves
-    to `runs_base.parent / "sessions"`, so a `runs_base` off by one directory level still names
-    a well-formed path, and `open_store` creates-if-missing. A wrong derivation therefore
-    returns a live handle over an EMPTY database and the fault surfaces far away, as
-    `main_session_id` finding no root session in a store that was never the right one.
-
-    Both sides are RESOLVED before they are compared, because `Path.__eq__` compares spellings
-    and the two sides are spelled by different callers. The writer recorded whatever
-    `runs_base` its run was handed; this reads whatever `source_run_dir` the branch was handed.
-    A caller that normalises — `Path(x).resolve()`, a relative path, a `..` component, or the
-    symlinked `/tmp` the default runs base lives under on macOS (`open_store`'s own comment
-    names that one) — otherwise gets this refusal for the RIGHT database, with a message
-    naming the opposite cause.
-    """
-    # RESOLVED FIRST, because `runs_base` is derived from `.parent` and `Path("run-x").parent`
-    # is `Path(".")` — a one-component relative run dir would derive the store under the
-    # PROCESS's cwd and be refused with a message naming the opposite cause. Resolving after
-    # the derivation, as the comparison below does, cannot recover the parent that was lost.
-    run_dir = Path(run_dir).resolve()
-    # ONE read of the pointer, and every way it can be malformed lands as `BranchError` — the
-    # class the driver's store-setup handler catches. A bare `KeyError`/`JSONDecodeError` from
-    # here escapes that handler and takes the process down with the wire log still registered.
-    # `store_path_for` is INSIDE it for the same reason: it raises `InvalidCaseId`, which is a
-    # bare `ValueError` and no kind of `StoreError`, so a pointer carrying a `case_id` that is
-    # not a well-formed one took exactly the exit this block exists to close.
-    try:
-        pointer = json.loads(
-            (run_dir / session_store.POINTER_FILENAME).read_text(encoding="utf-8"))
-        recorded = Path(pointer["store_path"]).resolve()
-        case_id = pointer["case_id"]
-        derived = session_store.store_path_for(case_id, runs_base=run_dir.parent).resolve()
-    except (OSError, ValueError, KeyError, TypeError) as e:
-        raise BranchError(
-            f"{run_dir} carries no readable case pointer "
-            f"({session_store.POINTER_FILENAME}): {e!r}") from e
-    if derived != recorded:
-        raise BranchError(
-            f"{run_dir} records its store at {recorded}, but its case {case_id!r} under "
-            f"runs_base {run_dir.parent} resolves to {derived} — opening the derived path "
-            "would create an empty database and lose the branch point")
-    return session_store.open_store(case_id=case_id, runs_base=run_dir.parent)
-
-
-def store_factory_for(spec: BranchSpec):
-    """A `driver.StoreFactory` that hands back the source run's store.
-
-    Signature is the factory's, `(case_id, run_dir)`, and BOTH arguments are ignored: a resumed
-    run does not mint a case, it joins one. Taking them anyway is what lets the resume ride the
-    seam `run_investigation` already has instead of growing a second one.
-    """
-    def factory(case_id: str, run_dir: Path) -> Any:  # noqa: ARG001 — the factory's shape
-        return open_source_store(spec.source_run_dir)
-
-    return factory
-
-
-def fence_count_at(
-    store: Any, session_id: str, branch_message_id: int, document: str,
-) -> int:
-    """How many invlang fences the document held at `branch_message_id`.
-
-    `frontier_at` indexes the DOCUMENT's own ````invlang` blocks, so this has to answer in that
-    unit or it silently addresses the wrong state. THREE things break the tempting shortcut of
-    counting `append_block` calls, all of them live, and all of them under-count — the silent
-    direction, because `FrontierAt.snapped` fires only when a caller asks PAST the end, so an
-    under-count branches the sibling at a frontier the run had already moved past and reports
-    nothing wrong.
-
-    - ONE CALL, SEVERAL FENCES. The text is one string and may carry any number of blocks. The
-      e2e harness's own `_split_at_fences` cuts a golden into fewer chunks than it has fences
-      whenever the two numbers disagree, which is not a test artifact — nothing asks a model
-      for one block per call either.
-    - ONE TURN, SEVERAL CALLS. `tools.py` sets `sequential=True`, which orders two calls inside
-      one response rather than preventing them, and nothing sets `parallel_tool_calls=False`.
-      This is also why the `actor` projection cannot answer it: `session_store._tool_name`
-      publishes every DISTINCT tool a message names, comma-joined, so it cannot say "twice".
-    - NOT EVERY FENCE CAME FROM AN APPEND. `lead_zero` writes lead-0's declaring `:L findings`
-      block into `investigation.md` itself, before the model's first turn, so a count derived
-      from the session alone is short by that block on EVERY real run — and a seed sliced by
-      it would drop the model's last landed fence.
-
-    So the document is the unit and the session says only WHEN. The blocks no append accounts
-    for (`total - overall`) are what was already on disk when the model started writing, and
-    they are present at every branch point; the appends carry the rest, attributed to the
-    message that returned them.
-
-    THE TOOL RETURN is what makes a call count, and the CALL carries the text, so the two
-    halves join on `tool_call_id`. The return is the half that agrees with the prefix —
-    `hydrate(role="send")` truncates a trailing response whose tool call is unresolved — so a
-    fence counts exactly when the prefix carries the write that landed it.
-
-    THE CLAMP IS WHAT KEEPS `snapped` MEANINGFUL. A document holding FEWER fences than the
-    appends say were written is a document that was truncated or rewritten, and there the
-    unaccounted-for term is negative; clamped at 0, the running count can still run past
-    `total` and `frontier_at` reports the disagreement instead of quietly answering from a
-    state neither half describes.
-    """
-    from defender.skills.invlang.parser import scan_fences
-
-    ids = session_store.path_row_ids(store, session_id)
-    messages = session_store.hydrate(store, session_id, role="analysis")
-    pending: dict[str, str] = {}
-    through = overall = 0
-    for row_id, message in zip(ids, messages, strict=True):
-        for part in getattr(message, "parts", []):
-            if getattr(part, "tool_name", None) != "append_block":
-                continue
-            if isinstance(part, ToolCallPart):
-                pending[part.tool_call_id] = _appended_text(part)
-            elif isinstance(part, RetryPromptPart):
-                # A REFUSAL LANDS NOTHING, and it is not a return. `_tool_append_block` turns
-                # all five of its refusals into `ModelRetry`, which the framework records as a
-                # `RetryPromptPart` — so the call's text would otherwise sit in `pending`
-                # forever, and a provider that reuses a `tool_call_id` after a refusal would
-                # have the next return pop the refused text instead of its own.
-                pending.pop(part.tool_call_id, None)
-            elif isinstance(part, ToolReturnPart):
-                landed = len(scan_fences(pending.pop(part.tool_call_id, "")).bodies)
-                overall += landed
-                through += landed if row_id <= branch_message_id else 0
-    return max(0, len(scan_fences(document).bodies) - overall) + through
-
-
-def _appended_text(part: Any) -> str:
-    """The `text` an `append_block` call carries, however the framework spelled its args.
-
-    `ToolCallPart.args` is a dict on the ordinary path and a JSON STRING when the provider
-    hands back unparsed arguments — both shapes reach the store, and a reader that knew only
-    the first would score every one of the other's calls as zero fences. Anything else is
-    read as no text rather than raised on: this counts what landed, and a call whose args
-    cannot be read is one whose fences cannot be attributed either way.
-    """
-    return _call_args(part).get("text", "")
-
-
-def _call_args(part: Any) -> dict:
-    """A `ToolCallPart`'s arguments as a dict, however the framework spelled them.
-
-    `args` is a dict on the ordinary path and a JSON STRING when the provider hands back
-    unparsed arguments — both shapes reach the store, and a reader that knew only the first
-    would silently score every one of the other's calls as carrying nothing. Anything else
-    reads as no arguments rather than raising: this caller COUNTS what landed, and a call whose
-    args cannot be read is one whose effect cannot be attributed either way.
-
-    A FENCE-COUNTING reader, and only that. `leads_at` walks the same shapes for a lead id and
-    goes through `session_store._lead_id_from_args` instead — the store's own extractor, which
-    the `gather_boundary` view answers with, and which resolves a duplicate JSON key
-    first-wins where a bare `loads` takes the last. Two rules over one hostile-text boundary is
-    a divergence nothing can see, so the id question has exactly one answer and this function
-    is not it.
-    """
-    args = getattr(part, "args", None)
-    if isinstance(args, str):
-        try:
-            args = json.loads(args)
-        except ValueError:
-            return {}
-    return args if isinstance(args, dict) else {}
-
-
-def main_session(store: Any) -> str:
-    """The source run's MAIN session, or a `BranchError`.
-
-    `main_session_id` raises a bare `ValueError` on zero or several roots — a store that is not
-    the one the branch point lives in, which `open_source_store`'s docstring names as the fault
-    it surfaces far away. Re-raised as this module's own class so it reaches the driver's
-    store-setup handler rather than unwinding the process.
-    """
-    try:
-        return session_store.main_session_id(store)
-    except ValueError as e:
-        raise BranchError(f"the source store holds no single root 'main' session: {e}") from e
-
-
-def source_session(store: Any, spec: BranchSpec) -> str:
-    """The SOURCE RUN's OWN main session — which is the root of the lineage only sometimes.
-
-    `main_session_id` answers the ROOT, and `fork` sets the child's `parent_session_id`, so a
-    sibling is never it. Asked of a source run that is ITSELF a sibling, the root is the run it
-    branched from: `validate` then refuses every branch point in the source's own turns as "not
-    on the source run's MAIN path", and accepts one the source never held — after which `fork`
-    inherits the GRANDPARENT's transcript while `seed_investigation` and `_inherit_evidence`
-    seed the sibling from the source's document and evidence, and `fence_count_at` scores one
-    run's appends against another run's file.
-
-    The pointer is what closes it, and this PR is what put the field there: `attach_case_pointer`
-    records the session the run owns, and `resolve_session_id` answers `None` for every run
-    written before it existed and for every fresh run — where the two coincide and the root is
-    right. The same fallback `visualize_run` resolves its transcript through, spelled once here
-    so the branch seam and the renderer cannot disagree about which session is a run's own.
-    """
-    return session_for_run(store, Path(spec.source_run_dir))
-
-
-def session_for_run(store: Any, run_dir: Path) -> str:
-    """`source_session`'s answer, asked of a RUN DIR rather than of a spec.
-
-    Split out because T0 has to be derived BEFORE a `BranchSpec` exists — the spec carries
-    `as_of`, so anything that computes it cannot already hold one. Same rule, one spelling: a
-    second "which session does this run own" would be free to disagree with the branch seam
-    about exactly the question `attach_case_pointer` was added to settle.
-    """
-    try:
-        recorded = session_store.resolve_session_id(Path(run_dir))
-    except (OSError, ValueError):
-        # A run dir with no readable pointer is one `open_source_store` has already refused on
-        # the path that opens a store; reached any other way, the root is the honest fallback
-        # and the refusals below still name what they find.
-        recorded = None
-    return recorded if recorded is not None else main_session(store)
-
-
-def branch_point_time(store: Any, run_dir: Path, branch_message_id: int) -> datetime:
-    """The moment the branch point was written — the clock a sibling resumes INTO.
-
-    Read off the STORE rather than the run dir's mtimes or the wall clock, because the store is
-    the only thing that knows when each message landed. `ModelRequest` and `ModelResponse` both
-    carry a `timestamp`, and the store round-trips it through pydantic-ai's own type adapter, so
-    the value is the framework's rather than one this module mints.
-
-    THE MAXIMUM over the prefix, not the branch row's own stamp. The rows are written in path
-    order but a resumed lineage can interleave, and a T0 EARLIER than some message the sibling
-    inherits would put the sibling before its own evidence — the one relationship the whole
-    design rests on. The max is the honest reading of "everything in the prefix has happened".
-
-    TRUNCATED TO WHOLE SECONDS, at the derivation and nowhere else. `_clock.Z_SECONDS` drops
-    sub-second precision, so a microsecond-bearing T0 formats to a string that no longer
-    round-trips to it — and `validate`'s cross-check would then reject the very spec this
-    function produced, for a difference no reader can see.
-    """
-    session = session_for_run(store, run_dir)
-    path = session_store.path_row_ids(store, session)
-    if branch_message_id not in path:
-        raise BranchError(
-            f"message {branch_message_id} is not on {run_dir}'s own main session, so it has no "
-            "branch-point time — the id has to be one this run's main path actually holds")
-    prefix = session_store.hydrate(store, session, role="analysis")
-    return _as_of_of(prefix[: path.index(branch_message_id) + 1], run_dir, branch_message_id)
-
-
-def _as_of_of(prefix: list, run_dir: Path, branch_message_id: int) -> datetime:
-    """T0 from an already-hydrated prefix slice.
-
-    The rule lives here alone so `branch_point_time` (which hydrates) and `validate` (which
-    already has the slice in hand) cannot compute it two ways — the failure that would produce
-    is a spec this module derived and then refused on its own cross-check.
-
-    PARTS COUNT, NOT ONLY MESSAGES, and that is a correction rather than a widening.
-    `ModelResponse.timestamp` is `default_factory=now_utc` but `ModelRequest.timestamp` is
-    `datetime | None = None` — the framework fills it when the request is SENT, so a request
-    that was appended and never sent carries none. That is exactly the shape `validate` steers
-    an operator into: it refuses a dangling tool call and tells them to branch at the tool
-    RETURN, which is a `ModelRequest`, and a run that ended there never sent it. Reading
-    messages alone, T0 then silently fell back to the PRECEDING `ModelResponse` — the moment
-    the model asked, not the moment the evidence landed, which for a gather lead is minutes
-    earlier — and put the sibling before its own evidence, the one relationship the maximum is
-    here to preserve. `ToolReturnPart.timestamp` is stamped when the return is built, so the
-    part carries the moment the message forgot.
-
-    NORMALISED BEFORE THE MAXIMUM, not after. `max` over a list mixing naive and aware
-    datetimes raises `TypeError: can't compare offset-naive and offset-aware datetimes` — not a
-    `BranchError`, so it escapes `run_investigation`'s store-setup handler entirely, leaving the
-    sqlite connection open and `llm_requests.jsonl` registered in `observe._ACTIVE_PATHS`. A
-    repair applied to the winner cannot save a comparison that already raised.
-    """
-    stamps = [
-        _utc(at) for at in _prefix_stamps(prefix) if isinstance(at, datetime)
-    ]
-    if not stamps:
-        # A prefix carrying no timestamp on any message OR any part is not what this function
-        # was pointed at. Falling back to the wall clock here would hand back "now" under the
-        # name of a branch point, which is the defect `as_of` exists to remove — arriving
-        # through its own derivation, and invisible afterwards.
-        raise BranchError(
-            f"no message at or before {branch_message_id} in {run_dir} carries a timestamp, so "
-            "the branch point has no moment to resume into")
-    return max(stamps).replace(microsecond=0)
-
-
-def _prefix_stamps(prefix: list):
-    """Every moment the prefix carries, message-level and part-level alike."""
-    for message in prefix:
-        yield getattr(message, "timestamp", None)
-        for part in getattr(message, "parts", ()):
-            yield getattr(part, "timestamp", None)
-
-
-def _utc(at: datetime) -> datetime:
-    """`at` as an aware UTC moment, reading a NAIVE value as UTC.
-
-    `_clock.as_utc`'s rule and NOT a second copy of it: T0 is normalised here at the
-    DERIVATION and again inside `_clock.z_seconds` at every FORMATTING, and `_refuse_bad_as_of`
-    compares the two for exact equality — so two spellings that ever part make this module
-    refuse the very spec it just derived.
-    """
-    return _clock.as_utc(at)
-
-
-def _refuse_bad_as_of(spec: BranchSpec, derived: datetime) -> None:
-    """Refuse a spec whose clock is not this branch point's.
-
-    Two failures, one raise-site. A NAIVE or non-UTC `as_of` formats a trailing `Z` that lies by
-    the host's offset, and nothing downstream can tell that from a correct stamp. A value that
-    disagrees with `branch_point_time` is a spec carrying ANOTHER branch point's clock — the
-    copy-paste case — and it lands as an episode whose siblings agree with each other and with
-    nothing else, which no comparison can detect from the inside.
-    """
-    at = spec.as_of
-    if not isinstance(at, datetime):
-        raise BranchError(
-            f"as_of must be a datetime, got {at!r} — a branch point without a moment cannot "
-            "pin the clock its siblings resume into")
-    if at.tzinfo is None or at.utcoffset() != timedelta(0):
-        raise BranchError(
-            f"as_of must be an aware UTC datetime, got {at!r} (offset {at.utcoffset()!r}) — a "
-            "naive or offset value formats a trailing `Z` that lies by that offset, and every "
-            "payload stamped from it is then wrong by the same amount with nothing to show it")
-    if at != derived:
-        raise BranchError(
-            f"as_of is {at.isoformat()} but message {spec.branch_message_id} of "
-            f"{spec.source_run_dir} was written at {derived.isoformat()} — a spec carrying "
-            "another branch point's clock yields an episode whose siblings agree with each "
-            "other and with nothing else")
-
-
-def frontier_at_branch(store: Any, spec: BranchSpec):
-    """The investigation's open state as it stood at the branch point.
-
-    `frontier_at` is imported HERE, not at module scope, and that is load-bearing rather than
-    untidy. `driver.py` does `from . import branch` at module level, so hoisting this pulls
-    `skills.invlang.frontier` and ten sibling invlang modules into the import graph of every
-    process that imports the driver — measured with `-X importtime` at 109ms cumulative for
-    that subtree, paid by every investigation, every gather subagent and every e2e child,
-    when only a resume ever reaches this function.
-    """
-    from defender.skills.invlang.frontier import frontier_at
-
-    text, _ = read_text_soft(RunPaths(Path(spec.source_run_dir)).investigation)
-    # A run that authored no document reads as the empty frontier, which is what `validate`
-    # refuses on — the same answer `frontier_at` gives a fence-less document.
-    document = text if text is not None else ""
-    return frontier_at(
-        document,
-        fence_count_at(store, source_session(store, spec), spec.branch_message_id, document))
-
-
-#: The tool whose call/return pair is the only join from a message id to a run's evidence.
-#:
-#: THE NAME pydantic-ai REGISTERS, which is the function's: `@main_agent.tool async def gather`
-#: in `tools_gather`. Spelled wrong, this matches no part in any message — `dispatched` stays
-#: empty, the lead-0 set difference below degenerates to the WHOLE table, and every sibling
-#: inherits every lead its source ever gathered while `leads_at` reports a clean answer.
-_DISPATCH_TOOL = "gather"
-
-
-def _drop_refused_dispatch(
-    pending: dict[str, str], dispatches: Counter[str], tool_call_id: str,
-) -> None:
-    """Remove this refused call's census contribution without erasing another call."""
-    refused = pending.pop(tool_call_id, None)
-    if refused is None:
-        return
-    dispatches[refused] -= 1
-    if dispatches[refused] <= 0:
-        del dispatches[refused]
-
-
-def leads_at(store: Any, session_id: str, branch_message_id: int, run_dir: Path) -> set[str]:
-    """Which gather leads the run held by `branch_message_id`.
-
-    THE LEAD IS THE JOIN, because there is no other. `append_query_row` writes thirteen frozen
-    keys and not one of them is a timestamp or a message id, so a query row cannot be dated
-    against the session directly. What it does carry is `lead_id`, and every lead enters through
-    a `gather` call/return pair in MAIN's own transcript — so the session dates the
-    lead, and the lead dates its rows.
-
-    THE RETURN is what makes a lead count, mirroring `fence_count_at` for the same reason: the
-    return is the half the prefix agrees with, so a lead counts exactly when the inherited
-    history shows the model learning it exists. A `RetryPromptPart` drops the claim, because a
-    refused dispatch claims nothing and its `tool_call_id` may be reused.
-
-    UNDER-COUNTING IS THE SILENT DIRECTION AND IT IS CORRECT. A dispatch whose return had not
-    landed by the branch point is dropped — and it should be: the prefix does not carry that
-    return either, so the resumed model has no idea the lead exists and would be reasoning over
-    evidence its own history cannot cite. Do not "fix" this to count the call.
-
-    LEADS NO DISPATCH ACCOUNTS FOR ARE KEPT, always. Lead-0 writes its rows before the model's
-    first turn, so no dispatch in any session explains them and they are present at every branch
-    point. Derived as a set difference against the table rather than by naming the reserved ids,
-    for the same reason `fence_count_at` does not hardcode lead-0's fence: the ids are lead-0's
-    business, and a copy here would be a second place to update when they change.
-
-    The subtrahend is every lead an UNREFUSED dispatch named, not merely every lead that
-    returned — see the comment at the call site. Those are different sets exactly when a run
-    ended with a dispatch outstanding, and taking the narrower one silently reclassifies that
-    lead as lead-0's. A retry-refused call is removed again because it performed no work; this
-    matters when it named a claim lead-0 had already placed in the run dir.
-
-    AN UNFOLDED SESSION IS A PRECONDITION, and `validate` is where it is refused. A fold
-    reparents the frontier onto the lineage root, so the dispatches it displaced are reachable
-    from nothing, `dispatched` comes back empty and the set difference below degenerates to the
-    whole census — the leak this function exists to close, wearing a clean answer. Checked
-    there rather than here because a refusal after `store.fork` leaves an orphan child session.
-    """
-    ids = session_store.path_row_ids(store, session_id)
-    messages = session_store.hydrate(store, session_id, role="analysis")
-    pending: dict[str, str] = {}
-    dispatches: Counter[str] = Counter()
-    landed: set[str] = set()
-    for row_id, message in zip(ids, messages, strict=True):
-        for part in getattr(message, "parts", []):
-            if getattr(part, "tool_name", None) != _DISPATCH_TOOL:
-                continue
-            if isinstance(part, ToolCallPart):
-                # THE STORE's OWN EXTRACTOR, not a second one. `session_store._lead_id_from_args`
-                # is what the `gather_boundary` view answers "which lead did this call name"
-                # with, and it decodes a string `args` under `object_pairs_hook=_first_wins_pairs`
-                # while a bare `json.loads` lets the LAST duplicate key win. Two rules over one
-                # hostile-text boundary means the danger lens and this truncation can name
-                # different leads for one dispatch — and a lead named only by the losing
-                # spelling falls through the subtraction below as if lead-0 had written it, so
-                # its whole evidence class is inherited by a sibling whose prefix never shows it.
-                lead_id = session_store._lead_id_from_args(getattr(part, "args", None))
-                if lead_id:
-                    pending[part.tool_call_id] = lead_id
-                    # EVERY LEAD A DISPATCH NAMED, whether or not it ever returned — unless a
-                    # later RetryPrompt says the tool REFUSED that call. This census is
-                    # subtracted below to find lead-0's, and the question it has to answer is
-                    # "could this call have produced work?", not "did the model hear back?".
-                    # Recorded on the RETURN instead, a lead dispatched and never answered — a
-                    # run killed mid-gather, or a dispatch still in flight at the tip — is
-                    # absent here, falls through the subtraction as if lead-0 had written it,
-                    # and its evidence is inherited by every sibling whose prefix never shows
-                    # it returning. That is the leak this function exists to close, arriving
-                    # through its one fallback.
-                    dispatches[lead_id] += 1
-            elif isinstance(part, RetryPromptPart):
-                # A retry prompt means the tool refused THIS call. Remove only that call's
-                # contribution to the census: another accepted dispatch may legitimately name
-                # the same lead, so a bare set.discard would erase both.
-                _drop_refused_dispatch(pending, dispatches, part.tool_call_id)
-            elif isinstance(part, ToolReturnPart):
-                claimed = pending.pop(part.tool_call_id, None)
-                if claimed is not None and row_id <= branch_message_id:
-                    landed.add(claimed)
-    return landed | (_known_leads(run_dir) - set(dispatches))
-
-
-#: The per-lead evidence directories, in ONE place. `_known_leads` reads them for the census,
-#: `_inherit_evidence` walks them for the copy, and `_INHERITED` below is derived from them for
-#: the refusal — three readers of one fact, which is two too many to keep in step by hand.
-_LEAD_DIRS = ("gather_raw", "gather_summaries")
-
-
-def _known_leads(run_dir: Path) -> set[str]:
-    """Every lead this run dir names, by any of the three artifacts that name one.
-
-    THE TABLE IS NOT THE CENSUS. A lead is CLAIMED before it runs — `claim_lead` writes
-    `gather_raw/{lead}.lead.json` as an exclusive create, and that sidecar is the reuse gate —
-    so a lead can exist with no query row at all: it claimed, gathered nothing, and left only
-    the claim. Lead-0's correlation lead is exactly that shape.
-
-    Reading only the table therefore drops such a lead out of the set difference below, and the
-    sibling inherits no claim for it — after which the resumed run re-dispatches an id its own
-    prefix already used, `claim_lead` refuses the reuse, and turn-0 work is redone or lost. The
-    sidecar is what `e2e/test_920_branch_resume` pins, and it is why the census is over
-    ARTIFACTS rather than over rows.
-    """
-    paths = RunPaths(run_dir)
-    known = {
-        str(row.get("lead_id")) for row in read_jsonl_rows(paths.executed_queries)
-        if row.get("lead_id")
-    }
-    for directory in (run_dir / name for name in _LEAD_DIRS):
-        # `artifact_dir`, not `is_dir()`: this run dir is the box's rw bind, and a link planted
-        # at a lead directory would otherwise contribute its TARGET's entry names to the set
-        # that decides which leads a sibling inherits.
-        if artifact_dir(directory):
-            known |= {_lead_of(entry.name) for entry in directory.iterdir()}
-    return {lead for lead in known if lead}
-
-
-#: What a sibling inherits from the source RUN DIR, beside the document.
-#:
-#: The message prefix is full of absolute paths into the run dir that produced it — a gather
-#: return names `gather_raw/{lead_id}/{seq}.json`, a lead claim names `{lead_id}.lead.json` —
-#: and `permission.decide_read` roots the sibling at its OWN run dir, so every one of them is
-#: denied to a model reading back its own history. The queries table rides along for the same
-#: reason in reverse: `validate` refuses a branch whose source captured nothing, so the
-#: sibling's evidence IS those rows, and a run dir that dropped them would report a run that
-#: gathered nothing and then reasoned about it.
-#:
-#: DERIVED FROM `_LEAD_DIRS`, not spelled beside it. Three readers ask about the same set — the
-#: census (`_known_leads`), the copy (`_inherit_evidence`) and this refusal — and while each
-#: wrote its own tuple they could name different ones with nothing red: a fourth per-lead
-#: artifact added HERE is then refused in a fresh sibling's run dir and never copied into it, so
-#: the prefix names a path the sibling does not hold and `decide_read` denies the model its own
-#: history — the exact failure this tuple exists to prevent, arriving through the tuple.
-_INHERITED = ("executed_queries.jsonl", *_LEAD_DIRS)
-
-
-def refuse_seeded_run_dir(run_dir: Path) -> None:
-    """Refuse a sibling run dir that already holds inherited state.
-
-    ASKED BEFORE THE FORK, which is the whole reason it is a function of its own. `store.fork`
-    commits its own transaction and this module has no way to undo one, so a refusal raised
-    after it leaves a child session in the SOURCE database with no run behind it — and a
-    retried resume, which is exactly what hits this refusal, adds another every time.
-    """
-    run_dir = Path(run_dir)
-    present = [name for name in (RunPaths(run_dir).investigation.name, *_INHERITED)
-               if _holds_content(run_dir / name)]
-    if present:
-        raise BranchError(
-            f"{run_dir} already holds {present} — a resumed run inherits those from its "
-            "source, and a run dir that already carries them is not a fresh sibling: seeding "
-            "over them would interleave two runs' evidence in artifacts that are append-only")
-
-
-def _holds_content(path: Path) -> bool:
-    """Does `path` hold anything a run put there?
-
-    EXISTENCE IS NOT THE QUESTION. The run scaffolding creates `gather_raw/` for every run
-    before a resume ever reaches this check, so an existence test refuses every branch — and
-    an empty directory is what a fresh sibling is SUPPOSED to have. What a reused dir holds
-    is content, and content is what seeding over would interleave.
-    """
-    # A SYMLINK IS CONTENT, whatever it points at, and it is refused HERE — before the fork —
-    # rather than left to the copy. `_inherit_evidence` does route every directory through
-    # `guarded_mkdir` and every file through `write_guarded` now, so a linked `gather_summaries`
-    # would be refused there too; but that refusal lands AFTER `store.fork` has committed a
-    # child session this module cannot undo, and this check is the whole reason
-    # `refuse_seeded_run_dir` is a function of its own. An empty linked directory is otherwise
-    # indistinguishable from the empty real one a fresh sibling is supposed to have, and the
-    # scaffolding plants no links.
-    if path.is_symlink():
-        return True
-    if path.is_dir():
-        return any(path.iterdir())
-    return path.is_file() and path.stat().st_size > 0
-
-
-def seed_investigation(store: Any, spec: BranchSpec | None, run_dir: Path) -> int:
-    """Write the sibling's `investigation.md`: the source's document as it stood at the branch.
-
-    A FRESH RUN SEEDS NOTHING and says so with 0. The optional spec is `open_main_session`'s
-    shape for the same reason: the fresh/resumed choice belongs to this module, and a driver
-    that asked the question itself would answer it in two places that can drift.
-
-    A resume joins the source's SESSION and gets a fresh RUN DIR, and the document is a run-dir
-    artifact. Without this the two halves disagree from turn one: the inherited history says
-    the model authored N fences, `_opening_prompt` hands it coordinates into that document, and
-    `_tool_append_block` writes `deps.run_dir/"investigation.md"` — a file that does not exist.
-    The model can then neither read back what its own history says it wrote (`decide_read` is
-    rooted at the sibling's run dir, so the source's copy is denied) nor append to it without
-    starting an empty one, and everything downstream reads the prefix-less result:
-    `_check_append_only` has no blocks to conserve, `_frontier_recall` and `_fold_decision` see
-    a document that never moved, and `review/projector.parse_investigation` reads the sibling's
-    close against no belief history at all.
-
-    TRUNCATED AT THE BRANCH POINT, never the whole file. The source ran ON past the fork and
-    its later fences carry the conclusions this pair exists to NOT share — copying them whole
-    would hand the sibling the answer and measure agreement with it. The cut is the same fence
-    count `frontier_at_branch` reads the frontier at, so the seeded document and the frontier
-    `validate` accepted are the same state by construction rather than by coincidence.
-
-    SLICED, not rebuilt from fence bodies. `frontier_at` rebuilds a fence-only prefix because
-    it only ever parses what it builds; this is the document the model will read back and
-    append to, so the author's prose BETWEEN blocks is part of it. Slicing the original bytes
-    is also what keeps the seed byte-identical to a prefix of the source, which is the property
-    that makes the two documents comparable at all.
-
-    The cut lands on a fence boundary, so prose the source wrote AFTER its last landed block
-    does not come across. That is the honest edge of a fence-granular branch — `validate`
-    accepted the frontier `frontier_at(text, n)` derives, and that derivation reads fences and
-    ignores everything else, so the seed and the frontier describe the same state. It is also
-    the safer side of the cut: the trailing prose on a real document is where a run writes the
-    `## REPORT` section its disposition goes in, and a sibling inheriting the source's
-    conclusion is handed the answer the pair exists to not share.
-
-    Returns the fence count written, so the caller can record what the sibling started from.
-    """
-    if spec is None:
-        return 0
-    from defender._artifact_schema import INVESTIGATION_NAME, validate_artifact
-    from defender.skills.invlang.parser import scan_fences
-
-    target = RunPaths(Path(run_dir)).investigation
-    refuse_seeded_run_dir(run_dir)
-    source_text, _ = read_text_soft(RunPaths(Path(spec.source_run_dir)).investigation)
-    text = source_text if source_text is not None else ""
-    fences = fence_count_at(store, source_session(store, spec), spec.branch_message_id, text)
-    bounds = scan_fences(text).spans
-    if fences > len(bounds):
-        # `validate` refuses a SNAPPED frontier, so the count is in range by the time this
-        # runs. Restated here because the two reads are separated by a fork and this one
-        # would otherwise slice silently short — a sibling starting from fewer fences than
-        # its own history claims, which is the failure this function exists to remove.
-        raise BranchError(
-            f"{RunPaths(Path(spec.source_run_dir)).investigation} holds {len(bounds)} "
-            f"fence(s) but the branch point maps to {fences} — the document and the session "
-            "disagree about what had landed, and a seed cut from either is a guess")
-    seed = text[: bounds[fences - 1][1]] if fences else ""
-    # THE SEED MEETS THE SCHEMA, like every other writer of this artifact (#961/#964's class,
-    # third site). This frame reaches `write_guarded` directly — it is host code, not a tool
-    # call, so there is no `permission.decide_write` in front of it — and a valid source
-    # document does NOT guarantee a valid prefix: the reference rules are order-INDEPENDENT,
-    # so a source whose `:R` block cites a lead its `:L findings` block declares one fence
-    # LATER is well-formed whole and `undeclared lead` when cut between the two. Measured, not
-    # reasoned: no document in the checked-in corpus has that shape, and one built to have it
-    # reproduces the refusal exactly.
-    #
-    # RAISES rather than seeding anyway, unlike `lead_zero`'s best-effort seed. The difference
-    # is who is left holding it: that one runs before MAIN's first turn and its failure leaves
-    # a model that can still declare the lead itself, while this one hands a SIBLING RUN its
-    # entire starting document. Seeding a malformed one gives that run an investigation whose
-    # every subsequent append is refused for a fault it did not write and cannot repair —
-    # append-only puts the bad bytes out of its reach. This is also the same answer the fence
-    # mismatch above already gives, for the same reason: a seed cut wrong is not a seed.
-    # THE SEED IS ITS OWN BASELINE, for the reason `committed_investigation_reason` spells
-    # out: every check keyed on `current` asks what THIS WRITE INTRODUCES, and an inherited
-    # prefix introduces nothing its source had not already committed. With `None`, an unfenced
-    # block header the SOURCE committed — legal there, since the write gate scopes that family
-    # to what a write adds — reads as newly introduced, and a run whose document ever carried
-    # one could never be branched or resumed again. What this call is actually for survives the
-    # change untouched: the reference and structure rules are document-global and do not look
-    # at the baseline at all, which is why the `undeclared lead` prefix that motivated the
-    # check is still refused.
-    reason = validate_artifact(INVESTIGATION_NAME, seed, seed)
-    if reason is not None:
-        raise BranchError(
-            f"the {fences}-fence prefix of "
-            f"{RunPaths(Path(spec.source_run_dir)).investigation} does not pass validation, so "
-            f"the sibling cannot be seeded from it — the source document is well-formed only "
-            f"as a whole, and a run started on the prefix could never repair it "
-            f"(append-only). {reason}"
-        )
-    # `write_guarded`, not `write_text`: this writes into the shared run tree, and the seam
-    # stages under an unpredictable name and `os.replace`s into place rather than opening the
-    # target — so a planted symlink at the sibling's `investigation.md` is replaced instead of
-    # followed. The same lane `_tool_append_block` writes this file through.
-    write_guarded(target, seed)
-    _inherit_evidence(
-        Path(spec.source_run_dir), Path(run_dir),
-        leads_at(store, source_session(store, spec), spec.branch_message_id,
-                 Path(spec.source_run_dir)))
-    return fences
-
-
-def _inherit_evidence(source_run_dir: Path, run_dir: Path, leads: set[str]) -> None:
-    """Copy the evidence the inherited prefix REFERS TO into the sibling's run dir.
-
-    COPIED, not shared or symlinked. The sibling appends to `executed_queries.jsonl` and writes
-    new payload sidecars beside the old ones, and a link would put those writes into the source
-    run's own record — corrupting the base of the very comparison the branch exists to produce.
-
-    Absent is not an error. A source run that dispatched no gather has no `gather_raw/`, and
-    `validate` has already refused the one absence that matters (an empty queries table), so
-    everything else here is a directory that legitimately never existed.
-
-    TRUNCATED TO `leads`, which is what the source run held AT THE BRANCH POINT. Copied
-    whole, a sibling starts holding every payload the source went on to gather after the
-    fork — evidence its own inherited history cannot cite, for leads it never dispatched,
-    sitting in the table it reads as its own record of what it did. That is the source run's
-    conclusion arriving through the back door, and it would flow straight into the verdict
-    comparison the branch exists to produce.
-    """
-    # THE ALERT FIRST, and from the SEAM rather than from whichever launcher ran. It is the case
-    # INPUT — not the source run's work — and every resumed history's first turn reads it, so a
-    # sibling without one has no `read_file` target for a path its own prefix names. A launcher
-    # that materialises the run dir has already put an identical copy here; rewriting it costs a
-    # few hundred bytes and makes the guarantee the seam's, so `run_investigation(resume=…)`
-    # holds it for every caller rather than only for the one CLI that remembers.
-    #
-    # NOT in `_INHERITED`: that tuple is what `refuse_seeded_run_dir` reads, and an alert is
-    # exactly what a freshly materialised sibling legitimately already holds — listing it there
-    # would refuse every sibling a launcher prepared.
-    alert = RunPaths(source_run_dir).alert
-    if alert.exists() or alert.is_symlink():
-        if not artifact_file(alert):
-            raise BranchError(
-                f"{alert} is not a plain file — the alert is the case input both siblings "
-                f"investigate, and one that is {_not_a_plain_file(alert)} is not the source "
-                "run's own")
-        # BYTES, for `_copy_artifact`'s reason: `materialize_run_dir` puts this file here with
-        # `shutil.copy`, and a decode/re-encode round trip is a second spelling of the case
-        # input that only agrees with the first while the alert happens to be valid UTF-8.
-        write_guarded(RunPaths(run_dir).alert, alert.read_bytes())
-
-    queries = RunPaths(source_run_dir).executed_queries
-    if queries.exists() or queries.is_symlink():
-        # REFUSED, NOT SKIPPED. `artifact_file` is an `lstat` check, so a symlink wearing the
-        # table's own name fails it — and skipping there would seed a sibling with NO evidence
-        # at all, which every downstream reader sees as a run that gathered nothing rather than
-        # as a run whose evidence was refused. `validate` has already proved the source captured
-        # something, so an unreadable table here is a fault, not an absence.
-        if not artifact_file(queries):
-            raise BranchError(
-                f"{queries} is not a plain file — following a link at the queries table's own "
-                "name would seed the sibling's evidence from outside the source run")
-        rows = [row for row in read_jsonl_rows(queries) if str(row.get("lead_id", "")) in leads]
-        write_guarded(
-            RunPaths(run_dir).executed_queries,
-            # NOT MARKED `lint-jsonl-io: ok`: `lint_unsafe_jsonl_io` flags a `json.dumps(...) +
-            # "\n"` write to a handle opened in APPEND mode, and this is a whole-file rewrite
-            # through `write_guarded`'s `replace` lane — out of that gate's scope rather than a
-            # sanctioned exception to it. A marker here would pre-silence the site for the day
-            # someone converts this seed to an append, which is the one drift the gate exists
-            # to catch.
-            "".join(json.dumps(row) + "\n" for row in rows))
-    for name in _LEAD_DIRS:
-        _inherit_lead_dir(source_run_dir / name, run_dir / name, leads, run_dir)
-
-
-def _inherit_lead_dir(src: Path, dst: Path, leads: set[str], run_dir: Path) -> None:
-    """Copy the entries of one per-lead directory that belong to `leads`.
-
-    PER ENTRY, THROUGH THE GUARDED LANE, rather than `shutil.copytree`. Truncation needs
-    per-entry selection anyway, and copying entry by entry is what lets each one face
-    `artifact_file`/`artifact_dir` first — an `lstat` check, so a SYMLINK wearing an artifact's
-    name is refused rather than having its target's bytes copied into the sibling under that
-    name. The run dir is the box's rw bind and model-written bash writes into it, so a planted
-    link at an expected payload name is a real shape rather than a theoretical one; `copytree`
-    followed them without a word.
-
-    A REFUSAL IS LOUD. Skipping one silently reads downstream as a lead that gathered nothing,
-    which is indistinguishable from a lead the model never dispatched — and this whole function
-    exists to make the sibling's evidence say exactly what the prefix can cite.
-    """
-    if not src.exists():
-        # A source run that dispatched no gather has no such directory, and `validate` has
-        # already refused the one absence that matters (an empty queries table).
-        return
-    if not artifact_dir(src):
-        raise BranchError(
-            f"{src} is not a plain directory — a sibling's evidence is copied out of it, and "
-            "following a link here would seed the run from outside the source's own tree")
-    # THE DESTINATION IS MADE THROUGH THE GUARDED LANE, not by `write_guarded`'s own parents —
-    # it has none: `replace` mode stages beside the target and `os.replace`s in, so a missing
-    # parent is a `FileNotFoundError` on the staged name rather than a created directory.
-    # `copytree` used to do this implicitly, which is exactly why it was easy to drop when the
-    # copy became per-entry. ONCE, above the loop: the call is idempotent and its answer cannot
-    # change inside it, so a per-entry copy re-walked and re-`lstat`ed every component below
-    # the run dir once per claim sidecar.
-    guarded_mkdir(dst, base=run_dir)
-    for entry in sorted(src.iterdir()):
-        if _lead_of(entry.name) not in leads:
-            continue
-        if artifact_dir(entry):
-            guarded_mkdir(dst / entry.name, base=run_dir)
-            for payload in sorted(entry.iterdir()):
-                _copy_artifact(payload, dst / entry.name / payload.name)
-        else:
-            _copy_artifact(entry, dst / entry.name)
-
-
-def _copy_artifact(src: Path, dst: Path) -> None:
-    """Copy one artifact file into the sibling, refusing anything that is not one.
-
-    ONE SPELLING of guard-then-copy. Written twice, the two copies carried different refusal
-    text and the drift was not cosmetic: the nested one blamed "a link planted at a payload's
-    own name" for whatever it found, so an ordinary `mkdir` under a lead's payload directory —
-    the run dir is the box's rw bind, so the model can make one — was reported as a planted
-    symlink and the source became unbranchable with the cause named backwards. The refusal
-    stays LOUD, which is this function's whole posture; what it says is now what it found.
-
-    BYTES, not decoded text. `read_text_utf8` is a strict `read_text(encoding="utf-8")`, so one
-    payload carrying an invalid byte raised `UnicodeDecodeError` mid-copy — not a `BranchError`,
-    so it reached `open_main_session`'s catch-all AFTER `store.fork` had already committed, and
-    every retry repeated it. `shutil.copytree` copied those bytes without looking, and
-    `write_guarded` takes `bytes` for exactly this lane (the drain's corpus restore), so the
-    guard is kept and the fidelity comes back.
-    """
-    if not artifact_file(src):
-        raise BranchError(f"{src} is {_not_a_plain_file(src)}")
-    write_guarded(dst, src.read_bytes())
-
-
-def _not_a_plain_file(path: Path) -> str:
-    """Why `path` is not an artifact a sibling may inherit, in the words of what it actually is."""
-    if path.is_symlink():
-        return (
-            "a symlink — a link planted at an artifact's own name would copy bytes from "
-            "outside the run into the sibling under that name")
-    if artifact_dir(path):
-        return (
-            "a directory where a run writes only files (`gather_raw/{lead}/{seq}.json`, "
-            "`{lead}.lead.json`, `{lead}.md`) — a sibling's evidence is what the source "
-            "actually wrote, and nothing this system writes puts a directory here")
-    return (
-        "neither a plain file nor a plain directory — a sibling's evidence must be what the "
-        "source actually wrote, not what a link or a device node points at")
-
-
-def _lead_of(name: str) -> str:
-    """The lead a per-lead entry belongs to.
-
-    Three spellings across two directories — `l-001/` (a payload subtree), `l-001.lead.json` (a
-    claim sidecar) and `l-001.md` (a gather summary) — and all three are the lead id up to the
-    first dot. Suffix-stripping rather than a regex per shape, because a shape this function did
-    not know would otherwise silently belong to no lead and be dropped from every sibling.
-    """
-    return name.split(".", 1)[0]
+from ._br_spec import (
+    BranchError,
+    BranchSpec,
+    open_source_store,
+    store_factory_for,
+)
+from ._br_frontier import (
+    _DISPATCH_TOOL,
+    _LEAD_DIRS,
+    _appended_text,
+    _as_of_of,
+    _call_args,
+    _drop_refused_dispatch,
+    _known_leads,
+    _lead_of,
+    _prefix_stamps,
+    _refuse_bad_as_of,
+    _utc,
+    branch_point_time,
+    fence_count_at,
+    frontier_at_branch,
+    leads_at,
+    main_session,
+    session_for_run,
+    source_session,
+)
+from ._br_seed import (
+    _INHERITED,
+    _copy_artifact,
+    _holds_content,
+    _inherit_evidence,
+    _inherit_lead_dir,
+    _not_a_plain_file,
+    refuse_seeded_run_dir,
+    seed_investigation,
+)
 
 
 def validate(store: Any, spec: BranchSpec) -> None:
@@ -1195,3 +399,66 @@ def open_main_session(
             f"the resume of {spec.source_run_dir} at message {spec.branch_message_id} could "
             f"not be opened: {type(e).__name__}: {e}") from e
     return session_id, visible
+
+
+#: Everything imported above is a RE-EXPORT: the name's real home is the module it
+#: comes from. Kept because a reader already imports it from here.
+__all__ = [
+    "Any",
+    "BranchError",
+    "BranchSpec",
+    "Counter",
+    "Path",
+    "RetryPromptPart",
+    "RunPaths",
+    "ToolCallPart",
+    "ToolReturnPart",
+    "_DISPATCH_TOOL",
+    "_INHERITED",
+    "_LEAD_DIRS",
+    "_appended_text",
+    "_as_of_of",
+    "_call_args",
+    "_clock",
+    "_copy_artifact",
+    "_drop_refused_dispatch",
+    "_holds_content",
+    "_inherit_evidence",
+    "_inherit_lead_dir",
+    "_known_leads",
+    "_lead_of",
+    "_not_a_plain_file",
+    "_prefix_stamps",
+    "_refuse_bad_as_of",
+    "_utc",
+    "artifact_dir",
+    "artifact_file",
+    "attach_case_pointer",
+    "branch_point_time",
+    "contextlib",
+    "dataclass",
+    "datetime",
+    "fence_count_at",
+    "framework_view",
+    "frontier_at_branch",
+    "guarded_mkdir",
+    "is_reserved_query_id",
+    "json",
+    "leads_at",
+    "main_session",
+    "open_main_session",
+    "open_source_store",
+    "read_jsonl_rows",
+    "read_text_soft",
+    "refuse_seeded_run_dir",
+    "seed_investigation",
+    "session_for_run",
+    "session_store",
+    "source_session",
+    "sqlite3",
+    "stamp_dead_fork",
+    "store_factory_for",
+    "timedelta",
+    "validate",
+    "write_guarded",
+]

@@ -124,7 +124,7 @@ MIN_KEYS = 2
 _LOOKUP_METHODS = frozenset({"get", "items", "keys", "values"})
 
 
-# --------------------------------------------------------------------------- corpus
+# corpus
 
 
 def _in_scope(path: Path, scope: Path) -> bool:
@@ -144,7 +144,7 @@ def _dotted(rel: str) -> tuple[str, ...]:
     return parts[:-1] if parts and parts[-1] == "__init__" else parts
 
 
-# ----------------------------------------------------------------------- owner side
+# owner side
 
 
 def _module_tables(tree: ast.Module, env: ModuleEnv) -> dict[str, tuple[str, ...]]:
@@ -224,7 +224,7 @@ def _generic_lookups(tree: ast.AST, env: ModuleEnv) -> tuple[set[str], set[str]]
     return local, origins
 
 
-# -------------------------------------------------------------------- consumer side
+# consumer side
 
 
 def _imported_modules(tree: ast.Module) -> set[tuple[str, ...]]:
@@ -319,7 +319,45 @@ def _suppressed(node: ast.AST, lines: list[str]) -> bool:
     return False
 
 
-# --------------------------------------------------------------------------- the scan
+# the scan
+
+
+def _reexport_edges(
+    corpus: list[tuple[str, ast.Module, list[str], ModuleEnv]],
+    tables: dict[tuple[str, str], tuple[str, ...]],
+) -> dict[tuple[str, str], set[tuple[str, ...]]]:
+    """Facade modules that re-export a table, as extra module paths standing in for its owner.
+
+    A file split into families behind a facade (`validate.py` -> `_gating.py` et al.) moves the
+    table's DEFINITION without moving the name its consumers import. The import edge this gate
+    ties a consumer to an owner by is then a suffix match that can never hit: `persist.py`
+    names `...invlang.validate`, and the table now lives in `...invlang._gating`. Left
+    unresolved, every such consumer goes quiet and the gate reads as clean — the exact
+    regression `test_the_scan_still_produces_exactly_what_the_shipped_baseline_buries` exists
+    to catch.
+
+    ONE HOP, deliberately: a re-export of a re-export is a facade over a facade, which is a
+    shape to refuse rather than to resolve.
+    """
+    edges: dict[tuple[str, str], set[tuple[str, ...]]] = {}
+    owners = {(owner_rel, name) for owner_rel, name in tables}
+    for rel, tree, _lines, _env in corpus:
+        package = tuple(_dotted(rel)[:-1])
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ImportFrom) or node.module is None:
+                continue
+            if node.level:                      # `from ._gating import T`
+                target = package + tuple(node.module.split("."))
+            else:
+                target = tuple(node.module.split("."))
+            for alias in node.names:
+                for owner_rel, name in owners:
+                    if name != alias.name:
+                        continue
+                    owner = _dotted(owner_rel)
+                    if len(target) <= len(owner) and owner[-len(target):] == target:
+                        edges.setdefault((owner_rel, name), set()).add(_dotted(rel))
+    return edges
 
 
 def _scan_file(
@@ -328,6 +366,7 @@ def _scan_file(
     lines: list[str],
     env: ModuleEnv,
     tables: dict[tuple[str, str], tuple[str, ...]],
+    reexports: dict[tuple[str, str], set[tuple[str, ...]]] | None = None,
 ) -> list[Finding]:
     literals = _branch_literals(tree, env)
     if not literals:
@@ -341,7 +380,11 @@ def _scan_file(
             if owner_rel == rel or value not in keys:
                 continue
             owner = _dotted(owner_rel)
-            if not _imports_owner(imports, owner):
+            # The owner's own path, or any facade re-exporting the table under its own
+            # name: both are this consumer naming the module that decides the keys.
+            stand_ins = (reexports or {}).get((owner_rel, name), set())
+            if not (_imports_owner(imports, owner)
+                    or any(_imports_owner(imports, path) for path in stand_ins)):
                 continue
             if _reaches_lookup(func, env, f"{'.'.join(owner)}.{name}"):
                 continue
@@ -411,9 +454,10 @@ def _scan(scope: Path = DEFENDER) -> list[Finding]:
     }
 
     # Pass 2: everyone else branching on one of an armed table's keys.
+    reexports = _reexport_edges(corpus, armed)
     findings: list[Finding] = []
     for rel, tree, lines, env in corpus:
-        findings.extend(_scan_file(rel, tree, lines, env, armed))
+        findings.extend(_scan_file(rel, tree, lines, env, armed, reexports))
     return findings
 
 
