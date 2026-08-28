@@ -214,6 +214,22 @@ def _copy_shared_inputs(run_dir: Path, learning_run_dir: Path) -> None:
             # `src` is judged by `artifact_file` at the top of this loop, and a link there
             # raises rather than reaching the copy.
             shutil.copy2(src, dst)  # lint-tree-read-follows-link: ok — screened above
+        # THE SOURCE RUN'S STAMP, carried across (#976). Best-effort and separate from the
+        # three above, which are REQUIRED — a run whose stamp could not be written is still a
+        # run worth learning from, so a missing stamp is logged rather than raised, exactly as
+        # `run_common._stamp` chose when it declined to take a run down over one.
+        #
+        # COPIED RATHER THAN RE-CAPTURED, which is the whole point. This directory is
+        # materialised by the drain, potentially days after the investigation and off a
+        # checkout that has moved since; a stamp taken here would name when the LOOP ran, and
+        # the archive would carry a confident record of the wrong tree. The copy names what the
+        # investigation actually executed, which is the question #947's recomputation asks.
+        prov_src, prov_dst = src_paths.provenance, dst_paths.provenance
+        if artifact_file(prov_src):
+            shutil.copy2(  # lint-tree-read-follows-link: ok — screened on the line above
+                prov_src, prov_dst)
+        elif prov_src.exists() or prov_src.is_symlink():
+            _refused(run_dir, [prov_src])
         loaded = run_dir / "lessons_loaded.jsonl"
         if artifact_file(loaded):
             # Guarded by the `artifact_file` above; the `elif` below is what a link here gets.

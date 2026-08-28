@@ -147,6 +147,27 @@ def _mark_alias(exc: OSError, *, is_alias: bool) -> OSError:
     return exc
 
 
+def plain_unaliased_file(path: Path) -> bool:
+    """True iff `path` is a present, plain, SINGLE-LINKED regular file.
+
+    The predicate half of `_refuse_unless_plain`, split out so a READER can ask the same
+    question the write seam answers. `_run_paths.artifact_file` is the weaker screen — it is an
+    `S_ISREG` lstat, so it accepts a hard link, the one alias shape `O_NOFOLLOW` cannot refuse
+    (B9) — and a reader that pairs itself with a `write_guarded` write needs THIS one, or the
+    two guards admit different sets while a comment claims they are twins.
+
+    Note the asymmetry with the refusal below, and it is deliberate: ABSENT is plain enough to
+    write (that is the ordinary case) and is not a file to read, so this answers False where
+    `_refuse_unless_plain` returns without raising."""
+    try:
+        st = os.lstat(path)
+    except (OSError, ValueError):
+        # Fails closed, like `_run_paths._lstat_is`: an entry the caller cannot judge is not
+        # one it may read through.
+        return False
+    return stat.S_ISREG(st.st_mode) and st.st_nlink == 1
+
+
 def _refuse_unless_plain(path: Path) -> None:
     """Refuse unless `path` is absent or a plain, single-linked regular file.
 

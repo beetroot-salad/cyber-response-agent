@@ -19,6 +19,7 @@ from .files import (
     decide_write,
     is_captured_payload,
     is_untrusted_read,
+    names_run_provenance,
     names_wire_log_dir,
 )
 from .grant import OPENS_NOTHING, PROGRAMS, Grant, Route, under
@@ -48,6 +49,7 @@ __all__ = [
     "decide_write",
     "is_captured_payload",
     "is_untrusted_read",
+    "names_run_provenance",
     "names_wire_log_dir",
     "require_anchor_root",
     "under",

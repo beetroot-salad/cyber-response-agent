@@ -30,15 +30,26 @@ real work happens with uncommitted edits, and a stamp that refuses to exist is w
 that admits what it could not promise. The refusal belongs to the caller that needs the
 guarantee — a run being archived or forked — and is #976's, not this module's.
 
-`dirty` IS THE WHOLE REPO, not `defender/`, and a consumer must read it that way: it answers
-"does this sha name the bytes on disk anywhere in the checkout", which OVER-reports relative
-to the code a run executes (an edit in `docs/` or `experiments/` sets it). Deliberately the
-conservative direction — a bit that under-reported would be the lie the record exists to
-prevent — but it means the bit alone cannot distinguish "the agent changed" from "a doc
-changed", and the same width reaches the sample: `dirty_paths` is the alphabetical head of the
-whole repo's dirt, so on a busy tree it can be 50 paths none of which is under `defender/`. A
-caller that needs the narrower question has `_git.git_status(cwd, pathspec=...)` and should
-ask it rather than reading more into this field than it says.
+THE COMMIT IS REPO-WIDE AND THE DIRT IS NOT, which is a pairing rather than an inconsistency.
+HEAD names the whole checkout because that is the only thing a sha can name. `dirty` is scoped
+to `CODE_SCOPE` — the subtree the box actually mounts and the interpreter actually imports —
+and `scope` records that pathspec IN the file, so no reader has to infer which question was
+asked.
+
+Scoped because the wide bit could not be acted on. `dirty` exists for one consumer: the
+refusal a fork or an archive makes when the sha does not name the bytes that ran. A bit that a
+scratch file in `docs/` or an untracked note in `experiments/` sets is True on a working
+machine nearly always, so that consumer would either refuse every run or learn to ignore the
+field — and a bit everyone ignores protects nothing. The width reached the sample too: 50
+alphabetically-first paths out of a busy repo can contain no `defender/` path at all, leaving
+the debugging affordance empty exactly when it is wanted.
+
+Nothing outside the scope executes: the estate's own tree is configuration for the systems
+this queries over a socket rather than code it imports, the repo-root scripts are dev tooling,
+and the rest is prose. An edit to that configuration IS a real difference between two runs —
+it is corpus drift, which the paragraph above says this record does not cover and which #947
+answers with its own mechanism. Widening this bit would not have covered it either; it would
+only have made the narrow claim look like the wide one.
 
 `dirty is False` IS ONLY A CLAIM ABOUT TRACKED AND UNTRACKED PATHS, never about IGNORED ones —
 `git status` does not report them at any `--untracked-files` setting, and that is the one place
@@ -49,21 +60,36 @@ installed dependency the box runs against are outside what a clean bit can speak
 which is tracked and therefore is covered.
 
 THE RUN DIR IS THE BOX'S RW BIND, so a model can overwrite this file the same way it can
-overwrite any run-dir artifact — see `_run_paths.artifact_file`, which exists for exactly that
-reason. The stamp is written by the host BEFORE the box is created and before any agent is
-alive, so a consumer that must trust it reads it off a run it is not concurrently hosting.
+overwrite any run-dir artifact. The stamp is written by the host BEFORE the box is created and
+before any agent is alive, so a consumer that must trust it reads it off a run it is not
+concurrently hosting — and since #976 the read gate DENIES the file to every agent on both
+surfaces (`permission.files.names_run_provenance`), because this is the one run-root file
+whose subject is the HOST tree rather than the run: a sha plus up to fifty repo-relative paths
+of somebody's uncommitted work is reconnaissance, and every other file at that root is about
+the run alone.
+
+WHEN GIT CANNOT BE ASKED AT ALL, a BUILD STAMP is the fallback. The shipped runtime image
+carries no git and no repository metadata — it is `FROM python:3.11-slim` plus the package
+directory — so without this every containerised run would record `unavailable` while carrying
+a file that looks like the drift problem was solved. `BUILD_COMMIT_ENV` is baked at image
+build time from the tree the image was built from. The recovered commit ships with
+`dirty=None` and NEVER with the build's own clean bit, however clean that build was: the image
+documents mounting a workspace over its code, so at runtime nothing can confirm the bytes on
+disk are the bytes that were built, and a fallback that claimed clean would be inventing
+exactly the assurance this record exists to refuse.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import subprocess
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
 from defender import _git
-from defender._io import read_text_soft, write_guarded
-from defender._run_paths import artifact_file
+from defender._io import plain_unaliased_file, read_text_soft, write_guarded
 
 #: The dirty-path sample's ceiling. The paths are a debugging affordance — `dirty` is the bit
 #: that carries meaning — and `--untracked-files=all` over a tree with a vendored directory in
@@ -71,6 +97,17 @@ from defender._run_paths import artifact_file
 #: (`dirty_path_count`), so the cap costs detail and never costs the fact: a reader can always
 #: tell a 3-file edit from a 30,000-file one, which is what a silent truncation would hide.
 DIRTY_PATH_SAMPLE = 50
+
+#: The subtree `dirty` speaks for, as a git pathspec relative to the repo root: the directory
+#: the box bind-mounts read-only and the only package the interpreter imports. Spelled once
+#: here and RECORDED in every stamp (`RunProvenance.scope`), so a reader never has to guess
+#: which question a given file answered — the answer travels with the answer.
+CODE_SCOPE = "defender"
+
+#: Where a commit comes from when git cannot be asked. Baked into the shipped runtime image at
+#: build time (`.devcontainer/Dockerfile.runtime`), which carries neither git nor repository
+#: metadata; see the module docstring for why the recovered commit never carries a clean bit.
+BUILD_COMMIT_ENV = "DEFENDER_BUILD_COMMIT"
 
 #: Wall clock each git call gets. NOT decoration: this runs on the critical path of every
 #: run-dir creation, before the box exists and before any lifecycle bound applies, so a git
@@ -108,6 +145,11 @@ class RunProvenance:
     dirty_paths: tuple[str, ...] = ()
     dirty_path_count: int = 0
     unavailable: str | None = None
+    #: The pathspec `dirty` was measured over — `CODE_SCOPE` for anything `capture_tree`
+    #: produced. Carried IN the record rather than assumed by its readers, because the day
+    #: this scope changes is the day every already-archived stamp starts meaning something
+    #: different, and an episode recomputed later has no other way to know which it holds.
+    scope: str | None = None
 
     def as_json(self) -> str:
         # SPELLED OUT rather than `asdict(self)`: the wire shape is a contract a reader off
@@ -125,6 +167,7 @@ class RunProvenance:
                 "dirty_paths": list(self.dirty_paths),
                 "dirty_path_count": self.dirty_path_count,
                 "unavailable": self.unavailable,
+                "scope": self.scope,
             },
             indent=2,
             sort_keys=True,
@@ -183,17 +226,49 @@ class RunProvenance:
         raw_paths = obj.get("dirty_paths")
         paths = tuple(p for p in raw_paths if isinstance(p, str)) if isinstance(raw_paths, list) else ()
         count = obj.get("dirty_path_count")
+        # `scope` is dropped rather than refused when it is the wrong type, and a record with
+        # no scope still stands: a stamp written before this field existed is a real record of
+        # a real run, and refusing it would make every archived episode unreadable to settle a
+        # question about a field it never carried. `None` reads as "this record does not say".
+        scope = obj.get("scope")
         return cls(
             commit=commit,
             dirty=dirty,
             dirty_paths=paths,
             dirty_path_count=count if isinstance(count, int) and not isinstance(count, bool) else 0,
             unavailable=unavailable,
+            scope=scope if isinstance(scope, str) else None,
         )
 
 
-def capture_tree(repo_root: Path) -> RunProvenance:
+def _from_build_stamp(environ: Mapping[str, str], why: str) -> RunProvenance:
+    """The record a git-less environment can still produce, or the bare failure if it cannot.
+
+    `dirty=None` unconditionally — see the module docstring. The build's own cleanliness is
+    deliberately NOT carried: the runtime image documents mounting a workspace over its baked
+    code, so a stamp that answered `False` here would be describing a tree it has no way to
+    look at."""
+    baked = (environ.get(BUILD_COMMIT_ENV) or "").strip()
+    if not baked:
+        return RunProvenance(commit=None, dirty=None, unavailable=why, scope=CODE_SCOPE)
+    return RunProvenance(
+        commit=baked, dirty=None, scope=CODE_SCOPE,
+        unavailable=(
+            f"{why}; commit recovered from the {BUILD_COMMIT_ENV} build stamp, which names the "
+            "tree the image was BUILT from — nothing here can confirm it describes the code on "
+            "disk, so the working tree's state is unknown rather than clean"
+        ),
+    )
+
+
+def capture_tree(
+    repo_root: Path, *, environ: Mapping[str, str] | None = None
+) -> RunProvenance:
     """Ask git what `repo_root` is sitting on, right now.
+
+    `environ` is the injection seam for the build-stamp fallback, defaulted at the boundary
+    rather than re-coalesced in the body (`defender/CLAUDE.md`, "anchor a default in one
+    place").
 
     NEVER RAISES. A run that cannot be stamped still has to run — this is a record, not a gate
     — so every way git can refuse (absent binary, not a repository, an unborn HEAD in a
@@ -206,21 +281,28 @@ def capture_tree(repo_root: Path) -> RunProvenance:
     that never returns lands here as a `TimeoutExpired` record rather than as a run that
     started and produced no output.
     """
+    env = os.environ if environ is None else environ
     try:
         commit = _git.git_head_sha(repo_root, timeout=GIT_TIMEOUT_S)
     except _git.GitError as e:
         # `e`, not `e.stderr`: `GitError.__str__` already carries the command and the return
         # code, and which of the two git calls refused is half of what sends an operator at
         # the right knob.
-        return RunProvenance(commit=None, dirty=None, unavailable=f"git rev-parse: {e}")
+        return _from_build_stamp(env, f"git rev-parse: {e}")
     except _GIT_UNREACHABLE as e:
-        return RunProvenance(commit=None, dirty=None, unavailable=f"git unavailable: {e!r}")
+        return _from_build_stamp(env, f"git unavailable: {e!r}")
     try:
-        records = _git.git_status(repo_root, timeout=GIT_TIMEOUT_S, no_renames=True)
+        records = _git.git_status(
+            repo_root, pathspec=CODE_SCOPE, timeout=GIT_TIMEOUT_S, no_renames=True
+        )
     except _GIT_FAILED as e:
         # The sha is already in hand and is worth keeping on its own; what is unknown is
         # whether it describes the bytes that ran, and `dirty=None` is exactly that statement.
-        return RunProvenance(commit=commit, dirty=None, unavailable=f"git status: {e!r}")
+        # NOT the build-stamp path: a live git already named a better commit than any baked
+        # value, and falling back here would REPLACE a true sha with a stale one.
+        return RunProvenance(
+            commit=commit, dirty=None, unavailable=f"git status: {e!r}", scope=CODE_SCOPE
+        )
     # A KEY SET, not the record list (`defender/CLAUDE.md`, "a render list is not a key set").
     # `git status -z` emits one record per (path, reason), and one path can earn two: `git rm
     # --cached foo` leaves `D  foo` AND `?? foo`, so `len(records)` counts that path twice and
@@ -241,6 +323,7 @@ def capture_tree(repo_root: Path) -> RunProvenance:
         dirty=bool(paths),
         dirty_paths=tuple(paths[:DIRTY_PATH_SAMPLE]),
         dirty_path_count=len(paths),
+        scope=CODE_SCOPE,
     )
 
 
@@ -262,12 +345,17 @@ def read(path: Path) -> RunProvenance | None:
     and the answer is no. The read error itself is DROPPED rather than raised or returned: no
     caller can act on "the stamp was unreadable" differently from "there is no stamp", and a
     second return channel would put that choice in front of every one of them."""
-    # `artifact_file` (an `lstat`), not the plain read: this file sits in the box's rw bind, so
-    # an entry at its name may be a link the model planted, and `read_text_soft` would follow
-    # it and hand back whatever it points at AS this run's stamp — the read-side twin of the
-    # refusal `write` already makes. `scripts/lint/lint_tree_read_follows_link` is the census
-    # this module is listed in for exactly that reason.
-    if not artifact_file(path):
+    # `plain_unaliased_file`, not the plain read: this file sits in the box's rw bind, so an
+    # entry at its name may be an alias the model planted, and `read_text_soft` would follow it
+    # and hand back whatever it points at AS this run's stamp.
+    #
+    # THE SAME PREDICATE `write_guarded` REFUSES ON, which is the point of it being a shared
+    # function rather than a matching pair of lstats. `_run_paths.artifact_file` stood here
+    # first and is strictly weaker: it is an `S_ISREG` test, so it ACCEPTS a hard link — the
+    # one alias shape `O_NOFOLLOW` cannot refuse (`_io`, B9) and therefore the one the write
+    # side goes out of its way to catch. Twins by construction; the comment that claimed it
+    # before was describing an intention.
+    if not plain_unaliased_file(path):
         return None
     raw, _err = read_text_soft(path)
     if raw is None:

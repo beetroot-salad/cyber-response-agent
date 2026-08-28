@@ -10,6 +10,7 @@ count, and a run whose tree could not be interrogated at all still runs.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import fields
 from pathlib import Path
 
@@ -21,13 +22,21 @@ from defender._run_paths import PROVENANCE, RunPaths  # type: ignore[import-not-
 from defender.tests._repo import seed_repo  # type: ignore[import-not-found]
 
 
+#: The seeded file's path, spelled once: every dirt arm below edits, removes or renames it, and
+#: it has to sit under `CODE_SCOPE` for the scoped bit to see it at all.
+SEED = f"{_provenance.CODE_SCOPE}/seed.md"
+
+
 def _repo(tmp_path: Path) -> Path:
     """A throwaway repo with one commit, through `_repo.seed_repo` rather than a fifteenth
     hand-rolled `git init` — that module exists because the same five lines had drifted across
     fourteen sites under five different placeholder identities."""
     repo = tmp_path / "repo"
-    repo.mkdir()
-    (repo / "seed.md").write_text("seed\n", encoding="utf-8")
+    (repo / _provenance.CODE_SCOPE).mkdir(parents=True)
+    # SEEDED INSIDE THE SCOPE `dirty` speaks for. A file at the repo root would be invisible to
+    # every dirt arm below now that the bit is scoped to the code the box mounts, and the arms
+    # would pass while measuring nothing.
+    (repo / SEED).write_text("seed\n", encoding="utf-8")
     return seed_repo(repo)
 
 
@@ -43,10 +52,10 @@ def test_clean_tree_records_the_head_sha_and_no_dirt(tmp_path):
 
 def test_uncommitted_edit_is_recorded_as_dirty_with_the_path(tmp_path):
     repo = _repo(tmp_path)
-    (repo / "seed.md").write_text("edited\n")
+    (repo / SEED).write_text("edited\n")
     prov = _provenance.capture_tree(repo)
     assert prov.dirty is True
-    assert "seed.md" in prov.dirty_paths
+    assert SEED in prov.dirty_paths
     assert prov.dirty_path_count == 1
 
 
@@ -54,10 +63,10 @@ def test_untracked_file_counts_as_dirty(tmp_path):
     """`--untracked-files=all`: a file nobody added is still a file the sha does not name, so
     a stamp that called this tree clean would be describing bytes that did not run."""
     repo = _repo(tmp_path)
-    (repo / "stray.md").write_text("stray\n")
+    (repo / _provenance.CODE_SCOPE / "stray.md").write_text("stray\n")
     prov = _provenance.capture_tree(repo)
     assert prov.dirty is True
-    assert "stray.md" in prov.dirty_paths
+    assert f"{_provenance.CODE_SCOPE}/stray.md" in prov.dirty_paths
 
 
 def test_the_path_sample_is_capped_but_the_count_is_not(tmp_path):
@@ -66,7 +75,7 @@ def test_the_path_sample_is_capped_but_the_count_is_not(tmp_path):
     repo = _repo(tmp_path)
     total = _provenance.DIRTY_PATH_SAMPLE + 7
     for i in range(total):
-        (repo / f"stray-{i:03d}.md").write_text("x\n")
+        (repo / _provenance.CODE_SCOPE / f"stray-{i:03d}.md").write_text("x\n")
     prov = _provenance.capture_tree(repo)
     assert len(prov.dirty_paths) == _provenance.DIRTY_PATH_SAMPLE
     assert prov.dirty_path_count == total
@@ -357,14 +366,17 @@ def test_a_rename_counts_both_paths_the_sha_fails_to_name(tmp_path):
     that differ from HEAD are counted once and the vanished one is named nowhere. `capture_tree`
     asks with `no_renames=True` so the same move reports `D  a` + `A  b`."""
     repo = _repo(tmp_path)
-    (repo / "moved.md").write_text("moved\n", encoding="utf-8")
+    (repo / _provenance.CODE_SCOPE / "moved.md").write_text("moved\n", encoding="utf-8")
     _git.git(["add", "-A"], cwd=repo)
     _git.git(["commit", "-qm", "add"], cwd=repo)
-    _git.git(["mv", "moved.md", "elsewhere.md"], cwd=repo)
+    scope = _provenance.CODE_SCOPE
+    _git.git(["mv", f"{scope}/moved.md", f"{scope}/elsewhere.md"], cwd=repo)
 
     prov = _provenance.capture_tree(repo)
     assert prov.dirty is True
-    assert set(prov.dirty_paths) == {"moved.md", "elsewhere.md"}, prov.dirty_paths
+    assert set(prov.dirty_paths) == {
+        f"{scope}/moved.md", f"{scope}/elsewhere.md",
+    }, prov.dirty_paths
     assert prov.dirty_path_count == 2, "a rename hid the path the sha no longer names"
 
 
@@ -374,9 +386,185 @@ def test_one_dirty_path_earning_two_status_records_is_counted_once(tmp_path):
     dirt — in exactly the direction `DIRTY_PATH_SAMPLE`'s comment promises the count never
     does — and would spend two of the sample's 50 slots on one file."""
     repo = _repo(tmp_path)
-    _git.git(["rm", "--cached", "-q", "seed.md"], cwd=repo)
+    _git.git(["rm", "--cached", "-q", SEED], cwd=repo)
 
     prov = _provenance.capture_tree(repo)
     assert prov.dirty is True
-    assert prov.dirty_paths == ("seed.md",), prov.dirty_paths
+    assert prov.dirty_paths == (SEED,), prov.dirty_paths
     assert prov.dirty_path_count == 1, "one dirty path was counted once per status record"
+
+
+# --------------------------------------------------------------------------- #
+# The scoped dirt, the build stamp, the non-fatal write, the shared family
+# capture, the archive copy, and the read gate (#976 follow-ups).
+# --------------------------------------------------------------------------- #
+
+
+def test_dirt_is_scoped_to_the_code_the_box_mounts(tmp_path):
+    """A scratch file outside the mounted package must not mark the run dirty.
+
+    The bit exists for ONE consumer — the refusal a fork or an archive makes — and a bit that
+    a note in `docs/` sets is True on a working machine nearly always, so that consumer would
+    either refuse everything or learn to ignore it."""
+    repo = _repo(tmp_path)
+    (repo / "docs").mkdir()
+    (repo / "docs" / "note.md").write_text("scratch\n")
+    (repo / "experiments").mkdir()
+    (repo / "experiments" / "x.py").write_text("x\n")
+    prov = _provenance.capture_tree(repo)
+    assert prov.dirty is False, f"an out-of-scope edit set the bit: {prov.dirty_paths}"
+    assert prov.scope == _provenance.CODE_SCOPE
+
+
+def test_dirt_inside_the_mounted_code_still_counts(tmp_path):
+    repo = _repo(tmp_path)
+    (repo / _provenance.CODE_SCOPE / "thing.py").write_text("x\n")
+    prov = _provenance.capture_tree(repo)
+    assert prov.dirty is True
+    assert prov.dirty_paths == (f"{_provenance.CODE_SCOPE}/thing.py",)
+
+
+def test_the_scope_travels_in_the_record(tmp_path):
+    """Recorded rather than assumed: the day the scope changes, every already-archived stamp
+    starts meaning something different, and a recomputed episode has no other way to know
+    which of the two it is holding."""
+    repo = _repo(tmp_path)
+    path = tmp_path / "p.json"
+    _provenance.write(path, _provenance.capture_tree(repo))
+    assert json.loads(path.read_text())["scope"] == _provenance.CODE_SCOPE
+    assert _provenance.read(path).scope == _provenance.CODE_SCOPE
+
+
+def test_a_stamp_written_before_the_scope_field_still_reads(tmp_path):
+    """A record with no scope is a real record of a real run. Refusing it would make every
+    already-archived episode unreadable to settle a question about a field it never carried."""
+    path = tmp_path / "old.json"
+    path.write_text(json.dumps({"commit": "a" * 40, "dirty": False}))
+    rec = _provenance.read(path)
+    assert rec is not None
+    assert rec.scope is None
+
+
+def test_the_build_stamp_answers_when_git_cannot(tmp_path, monkeypatch):
+    """The shipped runtime image carries neither git nor repository metadata, so without this
+    every containerised run files `unavailable` while carrying a file that LOOKS like the drift
+    problem was solved."""
+    plain = tmp_path / "no-repo"
+    plain.mkdir()
+    monkeypatch.setenv("PATH", str(tmp_path / "empty-bin"))
+    prov = _provenance.capture_tree(plain, environ={_provenance.BUILD_COMMIT_ENV: "b" * 40})
+    assert prov.commit == "b" * 40
+    assert prov.unavailable is not None
+    assert _provenance.BUILD_COMMIT_ENV in prov.unavailable
+
+
+def test_the_build_stamp_never_claims_a_clean_tree(tmp_path, monkeypatch):
+    """THE POINT OF THE FALLBACK'S RESTRAINT. The image documents mounting a workspace over
+    its baked code, so nothing at runtime can confirm the bytes on disk are the bytes built —
+    a fallback that answered `False` would invent the one assurance this record refuses to."""
+    plain = tmp_path / "no-repo"
+    plain.mkdir()
+    monkeypatch.setenv("PATH", str(tmp_path / "empty-bin"))
+    prov = _provenance.capture_tree(plain, environ={_provenance.BUILD_COMMIT_ENV: "c" * 40})
+    assert prov.dirty is None
+    assert prov.dirty is not False
+
+
+def test_an_empty_build_stamp_is_no_stamp(tmp_path, monkeypatch):
+    plain = tmp_path / "no-repo"
+    plain.mkdir()
+    monkeypatch.setenv("PATH", str(tmp_path / "empty-bin"))
+    for value in ("", "   "):
+        prov = _provenance.capture_tree(plain, environ={_provenance.BUILD_COMMIT_ENV: value})
+        assert prov.commit is None, f"{value!r} was read as a commit"
+
+
+def test_a_live_sha_is_never_replaced_by_a_stale_baked_one(tmp_path):
+    """Git answered for HEAD; only the working-tree question failed. Falling back here would
+    swap a true sha for whatever an image was built from months ago."""
+    repo = _repo(tmp_path)
+    head = _git.git_head_sha(repo)
+    (repo / ".git" / "index").write_bytes(b"\x00 not an index \xff" * 8)
+    prov = _provenance.capture_tree(repo, environ={_provenance.BUILD_COMMIT_ENV: "d" * 40})
+    assert prov.commit == head
+    assert prov.dirty is None
+
+
+def test_a_read_refuses_a_hard_link_the_write_would_refuse(tmp_path):
+    """The two guards are twins by CONSTRUCTION now, not by a comment. The old screen was an
+    `S_ISREG` lstat, which accepts a hard link — the one alias shape `O_NOFOLLOW` cannot
+    refuse, and therefore the one the write side goes out of its way to catch."""
+    real = tmp_path / "real.json"
+    _provenance.write(real, RunProvenance(commit="a" * 40, dirty=False))
+    link = tmp_path / "provenance.json"
+    os.link(real, link)
+    assert _provenance.read(link) is None, "a hard-linked stamp was read as this run's own"
+    # EMLINK, not ELOOP: `_io._refuse_unless_plain` distinguishes the two alias shapes by
+    # errno because `O_NOFOLLOW` never fires for a hard link, so ELOOP would name a cause a
+    # hard-link plant cannot produce.
+    with pytest.raises(OSError, match="aliased entry"):
+        _provenance.write(link, RunProvenance(commit="b" * 40, dirty=False))
+
+
+def test_a_stamp_that_cannot_be_written_does_not_take_the_run_down(tmp_path, monkeypatch, capsys):
+    """`capture_tree` goes to some length never to raise; a write that raised beside it would
+    hand that promise back. Worse, it arrives AFTER the run dir exists, so an escaping OSError
+    burns the run id — the retry an operator reaches for is refused forever."""
+    from defender import run_common
+
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    monkeypatch.setenv("DEFENDER_RUNS_BASE", str(runs))
+    alert = tmp_path / "alert.json"
+    alert.write_text(json.dumps({"id": "a1"}))
+    # A real failure, not an authored exception: a DIRECTORY at the stamp's name is one of the
+    # shapes `write_guarded` refuses, and it is the shape a previous crashed run can leave.
+    run_id = "20260101T000000Z-wedge"
+    (runs / run_id).mkdir()
+    (runs / run_id / PROVENANCE).mkdir()
+
+    def _materialize():
+        # `materialize_run_dir` refuses an existing dir, so drive `_stamp` directly — it is the
+        # seam that owns the promise, and the arm is about the promise rather than the caller.
+        run_common._stamp(runs / run_id / PROVENANCE, None)
+
+    _materialize()
+    assert "could not stamp" in capsys.readouterr().err
+
+
+def test_a_family_shares_one_capture(tmp_path, monkeypatch):
+    """Hoisted above the loop: taken per world, a commit landing mid-launch gives siblings
+    different records, and the family would differ in its code as well as in the axis the
+    questioner declared — the very thing the stamp exists to make noticeable."""
+    from defender import run_common
+
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    monkeypatch.setenv("DEFENDER_RUNS_BASE", str(runs))
+    alert = tmp_path / "alert.json"
+    alert.write_text(json.dumps({"id": "a1"}))
+    shared = RunProvenance(commit="e" * 40, dirty=False, scope=_provenance.CODE_SCOPE)
+    stamps = []
+    for world in ("a", "b", "c"):
+        run_dir = run_common.materialize_run_dir(
+            alert, f"20260101T000000Z-{world}", provenance=shared
+        )
+        stamps.append(_provenance.read(RunPaths(run_dir).provenance))
+    assert stamps == [shared, shared, shared]
+    assert len({s.commit for s in stamps}) == 1
+
+
+def test_without_a_shared_capture_each_run_takes_its_own(tmp_path, monkeypatch):
+    """The default is unchanged for every other caller — the keyword only lets a launcher that
+    HAS a family answer once for all of it."""
+    from defender import run_common
+
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    monkeypatch.setenv("DEFENDER_RUNS_BASE", str(runs))
+    alert = tmp_path / "alert.json"
+    alert.write_text(json.dumps({"id": "a1"}))
+    run_dir = run_common.materialize_run_dir(alert, "20260101T000000Z-solo")
+    rec = _provenance.read(RunPaths(run_dir).provenance)
+    assert rec is not None
+    assert rec.commit is not None or rec.unavailable is not None

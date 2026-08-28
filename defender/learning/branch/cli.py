@@ -65,6 +65,7 @@ if __name__ == "__main__" and _VENV_PY.is_file() and Path(sys.executable) != _VE
 if (_root := str(_DEFENDER_DIR.parent)) not in sys.path:
     sys.path.insert(0, _root)
 
+from defender import _provenance
 from defender._paths import PATHS
 from defender._run_id import (
     CASE_STABLE_REQUIRED,
@@ -80,7 +81,7 @@ from defender.learning.branch.estate.registry import (
     validate_world_touches,
 )
 from defender.learning.branch.ledger import Ledger, LedgerError, base_file
-from defender.run_common import materialize_run_dir, resolve_runs_base
+from defender.run_common import REPO_ROOT, materialize_run_dir, resolve_runs_base
 from defender.runtime import branch, driver, session_store
 
 
@@ -243,6 +244,21 @@ def materialize_worlds(
             f"source alert {alert} is not a plain file — the alert is the case input every "
             "sibling investigates, and a link wearing its name would copy bytes from outside "
             "the source run into every run dir this launcher creates")
+    # ONE capture for the whole family, hoisted above the loop, and this is the reason the
+    # stamp exists at all. Taken per world — which is what `materialize_run_dir` does when a
+    # caller does not hand it one — a commit landing, or anyone saving a file in the checkout,
+    # between world 1 and world N gives the siblings DIFFERENT records: the family would differ
+    # in its code as well as in the axis the questioner declared, and the only evidence would
+    # sit unread in N separate files. Shared, the worlds are provably built from one reading of
+    # one tree, which is the comparability `run_common`'s own comment claims this buys.
+    #
+    # A dirty tree is announced, never refused. #976 keeps the refusal with the caller that
+    # needs the guarantee, and a branched family run from a working checkout is the ordinary
+    # case during development — but a sibling comparison is exactly where an uncommitted edit
+    # is most likely to be mistaken for a world's effect, so the operator is told before the
+    # first world spends anything.
+    provenance = _provenance.capture_tree(REPO_ROOT)
+    _announce_family_provenance(provenance, len(worlds))
     prepared = []
     for world in worlds:
         run_id = f"{episode_id}-{world.world_id}"
@@ -251,9 +267,34 @@ def materialize_worlds(
             world=world, ledger=Ledger.for_world(episode_dir, world.world_id),
             as_of=spec.as_of,
         )
-        run_dir = materialize_run_dir(RunPaths(Path(spec.source_run_dir)).alert, run_id)
+        run_dir = materialize_run_dir(
+            RunPaths(Path(spec.source_run_dir)).alert, run_id, provenance=provenance,
+        )
         prepared.append((world, run_id, run_dir, registry))
     return prepared
+
+
+def _announce_family_provenance(prov: _provenance.RunProvenance, worlds: int) -> None:
+    """Tell the operator what every sibling is about to be built from, once.
+
+    The single-run entry point announces its own stamp and this launcher did not, which left
+    the ONE caller whose comparison the stamp protects as the one that never mentioned it."""
+    if prov.commit is None:
+        print(f"[branch] {worlds} worlds, commit UNRECORDED ({prov.unavailable})",
+              file=sys.stderr)
+        return
+    if prov.dirty:
+        print(
+            f"[branch] {worlds} worlds share commit {prov.commit[:12]}, but "
+            f"{prov.dirty_path_count} path(s) under {prov.scope}/ are uncommitted — every "
+            "sibling runs the same working tree, so the family stays internally comparable; "
+            "an edit made WHILE they run does not, and no later reader could tell it from a "
+            "world's effect",
+            file=sys.stderr,
+        )
+        return
+    mark = "" if prov.dirty is False else " (working tree state unknown)"
+    print(f"[branch] {worlds} worlds share commit {prov.commit[:12]}{mark}", file=sys.stderr)
 
 
 async def run_world(

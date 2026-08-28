@@ -51,4 +51,22 @@ RUN cd defender && uv sync --frozen --extra runtime
 # Code layer (busts only when defender/ changes, not on a dep change).
 COPY defender/ defender/
 
+# PROVENANCE STAMP (#976). Every run records the commit it was made against, which it normally
+# asks git for — and this image has neither git nor .git, by design: it is python + the deps +
+# the package, and `.dockerignore` keeps repository metadata out. Without a baked value every
+# containerised run would file `commit: unavailable` while carrying a file that LOOKS like the
+# drift problem was solved, which is worse than not carrying one.
+#
+# Pass it at build time; the build is where the answer is known:
+#   docker build -f .devcontainer/Dockerfile.runtime \
+#       --build-arg DEFENDER_BUILD_COMMIT="$(git rev-parse HEAD)" -t defender-runtime .
+#
+# The recovered commit NEVER ships with a clean working-tree bit, however clean the build tree
+# was — see `defender/_provenance.py`. This image documents mounting a workspace over its baked
+# code for live iteration, so at runtime nothing can confirm the bytes on disk are the bytes
+# that were built; the stamp says "this commit, tree state unknown", which is true either way.
+# An unset arg is not an error: the run stamps `unavailable` and says so, as it does today.
+ARG DEFENDER_BUILD_COMMIT=""
+ENV DEFENDER_BUILD_COMMIT=$DEFENDER_BUILD_COMMIT
+
 CMD ["bash"]

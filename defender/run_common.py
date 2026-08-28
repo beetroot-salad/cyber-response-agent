@@ -46,7 +46,10 @@ def _alert_label(alert: Path) -> str:
     return alert.parent.name if alert.stem in _GENERIC_ALERT_STEMS else alert.stem
 
 
-def materialize_run_dir(alert: Path, run_id: str | None) -> Path:
+def materialize_run_dir(
+    alert: Path, run_id: str | None, *,
+    provenance: _provenance.RunProvenance | None = None,
+) -> Path:
     if not alert.is_file():
         sys.exit(f"alert not found: {alert}")
     if run_id is None:
@@ -69,12 +72,40 @@ def materialize_run_dir(alert: Path, run_id: str | None) -> Path:
     # written later is a stamp the run could have moved.
     #
     # NOT every `RunPaths` bundle: the learning loop's ARCHIVED episode under
-    # `LoopPaths.runs_dir` is mkdir'd and populated by `learning/core/persist.py`, never
-    # through here, and carries no stamp today. Carrying the source run's stamp across that
-    # copy is #976's archive half — see `_run_paths.RunPaths`, which says so where a reader
-    # holding an arbitrary run dir will meet it.
-    _provenance.write(paths.provenance, _provenance.capture_tree(REPO_ROOT))
+    # `LoopPaths.runs_dir` is mkdir'd by `learning/core/persist.py` rather than through here.
+    # It carries the SOURCE run's stamp, copied across with the other shared inputs, because
+    # the stamp of the archive directory itself would name whenever the drain happened to run
+    # rather than what the investigation executed.
+    #
+    # `provenance` is the caller's when it has one. A sibling family passes ONE capture for all
+    # N worlds: taken per world here, a commit landing mid-launch would give siblings different
+    # records, and the comparison this stamp exists to protect would be the thing it failed to
+    # notice.
+    _stamp(paths.provenance, provenance)
     return run_dir
+
+
+def _stamp(path: Path, provenance: _provenance.RunProvenance | None) -> None:
+    """Write the run's stamp, and NEVER take the run down doing it.
+
+    `capture_tree` goes to some length never to raise; a write that raised beside it would
+    hand that promise straight back. The failure is real and unexceptional — ENOSPC on the runs
+    base, a read-only remount, an alias planted where a previous run left one — and it arrives
+    AFTER the run dir exists, so an escaping `OSError` both kills the run and burns the run id:
+    `materialize_run_dir` `sys.exit`s on a dir that already exists, so the retry the operator
+    reaches for is refused forever.
+
+    The asymmetry with `shutil.copy(alert, ...)` three lines up is the point, not an
+    oversight. A run without its alert has no case to investigate and must die. A run without
+    its stamp is a run nobody can later prove the code for — worth a loud line on stderr and
+    worth nothing more, because `read` already answers "no usable record" for a file that is
+    not there, and an operator who needs the guarantee has the announce line saying it is
+    missing."""
+    try:
+        _provenance.write(path, provenance if provenance is not None else _provenance.capture_tree(REPO_ROOT))
+    except OSError as e:
+        print(f"[run_common] could not stamp {path}: {e!r} — the run continues UNSTAMPED, so "
+              "nothing downstream can prove which code it ran", file=sys.stderr)
 
 
 def run_env(defender_dir: Path, run_dir: Path) -> dict[str, str]:

@@ -14,7 +14,7 @@ import re
 from pathlib import Path
 
 from defender import _artifact_schema
-from defender._run_paths import CASE_ANSWER_KEY_NAMES, WIRE_LOG_DIR
+from defender._run_paths import CASE_ANSWER_KEY_NAMES, PROVENANCE, WIRE_LOG_DIR
 from defender.runtime import bash_policy
 
 from .decision import Decision
@@ -209,6 +209,8 @@ def decide_read(
     # `admitted` is never True for it and no positive enumeration can exclude anything.
     if names_wire_log_dir(rp):
         return Decision(False, WIRE_LOG_DENY_REASON)
+    if names_run_provenance(rp, rd):
+        return Decision(False, PROVENANCE_DENY_REASON)
     # The same argument as `gather_raw` one step up, applied to the OTHER thing the learning loop
     # stages into the gray-box agent's own root. `persist._copy_shared_inputs` and
     # `lead_repository.stage_tables` write the source run's investigation.md, report.md,
@@ -295,6 +297,42 @@ WIRE_LOG_DENY_REASON = (
     "deliberately not shown. It is host-side observability, readable by no agent. Work from "
     "the artifacts your own role is given."
 )
+
+
+# The run's provenance stamp (#976). DENIED OUTRIGHT, on both surfaces and for every role, and
+# it is the only run-root file that earns that: every other one — `tool_trace.jsonl`,
+# `budget.json`, `policy_denials.jsonl` — is a fact about the RUN, while this one is a fact
+# about the HOST TREE the run was launched from. A sha plus up to fifty repo-relative paths of
+# somebody's uncommitted work is reconnaissance on the defender's own source, and because the
+# host writes it, `is_untrusted_read` never frames it either.
+#
+# NOT merely suppressed from the workspace map, which is where this started: `_UNLISTED` there
+# removes a NAME from a listing, and the run root sits inside MAIN's and GATHER's
+# `under(run, SEG)` read shape, so a guessed filename walked straight to it. Suppression is not
+# containment; this is.
+#
+# UNCONDITIONAL, like the wire log and unlike the answer key: the answer key is denied only to a
+# CONFINED agent because the judge legitimately grades those files, whereas no role in this
+# system has business reading the host's working-tree state. The JUDGE's `cat` scope is
+# `under(run, TREE)` and would otherwise admit it.
+PROVENANCE_DENY_REASON = (
+    "Blocked: provenance.json records the host checkout this run was launched from — a commit "
+    "and the paths of uncommitted work in the defender's own source tree. It is host-side "
+    "bookkeeping about the run, readable by no agent, and it says nothing about the case. Work "
+    "from the artifacts your own role is given."
+)
+
+
+def names_run_provenance(p: Path, run_dir: Path) -> bool:
+    """Whether RESOLVED path `p` is the provenance stamp at the ROOT of `run_dir`.
+
+    Rooted, not a bare basename, for the reason `names_case_answer_key` is: a confined agent's
+    other read root is a lesson corpus, and a flat name test would make a corpus file called
+    `provenance.json` unreadable with a reason about host bookkeeping."""
+    try:
+        return p == (run_dir / PROVENANCE).resolve()
+    except RESOLVE_ERRORS:
+        return False
 
 
 def names_wire_log_dir(p: Path) -> bool:
