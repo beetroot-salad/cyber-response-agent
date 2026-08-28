@@ -490,34 +490,62 @@ def _is_run_paths_call(node: ast.expr) -> bool:
 
 def _run_paths_locals(tree: ast.AST) -> set[str]:
     """Names bound to a `RunPaths(...)`. `rp = RunPaths(d)` and `src, dst = RunPaths(a),
-    RunPaths(b)` are both live shapes in this tree."""
+    RunPaths(b)` are both live shapes in this tree.
+
+    EVERY BINDING FORM, not `ast.Assign` alone. A name this walk misses is a name whose reads
+    are invisible, and the failure is the LOUD direction: the accessor read only through it is
+    reported as "nothing outside the tests reads" and the gate fails a change that is correct.
+    `rp: RunPaths = RunPaths(d)` (`AnnAssign`), `a = b = RunPaths(d)` (a second target) and
+    `if (rp := RunPaths(d)).report...` (`NamedExpr`) all bind one."""
     bound: set[str] = set()
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Assign):
-            continue
-        target = node.targets[0]
-        if isinstance(target, ast.Tuple) and isinstance(node.value, ast.Tuple):
-            pairs = list(zip(target.elts, node.value.elts, strict=False))
+        if isinstance(node, ast.NamedExpr):
+            pairs: list[tuple[ast.expr, ast.expr]] = [(node.target, node.value)]
+        elif isinstance(node, ast.AnnAssign):
+            pairs = [(node.target, node.value)] if node.value is not None else []
+        elif isinstance(node, ast.Assign):
+            pairs = []
+            for target in node.targets:
+                if isinstance(target, ast.Tuple) and isinstance(node.value, ast.Tuple):
+                    pairs += list(zip(target.elts, node.value.elts, strict=False))
+                else:
+                    pairs.append((target, node.value))
         else:
-            pairs = [(target, node.value)]
+            continue
         bound |= {t.id for t, v in pairs if isinstance(t, ast.Name) and _is_run_paths_call(v)}
     return bound
 
 
 def _write_target_ids(tree: ast.AST) -> set[int]:
     """The `id()` of every expression this module uses as a WRITE target — the receiver of a
-    mutating `Path` method, or an argument to a write/copy seam."""
+    mutating `Path` method, or an argument to a write/copy seam.
+
+    KEYWORDS TOO, and through a `/` join. `write_guarded(path=RunPaths(d).report, ...)` and
+    `(RunPaths(d).gather_raw / name).write_text(...)` are both ordinary spellings of a write,
+    and reading only `node.args`/the bare receiver counts each as a READ — which discharges the
+    accessor on its own writer, the exact census error that would have let `meta.json` stand.
+    """
     written: set[int] = set()
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
         func = node.func
         if isinstance(func, ast.Attribute) and func.attr in _WRITE_RECEIVER_METHODS:
-            written.add(id(func.value))
+            written |= _joined_ids(func.value)
         name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
         if name in _WRITE_ARG_CALLS:
-            written.update(id(arg) for arg in node.args)
+            for arg in (*node.args, *(kw.value for kw in node.keywords)):
+                written |= _joined_ids(arg)
     return written
+
+
+def _joined_ids(node: ast.expr) -> set[int]:
+    """`node`, plus the operands of any `/` path join it is built from — `RunPaths(d).gather_raw
+    / lead / f"{seq}.json"` names the accessor several `BinOp`s down from the write."""
+    ids = {id(node)}
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        ids |= _joined_ids(node.left) | _joined_ids(node.right)
+    return ids
 
 
 def _run_paths_reads(tree: ast.AST, accessors: set[str]) -> set[str]:

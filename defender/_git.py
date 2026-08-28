@@ -56,9 +56,20 @@ def git_ok(args: Sequence[str], *, cwd: Path = REPO_ROOT) -> bool:
 
 
 def git_status(
-    cwd: Path, *, pathspec: Path | str | None = None, timeout: float | None = None
+    cwd: Path, *, pathspec: Path | str | None = None, timeout: float | None = None,
+    no_renames: bool = False,
 ) -> list[tuple[str, str]]:
+    """The working tree's status as `(XY, path)` records.
+
+    `no_renames` turns OFF git's rename detection, which is what a caller COUNTING the paths a
+    sha does not name has to do: `git mv a b` is reported as one `R  b` record whose original
+    `a` this parser consumes as the record's second field and drops, so two paths that differ
+    from HEAD are counted once and the vanished one is never named. With the flag, the same
+    move reports `D  a` and `A  b` — two records, two paths, which is the honest answer.
+    """
     args = ["status", "--porcelain", "--untracked-files=all", "-z"]
+    if no_renames:
+        args.append("--no-renames")
     if pathspec is not None:
         args += ["--", str(pathspec)]
     out = _run(args, cwd=cwd, timeout=timeout).stdout

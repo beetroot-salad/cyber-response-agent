@@ -48,6 +48,7 @@ on both sides.
 from __future__ import annotations
 
 import asyncio
+import functools
 import re
 import shutil
 from collections.abc import Callable, Mapping
@@ -383,8 +384,20 @@ def materialize(tmp_path: Path, golden: Path) -> Path:
     paths = RunPaths(run_dir)
     paths.gather_raw.mkdir(parents=True)
     shutil.copy(golden / "alert.json", paths.alert)
-    _provenance.write(paths.provenance, _provenance.capture_tree(run_common.REPO_ROOT))
+    _provenance.write(paths.provenance, _harness_provenance())
     return run_dir
+
+
+@functools.cache
+def _harness_provenance() -> _provenance.RunProvenance:
+    """The capture, taken ONCE per test session rather than once per fixture.
+
+    `capture_tree` shells out to `git rev-parse` and to a whole-repo `git status
+    --untracked-files=all`, and this builder runs in ~120 places across the suite. What the
+    parity arm needs is that the harness writes the same FILE production writes; it does not
+    need a fresh interrogation of an unchanging checkout per test, and paying for one turns a
+    hermetic fixture into a per-test subprocess pair."""
+    return _provenance.capture_tree(run_common.REPO_ROOT)
 
 
 #: Every frame delimiter, whatever salt it carries. Since #875 a run has no single salt to

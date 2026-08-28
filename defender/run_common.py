@@ -58,8 +58,9 @@ def materialize_run_dir(alert: Path, run_id: str | None) -> Path:
     run_dir = runs_base / run_id
     if run_dir.exists():
         sys.exit(f"run dir already exists: {run_dir}")
-    RunPaths(run_dir).gather_raw.mkdir(parents=True)
-    shutil.copy(alert, RunPaths(run_dir).alert)
+    paths = RunPaths(run_dir)
+    paths.gather_raw.mkdir(parents=True)
+    shutil.copy(alert, paths.alert)
     # STAMPED HERE, at the one place a run the box will EXECUTE is ever materialised, so no
     # caller can forget — the branch launcher materialises its siblings through this same call
     # (`learning/branch/cli.materialize_worlds`), which is what makes a family's worlds
@@ -72,7 +73,7 @@ def materialize_run_dir(alert: Path, run_id: str | None) -> Path:
     # through here, and carries no stamp today. Carrying the source run's stamp across that
     # copy is #976's archive half — see `_run_paths.RunPaths`, which says so where a reader
     # holding an arbitrary run dir will meet it.
-    _provenance.write(RunPaths(run_dir).provenance, _provenance.capture_tree(REPO_ROOT))
+    _provenance.write(paths.provenance, _provenance.capture_tree(REPO_ROOT))
     return run_dir
 
 

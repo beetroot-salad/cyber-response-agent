@@ -40,6 +40,14 @@ whole repo's dirt, so on a busy tree it can be 50 paths none of which is under `
 caller that needs the narrower question has `_git.git_status(cwd, pathspec=...)` and should
 ask it rather than reading more into this field than it says.
 
+`dirty is False` IS ONLY A CLAIM ABOUT TRACKED AND UNTRACKED PATHS, never about IGNORED ones —
+`git status` does not report them at any `--untracked-files` setting, and that is the one place
+this record genuinely under-reports. It matters here rather than in the abstract: `defender/`
+is bind-mounted into the box whole and `.venv/` is gitignored, so the interpreter and every
+installed dependency the box runs against are outside what a clean bit can speak for. Read
+`dirty is False` as "no TRACKED source moved", and pin the dependency set with the lockfile,
+which is tracked and therefore is covered.
+
 THE RUN DIR IS THE BOX'S RW BIND, so a model can overwrite this file the same way it can
 overwrite any run-dir artifact — see `_run_paths.artifact_file`, which exists for exactly that
 reason. The stamp is written by the host BEFORE the box is created and before any agent is
@@ -137,6 +145,14 @@ class RunProvenance:
             return None
         if not (dirty is None or isinstance(dirty, bool)):
             return None
+        # `""` IS NOT A SHA, and `isinstance(commit, str)` admits it. Left standing it reads as
+        # a commit that is PRESENT, so it walks straight past the guard below and a truncated or
+        # planted `{"commit": "", "dirty": false}` comes back as a clean bill of health with
+        # nothing behind it — the identical error a missing `commit` is refused for, and
+        # `_announce_provenance` then prints the bare `commit=`. Folded into the absent case
+        # rather than refused on its own line, because "no sha" is what both shapes say.
+        if commit == "":
+            commit = None
         unavailable = obj.get("unavailable")
         unavailable = unavailable if isinstance(unavailable, str) else None
         # TYPE-CHECKING EACH FIELD ALONE IS NOT ENOUGH — the two shapes below are well-typed
@@ -147,12 +163,16 @@ class RunProvenance:
         #   `read` would report it as "this run carries a stamp" to a caller whose only
         #   question is whether one exists.
         #
-        #   `dirty is False` with no `commit` is the clean bill of health with nothing behind
-        #   it — the ONE error the class docstring says this record must not make. Every
-        #   `commit is None` path in `capture_tree` leaves `dirty` at `None`.
+        #   ANY answer about the dirt with no `commit` behind it. `dirty is False` is the clean
+        #   bill of health with nothing behind it — the ONE error the class docstring says this
+        #   record must not make — and `dirty is True` is no more producible: every
+        #   `commit is None` path in `capture_tree` leaves `dirty` at `None` and sets a reason,
+        #   so the guard is written against that rule rather than against the one shape of it
+        #   that is scariest. Admitting `{"commit": null, "dirty": true}` also put an announce
+        #   line reading `commit=unavailable (None)` in front of an operator.
         if commit is None and dirty is None and unavailable is None:
             return None
-        if dirty is False and commit is None:
+        if dirty is not None and commit is None:
             return None
         # The non-string entries are dropped rather than refused, and the record still stands:
         # `dirty_paths` is a LOSSY SAMPLE by construction (capped at `DIRTY_PATH_SAMPLE`), so a
@@ -196,7 +216,7 @@ def capture_tree(repo_root: Path) -> RunProvenance:
     except _GIT_UNREACHABLE as e:
         return RunProvenance(commit=None, dirty=None, unavailable=f"git unavailable: {e!r}")
     try:
-        records = _git.git_status(repo_root, timeout=GIT_TIMEOUT_S)
+        records = _git.git_status(repo_root, timeout=GIT_TIMEOUT_S, no_renames=True)
     except _GIT_FAILED as e:
         # The sha is already in hand and is worth keeping on its own; what is unknown is
         # whether it describes the bytes that ran, and `dirty=None` is exactly that statement.
@@ -209,6 +229,12 @@ def capture_tree(repo_root: Path) -> RunProvenance:
     # cannot — it overstates, in exactly the direction the cap's comment promises it never
     # does. The status letters are dropped here rather than kept: the record answers HOW MANY
     # paths the sha does not name, never why each one differs.
+    #
+    # `no_renames=True` closes the OTHER direction, which is the one that would be a lie. With
+    # detection on, `git mv a b` is a single `R  b` record whose original `a` the parser
+    # consumes as the record's trailing field and drops — so a 30,000-file rename counts 15,000
+    # and the vanished halves are named nowhere. Off, the same move is `D  a` + `A  b`: two
+    # paths, both of which the sha genuinely fails to describe.
     paths = sorted({path for _xy, path in records})
     return RunProvenance(
         commit=commit,

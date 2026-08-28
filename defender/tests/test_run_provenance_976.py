@@ -256,13 +256,31 @@ def test_a_deeply_nested_payload_reads_as_no_stamp(tmp_path):
     assert _provenance.read(path) is None
 
 
-@pytest.mark.parametrize("doc", [{}, {"commit": None, "dirty": None}, {"commit": None, "dirty": False}])
+@pytest.mark.parametrize(
+    "doc",
+    [
+        {},
+        {"commit": None, "dirty": None},
+        {"commit": None, "dirty": False},
+        # `dirty is True` with no sha is no more producible than `dirty is False` with none —
+        # the guard is the RULE ("no answer about the dirt without a commit behind it"), not
+        # the one shape of it that is scariest. Admitting this one also printed an announce
+        # line reading `commit=unavailable (None)`.
+        {"commit": None, "dirty": True},
+        # `isinstance("", str)` is True, so an EMPTY sha walks past a `commit is None` guard
+        # and lands as the clean bill of health with nothing behind it — the identical error,
+        # spelled with a string instead of a null, and `[run.py] commit=` on the operator's
+        # line.
+        {"commit": "", "dirty": False},
+        {"commit": "", "dirty": None},
+    ],
+)
 def test_a_record_capture_cannot_produce_is_not_a_record(tmp_path, doc):
     """Type-checking each field alone is not enough. An object saying NOTHING would otherwise
     answer "this run carries a stamp" to a caller whose only question is whether one exists,
-    and `dirty is False` with no sha is the clean bill of health with nothing behind it — the
-    one error the record must not make. Every `commit is None` path in `capture_tree` leaves
-    `dirty` at `None` and sets a reason."""
+    and an answer about the dirt with no sha behind it is the clean bill of health with nothing
+    behind it — the one error the record must not make. Every `commit is None` path in
+    `capture_tree` leaves `dirty` at `None` and sets a reason."""
     path = tmp_path / PROVENANCE
     path.write_text(json.dumps(doc), encoding="utf-8")
     assert _provenance.read(path) is None
@@ -329,6 +347,25 @@ def test_every_field_reaches_the_wire_and_comes_back(tmp_path):
     path = tmp_path / PROVENANCE
     _provenance.write(path, rich)
     assert _provenance.read(path) == rich
+
+
+def test_a_rename_counts_both_paths_the_sha_fails_to_name(tmp_path):
+    """The count must not UNDER-report, which is the direction that would be a lie.
+
+    With rename detection on, `git mv a b` is a single `R  b` record whose original `a` rides
+    as the record's trailing field — which `_git.git_status` consumes and drops — so two paths
+    that differ from HEAD are counted once and the vanished one is named nowhere. `capture_tree`
+    asks with `no_renames=True` so the same move reports `D  a` + `A  b`."""
+    repo = _repo(tmp_path)
+    (repo / "moved.md").write_text("moved\n", encoding="utf-8")
+    _git.git(["add", "-A"], cwd=repo)
+    _git.git(["commit", "-qm", "add"], cwd=repo)
+    _git.git(["mv", "moved.md", "elsewhere.md"], cwd=repo)
+
+    prov = _provenance.capture_tree(repo)
+    assert prov.dirty is True
+    assert set(prov.dirty_paths) == {"moved.md", "elsewhere.md"}, prov.dirty_paths
+    assert prov.dirty_path_count == 2, "a rename hid the path the sha no longer names"
 
 
 def test_one_dirty_path_earning_two_status_records_is_counted_once(tmp_path):
