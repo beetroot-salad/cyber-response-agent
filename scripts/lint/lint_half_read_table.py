@@ -342,7 +342,11 @@ def _reexport_edges(
     edges: dict[tuple[str, str], set[tuple[str, ...]]] = {}
     owners = {(owner_rel, name) for owner_rel, name in tables}
     for rel, tree, _lines, _env in corpus:
-        package = tuple(_dotted(rel)[:-1])
+        # For `pkg/__init__.py` the package IS its dotted path — `_dotted` already dropped
+        # the `__init__`, so a one-dot import there resolves INSIDE the package, not beside
+        # it. Taking `[:-1]` unconditionally aimed the facade's own re-export at the parent
+        # directory and the edge never matched, which put this gate back to zero findings.
+        package = _dotted(rel) if rel.endswith("/__init__.py") else tuple(_dotted(rel)[:-1])
         for node in ast.walk(tree):
             if not isinstance(node, ast.ImportFrom) or node.module is None:
                 continue

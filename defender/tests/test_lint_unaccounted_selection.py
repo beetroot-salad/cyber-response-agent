@@ -101,7 +101,7 @@ def test_the_canonical_module_and_tests_are_exempt(tmp_path):
     The exemption is by full relative PATH — a second `parser.py` elsewhere under the scope
     is exactly the copy this gate exists to stop, so a basename match would wave it in."""
     tree = tmp_path / "scope"
-    _pyfile(tree, "skills/invlang/parser.py", _IMPORT_ALIASED)
+    _pyfile(tree, "skills/invlang/parser/__init__.py", _IMPORT_ALIASED)
     _pyfile(tree, "test_reader.py", _IMPORT_ALIASED)
     _pyfile(tree, "tests/helper.py", _IMPORT_ALIASED)
     assert _GATE._scan(tree) == []
@@ -178,7 +178,7 @@ def test_arm2_applies_inside_the_parser_too(tmp_path):
     no such owner: a silent grammar filter is the same defect wherever it sits, and three of
     the four sites this gate documents live in the parser."""
     tree = tmp_path / "scope"
-    _pyfile(tree, "skills/invlang/parser.py", _GRAMMAR_FILTER + _IMPORT_ALIASED)
+    _pyfile(tree, "skills/invlang/parser/__init__.py", _GRAMMAR_FILTER + _IMPORT_ALIASED)
     # arm 1 exempt (the import), arm 2 not
     assert _kinds(_GATE._scan(tree)) == {"filter"}
 

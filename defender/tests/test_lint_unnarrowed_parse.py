@@ -381,7 +381,7 @@ def test_the_motivating_findings_are_in_the_shipped_baseline():
     aware comparison is reachable from it. It is a debt this gate names, not one of #878's five
     reachable faults, and #878 did not widen its scope to collect it."""
     fingerprints = {f.fingerprint for f in _GATE._scan(_GATE.DEFENDER)}
-    assert "defender/runtime/_l0_items.py:_correlation_contract:unowned-iso-parse" in fingerprints
+    assert "defender/runtime/lead_zero/_items.py:_correlation_contract:unowned-iso-parse" in fingerprints
 
     for fixed in (
         "defender/hooks/_run_dir.py:read_json_locked:unnarrowed-parse",

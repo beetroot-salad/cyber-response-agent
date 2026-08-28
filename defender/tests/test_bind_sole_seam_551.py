@@ -691,7 +691,7 @@ def test_d3_main_driver_threads_param_into_bind():
     param into the bind(MAIN_DEF, …) call (so prompt tree == gate tree), not only into
     build_agent/_user_prompt while bind anchors PATHS."""
     # RED@HEAD: the driver's bind(MAIN_DEF, run_dir) call has no defender_dir today.
-    src = (PATHS.repo_root / "defender" / "runtime" / "driver.py").read_text()
+    src = (PATHS.repo_root / "defender" / "runtime" / "driver" / "__init__.py").read_text()
     assert re.search(r"bind\(\s*MAIN_DEF[^)]*defender_dir\s*=", src), \
         "run_investigation must thread defender_dir into bind(MAIN_DEF, …)"
 
@@ -926,7 +926,7 @@ def test_d6_writers_pass_roots(tmp_path):
     # in `_files`, the two investigation writers (`append_block`, `fix_row`) in `_document`.
     # Both are read, so the census still covers every writer rather than whichever half a
     # later split happens to leave behind.
-    runtime = PATHS.repo_root / "defender" / "runtime"
+    runtime = PATHS.repo_root / "defender" / "runtime" / "tools"
     tools_src = "\n".join(
         (runtime / name).read_text() for name in ("_files.py", "_document.py")
     )

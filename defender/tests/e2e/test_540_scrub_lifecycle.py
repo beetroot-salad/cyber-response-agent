@@ -99,7 +99,7 @@ RUN_PY = DEFENDER / "run.py"
 #: The module holding the bash tool BODY. Not `tools.py`, which is the registration
 #: facade: the structural leg below parses the function itself, so it has to read the
 #: file that defines it.
-BASH_PY = DEFENDER / "runtime" / "_bash.py"
+BASH_PY = DEFENDER / "runtime" / "tools" / "_bash.py"
 GATHER_ONLY = REPO_ROOT / "scripts" / "testing" / "gather_only.py"
 
 

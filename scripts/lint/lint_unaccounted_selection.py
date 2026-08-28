@@ -83,8 +83,8 @@ SUPPRESS_MARKERS = ("lint-selection: ok",)
 #: basename match would wave through any new `parser.py` anywhere under the scope — i.e. a
 #: verbatim second copy of the grammar, which is the one thing this gate exists to stop.
 CANONICAL_MODULES = (
-    "skills/invlang/_tokenize.py",
-    "skills/invlang/parser.py",
+    "skills/invlang/parser/_tokenize.py",
+    "skills/invlang/parser/__init__.py",
 )
 
 FENCE_CONST = "INVLANG_FENCE_RE"

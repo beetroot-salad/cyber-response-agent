@@ -1013,7 +1013,7 @@ def test_the_write_lint_hard_gates_the_census_rows_and_ratchets_only_new_ones(tm
         "missing there is a writer CI stops gating"
     )
 
-    assert "runtime/driver.py" in LINT_HARD_GATED_MODULES, (
+    assert "runtime/driver/" in LINT_HARD_GATED_MODULES, (
         "the derived gate list lost the driver's fault-exit trace write — one of the two sites "
         "the issue itself reported, and the row whose absence made this assertion vacuous"
     )

@@ -50,7 +50,7 @@
     "learning/lead_repository.py:stage_tables": "",
     "learning/leads/_lead_spine.py:_spawn_author_agent": "",
     "learning/leads/draft_synthesis.py:synthesize_drafts": "",
-    "learning/leads/lead_author.py:_write_state": "",
+    "learning/leads/lead_author/__init__.py:_write_state": "",
     "learning/ops/replay_actor.py:main": "",
     "learning/pipeline/benign_actor/run.py:invoke_actor_benign": "",
     "learning/pipeline/judge/closed_ticket_tool.py:_go": "",

@@ -316,7 +316,7 @@ def test_vulture_baseline_already_carries_the_fix_row_entry():
     entries = json.loads(VULTURE_BASELINE.read_text(encoding="utf-8"))["entries"]
     tool_entries = {
         k for k in entries
-        if k.startswith("defender/runtime/tools.py: unused function ")
+        if k.startswith("defender/runtime/tools/__init__.py: unused function ")
     }
 
     assert any("'fix_row'" in k for k in tool_entries), (
