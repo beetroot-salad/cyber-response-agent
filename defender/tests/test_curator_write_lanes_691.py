@@ -56,9 +56,7 @@ def _admitted_in_corpus(wt, deps, corpus_name: str, stem: str = "lesson") -> Non
     assert landed.read_text() == "edited\n"
 
 
-# ===========================================================================
 # O2 / S1 / S4 — the write scope roots at the worktree corpus, not run_dir
-# ===========================================================================
 
 def test_write_allow_roots_at_the_worktree_corpus_not_run_dir(tmp_path):
     """The compiled write scope roots at <worktree>/defender/<corpus>, NOT run_dir: an in-corpus
@@ -143,9 +141,7 @@ def test_a_write_operand_path_is_given_relative_with_a_leading_dot_slash(tmp_pat
     assert (corpus(wt, "lessons") / "dot.md").read_text() == "body\n"
 
 
-# ===========================================================================
 # MD-1 (RG-1 / D1) — a mis-scoped curator is unbuildable (refuse at bind)
-# ===========================================================================
 
 def test_a_non_shipped_corpus_name_write_is_denied_by_confine_containment(tmp_path):
     """MD-1 / D1: a curator whose write scope roots OUTSIDE its own read confine is UNBUILDABLE —
@@ -187,9 +183,7 @@ def test_a_shipped_corpus_write_is_denied_when_its_read_confine_excludes_it(tmp_
     assert (corpus(wt, "lessons") / "ok.md").read_text() == "body\n"
 
 
-# ===========================================================================
 # S3 / MD-3 / MD-4 / MD-5 — the rm lane and the four-lane parity
-# ===========================================================================
 
 def test_the_rm_lane_is_scoped_to_the_same_corpus_as_the_write_lane(tmp_path):
     """Parity: the rm grant admits exactly the spawn's OWN corpus, the same set the write lane
@@ -284,9 +278,7 @@ def test_a_single_rm_naming_two_corpora_is_denied(tmp_path):
     assert bash_decision(deps, "rm defender/lessons/single.md").allow          # positive control
 
 
-# ===========================================================================
 # MD-7 / F77 / f7 — the write lane and the read lane admit the same names
-# ===========================================================================
 
 def test_a_lesson_the_curator_can_write_it_can_read_back(tmp_path):
     """MD-7 / D3: every lesson filename the write lane admits, the read lane admits too — the write

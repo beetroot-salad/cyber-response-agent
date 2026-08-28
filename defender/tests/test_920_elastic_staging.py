@@ -90,9 +90,7 @@ def leading_source(body: str) -> str:
     return first[len("FROM "):].strip()
 
 
-# ==========================================================================
 # the committed corpus: every template retargets, with its pipes intact
-# ==========================================================================
 
 def test_the_committed_catalog_is_the_corpus_this_sweep_claims():
     """    15 committed templates, 12 of them ES|QL — the split the two redirection paths are sized
@@ -143,9 +141,7 @@ def test_the_catalog_spans_more_than_one_corpus():
     assert ".internal.alerts-security.alerts-default-*" in patterns
 
 
-# ==========================================================================
 # the view name: per world, derived from the pattern
-# ==========================================================================
 
 @pytest.mark.parametrize(("pattern", "world_id", "expected"), [
     ("logs-system.auth-*", "b", "wv-b-logs-system.auth-"),
@@ -197,9 +193,7 @@ def test_two_siblings_never_share_a_view():
     assert a != b
 
 
-# ==========================================================================
 # the ES|QL rewrite: what belongs to the FROM command, and what does not
-# ==========================================================================
 
 def test_a_metadata_clause_survives_with_its_following_newline():
     """    `FROM <sources> METADATA <fields>` keeps the METADATA suffix AND the newline after it.
@@ -308,9 +302,7 @@ def test_an_esql_call_carrying_no_query_body_is_refused():
         elastic.redirect("esql", {"limit": 5}, "w1")
 
 
-# ==========================================================================
 # the param-indexed path: `query` and `alerts`
-# ==========================================================================
 
 @pytest.mark.parametrize("verb", ["query", "alerts"])
 def test_the_param_indexed_verbs_retarget_through_the_index_param(verb):
@@ -405,9 +397,7 @@ def test_an_omitted_index_resolves_through_the_runs_own_config(verb):
     assert expected.startswith("wv-w1-")
 
 
-# ==========================================================================
 # the inverse: what the payload echoes back
-# ==========================================================================
 
 @pytest.mark.parametrize(("verb", "asked"), [
     ("esql", {"query": "FROM logs-falco.alerts-*\n| STATS events = COUNT(*)"}),
@@ -551,9 +541,7 @@ def test_source_pattern_reads_the_route_each_verb_carries():
     assert elastic.source_pattern("query", {}) is None
 
 
-# ==========================================================================
 # the null cases: the base world, and a verb with no corpus
-# ==========================================================================
 
 @pytest.mark.parametrize(("verb", "params"), [
     ("esql", {"query": "FROM logs-system.auth-*\n| LIMIT 5"}),
@@ -585,9 +573,7 @@ def test_a_verb_that_addresses_no_corpus_is_left_alone(verb):
     assert elastic.redirect(verb, params, "w1") == params
 
 
-# ==========================================================================
 # the dispatch table: the one place the estate names a vendor
-# ==========================================================================
 
 def test_the_event_stream_is_the_only_staged_system():
     """    `STAGERS` names `elastic` and nothing else.

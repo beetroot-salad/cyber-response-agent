@@ -105,8 +105,6 @@ def _tool_then_text(tool_calls, final_text):
     return fn
 
 
-
-
 def _prompt(tmp_path):
     p = tmp_path / "lead_author.md"
     p.write_text("Curate the catalog. Edit skill files under defender/skills. Finish when done.\n")
@@ -171,9 +169,7 @@ def _spawn(**over):
     )
 
 
-# ===========================================================================
 # bind(LEAD_AUTHOR_DEF, defender_dir=) — worktree binding + safe-by-construction
-# ===========================================================================
 
 def test_for_run_binds_worktree_defender_dir_and_write_allow(tmp_path):
     """bind stamps the WORKTREE's defender_dir + write_allow, NOT PATHS.defender_dir (the main
@@ -218,9 +214,7 @@ def test_lead_author_deps_cannot_be_born_without_policy(tmp_path):
         "defender-elastic query x | defender-sql 'SELECT 1'", policy=deps.policy).allow
 
 
-# ===========================================================================
 # the bound lead-author policy — shape + the rm-of-drafts matcher (F3) + asymmetry
-# ===========================================================================
 
 def test_lead_author_policy_shape(tmp_path):
     """write_allow = the five NAMED lanes of #772, exactly ONE bash grant (the `rm` of drafts —
@@ -343,9 +337,7 @@ def test_both_lanes_deny_dotdot_traversal_escape(tmp_path):
     assert permission.decide_bash("rm defender/skills/gather/queries/elastic/_draft/z.md", policy=pol).allow
 
 
-# ===========================================================================
 # run_stage — require_output (the new flag) + the writers toolset
-# ===========================================================================
 
 def test_run_stage_require_output_matrix(tmp_path):
     """The blast-radius guard for the four shipped read-only stages. With a CONTENT-LESS final text
@@ -411,9 +403,7 @@ def test_lead_author_registers_file_writers(tmp_path):
     assert list(w._function_toolset.tools) == ["bash", "read_file", "write_file", "edit_file"]
 
 
-# ===========================================================================
 # F2 — a repo-relative file op resolves against the WORKTREE, not the process cwd
-# ===========================================================================
 
 def test_relative_write_lands_in_worktree_not_process_cwd(tmp_path, monkeypatch):
     """F2 (the sharpest correctness fault), pinned as the OBSERVABLE (impl-agnostic — chdir or
@@ -550,9 +540,7 @@ def test_writer_contentless_final_after_write_is_success(tmp_path):
     assert (wt / "defender" / "skills" / "gather" / "queries" / "elastic" / "e.md").read_text() == "X"
 
 
-# ===========================================================================
 # run_author_stage — rc mapping (F1) + key ordering + trace key
-# ===========================================================================
 
 def test_run_author_stage_success_returns_zero():
     """A run_author that completes (returns text — or "" for a writer) → rc 0."""
@@ -658,9 +646,7 @@ def test_two_distinct_traces_into_one_dir_both_survive(tmp_path):
     assert b.read_text().strip()
 
 
-# ===========================================================================
 # config cross-product + defaults (FACT-EFFORT / F5) + build-fault → FatalConfigError
-# ===========================================================================
 
 def test_lead_author_config_defaults_glm_low():
     """The migration flips the shipped defaults: model glm-5.2, effort low (matching the defender

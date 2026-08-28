@@ -51,9 +51,7 @@ from defender.tests._session_store_705 import (  # noqa: E402
 )
 
 
-# ==========================================================================
 # the two tables' declared shape
-# ==========================================================================
 
 def test_session_head_log_has_the_declared_shape(tmp_path):
     """    `session_head_log` is one STRICT table with SIX columns — an integer primary key, the
@@ -136,9 +134,7 @@ def test_session_carries_head_message_id_and_no_fork_at_message_id(tmp_path):
     assert head_of(store, main) == r2
 
 
-# ==========================================================================
 # the log as an append-only record
-# ==========================================================================
 
 def test_no_head_log_row_is_ever_updated_or_deleted(tmp_path):
     """    No head move the store's own API can make ever rewrites or removes an entry already in the
@@ -297,9 +293,7 @@ def test_the_log_reads_back_identically_from_a_second_process(tmp_path):
     assert expected[headless][1] == []
 
 
-# ==========================================================================
 # the reason domain has no SQL enforcement behind it
-# ==========================================================================
 
 def test_reason_is_a_python_closed_set_not_a_sql_check(tmp_path):
     """    SQLite objects to nothing about a reason outside the closed set: a raw connection inserts
@@ -339,9 +333,7 @@ def test_reason_is_a_python_closed_set_not_a_sql_check(tmp_path):
         "reason is a one-line Python edit")
 
 
-# ==========================================================================
 # every role-scoped reader over a NULL-head session
-# ==========================================================================
 
 def test_every_role_scoped_reader_returns_empty_for_a_null_head_session(tmp_path):
     """    Every role-scoped read of a session whose head is NULL returns empty — `send`, `analysis`
@@ -439,9 +431,7 @@ def test_hydrate_fails_closed_on_an_unresolvable_path_element(tmp_path):
     assert ss.path_row_ids(store, session_id) == [r1, r2]
 
 
-# ==========================================================================
 # the schema version, and where the refusal lands
-# ==========================================================================
 
 def test_a_fresh_store_stamps_schema_version_2(tmp_path):
     """    Opening a store on a path that does not exist yet SUCCEEDS and leaves the file stamped at
@@ -643,9 +633,7 @@ def test_no_alter_shim_reshapes_an_existing_store(tmp_path):
         "control: the fresh path still builds the current shape")
 
 
-# ==========================================================================
 # the visualizer's pick
-# ==========================================================================
 
 def _rendered_run(tmp_path, *, case_id: str = "case-alpha"):
     """A run dir whose pointer resolves a real store — the only thing `_main_session_analysis`

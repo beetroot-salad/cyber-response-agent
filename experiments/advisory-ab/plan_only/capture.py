@@ -90,12 +90,10 @@ def spawn_capture(case_id: str) -> dict:
     if not inv.is_file():
         sys.exit(f"[capture] {case_id}: investigation.md not written; rc={rc}")
 
-    # Persist the anchor.
     case_anchor = ANCHORS_DIR / case_id
     case_anchor.mkdir(parents=True, exist_ok=True)
     shutil.copy(inv, case_anchor / "investigation.md")
 
-    # Pull cost from tool_trace.
     cost = 0.0
     tin = tout = 0
     trace = run_dir / "tool_trace.jsonl"

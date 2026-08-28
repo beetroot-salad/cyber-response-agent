@@ -123,9 +123,7 @@ def test_a_boundary_wide_demand_does_not_discharge_a_per_reader_obligation(make_
     assert "interacts(mirror_a->ceiling)" in p.stdout
 
 
-# ---------------------------------------------------------------------------
 # check_claims — the typing pass under the instrument table
-# ---------------------------------------------------------------------------
 
 _CLAIMS = """\
 schema_version: 1
@@ -198,9 +196,7 @@ def test_running_the_probe_anyway_is_never_a_typing_finding(make_repo):
     assert "MISTYPED" not in p.stdout
 
 
-# ---------------------------------------------------------------------------
 # check_claims — the probe-corpus pass (#869: an executed probe over ASCII only)
-# ---------------------------------------------------------------------------
 
 _CORPUS = """\
 schema_version: 1

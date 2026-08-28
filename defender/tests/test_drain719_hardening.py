@@ -46,9 +46,7 @@ def _git_log(repo: Path) -> str:
     ).stdout
 
 
-# =======================================================================================
 # A read-only git probe is repo contention, not a failing batch
-# =======================================================================================
 
 
 def test_a_git_failure_in_a_read_only_probe_does_not_spend_an_attempt(tmp_path: Path):
@@ -102,9 +100,7 @@ def test_a_git_failure_in_a_read_only_probe_does_not_spend_an_attempt(tmp_path: 
     assert h.pending(ch) == []
 
 
-# =======================================================================================
 # The retire seam does not wait forever while holding the repo lock
-# =======================================================================================
 
 
 def test_the_retire_seams_append_lock_wait_ends_at_the_configured_deadline(tmp_path: Path):
@@ -157,9 +153,7 @@ def test_the_retire_seams_append_lock_wait_ends_at_the_configured_deadline(tmp_p
     assert h.stuck_records(ch)[-1]["fault_class"] == "TimeoutError"
 
 
-# =======================================================================================
 # The out-of-scope-write guard stays armed across a faulted tick
-# =======================================================================================
 
 
 def test_a_stray_the_agent_wrote_outside_the_corpus_does_not_whitelist_itself(tmp_path: Path):
@@ -203,9 +197,7 @@ def test_a_stray_the_agent_wrote_outside_the_corpus_does_not_whitelist_itself(tm
     assert not stray.exists()
 
 
-# =======================================================================================
 # A fault AFTER the commit landed must not delete what the commit captured
-# =======================================================================================
 
 
 def test_a_git_failure_after_the_commit_lands_does_not_delete_the_committed_lessons(

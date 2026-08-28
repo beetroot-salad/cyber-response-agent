@@ -32,10 +32,6 @@ ACTOR_MODEL = "claude-sonnet-4-6"   # matches production default
 JUDGE_MODEL = "claude-sonnet-4-6"
 
 
-# ---------------------------------------------------------------------------
-# Variant patching
-# ---------------------------------------------------------------------------
-
 CURRENT_SECTION_2 = (
     "**2. Goal.** What this specific operation achieves end-to-end. "
     "Tie to actor model and entry point."
@@ -132,11 +128,6 @@ def patched_actor_md(variant: str) -> str:
     raise SystemExit(f"unknown variant: {variant}")
 
 
-# ---------------------------------------------------------------------------
-# Cell layout
-# ---------------------------------------------------------------------------
-
-
 def cell_dir(variant: str, fixture: str, seed: int) -> Path:
     # Stage inferred from variant prefix.
     if variant.startswith("e1-"):
@@ -157,13 +148,11 @@ def fixture_dir(fixture: str) -> Path:
     return d
 
 
-# ---------------------------------------------------------------------------
 # Streamed claude wrapper — concatenates every assistant text message so
 # multi-message actor outputs aren't truncated by `--output-format text`.
 # Production loop.py uses text mode which silently drops earlier assistant
 # texts (e.g., Section 0 emitted before lessons-corpus tool calls). For
 # evaluation we need the full story regardless of how the actor split it.
-# ---------------------------------------------------------------------------
 
 
 def _run_claude_streamed(
@@ -227,9 +216,7 @@ def _run_claude_streamed(
     return "\n\n".join(parts)
 
 
-# ---------------------------------------------------------------------------
 # Generation — calls into defender.learning.loop.invoke_actor
-# ---------------------------------------------------------------------------
 
 
 def generate(variant: str, fixture: str, seed: int) -> Path:
@@ -292,9 +279,7 @@ def generate(variant: str, fixture: str, seed: int) -> Path:
     return out / "story.md"
 
 
-# ---------------------------------------------------------------------------
 # Grading — rubric judge via claude -p
-# ---------------------------------------------------------------------------
 
 
 def grade(variant: str, fixture: str, seed: int) -> Path:
@@ -345,11 +330,6 @@ def grade(variant: str, fixture: str, seed: int) -> Path:
         raise SystemExit(f"rubric output did not parse as JSON after 3 tries; raw at {out / 'grade.raw.txt'}")
     print(f"[grade] {out.relative_to(EXP_DIR)}  {parsed}")
     return grade_path
-
-
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
 
 
 def parse_seeds(s: str) -> list[int]:

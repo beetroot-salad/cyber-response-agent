@@ -38,7 +38,7 @@ REALM = Path("/opt/soc-playground/realm.yaml")
 LOG_PATH = Path("/var/log/baseline.log")
 
 
-# ── Shape functions ──────────────────────────────────────────────────────────
+# Shape functions
 # Every shape returns a multiplier in (0, 1]. effective_mean = mean_s /
 # multiplier — smaller multiplier → longer gaps between dispatches.
 
@@ -83,7 +83,7 @@ SHAPES = {
 }
 
 
-# ── Inventory / identity resolution ──────────────────────────────────────────
+# Inventory / identity resolution
 
 def load_host(host_name: str) -> dict:
     inv = yaml.safe_load(INVENTORY.read_text())
@@ -136,7 +136,7 @@ def match_identities(patterns: list[str], users: list[str]) -> list[str]:
     return out
 
 
-# ── Dispatch ─────────────────────────────────────────────────────────────────
+# Dispatch
 
 def substitute(template: str, **kwargs) -> str:
     out = template
@@ -168,7 +168,7 @@ def dispatch(action_id: str, user: str, cmd: str, log: logging.Logger) -> None:
              action_id, user, rc, elapsed_ms, err_tail[:200])
 
 
-# ── Per-binding loop ─────────────────────────────────────────────────────────
+# Per-binding loop
 
 def run_binding(action: dict, user: str, host: dict, seed: str,
                 log: logging.Logger, stop: threading.Event) -> None:
@@ -232,7 +232,7 @@ def _resolve_targets(action: dict, host: dict) -> list[str]:
     return []
 
 
-# ── Entrypoint ───────────────────────────────────────────────────────────────
+# Entrypoint
 
 def main() -> None:
     host_name = os.environ.get("HOST_NAME", "").strip()

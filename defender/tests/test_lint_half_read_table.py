@@ -79,7 +79,7 @@ def _tree(tmp_path: Path, owner: str = _OWNER, consumer: str = _CONSUMER) -> Pat
     return tree
 
 
-# --------------------------------------------------------------- (a) it fires
+# (a) it fires
 
 
 def test_fires_on_a_half_read_table(tmp_path):
@@ -164,7 +164,7 @@ def test_module_attribute_lookup_arms_the_table(tmp_path):
     assert _GATE._scan(tree), "`owner._DISPOSITION_GATES.get(d)` must arm the table"
 
 
-# ----------------------------------------------- (b) the legitimate near-misses
+# (b) the legitimate near-misses
 
 
 def test_owner_branching_on_its_own_key_is_clean(tmp_path):
@@ -266,7 +266,7 @@ def test_tests_directory_is_out_of_scope(tmp_path):
     assert all("tests/" not in f.fingerprint for f in _GATE._scan(tree))
 
 
-# ------------------------------------------------------------ (c) the suppression marker
+# (c) the suppression marker
 
 
 # The marker is scoped to ITS OWN SITE — the branch line, or the comment block directly above
@@ -303,7 +303,7 @@ def test_the_marker_suppresses_only_at_its_own_site(tmp_path, case, consumer, su
     assert (_GATE._scan(_tree(tmp_path, consumer=consumer)) == []) is suppressed
 
 
-# ------------------------------------------------------------------- (d) ScanBlind
+# (d) ScanBlind
 
 
 def test_unparseable_file_in_scope_raises_scanblind(tmp_path):
@@ -335,7 +335,7 @@ def test_missing_scope_is_exit_2(tmp_path):
     assert _GATE.main([], scope=tmp_path / "not-a-dir") == 2
 
 
-# ----------------------------------------------------------------------- the ratchet
+# the ratchet
 
 
 def test_ratchet_contract(tmp_path):

@@ -48,10 +48,8 @@ from defender.runtime import permission  # noqa: E402
 from defender.runtime.agent_definition import compile_policy_for  # noqa: E402
 
 
-# --------------------------------------------------------------------------- #
 # Fixtures: a per-run run dir + corpus, and the two per-run policies built off  #
 # them. The dirs are real because both surfaces resolve() their operands.       #
-# --------------------------------------------------------------------------- #
 @pytest.fixture
 def env(tmp_path):
     run = tmp_path / "run"
@@ -78,9 +76,7 @@ def _read(env, path, which="gather"):
     return permission.decide_read(Path(path), run_dir=env.run, defender_dir=env.dfn, policy=pol)
 
 
-# ===========================================================================  #
 # A. Safe-by-construction: the compile seam cannot build an unconfined policy    #
-# ===========================================================================  #
 
 def test_compile_policy_for_requires_run_dir():
     """compile_policy_for(GATHER_DEF) with NO run_dir RAISES → the confined reader policy can't
@@ -106,9 +102,7 @@ def test_compile_policy_for_rejects_degenerate_roots(tmp_path):
             compile_policy_for(MAIN_DEF, run_dir=tmp_path, defender_dir=Path(bad))
 
 
-# ===========================================================================  #
 # B. In-scope reads ALLOW (positive controls — the reads real runs actually make)#
-# ===========================================================================  #
 
 # The positive controls: the reads real runs actually make. A confinement gate that denies
 # everything is trivially "secure", so each of these is a capability the lane must keep.
@@ -156,9 +150,7 @@ def test_an_in_scope_read_is_allowed(env, case, cmd, lane):
     assert _bash(env, cmd.format(run=env.run, dfn=env.dfn), lane).allow
 
 
-# ===========================================================================  #
 # C. Out-of-scope reads DENY (guarded negatives, each with a positive control)  #
-# ===========================================================================  #
 
 # Each row is one out-of-scope read plus, where one exists, the in-scope read that proves the
 # deny came from the SCOPE check and not from the program being unsupported. Without that
@@ -203,11 +195,9 @@ def test_an_out_of_scope_read_is_denied(env, case, denied, control, lane):
         assert _bash(env, control.format(**fmt), lane).allow, "positive control"
 
 
-# ===========================================================================  #
 # D. File-opening FLAGS — the escape a clean trailing operand hides             #
 #    (`OPENS_NOTHING` is a CLAIM the SHAPE must earn: the gate skips the scope   #
 #     check for those programs, so any flag that opens a file is a fail-open)    #
-# ===========================================================================  #
 
 def test_grep_dash_f_patternfile_escapes(env):
     """grep -f /etc/passwd → DENY: `-f` opens the out-of-root PATTERN file. grep is `OPENS_NOTHING`,
@@ -307,9 +297,6 @@ def test_wc_files0_from_escapes(env):
     assert not _bash(env, f"cat {env.run}/report.md | wc --files0-from=/etc/passwd", "gather").allow
 
 
-
-
-
 def test_stdin_consuming_viewers_in_pipe_allowed(env):
     """`<in-scope cat | shim> | grep/wc/head/tail/cat` → ALLOW: a downstream viewer reads STDIN and
     names no file operand, so `cat`'s operand grammar must be OPTIONAL (a bare `cat` / `cat -` in a
@@ -338,9 +325,7 @@ def test_stdin_viewer_second_stage_still_gated(env):
     assert not _bash(env, f"cat {env.run}/investigation.md | wc -l /etc/passwd", "gather").allow
 
 
-# ===========================================================================  #
 # E. Cross-surface PARITY: the read tool and the bash lane share ONE object     #
-# ===========================================================================  #
 
 def test_read_allow_is_the_cat_grants_scope(env):
     """The parity MECHANISM, not just its symptom: `policy.read_allow` IS the `cat` grant's `scope` —
@@ -465,9 +450,7 @@ def test_empty_denylist_cannot_brick_the_reader_lane(env, monkeypatch):
     assert _bash(env, f"cat {env.run}/.env", "gather").allow               # the axis really is empty
 
 
-# ===========================================================================  #
 # F. gather_raw: POSITIVE ENUMERATION replaces the raw clamp                    #
-# ===========================================================================  #
 
 def test_raw_payload_is_gathers_shape_and_not_mains(env):
     """cat {RUN}/gather_raw/l-001/1.json: DENY for main, ALLOW for gather — same program, same
@@ -523,9 +506,7 @@ def test_ls_and_cd_are_gone_from_the_lane(env):
         assert _bash(env, f"cat {env.run}/investigation.md", which).allow, which  # control
 
 
-# ===========================================================================  #
 # G. Relative operands: rebased on the EXECUTOR's cwd, then resolved            #
-# ===========================================================================  #
 
 def test_relative_operand_is_rebased_not_guessed(env):
     """A relative operand is rebased on the cwd `tools._tool_bash` hands the executor, before it
@@ -558,9 +539,7 @@ def test_relative_after_cd_still_denied(env):
     assert not _bash(env, f"cd {env.run} && cat gather_raw/l-001/1.json", "gather").allow
 
 
-# ===========================================================================  #
 # H. Symlinks: the residual this file used to DOCUMENT is now CLOSED            #
-# ===========================================================================  #
 
 def test_ln_symlink_creation_denied(env):
     """ln -s /etc/passwd {RUN}/x → DENY (both): `ln` is in no grant (and not in `PROGRAMS`), so the
@@ -600,9 +579,7 @@ def test_symlink_loop_fails_closed(env):
     assert not _bash(env, f"cat {a}", "gather").allow      # must not raise
 
 
-# ===========================================================================  #
 # I. Writes stay on write_file/edit_file; bash redirect-writes deny             #
-# ===========================================================================  #
 
 def test_bash_redirect_write_denied(env):
     """cat ... >> {RUN}/investigation.md and echo x > {RUN}/f → DENY: the executor fails closed on
@@ -633,10 +610,8 @@ def test_write_investigation_invalid_invlang_denied(env):
     assert not d.allow
 
 
-# ===========================================================================  #
 # J. #611 — the adapter lane is gone; the local-compute lane over payloads       #
 #    already on disk survives, and an adapter denies on BOTH lanes.              #
-# ===========================================================================  #
 
 def test_standalone_adapter_denied_for_gather(env):
     """#611 FLIP: `defender-elastic query 'x'` used to be ALLOW for gather (its payload captured
@@ -689,9 +664,7 @@ def test_adapter_denied_for_main(env):
     assert d.reason == permission.ADAPTER_RETIRED_REASON
 
 
-# ===========================================================================  #
 # K. Degenerate inputs                                                          #
-# ===========================================================================  #
 
 def test_empty_command_allowed(env):
     """An empty / whitespace-only command is a no-op → ALLOW (unchanged current behavior; nothing is

@@ -124,7 +124,6 @@ def run_loop(role: str, alert: str, protocol: str, facts_path: Path, addendum: s
             committed = True
             break
 
-        # Resolve tool calls
         calls = adapter.parse_tool_calls(agent_text)
         if not calls:
             # No commit, no tool calls — degenerate; force commit message
@@ -238,7 +237,7 @@ def main() -> int:
     test_alert = load_alert(TEST_FID)
     test_protocol = load_text(TEST_PROTOCOL)
 
-    # ---- TRAIN ----
+    # TRAIN
     if args.phase in {"train", "all"} and "train" not in state:
         print("== TRAIN phase (fixture 11) ==", file=sys.stderr)
         with cf.ThreadPoolExecutor(max_workers=2) as ex:
@@ -246,7 +245,6 @@ def main() -> int:
             fb = ex.submit(run_arm_b, train_alert, train_protocol, TRAIN_FACTS, "", "trainB")
             arm_a = fa.result()
             arm_b = fb.result()
-        # Persist transcripts
         md_a = f"# Arm A training transcript — fixture {TRAIN_FID}\n\n"
         md_a += fmt_loop("Defender loop", arm_a["defender"])
         md_a += "\n\n" + fmt_call("Critic (REPORT-time)", arm_a["critic"])
@@ -257,7 +255,7 @@ def main() -> int:
         state["train"] = {"arm_a": arm_a, "arm_b": arm_b}
         state_path.write_text(json.dumps(state, indent=2, default=str))
 
-    # ---- CURATE ----
+    # CURATE
     if args.phase in {"curate", "all"} and "curate" not in state:
         print("== CURATE phase ==", file=sys.stderr)
         raw_a = extract_directives_a(state["train"]["arm_a"])
@@ -274,7 +272,7 @@ def main() -> int:
         state["curate"] = {"A": cur_a, "B": cur_b}
         state_path.write_text(json.dumps(state, indent=2, default=str))
 
-    # ---- TEST ----
+    # TEST
     if args.phase in {"test", "all"} and "test" not in state:
         print(f"== TEST phase (held-out fixture {TEST_FID}) ==", file=sys.stderr)
         addendum_a = state["curate"]["A"]["result"]

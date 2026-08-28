@@ -64,7 +64,6 @@ pytestmark = pytest.mark.e2e
 _JUDGE_EFFECTIVE_TOOLS = effective_tools_for(JUDGE_DEF)
 
 
-
 def test_repeated_reads_are_fresh_live_and_unreconciled(tmp_path):
     """[d0_tool_result_envelope — dispositions consensus ×4] Repeated identical calls in one
     run are fully independent FRESH live reads — no cache, no memo: the store is asked each
@@ -227,9 +226,7 @@ def test_cached_open_payload_beside_live_refusal(tmp_path):
     assert g.params == {"key": "SOC-K", "require_closed": True}
 
 
-# ═════════════════════════════════════════════════════════════════════════════
 # G. Teaching, deny reason, grants, routes, CLI survival, operator surface
-# ═════════════════════════════════════════════════════════════════════════════
 
 
 def _cited_section(user_text: str) -> str:

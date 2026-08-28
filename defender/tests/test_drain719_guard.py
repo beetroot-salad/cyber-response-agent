@@ -106,9 +106,7 @@ def _git_log(repo: Path) -> str:
     ).stdout
 
 
-# =======================================================================================
 # Decision 8 — the trigger is an enumerated set, and A12 is reversed
-# =======================================================================================
 
 
 def test_only_a_named_fault_class_reaches_the_retire_seam(tmp_path: Path):
@@ -496,9 +494,7 @@ def test_the_retire_set_clauses_span_the_agent_call_through_the_corpus_commit_an
     )
 
 
-# =======================================================================================
 # Decision 1's four paths — each is a named member, which is why each still retires
-# =======================================================================================
 
 
 def test_post_agent_failure_with_a_succeeding_agent_bumps_and_retires(tmp_path: Path):
@@ -610,9 +606,7 @@ def test_externally_killed_box_command_is_not_reported_as_a_successful_batch(tmp
     )
 
 
-# =======================================================================================
 # Non-membership carries what placement used to
-# =======================================================================================
 
 
 def test_a_plain_oserror_from_a_lock_acquisition_is_classified_systemic(tmp_path: Path):
@@ -719,9 +713,7 @@ def test_systemic_faults_propagate_without_bumping_attempts(tmp_path: Path):
     )
 
 
-# =======================================================================================
 # Decision 9 — the reconciling tick, which is what this test actually earns
-# =======================================================================================
 
 
 def test_a_fault_after_a_successful_corpus_commit_leaves_the_attempt_count_alone(tmp_path: Path):

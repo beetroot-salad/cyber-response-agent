@@ -383,7 +383,7 @@ def _blank_sweep() -> list[Case]:
 
 #: The corpus. Hand-authored shapes first, then the swept alphabet.
 CORPUS: tuple[Case, ...] = tuple([
-    # ---------------------------------------------------------------- neutral: the plain lane
+    # neutral: the plain lane
     Case("plain-cat", "cat " + REPORT),
     Case("plain-pipe", "cat " + REPORT + " | wc -c"),
     Case("plain-three-stage", "cat " + REPORT + " | grep alpha | wc -l"),
@@ -401,7 +401,7 @@ CORPUS: tuple[Case, ...] = tuple([
     Case("plain-dollar-not-expanded", 'echo "$HOME"'),
     Case("plain-escaped-space", "echo a\\ b"),
     Case("plain-fd-glued", "cat " + REPORT + " 2>/dev/null | wc -c"),
-    # ------------------------------------------------------------ neutral: refusals of today
+    # neutral: refusals of today
     Case("deny-ungranted-program", "ls -la"),
     Case("deny-outside-scope", "cat /etc/hosts"),
     Case("deny-write-redirect", "cat " + REPORT + " > /tmp/out"),
@@ -421,13 +421,13 @@ CORPUS: tuple[Case, ...] = tuple([
     Case("untok-pipe-then-pipe", "cat " + REPORT + " | | wc -l"),
     Case("untok-connector-then-semicolon", "cat " + REPORT + " && ;"),
     Case("untok-pipe-into-redirect", "cat " + REPORT + " | 2> /dev/null"),
-    # ------------------------------------------------- neutral: the bash blanks, still no-ops
+    # neutral: the bash blanks, still no-ops
     Case("blank-empty", ""),
     Case("blank-spaces", "   "),
     Case("blank-tab", "\t"),
     Case("blank-newline", "\n"),
     Case("blank-trailing-newline", "cat " + REPORT + "\n"),
-    # ------------------------------- neutral: a divergent blank that is NOT at either end
+    # neutral: a divergent blank that is NOT at either end
     Case("neutral-interior-blank-echo", "echo a" + NBSP + "b"),
     Case("neutral-interior-blank-operand", "cat " + REPORT + NBSP + "| wc -c"),
     Case("neutral-blank-glued-to-timeout", "timeout" + NBSP + "5 cat " + REPORT),
@@ -435,11 +435,11 @@ CORPUS: tuple[Case, ...] = tuple([
     Case("neutral-blank-inside-c-argument", "bash -c '" + NBSP + "cat " + REPORT + "'"),
     Case("neutral-blank-is-the-whole-c-argument", "bash -c '" + NBSP + "'"),
     Case("neutral-quoted-blank", "echo 'a" + NBSP + "b'"),
-    # --------------------------------------------- neutral: carriage returns that do not move
+    # neutral: carriage returns that do not move
     Case("neutral-quoted-cr-operand", "cat '" + REPORT + CR + "'"),
     Case("neutral-quoted-cr-echo", "echo 'a" + CR + "b'"),
     Case("neutral-cr-before-fd-marker", "cat " + REPORT + " 2" + CR + ">/dev/null"),
-    # --------------------- member 10: the wrapper words (#971 - see the enumerated set below)
+    # member 10: the wrapper words (#971 - see the enumerated set below)
     Case("wrap-bash-c", "bash -c 'cat " + REPORT + "'", "10", _deny()),
     Case("wrap-bash-c-pipeline", "bash -c 'cat " + REPORT + " | wc -l'", "10", _deny()),
     Case("wrap-sh-c", "sh -c 'echo hi'", "10", _deny()),
@@ -472,12 +472,12 @@ CORPUS: tuple[Case, ...] = tuple([
     Case("wrap-timeout-twice", "timeout 5 timeout 3 cat " + REPORT),
     Case("wrap-timeout-inside-c", "bash -c 'timeout 5 cat " + REPORT + "'"),
     Case("wrap-nested-bash-c", "bash -c 'bash -c \"echo hi\"'"),
-    # ------------------------------------------------------------------ neutral: gather's lane
+    # neutral: gather's lane
     Case("gather-payload-pipe", "cat /run/gather_raw/l-1/0.json | grep hits", policy="gather"),
     Case("gather-adapter-denied", "defender-elastic query foo", policy="gather"),
     Case("gather-untok-wrapper", "bash -c 'cat " + REPORT + "' extra", "10", _deny(),
          policy="gather"),
-    # ============================================== the enumerated set - members 1 through 7
+    # the enumerated set - members 1 through 7
     # 1: leading/trailing divergent blanks - the deleted trim (M4). The sweep below carries the
     #    whole 26-character alphabet at both ends; these are the composed spellings.
     Case("m1-stacked-real-and-divergent", " " + NBSP + "cat " + REPORT, "1",

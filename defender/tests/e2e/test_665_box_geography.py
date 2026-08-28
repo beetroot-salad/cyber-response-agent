@@ -92,9 +92,7 @@ def _request(run_dir: Path, *, name="defender-runcycle-abc", env=None, mounts=No
     )
 
 
-# ======================================================================= #
 # box.py renders the caller-composed geography (O8/M2)
-# ======================================================================= #
 def test_box_request_renders_mounts_and_no_tier_discriminator(tmp_path):
     """box_request_geography — box.py renders exactly the mounts the caller's BoxRequest
     carries onto the `docker run` argv (target ≡ source, readonly per the Mount flag), and
@@ -161,9 +159,7 @@ def test_composed_container_name_fails_the_naming_grammar(tmp_path):
     assert ok.create_argv is not None
 
 
-# ======================================================================= #
 # The box environment (S8/M2/RF1) — allowlist by key, one shared helper
-# ======================================================================= #
 def test_box_env_filtered_by_key_no_host_credential(tmp_path):
     """env_filtered_no_credential — box.py's env is a positive allowlist BY KEY
     (BOX_ENV_ALLOWLIST); a host credential-shaped key in the caller's request env crosses to
@@ -258,9 +254,7 @@ def test_env_reaching_the_program_differs_between_the_boxed_path_and_the_loud_fa
         "the unboxed fallback env has no PYTHONPATH — it diverges from the boxed path (RF1)"
 
 
-# ======================================================================= #
 # The startup sentinel (O2/M11) + startup-fault loudness (M4/decision 5)
-# ======================================================================= #
 def test_sentinel_probes_every_mount_ro_readback(tmp_path):
     """sentinel_probes_every_mount — under M2 the startup sentinel is a PER-MOUNT obligation
     (M11): every mount the box carries (the rw tree AND each ro tree) is individually probed
@@ -660,9 +654,7 @@ def test_tmp_is_noexec_size_capped_tmpfs(tmp_path):
     assert "size=" in tmpfs, f"/tmp is not size-capped: {tmpfs!r}"
 
 
-# ======================================================================= #
 # The unboxed opt-out (M9/S2/S8) + derived sandboxed (M5/O5)
-# ======================================================================= #
 def test_unsandboxed_opt_out_uniform_across_tiers(tmp_path, monkeypatch):
     """uniform_opt_out — the loud DEFENDER_ALLOW_UNSANDBOXED=1 opt-out is the ONE host lane,
     reached uniformly from every creation site (both new sites call start_box, which carries
@@ -719,9 +711,7 @@ def test_sandboxed_is_derived_not_settable(tmp_path):
     assert unattached.sandboxed is False, "an unattached box claimed it was sandboxed"
 
 
-# ======================================================================= #
 # The return contract (demand #0 / F0 / F12 / SB-return → R9)
-# ======================================================================= #
 def _judge_deps(run_dir: Path, box):
     """Judge deps (a learning role) through the REAL bind, carrying an injected box.
 
@@ -788,8 +778,6 @@ def test_bash_lane_transport_fault_raises_not_wrapped(tmp_path):
     out = runtime_tools._tool_bash(healthy, f"cat {run_dir / 'alert.json'}")
     assert_one_frame(out, _format_bash_result(0, "ok\n", ""), "untrusted"), \
         "the executed-command positive control did not return the wrapped envelope"
-
-
 
 
 def test_box_becomes_unreachable_mid_batch(tmp_path):

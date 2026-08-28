@@ -46,9 +46,7 @@ def _companion(disposition: str) -> str:
     )
 
 
-# ═══════════════════════════════════════════════════════════════════════════
 # one definition, imported rather than restated
-# ═══════════════════════════════════════════════════════════════════════════
 
 def test_invlang_carries_the_project_vocabulary_not_a_copy():
     """invlang defines its own schema — its entity types, its relations — but not this. The
@@ -96,9 +94,7 @@ def test_the_slot_is_advertised_to_the_model():
     assert "disposition" in vocab.list_slots()
 
 
-# ═══════════════════════════════════════════════════════════════════════════
 # invlang now enforces it
-# ═══════════════════════════════════════════════════════════════════════════
 
 @pytest.mark.parametrize("disposition", sorted(DISPOSITION_ENUM))
 def test_every_keyword_clears_the_vocabulary_check(disposition):
@@ -198,9 +194,7 @@ def test_the_benign_gate_still_only_fires_on_benign():
     assert validate_companion(_unresolved_companion("malicious"), None) == []
 
 
-# ═══════════════════════════════════════════════════════════════════════════
 # the write gates stay exact
-# ═══════════════════════════════════════════════════════════════════════════
 
 def test_the_report_write_gate_still_refuses_what_the_reader_understands():
     """The one place the normalizer must NOT be used. On write there is still an author to ask,

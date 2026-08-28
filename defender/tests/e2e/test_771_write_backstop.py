@@ -89,9 +89,7 @@ from defender.tests.e2e._spec771 import (  # noqa: E402
 pytestmark = pytest.mark.e2e
 
 
-# --------------------------------------------------------------------------- #
 # demand #0 and its leave-in-place doctrine
-# --------------------------------------------------------------------------- #
 def test_refused_write_raises_oserror_and_leaves_the_outside_target_intact(tmp_path):
     """refused_write_outcome — driving the guarded primitive at a name a symlink occupies
     RAISES `OSError` at the primitive and writes NOTHING through the alias: the outside
@@ -149,9 +147,7 @@ def test_a_refused_write_leaves_the_planted_alias_in_place(tmp_path):
     assert Path(os.readlink(planted)) == target, "the refusal rewrote the alias"
 
 
-# --------------------------------------------------------------------------- #
 # O1's census-keyed negative and its positive control
-# --------------------------------------------------------------------------- #
 @pytest.mark.parametrize("writer", CENSUS, ids=lambda w: w.id)
 def test_no_writer_follows_a_link_planted_at_its_artifact_name(writer: Writer, tmp_path):
     """no_write_through_planted_leaf — for EVERY host-side writer into a shared tree, a
@@ -275,9 +271,7 @@ def test_the_fault_exit_trace_write_never_blanks_a_completed_one(tmp_path):
     )
 
 
-# --------------------------------------------------------------------------- #
 # the directory-component half (B8/B10, five sites not two)
-# --------------------------------------------------------------------------- #
 def test_no_writer_mkdirs_through_a_planted_directory_component(tmp_path):
     """no_write_through_planted_dir_component — a symlink-to-directory planted at a path
     COMPONENT a writer will create or traverse makes the write fail closed; nothing lands in
@@ -422,9 +416,7 @@ def test_a_symlinked_ancestor_above_the_tree_does_not_refuse(tmp_path):
     )
 
 
-# --------------------------------------------------------------------------- #
 # §7 D1 — the staged name, and the collision class it dissolves
-# --------------------------------------------------------------------------- #
 def test_a_replacing_write_stages_under_an_unpredictable_name(tmp_path):
     """staged_name_is_unpredictable — the replacing write stages its payload under a name that
     is never `<artifact>.tmp` and never repeats between two writes to the SAME artifact.
@@ -510,9 +502,7 @@ def test_orphaned_staged_files_are_swept_through_the_same_primitive(tmp_path):
     assert (run / "alert.json").is_file(), "the sweep removed a real artifact"
 
 
-# --------------------------------------------------------------------------- #
 # the four postures F1 preserved, and §7 D3's exemption
-# --------------------------------------------------------------------------- #
 @pytest.mark.parametrize("writer", CENSUS, ids=lambda w: w.id)
 def test_each_writer_keeps_its_exception_posture_when_the_write_is_refused(writer, tmp_path):
     """call_site_postures_preserved — for EVERY census writer, an alias refusal produces the
@@ -842,9 +832,7 @@ def test_a_refused_circuit_breaker_read_is_not_silently_reported_as_untripped(tm
     )
 
 
-# --------------------------------------------------------------------------- #
 # the two budget idioms, the seam, the lint, and the callers outside every box
-# --------------------------------------------------------------------------- #
 def test_budget_write_is_alias_safe_under_both_enforcement_postures(tmp_path, monkeypatch):
     """budget_write_alias_safe_under_the_enforce_flag — `budget.json` is alias-safe under BOTH
     values of the enforcement flag: the flag-on lane (stage-then-rename) and the flag-off lane
@@ -1091,9 +1079,7 @@ def test_write_atomic_callers_outside_the_run_dir_still_write(tmp_path):
     assert not leftovers, f"a staged name was left beside a caller's target: {leftovers}"
 
 
-# --------------------------------------------------------------------------- #
 # the lead tables, and the second shared root
-# --------------------------------------------------------------------------- #
 def test_a_duplicate_lead_id_still_fails_exclusive_create(tmp_path):
     """duplicate_lead_claim_still_refuses — claiming a `lead_id` twice still fails on the
     exclusive create: the second claim reports the reuse and does NOT overwrite the first
@@ -1234,9 +1220,7 @@ def test_the_drain_worktree_writers_meet_a_planted_alias_the_same_way(tmp_path):
     )
 
 
-# --------------------------------------------------------------------------- #
 # the gated model writers, back in the negatives on the hard-link axis
-# --------------------------------------------------------------------------- #
 #: The four arms X17's executed matrix covered: both gated model write tools crossed with both
 #: names the write allowlist admits. Each arm carries content its own artifact schema accepts,
 #: so a refusal in the test can only come from the alias check and never from the schema.

@@ -11,9 +11,6 @@ from __future__ import annotations
 import json
 import textwrap
 
-# ---------------------------------------------------------------------------
-# Shared system prompts
-# ---------------------------------------------------------------------------
 
 _BASE_SYSTEM = """\
 You are PREDICT — the lead-selection step of a security alert investigation
@@ -100,11 +97,6 @@ def _prior_block(prior_strength: str, gate_decision: dict) -> str:
             No specific lead recommendation.
         """).strip()
     return "## Past-investigation priors\n(weak/none — scaffold from first principles)"
-
-
-# ---------------------------------------------------------------------------
-# Per-arm builders
-# ---------------------------------------------------------------------------
 
 
 def build_arm_a(

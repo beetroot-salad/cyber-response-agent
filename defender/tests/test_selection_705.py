@@ -56,9 +56,7 @@ from defender.tests._session_store_705 import (
 )
 
 
-# ==========================================================================
 # demand #0 — one entry point, three roles, one truncation rule
-# ==========================================================================
 
 def test_store_reader_return_shape_is_role_scoped(tmp_path):
     """One reader entry point takes a role from the closed set {send, analysis, actor}:
@@ -250,9 +248,7 @@ def test_the_reader_exposes_no_row_id_entry_point(tmp_path):
     assert orphaned not in ss.path_row_ids(store, fx["fork_a"])
 
 
-# ==========================================================================
 # truncation — the demand and its REQUIRED negative control (R8)
-# ==========================================================================
 
 @pytest.mark.parametrize("terminator", ["BudgetKill", "UsageLimitExceeded", "RunAborted"])
 def test_sendable_history_stops_at_the_last_complete_pair_on_every_terminator(
@@ -426,9 +422,7 @@ def test_run_end_flush_on_a_forked_sessions_own_terminal_turn(tmp_path):
         "the flush writes the terminal response on the fork's own session_id")
 
 
-# ==========================================================================
 # hydrate — the walk, and what separates it from the truncation rule
-# ==========================================================================
 
 def test_hydrate_returns_the_root_to_tip_path_in_order(tmp_path):
     """The reader called with an untruncated role (`analysis`) returns the parent chain
@@ -481,9 +475,7 @@ def test_the_synthesized_flag_is_surfaced_to_the_analysis_shape(tmp_path):
     assert flags == [False, True], f"provenance must be positional and complete; got {flags}"
 
 
-# ==========================================================================
 # the renderer — inversion, the tail, the fold
-# ==========================================================================
 
 def test_render_ignores_its_input_and_returns_the_store_render(tmp_path):
     """The ProcessHistory processor discards the list it is handed and returns

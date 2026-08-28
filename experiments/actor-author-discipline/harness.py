@@ -177,7 +177,6 @@ def snapshot(worktree: Path, baseline_sha: str, out_dir: Path) -> dict:
         (out_dir / "commit_files.txt").write_text("\n".join(files) + "\n")
         snap["touched_files"] = files
 
-    # Snapshot final lessons-actor state
     lessons_dst = out_dir / "lessons-actor-final"
     if lessons_dst.exists():
         shutil.rmtree(lessons_dst)
@@ -186,7 +185,6 @@ def snapshot(worktree: Path, baseline_sha: str, out_dir: Path) -> dict:
         ignore=shutil.ignore_patterns(".*"),
     )
 
-    # Snapshot rotated queue + consumed
     pending = worktree / "defender" / "learning" / "_pending"
     pending_dst = out_dir / "_pending-final"
     pending_dst.mkdir(exist_ok=True)

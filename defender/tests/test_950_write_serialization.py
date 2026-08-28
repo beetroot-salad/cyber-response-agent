@@ -93,7 +93,7 @@ def main_tools() -> dict:
     return dict(agent._function_toolset.tools)
 
 
-# ── the writer serialization rule ────────────────────────────────────────────
+# the writer serialization rule
 def test_every_writer_main_can_call_is_sequential(main_tools):
     """The rule `append_block` and `fix_row` already followed, applied to the roster.
 
@@ -149,7 +149,7 @@ def test_the_writer_roster_is_actually_registered(main_tools):
     assert set(WRITERS) <= set(main_tools), f"expected {WRITERS} among {sorted(main_tools)}"
 
 
-# ── the closed-vocabulary rule, both sites ───────────────────────────────────
+# the closed-vocabulary rule, both sites
 @pytest.fixture(scope="module")
 def refs():
     return citable_refs(parse_investigation(GOLDEN.read_text(encoding="utf-8")))

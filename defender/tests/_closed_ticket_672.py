@@ -94,7 +94,7 @@ def _list(**filters) -> Turn:
     return Turn(tool_calls=[(TOOL_LIST, filters)])
 
 
-# ── the injected ticket-verb registry (the #611 FakeVerbs idiom, ticket-shaped) ──────────
+# the injected ticket-verb registry (the #611 FakeVerbs idiom, ticket-shaped)
 
 
 def _outcome(spec_queue: deque, default):
@@ -163,7 +163,7 @@ def _ticket_registry(
     return FakeVerbs({"ticket": table})
 
 
-# ── the drive: the REAL judge leg entry, fakes through its injection seams ───────────────
+# the drive: the REAL judge leg entry, fakes through its injection seams
 
 
 #: This suite's observation channel for registration and schema demands: what the MODEL is

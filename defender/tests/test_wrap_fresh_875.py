@@ -156,7 +156,7 @@ def _sole_closing_tag(text: str) -> str:
     return closer
 
 
-# ------------------------------------------------------------------ the mint itself
+# the mint itself
 
 
 def test_875_wrap_fresh_remints_until_the_delimiter_is_absent_from_the_body(monkeypatch):
@@ -228,7 +228,7 @@ def test_875_wrap_fresh_mints_one_salt_per_call(tmp_path):
         assert framed.endswith(f"\n</run-{ANY_TAG_RE.match(framed)[1]}-untrusted>")
 
 
-# ------------------------------------------------------------------ the real escape
+# the real escape
 
 
 def test_875_an_injected_gather_cannot_close_the_frame_its_summary_arrives_in(tmp_path):
@@ -277,7 +277,7 @@ def test_875_the_persisted_gather_summary_cannot_replay_the_escape_on_mains_re_r
     assert text.startswith(out[:60]), "the persisted bytes are not what MAIN was returned"
 
 
-# ------------------------------------------------------------------ the class, closed
+# the class, closed
 
 
 def _bind_calls_under_runtime() -> list[tuple[Path, ast.Call]]:

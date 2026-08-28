@@ -94,9 +94,7 @@ def _registered_names(defn) -> set[str]:
     return set(agent._function_toolset.tools)
 
 
-# --------------------------------------------------------------------------- #
 # A5 — which agents are offered the repair verb
-# --------------------------------------------------------------------------- #
 
 def test_exactly_one_agent_definition_is_offered_fix_row():
     """A5: `fix_row` rides `append=True` — no new capability bit, matching N4's posture of
@@ -131,9 +129,7 @@ def test_exactly_one_agent_definition_is_offered_fix_row():
     assert "read_file" in without_append, "the whole roster vanished — a vacuous comparison"
 
 
-# --------------------------------------------------------------------------- #
 # R1 — the budget roster, and what tail tier does and does not buy
-# --------------------------------------------------------------------------- #
 
 def _budgeted(tmp_path, tool_calls: int):
     """A run dir whose real `budget.json` records `tool_calls` executed calls."""
@@ -242,9 +238,7 @@ def test_budget_stop_message_while_flagged(tmp_path):
     assert "fix_row" in text, "the model is told the wrong survivor set while a window is open"
 
 
-# --------------------------------------------------------------------------- #
 # the remaining by-name rosters
-# --------------------------------------------------------------------------- #
 
 def test_replay_harness_recognizes_fix_row_as_an_investigation_write():
     """Brief F11, and the one obligation this suite has ON ITSELF.
@@ -334,9 +328,7 @@ def test_vulture_baseline_already_carries_the_fix_row_entry():
     }
 
 
-# --------------------------------------------------------------------------- #
 # A7 — the four model-facing prose sites
-# --------------------------------------------------------------------------- #
 
 def test_model_facing_prose_updated_at_all_four_sites(tmp_path):
     """A7: FOUR model-facing sites, where M7 named one.
@@ -405,9 +397,7 @@ def test_model_facing_prose_updated_at_all_four_sites(tmp_path):
     assert "close the investigation" in clean_remedy
 
 
-# --------------------------------------------------------------------------- #
 # O3 / SEC1 — the grants the negative universal rests on
-# --------------------------------------------------------------------------- #
 
 def test_main_is_not_regranted_write_file_or_edit_file():
     """N4: the repair window does not re-open the surface #810 closed on measurement.

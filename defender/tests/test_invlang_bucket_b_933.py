@@ -52,9 +52,7 @@ import pytest
 from defender.skills.invlang.parser import parse_dense_companion
 from defender.skills.invlang.validate import diagnose, validate_companion, warn_diagnostics
 
-# --------------------------------------------------------------------------- #
 # shared scaffolding
-# --------------------------------------------------------------------------- #
 
 #: Two hosts and the failed auth between them. Every fixture in this file hangs off it, so no
 #: test is answering a question about the prologue when it means to ask about a closure rule.
@@ -144,9 +142,7 @@ def _deferred_preds(*rows: str) -> str:
     return _table("deferred_preds", "prediction_ref|rationale", rows)
 
 
-# --------------------------------------------------------------------------- #
 # rule #13 — `ceiling_test` required when termination is severity-ceiling, forbidden otherwise
-# --------------------------------------------------------------------------- #
 
 #: The four members of the termination-category enum (§Conclude → Termination categories).
 #: Parametrising over all four is deliberate: `severity-ceiling` is the only cell where
@@ -255,9 +251,7 @@ def test_severity_ceiling_with_both_rows_is_clean() -> None:
     assert _errors(doc) == []
 
 
-# --------------------------------------------------------------------------- #
 # rule #18 — lead-level prediction structure (`lp*`)
-# --------------------------------------------------------------------------- #
 
 _LP_COLS = ("id", "if", "read_as", "advance_to")
 _LP_DEFAULTS = {
@@ -395,7 +389,7 @@ def test_advance_to_naming_a_lead_id_rather_than_its_name_is_refused() -> None:
     _one_error(_lp_doc({"advance_to": "l-002"}), "l-002")
 
 
-# --- #18's route-compliance clause is a WARNING, not an error ---------------- #
+# #18's route-compliance clause is a WARNING, not an error
 
 
 def _warning_messages(doc: str) -> list[str]:
@@ -468,9 +462,7 @@ def test_a_dangling_advance_to_is_an_error_and_not_merely_a_warning() -> None:
     assert warn_diagnostics(doc) == ()
 
 
-# --------------------------------------------------------------------------- #
 # rule #26 — authorization contract closure at CONCLUDE
-# --------------------------------------------------------------------------- #
 
 #: A contract-carrying hypothesis with NO predictions, deliberately: rule #34 would otherwise
 #: fire on the same documents and every count assertion below would be reading two rules at
@@ -612,9 +604,7 @@ def test_deferred_authorizations_project_onto_the_conclude_block() -> None:
     assert [d["contract_ref"] for d in deferred] == ["h-001.ac1"]
 
 
-# --------------------------------------------------------------------------- #
 # rule #29 — impact prediction structure (`ip*`)
-# --------------------------------------------------------------------------- #
 
 _IP_COLS = ("id", "dim", "claim", "on_match", "on_mismatch", "on_indeterminate", "escalation_on")
 _IP_DEFAULTS = {
@@ -779,9 +769,7 @@ def test_a_claim_containing_the_letters_and_inside_a_word_is_not_compound() -> N
     ) == []
 
 
-# --------------------------------------------------------------------------- #
 # rule #30 — impact resolution back-refs and grounding
-# --------------------------------------------------------------------------- #
 
 _R_IMPACT_COLS = (
     "resolved_by", "pred_ref", "dim", "observed", "verdict",
@@ -974,9 +962,7 @@ def test_two_resolutions_may_fulfil_two_different_predictions() -> None:
     ) == []
 
 
-# --------------------------------------------------------------------------- #
 # rule #31 — impact closure at CONCLUDE, plus the verdict/severity pair
-# --------------------------------------------------------------------------- #
 
 
 def _impact_closure_doc(
@@ -1075,7 +1061,7 @@ def test_deferred_impact_predictions_project_onto_the_conclude_block() -> None:
     assert [d["prediction_ref"] for d in deferred] == ["l-001.ip1"]
 
 
-# --- #31's `impact_verdict` enum -------------------------------------------- #
+# #31's `impact_verdict` enum
 
 
 def _verdict_doc(impact_verdict: str, impact_severity: str | None) -> str:
@@ -1147,7 +1133,7 @@ def test_an_off_enum_impact_verdict_is_refused(impact_verdict: str) -> None:
     _one_error(_verdict_doc(impact_verdict, None), impact_verdict)
 
 
-# --- #31's `impact_severity` conditional presence ---------------------------- #
+# #31's `impact_severity` conditional presence
 
 
 @pytest.mark.parametrize("impact_severity", ["low", "moderate", "high"])
@@ -1243,9 +1229,7 @@ def test_an_off_enum_impact_severity_is_refused(impact_severity: str) -> None:
     _one_error(_verdict_doc("exceeds", impact_severity), impact_severity)
 
 
-# --------------------------------------------------------------------------- #
 # rule #34 — prediction closure at CONCLUDE
-# --------------------------------------------------------------------------- #
 
 _PRED_HYPOTHESES = """\
 :H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]

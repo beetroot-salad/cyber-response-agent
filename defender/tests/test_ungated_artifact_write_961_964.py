@@ -65,9 +65,7 @@ def _close(deps, disposition, **kw):
     )
 
 
-# --------------------------------------------------------------------------- #
 # #961 — the close is a gated write path
-# --------------------------------------------------------------------------- #
 
 def test_a_close_over_an_error_severity_document_commits_nothing(tmp_path):
     """THE defect. A document carrying an error-severity finding used to close successfully and
@@ -330,9 +328,7 @@ def test_a_validator_that_raises_does_not_make_the_run_unclosable(tmp_path, caps
     assert "could not be validated" in capsys.readouterr().err, "the fault must be logged"
 
 
-# --------------------------------------------------------------------------- #
 # #964 — the harness's own seed
-# --------------------------------------------------------------------------- #
 
 def test_the_harness_seed_lands_when_it_validates(tmp_path):
     """The ordinary path, asserted first so the refusal test below cannot pass by the seed
@@ -440,9 +436,7 @@ def test_the_heading_says_nothing_extra_when_the_seed_landed(tmp_path):
         LeadZeroResult(text="", status="failed"))
 
 
-# --------------------------------------------------------------------------- #
 # the third site — the turn-N branch's seed
-# --------------------------------------------------------------------------- #
 
 def test_a_valid_document_can_have_an_invalid_fence_prefix():
     """The premise the branch seed rested on, refuted by construction.

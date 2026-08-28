@@ -85,9 +85,7 @@ def _shim_batch(paths, n: int = 3) -> list[str]:
     return [r["pitfall_id"] for r in rows]
 
 
-# =============================================================================================
 # FK-7 — a handoff is an OFFER; only a confirmed edit is curation.
-# =============================================================================================
 
 
 def test_a_taught_reducer_row_is_consumed_not_retired(scene):
@@ -413,9 +411,7 @@ def test_no_row_leaves_the_queue_without_a_record(scene):
         assert "consumed_commit" not in consumed[pid]
 
 
-# =============================================================================================
 # What the commit carries, and what a human is told about it.
-# =============================================================================================
 
 
 def test_the_commit_carries_exactly_what_the_rule_admitted(scene):
@@ -507,9 +503,7 @@ def test_a_reducer_only_tick_reports_what_it_taught(scene, capsys):
     assert REDUCER_REL in head_files(repo)
 
 
-# =============================================================================================
 # The composition frame — two ticks over one corpus tree and one queue.
-# =============================================================================================
 
 
 def _leg(paths, spawn):

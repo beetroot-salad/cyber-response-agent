@@ -110,7 +110,7 @@ def _norm(value: object) -> str:
     return str(value)
 
 
-# ------------------------------------------------------------------ mechanical checks
+# mechanical checks
 
 def _marker_kind(marker: str) -> str | None:
     text = marker.strip()
@@ -207,7 +207,7 @@ def has_concrete_value(events: Iterable) -> bool:
     return any(not _PLACEHOLDER.search(v) for v in emitted_values(events))
 
 
-# ---------------------------------------------------------- definitional expectations
+# definitional expectations
 
 def _requested(spec: str | list[str] | None, lead_ids: list[str]) -> list[str]:
     """`all`, or an explicit lead list, resolved against the case's own lead ids.
@@ -263,7 +263,7 @@ def expectation_failures(expectation: dict, preds: dict[str, list],
     return out
 
 
-# ------------------------------------------------------------------------ lead framing
+# lead framing
 
 def system_of(lead: dict) -> str:
     """The stratification axis, derived from the lead's own `query_id` prefixes.
@@ -298,7 +298,7 @@ def integrity(lead_ids: list[str], preds: dict[str, list],
     }
 
 
-# ----------------------------------------------------------------------- the label pass
+# the label pass
 
 def labels_path(case_dir: Path, model: str, effort: str) -> Path:
     return case_dir / "labels" / f"{judge.tag_suffix(model, effort)}.json"
@@ -340,7 +340,7 @@ def measure_case(case_dir: Path, lead_ids: list[str], *, model: str, effort: str
     return cached
 
 
-# --------------------------------------------------------------------------- the score
+# the score
 
 def _mechanical_row(lead_id: str, system: str, label: dict, cause: str, note: str) -> dict:
     """A row failed in code. It carries the measurement's `delta_kind` anyway, so the
@@ -556,7 +556,7 @@ def score_tag(projection_stem: str, model: str, effort: str) -> str:
     return f"{projection_stem}__{judge.tag_suffix(model, effort)}"
 
 
-# ---------------------------------------------------------------------------- reporting
+# reporting
 
 def print_report(summary: dict) -> None:
     mech = summary["mechanical"]

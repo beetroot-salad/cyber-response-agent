@@ -87,9 +87,7 @@ def _every_consumers_reading(run: Path) -> dict[str, object]:
     return readings
 
 
-# ═══════════════════════════════════════════════════════════════════════════
 # the headline: the six consumers no longer disagree on attacker-shaped input
-# ═══════════════════════════════════════════════════════════════════════════
 
 @pytest.mark.parametrize(
     ("tag", "written"),
@@ -143,9 +141,7 @@ def test_a_missing_report_reads_the_same_way_everywhere(tmp_path):
     assert set(_every_consumers_reading(run).values()) == {None}
 
 
-# ═══════════════════════════════════════════════════════════════════════════
 # reaction stays per-consumer, by kind
-# ═══════════════════════════════════════════════════════════════════════════
 
 def test_the_gates_refuse_in_their_own_vocabulary(tmp_path):
     """Both gates raise a TYPED domain error rather than the accessor's own — the learning
@@ -180,9 +176,7 @@ def test_the_tracer_reports_the_row_it_dropped(tmp_path, capsys):
     assert "caseA/report.md" in capsys.readouterr().err
 
 
-# ═══════════════════════════════════════════════════════════════════════════
 # the accessor's own contract
-# ═══════════════════════════════════════════════════════════════════════════
 
 def test_require_report_carries_the_reason_the_others_report(tmp_path):
     run = _run_dir(tmp_path, "c", _report_text("spicy"))
@@ -225,9 +219,7 @@ def test_an_undecodable_report_costs_its_own_row(tmp_path):
     assert "unreadable" in read.reason
 
 
-# ═══════════════════════════════════════════════════════════════════════════
 # the write gate is deliberately NOT folded in
-# ═══════════════════════════════════════════════════════════════════════════
 
 def test_the_write_gate_stays_exact_where_the_read_normalizes():
     """The asymmetry is the design, not an oversight. On WRITE there is an author to ask: the

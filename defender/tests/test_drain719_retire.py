@@ -26,9 +26,7 @@ from defender.learning.core import persist  # type: ignore[import-not-found]
 from defender.learning.leads import pitfalls_curator  # type: ignore[import-not-found]
 
 
-# =======================================================================================
 # Demand #0 — the return-value contract, after decision 1 flipped its `2` branch
-# =======================================================================================
 
 
 def test_folded_drain_rc_alphabet_after_the_pitfalls_fault_conversion(tmp_path: Path):
@@ -80,9 +78,7 @@ def test_folded_drain_rc_alphabet_after_the_pitfalls_fault_conversion(tmp_path: 
         pitfalls_curator.run_pitfalls(paths=paths, invoke=lambda *a, **k: 7)
 
 
-# =======================================================================================
 # O6 + O8 — one uniform, bounded retirement into one graveyard
-# =======================================================================================
 
 
 def test_retirement_is_identical_for_observations_and_findings(tmp_path: Path):
@@ -254,9 +250,7 @@ def test_a_row_at_or_over_the_ceiling_on_arrival_does_not_retire_until_it_fails(
     assert [r["observation_id"] for r in h.graveyard(ch)] == ["a/2"]
 
 
-# =======================================================================================
 # Decision 3 — terminality: consumed ledger, graveyard first
-# =======================================================================================
 
 
 def test_a_retired_id_is_deduped_out_of_a_later_append_on_the_dedup_channels(tmp_path: Path):
@@ -363,9 +357,7 @@ def test_consumed_ledger_append_survives_a_concurrent_interleaving(tmp_path: Pat
     assert {r["observation_id"] for r in rows} == set(left + right)
 
 
-# =======================================================================================
 # The ceiling's own domain — 1, 0 and -1
-# =======================================================================================
 
 
 def _retires_on_the_first_failure(tmp_path: Path, ceiling: int) -> None:
@@ -407,9 +399,7 @@ def test_negative_ceiling_retires_like_zero(tmp_path: Path):
     _retires_on_the_first_failure(tmp_path, -1)
 
 
-# =======================================================================================
 # The seam's edges — what it does not touch, and what stops it
-# =======================================================================================
 
 
 def test_retire_leaves_every_row_outside_the_batch_byte_identical(tmp_path: Path):

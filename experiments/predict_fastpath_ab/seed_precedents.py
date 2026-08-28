@@ -15,7 +15,7 @@ from gate import Precedent
 
 
 PRECEDENTS: list[Precedent] = [
-    # ---- wazuh-rule-5710 monitoring-probe family ----
+    # wazuh-rule-5710 monitoring-probe family
     Precedent(
         case_id="SEED-5710-PROBE-001",
         signature_id="wazuh-rule-5710",
@@ -76,7 +76,7 @@ PRECEDENTS: list[Precedent] = [
         fidelity_rate=0.85,
         discriminating_attrs={"data": {"srcip": "203.0.113.47", "srcuser": "root"}},
     ),
-    # ---- wazuh-rule-550 filebeat cert inode-flap ----
+    # wazuh-rule-550 filebeat cert inode-flap
     Precedent(
         case_id="SEED-550-INODE-001",
         signature_id="wazuh-rule-550",

@@ -56,9 +56,7 @@ from defender.tests._session_store_705 import (
 )
 
 
-# ==========================================================================
 # the handle, the connection, the schema version
-# ==========================================================================
 
 def test_open_store_returns_a_per_case_handle(tmp_path):
     """Opening the store on a case_id returns a handle bound to that case's database
@@ -234,9 +232,7 @@ def test_the_ddl_loads_on_the_sqlite_the_gate_actually_runs(tmp_path):
         f"STRICT needs sqlite >= 3.37; this interpreter runs {sqlite3.sqlite_version}")
 
 
-# ==========================================================================
 # append-only: the negative and its positive control
-# ==========================================================================
 
 def test_message_rows_are_never_updated_or_deleted(tmp_path):
     """Driving a fold and a fork issues no UPDATE and no DELETE against `message`; every
@@ -288,9 +284,7 @@ def test_message_rows_are_appended_by_every_writer(tmp_path):
         "the synthesized flag must distinguish the two writers' rows")
 
 
-# ==========================================================================
 # payloads — round-trip, coercion, unknown fields, the encoding
-# ==========================================================================
 
 def test_ingested_payload_round_trips_verbatim(tmp_path):
     """Every ingested row's stored payload re-validates into a ModelMessage that
@@ -447,9 +441,7 @@ def test_payload_sha_digests_the_stored_payload_text_at_write_time(tmp_path):
     assert rows[0][0] != rows[1][0], "the digest is not an identity"
 
 
-# ==========================================================================
 # lineage: the path walk, ordering, cycles
-# ==========================================================================
 
 def test_path_exactness_nine_row_fixture(tmp_path):
     """Over the nine-row fixture `fork-a`'s tip walks to exactly 1,5,6,8,9 and `main`'s
@@ -537,9 +529,7 @@ def test_the_path_walk_refuses_a_cyclic_parent_chain(tmp_path):
         ss.hydrate(store, session_id, role="analysis")
 
 
-# ==========================================================================
 # identity: sessions, forks, case_id, config
-# ==========================================================================
 
 def test_a_fork_is_a_branch_with_no_prefix_copy_and_no_id_remap(tmp_path):
     """Constructing a fork writes one `session` row and sets its first message's
@@ -646,9 +636,7 @@ def test_config_row_is_content_addressed_over_the_reproducibility_set(tmp_path):
     assert stored == [(sha,)], "the config row is addressed by its own digest"
 
 
-# ==========================================================================
 # retention, absences, the session row's bookkeeping
-# ==========================================================================
 
 def test_payload_lives_in_its_own_table_and_retention_drops_only_bodies(tmp_path):
     """`DELETE FROM message_payload` for one session drops the bodies while leaving that

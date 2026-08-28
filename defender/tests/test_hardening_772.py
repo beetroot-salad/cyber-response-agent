@@ -99,9 +99,7 @@ def _gate(tmp_path: Path, systems: tuple[str, ...] = _SYSTEMS):
     return admits, defender_dir
 
 
-# =========================================================================== #
 # 1. The two `SKILL.md` files that are agent system prompts.
-# =========================================================================== #
 
 def test_the_lane_cannot_write_gathers_system_prompt(tmp_path: Path):
     """`defender/skills/gather/SKILL.md` is not a system's skill doc — it is the whole of
@@ -178,9 +176,7 @@ def test_the_authored_surface_roster_is_the_shipped_one(tmp_path: Path):
     assert {"gather", "invlang"} <= set(_AUTHORED_SURFACES)
 
 
-# =========================================================================== #
 # 2. The five lanes that remain — one per surface the two roles really author.
-# =========================================================================== #
 
 @pytest.mark.parametrize(
     "rel",
@@ -287,9 +283,7 @@ def test_the_lanes_read_the_tree_that_was_bound_not_a_sibling_of_it(tmp_path: Pa
     assert not admits("ghost/SKILL.md")        # the sibling's does not
 
 
-# =========================================================================== #
 # 3. The frame-injection channel, which was open — not "saved by accident".
-# =========================================================================== #
 
 @pytest.mark.parametrize(
     "rel",
@@ -340,9 +334,7 @@ def test_the_porcelain_reader_does_not_quote_so_the_commit_gate_never_saw_this(t
     assert _is_in_scope(rel)
 
 
-# =========================================================================== #
 # 4. The two gates stop disagreeing in the direction that discards a batch.
-# =========================================================================== #
 
 #: Representative of every shape either gate has an opinion about — the five lanes, the
 #: protected surfaces at every depth they can appear, the authored surfaces, a phantom system,
@@ -488,9 +480,7 @@ def test_the_prompt_names_the_one_lane_it_cannot_promise_a_recoverable_denial_fo
     )
 
 
-# =========================================================================== #
 # 5. The `rm` lane, which had the same recoverable-vs-discard problem.
-# =========================================================================== #
 
 def test_rm_can_no_longer_name_an_agent_prompt(tmp_path: Path):
     """`rm defender/skills/gather/SKILL.md` used to MATCH the grant — the old pattern was

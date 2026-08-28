@@ -38,7 +38,6 @@ from defender.evals.oracle_golden import judge, score  # noqa: E402
 CASE_DIRS = sorted(p for p in CASES_DIR.iterdir() if p.is_dir())
 
 
-
 def test_there_are_cases_to_check():
     """Every sweep below would pass vacuously against an empty cases/ tree."""
     assert CASE_DIRS
@@ -121,9 +120,7 @@ def test_no_story_states_the_expected_result(case_dir):
         f"oracle: {[t for t in _EVAL_TELLS if t in story]}")
 
 
-# --------------------------------------------------------------------------
 # the committed scores — provenance, since they no longer reproduce
-# --------------------------------------------------------------------------
 
 def _committed_scores():
     for case_dir in CASE_DIRS:

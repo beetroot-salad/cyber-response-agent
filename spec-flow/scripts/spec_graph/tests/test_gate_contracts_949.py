@@ -26,7 +26,7 @@ from conftest import DEFAULT_CHECK_ACTORS, run_script
 GRAPH = "schema_version: 1\ndemands: []\nactors: []\n"
 
 
-# ── F-37a: check_actors must not answer over a base it could not resolve ─────
+# F-37a: check_actors must not answer over a base it could not resolve
 def _diffable_repo(make_repo):
     r = make_repo()
     r.config(code_roots=["app"], entrypoint_stems=("run",))
@@ -109,7 +109,7 @@ def test_the_default_base_is_refused_when_the_profile_does_not_declare_it(make_r
     assert "does not resolve to a commit" in out.stderr, out.stderr
 
 
-# ── F-37b: check_binds joins the rest of the family on an empty corpus ───────
+# F-37b: check_binds joins the rest of the family on an empty corpus
 def test_check_binds_reports_an_empty_corpus_as_could_not_look(make_repo, tmp_path):
     """`check_claims`, `check_lint` and `check_gate` all return 2 on this identical branch, and
     check_binds' own unreadable-graph arm returns 2 — it was the one member reporting "there
@@ -123,7 +123,7 @@ def test_check_binds_reports_an_empty_corpus_as_could_not_look(make_repo, tmp_pa
     assert "no spec_graph_*.yaml found" in p.stderr
 
 
-# ── F-38: the suite is the one the graph NAMES, not the dir it sits in ───────
+# F-38: the suite is the one the graph NAMES, not the dir it sits in
 def _graph_and_suite(make_repo):
     """A graph in `specs/` whose `tests:` names a suite somewhere else entirely — the layout
     the corpus actually has, and the one `p.parent` gets wrong."""
@@ -284,7 +284,7 @@ def test_an_unrecorded_pass_is_still_a_finding(make_repo):
     assert "test_recorded_by_b" not in p.stdout, p.stdout
 
 
-# ── F-39: the alphabet rule reaches the claims that enumerate ────────────────
+# F-39: the alphabet rule reaches the claims that enumerate
 CENSUS_CLAIM = textwrap.dedent("""\
     schema_version: 1
     demands: []

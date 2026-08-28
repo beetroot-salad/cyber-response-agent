@@ -33,7 +33,6 @@ EXTRACTIONS = RESULTS / "extractions"
 JUDGE_MODEL = "claude-sonnet-4-6"
 
 
-# ----------------------------------------------------------------------------- judge
 _JUDGE_SYS = (
     "You score a security 'gather' summary against ground truth. The summary was "
     "produced by a subagent told to report specific measurements over a log payload. "
@@ -83,7 +82,7 @@ def _extract(run_id: str, summary: str, dims: dict, use_judge: bool) -> dict:
     return scored
 
 
-# ----------------------------------------------------------------- replayability (det.)
+# replayability (det.)
 def _norm(v) -> str:
     return re.sub(r"\s+", "", str(v)).strip().lower()
 
@@ -132,7 +131,6 @@ def _replayability(run_dir: Path, dims: dict) -> tuple[int, int]:
     return backed, len(dims)
 
 
-# --------------------------------------------------------------------------- aggregate
 def _mean(xs):
     xs = [x for x in xs if x is not None]
     return sum(xs) / len(xs) if xs else None

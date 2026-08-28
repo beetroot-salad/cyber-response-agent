@@ -109,10 +109,8 @@ from defender.tests._invlang_amendment_954 import (
     warnings_of,
 )
 
-# --------------------------------------------------------------------------- #
 # F-46 rows. Two rows for one lead, disagreeing on every non-empty cell they share, so no
 # assertion below can be satisfied by an implementation that merges instead of choosing.
-# --------------------------------------------------------------------------- #
 
 #: The row a first-wins fold must keep, whole.
 FIRST_ROW = "l-001|1|alpha|v-001||cmdb|24h"
@@ -157,9 +155,7 @@ def _inv(run):
     return (run / "investigation.md").read_text(encoding="utf-8")
 
 
-# =========================================================================== #
 # F-46 — the repeated lead id
-# =========================================================================== #
 
 def test_repeated_lead_id_returns_a_first_wins_bucket_and_an_error_diagnostic():
     """`parse_dense_companion` over a `:L findings` block listing one lead id twice returns
@@ -493,9 +489,7 @@ def test_a_blank_cell_in_an_amending_row_does_not_erase_the_earlier_value():
     assert repeat_diagnostics(doc) == [], "a CROSS-block re-listing is the legal amendment"
 
 
-# =========================================================================== #
 # F-47 — the repair suggestion
-# =========================================================================== #
 
 #: The escaped-pipe trigger, RIGHT of the key cell. EXECUTED at base: both candidates split to
 #: FIVE cells under a four-column header, which is the second refusal F-47 describes.
@@ -1165,9 +1159,7 @@ def test_a_row_with_an_illegal_key_and_an_empty_value_is_flagged_once_and_still_
     assert "empty" not in diags[0].message
 
 
-# =========================================================================== #
 # O3's payoff over the class of readers that parse without validating
-# =========================================================================== #
 
 #: A three-row document whose fold boundary DIFFERS under the two readings: with the later row
 #: discarded the lead sits in the closed loop 1 and the fold advances; with it kept the lead
@@ -1392,9 +1384,7 @@ def test_a_lead_bucket_an_earlier_refinement_block_seeded_survives_the_fold():
     assert len(repeat_diagnostics(repeat)) == 1
 
 
-# =========================================================================== #
 # F-L — the uniform formation gate
-# =========================================================================== #
 
 #: A document whose committed `:L findings` block ALREADY holds a within-block repeat, and
 #: whose surviving lead is committed in loop 1 under BOTH readings — so a `:T close` for that

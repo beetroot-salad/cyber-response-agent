@@ -38,9 +38,7 @@ from defender.runtime import circuit_breaker as cb  # noqa: E402
 _LONG_NAME = "n" * 300
 
 
-# ---------------------------------------------------------------------------------------
 # F-15 — a path the read gate ALLOWS raises ENAMETOOLONG out of the `is_file()` probe
-# ---------------------------------------------------------------------------------------
 
 
 def _main_deps(tmp_path: Path):
@@ -122,9 +120,7 @@ def test_edit_file_refuses_an_overlong_basename_instead_of_raising(tmp_path):
             f"old_string={old_string!r}: the probe raised instead of drawing a refusal"
 
 
-# ---------------------------------------------------------------------------------------
 # F-17 — a malformed `budget.json` raises out of the enforcement path and ends the run
-# ---------------------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("doc", ["[]", "3", '"x"', "null", "[1, 2, 3]"])
@@ -209,9 +205,7 @@ def test_a_naive_origin_is_read_as_utc_not_dropped(tmp_path):
     assert origin.isoformat() == "2026-08-13T00:00:00+00:00"
 
 
-# ---------------------------------------------------------------------------------------
 # F-25 — below the top level, no reader or writer of the breaker state validated its shape
-# ---------------------------------------------------------------------------------------
 
 #: The four nested shapes, each reproduced against the real module before the fix.
 #: `{"systems": 5}` and `{"systems": {"elastic": 7}}` raised `AttributeError` in `is_tripped`;
@@ -295,9 +289,7 @@ def test_a_healthy_state_still_reads_and_trips(tmp_path):
     assert cb.is_tripped(tmp_path, "identity") is False, "one system's failures tripped another"
 
 
-# ---------------------------------------------------------------------------------------
 # The read half of the same seam: UNDECODABLE bytes, and an alias at the state's name
-# ---------------------------------------------------------------------------------------
 
 #: A byte the utf-8 decoder cannot start a sequence with. The run root is bind-mounted rw into
 #: the box, so "not utf-8" needs no more privilege than "not a dict" does.

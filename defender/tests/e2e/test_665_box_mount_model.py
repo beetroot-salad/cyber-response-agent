@@ -46,7 +46,6 @@ SALT = "s665mnt"
 PINNED = REPO_ROOT / "defender" / "scripts" / "lessons" / "defender-lessons"
 
 
-# --------------------------------------------------------------------------- #
 def _rc_request(tmp_path, monkeypatch, **kw):
     """The run-cycle BoxRequest run_one composes (captured off the injected start_box)."""
     rec = BoxLifecycleRecorder()
@@ -80,9 +79,7 @@ def _anchor_covered(req, anchor) -> bool:
     return False
 
 
-# ======================================================================= #
 # The run-cycle box mount SET (O3/M3/S1/S4, DC2, R4, R10)
-# ======================================================================= #
 def test_mount_covers_union_gate_scope_and_cwd_anchor(tmp_path, monkeypatch):
     """mount_covers_scope (DC2) — the run-cycle box's mounts cover the UNION of its roles'
     gate scopes (run_dir, defender_dir, gather_raw) plus each role's cwd_anchor; per DC2 a
@@ -216,9 +213,7 @@ def test_role_anchor_that_is_a_mount_parent_not_inside_any_mount(tmp_path, monke
         "the actor workdir is not the auto-created ro parent of the defender mount (DC2)"
 
 
-# ======================================================================= #
 # The drain box mount SET (M1/S3/S4)
-# ======================================================================= #
 def test_drain_box_mounts_only_triggered_corpora(tmp_path):
     """drain_mounts_only_triggered — the drain box mounts only the corpora that TRIGGERED this
     batch, not the static SHIPPED_LESSON_CORPORA union (M1: a static union would hand every
@@ -275,9 +270,7 @@ def test_drain_leaf_mount_source_resolved_at_a_different_time_than_leaf_creation
                 "the drain rw mount source is the .worktrees parent, not the specific leaf"
 
 
-# ======================================================================= #
 # gate ↔ mount reasoning (M3a / O3 / decision 1 / DC2)
-# ======================================================================= #
 def test_a_gate_approved_operand_resolves_to_a_path_absent_from_every_declared_mount(
     tmp_path, monkeypatch,
 ):
@@ -367,9 +360,7 @@ def test_judge_cat_operand_reaches_defender_dir_beyond_its_declared_gate_roots(t
     assert decision.allow, "defender_dir is one of the judge's declared cat gate roots, not beyond it"
 
 
-# ======================================================================= #
 # The actor anchor move (decision 1) + N3/N4/S6 containment (host-side gate)
-# ======================================================================= #
 def test_actor_cwd_anchor_is_repo_root(tmp_path):
     """actor_cwd_anchor_repo_root (decision 1) — the actor's cwd_anchor moves to repo_root
     (defender_dir.parent), so a relative `python3 defender/...` operand resolves against the
@@ -473,9 +464,7 @@ def test_pinned_script_argv_carries_extra_arguments_beyond_the_pinned_path(tmp_p
     assert d.allow, "pins_path unexpectedly examined the extra argv (the reliance is on the script)"
 
 
-# ======================================================================= #
 # N3 — the host-side write tools never cross the box; the scan (S7)
-# ======================================================================= #
 def test_host_side_write_tools_write_live_tree_in_process(tmp_path):
     """host_tools_do_not_cross_box (negative) — the write/edit tools mutate the live tree
     IN-PROCESS host-side; they never cross the box transport (N3), so no in-box mount exists for

@@ -64,9 +64,7 @@ def _load_dryrun():
                        name="compaction_dryrun_705")
 
 
-# ==========================================================================
 # the encoding
-# ==========================================================================
 
 def test_wire_log_dumps_the_request_list_verbatim_with_no_delta_encoding(tmp_path):
     """Across a SECOND fold the wire log holds the full request list actually sent for
@@ -170,9 +168,7 @@ def test_two_wire_log_constructions_under_one_key_do_not_silently_clobber_each_o
     assert len(after) > len(before)
 
 
-# ==========================================================================
 # the two-digest join — R7's restatement of O22
-# ==========================================================================
 
 @pytest.mark.e2e
 def test_wire_sha_joins_a_store_row_to_its_wire_log_line(tmp_path):
@@ -261,9 +257,7 @@ def test_the_digest_is_stable_per_message_set_and_moves_with_it():
     assert set(same) <= set("0123456789abcdef")
 
 
-# ==========================================================================
 # the consumers the census missed — survival
-# ==========================================================================
 
 def test_pydantic_stage_still_classifies_an_empty_final_response(tmp_path):
     """A learning stage's empty-final-response classification survives the delta encoding's

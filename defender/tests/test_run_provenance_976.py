@@ -394,10 +394,8 @@ def test_one_dirty_path_earning_two_status_records_is_counted_once(tmp_path):
     assert prov.dirty_path_count == 1, "one dirty path was counted once per status record"
 
 
-# --------------------------------------------------------------------------- #
 # The scoped dirt, the build stamp, the non-fatal write, the shared family
 # capture, the archive copy, and the read gate (#976 follow-ups).
-# --------------------------------------------------------------------------- #
 
 
 def test_dirt_is_scoped_to_the_code_the_box_mounts(tmp_path):
@@ -570,9 +568,7 @@ def test_without_a_shared_capture_each_run_takes_its_own(tmp_path, monkeypatch):
     assert rec.commit is not None or rec.unavailable is not None
 
 
-# --------------------------------------------------------------------------- #
 # The coherence rules as a CONSTRUCTOR invariant, not a parser habit.
-# --------------------------------------------------------------------------- #
 
 #: Every shape no capture can produce, as `description -> (kwargs, the refusal that must fire)`.
 #: Spelled as data so the two halves below — "nothing may construct one" and "the parser

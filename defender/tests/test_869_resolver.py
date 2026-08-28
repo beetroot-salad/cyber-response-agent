@@ -623,7 +623,7 @@ def test_the_adapter_half_resolution_point_is_its_own_call(tmp_path, monkeypatch
        `repr(name)` and the source directory it came from; `cmdb` surviving in the same drive
        is the control against a predicate that refuses everything.
     """
-    # ---- (1) the marker source is not this call's to raise about; its own source is ----
+    # (1) the marker source is not this call's to raise about; its own source is
     no_skills = tmp_path / "no-skills"
     init_git(no_skills)
     write_adapter(no_skills, "elastic")
@@ -641,7 +641,7 @@ def test_the_adapter_half_resolution_point_is_its_own_call(tmp_path, monkeypatch
     with pytest.raises(LeadAuthorError):
         adapter_declared_systems(no_adapters)
 
-    # ---- (2) emptiness is the ADAPTER half's, and it refuses the lane ----
+    # (2) emptiness is the ADAPTER half's, and it refuses the lane
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
     markers_only = seed_tree(
         tmp_path, adapters=(), markers=("elastic",), skills=("elastic",), catalog=(),
@@ -663,7 +663,7 @@ def test_the_adapter_half_resolution_point_is_its_own_call(tmp_path, monkeypatch
     assert len(persist.read_pitfalls(paths)) == 2
     assert not paths.pitfalls.consumed.exists()
 
-    # ---- (3) FK-5's filter and its per-refusal line, on this path ----
+    # (3) FK-5's filter and its per-refusal line, on this path
     hostile = seed_tree(
         tmp_path, adapters=("cmdb",), markers=("mcpsys",), skills=(), catalog=(),
         name="hostile-half",

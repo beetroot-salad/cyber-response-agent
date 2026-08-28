@@ -115,9 +115,7 @@ def _only(leads: list, lead_id: str):
     return jl
 
 
-# --------------------------------------------------------------------------------------- #
 # The projection itself
-# --------------------------------------------------------------------------------------- #
 
 
 def test_row_names_itself_by_the_writers_own_predicate():
@@ -164,9 +162,7 @@ def test_load_queries_still_returns_every_row(run):
     ]
 
 
-# --------------------------------------------------------------------------------------- #
 # The three agents that are told "these are the queries the defender ran"
-# --------------------------------------------------------------------------------------- #
 
 
 def test_actor_view_hides_sentinels_and_keeps_the_lead(run):
@@ -246,9 +242,7 @@ def test_sentinel_payload_is_not_offered_as_evidence(run):
     ) == "(missing)"
 
 
-# --------------------------------------------------------------------------------------- #
 # ...and the readers that legitimately want every row (#823 must survive intact)
-# --------------------------------------------------------------------------------------- #
 
 
 def test_extraction_still_yields_every_row_in_table_order(run):

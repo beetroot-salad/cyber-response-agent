@@ -55,9 +55,7 @@ REPO_ROOT = DEFENDER.parent
 SECRET = "STORE-BYTES-DEFENDER-GOALS-4242"
 
 
-# ==========================================================================
 # R1 — placement, and the pointer file's own domain
-# ==========================================================================
 
 def test_store_path_is_not_under_the_runs_base(tmp_path):
     """The resolved store path is a SIBLING of the runs base, not a descendant of it, for
@@ -123,9 +121,7 @@ def test_the_resolver_rejects_a_non_conforming_case_id(tmp_path):
     assert leaked == [], f"a rejected case_id composed a path anyway: {leaked}"
 
 
-# ==========================================================================
 # R1's corollary — the box, and the host-side leg adv:PO5b opened
-# ==========================================================================
 
 _NO_DAEMON = not daemon_reachable()
 _DOOD = (not _NO_DAEMON) and is_dood()
@@ -244,9 +240,7 @@ def test_host_readers_do_not_dereference_a_symlink_out_of_the_run_dir(tmp_path):
         "a symlink out of run_dir must be refused or preserved as a link, never resolved")
 
 
-# ==========================================================================
 # R2 — the leak test, its positive control, and the parity
-# ==========================================================================
 
 def _actor_fixture(tmp_path):
     store = make_store(tmp_path)

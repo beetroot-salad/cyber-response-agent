@@ -22,9 +22,7 @@ sys.path.insert(0, str(SPEC_GRAPH_DIR))
 import _schema  # noqa: E402 — resolvable only after the sys.path line above
 
 
-# ---------------------------------------------------------------------------
 # check_gate
-# ---------------------------------------------------------------------------
 
 def _evaluated(version: int = 1, **fired: bool) -> str:
     """A `gate.evaluated` block recording every rule a graph at `version` OWES an entry for
@@ -212,9 +210,7 @@ structure:
     assert "does not cover key axis" not in p2.stdout
 
 
-# ---------------------------------------------------------------------------
 # check_frontiers
-# ---------------------------------------------------------------------------
 
 def _frontier(path: Path, name: str, meta: str, digest: str = "ok") -> None:
     (path / name).write_text(f"---\n{meta}---\n\n## Digest\n\n{digest}\n", encoding="utf-8")
@@ -279,9 +275,7 @@ def test_frontiers_resume_reports_design_refuted_as_a_halt(tmp_path):
     assert "design-refuted" in p.stdout and "halted" in p.stdout
 
 
-# ---------------------------------------------------------------------------
 # check_lint
-# ---------------------------------------------------------------------------
 
 _MINIMAL = """\
 schema_version: {v}
@@ -356,9 +350,7 @@ structure:
     assert p.returncode == 0, p.stdout
 
 
-# ---------------------------------------------------------------------------
 # check_claims — the spend-point pass
-# ---------------------------------------------------------------------------
 
 _CLAIMS_GRAPH = """\
 schema_version: 1
@@ -413,9 +405,7 @@ gate:
     assert "R1" not in p.stdout  # computed rule — check_gate verifies it, not a citation
 
 
-# ---------------------------------------------------------------------------
 # check_calls + check_stub (shared target identification)
-# ---------------------------------------------------------------------------
 
 def _suite_repo(make_repo):
     """A fixture repo whose suite imports `appx.summarize` — a project-rooted module
@@ -485,9 +475,7 @@ def test_nullstub_recorded_pass_in_the_graph_is_accepted(make_repo):
     assert "2 discriminating" in p.stdout
 
 
-# ---------------------------------------------------------------------------
 # trace
-# ---------------------------------------------------------------------------
 
 def test_trace_drivers_reports_the_entrypoint_reaching_the_change(make_repo):
     r = make_repo()

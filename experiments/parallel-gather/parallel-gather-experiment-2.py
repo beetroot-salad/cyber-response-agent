@@ -175,7 +175,7 @@ def main() -> int:
 
     scopes, hints, _, _ = build_scopes()
 
-    # ---- Experiment: parallel singletons ----
+    # Experiment: parallel singletons
     exp_run = setup_run_dir("exp")
     os.environ["SOC_AGENT_RUN_DIR"] = str(exp_run)
     exp_ctx = CtxShim(run_dir=exp_run, signature_id="wazuh-rule-5710")
@@ -189,7 +189,7 @@ def main() -> int:
         ]
     exp_wall = round(time.monotonic() - exp_wall_start, 1)
 
-    # ---- Control: serial gather-composite on the same set ----
+    # Control: serial gather-composite on the same set
     ctl_run = setup_run_dir("ctl")
     os.environ["SOC_AGENT_RUN_DIR"] = str(ctl_run)
     ctl_ctx = CtxShim(run_dir=ctl_run, signature_id="wazuh-rule-5710")
@@ -198,7 +198,6 @@ def main() -> int:
     control = dispatch_composite_control(ctl_ctx, scopes, hints)
     ctl_wall = round(time.monotonic() - ctl_wall_start, 1)
 
-    # ---- Synthesize experiment envelope ----
     syn_leads: list[dict] = []
     for r in results:
         env = r.get("envelope") or {}
@@ -207,7 +206,6 @@ def main() -> int:
         yaml.safe_dump({"gather": {"loop": 1, "leads": syn_leads}}, sort_keys=False)
     )
 
-    # ---- Metrics ----
     sum_prompt = sum(r["prompt_chars"] for r in results)
     sum_stdout = sum(r["stdout_chars"] for r in results)
     exp_lead_status = [

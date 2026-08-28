@@ -65,9 +65,7 @@ __all__ = [
     "warnings_of",
 ]
 
-# --------------------------------------------------------------------------- #
 # documents
-# --------------------------------------------------------------------------- #
 
 #: Two declared vertices, and no `:L findings` block — every F-46 document below opens its
 #: own, because a lead re-listed in a SECOND block is the legal cross-block amendment (C4),
@@ -208,9 +206,7 @@ def attr_doc(*rows: str, header: str = ATTR_HEADER, prologue: str = VERTICES) ->
     )
 
 
-# --------------------------------------------------------------------------- #
 # the readers, through the real primitives
-# --------------------------------------------------------------------------- #
 
 def parse(text: str) -> tuple[Any, list[Any]]:
     """`parse_dense_companion(text)` — the projector's two return surfaces."""
@@ -271,9 +267,7 @@ def cells(row: str) -> list[str]:
     return _split_cells(row)
 
 
-# --------------------------------------------------------------------------- #
 # deps and the run dir — the write verbs' real seam
-# --------------------------------------------------------------------------- #
 
 def main_deps(tmp_path: Path) -> tuple[Any, Path]:
     """MAIN deps through the real `bind` seam — real compiled policy, real gate.

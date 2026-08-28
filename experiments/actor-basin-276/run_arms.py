@@ -33,7 +33,7 @@ RUNS = EXP / "runs"
 VAR = EXP / "variants"
 FIXED_SEED = 0x5EED0276              # constant across arms
 
-# --- helpers that may live in S or a sibling module ---
+# helpers that may live in S or a sibling module
 def _strip(x):
     return V.strip_yaml_fence(x)
 
@@ -43,10 +43,10 @@ def _is_skip(story):
         return fn(story)
     return story.lstrip().startswith("SKIP:")
 
-# --- pin the actor seed so archetype+menu are identical across arms ---
+# pin the actor seed so archetype+menu are identical across arms
 S._actor_seed = lambda name: FIXED_SEED
 
-# --- whitebox injection: inline the gather summary into the actor's user prompt.
+# whitebox injection: inline the gather summary into the actor's user prompt.
 # The actor call is the only _run_claude with a non-empty add_dir (the lessons corpora);
 # oracle passes none and the judge uses _run_judge_claude. We append a delimited
 # gather_summary section to the user prompt (args[1]) exactly as alert/actor_input are

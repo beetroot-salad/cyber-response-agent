@@ -44,9 +44,7 @@ def _judge_doc(n: int) -> dict:
     }
 
 
-# =======================================================================================
 # D1 — QueueChannel carries its own lock topology
-# =======================================================================================
 
 
 def test_every_channel_declares_its_lock_topology(tmp_path: Path):
@@ -125,9 +123,7 @@ def test_every_channel_declares_its_id_key(tmp_path: Path):
     assert h.pending(ch) == [theirs], "only the row keyed under this channel's field matched"
 
 
-# =======================================================================================
 # D2 — merge_concurrent deleted; rotation always merges (O1)
-# =======================================================================================
 
 
 def test_rotation_has_no_merge_knob_and_always_merges(tmp_path: Path):
@@ -218,9 +214,7 @@ def test_relearn_colliding_finding_id_is_dropped_by_merge_filter(tmp_path: Path)
     assert survivors == ["run-D/0"], "the colliding id is dropped; the fresh one is not"
 
 
-# =======================================================================================
 # O2 — appending does not block on an author batch
-# =======================================================================================
 
 
 def test_append_completes_while_drain_batch_in_flight(tmp_path: Path):
@@ -290,9 +284,7 @@ def test_two_concurrent_directions_both_land_every_finding(tmp_path: Path):
     assert sorted(r["direction"] for r in rows).count("benign") == 25
 
 
-# =======================================================================================
 # O7 — rotation and retirement are mutually exclusive with appends
-# =======================================================================================
 
 
 def test_rotate_blocks_while_append_lock_held(tmp_path: Path):
@@ -466,9 +458,7 @@ def test_a_stuck_appender_on_one_channel_does_not_hold_the_repo_lock_forever(tmp
     assert h.pending(sibling) == []
 
 
-# =======================================================================================
 # The locks the fold must not change
-# =======================================================================================
 
 
 def test_the_drain_acquires_its_three_locks_in_one_declared_order(tmp_path: Path):

@@ -152,10 +152,8 @@ def completeness(obj: Any) -> Completeness:
     return Completeness("unknown")
 
 
-# --------------------------------------------------------------------------------------- #
 # The span of a capped payload's returned docs — a cap is ONE slice and the envelope never says
 # which. Computed over the FULL returned list, not over whatever survived the byte budget.
-# --------------------------------------------------------------------------------------- #
 
 _TIME_KEYS = ("@timestamp", "timestamp")
 
@@ -212,9 +210,7 @@ def _returned_records(obj: Any, comp: Completeness) -> list:
     return rows if rows is not None else []
 
 
-# --------------------------------------------------------------------------------------- #
 # The walk.
-# --------------------------------------------------------------------------------------- #
 
 @dataclass(frozen=True)
 class _Node:
@@ -497,9 +493,7 @@ def walk(obj: Any, budget: int) -> tuple[Any, list[Elision]]:
     return result, elisions
 
 
-# --------------------------------------------------------------------------------------- #
 # The view.
-# --------------------------------------------------------------------------------------- #
 
 def _prose(comp: Completeness, elisions: list[Elision], size: int, span) -> list[str]:
     """Four cases, four statements. What the SERVER did and what THIS VIEW did are separate

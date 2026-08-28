@@ -43,7 +43,6 @@ BASELINE_REFS_RE = re.compile(
 def score(output: str) -> dict:
     scorecard: dict = {}
 
-    # Mode detection
     has_hypothesize = re.search(r"^```yaml\s*\n\s*hypothesize:", output, re.M) is not None
     has_gather = re.search(r"^```yaml\s*\n\s*gather:", output, re.M) is not None
     if has_hypothesize:

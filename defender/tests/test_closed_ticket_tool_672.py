@@ -417,9 +417,7 @@ def test_closed_ticket_registration_reaches_every_benign_call_site():
     assert ADVERSARIAL.judge_wiring.closed_ticket_read is False
 
 
-# ═════════════════════════════════════════════════════════════════════════════
 # B. The seam and the outbound payload
-# ═════════════════════════════════════════════════════════════════════════════
 
 
 def test_tools_drive_verbs_in_process_via_deps(tmp_path):

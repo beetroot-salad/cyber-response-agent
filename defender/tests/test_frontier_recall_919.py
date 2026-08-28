@@ -55,7 +55,6 @@ from defender.tests._invlang_warn_836 import (  # noqa: E402
     attr_block,
 )
 
-# --------------------------------------------------------------------------- #
 # documents
 #
 # Every fixture below was EXECUTED against the real `diagnose` while this file was written and
@@ -67,7 +66,6 @@ from defender.tests._invlang_warn_836 import (  # noqa: E402
 # `PROLOGUE` (two vertices, one lead, nothing open) is the base every document extends, so
 # each fixture carries exactly the ONE open thing under test and no other — the fixture-hygiene
 # rule `_invlang_warn_836` states.
-# --------------------------------------------------------------------------- #
 
 #: A `process` vertex whose CLASS cell is the bare open marker. `process` class is a single
 #: token (SKILL.md §Classification grammar), so `??` is the whole cell — which makes the
@@ -247,9 +245,7 @@ _FIXTURE_DOCS = {
 }
 
 
-# --------------------------------------------------------------------------- #
 # the frontier, read through the functions this spec mints
-# --------------------------------------------------------------------------- #
 
 def _frontier(text: str):
     """`frontier_from_text(text)` — imported INSIDE the body, never at module scope, so this
@@ -283,9 +279,7 @@ def _lessons_frontier():
     return lessons_frontier
 
 
-# --------------------------------------------------------------------------- #
 # corpora
-# --------------------------------------------------------------------------- #
 
 # `_write_lesson` and `_main_deps` live in `_lessons_corpus` so a second suite can use them
 # without importing this COLLECTED module (which would load it twice in one session).
@@ -317,9 +311,7 @@ def _exit_code(main, argv: list[str]) -> int:
         return int(e.code or 0)
 
 
-# --------------------------------------------------------------------------- #
 # the fixtures themselves
-# --------------------------------------------------------------------------- #
 
 def test_the_fixture_documents_carry_no_invlang_fault():
     """Guards every document below. An empty frontier is the CORRECT answer for a malformed
@@ -336,9 +328,7 @@ def test_the_fixture_documents_carry_no_invlang_fault():
     assert [d.severity for d in diagnose(TRUNCATED_ROW_DOC, None)] == ["error"]
 
 
-# --------------------------------------------------------------------------- #
 # case 1 — an open slot is in the frontier until a refinement closes it
-# --------------------------------------------------------------------------- #
 
 def test_an_open_class_slot_matches_until_a_refinement_closes_it(tmp_path):
     """CLAIM: the frontier is the document's state AFTER `:R attr_updates`, so the same
@@ -377,9 +367,7 @@ def test_an_open_class_slot_matches_until_a_refinement_closes_it(tmp_path):
     assert derive_frontier(body) == _frontier(open_doc)
 
 
-# --------------------------------------------------------------------------- #
 # case 2 — the motivating miss, retrieved without the alert signature
-# --------------------------------------------------------------------------- #
 
 def test_the_loginuid_lesson_is_retrieved_though_its_signature_does_not_match(tmp_path):
     """CLAIM: retrieval is signature-BLIND — the frontier is the whole key.
@@ -427,9 +415,7 @@ def test_the_loginuid_lesson_is_retrieved_though_its_signature_does_not_match(tm
     ]
 
 
-# --------------------------------------------------------------------------- #
 # case 3 — `ident` is in the frontier and still not in the benign gate
-# --------------------------------------------------------------------------- #
 
 def test_an_unresolved_ident_is_in_the_frontier_but_not_in_the_benign_gate(tmp_path):
     """CLAIM: `identifier` is an `OpenSlot` (`slot="ident"`), and `_check_benign_open_slots` is
@@ -465,9 +451,7 @@ def test_an_unresolved_ident_is_in_the_frontier_but_not_in_the_benign_gate(tmp_p
     assert "benign blocked" in (validate_investigation(blocked, None) or "")
 
 
-# --------------------------------------------------------------------------- #
 # case 4 — contracts
-# --------------------------------------------------------------------------- #
 
 def test_a_contract_is_open_until_a_row_authorizes_it(tmp_path):
     """CLAIM: a contract leaves the frontier on `verdict == "authorized"` and on nothing else.
@@ -536,9 +520,7 @@ def test_an_edge_selector_matches_only_when_every_field_it_declares_is_equal(tmp
     assert [h.score for h in hits] == [4, 3]
 
 
-# --------------------------------------------------------------------------- #
 # case 5 — ranking
-# --------------------------------------------------------------------------- #
 
 def _ranking_corpus(tmp_path: Path) -> Path:
     """Five node selectors against `OPEN_TRIPLE_BLOCK` (`class=ip-only/??/??`).
@@ -617,9 +599,7 @@ def test_ties_break_by_name_and_the_order_is_stable_across_calls(tmp_path):
     assert [h.score for h in first] == [h.score for h in second]
 
 
-# --------------------------------------------------------------------------- #
 # case 6 — the recall rides on the append that moved it
-# --------------------------------------------------------------------------- #
 
 def test_append_block_carries_the_lessons_only_when_the_append_moved_the_recall(tmp_path):
     """CLAIM: `_tool_append_block` derives the recall over the pre- and post-append document
@@ -664,9 +644,7 @@ def test_append_block_carries_the_lessons_only_when_the_append_moved_the_recall(
     ), "the recall changed what landed on disk"
 
 
-# --------------------------------------------------------------------------- #
 # case 7 — a half-written block is inert, not fatal
-# --------------------------------------------------------------------------- #
 
 def test_a_malformed_block_yields_an_empty_frontier_rather_than_raising(tmp_path):
     """CLAIM: `frontier_from_text` never raises — a document it cannot read has an empty
@@ -715,9 +693,7 @@ def test_an_append_landing_a_half_written_block_still_leads_with_its_byte_count(
     assert (run / "investigation.md").read_text(encoding="utf-8").endswith(HALF_WRITTEN_BLOCK)
 
 
-# --------------------------------------------------------------------------- #
 # case 8 — `--corpus` is a relocation seam, not a corpus selector
-# --------------------------------------------------------------------------- #
 
 def test_the_relocated_corpus_must_still_be_named_lessons(tmp_path, capsys):
     """CLAIM: `--corpus` accepts a RELOCATED `lessons` directory and refuses anything else,
@@ -751,12 +727,10 @@ def test_the_relocated_corpus_must_still_be_named_lessons(tmp_path, capsys):
     assert "process-class-open" not in capsys.readouterr().out
 
 
-# --------------------------------------------------------------------------- #
 # hardening (#919 review) — the holes a mutation sweep found in the cases above
 #
 # Every test below was written because a WRONG implementation survived the suite as it
 # first stood. Each names the mutation it kills.
-# --------------------------------------------------------------------------- #
 
 def test_an_open_case_slot_matches_a_concrete_selector_and_a_settled_one_does_not(tmp_path):
     """CLAIM: the inversion — an UNRESOLVED case slot satisfies any selector slot — and it is
@@ -968,14 +942,12 @@ def test_render_of_nothing_is_empty_and_the_cli_honours_top_k(tmp_path):
     assert "beta" not in out, "--top-k did not reach the retrieval"
 
 
-# --------------------------------------------------------------------------- #
 # hardening, round 2 — what an adversarial implementer got away with
 #
 # A throwaway implementation passed the suite above while (a) never calling
 # `match_lessons` from the tool at all, (b) never opening `--investigation`, (c) discharging
 # every contract off any one authorized row, and (d) folding only `class` refinements. Each
 # test below is the decoy that makes one of those impossible.
-# --------------------------------------------------------------------------- #
 
 def test_the_tool_pushes_only_the_lessons_that_matched(tmp_path):
     """CLAIM: `_tool_append_block` is wired to `match_lessons`, not to a directory listing.
@@ -1099,9 +1071,7 @@ def test_a_contract_on_a_refuted_hypothesis_is_not_on_the_frontier(tmp_path):
     )
 
 
-# --------------------------------------------------------------------------- #
 # review follow-ups (#930): the two ways the shipped mechanism missed its own case
-# --------------------------------------------------------------------------- #
 
 def test_a_class_slot_matched_only_through_the_inversion_pins_nothing(tmp_path):
     """CLAIM: specificity scores the MATCH, not the selector — a class component that landed
@@ -1284,12 +1254,10 @@ def test_a_pushed_lesson_is_recorded_the_way_a_read_one_is(tmp_path):
     )
 
 
-# --------------------------------------------------------------------------- #
 # the in-hand axis — `observed_nodes`
 #
 # Keying only on OPEN slots made #919's own motivating lesson unreachable: the alert carries
 # `loginuid=-1` concretely, so the slot it keyed on never opened. These pin the second half.
-# --------------------------------------------------------------------------- #
 
 #: A `process` whose class and attributes are all SETTLED. Nothing here is open, so the whole
 #: document is invisible to `frontier_nodes` and visible only to `observed_nodes`.

@@ -58,9 +58,7 @@ def repo(tmp_path: Path) -> Path:
     return tree
 
 
-# =============================================================================================
 # The routing decision, at the shape seam.
-# =============================================================================================
 
 
 def test_an_attributed_shim_row_is_never_taught_as_a_systems_mistake():
@@ -201,9 +199,7 @@ def test_a_reducer_failure_shows_the_curator_its_command():
     assert failure["query_id"] == BASH_SHIM_QUERY_ID
 
 
-# =============================================================================================
 # The two readers of one decision: the prompt the model obeys, and the gate that refuses it.
-# =============================================================================================
 
 
 def test_the_curator_prompt_agrees_with_the_commit_gate():

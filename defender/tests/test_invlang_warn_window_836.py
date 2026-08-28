@@ -79,9 +79,7 @@ class _NullStore:
         return None
 
 
-# --------------------------------------------------------------------------- #
 # M3 — the window is DERIVED
-# --------------------------------------------------------------------------- #
 
 def test_window_is_derived_from_the_on_disk_document(tmp_path):
     """The window is a pure function of the document's current bytes: change the bytes and
@@ -355,9 +353,7 @@ def test_window_derivation_failure_does_not_wedge_the_run(tmp_path):
     assert not (run2 / "report.md").exists()
 
 
-# --------------------------------------------------------------------------- #
 # O1 / F-E — the accept path
-# --------------------------------------------------------------------------- #
 
 def test_a_warn_family_defect_lands_and_returns_a_warning(tmp_path):
     """O1, the cost lever: a block whose only defect is warn-family LANDS, and the model is
@@ -433,9 +429,7 @@ def test_repair_instruction_names_a_verb_the_model_can_actually_call(tmp_path):
     assert "fix_row" in offered_tool_names(deps)
 
 
-# --------------------------------------------------------------------------- #
 # M5 — the gate
-# --------------------------------------------------------------------------- #
 
 def test_append_block_refused_while_a_row_is_flagged(tmp_path):
     """M5 on the write side: with a row flagged, the next `append_block` is refused — even
@@ -842,9 +836,7 @@ def test_review_challenge_answered_by_a_warn_landing_block(tmp_path):
     assert (run / "report.md").is_file()
 
 
-# --------------------------------------------------------------------------- #
 # H1 — the framework's forced close
-# --------------------------------------------------------------------------- #
 
 def _drive_to_retry_exhaustion(deps):
     """Run the REAL agent loop with a model that never stops retrying a refused call, so

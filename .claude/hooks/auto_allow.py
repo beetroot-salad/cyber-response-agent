@@ -148,7 +148,6 @@ def claude_pattern_matches(pattern: str, tool_name: str, value: str) -> bool:
         Read(//etc/hosts)     — absolute path (// = filesystem root)
         Read(//var/log/**)    — recursive glob
     """
-    # Parse the pattern: ToolName(content)
     m = re.match(r"^(\w+)\((.+)\)$", pattern)
     if not m:
         # Bare tool name like "Bash" — matches all uses of that tool
@@ -158,13 +157,9 @@ def claude_pattern_matches(pattern: str, tool_name: str, value: str) -> bool:
     if pat_tool != tool_name:
         return False
 
-    # Wildcard matching for Bash commands and Read paths
     if "*" not in pat_content:
-        # Exact match
         return value == pat_content
 
-    # Convert Claude's simple wildcard to a regex.
-    # Split on * and re-join with .* for matching.
     parts = pat_content.split("*")
     regex = ".*".join(re.escape(p) for p in parts)
     regex = "^" + regex + "$"
@@ -204,7 +199,6 @@ def build_rule(tool_name: str, tool_input: dict) -> str | None:
             return None
         if is_compound(command):
             return None
-        # Only persist commands that match a known safe prefix.
         # Always save the exact command (useful for debugging iteration).
         if matching_safe_prefix(command) is None:
             return None
@@ -214,7 +208,6 @@ def build_rule(tool_name: str, tool_input: dict) -> str | None:
         file_path = tool_input.get("file_path", "")
         if not file_path:
             return None
-        # Only auto-allow reads outside the project directory.
         # In-project reads are already permitted by default.
         if file_path.startswith("/workspace"):
             return None
@@ -241,7 +234,6 @@ def update_settings(rule: str) -> None:
 
     allow.append(rule)
 
-    # Atomic write: write to temp file, then rename
     try:
         fd, tmp_path = tempfile.mkstemp(
             dir=SETTINGS_PATH.parent, suffix=".tmp", prefix=".settings_"
@@ -251,7 +243,6 @@ def update_settings(rule: str) -> None:
             f.write("\n")
         os.replace(tmp_path, SETTINGS_PATH)
     except OSError:
-        # Clean up temp file on failure
         try:
             os.unlink(tmp_path)
         except OSError:
@@ -271,7 +262,6 @@ def main():
     if rule is None:
         sys.exit(0)
 
-    # Read current allow list to check coverage
     allow_list = []
     if SETTINGS_PATH.exists():
         try:
@@ -280,12 +270,10 @@ def main():
         except (json.JSONDecodeError, OSError):
             pass
 
-    # Determine the value to match against existing patterns
     if tool_name == "Bash":
         value = tool_input.get("command", "")
     elif tool_name == "Read":
         file_path = tool_input.get("file_path", "")
-        # Value for matching uses the // prefix (absolute path syntax)
         value = f"/{file_path}" if file_path.startswith("/") else file_path
     else:
         sys.exit(0)

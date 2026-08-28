@@ -97,9 +97,7 @@ EVENTS_INDEX = "logs-*"
 ALERTS_INDEX = ".alerts-security.alerts-*"
 
 
-# --------------------------------------------------------------------------
 # the injected estate: a `docker` on the run's own PATH, and a fake adapters dir
-# --------------------------------------------------------------------------
 
 #: A `docker` that answers the two transport shapes this file drives and records every argv it
 #: was handed. The shebang is the RUNNING interpreter's absolute path, deliberately: the child's
@@ -301,9 +299,7 @@ def served_rows(ledger: Ledger) -> list[dict]:
     return read_jsonl_rows(ledger.path)
 
 
-# ==========================================================================
 # 1. the format
-# ==========================================================================
 
 def test_the_z_spelling_drops_the_precision_it_cannot_carry():
     """    `z_seconds` answers whole seconds with a trailing `Z`, and `Z_SECONDS` is that format.
@@ -379,9 +375,7 @@ def tz_east_of_utc(monkeypatch):
         time.tzset()
 
 
-# ==========================================================================
 # 2. the seam: `VerbContext.as_of`, threaded unconditionally
-# ==========================================================================
 
 def test_the_clock_is_appended_after_the_world_id_it_rides_beside():
     """    `as_of` is the LAST field of `VerbContext`, and defaults to `None`.
@@ -606,9 +600,7 @@ def test_a_registry_will_not_serve_without_being_told_which_moment_it_serves(tmp
                       ledger=primed_ledger(tmp_path))
 
 
-# ==========================================================================
 # 3. the stamps: host-state's `captured_at`, elastic's open window
-# ==========================================================================
 
 #: The six verbs whose payload carries `captured_at`, with the arguments each needs. Named as
 #: the VERB TABLE spells them, not as python functions, because the table is what the estate
@@ -754,9 +746,7 @@ def test_filling_the_window_does_not_edit_the_callers_own_arguments(tmp_path):
     assert second == {"gte": "2026-05-01T00:00:00Z", "lte": T0_Z}
 
 
-# --------------------------------------------------------------------------
 # the ES|QL half of the window: a stage appended, never a predicate edited
-# --------------------------------------------------------------------------
 
 #: The clause a bounded ES|QL query carries. `<=`, matching `_build_search_body`'s `lte` on the
 #: parameter path — the two halves close the same window, so a document written at exactly the
@@ -923,9 +913,7 @@ def test_the_swept_catalog_is_the_corpus_this_half_claims():
     assert len(COMMITTED) == ESQL_TEMPLATES
 
 
-# ==========================================================================
 # 4. T0 itself: derived from the prefix, and pinned into the spec
-# ==========================================================================
 
 def _stamped_turn(store, session_id, moment, *, text="a turn"):
     """One complete pair whose messages AND parts carry `moment`.

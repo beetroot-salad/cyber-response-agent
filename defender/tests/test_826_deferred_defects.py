@@ -66,9 +66,7 @@ def _above(seq: int, **kw) -> dict:
     return _row(seq, query_id=rq.ABOVE_GUARD_QUERY_ID, **kw)
 
 
-# --------------------------------------------------------------------------------------- #
 # ITEM 2 — the hardcoded `@timestamp` descending sort.
-# --------------------------------------------------------------------------------------- #
 
 def _body(**kw) -> dict:
     args = {
@@ -148,9 +146,7 @@ def test_the_sort_param_is_visible_to_the_model_on_both_search_verbs():
     assert "sort" not in declared_params(ea.esql)
 
 
-# --------------------------------------------------------------------------------------- #
 # ITEM 3 — ask (2)'s repeat notice never fired for a FAILING repeat.
-# --------------------------------------------------------------------------------------- #
 
 def _write(tmp_path: Path, rows: list[dict]) -> Path:
     from defender._io import append_jsonl
@@ -239,9 +235,7 @@ def test_the_exit_code_selects_wording_and_never_whether_a_note_fires(tmp_path):
     assert rq.repeat_note(tmp_path, LEAD, **kw) is not None, "the default changed behaviour"
 
 
-# --------------------------------------------------------------------------------------- #
 # ITEM 4 — the argument-schema repeat class had no guard and no record.
-# --------------------------------------------------------------------------------------- #
 
 def test_the_companion_guard_counts_what_the_first_guard_cannot_see():
     """THE DEFECT (item 4): a repeat loop the pydantic ARGUMENT SCHEMA turns back never

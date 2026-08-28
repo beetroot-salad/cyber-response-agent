@@ -60,9 +60,7 @@ def _cats(deps, path: str) -> bool:
     return bash_decision(deps, f"cat {path}").allow
 
 
-# ===========================================================================
 # O6 / R4 — the read confine
-# ===========================================================================
 
 def test_the_curator_declares_requires_confine_over_the_three_corpora(tmp_path):
     """The curator's read reach is the three-corpus confine, not the whole tree: a read of a
@@ -192,9 +190,7 @@ def test_the_curator_reads_no_longer_reach_defender_docs(tmp_path):
     assert _reads(deps, rel("lessons", "own.md"))                # control: own corpus still reads
 
 
-# ===========================================================================
 # M3 — the explicit worktree tree (the binding seam raises without one)
-# ===========================================================================
 
 _EXPLICIT_TREE = r"explicit NON-PATHS defender_dir"
 

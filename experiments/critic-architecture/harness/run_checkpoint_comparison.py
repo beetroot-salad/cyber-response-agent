@@ -201,7 +201,6 @@ def trial(checkpoint: str, trial_id: int, alert: str, protocol: str) -> dict:
         total_in += u.get("input_tokens", 0) or 0
         total_out += u.get("output_tokens", 0) or 0
 
-        # Resolve tool calls for this turn
         calls = adapter.parse_tool_calls(agent_text)
         tool_results = ""
         if calls:
@@ -215,9 +214,8 @@ def trial(checkpoint: str, trial_id: int, alert: str, protocol: str) -> dict:
             "tool_calls": [c.get("tool", "") for c in calls],
         }
 
-        # ---- Checkpoint: post-PREDICT ----
+        # Checkpoint: post-PREDICT
         if checkpoint == "post-PREDICT" and n == 1 and reviewer_call is None:
-            # Build turn1 block from this turn (no commit expected at n=1)
             turn1_block = (
                 f"### Defender turn 1\n\n{agent_text}\n\n"
                 f"### Tool results\n\n{tool_results or '(none)'}"
@@ -237,7 +235,7 @@ def trial(checkpoint: str, trial_id: int, alert: str, protocol: str) -> dict:
                 redirect_text = reviewer_call.get("result", "")
                 turn_record["redirect_block"] = redirect_text
 
-        # ---- Checkpoint: pre-COMMIT ----
+        # Checkpoint: pre-COMMIT
         if (
             checkpoint == "pre-COMMIT"
             and is_committed(agent_text)
@@ -272,9 +270,7 @@ def trial(checkpoint: str, trial_id: int, alert: str, protocol: str) -> dict:
                 turn_record["redirect_block"] = redirect_text
                 turn_record["tool_results"] = tool_results
                 turns.append(turn_record)
-                # Force one more turn
                 n += 1
-                # Add the redirect-aware nudge in next turn
                 extra_note = (
                     "REVIEWER REDIRECT (you must address this before "
                     "committing — run the named check, then commit):\n\n"
@@ -332,7 +328,7 @@ def trial(checkpoint: str, trial_id: int, alert: str, protocol: str) -> dict:
         turns.append(turn_record)
         n += 1
 
-    # ---- Checkpoint: REPORT-time ----
+    # Checkpoint: REPORT-time
     if checkpoint == "REPORT-time":
         transcript = render_transcript(turns, include_commit=True)
         rprompt = (

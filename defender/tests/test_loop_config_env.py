@@ -92,9 +92,7 @@ def test_accessor_returns_the_default_when_unset(monkeypatch):
     assert config.actor_model() == "glm-5.2"
 
 
-# ===========================================================================
 # #713 — the grouping objects must not re-freeze what #717 unfroze
-# ===========================================================================
 
 # The stage ENGINES — the entry points whose signatures the passthrough guard polices.
 _STAGE_MODULES = (
@@ -197,9 +195,7 @@ def test_no_module_level_stage_wiring_or_context(rel):
     )
 
 
-# ===========================================================================
 # #713 — a per-batch spawn's trace name stays unique on (batch_id, pid)
-# ===========================================================================
 
 # The spawn boundaries that stand up ONE batch of an authoring drain. Each used to let
 # `run_curator_stage` / `run_author_stage` derive the trace name for it; since #713 each

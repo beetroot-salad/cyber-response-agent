@@ -81,9 +81,7 @@ def module_level_defs(path: Path) -> set[str]:
     }
 
 
-# =======================================================================================
 # O3 — one drain body
-# =======================================================================================
 
 
 def test_duplicate_helper_baseline_drops_the_five_pair_exclusive_names(tmp_path: Path):
@@ -204,9 +202,7 @@ def test_curator_no_longer_re_exports_the_shared_git_helpers(tmp_path: Path):
         assert hasattr(author_shared, name), f"shared lost {name}"
 
 
-# =======================================================================================
 # O5 — per-direction gating semantics unchanged
-# =======================================================================================
 
 
 def test_gate_seam_returns_held_consumed_pre_to_author(tmp_path: Path):
@@ -400,9 +396,7 @@ def test_consumed_skip_bucket_is_idempotent_and_projects(tmp_path: Path):
     assert written == 0, "the skipped id is deduped out of a later append"
 
 
-# =======================================================================================
 # The written record the fold makes normative
-# =======================================================================================
 
 
 def test_the_three_do_not_fold_comments_record_their_reversal(tmp_path: Path):

@@ -142,7 +142,7 @@ def main() -> int:
     state_path = Path(args.state)
     state = json.loads(state_path.read_text()) if state_path.exists() else {}
 
-    # ---- TRAINING ----
+    # TRAINING
     if args.phase in {"training", "all"} and "training" not in state:
         print("== TRAINING phase ==", file=sys.stderr)
         with cf.ThreadPoolExecutor(max_workers=6) as ex:
@@ -150,7 +150,6 @@ def main() -> int:
             futB = {ex.submit(run_arm_b_training, fid): fid for fid in TRAINING}
             arm_a = [f.result() for f in cf.as_completed(futA)]
             arm_b = [f.result() for f in cf.as_completed(futB)]
-        # write transcripts
         for t in arm_a:
             md = f"# Arm A training: {t['fixture']}\n\n"
             md += fmt_call("Defender", t["defender"])
@@ -163,7 +162,7 @@ def main() -> int:
         state["training"] = {"arm_a": arm_a, "arm_b": arm_b}
         state_path.write_text(json.dumps(state, indent=2, default=str))
 
-    # ---- CURATE ----
+    # CURATE
     if args.phase in {"curate", "all"} and "curate" not in state:
         print("== CURATE phase ==", file=sys.stderr)
         arm_a = state["training"]["arm_a"]
@@ -186,7 +185,7 @@ def main() -> int:
         state["curate"] = {"A": cur_a, "B": cur_b}
         state_path.write_text(json.dumps(state, indent=2, default=str))
 
-    # ---- TEST ----
+    # TEST
     if args.phase in {"test", "all"} and "test" not in state:
         print("== TEST phase ==", file=sys.stderr)
         addendum_a = state["curate"]["A"]["result"]

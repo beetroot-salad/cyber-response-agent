@@ -45,9 +45,7 @@ pytestmark = pytest.mark.e2e
 SALT = "s665"
 
 
-# --------------------------------------------------------------------------- #
 # Helpers to drive the two composition frames with the injectable box seams.
-# --------------------------------------------------------------------------- #
 def _worktree_batch(tmp_path, rec, *, do_work, has_work=None, branch=None,
                     label="author_drain", **kw):
     """Drive the REAL _run_worktree_batch with the future injectable box seams."""
@@ -89,9 +87,7 @@ def _curator_for_run(tmp_path, *, box):
     )
 
 
-# ======================================================================= #
 # Delivery / census (O1/O6/M10) — the box reaches every bash-enabled role
-# ======================================================================= #
 def test_census_observes_box_attachment_on_production_path(tmp_path):
     """census_observes_attachment — every bash-enabled learning role runs in a box, and
     that is observed as ATTACHMENT on the PRODUCTION construction seam, not `isinstance`
@@ -363,9 +359,7 @@ def test_role_keyed_census_blind_to_caller_constructed_boxless_instance(tmp_path
         off_path.box.run_parsed([], command="true", cwd=tmp_path / "run", timeout=1.0)
 
 
-# ======================================================================= #
 # run_one — the run-cycle box shared by the actor + judge legs
-# ======================================================================= #
 def test_run_one_creates_run_cycle_box_and_delivers_to_actor_and_judge(tmp_path, monkeypatch):
     """run_cycle_box_delivered — run_one creates ONE run-cycle box once learning_run_dir
     exists and delivers it to the concurrently-dispatched direction legs (the actor and the
@@ -460,9 +454,7 @@ def test_box_names_distinct_no_runtime_collision(tmp_path, monkeypatch):
     assert run_cycle_name != box_mod.container_name(run_dir.name)
 
 
-# ======================================================================= #
 # _run_worktree_batch — the drain box over its worktree leaf
-# ======================================================================= #
 def test_drain_batch_creates_own_box_and_delivers_to_triggered_roles(tmp_path):
     """drain_box_delivered — each drain invocation builds its OWN box over its worktree leaf
     and delivers it to the bash roles its do_work dispatches (curator + lead_author). Driven

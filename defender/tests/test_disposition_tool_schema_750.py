@@ -134,9 +134,7 @@ def _disposition_property(tool_def) -> dict:
     return prop
 
 
-# ═══════════════════════════════════════════════════════════════════════════
 # O1 — the vocabulary is stated to the model structurally, derived from its owner.
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 def test_the_registered_tool_advertises_the_owners_vocabulary(tmp_path):
@@ -191,9 +189,7 @@ def test_the_tool_description_no_longer_copies_the_member_list(tmp_path):
     )
 
 
-# ═══════════════════════════════════════════════════════════════════════════
 # NU2 — the hint must not become the gate.
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 def test_the_schema_hint_is_not_the_gate(tmp_path):
@@ -234,9 +230,7 @@ def test_the_schema_hint_is_not_the_gate(tmp_path):
     assert not (run_dir / "report.md").exists(), "an out-of-enum close committed a report"
 
 
-# ═══════════════════════════════════════════════════════════════════════════
 # O2 — no value outside the vocabulary commits, by EITHER entry path.
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 @pytest.mark.parametrize("disposition", NEAR_MISSES)
@@ -333,9 +327,7 @@ def test_a_member_of_the_vocabulary_commits_through_the_tool_lane(tmp_path):
     )
 
 
-# ═══════════════════════════════════════════════════════════════════════════
 # O3 — the refusal distinguishes an invisible character from a valid value.
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 def test_the_refusal_escapes_an_invisible_character_rather_than_echoing_it(tmp_path):

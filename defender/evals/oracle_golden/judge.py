@@ -95,7 +95,7 @@ def tag_suffix(model: str, effort: str) -> str:
     return f"judge-{model}-{effort}_{prompts_sha8()}"
 
 
-# --------------------------------------------------------------------------- inputs
+# inputs
 
 @dataclass(frozen=True)
 class LeadInputs:
@@ -288,7 +288,7 @@ def verdict_user_prompt(inputs: LeadInputs, projection: Any, measurement: dict) 
     ])
 
 
-# --------------------------------------------------------------------------- parsing
+# parsing
 
 def _document(raw: str) -> dict:
     text = raw.strip()
@@ -371,7 +371,7 @@ def parse_verdict_reply(raw: str) -> dict:
     }
 
 
-# ----------------------------------------------------------------------------- calls
+# calls
 
 @dataclass(frozen=True)
 class CallResult:

@@ -113,9 +113,7 @@ GRANTED_ENTRIES = 28
 GRANTED_SYSTEMS = 7
 
 
-# --------------------------------------------------------------------------
 # the fake estate: a real adapters directory, with verb bodies that count
-# --------------------------------------------------------------------------
 
 #: A recording adapter. Written to disk rather than patched in, because `ModuleVerbRegistry`
 #: COLD-READS this text (`declared_verb_names` parses the `VERBS = {...}` literal without
@@ -315,9 +313,7 @@ def world_registry(
     )
 
 
-# ==========================================================================
 # 1. structural coverage: every granted verb, and no route to a bare body
-# ==========================================================================
 
 
 def test_the_shipped_grant_still_spans_seven_systems():
@@ -435,9 +431,7 @@ def test_a_wrapper_only_param_is_still_reserved_through_the_wrapper(tmp_path):
     assert validate_params(served, {"status": "open"}) is None
 
 
-# ==========================================================================
 # 2. nominal typing: the build site's isinstance check
-# ==========================================================================
 
 def _built(logger, verbs):
     with override_allow_model_requests(False):
@@ -485,9 +479,7 @@ def test_build_agent_core_accepts_a_world_registry(logger, tmp_path):
     assert {"query", "list_verbs"} <= set(agent._function_toolset.tools)
 
 
-# ==========================================================================
 # 3. every served response is recorded with a decision
-# ==========================================================================
 
 def test_serving_through_the_wrapper_writes_a_row_carrying_the_decision(tmp_path):
     """    One served call, one world row: the system, the verb, the params AS PREPARED, the
@@ -826,9 +818,7 @@ def test_the_reserved_base_world_id_cannot_name_the_family_capture(tmp_path):
     assert capture.read_text(encoding="utf-8") == ""
 
 
-# ==========================================================================
 # 4. the family tier: one base recording, no second adapter call
-# ==========================================================================
 
 def test_the_same_key_twice_is_one_adapter_call_and_one_payload(tmp_path):
     """    Serving one key twice returns identical payloads and issues EXACTLY ONE adapter call.
@@ -972,9 +962,7 @@ def test_a_staged_call_records_its_base_under_the_view_it_asked_for(tmp_path):
     assert from_a["query"] == from_b["query"] == body
 
 
-# ==========================================================================
 # 5-6. staging reaches the adapter, and `touches` decides whether it happens
-# ==========================================================================
 
 def test_a_staged_call_reaches_the_adapter_already_retargeted(tmp_path):
     """    The verb body itself is called with the RETARGETED query, and the row says `staged`.

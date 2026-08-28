@@ -80,15 +80,13 @@ def _two_hypotheses() -> str:
     )
 
 
-
-
 def _resolution_doc(row: str, extra: str = "") -> str:
     """The two-hypothesis fixture, optional extra blocks, then one `:T resolutions` row.
     Every case below varies only the row (and, where the case is about a block, `extra`)."""
     return _doc(_two_hypotheses() + "\n" + extra + ":T resolutions\n" + row)
 
 
-# --- rows the rule must REJECT ---------------------------------------------
+# rows the rule must REJECT
 # Each case is one defective resolution row, and each asserts the same two things: the row
 # produces EXACTLY ONE error (a second error means the check double-reports a single defect),
 # and that error names the offending token — an error the author cannot act on is the failure
@@ -171,7 +169,7 @@ def test_a_defective_resolution_row_is_rejected_once_and_names_the_token(
         assert fragment in errors[0], f"the error must name {fragment}"
 
 
-# --- rows the rule must ACCEPT ---------------------------------------------
+# rows the rule must ACCEPT
 # The controls. Each of these is a legitimate shape the rule cost nothing, and several are
 # shapes an earlier draft of it wrongly denied.
 @pytest.mark.parametrize(("case", "row", "extra"), [
@@ -281,8 +279,6 @@ def test_a_misspelled_new_hypotheses_block_names_itself():
     assert [e for e in validate_companion(doc) if "new_hypothesis`" in e], (
         "the parse warning must name the misspelled block"
     )
-
-
 
 
 @pytest.mark.parametrize("path", corpus_docs(), ids=corpus_id)

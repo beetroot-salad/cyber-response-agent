@@ -131,7 +131,7 @@ from defender.tests.e2e.test_query_tool_611 import (  # noqa: E402
     raising,
 )
 
-# ---- THE SURFACE UNDER TEST — none of it exists on this base (RED by construction) ----
+# THE SURFACE UNDER TEST — none of it exists on this base (RED by construction)
 from defender.scripts.gather_tools.record_query import (  # noqa: E402
     REPEAT_ESCAPE,
     REPEAT_THRESHOLD,
@@ -154,8 +154,6 @@ CORPUS = DEFENDER / "fixtures-e2e" / "repeat-corpus-807"
 # The idiom `_run_gather`'s three shipped terminal branches already use, and the ONLY
 # vocabulary any prompt in the corpus teaches main (defender/SKILL.md:394 — G19).
 INCOMPLETE_IDIOM = "Treat this lead as incomplete and reason from what was captured."
-
-
 
 
 class _Res:
@@ -357,8 +355,6 @@ def _replay_rejections(
     return trips
 
 
-
-
 def named_verbs(rec: VerbRecorder, *, system: str = "elastic", verb: str = "sshd-auth-window") -> FakeVerbs:
     """The happy-path registry under a DISTINCTIVE (system, verb) pair, so an assertion that
     the dead-end message names the repeated request cannot pass on a generic word."""
@@ -480,8 +476,6 @@ def _bad_args(params: dict) -> Turn:
     return Turn(tool_calls=[("query", {
         "system": "elastic", "verb": "query", "params": params, "bogus_extra_arg": "x",
     })])
-
-
 
 
 def test_repeat_trip_predicate_seam(tmp_path):

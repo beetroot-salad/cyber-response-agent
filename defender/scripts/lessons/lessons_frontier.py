@@ -76,7 +76,6 @@ DEFAULT_TOP_K = 3
 
 WILDCARD = "*"
 
-# --------------------------------------------------------------------------- #
 # THE SCALE (#935)
 #
 # One scale across both lanes, because `_best_match` pools them into one `max` and

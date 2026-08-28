@@ -33,9 +33,7 @@ from defender.skills.invlang.parser import (
 )
 from defender.skills.invlang.validate import validate_companion
 
-# --------------------------------------------------------------------------- #
 # document fixtures
-# --------------------------------------------------------------------------- #
 
 _CONCLUDE_BENIGN = """
 :T conclude
@@ -65,9 +63,7 @@ def _blocked(errors: list[str]) -> list[str]:
     return [e for e in errors if "disposition benign blocked" in e]
 
 
-# --------------------------------------------------------------------------- #
 # F-14 — the escaped quote never reaches the quote toggle
-# --------------------------------------------------------------------------- #
 
 def test_backslash_quote_in_a_middle_cell_does_not_merge_the_rest_of_the_row():
     """The defect in one call: an ODD `\\"` before the last cell used to swallow every
@@ -177,9 +173,7 @@ def test_an_omitted_trailing_optional_column_is_still_padded():
     assert validate_companion(doc) == []
 
 
-# --------------------------------------------------------------------------- #
 # F-15 — every documented spelling of an unresolved slot blocks benign
-# --------------------------------------------------------------------------- #
 
 def test_per_slot_candidate_set_blocks_benign():
     """SKILL.md §Open questions: "Per-slot enumeration is fine when only one axis is open" —
@@ -253,9 +247,7 @@ def test_a_candidate_set_resolved_by_attr_updates_closes_benign():
     assert validate_companion(doc) == []
 
 
-# --------------------------------------------------------------------------- #
 # F-16 — an `ac*` id binds to exactly one hypothesis
-# --------------------------------------------------------------------------- #
 
 _TWO_LIVE_HYPS = (
     ":H hypothesize.hypotheses "
@@ -387,9 +379,7 @@ def test_distinct_contract_ids_each_discharged_still_close_benign():
     assert validate_companion(doc) == []
 
 
-# --------------------------------------------------------------------------- #
 # F-27 — a hierarchical child declares its own sub-blocks
-# --------------------------------------------------------------------------- #
 
 _CHILD_DOC = _doc(
     ":V prologue.vertices [id|type|class|ident|attrs?]\n"

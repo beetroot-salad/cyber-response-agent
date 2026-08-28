@@ -20,8 +20,6 @@ from defender.evals.oracle_golden import build_case as BUILD_CASE
 from defender.evals.oracle_golden import controls as CONTROLS
 
 
-
-
 # Shaped like a real lead: full predicate, two bounds, an aggregation.
 LEAD_Q = (
     'FROM logs-system.auth-*\n'
@@ -255,9 +253,7 @@ def test_a_query_with_an_odd_bound_count_is_refused_not_patched():
     assert contribution is None
 
 
-# --------------------------------------------------------------------------------------- #
 # One producer of the ES|QL payload shape, not two (#834).
-# --------------------------------------------------------------------------------------- #
 
 def test_controls_emit_the_adapters_payload_shape_because_they_use_its_shaper():
     """This module's docstring promises payloads "in the SAME shape the production `esql` verb
@@ -322,10 +318,8 @@ def test_a_column_the_probe_did_not_project_is_not_a_zero():
     assert CONTROLS.named_cell(mismatched, "total") is None, "read a cell it cannot name"
 
 
-# --------------------------------------------------------------------------------------- #
 # A control is keyed by the QUERIES TABLE's seq, the same number its observed payload
 # is named for — not by the position of the query in `leads.jsonl` (#841).
-# --------------------------------------------------------------------------------------- #
 
 def _write_run(run: Path, lead_id: str, rows: list[tuple[int, str]]) -> None:
     """A run dir carrying the two tables, written the way the run writes them.

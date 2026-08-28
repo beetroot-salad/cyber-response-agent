@@ -94,9 +94,7 @@ def test_the_golden_is_a_real_positive_control(companion):
     assert any(r.get("after") for _lid, r in resolutions)
 
 
-# ---------------------------------------------------------------------------------------
 # The cut
-# ---------------------------------------------------------------------------------------
 
 
 def test_the_prune_drops_every_inference_key(companion):
@@ -237,9 +235,7 @@ def test_the_observation_side_survives_the_cut(companion):
     assert list(_walkers.iter_attr_updates(pruned)), ":R attr_updates did not survive"
 
 
-# ---------------------------------------------------------------------------------------
 # What the surviving lens keeps
-# ---------------------------------------------------------------------------------------
 
 
 def test_the_support_lens_reads_the_results_it_reconstructs_from(companion):
@@ -256,9 +252,7 @@ def test_the_support_lens_reads_the_results_it_reconstructs_from(companion):
     )
 
 
-# ---------------------------------------------------------------------------------------
 # Ablation
-# ---------------------------------------------------------------------------------------
 
 
 def _edges(body: dict) -> set[str]:
@@ -431,9 +425,7 @@ def test_ablating_an_unknown_edge_changes_nothing(companion):
     ).text == full.text
 
 
-# ---------------------------------------------------------------------------------------
 # The empty document
-# ---------------------------------------------------------------------------------------
 
 
 def test_an_unfenced_document_is_refused_rather_than_projected_empty():
@@ -451,9 +443,7 @@ def test_an_empty_document_is_refused():
         parse_investigation("")
 
 
-# ---------------------------------------------------------------------------------------
 # Ablation targeting
-# ---------------------------------------------------------------------------------------
 
 
 def test_the_ablation_target_is_a_load_bearing_edge_with_its_footprint(companion):

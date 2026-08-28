@@ -110,9 +110,7 @@ def _run(root: Path, *, verbs, turns: list[Turn], run_id: str, tmp_path: Path,
     return _Res(run_dir, main, gather, stores)
 
 
-# --------------------------------------------------------------------------------------- #
 # ITEM 1 — no gather-side session terminator stamp.
-# --------------------------------------------------------------------------------------- #
 
 def test_every_gather_terminator_arm_stamps_its_own_reason(tmp_path):
     """THE DEFECT (item 1): `_run_gather`'s terminal arms left the gather session ending on an
@@ -320,9 +318,7 @@ def test_both_writers_of_the_column_draw_on_one_vocabulary(tmp_path):
     assert session_store.TRUNCATED_BY_DEAD_END in stamped
 
 
-# --------------------------------------------------------------------------------------- #
 # ITEM 3 — the failing repeat, live.
-# --------------------------------------------------------------------------------------- #
 
 def test_a_lead_repeating_a_failing_request_is_told_so_before_it_is_stopped(tmp_path):
     """Live proof of item 3: `_model_view`'s early return meant the notice never reached a
@@ -346,9 +342,7 @@ def test_a_lead_repeating_a_failing_request_is_told_so_before_it_is_stopped(tmp_
     assert "parse_exception" in second, "the notice displaced the error it was prepended to"
 
 
-# --------------------------------------------------------------------------------------- #
 # ITEM 4 — the argument-schema repeat class, live.
-# --------------------------------------------------------------------------------------- #
 
 def _bad_args(params: dict) -> Turn:
     """A tool call the pydantic ARG SCHEMA turns back, so the row is written by

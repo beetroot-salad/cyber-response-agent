@@ -57,9 +57,7 @@ def _run_cycle_box(tmp_path):
     return run_dir, start_box_request(req, docker=box_mod._docker)
 
 
-# --------------------------------------------------------------------------- #
 # ro-mount / traversal containment (po63 / c13)
-# --------------------------------------------------------------------------- #
 def test_single_non_overlapping_readonly_mount_refuses_a_direct_in_box_write(tmp_path):
     """A write to a read-only bind's own target is refused (rc=2, Read-only file system) —
     distinct from the `--read-only` rootfs (po63 confirmed live). S1's containment rests on
@@ -119,9 +117,7 @@ def test_single_readonly_mount_still_reads(tmp_path):
         box_mod.stop_box(box)
 
 
-# --------------------------------------------------------------------------- #
 # nested / overlapping mounts + tmpfs (po19 / po46)
-# --------------------------------------------------------------------------- #
 def test_two_mounts_with_nested_or_overlapping_sources_and_targets(tmp_path):
     """The deeper (more-specific) mount governs its subtree with its own flags — rw-inside-ro
     works, the drain's shape (outer worktree ro + a triggered-corpus rw override) (po19)."""
@@ -170,9 +166,7 @@ def test_legs_sharing_one_box_tmpfs_see_each_others_writes_cross_exec(tmp_path):
         box_mod.stop_box(box)
 
 
-# --------------------------------------------------------------------------- #
 # interpreter coupling + the behavioral startup probe (c12 / decision 7)
-# --------------------------------------------------------------------------- #
 # box_start_probes_interpreter (decision 7 / c12) — the startup probe is BEHAVIORAL: it RUNS
 # the granted programs when the box comes up and refuses the start if they do not exit clean,
 # rather than comparing interpreter identities. Each row is one granted program the probe has
@@ -238,9 +232,7 @@ def test_worktree_leaf_contains_a_symlink_that_resolves_outside_the_leaf(tmp_pat
         box_mod.stop_box(box)
 
 
-# --------------------------------------------------------------------------- #
 # teardown / bind release / host mutation reflection (po47 / po35)
-# --------------------------------------------------------------------------- #
 def test_worktree_or_scan_races_a_not_yet_released_box_bind(tmp_path):
     """`docker rm -f` releases the kernel bind synchronously — a subsequent host rm -rf of the
     formerly-bound source does not race (no EBUSY): the dec8 teardown order (stop_box before
@@ -271,9 +263,7 @@ def test_git_reset_hard_runs_between_sequential_markers_under_one_live_box(tmp_p
         box_mod.stop_box(box)
 
 
-# --------------------------------------------------------------------------- #
 # mount-source symlink following (po18 / F14 → R12) + the OWED lesson-script probes
-# --------------------------------------------------------------------------- #
 def test_mount_source_symlink_target_resolves_outside_worktree_leaf(tmp_path):
     """A resolving symlink bind source is FOLLOWED by docker to its target (rc=0, resolved in
     the daemon namespace); mount sources are design-controlled leaves, so this is a bounded

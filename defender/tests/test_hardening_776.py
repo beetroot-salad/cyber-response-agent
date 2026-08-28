@@ -55,10 +55,8 @@ def _lesson(corpus: Path, name: str, *, rule: str = "rule-1") -> Path:
     return path
 
 
-# =========================================================================== #
 # 1. The actor's pinned-script grant admits arbitrary trailing argv, so the
 #    script itself is the only containment there is.
-# =========================================================================== #
 
 def _actor_deps(tmp_path: Path):
     defender_dir = tmp_path / "tree" / "defender"
@@ -133,9 +131,7 @@ def test_a_relocated_environment_corpus_still_walks(tmp_path):
     assert "vpn-egress" in proc.stdout
 
 
-# =========================================================================== #
 # 2. Gather's one reduce step delivered attacker-chosen payloads unframed.
-# =========================================================================== #
 
 def _bash_scene(tmp_path: Path, definition, payload: bytes = b"reduced\n"):
     run = tmp_path / "run"
@@ -208,9 +204,7 @@ def test_gathers_prompt_carries_the_untrusted_data_contract(tmp_path):
     assert "never an instruction" in lowered or "never an instruction to follow" in lowered
 
 
-# =========================================================================== #
 # 3. The env forward-check matched on basename.
-# =========================================================================== #
 
 def test_a_basename_collision_no_longer_certifies_a_lesson(tmp_path):
     """The defect: `lesson_returned` answered yes if ANY returned path merely shared the

@@ -18,8 +18,6 @@ from defender.evals.oracle_golden import report as REPORT
 import yaml
 
 
-
-
 TAG = "t"
 
 
@@ -159,7 +157,7 @@ def test_an_unreachable_bound_says_so_rather_than_naming_an_n(tmp_path):
     assert "cannot qualify" in overall["why"]
 
 
-# ------------------------------------------------------- bands and abstentions (#711 §5)
+# bands and abstentions (#711 §5)
 
 def test_the_quiet_band_cannot_carry_the_headline(tmp_path):
     """The fix worth having. On the seed data 27 of 36 dev leads were `0`, so a pooled
@@ -215,7 +213,7 @@ def test_a_slice_that_abstains_more_than_it_decides_is_not_a_measurement(tmp_pat
     assert overall["rate"] == 1.0, "still recorded — the point is that it is not certified"
 
 
-# ------------------------------------------------------------- the mechanical results
+# the mechanical results
 
 def test_a_derived_case_contributes_no_rows_but_is_still_named(tmp_path):
     """A mutation case has no capture of its own, so there is no measurement to grade a

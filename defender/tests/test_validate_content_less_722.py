@@ -95,9 +95,7 @@ def _report(tmp_path: Path, disposition: str) -> Path:
     return p
 
 
-# ===========================================================================
 # the "non-empty string" gates — a field that renders as nothing is empty
-# ===========================================================================
 
 @pytest.mark.parametrize(("tag", "text"), CONTENT_LESS, ids=_IDS)
 @pytest.mark.parametrize("key", ["subject_anchor", "subject_topic"])
@@ -195,9 +193,7 @@ def test_real_fields_still_validate_and_are_not_rewritten():
     assert out["defender_findings"][0]["subject_topic"] == topic
 
 
-# ===========================================================================
 # the keyword gates — the same split, running the other way
-# ===========================================================================
 
 @pytest.mark.parametrize(
     ("tag", "outcome"),
@@ -250,9 +246,7 @@ def test_a_report_disposition_that_is_not_a_keyword_is_still_rejected(tmp_path, 
         loop.normalize_disposition(_report(tmp_path, written))
 
 
-# ===========================================================================
 # the shared helper's own contract
-# ===========================================================================
 
 def test_strip_zero_width_keeps_the_whitespace_callers_split_on():
     """`strip_zero_width` drops what occupies no space and KEEPS whitespace — the

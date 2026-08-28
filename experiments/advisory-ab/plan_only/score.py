@@ -40,7 +40,6 @@ def format_case(case_id: str, arms: dict) -> str:
     if not arms_present:
         return "\n".join(lines) + "(no results)\n"
 
-    # Header row: arm × leads.
     header = ["metric"] + arms_present
     sep = ["---"] * len(header)
     rows: list[list[str]] = [header, sep]
@@ -79,7 +78,6 @@ def format_case(case_id: str, arms: dict) -> str:
         names = [f"`{lead['name']}`" for lead in arms[a]['leads_authored']]
         lines.append(f"- **arm {a}**: " + (", ".join(names) if names else "_none_"))
 
-    # Advisory call detail.
     lines.append("\n### Advisory retrieval detail\n")
     for a in arms_present:
         calls = arms[a]['advisory_calls']

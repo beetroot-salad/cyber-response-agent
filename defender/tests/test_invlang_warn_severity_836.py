@@ -29,9 +29,7 @@ from defender.tests._invlang_warn_836 import (
     warn_window,
 )
 
-# --------------------------------------------------------------------------- #
 # error-severity documents, one per family that must NOT become a warning (N1)
-# --------------------------------------------------------------------------- #
 
 #: EXECUTED at c0dca747 — one `parse error: ... row has 5 cells but 4 expected` diagnostic.
 #: PR-3's finding is that only the too-MANY direction produces one; one cell too FEW is
@@ -88,9 +86,7 @@ def _stage_run(root: Path, investigation: str) -> Path:
     return run
 
 
-# --------------------------------------------------------------------------- #
 # demand #0 — the return contract
-# --------------------------------------------------------------------------- #
 
 def test_return_contract_shapes(tmp_path):
     """The whole change's return surface, in one census, because six demands' assertion
@@ -130,9 +126,7 @@ def test_return_contract_shapes(tmp_path):
     assert (run / "investigation.md").read_text(encoding="utf-8") == WARN_DOC
 
 
-# --------------------------------------------------------------------------- #
 # M1 — the severity field and its partition
-# --------------------------------------------------------------------------- #
 
 def test_diagnostic_severity_defaults_to_error():
     """`Diagnostic.severity` is additive and defaults to `"error"`, so every one of the
@@ -203,9 +197,7 @@ def test_append_block_mixes_warn_and_error_defects(tmp_path):
     assert (run / "investigation.md").read_text(encoding="utf-8") == warn_only
 
 
-# --------------------------------------------------------------------------- #
 # M2 — the write gate, the two entry points, and the two other validators
-# --------------------------------------------------------------------------- #
 
 def test_validate_investigation_returns_none_on_warn_only(tmp_path):
     """The gate ACCEPTS a document whose only defects are warn-severity — with the size
@@ -328,9 +320,7 @@ def test_persist_reads_document_written_under_different_severity_semantics(tmp_p
     assert [d.severity for d in warn_window(from_disk)] == ["warning"]
 
 
-# --------------------------------------------------------------------------- #
 # O2 — the copy gate and the readers downstream of it
-# --------------------------------------------------------------------------- #
 
 def test_persist_copy_path_accepts_warn_only_document(tmp_path):
     """O2, discharged AT THE COPY GATE: a run whose only defect is a warn-family row still
@@ -399,9 +389,7 @@ def test_the_learning_mirror_carries_a_warn_only_document_onward(tmp_path):
     )
 
 
-# --------------------------------------------------------------------------- #
 # A2 — what the rendered warning shows the model
-# --------------------------------------------------------------------------- #
 
 @pytest.mark.parametrize(("label", "row"), [
     ("ordinary", WARN_ROW),

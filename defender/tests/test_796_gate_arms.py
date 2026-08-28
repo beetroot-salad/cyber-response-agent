@@ -53,8 +53,6 @@ def _deps(tmp_path: Path):
     return bind(MAIN_DEF, run_dir, defender_dir=dfn), run_dir
 
 
-
-
 def _run(deps, bundle, *, disposition="malicious", bounds=None):
     return asyncio.run(challenge_gate.challenge_gate(
         deps, disposition, stages=bundle,
@@ -76,9 +74,7 @@ def _a_real_target(deps) -> str:
     return _real_targets(deps)[0]
 
 
-# ---------------------------------------------------------------------------------------
 # The three findings
-# ---------------------------------------------------------------------------------------
 
 
 def test_a_close_the_review_finds_sound_stands(tmp_path):
@@ -117,9 +113,7 @@ def test_an_unmeasurable_gap_forces_inconclusive_without_spending_a_turn(tmp_pat
     )
 
 
-# ---------------------------------------------------------------------------------------
 # The bounds the reviewer cannot see
-# ---------------------------------------------------------------------------------------
 
 
 def test_repeating_an_ask_that_bought_nothing_does_not_spend_another_turn(tmp_path):
@@ -178,9 +172,7 @@ def test_the_forced_turn_cap_stops_the_run(tmp_path):
     assert spent.cause == CAUSE_TURN_BUDGET_SPENT
 
 
-# ---------------------------------------------------------------------------------------
 # Fail-closed
-# ---------------------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -228,9 +220,7 @@ def test_a_missing_investigation_fails_the_review_closed(tmp_path):
     assert verdict.failure_kind is not None
 
 
-# ---------------------------------------------------------------------------------------
 # Traces
-# ---------------------------------------------------------------------------------------
 
 
 def test_every_dispatched_role_leaves_its_own_trace(tmp_path):
@@ -405,9 +395,7 @@ def test_the_composers_json_reply_does_not_stand_as_a_trace_row_of_its_own(tmp_p
     assert "the close reads sound" in trace, "the reply did not reach the trace at all"
 
 
-# ---------------------------------------------------------------------------------------
 # The review's own deadline
-# ---------------------------------------------------------------------------------------
 
 
 def test_moving_the_generic_subagent_deadline_does_not_move_the_reviews(monkeypatch):

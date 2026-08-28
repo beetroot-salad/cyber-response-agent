@@ -126,7 +126,6 @@ def _create_worktree(repo_root: Path, branch: str, path: Path) -> None:
     if path.exists():
         shutil.rmtree(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    # Ensure branch doesn't exist
     subprocess.run(
         ["git", "-C", str(repo_root), "branch", "-D", branch],
         capture_output=True, text=True,

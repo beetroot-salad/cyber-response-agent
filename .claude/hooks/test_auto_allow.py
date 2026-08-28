@@ -10,14 +10,9 @@ from unittest.mock import patch
 
 import pytest
 
-# Import the module under test
 sys.path.insert(0, str(Path(__file__).parent))
 import auto_allow
 
-
-# ---------------------------------------------------------------------------
-# Deny list
-# ---------------------------------------------------------------------------
 
 class TestIsDenied:
     def test_rm_rf(self):
@@ -72,10 +67,6 @@ class TestIsDenied:
         pass
 
 
-# ---------------------------------------------------------------------------
-# Compound command detection
-# ---------------------------------------------------------------------------
-
 class TestIsCompound:
     def test_and_operator(self):
         assert auto_allow.is_compound("ls && pwd")
@@ -98,10 +89,6 @@ class TestIsCompound:
     def test_python_c_with_semicolons_in_quotes(self):
         assert not auto_allow.is_compound("""python -c 'import os; print(os.getcwd())'""")
 
-
-# ---------------------------------------------------------------------------
-# Pattern matching
-# ---------------------------------------------------------------------------
 
 class TestPatternMatching:
     def test_exact_bash(self):
@@ -161,10 +148,6 @@ class TestPatternMatching:
         )
 
 
-# ---------------------------------------------------------------------------
-# is_already_allowed
-# ---------------------------------------------------------------------------
-
 class TestIsAlreadyAllowed:
     def test_covered_by_wildcard(self):
         allow = ["Bash(docker logs:*)"]
@@ -190,10 +173,6 @@ class TestIsAlreadyAllowed:
         allow = ["Read(//var/log/*)"]
         assert not auto_allow.is_already_allowed(allow, "Read", "//etc/hosts")
 
-
-# ---------------------------------------------------------------------------
-# build_rule
-# ---------------------------------------------------------------------------
 
 class TestBuildRule:
     def test_bash_simple(self):
@@ -221,10 +200,6 @@ class TestBuildRule:
     def test_unknown_tool(self):
         assert auto_allow.build_rule("WebFetch", {"url": "https://example.com"}) is None
 
-
-# ---------------------------------------------------------------------------
-# update_settings (file I/O)
-# ---------------------------------------------------------------------------
 
 class TestUpdateSettings:
     def test_creates_new_file(self, tmp_path):
@@ -267,10 +242,6 @@ class TestUpdateSettings:
         assert "Bash(rm -rf *)" in data["permissions"]["deny"]
         assert "Notification" in data["hooks"]
 
-
-# ---------------------------------------------------------------------------
-# End-to-end: subprocess invocation
-# ---------------------------------------------------------------------------
 
 HOOK_SCRIPT = str(Path(__file__).parent / "auto_allow.py")
 

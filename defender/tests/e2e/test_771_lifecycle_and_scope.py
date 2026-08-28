@@ -95,9 +95,7 @@ class _Recorder:
         scrub_mod.scrub(tree)
 
 
-# --------------------------------------------------------------------------- #
 # §7 D2 — the scan that never ran
-# --------------------------------------------------------------------------- #
 @pytest.mark.parametrize("in_flight", [False, True], ids=["teardown-fault", "in-flight-failure"])
 def test_a_skipped_reap_scan_leaves_a_did_not_run_marker(in_flight, tmp_path):
     """skipped_scan_leaves_a_did_not_run_marker — when teardown faults and the walk is skipped,
@@ -577,9 +575,7 @@ def test_a_retry_against_a_leftover_sentinel_reports_the_ban_fault(tmp_path):
     )
 
 
-# --------------------------------------------------------------------------- #
 # what must not move
-# --------------------------------------------------------------------------- #
 def test_reap_scan_still_refuses_sockets_and_hard_links_under_the_ban(tmp_path):
     """scrub_refusal_set_unchanged — the reap scan's refusal set is unchanged by the ban: a
     socket and a hard link in either shared root still fail the run loudly.

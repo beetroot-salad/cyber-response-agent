@@ -31,7 +31,7 @@ class AllowlistError(Exception):
     """A read-endpoint allowlist authoring defect — raised at construction, never at use."""
 
 
-# ── the read-endpoint allowlist ──────────────────────────────────────────────────────────
+# the read-endpoint allowlist
 
 
 class ReadEndpointAllowlist(Mapping):
@@ -138,7 +138,7 @@ def confine_read_endpoint(system: str, url: str, *, method: str, verb_class: str
     return url
 
 
-# ── the transport capture seam ───────────────────────────────────────────────────────────
+# the transport capture seam
 
 
 @dataclass(frozen=True)
@@ -168,7 +168,7 @@ def guard_outbound(ctx: Any, system: str, url: str, *, method: str) -> None:
         capture.record(system=system, url=url, method=method)
 
 
-# ── the elastic index (D3) confinement ───────────────────────────────────────────────────
+# the elastic index (D3) confinement
 
 
 def _reach_ok(index: str, pattern: str) -> bool:
@@ -219,7 +219,7 @@ def confine_index(
     )
 
 
-# ── the world-view namespace ─────────────────────────────────────────────────────────────
+# the world-view namespace
 
 #: Characters an Elasticsearch index or alias name cannot carry. Whitespace is checked
 #: separately (`str.isspace`), so this names only the punctuation. `:` is NOT here: it is
@@ -412,7 +412,7 @@ def is_world_view(index: str, configured_patterns: Iterable[str], world_id: str)
     )
 
 
-# ── the host-state program+target confinement ────────────────────────────────────────────
+# the host-state program+target confinement
 
 
 HOST_STATE_PROGRAMS: frozenset[str] = frozenset({

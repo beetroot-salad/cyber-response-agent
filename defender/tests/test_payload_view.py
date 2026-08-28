@@ -49,9 +49,7 @@ def _view(text: str, *, ceiling: int, run_dir) -> str:
     return pv.render(text, RUN, run_dir, ceiling=ceiling)
 
 
-# --------------------------------------------------------------------------------------- #
 # The gate: size, and nothing else.
-# --------------------------------------------------------------------------------------- #
 
 def test_under_the_ceiling_the_payload_is_verbatim(tmp_path):
     """No prose, no samples, no reformatting — the bytes the adapter produced.
@@ -93,9 +91,7 @@ def test_every_list_key_is_treated_alike(tmp_path, key):
     assert [e.path for e in elisions] == [key]
 
 
-# --------------------------------------------------------------------------------------- #
 # O1 — the view never asserts a limitation the payload in context does not have.
-# --------------------------------------------------------------------------------------- #
 
 def test_a_complete_empty_envelope_carries_no_prohibition(tmp_path):
     """THE regression. `{total: 0, truncated: false, hits: []}` is 94 bytes, complete, and
@@ -116,9 +112,7 @@ def test_a_complete_payload_shown_in_full_is_never_called_a_sample(tmp_path):
         assert len(json.loads(view)["hits"]) == n
 
 
-# --------------------------------------------------------------------------------------- #
 # O3 — a view can never be mistaken for the payload.
-# --------------------------------------------------------------------------------------- #
 
 def test_every_shortened_list_carries_a_marker_in_its_own_scope(tmp_path):
     """A silently-shortened array is valid JSON that parses clean and counts wrong. The marker
@@ -142,9 +136,7 @@ def test_nothing_is_marked_when_nothing_was_dropped(tmp_path):
     assert pv.ELISION_PREFIX not in view
 
 
-# --------------------------------------------------------------------------------------- #
 # O5 — a kept element is a WHOLE element. Only long string leaves clip.
-# --------------------------------------------------------------------------------------- #
 
 def test_kept_elements_keep_every_field(tmp_path):
     """`_SAMPLE_MAX_CHARS` used to clip `json.dumps(record)`, so 80 of 80 real elastic sample
@@ -182,9 +174,7 @@ def test_a_payload_with_no_list_at_all_is_walked(tmp_path):
     assert pv.ELISION_PREFIX in body["ps_output"]
 
 
-# --------------------------------------------------------------------------------------- #
 # N6 — no key is privileged. "The bulk" is a fact about bytes.
-# --------------------------------------------------------------------------------------- #
 
 def test_a_small_sibling_list_survives_while_the_bulk_is_elided(tmp_path):
     """ES|QL returns `columns` (the schema) beside `values` (the rows). Cutting `columns` to
@@ -214,9 +204,7 @@ def test_the_bulk_is_whichever_list_is_big(tmp_path):
     assert [e.path for e in elisions] == ["columns"]
 
 
-# --------------------------------------------------------------------------------------- #
 # O4 — server-side capping and view-side elision are two facts, never one.
-# --------------------------------------------------------------------------------------- #
 
 def test_a_capped_envelope_states_the_servers_own_total(tmp_path):
     view = _view(_lucene(_docs(20), total=2471), ceiling=1200, run_dir=tmp_path)
@@ -249,9 +237,7 @@ def test_the_span_line_survives_for_a_capped_envelope(tmp_path):
     assert "2026-08-07T11:19:00Z" in view
 
 
-# --------------------------------------------------------------------------------------- #
 # Bounds.
-# --------------------------------------------------------------------------------------- #
 
 @pytest.mark.parametrize("ceiling", [400, 1200, 8192])
 def test_the_view_respects_its_budget(tmp_path, ceiling):
@@ -361,9 +347,7 @@ def test_a_bare_truncated_flag_still_reports_the_server_cap(tmp_path):
     assert "count(*)" not in view
 
 
-# --------------------------------------------------------------------------------------- #
 # #877 F-10 — the envelope may not derive a fact from itself.
-# --------------------------------------------------------------------------------------- #
 
 def _esql_rows(n: int) -> list[list]:
     return [[f"host-{i:04d}", i] for i in range(n)]
@@ -481,9 +465,7 @@ def test_the_squeeze_keeps_field_shape_before_value_shape(tmp_path):
     assert any(v.startswith("2026") for v in first.values() if isinstance(v, str))
 
 
-# --------------------------------------------------------------------------------------- #
 # A positional ROW degrades like a record does (#834).
-# --------------------------------------------------------------------------------------- #
 
 def _esql(rows: list[list], names: list[str]) -> str:
     """The ES|QL envelope as the adapter now stores it: names once, rows as bare arrays."""

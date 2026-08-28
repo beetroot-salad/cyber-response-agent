@@ -133,9 +133,7 @@ class ReviewState:
         return box["state"]
 
 
-# --------------------------------------------------------------------------------------
 # The review record — beside the run, temp-plus-rename, keyed by run + turn.
-# --------------------------------------------------------------------------------------
 
 
 def review_record_path(run_dir, turn: int = 1):
@@ -150,9 +148,7 @@ def write_review_record(run_dir, turn: int, record: dict) -> None:
     write_guarded(review_record_path(run_dir, turn), json.dumps(record, indent=2), mode="replace")
 
 
-# --------------------------------------------------------------------------------------
 # Stage invocation: real wall-clock bound, distinguishable timeout/error.
-# --------------------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)

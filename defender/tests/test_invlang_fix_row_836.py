@@ -90,9 +90,7 @@ def _registered_tools():
     return dict(agent._function_toolset.tools)
 
 
-# --------------------------------------------------------------------------- #
 # the seam
-# --------------------------------------------------------------------------- #
 
 def test_fix_row_takes_old_row_and_new_row_only(tmp_path):
     """M4's signature: two string arguments, no path and no free-form anchor.
@@ -134,9 +132,7 @@ def test_new_verb_leaves_same_write_bookkeeping_as_siblings(tmp_path):
     assert str(len(_inv(run).encode("utf-8"))) in result, "no byte count in the return"
 
 
-# --------------------------------------------------------------------------- #
 # the repair itself
-# --------------------------------------------------------------------------- #
 
 def test_fix_row_repairs_a_flagged_row(tmp_path):
     """THE positive control for every negative in this module: a flagged row named exactly,
@@ -363,9 +359,7 @@ def test_fix_row_new_row_syntactically_legal_but_unrelated(tmp_path):
     assert flagged_rows(_inv(run)) == ()
 
 
-# --------------------------------------------------------------------------- #
 # H3 — the `new_row` shape guard
-# --------------------------------------------------------------------------- #
 
 @pytest.mark.parametrize(("label", "new_row"), [
     ("embedded newline", "l-001|v-001|class|a\nl-001|v-002|class|b"),
@@ -488,9 +482,7 @@ def test_no_verb_mutates_or_removes_a_committed_v_or_e_record(tmp_path):
     assert flagged_rows(_inv(run)) == ()
 
 
-# --------------------------------------------------------------------------- #
 # `old_row`'s own domain
-# --------------------------------------------------------------------------- #
 
 def test_fix_row_old_row_names_text_never_flagged(tmp_path):
     """N2: a row the window never flagged is refused as a SCOPE violation, not merely as a
@@ -632,9 +624,7 @@ def test_fix_row_repeated_identical_call(tmp_path):
     assert str(repeat_exc.value) == str(never_exc.value)
 
 
-# --------------------------------------------------------------------------- #
 # `new_row`'s falsy member — O5's escape
-# --------------------------------------------------------------------------- #
 
 def test_fix_row_with_empty_new_row_deletes_the_line(tmp_path):
     """The empty string is `new_row`'s distinguished falsy member and it is VALID: it deletes
@@ -704,9 +694,7 @@ def test_the_repair_window_is_closable_while_the_run_is_still_taking_turns(tmp_p
     assert (run / "report.md").is_file()
 
 
-# --------------------------------------------------------------------------- #
 # the gate the repair itself faces
-# --------------------------------------------------------------------------- #
 
 def test_fix_row_result_goes_through_decide_write(tmp_path):
     """The RESULTING full document faces the same `decide_write` -> `validate_investigation`
@@ -783,9 +771,7 @@ def test_append_block_size_bound_unchanged_by_fix_row(tmp_path):
     assert _inv(run) == before
 
 
-# --------------------------------------------------------------------------- #
 # SEC2 / SEC3 — who may call it, and when
-# --------------------------------------------------------------------------- #
 
 def test_fix_row_is_offered_only_while_the_window_is_open(tmp_path):
     """`prepare=` hides the verb when nothing is flagged — the ergonomics half of M4.
@@ -875,9 +861,7 @@ def test_fix_row_refused_once_the_close_committed(tmp_path):
     assert _inv(run) == committed
 
 
-# --------------------------------------------------------------------------- #
 # H6 — two write calls in one model response
-# --------------------------------------------------------------------------- #
 
 def test_write_verbs_execute_sequentially_within_one_response(tmp_path):
     """H6: the write verbs execute SEQUENTIALLY within one model response.

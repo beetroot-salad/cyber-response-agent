@@ -179,9 +179,7 @@ def run_ctx(tmp_path: Path) -> VerbContext:
     return VerbContext(defender_dir=tmp_path, run_dir=run_dir, env={})
 
 
-# ==========================================================================
 # 1. what a primed row is
-# ==========================================================================
 
 def test_a_captured_call_becomes_a_family_row_the_ledger_can_read(tmp_path):
     """    One captured call in, one `captured` family row out — and the ledger reads it straight
@@ -267,9 +265,7 @@ def test_a_primed_key_is_served_without_the_estate_being_asked(tmp_path):
         "the adapter ran for a key the capture already holds")
 
 
-# ==========================================================================
 # 2. what it refuses to take
-# ==========================================================================
 
 def test_the_five_counters_partition_a_realistic_table(tmp_path):
     """    One table carrying every shape at once: a capture, a sentinel, a failure, a lost payload
@@ -483,9 +479,7 @@ def test_priming_an_existing_base_is_refused_without_changing_its_first_capture(
     assert json.loads(payload) == {"owner": "first"}
 
 
-# ==========================================================================
 # 3. an episode that primed nothing is not an episode
-# ==========================================================================
 
 @pytest.mark.parametrize("label", ["empty-table", "all-sentinels", "all-failed", "no-table"])
 def test_priming_nothing_is_refused_rather_than_reported(tmp_path, label):

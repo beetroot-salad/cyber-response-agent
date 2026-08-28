@@ -103,7 +103,7 @@ BLOCK_TYPE = "Block"
 LANDING_ATTRS = frozenset({"append", "extend", "update", "add", "setdefault", "insert"})
 
 
-# ---------------------------------------------------------------- resolution
+# resolution
 
 
 def _local_defs(tree: ast.Module) -> frozenset[str]:
@@ -159,7 +159,7 @@ def _bare_name(call: ast.Call) -> str | None:
     return call.func.id if isinstance(call.func, ast.Name) else None
 
 
-# ---------------------------------------------------------------- roles + emitters
+# roles + emitters
 
 
 def _functions(node: ast.AST):
@@ -258,7 +258,7 @@ def _tokenizers(
     ]
 
 
-# ---------------------------------------------------------------- path walk
+# path walk
 
 
 def _is_escape(node: ast.AST) -> bool:
@@ -398,7 +398,7 @@ def _suppressed(node: ast.AST, lines: list[str]) -> bool:
     )
 
 
-# ---------------------------------------------------------------- detector
+# detector
 
 
 def _escape_findings(

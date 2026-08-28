@@ -73,14 +73,12 @@ from defender.tests._invlang_warn_836 import (  # noqa: E402
     attr_block,
 )
 
-# --------------------------------------------------------------------------- #
 # fixtures
 #
 # Every document below was EXECUTED against the real `diagnose` while this file was written and
 # carries ZERO diagnostics; `test_the_fixture_documents_carry_no_invlang_fault` re-asserts it on
 # every run. An empty frontier is the honest answer for an unparseable document, so a fixture
 # that quietly failed to parse would let a do-nothing implementation pass half this file.
-# --------------------------------------------------------------------------- #
 
 #: One observed edge, so a `:R attr_updates` row has a legal EDGE target to name. `diagnose`
 #: accepts a refinement targeting `e-001` (`_check_attr_update_targets`), which is the whole
@@ -142,9 +140,7 @@ def test_the_fixture_documents_carry_no_invlang_fault():
         assert diagnose(doc) == [], f"fixture {name!r} carries a diagnostic"
 
 
-# --------------------------------------------------------------------------- #
 # the shared walk
-# --------------------------------------------------------------------------- #
 
 def test_the_gate_and_the_frontier_read_one_walk():
     """CLAIM: both readers CALL `iter_vertex_cells` rather than re-deriving the node axis.
@@ -261,9 +257,7 @@ def test_the_open_cells_are_exactly_what_the_gate_refuses_on():
                for c in iter_vertex_cells(body, include_ident=True))
 
 
-# --------------------------------------------------------------------------- #
 # frontier_at
-# --------------------------------------------------------------------------- #
 
 def test_the_prefix_frontier_is_where_the_key_lives():
     """CLAIM: the motivating contrast — a slot open at one block index and gone at the next.
@@ -375,7 +369,6 @@ def test_frontier_at_never_raises():
         assert result.frontier.is_empty()
 
 
-# --------------------------------------------------------------------------- #
 # the re-observation fold — what a LATER `:V` row is allowed to supersede
 #
 # `_seed_vertex_state` is the half of `effective_vertex_state` that reads `:V` declarations,
@@ -383,7 +376,6 @@ def test_frontier_at_never_raises():
 # ident cell, and stamps the class tuple onto EVERY cell). Both of its supersede rules were
 # written for the `??`-to-concrete case only, so the shapes below folded to a value the
 # document had already superseded — silently, on documents `diagnose` accepts.
-# --------------------------------------------------------------------------- #
 
 def _reobservation_doc(*rows: str) -> str:
     """`v-001` declared in the prologue and re-declared once per lead — one `:V` row each.

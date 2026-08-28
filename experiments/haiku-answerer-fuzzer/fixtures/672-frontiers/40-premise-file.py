@@ -12,9 +12,7 @@
 #   # probe: see POn[, POm]            mechanism fact this premise depends on
 
 
-# ============================================================================
 # get_closed_ticket's key argument shape space
-# ============================================================================
 
 def test_get_closed_ticket_key_empty_string():
     """get_closed_ticket is called with key set to the empty string rather than
@@ -74,9 +72,7 @@ def test_get_closed_ticket_key_not_found_vs_wrong_status():
     # origin: input-surface
 
 
-# ============================================================================
 # Status field ambiguity
-# ============================================================================
 
 def test_get_closed_ticket_response_omits_status():
     """the store answers a get on a cited ticket with a 200 body that carries no
@@ -102,9 +98,7 @@ def test_get_closed_ticket_status_case_or_whitespace_variant():
     # probe: see PO2.
 
 
-# ============================================================================
 # Response shape faults
-# ============================================================================
 
 def test_list_closed_tickets_malformed_store_response():
     """the ticket store's list endpoint answers with a body that parses as JSON but
@@ -121,9 +115,7 @@ def test_get_closed_ticket_response_shape_mismatch():
     # origin: input-surface
 
 
-# ============================================================================
 # Adversarial ticket content
-# ============================================================================
 
 def test_closed_ticket_content_names_the_open_ticket():
     """a ticket that is genuinely closed, and legitimately returned by
@@ -151,9 +143,7 @@ def test_ticket_content_carries_model_directed_language():
     # probe: see PO5.
 
 
-# ============================================================================
 # list_closed_tickets' filter space (label/q)
-# ============================================================================
 
 def test_list_closed_tickets_no_filters_supplied():
     """list_closed_tickets is called with neither filter argument supplied — an
@@ -203,9 +193,7 @@ def test_list_filter_crafted_to_cross_the_closed_boundary():
     # probe: see PO18.
 
 
-# ============================================================================
 # list_closed_tickets' result faults
-# ============================================================================
 
 def test_list_closed_tickets_result_empty():
     """the closed-ticket listing matching the given filters comes back with zero
@@ -227,9 +215,7 @@ def test_list_closed_tickets_response_contains_duplicate_key():
     # origin: input-surface
 
 
-# ============================================================================
 # Oversized payloads (single record and result set)
-# ============================================================================
 
 def test_oversized_ticket_payload_or_result_set():
     """a single ticket record, or a list-tickets result set, is large — a long
@@ -247,9 +233,7 @@ def test_oversized_ticket_payload_or_result_set():
     # probe: see PO5.
 
 
-# ============================================================================
 # Ordering and repetition
-# ============================================================================
 
 def test_get_closed_ticket_without_a_prior_list_call():
     """the model calls get-closed-ticket for a case id it never obtained via
@@ -296,9 +280,7 @@ def test_ticket_status_transitions_around_the_read():
     # probe: see PO17.
 
 
-# ============================================================================
 # The case-under-judgment's own ticket / self-citation
-# ============================================================================
 
 def test_case_under_judgment_own_ticket_state_at_judgment_time():
     """when a benign judge run begins, what is the actual lifecycle state of that
@@ -340,9 +322,7 @@ def test_ticket_key_that_was_never_opened_at_all():
     # origin: lifecycle-state
 
 
-# ============================================================================
 # Content mutation over time
-# ============================================================================
 
 def test_cited_ticket_enriched_between_its_own_closure_and_a_later_citation():
     """a closed ticket the benign judge cites was stamped with seed-eligibility and
@@ -383,9 +363,7 @@ def test_cached_open_payload_beside_live_refusal():
     # to §7.
 
 
-# ============================================================================
 # Concurrency
-# ============================================================================
 
 def test_concurrent_legs_no_toolset_bleed():
     """Both judge legs are built and run concurrently in one process over the one
@@ -407,9 +385,7 @@ def test_each_concurrently_running_leg_gets_its_own_independently_scoped_salt():
     # origin: lifecycle-state
 
 
-# ============================================================================
 # Wiring completeness and repeated builds
-# ============================================================================
 
 def test_closed_ticket_registration_reaches_every_benign_call_site():
     """every call site that builds a benign-direction judge run must end up with
@@ -467,9 +443,7 @@ def test_no_surface_teaches_the_tool_to_a_leg_that_lacks_it():
     # probe: see PO20.
 
 
-# ============================================================================
 # Config/env resolution
-# ============================================================================
 
 def test_typed_tool_config_env_divergence_from_cli_callers():
     """the store's config knobs (URL base, bastion host, timeout) are set only in
@@ -493,9 +467,7 @@ def test_ticket_config_knob_value_changes_between_two_calls_in_one_run():
     # probe: see PO13.
 
 
-# ============================================================================
 # Dependency reliability
-# ============================================================================
 
 def test_repeated_store_failures_across_one_judge_run():
     """the ticket store stays down for an entire benign judge turn, and the model
@@ -535,9 +507,7 @@ def test_ticket_tool_call_in_flight_when_the_surrounding_run_is_cut_off():
     # probe: see PO10.
 
 
-# ============================================================================
 # Re-judging and long-run consistency
-# ============================================================================
 
 def test_same_case_judged_a_second_time_after_an_earlier_judgment():
     """a case is judged more than once — a re-drain after a crash, a manual
@@ -551,9 +521,7 @@ def test_same_case_judged_a_second_time_after_an_earlier_judgment():
     # probe: see PO12.
 
 
-# ============================================================================
 # Operator-facing behavior
-# ============================================================================
 
 def test_operator_policy_cli_after_the_demo_scope_removal():
     """An operator runs the policy show/explain surface for the judge role after

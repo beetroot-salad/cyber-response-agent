@@ -80,9 +80,7 @@ def _records(line: str):
     return records
 
 
-# --------------------------------------------------------------------------- #
 # M1 - the record stream, and what `parse` is handed.
-# --------------------------------------------------------------------------- #
 def test_scan_returns_one_frozen_record_per_token_with_value_span_and_kind():
     r"""`_scan` returns one frozen record per token carrying the resolved value, the start and
     end offsets of that token in the raw line, and its kind - word, operator, or fd-prefixed
@@ -177,9 +175,7 @@ def test_a_blank_command_is_answered_ahead_of_the_parse_not_by_its_result():
     assert not _bash("bash -c ''").allow
 
 
-# --------------------------------------------------------------------------- #
 # M4 - the gate's trim, and the blank alphabet.
-# --------------------------------------------------------------------------- #
 def test_the_gate_hands_the_parser_the_command_text_unchanged():
     """`decide_bash` passes the model's command text to the parser byte for byte: no character
     is removed from either end on the way in, so the argv the gate authorises is the argv the
@@ -327,9 +323,7 @@ def test_every_member_of_the_divergent_blank_alphabet_behaves_the_same_way():
             )
 
 
-# --------------------------------------------------------------------------- #
 # M6 + M2 - the carriage return, and the two layers that must agree about it.
-# --------------------------------------------------------------------------- #
 def test_the_boundary_decision_and_the_value_resolution_agree_about_the_removed_separator():
     r"""The boundary decision and the value resolution agree about the removed separator in all
     three shapes, which is only true once the unquoter has no blank set of its own: a mid-word
@@ -357,9 +351,7 @@ def test_the_boundary_decision_and_the_value_resolution_agree_about_the_removed_
     assert _parsed("echo 'A" + CR + "B'") == [[["echo", "A" + CR + "B"]]]
 
 
-# --------------------------------------------------------------------------- #
 # O2 - one module decides, and it still decides.
-# --------------------------------------------------------------------------- #
 def _shlex_attributes(path: Path) -> set[str]:
     tree = ast.parse(path.read_text(encoding="utf-8"))
     return {
@@ -531,9 +523,7 @@ def test_the_line_boundary_and_incomplete_connector_causes_still_name_what_they_
         )
 
 
-# --------------------------------------------------------------------------- #
 # F1 + FK4 - where the blank test sits, and which alphabet it reads.
-# --------------------------------------------------------------------------- #
 def test_the_blank_test_holds_no_opinion_of_its_own_about_what_a_blank_is():
     r"""The blank test ahead of the parse holds no opinion of its own about what a blank is: it
     READS the scanner's separator constant rather than owning a second one, so exactly one

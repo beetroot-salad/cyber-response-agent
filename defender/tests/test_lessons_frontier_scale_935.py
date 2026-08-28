@@ -128,9 +128,7 @@ def _prefixes(text: str) -> list:
     return [frontier_at(text, n).frontier for n in range(total + 1)]
 
 
-# --------------------------------------------------------------------------- #
 # the missing table
-# --------------------------------------------------------------------------- #
 
 def test_the_arity_table_says_what_the_skill_documents():
     """CLAIM: `vocab.CLASS_GRAMMAR` is the SKILL's §Classification grammar table, readable.
@@ -188,9 +186,7 @@ def test_every_grammar_position_is_a_slot_enum_can_answer():
             assert vocab.get_enum(slot), f"{vertex_type}'s position {slot!r} enumerates nothing"
 
 
-# --------------------------------------------------------------------------- #
 # defect 3 — the class match is monotonic in what the document records
-# --------------------------------------------------------------------------- #
 
 def test_recording_more_about_a_class_slot_never_loses_a_selector():
     """CLAIM: refining a class cell only ever ADDS matches — never removes one.
@@ -269,9 +265,7 @@ def test_a_cell_declaring_more_slots_than_its_type_is_widened_not_truncated():
     )
 
 
-# --------------------------------------------------------------------------- #
 # defect 1 — the node lane can tell a named attribute from a universal cell
-# --------------------------------------------------------------------------- #
 
 def test_the_filed_reproduction_reaches_the_loginuid_lesson_at_the_real_cut():
     """CLAIM: the issue's own two-row document, against the REAL corpus, at the REAL `top_k`.
@@ -329,9 +323,7 @@ def test_a_named_attribute_outscores_a_cell_every_vertex_carries():
     ), "`class` and `ident` are both universal cells and must weigh the same"
 
 
-# --------------------------------------------------------------------------- #
 # defect 2 — the edge lane can be heard
-# --------------------------------------------------------------------------- #
 
 def test_the_edge_lane_is_not_floored_below_the_node_lane():
     """CLAIM: an edge selector carrying only its mandatory field is not outranked by every
@@ -426,9 +418,7 @@ def test_the_block_moves_on_the_append_that_opens_an_authorization_question(labe
         )
 
 
-# --------------------------------------------------------------------------- #
 # the selection — what a reweight alone cannot do
-# --------------------------------------------------------------------------- #
 
 def test_two_lessons_about_one_open_thing_do_not_take_the_whole_block(tmp_path):
     """CLAIM: the head covers as many DISTINCT frontier items as the matches allow, before it
@@ -487,9 +477,7 @@ def test_the_order_is_total_and_stable_across_calls():
     assert _names(_match(TWO_VERTEX_DOC, top_k=2)) == _names(first)[:2]
 
 
-# --------------------------------------------------------------------------- #
 # the whole thing, against the real corpus and the real runs
-# --------------------------------------------------------------------------- #
 
 @pytest.mark.parametrize(("label", "path"), REPLAYED_RUNS)
 def test_no_replayed_block_leaves_an_open_thing_unrepresented(label, path):
@@ -546,9 +534,7 @@ def test_the_loginuid_lesson_survives_every_fence_of_its_own_run():
         ), f"the loginuid lesson fell out of the block at fence {n}, where the run holds the value"
 
 
-# --------------------------------------------------------------------------- #
 # the gate the spread sits in front of
-# --------------------------------------------------------------------------- #
 
 #: One `compute` vertex with an open class triple and an open ident, and the ordinary append
 #: that declares a second. The pair is the churn shape the gate below exists for — see the test.

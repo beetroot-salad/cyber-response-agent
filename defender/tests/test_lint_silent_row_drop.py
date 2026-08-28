@@ -115,7 +115,7 @@ _LANDS = (
 )
 
 
-# ---------------------------------------------------------------- the rule
+# the rule
 
 
 def test_the_gate_fires_on_an_unwarned_drop(tmp_path):
@@ -190,7 +190,7 @@ def test_suppression_marker(tmp_path):
     assert _GATE._scan(_scope(tmp_path, _DROPS, name="unmarked"))
 
 
-# ---------------------------------------------------------------- the roles
+# the roles
 
 
 _COMPANION_CARRIER = (
@@ -272,7 +272,7 @@ def test_only_a_role_anchor_arms_the_gate(tmp_path, case, filename, source, expe
     assert _quals(_GATE._scan(tree)) == expected
 
 
-# ---------------------------------------------------------------- ratchet + corpus
+# ratchet + corpus
 
 
 def test_scan_and_ratchet_contract(tmp_path):

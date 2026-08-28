@@ -30,8 +30,6 @@ from defender.tests._repo import head_files, head_message, seed_repo
 CORPUS_REL = "defender/lessons/"
 
 
-
-
 def _repo(tmp_path: Path) -> Path:
     """A fresh git repo with a seed commit and an empty corpus dir."""
     repo = tmp_path / "repo"
@@ -44,17 +42,11 @@ def _corpus(repo: Path) -> Path:
     return repo / CORPUS_REL
 
 
-
-
-
-
 def _status(repo: Path, path: str) -> str:
     return subprocess.run(
         ["git", "-C", str(repo), "status", "--porcelain", "--", path],
         capture_output=True, text=True, check=True,
     ).stdout
-
-
 
 
 def test_commit_corpus_commits_only_corpus(tmp_path):
@@ -154,8 +146,6 @@ def test_commit_corpus_commit_failure_is_atomic(tmp_path):
     assert shared.git_head_sha(repo) == head_before
 
 
-
-
 def test_changes_outside_flags_only_non_corpus_paths(tmp_path):
     """A corpus ``*.md`` edit is in-scope; anything else (incl. a non-``.md`` file inside
     the corpus dir) is stray. ``--untracked-files=all`` reports each stray individually."""
@@ -174,8 +164,6 @@ def test_corpus_dir_clean(tmp_path):
     assert shared.corpus_dir_clean(repo, _corpus(repo)) is True
     (_corpus(repo) / "x.md").write_text("hello\n")
     assert shared.corpus_dir_clean(repo, _corpus(repo)) is False
-
-
 
 
 def test_verify_rejects_change_outside_corpus(tmp_path):
@@ -220,8 +208,6 @@ def test_verify_rejects_committed_with_clean_corpus_using_noun(tmp_path):
         )
 
 
-
-
 def test_git_head_sha_matches_rev_parse(tmp_path):
     repo = _repo(tmp_path)
     expected = subprocess.run(
@@ -249,8 +235,6 @@ def test_result_list_normalizes_and_validates():
     assert shared.result_list({"committed": ["a"]}, "committed") == ["a"]
     with pytest.raises(shared.AuthorError, match="must be a list"):
         shared.result_list({"committed": "x"}, "committed")
-
-
 
 
 def test_flock_or_skip_acquires_then_releases(tmp_path: Path):
@@ -319,9 +303,7 @@ def test_acquire_flock_closes_handle_when_error_propagates(tmp_path: Path, monke
     assert all(fh.closed for fh in opened), "acquire_flock leaked the lock-file handle"
 
 
-# ===========================================================================
 # content-less gates — the #722 defect class on the author's own result fields
-# ===========================================================================
 
 _CONTENT_LESS = [
     ("ascii-space", " "),

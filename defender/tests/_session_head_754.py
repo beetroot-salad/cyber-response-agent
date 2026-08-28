@@ -56,9 +56,7 @@ pytest.importorskip("pydantic_ai")
 from defender.tests._session_store_705 import DEFENDER, user_request  # noqa: E402
 
 
-# --------------------------------------------------------------------------
 # the observation channel for the two new pieces of state
-# --------------------------------------------------------------------------
 
 class LogRow(NamedTuple):
     """One `session_head_log` row as the file holds it.
@@ -119,9 +117,7 @@ def linear_turns(store: Any, session_id: str, n: int, *, agent_id: str = "main",
     return ids
 
 
-# --------------------------------------------------------------------------
 # a real, hand-built store file at the schema version this change refuses
-# --------------------------------------------------------------------------
 
 #: The `session` table as #705 first shipped it — before `_migrate_session_columns`'
 #: two ALTERs. B7 (executed) measured the shim growing exactly this table from five
@@ -229,9 +225,7 @@ def sidecars(path: Path) -> list[str]:
     return [s for s in ("-wal", "-shm") if Path(str(path) + s).exists()]
 
 
-# --------------------------------------------------------------------------
 # the one injected fault object, and the loose-class call helper
-# --------------------------------------------------------------------------
 
 class NotSerializable:
     """A message object the REAL serializer refuses — B8's "an object dump_python rejects".
@@ -264,9 +258,7 @@ def raised_by(fn: Any, *args: Any, **kwargs: Any) -> BaseException | None:
 DELIBERATE = (AttributeError, NameError, TypeError, IndexError, KeyError)
 
 
-# --------------------------------------------------------------------------
 # the cross-process read (C11/F6: the visualizer is the only one)
-# --------------------------------------------------------------------------
 
 _READBACK = """
 import json, sys

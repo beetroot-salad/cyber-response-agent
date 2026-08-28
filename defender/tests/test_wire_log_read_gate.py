@@ -170,9 +170,7 @@ def test_the_workspace_map_does_not_name_the_observe_dir(env):
     assert "investigation.md" in listing, "the run-dir listing stopped listing anything at all"
 
 
-# --------------------------------------------------------------------------- #
 # the offline lane: same stream class, same component, a DIFFERENT mechanism
-# --------------------------------------------------------------------------- #
 
 LEARNING_READERS = ("actor", "judge")
 

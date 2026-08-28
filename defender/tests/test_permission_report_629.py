@@ -61,7 +61,7 @@ GOLDEN_INV = (Path(__file__).resolve().parents[1]
               / "fixtures-e2e" / "golden-sshpivot-ab3" / "investigation.md").read_text(encoding="utf-8")
 
 
-# ── fixtures + builders ──────────────────────────────────────────────────────
+# fixtures + builders
 
 @dataclass
 class Env:
@@ -124,9 +124,7 @@ def fm_raw_of(raw_bytes: int) -> str:
     return text
 
 
-# ═══════════════════════════════════════════════════════════════════════════
 # D0-D3 — the umbrella contract
-# ═══════════════════════════════════════════════════════════════════════════
 
 def test_decide_write_returns_decision(env):
     """D0 — decide_write returns Decision(False, <non-empty reason>) on any report.md
@@ -191,9 +189,7 @@ def test_investigation_size_bound(env):
     assert env.decide("investigation.md", mb).allow is False
 
 
-# ═══════════════════════════════════════════════════════════════════════════
 # section A — path / branch keying (exact-name + run-dir ROOT + resolve symlinks)
-# ═══════════════════════════════════════════════════════════════════════════
 
 def test_report_md_at_run_dir_root(env):
     """pa1 — a report.md at the canonical run-dir root is Decision(True) iff its content
@@ -302,7 +298,7 @@ def test_forward_check_lesson_named_report_md_not_gated(tmp_path):
     assert d2.allow is False
 
 
-# --- investigation.md keying (the SHARED §7 F-A2/Fork 6 rule, investigation half) ---
+# investigation.md keying (the SHARED §7 F-A2/Fork 6 rule, investigation half)
 # The keying rule §7 resolved is stated over BOTH artifacts verbatim ("<run_dir>/report.md OR
 # <run_dir>/investigation.md — exact basename, run-dir ROOT, symlinks resolved"). ak1-ak3 pin the
 # report.md half; ak5-ak7 mirror them for investigation.md so the branch cannot be left keyed
@@ -332,9 +328,7 @@ def test_investigation_md_in_subdir_not_gated(env):
     assert env.decide("investigation.md", bad).allow is False  # positive control
 
 
-# ═══════════════════════════════════════════════════════════════════════════
 # section B — frontmatter / content shape (split_frontmatter failure modes + disposition)
-# ═══════════════════════════════════════════════════════════════════════════
 
 def test_report_md_no_leading_fence(env):
     """fb1 — no leading `---` fence -> Decision(False, reason). Positive control: the same body
@@ -422,7 +416,7 @@ def test_report_md_disposition_malicious_commits(env):
     assert env.decide("report.md", report(disposition="malicious")).allow is True
 
 
-# --- disposition normalization (Fork 7 -> exact-lowercase, non-string/dup -> not-in-enum) ---
+# disposition normalization (Fork 7 -> exact-lowercase, non-string/dup -> not-in-enum)
 
 def test_report_disposition_case_variant_denied(env):
     """dn1 (Fork 7a -> exact-lowercase) — a case-variant disposition ("Benign", "MALICIOUS")
@@ -473,9 +467,7 @@ def test_report_disposition_nested_not_found_denied(env):
     assert env.decide("report.md", report(disposition="benign")).allow is True
 
 
-# ═══════════════════════════════════════════════════════════════════════════
 # section C — size boundary (non-basis)
-# ═══════════════════════════════════════════════════════════════════════════
 
 def test_report_frontmatter_valid_but_over_size_bound(env):
     """sz1 — the size bound is independent of D1 validity: a structurally/enum-valid report
@@ -531,9 +523,7 @@ def test_report_body_bound_measures_whole_file(env):
     assert env.decide("report.md", f"---\ndisposition: benign\n---\n{tiny_body}").allow is True
 
 
-# ═══════════════════════════════════════════════════════════════════════════
 # section D — adversarial payload / carrier-capacity (R6 sink walk; acknowledged residuals)
-# ═══════════════════════════════════════════════════════════════════════════
 
 def test_report_body_encodes_high_entropy_payload_within_bound(env):
     """cc1 — an in-bound, disposition-valid high-entropy body commits (Decision(True)): the
@@ -616,9 +606,7 @@ def test_report_body_containing_closing_report_sequence_denied(env):
     assert env.decide("report.md", report(body="ordinary analysis prose, no delimiters.\n")).allow is True
 
 
-# ═══════════════════════════════════════════════════════════════════════════
 # section F/G — investigation interaction + lifecycle (stateless-decision legs)
-# ═══════════════════════════════════════════════════════════════════════════
 
 def test_report_disposition_precedes_supporting_investigation_content(env):
     """ii1 — a valid in-bound report.md is Decision(True) reachable with ZERO investigation.md
@@ -687,9 +675,7 @@ def test_absent_report_still_reaches_the_tolerant_consumer_fallbacks(env):
         read_case_record(env.run)
 
 
-# ═══════════════════════════════════════════════════════════════════════════
 # re-grounded forks: empty investigation (Fork 9), density residual (Fork 10), alias (Fork 12)
-# ═══════════════════════════════════════════════════════════════════════════
 
 def test_investigation_empty_or_whitespace_commits(env):
     """fork9 (re-ground, settled) — empty / whitespace-only investigation.md ACCEPTS: 0 bytes is
@@ -750,9 +736,7 @@ def test_report_frontmatter_yaml_alias_amplification_under_byte_bound(env):
     assert env.decide("report.md", text).allow is True
 
 
-# ═══════════════════════════════════════════════════════════════════════════
 # regression (finalize / PR #677) — the gate FAILS CLOSED, never raises
-# ═══════════════════════════════════════════════════════════════════════════
 
 def test_report_gate_cannot_be_skipped_by_omitting_the_run_root(env):
     """#681/1 — the report gate KEYS on `<run_dir>/report.md`, so under the former

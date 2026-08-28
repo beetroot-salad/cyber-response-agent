@@ -43,9 +43,7 @@ from defender.tests._spec791 import (
 )
 
 
-# --------------------------------------------------------------------------------------
 # F-02 — the corpus commit is pathspec-wide; attribution is what bounds it
-# --------------------------------------------------------------------------------------
 
 
 def _write_corpus_file(corpus_dir: Path, stem: str, field: str, cited: list[str]) -> Path:
@@ -300,9 +298,7 @@ def test_852_f02_a_modified_file_that_claims_a_new_source_still_needs_a_voucher(
     assert sorted(h.pending_by_id(ch)) == ["run-B/0", "run-G/0"]
 
 
-# --------------------------------------------------------------------------------------
 # F-03 — a skip is not a serve
-# --------------------------------------------------------------------------------------
 
 
 def _queued_run(tmp_path: Path, case_id: str, name: str, paths) -> Path:
@@ -393,9 +389,7 @@ def test_852_f03_the_skip_rc_is_distinct_from_a_completed_serve(tmp_path: Path):
     assert rc not in (0, 2), "the skip is indistinguishable from a serve or from a fault"
 
 
-# --------------------------------------------------------------------------------------
 # F-04 — a re-queue must not overwrite a fresher request for the same case
-# --------------------------------------------------------------------------------------
 
 
 def test_852_f04_a_transient_retry_does_not_clobber_a_fresher_request(tmp_path: Path):

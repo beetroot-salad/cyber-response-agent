@@ -68,9 +68,7 @@ def _tick(paths) -> Spawn:
     return spawn
 
 
-# =============================================================================================
 # FK-3 — the arrival condition.
-# =============================================================================================
 
 
 def test_the_threshold_gates_on_a_records_own_occurrences(scene, monkeypatch):
@@ -300,9 +298,7 @@ def test_a_threshold_of_one_curates_on_the_first_mistake(scene, monkeypatch):
     assert by_surface(_tick(attributed).handoffs)["system"]
 
 
-# =============================================================================================
 # The other two readers of the same moved count.
-# =============================================================================================
 
 
 def test_the_lead_author_log_line_counts_post_normalization_records(scene, tmp_path, capsys):
