@@ -568,3 +568,93 @@ def test_without_a_shared_capture_each_run_takes_its_own(tmp_path, monkeypatch):
     rec = _provenance.read(RunPaths(run_dir).provenance)
     assert rec is not None
     assert rec.commit is not None or rec.unavailable is not None
+
+
+# --------------------------------------------------------------------------- #
+# The coherence rules as a CONSTRUCTOR invariant, not a parser habit.
+# --------------------------------------------------------------------------- #
+
+#: Every shape no capture can produce, as `description -> (kwargs, the refusal that must fire)`.
+#: Spelled as data so the two halves below — "nothing may construct one" and "the parser
+#: refuses one off disk" — are provably the SAME set rather than two lists that agree today.
+#:
+#: The expected refusal is pinned per shape rather than left as a bare `ValueError`, and that
+#: is load-bearing: several rules would refuse several of these, so without it a rule could
+#: quietly stop firing while another one caught its cases and the arm stayed green — the same
+#: "green while measuring nothing" this change's review already found once.
+IMPOSSIBLE = {
+    "says nothing at all": (
+        {"commit": None, "dirty": None}, "says nothing"),
+    "clean bill of health with no sha": (
+        {"commit": None, "dirty": False}, "no commit was"),
+    "dirt answered for with no sha": (
+        {"commit": None, "dirty": True}, "no commit was"),
+    "an empty string is not a sha": (
+        {"commit": "", "dirty": False}, "not a sha"),
+    "a blank string is not a sha": (
+        {"commit": "   ", "dirty": False}, "not a sha"),
+    "a clean tree carrying dirty paths": (
+        {"commit": "a" * 40, "dirty": False, "dirty_paths": ("x.md",), "dirty_path_count": 1},
+        "clean tree cannot carry"),
+    "a clean tree carrying a dirt count": (
+        {"commit": "a" * 40, "dirty": False, "dirty_path_count": 3},
+        "clean tree cannot carry"),
+    "a sample larger than the total it samples": (
+        {"commit": "a" * 40, "dirty": True, "dirty_paths": ("x.md", "y.md"),
+         "dirty_path_count": 1},
+        "larger than the count"),
+    "a negative count": (
+        {"commit": "a" * 40, "dirty": True, "dirty_path_count": -1},
+        "larger than the count"),
+}
+
+
+@pytest.mark.parametrize("why", sorted(IMPOSSIBLE))
+def test_nothing_can_construct_a_record_no_capture_could_produce(why):
+    """THE POINT OF MOVING THESE ONTO THE CLASS. Written in the parser they read as a reader
+    being careful, and were one edit away from the writer they constrain: `capture_tree` could
+    have grown a fifth return that broke one, and no parser test would have noticed, because
+    parser tests feed the parser."""
+    kwargs, refusal = IMPOSSIBLE[why]
+    with pytest.raises(ValueError, match=refusal):
+        RunProvenance(**kwargs)
+
+
+@pytest.mark.parametrize("why", sorted(IMPOSSIBLE))
+def test_the_parser_refuses_the_same_set_it_cannot_construct(why):
+    """The reader inherits the rules for free — `from_obj` only has to catch. Two lists that
+    happened to agree is what this replaces."""
+    kwargs, _refusal = IMPOSSIBLE[why]
+    on_disk = {k: (list(v) if isinstance(v, tuple) else v) for k, v in kwargs.items()}
+    assert RunProvenance.from_obj(on_disk) is None
+
+
+def test_every_capture_path_produces_a_constructible_record(tmp_path, monkeypatch):
+    """The other half of the claim: the WRITER is held to the same statement. A rule the
+    capture paths could not satisfy would be a rule that turned every run into a crash, so the
+    arm walks the real returns rather than asserting the invariant is merely strict."""
+    clean = _repo(tmp_path)
+    dirty = _repo(tmp_path / "d")
+    (dirty / SEED).write_text("edited\n", encoding="utf-8")
+    unborn = tmp_path / "fresh"
+    unborn.mkdir()
+    _git.git(["init", "-q", "-b", "main"], cwd=unborn)
+    broken = _repo(tmp_path / "b")
+    (broken / ".git" / "index").write_bytes(b"\x00 not an index \xff" * 8)
+    for repo in (clean, dirty, unborn, broken, tmp_path / "not-a-repo-at-all"):
+        prov = _provenance.capture_tree(repo)
+        # Constructing a copy re-runs `__post_init__` on what the capture produced.
+        assert RunProvenance(**{f.name: getattr(prov, f.name) for f in fields(prov)}) == prov
+
+    monkeypatch.setenv("PATH", str(tmp_path / "empty-bin"))
+    for env in ({}, {_provenance.BUILD_COMMIT_ENV: "f" * 40}):
+        prov = _provenance.capture_tree(clean, environ=env)
+        assert RunProvenance(**{f.name: getattr(prov, f.name) for f in fields(prov)}) == prov
+
+
+def test_a_truncated_sha_on_disk_reads_as_no_stamp(tmp_path):
+    """`{"commit": ""}` is what a torn write leaves. It folds to absent in the parser and is
+    then refused by the class for having no reason behind it — one rule, reached two ways."""
+    path = tmp_path / "torn.json"
+    path.write_text(json.dumps({"commit": "", "dirty": None, "unavailable": None}))
+    assert _provenance.read(path) is None

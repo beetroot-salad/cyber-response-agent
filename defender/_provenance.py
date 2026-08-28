@@ -89,7 +89,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from defender import _git
-from defender._io import plain_unaliased_file, read_text_soft, write_guarded
+from defender._io import read_guarded, write_guarded
 
 #: The dirty-path sample's ceiling. The paths are a debugging affordance — `dirty` is the bit
 #: that carries meaning — and `--untracked-files=all` over a tree with a vendored directory in
@@ -151,6 +151,58 @@ class RunProvenance:
     #: different, and an episode recomputed later has no other way to know which it holds.
     scope: str | None = None
 
+    def __post_init__(self) -> None:
+        """Refuse a record no capture could have produced — HERE, so nothing can build one.
+
+        These rules were written in `from_obj`, where they read as a parser being careful. They
+        are not: they are properties of what a provenance record MEANS, and stating them at the
+        boundary put them one edit away from the writer they constrain. `capture_tree` could
+        have grown a fifth return that broke one and no parser test would have noticed, because
+        parser tests feed the parser. On the class, the reader inherits them for free (an
+        invalid object cannot be constructed, so `from_obj` only has to catch), the writer is
+        held to the same statement, and there is one place to change when the meaning does.
+
+        `ValueError`, not a bespoke type: `from_obj` is the only caller that expects a refusal
+        and it catches this; every other construction is a programming error and reads better
+        as one.
+        """
+        # `""` IS NOT A SHA, and `isinstance(commit, str)` admits it. Left standing it reads as
+        # a commit that is PRESENT, walking past the rule below, so a truncated or planted
+        # `{"commit": "", "dirty": false}` came back as a clean bill of health with nothing
+        # behind it — the identical error a missing commit is refused for.
+        if self.commit is not None and not self.commit.strip():
+            raise ValueError("commit is present but empty — an empty string is not a sha")
+        # SAYS NOTHING AT ALL. `read` would report it as "this run carries a stamp" to a caller
+        # whose only question is whether one exists.
+        if self.commit is None and self.dirty is None and self.unavailable is None:
+            raise ValueError("a record with no commit, no dirt and no reason says nothing")
+        # ANY answer about the dirt with no commit behind it. `dirty is False` is the clean bill
+        # of health with nothing behind it — the ONE error the class docstring says this record
+        # must not make — and `dirty is True` is no more producible: every `commit is None` path
+        # in `capture_tree` leaves `dirty` at `None` and sets a reason. Written against that
+        # rule rather than against the one shape of it that is scariest.
+        if self.dirty is not None and self.commit is None:
+            raise ValueError("the working tree was answered for but no commit was")
+        # A CLEAN TREE HAS NO DIRTY PATHS. `capture_tree` derives both from one set, so the two
+        # cannot disagree at the source; a file where they do is not a record of a capture.
+        if self.dirty is False and (self.dirty_paths or self.dirty_path_count):
+            raise ValueError("a clean tree cannot carry dirty paths")
+        # THE SAMPLE CANNOT EXCEED THE TOTAL IT IS A SAMPLE OF. This is the exact field pair
+        # that lied before — a per-record count overstating a per-path sample — so the
+        # relationship they are supposed to hold is stated rather than left to the one writer
+        # that happens to get it right.
+        #
+        # A NEGATIVE COUNT IS COVERED BY THIS RULE and does not get its own: an empty sample is
+        # length 0, and 0 is greater than every negative number, so the comparison already
+        # refuses one. A separate check for it was written here first and a mutation pass found
+        # it could be deleted with the whole suite still green — an equivalent mutant, which is
+        # dead code wearing the appearance of an independent guarantee.
+        if len(self.dirty_paths) > self.dirty_path_count:
+            raise ValueError(
+                f"the dirty-path sample ({len(self.dirty_paths)}) is larger than the count it "
+                f"samples ({self.dirty_path_count}) — a negative count lands here too"
+            )
+
     def as_json(self) -> str:
         # SPELLED OUT rather than `asdict(self)`: the wire shape is a contract a reader off
         # disk parses, so the fields that reach the file are chosen here rather than following
@@ -188,35 +240,14 @@ class RunProvenance:
             return None
         if not (dirty is None or isinstance(dirty, bool)):
             return None
-        # `""` IS NOT A SHA, and `isinstance(commit, str)` admits it. Left standing it reads as
-        # a commit that is PRESENT, so it walks straight past the guard below and a truncated or
-        # planted `{"commit": "", "dirty": false}` comes back as a clean bill of health with
-        # nothing behind it — the identical error a missing `commit` is refused for, and
-        # `_announce_provenance` then prints the bare `commit=`. Folded into the absent case
-        # rather than refused on its own line, because "no sha" is what both shapes say.
+        # An empty sha folds into the absent case rather than being refused outright, and this
+        # is the one coherence decision that belongs to the PARSER rather than to the class:
+        # `{"commit": ""}` on disk is a truncated write, and "no sha" is what it says. The class
+        # refuses the same value because nothing should ever CONSTRUCT one.
         if commit == "":
             commit = None
         unavailable = obj.get("unavailable")
         unavailable = unavailable if isinstance(unavailable, str) else None
-        # TYPE-CHECKING EACH FIELD ALONE IS NOT ENOUGH — the two shapes below are well-typed
-        # and `capture_tree` cannot produce either, so accepting them would let a truncated or
-        # planted file read back as a legitimate record:
-        #
-        #   `{}` (and any object whose three answers are all absent) says nothing at all, and
-        #   `read` would report it as "this run carries a stamp" to a caller whose only
-        #   question is whether one exists.
-        #
-        #   ANY answer about the dirt with no `commit` behind it. `dirty is False` is the clean
-        #   bill of health with nothing behind it — the ONE error the class docstring says this
-        #   record must not make — and `dirty is True` is no more producible: every
-        #   `commit is None` path in `capture_tree` leaves `dirty` at `None` and sets a reason,
-        #   so the guard is written against that rule rather than against the one shape of it
-        #   that is scariest. Admitting `{"commit": null, "dirty": true}` also put an announce
-        #   line reading `commit=unavailable (None)` in front of an operator.
-        if commit is None and dirty is None and unavailable is None:
-            return None
-        if dirty is not None and commit is None:
-            return None
         # The non-string entries are dropped rather than refused, and the record still stands:
         # `dirty_paths` is a LOSSY SAMPLE by construction (capped at `DIRTY_PATH_SAMPLE`), so a
         # dropped entry is indistinguishable from a capped one and breaks no invariant the
@@ -231,14 +262,23 @@ class RunProvenance:
         # a real run, and refusing it would make every archived episode unreadable to settle a
         # question about a field it never carried. `None` reads as "this record does not say".
         scope = obj.get("scope")
-        return cls(
-            commit=commit,
-            dirty=dirty,
-            dirty_paths=paths,
-            dirty_path_count=count if isinstance(count, int) and not isinstance(count, bool) else 0,
-            unavailable=unavailable,
-            scope=scope if isinstance(scope, str) else None,
-        )
+        # WHAT MAKES A RECORD COHERENT IS NOT ASKED HERE. `__post_init__` holds those rules, so
+        # this seam only has to decide what each FIELD is, and a well-typed object that no
+        # capture could have produced is refused by the construction itself. The parser and the
+        # writer are held to one statement of the invariant rather than to two that can drift.
+        try:
+            return cls(
+                commit=commit,
+                dirty=dirty,
+                dirty_paths=paths,
+                dirty_path_count=(
+                    count if isinstance(count, int) and not isinstance(count, bool) else 0
+                ),
+                unavailable=unavailable,
+                scope=scope if isinstance(scope, str) else None,
+            )
+        except ValueError:
+            return None
 
 
 def _from_build_stamp(environ: Mapping[str, str], why: str) -> RunProvenance:
@@ -340,24 +380,17 @@ def write(path: Path, prov: RunProvenance) -> None:
 def read(path: Path) -> RunProvenance | None:
     """The record at `path`, or `None` if there is not a usable one there.
 
-    `read_text_soft` and a swallowed decode error together mean a missing, unreadable or
+    `read_guarded` and a swallowed decode error together mean a missing, unreadable, ALIASED or
     non-JSON file all answer the same way: the caller asked whether this run carries a stamp,
     and the answer is no. The read error itself is DROPPED rather than raised or returned: no
     caller can act on "the stamp was unreadable" differently from "there is no stamp", and a
-    second return channel would put that choice in front of every one of them."""
-    # `plain_unaliased_file`, not the plain read: this file sits in the box's rw bind, so an
-    # entry at its name may be an alias the model planted, and `read_text_soft` would follow it
-    # and hand back whatever it points at AS this run's stamp.
-    #
-    # THE SAME PREDICATE `write_guarded` REFUSES ON, which is the point of it being a shared
-    # function rather than a matching pair of lstats. `_run_paths.artifact_file` stood here
-    # first and is strictly weaker: it is an `S_ISREG` test, so it ACCEPTS a hard link — the
-    # one alias shape `O_NOFOLLOW` cannot refuse (`_io`, B9) and therefore the one the write
-    # side goes out of its way to catch. Twins by construction; the comment that claimed it
-    # before was describing an intention.
-    if not plain_unaliased_file(path):
-        return None
-    raw, _err = read_text_soft(path)
+    second return channel would put that choice in front of every one of them.
+
+    `read_guarded` rather than `read_text_soft`, because this file sits in the box's rw bind
+    and an entry at its name may be something the model planted — it is `write_guarded`'s twin
+    BY CONSTRUCTION now, one function rather than a pair of hand-written checks that were
+    wrong in two different ways here before it existed."""
+    raw, _err = read_guarded(path)
     if raw is None:
         return None
     try:
