@@ -42,6 +42,65 @@ def read_text_soft(path: Path) -> tuple[str | None, str | None]:
         return None, str(e)
 
 
+ALIAS_READ_REFUSAL = "refusing to read through a non-plain or aliased entry"
+
+
+def read_guarded(path: Path) -> tuple[str | None, str | None]:
+    """:func:`write_guarded`'s READ-side twin: the text at ``path``, or a refusal reason.
+
+    Same return shape as :func:`read_text_soft` — ``(text, None)`` or ``(None, reason)`` — so it
+    drops in wherever a reader already tolerates "could not read this". What it adds is that a
+    path which is not a plain, single-linked regular file is a REFUSAL rather than a read of
+    whatever the entry points at.
+
+    WHY A SEPARATE FUNCTION RATHER THAN A CHECK EACH CALLER WRITES. Every read of a path inside
+    a run dir, an episode dir or the drain corpus is a read from a tree a live box is root on,
+    so an entry at an expected artifact's name may be something the model planted. The write
+    side has had one seam for this since M3; the read side had a per-module habit, and the
+    habit was wrong in two different ways in one file — an ``S_ISREG`` screen that admitted a
+    hard link, and before that no screen at all. Two guards on one path that do not match is
+    not a bug you fix once.
+
+    STRICTLY STRONGER THAN AN ``lstat`` THEN A READ, which is what the hand-written version was.
+    The plainness question is asked of the OPEN DESCRIPTOR: ``O_NOFOLLOW`` refuses a symlink at
+    the open itself, and ``fstat`` then judges the very object that was opened. A check-then-act
+    pair answers about whatever the name meant a moment ago, and the window between them is
+    exactly where a plant belongs.
+
+    ABSENT is a refusal here, unlike on the write side where it is the ordinary case: a file
+    that is not there is not a file to read, and folding it in with the alias refusal is right
+    because no caller of this can act on the two differently — both mean "you have no content".
+    The reason string tells them apart for a log.
+    """
+    # `O_NONBLOCK` IS NOT AN OPTIMISATION, it is the only thing standing between this and a
+    # hang. An ordinary `O_RDONLY` open of a FIFO BLOCKS until some process opens the write
+    # end — before any screen below can run — so a fifo planted at an artifact's name would
+    # wedge the caller forever rather than be refused. Non-blocking makes the open return at
+    # once; `fstat` then refuses it like any other non-regular entry. On a regular file the
+    # flag does nothing at all, so the ordinary path is unchanged.
+    try:
+        fd = open_nofollow_fd(Path(path), os.O_RDONLY | os.O_NONBLOCK)
+    except TEXT_READ_ERRORS as e:
+        return None, str(e)
+    try:
+        st = os.fstat(fd)
+        # A hard link is the shape `O_NOFOLLOW` cannot refuse — the open SUCCEEDS (B9) — so the
+        # link count is asked here rather than inferred from the open having worked. A
+        # directory, fifo, socket or device lands in the same refusal for the reason
+        # `_refuse_unless_plain` gives: a caller must not have to tell those apart from a
+        # planted symlink to know it has no artifact.
+        if not stat.S_ISREG(st.st_mode) or st.st_nlink > 1:
+            return None, f"{ALIAS_READ_REFUSAL}: {path}"
+        with os.fdopen(fd, "r", encoding="utf-8") as fh:
+            fd = -1  # `fdopen` owns it now; the finally below must not close it twice.
+            return fh.read(), None
+    except TEXT_READ_ERRORS as e:
+        return None, str(e)
+    finally:
+        if fd >= 0:
+            os.close(fd)
+
+
 def use_utf8_stdio() -> None:
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)

@@ -81,6 +81,7 @@ _UNSAFE_METHODS = frozenset({"is_file", "is_dir"})
 #: corpus). A module that grows such a read and is not added here is a module this gate stops
 #: covering — the same failure ``lint_unguarded_tree_write``'s census comment names.
 LINT_TREE_READER_MODULES: frozenset[str] = frozenset({
+    "_provenance.py",
     "run_common.py",
     "runtime/branch.py",
     "learning/branch/cli.py",

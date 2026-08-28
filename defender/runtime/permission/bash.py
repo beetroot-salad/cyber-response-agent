@@ -10,7 +10,7 @@ from defender.runtime import bash_exec
 
 from . import command_shape
 from .decision import Decision
-from .files import RESOLVE_ERRORS, denylisted, names_wire_log_dir
+from .files import RESOLVE_ERRORS, denylisted, names_run_provenance, names_wire_log_dir
 from .grant import OPENS_NOTHING, PROGRAMS, Grant, Route, rm_target_files
 from .policy import AgentPolicy
 
@@ -394,7 +394,11 @@ def _in_scope(argv: list[str], grant: Grant, *, run_dir: Path | None) -> bool:
             rp = (p if p.is_absolute() else cwd / p).resolve()
         except RESOLVE_ERRORS:
             return False
-        if denylisted(rp) or names_wire_log_dir(rp):
+        # `names_run_provenance` joins them here rather than in `decide_read` alone, for the
+        # reason the wire log does: the JUDGE holds a `cat` grant scoped `under(run, TREE)`,
+        # which fullmatches a run-root file, so without this the bash lane would admit the very
+        # stamp `decide_read` refuses it — two surfaces disagreeing about one path.
+        if denylisted(rp) or names_wire_log_dir(rp) or names_run_provenance(rp, run_dir):
             return False
         if not any(shape.fullmatch(str(rp)) for shape in grant.scope):
             return False

@@ -4,6 +4,7 @@ import pytest
 
 from defender import run_common
 from defender._run_id import is_valid_run_id
+from defender._run_paths import RunPaths
 from defender.runtime.box import container_name
 
 
@@ -71,7 +72,13 @@ def test_materialize_accepts_a_valid_run_id(tmp_path, monkeypatch, run_id):
     run_dir = run_common.materialize_run_dir(alert, run_id)
 
     assert run_dir == runs_base / run_id
-    assert sorted(path.name for path in run_dir.iterdir()) == ["alert.json", "gather_raw"]
+    # THE ACCESSORS, not the filenames re-typed here: `_run_paths.PROVENANCE`'s own comment is
+    # that a second spelling of a run-dir name keeps agreeing with itself the day the writer
+    # renames the file, and this arm is exactly such a second spelling.
+    rp = RunPaths(run_dir)
+    assert sorted(path.name for path in run_dir.iterdir()) == sorted(
+        p.name for p in (rp.alert, rp.gather_raw, rp.provenance)
+    )
 
 
 @pytest.mark.parametrize("kind", [("absolute",), ("traversal",)])

@@ -67,6 +67,14 @@ from pathlib import Path
 WIRE_LOG_DIR = "wire_logs"
 WIRE_LOG = "llm_requests.jsonl"
 
+#: The run's provenance stamp (#976), named here rather than inline in the accessor for the
+#: reason `WIRE_LOG_DIR` is: a SECOND module needs the same string. `scripts/workspace_map`
+#: suppresses this name from the model-facing directory view, and a suppression that spells
+#: the filename independently of the writer keeps suppressing a name that no longer exists the
+#: day the writer renames it — after which the stamp silently reappears in MAIN's message 0,
+#: which is the one outcome that suppression exists to prevent.
+PROVENANCE = "provenance.json"
+
 #: The reserved key on a `tool-return` part's `metadata` that the TOON view gate parks the
 #: tool's ORIGINAL JSON under when it substitutes a smaller view. Spelled HERE for the reason
 #: the wire log's location is: the WRITER is `runtime.toon_gate` (which imports pydantic-ai, a
@@ -78,13 +86,28 @@ GATE_METADATA_KEY = "json"
 
 @dataclass(frozen=True)
 class RunPaths:
-    """One run's directories and its six artifact accessors: the alert, the report, the
-    investigation log, the executed-queries table, the raw-payload dir and the wire log.
+    """One run's directories and its seven accessors: the alert, the report, the
+    investigation log, the executed-queries table, the raw-payload dir, the wire log — and the
+    provenance stamp.
 
-    Every artifact accessor resolves relative to ``run_dir``, so construct
-    ``RunPaths(some_dir)`` on whichever root you hold. ONE root, deliberately: a caller
-    needing a second (the per-case leg-output dir) takes it as its own argument rather than
-    making every single-root construction carry an always-`None` `Optional`.
+    Every accessor resolves relative to ``run_dir``, so construct ``RunPaths(some_dir)`` on
+    whichever root you hold. ONE root, deliberately: a caller needing a second (the per-case
+    leg-output dir) takes it as its own argument rather than making every single-root
+    construction carry an always-`None` `Optional`.
+
+    SIX OF THE SEVEN ARE CONTENT THE RUN PRODUCED; ``provenance`` is not, and the census above
+    keeps them in one list only because the census is about LAYOUT. It is the run's record of
+    what it ran against, captured by the host at ``run_common.materialize_run_dir`` time before
+    any agent exists — see ``defender._provenance`` for why a run needs one and what it does
+    not cover. A second fact of that kind (the branch point's moment, the source-run pointer)
+    belongs beside it rather than as another argument threaded through a call chain.
+
+    ``provenance`` IS THE ONE ACCESSOR THAT DOES NOT RESOLVE ON EVERY BUNDLE. ``RunPaths`` is a
+    name resolver, and the learning loop builds a SECOND kind of bundle — the archived episode
+    under ``LoopPaths.runs_dir``, mkdir'd and populated by ``learning/core/persist.py``, not by
+    ``materialize_run_dir`` — which carries no stamp. A caller holding an arbitrary run dir
+    must read the stamp as ``_provenance.read`` returns it (``None`` = no stamp here), never as
+    a file this class promises exists.
     """
 
     run_dir: Path
@@ -112,6 +135,10 @@ class RunPaths:
     @property
     def wire_log(self) -> Path:
         return self.run_dir / WIRE_LOG_DIR / WIRE_LOG
+
+    @property
+    def provenance(self) -> Path:
+        return self.run_dir / PROVENANCE
 
 
 # A run bundle is ALWAYS `runs_dir / <run_id>` (`LoopPaths.runs_dir` is the only place the

@@ -9,7 +9,7 @@ if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender._corpus import iter_query_templates  # noqa: E402
-from defender._run_paths import WIRE_LOG_DIR  # noqa: E402
+from defender._run_paths import PROVENANCE, WIRE_LOG_DIR  # noqa: E402
 from defender.runtime.verbs import ADAPTER_SUFFIX  # noqa: E402
 
 DEFENDER_DIR = Path(__file__).resolve().parent.parent
@@ -21,8 +21,15 @@ REPO_ROOT = DEFENDER_DIR.parent
 #: (`test_gather_raw_suppressed`). `wire_logs/` joins `gather_raw/` on exactly that ground: it
 #: holds the run's wire log, one level down and so outside MAIN's `under(run, SEG)` read shape
 #: by construction — see `_run_paths.WIRE_LOG_DIR`. `budget.json` is listed here too, to keep
-#: the suppression in one place.
-_UNLISTED = frozenset({"gather_raw", WIRE_LOG_DIR, "budget.json"})
+#: the suppression in one place, and the provenance stamp joins it on the same ground: the
+#: run's record of the commit it was made against is infrastructure the OPERATOR reads, and
+#: naming it as a "canonical surface" would invite the investigator to reason about its own
+#: build. THE LAST TWO ARE NOT CONTAINMENT and must not be read as it: `read_shapes` is
+#: `under(run, SEG)`, one segment, so every run-ROOT file is inside MAIN's and GATHER's read
+#: shape and no deny names either of these. Suppressing the name keeps it out of the model's
+#: directory view; it does not put the file out of reach. `gather_raw`/`wire_logs` are the two
+#: that are actually refused (`permission.files`).
+_UNLISTED = frozenset({"gather_raw", WIRE_LOG_DIR, "budget.json", PROVENANCE})
 
 
 def _safe_name(name: str) -> str:

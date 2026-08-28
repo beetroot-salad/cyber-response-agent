@@ -55,11 +55,24 @@ def git_ok(args: Sequence[str], *, cwd: Path = REPO_ROOT) -> bool:
     return _run(args, cwd=cwd, check=False).returncode == 0
 
 
-def git_status(cwd: Path, *, pathspec: Path | str | None = None) -> list[tuple[str, str]]:
+def git_status(
+    cwd: Path, *, pathspec: Path | str | None = None, timeout: float | None = None,
+    no_renames: bool = False,
+) -> list[tuple[str, str]]:
+    """The working tree's status as `(XY, path)` records.
+
+    `no_renames` turns OFF git's rename detection, which is what a caller COUNTING the paths a
+    sha does not name has to do: `git mv a b` is reported as one `R  b` record whose original
+    `a` this parser consumes as the record's second field and drops, so two paths that differ
+    from HEAD are counted once and the vanished one is never named. With the flag, the same
+    move reports `D  a` and `A  b` — two records, two paths, which is the honest answer.
+    """
     args = ["status", "--porcelain", "--untracked-files=all", "-z"]
+    if no_renames:
+        args.append("--no-renames")
     if pathspec is not None:
         args += ["--", str(pathspec)]
-    out = _run(args, cwd=cwd).stdout
+    out = _run(args, cwd=cwd, timeout=timeout).stdout
     fields = out.split("\0")
     records: list[tuple[str, str]] = []
     i = 0
@@ -92,8 +105,8 @@ def git_show_head(cwd: Path, path: str) -> str | None:
     return proc.stdout if proc.returncode == 0 else None
 
 
-def git_head_sha(cwd: Path) -> str:
-    return git(["rev-parse", "HEAD"], cwd=cwd)
+def git_head_sha(cwd: Path, *, timeout: float | None = None) -> str:
+    return git(["rev-parse", "HEAD"], cwd=cwd, timeout=timeout)
 
 
 def git_show_file(cwd: Path, rev: str, path: str) -> str | None:

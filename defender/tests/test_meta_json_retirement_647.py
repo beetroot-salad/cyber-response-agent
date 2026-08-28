@@ -444,24 +444,156 @@ def test_run_paths_accessor_set_is_exactly_its_artifacts_after_the_meta_accessor
     tmp_path,
 ):
     """`RunPaths` names exactly the run artifacts a consumer reads, and no longer the removed
-    file — the alert, the report, the investigation log, the queries table, the raw-payload dir
-    and the wire log. No accessor may survive naming a file no consumer reads, and the class
-    docstring's own count must agree with the accessors it enumerates.
+    file — the alert, the report, the investigation log, the queries table, the raw-payload
+    dir, the wire log and the provenance stamp. No accessor may survive naming a file no
+    consumer reads, and the class docstring's own count must agree with the accessors it
+    enumerates.
 
     The count is asserted rather than typed twice: `wire_log` was added when the wire log moved
     under `<run>/wire_logs/` (out of every reader agent's single-segment read shape), and the
-    docstring is where a reader learns the set, so the two must not be able to drift apart."""
+    docstring is where a reader learns the set, so the two must not be able to drift apart.
+
+    `provenance` (#976) is the seventh and the first that is NOT content the run produced — it
+    is the run's record of the commit it was made against. THE RULE THIS TEST ENFORCES IS
+    UNCHANGED AND IT STILL BINDS: what retired `meta.json` was inertness, a file written by one
+    thing and read by NOTHING, and the arm below is what keeps that from being re-earned
+    quietly. `run.py` reads this one back at run start to announce the commit, so it has a
+    consumer on the day it lands rather than an intention to have one."""
     accessors = {n for n, v in vars(RunPaths).items() if isinstance(v, property)}
     assert accessors == {
         "alert", "report", "investigation", "executed_queries", "gather_raw", "wire_log",
+        "provenance",
     }, f"the artifact accessor set drifted: {sorted(accessors)}"
     assert not hasattr(RunPaths(tmp_path), "meta"), "RunPaths still resolves a meta.json path"
 
     doc = " ".join((RunPaths.__doc__ or "").split())
-    assert "six artifact accessors" in doc, (
+    assert "seven accessors" in doc, (
         "the class docstring's count disagrees with the accessors it has"
     )
     assert "meta" not in doc, "the docstring still enumerates the removed accessor"
+
+
+#: Calls that make an accessor's path a WRITE TARGET rather than something read back.
+#: `meta.json` was written by `materialize_run_dir` and read by nothing, so a census that
+#: counts its writer as a consumer discharges the exact accessor #647 deleted — which is why
+#: the two are told apart here rather than merged into "is mentioned".
+_WRITE_RECEIVER_METHODS = frozenset({"mkdir", "write_text", "write_bytes", "touch", "unlink"})
+_WRITE_ARG_CALLS = frozenset(
+    {"write", "write_guarded", "guarded_mkdir", "copy", "copy2", "copyfile", "copytree", "move"}
+)
+
+
+def _is_run_paths_call(node: ast.expr) -> bool:
+    return (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id == "RunPaths")
+
+
+def _run_paths_locals(tree: ast.AST) -> set[str]:
+    """Names bound to a `RunPaths(...)`. `rp = RunPaths(d)` and `src, dst = RunPaths(a),
+    RunPaths(b)` are both live shapes in this tree.
+
+    EVERY BINDING FORM, not `ast.Assign` alone. A name this walk misses is a name whose reads
+    are invisible, and the failure is the LOUD direction: the accessor read only through it is
+    reported as "nothing outside the tests reads" and the gate fails a change that is correct.
+    `rp: RunPaths = RunPaths(d)` (`AnnAssign`), `a = b = RunPaths(d)` (a second target) and
+    `if (rp := RunPaths(d)).report...` (`NamedExpr`) all bind one."""
+    bound: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.NamedExpr):
+            pairs: list[tuple[ast.expr, ast.expr]] = [(node.target, node.value)]
+        elif isinstance(node, ast.AnnAssign):
+            pairs = [(node.target, node.value)] if node.value is not None else []
+        elif isinstance(node, ast.Assign):
+            pairs = []
+            for target in node.targets:
+                if isinstance(target, ast.Tuple) and isinstance(node.value, ast.Tuple):
+                    pairs += list(zip(target.elts, node.value.elts, strict=False))
+                else:
+                    pairs.append((target, node.value))
+        else:
+            continue
+        bound |= {t.id for t, v in pairs if isinstance(t, ast.Name) and _is_run_paths_call(v)}
+    return bound
+
+
+def _write_target_ids(tree: ast.AST) -> set[int]:
+    """The `id()` of every expression this module uses as a WRITE target — the receiver of a
+    mutating `Path` method, or an argument to a write/copy seam.
+
+    KEYWORDS TOO, and through a `/` join. `write_guarded(path=RunPaths(d).report, ...)` and
+    `(RunPaths(d).gather_raw / name).write_text(...)` are both ordinary spellings of a write,
+    and reading only `node.args`/the bare receiver counts each as a READ — which discharges the
+    accessor on its own writer, the exact census error that would have let `meta.json` stand.
+    """
+    written: set[int] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if isinstance(func, ast.Attribute) and func.attr in _WRITE_RECEIVER_METHODS:
+            written |= _joined_ids(func.value)
+        name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+        if name in _WRITE_ARG_CALLS:
+            for arg in (*node.args, *(kw.value for kw in node.keywords)):
+                written |= _joined_ids(arg)
+    return written
+
+
+def _joined_ids(node: ast.expr) -> set[int]:
+    """`node`, plus the operands of any `/` path join it is built from — `RunPaths(d).gather_raw
+    / lead / f"{seq}.json"` names the accessor several `BinOp`s down from the write."""
+    ids = {id(node)}
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        ids |= _joined_ids(node.left) | _joined_ids(node.right)
+    return ids
+
+
+def _run_paths_reads(tree: ast.AST, accessors: set[str]) -> set[str]:
+    """Which of `accessors` this module READS off a `RunPaths` value.
+
+    AST, not a substring sweep. `f".{accessor}" in text` answers yes for `stream.provenance` on
+    an unrelated object, for a filename in a docstring, and for a probe string inside a
+    spec yaml — three channels that each discharge an accessor here today with no reader
+    behind them."""
+    bound, written = _run_paths_locals(tree), _write_target_ids(tree)
+
+    def _on_run_paths(value: ast.expr) -> bool:
+        return _is_run_paths_call(value) or (isinstance(value, ast.Name) and value.id in bound)
+
+    return {
+        node.attr for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute) and node.attr in accessors
+        and _on_run_paths(node.value) and id(node) not in written
+    }
+
+
+def test_no_accessor_names_a_file_nothing_reads():
+    """#647's actual rule, kept executable rather than left as prose in the docstring above.
+
+    Every accessor must be READ off a `RunPaths` value somewhere outside `_run_paths.py` and
+    outside the tests — that is what `meta.json` had stopped having and why it was deleted.
+    Derived with `git grep` from the repo root rather than from a list typed into this file,
+    for the reason the module docstring gives: every hand-written census in this change was
+    wrong.
+
+    A WRITE IS NOT A READ, and the distinction is the whole test: `meta.json`'s writer was
+    `materialize_run_dir`, which named the accessor, so a census that accepts any mention
+    passes the very accessor #647 deleted. `provenance` (#976) has exactly one real reader —
+    `run.py:_announce_provenance` — and its writer in `run_common` must not stand in for it."""
+    consumers = [
+        h.split(":", 1)[0]
+        for h in live_hits(repo_grep(r"RunPaths\(", "*.py"),
+                           extra_excludes=("defender/tests/", "defender/_run_paths.py"))
+    ]
+    accessors = {n for n, v in vars(RunPaths).items() if isinstance(v, property)}
+    unread = set(accessors)
+    for path in dict.fromkeys(consumers):
+        try:
+            tree = ast.parse((REPO_ROOT / path).read_text(encoding="utf-8", errors="replace"))
+        except SyntaxError:  # pragma: no cover — a tracked .py that does not parse
+            continue
+        unread -= _run_paths_reads(tree, accessors)
+    assert not unread, f"accessors nothing outside the tests reads: {sorted(unread)}"
 
 
 def test_run_paths_resolves_artifacts_under_exactly_one_root():

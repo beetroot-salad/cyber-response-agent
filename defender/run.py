@@ -39,6 +39,7 @@ from typing import Any, Protocol  # noqa: E402
 if (_root := str(_DEFENDER_DIR.parent)) not in sys.path:
     sys.path.insert(0, _root)
 
+from defender import _provenance  # noqa: E402
 from defender import run_common as _run  # noqa: E402
 from defender._run_paths import RunPaths  # noqa: E402
 from defender.runtime import box as box_mod  # noqa: E402
@@ -282,6 +283,38 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
     return summary
 
 
+def _announce_provenance(run_dir: Path) -> None:
+    """Say out loud what this run was made against, reading the stamp back off the run dir
+    rather than re-asking git — so the line an operator sees is the RECORD, not a second
+    capture that could disagree with it.
+
+    The dirty marker is not decoration. A sha over a modified tree does not name the bytes that
+    ran, and an operator reading a later comparison needs to have been told so at the moment it
+    stopped being true, not months afterwards when they go looking."""
+    rec = _provenance.read(RunPaths(run_dir).provenance)
+    if rec is None:
+        print("[run.py] commit=unrecorded", file=sys.stderr)
+        return
+    if rec.commit is None:
+        print(f"[run.py] commit=unavailable ({rec.unavailable})", file=sys.stderr)
+        return
+    # `dirty is None` is neither clean nor dirty: git answered for HEAD and then could not
+    # answer for the working tree, and flattening that to either word would be a claim.
+    mark = {True: " +dirty", False: "", None: " +dirt-unknown"}[rec.dirty]
+    if rec.dirty is None:
+        # The REASON, on the one branch where it is most actionable: a corrupt index and a
+        # missing git send an operator at different knobs, and " +dirt-unknown" alone names
+        # neither. `capture_tree` kept the string for exactly this line.
+        detail = f" ({rec.unavailable})" if rec.unavailable else ""
+    else:
+        # `if rec.dirty_path_count`, not `if rec.dirty`: this file is in the box's rw bind, so
+        # the count read back may be a default standing in for a corrupted one, and " (0
+        # paths)" beside "+dirty" is a QUANTITY nobody wrote — the announce's own version of
+        # filing an unknown as a fact.
+        detail = f" ({rec.dirty_path_count} paths)" if rec.dirty_path_count else ""
+    print(f"[run.py] commit={rec.commit[:12]}{mark}{detail}", file=sys.stderr)
+
+
 def main(
     argv: list[str],
     *,
@@ -310,6 +343,7 @@ def main(
         ticket_writer.open_case_ticket(run_dir)
 
     print(f"[run.py] run_dir={run_dir} model={model}", file=sys.stderr)
+    _announce_provenance(run_dir)
 
     summary = lifecycle(
         run_dir=run_dir,
