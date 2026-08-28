@@ -257,9 +257,13 @@ rather than a fact carries none and is reached by grep.
 
 **No block means nothing new reached the TOP THREE**, never that the corpus is
 exhausted and never that nothing matched: your write left the state where it
-was, nothing in it matched, or what it opened ranked below the three lessons
-you were already shown. Settled cells accumulate, so the top three stabilise as
-a run goes on — a question you open late can match a lesson and still be cut.
+was, nothing in it matched, or what it opened lost the three slots to lessons
+you were already shown. Losing a slot is not the same as scoring below them —
+the three cover as many DIFFERENT open things as the matches allow before any
+one of them gets a second lesson, so a second lesson about a question already
+represented is cut even when it speaks to that question more precisely than
+anything else in the block. Settled cells accumulate, so the top three stabilise
+as a run goes on — a question you open late can match a lesson and still be cut.
 **Widen with the shim whenever a question stays open**, and especially for the
 one you just opened.
 

@@ -287,39 +287,9 @@ def _lessons_frontier():
 # corpora
 # --------------------------------------------------------------------------- #
 
-def _write_lesson(
-    corpus: Path,
-    name: str,
-    *,
-    nodes: tuple[str, ...] = (),
-    edges: tuple[str, ...] = (),
-    observed: tuple[str, ...] = (),
-    signature: str = "v2-cross-tier-ssh-pivot",
-    filename: str | None = None,
-    raw_nodes: str | None = None,
-) -> Path:
-    """One lesson file. `nodes` / `edges` are YAML FLOW mappings written exactly as the
-    design spells them (`type: process, slot: attrs.loginuid`), so the fixture and the doc
-    cannot drift on spelling."""
-    lines = [
-        f"name: {name}",
-        f"description: {name} description",
-        f"source_signature: [{signature}]",
-    ]
-    if observed:
-        lines.append("observed_nodes:")
-        lines += [f"  - {{{sel}}}" for sel in observed]
-    if raw_nodes is not None:
-        lines.append(f"frontier_nodes: {raw_nodes}")
-    elif nodes:
-        lines.append("frontier_nodes:")
-        lines += [f"  - {{{sel}}}" for sel in nodes]
-    if edges:
-        lines.append("frontier_edges:")
-        lines += [f"  - {{{sel}}}" for sel in edges]
-    path = corpus / (filename or f"{name}.md")
-    path.write_text("---\n" + "\n".join(lines) + "\n---\n\nlesson body\n", encoding="utf-8")
-    return path
+# `_write_lesson` and `_main_deps` live in `_lessons_corpus` so a second suite can use them
+# without importing this COLLECTED module (which would load it twice in one session).
+from defender.tests._lessons_corpus import _main_deps, _write_lesson  # noqa: E402
 
 
 def _corpus(parent: Path, name: str = "lessons") -> Path:
@@ -345,23 +315,6 @@ def _exit_code(main, argv: list[str]) -> int:
         return int(main(argv))
     except SystemExit as e:
         return int(e.code or 0)
-
-
-def _main_deps(tmp_path: Path):
-    """MAIN deps through the real `bind` seam — real compiled policy, real gate.
-
-    `test_append_only_write_lane_810.py::_main_deps` verbatim, plus the defender tree in the
-    return: the corpus `_tool_append_block` recalls against is `deps`-resolved
-    (`defender_dir/lessons`, MAIN's own `corpus_dirs` entry), so a hermetic test needs the
-    tmp tree the `bind` call was given."""
-    from defender.agents import MAIN_DEF
-    from defender.runtime.agent_definition import bind
-
-    run = tmp_path / "run"
-    run.mkdir()
-    dfn = tmp_path / "defender"
-    dfn.mkdir()
-    return bind(MAIN_DEF, run, defender_dir=dfn), run, dfn
 
 
 # --------------------------------------------------------------------------- #
@@ -576,8 +529,11 @@ def test_an_edge_selector_matches_only_when_every_field_it_declares_is_equal(tmp
     hits = match_lessons(_frontier(_FIXTURE_DOCS["authz declared"]), corpus, top_k=10)
 
     assert _names(hits) == ["edge-both", "edge-kind-only"]
-    # ...and specificity is the count of DECLARED fields, so the two-field selector ranks first
-    assert [h.score for h in hits] == [2, 1]
+    # ...and each declared field adds its own weight, so the two-field selector ranks first.
+    # The numbers are the edge lane's floor plus `rel`, not a count of fields: a count floored
+    # this whole lane below the node lane's floor, which is #935's defect 2. `ANCHOR_KIND_
+    # WEIGHT` + `REL_WEIGHT` against `ANCHOR_KIND_WEIGHT` alone.
+    assert [h.score for h in hits] == [4, 3]
 
 
 # --------------------------------------------------------------------------- #
@@ -934,7 +890,10 @@ def test_an_edge_selector_can_key_on_the_observational_authority(tmp_path):
     assert _names(hits) == ["right-authority"], (
         "an edge selector matched a contract whose observational authority differs"
     )
-    assert hits[0].score == 2, "both declared fields should count toward specificity"
+    assert hits[0].score == 4, (
+        "both declared fields should count toward specificity — `ANCHOR_KIND_WEIGHT` plus "
+        "`AUTH_KIND_WEIGHT`"
+    )
 
 
 def test_matched_names_the_frontier_item_rather_than_the_selector(tmp_path):
@@ -1176,10 +1135,21 @@ v-008|process|??|nc[pid=4242]|loginuid=??
     assert hits["aaa-wholly-open-class"] == 2, (
         "`nginx` matched a `??` — it pinned nothing and must not outscore the attribute"
     )
-    assert hits["zzz-names-the-open-attribute"] == 2
-    assert hits["aaa-wholly-open-class"] <= hits["zzz-names-the-open-attribute"], (
+    assert hits["zzz-names-the-open-attribute"] == 3, (
+        "naming an `attrs.<name>` slot is a claim about what the document HOLDS, where "
+        "`class` and `ident` are cells every vertex carries — `ATTR_SLOT_WEIGHT` (#935)"
+    )
+    assert hits["aaa-wholly-open-class"] < hits["zzz-names-the-open-attribute"], (
         "a class literal the document never mentions outranked the exact open slot"
     )
+
+    # ...and STRICTLY, which is the half this test could not see (#935). It ran at `top_k=9`
+    # and asserted only scores, so it stayed green while the two TIED at 2 and the emitted
+    # top-3 was decided by the alphabet — cutting the loginuid lesson its own docstring is
+    # about. The ordering at the real cut is the observable.
+    assert _names(match_lessons(_frontier(open_class), corpus, top_k=1)) == [
+        "zzz-names-the-open-attribute"
+    ], "the exact open slot must lead the block, not lose a coin-flip to `aaa`"
 
 
 def test_the_frontier_and_the_benign_gate_agree_on_a_shared_contract_id(tmp_path):
@@ -1389,7 +1359,12 @@ def test_the_two_node_lanes_share_one_ranking_scale(tmp_path):
     A tilt toward either half would bury one kind of advice behind the other regardless of
     how precisely it speaks to the document."""
     corpus = _corpus(tmp_path)
-    _write_lesson(corpus, "aaa-held-loose", observed=("type: identity, slot: attrs.loginuid",))
+    # BOTH selectors are `type` + a universal cell, so the two carry the same specificity and
+    # only the LANE differs — which is the claim. The held side used to name `attrs.loginuid`,
+    # and that stopped being an equal-specificity pair once the scale learned to tell a named
+    # attribute from a cell every vertex has (#935): the fixture would have been asserting
+    # that a more specific selector scores the same, not that the lanes are level.
+    _write_lesson(corpus, "aaa-held-loose", observed=("type: identity, slot: class",))
     _write_lesson(corpus, "zzz-open-loose", nodes=("type: process, slot: class",))
     doc = PROLOGUE + SETTLED_BLOCK + OPEN_CLASS_BLOCK
     hits = _lessons_frontier().match_lessons(_frontier(doc), corpus)
@@ -1405,13 +1380,15 @@ def test_the_shipped_corpus_reaches_the_motivating_investigation(tmp_path):
     retrieved.
 
     Every other test in this file drives a fixture. This one drives the artefact the issue
-    was filed about — `learning/runs/turnN-A/investigation.md`, the Falco authorized_keys
-    case whose report asserted an attack chain that did not happen — against the REAL 16-file
-    corpus. It is the only test here that can tell "the mechanism works" from "the mechanism
-    works on documents written to suit it"."""
-    real = Path(__file__).resolve().parents[1] / "learning" / "runs" / "turnN-A" / "investigation.md"
-    if not real.is_file():
-        pytest.skip(f"the motivating investigation is not in this tree ({real})")
+    was filed about — the `turnN-A` run, the Falco authorized_keys case whose report asserted
+    an attack chain that did not happen — against the REAL 16-file corpus. It is the only test
+    here that can tell "the mechanism works" from "the mechanism works on documents written to
+    suit it"."""
+    # The COMMITTED copy under `_golden_invlang/`, not `learning/runs/turnN-A/` — that path is
+    # where the run lives and `.gitignore:91` excludes it, so this test, the repo's north star
+    # for the whole lane, skipped everywhere but the machine that produced the run (#935).
+    real = Path(__file__).resolve().parent / "_golden_invlang" / "turnN-A.investigation.md"
+    assert real.is_file(), f"the motivating investigation is tracked and must be present ({real})"
     corpus = Path(__file__).resolve().parents[1] / "lessons"
 
     hits = _names(_lessons_frontier().match_lessons(

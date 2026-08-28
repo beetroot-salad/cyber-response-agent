@@ -2392,8 +2392,14 @@ def _seed_vertex_state(
         # diagnostic-clean, and the pre-#919 test — `has_open_slot(cur["classification"])` —
         # is False for `""`, so the concrete class a later `observations.vertices` row
         # supplies was dropped. That only mattered once `iter_vertex_cells` stamped the class
-        # tuple onto EVERY cell: a latched `""` makes `_class_pins` refuse every class-bearing
+        # tuple onto EVERY cell: a latched `""` makes `_class_pins` refuse a class-bearing
         # selector against the vertex's ident and attrs cells too, not just its class cell.
+        #
+        # A SELECTOR NAMING SLOT 0, since #935. `_class_pins` now pads a short cell to the
+        # type's arity, and a blank cell splits as `['']` rather than `[]` — so the padding
+        # reaches the trailing slots and a selector wildcarding slot 0 matches at zero, while
+        # one naming it concretely still refuses, `""` being neither open nor equal to
+        # anything. The direction below is unchanged; only the breadth of that refusal is.
         #
         # Still one direction, and still never blank→OPEN: taking an unresolved class over an
         # empty one would newly BLOCK a benign close on a document the gate accepts today.

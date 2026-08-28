@@ -26,7 +26,7 @@ truthful selector to write, and a birth-time gate would only buy fabricated ones
 from __future__ import annotations
 
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
@@ -52,7 +52,13 @@ from defender.skills.invlang.frontier import (
     OpenContract,
     OpenSlot,
 )
-from defender.skills.invlang.validate import class_slots, is_open_slot
+from defender.skills.invlang import vocab
+from defender.skills.invlang.validate import (
+    ATTR_PREFIX,
+    OPEN_MARKER,
+    class_slots,
+    is_open_slot,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_CORPUS = REPO_ROOT / "defender" / "lessons"
@@ -69,6 +75,78 @@ HIDDEN_KEYS = PROVENANCE_KEYS | SELECTOR_KEYS
 DEFAULT_TOP_K = 3
 
 WILDCARD = "*"
+
+# --------------------------------------------------------------------------- #
+# THE SCALE (#935)
+#
+# One scale across both lanes, because `_best_match` pools them into one `max` and
+# `match_loaded` cuts one ranked list at `top_k`. It used to be a COUNT OF DECLARED FIELDS on
+# each side, and a count is not a measure of specificity: the fields are not comparable, and
+# the mandatory ones are not comparable ACROSS the lanes at all. Two things followed, both
+# measured on the corpus as merged rather than latent. (#935's third defect is the class match
+# guessing arity from the cell, which is `_class_pins`' business, not this scale's — the three
+# share a cause, not a site.)
+#
+#   * Every node selector scored exactly 2. `type` and `slot` are both mandatory
+#     (`_node_selector` drops a selector missing either) and most shipped selectors omit the
+#     optional `class`, so the whole node lane was one flat value and the `name` tiebreak in
+#     `match_loaded` picked the top-3 alphabetically. On a two-vertex document holding
+#     `loginuid=-1`, two lessons keyed on a bare `slot: ident` — a cell EVERY vertex carries —
+#     cut the one naming `attrs.loginuid`, because `c` sorts before `f`.
+#   * The edge lane could not compete. `anchor_kind` is its only mandatory field, so every
+#     shipped `frontier_edges` selector floored at 1 against a node floor of 2 and ANY node
+#     match outranked it. Replaying `golden-sshpivot-ab3` and `turnN-A` fence by fence, the
+#     block where `contracts` goes 0 -> 2 — exactly when "what this anchor can and cannot
+#     conclude" is worth reading — emitted the same three node lessons as the block before it,
+#     so `_frontier_recall`'s diff emitted NO block at all on the append that opened the
+#     authorization question.
+#
+# So the weights below are per-COMPONENT, and each is set by how much matching that component
+# narrows the frontier items it could have hit — not by how many cells the author filled in.
+# Two facts about the populations do the work, and both are measured on the runs in hand:
+#
+#   1. `class` and `ident` are UNIVERSAL cells — every vertex carries exactly one of each — so
+#      matching one says only "this document has a vertex of type T". `attrs.<name>` is a
+#      constraint on what the document actually HOLDS, and it is the shape #919 was filed
+#      about. Hence `ATTR_SLOT_WEIGHT` over `UNIVERSAL_SLOT_WEIGHT`.
+#   2. The two lanes' item populations differ by an order of magnitude. Those two runs carry
+#      13-28 node cells apiece against 0 or 2 open contracts, and the contracts exist only
+#      once a hypothesis declares authz. Matching one of ~2 open contracts under a NAMED
+#      anchor is a far stronger statement about this document than matching one of ~25 node
+#      cells by type plus a universal cell — and the count-of-fields scale encoded exactly the
+#      opposite. Hence `ANCHOR_KIND_WEIGHT` at 3.
+#
+# The ranges overlap on purpose: on a well-formed document node runs 2..6 (`type` + an attrs
+# slot + up to a pinned class triple) and edge runs 3..5. The node lane still FLOORS lower —
+# 2 against 3 — and that is the point rather than an oversight: what the old scale got wrong
+# was that the edge lane could never reach a node match at all, and what matters is that
+# neither lane can now shut the other out. The overlap is where that is written.
+#
+# The node CEILING is a property of the document, not of this table: `_class_pins` widens
+# arity to `max(the type's grammar, what the cell declares)`, so a mis-authored class cell
+# carrying five slots against a five-slot selector pins 5 and scores 8. Both sides have to be
+# wrong for that, and nothing validates class arity — so read 6 as the well-formed ceiling,
+# not as a bound.
+#
+# WEIGHTS ARE HALF OF IT. Two selectors at their lanes' floors are genuinely equally specific
+# and no honest weight orders them, so ties are a permanent feature of any scale here rather
+# than a defect this one removed. `_spread_over_items` is what decides those, on what the block
+# is FOR, instead of leaving them to the alphabet.
+#: `type` is mandatory, so this is the node lane's floor contribution — and it is conditioned
+#: on being declared anyway, because an omitted `type` constrains nothing and crediting it
+#: would rank a match-any-vertex selector level with one that named the type.
+TYPE_WEIGHT = 1
+#: A `class` or `ident` slot — one cell on every vertex of the matched type.
+UNIVERSAL_SLOT_WEIGHT = 1
+#: An `attrs.<name>` slot — only vertices CARRYING that attribute have the cell.
+ATTR_SLOT_WEIGHT = 2
+#: Each class slot the selector pinned by equality. See `_class_pins` for what counts.
+CLASS_PIN_WEIGHT = 1
+#: `anchor_kind` — mandatory on an edge selector, and see (2) above for why it is not 1.
+ANCHOR_KIND_WEIGHT = 3
+#: The two optional edge fields, each one more thing the contract had to agree on.
+REL_WEIGHT = 1
+AUTH_KIND_WEIGHT = 1
 
 
 @dataclass(frozen=True)
@@ -94,23 +172,32 @@ class _NodeSelector:
     @property
     def fixed_specificity(self) -> int:
         """The `type` and `slot` half of the score — the components that do not depend on
-        what the class pattern managed to pin against a particular case."""
-        # ONE BOUND COMPONENT EACH, and `type` is conditioned exactly as `slot` is: an
-        # omitted `type` constrains nothing (`_node_match_score` skips the comparison), so
-        # crediting it would rank a match-any-vertex selector level with one that named the
-        # type. `_EdgeSelector` has always counted only declared fields; this is the same rule.
-        #
-        # KNOWN IMBALANCE, not a knob: `_node_selector` DROPS a selector missing `type` or
-        # `slot`, so in practice this is a constant 2 — the node lane's floor — while an
-        # `anchor_kind`-only edge selector (every shipped `frontier_edges` entry, and the only
-        # shape available for a contract on a proposed edge) floors at 1. `_best_match` pools
-        # both lanes into one `max` and `match_loaded` cuts at `top_k`, so an edge lesson is
-        # outranked by ANY node match, and held facts accumulate — the edge lane goes dark
-        # once three node selectors match. Raising the edge floor is not the fix on its own:
-        # at 2 it TIES with a bare node match and the `name` tiebreak then evicts whichever
-        # lesson sorts later. Both lanes need more resolution than "2", which is #919
-        # follow-up work rather than a knob to turn here.
-        return (1 if self.type else 0) + (1 if self.slot else 0)
+        what the class pattern managed to pin against a particular case.
+
+        Both are conditioned on being DECLARED: an omitted field constrains nothing
+        (`_node_match_score` skips an empty comparison), so crediting it would rank a
+        match-any-vertex selector level with one that named the type. In practice
+        `_node_selector` drops a selector missing either, so both terms are always paid — the
+        conditioning is what keeps this honest if that ever loosens.
+
+        The slot term is where the node lane got the resolution it was missing (#935): `class`
+        and `ident` are cells EVERY vertex carries, so matching one narrows the frontier to
+        "a vertex of this type", while `attrs.<name>` narrows it to the vertices that hold
+        that attribute. Scoring the two the same is what made the whole lane a flat 2 and
+        handed the top-3 to an alphabetical tiebreak — cutting the exact lesson #919 exists
+        for. See THE SCALE above.
+        """
+        return (TYPE_WEIGHT if self.type else 0) + self._slot_weight
+
+    @property
+    def _slot_weight(self) -> int:
+        # `ATTR_PREFIX` is imported from `validate` rather than spelled here, because that is
+        # where the `:R attr_updates` key grammar is enforced and where the walk that REPORTS
+        # these slots lives. The corpus writes `slot: attrs.loginuid` as free YAML; a second
+        # copy of the prefix is how the two sides of that join drift.
+        if not self.slot:
+            return 0
+        return ATTR_SLOT_WEIGHT if self.slot.startswith(ATTR_PREFIX) else UNIVERSAL_SLOT_WEIGHT
 
 
 @dataclass(frozen=True)
@@ -121,7 +208,20 @@ class _EdgeSelector:
 
     @property
     def specificity(self) -> int:
-        return sum(1 for v in (self.rel, self.auth_kind, self.anchor_kind) if v)
+        """Same scale as `_NodeSelector`, and NOT a count of declared fields (#935).
+
+        `anchor_kind` is the only mandatory field, so a count floored this whole lane at 1
+        against a node floor of 2 — and since `_best_match` pools both lanes into one `max`,
+        any node match at all outranked any edge match. The append where the first
+        authorization contract opens is exactly when a lesson about what an anchor can and
+        cannot conclude is worth reading, and it was the append on which no block was emitted.
+        `ANCHOR_KIND_WEIGHT` carries why 3 is the honest weight rather than the fix's floor.
+        """
+        return (
+            (ANCHOR_KIND_WEIGHT if self.anchor_kind else 0)
+            + (REL_WEIGHT if self.rel else 0)
+            + (AUTH_KIND_WEIGHT if self.auth_kind else 0)
+        )
 
 
 @dataclass
@@ -131,7 +231,21 @@ class _Selectors:
     observed: list[_NodeSelector] = field(default_factory=list)
 
 
-def _class_pins(selector_class: str, case_class: str) -> int | None:
+def _candidate_members(slot: str) -> frozenset[str]:
+    """The values a `{a, b}` slot enumerates — empty for any other spelling.
+
+    Split on the commas the SKILL's own `{a, b, c}` form writes, and no deeper: a nested brace
+    is not a shape the class grammar has, and treating an unterminated `{` as a one-member set
+    would let a dropped `}` name a value nothing can equal. `is_open_slot` has already said
+    this slot is unresolved; this only asks WHICH of the two unresolved spellings it is.
+    """
+    v = slot.strip()
+    if not (v.startswith("{") and v.endswith("}")):
+        return frozenset()
+    return frozenset(part.strip() for part in v[1:-1].split(",") if part.strip())
+
+
+def _class_pins(selector_class: str, case_class: str, vertex_type: str) -> int | None:
     """How many class slots this selector actually PINNED about this cell — `None` on a miss.
 
     A slot MATCHES when the selector names `*`, names the same value, or the case slot is
@@ -145,11 +259,11 @@ def _class_pins(selector_class: str, case_class: str) -> int | None:
 
     Crediting it inverted the ranking on the most common early-investigation shape. A vertex
     declared `class=??` is matched by `{class: bastion}` and `{class: ip-only}` and
-    `{class: client-cert}` alike; scoring those 3 put them above `{type: process,
-    slot: attrs.loginuid}` at 2 — so on the append that opened #919's own motivating slot the
-    top-3 was saturated by lessons the document says nothing about, the loginuid lesson was
-    cut, and (because `_frontier_recall` diffs the rendered block) no lessons block was
-    emitted at all.
+    `{class: client-cert}` alike; crediting those put them ABOVE a selector naming the exact
+    open `attrs.loginuid` — so on the append that opened #919's own motivating slot the top-3
+    was saturated by lessons the document says nothing about, the loginuid lesson was cut,
+    and (because `_frontier_recall` diffs the rendered block) no lessons block was emitted at
+    all. The numbers moved with THE SCALE (#935); the rule did not.
 
     ANCHORED, not per-slot, and the distinction is the whole rule — read it before "fixing"
     the `pinned += 1` below. The no-credit clause above applies to a pattern that matched
@@ -161,31 +275,86 @@ def _class_pins(selector_class: str, case_class: str) -> int | None:
     `name` tiebreak picks between them.
     """
     sel = class_slots(selector_class)
-    case = class_slots(case_class)
-    if len(sel) > len(case):
-        # A WHOLLY-open case class says nothing about its own arity either, so refusing an
-        # explicit triple against it would make the MOST open cell match the FEWEST selectors
-        # — the inverse of what the inversion exists for. Keyed on "every slot is open"
-        # rather than on "exactly one slot": `??/??` is as silent about its arity as `??` is,
-        # and gating on the length made the match NON-MONOTONIC — a document refined from
-        # `??` to `??/??` lost a three-slot selector that the less-informative `??` matched.
-        #
-        # STILL NON-MONOTONIC one arity over, and this branch cannot fix it: for
-        # `sel="ip-only/internet/novel"`, case `??/??` matches but `ip-only/??` falls to the
-        # `return None` below, so refining slot 0 of a SHORT tuple drops a selector the
-        # document matched one write earlier. The real answer is that class-tuple arity is a
-        # documented function of the vertex TYPE (SKILL.md §Classification grammar,
-        # `vocab.SLOTS`) and `_node_match_score` has already agreed on the type before it gets
-        # here — so both sides should be normalized to the type's arity in the frontier rather
-        # than guessed at from the cell. #919 follow-up.
-        if all(is_open_slot(c) for c in case):
-            case = list(case) + ["??"] * (len(sel) - len(case))
-        else:
-            return None
+    case = class_slots(case_class)  # a fresh list per call, so the padding below may mutate it
+
+    # NORMALISED TO THE TYPE, not guessed from the cell (#935). Class-tuple arity is a
+    # documented function of the vertex TYPE (SKILL.md §Classification grammar, now readable as
+    # `vocab.CLASS_GRAMMAR`), and `_node_match_score` has already agreed on the type before it
+    # calls here — so a cell that names FEWER slots than its type has is a cell that left the
+    # rest open, and padding says so.
+    #
+    # Guessing from the cell was non-monotonic across arity, which is the defect this fixes:
+    # for `sel="ip-only/internet/novel"`, case `??` and `??/??` both matched (they say nothing
+    # about their own arity, so the old code widened to the selector), and `ip-only/??/??`
+    # matched — but `ip-only/??` MISSED, because it was concrete enough to be taken at its
+    # length. Recording more about slot 0 of a two-slot tuple LOST a selector the vaguer
+    # document matched one write earlier, and nothing validates class arity, so that cell is
+    # diagnostic-clean.
+    #
+    # WIDENED, never truncated, and the widening is `len(case)`: a cell declaring MORE slots
+    # than the grammar allows is mis-authored, but truncating it would silently drop what the
+    # author did say and let a selector match through the hole. The extra slots stay, and a
+    # selector still has to agree with them. This is also what keeps an off-vocabulary `type`
+    # working: `vocab.class_arity` answers 1 for a type it does not know, and the cell's own
+    # length takes over.
+    #
+    # The case's OPENNESS is not a second widening, and it must not be. Padding to the type
+    # already admits an explicit triple against `??` or `??/??` on a three-slot type, so the
+    # only selector a "wholly-open case widens to the selector" clause ever reached was one
+    # naming MORE slots than the type has — and it reached that selector only while the cell
+    # was wholly open. `class: bash/child` on a `process` (one slot) matched `class=??` at 0
+    # and then returned `None` the moment the run settled the image basename to `bash`: the
+    # retrieval going dark on the write that made the document more specific, which is the
+    # exact non-monotonicity this whole function was rewritten to remove, one arity over.
+    arity = max(vocab.class_arity(vertex_type), len(case))
+    # A selector naming more slots than the type HAS is mis-authored — the same class of fault
+    # `_node_selector` drops a non-scalar cell for — and it matches nothing, at every stage of
+    # the cell's refinement rather than at some of them.
+    if len(sel) > arity:
+        return None
+    case += [OPEN_MARKER] * (arity - len(case))
+
     pinned = 0
     anchored = False
     for i, s in enumerate(sel):
         if not s or s == WILDCARD:
+            continue
+        # An UNRESOLVED selector slot earns NO pin and NO anchor. It used to anchor: `??`
+        # compares equal to an open case slot, so `??/internet/novel` against `??/??/??`
+        # anchored on slot 0 and then collected slots 1 and 2 as pins — a selector agreeing
+        # with the document about nothing scoring a full pinned triple and outranking every
+        # honest match. That is the inversion this function exists to refuse, wearing the open
+        # marker instead of a class literal. `is_open_slot`, not `s == OPEN_MARKER`, because
+        # the marker is one spelling of unresolved and the candidate set is the other, and a
+        # quoted `'{internal, dmz}/internet'` against a case still carrying that set is the
+        # identical fabrication one spelling over.
+        #
+        # WHAT THEY CONSTRAIN IS WHERE THE TWO SPELLINGS PART, and reading them as one thing
+        # was wrong (#935 review). In a DOCUMENT both mean "not settled" and the candidate set
+        # is the richer of the two. In a SELECTOR the author is stating a scope, so:
+        #
+        #   * `??` constrains NOTHING — the same non-statement `*` makes, and skipped by the
+        #     same `continue`. Refusing on it made the marker non-monotonic: a lesson keyed
+        #     `??/internet/novel` matched `??/??/??` and returned `None` once a refinement
+        #     settled slot 0, so retrieval went dark on the write that made the document MORE
+        #     specific — what `test_recording_more_about_a_class_slot_never_loses_a_selector`
+        #     forbids. A slot that says nothing cannot also refuse.
+        #   * `{internal, dmz}` is a DISJUNCTION — "this lesson is about internal or dmz
+        #     hosts". Treating it as `*` too let that lesson match, and score a pin against, a
+        #     `bastion` vertex. So it still refuses a slot settled outside its members, and
+        #     that refusal is not the non-monotonicity above: a selector naming `bastion`
+        #     against a cell settled to `ip-only` refuses for the same reason, and
+        #     `test_a_settled_slot_still_refuses_a_selector_that_disagrees_with_it` pins it.
+        #     Losing a selector the document CONTRADICTS is correct; losing one it merely
+        #     refined is the bug.
+        #
+        # It admits a member (`internal`) where the pre-#935 code refused even that — it
+        # compared the whole `{...}` string to the cell — so the refinement path INSIDE the
+        # set stays monotonic: `??` -> `{internal, dmz}` -> `internal` all match, at 0.
+        if is_open_slot(s):
+            members = _candidate_members(s)
+            if members and not is_open_slot(case[i]) and case[i] not in members:
+                return None
             continue
         pinned += 1
         if s == case[i]:
@@ -218,10 +387,12 @@ def _node_match_score(sel: _NodeSelector, item: OpenSlot | HeldFact) -> int | No
         return None
     if sel.slot and sel.slot != item.slot:
         return None
-    pinned = _class_pins(sel.class_pattern, item.class_tuple)
+    # `item.type`, not `sel.type`: the two are equal by the guard above whenever the selector
+    # declares one, and `item` is the side that is always populated.
+    pinned = _class_pins(sel.class_pattern, item.class_tuple, item.type)
     if pinned is None:
         return None
-    return sel.fixed_specificity + pinned
+    return sel.fixed_specificity + pinned * CLASS_PIN_WEIGHT
 
 
 def _edge_matches(sel: _EdgeSelector, contract: OpenContract) -> bool:
@@ -299,8 +470,8 @@ def _parse_selectors(fm: dict) -> _Selectors:
     return out
 
 
-def _best_match(selectors: _Selectors, frontier: Frontier) -> tuple[int, str] | None:
-    """The single most specific selector this lesson has that the frontier satisfies.
+def _best_match(selectors: _Selectors, frontier: Frontier) -> tuple[int, tuple[str, ...]] | None:
+    """This lesson's best score against the frontier, and EVERY item it reaches that score on.
 
     BEST, not sum: a lesson declaring five loose selectors should not outrank one that
     declares the exact slot in play. Scoring the winner makes the rank mean "how precisely
@@ -311,6 +482,12 @@ def _best_match(selectors: _Selectors, frontier: Frontier) -> tuple[int, str] | 
     lesson-worthy than a settled fact — the corpus's most valuable lesson is about what a
     KNOWN `loginuid` licenses — so tilting toward either half would bury one kind of advice
     behind the other rather than ranking by how precisely each speaks to this document.
+
+    ALL THREE lanes share it, and the edge lane only really does since #935. The `max` below
+    is what makes that a requirement rather than a nicety: two scores computed on scales that
+    are not comparable still compare, silently, and the answer is whichever scale ran hotter.
+    THE SCALE at the top of this module is the one place the weights are set, for exactly
+    that reason.
     """
     scored: list[tuple[int, str]] = [
         (score, f"{item.vertex_id} {item.type} {item.slot}={item.value}")
@@ -332,15 +509,32 @@ def _best_match(selectors: _Selectors, frontier: Frontier) -> tuple[int, str] | 
         for contract in frontier.contracts
         if _edge_matches(edge_sel, contract)
     ]
-    # `max` with a key returns the FIRST maximal element, which is the tie-break the two
-    # hand-rolled `>` accumulators had — one rule now instead of two that can drift apart.
-    return max(scored, key=lambda m: m[0], default=None)
+    if not scored:
+        return None
+    best = max(score for score, _ in scored)
+    # EVERY item at the best score, not the first of them (#935 review). This used to be a
+    # `max`, which returns the FIRST maximal element — so when a lesson tied across two cells,
+    # which cell it was recorded against came down to the order the vertices happen to be
+    # declared in. That was harmless while the answer was only rendered. `_spread_over_items`
+    # made it load-bearing: it places a lesson by the item it matched, so an arbitrary winner
+    # made block MEMBERSHIP a function of declaration order. The tie is not an edge case —
+    # replayed over both committed runs it holds on nearly every fence, including for the
+    # `attrs.loginuid` lesson this lane exists to retrieve, which ties across two cells on the
+    # last two fences of `turnN-A`.
+    #
+    # SORTED, so the tuple is a function of the frontier's CONTENT rather than of the order it
+    # was walked in — the same reason the ranking has a total tiebreak at all.
+    return best, tuple(sorted({item for score, item in scored if score == best}))
 
 
 def match_lessons(
     frontier: Frontier, corpus: Path, *, top_k: int = DEFAULT_TOP_K
 ) -> list[Hit]:
-    """The `top_k` lessons that speak most precisely to something still open."""
+    """The `top_k` lessons the block is built from — the head of `_spread_over_items`' order.
+
+    NOT simply "the `top_k` highest-scoring": the head covers as many DISTINCT frontier items as
+    the matches allow before any one item takes a second slot, so a lower-scoring lesson about
+    an unrepresented question outranks the runner-up on a question already covered (#935)."""
     # A NEGATIVE `top_k` would reach `hits[:top_k]` as a negative slice and return everything
     # BUT the last few — the opposite of a cap, on the one surface whose whole job is to bound
     # what the model is handed. Checked here as well as in `match_loaded` so an empty answer
@@ -370,23 +564,87 @@ def match_loaded(
     # second gate exists to prevent, with no error to notice it by.
     lessons = list(lessons)
     hits: list[Hit] = []
+    candidate_items: list[tuple[str, ...]] = []
     for lesson in lessons:
         fm = lesson.fm
         match = _best_match(_parse_selectors(fm), frontier)
         if match is None:
             continue
-        score, why = match
+        score, candidates = match
+        # `candidates[0]` is a PLACEHOLDER — `_spread_over_items` picks which of the tied
+        # items this lesson is finally recorded against, and rewrites `matched` to it.
+        candidate_items.append(candidates)
         hits.append(Hit(
             path=lesson.path,
             name=str(fm.get("name") or lesson.path.stem),
             frontmatter=fm,
             score=score,
-            matched=why,
+            matched=candidates[0],
         ))
-    # Name is the tiebreak so the order is total and stable: an unstable top-3 would make the
-    # injected block churn between appends that changed nothing about the frontier.
-    hits.sort(key=lambda h: (-h.score, h.name))
-    return hits[:top_k]
+    # Name is the LAST tiebreak so the order is total and stable: an unstable top-3 would make
+    # the injected block churn between appends that changed nothing about the frontier.
+    # Sorted TOGETHER, so each hit keeps its own candidate tuple across the reorder.
+    # `strict`, because the two lists are built by one loop and a mismatch would silently
+    # pair a hit with another lesson's candidate items rather than raise.
+    ranked = sorted(
+        zip(hits, candidate_items, strict=True),
+        key=lambda pair: (-pair[0].score, pair[0].name),
+    )
+    return _spread_over_items(ranked)[:top_k]
+
+
+def _spread_over_items(ranked: list[tuple[Hit, tuple[str, ...]]]) -> list[Hit]:
+    """The ranked hits, re-ordered so the head COVERS distinct frontier items before it doubles
+    up on one — the best lesson about each item first, then the second-best about each, and so
+    on, score order inside every pass. Each hit is recorded against the item it was PLACED on.
+
+    THE OTHER HALF OF THE REBALANCE (#935), and the scale alone is not enough without it. Two
+    selectors at their lanes' floors are genuinely equally specific — `{type: T, slot: class}`
+    says "this run has a vertex of type T" and `{anchor_kind: iam-policy}` says "this run has an
+    undischarged contract anchored on iam-policy" — and no honest weight orders them. Only the
+    `name` tiebreak could, which is how #919's motivating lesson got cut in the first place, and
+    reweighting alone just changes WHICH lesson the alphabet evicts: against the real corpus on
+    `turnN-A`, the two lessons keyed on `iam-policy` both matched the SAME contract `ac2`, took
+    two of three slots between them, and cut the `attrs.loginuid` lesson a second time.
+
+    So the ordering answers the question the block is actually for. It is three lines in front
+    of a model that has to decide what to read; two lessons about one contract is strictly less
+    of the frontier covered than one about the contract and one about the open attribute, and
+    the second lesson on an item is not thereby lost — it is behind the first lesson on every
+    OTHER item, which is where it belongs.
+
+    EVERY item a lesson tied on, not one of them, and that is not a refinement (#935 review).
+    A lesson frequently reaches its best score on several cells at once, and `_best_match` used
+    to hand over whichever the walk saw first — so placing a lesson by its item made block
+    MEMBERSHIP depend on the order vertices were declared in. Choosing the least-covered of a
+    lesson's tied items instead makes the block a function of the frontier's content, and it is
+    also simply the better answer: a lesson that CAN speak to something nothing else in the
+    block covers should be recorded against that.
+
+    TOTAL AND STABLE: `ranked` arrives sorted by `(-score, name)`, each candidate tuple is
+    itself sorted, and the placement below is a single forward pass — so two calls on one
+    frontier cannot disagree.
+
+    Stable is NOT the same as order-insensitive, and the difference is a gate.
+    `runtime/tools._frontier_recall` decides whether to inject by comparing WHICH lessons at
+    WHICH scores, and it SORTS that comparison because this function makes the emitted order a
+    property of coverage rather than of score alone; do not "simplify" it back to a list
+    comparison, which would re-staple a byte-identical set of lessons whenever coverage
+    reshuffled them.
+    """
+    used: dict[str, int] = {}
+    keyed: list[tuple[int, int, Hit]] = []
+    for position, (hit, candidates) in enumerate(ranked):
+        # The least-covered of this lesson's tied items, ties inside that broken by the
+        # candidate tuple's own sorted order — never by how the frontier was walked.
+        item = min(candidates, key=lambda c: (used.get(c, 0), c))
+        pass_index = used.get(item, 0)
+        used[item] = pass_index + 1
+        # `position` preserves the incoming `(-score, name)` order within a pass rather than
+        # re-deriving it, so this function owns exactly one rule and cannot drift from the sort.
+        keyed.append((pass_index, position, replace(hit, matched=item)))
+    keyed.sort(key=lambda k: (k[0], k[1]))
+    return [hit for _, _, hit in keyed]
 
 
 def _render_frontmatter(fm: dict) -> str:

@@ -1095,10 +1095,20 @@ def _frontier_recall(deps: AgentDeps, before: str, after: str) -> str:
         # class=ip-only/??/known-corp`) and re-staple ~1.5KB of precedent the model already
         # holds — the churn this gate exists to prevent. `matched` still RENDERS, because it is
         # the model's only account of why a lesson was pushed; it just does not decide.
-        shape = [(h.path, h.score) for h in hits]
-        if not shape or shape == [
-            (h.path, h.score) for h in match_loaded(was_frontier, lessons)
-        ]:
+        #
+        # SORTED, which is what keeps that true now that `_spread_over_items` exists (#935).
+        # The ranked list used to be ordered by `(-score, name)` alone, so the ORDER of these
+        # pairs was a function of the pairs themselves and comparing the list was already a
+        # comparison of the multiset. The spread re-orders on `matched` — it groups hits by
+        # which frontier item won `_best_match`'s `max` — so an unsorted comparison would let
+        # exactly the flip described above decide emission through the back door: same
+        # lessons, same scores, same frontmatter, re-stapled because one hit's `max` moved
+        # from v-003 to v-004. Sorting restores "which lessons, and at what score" as the
+        # whole question.
+        shape = sorted((str(h.path), h.score) for h in hits)
+        if not shape or shape == sorted(
+            (str(h.path), h.score) for h in match_loaded(was_frontier, lessons)
+        ):
             return ""
         now = render(hits)
         # RECORDED, on the same terms a Read is. `lessons_loaded.jsonl` is the loop's only

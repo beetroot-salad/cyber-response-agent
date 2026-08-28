@@ -8,6 +8,11 @@ itself is one fact with one owner rather than a glob each new rule re-derives (#
 parametrization a function of what happens to sit on the developer's disk — empty on CI,
 where the guard is supposed to run, and on a laptop able to go red over a run nobody is
 shipping.
+
+That is a rule about TRACKING, not about provenance: `fixtures-e2e/` holds run output too,
+and `_golden_invlang/turnN-A.investigation.md` is a copy of one committed so the lesson
+retrieval it is the north star for can be judged in CI (#935). Once a document is in the
+tree, every rule that says the corpus stays green owes it the same guard.
 """
 
 from __future__ import annotations
@@ -20,7 +25,8 @@ DEFENDER = Path(__file__).resolve().parents[1]
 
 @functools.cache
 def corpus_docs() -> list[Path]:
-    """The two `fixtures-e2e/` golden runs and the `examples/` the SKILL points at.
+    """The `fixtures-e2e/` golden runs, the `examples/` the SKILL points at, and the
+    committed run documents under `tests/_golden_invlang/`.
 
     Cached: this is called once per `parametrize` decorator, at COLLECTION time, and each
     call globs two trees and reads every hit to filter on the fence. The list is a fact
@@ -30,6 +36,7 @@ def corpus_docs() -> list[Path]:
     candidates = [
         *sorted((DEFENDER / "examples").glob("*.md")),
         *sorted((DEFENDER / "fixtures-e2e").glob("*/investigation.md")),
+        *sorted((DEFENDER / "tests" / "_golden_invlang").glob("*.investigation.md")),
     ]
     docs = [p for p in candidates if "```invlang" in p.read_text(encoding="utf-8")]
     # An empty parametrize list is a silently-green suite; if the corpus moves, this must
