@@ -76,7 +76,7 @@ _UNSAFE_METHODS = frozenset({"write_text", "write_bytes", "mkdir"})
 #: from this gate once already.
 LINT_HARD_GATED_MODULES: frozenset[str] = frozenset({
     "runtime/observe.py",
-    "runtime/driver.py",
+    "runtime/driver/",
     "runtime/session_store.py",
     "hooks/budget_enforcer.py",
     "runtime/circuit_breaker.py",
@@ -84,10 +84,26 @@ LINT_HARD_GATED_MODULES: frozenset[str] = frozenset({
     "runtime/tools_gather.py",
     "hooks/record_lead.py",
     "_io.py",
-    "runtime/tools.py",
-    "runtime/box.py",
+    "runtime/tools/",
+    "runtime/box/",
     "learning/author/drain.py",
 })
+
+
+def _hard_gated(rel: str) -> bool:
+    """Is this file one the census hard-gates?
+
+    An entry ending in `/` names a PACKAGE and covers every file under it. Three of the
+    census modules became packages (`runtime/driver.py` -> `runtime/driver/`), spreading
+    their writers across several files: an exact-match test would have kept covering only
+    the file that no longer exists, and the gate would have gone quiet on every writer in
+    the package — the same way the driver's fault-exit trace write went missing once
+    already. Covering the directory is strictly wider than the single file it replaced.
+    """
+    return rel in LINT_HARD_GATED_MODULES or any(
+        entry.endswith("/") and rel.startswith(entry) for entry in LINT_HARD_GATED_MODULES
+    )
+
 
 SUPPRESS_MARKERS = ("lint-unguarded-tree-write: ok",)
 
@@ -207,7 +223,7 @@ def main(
 
     hard_gated = [
         f for f in findings
-        if f.fingerprint.split(":")[0] in LINT_HARD_GATED_MODULES
+        if _hard_gated(f.fingerprint.split(":")[0])
     ]
     if hard_gated:
         # A census module's finding ends the run: the ratchet below never sees one, so there is

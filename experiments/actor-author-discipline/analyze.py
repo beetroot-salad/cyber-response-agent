@@ -221,7 +221,6 @@ def analyze_trial(trial_dir: Path) -> dict:
         except json.JSONDecodeError:
             metrics["author_result_parse_error"] = True
 
-    # Commit metadata
     cmsg = (trial_dir / "commit_message.txt").read_text() if (trial_dir / "commit_message.txt").exists() else ""
     metrics["commit_trailers_ok"] = (
         "Generation:" in cmsg and "Actor-Model:" in cmsg

@@ -50,7 +50,7 @@ rationale: |
 """
 
 
-# --------------------------------------------------------------- the input split
+# the input split
 
 def test_the_label_pass_is_shown_neither_the_story_nor_a_projection():
     """The whole point of two passes. A label pass that has read a confident projection
@@ -79,7 +79,7 @@ def test_the_verdict_pass_is_shown_the_story_projection_and_measurement():
         assert block in user
 
 
-# --------------------------------------------------------------- input assembly
+# input assembly
 
 def test_a_control_is_passed_with_its_liveness():
     """`window_live: false` means "not measured", not "nothing happens here" — a judge
@@ -161,7 +161,7 @@ def test_a_lookup_payload_passes_through_untouched(payload):
     assert judge._bounded(payload) == (payload, False)
 
 
-# ------------------------------------------------------------------- the grammar
+# the grammar
 
 def test_a_well_formed_label_parses():
     got = judge.parse_label(LABEL_OK)
@@ -222,7 +222,7 @@ def test_a_malformed_verdict_is_a_grammar_error(raw, why):
         judge.parse_verdict_reply(raw)
 
 
-# ----------------------------------------------------------------------- the call
+# the call
 
 def test_a_grammar_failure_is_retried():
     call = _call("not a mapping", LABEL_OK)
@@ -270,7 +270,7 @@ def test_the_prompt_is_sent_as_instructions_so_it_stays_a_cacheable_prefix():
     assert "<observed>" in sent["user"], "only the per-lead payload varies"
 
 
-# ------------------------------------------------------------- the headless runner
+# the headless runner
 
 def _fake_run(monkeypatch, report: dict, *, returncode: int = 0, stdout: str | None = None):
     """Capture the argv/env/cwd `call_model` would hand to `claude -p`."""
@@ -357,7 +357,7 @@ def test_the_call_reports_what_it_cost(monkeypatch):
     assert judge.call_model("i", "p", "claude-opus-5", "high").cost_usd == 0.0058
 
 
-# ------------------------------------------------------------------- provenance
+# provenance
 
 def test_each_lead_records_the_judge_that_actually_answered():
     got = judge.label_lead(judge.load_lead_inputs(CASE, "l-001"), model="claude-opus-5",
@@ -374,7 +374,7 @@ def test_provenance_is_read_back_rather_than_echoed_from_the_request():
     assert got["judge_model"] == "claude-sonnet-5"
 
 
-# -------------------------------------------------------------------------- tags
+# tags
 
 def test_the_tag_carries_the_resolved_model_effort_and_both_prompts():
     suffix = judge.tag_suffix("claude-opus-5", "high")
@@ -404,7 +404,7 @@ def test_the_configured_judge_can_be_overridden_for_a_run(monkeypatch):
     assert judge.judge_effort() == "medium"
 
 
-# ------------------------------------------------------------------- the audit set
+# the audit set
 
 def test_the_audit_set_is_the_hand_labelled_measurable_leads():
     entries = audit_judge.audit_set(audit_judge.AUDIT_CASES)
@@ -496,7 +496,7 @@ def test_the_audit_reports_the_resolved_judge_and_what_it_cost():
     assert report["tag_suffix"] == judge.tag_suffix("claude-opus-5", "high")
 
 
-# ------------------------------------------------------- the committed calibration
+# the committed calibration
 
 AUDITS = judge.GOLDEN_DIR / "audits"
 
@@ -559,7 +559,7 @@ def test_the_report_serialises_for_the_committed_artifact():
     assert "calibration:" in audit_judge.render(report)
 
 
-# ------------------------------------------------- the verdict pass's own noise floor
+# the verdict pass's own noise floor
 
 def _verdict_call(*answers):
     """A seam that cycles fixed verdicts, so instability can be scripted exactly."""
@@ -694,7 +694,7 @@ def test_the_verdict_pass_has_a_measured_noise_floor_for_the_current_prompts():
             assert len(row["faithful"]) == audit["repeats"], row["lead"]
 
 
-# --------------------------------------------------------------- the lead projection
+# the lead projection
 
 def test_a_plumbing_field_in_a_lead_row_never_reaches_a_judge_prompt():
     """`seq` is the queries-table key that pairs a control with its observed payload

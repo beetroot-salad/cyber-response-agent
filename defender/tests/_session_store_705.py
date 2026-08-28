@@ -69,9 +69,7 @@ from pydantic_ai.messages import (  # noqa: E402
 DEFENDER = Path(__file__).resolve().parents[1]
 
 
-# --------------------------------------------------------------------------
 # the two new targets, imported per test
-# --------------------------------------------------------------------------
 
 def store_mod():
     """`defender.runtime.session_store` — M1's module."""
@@ -83,9 +81,7 @@ def selection_mod():
     return importlib.import_module("defender.runtime.selection")
 
 
-# --------------------------------------------------------------------------
 # message builders — real ModelMessage objects, never dicts
-# --------------------------------------------------------------------------
 
 def user_request(text: str = "investigate", *, instructions: str | None = None) -> ModelRequest:
     parts: list[Any] = [UserPromptPart(content=text)]
@@ -135,9 +131,7 @@ def complete_pair() -> list[Any]:
     return [tool_call_response(), tool_return_request()]
 
 
-# --------------------------------------------------------------------------
 # store fixtures
-# --------------------------------------------------------------------------
 
 def runs_base(tmp_path: Path) -> Path:
     base = tmp_path / "defender-runs"
@@ -218,9 +212,7 @@ def nine_row_fixture(store, *, folded_body: str = "pre-fold chatter"):
     return {"row_ids": ids, "main": main, "fork_a": fork_a}
 
 
-# --------------------------------------------------------------------------
 # THE fault-injection fake — one per dependency, driven by data
-# --------------------------------------------------------------------------
 
 @dataclass
 class StoreFault:
@@ -262,7 +254,7 @@ class FaultStore:
         self.appends: list[dict] = []
         self.reads: list[dict] = []
 
-    # -- observation channel -------------------------------------------------
+    # observation channel
     @property
     def appended_messages(self) -> list[Any]:
         out: list[Any] = []
@@ -270,7 +262,7 @@ class FaultStore:
             out.extend(call["messages"])
         return out
 
-    # -- delegation ----------------------------------------------------------
+    # delegation
     def __getattr__(self, name: str) -> Any:
         return getattr(self._real, name)
 
@@ -367,9 +359,7 @@ def store_factory(tmp_path: Path, *, fault: StoreFault | None = None,
     return factory
 
 
-# --------------------------------------------------------------------------
 # small readers used by more than one script
-# --------------------------------------------------------------------------
 
 def jsonl(path: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]

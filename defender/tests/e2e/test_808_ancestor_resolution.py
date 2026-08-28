@@ -114,9 +114,7 @@ def _order(section: str, *needles: str) -> list[int]:
     return [section.index(n) for n in needles]
 
 
-# --------------------------------------------------------------------------------------- #
 # Call 1 — the shell alert
-# --------------------------------------------------------------------------------------- #
 
 def test_item_one_fetches_the_shell_alert_by_alert_id_against_its_own_signal_index(tmp_path):
     """F4(b) — item 1's FIRST backend call fetches the alert's own shell document by
@@ -595,9 +593,7 @@ def test_an_alert_id_that_is_not_a_document_id_issues_no_shell_fetch(tmp_path):
         "the refused shell fetch took the ancestors with it"
 
 
-# --------------------------------------------------------------------------------------- #
 # Call 2 — the branch
-# --------------------------------------------------------------------------------------- #
 
 def test_group_id_present_fetches_building_blocks_from_the_alerts_own_signal_index(tmp_path):
     """d2 — when the shell document carries `kibana.alert.group.id`, item 1's SECOND call
@@ -744,9 +740,7 @@ def test_the_group_scoped_fetch_filters_the_shell_alert_out_of_its_own_result(tm
     assert "Accepted password for dev.dana" in section
 
 
-# --------------------------------------------------------------------------------------- #
 # The `.ds-` → datastream mapping (K2)
-# --------------------------------------------------------------------------------------- #
 
 def test_ds_backing_index_maps_to_a_confined_datastream_pattern(tmp_path):
     """d6 — a concrete `.ds-logs-falco.alerts-default-2026.04.30-000003` backing index is
@@ -849,9 +843,7 @@ def test_an_absent_signal_index_falls_back_to_the_configured_alerts_index(tmp_pa
         "an alert with no signal_index did not fall back to the configured alerts pattern"
 
 
-# --------------------------------------------------------------------------------------- #
 # Rendering
-# --------------------------------------------------------------------------------------- #
 
 def test_resolved_ancestors_render_chronologically_on_both_paths(tmp_path):
     """d3/K4 — resolved ancestors are presented CHRONOLOGICALLY, sorted CLIENT-SIDE, on both
@@ -1040,9 +1032,7 @@ def test_the_rendered_block_survives_a_failed_queries_table_write(tmp_path):
     )
 
 
-# --------------------------------------------------------------------------------------- #
 # K13 — the degenerate id predicate, and its positive control
-# --------------------------------------------------------------------------------------- #
 
 def test_no_usable_ancestor_identifier_issues_no_fetch_at_all(tmp_path):
     """K13 (NEGATIVE) — when no usable ancestor identifier survives, item 1 issues NO ancestor

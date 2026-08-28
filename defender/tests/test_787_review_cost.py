@@ -59,9 +59,7 @@ _USAGE = {"input_tokens": 4000, "output_tokens": 1000, "cache_read_input_tokens"
           "cache_creation_input_tokens": 500}
 
 
-# --------------------------------------------------------------------------------------
 # The write side: a live stage on the run's own logger.
-# --------------------------------------------------------------------------------------
 
 
 def _response(text: str = "reads sound"):
@@ -211,9 +209,7 @@ def test_the_two_support_calls_stay_apart_in_the_log(run_dir):
     assert set(review_cost_by_lens(run_dir)) == set(_LENSES)
 
 
-# --------------------------------------------------------------------------------------
 # The read side: the review is priced, and it is disjoint from main's and gather's.
-# --------------------------------------------------------------------------------------
 
 
 def _wire(agent_id: str, model: str, usage: dict | None = None, kind: str = "response") -> dict:

@@ -26,9 +26,7 @@ from typing import Any
 import yaml
 
 
-# ---------------------------------------------------------------------------
 # Decision-relevant classifications + discriminating-field policy
-# ---------------------------------------------------------------------------
 # Hand-curated for the fixture set. In production this would live alongside
 # the playbook (e.g. playbook.discriminating_fields). For the experiment we
 # inline it so we can iterate without touching plugin knowledge files.
@@ -43,7 +41,6 @@ KEY_ATTRIBUTE_PATTERNS: dict[str, list[str]] = {
     "unclassified-endpoint":     [r".*"],  # never load-bearing
 }
 
-# Subnet buckets for network-endpoint comparison
 def _subnet_bucket(ip: str) -> str:
     if not ip:
         return "unknown"
@@ -54,9 +51,7 @@ def _subnet_bucket(ip: str) -> str:
     return "external"
 
 
-# ---------------------------------------------------------------------------
 # Prologue parsing (duplicated from handlers/predict.py to keep gate self-contained)
-# ---------------------------------------------------------------------------
 
 _FIRST_FENCE_RE = re.compile(r"```yaml\s*\n(?P<body>.*?)\n```", re.DOTALL)
 
@@ -84,9 +79,7 @@ def prologue_signature(prologue: dict) -> dict:
     }
 
 
-# ---------------------------------------------------------------------------
 # Precedent shape (loaded from archetype JSON snapshots in the experiment)
-# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -114,9 +107,7 @@ class GateThresholds:
     )
 
 
-# ---------------------------------------------------------------------------
 # IFF condition predicates (each returns (passed: bool, evidence: str))
-# ---------------------------------------------------------------------------
 
 
 def _iff_1_signature(p: Precedent, current_sig: str) -> tuple[bool, str]:
@@ -230,11 +221,6 @@ def _iff_11_lead_kind(p: Precedent, t: GateThresholds) -> tuple[bool, str]:
         p.lead_kind in t.allowed_lead_kinds,
         f"kind={p.lead_kind} allowed={sorted(t.allowed_lead_kinds)}",
     )
-
-
-# ---------------------------------------------------------------------------
-# Top-level decision
-# ---------------------------------------------------------------------------
 
 
 def evaluate(

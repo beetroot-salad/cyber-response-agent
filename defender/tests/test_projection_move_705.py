@@ -104,9 +104,7 @@ def _log_derived_reference(run_dir: Path) -> dict:
     return {"usage": totals, "total_cost_usd": round(cost, 6), "num_turns": len(records)}
 
 
-# ==========================================================================
 # the negative and its positive control
-# ==========================================================================
 
 def test_projections_are_built_from_the_store_not_from_logger_messages(tmp_path):
     """`tool_trace.jsonl` and the HTML pages are produced from the store: deleting the wire
@@ -141,9 +139,7 @@ def test_projections_are_built_from_the_store_not_from_logger_messages(tmp_path)
         "the store is where the content came from")
 
 
-# ==========================================================================
 # consumed-field equivalence, one demand per frozen reader
-# ==========================================================================
 
 def test_the_moved_projection_preserves_the_usage_transform_and_the_cost(tmp_path):
     """The store-derived projection emits `input_tokens` NET of cache reads and writes,
@@ -281,9 +277,7 @@ def test_tool_trace_is_written_at_most_once_per_run_id_or_fails_loud_on_a_second
         "the second write silently dropped events from the first")
 
 
-# ==========================================================================
 # gl5 / rp1 — the render surface R4 loaded and every reasoning artifact missed
-# ==========================================================================
 
 def test_the_two_render_drivers_under_one_run_id_do_not_clobber_each_other(tmp_path):
     """`render_and_mirror` writes `transcript.html` and `runtime.html` with a truncating
@@ -395,9 +389,7 @@ def test_the_visualizer_fails_closed_when_it_cannot_resolve_the_store(tmp_path, 
         "a failed render must not leave a page behind that a reader would trust")
 
 
-# ==========================================================================
 # gl1 — the store-backed render path's escaping
-# ==========================================================================
 
 def test_transcript_html_escapes_message_payload_content_reaching_the_store_backed_render(
         tmp_path):

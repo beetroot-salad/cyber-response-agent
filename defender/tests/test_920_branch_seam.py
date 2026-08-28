@@ -78,9 +78,7 @@ def branch_mod():
     return importlib.import_module("defender.runtime.branch")
 
 
-# ==========================================================================
 # the caller contract: fork's seeding and send-role hydration are one number
-# ==========================================================================
 
 def test_a_fresh_framework_message_list_underflows_against_a_fork(tmp_path):
     """    A fork already carries a `last_render_len` for the prefix it inherited, so an
@@ -187,9 +185,7 @@ def test_a_mid_pair_branch_point_hydrates_to_what_the_fork_was_charged_for(tmp_p
         "the child owns more than the one row it added")
 
 
-# ==========================================================================
 # the store factory: a sibling forks INTO the source run's database
-# ==========================================================================
 
 def _source_run(tmp_path, *, case_id: str = "case-source"):
     """A finished run's store and run dir, wired the way `run_investigation` wires them: the
@@ -268,9 +264,7 @@ def test_the_branch_factory_wears_the_store_factory_shape(tmp_path):
         "must not choose which database its prefix lives in")
 
 
-# ==========================================================================
 # branch-point legality
-# ==========================================================================
 
 def _legal_source(tmp_path, *, investigation: str | None, queries: str | None = "row"):
     """A source run whose session carries an `append_block` turn — a branch point past which
@@ -755,9 +749,7 @@ def test_a_snapped_frontier_is_refused_by_its_own_name(tmp_path):
         branch.validate(store, spec_at(store, run_dir, tip))
 
 
-# ==========================================================================
 # the two named seams
-# ==========================================================================
 
 def test_branch_spec_carries_the_four_branch_coordinates():
     """    `BranchSpec` is the whole of what a resume is told: which run to read the capture and

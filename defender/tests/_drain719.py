@@ -182,9 +182,7 @@ def cfg_for(paths: LoopPaths, name: str, **overrides):
     return dataclasses.replace(cfg, **overrides)
 
 
-# --------------------------------------------------------------------------------------
 # queue rows
-# --------------------------------------------------------------------------------------
 
 
 def obs_row(oid: str, *, outcome: str = "caught", **extra) -> dict:
@@ -287,9 +285,7 @@ def attempts_of(channel, rid: str) -> int | None:
     return None if row is None else row.get("attempts")
 
 
-# --------------------------------------------------------------------------------------
 # fakes — they inject faults or success, never classify
-# --------------------------------------------------------------------------------------
 
 
 def raising(exc: BaseException):
@@ -378,9 +374,7 @@ def blocking(gate: threading.Event, released: threading.Event, inner=None):
     return fake
 
 
-# --------------------------------------------------------------------------------------
 # concurrency helpers
-# --------------------------------------------------------------------------------------
 
 
 class Holder:

@@ -151,7 +151,6 @@ def _run_gate(work: Path, tmp_path: Path, *, argv: list[str] | None = None,
     )
 
 
-
 def test_unresolvable_base_ref_exits_2(tmp_path, capsys):
     """No origin at all. The old gate printed a WARN and returned [] -> exit 0."""
     repo = tmp_path / "solo"
@@ -218,7 +217,6 @@ def test_update_baseline_refuses_on_an_unusable_base(tmp_path):
         ["--update-baseline"], repo_root=work, base_ref="origin/main", baseline_path=baseline
     ) == 2
     assert baseline.read_text(encoding="utf-8") == before, "baseline was rewritten anyway"
-
 
 
 def test_stale_reference_is_flagged(tmp_path):
@@ -343,7 +341,6 @@ def test_baselined_finding_exits_0(tmp_path):
     assert _run_gate(
         work, tmp_path, entries={"caller.py:some_removed_helper": "knowingly tolerated"}
     ) == 0
-
 
 
 def test_a_dropped_import_line_does_not_condemn_the_MODULE_it_imported(tmp_path):
@@ -574,7 +571,7 @@ def test_a_parameter_named_like_the_removed_ident_is_a_declaration(tmp_path):
     assert _run_gate(work, tmp_path) == 0
 
 
-# --- declaration vs reference: what only the AST can separate ---------------
+# declaration vs reference: what only the AST can separate
 # Every row plants ONE shape in a file `main` owns (the PR does not touch it, so
 # the reference is visible to the scan — see `_upstream`'s docstring) and pins
 # the gate's WHOLE verdict: the exit code and the exact fingerprint set. Only

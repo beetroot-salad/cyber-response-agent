@@ -51,11 +51,6 @@ sys.path.insert(0, str(SOC_AGENT_ROOT))
 sys.path.insert(0, str(SOC_AGENT_ROOT / "scripts"))
 
 
-# ---------------------------------------------------------------------------
-# Fixture prompt extraction
-# ---------------------------------------------------------------------------
-
-
 def _extract_section(path: Path, start_marker: str, end_marker: str) -> str:
     text = path.read_text()
     s = text.index(start_marker) + len(start_marker)
@@ -95,11 +90,6 @@ def analyze_l2_prompt_with_dense(predict_dense: str) -> str:
     return base.replace(marker, inject + marker, 1)
 
 
-# ---------------------------------------------------------------------------
-# Claude invocation
-# ---------------------------------------------------------------------------
-
-
 def run_claude(system_prompt_file: Path, prompt: str, timeout: int = 900) -> dict:
     argv = [
         "claude",
@@ -134,11 +124,6 @@ def run_claude(system_prompt_file: Path, prompt: str, timeout: int = 900) -> dic
             "stdout": "",
             "stderr": f"TIMEOUT after {timeout}s",
         }
-
-
-# ---------------------------------------------------------------------------
-# Parsers / metrics
-# ---------------------------------------------------------------------------
 
 
 def parse_predict_metrics(stdout: str, *, treatment: bool = False) -> dict:
@@ -232,11 +217,6 @@ def parse_analyze_metrics(
         "disposition": disposition,
         "stdout_chars": len(stdout),
     }
-
-
-# ---------------------------------------------------------------------------
-# Trial runner
-# ---------------------------------------------------------------------------
 
 
 VARIANTS = {

@@ -49,7 +49,7 @@ def _flags(tmp_path: Path, src: str) -> bool:
     return bool(_scan(tmp_path, src))
 
 
-# ---------------------------------------------------------------- what it catches
+# what it catches
 
 
 def test_the_shipped_defect_is_caught(tmp_path):
@@ -101,7 +101,7 @@ def render(events, order):
 """) == ["m.py:render:order->t"]
 
 
-# ------------------------------------------------- what it must NOT catch (the idiom)
+# what it must NOT catch (the idiom)
 
 
 def test_the_counting_idiom_is_not_flagged(tmp_path):
@@ -174,7 +174,7 @@ def render(events, order):
 """)
 
 
-# --------------------------------------------------------------- scope + the ratchet
+# scope + the ratchet
 
 
 def test_a_function_is_scanned_once_not_twice(tmp_path):

@@ -57,9 +57,7 @@ def _doc(*parts: str) -> str:
     return "".join(parts)
 
 
-# ═══════════════════════════════════════════════════════════════════════════
 # the keyword exists
-# ═══════════════════════════════════════════════════════════════════════════
 
 def test_false_positive_is_in_the_shared_vocabulary():
     """It has to be in `_vocab` rather than invlang-local: `report.md`'s frontmatter and the
@@ -67,9 +65,7 @@ def test_false_positive_is_in_the_shared_vocabulary():
     assert "false-positive" in DISPOSITION_ENUM
 
 
-# ═══════════════════════════════════════════════════════════════════════════
 # the six ways the exit could be faked
-# ═══════════════════════════════════════════════════════════════════════════
 
 _FAILED_LEAD = (
     "```invlang\n"
@@ -142,9 +138,7 @@ def test_a_false_positive_exit_that_was_not_earned_is_rejected(
     assert any(fragment in e for e in errors), f"no error mentioned {fragment!r}"
 
 
-# ═══════════════════════════════════════════════════════════════════════════
 # and the shape that is allowed through
-# ═══════════════════════════════════════════════════════════════════════════
 
 def test_a_stated_defect_plus_a_committed_check_on_the_alerted_entity_closes():
     """The fast exit the disposition exists for: the defect is named, one lead tested the host
@@ -175,9 +169,7 @@ def test_a_zero_width_character_cannot_switch_the_gate_off(spelling):
     assert any("false-positive blocked" in e for e in errors)
 
 
-# ═══════════════════════════════════════════════════════════════════════════
 # the price is collected at BOTH boundaries
-# ═══════════════════════════════════════════════════════════════════════════
 
 def _paid(**over: str) -> str:
     rows = {"disposition": "false-positive", "detection_notes": _NOTES,

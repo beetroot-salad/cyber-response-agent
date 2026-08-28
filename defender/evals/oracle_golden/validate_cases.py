@@ -84,7 +84,7 @@ def _leads_of(case_dir: Path) -> dict[str, dict]:
     return out
 
 
-# ------------------------------------------------------------------------- checks
+# checks
 
 def check_case(case_dir: Path, by_id: dict[str, dict],
                known: dict[tuple[str, str, int], dict] | None = None) -> list[str]:
@@ -561,7 +561,7 @@ def check_replay_boundary() -> list[str]:
     return problems
 
 
-# ------------------------------------------------------------------ completeness
+# completeness
 
 def coverage(case_dir: Path, manifest: dict) -> dict:
     """What this case actually holds — reported, never asserted.

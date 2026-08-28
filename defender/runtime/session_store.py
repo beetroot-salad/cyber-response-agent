@@ -223,10 +223,8 @@ COMMIT;
 """
 
 
-# --------------------------------------------------------------------------
 # gather_boundary's extraction — pure Python, registered as a SQL function so a
 # malformed or pathologically deep `args` value can never abort the query (adv:PO2).
-# --------------------------------------------------------------------------
 
 def _first_wins_pairs(pairs: list[tuple[str, Any]]) -> dict:
     out: dict = {}
@@ -293,9 +291,7 @@ def _finish_connect(conn: sqlite3.Connection) -> None:
     conn.create_function("extract_lead_id", 1, _extract_lead_id)
 
 
-# --------------------------------------------------------------------------
 # the handle
-# --------------------------------------------------------------------------
 
 @dataclass
 class StoreHandle:
@@ -664,9 +660,7 @@ def _find_nonrepresentable(obj: Any) -> Any:
     return None
 
 
-# --------------------------------------------------------------------------
 # open / resolve
-# --------------------------------------------------------------------------
 
 def store_path_for(case_id: str, *, runs_base: Path) -> Path:
     if not isinstance(case_id, str) or not CASE_ID_RE.match(case_id):
@@ -765,9 +759,7 @@ def resolve_session_id(run_dir: Path) -> str | None:
     return session_id if isinstance(session_id, str) and session_id else None
 
 
-# --------------------------------------------------------------------------
 # the path walk
-# --------------------------------------------------------------------------
 
 def path_row_ids(store: Any, session_id: str) -> list[int]:
     """The parent walk from the session's RECORDED head — never from the highest-id row it
@@ -782,9 +774,7 @@ def path_row_ids(store: Any, session_id: str) -> list[int]:
     return ids
 
 
-# --------------------------------------------------------------------------
 # the log readers
-# --------------------------------------------------------------------------
 
 def displaced_tip(store: Any, session_id: str) -> int | None:
     """The MOST RECENT fold's displaced tip — `None` for a session with no fold entry
@@ -836,9 +826,7 @@ def main_session_id(store: Any, *, agent_id: str = "main") -> str:
     return rows[0][0]
 
 
-# --------------------------------------------------------------------------
 # the one role-scoped reader
-# --------------------------------------------------------------------------
 
 def _check_schema_version(store: Any) -> None:
     """`_refuse_stale_version`'s refusal, re-checked at read time against the handle actually
@@ -950,9 +938,7 @@ def ends_on_complete_pair(store: Any, session_id: str) -> bool:
     return row is not None and row[0] is None
 
 
-# --------------------------------------------------------------------------
 # payload validation, standalone (skew detection)
-# --------------------------------------------------------------------------
 
 def _has_extra_keys(raw: Any, redumped: Any) -> bool:
     if isinstance(raw, dict):

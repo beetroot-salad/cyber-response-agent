@@ -134,9 +134,7 @@ def test_the_benign_gate_is_live_on_that_document() -> None:
     assert "vertex v-001" in blocked[0]
 
 
-# --------------------------------------------------------------------------- #
 # rule #23 — the textual floor over declared claims
-# --------------------------------------------------------------------------- #
 
 def _fork_errors(doc: str) -> list[str]:
     """Rule #23's diagnostics, picked out of the flat list `validate_companion` returns.

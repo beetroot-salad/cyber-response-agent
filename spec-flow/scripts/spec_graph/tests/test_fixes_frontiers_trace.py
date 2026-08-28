@@ -14,9 +14,7 @@ from conftest import SPEC_GRAPH_DIR  # noqa: F401 — the import wires PYTHONPAT
 from test_mechanical_checks import run_script
 
 
-# ---------------------------------------------------------------------------
 # check_frontiers
-# ---------------------------------------------------------------------------
 
 def _frontier(path: Path, name: str, meta: str, digest: str = "ok") -> None:
     (path / name).write_text(f"---\n{meta}---\n\n## Digest\n\n{digest}\n", encoding="utf-8")
@@ -83,9 +81,7 @@ def test_frontiers_string_count_is_a_finding_not_a_crash(tmp_path):
     assert "[check_frontiers]" in p.stdout        # the report survived to its summary line
 
 
-# ---------------------------------------------------------------------------
 # trace
-# ---------------------------------------------------------------------------
 
 def test_trace_drivers_bad_base_ref_exits_2(make_repo):
     # A nonexistent/unfetched base made `git diff` exit 128 with empty stdout, which read

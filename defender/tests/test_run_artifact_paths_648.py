@@ -143,7 +143,6 @@ def test_degenerate_source_run_dir_is_not_the_runs_root_itself(tmp_path: Path) -
         assert not resolve_run_bundle(runs, degenerate).is_dir()
 
 
-#
 # Staging — the copy, not the read.
 #
 # The read gate above judges a path the moment a consumer follows it. Staging runs EARLIER and
@@ -151,7 +150,6 @@ def test_degenerate_source_run_dir_is_not_the_runs_root_itself(tmp_path: Path) -
 # write the TARGET's bytes in under an artifact's name. After that copy the planted content is
 # an ordinary in-run file and the gate has nothing left to catch. Nothing this system writes is
 # ever a link (a boxed run's exit scrub taints a tree holding one), so the boundary bans them.
-#
 
 
 def _outside_secret(tmp_path: Path) -> Path:

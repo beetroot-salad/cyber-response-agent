@@ -25,7 +25,7 @@ def _graph_modelling(*names: str) -> str:
     return "schema_version: 1\nactors:\n" + body
 
 
-# ── #0 output/exit contract ──────────────────────────────────────────────────
+# #0 output/exit contract
 def test_findings_list_and_exit_code_contract(make_repo):
     """main() exits 1 when an unmodelled driver reaches the change (finding printed) and 0 when
     none does — the findings-list / exit-code contract."""
@@ -58,7 +58,7 @@ def test_findings_list_and_exit_code_contract(make_repo):
     assert "UNMODELLED" not in rc.stdout
 
 
-# ── O1 direct named-import resolution ────────────────────────────────────────
+# O1 direct named-import resolution
 def test_from_pkg_import_changed_submodule_is_flagged(make_repo):
     """`from pkg import changed_submodule` flags the entrypoint: exit 1, finding names the
     entrypoint and the changed submodule."""
@@ -93,7 +93,7 @@ def test_fully_qualified_import_of_changed_module_is_flagged(make_repo):
     assert "gamma" in r.stdout
 
 
-# ── O3 relative & multi-name forms ───────────────────────────────────────────
+# O3 relative & multi-name forms
 @pytest.mark.parametrize(
     "entry_rel, entry_src, changed_rel",
     [
@@ -170,7 +170,7 @@ def test_parenthesized_multiline_import_is_flagged(make_repo):
     assert "psecond" in r.stdout
 
 
-# ── O2 transitive ────────────────────────────────────────────────────────────
+# O2 transitive
 @pytest.mark.parametrize("depth", [2, 3])
 def test_transitive_reach_to_changed_module_is_flagged(make_repo, depth):
     """An entrypoint that reaches a changed module only transitively (run→driver→compaction, and
@@ -240,7 +240,7 @@ def test_transitive_changed_sibling_fires_unchanged_stays_silent(make_repo):
     assert "unchangedsib" not in r.stdout
 
 
-# ── N5 termination ───────────────────────────────────────────────────────────
+# N5 termination
 @pytest.mark.parametrize(
     "topology",
     ["two_node", "three_ring", "self_loop"],
@@ -274,7 +274,7 @@ def test_import_cycle_terminates_and_still_flags(make_repo, topology):
     assert changed_stem in r.stdout
 
 
-# ── N3 false-positive freedom (negatives + paired controls) ──────────────────
+# N3 false-positive freedom (negatives + paired controls)
 def test_from_pkg_import_symbol_with_no_file_invents_no_driver(make_repo):
     """`from pkg import symbol` where no symbol.py exists invents no driver; a real changed
     submodule in the same shape does fire (control)."""
@@ -491,7 +491,7 @@ def test_pkg_head_stem_collision_yields_no_false_reach(make_repo):
     assert "driver" in rc.stdout
 
 
-# ── N4 suppression keyed on the entrypoint ───────────────────────────────────
+# N4 suppression keyed on the entrypoint
 def test_modelled_driver_stays_suppressed_after_fix(make_repo):
     """A modelled entrypoint (its stem, or its contextAlias, in the graph) stays suppressed even
     though it reaches a changed module; an unmodelled entrypoint fires."""
@@ -541,7 +541,7 @@ def test_suppression_keyed_on_entrypoint_not_reached_module(make_repo):
     assert "reachedmod" in r.stdout
 
 
-# ── N1 subprocess arm survives ───────────────────────────────────────────────
+# N1 subprocess arm survives
 def test_subprocess_arm_still_fires_ungated_by_changed(make_repo):
     """The subprocess re-exec arm still fires, with its own re-execute wording, ungated by the
     changed set."""
@@ -566,7 +566,7 @@ def test_subprocess_arm_still_fires_ungated_by_changed(make_repo):
     assert "subprocess" in r.stdout  # the re-exec wording, not the import wording
 
 
-# ── clean-exit and /tests/-exclusion boundaries ──────────────────────────────
+# clean-exit and /tests/-exclusion boundaries
 def test_diff_with_no_in_scope_reach_exits_zero(make_repo):
     """A diff no in-scope entrypoint reaches exits 0; a diff a fully-qualified import reaches exits
     1 (control)."""
@@ -624,7 +624,7 @@ def test_changed_module_under_tests_path_is_excluded(make_repo):
     assert "includedmod" in rc.stdout
 
 
-# ── step-7 resolved demands ──────────────────────────────────────────────────
+# step-7 resolved demands
 def test_cross_package_same_stem_no_false_reach(make_repo):
     """A same-stem module changed in a different package than the one imported yields no false
     reach (PATH-granular); the imported package's module changed does fire (control)."""
@@ -737,7 +737,7 @@ def test_co_firing_finding_reports_both_import_and_subprocess(make_repo):
     assert "subtarget" in r.stdout  # the subprocess re-exec hazard — must co-appear, not be masked
 
 
-# ── cold-reconciler composition holes ────────────────────────────────────────
+# cold-reconciler composition holes
 def test_cross_package_same_stem_no_false_reach_transitive(make_repo):
     """PATH-granular ∧ transitive (F1): a same-stem module changed in a package the entrypoint only
     reaches through a DIFFERENT package's transitive closure yields no false reach; the actually
@@ -841,7 +841,7 @@ def test_whole_repo_diff_anchoring_survives_subdir_cwd(make_repo):
     assert "mod" in r.stdout
 
 
-# ── locale robustness (read + output) ────────────────────────────────────────
+# locale robustness (read + output)
 # Forces a non-utf-8 (ascii) child locale on CPython/Linux: LC_ALL=C alone is coerced back to
 # C.UTF-8 by PEP 538, so PYTHONCOERCECLOCALE=0 + PYTHONUTF8=0 are needed to actually get ascii.
 _ASCII_LOCALE = {"LC_ALL": "C", "LANG": "C", "PYTHONCOERCECLOCALE": "0", "PYTHONUTF8": "0"}

@@ -57,9 +57,7 @@ def _effective(text):
     return effective_vertex_state(companion)
 
 
-# --------------------------------------------------------------------------- #
 # the vocabulary itself
-# --------------------------------------------------------------------------- #
 
 def test_ident_is_accepted_as_a_refinement_key(tmp_path):
     """O6: `key=ident` is legal, so the operation 7 of 7 measured refusals reached for
@@ -167,9 +165,7 @@ def test_document_written_before_the_key_became_legal(tmp_path):
     assert _effective(from_disk)["v-001"]["identifier"] == "svc.config-mgmt"
 
 
-# --------------------------------------------------------------------------- #
 # R2 — where the sharpened value lands
-# --------------------------------------------------------------------------- #
 
 def test_ident_refinement_reaches_effective_vertex_state(tmp_path):
     """The sharpened value lands in a DISTINCT top-level `identifier` slot — never in
@@ -388,9 +384,7 @@ def test_refinement_targets_a_vertex_never_declared(tmp_path):
     assert _diagnose(declared, None) == []
 
 
-# --------------------------------------------------------------------------- #
 # O3 — the `:V` declaration stays immutable
-# --------------------------------------------------------------------------- #
 
 def test_declared_identifier_after_a_sharpening(tmp_path):
     """Append-only compares the DECLARED identifier, so a sharpening is invisible to it.

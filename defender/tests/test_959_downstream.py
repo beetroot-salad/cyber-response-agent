@@ -93,9 +93,7 @@ def _gather_scene(tmp_path: Path, result: BoxResult, *, lead_id: str = "l-1"):
     return deps, box, payload
 
 
-# --------------------------------------------------------------------------- #
 # O3 - the neutrality negative, at the decision object.
-# --------------------------------------------------------------------------- #
 def test_no_verdict_moves_outside_the_enumerated_set():
     """Every command shape this suite and the two differentials already exercise reaches the
     same decision after the refactor as before it - the same allow, the same reason IDENTITY,
@@ -126,9 +124,7 @@ def test_no_verdict_moves_outside_the_enumerated_set():
         assert d.reason == base.MAIN.deny_reason, f"{cmd!r} moved"
 
 
-# --------------------------------------------------------------------------- #
 # FK8 - the operand set the four post-decision consumers read.
-# --------------------------------------------------------------------------- #
 def test_the_operand_set_the_four_post_decision_consumers_read_is_the_one_the_gate_authorised(
     tmp_path,
 ):
@@ -237,9 +233,7 @@ def test_the_audit_rows_raw_command_is_unmoved_for_every_shape_outside_the_enume
         )
 
 
-# --------------------------------------------------------------------------- #
 # The sibling surfaces: the read-tool lane.
-# --------------------------------------------------------------------------- #
 #: Paths and the answer both lanes must give for them, under MAIN. Every row is a constraint
 #: the read lane enforces - confine (the grant's scope fullmatch), the denylist, and resolve.
 _PARITY = (
@@ -348,9 +342,7 @@ def test_every_assertion_site_of_the_lexing_reason_agrees_with_the_reason_after_
         )
 
 
-# --------------------------------------------------------------------------- #
 # The object that crosses into the box.
-# --------------------------------------------------------------------------- #
 def test_the_object_the_gate_authorised_is_the_object_the_box_runs(tmp_path):
     r"""The pipelines the gate authorised are the pipelines the box runs: they cross the process
     boundary unmediated, with no re-derivation from text anywhere on the path, and every argv
@@ -405,9 +397,7 @@ def test_nothing_mutates_the_authorised_pipelines_between_authorisation_and_exec
     assert live == _argv_of(again)
 
 
-# --------------------------------------------------------------------------- #
 # What the model is told, and what the operator can see.
-# --------------------------------------------------------------------------- #
 def _names_codepoint(reason: str, char: str) -> bool:
     """Does `reason` name `char` the only way a reason can name a character nobody can see -
     by its codepoint? `U+00A0`, any case, leading zeros optional."""

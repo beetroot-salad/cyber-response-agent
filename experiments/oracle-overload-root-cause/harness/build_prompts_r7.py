@@ -19,7 +19,7 @@ RUN = Path("/tmp/defender-runs-v2/live-falco-nettool-1")
 STORY = Path("/tmp/ab-effort/medium/live-falco-nettool-1/actor_story.md").read_text()
 OUT = Path("/tmp/oracle-v2-probe")
 
-# --- the sanitizer ---------------------------------------------------------
+# the sanitizer
 _ISO = re.compile(r"\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?\b")
 _CLOCK = re.compile(r"\b\d{1,2}:\d{2}:\d{2}(?:\.\d+)?Z?\b")          # HH:MM:SS(.ms)(Z)
 _CLOCK_HM = re.compile(r"(?<![\d:])\d{1,2}:\d{2}Z\b")                # bare HH:MMZ
@@ -35,7 +35,6 @@ def sanitize_wtc(item: str) -> str:
     item = _CLOCK.sub("<alert-time>", item)
     item = _CLOCK_HM.sub("<alert-time>", item)
     return item
-# ---------------------------------------------------------------------------
 
 
 def first_event(position):

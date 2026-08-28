@@ -181,9 +181,7 @@ def resume(store, run_dir, message_id, target: Path):
     return branch.open_main_session(store, spec_at(store, run_dir, message_id), target)
 
 
-# ==========================================================================
 # 1. which leads existed at the branch point
-# ==========================================================================
 
 @pytest.mark.parametrize(("landed", "expected"), [
     (0, {UNDISPATCHED, "l-001"}),
@@ -474,9 +472,7 @@ def test_a_dispatch_counts_however_the_provider_spelled_its_arguments(tmp_path, 
         UNDISPATCHED, "l-001"}
 
 
-# ==========================================================================
 # 2. what the sibling's run dir ends up holding
-# ==========================================================================
 
 def test_the_sibling_inherits_the_leads_the_branch_point_held_and_no_later_one(tmp_path):
     """    The sibling's table, payload tree and summaries carry the branch point's leads only.
@@ -604,9 +600,7 @@ def test_the_sibling_does_not_inherit_the_source_runs_own_account_of_itself(tmp_
         "another run's")
 
 
-# ==========================================================================
 # 3. the copy is a boundary
-# ==========================================================================
 
 @pytest.mark.parametrize("name", ["executed_queries.jsonl", "gather_raw", "gather_summaries"])
 def test_a_symlink_wearing_an_artifacts_name_is_refused_rather_than_followed(tmp_path, name):

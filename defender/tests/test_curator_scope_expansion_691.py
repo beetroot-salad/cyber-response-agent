@@ -31,9 +31,7 @@ from defender.learning.author.verify_forward.engine import VERIFY_DEF  # noqa: E
 from defender.learning.core.config import DefenderPaths  # noqa: E402
 
 
-# ===========================================================================
 # MD-8 (F11) — the forward-check verifier must not reach the MAIN checkout
-# ===========================================================================
 
 def test_the_forward_check_verifier_does_not_reach_the_main_checkout(tmp_path):
     """MD-8 (F11, §7 D4): a forward-check verifier spawned from a WORKTREE curator must not resolve
@@ -62,9 +60,7 @@ def test_the_forward_check_verifier_does_not_reach_the_main_checkout(tmp_path):
     assert control.defender_dir.resolve() == (wt / "defender").resolve()
 
 
-# ===========================================================================
 # MD-9 (F37/S120) — the post-run audit agrees with the write-lane gate
-# ===========================================================================
 
 def _git_repo(tmp_path: Path) -> Path:
     """A worktree-shaped git repo with the three corpora + a non-lesson dir, one commit deep, so

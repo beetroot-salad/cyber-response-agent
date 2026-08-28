@@ -103,7 +103,7 @@ def test_list_no_flag_passes_status_through(monkeypatch, ctx):
     assert seen["params"]["status"] == "open"
 
 
-# ── the key grammar as REQUIRED environment config (#684) ───────────────────────────────
+# the key grammar as REQUIRED environment config (#684)
 
 
 def _write_config(ctx, **values) -> None:
@@ -162,7 +162,7 @@ def test_run_env_overrides_the_declared_grammar(ctx, real_config):
     assert ticket_adapter.key_pattern(over) == "CASE-[0-9]+"
 
 
-# ── the key/filter encoding symmetry (#684 follow-up) ───────────────────────────────────
+# the key/filter encoding symmetry (#684 follow-up)
 
 
 @pytest.mark.parametrize(
@@ -278,7 +278,7 @@ def test_list_filters_ride_urlencoded_not_raw(monkeypatch, ctx, label, q):
     assert query.count("&") == 2, "a filter value injected a query-parameter separator"
 
 
-# ── the case-opened boundary verb (Fork J / d33) ─────────────────────────────────────────
+# the case-opened boundary verb (Fork J / d33)
 
 
 def test_case_opened_at_yields_a_timestamp_and_never_the_record(monkeypatch, ctx):

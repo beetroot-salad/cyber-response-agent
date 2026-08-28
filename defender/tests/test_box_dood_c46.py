@@ -49,9 +49,7 @@ MOUNTS: tuple[tuple[Path, Path], ...] = (
 )
 
 
-# --------------------------------------------------------------------------- #
 # C46 — source translation
-# --------------------------------------------------------------------------- #
 def test_a_nested_path_is_rewritten_through_its_covering_mount():
     assert _daemon_source(Path("/workspace/defender"), MOUNTS) == Path(
         "/home/dev/projects/repo/defender"
@@ -236,9 +234,7 @@ def test_the_refusal_names_the_knob_that_actually_moves_the_uncovered_path():
     )
 
 
-# --------------------------------------------------------------------------- #
 # C46 — discovering THIS container's mount table (the half that runs in production)
-# --------------------------------------------------------------------------- #
 class _InspectDocker:
     """Answers `docker inspect <id>` for one known id and fails for every other."""
 
@@ -307,9 +303,7 @@ def test_absent_id_sources_off_a_container_are_not_an_error(tmp_path):
     assert box_mod._own_container_ids(tmp_path / "nope", tmp_path / "also-nope") == ()
 
 
-# --------------------------------------------------------------------------- #
 # F1 — the runtime lever, exercised at BOTH settings (intent_540 §542)
-# --------------------------------------------------------------------------- #
 class _CapturingDocker:
     """Minimal `docker=` seam: reports no live container, fails create so `start_box` raises
     before any sentinel work, and hands back an empty mount table."""
@@ -408,9 +402,7 @@ def test_request_runtime_lever_honours_an_explicit_runc(monkeypatch):
     assert _request_runtime_of(monkeypatch, "runc") == "runc"
 
 
-# --------------------------------------------------------------------------- #
 # C46 — the wiring: the discovered table must actually REACH the argv builders
-# --------------------------------------------------------------------------- #
 # Every translation test above calls the argv builders directly with a table handed in. That
 # leaves the connection between discovery and use unpinned: drop the mounts argument at
 # either call site and all of them stay green while the shipped code emits untranslated

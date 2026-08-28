@@ -49,7 +49,6 @@ def ensure_user(username: str, shell: str, sudo: bool) -> None:
         # -m creates $HOME; -U makes a matching group.
         run(["useradd", "-m", "-s", shell, "-U", username])
 
-    # (Re)set password.
     subprocess.run(["chpasswd"], input=f"{username}:{DEFAULT_PASSWORD}\n",
                    text=True, check=True)
 
@@ -95,7 +94,6 @@ def resolve_users(inv: dict, host_name: str) -> list[dict]:
         sudo_hosts = role_cfg.get("sudo_hosts")
         if sudo_hosts is not None:
             sudo = host_name in sudo_hosts
-        # Find every realm user carrying this role.
         matching = [u for u, r in realm_users.items() if r == role_name]
         for username in matching:
             resolved[username] = {"username": username, "shell": shell, "sudo": sudo}

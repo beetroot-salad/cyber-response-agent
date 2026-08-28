@@ -87,7 +87,7 @@ from defender.tests.e2e.test_query_tool_611 import (
     raising,
 )
 
-# ---- THE SURFACE UNDER TEST — none of it exists on this base (RED by construction) ----
+# THE SURFACE UNDER TEST — none of it exists on this base (RED by construction)
 from defender.scripts.gather_tools.record_query import (  # noqa: E402
     BASH_SHIM_QUERY_ID,
     REPEAT_TRIP_QUERY_ID,
@@ -230,11 +230,9 @@ def _reduce(run_dir: Path, seq: int = 0, lead: str = LEAD, sql: str = "SELECT co
     return Turn(tool_calls=[("bash", {"command": f"cat {payload} | {SQL} '{sql}'"})])
 
 
-# =============================================================================================
 # O1 — an agent-fixable gather failure produces exactly one curator-readable record, WHATEVER
 #      tool it came through. Today `_tool_bash` (`runtime/tools.py:156-181`) writes nothing, so
 #      every shim failure is invisible to the whole offline loop.
-# =============================================================================================
 
 
 def test_failing_reducer_shim_writes_one_row(tmp_path):
@@ -409,12 +407,10 @@ def test_main_lane_shim_failure_writes_no_row(tmp_path):
     assert r.own_rows == [], "a main-lane shim failure wrote a queries row"
 
 
-# =============================================================================================
 # O4 — nothing this change writes may name a system that does not exist. `derive_system`
 #      (`record_query.py:36`) returns 'sql' for a `defender-sql` pipeline, which would invite
 #      the curator to create a phantom `skills/sql/execution.md` — the class closed for `h-*`
 #      in #821/#828. The system comes from the PAYLOAD the reducer reads instead.
-# =============================================================================================
 
 
 def test_shim_row_takes_the_system_of_the_payload_it_reduces(tmp_path):
@@ -505,12 +501,10 @@ def test_shim_row_reaches_the_curator_and_nothing_else(tmp_path):
     assert BASH_SHIM_QUERY_ID not in by_id
 
 
-# =============================================================================================
 # O2 — a lead that loops teaches, and pollutes nothing. #807's trip row today carries the
 #      MODEL's coined id, so it misroutes: `elastic.sshd-raw-events-window` is not a catalog
 #      member, so `synthesize_drafts` mints a `_draft/` template proposing the very query that
 #      dead-ended the lead. A catalog-named id misroutes the other way, into `build_handoff`.
-# =============================================================================================
 
 
 def _looping_run(tmp_path, run_id: str, query_id: str | None) -> _Res:
@@ -620,10 +614,8 @@ def test_shim_row_never_causes_a_trip(tmp_path):
     assert all(row["exit_code"] == 1 for row in r.shim_rows), "a shim row carries a guard exit"
 
 
-# =============================================================================================
 # Security — the committed corpus is the asset. A shim row's command is model-authored text
 #      that reaches the curator's prompt and can be echoed into `execution.md`.
-# =============================================================================================
 
 
 def test_shim_command_is_capped_in_the_record(tmp_path):
@@ -664,9 +656,7 @@ def test_shim_row_payload_is_not_the_untrusted_stdout(tmp_path):
     assert "pwned" not in json.dumps(shim)
 
 
-# =============================================================================================
 # O3 — the channel can complete a revolution.
-# =============================================================================================
 
 
 def test_pitfalls_threshold_default_is_three():
@@ -676,10 +666,8 @@ def test_pitfalls_threshold_default_is_three():
     assert loop_config.pitfalls_threshold() == 3
 
 
-# =============================================================================================
 # Non-obligations — examined noes, pinned so a rejected reading cannot re-enter as an
 #      assumption. Each is a `Demand {form: waiver}` in the graph.
-# =============================================================================================
 
 
 def test_catalog_template_failures_still_route_to_the_lead_author(tmp_path):

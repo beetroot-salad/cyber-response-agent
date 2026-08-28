@@ -421,7 +421,7 @@ def test_d1_shared_wrap_seam():
     # The runtime frames TOOL RETURNS, so it takes the minting entry point — never `wrap`,
     # which would reintroduce the caller-supplied salt F-1 turned on.
     assert any(
-        path == "defender/runtime/tools.py"
+        path == "defender/runtime/tools/__init__.py"
         and module == "defender._untrusted"
         and name == "wrap_fresh"
         for path, module, name in imports
@@ -515,7 +515,9 @@ def test_d6_every_stage_boundary_grammar_uses_wrap(tmp_path, monkeypatch):
         "pipeline/oracle/sample.py",
         "author/verify_forward/checks.py",
         "author/shared.py",
-        "leads/lead_author.py",
+        # The handoff prompt is built here since `lead_author.py` became a facade — this
+        # list names the file that RENDERS a boundary, not the module a reader imports.
+        "leads/lead_author/_handoff.py",
         "leads/pitfalls_curator.py",
     }
     called = set()

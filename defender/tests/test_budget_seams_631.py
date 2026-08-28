@@ -706,7 +706,7 @@ def test_every_agent_construction_pins_retries_explicitly(tmp_path):
     site and observes that two consecutive denials do NOT abort the run, which they
     would at the framework default of None."""
     sites = []
-    for src in (DEFENDER / "runtime" / "driver.py",
+    for src in (DEFENDER / "runtime" / "driver" / "__init__.py",
                 REPO_ROOT / "experiments" / "gather-verifiable-code-289" / "run_arms.py"):
         tree = ast.parse(src.read_text())
         for node in ast.walk(tree):

@@ -120,9 +120,7 @@ def _read_alert_turns(run_dir: Path, n: int) -> list[Turn]:
             for _ in range(n)]
 
 
-# ==========================================================================
 # the fifth seam, and the identity the run mints
-# ==========================================================================
 
 def test_run_investigation_takes_a_store_factory_seam(tmp_path):
     """`run_investigation` takes a store-factory argument as a VALUE, alongside
@@ -191,9 +189,7 @@ def test_run_investigation_mints_a_case_id_and_writes_a_run_dir_pointer(tmp_path
         "by persist.py's allowlist copy and evals/harness.py's copytree")
 
 
-# ==========================================================================
 # the capability, its seam, and the flag that no longer gates it
-# ==========================================================================
 
 def test_capability_attaches_at_the_existing_extra_capabilities_seam(tmp_path):
     """Both the main agent and the gather agent receive the store capability through
@@ -307,9 +303,7 @@ def test_the_pre_change_construction_assertions_are_overturned(tmp_path, monkeyp
     assert isinstance(on[0], driver.ProcessHistory)
 
 
-# ==========================================================================
 # whose history is store-rendered
-# ==========================================================================
 
 def test_main_history_is_store_rendered(tmp_path):
     """The main agent's history on every request past the first is the store's render,
@@ -403,9 +397,7 @@ def test_gather_history_is_not_store_rendered_and_learning_stages_get_neither(tm
     assert "selection" not in stage_source, neither
 
 
-# ==========================================================================
 # fail-closed — real faults through the real primitive, timed by the seam
-# ==========================================================================
 
 @pytest.mark.parametrize("mode", ["absent", "corrupt", "locked", "disk-full"])
 def test_store_append_is_fail_closed(tmp_path, mode):
@@ -542,9 +534,7 @@ def test_the_request_logging_guard_stays_around_the_log_path_only(tmp_path):
         "the store append alone")
 
 
-# ==========================================================================
 # the run-end flush — R11's true `finally`
-# ==========================================================================
 
 def test_run_end_flush_captures_the_terminal_response_on_every_exit(tmp_path, monkeypatch):
     """A run that ends by `UsageLimitExceeded`, `BudgetKill`, `RunAborted` or an uncaught

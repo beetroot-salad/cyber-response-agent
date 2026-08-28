@@ -111,9 +111,7 @@ def _records(paths: LoopPaths) -> list[dict]:
     return persist.merge_pitfalls(persist.read_pitfalls(paths))
 
 
-# =============================================================================================
 # The collapse itself — one looping lead is one lesson, and the loop is still legible.
-# =============================================================================================
 
 
 def test_one_looping_leads_eight_turns_become_one_record_carrying_its_count(paths):
@@ -287,10 +285,8 @@ def test_an_empty_append_leaves_the_queue_untouched(paths):
     assert paths.pitfalls.file.read_text(encoding="utf-8") == before
 
 
-# =============================================================================================
 # O3's repair — the threshold now counts distinct mistakes, so clearing it means the channel
 # learned that many things.
-# =============================================================================================
 
 
 def _invoke_spy(calls: list) -> object:
@@ -393,9 +389,7 @@ def test_the_wake_gate_counts_what_the_curation_gate_counts(paths, monkeypatch):
     assert drains._has_lead_author_work(paths) is True
 
 
-# =============================================================================================
 # What the curator receives — collapsed, counted, severest first.
-# =============================================================================================
 
 
 def test_the_handoff_carries_the_count_and_leads_with_it():

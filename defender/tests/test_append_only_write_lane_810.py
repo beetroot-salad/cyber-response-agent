@@ -93,9 +93,7 @@ def _only(diags, predicate):
     return hits[0]
 
 
-# --------------------------------------------------------------------------- #
 # the typed diagnostic
-# --------------------------------------------------------------------------- #
 
 def test_the_bad_key_is_the_documents_only_fault():
     """Guards the fixture the rest of this file leans on. An earlier draft declared the lead
@@ -173,9 +171,7 @@ def test_validate_companion_still_returns_the_same_strings():
     assert [d.severity for d in diagnose(_BAD_ATTR_KEY, None)] == ["warning"]
 
 
-# --------------------------------------------------------------------------- #
 # the refusal says nothing landed
-# --------------------------------------------------------------------------- #
 
 @pytest.mark.parametrize(("kind", "text", "current"), [
     # `_ERROR_INVLANG`, not `_BAD_ATTR_KEY`: since #836 a bad refinement key WARNS and the
@@ -274,9 +270,7 @@ def test_an_accepted_document_still_returns_no_reason():
     assert validate_investigation("", None) is None
 
 
-# --------------------------------------------------------------------------- #
 # the bounded tail
-# --------------------------------------------------------------------------- #
 
 def test_tail_never_starts_mid_row():
     """An invlang row is `|`-delimited and a half row reads as truncated data, so the window
@@ -313,9 +307,7 @@ def test_tail_of_a_real_investigation_is_a_fraction_of_the_whole():
     assert out.startswith("l-")
 
 
-# --------------------------------------------------------------------------- #
 # append_block, at the handler
-# --------------------------------------------------------------------------- #
 
 def _main_deps(tmp_path):
     """MAIN deps through the real `bind` seam — real compiled policy, real gate."""
@@ -449,9 +441,7 @@ def test_a_duplicate_append_is_accepted_so_the_refusal_must_be_believed(tmp_path
     assert _tail_chars(text, len(block)).strip() == block.strip()
 
 
-# --------------------------------------------------------------------------- #
 # the roster has one owner, and the prompt does not carry a second copy
-# --------------------------------------------------------------------------- #
 
 def test_no_skill_frontmatter_reaches_a_system_prompt():
     """`_main_instructions` used to read SKILL.md whole, so its `allowed-tools:` line was the
@@ -494,9 +484,7 @@ def test_the_registered_roster_is_what_the_toolset_grants():
     assert MAIN_DEF.tools.write is False
 
 
-# --------------------------------------------------------------------------- #
 # #825 — the correction follows the block's DECLARED header, not a convention
-# --------------------------------------------------------------------------- #
 
 _TRANSPOSED = """```invlang
 :V prologue.vertices [id|type|class|ident|attrs?]

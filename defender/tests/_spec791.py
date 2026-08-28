@@ -306,8 +306,6 @@ def loop_paths(tmp_path: Path):
     return LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
 
 
-
-
 def satisfy_entrypoint_keys(monkeypatch, tmp_path: Path) -> None:
     """Give the ENTRYPOINT's startup preflight a key per provider and a runs base under tmp,
     so a scenario about the tail does not fail in the credential step ahead of it.
@@ -432,7 +430,7 @@ class SpecTail:
         self.run_dirs: list[Path] = []
         self.steps: list[TailStep] = []
 
-    # -- the seam's three dependencies -------------------------------------------------
+    # the seam's three dependencies
     def lifecycle(self, *, run_dir: Path, **_kw: Any) -> dict:
         from defender.runtime import scrub as scrub_mod
 
@@ -452,7 +450,7 @@ class SpecTail:
     def close_case_ticket(self, run_dir: Path) -> None:
         self._note("close_case_ticket", run_dir)
 
-    # -- what the steps saw --------------------------------------------------------------
+    # what the steps saw
     def _note(self, name: str, run_dir: Path) -> None:
         from defender.runtime import scrub as scrub_mod
 

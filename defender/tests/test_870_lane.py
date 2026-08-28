@@ -44,9 +44,7 @@ def _collect(*leads):
     return collect_general_failures(list(leads), RUN, catalog=[])
 
 
-# =============================================================================================
 # O3 / O3b — the row reaches the queue, normalized, whatever it was attributed to.
-# =============================================================================================
 
 
 def test_shim_row_enqueues_with_its_system_normalized():

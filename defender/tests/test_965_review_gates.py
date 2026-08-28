@@ -44,9 +44,7 @@ def _run(gate, tmp_path: Path, files: dict[str, str]) -> int:
     )
 
 
-# --------------------------------------------------------------------------------------
 # lint_tree_read_follows_link
-# --------------------------------------------------------------------------------------
 
 def test_a_link_following_admit_check_in_a_tree_reader_is_refused(tmp_path: Path) -> None:
     """`is_file()` answers about a link's TARGET, so admitting on it admits whatever the model
@@ -125,9 +123,7 @@ def test_every_read_gate_baseline_entry_carries_a_reason() -> None:
     assert all(reason.strip() for reason in entries.values())
 
 
-# --------------------------------------------------------------------------------------
 # lint_dataclass_fields
-# --------------------------------------------------------------------------------------
 
 def test_the_raw_field_mapping_is_refused(tmp_path: Path) -> None:
     """It also holds ClassVar/InitVar pseudo-fields, which the generated `__init__` does not
@@ -174,9 +170,7 @@ def test_the_repo_itself_passes_the_fields_gate_on_an_empty_baseline() -> None:
     assert FIELDS_GATE.main([]) == 0
 
 
-# --------------------------------------------------------------------------------------
 # the case-stable id rule
-# --------------------------------------------------------------------------------------
 
 @pytest.mark.parametrize("run_id", ["base", "w1", "2026-05-25t15.30.45z-alert"])
 def test_an_already_folded_id_is_case_stable(run_id: str) -> None:
@@ -211,9 +205,7 @@ def test_an_episode_id_carrying_upper_case_is_refused() -> None:
         cli.refuse_bad_episode_id("Ep1")
 
 
-# --------------------------------------------------------------------------------------
 # the outbound-body type
-# --------------------------------------------------------------------------------------
 
 def test_the_wire_takes_only_a_body_that_went_past_the_clock() -> None:
     """Both minting functions consult `ctx.as_of`; `_http_json` accepts what they return and

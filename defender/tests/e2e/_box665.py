@@ -35,13 +35,11 @@ DEFENDER = Path(__file__).resolve().parents[2]
 REPO_ROOT = DEFENDER.parent
 
 
-# --------------------------------------------------------------------------- #
 # Live-daemon skip convention (mirrors test_540_box_boundary.py): the `[live]`
 # mechanism-confirmation tests carry the marker to write-code-from-spec's first
 # live box run; `-m "not live"` (the gate) never runs them, and under
 # docker-outside-of-Docker they skip because bind SOURCES resolve on the daemon
 # host, invisible to this process.
-# --------------------------------------------------------------------------- #
 _NO_DAEMON = not daemon_reachable()
 _DOOD = (not _NO_DAEMON) and is_dood()
 
@@ -52,13 +50,11 @@ requires_live_box = pytest.mark.skipif(
 )
 
 
-# --------------------------------------------------------------------------- #
 # The declarative docker fault-injection fake — the tier-2 seam of the
 # fault-injection hierarchy (the daemon is too expensive/nondeterministic to
 # drive host-side, so its faults are data whose content cites the ledger claim
 # that observed them on a real box). box.py's REAL argv build + framing run
 # unchanged, so a geography demand asserts on `create_argv`.
-# --------------------------------------------------------------------------- #
 def _cp(rc: int, out: str = "", err: str = "") -> subprocess.CompletedProcess:
     return subprocess.CompletedProcess(args=["docker"], returncode=rc, stdout=out, stderr=err)
 
@@ -203,7 +199,7 @@ class RecordingDocker:
                 return _cp(1, "", "cat: no such file or directory\n")
         return _cp(0)
 
-    # ---- argv readers (parse the captured `docker run` argv) ----------------
+    # argv readers (parse the captured `docker run` argv)
     def _argv(self) -> list[str]:
         assert self.create_argv is not None, "docker create was never invoked"
         return self.create_argv
@@ -287,10 +283,8 @@ def reaped_after_create(calls) -> bool:
     return ["docker", "rm", "-f", name] in calls[create + 1:]
 
 
-# --------------------------------------------------------------------------- #
 # The future box.py geography seam (O8/M2: callers own the geography, box.py
 # renders + validates the boundary). Referenced lazily so HEAD still collects.
-# --------------------------------------------------------------------------- #
 def Mount(source: Path, target: Path, writable: bool = False):
     """box.Mount(source, target, writable) — future symbol; AttributeError at HEAD."""
     return box_mod.Mount(source=source, target=target, writable=writable)  # type: ignore[attr-defined]
@@ -311,13 +305,11 @@ def start_box_request(request, *, docker):
     return box_mod.start_box(request, docker=docker)  # type: ignore[call-arg]
 
 
-# --------------------------------------------------------------------------- #
 # Composition-frame seams: run_one / _run_worktree_batch gain injectable
 # `start_box`/`stop_box` (matching box.py's own names) so a test observes the
 # box's creation geography, its delivery to the roles, and its teardown order
 # WITHOUT a live daemon. These are part of the contract (the design gives box
 # creation no observation seam — pin it). TypeError at HEAD (no such kwarg).
-# --------------------------------------------------------------------------- #
 @dataclass
 class FakeBox:
     """A stand-in BoxExecutor a creation seam produced — identity is what tests assert."""
@@ -456,9 +448,7 @@ class RecordingBranch:
         verdict_path(wt).unlink(missing_ok=True)
 
 
-# --------------------------------------------------------------------------- #
 # run_dir / learning setup + provider-key satisfaction for driving run_one.
-# --------------------------------------------------------------------------- #
 def make_run_dir(tmp_path: Path, *, disposition: str = "inconclusive",
                  gather_raw: bool = True) -> Path:
     """A finished defender run dir run_one accepts: alert.json + report.md (its

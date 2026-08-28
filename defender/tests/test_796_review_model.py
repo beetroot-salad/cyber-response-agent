@@ -86,9 +86,7 @@ def test_every_review_effort_is_legal_for_the_model_it_pins():
         providers.provider_for(defn.model()).settings_for_effort(defn.effort)
 
 
-# ---------------------------------------------------------------------------------------
 # The signature rule
-# ---------------------------------------------------------------------------------------
 
 
 def test_the_override_reaches_an_accessor_that_takes_one():

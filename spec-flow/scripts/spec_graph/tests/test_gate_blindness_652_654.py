@@ -53,7 +53,7 @@ def _chain_repo(make_repo, broken_rel: str | None):
     return r, base
 
 
-# ── #652 — a per-file census gap ─────────────────────────────────────────────
+# #652 — a per-file census gap
 def test_unparseable_file_on_the_reach_path_refuses_to_certify(make_repo):
     """#652's exact repro. `run.py → mid.py → leaf.py`, leaf changed, mid unparseable at base.
 
@@ -109,7 +109,7 @@ def test_unparseable_file_the_diff_touched_refuses_to_certify(make_repo):
     assert "solo.py" in out.stderr
 
 
-# ── #652 — whole-gate blindness ──────────────────────────────────────────────
+# #652 — whole-gate blindness
 def test_no_artifacts_matched_is_not_clean(make_repo):
     """`artifacts` matching nothing checked zero graphs and printed '0 unmodelled ... over 0
     graph(s)', exit 0 — a pass earned by having no question to ask."""
@@ -134,7 +134,7 @@ def test_empty_source_census_is_not_clean(make_repo):
     assert "census" in out.stderr.lower()
 
 
-# ── #654 — membership predicates ─────────────────────────────────────────────
+# #654 — membership predicates
 def test_entrypoint_stems_honoured_for_underscore_prefixed_stem(make_repo):
     """#654.1: `_is_entrypoint` rejected `_`-prefixed stems BEFORE consulting the config, so
     `"entrypointStems": ["_harness"]` was silently ignored — a config option that did not do what

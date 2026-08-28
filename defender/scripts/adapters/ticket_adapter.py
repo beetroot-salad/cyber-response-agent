@@ -178,7 +178,7 @@ VERBS = {
 }
 
 
-# --- the CLI surface ---------------------------------------------------------
+# the CLI surface
 
 
 def build_parser():

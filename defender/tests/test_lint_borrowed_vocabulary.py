@@ -58,9 +58,7 @@ def _names(findings) -> list[str]:
     return [f.fingerprint for f in findings]
 
 
-# ═══════════════════════════════════════════════════════════════════════════
 # the arming rule
-# ═══════════════════════════════════════════════════════════════════════════
 
 def test_a_borrowed_vocabulary_with_an_owners_answer_is_flagged(gate, tmp_path):
     root = _tree(tmp_path, {"owner.py": _OWNER_ARMED, "borrower.py": _BORROWER})
@@ -91,9 +89,7 @@ def test_the_owner_testing_its_own_vocabulary_is_the_answer_not_the_smell(gate, 
     assert gate._scan(_tree(tmp_path, {"owner.py": _OWNER_ARMED})) == []
 
 
-# ═══════════════════════════════════════════════════════════════════════════
 # what must not slip past, and what must not be caught
-# ═══════════════════════════════════════════════════════════════════════════
 
 @pytest.mark.parametrize(
     ("spelling", "borrower"),
@@ -189,9 +185,7 @@ def test_tests_are_out_of_scope(gate, tmp_path):
     assert gate._scan(root) == []
 
 
-# ═══════════════════════════════════════════════════════════════════════════
 # the gate cannot report clean on source it never read
-# ═══════════════════════════════════════════════════════════════════════════
 
 def test_an_unparseable_file_fails_the_gate_rather_than_passing_it(gate, tmp_path):
     """#618/#621/#652's rule, and sharper here than for a single-pass lint: an unreadable OWNER

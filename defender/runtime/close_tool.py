@@ -41,7 +41,6 @@ from . import tools as tools_mod
 from .agent_role import AgentRole
 from .tools import AgentDeps
 
-# --------------------------------------------------------------------------------------
 # THE TWO OUTCOME VOCABULARIES, deliberately not one.
 #
 # `CLOSE_RETURNS` answers what a close ATTEMPT did — the tool's return and the numbered review
@@ -49,7 +48,6 @@ from .tools import AgentDeps
 # challenged path returns before the write, so its value is structurally incapable of reaching
 # disk; spanning both sinks with one enum makes every reader carry in its head which members
 # its own sink cannot hold.
-# --------------------------------------------------------------------------------------
 
 #: The investigation continues: nothing is committed and the discriminating material comes back.
 CHALLENGED = "challenged"
@@ -63,7 +61,6 @@ FORCED_INCONCLUSIVE = "forced-inconclusive"
 CLOSE_RETURNS: tuple[str, ...] = (CHALLENGED, STANDS, FORCED_INCONCLUSIVE)
 COMMITTED_OUTCOMES: tuple[str, ...] = (STANDS, FORCED_INCONCLUSIVE)
 
-# --------------------------------------------------------------------------------------
 # HOW THE REVIEW FAILED — the typed, countable half of "why". The cause cannot do this job: it
 # is a sentence whose wording nothing promises to keep stable, and a fleet query counting
 # broken reviews cannot key on prose.
@@ -74,7 +71,6 @@ COMMITTED_OUTCOMES: tuple[str, ...] = (STANDS, FORCED_INCONCLUSIVE)
 #
 # Three members, each earning its place by a DIFFERENT RESPONSE rather than by naming a
 # different condition.
-# --------------------------------------------------------------------------------------
 
 #: A stage was still pending at its deadline. Capacity: move the bound, or chase the
 #: provider's latency. The one member whose right response may be to do nothing.
@@ -91,7 +87,6 @@ UNREADABLE = "unreadable"
 
 FAILURE_KINDS: tuple[str, ...] = (TIMEOUT, STAGE_ERROR, UNREADABLE)
 
-# --------------------------------------------------------------------------------------
 # THE CAUSE — the close's OWN sentences, and the only strings the frontmatter's `cause` may
 # be. report.md rides VERBATIM into the judge LLM's prompt and its body rides out through the
 # ticket bridge's HTTP egress, and every review stage composes its reply after reading
@@ -103,7 +98,6 @@ FAILURE_KINDS: tuple[str, ...] = (TIMEOUT, STAGE_ERROR, UNREADABLE)
 # DISTINCTION, ONE FIELD — where the typed failure kind already separates two conditions, the
 # sentence must not separate them again, or the prose becomes an unversioned second copy of a
 # key something counts.
-# --------------------------------------------------------------------------------------
 
 CAUSE_NOT_REVIEWED = "the disposition was recorded without a challenge review"
 CAUSE_STORY_SETTLED = (

@@ -36,7 +36,7 @@ ALERT_KEYS = {"alert_id", "alert_timestamp", "rule", "reason", "host", "user",
               "ancestor_events", "signal_index", "threshold_result"}
 
 
-# ------------------------------------------------------ the reason for the rebuild
+# the reason for the rebuild
 
 def test_no_rule_firing_no_longer_discards_the_run(tmp_path, monkeypatch):
     """The whole point. `wait_for_alert` returning None used to end the recruitment;
@@ -113,7 +113,7 @@ def test_a_captured_alert_is_recorded_as_captured(tmp_path):
     assert "split: held-out" in text
 
 
-# --------------------------------------------------------------- alert selection
+# alert selection
 
 def _es(payload: dict, returncode: int = 0):
     def run(cmd, **kw):
@@ -215,7 +215,7 @@ def test_the_hand_written_and_generated_environment_notes_are_one_template(tmp_p
     assert generated == hand
 
 
-# ------------------------------------------------------- the retarget guard (#711)
+# the retarget guard (#711)
 
 CATALOG = {"scenarios": [
     {"id": "local-only", "source_host": "canary-1", "target_host": "canary-1",
@@ -289,7 +289,7 @@ def test_the_guard_reads_the_real_catalog():
         "cross-tier-ssh-probe", "web-2", catalog_path=real) is None
 
 
-# ------------------------------------------------ relocating a local scenario (--source)
+# relocating a local scenario (--source)
 
 def test_a_local_scenario_moves_when_source_and_target_agree(catalog):
     """`--source` moves where the commands run. When it lands on the same host the story
@@ -329,7 +329,7 @@ def test_source_alone_autofills_the_target_in_main(catalog, tmp_path, monkeypatc
     assert captured == {"source": "db-1", "target": "db-1"}
 
 
-# ---------------------------------------------------- the runner's own --source plumbing
+# the runner's own --source plumbing
 
 def _load_runner():
     """Import `runner.py` from the path the generator already resolves to it."""
@@ -367,7 +367,7 @@ def test_a_per_step_source_host_still_wins_over_source(tmp_path):
     assert [s["source_host"] for s in step_log] == ["db-1", "jump-box-1"]
 
 
-# --------------------------------------------------- the occupied-case-id guard (#711)
+# the occupied-case-id guard (#711)
 
 def test_a_free_case_id_is_not_refused(tmp_path):
     assert generate_case.occupancy_problem(tmp_path / "case-new") is None

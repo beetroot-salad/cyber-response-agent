@@ -153,9 +153,7 @@ def _logged(tmp_path: Path, parts, tag: str) -> list[dict]:
     return logger.messages
 
 
-# ===========================================================================
 # run_stage's tail guard — the content-driven abort
-# ===========================================================================
 
 @pytest.mark.parametrize(("tag", "text"), CONTENT_LESS, ids=[t for t, _ in CONTENT_LESS])
 def test_oracle_stage_aborts_on_any_content_less_final(tmp_path, tag, text):
@@ -204,9 +202,7 @@ def test_content_less_classifies_by_rendering_not_by_isspace():
     assert not is_content_less("​﻿x ")
 
 
-# ===========================================================================
 # require_output=False — the opt-in lane stays opted out
-# ===========================================================================
 
 @pytest.mark.parametrize(
     ("tag", "text"),
@@ -227,9 +223,7 @@ def test_default_require_output_still_quarantines_the_writer_lane(tmp_path):
         _lead_author(tmp_path, "​", "default", require_output=True)
 
 
-# ===========================================================================
 # the fault-path classifier — which message a failed run reports
-# ===========================================================================
 
 @pytest.mark.parametrize(("tag", "text"), CONTENT_LESS, ids=[t for t, _ in CONTENT_LESS])
 def test_a_logged_response_of_only_content_less_text_reads_as_empty(tmp_path, tag, text):

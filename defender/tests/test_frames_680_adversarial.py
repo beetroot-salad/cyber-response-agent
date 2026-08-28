@@ -307,7 +307,7 @@ def test_frame_empty_body(tmp_path):
     assert all(not gap.strip() for gap in gaps)
 
 
-# --- one producer, many hostile bodies -------------------------------------
+# one producer, many hostile bodies
 # Every case below is the SAME question — does the salted frame still bound an
 # attacker-controlled body? — asked of the actor producer with a different
 # payload. The payload is the whole variable, so the cases are a list rather
@@ -356,7 +356,7 @@ def test_a_hostile_actor_body_stays_inside_its_salted_frame(tmp_path, case, host
     assert_body_survives(observation, hostile)
 
 
-# --- one hostile body per PRODUCER -----------------------------------------
+# one hostile body per PRODUCER
 # The variable here is the stage, not the payload: each row drives a different
 # real producer with the lookalike that stage's own grammar is vulnerable to.
 # The lambda normalises the producers' differing signatures (`_lead_prompt`

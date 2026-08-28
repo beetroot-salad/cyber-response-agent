@@ -18,7 +18,7 @@ RUN = Path("/tmp/defender-runs-v2/live-falco-nettool-1")
 STORY = Path("/tmp/ab-effort/medium/live-falco-nettool-1/actor_story.md").read_text()
 OUT = Path("/tmp/oracle-v2-probe")
 
-# --- timestamp sanitizer (from build_prompts_r7) ---------------------------
+# timestamp sanitizer (from build_prompts_r7)
 _ISO = re.compile(r"\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?\b")
 _CLOCK = re.compile(r"\b\d{1,2}:\d{2}:\d{2}(?:\.\d+)?Z?\b")
 _CLOCK_HM = re.compile(r"(?<![\d:])\d{1,2}:\d{2}Z\b")
@@ -27,7 +27,7 @@ def sanitize(s):
     s = _CLOCK.sub("<alert-time>", s)
     return _CLOCK_HM.sub("<alert-time>", s)
 
-# --- scrubbed exemplar (from _loop_exemplars._scrub_skeleton) --------------
+# scrubbed exemplar (from _loop_exemplars._scrub_skeleton)
 def scrub(value, key=None):
     if isinstance(value, dict):
         return {k: scrub(v, k) for k, v in value.items()}

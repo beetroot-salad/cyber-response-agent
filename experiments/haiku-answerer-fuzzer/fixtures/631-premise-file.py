@@ -14,9 +14,7 @@
 #   # probe: see POn[, POm]            mechanism fact this premise depends on
 
 
-# ============================================================================
 # The kill's downstream — consumers of a truncated run
-# ============================================================================
 
 def test_killed_run_flows_into_the_post_run_steps():
     """The budget kill ends the loop and run_investigation returns normally, so the caller's
@@ -59,9 +57,7 @@ def test_visualization_of_a_run_dir_the_kill_truncated():
     # origin: author
 
 
-# ============================================================================
 # Which limb trips, and the tail it opens
-# ============================================================================
 
 def test_wall_clock_trip_and_the_report_window():
     """The wall-clock cap trips while tool_calls sits far below N, and MAIN has not yet written
@@ -91,9 +87,7 @@ def test_cap_is_crossed_while_a_long_call_is_still_in_flight():
     # origin: lifecycle
 
 
-# ============================================================================
 # Clock origin, state-file presence, and recreation
-# ============================================================================
 
 def test_state_file_absent_before_any_call():
     """the very first tool call of a run finds no state file at all — is this the normal
@@ -190,9 +184,7 @@ def test_system_clock_moves_during_the_run():
     # probe: see PO10.
 
 
-# ============================================================================
 # Counting and spawn accounting
-# ============================================================================
 
 def test_refused_gather_and_the_spawn_counter():
     """A gather refused for budget never dispatches a subagent, and the refusal still reaches the
@@ -259,9 +251,7 @@ def test_subagent_dispatched_into_an_already_stopped_pool():
     # probe: see PO33.
 
 
-# ============================================================================
 # The report MAIN is told to write
-# ============================================================================
 
 def test_tail_write_rejected_by_the_write_gate():
     """MAIN spends tail calls on report writes that the invlang schema gate rejects, having been
@@ -282,9 +272,7 @@ def test_model_ignores_the_refusal_and_keeps_planning():
     # probe: see PO8.
 
 
-# ============================================================================
 # Composition — seams this design shares rather than adds
-# ============================================================================
 
 def test_enforcement_seam_raises_an_unexpected_error():
     """Something other than the budget kill goes wrong inside the new enforcement seam — a
@@ -336,9 +324,7 @@ def test_sibling_locked_files_in_the_same_tool_call_window():
     # probe: see PO14 (open).
 
 
-# ============================================================================
 # Posture and exemption from enforcement
-# ============================================================================
 
 def test_unenforced_agent_spends_the_enforced_pool():
     """An agent (or run stage) exempt from the stop still makes tool calls that increment the
@@ -404,9 +390,7 @@ def test_lead_cut_short_by_the_trip_is_read_by_main():
     # probe: see PO9.
 
 
-# ============================================================================
 # The flag's own input surface, and its reach across process boundaries
-# ============================================================================
 
 def test_enforce_flag_unrecognized_token():
     """DEFENDER_BUDGET_ENFORCE is set to a token that is neither a recognized truthy nor
@@ -458,9 +442,7 @@ def test_flag_reaches_a_child_process_that_starts_its_own_run():
     # probe: see PO12, PO13.
 
 
-# ============================================================================
 # The on-disk budget.json — malformed input surface
-# ============================================================================
 
 def test_budget_json_is_corrupted_on_disk():
     """budget.json exists but its bytes are not valid JSON — e.g. truncated by a process
@@ -486,9 +468,7 @@ def test_budget_json_counters_are_negative_or_non_integer():
     # path" the boundary of what we defend?
 
 
-# ============================================================================
 # The injected `limits` seam — a new, test-only input surface
-# ============================================================================
 
 def test_injected_limits_missing_a_key():
     """The test seam's limits dict, threaded into check_budgets, omits one of the three
@@ -537,9 +517,7 @@ def test_replay_harness_without_injected_limits_uses_production_values():
     # origin: dependency
 
 
-# ============================================================================
 # The call stream reaching the short-circuit seam
-# ============================================================================
 
 def test_short_circuited_call_carries_invalid_tool_args():
     """A call to a budget-stopped tool arrives at the tool_execute short-circuit carrying
@@ -558,9 +536,7 @@ def test_same_budget_stopped_tool_reissued_twice_in_one_turn():
     # origin: input-surface
 
 
-# ============================================================================
 # Dependency-specific structural premises
-# ============================================================================
 
 def test_new_spawn_arm_assertions_coexist_with_the_retired_name_assertion():
     """a test module that already asserts the retired dispatch names contribute nothing
@@ -584,9 +560,7 @@ def test_two_consumers_construct_the_budget_path_independently():
     # probe: see PO22.
 
 
-# ============================================================================
 # Concurrency — admission races at or near the cap
-# ============================================================================
 
 def test_last_remaining_slot_is_claimed_by_more_than_one_concurrent_caller():
     """Several sibling GATHER subagents (or a call arriving at the exact threshold count)
@@ -646,9 +620,7 @@ def test_late_committing_sibling_increment_lands_inside_mains_tail_window():
     # sized to be indifferent to which agent's calls fill it.
 
 
-# ============================================================================
 # Concurrency — accounting integrity and message delivery
-# ============================================================================
 
 def test_concurrent_refusals_of_the_same_stopped_tool_do_not_cross_attribute_accounting():
     """Two concurrently-executing calls to the same budget-stopped tool —
@@ -709,9 +681,7 @@ def test_concurrent_readers_disagree_on_the_recreated_clock_origin():
     # test_two_processes_both_reseed_the_state_file_at_once)
 
 
-# ============================================================================
 # The kill instant, shutdown, and sibling fate
-# ============================================================================
 
 def test_artifact_state_at_the_exact_kill_instant():
     """the run ends because a cap's tail is exhausted — at that instant, what is already
@@ -756,16 +726,13 @@ def test_the_same_refusal_repeats_across_a_long_stretch_of_the_run():
     # origin: lifecycle
 
 
-# ============================================================================
 # FOLLOW-UP RGX1 — the budget-accounting write itself fails mid-run
-# ----------------------------------------------------------------------------
 # Strong-author follow-up (phase B/C boundary). Distinct from
 # `test_the_shutdown_write_itself_fails` (the FINAL artifact-preservation write, at the
 # kill instant) and from `test_budget_json_is_corrupted_on_disk` (bytes ALREADY malformed
 # when read). This region is the run's own per-call accounting write failing while the run
 # is still going — the write enforcement newly makes load-bearing, where accounting-only
 # made it merely lossy.
-# ============================================================================
 
 def test_accounting_write_fails_on_one_call_before_any_cap_trips():
     """A completed tool call's own accounting write fails on its own terms — the run dir is
@@ -900,14 +867,11 @@ def test_the_run_dir_stops_being_writable_partway_through_the_run():
     # probe: see PO44.
 
 
-# ============================================================================
 # FOLLOW-UP RGX2 — two independent kill mechanisms sharing one run
-# ----------------------------------------------------------------------------
 # Strong-author follow-up (phase B/C boundary). The circuit breaker's run-wide abort and
 # the budget kill are separate mechanisms that end the same run, keyed on the same run dir,
 # with sibling state files under the same serialization primitive (PO14, still open: is
 # that hold per-file or broader). No lens premise covers their interaction.
-# ============================================================================
 
 def test_both_kills_become_eligible_in_the_same_window():
     """The circuit breaker's run-wide abort condition and the budget's tail exhaustion both
@@ -1021,10 +985,8 @@ def test_an_already_tripped_breaker_changes_the_shape_of_budget_spend():
     # budget's own refusals, unsettled for the other mechanism's.
 
 
-# ============================================================================
 # The enforced actor's own authoring region contains the enforcement state
 # (strong-author follow-up — routed from 45-dispositions.md red flag 6)
-# ============================================================================
 
 def test_the_enforced_actor_authors_the_region_holding_its_own_limit_state():
     """The actor whose spending the limit bounds holds a general authoring capability over the

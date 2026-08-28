@@ -43,8 +43,7 @@ _CLEAN_ADV = "outcome: caught\ndefender_findings: []"
 _CLEAN_BENIGN = "outcome: refuted\ndefender_findings: []"
 
 
-
-# --- E1: what the walk TRIMS ------------------------------------------------
+# E1: what the walk TRIMS
 # Every case feeds one raw model return and asserts the trimmed text parses to the intended
 # verdict. Only the preamble shape varies; the primitive under test never does.
 @pytest.mark.parametrize(("case", "raw", "outcome"), [
@@ -111,7 +110,7 @@ def test_the_walk_trims_a_preamble_down_to_the_real_verdict(case, raw, outcome):
     assert yaml.safe_load(strip_yaml_preamble(raw))["outcome"] == outcome
 
 
-# --- E1: what the walk must LEAVE ALONE -------------------------------------
+# E1: what the walk must LEAVE ALONE
 # Fail-closed. Nothing here is a best-effort truncated slice: the input comes back
 # byte-identical so downstream validation dead-letters it exactly as it does today.
 @pytest.mark.parametrize(("case", "raw"), [
@@ -157,7 +156,6 @@ def test_composes_after_strip_yaml_fence_for_preamble_plus_fence():
     raw = "Let me construct the verdict.\n\n```yaml\noutcome: caught\ndefender_findings: []\n```"
     out = strip_yaml_preamble(strip_yaml_fence(raw))
     assert yaml.safe_load(out)["outcome"] == "caught"
-
 
 
 def test_e2_parses_preambled_verdict(tmp_path):
@@ -222,7 +220,6 @@ def test_e2_schema_invalid_raises_and_writes_raw(tmp_path):
     assert raw_path.read_text() == raw
 
 
-
 def test_e3_parses_preambled_adversarial_verdict():
     """E3: the eval harness now trims a prose preamble too (it was the third consumer the
     fix must cover) -> Verdict(outcome='caught', parsed_ok=True)."""
@@ -247,7 +244,6 @@ def test_e3_malformed_returns_parsed_ok_false_without_raising():
     v = parse_judge_verdict("not yaml: [", case_id="c1", direction="adversarial")
     assert not v.parsed_ok
     assert v.outcome is None
-
 
 
 def test_e2_and_e3_agree_on_same_preambled_input(tmp_path):

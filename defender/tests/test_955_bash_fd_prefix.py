@@ -87,9 +87,7 @@ def _single(cmd: str):
     return result
 
 
-# --------------------------------------------------------------------------- #
 # The properties, which need no bash.
-# --------------------------------------------------------------------------- #
 @pytest.mark.parametrize("operand", ["2", "20", "1", "0", "9", "x"])
 def test_the_verdict_does_not_depend_on_the_value_of_an_operand(operand):
     """The headline property, stated over values rather than over the one value that broke.
@@ -356,9 +354,7 @@ def test_an_unquoted_operator_is_still_an_operator():
     assert [s.argv for s in stages] == [["a"], ["b"], ["c"]]
 
 
-# --------------------------------------------------------------------------- #
 # The same invariant, at the layer that actually decides.
-# --------------------------------------------------------------------------- #
 def test_the_gate_does_not_rewrite_the_command_before_it_parses_it():
     """`decide_bash` is the entry point; `bash_exec.parse` is a step inside it.
 
@@ -402,9 +398,7 @@ def test_the_gate_does_not_rewrite_the_command_before_it_parses_it():
         )
 
 
-# --------------------------------------------------------------------------- #
 # The differential: for everything we accept, bash says what it MEANS.
-# --------------------------------------------------------------------------- #
 _CANDIDATES = [
     f"{_SHIM} -c {v}{sp}{redir}"
     for v in ("2", "20", "x")
@@ -539,7 +533,6 @@ def test_what_we_accept_means_what_bash_means(shim_dir, cmd):
     )
 
 
-# ============================================================================================ #
 # #959 — the wrapper seam, the blank alphabet, and the oracle's own evidence channels.
 #
 # Folding the standalone `hooks/_cmd_segments` wrapper step into `parse` (M3) puts the wrapper under this
@@ -553,7 +546,6 @@ def test_what_we_accept_means_what_bash_means(shim_dir, cmd):
 # recovered as two entries and the oracle certifies the `\r` divergence CLEAN. Every blank
 # below is built from its codepoint for the same reason the corpus is: a literal in a docstring
 # is a character a later edit can normalise into a space.
-# ============================================================================================ #
 
 import ast as _ast  # noqa: E402
 import sys as _sys  # noqa: E402

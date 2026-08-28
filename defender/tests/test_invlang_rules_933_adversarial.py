@@ -60,7 +60,7 @@ def _joined(body: str) -> str:
     return "\n".join(_errors(body))
 
 
-# --- rule #6: prediction completeness for `++` --------------------------------------------
+# rule #6: prediction completeness for `++`
 
 _TWO_PREDS = _PROLOGUE + _HYP_HEADER + """\
 h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
@@ -211,7 +211,7 @@ h-002  null → -    [l-001 p2 moderate ⟂ e-001 :: no stable interval]
     assert "resolution of h-001 to '++' leaves p2 unmatched" in errors[0]
 
 
-# --- rule #17: SCREEN structural integrity ------------------------------------------------
+# rule #17: SCREEN structural integrity
 
 _SCREEN_HEADER = ":L findings [id|loop|name|target|mode|tests|system|window|screen_result]\n"
 
@@ -273,7 +273,7 @@ l-002|1|auth-history|v-001|||elastic|10m|no_match
     assert errors[0].startswith("lead l-002: `screen_result: no_match` on a lead whose mode is")
 
 
-# --- rule #23: hypothesis fork distinctness -----------------------------------------------
+# rule #23: hypothesis fork distinctness
 
 _TWO_PARENTS = _PROLOGUE + _HYP_HEADER + """\
 h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
@@ -438,7 +438,7 @@ ap1|proposed_parent|signing|
     assert joined.count("empty `claim`") == 2
 
 
-# --- rule #24: hypothesis persistence at CONCLUDE -----------------------------------------
+# rule #24: hypothesis persistence at CONCLUDE
 
 def test_naming_a_hypothesis_in_the_conclude_prose_is_not_a_discharge() -> None:
     """v2.18 excised "cited in the conclude block" from arm (b): `termination.rationale` is
@@ -477,7 +477,7 @@ h-002.p1|"the interval histogram lead did not return"
     assert "hypothesis h-002 is neither refuted nor carried into the close" in errors[0]
 
 
-# --- rule #33: attribute-prediction structure ---------------------------------------------
+# rule #33: attribute-prediction structure
 
 def _with_attr_preds(rows: str) -> str:
     return _PROLOGUE + _HYP_HEADER + """\

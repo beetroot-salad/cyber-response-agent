@@ -74,7 +74,7 @@ from defender import _git
 #: states this seam's contract, rather than each reaching into `runtime.verbs` themselves.
 from defender.runtime.verbs import is_system_name  # noqa: F401  (re-exported)
 
-# ---- THE SURFACE UNDER TEST — it does not exist on this base (RED by construction) ----
+# THE SURFACE UNDER TEST — it does not exist on this base (RED by construction)
 try:  # pragma: no cover — the post-implementation branch
     from defender.learning.leads.declared_systems import (  # type: ignore[import-not-found]
         adapter_declared_systems,

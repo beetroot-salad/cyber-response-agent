@@ -39,9 +39,7 @@ def _reply(review="the close holds", ask=None, finding=None):
     return json.dumps({"finding": finding, "review": review, "ask": ask})
 
 
-# ---------------------------------------------------------------------------------------
 # Role prompts
-# ---------------------------------------------------------------------------------------
 
 
 def test_every_role_has_a_prompt_asset():
@@ -78,9 +76,7 @@ def test_the_composer_is_told_it_cannot_argue_the_opposite_disposition():
     assert "opposite disposition" in _flat("composer")
 
 
-# ---------------------------------------------------------------------------------------
 # Lens readings — the fail-open guard
-# ---------------------------------------------------------------------------------------
 
 
 def test_a_lens_reading_survives_intact():
@@ -98,9 +94,7 @@ def test_an_empty_lens_reading_is_refused(empty):
         read_lens_reading(empty)
 
 
-# ---------------------------------------------------------------------------------------
 # The composer's reply
-# ---------------------------------------------------------------------------------------
 
 
 def test_a_review_with_no_ask_is_readable(refs):
@@ -212,9 +206,7 @@ def test_the_finding_decides_the_route_and_not_the_presence_of_an_ask(refs):
     assert not gap.holds
 
 
-# ---------------------------------------------------------------------------------------
 # The citable set
-# ---------------------------------------------------------------------------------------
 
 
 def test_the_citable_set_spans_every_kind_a_review_may_name(refs):

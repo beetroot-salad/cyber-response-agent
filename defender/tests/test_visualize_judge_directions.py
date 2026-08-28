@@ -111,7 +111,7 @@ _BENIGN_JUDGE = {
 }
 
 
-# --- the view table is driven off Direction ---------------------------------------
+# the view table is driven off Direction
 
 def test_views_cover_every_direction():
     """The drift guard this refactor exists for: a `Direction` with no `DirectionView`
@@ -143,7 +143,7 @@ def test_false_positive_trains_nothing():
     assert directions_for("false-positive") == []
 
 
-# --- ids come off the direction name, through one mechanism -----------------------
+# ids come off the direction name, through one mechanism
 
 _ANCHOR_BASES = ("sec-actor", "sec-judge", "sec-oracle", "finding", "env-obs", "actor-obs")
 
@@ -201,7 +201,7 @@ def test_no_oracle_section_survives_the_retired_stage():
     assert not hasattr(vj, "render_judge_oracle_section")
 
 
-# --- disposition decides which directions appear ---------------------------------
+# disposition decides which directions appear
 
 def test_malicious_disposition_omits_the_adversarial_direction():
     """The bug: on `malicious` the adversarial direction is never selected
@@ -242,7 +242,7 @@ def test_disposition_is_normalized_the_way_the_loop_normalizes_it():
         assert [d.name for d in directions_for(disposition)] == ["benign"]
 
 
-# --- ...and artifacts on disk override it ----------------------------------------
+# ...and artifacts on disk override it
 
 def test_a_direction_that_left_artifacts_renders_even_when_unselected(tmp_path):
     """`report.md` is mutable and the learning run dir accumulates. A run learned under
@@ -286,7 +286,7 @@ def test_an_empty_learning_run_dir_leaves_the_unselected_direction_off(tmp_path)
     assert [v.direction.name for v in vj.active_views("case-1", "malicious")] == ["benign"]
 
 
-# --- the finding count the TOC and the headline link -------------------------------
+# the finding count the TOC and the headline link
 
 def test_finding_count_matches_the_cards_the_section_emits():
     assert vj.judge_finding_count(_JUDGE) == 1
@@ -308,7 +308,7 @@ def test_finding_count_survives_a_non_list_defender_findings():
     )
 
 
-# --- rendering, both directions ---------------------------------------------------
+# rendering, both directions
 
 def test_judge_section_renders_outcome_and_findings():
     html = vj.render_judge_judge_section(_BENIGN_JUDGE, _BENIGN)
@@ -343,7 +343,7 @@ def test_env_observation_anchors_do_not_collide_across_directions():
     assert 'id="env-obs-benign-0"' in both
 
 
-# --- the optional judge-doc keys (#748) -------------------------------------------
+# the optional judge-doc keys (#748)
 
 def test_every_optional_key_the_schema_accepts_has_somewhere_to_render():
     """The #748 bug in one assertion: `validate_judge_doc` accepted three optional keys and
@@ -499,7 +499,7 @@ def test_actor_section_placeholder_names_the_missing_story():
     assert "no actor_benign_story.md" in html
 
 
-# --- TOC --------------------------------------------------------------------------
+# TOC
 
 def _toc(sections, *, raw_bundle: bool = True) -> str:
     return vj.render_judge_toc(sections, raw_bundle=raw_bundle)
@@ -561,7 +561,7 @@ def test_toc_requires_the_caller_to_state_whether_the_raw_bundle_rendered():
     assert param.kind is inspect.Parameter.KEYWORD_ONLY
 
 
-# --- unchanged surfaces -----------------------------------------------------------
+# unchanged surfaces
 
 def test_adversarial_finding_anchor_unchanged():
     html = vj.render_judge_finding(0, {

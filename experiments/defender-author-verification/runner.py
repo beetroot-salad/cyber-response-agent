@@ -124,7 +124,6 @@ def main() -> int:
         for f in as_completed(futures):
             records.append(f.result())
 
-    # Aggregate
     by_key: dict[tuple[str, str], list[str]] = {}
     for r in records:
         by_key.setdefault((r["lesson"], r["check"]), []).append(r["verdict"])

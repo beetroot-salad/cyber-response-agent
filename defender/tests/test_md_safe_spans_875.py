@@ -126,7 +126,7 @@ def _file_for(comps: list, written: list[Path], lead_id: str) -> str:
     return written[idx[0]].read_text(encoding="utf-8")
 
 
-# ------------------------------------------------- the reachable chooser: `query_id`
+# the reachable chooser: `query_id`
 
 
 def test_875_a_model_chosen_query_id_cannot_forge_a_section_in_the_comparison(tmp_path):
@@ -216,7 +216,7 @@ def test_875_the_payload_paths_fallback_cannot_forge_a_section(tmp_path):
     assert "FORGED-CHARLIE" in text, "the span was dropped rather than neutralized"
 
 
-# ------------------------------------------------- the id screen, one rule
+# the id screen, one rule
 
 
 def test_875_resolve_query_id_refuses_a_newline_like_a_traversal(tmp_path):
@@ -245,7 +245,7 @@ def test_875_resolve_query_id_refuses_a_newline_like_a_traversal(tmp_path):
     assert resolve_query_id("elastic", "search", None) == "elastic.search"
 
 
-# ------------------------------------------------- the docstring's claim, made true
+# the docstring's claim, made true
 
 
 _PROBE = "ALPHA\n##BRAVO#CHARLIE"

@@ -77,7 +77,7 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
     drive,
 )
 
-# ─── the names this spec mints on the production side ───────────────────────────────────
+# the names this spec mints on the production side
 # `schema.md`, "Coin ids from the code's name": a private synonym does not cost a config
 # entry, it costs the check. Spell these exactly in `defender/runtime/lead_zero.py`.
 LEAD_ZERO_MODULE = "defender.runtime.lead_zero"
@@ -108,7 +108,7 @@ AUTH_BACKING = ".ds-logs-system.auth-default-2026.05.24-000002"
 FALCO_BACKING = ".ds-logs-falco.alerts-default-2026.04.30-000003"
 
 
-# ─── the alert ──────────────────────────────────────────────────────────────────────────
+# the alert
 
 def ancestor(doc_id: str, index: str = AUTH_BACKING, **over: Any) -> dict:
     """One `ancestor_events[]` entry, in the exact shape g7 found across all five checked-in
@@ -199,7 +199,7 @@ def building_block(*, ts: str, group_index: int, **over: Any) -> dict:
     }
 
 
-# ─── the injected backend ───────────────────────────────────────────────────────────────
+# the injected backend
 
 Answer = Callable[[str, dict], Any]
 
@@ -313,7 +313,7 @@ def elastic_backend(rec: VerbRecorder, answer: Answer, *, shell: Any = SHELL_DEF
     }})
 
 
-# ─── the driven run ─────────────────────────────────────────────────────────────────────
+# the driven run
 
 @dataclass
 class Res:
@@ -328,7 +328,7 @@ class Res:
     stores: list = field(default_factory=list)
     alert_id: str | None = None
 
-    # -- what MAIN was handed ------------------------------------------------------------
+    # what MAIN was handed
     @property
     def message_zero(self) -> str:
         """The flattened message history at MAIN's FIRST request — message 0, ORIENT text
@@ -376,7 +376,7 @@ class Res:
         assert framed is not None, "lead-0's untrusted frame opens but never closes"
         return framed.group(1)
 
-    # -- item 1's two-stage call record ---------------------------------------------------
+    # item 1's two-stage call record
     @property
     def shell_call(self):
         """Item 1's FIRST backend call — the by-`alert_id` fetch of the alert's own shell
@@ -404,7 +404,7 @@ class Res:
         )
         return self.rec.calls[1:]
 
-    # -- the run dir ---------------------------------------------------------------------
+    # the run dir
     @property
     def rows(self) -> list[dict]:
         return read_jsonl_rows(RunPaths(self.run_dir).executed_queries)

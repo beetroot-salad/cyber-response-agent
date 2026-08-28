@@ -51,10 +51,8 @@ from defender.learning.author.verify_forward.checks import FINDINGS_CHECK  # noq
 SHIPPED: tuple[str, ...] = ("lessons", "lessons-actor", "lessons-environment")
 
 
-# --------------------------------------------------------------------------- #
 # On-disk fixtures: a worktree (where lessons are authored) + a _pending run dir
 # (the shared state root every spawn drains into; run_id == "_pending", P4).
-# --------------------------------------------------------------------------- #
 
 def make_worktree(tmp_path: Path) -> Path:
     """A tmp batch worktree: the three lesson corpora exist (so real writes land) plus two
@@ -89,9 +87,7 @@ def rel(corpus_name: str, filename: str = "lesson.md") -> str:
     return f"defender/{corpus_name}/{filename}"
 
 
-# --------------------------------------------------------------------------- #
 # The binding seam under test (RED against HEAD).
-# --------------------------------------------------------------------------- #
 
 def curator_scope(wt: Path, corpus_name: str = "lessons", *, read_confine=None) -> RunScope:
     """The target ``RunScope`` a curator bind takes: the per-spawn corpus NAME (F89 — a bind input;
@@ -135,11 +131,9 @@ def curator_deps(
     )
 
 
-# --------------------------------------------------------------------------- #
 # Real-gate drivers — the OBSERVABLE channels. One home for each so the four test
 # files never re-roll them (the duplicate-helpers ratchet). Every driver hits a
 # REAL permission primitive; assertions are on its Decision / raised ModelRetry.
-# --------------------------------------------------------------------------- #
 
 def bash_decision(deps, cmd: str):
     """The bash lane the way ``_tool_bash`` drives it (run_dir + defender_dir + cwd_anchor)."""

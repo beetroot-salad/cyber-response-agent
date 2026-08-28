@@ -80,9 +80,7 @@ __all__ = [
 ]
 
 
-# --------------------------------------------------------------------------- #
 # documents
-# --------------------------------------------------------------------------- #
 
 #: Two declared vertices and one lead. EXECUTED: `diagnose(PROLOGUE, None) == []`.
 PROLOGUE = """```invlang
@@ -136,9 +134,7 @@ WARN_DOC = PROLOGUE + attr_block(WARN_ROW)
 CLEAN_BLOCK = attr_block(REPAIRED_ROW)
 
 
-# --------------------------------------------------------------------------- #
 # the window, read through the function this spec mints
-# --------------------------------------------------------------------------- #
 
 def warn_window(text: str) -> tuple[Any, ...]:
     """`warn_diagnostics(text)` — M3's derived window, imported here so the suite still
@@ -163,9 +159,7 @@ def flagged_rows(text: str) -> tuple[str, ...]:
     return tuple(d.locus.row_text for d in warn_window(text) if d.locus is not None)
 
 
-# --------------------------------------------------------------------------- #
 # deps and the run dir
-# --------------------------------------------------------------------------- #
 
 def main_deps(tmp_path: Path) -> tuple[Any, Path]:
     """MAIN deps through the real `bind` seam — real compiled policy, real gate.
@@ -191,9 +185,7 @@ def seed_investigation(run_dir: Path, text: str) -> Path:
     return p
 
 
-# --------------------------------------------------------------------------- #
 # driving a real MAIN agent
-# --------------------------------------------------------------------------- #
 
 class _Recorder:
     """A FunctionModel callable that records the tool definitions the model was SHOWN.

@@ -46,7 +46,7 @@ def validate_cases_environment(case_dir):
     }), encoding="utf-8")
 
 
-# ------------------------------------------------------------------- structure
+# structure
 
 def test_a_case_missing_a_required_file_is_a_problem(tmp_path):
     d = _case(tmp_path, "case-x")
@@ -96,7 +96,7 @@ def test_a_derived_case_needs_no_telemetry(kind, tmp_path):
     assert problems == []
 
 
-# --------------------------------------------------------------- story hygiene
+# story hygiene
 
 def test_a_story_that_states_the_expected_result_is_caught(tmp_path):
     """The one leak the hidden/visible split cannot catch, because `story.md` is
@@ -106,7 +106,7 @@ def test_a_story_that_states_the_expected_result_is_caught(tmp_path):
     assert any("leaks the evaluation frame" in p for p in validate_cases.check_case(d, {}))
 
 
-# ------------------------------------------------------------- split and unit
+# split and unit
 
 def test_a_derived_case_may_not_sit_on_the_other_side_of_the_split():
     """It reuses the base's envelope, so a differing split puts one capture on both."""
@@ -137,7 +137,7 @@ def test_a_case_missing_its_calibration_metadata_is_a_problem(manifest, why):
     assert validate_cases.check_split_and_unit("case-x", manifest, {})
 
 
-# ------------------------------------------------------------ held-out ledger
+# held-out ledger
 
 def _ledger(tmp_path, entries):
     p = tmp_path / "ledger.yaml"
@@ -188,14 +188,14 @@ def test_a_deleted_held_out_result_needs_a_retirement_reason(tmp_path):
     assert validate_cases.check_held_out_ledger([], retired) == []
 
 
-# ---------------------------------------------------------------- the boundary
+# the boundary
 
 def test_the_replay_boundary_check_is_not_vacuous():
     """It asserts replay.py names no `hidden/` path — worthless if it found no paths."""
     assert validate_cases.check_replay_boundary() == []
 
 
-# --------------------------------------------------------------- completeness
+# completeness
 
 def test_coverage_counts_what_a_case_actually_holds(tmp_path):
     d = _case(tmp_path, "case-x", leads=("l-001", "l-002"))
@@ -292,7 +292,7 @@ def test_a_story_that_leaks_the_evaluation_frame_is_caught_case_insensitively(tm
                    for p in validate_cases.check_case(tmp_path / "case-clean", {}))
 
 
-# ------------------------------------------------------------------- controls
+# controls
 
 #: A lead query with no `@timestamp` bound of its own, written on ONE line — ES|QL
 #: separates commands with `|`, not with newlines, and the defender model writes both
@@ -445,7 +445,7 @@ def test_a_window_literal_the_record_cannot_state_is_reported_not_raised(tmp_pat
     assert any("not a pair of timestamps" in p for p in validate_cases.check_controls(d))
 
 
-# --------------------------------------------------------------- seq keying
+# seq keying
 
 def test_an_observed_payload_no_query_is_keyed_by_is_a_problem(tmp_path):
     """The half of the join `check_controls` cannot see. `controls.lead_queries` falls
@@ -482,7 +482,7 @@ def test_a_lead_whose_payloads_match_its_own_seqs_is_not_a_problem(tmp_path):
     assert validate_cases.check_seq_keying(d) == []
 
 
-# ------------------------------------------------------- the accepted-defect registry
+# the accepted-defect registry
 
 _BAD = (f'FROM logs-zeek.ssh-* | LIMIT 1 | WHERE @timestamp >= "{_WINDOW[0]}" '
         f'AND @timestamp < "{_WINDOW[1]}"')

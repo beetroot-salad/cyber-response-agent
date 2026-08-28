@@ -68,9 +68,7 @@ def _generic_lexing_reason() -> str:
     return _bash("cat 'x").reason
 
 
-# --------------------------------------------------------------------------- #
 # #971 - no word is a wrapper, and what that leaves the parser doing.
-# --------------------------------------------------------------------------- #
 def test_no_word_is_parsed_as_a_wrapper():
     r"""#971: neither `bash` nor `sh` is recognised, so no text is extracted from a command
     before the gate decides about it. They are ungranted programs and the lane's capability
@@ -259,10 +257,7 @@ def test_a_blank_glued_to_an_ungranted_word_is_not_blamed_for_the_refusal():
     assert re.search(rf"U\+0*{ord(NBSP):04x}\b", d.reason, re.IGNORECASE)
 
 
-
-# --------------------------------------------------------------------------- #
 # C3 / C4 - what the removal leaves behind.
-# --------------------------------------------------------------------------- #
 def _identifier_hits(name: str, *, skip: set[str]) -> dict[str, list[int]]:
     """Every line under `defender/` naming `name`, by file - tests included, this file's own
     suite excluded (it names the symbol in prose about its removal)."""

@@ -88,13 +88,13 @@ def test_e2e_a_failed_reducer_pipe_becomes_a_reducer_handoff(tmp_path: Path, mon
         ],
     )
 
-    # --- the runtime half: the table really carries the sentinel rows ---------------------
+    # the runtime half: the table really carries the sentinel rows
     shim = [r for r in res.own_rows if r["query_id"] == BASH_SHIM_QUERY_ID]
     assert len(shim) == 3, "the terminal reduce recorded nothing, so there is nothing to teach"
     assert {r["payload_digest"] for r in shim} == {BINDER}
     assert {r["error_class"] for r in shim} == {"agent-fixable"}
 
-    # --- the learning half: the same rows, through the real join and the real collector ---
+    # the learning half: the same rows, through the real join and the real collector
     collected = collect_general_failures(res.own_leads(), run_dir, catalog=[])
     assert len(collected) == 3, "the rows did not survive the offline extraction"
     assert {r["system"] for r in collected} == {""}, (
@@ -111,7 +111,7 @@ def test_e2e_a_failed_reducer_pipe_becomes_a_reducer_handoff(tmp_path: Path, mon
     records = persist.merge_pitfalls(persist.read_pitfalls(paths))
     assert [r["occurrences"] for r in records] == [3]
 
-    # --- the curation tick: the handoff names the surface, and the commit carries it ------
+    # the curation tick: the handoff names the surface, and the commit carries it
     spawn = Spawn(curate_reducer_surface("keep the unnest argument a LIST"))
     head_before = git(repo, "rev-parse", "HEAD").stdout.strip()
     assert pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn) == 0
@@ -137,7 +137,7 @@ def test_e2e_a_failed_reducer_pipe_becomes_a_reducer_handoff(tmp_path: Path, mon
         r["consumed_category"] == "consumed_committed" for r in consumed_by_id(paths).values()
     )
 
-    # --- and the loop closes: the NEXT reduce can read what this one was taught -----------
+    # and the loop closes: the NEXT reduce can read what this one was taught
     # O3's own reachability claim (G23), executed as a break attempt rather than believed
     # from two definitions: the gather role's REAL read gate, compiled against the tree the
     # tick just committed into, admits the reducer surface and refuses the paths outside the

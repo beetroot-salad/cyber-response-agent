@@ -75,7 +75,7 @@ def _stdout_of(formatted: str) -> str:
     return body.group("body").split("--- stdout ---\n", 1)[1]
 
 
-# ---------------------------------------------------------------- F-08: the capture's frame
+# F-08: the capture's frame
 
 
 def test_a_captured_ticket_is_an_untrusted_read():
@@ -123,7 +123,7 @@ def test_the_judges_read_of_its_own_ticket_capture_comes_back_framed(tmp_path):
     assert_one_frame(out, body, "untrusted")
 
 
-# ------------------------------------------------- F-11: the run dir is the SHARED directory
+# F-11: the run dir is the SHARED directory
 
 
 def test_a_host_written_run_dir_artifact_reaches_a_learning_stage_framed(tmp_path):
@@ -163,7 +163,7 @@ def test_a_runtime_agents_own_run_dir_read_stays_unframed(tmp_path):
     assert _tool_read_file(deps, str(run / "report.md")) == "trusted\n"
 
 
-# ------------------------------------------------------------- F-24: the ceiling on the lane
+# F-24: the ceiling on the lane
 
 
 def test_the_cat_lane_caps_a_captured_payload_at_the_capture_ceiling(tmp_path):

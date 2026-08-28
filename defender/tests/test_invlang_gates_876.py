@@ -48,9 +48,7 @@ from defender.skills.invlang.validate import (
     validate_companion,
 )
 
-# --------------------------------------------------------------------------- #
 # document fixtures — the #853 suite's shapes, so a reader who knows one knows both
-# --------------------------------------------------------------------------- #
 
 _CONCLUDE_BENIGN = """
 :T conclude
@@ -91,9 +89,7 @@ def _parse_errors(errors: list[str]) -> list[str]:
 _CLEAN_VERTEX = "v-001|compute|bastion/internal/known-corp|bastion-01.corp|"
 
 
-# --------------------------------------------------------------------------- #
 # F-2 — a header the regex rejects no longer vaporizes its block
-# --------------------------------------------------------------------------- #
 
 #: The two spellings that reach the tokenizer's silent path in the ordinary authoring loop.
 #: `append_block` sends ONE block per fence (`runtime/tools.py`), so the rejected header is
@@ -212,9 +208,7 @@ def test_each_rejected_header_earns_its_own_warning():
     ]
 
 
-# --------------------------------------------------------------------------- #
 # F-3 — a refuted hypothesis's row discharges nothing of a live one's
-# --------------------------------------------------------------------------- #
 
 _TWO_HYPS = (
     ":H hypothesize.hypotheses "
@@ -327,9 +321,7 @@ def test_a_live_contract_with_an_unambiguous_row_still_discharges():
     assert validate_companion(doc) == []
 
 
-# --------------------------------------------------------------------------- #
 # F-12 — an id repeated inside ONE block is named, not deleted in silence
-# --------------------------------------------------------------------------- #
 
 _REPEAT_REASON = (
     "'v-001' is declared twice in this block; only the FIRST row is kept and the later one "
@@ -426,9 +418,7 @@ def test_the_same_id_across_two_blocks_is_still_the_silent_legal_re_emission():
     assert validate_companion(doc) == []
 
 
-# --------------------------------------------------------------------------- #
 # F-6 — a blank refinement value resolves nothing
-# --------------------------------------------------------------------------- #
 
 _OPEN_VERTEX = "v-001|compute|??/??/??|10.42.7.183|knowledge=??"
 
@@ -496,9 +486,7 @@ def test_a_bad_key_with_a_blank_value_still_earns_only_the_key_warning():
     assert [e for e in validate_companion(doc) if "the `value` cell" in e] == []
 
 
-# --------------------------------------------------------------------------- #
 # F-26 — an unterminated candidate set in an ATTRIBUTE value blocks benign
-# --------------------------------------------------------------------------- #
 
 def test_an_unterminated_candidate_set_in_an_attribute_blocks_benign():
     """The attribute-arm twin of #853's `test_an_unterminated_candidate_set_blocks_benign`,
@@ -538,9 +526,7 @@ def test_a_value_that_merely_contains_a_brace_still_closes():
         assert validate_companion(doc) == [], value
 
 
-# --------------------------------------------------------------------------- #
 # F-27 — a stray `:H l-NNN.<sub>` block stands nothing down
-# --------------------------------------------------------------------------- #
 
 def _stray_doc(*extra: str) -> str:
     return _doc(
@@ -589,9 +575,7 @@ def test_the_singular_new_hypothesis_typo_still_defers_for_its_own_ids():
     assert not [e for e in validate_companion(_stray_doc(typo)) if "h-999" in e]
 
 
-# --------------------------------------------------------------------------- #
 # the silent-drop gate's own findings — baselined by #886, fixed here
-# --------------------------------------------------------------------------- #
 
 def _conclude_table(block: str) -> str:
     return _benign_doc(_vertices(_CLEAN_VERTEX), block)

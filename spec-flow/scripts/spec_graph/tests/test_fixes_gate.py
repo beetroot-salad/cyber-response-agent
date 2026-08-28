@@ -15,9 +15,7 @@ from test_mechanical_checks import _evaluated, run_script
 # test's exit code is decided by the trigger/answer mechanics alone.
 _EVALUATED_TRUE = _evaluated()  # every rule a version-1 graph owes — see test_mechanical_checks
 
-# ---------------------------------------------------------------------------
 # check_gate #1 — answered() must not let a sibling facet silence a trigger
-# ---------------------------------------------------------------------------
 
 # Two design writers into `sink` fire R2 on `sink.identity`; `demands` decides whether
 # the trigger is answered.
@@ -70,9 +68,7 @@ def test_gate_same_facet_demand_does_answer_identity_trigger(make_repo):
     assert p.returncode == 0, p.stdout + p.stderr
 
 
-# ---------------------------------------------------------------------------
 # check_gate #2 — a design drives edge over code-provenance writers is in the delta
-# ---------------------------------------------------------------------------
 
 def test_gate_r2_fires_on_design_drives_edge_over_code_writers(make_repo):
     """rules.md's R2 trigger includes "gaining a new `drives` edge over its writers", but
@@ -105,9 +101,7 @@ structure:
     assert "UNANSWERED" in p.stdout and "sink.identity" in p.stdout
 
 
-# ---------------------------------------------------------------------------
 # check_gate #3 — R4 is about the domain facet, not the `read` edge label
-# ---------------------------------------------------------------------------
 
 _R4_MODE_GRAPH = """\
 schema_version: 1
@@ -154,9 +148,7 @@ def test_gate_r4_fires_on_design_domain_boundary_with_no_edges(make_repo):
     assert "UNANSWERED" in p.stdout and "knob.domain.distinguished[0]" in p.stdout
 
 
-# ---------------------------------------------------------------------------
 # check_gate #5 — a scalar `binds:` is one address, not a character sequence
-# ---------------------------------------------------------------------------
 
 def test_gate_scalar_binds_is_one_address_not_per_character(make_repo):
     """`binds: "knob.domain.distinguished[0]"` (string, not list) was iterated per
@@ -188,9 +180,7 @@ structure:
     assert "resolves to nothing" not in p.stdout
 
 
-# ---------------------------------------------------------------------------
 # check_gate #6 / check_claims #15 — findings survive a later unreadable graph
-# ---------------------------------------------------------------------------
 
 def test_gate_prints_findings_before_exiting_2_on_unreadable_sibling(make_repo):
     """Returning 2 on the first unreadable graph threw away every finding the
@@ -208,9 +198,7 @@ def test_gate_prints_findings_before_exiting_2_on_unreadable_sibling(make_repo):
     assert "cannot read" in p.stderr and "g_bad.yaml" in p.stderr
 
 
-# ---------------------------------------------------------------------------
 # check_lint #9 — a gate entry with no demand pointer is a silencer, not a discharge
-# ---------------------------------------------------------------------------
 
 _POINTER_GRAPH = """\
 schema_version: 1
@@ -250,9 +238,7 @@ def test_lint_present_pointers_naming_a_real_demand_pass(make_repo):
     assert p.returncode == 0, p.stdout + p.stderr
 
 
-# ---------------------------------------------------------------------------
 # check_claims #12 — claim ids are matched as strings, like the citations
-# ---------------------------------------------------------------------------
 
 def test_claims_int_claim_id_is_not_a_dangling_citation(make_repo):
     """`_cited` stringifies every citation while the verdict map kept int keys — so a
@@ -271,9 +257,7 @@ claims:
     assert p.returncode == 0, p.stdout + p.stderr
 
 
-# ---------------------------------------------------------------------------
 # check_claims #13 — a judgment-closed hole is a spend-point: it cites or it fails
-# ---------------------------------------------------------------------------
 
 _HOLE_GRAPH = """\
 schema_version: 1
@@ -322,9 +306,7 @@ def test_claims_judgment_closed_hole_with_probed_citation_passes(make_repo):
     assert p.returncode == 0, p.stdout + p.stderr
 
 
-# ---------------------------------------------------------------------------
 # check_claims #14 — no graphs matched is could-not-look, not clean
-# ---------------------------------------------------------------------------
 
 def test_claims_no_graphs_matched_exits_2(make_repo):
     """Every sibling check exits 2 when the artifacts glob matches nothing (verify.md's

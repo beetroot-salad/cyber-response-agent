@@ -58,7 +58,7 @@ def _assert_bind_accepts(wt, run_dir, name: str, expect_corpus_name: str):
     return deps
 
 
-# ================= M7 : the corpus_name domain =============================
+# M7 : the corpus_name domain
 # Each row supplies one degenerate `corpus_name` and the shipped name that must still bind
 # beside it. The control is not decoration: a bind that rejected EVERYTHING would satisfy the
 # rejection half of every row here.

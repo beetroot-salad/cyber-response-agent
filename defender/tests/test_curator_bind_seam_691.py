@@ -50,9 +50,7 @@ from defender.runtime.agent_definition import bind  # noqa: E402
 from defender.runtime.tools import AgentDeps  # noqa: E402
 
 
-# ===========================================================================
 # #0 — the binding seam returns a corpus-scoped curator deps
-# ===========================================================================
 
 def test_bind_returns_a_corpus_scoped_curator_deps(tmp_path):
     """Binding the curator BY NAME against its worktree returns a CuratorDeps whose compiled write
@@ -143,9 +141,7 @@ def test_bound_curator_anchoring_matches_the_for_run_anchoring(tmp_path):
     assert via_bind.defender_dir == via_for_run.defender_dir
 
 
-# ===========================================================================
 # M6 / M1 — retained roots + the corpus found by NAME
-# ===========================================================================
 
 def test_bound_deps_retain_the_compiled_resolved_roots(tmp_path):
     """M6: the deps retains the ResolvedRoots the bind compiled — the record reproduces the run_dir
@@ -204,9 +200,7 @@ def test_corpus_dir_derivation_is_unchanged_for_the_git_commit_consumer(tmp_path
     assert deps.corpus_dir == wt / "defender" / "lessons"
 
 
-# ===========================================================================
 # M4 / M5 — the named tool-config slot: inert-by-default, loud at first use
-# ===========================================================================
 
 def test_agent_deps_carries_a_named_tool_config_slot(tmp_path):
     """M4: the five forward-check fields collapse into ONE named ``tool_config`` slot on the base

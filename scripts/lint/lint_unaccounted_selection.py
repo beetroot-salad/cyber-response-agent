@@ -77,10 +77,15 @@ BASELINE_PATH = Path(__file__).with_name("lint_unaccounted_selection_baseline.js
 EXCLUDED_DIRS = (".venv", "__pycache__", "run-visualizations", "run-transcripts")
 SUPPRESS_MARKERS = ("lint-selection: ok",)
 
-#: The module that OWNS the split. Exempted by full relative path, not basename: a basename
-#: match would wave through any new `parser.py` anywhere under the scope — i.e. a verbatim
-#: second copy of the grammar, which is the one thing this gate exists to stop.
-CANONICAL_MODULE = "skills/invlang/parser.py"
+#: The modules that OWN the split. `_tokenize` holds the fence grammar and must use the
+#: regex; `parser` is the facade that re-exports the name, which reads as an `import`
+#: finding but adds no second reader. Exempted by full relative path, not basename: a
+#: basename match would wave through any new `parser.py` anywhere under the scope — i.e. a
+#: verbatim second copy of the grammar, which is the one thing this gate exists to stop.
+CANONICAL_MODULES = (
+    "skills/invlang/parser/_tokenize.py",
+    "skills/invlang/parser/__init__.py",
+)
 
 FENCE_CONST = "INVLANG_FENCE_RE"
 FENCE_LITERAL = "```invlang"
@@ -202,7 +207,7 @@ def _scan_file(rel: str, tree: ast.AST, lines: list[str]) -> list[Finding]:
         # Arm 1 exempts the module that OWNS the fence split — it must use the regex. Arm 2
         # does not: a silent grammar filter inside the parser is the same defect it is
         # anywhere else, and three of the four sites this gate documents live there.
-        if kind in ("import", "attribute", "regex") and rel == CANONICAL_MODULE:
+        if kind in ("import", "attribute", "regex") and rel in CANONICAL_MODULES:
             kind = None
         if kind and not _suppressed(node, lines):
             # Fingerprint carries no line number, so moving the offending call within its

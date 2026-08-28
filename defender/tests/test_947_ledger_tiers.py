@@ -84,9 +84,7 @@ def base_file(root: Path) -> Path:
     return root / SERVED_DIRNAME / BASE_FILENAME
 
 
-# ==========================================================================
 # 1. the vocabulary
-# ==========================================================================
 
 def test_the_family_tier_is_two_labels_and_the_applier_owns_neither():
     """    `SOURCES` partitions into the FAMILY tier, the seam's own two, and the applier's three.
@@ -165,9 +163,7 @@ def test_a_live_base_read_is_still_recordable(tmp_path):
     assert [r["source"] for r in read_jsonl_rows(ledger.path)] == [BASE]
 
 
-# ==========================================================================
 # 2. the primed base is a precondition, not a parameter
-# ==========================================================================
 
 def test_a_ledger_without_a_primed_base_does_not_construct(tmp_path):
     """    `base_path` is REQUIRED: a ledger cannot be opened without naming the capture it reads.
@@ -227,9 +223,7 @@ def test_the_primed_capture_is_never_written_to(tmp_path):
     assert len(read_jsonl_rows(ledger.path)) == 2
 
 
-# ==========================================================================
 # 3. what `base_payload` reads
-# ==========================================================================
 
 def test_a_primed_key_is_answered_without_the_world_ever_asking(tmp_path):
     """    A key the capture holds resolves out of `base.jsonl` — the world's own file is empty.
@@ -449,9 +443,7 @@ def test_a_duplicate_inside_one_file_resolves_to_the_first_row(tmp_path):
         == '{"owner": "first"}'
 
 
-# ==========================================================================
 # 4. `for_world`: one file per world, under the episode's own capture
-# ==========================================================================
 
 def test_for_world_opens_this_worlds_file_beside_the_shared_capture(tmp_path):
     """    `for_world` is the naming rule: `served/<world_id>.jsonl` over `served/base.jsonl`.

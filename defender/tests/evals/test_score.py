@@ -29,7 +29,7 @@ import yaml
 
 from defender.evals.oracle_golden import judge, score
 
-# --------------------------------------------------------------------------- fixtures
+# fixtures
 
 LABEL_OK = "delta_kind: present\nheterogeneous: false\nevidence: |\n  four failed auths\n"
 LABEL_UNDECIDABLE = ("delta_kind: undecidable\nundecidable_reason: insufficient-baseline\n"
@@ -97,7 +97,7 @@ def _score(case_dir, proj, call, **kw):
                             jobs=1, call=call, **kw)
 
 
-# ------------------------------------------------------------------- the closed grammar
+# the closed grammar
 
 @pytest.mark.parametrize("events", [
     [],
@@ -148,7 +148,7 @@ def test_a_malformed_lead_keeps_the_measurement_s_slice(tmp_path):
     assert summary["rows"][0]["delta_kind"] == "present"
 
 
-# --------------------------------------------------------------------- the leak check
+# the leak check
 
 def test_a_forbidden_value_emitted_as_a_field_value_leaks():
     assert score.leaks(["root", "172.18.0.15"],
@@ -201,7 +201,7 @@ def test_the_leak_check_reads_the_manifest_when_a_case_has_no_hand_labels(tmp_pa
     assert _score(d, proj, _scripted())["mechanical"]["forbidden_emitted"] == ["root"]
 
 
-# ------------------------------------------------------------------- what is not judged
+# what is not judged
 
 def test_a_derived_case_is_never_sent_to_the_judge(tmp_path):
     """A mutation case's story was never fired, so no telemetry was captured for it.
@@ -252,7 +252,7 @@ def test_a_lead_set_mismatch_exits_non_zero(tmp_path, capsys, monkeypatch):
     assert "lead-set integrity" in capsys.readouterr().out
 
 
-# ------------------------------------------------------------------ the two-pass flow
+# the two-pass flow
 
 def test_an_undecidable_measurement_stops_before_the_verdict_pass(tmp_path):
     """There is nothing to grade against. The lead is recorded with `faithful: null`,
@@ -298,7 +298,7 @@ def test_the_verdict_pass_is_shown_the_measurement_but_not_its_price_tag(tmp_pat
     assert "judge_model" not in seen["user"]
 
 
-# ------------------------------------------------------------------- the label cache
+# the label cache
 
 def test_the_label_pass_is_measured_once_and_reused_across_oracle_tags(tmp_path):
     """It is a function of (case, lead) and nothing else — it never sees a projection. Two
@@ -347,7 +347,7 @@ def test_a_label_pass_that_changed_judge_mid_sweep_is_refused(tmp_path):
                            jobs=1, call=call)
 
 
-# ------------------------------------------------------------------ the slice axis
+# the slice axis
 
 @pytest.mark.parametrize(("systems", "expected"), [
     (["elastic"], "elastic"),
@@ -376,7 +376,7 @@ def test_the_score_records_the_judge_beside_the_rows(tmp_path):
     assert summary["tag"].endswith(judge.tag_suffix("test-judge", "high"))
 
 
-# ------------------------------------------------------------------------- the dry run
+# the dry run
 
 def test_the_dry_run_reports_the_mechanical_half_and_calls_nothing(tmp_path, capsys,
                                                                    monkeypatch):
@@ -420,7 +420,7 @@ def test_the_dry_run_and_the_real_score_report_the_same_mechanical_half(tmp_path
         k: real[k] for k in ("tag", "case", "kind", "n_leads")}
 
 
-# ------------------------------------------------------------- the sibling entrypoints
+# the sibling entrypoints
 
 @pytest.mark.parametrize("module", ["replay", "build_case", "controls", "report",
                                     "record_held_out", "validate_cases", "audit_judge",
@@ -470,7 +470,7 @@ def test_the_cli_resolves_the_call_seam_at_the_boundary(tmp_path, monkeypatch):
     assert seen, "the patched seam was never reached — main bound its default at import"
 
 
-# ------------------------------------------------- definitional expectations (derived)
+# definitional expectations (derived)
 #
 # A derived case has no telemetry, so the judge never runs on it and `expectation:` is
 # the only thing between it and a vacuous pass. These pin the regression that made this

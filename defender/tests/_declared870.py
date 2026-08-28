@@ -158,7 +158,6 @@ from defender.tests._declared869 import (  # noqa: F401 — re-exported substrat
     write_marker,
 )
 
-# ---------------------------------------------------------------------------------------
 # THE ONE LITERAL THIS ROUND ADDS, and the shape of the document behind it.
 #
 # Spelled HERE rather than imported from the target: an oracle a test reads out of the code
@@ -166,7 +165,6 @@ from defender.tests._declared869 import (  # noqa: F401 — re-exported substrat
 # assertion below is against these literals, and `test_870_handoff.py` asserts the REAL
 # committed file still matches them — so a drift in production is a red test, not a silently
 # agreeing one.
-# ---------------------------------------------------------------------------------------
 
 #: The reducer surface — `defender/skills/gather/defender-sql.md`, repo-relative, the exact
 #: spelling `_pitfalls_path_rule` compares and `commit_corpus` stages.
@@ -268,9 +266,7 @@ def edits(*fns):
     return _edit
 
 
-# ---------------------------------------------------------------------------------------
 # The two row shapes the lane routes on.
-# ---------------------------------------------------------------------------------------
 
 
 def shim_lead(

@@ -51,9 +51,7 @@ from defender.tests._session_store_705 import (  # noqa: E402
 )
 
 
-# ==========================================================================
 # fork: the branch point becomes a log entry
-# ==========================================================================
 
 def test_fork_logs_null_to_branch_point(tmp_path):
     """    Constructing a fork sets the new session's head to the branch point and records that move
@@ -349,9 +347,7 @@ def test_a_fresh_fork_renders_its_inherited_prefix_exactly_once(tmp_path):
         f"PR-24's byte-identical duplicates must not appear anywhere; got {shas}")
 
 
-# ==========================================================================
 # the log readers
-# ==========================================================================
 
 def test_displaced_tip_survives_later_appends(tmp_path):
     """    The tip a fold displaced stays answerable after the conversation moves on: ordinary turns
@@ -514,9 +510,7 @@ def test_branch_point_requires_a_fork_reason_not_just_a_null_origin(tmp_path):
         "control: a fold that DID displace something is still recoverable")
 
 
-# ==========================================================================
 # obligation 8 — the one transaction, in every failure shape
-# ==========================================================================
 
 def test_head_and_log_move_in_one_transaction(tmp_path):
     """    The head UPDATE and the conditional log INSERT ride inside the same transaction as the

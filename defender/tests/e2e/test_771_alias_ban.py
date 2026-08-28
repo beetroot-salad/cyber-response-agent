@@ -106,9 +106,7 @@ def _request(tmp_path: Path, *, writable: bool = True) -> object:
     )
 
 
-# --------------------------------------------------------------------------- #
 # M1 — the profile on the argv, on every lane
-# --------------------------------------------------------------------------- #
 def test_box_argv_carries_the_alias_profile(tmp_path):
     """alias_profile_seam — the rendered `docker run` argv carries
     `--security-opt seccomp=<the shipped profile>`, pointing at a file that exists and parses
@@ -530,9 +528,7 @@ def test_an_altered_or_unreadable_profile_faults_the_box_like_a_missing_one(tmp_
         _start_investigation_lane(run_tree(tmp_path / "second"), rec2)
 
 
-# --------------------------------------------------------------------------- #
 # M2 — the startup probe
-# --------------------------------------------------------------------------- #
 def test_startup_probe_refuses_each_banned_shape(tmp_path):
     """probe_banned_shapes_fail — at every box start the probe attempts each banned shape
     inside the box, observes each one refused, and confirms afterwards that no entry of that
@@ -766,9 +762,7 @@ def test_the_alias_probe_reruns_in_full_and_cleans_its_own_leavings_on_both_arms
     )
 
 
-# --------------------------------------------------------------------------- #
 # F4/D5 — the fault that must not be swallowed
-# --------------------------------------------------------------------------- #
 def test_box_start_faults_when_the_ban_is_not_in_force(tmp_path):
     """probe_failure_faults_box_start — when the probe observes the ban absent, box startup
     faults: no executor is returned, and no model turn is ever reached.
@@ -962,9 +956,7 @@ def test_ci_registers_the_box_runtime_with_oci_seccomp(tmp_path):
         )
 
 
-# --------------------------------------------------------------------------- #
 # mechanism confirmations against a REAL box — selected by CI's `test` job
-# --------------------------------------------------------------------------- #
 def _box_probe(box, run_dir: Path, name: str, source: str) -> dict:
     """Run a probe script inside the box and decode its one JSON line.
 

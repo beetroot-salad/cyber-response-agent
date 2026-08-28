@@ -56,7 +56,7 @@ def _errors(body: str) -> list[str]:
     return validate_companion(_doc(body), None)
 
 
-# --- rule #6: prediction completeness for `++` --------------------------------------------
+# rule #6: prediction completeness for `++`
 
 _SIX_FULL = _PROLOGUE + _ONE_HYPOTHESIS + _LEAD + """\
 :T resolutions
@@ -116,7 +116,7 @@ def test_citing_the_attribute_prediction_clears_it() -> None:
     ) == []
 
 
-# --- rule #17: SCREEN structural integrity ------------------------------------------------
+# rule #17: SCREEN structural integrity
 
 _SCREEN_HEADER = ":L findings [id|loop|name|target|mode|tests|system|window|screen_result]\n"
 
@@ -165,7 +165,7 @@ def test_the_screen_shapes_the_rule_must_accept(case: str, body: str) -> None:
     assert _errors(body) == []
 
 
-# --- rule #23: hypothesis fork distinctness -----------------------------------------------
+# rule #23: hypothesis fork distinctness
 
 _FORK_DISTINCT = _PROLOGUE + _HYP_HEADER + """\
 h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
@@ -249,7 +249,7 @@ def test_the_same_claims_on_different_anchors_are_not_siblings() -> None:
     assert _errors(_SAME_CLAIMS_ON_TWO_ANCHORS) == []
 
 
-# --- rule #24: hypothesis persistence at CONCLUDE -----------------------------------------
+# rule #24: hypothesis persistence at CONCLUDE
 
 _TWO_LIVE_HYPOTHESES = _PROLOGUE + _HYP_HEADER + """\
 h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
@@ -331,7 +331,7 @@ none|
     assert all("neither refuted nor carried into the close" in e for e in errors)
 
 
-# --- rule #33: attribute-prediction structure ---------------------------------------------
+# rule #33: attribute-prediction structure
 
 def _with_attr_preds(rows: str) -> str:
     return _PROLOGUE + _HYP_HEADER + """\
@@ -393,7 +393,7 @@ def test_the_uniqueness_clause_is_already_owned_by_the_parser() -> None:
     assert across_two_blocks == []
 
 
-# --- refutation scope: the third `p*` site, which rule #7's family never reached ----------
+# refutation scope: the third `p*` site, which rule #7's family never reached
 
 _REFUT_IN_SCOPE = _PROLOGUE + _HYP_HEADER + """\
 h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
@@ -467,7 +467,7 @@ def test_a_refutation_on_a_hypothesis_with_no_predictions_is_left_alone() -> Non
     assert _errors(_REFUT_ON_A_PREDICTIONLESS_HYPOTHESIS) == []
 
 
-# --- review follow-ups: the holes the armed rules left open --------------------------------
+# review follow-ups: the holes the armed rules left open
 #
 # Every case below was reachable on the first arming pass and is now closed. They live here
 # rather than in a file of their own because each is the SAME rule as the block above it, one
@@ -664,7 +664,7 @@ def test_a_leading_decimal_point_is_not_stripped_from_a_claim() -> None:
     assert _normalized_claim('  "Alpha holds."  ') == "alpha holds"
 
 
-# --- #940 review regressions ---------------------------------------------------------------
+# #940 review regressions
 #
 # Each of these was a hole a rule armed in this change left open, or a legal document one of
 # them refused. They sit here rather than in their own file so they share the one prologue —
@@ -919,7 +919,7 @@ def test_a_conclude_block_that_really_records_nothing_still_warns() -> None:
     )
 
 
-# --- #940 sweep regressions ------------------------------------------------------------------
+# #940 sweep regressions
 #
 # The second pass over the first pass. Two of these are defects the FIRST round of #940 fixes
 # introduced, which is the reason the block exists as its own heading.
@@ -962,7 +962,7 @@ def test_rule_17_reads_mode_and_screen_result_the_same_way() -> None:
     assert _errors(_PROLOGUE + _screen_row('"screen"', '"no_match"') + _ONE_PRED) == []
 
 
-# --- #943 review regressions -----------------------------------------------------------------
+# #943 review regressions
 #
 # The quoting sweep the `target` fix started, finished across the rest of the row, plus the two
 # normalization holes the fork rule was left with. Each case below validated CLEAN (or was
@@ -1110,7 +1110,7 @@ ap1|proposed_parent|"  "|"unsigned"
     assert "attr_preds row missing id/target/attribute" in errors[0]
 
 
-# --- #943 second-review regressions ----------------------------------------------------------
+# #943 second-review regressions
 #
 # Nine more inputs the first arming pass let through, in the order the rules are declared
 # above. Every one is the SAME rule one input further out, so each carries the control that
@@ -1393,7 +1393,7 @@ def test_one_impact_predicate_graded_once_is_clean() -> None:
     ) == []
 
 
-# --- the two append-only wedges -------------------------------------------------------------
+# the two append-only wedges
 #
 # A rule may refuse a row only for something knowable when that row is written. Both cases
 # below broke it in the same way: a document that validated CLEAN was turned into a refusal by

@@ -58,7 +58,7 @@ def _bash(cmd, policy):
     return permission.decide_bash(cmd, policy=policy, run_dir=_RUN, defender_dir=_DFN)
 
 
-# --- bash, main loop -------------------------------------------------------
+# bash, main loop
 
 @pytest.mark.parametrize("cmd", [
     "defender-invlang enum types",
@@ -102,7 +102,7 @@ def test_main_loop_denies(cmd, reason_substr):
     assert reason_substr in d.reason
 
 
-# --- bash, gather subagent (#611: the adapter lane is gone) ----------------
+# bash, gather subagent (#611: the adapter lane is gone)
 
 def test_gather_denies_standalone_adapter():
     # #611 FLIP: gather used to run a standalone adapter from bash and have its payload captured
@@ -166,7 +166,7 @@ def test_decision_carries_no_adapter_routing_payload(cmd):
         assert not d.allow
 
 
-# --- quoted comparison operators are not redirects (quote-aware unsafe scan) -----
+# quoted comparison operators are not redirects (quote-aware unsafe scan)
 # Regression: `>`/`<` inside a quoted filter (a comparison) were read as shell
 # redirects and hard-denied in-process. They must be allowed; real redirects and
 # command substitution outside quotes must still be denied.
@@ -225,7 +225,7 @@ def test_gather_still_denies_real_redirect_and_substitution(cmd):
     assert not _bash(cmd, MAIN).allow
 
 
-# --- a second command must never hide behind a safe head -------------------
+# a second command must never hide behind a safe head
 # shlex eats an unquoted newline as whitespace, and the wrapper fold's `bash -c`/`timeout`
 # handling used to drop or re-quote what followed — both let a safe head (an in-scope
 # `cat`) front an ungated second command the shell still runs. Each must fail closed
@@ -431,7 +431,7 @@ def test_the_real_pipe_the_gather_deny_reason_teaches_is_still_allowed():
     ]
 
 
-# --- read: deny-by-default allowlist over {run_dir, defender_dir} -----------
+# read: deny-by-default allowlist over {run_dir, defender_dir}
 
 def _read_roots(tmp_path):
     """A run dir + a defender corpus dir for the read allowlist (both real dirs so
@@ -536,7 +536,7 @@ def test_alert_is_untrusted():
     assert not permission.is_untrusted_read(Path("/tmp/defender-runs/x/report.md"))
 
 
-# --- write -----------------------------------------------------------------
+# write
 # decide_write is a flat, deny-by-default allowlist (the write twin of bash_allow):
 # the RESOLVED path must fullmatch a `policy.write_allow` pattern. There is NO implicit
 # run_dir base — every writer declares its paths (main: its run-dir subtree; the lead
@@ -710,7 +710,7 @@ def test_write_allow_corpus_file_named_investigation_not_gated(tmp_path):
     assert "invlang validation" in d.reason
 
 
-# --- gather subagent: compute + adapter surface ---
+# gather subagent: compute + adapter surface
 
 def test_gather_drops_find():
     # `find` was dropped from the allowlist (#379): template discovery is Read/Grep
@@ -801,7 +801,7 @@ def test_gather_drops_residual_reduce_by_hand_tools():
         assert not _bash(cmd, GATHER).allow, cmd
 
 
-# --- command_shape: pure classifiers over parsed pipelines (#456) ----------
+# command_shape: pure classifiers over parsed pipelines (#456)
 # The classification half, shared between the gate and dispatch. It operates on
 # the parsed bash_exec.Pipeline structure (no parsing of its own); the gate parses
 # once and routes off these, so a command is decomposed exactly once per tool call.
@@ -854,7 +854,7 @@ def test_command_shape_has_adapter_survives_for_the_deny(cmd, adapter):
         assert _bash(cmd, GATHER).reason == permission.ADAPTER_RETIRED_REASON, cmd
 
 
-# --- AgentPolicy primitive: read_roots + hand-built grants ------------------
+# AgentPolicy primitive: read_roots + hand-built grants
 # The generic mechanism the judge is the first consumer of: an agent brings its
 # capability as DATA (an AgentPolicy carrying Grants). These test the primitive itself
 # with a synthetic policy; the judge's own policy is tested with the judge module (its

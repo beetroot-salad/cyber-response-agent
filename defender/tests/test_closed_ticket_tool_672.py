@@ -330,7 +330,7 @@ def test_closed_ticket_tools_registration_order(tmp_path):
     # (1) The source-order census: the ToolSet presence-table guard sequence, walked in
     # execution order (register_tools' body, splicing in any local helper it composes —
     # today the deferred tail lives in _register_deferred_tools).
-    tree = ast.parse((DEFENDER / "runtime" / "tools.py").read_text(encoding="utf-8"))
+    tree = ast.parse((DEFENDER / "runtime" / "tools" / "__init__.py").read_text(encoding="utf-8"))
     funcs = {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef)}
 
     def guard_bits(fn_name: str, seen: frozenset) -> list[str]:
@@ -417,9 +417,7 @@ def test_closed_ticket_registration_reaches_every_benign_call_site():
     assert ADVERSARIAL.judge_wiring.closed_ticket_read is False
 
 
-# ═════════════════════════════════════════════════════════════════════════════
 # B. The seam and the outbound payload
-# ═════════════════════════════════════════════════════════════════════════════
 
 
 def test_tools_drive_verbs_in_process_via_deps(tmp_path):

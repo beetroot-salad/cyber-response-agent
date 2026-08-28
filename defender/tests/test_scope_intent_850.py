@@ -119,9 +119,7 @@ def _judge(env, run_dir):
     )
 
 
-# --------------------------------------------------------------------------- #
 # F-09 — the payload shape and the lead-id validators are ONE alphabet
-# --------------------------------------------------------------------------- #
 
 def test_f09_a_lettered_lead_id_survives_claim_persist_and_the_read_gate(env):
     """The end-to-end path the defect broke: a lettered id is CLAIMED, its payload is PERSISTED
@@ -186,9 +184,7 @@ def test_f09_main_is_still_denied_the_payload_either_way(env):
     assert "gather_raw" in denial.reason
 
 
-# --------------------------------------------------------------------------- #
 # F-19 — a confined agent's own run dir is not a hole in its confine
-# --------------------------------------------------------------------------- #
 
 def _staged(env, run_dir):
     """A learning run dir in the state the SECOND pass over a run id starts the actor in: the

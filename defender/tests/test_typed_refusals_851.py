@@ -73,7 +73,6 @@ def _curator_scene(tmp_path: Path):
     return deps, corpus_dir(wt, "lessons")
 
 
-# =========================================================================== #
 # F-07 / F-10 — an embedded NUL in a bash argv.
 #
 # The gate ALLOWED it for every program whose extractor is OPENS_NOTHING (no `resolve()` runs,
@@ -81,7 +80,6 @@ def _curator_scene(tmp_path: Path):
 # which sits ABOVE `run_parsed`'s own try — then raised a bare `ValueError` that nothing between
 # there and `run.py::main` catches. One command the model could have retried killed the whole
 # investigation instead: no `write_trace`, no disposition, no `report.md`.
-# =========================================================================== #
 
 #: One per OPENS_NOTHING family that gather actually holds a grant for — a plain program, a
 #: reducer, and a `defender-*` shim. Each of these was ALLOWED before the fix; a program the
@@ -178,13 +176,11 @@ def test_f07_a_clean_command_still_runs(tmp_path):
     assert len(box.calls) == 1
 
 
-# =========================================================================== #
 # F-25 — `_closed_for_investigation_write` resolved a model-supplied operand ONE LINE ahead of
 # `decide_write`/`decide_read`, so an operand that makes `resolve()` throw (an embedded NUL ->
 # `ValueError`; a symlink loop -> `RuntimeError`) escaped the write/edit tool as an unhandled
 # exception, quarantining the authoring spawn instead of becoming the `Decision(False)` that
 # `RESOLVE_ERRORS` exists to produce.
-# =========================================================================== #
 
 def test_f25_a_nul_operand_refuses_the_write_instead_of_killing_the_stage(tmp_path):
     deps, corpus = _curator_scene(tmp_path)
@@ -220,12 +216,10 @@ def test_f25_an_ordinary_corpus_write_still_lands(tmp_path):
     assert (corpus / "ok.md").read_text(encoding="utf-8") == "body\n"
 
 
-# =========================================================================== #
 # F-26 — the UTF-8-encodability check lived INSIDE `validate_artifact`, below the artifact
 # keying, so it ran for `report.md` / `investigation.md` and for nothing else. Unencodable
 # content on any other allowed path was ALLOWED by the gate and then raised
 # `UnicodeEncodeError` out of `write_guarded`, which the write tools map to nothing.
-# =========================================================================== #
 
 def test_f26_a_lone_surrogate_is_denied_on_a_non_artifact_path(tmp_path):
     """The gate's contract is to RETURN a Decision, never propagate (its `RESOLVE_ERRORS`
@@ -276,13 +270,11 @@ def test_f26_an_undecodable_baseline_denies_rather_than_raising(tmp_path):
     assert "failing closed" in d.reason
 
 
-# =========================================================================== #
 # F-23 — `_alert_signature` is annotated `-> str | None` and returned the parsed JSON value
 # RAW, so a numeric `rule.id` detonated in `re.escape` on `orientation()`'s unguarded path and
 # killed the run before the first model request — an opaque `TypeError: decoding to str` in
 # place of a legible complaint, and a breach of the module's own "orientation must never break
 # the run" invariant.
-# =========================================================================== #
 
 def _alert(tmp_path: Path, rule_id) -> Path:
     p = tmp_path / "alert.json"

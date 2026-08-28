@@ -88,9 +88,7 @@ NUL_ESCAPE = "\\u0000"
 NUL = "\x00"
 
 
-# ---------------------------------------------------------------------------------------
 # The vendored evidence corpus (§7 r10, P5 = A)
-# ---------------------------------------------------------------------------------------
 
 #: The 40 committed fixture payloads, copied into the suite at §7 r10 (P5 = A). VENDORED, not
 #: imported: `experiments/toon-vs-columnar-kimi/build_fixtures.py:15` does
@@ -234,9 +232,7 @@ def frame_count(text: str, *, tag: str = "untrusted") -> int:
     return len(re.findall(rf"<run-[0-9a-f]+-{re.escape(tag)}>", text))
 
 
-# ---------------------------------------------------------------------------------------
 # The declarative fault-injection fake for the encoder seam
-# ---------------------------------------------------------------------------------------
 
 def _panic_class() -> type[BaseException]:
     """The REAL `pyo3_runtime.PanicException` class, captured from the real primitive.
@@ -320,9 +316,7 @@ class SpyEncoder:
         return toons.loads(text, **kwargs)
 
 
-# ---------------------------------------------------------------------------------------
 # Foreign and owned toolsets
-# ---------------------------------------------------------------------------------------
 
 def foreign_toolset(returns: Any, *, name: str = "fetch_rows") -> FunctionToolset:
     """A toolset defender does not own, carrying one dict/list-returning tool.
@@ -381,9 +375,7 @@ def owned_toolset(returns: Any, *, name: str = "fetch_rows") -> Any:
     return mark_owned(foreign_toolset(returns, name=name))
 
 
-# ---------------------------------------------------------------------------------------
 # Driving the composition root
-# ---------------------------------------------------------------------------------------
 
 class Dispatched:
     """What the model received, and nothing the gate says about itself.
@@ -691,9 +683,7 @@ def _built(model):
     return BuiltModel(FunctionModel(model), None)
 
 
-# ---------------------------------------------------------------------------------------
 # Driving an agent one of the FIVE BUILD FUNCTIONS produced (`d35`, `d74`)
-# ---------------------------------------------------------------------------------------
 
 def probe_model(calls: list[tuple[str, dict]] | None = None, turns: int = 1):
     """A `make_model` seam and the recorder behind it — `(make_model, recorder)`.
@@ -723,9 +713,7 @@ def run_with_foreign_toolset(agent: Agent, deps: Any, recorder: _Recorder, value
     return Dispatched(recorder.requests, [])
 
 
-# ---------------------------------------------------------------------------------------
 # Child-process isolation — hazard containment, not tidiness
-# ---------------------------------------------------------------------------------------
 
 @dataclass(frozen=True)
 class ChildOutcome:
@@ -835,9 +823,7 @@ def drive(value, *, gated):
 '''
 
 
-# ---------------------------------------------------------------------------------------
 # Hazard corpora — every value below is an `r11` / `R7` / `S1` probe value, not an invention
-# ---------------------------------------------------------------------------------------
 
 #: `r11`/`c4`'s fifteen-value hazard corpus: the characters TOON's SPEC 7.1 escaping is about.
 #: Each is a value that, unescaped, could close a row, open a field or forge a delimiter.

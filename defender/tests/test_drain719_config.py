@@ -28,9 +28,7 @@ def _pitfalls_rows(n: int) -> list[dict]:
     return [h.row_for("pitfalls", f"r:l-{i:03d}:0") for i in range(n)]
 
 
-# =======================================================================================
 # Where the new paths live
-# =======================================================================================
 
 
 def test_new_queue_paths_resolve_under_state_root_not_the_worktree(tmp_path: Path):
@@ -117,9 +115,7 @@ def test_new_lock_and_graveyard_paths_do_not_abort_the_next_batch(tmp_path: Path
     assert drain.run_batch(cfg=stray) == 2, "a path outside the ignored prefix must be seen"
 
 
-# =======================================================================================
 # When the ceiling is bound
-# =======================================================================================
 
 
 def test_a_non_integer_ceiling_aborts_the_tick_before_any_row_is_processed(tmp_path: Path):
@@ -219,9 +215,7 @@ def test_author_timeout_seconds_zero_behavior_is_pinned(tmp_path: Path):
     assert agent.calls[0]["cfg"].author_timeout == 0, "the drain re-coalesced the deadline"
 
 
-# =======================================================================================
 # The pitfalls channel — O8's discriminating case
-# =======================================================================================
 
 
 def test_pitfalls_agent_failure_bumps_attempts_and_retires_at_the_ceiling(

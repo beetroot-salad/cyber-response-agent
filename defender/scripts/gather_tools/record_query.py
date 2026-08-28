@@ -333,7 +333,6 @@ def _next_seq(run_dir: Path, lead: str) -> int:
     return len(lead_rows(run_dir, lead))
 
 
-# --------------------------------------------------------------------------------------- #
 # The repeat circuit breaker.
 #
 # `repeat_trip` is the predicate: a lead that issues the SAME request (`lead_id`, `system`,
@@ -342,7 +341,6 @@ def _next_seq(run_dir: Path, lead: str) -> int:
 # from `lead_rows` — no new persisted state — over exactly the rows the guard itself could have
 # refused: a row answered ABOVE the guard's placement in `QueryCapture.wrap_tool_execute` is
 # never an occurrence, live or on replay.
-# --------------------------------------------------------------------------------------- #
 
 REPEAT_THRESHOLD = 3
 

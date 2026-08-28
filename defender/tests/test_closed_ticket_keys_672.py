@@ -39,7 +39,6 @@ from defender.tests._closed_ticket_672 import (  # noqa: E402
 pytestmark = pytest.mark.e2e
 
 
-
 @pytest.mark.parametrize(
     ("key", "reaches_store"),
     [
@@ -497,7 +496,7 @@ def test_list_response_non_closed_item_dropped_or_faulted(tmp_path):
     assert "TKT-DUP-B" in run2.all_text
 
 
-# ── Fork J: the recency arm ──────────────────────────────────────────────────────────────
+# Fork J: the recency arm
 
 AFTER_CASE = {"created": "2026-05-02T09:15:00+00:00", "updated": "2026-07-20T06:30:00+00:00"}
 

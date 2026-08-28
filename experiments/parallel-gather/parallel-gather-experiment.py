@@ -42,7 +42,7 @@ CONTROL_RUN = Path(
 )
 
 
-# --- minimal Context shim (matches the field set _assemble_prompt_single uses)
+# minimal Context shim (matches the field set _assemble_prompt_single uses)
 @dataclass
 class CtxShim:
     run_dir: Path
@@ -199,7 +199,6 @@ def main() -> int:
         results = [f.result() for f in futures]
     wall_total = round(time.monotonic() - wall_start, 1)
 
-    # Build a synthesized envelope (concatenate leads).
     synthesized_leads = []
     for r in results:
         env = r.get("envelope") or {}
@@ -224,7 +223,6 @@ def main() -> int:
         None,
     )
 
-    # Write summary.
     lines = [
         "# parallel-gather stress test — results",
         "",

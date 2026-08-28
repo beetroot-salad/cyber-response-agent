@@ -61,9 +61,7 @@ from defender.tests._session_store_705 import (  # noqa: E402
 )
 
 
-# ==========================================================================
 # #0 — the signal contract
-# ==========================================================================
 
 def test_head_move_signal_contract(tmp_path):
     """    The head-move surface is exactly this: `append` takes a keyword `reason` drawn from the
@@ -116,9 +114,7 @@ def test_head_move_signal_contract(tmp_path):
         assert ss.fold_history(store, absent) == []
 
 
-# ==========================================================================
 # the path reads from head
-# ==========================================================================
 
 def test_path_follows_head_not_insertion_order(tmp_path):
     """    The path a reader projects is the parent walk from the session's RECORDED head, not from
@@ -224,9 +220,7 @@ def test_session_head_is_a_column_read_with_no_fork_fallback(tmp_path):
     assert head_of(store, main) == off
 
 
-# ==========================================================================
 # the fold
-# ==========================================================================
 
 def test_fold_moves_head_to_frontier_and_logs_fold(tmp_path):
     """    A fold moves the session's head to the frontier row it mints and leaves exactly ONE
@@ -411,9 +405,7 @@ def test_a_degenerate_fold_still_writes_its_log_entry(tmp_path):
         "control: a linear move carrying NO reason still writes nothing")
 
 
-# ==========================================================================
 # the non-linearity rule
-# ==========================================================================
 
 def test_a_linear_turn_writes_no_log_entry(tmp_path):
     """    An ordinary turn — the first inserted row parenting onto the session's own current head,
@@ -786,9 +778,7 @@ def test_an_empty_batch_with_a_reason_validates_before_the_short_circuit(tmp_pat
     assert message_ids(store, session_id) == [r1]
 
 
-# ==========================================================================
 # who may hand `append` a reason at all
-# ==========================================================================
 
 def test_a_reason_on_a_linear_move_is_refused_unless_the_caller_mints_a_frontier(tmp_path):
     """    A member reason handed to a LINEAR move is accepted only from a caller minting a frontier
@@ -965,9 +955,7 @@ def test_a_fold_on_an_empty_path_is_refused(tmp_path):
     assert sql(store, "SELECT parent_id FROM message WHERE id = ?", (frontier,)) == [(r1,)]
 
 
-# ==========================================================================
 # the cycle guard (correction R3, binding)
-# ==========================================================================
 
 def test_append_still_refuses_a_cyclic_parent_chain_at_write_time(tmp_path):
     """    `append` still refuses a cyclic `parent_id` chain at WRITE time — before anything is
@@ -1015,9 +1003,7 @@ def test_append_still_refuses_a_cyclic_parent_chain_at_write_time(tmp_path):
     assert log_rows(store, clean) == []
 
 
-# ==========================================================================
 # D4 / survival, and the end-to-end walk
-# ==========================================================================
 
 def test_deleting_default_boundary_leaves_every_fold_caller_working(tmp_path):
     """    With `_default_boundary` no longer standing in as the fold's placeholder default, every

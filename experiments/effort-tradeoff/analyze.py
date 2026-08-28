@@ -115,7 +115,6 @@ def main() -> None:
         }
         rows.append(row)
 
-    # table
     cols = ["run_id", "effort", "fixture", "rc", "cost_usd", "out_tok", "cache_read",
             "dur_s", "turns", "think_pct", "disposition", "confidence", "spray_flag", "authz"]
     w = {c: max(len(c), *(len(str(r.get(c))) for r in rows)) for c in cols} if rows else {}

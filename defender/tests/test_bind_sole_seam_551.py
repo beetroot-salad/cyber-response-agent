@@ -233,9 +233,7 @@ def _main_write_shape(roots: ResolvedRoots) -> tuple:
     return (permission.build_write_allow(roots.run_dir),)
 
 
-# ============================================================================
 # D0 — the return-value contract (resolve FIRST)
-# ============================================================================
 
 def test_d0_bind_return_contract(tmp_path):
     """d0_bind_return_contract: bind(defn, run_dir, *, scope, salt, defender_dir=None) returns
@@ -253,9 +251,7 @@ def test_d0_bind_return_contract(tmp_path):
     assert deps.defender_dir == wt          # the threaded tree, NOT PATHS
 
 
-# ============================================================================
 # D1 — all seven roles obtain deps via bind
-# ============================================================================
 
 def test_d1_judge_via_bind(tmp_path):
     """d1_judge_via_bind: bind(JUDGE_DEF, scope=RunScope(add_dirs)) yields a policy whose
@@ -434,9 +430,7 @@ def test_d1_no_factory_in_stage_modules():
         assert "for_run(" not in src, f"{name} still has a for_run/_for_run front door"
 
 
-# ============================================================================
 # D2 — write scope as data (write_shapes; lead-author fork removed)
-# ============================================================================
 
 def test_d2_write_shapes_field(tmp_path):
     """d2_write_shapes_field (seam): the def carries `write_shapes` — per-run (ResolvedRoots)->
@@ -606,9 +600,7 @@ def test_d2_deps_class_maps_every_bindable_role(tmp_path):
         bind(CORPUS_AUTHOR_DEF, tmp_path)
 
 
-# ============================================================================
 # D3 — defender_dir threaded through resolve_roots AND _for_run (deps)
-# ============================================================================
 
 def test_d3_resolve_roots_defender_dir_param(tmp_path):
     """d3_resolve_roots_defender_dir_param (seam): resolve_roots takes defender_dir (default
@@ -699,7 +691,7 @@ def test_d3_main_driver_threads_param_into_bind():
     param into the bind(MAIN_DEF, …) call (so prompt tree == gate tree), not only into
     build_agent/_user_prompt while bind anchors PATHS."""
     # RED@HEAD: the driver's bind(MAIN_DEF, run_dir) call has no defender_dir today.
-    src = (PATHS.repo_root / "defender" / "runtime" / "driver.py").read_text()
+    src = (PATHS.repo_root / "defender" / "runtime" / "driver" / "__init__.py").read_text()
     assert re.search(r"bind\(\s*MAIN_DEF[^)]*defender_dir\s*=", src), \
         "run_investigation must thread defender_dir into bind(MAIN_DEF, …)"
 
@@ -747,9 +739,7 @@ def test_d3_corpus_traversal_guard_survives(tmp_path):
     assert resolve_roots(run, ("lessons",), RunScope()).corpus_roots  # positive control (clean name)
 
 
-# ============================================================================
 # D4 — actor confine + lead-author tree preconditions as data
-# ============================================================================
 
 def test_d4_requires_confine_data(tmp_path):
     """d4_requires_confine_data (seam): the actor's empty-read_confine fail-loud is a
@@ -824,9 +814,7 @@ def test_d4_lead_author_no_tree_raises(tmp_path):
     assert isinstance(bind(LEAD_AUTHOR_DEF, run, defender_dir=wtd), LeadAuthorDeps)
 
 
-# ============================================================================
 # D5 — the parallel factory path retires
-# ============================================================================
 
 def test_d5_oracle_verify_denyall_via_compile_policy(tmp_path):
     """d5_oracle_verify_denyall_via_compile_policy (survival): the _ORACLE_POLICY/_VERIFY_POLICY
@@ -906,9 +894,7 @@ def test_d5_reader_patterns_for_kept(tmp_path):
     assert not permission.decide_bash("cat /etc/passwd", policy=pol, run_dir=run, defender_dir=_DEFENDER).allow
 
 
-# ============================================================================
 # D6 — wire the write ⊆ read guard
-# ============================================================================
 
 def test_d6_writers_pass_roots(tmp_path):
     """d6_writers_pass_roots (seam): both writer call sites (tools.py write_file/edit_file) call
@@ -936,7 +922,14 @@ def test_d6_writers_pass_roots(tmp_path):
     # there). FOUR sites since #836 added fix_row, the second writer bound to investigation.md;
     # the count is the census half of the assertion, so a new writer that skips the roots shows
     # up here as a mismatch rather than as a dormant guard.
-    tools_src = (PATHS.repo_root / "defender" / "runtime" / "tools.py").read_text()
+    # TWO modules since the tool bodies were split out of `tools.py`: the file writers live
+    # in `_files`, the two investigation writers (`append_block`, `fix_row`) in `_document`.
+    # Both are read, so the census still covers every writer rather than whichever half a
+    # later split happens to leave behind.
+    runtime = PATHS.repo_root / "defender" / "runtime" / "tools"
+    tools_src = "\n".join(
+        (runtime / name).read_text() for name in ("_files.py", "_document.py")
+    )
     calls = re.findall(r"decide_write\(.*?policy=deps\.policy", tools_src, re.DOTALL)
     assert len(calls) == 4, "a decide_write call site appeared or vanished — check the roots"
     assert all("defender_dir=deps.defender_dir" in c for c in calls)
@@ -995,9 +988,7 @@ def test_d6_guard_needs_worktree_defender_dir(tmp_path):
     assert not permission.decide_write(target, "c", run_dir=run, defender_dir=_DEFENDER, policy=pol).allow
 
 
-# ============================================================================
 # R3 — read↔bash filename + symlink parity
-# ============================================================================
 
 def test_r3_read_bash_filename_parity(tmp_path):
     """r3_read_bash_filename_parity (parity): for a reader agent, decide_read and the bash cat lane
@@ -1051,9 +1042,7 @@ def test_r3_symlink_pointing_out_denies(tmp_path):
     assert not permission.decide_bash(f"cat {run}/../outside/secret", policy=pol, run_dir=run, defender_dir=_DEFENDER).allow  # textual `..`
 
 
-# ============================================================================
 # R2 — per-pair isolation
-# ============================================================================
 
 def test_r2_resolve_roots_per_pair_distinct(tmp_path):
     """r2_resolve_roots_per_pair_distinct (uniqueness): two different (run_dir, defender_dir) pairs
@@ -1074,9 +1063,7 @@ def test_r2_resolve_roots_per_pair_distinct(tmp_path):
     assert ra.corpus_roots != rb.corpus_roots
 
 
-# ============================================================================
 # R5 — safe-by-construction: compile_policy write co-constraint
-# ============================================================================
 
 def test_r5_tools_write_write_shapes_agree(tmp_path):
     """r5_tools_write_write_shapes_agree (negative, Q3 assert): compile_policy RAISES on an
@@ -1094,9 +1081,7 @@ def test_r5_tools_write_write_shapes_agree(tmp_path):
     compile_policy(_reader_def(), roots)
 
 
-# ============================================================================
 # D7 — bind input-validation seam (Q4 harden)
-# ============================================================================
 
 def test_d7_bind_validates_roots(tmp_path):
     """d7_bind_validates_roots (seam): bind validates its root inputs — a relative or empty-string

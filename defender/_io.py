@@ -176,7 +176,6 @@ def write_atomic(path: Path, text: str) -> None:
     write_guarded(path, text, mode="replace")
 
 
-# --------------------------------------------------------------------------- #
 # The alias-refusing write backstop (M3).
 #
 # Every host-side write into a shared box tree routes through `write_guarded` (or
@@ -190,7 +189,6 @@ def write_atomic(path: Path, text: str) -> None:
 # per-call-site posture parity depends on exactly one type here). `.write_guarded_alias` is a
 # non-standard attribute set on the raised OSError so a caller that DOES need to tell "aliased"
 # from "ordinary occupied name" (D3's accounting exemption) can, without weakening that.
-# --------------------------------------------------------------------------- #
 def stage_name(path: Path) -> Path:
     """An unpredictable staged name in `path`'s own directory (§7 D1).
 

@@ -220,7 +220,7 @@ def test_no_membership_consumer_reprobes_the_tree(tmp_path):
     assert not (repo / SKILLS_REL / "mcpsys").exists()
     assert not adapter_file(repo, "mcpsys").exists()
 
-    # --- handed a name the tree does not carry: every consumer admits it anyway ---
+    # handed a name the tree does not carry: every consumer admits it anyway
     assert pitfalls_curator._pitfalls_path_rule(
         "A ", "defender/skills/mcpsys/execution.md", systems=contradicts) is None
     assert [
@@ -234,7 +234,7 @@ def test_no_membership_consumer_reprobes_the_tree(tmp_path):
         systems=contradicts,
     ) == [cat / "mcpsys" / "_draft" / f"{_draft_basename('mcpsys.new-verb')}.md"]
 
-    # --- handed nothing, over a tree that carries elastic in both sources: every one refuses ---
+    # handed nothing, over a tree that carries elastic in both sources: every one refuses
     assert marker_file(repo, "elastic").is_file()
     assert adapter_file(repo, "elastic").is_file()
     with pytest.raises(LeadAuthorError):

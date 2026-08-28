@@ -148,9 +148,7 @@ def ban_dependency_files() -> dict[str, Path]:
     }
 
 
-# --------------------------------------------------------------------------- #
 # The real-box guard — and WHICH CI JOB SELECTS IT
-# --------------------------------------------------------------------------- #
 # The obvious idiom here is `@pytest.mark.live`, and it is the wrong one. The gate runs
 # `pytest tests/ -m "not live"`, so a `live`-marked test is DESELECTED in the `test` job; the
 # `box-dood` job collects one path only (`tests/e2e/test_540_box_boundary.py`) and never sees
@@ -431,9 +429,7 @@ SCRUB_VERDICT_SUFFIX = ".scrub-verdict.json"
 FORGED_IN_TREE_VERDICT_NAME = ".scrub-verdict.json"
 
 
-# --------------------------------------------------------------------------- #
 # Real trees, and real aliases planted in them (tier 1)
-# --------------------------------------------------------------------------- #
 def run_tree(tmp_path: Path) -> Path:
     """A LIVE run dir — the shape the host-side writers write into while a box is alive.
 
@@ -553,9 +549,7 @@ def snapshot_outside(root: Path) -> dict[str, tuple]:
     return out
 
 
-# --------------------------------------------------------------------------- #
 # Future symbols — referenced LAZILY so HEAD still collects
-# --------------------------------------------------------------------------- #
 def write_guarded(path: Path, text: str, *, mode: str = "replace", **kw: Any) -> None:
     """`defender._io.write_guarded` — M3's alias-refusing write primitive, and the single seam
     every shared-tree writer routes through. AttributeError at HEAD.
@@ -673,9 +667,7 @@ def write_verdict(tree: Path, doc: dict) -> Path:
     return p
 
 
-# --------------------------------------------------------------------------- #
 # The docker fault-injection fake (tier 2) — the probe's verdict as DATA
-# --------------------------------------------------------------------------- #
 @dataclass(frozen=True)
 class ProbeVerdict:
     """One in-box alias-probe outcome, declaratively.
@@ -749,9 +741,7 @@ class AliasProbeDocker(RecordingDocker):
         return shapes_named_in(" ".join(" ".join(a) for a in self.probe_argvs))
 
 
-# --------------------------------------------------------------------------- #
 # The writer census (C1 as re-derived by C3-fix: >=14 writers, >=5 idioms)
-# --------------------------------------------------------------------------- #
 @dataclass(frozen=True)
 class Writer:
     """One host-side writer into a shared tree while a box is alive.
@@ -964,7 +954,7 @@ CENSUS: tuple[Writer, ...] = (
     Writer("write_trace", "tool_trace.jsonl", "write_text", "unmeasured",
            _invoke_write_trace, "runtime/observe.py", cite="C1,X10"),
     Writer("run_investigation", "tool_trace.jsonl", "write_text", "unmeasured",
-           _invoke_fault_exit_trace, "runtime/driver.py", cite="C1,X10", lands_empty=True),
+           _invoke_fault_exit_trace, "runtime/driver/", cite="C1,X10", lands_empty=True),
     Writer("observe_logger", "wire_logs/llm_requests.jsonl", "append-open", "unmeasured",
            _invoke_observe_logger, "runtime/observe.py", cite="C1", mkdirs_component=True),
     Writer("denial_logger", "policy_denials.jsonl", "append-open", "unmeasured",
@@ -992,9 +982,9 @@ CENSUS: tuple[Writer, ...] = (
     Writer("claim_lead", "gather_raw/l-001.lead.json", "excl-create", "return-zero",
            _invoke_claim_lead, "hooks/record_lead.py", cite="X5,C1", mkdirs_component=True),
     Writer("record_lesson_load", "lessons_loaded.jsonl", "append_jsonl", "unmeasured",
-           _invoke_lesson_load, "runtime/tools.py", cite="G15"),
+           _invoke_lesson_load, "runtime/tools/", cite="G15"),
     Writer("start_box", ".box-sentinel", "write_text", "fault-startup",
-           _invoke_sentinel_plant, "runtime/box.py", cite="X5,G10"),
+           _invoke_sentinel_plant, "runtime/box/", cite="X5,G10"),
     Writer("write_atomic", "budget.json", "tmp-then-replace", "unmeasured",
            _invoke_write_atomic, "_io.py", cite="B4,C3-fix"),
     Writer("write_guarded", "report.md", "guarded", "unmeasured",
@@ -1009,10 +999,8 @@ CENSUS: tuple[Writer, ...] = (
 POSTURES = ("swallow-continue", "return-none", "return-zero", "fault-startup")
 
 
-# --------------------------------------------------------------------------- #
 # X5's FOUR MEASURED POSTURES — the anchor, at the sites and under the faults the
 # ledger actually drove
-# --------------------------------------------------------------------------- #
 # F1's content is "every call site keeps the posture it has TODAY". Measuring "today" during
 # the test run makes the demand vacuous for any site that moves in BOTH lanes — a per-row
 # self-comparison is satisfied by an implementation that changed a site consistently. So the
@@ -1210,9 +1198,7 @@ def is_eexist(exc: BaseException) -> bool:
     return isinstance(exc, OSError) and exc.errno == errno.EEXIST
 
 
-# --------------------------------------------------------------------------- #
 # §7 D7 — where the alias-refusal record lives, and where it must NOT
-# --------------------------------------------------------------------------- #
 def accounting_sidecar(run_dir: Path) -> Path:
     """The accounting-failure sidecar — `<run_dir>.accounting_failures.json`, a SIBLING of the
     run dir (X6), outside the bind and outside every box mount.
@@ -1239,9 +1225,7 @@ def alias_refusals(run_dir: Path) -> list[dict]:
     return list(json.loads(p.read_text(encoding="utf-8")).get("alias_refusals", []))
 
 
-# --------------------------------------------------------------------------- #
 # The second shared root's own production writers (F6)
-# --------------------------------------------------------------------------- #
 def quarantine_a_tainted_tree(
     tree: Path, quarantine_dir: Path, *, batch_id: str = "b-771", verdict: dict | None = None,
 ):
